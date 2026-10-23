@@ -12,7 +12,7 @@ import {
   symlink,
   writeFile,
 } from 'node:fs/promises';
-import {arch, platform} from 'node:os';
+import {arch, platform, tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Transform} from 'node:stream';
 import {fileURLToPath} from 'node:url';
@@ -37,6 +37,7 @@ import {
   HelloRequestSchema,
   HelloResponseSchema,
   RecordSchema,
+  SkeletonRequestSchema,
   TailRequestSchema,
   TailResponseSchema,
 } from '@vibesys/proto';
@@ -108,13 +109,13 @@ for (const mode of ['socket', 'connect pipe'] as const) {
       const hello = await page.evaluate(
         async request => {
           const bridge = (window as unknown as GatewayRenderer).vibesysGateway;
-          return [
-            ...(await bridge.unary(
-              'local',
-              '/vibesys.api.v1.HostService/Hello',
-              new Uint8Array(request),
-            ).result),
-          ];
+          const reply = await bridge.unary(
+            'local',
+            '/vibesys.api.v1.HostService/Hello',
+            new Uint8Array(request),
+          ).result;
+          if (!('bytes' in reply)) throw new Error(reply.error);
+          return [...reply.bytes];
         },
         [
           ...toBinary(
@@ -126,6 +127,8 @@ for (const mode of ['socket', 'connect pipe'] as const) {
       expect(fromBinary(HelloResponseSchema, new Uint8Array(hello)).apiSchemaHash).toBe(
         API_SCHEMA_HASH,
       );
+      // A refusal reaches the renderer with its gRPC status, so a missing run is not a dead link.
+      expect(await missingRunStatus(page)).toBe(5);
       await startTail(page);
       const initial = await page.evaluate(() =>
         (window as unknown as GatewayRenderer).gatewayRead(),
@@ -157,6 +160,98 @@ for (const mode of ['socket', 'connect pipe'] as const) {
       }
     }
   });
+}
+
+// The identical steps run over the scheduled Fake in ipc/src/gateway-port.test.ts: the receiver
+// closes first or not, the sender posts every message and closes at once, and the receiver reports
+// what arrived once its port is closed. The receiver is another process, as the page is.
+test('MessageChannelMain across processes preserves FIFO, copies bytes and stops at a closed peer', async () => {
+  const cases: Array<{
+    name: string;
+    messages: number[][];
+    receiverClosed: boolean;
+    expected: number[][];
+  }> = JSON.parse(
+    await readFile(join(repository, 'proto/testdata/gateway_port/contract.json'), 'utf8'),
+  );
+  const directory = await mkdtemp(join(tmpdir(), 'vibesys-port-peer-'));
+  const peer = join(directory, 'peer.cjs');
+  await writeFile(
+    peer,
+    `process.parentPort.once('message', event => {
+  const [port] = event.ports;
+  const received = [];
+  port.on('message', message => received.push([...message.data]));
+  port.on('close', () => process.parentPort.postMessage({received}));
+  port.start();
+  process.parentPort.on('message', command => {
+    if (command.data === 'close-receiver') port.close();
+  });
+});
+`,
+  );
+  const app = await electron.launch({
+    args: [fileURLToPath(new URL('./gateway-app.mjs', import.meta.url)), ...electronRuntimeArgs()],
+    env: {
+      ...process.env,
+      VIBESYS_GATEWAY_ROOT: buildDirectory,
+      VIBESYS_GATEWAY_BINARY: binary,
+      VIBESYS_GATEWAY_MODE: 'connect pipe',
+    },
+  });
+  try {
+    for (const row of cases) {
+      const received = await app.evaluate(
+        async ({MessageChannelMain, utilityProcess}, {row, peer}) => {
+          const child = utilityProcess.fork(peer);
+          const report = new Promise<number[][]>(resolve => {
+            child.on('message', (message: {received: number[][]}) => resolve(message.received));
+          });
+          const {port1, port2} = new MessageChannelMain();
+          const senderSawClose = new Promise<void>(resolve => port1.on('close', resolve));
+          child.postMessage(null, [port2]);
+          port1.start();
+          if (row.receiverClosed) {
+            child.postMessage('close-receiver');
+            await senderSawClose;
+          }
+          for (const values of row.messages) {
+            const bytes = new Uint8Array(values);
+            port1.postMessage(bytes);
+            bytes.fill(99);
+          }
+          port1.close();
+          const delivered = await report;
+          child.kill();
+          return delivered;
+        },
+        {row, peer},
+      );
+      expect(received, row.name).toEqual(row.expected);
+    }
+  } finally {
+    await app.close();
+    await rm(directory, {recursive: true, force: true});
+  }
+});
+
+async function missingRunStatus(page: Page): Promise<number | null> {
+  const request = toBinary(
+    SkeletonRequestSchema,
+    create(SkeletonRequestSchema, {runId: 'run-missing'}),
+  );
+  return page.evaluate(
+    async bytes => {
+      const bridge = (window as unknown as GatewayRenderer).vibesysGateway;
+      const reply = await bridge.unary(
+        'local',
+        '/vibesys.api.v1.HostService/Skeleton',
+        new Uint8Array(bytes),
+      ).result;
+      return 'status' in reply ? (reply.status ?? null) : null;
+    },
+    [...request],
+  );
 }
 
 function deferred<T>() {
@@ -286,7 +381,7 @@ for (const damage of ['truncated', 'corrupt'] as const) {
 }
 
 interface GatewayRenderer {
-  vibesysGateway: import('@vibesys/ipc').GatewayBridge;
+  vibesysGateway: import('@vibesys/ipc').GatewayPreload;
   gatewayRead(): Promise<number[]>;
   gatewayCancel(): void;
 }

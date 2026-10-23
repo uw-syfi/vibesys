@@ -63,7 +63,7 @@ import {
   problemWord,
   recordedProjectRoot,
 } from '@vibesys/hosts';
-import {settled, type WelcomeBridge} from '@vibesys/ipc';
+import {gatewayBridge, settled, type WelcomeBridge} from '@vibesys/ipc';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import {sameRun} from '@vibesys/runs';
 import type {Store} from '@vibesys/store';
@@ -297,7 +297,11 @@ function RunRoute(props: {
     }),
     [run.host, run.runId, project, recent?.task, unavailableWindow],
   );
-  const gateway = typeof window === 'undefined' ? undefined : window.vibesysGateway;
+  const preload = typeof window === 'undefined' ? undefined : window.vibesysGateway;
+  const gateway = useMemo(
+    () => (preload === undefined ? undefined : gatewayBridge(preload)),
+    [preload],
+  );
   const legacy = (toggle?: import('react').ReactNode) => (
     <LegacyRunRoute seed={seed} record={record} stores={stores} place={place} toolbar={toggle} />
   );

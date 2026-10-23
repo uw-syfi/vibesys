@@ -22,14 +22,24 @@ import {
 import {registerAbort, type ScheduleTimeout} from '@vibesys/transport';
 import {createActor, fromPromise} from 'xstate';
 import {gatewayMachine} from '../state/gateway.js';
-import {GatewaySession, GrpcError} from './grpc.js';
+import {
+  type GatewaySession,
+  type GatewaySessionFactory,
+  GrpcError,
+  Http2GatewaySession,
+} from './grpc.js';
 
 export const HELLO_METHOD = `/${HostService.typeName}/${HostService.method.hello.name}`;
 export const TAIL_METHOD = `/${HostService.typeName}/${HostService.method.tail.name}`;
 
+const http2Session: GatewaySessionFactory = (duplex, schedule, lost) =>
+  new Http2GatewaySession(duplex, schedule, lost);
+
 export interface GatewayDialer {
   /** Force replaces the artifact after the first schema mismatch. Honor abort and dispose pipes. */
   dial(signal: AbortSignal, force: boolean): Promise<Duplex>;
+  /** How calls are spoken over the dialed duplex; HTTP/2 unless the dialer's owner says otherwise. */
+  readonly session?: GatewaySessionFactory;
 }
 
 interface LiveCall {
@@ -256,7 +266,7 @@ async function openSession(
 ): Promise<GatewaySession> {
   for (const force of [false, true]) {
     const duplex = await dialer.dial(signal, force);
-    const session = new GatewaySession(duplex, schedule, lost);
+    const session = (dialer.session ?? http2Session)(duplex, schedule, lost);
     const aborted = registerAbort(signal, () => session.close());
     try {
       if (aborted.aborted) throw new Error('gateway dial cancelled');

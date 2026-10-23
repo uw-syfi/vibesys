@@ -17,7 +17,7 @@
 import {describe, expect, test} from 'bun:test';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {ConnectionManager, registrySetup} from '@vibesys/connection';
-import {FakeLink, phaseReached, record} from '@vibesys/connection/testing';
+import {FakeLink, HeldReply, phaseReached, record} from '@vibesys/connection/testing';
 import {type HostId, type HostListing, hostKey} from '@vibesys/hosts';
 import {
   CandidateState,
@@ -28,7 +28,7 @@ import {
 } from '@vibesys/proto';
 import {SettingsStore, withHostSettings} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
-import {Seeded} from '@vibesys/store/testing';
+import {Seeded, seedsAtDepth} from '@vibesys/store/testing';
 import {FakeClock} from '@vibesys/transport/testing';
 import {Hosts} from './index.js';
 
@@ -49,27 +49,17 @@ interface ProbeRequest {
 }
 
 /** One probe the registry client sent, and its reply held until the test releases it. */
-class HeldProbe {
-  readonly signal: AbortSignal;
+class HeldProbe extends HeldReply<Uint8Array> {
   readonly #request: ProbeRequest;
-  readonly #settle: {resolve: (bytes: Uint8Array) => void; reject: (error: Error) => void};
-  readonly reply: Promise<Uint8Array>;
-  answered = false;
-
   constructor(signal: AbortSignal, request: ProbeRequest) {
-    this.signal = signal;
+    super(signal);
     this.#request = request;
-    let settle = {resolve: (_: Uint8Array) => {}, reject: (_: Error) => {}};
-    this.reply = new Promise<Uint8Array>((resolve, reject) => {
-      settle = {resolve, reject};
-    });
-    this.#settle = settle;
   }
 
-  answer(answer: Answer): void {
+  respond(answer: Answer): void {
     this.answered = true;
     if (answer === 'closed') {
-      this.#settle.reject(new Error('gateway closed'));
+      this.fail(new Error('gateway closed'));
       return;
     }
     const base = {...this.#request, schemaHash: HASH};
@@ -106,7 +96,7 @@ class HeldProbe {
               message: 'the host said so',
             },
           } as const);
-    this.#settle.resolve(toBinary(ReadResponseSchema, create(ReadResponseSchema, {result})));
+    super.answer(toBinary(ReadResponseSchema, create(ReadResponseSchema, {result})));
   }
 }
 
@@ -310,7 +300,7 @@ async function answer(
   const target = open[step.probe % open.length];
   if (target === undefined) return;
   const pushes = rig.pushed.length;
-  target.answer(step.answer);
+  target.respond(step.answer);
   await rig.quiesce();
   if (target === rig.probes.at(-1)) expectation.verdict(step.answer);
   else expect(rig.pushed.length).toBe(pushes);
@@ -348,6 +338,7 @@ async function run(seed: number): Promise<void> {
 
 describe('the host version check under generated interleavings', () => {
   test('the screen follows the current generation across connects, drops, retries and late probe answers', async () => {
-    for (let seed = 1; seed <= 40; seed += 1) await run(seed);
+    for (const seed of seedsAtDepth(Array.from({length: 40}, (_, index) => index + 1)))
+      await run(seed);
   });
 });

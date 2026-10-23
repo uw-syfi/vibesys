@@ -16,6 +16,7 @@ export {
 } from './generated/vibesys/api/v1/host_mutate_generated_pb.js';
 export {
   BlobResultSchema,
+  DescriptorSetSchema,
   GetBlobsRequestSchema,
   GetBlobsResponseSchema,
   type HelloRequest,

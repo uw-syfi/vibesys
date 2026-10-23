@@ -74,7 +74,6 @@ test('model: requests are unique and operations and deadlines are owned', () => 
       random.pick([
         {type: 'send', request},
         {type: 'retry', requestId: 'r-1'},
-        {type: 'watchFailed', error: 'disconnected'},
         {type: 'outcomes', outcomes: []},
         ...live.operations
           .filter(operation => operation === 'post')

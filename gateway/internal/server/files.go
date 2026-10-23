@@ -181,24 +181,33 @@ func keyframePosition(data []byte) (runlog.Position, error) {
 }
 
 func latestKeyframe(dir string, cap uint64, maxBytes int) ([]byte, runlog.Position, error) {
+	seqs, err := keyframeSeqs(dir, cap)
+	if err != nil || len(seqs) == 0 {
+		return nil, runlog.Position{}, err
+	}
+	return readKeyframe(dir, seqs[0], maxBytes)
+}
+
+// keyframeSeqs lists the published keyframes at or before cap, newest first.
+func keyframeSeqs(dir string, cap uint64) ([]uint64, error) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
-		return nil, runlog.Position{}, err
+		return nil, err
 	}
 	defer root.Close()
 	frames, err := root.Open("keyframes")
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, runlog.Position{}, nil
+		return nil, nil
 	}
 	if err != nil {
-		return nil, runlog.Position{}, err
+		return nil, err
 	}
 	defer frames.Close()
 	names, err := frames.Readdirnames(-1)
 	if err != nil {
-		return nil, runlog.Position{}, err
+		return nil, err
 	}
-	var best uint64
+	var seqs []uint64
 	for _, name := range names {
 		if filepath.Ext(name) != ".pb" {
 			continue
@@ -207,14 +216,16 @@ func latestKeyframe(dir string, cap uint64, maxBytes int) ([]byte, runlog.Positi
 		if err != nil || name != strconv.FormatUint(seq, 10)+".pb" {
 			continue
 		}
-		if seq <= cap && seq > best {
-			best = seq
+		if seq <= cap && seq > 0 {
+			seqs = append(seqs, seq)
 		}
 	}
-	if best == 0 {
-		return nil, runlog.Position{}, nil
-	}
-	data, err := readFile(dir, fmt.Sprintf("keyframes/%d.pb", best), maxBytes)
+	sort.Slice(seqs, func(i, j int) bool { return seqs[i] > seqs[j] })
+	return seqs, nil
+}
+
+func readKeyframe(dir string, seq uint64, maxBytes int) ([]byte, runlog.Position, error) {
+	data, err := readFile(dir, fmt.Sprintf("keyframes/%d.pb", seq), maxBytes)
 	if err != nil {
 		return nil, runlog.Position{}, err
 	}
@@ -222,7 +233,7 @@ func latestKeyframe(dir string, cap uint64, maxBytes int) ([]byte, runlog.Positi
 	if err != nil {
 		return nil, runlog.Position{}, err
 	}
-	if position.ThroughSeq != best {
+	if position.ThroughSeq != seq {
 		return nil, runlog.Position{}, status.Error(codes.DataLoss, "keyframe filename and through_seq differ")
 	}
 	return data, position, nil

@@ -569,12 +569,18 @@ func (x *MetricVersion) GetPoint() *MetricPoint {
 	return nil
 }
 
+// A stored keyframe carries epoch.descriptors inline. The gateway replaces them
+// with descriptors_sha256 on the wire (SkeletonResponse.descriptor_sets), since
+// every epoch of a run usually repeats one set. Exactly one of the two names the
+// descriptors of an epoch that has any. The wire form is not valid under the
+// EpochStarted descriptor rules until a reader has restored them.
 type EpochVersion struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Seq           uint64                 `protobuf:"varint,1,opt,name=seq,proto3" json:"seq,omitempty"`
-	Epoch         *EpochStarted          `protobuf:"bytes,2,opt,name=epoch,proto3" json:"epoch,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Seq               uint64                 `protobuf:"varint,1,opt,name=seq,proto3" json:"seq,omitempty"`
+	Epoch             *EpochStarted          `protobuf:"bytes,2,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	DescriptorsSha256 string                 `protobuf:"bytes,3,opt,name=descriptors_sha256,json=descriptorsSha256,proto3" json:"descriptors_sha256,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *EpochVersion) Reset() {
@@ -619,6 +625,13 @@ func (x *EpochVersion) GetEpoch() *EpochStarted {
 		return x.Epoch
 	}
 	return nil
+}
+
+func (x *EpochVersion) GetDescriptorsSha256() string {
+	if x != nil {
+		return x.DescriptorsSha256
+	}
+	return ""
 }
 
 type LifecycleVersion struct {
@@ -740,10 +753,12 @@ const file_vibesys_store_v1_skeleton_proto_rawDesc = "" +
 	"\x06points\x18\x02 \x03(\v2\x1f.vibesys.store.v1.MetricVersionR\x06points\"g\n" +
 	"\rMetricVersion\x12\x19\n" +
 	"\x03seq\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\x03seq\x12;\n" +
-	"\x05point\x18\x02 \x01(\v2\x1d.vibesys.store.v1.MetricPointB\x06\xbaH\x03\xc8\x01\x01R\x05point\"g\n" +
+	"\x05point\x18\x02 \x01(\v2\x1d.vibesys.store.v1.MetricPointB\x06\xbaH\x03\xc8\x01\x01R\x05point\"\xd0\x02\n" +
 	"\fEpochVersion\x12\x19\n" +
 	"\x03seq\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\x03seq\x12<\n" +
-	"\x05epoch\x18\x02 \x01(\v2\x1e.vibesys.store.v1.EpochStartedB\x06\xbaH\x03\xc8\x01\x01R\x05epoch\"p\n" +
+	"\x05epoch\x18\x02 \x01(\v2\x1e.vibesys.store.v1.EpochStartedB\x06\xbaH\x03\xc8\x01\x01R\x05epoch\x12G\n" +
+	"\x12descriptors_sha256\x18\x03 \x01(\tB\x18\xbaH\x15r\x132\x11^([0-9a-f]{64})?$R\x11descriptorsSha256:\x9d\x01\xbaH\x99\x01\x1a\x96\x01\n" +
+	"\x1eepoch_version.descriptors_once\x125descriptors are inline or addressed by hash, not both\x1a=this.descriptors_sha256 == '' || !has(this.epoch.descriptors)\"p\n" +
 	"\x10LifecycleVersion\x12\x19\n" +
 	"\x03seq\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\x03seq\x12A\n" +
 	"\tlifecycle\x18\x02 \x01(\v2\x1b.vibesys.store.v1.LifecycleB\x06\xbaH\x03\xc8\x01\x01R\tlifecycleBAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"

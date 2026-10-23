@@ -1,3 +1,5 @@
+import {readFileSync} from 'node:fs';
+import {resolve} from 'node:path';
 import {describe, test} from 'node:test';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {
@@ -494,4 +496,36 @@ test('a maximum-size blob plus response metadata fits the shared gateway frame b
   expect(
     validatedFromBinary(GetBlobsResponseSchema, decoded[0] as Uint8Array).blobs[0]?.data.byteLength,
   ).toBe(data.byteLength);
+});
+
+// Both Go's in-process gateway mapping and the deterministic seam host use this same corpus.
+test('every shared status and percent-encoded diagnostic crosses real HTTP/2', {
+  timeout: 15000,
+}, async () => {
+  const rows: Array<{code: number; message: string}> = JSON.parse(
+    // The runner compiles the tests into a directory under the package and runs from the package.
+    readFileSync(resolve('../../../proto/testdata/grpc_status/statuses.json'), 'utf8'),
+  );
+  const fake = new FakeGateway();
+  const clock = new FakeClock();
+  const connection = new GatewayConnection(fake, clock.schedule);
+  try {
+    for (const row of rows) {
+      const outcome = connection
+        .stream(TAIL_METHOD, request(), new AbortController().signal, () => {})
+        .then(
+          () => undefined,
+          error => ({code: error.code, message: error.message}),
+        );
+      const call = await fake.nextTail();
+      call.end(row.code, row.message);
+      expect(await outcome).toEqual(
+        row.code === 0 ? undefined : {code: row.code, message: row.message},
+      );
+    }
+    expect(fake.forces).toEqual([false]);
+  } finally {
+    connection.close();
+    fake.close();
+  }
 });

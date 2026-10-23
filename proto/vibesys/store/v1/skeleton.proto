@@ -100,9 +100,20 @@ message MetricVersion {
   MetricPoint point = 2 [(buf.validate.field).required = true];
 }
 
+// A stored keyframe carries epoch.descriptors inline. The gateway replaces them
+// with descriptors_sha256 on the wire (SkeletonResponse.descriptor_sets), since
+// every epoch of a run usually repeats one set. Exactly one of the two names the
+// descriptors of an epoch that has any. The wire form is not valid under the
+// EpochStarted descriptor rules until a reader has restored them.
 message EpochVersion {
+  option (buf.validate.message).cel = {
+    id: "epoch_version.descriptors_once"
+    message: "descriptors are inline or addressed by hash, not both"
+    expression: "this.descriptors_sha256 == '' || !has(this.epoch.descriptors)"
+  };
   uint64 seq = 1 [(buf.validate.field).uint64.gt = 0];
   EpochStarted epoch = 2 [(buf.validate.field).required = true];
+  string descriptors_sha256 = 3 [(buf.validate.field).string.pattern = "^([0-9a-f]{64})?$"];
 }
 
 message LifecycleVersion {

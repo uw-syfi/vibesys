@@ -11,7 +11,7 @@ import {
 import {type JSX, useEffect, useRef, useState} from 'react';
 import type {SnapshotFrom} from 'xstate';
 import type {runIntentsMachine} from '../state/index.js';
-import {intentsActor} from './effects/controls.js';
+import {intentsActor, type RunRecords} from './effects/controls.js';
 import {useRelaunch} from './relaunch.js';
 import {IntentControls} from './ui/controls.js';
 
@@ -21,6 +21,7 @@ export function useRunIntents(props: {
   readonly host: HostKey;
   readonly projectRoot: RecordedProjectRoot | undefined;
   readonly runId: string;
+  readonly records: RunRecords;
   readonly enabled: boolean;
   readonly schedule: ScheduleTimeout;
   readonly relaunch?: RelaunchObservation;
@@ -34,6 +35,7 @@ export function useRunIntents(props: {
       bridge: props.bridge,
       host: props.host,
       runId: props.runId,
+      records: props.records,
       enabled: props.enabled,
       schedule: props.schedule,
     });
@@ -45,7 +47,7 @@ export function useRunIntents(props: {
       subscription.unsubscribe();
       actor.stop();
     };
-  }, [props.bridge, props.host, props.runId, props.enabled, props.schedule]);
+  }, [props.bridge, props.host, props.runId, props.records, props.enabled, props.schedule]);
   const projectRoot = props.projectRoot;
   const relaunch = useRelaunch({
     bridge: props.bridge,
@@ -96,5 +98,5 @@ export function RunIntents(props: Parameters<typeof useRunIntents>[0]): JSX.Elem
   return useRunIntents(props).controls;
 }
 
-export {intentsActor} from './effects/controls.js';
+export {intentsActor, type RunRecords} from './effects/controls.js';
 export {relaunchActor} from './effects/relaunch.js';

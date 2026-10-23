@@ -203,27 +203,28 @@ test.each([
     expect(transport.streamSignal.aborted || transport.streamClosed).toBe(true);
 });
 
-test('closed streams recover from a fresh Skeleton and release retries when stopped', async () => {
+test('a cut stream resumes from its cursor without another Skeleton and stops with its owner', async () => {
   const transport = new FakeRunTransport();
   const clock = new FakeClock();
   const actor = startSkeletonLoader(transport, clock.schedule, INPUT);
+  transport.finishSkeleton(toBinary(SkeletonResponseSchema, initial()));
+  await reached(actor, snapshot => snapshot.matches('following'));
   for (let cycle = 0; cycle < 5; cycle += 1) {
-    transport.finishSkeleton(toBinary(SkeletonResponseSchema, initial()));
-    await reached(actor, snapshot => snapshot.matches('following'));
-    transport.push(toBinary(TailResponseSchema, batch(1n)));
-    await reached(actor, snapshot => snapshot.context.load?.nextSeq === 2n);
-    transport.push(toBinary(TailResponseSchema, batch(2n)));
+    const first = BigInt(1 + 2 * cycle);
+    transport.push(toBinary(TailResponseSchema, batch(first)));
+    await reached(actor, snapshot => snapshot.context.load?.nextSeq === first + 1n);
+    transport.push(toBinary(TailResponseSchema, batch(first + 1n)));
     await reached(actor, snapshot => snapshot.matches({following: 'live'}));
     expect(actor.getSnapshot().context.error).toBeUndefined();
     transport.endStream();
     await reached(actor, snapshot => snapshot.matches('recovering'));
-    expect(actor.getSnapshot().context.load?.nextSeq).toBe(3n);
+    expect(actor.getSnapshot().context.load?.nextSeq).toBe(first + 2n);
     expect(actor.getSnapshot().context.error?.kind).toBe('stream-ended');
     expect(clock.pending).toBe(1);
     clock.advanceBy(1000);
-    expect(actor.getSnapshot().matches('loading')).toBe(true);
+    expect(actor.getSnapshot().matches('following')).toBe(true);
+    expect(transport.fromSeq).toBe(first + 2n);
   }
   actor.stop();
   expect(clock.pending).toBe(0);
-  expect(transport.unarySignal?.aborted).toBe(true);
 });

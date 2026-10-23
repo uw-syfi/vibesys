@@ -127,8 +127,9 @@ describe('the performance tile of a run with no measured input', () => {
     expect(heroView(modelOf(spans)).tiles[0]?.detail).toBe('no input');
   });
 
-  test('draws no trend from one value', () => {
-    expect(heroView(modelOf(spans, TWO_GATES)).tiles[0]?.trend).toBeNull();
+  test('draws the one value instead of nothing', () => {
+    const trend = heroView(modelOf(spans, TWO_GATES)).tiles[0]?.trend;
+    expect(trend?.steps).toHaveLength(1);
   });
 
   test('headlines any value as the screen writes numbers, and never shows a raw metric key', () => {

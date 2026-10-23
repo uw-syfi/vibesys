@@ -1,0 +1,19 @@
+[
+  {"name": "one message", "messages": ["01"], "trailers": {"status": "0", "message": ""},
+   "unary": {"bytes": "01"}, "stream": {"received": ["01"], "error": null}},
+  {"name": "two messages", "messages": ["01", "02"], "trailers": {"status": "0", "message": ""},
+   "unary": {"error": {"code": 13, "message": "unary returned multiple messages"}},
+   "stream": {"received": ["01", "02"], "error": null}},
+  {"name": "no message", "messages": [], "trailers": {"status": "0", "message": ""},
+   "unary": {"error": {"code": 13, "message": "unary returned no message"}},
+   "stream": {"received": [], "error": null}},
+  {"name": "refusal with percent text", "messages": [], "trailers": {"status": "5", "message": "NOT_FOUND: 50% café"},
+   "unary": {"error": {"code": 5, "message": "NOT_FOUND: 50% café"}},
+   "stream": {"received": [], "error": {"code": 5, "message": "NOT_FOUND: 50% café"}}},
+  {"name": "message then refusal", "messages": ["01"], "trailers": {"status": "8", "message": "too big"},
+   "unary": {"error": {"code": 8, "message": "too big"}},
+   "stream": {"received": ["01"], "error": {"code": 8, "message": "too big"}}},
+  {"name": "stream ended without a status", "messages": ["01"], "trailers": {"status": null, "message": ""},
+   "unary": {"error": {"code": 2, "message": "missing gRPC status"}},
+   "stream": {"received": ["01"], "error": {"code": 2, "message": "missing gRPC status"}}}
+]

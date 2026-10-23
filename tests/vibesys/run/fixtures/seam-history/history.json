@@ -1,0 +1,252 @@
+{
+  "missing-identity": {
+    "commit": "bd0e5f31f319e9a28dc02fd74bedabff1ea9f61f",
+    "event_fields": [
+      "sequence",
+      "run_id",
+      "timestamp",
+      "type",
+      "text",
+      "status",
+      "round_label",
+      "agent_kind",
+      "execution_id",
+      "data"
+    ],
+    "events": [
+      {
+        "data": {
+          "input": "synthetic",
+          "kind": "run_started",
+          "outer_loop": "single-agent"
+        },
+        "run_id": "run-1",
+        "sequence": 1,
+        "timestamp": "2026-01-01T00:00:00Z",
+        "type": "run_started"
+      },
+      {
+        "data": {
+          "kind": "span_started",
+          "span": {
+            "id": "op:turn",
+            "label": {
+              "attrs_json": "{\"role\":\"implementer\"}",
+              "kind": "agent_turn"
+            },
+            "name": "agent_turn",
+            "parent": null,
+            "started_at": 0.0,
+            "status": "running",
+            "type": "operation"
+          }
+        },
+        "run_id": "run-1",
+        "sequence": 2,
+        "timestamp": "2026-01-01T00:00:00Z",
+        "type": "span_started"
+      }
+    ],
+    "journal_sha256": "29946e53a22b195f864093b499d2941f9945a141a343f332cc0f2883c0838614",
+    "source_sha256": {
+      "libs/vs-core/src/vs_core/flows/_spans.py": "e58fedac29d9477522450a4471500aed195ee4f952498b3e032dfa04c8b3d152",
+      "src/server/events.py": "6c041055ea040c67827e4cb31ae27e9f3e164f05c5b4aad1a4d331a1fd171eaf",
+      "src/server/host_api.py": "d7bd48a6d7795908a90c7491fad7178569e36e555676f7c573c77c1472cc3df9",
+      "src/server/journal.py": "abfe1c0bfbc05947712776cc456fb94a98216af680010c344c5def5c357e2227",
+      "src/vibesys/events.py": "d37ea3016a8699c1543743f6504b25a2e225da11e8aaa5ea418ccd1c4b60314b"
+    },
+    "wire_event": {
+      "data": {
+        "input": "synthetic",
+        "kind": "run_started",
+        "outer_loop": "single-agent"
+      },
+      "run_id": "run-1",
+      "sequence": 1,
+      "timestamp": "2026-01-01T00:00:00Z",
+      "type": "run_started"
+    },
+    "wire_filename": "run-events.jsonl",
+    "wire_sha256": "1d5a9c2879738959b421ba7ad5db4c24ddb7404b4d0ed37f3ae0b6da6db9222e"
+  },
+  "pre-lock": {
+    "commit": "2d4f62793f631f367f8f5e7d99ebf15dbacf958c",
+    "event_fields": [
+      "sequence",
+      "run_id",
+      "timestamp",
+      "type",
+      "text",
+      "status",
+      "round_label",
+      "agent_kind",
+      "execution_id",
+      "data"
+    ],
+    "events": [
+      {
+        "data": {
+          "input": "synthetic",
+          "kind": "run_started",
+          "outer_loop": "single-agent"
+        },
+        "run_id": "run-1",
+        "sequence": 1,
+        "timestamp": "2026-01-01T00:00:00Z",
+        "type": "run_started"
+      },
+      {
+        "data": {
+          "kind": "span_started",
+          "span": {
+            "id": "flow:root",
+            "name": "root",
+            "parent": null,
+            "started_at": 0.0,
+            "status": "running",
+            "type": "flow"
+          }
+        },
+        "run_id": "run-1",
+        "sequence": 2,
+        "timestamp": "2026-01-01T00:00:00Z",
+        "type": "span_started"
+      }
+    ],
+    "journal_sha256": "6802a61da3313ac0e47c7912251a03d6f70b01b81024ee1868fb9ce888cdd617",
+    "source_sha256": {
+      "libs/vs-core/src/vs_core/flows/_spans.py": "e58fedac29d9477522450a4471500aed195ee4f952498b3e032dfa04c8b3d152",
+      "src/server/events.py": "6c041055ea040c67827e4cb31ae27e9f3e164f05c5b4aad1a4d331a1fd171eaf",
+      "src/server/host_api.py": "d7bd48a6d7795908a90c7491fad7178569e36e555676f7c573c77c1472cc3df9",
+      "src/server/journal.py": "abfe1c0bfbc05947712776cc456fb94a98216af680010c344c5def5c357e2227",
+      "src/vibesys/events.py": "d37ea3016a8699c1543743f6504b25a2e225da11e8aaa5ea418ccd1c4b60314b"
+    },
+    "wire_event": {
+      "data": {
+        "input": "synthetic",
+        "kind": "run_started",
+        "outer_loop": "single-agent"
+      },
+      "run_id": "run-1",
+      "sequence": 1,
+      "timestamp": "2026-01-01T00:00:00Z",
+      "type": "run_started"
+    },
+    "wire_filename": "run-events.jsonl",
+    "wire_sha256": "1d5a9c2879738959b421ba7ad5db4c24ddb7404b4d0ed37f3ae0b6da6db9222e"
+  },
+  "pre-log": {
+    "commit": "c934bc30af21ef426f31590d1e7e7bf4ae01dcbe",
+    "event_fields": [
+      "sequence",
+      "run_id",
+      "timestamp",
+      "type",
+      "text",
+      "status",
+      "round_label",
+      "agent_kind",
+      "execution_id",
+      "data"
+    ],
+    "events": [
+      {
+        "data": {
+          "input": "synthetic",
+          "kind": "run_started",
+          "outer_loop": "single-agent"
+        },
+        "run_id": "run-1",
+        "sequence": 1,
+        "timestamp": "2026-01-01T00:00:00Z",
+        "type": "run_started"
+      },
+      {
+        "data": {
+          "kind": "span_started",
+          "span": {
+            "id": "flow:root",
+            "name": "root",
+            "parent": null,
+            "started_at": 0.0,
+            "status": "running",
+            "type": "flow"
+          }
+        },
+        "run_id": "run-1",
+        "sequence": 2,
+        "timestamp": "2026-01-01T00:00:00Z",
+        "type": "span_started"
+      }
+    ],
+    "journal_sha256": "6802a61da3313ac0e47c7912251a03d6f70b01b81024ee1868fb9ce888cdd617",
+    "source_sha256": {
+      "libs/vs-core/src/vs_core/flows/_spans.py": "e58fedac29d9477522450a4471500aed195ee4f952498b3e032dfa04c8b3d152",
+      "src/server/events.py": "6c041055ea040c67827e4cb31ae27e9f3e164f05c5b4aad1a4d331a1fd171eaf",
+      "src/server/host_api.py": "d7bd48a6d7795908a90c7491fad7178569e36e555676f7c573c77c1472cc3df9",
+      "src/server/journal.py": "abfe1c0bfbc05947712776cc456fb94a98216af680010c344c5def5c357e2227",
+      "src/vibesys/events.py": "d37ea3016a8699c1543743f6504b25a2e225da11e8aaa5ea418ccd1c4b60314b"
+    },
+    "wire_event": {
+      "data": {
+        "input": "synthetic",
+        "kind": "run_started",
+        "outer_loop": "single-agent"
+      },
+      "run_id": "run-1",
+      "sequence": 1,
+      "timestamp": "2026-01-01T00:00:00Z",
+      "type": "run_started"
+    },
+    "wire_filename": "run-events.jsonl",
+    "wire_sha256": "1d5a9c2879738959b421ba7ad5db4c24ddb7404b4d0ed37f3ae0b6da6db9222e"
+  },
+  "pre-trace": {
+    "commit": "a2d924d9f903bac2303862546aa7f61ab86eed27",
+    "event_fields": [
+      "sequence",
+      "run_id",
+      "timestamp",
+      "type",
+      "text",
+      "status",
+      "round_label",
+      "agent_kind",
+      "execution_id",
+      "data"
+    ],
+    "events": [
+      {
+        "data": {
+          "input": "synthetic",
+          "kind": "run_started",
+          "outer_loop": "single-agent"
+        },
+        "run_id": "run-1",
+        "sequence": 1,
+        "timestamp": "2026-01-01T00:00:00Z",
+        "type": "run_started"
+      }
+    ],
+    "journal_sha256": "1d5a9c2879738959b421ba7ad5db4c24ddb7404b4d0ed37f3ae0b6da6db9222e",
+    "source_sha256": {
+      "src/server/events.py": "6ddaddb47de6ffa5ac7d8108a5717e08a7854cdca50c97d824a6ebd108caf98a",
+      "src/server/host_api.py": "4f0532824c8e7f1c15546eb49745878ca676109f97118c2a6dd382cc58d8bb6b",
+      "src/server/journal.py": "78232aca39b9bfa4b09df1f902a5dc19e41134fa8da8590d2a799031bd7307fd",
+      "src/vibesys/events.py": "419fe3e7ca9ff4e5ffac52be323b65832dd7c7a7f1803170fcb5f079eba4ecbc"
+    },
+    "wire_event": {
+      "data": {
+        "input": "synthetic",
+        "kind": "run_started",
+        "outer_loop": "single-agent"
+      },
+      "run_id": "run-1",
+      "sequence": 1,
+      "timestamp": "2026-01-01T00:00:00Z",
+      "type": "run_started"
+    },
+    "wire_filename": "run-events.jsonl",
+    "wire_sha256": "1d5a9c2879738959b421ba7ad5db4c24ddb7404b4d0ed37f3ae0b6da6db9222e"
+  }
+}

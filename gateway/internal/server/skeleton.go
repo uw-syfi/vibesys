@@ -20,6 +20,14 @@ import (
 // gRPC receive limit. Tail carries remaining records, even a large first one.
 const skeletonBytes = 1 << 20
 
+// maxStoredKeyframe bounds what the gateway reads to rewrite. A stored keyframe
+// is larger than its wire form, which names descriptors by hash.
+const maxStoredKeyframe = 16 << 20
+
+// keyframeCandidates bounds how many older keyframes a reply tries when the
+// newest does not fit; each older one is smaller.
+const keyframeCandidates = 4
+
 func (h *host) Skeleton(ctx context.Context, request *apiv1.SkeletonRequest) (*apiv1.SkeletonResponse, error) {
 	dir, err := h.directory(request.GetRunId())
 	if err != nil {
@@ -37,15 +45,11 @@ func (h *host) Skeleton(ctx context.Context, request *apiv1.SkeletonRequest) (*a
 	if listingBytes+32 > skeletonBytes {
 		return nil, status.Error(codes.ResourceExhausted, "session listing exceeds skeleton budget")
 	}
-	data, position, err := latestKeyframe(dir, cap, skeletonBytes-listingBytes-32)
-	if status.Code(err) == codes.ResourceExhausted {
-		// An oversized keyframe cannot fit a unary prefix. Replay from the log.
-		data, position, err = nil, runlog.Position{}, nil
-	}
+	data, position, sets, err := wireKeyframe(dir, cap, request.GetKnownDescriptorsSha256(), sessionIDs)
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	response := &apiv1.SkeletonResponse{Keyframe: data, CommittedSeq: position.ThroughSeq, NextSeq: position.ThroughSeq + 1, Complete: true, Sessions: sessionIDs}
+	response := &apiv1.SkeletonResponse{Keyframe: data, DescriptorSets: sets, CommittedSeq: position.ThroughSeq, NextSeq: position.ThroughSeq + 1, Complete: true, Sessions: sessionIDs}
 	if position.Offset == 0 {
 		response.NextSeq = 0 // Phase 1 logs may start at sequence zero.
 	}
@@ -75,7 +79,7 @@ func (h *host) Skeleton(ctx context.Context, request *apiv1.SkeletonRequest) (*a
 	previous := position.ThroughSeq
 	seen := position.Offset > 0
 	// Reserve maximum encodings of committed_seq, next_seq and complete.
-	size := proto.Size(&apiv1.SkeletonResponse{Keyframe: data, Sessions: sessionIDs}) + 24
+	size := proto.Size(&apiv1.SkeletonResponse{Keyframe: data, DescriptorSets: sets, Sessions: sessionIDs}) + 24
 	for !bounded || previous < cap {
 		if err := ctx.Err(); err != nil {
 			return nil, rpcError(err)
@@ -145,4 +149,45 @@ func (h *host) seek(path string, from, cap uint64) (runlog.Position, error) {
 		}
 	}
 	return position, nil
+}
+
+// wireKeyframe picks the newest keyframe whose wire form fits the reply beside
+// the session listing, naming descriptors by hash and sending the sets the
+// client did not list. No keyframe fits: the client replays from the log.
+func wireKeyframe(dir string, cap uint64, known []string, sessionIDs []string) ([]byte, runlog.Position, []*apiv1.DescriptorSet, error) {
+	seqs, err := keyframeSeqs(dir, cap)
+	if err != nil {
+		return nil, runlog.Position{}, nil, err
+	}
+	if len(seqs) > keyframeCandidates {
+		seqs = seqs[:keyframeCandidates]
+	}
+	listed := make(map[string]bool, len(known))
+	for _, hash := range known {
+		listed[hash] = true
+	}
+	for _, seq := range seqs {
+		stored, position, err := readKeyframe(dir, seq, maxStoredKeyframe)
+		if status.Code(err) == codes.ResourceExhausted {
+			continue
+		}
+		if err != nil {
+			return nil, runlog.Position{}, nil, err
+		}
+		wire, addressed, err := addressDescriptors(stored)
+		if err != nil {
+			return nil, runlog.Position{}, nil, err
+		}
+		var sent []*apiv1.DescriptorSet
+		for _, hash := range addressed.order {
+			if !listed[hash] {
+				sent = append(sent, &apiv1.DescriptorSet{Sha256: hash, Data: addressed.data[hash]})
+			}
+		}
+		reply := &apiv1.SkeletonResponse{Keyframe: wire, DescriptorSets: sent, Sessions: sessionIDs}
+		if proto.Size(reply)+32 <= skeletonBytes {
+			return wire, position, sent, nil
+		}
+	}
+	return nil, runlog.Position{}, nil, nil
 }

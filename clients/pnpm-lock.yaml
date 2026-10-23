@@ -88,9 +88,18 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
+      '@vibesys/feature-run-page':
+        specifier: workspace:*
+        version: link:../../features/run-page
       '@vibesys/proto':
         specifier: workspace:*
         version: link:../../libs/proto
+      '@vibesys/run-fixtures':
+        specifier: workspace:*
+        version: link:../../libs/run-fixtures
+      '@vibesys/run-skeleton':
+        specifier: workspace:*
+        version: link:../../libs/run-skeleton
       '@vibesys/store':
         specifier: workspace:*
         version: link:../../libs/store
@@ -902,16 +911,31 @@ importers:
       '@vibesys/logs':
         specifier: workspace:*
         version: link:../logs
+      '@vibesys/run-skeleton':
+        specifier: workspace:*
+        version: link:../run-skeleton
       '@vibesys/runs':
         specifier: workspace:*
         version: link:../runs
+      '@vibesys/transport':
+        specifier: workspace:*
+        version: link:../transport
       '@vibesys/ui':
         specifier: workspace:*
         version: link:../ui
     devDependencies:
+      '@bufbuild/protobuf':
+        specifier: 2.16.0
+        version: 2.16.0
       '@types/bun':
         specifier: 1.4.2
         version: 1.4.2
+      '@vibesys/proto':
+        specifier: workspace:*
+        version: link:../proto
+      '@vibesys/run-fixtures':
+        specifier: workspace:*
+        version: link:../run-fixtures
       '@vibesys/store':
         specifier: workspace:*
         version: link:../store
@@ -1058,6 +1082,9 @@ importers:
       '@bufbuild/protobuf':
         specifier: 2.16.0
         version: 2.16.0
+      '@noble/hashes':
+        specifier: 2.0.1
+        version: 2.0.1
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../machine

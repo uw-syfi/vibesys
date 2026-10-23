@@ -36,3 +36,14 @@ export class Seeded {
 
 /** The seeds every model-based test folds through: enough to reach rare interleavings. */
 export const SEEDS: readonly number[] = Array.from({length: 300}, (_, index) => index + 1);
+
+/** CI's existing nightly job selects deeper schedules; explicit failure seeds always run at PR depth. */
+export function seedsAtDepth(pinned: readonly number[]): readonly number[] {
+  const depth =
+    (globalThis as {process?: {env: Record<string, string | undefined>}}).process?.env[
+      'VIBESYS_TEST_DEPTH'
+    ] ?? 'pr';
+  if (depth !== 'pr' && depth !== 'nightly')
+    throw new Error(`unknown VIBESYS_TEST_DEPTH: ${depth}`);
+  return depth === 'nightly' ? [...new Set([...pinned, ...SEEDS])] : pinned;
+}

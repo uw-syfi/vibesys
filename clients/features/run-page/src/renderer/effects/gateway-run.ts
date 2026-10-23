@@ -1,13 +1,12 @@
 /** The feature supplies session operations to its machine; the session owns wire I/O. */
 import {clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import type {GatewayReader} from '@vibesys/run-skeleton/reader';
-import {tailRecordRows} from '@vibesys/run-state/records';
+import {decodeRecordRows} from '@vibesys/run-state/records';
 import {createActor, fromCallback, fromPromise} from 'xstate';
 import {
   type GatewayEvent,
   type GatewayInput,
   type GatewayLogInput,
-  type GatewayRecordsInput,
   gatewayRunMachine,
 } from '../../state/index.js';
 
@@ -29,8 +28,18 @@ export function startGatewayRun(
         ),
         setting: fromPromise(({input}) => ports.setting(input)),
         loader: fromCallback<GatewayEvent, {runId: string}>(({input, sendBack}) =>
-          ports.reader.watch(input.runId, (load, failed, hint) =>
-            sendBack({type: 'loaded', load, failed, ...(hint ? {hint} : {})}),
+          ports.reader.watch(
+            input.runId,
+            ({load, progress, failure, terminal, hint}) =>
+              sendBack({
+                type: 'loaded',
+                load,
+                progress,
+                failure,
+                terminal,
+                ...(hint ? {hint} : {}),
+              }),
+            records => sendBack({type: 'records', rows: decodeRecordRows(records)}),
           ),
         ),
         content: fromPromise(({input, signal}) =>
@@ -45,11 +54,6 @@ export function startGatewayRun(
             if (!signal.aborted) input.receive({type: 'log-failed'});
           }
         }),
-        records: fromPromise<void, GatewayRecordsInput>(({input, signal}) =>
-          ports.reader.records(input.runId, input.fromSeq, signal, bytes =>
-            input.receive({type: 'records', rows: tailRecordRows(bytes)}),
-          ),
-        ),
       },
     }),
     {input, clock: clockFrom(schedule)},

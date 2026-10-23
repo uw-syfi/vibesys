@@ -195,13 +195,13 @@ function trendOf(
 ): TileTrend | null {
   const fold = performanceFold(candidates, direction, input);
   const last = fold.best.at(-1);
-  if (last === undefined) return null;
-  const from = Math.min(...model.candidates.candidates.map(item => item.startedAt));
-  const to = Math.max(from + 1, last.at, model.latest ?? 0);
+  // The input's own measurement is a point of the run: with nothing better yet it is the line.
+  if (last === undefined && input === null) return null;
+  const starts = model.candidates.candidates.map(item => item.startedAt);
+  const from = starts.length === 0 ? (model.latest ?? 0) : Math.min(...starts);
+  const to = Math.max(from + 1, last?.at ?? from, model.latest ?? 0);
   const start = input === null ? [] : [{x: from, y: input}];
   const steps = [...start, ...fold.best.map(step => ({x: step.at, y: step.value}))];
-  // One step is a value, not a trend: it would draw as a stray dot.
-  if (steps.length < 2) return null;
   return {
     label: `${name}: best so far over the run`,
     steps,
@@ -561,7 +561,8 @@ export function stripChartView(
 ): StripChartView | null {
   const minutes = (at: number) => (at - start) / 60;
   const fold = performanceFold(model.candidates.candidates, model.direction, inputValue(model));
-  if (fold.points.length === 0) return null;
+  // The input's measurement is a point too: with no idea measured yet the chart is its line.
+  if (fold.points.length === 0 && inputValue(model) === null) return null;
   const open = focusOn(model, fold.points, focus);
   const points = fold.points.map(point => ({
     id: point.id,

@@ -76,9 +76,13 @@ for (const epoch of [1, 7, 4294967295])
       let stop = () => {};
       try {
         const hint = await new Promise<RunLivenessHint>(resolve => {
-          stop = reader.watch('run-a', (_load, _failed, observed) => {
-            if (observed?.head) resolve(observed);
-          });
+          stop = reader.watch(
+            'run-a',
+            ({hint: observed}) => {
+              if (observed?.head) resolve(observed);
+            },
+            () => {},
+          );
         });
         expect(hint.epoch).toBe(format === 'absent' ? 0 : epoch);
         expect(hint.head).toEqual(head);

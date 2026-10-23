@@ -16,6 +16,9 @@
       "path": "./tsconfig.lib.json"
     },
     {
+      "path": "./tsconfig.testing.json"
+    },
+    {
       "path": "../store/tsconfig.testing.json"
     },
     {
@@ -23,6 +26,15 @@
     },
     {
       "path": "../runs/tsconfig.lib.json"
+    },
+    {
+      "path": "../proto/tsconfig.lib.json"
+    },
+    {
+      "path": "../run-fixtures/tsconfig.lib.json"
+    },
+    {
+      "path": "../run-skeleton/tsconfig.testing.json"
     }
   ]
 }

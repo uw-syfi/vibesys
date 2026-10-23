@@ -47,7 +47,39 @@ export class GrpcDecoder {
 }
 
 /** The session owns its duplex and multiplexes every call for this host. */
-export class GatewaySession {
+export interface GatewaySession {
+  close(): void;
+  unary(method: string, bytes: Uint8Array, signal: AbortSignal): Promise<Uint8Array>;
+  stream(
+    method: string,
+    bytes: Uint8Array,
+    signal: AbortSignal,
+    receive: (bytes: Uint8Array) => void,
+    deadlineMs?: number,
+  ): Promise<void>;
+}
+export type GatewaySessionFactory = (
+  duplex: Duplex,
+  schedule: ScheduleTimeout,
+  lost: () => void,
+) => GatewaySession;
+
+/**
+ * Parse the gateway's wire trailers into the call's outcome; undefined is success. A gRPC message
+ * is percent-encoded UTF-8, so the diagnostic is decoded before any screen reads it.
+ */
+export function grpcStatus(status: string | undefined, message: string): GrpcError | undefined {
+  if (status === '0') return undefined;
+  let detail: string;
+  try {
+    detail = decodeURIComponent(message);
+  } catch {
+    detail = message;
+  }
+  return new GrpcError(Number(status ?? 2), detail || 'missing gRPC status');
+}
+
+export class Http2GatewaySession implements GatewaySession {
   readonly #session: ClientHttp2Session;
 
   constructor(
@@ -142,8 +174,8 @@ export class GatewaySession {
       stream.on('end', () => {
         try {
           decoder.finish();
-          if (status !== '0')
-            throw new GrpcError(Number(status ?? 2), detail || 'missing gRPC status');
+          const error = grpcStatus(status, detail);
+          if (error !== undefined) throw error;
           finish();
         } catch (error) {
           finish(error);

@@ -24,6 +24,7 @@ from vs_proto.api import (
     MetricPoint,
     Oneof,
     OperatorHold,
+    Parked,
     Record,
     RunHead,
     Running,
@@ -153,6 +154,50 @@ def test_record_bound_and_recovery_preserve_immutable_checkpoints(count: int) ->
         for name, payload in files.items():
             assert (root / "keyframes" / name).read_bytes() == payload
         assert RunHead.from_binary((root / "run.head").read_bytes()).committed_seq == count + 3
+
+
+@given(
+    tail=st.integers(min_value=0, max_value=300),
+    commit_every=st.integers(min_value=1, max_value=64),
+    park=st.booleans(),
+)
+def test_a_finished_run_ends_on_a_keyframe_so_its_reply_needs_no_catch_up(
+    tail: int, commit_every: int, *, park: bool
+) -> None:
+    """Records after the last boundary, in any batching, are covered once the writer closes."""
+    with TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        records = scenarios()["core"][0]
+        with FileRunLogWriter(
+            root / "run.log", clock=ManualClock(), threads=SimThreads()
+        ) as writer:
+            for record in records:
+                writer.append(record)
+            last = records[-1].seq
+            for seq in range(last + 1, last + 1 + tail):
+                writer.append(
+                    Record(
+                        seq=seq,
+                        epoch=1,
+                        at=Timestamp(seconds=seq),
+                        body=Oneof("metric", MetricPoint(series="progress", value=float(seq))),
+                    )
+                )
+                if seq % commit_every == 0:
+                    writer.commit()
+            if park:
+                writer.append(
+                    Record(
+                        seq=last + tail + 1,
+                        epoch=1,
+                        at=Timestamp(seconds=last + tail + 1),
+                        body=Oneof("lifecycle", Lifecycle(state=Oneof("parked", Parked()))),
+                    )
+                )
+        final = last + tail + (1 if park else 0)
+        newest = max(int(p.name.removesuffix(".pb")) for p in (root / "keyframes").iterdir())
+        assert newest == final
+        assert RunHead.from_binary((root / "run.head").read_bytes()).committed_seq == final
 
 
 def test_exclusive_lock_covers_open_recovery_and_release(tmp_path: Path) -> None:

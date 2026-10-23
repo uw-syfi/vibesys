@@ -9,6 +9,7 @@ import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {RunIntents} from './index.js';
 
+const noRecords = () => () => {};
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
 beforeAll(() => {
@@ -60,6 +61,7 @@ test('Pause is enabled on the new path and sends the typed host intent', async (
           host={'local' as HostKey}
           projectRoot={recordedProjectRoot('/project')}
           runId="run-1"
+          records={noRecords}
           enabled
           relaunch={{epoch: 1n}}
           schedule={clock.schedule}

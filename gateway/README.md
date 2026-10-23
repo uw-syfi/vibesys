@@ -65,11 +65,16 @@ watcher and file descriptor.
 When run.head has committed_seq, Tail and Skeleton stop at that sequence. A
 present zero commits no records. With no head or no committed_seq, every complete
 record is committed, preserving the phase 1 converter path. Skeleton freezes its
-read extent, picks the latest keyframe at or below the boundary, and forwards its
-encoded bytes plus later records within a bounded unary response. The API
-reports next_seq and complete; clients continue with Tail(from_seq = next_seq).
-A keyframe that exceeds the response budget is omitted and replay starts from
-the log. A phase 1 run returns no keyframe and a bounded prefix of its complete
+read extent, picks the latest keyframe at or below the boundary whose wire form
+fits, and forwards its encoded bytes plus later records within a bounded unary
+response. The API reports next_seq and complete; clients continue with
+Tail(from_seq = next_seq). The wire form names each epoch's descriptors by the
+SHA-256 of their bytes (EpochVersion.descriptors_sha256) and sends each distinct
+set once in descriptor_sets, unless the request lists it in
+known_descriptors_sha256; every other byte of the stored keyframe, including
+fields the gateway does not know, is forwarded unchanged. A keyframe whose wire
+form exceeds the response budget is skipped for the next older one (at most
+four are tried); with none left, replay starts from the log. A phase 1 run returns no keyframe and a bounded prefix of its complete
 records. Its committed_seq is the last included sequence, since it has no
 published boundary. An incomplete committed prefix is DATA_LOSS when reached.
 

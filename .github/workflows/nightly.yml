@@ -133,6 +133,18 @@ jobs:
       - name: Run the full test suite at nightly depth
         run: uv run python -m pytest --depth=nightly -m 'not slow and not native_build' -n auto --dist loadgroup --no-cov -q
 
+      - uses: ./.github/actions/setup-clients
+
+      - name: Run the client seam schedules at nightly depth
+        env:
+          VIBESYS_TEST_DEPTH: nightly
+        run: >-
+          pnpm --dir clients exec bun test --conditions=@vibesys/source --timeout 120000
+          apps/desktop-main/src/preload/seam-dst.test.ts
+          apps/desktop-main/src/preload/host-seam.test.ts
+          features/hosts/src/main/host-version-sequences.test.ts
+          features/run-page/src/state/accounting-seam.test.ts
+
       # A failure prints its `@reproduce_failure` blob (print_blob); the
       # artifact uploaded below holds the failing examples for replay.
       - name: Keep the failing examples

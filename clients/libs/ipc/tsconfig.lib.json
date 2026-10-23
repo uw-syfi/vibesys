@@ -34,6 +34,12 @@
     },
     {
       "path": "../contracts/tsconfig.host-helper.json"
+    },
+    {
+      "path": "../transport/tsconfig.lib.json"
+    },
+    {
+      "path": "../run-skeleton/tsconfig.lib.json"
     }
   ]
 }

@@ -13,8 +13,47 @@ export interface GatewayBridge {
     method: string,
     bytes: Uint8Array,
     receive: (bytes: Uint8Array) => void,
-    ended: (error?: string) => void,
+    ended: (error?: string, status?: number) => void,
   ): {cancel(): void};
+}
+/**
+ * What the preload's unary resolves with. An `Error`'s own properties do not cross the context
+ * bridge (only its message and stack do), so a refusal travels as a value carrying its gRPC
+ * status, and `gatewayBridge` turns it back into a `GatewayError` in the page.
+ */
+export type GatewayUnaryReply =
+  | {readonly bytes: Uint8Array}
+  | {readonly error: string; readonly status?: number};
+/** The bridge the preload exposes: values only across the context bridge. */
+export interface GatewayPreload {
+  unary(host: HostKey, method: string, bytes: Uint8Array): GatewayCall<GatewayUnaryReply>;
+  stream: GatewayBridge['stream'];
+}
+/** A call the gateway or the link failed; `status` is the gRPC code when the gateway refused it. */
+export class GatewayError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+  }
+}
+/** The page's bridge over the preload's: a refused unary rejects with a `GatewayError`. */
+export function gatewayBridge(preload: GatewayPreload): GatewayBridge {
+  return {
+    unary(host, method, bytes) {
+      const call = preload.unary(host, method, bytes);
+      return {
+        result: call.result.then(reply => {
+          if ('bytes' in reply) return reply.bytes;
+          throw new GatewayError(reply.error, reply.status);
+        }),
+        cancel: () => call.cancel(),
+      };
+    },
+    stream: (host, method, bytes, receive, ended) =>
+      preload.stream(host, method, bytes, receive, ended),
+  };
 }
 export interface GatewayRequest {
   readonly kind: 'unary' | 'stream';
@@ -24,7 +63,7 @@ export interface GatewayRequest {
 }
 export type GatewayReply =
   | {readonly bytes: Uint8Array}
-  | {readonly end: true; readonly error?: string};
+  | {readonly end: true; readonly error?: string; readonly status?: number};
 
 export function parseGatewayRequest(value: unknown): GatewayRequest {
   if (value === null || typeof value !== 'object')

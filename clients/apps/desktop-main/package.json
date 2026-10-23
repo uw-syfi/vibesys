@@ -55,6 +55,9 @@
     "electron": "44.6.0",
     "typescript": "^5.8.3",
     "@bufbuild/protobuf": "2.16.0",
-    "@vibesys/proto": "workspace:*"
+    "@vibesys/proto": "workspace:*",
+    "@vibesys/run-skeleton": "workspace:*",
+    "@vibesys/feature-run-page": "workspace:*",
+    "@vibesys/run-fixtures": "workspace:*"
   }
 }

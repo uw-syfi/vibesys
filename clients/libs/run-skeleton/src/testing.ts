@@ -283,3 +283,5 @@ export class FakeRunTransport implements RunTransport {
     });
   }
 }
+
+export * from './sim-gateway.js';

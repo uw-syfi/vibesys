@@ -20,5 +20,7 @@ export {
 } from './fake-helper.js';
 export {FakeLogStore, type LogStoreFixture} from './fake-log-store.js';
 export {deferredKillProcess, fakeProcess, pipeHeldProcess} from './fake-process.js';
+export {FakeGatewaySession, type GatewayWireCall} from './gateway-session.js';
 export {commandOf, olderHost} from './older-host.js';
 export {phaseReached} from './phase-reached.js';
+export {HeldReply, Schedule} from './schedule.js';

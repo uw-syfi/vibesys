@@ -1,6 +1,5 @@
 import {expect, test} from 'bun:test';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
-import type {GatewayBridge} from '@vibesys/ipc';
 import {
   GetBlobsRequestSchema,
   SkeletonRequestSchema,
@@ -10,6 +9,7 @@ import {
 } from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
 import {FakeRunTransport} from '@vibesys/run-skeleton/testing';
+import type {GatewayBridge} from './gateway.js';
 import {gatewayTransport} from './gateway-transport.js';
 
 /** The callback bridge over a faithful in-memory gateway; each call owns its cancellation. */

@@ -74,11 +74,34 @@ message TailResponse {
 
 message SkeletonRequest {
   string run_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  // Descriptor sets the client already holds. The reply names each epoch's set
+  // by hash and sends the bytes only of sets not listed here.
+  repeated string known_descriptors_sha256 = 2 [(buf.validate.field).repeated = {
+    max_items: 64
+    unique: true
+    items: {
+      string: {pattern: "^[0-9a-f]{64}$"}
+    }
+  }];
+}
+
+// One EpochStarted.descriptors set, addressed by the SHA-256 of its encoded
+// bytes. data is exactly the bytes that hash covers, so a reader verifies it
+// without re-encoding.
+message DescriptorSet {
+  string sha256 = 1 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  bytes data = 2 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 1048576
+  }];
 }
 
 // A bounded committed prefix, at most 1 MiB encoded. No keyframe means replay
-// from the beginning; a keyframe larger than the budget is omitted. Records that
-// do not fit (including a single large record) are delivered through Tail.
+// from the beginning; a keyframe larger than the budget once its descriptors are
+// addressed by hash is omitted. Records that do not fit (including a single
+// large record) are delivered through Tail. Every epoch of the keyframe names its
+// descriptors by EpochVersion.descriptors_sha256; descriptor_sets carries the
+// ones the request did not list.
 message SkeletonResponse {
   optional bytes keyframe = 1 [(buf.validate.field).bytes = {
     min_len: 1
@@ -107,6 +130,7 @@ message SkeletonResponse {
       string: {pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"}
     }
   }];
+  repeated DescriptorSet descriptor_sets = 7 [(buf.validate.field).repeated.max_items = 64];
 }
 
 message WatchRunsRequest {}

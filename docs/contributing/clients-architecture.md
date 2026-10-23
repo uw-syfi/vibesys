@@ -420,6 +420,14 @@ span, measurement and usage values. `state/skeleton-projection.ts` builds the sh
 The desktop shell injects the generic Electron byte bridge. With the setting off, the existing
 run session and screen store remain the read path.
 
+A run opens by painting from the first Skeleton that holds an epoch; the history follows into the
+same fold. The loader reads each run's log once: record rows and intent outcomes subscribe to its
+Skeleton and Tail records (`recordsFanout`) and never open a Tail of their own. Its first Tail
+reaches back `RECORD_WINDOW` records past a keyframe for the record log. A refusal by the gateway
+(NotFound, DataLoss and the like) is final and typed; any other failure backs off (1 s doubling to
+30 s) for six tries, resumes a cut Tail from its cursor, and then waits for the person to retry.
+The gateway's gRPC status crosses the Electron bridge as `status` on the rejection.
+
 Data folds and selectors, all pure and under `state/`:
 
 - `state/run-page.ts`: the store, a reducer over the host's record of the run and the user's

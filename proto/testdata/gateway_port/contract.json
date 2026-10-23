@@ -1,0 +1,5 @@
+[
+  {"name":"FIFO and structured byte copy", "messages":[[1],[2,255],[3]], "receiverClosed":false, "expected":[[1],[2,255],[3]]},
+  {"name":"close truncates delivery", "messages":[[1],[2]], "receiverClosed":true, "expected":[]},
+  {"name":"empty close", "messages":[], "receiverClosed":false, "expected":[]}
+]

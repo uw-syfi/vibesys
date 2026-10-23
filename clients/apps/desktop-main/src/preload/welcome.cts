@@ -195,32 +195,13 @@ if (process.type === 'renderer') {
       },
     }),
   );
-  electron.contextBridge.exposeInMainWorld('vibesysGateway', {
-    unary: (host, method, bytes) => {
-      let cancel = (): void => {};
-      const result = new Promise<Uint8Array>((resolve, reject) => {
-        let response: Uint8Array | undefined;
-        cancel = openGateway(
-          'unary',
-          host,
-          method,
-          bytes,
-          value => {
-            response = value;
-          },
-          error => {
-            if (error !== undefined) reject(new Error(error));
-            else if (response === undefined) reject(new Error('missing unary response'));
-            else resolve(response);
-          },
-        );
-      });
-      return {result, cancel: () => cancel()};
-    },
-    stream: (host, method, bytes, receive, ended) => ({
-      cancel: openGateway('stream', host, method, bytes, receive, ended),
+  electron.contextBridge.exposeInMainWorld(
+    'vibesysGateway',
+    createGatewayPreload({
+      newChannel: () => new MessageChannel(),
+      open: (request, port) => electron.ipcRenderer.postMessage('vibesys:gateway', request, [port]),
     }),
-  } satisfies import('@vibesys/ipc').GatewayBridge);
+  );
   prepareFirstPaint(electron.ipcRenderer.sendSync(FIRST_PAINT_CHANNEL));
 }
 
@@ -248,32 +229,75 @@ function prepareFirstPaint(reply: unknown): void {
   observer.observe(document, {childList: true});
 }
 
-export = createWelcomePreload;
+/** The end of one gateway call's channel the preload keeps. */
+type GatewayPort = Pick<MessagePort, 'postMessage' | 'close' | 'onmessage'>;
 
-/** Ports are owned in the preload; renderer callbacks receive only structured protobuf bytes. */
-function openGateway(
-  kind: 'unary' | 'stream',
-  host: string,
-  method: string,
-  bytes: Uint8Array,
-  receive: (bytes: Uint8Array) => void,
-  ended: (error?: string) => void,
-): () => void {
-  const electron: typeof import('electron') = require('electron');
-  const {port1, port2} = new MessageChannel();
-  let closed = false;
-  const finish = (error?: string): void => {
-    if (closed) return;
-    closed = true;
-    port1.postMessage({cancel: true});
-    port1.close();
-    ended(error);
-  };
-  port1.onmessage = event => {
-    const reply = event.data as import('@vibesys/ipc').GatewayReply;
-    if ('bytes' in reply) receive(reply.bytes);
-    else finish(reply.error);
-  };
-  electron.ipcRenderer.postMessage('vibesys:gateway', {kind, host, method, bytes}, [port2]);
-  return () => finish('cancelled');
+/** Effects the sandbox grants the gateway bridge: a channel per call, and the way to the main process. */
+interface GatewayPreloadCapabilities {
+  newChannel(): {readonly port1: GatewayPort; readonly port2: MessagePort};
+  /** Hand the request and one end of its channel to the main process. */
+  open(request: import('@vibesys/ipc').GatewayRequest, port: MessagePort): void;
 }
+
+/**
+ * The generic gateway bridge. Ports are owned here; the page receives only values: protobuf bytes,
+ * and a refusal as `{error, status}`, because an Error's properties do not cross the context bridge.
+ */
+function createGatewayPreload(
+  capabilities: GatewayPreloadCapabilities,
+): import('@vibesys/ipc').GatewayPreload {
+  function openCall(
+    kind: 'unary' | 'stream',
+    host: import('@vibesys/ipc').GatewayRequest['host'],
+    method: string,
+    bytes: Uint8Array,
+    receive: (bytes: Uint8Array) => void,
+    ended: (error?: string, status?: number) => void,
+  ): () => void {
+    const {port1, port2} = capabilities.newChannel();
+    let closed = false;
+    const finish = (error?: string, status?: number): void => {
+      if (closed) return;
+      closed = true;
+      port1.postMessage({cancel: true});
+      port1.close();
+      ended(error, status);
+    };
+    port1.onmessage = event => {
+      const reply = event.data as import('@vibesys/ipc').GatewayReply;
+      if ('bytes' in reply) receive(reply.bytes);
+      else finish(reply.error, reply.status);
+    };
+    capabilities.open({kind, host, method, bytes}, port2);
+    return () => finish('cancelled');
+  }
+  return {
+    unary: (host, method, bytes) => {
+      let cancel = (): void => {};
+      const result = new Promise<import('@vibesys/ipc').GatewayUnaryReply>(resolve => {
+        let response: Uint8Array | undefined;
+        cancel = openCall(
+          'unary',
+          host,
+          method,
+          bytes,
+          value => {
+            response = value;
+          },
+          (error, status) => {
+            if (error !== undefined) resolve({error, ...(status === undefined ? {} : {status})});
+            else if (response === undefined) resolve({error: 'missing unary response'});
+            else resolve({bytes: response});
+          },
+        );
+      });
+      return {result, cancel: () => cancel()};
+    },
+    stream: (host, method, bytes, receive, ended) => ({
+      cancel: openCall('stream', host, method, bytes, receive, ended),
+    }),
+  };
+}
+
+createWelcomePreload.gateway = createGatewayPreload;
+export = createWelcomePreload;

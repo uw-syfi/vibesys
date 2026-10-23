@@ -26,4 +26,5 @@ export {
   type RunPageTarget,
   welcomeRunPorts,
 } from './effects/welcome-ports.js';
+export {LoadStatus} from './ui/load-status.js';
 export {type RunChatSlot, RunScreen} from './ui/run-screen.js';

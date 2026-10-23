@@ -2,7 +2,8 @@
   "extends": "../../tools/tsconfig.base.json",
   "compilerOptions": {
     "lib": [
-      "ES2022"
+      "ES2022",
+      "ES2024.Promise"
     ],
     "types": [],
     "rootDir": "src",
@@ -13,9 +14,7 @@
     "src/testing/**/*.ts"
   ],
   "exclude": [
-    "src/**/*.test.ts",
-    "src/**/*.test.tsx",
-    "src/testing/**"
+    "src/testing/**/*.test.ts"
   ],
   "references": [
     {

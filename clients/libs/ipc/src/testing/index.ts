@@ -14,7 +14,7 @@ export class FakeGatewayBridge implements GatewayBridge {
     method: string;
     bytes: Uint8Array;
     receive: (bytes: Uint8Array) => void;
-    ended: (error?: string) => void;
+    ended: (error?: string, status?: number) => void;
     cancelled: boolean;
   }> = [];
   unary(_host: HostKey, method: string, bytes: Uint8Array): GatewayCall<Uint8Array> {
@@ -33,7 +33,7 @@ export class FakeGatewayBridge implements GatewayBridge {
     method: string,
     bytes: Uint8Array,
     receive: (bytes: Uint8Array) => void,
-    ended: (error?: string) => void,
+    ended: (error?: string, status?: number) => void,
   ) {
     const stream = {method, bytes, receive, ended, cancelled: false};
     this.streams.push(stream);
@@ -44,3 +44,5 @@ export class FakeGatewayBridge implements GatewayBridge {
     };
   }
 }
+
+export {FakeGatewayPort} from './gateway-port.js';

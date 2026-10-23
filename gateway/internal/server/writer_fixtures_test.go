@@ -76,14 +76,60 @@ func TestPythonWriterSkeletonFixtures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var actual storev1.Keyframe
-			if err := proto.Unmarshal(got.Keyframe, &actual); err != nil {
-				t.Fatal(err)
+			if name == "converted" {
+				pinWireGolden(t, got)
 			}
-			if !proto.Equal(&actual, &keyframe) || got.CommittedSeq != keyframe.ThroughSeq || !got.Complete || len(got.Records) != 0 {
+			actual := restored(t, got, nil)
+			if !proto.Equal(actual, &keyframe) || got.CommittedSeq != keyframe.ThroughSeq || !got.Complete || len(got.Records) != 0 {
 				t.Fatalf("Python checkpoint did not round trip: %v", got)
 			}
 
 		})
+	}
+}
+
+// The TypeScript reader decodes this exact reply (clients/libs/run-skeleton
+// descriptors.test.ts), so the two languages agree on what the hash names.
+// Set VIBESYS_UPDATE_GOLDEN=1 to rewrite it after a deliberate wire change.
+func pinWireGolden(t *testing.T, reply *apiv1.SkeletonResponse) {
+	t.Helper()
+	path := "../../../proto/testdata/skeleton-wire/converted.response.pb.gz"
+	encoded, err := proto.MarshalOptions{Deterministic: true}.Marshal(reply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var packed bytes.Buffer
+	writer, err := gzip.NewWriterLevel(&packed, gzip.BestCompression)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Write(encoded); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if os.Getenv("VIBESYS_UPDATE_GOLDEN") != "" {
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, packed.Bytes(), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	golden, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := gzip.NewReader(bytes.NewReader(golden))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(want, encoded) {
+		t.Fatalf("Skeleton reply differs from %s; rerun with VIBESYS_UPDATE_GOLDEN=1 if intended", path)
 	}
 }

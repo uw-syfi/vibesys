@@ -12,8 +12,6 @@ import {
   RecordSchema,
   SteerMode,
   SteerTargetKind,
-  TailRequestSchema,
-  TailResponseSchema,
   TerminateRunOutcome,
 } from '@vibesys/proto';
 import {refusalMessage} from './refusal.js';
@@ -163,12 +161,9 @@ export function intentAdmissionWarning(response: PostIntentResponse): string | n
   return [order, observation].filter(value => value !== null).join(' ');
 }
 
-export function intentTailRequest(runId: string): Uint8Array {
-  return toBinary(TailRequestSchema, create(TailRequestSchema, {runId}));
-}
-
-export function intentTailResponse(bytes: Uint8Array): readonly IntentState[] {
-  return fromBinary(TailResponseSchema, bytes).records.flatMap(bytes => {
+/** Intent outcomes among records the run's one reader already delivered. */
+export function intentOutcomes(records: readonly Uint8Array[]): readonly IntentState[] {
+  return records.flatMap(bytes => {
     const record = fromBinary(RecordSchema, bytes);
     return record.body.case === 'intent' ? [record.body.value] : [];
   });

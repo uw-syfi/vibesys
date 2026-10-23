@@ -666,7 +666,7 @@ def test_all_new_enums_are_closed_and_text_is_bounded(name: str) -> None:
         ):
             assert rules is not None
             string = typed_rules(message, field.name, "string")
-            assert rule_value(string, "max_bytes") == 65536 or field.name == "sha256"
+            assert rule_value(string, "max_bytes") == 65536 or field.name.endswith("sha256")
 
 
 @pytest.mark.parametrize(("name", "field"), constrained_fields("repeated"))
@@ -683,6 +683,38 @@ def test_identifier_lists_reject_empty_items(name: str, field: str) -> None:
 )
 def test_blob_hash_is_exactly_64_lowercase_hex_digits(digest: str) -> None:
     assert_invalid(p.BlobRef(sha256=digest, media_type="text/plain"), "sha256")
+
+
+@given(
+    digest=st.one_of(
+        st.just("A" * 64),
+        st.text(alphabet="ghxyz", min_size=1, max_size=64),
+        st.text(alphabet="0123456789abcdef", min_size=1, max_size=63),
+    )
+)
+def test_descriptor_hashes_are_exactly_64_lowercase_hex_digits_or_absent(digest: str) -> None:
+    epoch = p.EpochStarted(run_id="run-1")
+    assert_invalid(
+        p.EpochVersion(seq=1, epoch=epoch, descriptors_sha256=digest), "descriptors_sha256"
+    )
+    assert_invalid(
+        p.SkeletonRequest(run_id="run-1", known_descriptors_sha256=[digest]),
+        "known_descriptors_sha256",
+    )
+    assert_invalid(p.DescriptorSet(sha256=digest, data=b"x"), "sha256")
+
+
+def test_descriptors_are_inline_or_named_by_hash_never_both() -> None:
+    digest = "0" * 64
+    inline = p.EpochStarted(run_id="run-1", descriptors=FileDescriptorSet(file=[]))
+    named = p.EpochStarted(run_id="run-1")
+    p.validate(p.EpochVersion(seq=1, epoch=inline))
+    p.validate(p.EpochVersion(seq=1, epoch=named, descriptors_sha256=digest))
+    assert_invalid(p.EpochVersion(seq=1, epoch=inline, descriptors_sha256=digest), "descriptors")
+    assert_invalid(
+        p.SkeletonRequest(run_id="run-1", known_descriptors_sha256=[digest, digest]),
+        "known_descriptors_sha256",
+    )
 
 
 @given(size=st.sampled_from([0, 1, 65535, 65536]))

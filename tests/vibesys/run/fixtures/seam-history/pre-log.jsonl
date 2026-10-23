@@ -1,0 +1,2 @@
+{"data": {"input": "synthetic", "kind": "run_started", "outer_loop": "single-agent"}, "run_id": "run-1", "sequence": 1, "timestamp": "2026-01-01T00:00:00Z", "type": "run_started"}
+{"data": {"kind": "span_started", "span": {"id": "flow:root", "name": "root", "parent": null, "started_at": 0.0, "status": "running", "type": "flow"}}, "run_id": "run-1", "sequence": 2, "timestamp": "2026-01-01T00:00:00Z", "type": "span_started"}

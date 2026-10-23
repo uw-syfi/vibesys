@@ -3,7 +3,9 @@ import {useEffect, useMemo, useRef, useState} from 'react';
 import {getInitialSnapshot} from 'xstate';
 import {
   gatewayRunMachine,
+  loadView,
   logStreamToFollow,
+  paintedSkeleton,
   projectSkeleton,
   type RunPageSeed,
   skeletonScreenState,
@@ -39,7 +41,7 @@ export function useGatewayRun(options: {
   }, [ports, schedule, host, runId]);
   const {route, zoom} = useZoom(`${seed.identity.host}/${seed.identity.runId}`, address);
   const {load, ui, text, hint, replies} = snapshot.context;
-  const skeleton = load?.complete ? load.skeleton : undefined;
+  const skeleton = paintedSkeleton(load);
   const at = ui.view.at === 'live' ? (skeleton?.throughSeq ?? 0n) : BigInt(ui.view.at);
   const epoch = skeleton?.epochs.filter(item => item.seq <= at).at(-1)?.epoch;
   const objective = text[epoch?.run?.objective?.sha256 ?? ''] ?? '';
@@ -86,6 +88,8 @@ export function useGatewayRun(options: {
   }, [actor, follow]);
   return {
     snapshot,
+    load: loadView(snapshot.context),
+    retry: () => actor?.send({type: 'retry'}),
     projectionError,
     route,
     zoom,

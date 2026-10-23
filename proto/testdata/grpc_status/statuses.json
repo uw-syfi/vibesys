@@ -1,0 +1,242 @@
+[
+  {
+    "name": "OK",
+    "source": "status",
+    "exitCode": 0,
+    "stderr": "",
+    "error": "",
+    "code": 0,
+    "message": "",
+    "grpcMessage": ""
+  },
+  {
+    "name": "CANCELLED",
+    "source": "status",
+    "exitCode": 0,
+    "stderr": "",
+    "error": "CANCELLED: 50% complete; caf\u00e9 / run-a",
+    "code": 1,
+    "message": "CANCELLED: 50% complete; caf\u00e9 / run-a",
+    "grpcMessage": "CANCELLED: 50%25 complete; caf%C3%A9 / run-a"
+  },
+  {
+    "name": "UNKNOWN",
+    "source": "status",
+    "exitCode": 0,
+    "stderr": "",
+    "error": "UNKNOWN: 50% complete; caf\u00e9 / run-a",
+    "code": 2,
+    "message": "UNKNOWN: 50% complete; caf\u00e9 / run-a",
+    "grpcMessage": "UNKNOWN: 50%25 complete; caf%C3%A9 / run-a"
+  },
+  {
+    "name": "INVALID_ARGUMENT",
+    "source": "status",
+    "exitCode": 0,
+    "stderr": "",
+    "error": "INVALID_ARGUMENT: 50% complete; caf\u00e9 / run-a",
+    "code": 3,
+    "message": "INVALID_ARGUMENT: 50% complete; caf\u00e9 / run-a",
+    "grpcMessage": "INVALID_ARGUMENT: 50%25 complete; caf%C3%A9 / run-a"
+  },
+  {
+    "name": "DEADLINE_EXCEEDED",
+    "source": "status",
+    "exitCode": 0,
+    "stderr": "",
+    "error": "DEADLINE_EXCEEDED: 50% complete; caf\u00e9 / run-a",
+    "code": 4,
+    "message": "DEADLINE_EXCEEDED: 50% complete; caf\u00e9 / run-a",
+    "grpcMessage": "DEADLINE_EXCEEDED: 50%25 complete; caf%C3%A9 / run-a"
+  },
+  {
+    "name": "NOT_FOUND",
+    "source": "status",
+    "exitCode": 0,
+    "stderr": "",
+    "error": "NOT_FOUND: 50% complete; caf\u00e9 / run-a",
+    "code": 5,
+    "message": "NOT_FOUND: 50% complete; caf\u00e9 / run-a",
+    "grpcMessage": "NOT_FOUND: 50%25 complete; caf%C3%A9 / run-a"
+  },
+  {
+    "name": "ALREADY_EXISTS",
+    "source": "status",
+    "exitCode": 0,
+    "stderr": "",
+    "error": "ALREADY_EXISTS: 50% complete; caf\u00e9 / run-a",
+    "code": 6,
+    "message": "ALREADY_EXISTS: 50% complete; caf\u00e9 / run-a",
+    "grpcMessage": "ALREADY_EXISTS: 50%25 complete; caf%C3%A9 / run-a"
+  },
+  {
+    "name": "PERMISSION_DENIED",
+    "source": "status",
+    "exitCode": 0,
+    "stderr": "",
+    "error": "PERMISSION_DENIED: 50% complete; caf\u00e9 / run-a",
+    "code": 7,
+    "message": "PERMISSION_DENIED: 50% complete; caf\u00e9 / run-a",
+    "grpcMessage": "PERMISSION_DENIED: 50%25 complete; caf%C3%A9 / run-a"
+  },
+  {
+    "name": "RESOURCE_EXHAUSTED",
+    "source": "status",
+    "exitCode": 0,
+    "stderr": "",
+    "error": "RESOURCE_EXHAUSTED: 50% complete; caf\u00e9 / run-a",
+    "code": 8,
+    "message": "RESOURCE_EXHAUSTED: 50% complete; caf\u00e9 / run-a",
+    "grpcMessage": "RESOURCE_EXHAUSTED: 50%25 complete; caf%C3%A9 / run-a"
+  },
+  {
+    "name": "FAILED_PRECONDITION",
+    "source": "status",
+    "exitCode": 0,
+    "stderr": "",
+    "error": "FAILED_PRECONDITION: 50% complete; caf\u00e9 / run-a",
+    "code": 9,
+    "message": "FAILED_PRECONDITION: 50% complete; caf\u00e9 / run-a",
+    "grpcMessage": "FAILED_PRECONDITION: 50%25 complete; caf%C3%A9 / run-a"
+  },
+  {
+    "name": "ABORTED",
+    "source": "status",
+    "exitCode": 0,
+    "stderr": "",
+    "error": "ABORTED: 50% complete; caf\u00e9 / run-a",
+    "code": 10,
+    "message": "ABORTED: 50% complete; caf\u00e9 / run-a",
+    "grpcMessage": "ABORTED: 50%25 complete; caf%C3%A9 / run-a"
+  },
+  {
+    "name": "OUT_OF_RANGE",
+    "source": "status",
+    "exitCode": 0,
+    "stderr": "",
+    "error": "OUT_OF_RANGE: 50% complete; caf\u00e9 / run-a",
+    "code": 11,
+    "message": "OUT_OF_RANGE: 50% complete; caf\u00e9 / run-a",
+    "grpcMessage": "OUT_OF_RANGE: 50%25 complete; caf%C3%A9 / run-a"
+  },
+  {
+    "name": "UNIMPLEMENTED",
+    "source": "status",
+    "exitCode": 0,
+    "stderr": "",
+    "error": "UNIMPLEMENTED: 50% complete; caf\u00e9 / run-a",
+    "code": 12,
+    "message": "UNIMPLEMENTED: 50% complete; caf\u00e9 / run-a",
+    "grpcMessage": "UNIMPLEMENTED: 50%25 complete; caf%C3%A9 / run-a"
+  },
+  {
+    "name": "INTERNAL",
+    "source": "status",
+    "exitCode": 0,
+    "stderr": "",
+    "error": "INTERNAL: 50% complete; caf\u00e9 / run-a",
+    "code": 13,
+    "message": "INTERNAL: 50% complete; caf\u00e9 / run-a",
+    "grpcMessage": "INTERNAL: 50%25 complete; caf%C3%A9 / run-a"
+  },
+  {
+    "name": "UNAVAILABLE",
+    "source": "status",
+    "exitCode": 0,
+    "stderr": "",
+    "error": "UNAVAILABLE: 50% complete; caf\u00e9 / run-a",
+    "code": 14,
+    "message": "UNAVAILABLE: 50% complete; caf\u00e9 / run-a",
+    "grpcMessage": "UNAVAILABLE: 50%25 complete; caf%C3%A9 / run-a"
+  },
+  {
+    "name": "DATA_LOSS",
+    "source": "status",
+    "exitCode": 0,
+    "stderr": "",
+    "error": "DATA_LOSS: 50% complete; caf\u00e9 / run-a",
+    "code": 15,
+    "message": "DATA_LOSS: 50% complete; caf\u00e9 / run-a",
+    "grpcMessage": "DATA_LOSS: 50%25 complete; caf%C3%A9 / run-a"
+  },
+  {
+    "name": "UNAUTHENTICATED",
+    "source": "status",
+    "exitCode": 0,
+    "stderr": "",
+    "error": "UNAUTHENTICATED: 50% complete; caf\u00e9 / run-a",
+    "code": 16,
+    "message": "UNAUTHENTICATED: 50% complete; caf\u00e9 / run-a",
+    "grpcMessage": "UNAUTHENTICATED: 50%25 complete; caf%C3%A9 / run-a"
+  },
+  {
+    "name": "missing",
+    "source": "missing",
+    "exitCode": 1,
+    "stderr": "",
+    "error": "host failed",
+    "code": 5,
+    "message": "file does not exist",
+    "grpcMessage": "file does not exist"
+  },
+  {
+    "name": "permission",
+    "source": "permission",
+    "exitCode": 1,
+    "stderr": "",
+    "error": "host failed",
+    "code": 7,
+    "message": "permission denied",
+    "grpcMessage": "permission denied"
+  },
+  {
+    "name": "cancelled",
+    "source": "cancelled",
+    "exitCode": 1,
+    "stderr": "",
+    "error": "host failed",
+    "code": 1,
+    "message": "context canceled",
+    "grpcMessage": "context canceled"
+  },
+  {
+    "name": "deadline",
+    "source": "deadline",
+    "exitCode": 1,
+    "stderr": "",
+    "error": "host failed",
+    "code": 4,
+    "message": "context deadline exceeded",
+    "grpcMessage": "context deadline exceeded"
+  },
+  {
+    "name": "ordinary",
+    "source": "ordinary",
+    "exitCode": 1,
+    "stderr": "",
+    "error": "host failed",
+    "code": 13,
+    "message": "gateway: host failed",
+    "grpcMessage": "gateway: host failed"
+  },
+  {
+    "name": "invalid-id",
+    "source": "invalid-id",
+    "exitCode": 1,
+    "stderr": "",
+    "error": "checksum mismatch",
+    "code": 3,
+    "message": "invalid run_id",
+    "grpcMessage": "invalid run_id"
+  },
+  {
+    "name": "corruption",
+    "source": "corruption",
+    "exitCode": 1,
+    "stderr": "",
+    "error": "checksum mismatch",
+    "code": 15,
+    "message": "run.log corruption: checksum mismatch",
+    "grpcMessage": "run.log corruption: checksum mismatch"
+  }
+]

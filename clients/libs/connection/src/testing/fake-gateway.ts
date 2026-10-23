@@ -52,6 +52,8 @@ export class FakeGateway implements GatewayDialer {
   schemaHash = API_SCHEMA_HASH;
   /** Peer fault input, like FakeTail.send: override the handshake bytes or status. */
   helloFault: Uint8Array | GrpcError | undefined;
+  /** Methods the peer answers with a status and no message, like a gateway refusing a run. */
+  readonly #refusals = new Map<string, number>();
   readonly #server = createServer();
   readonly #sessions = new Set<ServerHttp2Session>();
   readonly #tails: FakeTail[] = [];
@@ -81,28 +83,35 @@ export class FakeGateway implements GatewayDialer {
           {':status': 200, 'content-type': 'application/grpc'},
           {waitForTrailers: true},
         );
+        const refused = this.#refusals.get(String(method));
         if (method === HELLO_METHOD) {
           this.#hello(stream, messages[0] as Uint8Array);
+        } else if (refused !== undefined) {
+          end(stream, refused, 'refused by the fake gateway');
         } else if (method === TAIL_METHOD) {
-          const request = fromBinary(TailRequestSchema, messages[0] as Uint8Array);
-          const session = stream.session;
-          const tail: FakeTail = {
-            fromSeq: request.fromSeq,
-            runId: request.runId,
-            send: bytes => {
-              stream.write(grpcFrame(bytes));
-            },
-            disconnect: () => session?.destroy(),
-            end: (code, detail) => end(stream, code, detail),
-          };
-          const waiter = this.#waiters.shift();
-          if (waiter === undefined) this.#tails.push(tail);
-          else waiter(tail);
+          this.#tail(stream, messages[0] as Uint8Array);
         } else if (!this.#held(method, stream, messages[0] as Uint8Array)) {
           end(stream, 12, 'unknown method');
         }
       });
     });
+  }
+
+  #tail(stream: ServerHttp2Stream, bytes: Uint8Array): void {
+    const request = fromBinary(TailRequestSchema, bytes);
+    const session = stream.session;
+    const tail: FakeTail = {
+      fromSeq: request.fromSeq,
+      runId: request.runId,
+      send: bytes => {
+        stream.write(grpcFrame(bytes));
+      },
+      disconnect: () => session?.destroy(),
+      end: (code, detail) => end(stream, code, detail),
+    };
+    const waiter = this.#waiters.shift();
+    if (waiter === undefined) this.#tails.push(tail);
+    else waiter(tail);
   }
 
   #held(method: string | undefined, stream: ServerHttp2Stream, bytes: Uint8Array): boolean {
@@ -198,6 +207,11 @@ export class FakeGateway implements GatewayDialer {
       : Promise.resolve(tail);
   }
 
+  /** Answer every call of `method` with gRPC status `code` from now on. */
+  refuse(method: string, code: number): void {
+    this.#refusals.set(method, code);
+  }
+
   nextHostCall(): Promise<FakeHostCall> {
     const call = this.#hostCalls.shift();
     return call === undefined
@@ -227,7 +241,7 @@ export class FakeGateway implements GatewayDialer {
 
 function end(stream: ServerHttp2Stream, code = 0, detail = ''): void {
   stream.once('wantTrailers', () =>
-    stream.sendTrailers({'grpc-status': String(code), 'grpc-message': detail}),
+    stream.sendTrailers({'grpc-status': String(code), 'grpc-message': encodeURIComponent(detail)}),
   );
   stream.end();
 }

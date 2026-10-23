@@ -32,7 +32,10 @@
     "test": "node ../../tools/scripts/run_bun_tests.mjs ./src"
   },
   "devDependencies": {
+    "@bufbuild/protobuf": "2.16.0",
     "@types/bun": "1.4.2",
+    "@vibesys/proto": "workspace:*",
+    "@vibesys/run-fixtures": "workspace:*",
     "@vibesys/store": "workspace:*",
     "typescript": "^5.8.3"
   },
@@ -41,6 +44,8 @@
     "@vibesys/hosts": "workspace:*",
     "@vibesys/logs": "workspace:*",
     "@vibesys/runs": "workspace:*",
-    "@vibesys/ui": "workspace:*"
+    "@vibesys/ui": "workspace:*",
+    "@vibesys/transport": "workspace:*",
+    "@vibesys/run-skeleton": "workspace:*"
   }
 }

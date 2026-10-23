@@ -134,7 +134,10 @@ length) immutable and cacheable. There is no second, sealed copy.
 with each span's versions by sequence (status, verdict, attrs), the metric series, the stream
 index and the epoch list. The run writes a keyframe at its checkpoints (a bounded number of
 records, a lifecycle change, an epoch end). The `Skeleton` call returns the latest keyframe plus
-the log records after it, so opening a run reads a keyframe, not the log.
+the log records after it, so opening a run reads a keyframe, not the log. A run that ends or parks
+ends on a keyframe, so its reply has no records after it. On the wire the keyframe names each
+epoch's schema descriptors by hash and carries a descriptor set only when the reader has not
+listed it, since every epoch of a run repeats one set.
 
 **`run.head`.** The headline a list row draws: lifecycle, strategy name, objective and best result
 against the input, counts of work units, token and cost totals, a bounded point list for the tile
