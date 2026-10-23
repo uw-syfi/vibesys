@@ -34,6 +34,12 @@ Every case has all fields. The directory name is the first eight characters of `
 | `input_span` | The span id the measurement point is bound to, the input gate. |
 | `head_input_absent` | True when the stored head has no `input_value` and does not state its input (`input_stated` false), as a head written before the fact existed. |
 
+`best`, `ratio` and `measured` pin the best value, its ratio to the input and the number of
+measured ideas. Python head/keyframe reads, Go Head/Skeleton/WatchRuns and the client hero,
+Ideas and chart must retain these facts even when the saved head predates `performance_stated`.
+Only public RPC reply goldens are updated when a read upgrade adds these facts; producer files
+remain immutable.
+
 ## Adding a case
 
 Capture it before changing the producer or the writer, from a checkout of the preceding

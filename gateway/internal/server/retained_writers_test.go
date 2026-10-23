@@ -26,6 +26,9 @@ func TestSavedPreviousWritersRetainInputFacts(t *testing.T) {
 		Input          float64 `json:"input"`
 		MeasurementSeq uint64  `json:"measurement_seq"`
 		ProjectRoot    string  `json:"project_root"`
+		Best           float64 `json:"best"`
+		Ratio          float64 `json:"ratio"`
+		Measured       int     `json:"measured"`
 	}
 	if err := json.Unmarshal(manifest, &cases); err != nil {
 		t.Fatal(err)
@@ -74,6 +77,21 @@ func TestSavedPreviousWritersRetainInputFacts(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				if response.Head == nil || !response.Head.PerformanceStated || response.Head.GetObjective().GetBestValue() != want.Best {
+					t.Fatalf("retained Skeleton lost performance: %v", response.Head)
+				}
+				if response.Head.GetObjective().GetBestValue()/response.Head.GetObjective().GetInputValue() != want.Ratio {
+					t.Fatalf("retained ratio: %v", response.Head)
+				}
+				count := 0
+				for _, idea := range response.Head.Performance[0].Ideas {
+					if idea.MeasurementSeq != nil {
+						count++
+					}
+				}
+				if count != want.Measured {
+					t.Fatalf("retained measured = %d, want %d", count, want.Measured)
+				}
 				var epochs []*storev1.EpochVersion
 				if len(response.Keyframe) > 0 {
 					state := restored(t, response, nil)
@@ -100,6 +118,9 @@ func TestSavedPreviousWritersRetainInputFacts(t *testing.T) {
 					t.Fatal(err)
 				}
 				observed := watchEntry(t, watch)
+				if !observed.GetHead().GetPerformanceStated() || observed.GetHead().GetObjective().GetBestValue() != want.Best {
+					t.Fatalf("retained WatchRuns lost best: %v", observed)
+				}
 				if want.ProjectRoot != "" {
 					if observed.GetProjectRoot() != want.ProjectRoot {
 						t.Fatalf("retained index lost project: %v", observed)

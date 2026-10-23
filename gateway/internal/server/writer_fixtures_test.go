@@ -80,7 +80,9 @@ func TestPythonWriterSkeletonFixtures(t *testing.T) {
 			if name == "converted" {
 				pinWireGolden(t, got)
 			}
-			runlog.UpgradeSkeleton(&keyframe)
+			if _, err := runlog.UpgradeSkeleton(&keyframe); err != nil {
+				t.Fatal(err)
+			}
 			actual := restored(t, got, nil)
 			if !proto.Equal(actual, &keyframe) || got.CommittedSeq != keyframe.ThroughSeq || !got.Complete || len(got.Records) != 0 {
 				t.Fatalf("Python checkpoint did not round trip: %v", got)

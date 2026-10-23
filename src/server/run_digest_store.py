@@ -15,7 +15,6 @@ from vs_runlog.api import (
     RunLogReader,
     RunLogStopReason,
     fold_skeleton,
-    project_head,
     read_run_head,
     upgrade_skeleton,
 )
@@ -64,12 +63,6 @@ def _read_digest(path: Path) -> RunDigest:
         state.log_offset = reader.stop.offset
     last = records[-1].at if records else None
     state = upgrade_skeleton(state)
-    if not head.performance_stated:
-        upgraded = project_head(state, head.process)
-        if upgraded is None:
-            message = "run declaration: core projection is absent"
-            raise ValueError(message)
-        head = upgraded
     return digest_store(head, state, last_event_at=None if last is None else last.to_datetime())
 
 

@@ -498,7 +498,10 @@ type Keyframe struct {
 	RecordsTracked bool `protobuf:"varint,11,opt,name=records_tracked,json=recordsTracked,proto3" json:"records_tracked,omitempty"`
 	// Blob attachments, chat events and spans carrying steer delivery links. Other span facts
 	// already live in spans; epochs, lifecycles, metrics and streams have their own indexes.
-	RecordFacts   []*Record `protobuf:"bytes,12,rep,name=record_facts,json=recordFacts,proto3" json:"record_facts,omitempty"`
+	RecordFacts []*Record `protobuf:"bytes,12,rep,name=record_facts,json=recordFacts,proto3" json:"record_facts,omitempty"`
+	// Exact-prefix core projection restored by the read upgrade for previous writers.
+	// A reader ignores a head whose committed_seq differs from through_seq.
+	Head          *RunHead `protobuf:"bytes,13,opt,name=head,proto3" json:"head,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -613,6 +616,13 @@ func (x *Keyframe) GetRecordsTracked() bool {
 func (x *Keyframe) GetRecordFacts() []*Record {
 	if x != nil {
 		return x.RecordFacts
+	}
+	return nil
+}
+
+func (x *Keyframe) GetHead() *RunHead {
+	if x != nil {
+		return x.Head
 	}
 	return nil
 }
@@ -1227,7 +1237,7 @@ const file_vibesys_store_v1_skeleton_proto_rawDesc = "" +
 	"\x03pid\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\x03pid\x12\x1d\n" +
 	"\x05epoch\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\x05epoch\x12A\n" +
 	"\n" +
-	"started_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\tstartedAt\"\xe2\v\n" +
+	"started_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\tstartedAt\"\x91\f\n" +
 	"\bKeyframe\x12(\n" +
 	"\vthrough_seq\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\n" +
 	"throughSeq\x120\n" +
@@ -1245,7 +1255,8 @@ const file_vibesys_store_v1_skeleton_proto_rawDesc = "" +
 	"\aintents\x18\n" +
 	" \x03(\v2\x18.vibesys.store.v1.RecordR\aintents\x12'\n" +
 	"\x0frecords_tracked\x18\v \x01(\bR\x0erecordsTracked\x12;\n" +
-	"\frecord_facts\x18\f \x03(\v2\x18.vibesys.store.v1.RecordR\vrecordFacts\x1aW\n" +
+	"\frecord_facts\x18\f \x03(\v2\x18.vibesys.store.v1.RecordR\vrecordFacts\x12-\n" +
+	"\x04head\x18\r \x01(\v2\x19.vibesys.store.v1.RunHeadR\x04head\x1aW\n" +
 	"\n" +
 	"SpansEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x123\n" +
@@ -1378,25 +1389,26 @@ var file_vibesys_store_v1_skeleton_proto_depIdxs = []int32{
 	24, // 14: vibesys.store.v1.Keyframe.failures:type_name -> vibesys.store.v1.Record
 	24, // 15: vibesys.store.v1.Keyframe.intents:type_name -> vibesys.store.v1.Record
 	24, // 16: vibesys.store.v1.Keyframe.record_facts:type_name -> vibesys.store.v1.Record
-	8,  // 17: vibesys.store.v1.SpanHistory.versions:type_name -> vibesys.store.v1.SpanVersion
-	25, // 18: vibesys.store.v1.SpanVersion.span:type_name -> vibesys.store.v1.Span
-	10, // 19: vibesys.store.v1.MetricHistory.points:type_name -> vibesys.store.v1.MetricVersion
-	20, // 20: vibesys.store.v1.MetricVersion.point:type_name -> vibesys.store.v1.MetricPoint
-	26, // 21: vibesys.store.v1.EpochVersion.epoch:type_name -> vibesys.store.v1.EpochStarted
-	22, // 22: vibesys.store.v1.EpochVersion.started_at:type_name -> google.protobuf.Timestamp
-	18, // 23: vibesys.store.v1.LifecycleVersion.lifecycle:type_name -> vibesys.store.v1.Lifecycle
-	14, // 24: vibesys.store.v1.SeriesPerformance.points:type_name -> vibesys.store.v1.IdeaPerformance
-	15, // 25: vibesys.store.v1.SeriesPerformance.ideas:type_name -> vibesys.store.v1.IdeaDecision
-	0,  // 26: vibesys.store.v1.SeriesPerformance.refusal:type_name -> vibesys.store.v1.PerformanceRefusal
-	20, // 27: vibesys.store.v1.IdeaPerformance.point:type_name -> vibesys.store.v1.MetricPoint
-	1,  // 28: vibesys.store.v1.IdeaPerformance.outcome:type_name -> vibesys.store.v1.IdeaOutcome
-	1,  // 29: vibesys.store.v1.IdeaDecision.outcome:type_name -> vibesys.store.v1.IdeaOutcome
-	7,  // 30: vibesys.store.v1.Keyframe.SpansEntry.value:type_name -> vibesys.store.v1.SpanHistory
-	31, // [31:31] is the sub-list for method output_type
-	31, // [31:31] is the sub-list for method input_type
-	31, // [31:31] is the sub-list for extension type_name
-	31, // [31:31] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	3,  // 17: vibesys.store.v1.Keyframe.head:type_name -> vibesys.store.v1.RunHead
+	8,  // 18: vibesys.store.v1.SpanHistory.versions:type_name -> vibesys.store.v1.SpanVersion
+	25, // 19: vibesys.store.v1.SpanVersion.span:type_name -> vibesys.store.v1.Span
+	10, // 20: vibesys.store.v1.MetricHistory.points:type_name -> vibesys.store.v1.MetricVersion
+	20, // 21: vibesys.store.v1.MetricVersion.point:type_name -> vibesys.store.v1.MetricPoint
+	26, // 22: vibesys.store.v1.EpochVersion.epoch:type_name -> vibesys.store.v1.EpochStarted
+	22, // 23: vibesys.store.v1.EpochVersion.started_at:type_name -> google.protobuf.Timestamp
+	18, // 24: vibesys.store.v1.LifecycleVersion.lifecycle:type_name -> vibesys.store.v1.Lifecycle
+	14, // 25: vibesys.store.v1.SeriesPerformance.points:type_name -> vibesys.store.v1.IdeaPerformance
+	15, // 26: vibesys.store.v1.SeriesPerformance.ideas:type_name -> vibesys.store.v1.IdeaDecision
+	0,  // 27: vibesys.store.v1.SeriesPerformance.refusal:type_name -> vibesys.store.v1.PerformanceRefusal
+	20, // 28: vibesys.store.v1.IdeaPerformance.point:type_name -> vibesys.store.v1.MetricPoint
+	1,  // 29: vibesys.store.v1.IdeaPerformance.outcome:type_name -> vibesys.store.v1.IdeaOutcome
+	1,  // 30: vibesys.store.v1.IdeaDecision.outcome:type_name -> vibesys.store.v1.IdeaOutcome
+	7,  // 31: vibesys.store.v1.Keyframe.SpansEntry.value:type_name -> vibesys.store.v1.SpanHistory
+	32, // [32:32] is the sub-list for method output_type
+	32, // [32:32] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_skeleton_proto_init() }

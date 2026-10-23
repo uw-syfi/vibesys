@@ -4,11 +4,11 @@ package vibesys.api.v1;
 
 import "buf/validate/validate.proto";
 import "vibesys/api/v1/host_call.proto";
-import "vibesys/api/v1/host_read_generated.proto";
 import "vibesys/api/v1/host_mutate_generated.proto";
+import "vibesys/api/v1/host_read_generated.proto";
 import "vibesys/api/v1/host_watch_generated.proto";
-import "vibesys/store/v1/skeleton.proto";
 import "vibesys/store/v1/chat.proto";
+import "vibesys/store/v1/skeleton.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1";
 
@@ -133,6 +133,8 @@ message SkeletonResponse {
     }
   }];
   repeated DescriptorSet descriptor_sets = 7 [(buf.validate.field).repeated.max_items = 64];
+  // Core facts at committed_seq, including the retained-writer read upgrade.
+  vibesys.store.v1.RunHead head = 8;
 }
 
 message WatchRunsRequest {}

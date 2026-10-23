@@ -284,6 +284,12 @@ headers through the same bounded observation memo. No address backfill or writer
 required. If no project can be recovered, the listing and dashboard retain the run with an
 unknown project and expose no project control address.
 
+The same observation boundary restores unstated performance and terminal presentation from
+previous-writer committed prefixes. Head, keyframe and Skeleton readers share the projection;
+the card and page consume those facts. Keyframes and Skeleton replies carry the exact-prefix
+read head, while stored files remain unchanged. Explicit writer-stated facts win. The Go
+retained reader is checked against the Python core's generated performance histories.
+
 **Development mode.** The laptop tree builds the UI and the gateway; the host checkout runs the
 runs. They may diverge as long as store changes stay additive. The operator updates the host
 checkout, including any intended uncommitted edits, before relaunching. The app does not

@@ -44,6 +44,13 @@ function windowStart(response: SkeletonResponse): bigint {
   return response.nextSeq > RECORD_WINDOW ? response.nextSeq - RECORD_WINDOW : 0n;
 }
 
+function withObservedHead(skeleton: Skeleton, response: SkeletonResponse): Skeleton {
+  if (response.head === undefined) return skeleton;
+  if (response.head.committedSeq !== response.committedSeq)
+    throw new Error('skeleton.head.committed_seq: differs from committed_seq');
+  return {...skeleton, head: response.head};
+}
+
 /** Decode the server's bounded committed prefix. No keyframe means replay; next_seq remains authoritative for phase 1 gaps. */
 export function ingestSkeleton(response: SkeletonResponse): SkeletonLoad {
   const initial =
@@ -52,10 +59,11 @@ export function ingestSkeleton(response: SkeletonResponse): SkeletonLoad {
       : seedSkeleton(fromBinary(KeyframeSchema, response.keyframe));
   if (initial.throughSeq !== undefined && initial.throughSeq > response.committedSeq)
     throw new Error('keyframe.through_seq: exceeds committed_seq');
-  const skeleton = foldSkeleton(
+  const folded = foldSkeleton(
     initial,
     response.records.map(bytes => fromBinary(RecordSchema, bytes)),
   );
+  const skeleton = withObservedHead(folded, response);
   if (skeleton.throughSeq !== undefined && response.nextSeq <= skeleton.throughSeq)
     throw new Error('skeleton.next_seq: does not follow delivered prefix');
   if (

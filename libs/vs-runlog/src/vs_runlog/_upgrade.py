@@ -13,6 +13,7 @@ from vs_proto.api import (
     Record,
     Span,
 )
+from vs_runlog._head import project_head
 
 
 def _same_input(left: EpochStarted | None, right: EpochStarted) -> bool:
@@ -138,4 +139,10 @@ def upgrade_skeleton(state: Keyframe) -> Keyframe:
         elif (amended := upgrade.measurement(value)) is not None:
             result.epochs.append(EpochVersion(seq=seq, epoch=amended))
     result.epochs.sort(key=lambda version: version.seq)
+    if (
+        result.head is None
+        or not result.head.performance_stated
+        or result.head.committed_seq != result.through_seq
+    ):
+        result.head = project_head(result)
     return result

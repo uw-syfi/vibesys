@@ -48,6 +48,7 @@ def append_skeleton(state: Keyframe, record: Record) -> None:
     if record.seq != state.through_seq + 1:
         message = f"record.seq: expected {state.through_seq + 1}, got {record.seq}"
         raise ValueError(message)
+    state.clear_field("head")
     owned = Record.from_binary(record.to_binary())
     body = owned.body
     if body is not None:

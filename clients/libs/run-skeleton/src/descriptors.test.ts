@@ -9,6 +9,7 @@ import {
   DescriptorSetSchema,
   EpochVersionSchema,
   KeyframeSchema,
+  RunHeadSchema,
   SkeletonRequestSchema,
   SkeletonResponseSchema,
 } from '@vibesys/proto';
@@ -28,8 +29,19 @@ const golden = () =>
     SkeletonResponseSchema,
     gunzipSync(readFileSync(new URL('skeleton-wire/converted.response.pb.gz', FIXTURES))),
   );
-const stored = () =>
-  fromBinary(KeyframeSchema, readFileSync(new URL('conversion/expected.pb', FIXTURES)));
+const stored = () => {
+  const state = fromBinary(
+    KeyframeSchema,
+    readFileSync(new URL('conversion/expected.pb', FIXTURES)),
+  );
+  // Read projections add the same exact-prefix facts to the reply and checkpoint.
+  // The checkpoint has no process observation; core/Go performance equality has its own corpus.
+  const head = golden().head;
+  expect(head?.performanceStated).toBe(true);
+  state.head =
+    head === undefined ? undefined : create(RunHeadSchema, {...head, process: undefined});
+  return state;
+};
 
 test('the gateway reply names its descriptors and restores to the stored keyframe', () => {
   const reply = golden();

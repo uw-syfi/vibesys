@@ -11,10 +11,12 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-from vs_proto.api import Record, RunHead, validate
+from vs_proto.api import Keyframe, Record, RunHead, validate
 from vs_runlog._epoch import CurrentEpoch, current_epoch
 from vs_runlog._file import RunLogReader
+from vs_runlog._fold import append_skeleton
 from vs_runlog._framing import RunLogStopReason
+from vs_runlog._head import project_head
 from vs_runlog._upgrade import InputUpgrade
 
 _MEMO_CAPACITY = 1024
@@ -54,6 +56,7 @@ class _Recovered:
     epoch: CurrentEpoch
     input_value: float | None
     project_root: str | None = None
+    head: RunHead | None = None
 
 
 class HeadObserver:
@@ -80,11 +83,16 @@ class HeadObserver:
                 and not head.objective.input_stated
                 and not head.objective.has_field("input_value")
             )
-            if (head.epoch == 0 or wants_input) and log.exists():
+            wants_performance = not head.performance_stated
+            if (head.epoch == 0 or wants_input or wants_performance) and log.exists():
                 recovered = self._recovered(log, head)
                 head.epoch = head.epoch or recovered.epoch.number
                 if wants_input and recovered.input_value is not None and head.objective is not None:
                     head.objective.input_value = recovered.input_value
+                if wants_performance and recovered.head is not None:
+                    projected = RunHead.from_binary(recovered.head.to_binary())
+                    projected.process = head.process
+                    head = projected
             return head
 
     def project_root(self, path: Path) -> str | None:
@@ -138,6 +146,7 @@ class HeadObserver:
 def _recover_prefix(log: Path, head: RunHead | None) -> _Recovered:
     facts, upgrade = CurrentEpoch(), InputUpgrade()
     project_root = None
+    state = Keyframe()
     with log.open("rb") as stream:
         for record in _head_records(RunLogReader(stream), head, log):
             if record.body is not None and record.body.field == "epoch_started":
@@ -146,7 +155,12 @@ def _recover_prefix(log: Path, head: RunHead | None) -> _Recovered:
                 return _Recovered(CurrentEpoch(), None, project_root)
             facts = current_epoch((record,), facts)
             upgrade.apply(record)
-    return _Recovered(facts, upgrade.measured, project_root)
+            # Phase 1 observation prefixes may start at zero and have sequence gaps.
+            # Their zero envelope has no native snapshot facts; epoch authority was folded above.
+            if record.seq > 0:
+                state.through_seq = record.seq - 1
+                append_skeleton(state, record)
+    return _Recovered(facts, upgrade.measured, project_root, project_head(state))
 
 
 def _prefix(log: Path, head: RunHead | None) -> _Prefix:

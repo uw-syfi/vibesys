@@ -49,7 +49,11 @@ export function projectSkeleton(
     loadFailure?: string | undefined;
   } = {},
 ): RunModel {
-  const headline = readHeadline(options.head, seq);
+  const head =
+    options.head?.performanceStated && options.head.committedSeq === seq
+      ? options.head
+      : skeleton.head;
+  const headline = readHeadline(head, seq);
   const view = seekSkeleton(skeleton, seq);
   const reading = readSkeleton(skeleton, view, objectiveText, options.content);
   const tree = settleIdeas(candidateTree(reading.spans), reading.comparisons);
@@ -76,7 +80,7 @@ export function projectSkeleton(
     progress: options.progress,
     loadFailure: options.loadFailure,
     headline,
-    series: skeletonPerformance(view, reading.spans, candidates.candidates, options.head),
+    series: skeletonPerformance(view, reading.spans, candidates.candidates, head),
     input: reading.input,
     at: Number(seq),
     trace: {spans: new Map(reading.spans.map(span => [span.id, span])), sequence: Number(seq)},

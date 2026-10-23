@@ -29,6 +29,7 @@ export type Skeleton = Pick<
   | 'intents'
   | 'recordsTracked'
   | 'recordFacts'
+  | 'head'
 > & {
   readonly throughSeq: bigint | undefined;
 };
@@ -57,6 +58,7 @@ function copySkeleton(keyframe: Keyframe): Skeleton {
     intents,
     recordsTracked,
     recordFacts,
+    head,
   } = clone(KeyframeSchema, keyframe);
   return {
     throughSeq,
@@ -70,6 +72,7 @@ function copySkeleton(keyframe: Keyframe): Skeleton {
     intents,
     recordsTracked,
     recordFacts,
+    head,
   };
 }
 
@@ -84,6 +87,8 @@ export function foldSkeleton(state: Skeleton, records: readonly StoreRecord[]): 
   };
   for (const record of records) {
     validateSequence(next.throughSeq, record);
+    if (next.head !== undefined && (next.head.committedSeq ?? 0n) < record.seq)
+      next.head = undefined;
     foldBody(next, clone(RecordSchema, record));
     next.throughSeq = record.seq;
   }

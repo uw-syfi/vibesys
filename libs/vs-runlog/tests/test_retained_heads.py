@@ -25,6 +25,15 @@ def test_retained_head_has_the_previous_writers_input(version: str) -> None:
     head = read_run_head(directory / "run.log")
     assert head.objective is not None
     assert head.objective.input_value == CASES[version]["input"]
+    assert head.performance_stated
+    assert head.objective.best_value == CASES[version]["best"]
+    facts = head.performance[0]
+    assert facts.best_value == CASES[version]["best"]
+    assert facts.best_value / facts.input_value == CASES[version]["ratio"]
+    assert (
+        sum(idea.has_field("measurement_seq") for idea in facts.ideas) == CASES[version]["measured"]
+    )
+    assert all(point.outcome.name == "KEPT" for point in facts.points if point.new_best)
     assert (directory / "run.head").read_bytes() == original
 
 

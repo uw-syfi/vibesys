@@ -8,7 +8,10 @@
     "chart_reference": 100,
     "measurement_seq": 14,
     "head_input_absent": true,
-    "input_span": "input-gate"
+    "input_span": "input-gate",
+    "best": 102,
+    "ratio": 1.02,
+    "measured": 2
   },
   "471ec600": {
     "writer_commit": "471ec6007de08bedf072e906b6d9392057ba7167",
@@ -19,7 +22,10 @@
     "chart_reference": 100,
     "measurement_seq": 14,
     "head_input_absent": true,
-    "input_span": "input-gate"
+    "input_span": "input-gate",
+    "best": 102,
+    "ratio": 1.02,
+    "measured": 2
   },
   "0064a1bc": {
     "writer_commit": "0064a1bc69059a4b289d0f0c3cf510253bc0949b",
@@ -37,7 +43,10 @@
     ],
     "epoch_starts": [
       1
-    ]
+    ],
+    "best": 102,
+    "ratio": 1.02,
+    "measured": 2
   },
   "438bfd3d": {
     "writer_commit": "438bfd3de4b20304206ee9fa0a0e3cdf224bd588",
@@ -50,6 +59,9 @@
     "head_input_absent": false,
     "input_span": "input-gate",
     "project_root": "/projects/unvisited project",
-    "index_project_absent": true
+    "index_project_absent": true,
+    "best": 102,
+    "ratio": 1.02,
+    "measured": 2
   }
 }

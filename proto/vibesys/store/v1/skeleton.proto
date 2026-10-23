@@ -125,6 +125,9 @@ message Keyframe {
   // Blob attachments, chat events and spans carrying steer delivery links. Other span facts
   // already live in spans; epochs, lifecycles, metrics and streams have their own indexes.
   repeated Record record_facts = 12;
+  // Exact-prefix core projection restored by the read upgrade for previous writers.
+  // A reader ignores a head whose committed_seq differs from through_seq.
+  RunHead head = 13;
 }
 
 message SpanHistory {

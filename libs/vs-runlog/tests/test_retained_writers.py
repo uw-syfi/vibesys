@@ -59,6 +59,10 @@ def test_saved_previous_writers_reopen_with_the_same_facts(tmp_path: Path, versi
     assert fact.state.field == "measured"
     assert fact.state.value.value == CASES[version]["input"]
     validate(state)
+    assert state.head is not None
+    assert state.head.performance_stated
+    assert state.head.objective is not None
+    assert state.head.objective.best_value == CASES[version]["best"]
     assert (directory / "run.head").read_bytes() == original
     assert upgrade_skeleton(state) == state
 

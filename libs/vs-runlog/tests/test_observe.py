@@ -23,6 +23,7 @@ def stored_head(case: str) -> RunHead:
     assert head.objective is not None
     head.objective.clear_field("input_value")
     head.objective.input_stated = False
+    head.performance_stated = True
     return head
 
 
@@ -171,7 +172,7 @@ def test_a_previous_writer_head_scans_once_however_often_it_is_read(
     observer = HeadObserver()
     reads = [observer.read(tmp_path / "run" / "run.log") for _ in range(20)]
     assert all(read == reads[0] for read in reads)
-    assert observer.scans == int(CASES[case]["head_input_absent"])
+    assert observer.scans == 1
 
 
 @pytest.mark.parametrize("case", CASES)

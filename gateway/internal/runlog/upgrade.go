@@ -9,9 +9,9 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// UpgradeSkeleton applies the same semantic read upgrade as record streaming.
+// upgradeInputSkeleton applies the same semantic input upgrade as record streaming.
 // Declarations retain the sequence where their measurement became known.
-func UpgradeSkeleton(state *storev1.Keyframe) bool {
+func upgradeInputSkeleton(state *storev1.Keyframe) bool {
 	var records []*storev1.Record
 	for _, version := range state.Epochs {
 		records = append(records, &storev1.Record{Seq: version.Seq, Body: &storev1.Record_EpochStarted{EpochStarted: version.Epoch}})
@@ -53,7 +53,7 @@ func NewInputUpgrade(state *storev1.Keyframe) *InputUpgrade {
 	if state == nil {
 		return u
 	}
-	UpgradeSkeleton(state)
+	upgradeInputSkeleton(state)
 	if len(state.Epochs) > 0 && state.Epochs[len(state.Epochs)-1].GetEpoch() != nil {
 		u.epoch = proto.Clone(state.Epochs[len(state.Epochs)-1].Epoch).(*storev1.EpochStarted)
 	}
@@ -128,7 +128,9 @@ func (u *InputUpgrade) Measurement() *storev1.InputMeasurement {
 }
 
 // Irrelevant bodies remain opaque, including bodies added by newer writers.
-func upgradeMetadata(payload []byte) []byte {
+func upgradeMetadata(payload []byte) []byte    { return filteredMetadata(payload, false) }
+func projectionMetadata(payload []byte) []byte { return filteredMetadata(payload, true) }
+func filteredMetadata(payload []byte, lifecycle bool) []byte {
 	fields := (&storev1.Record{}).ProtoReflect().Descriptor().Oneofs().ByName("body").Fields()
 	var filtered []byte
 	for len(payload) > 0 {
@@ -141,7 +143,7 @@ func upgradeMetadata(payload []byte) []byte {
 			return payload
 		}
 		field := fields.ByNumber(number)
-		if field != nil && kind == protowire.BytesType && field.Name() != "epoch_started" && field.Name() != "declaration_amended" && field.Name() != "span" && field.Name() != "metric" {
+		if field != nil && kind == protowire.BytesType && field.Name() != "epoch_started" && field.Name() != "declaration_amended" && field.Name() != "span" && field.Name() != "metric" && !(lifecycle && field.Name() == "lifecycle") {
 			filtered = protowire.AppendTag(filtered, number, kind)
 			filtered = protowire.AppendBytes(filtered, nil)
 		} else {
@@ -155,4 +157,20 @@ func upgradeMetadata(payload []byte) []byte {
 func sameInput(left, right *storev1.EpochStarted) bool {
 	previous, current := left.GetRun(), right.GetRun()
 	return previous != nil && current != nil && previous.Input == current.Input && len(previous.Objectives) > 0 && len(current.Objectives) > 0 && previous.Objectives[0].Series == current.Objectives[0].Series
+}
+
+// UpgradeSkeleton restores input and performance facts without rewriting retained bytes.
+func UpgradeSkeleton(state *storev1.Keyframe) (bool, error) {
+	changed := upgradeInputSkeleton(state)
+	if state.Head == nil || !state.Head.PerformanceStated || state.Head.GetCommittedSeq() != state.ThroughSeq {
+		head, err := ProjectHead(state)
+		if err != nil {
+			return false, err
+		}
+		if head != nil {
+			state.Head = head
+			changed = true
+		}
+	}
+	return changed, nil
 }

@@ -84,6 +84,7 @@ func TestOnlyPreviousWriterHeadsScanTheirLogOncePerPrefix(t *testing.T) {
 				head.CommittedSeq = proto.Uint64(v.committed)
 				head.Objective.InputValue = nil
 				head.Objective.InputStated = v.stated
+				head.PerformanceStated = true
 				if !v.hasEpoc {
 					head.Epoch = 0
 				}
@@ -148,6 +149,7 @@ func objectiveHead(t *testing.T, stated bool, committed uint64) *storev1.RunHead
 	}
 	head.CommittedSeq = proto.Uint64(committed)
 	head.Objective.InputStated = stated
+	head.PerformanceStated = true
 	head.Objective.InputValue = nil
 	return head
 }

@@ -1,6 +1,12 @@
 package server
 
 import (
+	"bytes"
+	"encoding/binary"
+	"errors"
+	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
+	"hash/crc32"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -104,5 +110,113 @@ func TestTransientPrefixReadFailureIsRetried(t *testing.T) {
 	}
 	if observer.scans != 3 {
 		t.Fatalf("transient reads did not retry: %d scans", observer.scans)
+	}
+}
+
+// test-isolation: scans measures the committed-prefix work bound at the observation boundary.
+func TestSemanticProjectionDamageIsMemoizedAndRepairRetries(t *testing.T) {
+	original, err := os.ReadFile(filepath.Join(corpus, "64c1a8b7", "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := os.ReadFile(filepath.Join(corpus, "64c1a8b7", "run.head"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"gate", "workstream"} {
+		t.Run(kind, func(t *testing.T) {
+			reader := runlog.NewReader(bytes.NewReader(original))
+			damaged := []byte(runlog.Magic)
+			changed := false
+			for {
+				payload, err := reader.Next()
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				record := &storev1.Record{}
+				if err := proto.Unmarshal(payload, record); err != nil {
+					t.Fatal(err)
+				}
+				if label := record.GetSpan().GetSpan().GetLabel(); label.GetKind() == kind && label.Attrs != nil {
+					label.Attrs.Value = []byte{255}
+					changed = true
+				}
+				data, err := proto.Marshal(record)
+				if err != nil {
+					t.Fatal(err)
+				}
+				damaged = binary.AppendUvarint(damaged, uint64(len(data)))
+				damaged = binary.LittleEndian.AppendUint32(damaged, crc32.Checksum(data, crc32.MakeTable(crc32.Castagnoli)))
+				damaged = append(damaged, data...)
+			}
+			if !changed {
+				t.Fatal("fixture lacks requested attrs")
+			}
+			dir := t.TempDir()
+			log := filepath.Join(dir, "run.log")
+			if err := os.WriteFile(log, damaged, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "run.head"), stored, 0600); err != nil {
+				t.Fatal(err)
+			}
+			var observer headObserver
+			for range 10 {
+				if _, err := observer.read(dir); err == nil {
+					t.Fatal("invalid retained attrs were accepted")
+				}
+			}
+			if observer.scans != 1 {
+				t.Fatalf("semantic damage scanned %d times", observer.scans)
+			}
+			if err := os.WriteFile(log, original, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if head, err := observer.read(dir); err != nil || !head.GetPerformanceStated() {
+				t.Fatalf("repair: %v, %v", head, err)
+			}
+			if observer.scans != 2 {
+				t.Fatalf("repair scans = %d", observer.scans)
+			}
+		})
+	}
+}
+
+// test-isolation: the scan bound spans the public head and project observations.
+func TestUnfencedRetainedHeadAndProjectShareOnePrefix(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"run.head", "run.log"} {
+		data, err := os.ReadFile(filepath.Join(corpus, "438bfd3d", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "run.head"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := &storev1.RunHead{}
+	if err := proto.Unmarshal(raw, head); err != nil {
+		t.Fatal(err)
+	}
+	head.CommittedSeq = nil
+	publish(t, dir, head)
+	var observer headObserver
+	observed, err := observer.read(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := observer.project(t.TempDir(), "run-a", dir, observed)
+	if err != nil || root != "/projects/unvisited project" {
+		t.Fatalf("project = %q, %v", root, err)
+	}
+	if observer.scans != 1 {
+		t.Fatalf("same frozen prefix scanned %d times", observer.scans)
 	}
 }
