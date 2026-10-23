@@ -25,6 +25,7 @@ import type {Direction} from './direction.js';
 import {failuresAt, type GateFailure} from './input-gates.js';
 import {overviewAt, type TraceLog, traceAt} from './live.js';
 import {withLiveBest} from './live-best.js';
+import type {PerformanceFold} from './performance.js';
 import {NO_PAUSES, type QuotaPauseSpan} from './quota-pauses.js';
 import {settleIdeas} from './settled-ideas.js';
 import {latestTime} from './span-reading.js';
@@ -63,6 +64,8 @@ export interface RunModel {
   readonly input?: number | null;
   /** The writer's headline at exactly this committed prefix, when available. */
   readonly headline?: HeadlineReading | undefined;
+  /** The writer's metric series, including measurements with no idea owner. */
+  readonly series?: ReadonlyMap<string, PerformanceFold>;
   /** The sequence shown; null at the live end. */
   readonly at: number | null;
   readonly trace: RunTrace;

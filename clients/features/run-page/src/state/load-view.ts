@@ -60,7 +60,7 @@ export function loadView(
   }
 }
 
-/** The screen paints from the first Skeleton that holds an epoch; the rest of the history follows. */
+/** A prefix is progress, not settled run facts. Publish the page after committed history catches up. */
 export function paintedSkeleton(load: SkeletonLoad | undefined): Skeleton | undefined {
-  return load !== undefined && load.skeleton.epochs.length > 0 ? load.skeleton : undefined;
+  return load?.complete === true && load.skeleton.epochs.length > 0 ? load.skeleton : undefined;
 }

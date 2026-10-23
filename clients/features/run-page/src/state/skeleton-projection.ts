@@ -17,6 +17,7 @@ import {withLiveBest} from './live-best.js';
 import type {RunModel} from './run-model.js';
 import {type RunPageSeed, type RunPageState, runPageInitial} from './run-page.js';
 import {settleIdeas} from './settled-ideas.js';
+import {skeletonPerformance} from './skeleton-performance.js';
 import {duration} from './span-reading.js';
 import {STARTUP_LABELS} from './startup-stages.js';
 
@@ -39,23 +40,26 @@ export function projectSkeleton(
   options: {head?: RunLivenessHint['head']; content?: SkeletonContent} = {},
 ): RunModel {
   const headline = readHeadline(options.head, seq);
-  const reading = readSkeleton(
-    skeleton,
-    seekSkeleton(skeleton, seq),
-    objectiveText,
-    options.content,
+  const view = seekSkeleton(skeleton, seq);
+  const reading = readSkeleton(skeleton, view, objectiveText, options.content);
+  const candidates = withLiveBest(
+    settleIdeas(candidateTree(reading.spans), reading.comparisons),
+    reading.direction,
   );
   return {
     headline,
+    series: skeletonPerformance(
+      view,
+      reading.spans,
+      candidates.candidates,
+      reading.overview?.objective.objectives ?? [],
+    ),
     input: reading.input,
     at: Number(seq),
     trace: {spans: new Map(reading.spans.map(span => [span.id, span])), sequence: Number(seq)},
     overview: reading.overview,
     direction: reading.direction,
-    candidates: withLiveBest(
-      settleIdeas(candidateTree(reading.spans), reading.comparisons),
-      reading.direction,
-    ),
+    candidates,
     agents: agentGraph(reading.spans),
     pauses: reading.pauses,
     baselines: reading.baselines,

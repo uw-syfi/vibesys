@@ -123,16 +123,17 @@ function open(
 const painted = (actor: ReturnType<typeof open>['actor']): boolean =>
   paintedSkeleton(actor.getSnapshot().context.load) !== undefined;
 
-test('the first paint costs one round trip and one Skeleton reply, whatever the history holds', async () => {
+test('history progress costs one round trip; settled facts wait for catch-up', async () => {
   for (let seed = 1; seed <= CASES; seed += 1) {
     const {run, link} = generate(seed);
     const {clock, gateway, actor} = open(run, link);
-    const at = await until(clock, () => painted(actor));
+    const at = await until(clock, () => actor.getSnapshot().context.progress.phase !== 'skeleton');
     const first = gateway.deliveries.find(item => item.method === `${SERVICE}Skeleton`);
     expect(at).toBeDefined();
     if (at === undefined || first === undefined) throw new Error(`seed ${seed}: no paint`);
     expect(at).toBeLessThanOrEqual(link.rttMs + first.bytes / link.bytesPerMs + 1);
-    // Only the Skeleton reply (and the liveness hello) crossed the link before the paint.
+    expect(painted(actor)).toBe(actor.getSnapshot().context.load?.complete === true);
+    // Only the Skeleton reply (and the liveness hello) crossed the link before progress.
     expect(gateway.bytesBy(at)).toBeLessThanOrEqual(gateway.replyBytes + 256);
     actor.stop();
   }
@@ -250,7 +251,7 @@ test('a Tail cut mid-way resumes from its cursor and loses nothing', async () =>
   }
 });
 
-test('a converted run (the retained conversion corpus) paints from its first reply and reads on', async () => {
+test('a converted run reports progress from its first reply and settles after catch-up', async () => {
   const root = new URL('../../../../../../proto/testdata/conversion/', import.meta.url);
   const values: string[] = JSON.parse(
     gunzipSync(readFileSync(new URL('records.base64.json.gz', root))).toString(),
@@ -263,12 +264,14 @@ test('a converted run (the retained conversion corpus) paints from its first rep
     {records, keyframes: [], replyBytes: GATEWAY_REPLY_BYTES},
     link,
   );
-  const at = await until(clock, () => painted(actor));
+  const at = await until(clock, () => actor.getSnapshot().context.progress.phase !== 'skeleton');
   const first = gateway.deliveries.find(item => item.method === `${SERVICE}Skeleton`);
   if (at === undefined || first === undefined) throw new Error('no paint');
   expect(at).toBeLessThanOrEqual(link.rttMs + first.bytes / link.bytesPerMs + 1);
   expect(gateway.bytesBy(at)).toBeLessThanOrEqual(gateway.replyBytes + 256);
-  await until(clock, () => actor.getSnapshot().context.load?.complete === true);
+  expect(painted(actor)).toBe(actor.getSnapshot().context.load?.complete === true);
+  await until(clock, () => painted(actor));
+  expect(painted(actor)).toBe(true);
   expect(gateway.callsTo('Tail').length).toBeLessThanOrEqual(1);
   for (const tail of gateway.callsTo('Tail'))
     expect(fromBinary(TailRequestSchema, tail.request).fromSeq).toBeGreaterThanOrEqual(

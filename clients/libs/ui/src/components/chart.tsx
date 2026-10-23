@@ -7,6 +7,8 @@ import {useInlineSize} from './label-fit.js';
  * `selected` and picked; `label` names it for assistive technology (its `id` if absent).
  */
 export interface ChartPoint {
+  /** Stable sample identity when several samples open the same item. */
+  readonly key?: string;
   readonly id?: string;
   readonly label?: string;
   readonly x: number;
@@ -301,7 +303,7 @@ export function Chart(props: {
         {steps.length === 0 ? null : <path className="vs-chart-step" d={stepPath(steps, at)} />}
         {drawnPoints(props.points).map(point => (
           <Point
-            key={point.id ?? `${point.x}:${point.y}`}
+            key={point.key ?? point.id ?? `${point.x}:${point.y}`}
             point={point}
             at={at}
             selected={

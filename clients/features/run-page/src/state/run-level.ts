@@ -194,8 +194,11 @@ function trendOf(
   input: number | null,
   candidates: readonly Candidate[] = model.candidates.candidates,
   direction: Direction = model.direction,
+  metric = objectiveMetric(model),
 ): TileTrend | null {
-  const fold = performanceFold(candidates, direction, input);
+  const fold =
+    (metric === null ? undefined : model.series?.get(metric)) ??
+    performanceFold(candidates, direction, input);
   const last = fold.best.at(-1);
   // The input's own measurement is a point of the run: with nothing better yet it is the line.
   if (last === undefined && input === null) return null;
@@ -254,12 +257,14 @@ function axisTile(model: RunModel, axis: ObjectiveAxis): MetricTileView {
   const passed = all
     .filter(item => item.outcome === 'passed' && readingOn(item, axis.name) !== undefined)
     .map(item => (readingOn(item, axis.name) as MeasuredReading).value);
+  const seriesBest = model.series?.get(axis.name)?.best.at(-1)?.value;
   const value =
-    passed.length === 0
+    seriesBest ??
+    (passed.length === 0
       ? null
       : passed.reduce((best, next) =>
           (axis.direction === 'min' ? next < best : next > best) ? next : best,
-        );
+        ));
   const vs = value === null || input === null || input === 0 ? null : value / input;
   const better = vs === null ? null : improvement(vs, direction);
   return {
@@ -268,7 +273,7 @@ function axisTile(model: RunModel, axis: ObjectiveAxis): MetricTileView {
     ...((input === null && better === null
       ? baselineTile(value, words, baselineReferences(model.baselines, axis.name), direction)
       : null) ?? tileWords(model, value, input, words, better)),
-    trend: trendOf(model, name, input, measuredOn(all, axis.name), direction),
+    trend: trendOf(model, name, input, measuredOn(all, axis.name), direction, axis.name),
   };
 }
 
@@ -352,12 +357,16 @@ function objectiveTile(model: RunModel, best: CandidateMeasurement | null): Metr
   const named = typeof metric === 'string' && metric !== '';
   const name = named ? metricLabel(metric) : 'Metric';
   const input = inputValue(model);
-  const vs = best?.vsBaseline ?? null;
-  const better = vs === null ? null : improvement(vs, model.direction);
   // The objective's own reading when the benchmark reported it, else its headline: the first
   // reading, which is not always the objective's.
   const reading = named ? best?.readings.find(each => each.name === metric) : undefined;
-  const value = reading?.value ?? best?.metricValue ?? null;
+  const value =
+    model.series?.get(metric ?? '')?.best.at(-1)?.value ??
+    reading?.value ??
+    best?.metricValue ??
+    null;
+  const vs = againstInput(value, input) ?? best?.vsBaseline ?? null;
+  const better = vs === null ? null : improvement(vs, model.direction);
   const against = best?.against ?? null;
   return {
     id: named ? metric : 'metric',
@@ -432,7 +441,8 @@ export function heroView(
 export interface StripChartView {
   readonly label: string;
   readonly points: readonly {
-    readonly id: string;
+    readonly id?: string;
+    readonly key?: string;
     readonly label: string;
     readonly x: number;
     readonly y: number;
@@ -563,12 +573,14 @@ export function stripChartView(
   lit: ReadonlySet<string> = NO_IDEAS,
 ): StripChartView | null {
   const minutes = (at: number) => (at - start) / 60;
-  const fold = performanceFold(model.candidates.candidates, model.direction, inputValue(model));
+  const metric = objectiveMetric(model);
+  const fold = chartPerformance(model, metric);
   // The input's measurement is a point too: with no idea measured yet the chart is its line.
   if (fold.points.length === 0 && inputValue(model) === null) return null;
   const open = focusOn(model, fold.points, focus);
   const points = fold.points.map(point => ({
-    id: point.id,
+    ...(point.unowned ? {} : {id: point.id}),
+    ...(point.key === undefined ? {} : {key: point.key}),
     label: `${point.title} · ${formatValue(point.value)} · ${point.best ? 'New best' : RESULT_WORDS[point.result]}`,
     x: minutes(point.at),
     y: point.value,
@@ -585,7 +597,6 @@ export function stripChartView(
   const last = steps.at(-1);
   if (last !== undefined && last.x < end) steps.push({x: end, y: last.y});
   const input = inputValue(model);
-  const metric = objectiveMetric(model);
   const baselines = baselineReferences(model.baselines, metric).map(reference => ({
     y: reference.value,
     label: reference.label,
@@ -798,4 +809,15 @@ export function logStreamToFollow(
   }
   const scope = shownLogScope(route, resolveZoom(model, route));
   return scope === null ? null : streamToFollow(state, scope);
+}
+
+function chartPerformance(model: RunModel, metric: string | null) {
+  return (
+    (metric === null ? undefined : model.series?.get(metric)) ??
+    performanceFold(model.candidates.candidates, model.direction, inputValue(model))
+  );
+}
+
+function againstInput(value: number | null, input: number | null): number | null {
+  return value !== null && input !== null && input !== 0 ? value / input : null;
 }

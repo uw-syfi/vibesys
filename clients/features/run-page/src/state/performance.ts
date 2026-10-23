@@ -16,6 +16,10 @@ export type IdeaResult = 'passed' | 'failed' | 'pending';
 /** One measured idea. */
 export interface PerformancePoint {
   readonly id: string;
+  /** Distinct samples may belong to the same idea. */
+  readonly key?: string;
+  /** A metric can exist without an idea to open. */
+  readonly unowned?: boolean;
   readonly title: string;
   /** Run-clock seconds when the idea was first measured (see `measuredAt`). */
   readonly at: number;
