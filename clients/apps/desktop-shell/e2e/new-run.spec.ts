@@ -9,6 +9,7 @@ import {
   storeRunFixture,
 } from '@vibesys/run-fixtures';
 import {rawTextOf} from './checks/screen-check.js';
+import {settled} from './checks/settle.js';
 import {
   installFakeBridge,
   installFakeMachines,
@@ -332,6 +333,8 @@ for (const {width, height} of WINDOWS) {
     const nexts: unknown[] = [];
     for (const name of ['start', 'domain', 'model', 'review']) {
       await openAt(page, pageNamed(name), seed);
+      // Geometry is meaningful after font swapping and the rendered layout have settled.
+      await settled(page);
       expect(page.viewportSize()).toEqual({width, height});
       const forward = name === 'review' ? 'Start run' : 'Continue';
       const hasBack = name !== 'start';
