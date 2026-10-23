@@ -45,7 +45,7 @@ from server.host_api import (
     StartupStage,
     StopOutcome,
 )
-from server.host_helper_requests import ProjectRun, run_summaries
+from server.host_run_reads import ProjectRun, run_summaries
 from server.instances import ControlSocketStopRequester
 from server.registry import (
     INSTANCES_DIRECTORY,

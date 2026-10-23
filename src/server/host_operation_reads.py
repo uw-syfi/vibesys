@@ -28,8 +28,8 @@ if TYPE_CHECKING:
     from server.host_api import HarnessOption, RunDigest, RunDigestUnreadable, RunPreflightReply
     from server.host_compute import ComputeSettings
     from server.host_examples import ExampleDestination, ExampleList, TaskGoal, TaskList
-    from server.host_helper_requests import ProjectRun
     from server.host_machine_facts import MachineDescription
+    from server.host_run_reads import ProjectRun
     from server.registry import LiveRegistry
     from server.run_summary import Summarized
     from vs_proto.api import FailureCategory
@@ -160,7 +160,7 @@ class HostReadSource:
 
     def run_digests(self, request: pb.ListRunDigestsRequest) -> pb.ListRunDigestsResponse:
         """Read each run's digest through the owner of the helper's project run listing."""
-        requests = import_module("server.host_helper_requests")
+        requests = import_module("server.host_run_reads")
         runs = requests.project_runs(
             self._host,
             self._path(request.project),
@@ -182,7 +182,7 @@ class HostReadSource:
             since=request.since.to_datetime(),
             until=request.until.to_datetime(),
         )
-        requests = import_module("server.host_helper_requests")
+        requests = import_module("server.host_run_reads")
         reply = requests.usage_window_reply(legacy, self._host, self._path(request.project))
         return import_module("server.host_run_wire").usage_response(request.request_id, reply)
 

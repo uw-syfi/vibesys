@@ -64,7 +64,6 @@ from server.host_helper_preflight import preflight_unavailable
 from server.host_helper_requests import (
     EventPage,
     PathHints,
-    ProjectRun,
     Scan,
     ScannedEntry,
     SpanEventPage,
@@ -73,6 +72,7 @@ from server.host_helper_requests import (
 )
 from server.host_preflight import PreflightReport
 from server.host_run_events import EVENT_TYPES_BY_KINDS, RunEventKinds
+from server.host_run_reads import ProjectRun
 from server.run_digest import digest_journal
 from server.span_index import (
     Entry,
