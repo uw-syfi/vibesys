@@ -259,6 +259,15 @@ async function verifyOffers(input: Scenario) {
     expect(buttons.includes('Resume')).toBe(
       input.liveness !== RunLiveness.ALIVE && (!live || dead),
     );
+    // Chat steers are the Guidance control's twin: one permission, whichever surface offers it.
+    // Ordinary questions stay available whatever the writer is.
+    const chat = container.querySelector('button[aria-label="Chat"]');
+    if (chat) {
+      await act(async () => (chat as HTMLElement).click());
+      const chatButtons = [...container.querySelectorAll('button')].map(button => button.textContent);
+      expect(chatButtons.includes('New steer')).toBe(buttons.includes('Guidance'));
+      expect(chatButtons).toContain('New chat');
+    }
     if (!input.loading) {
       expect(container.querySelector('[inert] button') === null).toBe(true);
     }

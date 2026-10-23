@@ -65,7 +65,7 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
     records: fanout.subscribe,
     core: page.state?.run.core ?? null,
     epoch: observation?.epoch ?? 0n,
-    readOnly: observation?.lifecycle?.state.case === 'ended',
+    readOnly: !intents.steerable,
   });
   if (
     page.state === null ||

@@ -132,7 +132,9 @@ export function useRunIntents(props: RunIntentsProps) {
     />
   );
   const surface = intentSurface(props.enabled, controls);
-  return {...surface, busy, sendRequest};
+  // Every surface that steers asks the same projection the Guidance control does.
+  const steerable = props.enabled && writer.status === 'ready' && actions.includes('steer');
+  return {...surface, busy, sendRequest, steerable};
 }
 
 function intentSurface(
