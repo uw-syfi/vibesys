@@ -288,7 +288,25 @@ test('property: every loading live run exposes the controls its writer admits th
     fc.asyncProperty(LIVE, LIVENESS, BACKGROUND, async (lifecycle, liveness, background) => {
       await verifyOffers({...background, lifecycle, liveness, loading: true});
     }),
-    {numRuns: 24, seed: 226},
+    {
+      numRuns: 24,
+      seed: 226,
+      examples: [
+        [
+          create(LifecycleSchema, {
+            state: {
+              case: 'starting',
+              value: {
+                stage: StartupStage.PROBING_WORKSPACE,
+                state: StageState.RUNNING,
+              },
+            },
+          }),
+          RunLiveness.ALIVE,
+          {epoch: 1, modernHead: true, history: []},
+        ],
+      ],
+    },
   );
 });
 
