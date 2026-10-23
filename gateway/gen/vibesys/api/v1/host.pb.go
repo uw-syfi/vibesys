@@ -1031,7 +1031,7 @@ var File_vibesys_api_v1_host_proto protoreflect.FileDescriptor
 
 const file_vibesys_api_v1_host_proto_rawDesc = "" +
 	"\n" +
-	"\x19vibesys/api/v1/host.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1evibesys/api/v1/host_call.proto\x1a(vibesys/api/v1/host_read_generated.proto\x1a*vibesys/api/v1/host_mutate_generated.proto\x1a)vibesys/api/v1/host_watch_generated.proto\x1a\x1fvibesys/store/v1/skeleton.proto\x1a\x1bvibesys/store/v1/chat.proto\"M\n" +
+	"\x19vibesys/api/v1/host.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1evibesys/api/v1/host_call.proto\x1a*vibesys/api/v1/host_mutate_generated.proto\x1a(vibesys/api/v1/host_read_generated.proto\x1a)vibesys/api/v1/host_watch_generated.proto\x1a\x1bvibesys/store/v1/chat.proto\x1a\x1fvibesys/store/v1/skeleton.proto\"M\n" +
 	"\fHelloRequest\x12=\n" +
 	"\x0fapi_schema_hash\x18\x01 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$R\rapiSchemaHash\"\x83\x01\n" +
 	"\rHelloResponse\x12=\n" +
@@ -1216,8 +1216,8 @@ func file_vibesys_api_v1_host_proto_init() {
 		return
 	}
 	file_vibesys_api_v1_host_call_proto_init()
-	file_vibesys_api_v1_host_read_generated_proto_init()
 	file_vibesys_api_v1_host_mutate_generated_proto_init()
+	file_vibesys_api_v1_host_read_generated_proto_init()
 	file_vibesys_api_v1_host_watch_generated_proto_init()
 	file_vibesys_api_v1_host_proto_msgTypes[6].OneofWrappers = []any{}
 	file_vibesys_api_v1_host_proto_msgTypes[8].OneofWrappers = []any{}
