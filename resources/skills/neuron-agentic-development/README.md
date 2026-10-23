@@ -40,3 +40,8 @@ steer agents toward the stacks a task replaces.
 `./update.sh` to pull a newer upstream revision. The script applies one
 fix-up: a note at the top of `neuron-nki-debugging/SKILL.md` saying its
 `torch_xla` harness snippets predate native TorchNeuron.
+
+The vendored Python is kept byte-identical to upstream: `resources/skills` is
+excluded from Ruff, so do not reformat it. (Early repository-wide Ruff passes,
+#65 and #68, reformatted the first vendored copy; re-vendoring restores
+upstream's formatting, which the stale-revert check reports as undoing them.)
