@@ -2,7 +2,6 @@ import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import {
   HostService,
-  KeyframeSchema,
   RecordSchema,
   Severity,
   SkeletonRequestSchema,
@@ -22,7 +21,7 @@ import {
   skeletonLoaderMachine,
   type TailInput,
 } from './loader-machine.js';
-import {ingestSkeleton, RECORD_WINDOW} from './loading.js';
+import {RECORD_WINDOW, type SkeletonLoad} from './loading.js';
 import {checkpointRecords} from './record-facts.js';
 
 /** Generic unary/server-stream byte bridge. Both operations must release resources on abort. */
@@ -56,7 +55,6 @@ export function skeletonLoaderMachineFor(
           )
           .then(bytes => {
             const response = lease.restore(fromBinary(SkeletonResponseSchema, bytes));
-            publisher.skeleton(response, signal);
             return response;
           });
       }),
@@ -87,6 +85,11 @@ export function skeletonLoaderMachineFor(
         }
       }),
     },
+    actions: {
+      publishSkeleton: (_, {response, load, valid}) => {
+        if (valid && load !== undefined) publisher.skeleton(response, load);
+      },
+    },
   });
 }
 
@@ -95,24 +98,20 @@ function recordPublisher(records: RecordsListener) {
   const checkpoint = new Set<bigint>();
   let through = 0n;
   return {
-    skeleton(response: SkeletonResponse, signal: AbortSignalLike): void {
-      // The machine classifies invalid data; none of it reaches record consumers.
-      try {
-        ingestSkeleton(response);
-      } catch {
-        return;
-      }
-      if (signal.aborted) return;
-      const facts =
-        response.keyframe === undefined
-          ? []
-          : checkpointRecords(fromBinary(KeyframeSchema, response.keyframe));
+    skeleton(response: SkeletonResponse, load: SkeletonLoad): void {
+      const facts = response.keyframe === undefined ? [] : checkpointRecords(load.skeleton);
+      const initial = new Map<bigint, Uint8Array>();
       for (const bytes of [...facts, ...response.records]) {
         const seq = fromBinary(RecordSchema, bytes).seq;
         checkpoint.add(seq);
+        initial.set(seq, bytes);
         if (seq > through) through = seq;
       }
-      records([...facts, ...response.records]);
+      records(
+        [...initial.entries()]
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([, bytes]) => bytes),
+      );
     },
     tail(response: TailResponse): void {
       records(

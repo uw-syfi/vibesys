@@ -71,6 +71,10 @@ export const skeletonLoaderMachine = setup({
     retry: ({context}) => retryDelay(context.attempts),
   },
   actions: {
+    publishSkeleton: (
+      _context,
+      _params: {response: SkeletonResponse; load: SkeletonLoad | undefined; valid: boolean},
+    ) => undefined,
     recordRefusal: assign(({event}) => ({error: refusal(errorOf(event))})),
     recordFailure: assign(({context, event}) => ({
       error: tailFailure(context, transportFailure(errorOf(event))),
@@ -105,7 +109,17 @@ export const skeletonLoaderMachine = setup({
         input: ({context}) => context.runId,
         onDone: {
           target: 'loaded',
-          actions: assign(({event}) => safely(() => ingestSkeleton(event.output))),
+          actions: [
+            assign(({event}) => safely(() => ingestSkeleton(event.output))),
+            {
+              type: 'publishSkeleton',
+              params: ({context, event}) => ({
+                response: event.output,
+                load: context.load,
+                valid: context.error === undefined,
+              }),
+            },
+          ],
         },
         onError: [
           {guard: 'refused', target: 'failed', actions: 'recordRefusal'},

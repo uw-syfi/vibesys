@@ -36,7 +36,9 @@ export function isRecordFact(record: StoreRecord): boolean {
 }
 
 /** Materialize the checkpoint's semantic records at their original writer positions. */
-export function checkpointRecords(keyframe: Keyframe): Uint8Array[] {
+export function checkpointRecords(
+  keyframe: Pick<Keyframe, 'intents' | 'recordFacts' | 'failures' | 'epochs'>,
+): Uint8Array[] {
   const records = [...keyframe.intents, ...keyframe.recordFacts, ...keyframe.failures];
   for (const version of keyframe.epochs) {
     if (!version.startsEpoch || !version.epoch) continue;

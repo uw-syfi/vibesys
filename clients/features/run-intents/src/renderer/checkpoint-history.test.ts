@@ -230,3 +230,35 @@ test('the captured previous writer recovers history through the shared reader', 
     await peer.whenIdle();
   }
 });
+
+test('an invalid checkpoint publishes no semantic facts before the reader rejects it', async () => {
+  const records = log(1400);
+  const peer = new CheckpointPeer(records, checkpoint(records, 1400, false), 1399);
+  const clock = new FakeClock();
+  const fanout = recordsFanout();
+  const rejected = Promise.withResolvers<void>();
+  const actor = intentsActor({
+    bridge: new FakeGatewayBridge(),
+    host: 'local',
+    runId: 'run-a',
+    enabled: true,
+    schedule: clock.schedule,
+    records: fanout.subscribe,
+  }).start();
+  const stop = gatewayReader(peer, new FakeSkeletonCache(), clock.schedule).watch(
+    'run-a',
+    observation => {
+      if (observation.terminal && observation.failure?.kind === 'data') rejected.resolve();
+    },
+    fanout.publish,
+  );
+  try {
+    await rejected.promise;
+    expect(actor.getSnapshot().context.outcomes).toEqual([]);
+    expect(peer.calls.filter(call => call.method === TAIL)).toEqual([]);
+  } finally {
+    stop();
+    actor.stop();
+    await peer.whenIdle();
+  }
+});
