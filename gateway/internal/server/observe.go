@@ -37,7 +37,6 @@ type observedPrefix struct {
 	size          int64
 	committed     uint64
 	fenced        bool
-	wantsInput    bool
 }
 
 type recoveredHead struct {
@@ -75,21 +74,21 @@ func (o *headObserver) read(dir string) (*storev1.RunHead, error) {
 	if err != nil {
 		return nil, err
 	}
-	recovered, err := o.recovered(f, info, head, wantsInput)
+	recovered, err := o.recovered(f, info, head)
 	if err != nil {
 		return nil, status.Errorf(codes.DataLoss, "invalid retained prefix: %v", err)
 	}
 	if wantsEpoch {
 		head.Epoch = recovered.epoch
 	}
-	if recovered.input != nil {
+	if wantsInput && recovered.input != nil {
 		head.Objective.InputValue = proto.Float64(*recovered.input)
 	}
 	return head, nil
 }
 
-func (o *headObserver) recovered(f *os.File, info os.FileInfo, head *storev1.RunHead, wantsInput bool) (recoveredHead, error) {
-	key := observedPrefix{modifiedNs: info.ModTime().UnixNano(), size: info.Size(), wantsInput: wantsInput}
+func (o *headObserver) recovered(f *os.File, info os.FileInfo, head *storev1.RunHead) (recoveredHead, error) {
+	key := observedPrefix{modifiedNs: info.ModTime().UnixNano(), size: info.Size()}
 	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
 		key.device, key.inode = uint64(stat.Dev), uint64(stat.Ino)
 	}
@@ -110,9 +109,7 @@ func (o *headObserver) recovered(f *os.File, info os.FileInfo, head *storev1.Run
 			return err
 		}
 		epoch = max(epoch, declared)
-		if wantsInput {
-			_, err = upgrade.Record(payload)
-		}
+		_, err = upgrade.Record(payload)
 		return err
 	})
 	if err != nil {

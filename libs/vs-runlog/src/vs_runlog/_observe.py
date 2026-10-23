@@ -65,7 +65,7 @@ class HeadObserver:
     def __init__(self, capacity: int = _MEMO_CAPACITY) -> None:
         self.scans = 0
         self._capacity = capacity
-        self._memo: OrderedDict[tuple[_Prefix, bool], _Recovered] = OrderedDict()
+        self._memo: OrderedDict[_Prefix, _Recovered] = OrderedDict()
 
     def read(self, path: Path) -> RunHead:
         """Read a validated observation, never recovery state; files stay unchanged."""
@@ -78,19 +78,16 @@ class HeadObserver:
                 and not head.objective.has_field("input_value")
             )
             if (head.epoch == 0 or wants_input) and log.exists():
-                recovered = self._recovered(log, head, wants_input=wants_input)
+                recovered = self._recovered(log, head)
                 head.epoch = head.epoch or recovered.epoch
-                if recovered.input_value is not None and head.objective is not None:
+                if wants_input and recovered.input_value is not None and head.objective is not None:
                     head.objective.input_value = recovered.input_value
             return head
 
-    def _recovered(self, log: Path, head: RunHead, *, wants_input: bool) -> _Recovered:
+    def _recovered(self, log: Path, head: RunHead) -> _Recovered:
         stat = log.stat()
         committed = head.committed_seq if head.has_field("committed_seq") else None
-        key = (
-            _Prefix(stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_size, committed),
-            wants_input,
-        )
+        key = _Prefix(stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_size, committed)
         if (known := self._memo.get(key)) is not None:
             self._memo.move_to_end(key)
             return known
@@ -99,8 +96,7 @@ class HeadObserver:
         with log.open("rb") as stream:
             for record in _head_records(RunLogReader(stream), head, log):
                 facts = current_epoch((record,), facts)
-                if wants_input:
-                    upgrade.apply(record)
+                upgrade.apply(record)
         recovered = _Recovered(facts.number, upgrade.measured)
         self._memo[key] = recovered
         if len(self._memo) > self._capacity:

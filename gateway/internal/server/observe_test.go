@@ -92,7 +92,7 @@ func TestOnlyPreviousWriterHeadsScanTheirLogOncePerPrefix(t *testing.T) {
 					t.Fatalf("%s %+v: %v", name, v, err)
 				}
 				if !v.stated || !v.hasEpoc {
-					scanned[variant{v.committed, v.stated, false}] = true
+					scanned[variant{committed: v.committed}] = true
 				}
 				measured := got.Objective.InputValue != nil
 				if measured != (!v.stated && v.committed >= want.MeasurementSeq) || (measured && *got.Objective.InputValue != want.Input) {
@@ -102,12 +102,8 @@ func TestOnlyPreviousWriterHeadsScanTheirLogOncePerPrefix(t *testing.T) {
 					t.Fatalf("%s %+v: epoch %d", name, v, got.Epoch)
 				}
 			}
-			distinct := map[[2]any]bool{}
-			for v := range scanned {
-				distinct[[2]any{v.committed, v.stated}] = true
-			}
-			if observer.scans > len(distinct) {
-				t.Fatalf("%s seed %d: %d scans for %d previous-writer prefixes", name, seed, observer.scans, len(distinct))
+			if observer.scans > len(scanned) {
+				t.Fatalf("%s seed %d: %d scans for %d previous-writer prefixes", name, seed, observer.scans, len(scanned))
 			}
 		}
 	}
