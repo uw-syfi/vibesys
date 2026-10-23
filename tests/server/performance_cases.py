@@ -163,6 +163,8 @@ def generated_run(shape: int, seed: int, direction: Direction) -> tuple[Keyframe
         if owner is not None and owner % 4 == 3:
             fraction = 0.5
         value = baseline / fraction if direction == Direction.MIN else baseline * fraction
+        if seed == 4 and owner is not None and owner % 4 == 0:
+            value = 0
         append(
             Record(
                 body=Oneof(

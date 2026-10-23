@@ -268,7 +268,10 @@ function axisTile(model: RunModel, axis: ObjectiveAxis): MetricTileView {
           (axis.direction === 'min' ? next < best : next > best) ? next : best,
         ),
   );
-  const vs = value === null || input === null || input === 0 ? null : value / input;
+  const vs =
+    value === null || input === null || input === 0 || (direction === 'min' && value === 0)
+      ? null
+      : value / input;
   const better = vs === null ? null : improvement(vs, direction);
   return {
     id: axis.name,
@@ -412,7 +415,9 @@ function writerObjectiveTile(model: RunModel, tile: MetricTileView): MetricTileV
   const direction =
     objectivesOf(model).find(axis => axis.name === metric)?.direction ?? model.direction;
   const better =
-    value !== null && input !== null && input !== 0 ? improvement(value / input, direction) : null;
+    value !== null && input !== null && input !== 0 && !(direction === 'min' && value === 0)
+      ? improvement(value / input, direction)
+      : null;
   return {
     ...tile,
     ...tileWords(model, value, input, ` ${unitLabel(headline?.series?.unit ?? '')}`, better),

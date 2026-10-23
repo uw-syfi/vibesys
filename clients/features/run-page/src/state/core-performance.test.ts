@@ -28,6 +28,9 @@ for (const item of cases) {
     const skeleton = seedSkeleton(fromBinary(KeyframeSchema, Buffer.from(item.skeleton, 'base64')));
     const model = projectSkeleton(skeleton, skeleton.throughSeq ?? 0n, '', {head});
     const facts = head.performance[0];
+    expect(heroView(model).tiles[0]?.ratio).toBe(
+      item.card.adopted_ratio === null ? null : `${item.card.adopted_ratio.toFixed(2)}×`,
+    );
     expect(facts).toBeDefined();
     const kept = facts?.points.filter(point => point.newBest) ?? [];
     const chart = stripChartView(model, clockStart(model), model.latest);

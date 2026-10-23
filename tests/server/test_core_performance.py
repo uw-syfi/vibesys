@@ -75,8 +75,10 @@ def corpus() -> list[dict[str, object]]:
     """Actual core and card outputs are replayed by the client, not hand-written expected bests."""
     cases = []
     for shape in range(len(FIELD["shapes"])):
-        for seed in range(4):
-            state, _ = generated_run(shape, seed, Direction.MIN if seed % 2 else Direction.MAX)
+        for seed in range(5):
+            state, _ = generated_run(
+                shape, seed, Direction.MIN if seed % 2 or seed == 4 else Direction.MAX
+            )
             head = project_head(state)
             assert head is not None
             card = digest_store(head, state)
