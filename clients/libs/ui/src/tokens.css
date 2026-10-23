@@ -107,6 +107,7 @@
   --pane-list: 380px;
   --pane-outline: 340px;
   --pane-master: 480px;
+  --panes-floor: 288px;
   --row-dense: 28px;
   --gantt-label: 220px;
   --gantt-label-max: 420px;

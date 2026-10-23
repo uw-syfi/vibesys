@@ -1,6 +1,9 @@
 /* The frame: a screen that never scrolls, its panes, lists and time axes. Imported by components.css. */
 
 /* --- frame: a screen that never scrolls, panes that do ------------------------------------------ */
+/* The one exception is a window too short for what sits above the panes: the screen's body scrolls
+   so the panes keep --panes-floor, enough for their controls and a few rows, instead of being
+   squeezed to nothing. The screen's header stays where it is. */
 
 .vs-screen {
   box-sizing: border-box;
@@ -29,6 +32,7 @@
 .vs-screen-body {
   flex: 1 1 auto;
   min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -95,7 +99,7 @@ button.vs-crumb:focus-visible {
 
 .vs-panes {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: var(--panes-floor);
   display: flex;
   gap: var(--space-4);
   container-type: inline-size;

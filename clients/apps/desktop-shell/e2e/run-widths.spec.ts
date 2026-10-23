@@ -1,6 +1,7 @@
 import {expect, test} from '@playwright/test';
 import {fixtureNamed} from '@vibesys/run-fixtures';
-import {openFixture} from './fixture-world.js';
+import {settled} from './checks/settle.js';
+import {openFixture, playLive} from './fixture-world.js';
 
 /** Sweep the input space around the dock and rail breakpoints, including 660 and 1000 px. */
 test('the run header stays beside its controls and chat preserves the main at dock widths', async ({
@@ -32,5 +33,26 @@ test('the run header stays beside its controls and chat preserves the main at do
     await expect(page.getByRole('region', {name: 'Chat'})).toBeVisible();
     await expect(heading, `main content at ${width}px`).toBeVisible();
     await page.getByRole('region', {name: 'Chat'}).getByRole('button', {name: 'Close'}).click();
+  }
+});
+
+/** A window too short for what sits above the panes scrolls the screen's body; it never squeezes the list. */
+test('the Ideas list keeps two full rows at every supported window size', async ({page}) => {
+  const fixture = fixtureNamed('finished-ten-ideas');
+  await openFixture(page, fixture);
+  await playLive(page, fixture);
+  const ideas = page.getByRole('listbox', {name: 'Ideas'});
+  for (const width of [660, 840, 1000, 1440]) {
+    for (const height of [700, 800, 900]) {
+      await page.setViewportSize({width, height});
+      await settled(page);
+      const row = await ideas.getByRole('option').first().boundingBox();
+      const list = await ideas.boundingBox();
+      expect(row, `a row at ${width}x${height}`).not.toBeNull();
+      expect(
+        list?.height ?? 0,
+        `two rows of the list at ${width}x${height}`,
+      ).toBeGreaterThanOrEqual(2 * (row?.height ?? Number.POSITIVE_INFINITY));
+    }
   }
 });
