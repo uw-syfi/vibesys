@@ -47,6 +47,7 @@ afterAll(async () => {
 
 /** The same protobuf peer as the app journeys, through the Electron byte bridge role. */
 class RunPeer extends FakeGatewayBridge {
+  silent = false;
   constructor(
     readonly input: WireFixture,
     readonly records: StoreRecord[],
@@ -75,6 +76,7 @@ class RunPeer extends FakeGatewayBridge {
     ended: (error?: string) => void,
   ) {
     const owned = super.stream(host, method, request, receive, ended);
+    if (this.silent && method === this.input.methods.watchRuns) return owned;
     if (method === this.input.methods.tail) {
       const tail = fromBinary(TailRequestSchema, request);
       const records = this.records.filter(record => record.seq >= tail.fromSeq);
@@ -670,5 +672,152 @@ test('property: optional recorded facts never erase the catalog-addressed contro
         ],
       ],
     },
+  );
+});
+
+const RECEIPT = fc.record({
+  kind: fc.constantFrom('frame', 'freeze', 'close', 'resume'),
+  elapsed: fc.integer({min: 0, max: 35000}),
+});
+
+async function receiveHostStep(
+  peer: RunPeer,
+  step: Generated<typeof RECEIPT>,
+  state: {frozen: boolean; lastFrame: number},
+  now: number,
+) {
+  if (step.kind === 'freeze') state.frozen = true;
+  if (step.kind === 'resume') state.frozen = false;
+  const streams = followers(peer, 'liveness');
+  if (step.kind === 'close') {
+    state.lastFrame = -Infinity;
+    await act(async () => {
+      for (const stream of streams) stream.ended('closed');
+    });
+  } else if (
+    ((step.kind === 'frame' && !state.frozen) || step.kind === 'resume') &&
+    streams.length
+  ) {
+    state.lastFrame = now;
+    await act(async () => {
+      for (const stream of streams) stream.receive(new Uint8Array(peer.input.watchRuns));
+    });
+  }
+}
+
+test('property: host byte receipts alone renew the page controls lease across freeze, close and resume', async () => {
+  await fc.assert(
+    fc.asyncProperty(fc.array(RECEIPT, {minLength: 1, maxLength: 4}), async steps => {
+      const peer = peerFor({
+        epoch: 1,
+        lifecycle: create(LifecycleSchema, {
+          state: {case: 'running', value: {}},
+        }),
+        liveness: RunLiveness.ALIVE,
+        loading: false,
+        history: [],
+        modernHead: true,
+      });
+      await withPeer(peer, async (container, clock) => {
+        peer.silent = true;
+        const state = {frozen: false, lastFrame: clock.now()};
+        const check = () => {
+          const live = controlButtons(container).includes('Pause');
+          expect(live).toBe(clock.now() - state.lastFrame < 30000);
+          assertVisible(container);
+        };
+        for (const step of steps) {
+          await receiveHostStep(peer, step, state, clock.now());
+          check();
+          for (let elapsed = 0; elapsed < step.elapsed; elapsed += 1000) {
+            await act(async () => clock.advanceBy(Math.min(1000, step.elapsed - elapsed)));
+            check();
+          }
+        }
+      });
+    }),
+    {
+      numRuns: 12,
+      seed: 341809,
+      examples: [
+        [
+          [
+            {kind: 'freeze', elapsed: 35000},
+            {kind: 'resume', elapsed: 0},
+          ],
+        ],
+      ],
+    },
+  );
+});
+
+function statusWord(container: HTMLElement): string | undefined {
+  return [...container.querySelectorAll('span')]
+    .map(element => element.textContent ?? '')
+    .find(text => ['Starting', 'Running', 'Paused', 'Stopped', 'Failed'].includes(text));
+}
+
+test('property: relaunch headers and controls share the committed epoch even when history and older heads arrive late', async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.integer({min: 1, max: 8}),
+      fc.integer({min: 1, max: 4}),
+      async (epoch, count) => {
+        const peer = peerFor({
+          epoch,
+          lifecycle: create(LifecycleSchema, {
+            state: {case: 'ended', value: {outcome: Outcome.STOPPED}},
+          }),
+          liveness: RunLiveness.ENDED,
+          loading: false,
+          history: [],
+          modernHead: true,
+        });
+        await withPeer(peer, async (container, clock) => {
+          peer.silent = true;
+          let seq = peer.records.at(-1)?.seq ?? 0n;
+          for (let index = 1; index <= count; index += 1) {
+            const nextEpoch = epoch + index;
+            const packet = (running: boolean) =>
+              toBinary(
+                WatchRunsResponseSchema,
+                create(WatchRunsResponseSchema, {
+                  runId: 'run-a',
+                  liveness: RunLiveness.ALIVE,
+                  head: {
+                    epoch: nextEpoch,
+                    committedSeq: seq + (running ? 2n : 1n),
+                    lifecycle: {
+                      state: running ? {case: 'running', value: {}} : {case: 'starting', value: {}},
+                    },
+                  },
+                }),
+              );
+            const deliver = async (bytes: Uint8Array) =>
+              act(async () => {
+                for (const stream of followers(peer, 'liveness')) stream.receive(bytes);
+              });
+            await deliver(packet(false));
+            expect(statusWord(container)).toBe('Starting');
+            expect(controlButtons(container)).toEqual(['Pause', 'Pause now']);
+            await deliver(packet(true));
+            expect(statusWord(container)).toBe('Running');
+            expect(controlButtons(container)).toEqual(['Pause', 'Pause now', 'Guidance']);
+            await deliver(packet(false));
+            expect(statusWord(container)).toBe('Running');
+            await act(async () => clock.advanceBy(30000));
+            expect(statusWord(container)).toBe('Running');
+            expect(controlButtons(container)).toEqual([]);
+            assertVisible(container);
+            await act(async () => clock.advanceBy(1000));
+            await deliver(packet(true));
+            expect(statusWord(container)).toBe('Running');
+            expect(controlButtons(container)).toEqual(['Pause', 'Pause now', 'Guidance']);
+            seq += 2n;
+          }
+        });
+      },
+    ),
+    {numRuns: 8, seed: 341810, examples: [[1, 1]]},
   );
 });

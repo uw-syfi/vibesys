@@ -12,16 +12,9 @@ import type {RunPageSeed} from '@vibesys/feature-run-page/state';
 import type {RecordedProjectRoot} from '@vibesys/hosts';
 import type {GatewayBridge} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
-import {
-  observeRun,
-  type RecordsFanout,
-  type RecordsListener,
-  recordsFanout,
-  type Skeleton,
-} from '@vibesys/run-skeleton';
+import {type RecordsFanout, type RecordsListener, recordsFanout} from '@vibesys/run-skeleton';
 import {gatewayContentCache} from '@vibesys/run-skeleton/cache';
 import {type GatewayReader, gatewayReader} from '@vibesys/run-skeleton/reader';
-import type {RelaunchObservation} from '@vibesys/runs/intents';
 import {Card, EmptyState, Page, Text} from '@vibesys/ui';
 import {type JSX, useMemo} from 'react';
 import {useGatewayChat} from './gateway-chat.js';
@@ -44,7 +37,7 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
   );
   const page = useGatewayRun({seed, ports, schedule, address});
   const {snapshot} = page;
-  const observation = observationOf(snapshot.context.load?.skeleton);
+  const observation = page.observation;
   const projectRoot = props.projectRoot;
   const intents = useRunIntents({
     bridge,
@@ -141,11 +134,4 @@ function shared(reader: GatewayReader, publish: RecordsListener): GatewayReader 
         publish(batch);
       }),
   };
-}
-
-function observationOf(skeleton: Skeleton | undefined): RelaunchObservation | undefined {
-  if (!skeleton) return undefined;
-  const {epoch, lifecycle} = observeRun(skeleton);
-  if (epoch === 0) return undefined;
-  return {epoch: BigInt(epoch), ...(lifecycle ? {lifecycle} : {})};
 }

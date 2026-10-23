@@ -107,14 +107,23 @@ export function observeRun(skeleton: Skeleton, hint?: RunLivenessHint) {
   const epoch = skeleton.epochs.at(-1);
   const latest = skeleton.lifecycles.at(-1);
   const start = skeleton.epochs.find(item => item.epoch?.epoch === epoch?.epoch?.epoch);
-  const lifecycle = latest && (!start || latest.seq >= start.seq) ? latest.lifecycle : undefined;
+  const recorded = latest && (!start || latest.seq >= start.seq) ? latest.lifecycle : undefined;
+  const recordedEpoch = epoch?.epoch?.epoch ?? 0;
+  const head = hint?.head;
+  const currentHead =
+    head?.epoch === hint?.epoch &&
+    head !== undefined &&
+    head.lifecycle !== undefined &&
+    head.epoch >= recordedEpoch &&
+    (head.committedSeq ?? -1n) >= (skeleton.throughSeq ?? 0n);
+  const observedEpoch = currentHead ? head.epoch : recordedEpoch;
+  const lifecycle = currentHead ? head.lifecycle : recorded;
   const final = epochHasEnded(lifecycle);
   return {
-    epoch: epoch?.epoch?.epoch ?? 0,
+    epoch: observedEpoch,
     lifecycle,
     final,
-    interrupted:
-      !final && hint?.epoch === epoch?.epoch?.epoch && hint?.value === RunLiveness.INTERRUPTED,
+    interrupted: !final && hint?.epoch === observedEpoch && hint?.value === RunLiveness.INTERRUPTED,
   };
 }
 

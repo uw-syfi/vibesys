@@ -1,8 +1,10 @@
 import type {ScheduleTimeout} from '@vibesys/machine';
-import {transcriptStreamFor} from '@vibesys/run-skeleton';
+import {observeRun, transcriptStreamFor} from '@vibesys/run-skeleton';
+import {RunLiveness} from '@vibesys/runs/intents';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {getInitialSnapshot} from 'xstate';
 import {
+  type GatewayRunContext,
   gatewayRunMachine,
   loadView,
   logStreamToFollow,
@@ -41,8 +43,9 @@ export function useGatewayRun(options: {
     };
   }, [ports, schedule, host, runId]);
   const {route, zoom} = useZoom(`${seed.identity.host}/${seed.identity.runId}`, address);
-  const {load, ui, text, hint, replies, transcripts} = snapshot.context;
+  const {load, ui, text, replies, transcripts} = snapshot.context;
   const skeleton = paintedSkeleton(load);
+  const {hint, observation} = useWriterFacts(snapshot.context);
   const at = ui.view.at === 'live' ? (skeleton?.throughSeq ?? 0n) : BigInt(ui.view.at);
   const epoch = skeleton?.epochs.filter(item => item.seq <= at).at(-1)?.epoch;
   const objective = text[epoch?.run?.objective?.sha256 ?? ''] ?? '';
@@ -88,6 +91,7 @@ export function useGatewayRun(options: {
   useFollowedContent(actor, follow, skeleton, route.step);
   return {
     snapshot,
+    observation,
     load: loadView(snapshot.context),
     retry: () => actor?.send({type: 'retry'}),
     refreshWriter: () => actor?.send({type: 'refresh-writer'}),
@@ -100,6 +104,26 @@ export function useGatewayRun(options: {
     dispatch: (action: import('../../state/index.js').RunPageAction) =>
       actor?.send({type: 'ui', action}),
   };
+}
+
+function useWriterFacts({load, head, hint: liveHint}: GatewayRunContext) {
+  return useMemo(() => {
+    const hint = head
+      ? {
+          epoch: head.epoch,
+          value: liveHint?.epoch === head.epoch ? liveHint.value : RunLiveness.UNSPECIFIED,
+          head,
+        }
+      : liveHint;
+    const observed = load ? observeRun(load.skeleton, hint) : undefined;
+    const observation = observed?.epoch
+      ? {
+          epoch: BigInt(observed.epoch),
+          ...(observed.lifecycle ? {lifecycle: observed.lifecycle} : {}),
+        }
+      : undefined;
+    return {hint, observation};
+  }, [load, head, liveHint]);
 }
 
 function useFollowedContent(

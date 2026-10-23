@@ -4,6 +4,7 @@ import {checkMachine} from '@vibesys/machine/testing';
 import {
   NoticeCode,
   RecordSchema,
+  RunHeadSchema,
   RunLiveness,
   Severity,
   TailRequestSchema,
@@ -18,7 +19,7 @@ import {gatewayReader} from '@vibesys/run-skeleton/reader';
 import {FakeRunTransport} from '@vibesys/run-skeleton/testing';
 import {FakeClock} from '@vibesys/transport/testing';
 import fc from 'fast-check';
-import type {SnapshotFrom} from 'xstate';
+import {getInitialSnapshot, getNextSnapshot, type SnapshotFrom} from 'xstate';
 import {
   gatewayRunMachine,
   headerView,
@@ -761,4 +762,103 @@ test('an incomplete native transcript releases its reader on close or the first-
     expect(transport.activeStreams).toBe(0);
     expect(clock.pending).toBe(0);
   }
+});
+
+test('property: writer refreshes never replace a displayed epoch with an older committed prefix', () => {
+  fc.assert(
+    fc.property(fc.array(fc.nat(40), {minLength: 1, maxLength: 40}), arrivals => {
+      const fixture = storeRunFixture('live');
+      const records = [...fixture.records];
+      const first = records[0];
+      if (first?.body.case !== 'epochStarted') throw new Error('Epoch required');
+      for (let epoch = 2; epoch <= 4; epoch += 1) {
+        records.push(
+          create(RecordSchema, {
+            ...first,
+            seq: BigInt(records.length + 1),
+            epoch,
+            body: {case: 'epochStarted', value: {...first.body.value, epoch}},
+          }),
+        );
+        for (const state of ['starting', 'running'] as const)
+          records.push(
+            create(RecordSchema, {
+              seq: BigInt(records.length + 1),
+              epoch,
+              body: {case: 'lifecycle', value: {state: {case: state, value: {}}}},
+            }),
+          );
+      }
+      let snapshot = getInitialSnapshot(gatewayRunMachine, {seed: SEED});
+      let newest = 0;
+      for (const arrival of arrivals) {
+        const length = arrival % (records.length + 1);
+        const skeleton = foldSkeleton(seedSkeleton(), records.slice(0, length));
+        newest = Math.max(newest, length);
+        snapshot = getNextSnapshot(gatewayRunMachine, snapshot, {
+          type: 'loaded',
+          load:
+            length === 0
+              ? undefined
+              : {
+                  skeleton,
+                  nextSeq: BigInt(length + 1),
+                  committedSeq: BigInt(records.length),
+                  complete: length === records.length,
+                  windowFrom: undefined,
+                  failuresBefore: undefined,
+                },
+          progress: {phase: 'history', through: BigInt(length), committed: BigInt(records.length)},
+          failure: undefined,
+          terminal: false,
+        });
+        expect(snapshot.context.load?.skeleton.throughSeq ?? 0n).toBe(BigInt(newest));
+      }
+    }),
+    {numRuns: 60, seed: 341805, examples: [[[40, 0, 1, 2, 3]]]},
+  );
+});
+
+test('property: expiring or replayed lock hints cannot roll back committed writer facts', () => {
+  fc.assert(
+    fc.property(fc.integer({min: 1, max: 8}), fc.nat(100), (epoch, seq) => {
+      const head = create(RunHeadSchema, {
+        epoch,
+        committedSeq: BigInt(seq + 2),
+        lifecycle: {state: {case: 'running', value: {}}},
+      });
+      let snapshot = getInitialSnapshot(gatewayRunMachine, {seed: SEED});
+      const loaded = {
+        type: 'loaded' as const,
+        load: undefined,
+        progress: {phase: 'skeleton' as const},
+        failure: undefined,
+        terminal: false,
+      };
+      snapshot = getNextSnapshot(gatewayRunMachine, snapshot, {
+        ...loaded,
+        hint: {epoch, value: RunLiveness.ALIVE, head},
+      });
+      for (const hint of [
+        undefined,
+        {
+          epoch,
+          value: RunLiveness.ALIVE,
+          head: create(RunHeadSchema, {
+            epoch,
+            committedSeq: BigInt(seq + 1),
+            lifecycle: {state: {case: 'starting', value: {}}},
+          }),
+        },
+        {epoch: epoch - 1, value: RunLiveness.INTERRUPTED},
+      ]) {
+        snapshot = getNextSnapshot(gatewayRunMachine, snapshot, {
+          ...loaded,
+          ...(hint ? {hint} : {}),
+        });
+        expect(snapshot.context.head).toEqual(head);
+      }
+    }),
+    {numRuns: 40, seed: 341808, examples: [[1, 0]]},
+  );
 });

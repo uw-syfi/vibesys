@@ -60,6 +60,7 @@ export interface GatewayRunContext extends GatewayInput {
   failure: SkeletonLoadFailure | undefined;
   terminal: boolean;
   hint: RunLivenessHint | undefined;
+  head: RunLivenessHint['head'];
   ui: RunPageState;
   text: Readonly<Record<string, string>>;
   contentHash: string;
@@ -147,6 +148,16 @@ function receivedLog(
   };
 }
 
+/** Committed headlines survive a lost lease independently of the transient lock hint. */
+function receivedHead(previous: RunLivenessHint['head'], next: RunLivenessHint['head']) {
+  if (!previous) return next;
+  if (!next) return previous;
+  return next.epoch > previous.epoch ||
+    (next.epoch === previous.epoch && (next.committedSeq ?? -1n) >= (previous.committedSeq ?? -1n))
+    ? next
+    : previous;
+}
+
 export const gatewayRunMachine = setup({
   types: {context: {} as GatewayRunContext, input: {} as GatewayInput, events: {} as GatewayEvent},
   actors: {
@@ -181,6 +192,7 @@ export const gatewayRunMachine = setup({
     failure: undefined,
     terminal: false,
     hint: undefined,
+    head: undefined,
     ui: runPageInitial(input.seed),
     text: {},
     contentHash: '',
@@ -199,6 +211,7 @@ export const gatewayRunMachine = setup({
         failure: undefined,
         terminal: false,
         hint: undefined,
+        head: undefined,
         contentHash: '',
         attemptedContent: new Set(),
         replies: {},
@@ -211,11 +224,15 @@ export const gatewayRunMachine = setup({
       on: {
         loaded: {
           actions: assign({
-            load: ({event}) => event.load,
+            load: ({context, event}) =>
+              (event.load?.skeleton.throughSeq ?? -1n) >= (context.load?.skeleton.throughSeq ?? -1n)
+                ? event.load
+                : context.load,
             progress: ({event}) => event.progress,
             failure: ({event}) => event.failure,
             terminal: ({event}) => event.terminal,
             hint: ({event}) => event.hint,
+            head: ({context, event}) => receivedHead(context.head, event.hint?.head),
           }),
         },
         records: {actions: 'receivedRecords'},
