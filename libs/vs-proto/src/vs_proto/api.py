@@ -192,6 +192,7 @@ from vs_proto._generated.vibesys.store.v1.lifecycle_pb import (
     RunFailure,
     RunFailureKind,
     Running,
+    RunOutcomePresentation,
     StageState,
     Starting,
     StartupStage,
@@ -211,13 +212,18 @@ from vs_proto._generated.vibesys.store.v1.record_pb import (
 from vs_proto._generated.vibesys.store.v1.skeleton_pb import (
     EpochVersion,
     HeadlineObjective,
+    IdeaDecision,
+    IdeaOutcome,
+    IdeaPerformance,
     Keyframe,
     LifecycleVersion,
     MetricHistory,
     MetricVersion,
+    PerformanceRefusal,
     RunAddress,
     RunHead,
     RunProcess,
+    SeriesPerformance,
     SpanHistory,
     SpanVersion,
 )
@@ -248,6 +254,7 @@ from vs_proto._generated.vibesys.store.v1.transcript_pb import (
 from vs_proto._operation_projection import from_mapping, to_mapping
 from vs_proto._operations import AcceptedRequest, Operation
 from vs_proto._operations import checked as validated_operation_bytes
+from vs_proto._outcomes import outcome_presentation
 from vs_proto._schema_hashes import (
     API_SCHEMA_HASH,
     HOST_SCHEMA_HASH,
@@ -323,6 +330,9 @@ __all__ = [
     "Hold",
     "HostCallRequest",
     "HostCallResponse",
+    "IdeaDecision",
+    "IdeaOutcome",
+    "IdeaPerformance",
     "InputFailure",
     "InputFailureKind",
     "InputMeasurement",
@@ -353,6 +363,7 @@ __all__ = [
     "Parked",
     "PauseIntent",
     "PauseNowIntent",
+    "PerformanceRefusal",
     "PlanningAttrs",
     "PostIntentRequest",
     "PostIntentResponse",
@@ -373,6 +384,7 @@ __all__ = [
     "RunFailureKind",
     "RunHead",
     "RunLiveness",
+    "RunOutcomePresentation",
     "RunProcess",
     "Running",
     "RuntimeType",
@@ -380,6 +392,7 @@ __all__ = [
     "SearchRunDescription",
     "SearchRunFailure",
     "Selection",
+    "SeriesPerformance",
     "SeriesRole",
     "SetParallelismIntent",
     "Severity",
@@ -450,6 +463,7 @@ __all__ = [
     "host_payloads",
     "imported_facts",
     "operation_options",
+    "outcome_presentation",
     "replay",
     "replay_agent",
     "replay_evaluation",

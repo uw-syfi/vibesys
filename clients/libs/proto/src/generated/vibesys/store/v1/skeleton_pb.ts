@@ -2,8 +2,8 @@
 // @generated from file vibesys/store/v1/skeleton.proto (package vibesys.store.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
@@ -25,7 +25,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/store/v1/skeleton.proto.
  */
 export const file_vibesys_store_v1_skeleton: GenFile = /*@__PURE__*/
-  fileDesc("Ch92aWJlc3lzL3N0b3JlL3YxL3NrZWxldG9uLnByb3RvEhB2aWJlc3lzLnN0b3JlLnYxIlkKClJ1bkFkZHJlc3MSJAoMcHJvamVjdF9yb290GAEgASgJQg66SAtyCRABKICABDoBLxIlCg1sb2dfZGlyZWN0b3J5GAIgASgJQg66SAtyCRABKICABDoBLyLUBgoHUnVuSGVhZBIuCglsaWZlY3ljbGUYASABKAsyGy52aWJlc3lzLnN0b3JlLnYxLkxpZmVjeWNsZRIdCghzdHJhdGVneRgCIAEoCUILukgIcgYQASiAgAQSNgoJb2JqZWN0aXZlGAMgASgLMiMudmliZXN5cy5zdG9yZS52MS5IZWFkbGluZU9iamVjdGl2ZRJQCgtzcGFuX2NvdW50cxgEIAMoCzIpLnZpYmVzeXMuc3RvcmUudjEuUnVuSGVhZC5TcGFuQ291bnRzRW50cnlCELpIDZoBCiIIcgYQASiAgAQSKwoFdXNhZ2UYBSABKAsyHC52aWJlc3lzLnN0b3JlLnYxLlRva2VuVXNhZ2USMwoMY2hhcnRfcG9pbnRzGAYgAygLMh0udmliZXN5cy5zdG9yZS52MS5NZXRyaWNQb2ludBISCgpuZWVkc191c2VyGAcgASgIEhoKDWNvbW1pdHRlZF9zZXEYCCABKARIAIgBARItCgdwcm9jZXNzGAkgASgLMhwudmliZXN5cy5zdG9yZS52MS5SdW5Qcm9jZXNzEhoKEmF3YWl0aW5nX2xpZmVjeWNsZRgKIAEoCBINCgVlcG9jaBgLIAEoDRoxCg9TcGFuQ291bnRzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgEOgI4ATq+ArpIugIaZgoVcnVuX2hlYWQuY2hhcnRfcG9pbnRzEixjaGFydF9wb2ludHMgbXVzdCBjb250YWluIGF0IG1vc3QgMjU2IHBvaW50cxofdGhpcy5jaGFydF9wb2ludHMuc2l6ZSgpIDw9IDI1NhrPAQoScnVuX2hlYWQubGlmZWN5Y2xlEjtoZWFkIGhhcyBlaXRoZXIgYSBsaWZlY3ljbGUgb3IgYW4gZXhwbGljaXRseSBhd2FpdGluZyBlcG9jaBp8aGFzKHRoaXMubGlmZWN5Y2xlKSAhPSB0aGlzLmF3YWl0aW5nX2xpZmVjeWNsZSAmJiAoIXRoaXMuYXdhaXRpbmdfbGlmZWN5Y2xlIHx8ICh0aGlzLmVwb2NoID4gMHUgJiYgaGFzKHRoaXMuY29tbWl0dGVkX3NlcSkpKUIQCg5fY29tbWl0dGVkX3NlcSLJAQoRSGVhZGxpbmVPYmplY3RpdmUSOgoGc2VyaWVzGAEgASgLMiIudmliZXN5cy5zdG9yZS52MS5NZXRyaWNTZXJpZXNEZWNsQga6SAPIAQESIAoKYmVzdF92YWx1ZRgCIAEoAUIHukgEEgJAAUgAiAEBEiEKC2lucHV0X3ZhbHVlGAMgASgBQge6SAQSAkABSAGIAQESFAoMaW5wdXRfc3RhdGVkGAQgASgIQg0KC19iZXN0X3ZhbHVlQg4KDF9pbnB1dF92YWx1ZSJyCgpSdW5Qcm9jZXNzEhQKA3BpZBgBIAEoDUIHukgEKgIgABIWCgVlcG9jaBgCIAEoDUIHukgEKgIgABI2CgpzdGFydGVkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBIuIGCghLZXlmcmFtZRIcCgt0aHJvdWdoX3NlcRgBIAEoBEIHukgEMgIgABIlCgpsb2dfb2Zmc2V0GAIgASgEQhG6SA4yDBj//////////38oCBI0CgVzcGFucxgDIAMoCzIlLnZpYmVzeXMuc3RvcmUudjEuS2V5ZnJhbWUuU3BhbnNFbnRyeRIwCgdtZXRyaWNzGAQgAygLMh8udmliZXN5cy5zdG9yZS52MS5NZXRyaWNIaXN0b3J5EiwKB3N0cmVhbXMYBSADKAsyGy52aWJlc3lzLnN0b3JlLnYxLlN0cmVhbVJlZhIuCgZlcG9jaHMYBiADKAsyHi52aWJlc3lzLnN0b3JlLnYxLkVwb2NoVmVyc2lvbhI2CgpsaWZlY3ljbGVzGAcgAygLMiIudmliZXN5cy5zdG9yZS52MS5MaWZlY3ljbGVWZXJzaW9uEioKCGZhaWx1cmVzGAggAygLMhgudmliZXN5cy5zdG9yZS52MS5SZWNvcmQSGAoQZmFpbHVyZXNfdHJhY2tlZBgJIAEoCBpLCgpTcGFuc0VudHJ5EgsKA2tleRgBIAEoCRIsCgV2YWx1ZRgCIAEoCzIdLnZpYmVzeXMuc3RvcmUudjEuU3Bhbkhpc3Rvcnk6AjgBOv8Cukj7Ahr4Agofa2V5ZnJhbWUuZmFpbHVyZXNfd2l0aGluX3ByZWZpeBKVAWZhaWx1cmVzIG11c3QgYmUgZXJyb3Igbm90aWNlcyBvZiB0aGUgcHJlZml4OiBzZXF1ZW5jZSBhdCBtb3N0IHRocm91Z2hfc2VxLCBhdCBtb3N0IG9uZSBwZXIgZXBvY2gsIGFuZCBvbmx5IGEga2V5ZnJhbWUgdGhhdCB0cmFja3MgdGhlbSBtYXkgY2FycnkgYW55GrwBdGhpcy5mYWlsdXJlcy5hbGwoZiwgZi5zZXEgPD0gdGhpcy50aHJvdWdoX3NlcSAmJiBoYXMoZi5ub3RpY2UpICYmIGYubm90aWNlLnNldmVyaXR5ID49IDIpICYmIHRoaXMuZmFpbHVyZXMubWFwKGYsIGYuZXBvY2gpLnVuaXF1ZSgpICYmICh0aGlzLmZhaWx1cmVzLnNpemUoKSA9PSAwIHx8IHRoaXMuZmFpbHVyZXNfdHJhY2tlZCkiPgoLU3Bhbkhpc3RvcnkSLwoIdmVyc2lvbnMYASADKAsyHS52aWJlc3lzLnN0b3JlLnYxLlNwYW5WZXJzaW9uIlEKC1NwYW5WZXJzaW9uEhQKA3NlcRgBIAEoBEIHukgEMgIgABIsCgRzcGFuGAIgASgLMhYudmliZXN5cy5zdG9yZS52MS5TcGFuQga6SAPIAQEiXQoNTWV0cmljSGlzdG9yeRIbCgZzZXJpZXMYASABKAlCC7pICHIGEAEogIAEEi8KBnBvaW50cxgCIAMoCzIfLnZpYmVzeXMuc3RvcmUudjEuTWV0cmljVmVyc2lvbiJbCg1NZXRyaWNWZXJzaW9uEhQKA3NlcRgBIAEoBEIHukgEMgIgABI0CgVwb2ludBgCIAEoCzIdLnZpYmVzeXMuc3RvcmUudjEuTWV0cmljUG9pbnRCBrpIA8gBASKxAgoMRXBvY2hWZXJzaW9uEhQKA3NlcRgBIAEoBEIHukgEMgIgABI1CgVlcG9jaBgCIAEoCzIeLnZpYmVzeXMuc3RvcmUudjEuRXBvY2hTdGFydGVkQga6SAPIAQESNAoSZGVzY3JpcHRvcnNfc2hhMjU2GAMgASgJQhi6SBVyEzIRXihbMC05YS1mXXs2NH0pPyQ6nQG6SJkBGpYBCh5lcG9jaF92ZXJzaW9uLmRlc2NyaXB0b3JzX29uY2USNWRlc2NyaXB0b3JzIGFyZSBpbmxpbmUgb3IgYWRkcmVzc2VkIGJ5IGhhc2gsIG5vdCBib3RoGj10aGlzLmRlc2NyaXB0b3JzX3NoYTI1NiA9PSAnJyB8fCAhaGFzKHRoaXMuZXBvY2guZGVzY3JpcHRvcnMpImAKEExpZmVjeWNsZVZlcnNpb24SFAoDc2VxGAEgASgEQge6SAQyAiAAEjYKCWxpZmVjeWNsZRgCIAEoCzIbLnZpYmVzeXMuc3RvcmUudjEuTGlmZWN5Y2xlQga6SAPIAQFCQVo/Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_store_v1_agent_attrs, file_vibesys_store_v1_content, file_vibesys_store_v1_epoch, file_vibesys_store_v1_lifecycle, file_vibesys_store_v1_record, file_vibesys_store_v1_span]);
+  fileDesc("Ch92aWJlc3lzL3N0b3JlL3YxL3NrZWxldG9uLnByb3RvEhB2aWJlc3lzLnN0b3JlLnYxIlkKClJ1bkFkZHJlc3MSJAoMcHJvamVjdF9yb290GAEgASgJQg66SAtyCRABKICABDoBLxIlCg1sb2dfZGlyZWN0b3J5GAIgASgJQg66SAtyCRABKICABDoBLyKqBwoHUnVuSGVhZBIuCglsaWZlY3ljbGUYASABKAsyGy52aWJlc3lzLnN0b3JlLnYxLkxpZmVjeWNsZRIdCghzdHJhdGVneRgCIAEoCUILukgIcgYQASiAgAQSNgoJb2JqZWN0aXZlGAMgASgLMiMudmliZXN5cy5zdG9yZS52MS5IZWFkbGluZU9iamVjdGl2ZRJQCgtzcGFuX2NvdW50cxgEIAMoCzIpLnZpYmVzeXMuc3RvcmUudjEuUnVuSGVhZC5TcGFuQ291bnRzRW50cnlCELpIDZoBCiIIcgYQASiAgAQSKwoFdXNhZ2UYBSABKAsyHC52aWJlc3lzLnN0b3JlLnYxLlRva2VuVXNhZ2USMwoMY2hhcnRfcG9pbnRzGAYgAygLMh0udmliZXN5cy5zdG9yZS52MS5NZXRyaWNQb2ludBISCgpuZWVkc191c2VyGAcgASgIEhoKDWNvbW1pdHRlZF9zZXEYCCABKARIAIgBARItCgdwcm9jZXNzGAkgASgLMhwudmliZXN5cy5zdG9yZS52MS5SdW5Qcm9jZXNzEhoKEmF3YWl0aW5nX2xpZmVjeWNsZRgKIAEoCBINCgVlcG9jaBgLIAEoDRI4CgtwZXJmb3JtYW5jZRgMIAMoCzIjLnZpYmVzeXMuc3RvcmUudjEuU2VyaWVzUGVyZm9ybWFuY2USGgoScGVyZm9ybWFuY2Vfc3RhdGVkGA0gASgIGjEKD1NwYW5Db3VudHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAQ6AjgBOr4Cuki6AhpmChVydW5faGVhZC5jaGFydF9wb2ludHMSLGNoYXJ0X3BvaW50cyBtdXN0IGNvbnRhaW4gYXQgbW9zdCAyNTYgcG9pbnRzGh90aGlzLmNoYXJ0X3BvaW50cy5zaXplKCkgPD0gMjU2Gs8BChJydW5faGVhZC5saWZlY3ljbGUSO2hlYWQgaGFzIGVpdGhlciBhIGxpZmVjeWNsZSBvciBhbiBleHBsaWNpdGx5IGF3YWl0aW5nIGVwb2NoGnxoYXModGhpcy5saWZlY3ljbGUpICE9IHRoaXMuYXdhaXRpbmdfbGlmZWN5Y2xlICYmICghdGhpcy5hd2FpdGluZ19saWZlY3ljbGUgfHwgKHRoaXMuZXBvY2ggPiAwdSAmJiBoYXModGhpcy5jb21taXR0ZWRfc2VxKSkpQhAKDl9jb21taXR0ZWRfc2VxIskBChFIZWFkbGluZU9iamVjdGl2ZRI6CgZzZXJpZXMYASABKAsyIi52aWJlc3lzLnN0b3JlLnYxLk1ldHJpY1Nlcmllc0RlY2xCBrpIA8gBARIgCgpiZXN0X3ZhbHVlGAIgASgBQge6SAQSAkABSACIAQESIQoLaW5wdXRfdmFsdWUYAyABKAFCB7pIBBICQAFIAYgBARIUCgxpbnB1dF9zdGF0ZWQYBCABKAhCDQoLX2Jlc3RfdmFsdWVCDgoMX2lucHV0X3ZhbHVlInIKClJ1blByb2Nlc3MSFAoDcGlkGAEgASgNQge6SAQqAiAAEhYKBWVwb2NoGAIgASgNQge6SAQqAiAAEjYKCnN0YXJ0ZWRfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQEi4gYKCEtleWZyYW1lEhwKC3Rocm91Z2hfc2VxGAEgASgEQge6SAQyAiAAEiUKCmxvZ19vZmZzZXQYAiABKARCEbpIDjIMGP//////////fygIEjQKBXNwYW5zGAMgAygLMiUudmliZXN5cy5zdG9yZS52MS5LZXlmcmFtZS5TcGFuc0VudHJ5EjAKB21ldHJpY3MYBCADKAsyHy52aWJlc3lzLnN0b3JlLnYxLk1ldHJpY0hpc3RvcnkSLAoHc3RyZWFtcxgFIAMoCzIbLnZpYmVzeXMuc3RvcmUudjEuU3RyZWFtUmVmEi4KBmVwb2NocxgGIAMoCzIeLnZpYmVzeXMuc3RvcmUudjEuRXBvY2hWZXJzaW9uEjYKCmxpZmVjeWNsZXMYByADKAsyIi52aWJlc3lzLnN0b3JlLnYxLkxpZmVjeWNsZVZlcnNpb24SKgoIZmFpbHVyZXMYCCADKAsyGC52aWJlc3lzLnN0b3JlLnYxLlJlY29yZBIYChBmYWlsdXJlc190cmFja2VkGAkgASgIGksKClNwYW5zRW50cnkSCwoDa2V5GAEgASgJEiwKBXZhbHVlGAIgASgLMh0udmliZXN5cy5zdG9yZS52MS5TcGFuSGlzdG9yeToCOAE6/wK6SPsCGvgCCh9rZXlmcmFtZS5mYWlsdXJlc193aXRoaW5fcHJlZml4EpUBZmFpbHVyZXMgbXVzdCBiZSBlcnJvciBub3RpY2VzIG9mIHRoZSBwcmVmaXg6IHNlcXVlbmNlIGF0IG1vc3QgdGhyb3VnaF9zZXEsIGF0IG1vc3Qgb25lIHBlciBlcG9jaCwgYW5kIG9ubHkgYSBrZXlmcmFtZSB0aGF0IHRyYWNrcyB0aGVtIG1heSBjYXJyeSBhbnkavAF0aGlzLmZhaWx1cmVzLmFsbChmLCBmLnNlcSA8PSB0aGlzLnRocm91Z2hfc2VxICYmIGhhcyhmLm5vdGljZSkgJiYgZi5ub3RpY2Uuc2V2ZXJpdHkgPj0gMikgJiYgdGhpcy5mYWlsdXJlcy5tYXAoZiwgZi5lcG9jaCkudW5pcXVlKCkgJiYgKHRoaXMuZmFpbHVyZXMuc2l6ZSgpID09IDAgfHwgdGhpcy5mYWlsdXJlc190cmFja2VkKSI+CgtTcGFuSGlzdG9yeRIvCgh2ZXJzaW9ucxgBIAMoCzIdLnZpYmVzeXMuc3RvcmUudjEuU3BhblZlcnNpb24iUQoLU3BhblZlcnNpb24SFAoDc2VxGAEgASgEQge6SAQyAiAAEiwKBHNwYW4YAiABKAsyFi52aWJlc3lzLnN0b3JlLnYxLlNwYW5CBrpIA8gBASJdCg1NZXRyaWNIaXN0b3J5EhsKBnNlcmllcxgBIAEoCUILukgIcgYQASiAgAQSLwoGcG9pbnRzGAIgAygLMh8udmliZXN5cy5zdG9yZS52MS5NZXRyaWNWZXJzaW9uIlsKDU1ldHJpY1ZlcnNpb24SFAoDc2VxGAEgASgEQge6SAQyAiAAEjQKBXBvaW50GAIgASgLMh0udmliZXN5cy5zdG9yZS52MS5NZXRyaWNQb2ludEIGukgDyAEBIrECCgxFcG9jaFZlcnNpb24SFAoDc2VxGAEgASgEQge6SAQyAiAAEjUKBWVwb2NoGAIgASgLMh4udmliZXN5cy5zdG9yZS52MS5FcG9jaFN0YXJ0ZWRCBrpIA8gBARI0ChJkZXNjcmlwdG9yc19zaGEyNTYYAyABKAlCGLpIFXITMhFeKFswLTlhLWZdezY0fSk/JDqdAbpImQEalgEKHmVwb2NoX3ZlcnNpb24uZGVzY3JpcHRvcnNfb25jZRI1ZGVzY3JpcHRvcnMgYXJlIGlubGluZSBvciBhZGRyZXNzZWQgYnkgaGFzaCwgbm90IGJvdGgaPXRoaXMuZGVzY3JpcHRvcnNfc2hhMjU2ID09ICcnIHx8ICFoYXModGhpcy5lcG9jaC5kZXNjcmlwdG9ycykiYAoQTGlmZWN5Y2xlVmVyc2lvbhIUCgNzZXEYASABKARCB7pIBDICIAASNgoJbGlmZWN5Y2xlGAIgASgLMhsudmliZXN5cy5zdG9yZS52MS5MaWZlY3ljbGVCBrpIA8gBASLKAgoRU2VyaWVzUGVyZm9ybWFuY2USGwoGc2VyaWVzGAEgASgJQgu6SAhyBhABKICABBIhCgtpbnB1dF92YWx1ZRgCIAEoAUIHukgEEgJAAUgAiAEBEiAKCmJlc3RfdmFsdWUYAyABKAFCB7pIBBICQAFIAYgBARIxCgZwb2ludHMYBCADKAsyIS52aWJlc3lzLnN0b3JlLnYxLklkZWFQZXJmb3JtYW5jZRItCgVpZGVhcxgGIAMoCzIeLnZpYmVzeXMuc3RvcmUudjEuSWRlYURlY2lzaW9uEkYKB3JlZnVzYWwYBSABKA4yJC52aWJlc3lzLnN0b3JlLnYxLlBlcmZvcm1hbmNlUmVmdXNhbEIKukgHggEEEAEgAEgCiAEBQg4KDF9pbnB1dF92YWx1ZUINCgtfYmVzdF92YWx1ZUIKCghfcmVmdXNhbCLgAQoPSWRlYVBlcmZvcm1hbmNlEiAKD21lYXN1cmVtZW50X3NlcRgBIAEoBEIHukgEMgIgABI0CgVwb2ludBgCIAEoCzIdLnZpYmVzeXMuc3RvcmUudjEuTWV0cmljUG9pbnRCBrpIA8gBARIeCgRpZGVhGAMgASgJQgu6SAhyBhABKICABEgAiAEBEjoKB291dGNvbWUYBCABKA4yHS52aWJlc3lzLnN0b3JlLnYxLklkZWFPdXRjb21lQgq6SAeCAQQQASAAEhAKCG5ld19iZXN0GAUgASgIQgcKBV9pZGVhIrIBCgxJZGVhRGVjaXNpb24SGQoEaWRlYRgBIAEoCUILukgIcgYQASiAgAQSOgoHb3V0Y29tZRgCIAEoDjIdLnZpYmVzeXMuc3RvcmUudjEuSWRlYU91dGNvbWVCCrpIB4IBBBABIAASJQoPbWVhc3VyZW1lbnRfc2VxGAMgASgEQge6SAQyAiAASACIAQESEAoIbmV3X2Jlc3QYBCABKAhCEgoQX21lYXN1cmVtZW50X3NlcSpkChJQZXJmb3JtYW5jZVJlZnVzYWwSIwofUEVSRk9STUFOQ0VfUkVGVVNBTF9VTlNQRUNJRklFRBAAEikKJVBFUkZPUk1BTkNFX1JFRlVTQUxfVU5LTk9XTl9ESVJFQ1RJT04QASqJAgoLSWRlYU91dGNvbWUSHAoYSURFQV9PVVRDT01FX1VOU1BFQ0lGSUVEEAASGAoUSURFQV9PVVRDT01FX1BFTkRJTkcQARIXChNJREVBX09VVENPTUVfRkFJTEVEEAISFQoRSURFQV9PVVRDT01FX0tFUFQQAxIZChVJREVBX09VVENPTUVfTk9UX0tFUFQQBBIdChlJREVBX09VVENPTUVfV0lUSElOX05PSVNFEAUSIQodSURFQV9PVVRDT01FX1dPUlNFX1RIQU5fSU5QVVQQBhIWChJJREVBX09VVENPTUVfSU5QVVQQBxIdChlJREVBX09VVENPTUVfVU5BVFRSSUJVVEVEEAhCQVo/Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_store_v1_agent_attrs, file_vibesys_store_v1_content, file_vibesys_store_v1_epoch, file_vibesys_store_v1_lifecycle, file_vibesys_store_v1_record, file_vibesys_store_v1_span]);
 
 /**
  * Machine-local routing metadata, published by Project before its host discovery link.
@@ -119,6 +119,18 @@ export type RunHead = Message<"vibesys.store.v1.RunHead"> & {
    * @generated from field: uint32 epoch = 11;
    */
   epoch: number;
+
+  /**
+   * Core decisions over this exact committed prefix, including unowned measurements.
+   *
+   * @generated from field: repeated vibesys.store.v1.SeriesPerformance performance = 12;
+   */
+  performance: SeriesPerformance[];
+
+  /**
+   * @generated from field: bool performance_stated = 13;
+   */
+  performanceStated: boolean;
 };
 
 /**
@@ -401,3 +413,195 @@ export type LifecycleVersion = Message<"vibesys.store.v1.LifecycleVersion"> & {
  */
 export const LifecycleVersionSchema: GenMessage<LifecycleVersion> = /*@__PURE__*/
   messageDesc(file_vibesys_store_v1_skeleton, 10);
+
+/**
+ * @generated from message vibesys.store.v1.SeriesPerformance
+ */
+export type SeriesPerformance = Message<"vibesys.store.v1.SeriesPerformance"> & {
+  /**
+   * @generated from field: string series = 1;
+   */
+  series: string;
+
+  /**
+   * @generated from field: optional double input_value = 2;
+   */
+  inputValue?: number | undefined;
+
+  /**
+   * @generated from field: optional double best_value = 3;
+   */
+  bestValue?: number | undefined;
+
+  /**
+   * @generated from field: repeated vibesys.store.v1.IdeaPerformance points = 4;
+   */
+  points: IdeaPerformance[];
+
+  /**
+   * @generated from field: repeated vibesys.store.v1.IdeaDecision ideas = 6;
+   */
+  ideas: IdeaDecision[];
+
+  /**
+   * @generated from field: optional vibesys.store.v1.PerformanceRefusal refusal = 5;
+   */
+  refusal?: PerformanceRefusal | undefined;
+};
+
+/**
+ * Describes the message vibesys.store.v1.SeriesPerformance.
+ * Use `create(SeriesPerformanceSchema)` to create a new message.
+ */
+export const SeriesPerformanceSchema: GenMessage<SeriesPerformance> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_skeleton, 11);
+
+/**
+ * @generated from message vibesys.store.v1.IdeaPerformance
+ */
+export type IdeaPerformance = Message<"vibesys.store.v1.IdeaPerformance"> & {
+  /**
+   * @generated from field: uint64 measurement_seq = 1;
+   */
+  measurementSeq: bigint;
+
+  /**
+   * @generated from field: vibesys.store.v1.MetricPoint point = 2;
+   */
+  point?: MetricPoint | undefined;
+
+  /**
+   * @generated from field: optional string idea = 3;
+   */
+  idea?: string | undefined;
+
+  /**
+   * @generated from field: vibesys.store.v1.IdeaOutcome outcome = 4;
+   */
+  outcome: IdeaOutcome;
+
+  /**
+   * @generated from field: bool new_best = 5;
+   */
+  newBest: boolean;
+};
+
+/**
+ * Describes the message vibesys.store.v1.IdeaPerformance.
+ * Use `create(IdeaPerformanceSchema)` to create a new message.
+ */
+export const IdeaPerformanceSchema: GenMessage<IdeaPerformance> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_skeleton, 12);
+
+/**
+ * An idea still has an outcome when no gate produced a reading.
+ *
+ * @generated from message vibesys.store.v1.IdeaDecision
+ */
+export type IdeaDecision = Message<"vibesys.store.v1.IdeaDecision"> & {
+  /**
+   * @generated from field: string idea = 1;
+   */
+  idea: string;
+
+  /**
+   * @generated from field: vibesys.store.v1.IdeaOutcome outcome = 2;
+   */
+  outcome: IdeaOutcome;
+
+  /**
+   * @generated from field: optional uint64 measurement_seq = 3;
+   */
+  measurementSeq?: bigint | undefined;
+
+  /**
+   * @generated from field: bool new_best = 4;
+   */
+  newBest: boolean;
+};
+
+/**
+ * Describes the message vibesys.store.v1.IdeaDecision.
+ * Use `create(IdeaDecisionSchema)` to create a new message.
+ */
+export const IdeaDecisionSchema: GenMessage<IdeaDecision> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_skeleton, 13);
+
+/**
+ * A refusal preserves readings without guessing how an unknown objective improves.
+ *
+ * @generated from enum vibesys.store.v1.PerformanceRefusal
+ */
+export enum PerformanceRefusal {
+  /**
+   * @generated from enum value: PERFORMANCE_REFUSAL_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: PERFORMANCE_REFUSAL_UNKNOWN_DIRECTION = 1;
+   */
+  UNKNOWN_DIRECTION = 1,
+}
+
+/**
+ * Describes the enum vibesys.store.v1.PerformanceRefusal.
+ */
+export const PerformanceRefusalSchema: GenEnum<PerformanceRefusal> = /*@__PURE__*/
+  enumDesc(file_vibesys_store_v1_skeleton, 0);
+
+/**
+ * @generated from enum vibesys.store.v1.IdeaOutcome
+ */
+export enum IdeaOutcome {
+  /**
+   * @generated from enum value: IDEA_OUTCOME_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: IDEA_OUTCOME_PENDING = 1;
+   */
+  PENDING = 1,
+
+  /**
+   * @generated from enum value: IDEA_OUTCOME_FAILED = 2;
+   */
+  FAILED = 2,
+
+  /**
+   * @generated from enum value: IDEA_OUTCOME_KEPT = 3;
+   */
+  KEPT = 3,
+
+  /**
+   * @generated from enum value: IDEA_OUTCOME_NOT_KEPT = 4;
+   */
+  NOT_KEPT = 4,
+
+  /**
+   * @generated from enum value: IDEA_OUTCOME_WITHIN_NOISE = 5;
+   */
+  WITHIN_NOISE = 5,
+
+  /**
+   * @generated from enum value: IDEA_OUTCOME_WORSE_THAN_INPUT = 6;
+   */
+  WORSE_THAN_INPUT = 6,
+
+  /**
+   * @generated from enum value: IDEA_OUTCOME_INPUT = 7;
+   */
+  INPUT = 7,
+
+  /**
+   * @generated from enum value: IDEA_OUTCOME_UNATTRIBUTED = 8;
+   */
+  UNATTRIBUTED = 8,
+}
+
+/**
+ * Describes the enum vibesys.store.v1.IdeaOutcome.
+ */
+export const IdeaOutcomeSchema: GenEnum<IdeaOutcome> = /*@__PURE__*/
+  enumDesc(file_vibesys_store_v1_skeleton, 1);

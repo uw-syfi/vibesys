@@ -5,13 +5,15 @@
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
+import type { RunHead } from "../../store/v1/skeleton_pb.js";
+import { file_vibesys_store_v1_skeleton } from "../../store/v1/skeleton_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file vibesys/testing/v1/client_replay.proto.
  */
 export const file_vibesys_testing_v1_client_replay: GenFile = /*@__PURE__*/
-  fileDesc("CiZ2aWJlc3lzL3Rlc3RpbmcvdjEvY2xpZW50X3JlcGxheS5wcm90bxISdmliZXN5cy50ZXN0aW5nLnYxIqACCgxDbGllbnRSZXBsYXkSNgoHYmF0Y2hlcxgBIAMoCzIlLnZpYmVzeXMudGVzdGluZy52MS5DbGllbnRSZXBsYXlCYXRjaBI6CgVibG9icxgCIAMoCzIrLnZpYmVzeXMudGVzdGluZy52MS5DbGllbnRSZXBsYXkuQmxvYnNFbnRyeRI+CgdzdHJlYW1zGAMgAygLMi0udmliZXN5cy50ZXN0aW5nLnYxLkNsaWVudFJlcGxheS5TdHJlYW1zRW50cnkaLAoKQmxvYnNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAw6AjgBGi4KDFN0cmVhbXNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAw6AjgBImAKEUNsaWVudFJlcGxheUJhdGNoEigKD3NvdXJjZV9zZXF1ZW5jZRgBIAEoBEIPukgMMgoY//////////9/EiEKB3JlY29yZHMYAiADKAxCELpIDZIBCiIIegYQARiAgEBCRVpDZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy90ZXN0aW5nL3YxO3Rlc3Rpbmd2MWIGcHJvdG8z", [file_buf_validate_validate]);
+  fileDesc("CiZ2aWJlc3lzL3Rlc3RpbmcvdjEvY2xpZW50X3JlcGxheS5wcm90bxISdmliZXN5cy50ZXN0aW5nLnYxIqACCgxDbGllbnRSZXBsYXkSNgoHYmF0Y2hlcxgBIAMoCzIlLnZpYmVzeXMudGVzdGluZy52MS5DbGllbnRSZXBsYXlCYXRjaBI6CgVibG9icxgCIAMoCzIrLnZpYmVzeXMudGVzdGluZy52MS5DbGllbnRSZXBsYXkuQmxvYnNFbnRyeRI+CgdzdHJlYW1zGAMgAygLMi0udmliZXN5cy50ZXN0aW5nLnYxLkNsaWVudFJlcGxheS5TdHJlYW1zRW50cnkaLAoKQmxvYnNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAw6AjgBGi4KDFN0cmVhbXNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAw6AjgBIokBChFDbGllbnRSZXBsYXlCYXRjaBIoCg9zb3VyY2Vfc2VxdWVuY2UYASABKARCD7pIDDIKGP//////////fxInCgRoZWFkGAMgASgLMhkudmliZXN5cy5zdG9yZS52MS5SdW5IZWFkEiEKB3JlY29yZHMYAiADKAxCELpIDZIBCiIIegYQARiAgEBCRVpDZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy90ZXN0aW5nL3YxO3Rlc3Rpbmd2MWIGcHJvdG8z", [file_buf_validate_validate, file_vibesys_store_v1_skeleton]);
 
 /**
  * Content-addressed browser fixture cache. Records remain the shipping Record
@@ -51,6 +53,11 @@ export type ClientReplayBatch = Message<"vibesys.testing.v1.ClientReplayBatch"> 
    * @generated from field: uint64 source_sequence = 1;
    */
   sourceSequence: bigint;
+
+  /**
+   * @generated from field: vibesys.store.v1.RunHead head = 3;
+   */
+  head?: RunHead | undefined;
 
   /**
    * @generated from field: repeated bytes records = 2;

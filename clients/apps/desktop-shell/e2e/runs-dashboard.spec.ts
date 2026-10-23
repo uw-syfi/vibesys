@@ -284,7 +284,16 @@ test('a run that ends moves from Running to Finished', async ({page}) => {
   await open(page, dashboardWorld(ONE_RUN));
   await expect(tiles(page, 'Running')).toHaveCount(1);
 
-  const ended = listingOf([{...ONE_RUN[0], phase: 'completed'} as RunCase], 'ssh:host-a');
+  const finished = [{...ONE_RUN[0], phase: 'completed'} as RunCase];
+  const nextDigests = dashboardWorld(finished).digests;
+  await page.evaluate(
+    digests =>
+      (window as unknown as {fakeRunDigests: {set(value: unknown): void}}).fakeRunDigests.set(
+        digests,
+      ),
+    nextDigests,
+  );
+  const ended = listingOf(finished, 'ssh:host-a');
   await page.evaluate(
     ([listing]) => (window as unknown as FakeHostWindow).fakeHost.listing(listing),
     [ended],

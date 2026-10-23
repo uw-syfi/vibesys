@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal, TYPE_CHECKING, TypeAlias
 
-from protobuf import Message
+from protobuf import Enum, Message
 from protobuf._codegen import file_desc
 from protobuf.wkt.google.protobuf import timestamp_pb
 
@@ -66,7 +66,7 @@ class RunAddress(Message[_RunAddressFields]):
         project_root: str
         log_directory: str
 
-_RunHeadFields: TypeAlias = Literal["lifecycle", "strategy", "objective", "span_counts", "usage", "chart_points", "needs_user", "committed_seq", "process", "awaiting_lifecycle", "epoch"]
+_RunHeadFields: TypeAlias = Literal["lifecycle", "strategy", "objective", "span_counts", "usage", "chart_points", "needs_user", "committed_seq", "process", "awaiting_lifecycle", "epoch", "performance", "performance_stated"]
 
 class RunHead(Message[_RunHeadFields]):
     """
@@ -126,9 +126,19 @@ class RunHead(Message[_RunHeadFields]):
             ```proto
             uint32 epoch = 11;
             ```
+        performance:
+            Core decisions over this exact committed prefix, including unowned measurements.
+
+            ```proto
+            repeated vibesys.store.v1.SeriesPerformance performance = 12;
+            ```
+        performance_stated:
+            ```proto
+            bool performance_stated = 13;
+            ```
     """
 
-    __slots__ = ("lifecycle", "strategy", "objective", "span_counts", "usage", "chart_points", "needs_user", "committed_seq", "process", "awaiting_lifecycle", "epoch")
+    __slots__ = ("lifecycle", "strategy", "objective", "span_counts", "usage", "chart_points", "needs_user", "committed_seq", "process", "awaiting_lifecycle", "epoch", "performance", "performance_stated")
 
     if TYPE_CHECKING:
 
@@ -146,6 +156,8 @@ class RunHead(Message[_RunHeadFields]):
             process: RunProcess | None = None,
             awaiting_lifecycle: bool = False,
             epoch: int = 0,
+            performance: list[SeriesPerformance] | None = None,
+            performance_stated: bool = False,
         ) -> None:
             pass
 
@@ -160,6 +172,8 @@ class RunHead(Message[_RunHeadFields]):
         process: RunProcess | None
         awaiting_lifecycle: bool
         epoch: int
+        performance: list[SeriesPerformance]
+        performance_stated: bool
 
 _HeadlineObjectiveFields: TypeAlias = Literal["series", "best_value", "input_value", "input_stated"]
 
@@ -553,9 +567,244 @@ class LifecycleVersion(Message[_LifecycleVersionFields]):
         seq: int
         lifecycle: Lifecycle | None
 
+_SeriesPerformanceFields: TypeAlias = Literal["series", "input_value", "best_value", "points", "ideas", "refusal"]
+
+class SeriesPerformance(Message[_SeriesPerformanceFields]):
+    """
+    ```proto
+    message vibesys.store.v1.SeriesPerformance
+    ```
+
+    Attributes:
+        series:
+            ```proto
+            string series = 1;
+            ```
+        input_value:
+            ```proto
+            optional double input_value = 2;
+            ```
+        best_value:
+            ```proto
+            optional double best_value = 3;
+            ```
+        points:
+            ```proto
+            repeated vibesys.store.v1.IdeaPerformance points = 4;
+            ```
+        ideas:
+            ```proto
+            repeated vibesys.store.v1.IdeaDecision ideas = 6;
+            ```
+        refusal:
+            ```proto
+            optional vibesys.store.v1.PerformanceRefusal refusal = 5;
+            ```
+    """
+
+    __slots__ = ("series", "input_value", "best_value", "points", "ideas", "refusal")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            series: str = "",
+            input_value: float | None = None,
+            best_value: float | None = None,
+            points: list[IdeaPerformance] | None = None,
+            ideas: list[IdeaDecision] | None = None,
+            refusal: PerformanceRefusal | None = None,
+        ) -> None:
+            pass
+
+        series: str
+        input_value: float
+        best_value: float
+        points: list[IdeaPerformance]
+        ideas: list[IdeaDecision]
+        refusal: PerformanceRefusal
+
+_IdeaPerformanceFields: TypeAlias = Literal["measurement_seq", "point", "idea", "outcome", "new_best"]
+
+class IdeaPerformance(Message[_IdeaPerformanceFields]):
+    """
+    ```proto
+    message vibesys.store.v1.IdeaPerformance
+    ```
+
+    Attributes:
+        measurement_seq:
+            ```proto
+            uint64 measurement_seq = 1;
+            ```
+        point:
+            ```proto
+            optional vibesys.store.v1.MetricPoint point = 2;
+            ```
+        idea:
+            ```proto
+            optional string idea = 3;
+            ```
+        outcome:
+            ```proto
+            vibesys.store.v1.IdeaOutcome outcome = 4;
+            ```
+        new_best:
+            ```proto
+            bool new_best = 5;
+            ```
+    """
+
+    __slots__ = ("measurement_seq", "point", "idea", "outcome", "new_best")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            measurement_seq: int = 0,
+            point: MetricPoint | None = None,
+            idea: str | None = None,
+            outcome: IdeaOutcome | None = None,
+            new_best: bool = False,
+        ) -> None:
+            pass
+
+        measurement_seq: int
+        point: MetricPoint | None
+        idea: str
+        outcome: IdeaOutcome
+        new_best: bool
+
+_IdeaDecisionFields: TypeAlias = Literal["idea", "outcome", "measurement_seq", "new_best"]
+
+class IdeaDecision(Message[_IdeaDecisionFields]):
+    """
+    An idea still has an outcome when no gate produced a reading.
+
+    ```proto
+    message vibesys.store.v1.IdeaDecision
+    ```
+
+    Attributes:
+        idea:
+            ```proto
+            string idea = 1;
+            ```
+        outcome:
+            ```proto
+            vibesys.store.v1.IdeaOutcome outcome = 2;
+            ```
+        measurement_seq:
+            ```proto
+            optional uint64 measurement_seq = 3;
+            ```
+        new_best:
+            ```proto
+            bool new_best = 4;
+            ```
+    """
+
+    __slots__ = ("idea", "outcome", "measurement_seq", "new_best")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            idea: str = "",
+            outcome: IdeaOutcome | None = None,
+            measurement_seq: int | None = None,
+            new_best: bool = False,
+        ) -> None:
+            pass
+
+        idea: str
+        outcome: IdeaOutcome
+        measurement_seq: int
+        new_best: bool
+
+class PerformanceRefusal(Enum):
+    """
+    A refusal preserves readings without guessing how an unknown objective improves.
+
+    ```proto
+    enum vibesys.store.v1.PerformanceRefusal
+    ```
+
+    Attributes:
+        UNSPECIFIED:
+            ```proto
+            PERFORMANCE_REFUSAL_UNSPECIFIED = 0
+            ```
+        UNKNOWN_DIRECTION:
+            ```proto
+            PERFORMANCE_REFUSAL_UNKNOWN_DIRECTION = 1
+            ```
+    """
+
+    UNSPECIFIED = 0
+    UNKNOWN_DIRECTION = 1
+
+class IdeaOutcome(Enum):
+    """
+    ```proto
+    enum vibesys.store.v1.IdeaOutcome
+    ```
+
+    Attributes:
+        UNSPECIFIED:
+            ```proto
+            IDEA_OUTCOME_UNSPECIFIED = 0
+            ```
+        PENDING:
+            ```proto
+            IDEA_OUTCOME_PENDING = 1
+            ```
+        FAILED:
+            ```proto
+            IDEA_OUTCOME_FAILED = 2
+            ```
+        KEPT:
+            ```proto
+            IDEA_OUTCOME_KEPT = 3
+            ```
+        NOT_KEPT:
+            ```proto
+            IDEA_OUTCOME_NOT_KEPT = 4
+            ```
+        WITHIN_NOISE:
+            ```proto
+            IDEA_OUTCOME_WITHIN_NOISE = 5
+            ```
+        WORSE_THAN_INPUT:
+            ```proto
+            IDEA_OUTCOME_WORSE_THAN_INPUT = 6
+            ```
+        INPUT:
+            ```proto
+            IDEA_OUTCOME_INPUT = 7
+            ```
+        UNATTRIBUTED:
+            ```proto
+            IDEA_OUTCOME_UNATTRIBUTED = 8
+            ```
+    """
+
+    UNSPECIFIED = 0
+    PENDING = 1
+    FAILED = 2
+    KEPT = 3
+    NOT_KEPT = 4
+    WITHIN_NOISE = 5
+    WORSE_THAN_INPUT = 6
+    INPUT = 7
+    UNATTRIBUTED = 8
+
 
 _DESC = file_desc(
-    b'\n\x1fvibesys/store/v1/skeleton.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a"vibesys/store/v1/agent_attrs.proto\x1a\x1evibesys/store/v1/content.proto\x1a\x1cvibesys/store/v1/epoch.proto\x1a vibesys/store/v1/lifecycle.proto\x1a\x1dvibesys/store/v1/record.proto\x1a\x1bvibesys/store/v1/span.proto"t\n\nRunAddress\x121\n\x0cproject_root\x18\x01 \x01(\tR\x0bprojectRootB\x0e\xbaH\x0br\t\x10\x01(\x80\x80\x04:\x01/\x123\n\rlog_directory\x18\x02 \x01(\tR\x0clogDirectoryB\x0e\xbaH\x0br\t\x10\x01(\x80\x80\x04:\x01/"\xdc\x07\n\x07RunHead\x129\n\tlifecycle\x18\x01 \x01(\x0b2\x1b.vibesys.store.v1.LifecycleR\tlifecycle\x12\'\n\x08strategy\x18\x02 \x01(\tR\x08strategyB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12A\n\tobjective\x18\x03 \x01(\x0b2#.vibesys.store.v1.HeadlineObjectiveR\tobjective\x12\\\n\x0bspan_counts\x18\x04 \x03(\x0b2).vibesys.store.v1.RunHead.SpanCountsEntryR\nspanCountsB\x10\xbaH\r\x9a\x01\n"\x08r\x06\x10\x01(\x80\x80\x04\x122\n\x05usage\x18\x05 \x01(\x0b2\x1c.vibesys.store.v1.TokenUsageR\x05usage\x12@\n\x0cchart_points\x18\x06 \x03(\x0b2\x1d.vibesys.store.v1.MetricPointR\x0bchartPoints\x12\x1d\n\nneeds_user\x18\x07 \x01(\x08R\tneedsUser\x12(\n\rcommitted_seq\x18\x08 \x01(\x04H\x00R\x0ccommittedSeq\x88\x01\x01\x126\n\x07process\x18\t \x01(\x0b2\x1c.vibesys.store.v1.RunProcessR\x07process\x12-\n\x12awaiting_lifecycle\x18\n \x01(\x08R\x11awaitingLifecycle\x12\x14\n\x05epoch\x18\x0b \x01(\rR\x05epoch\x1a=\n\x0fSpanCountsEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01B\x10\n\x0e_committed_seq:\xbe\x02\xbaH\xba\x02\x1af\n\x15run_head.chart_points\x12,chart_points must contain at most 256 points\x1a\x1fthis.chart_points.size() <= 256\x1a\xcf\x01\n\x12run_head.lifecycle\x12;head has either a lifecycle or an explicitly awaiting epoch\x1a|has(this.lifecycle) != this.awaiting_lifecycle && (!this.awaiting_lifecycle || (this.epoch > 0u && has(this.committed_seq)))"\xf5\x01\n\x11HeadlineObjective\x12B\n\x06series\x18\x01 \x01(\x0b2".vibesys.store.v1.MetricSeriesDeclR\x06seriesB\x06\xbaH\x03\xc8\x01\x01\x12+\n\nbest_value\x18\x02 \x01(\x01H\x00R\tbestValueB\x07\xbaH\x04\x12\x02@\x01\x88\x01\x01\x12-\n\x0binput_value\x18\x03 \x01(\x01H\x01R\ninputValueB\x07\xbaH\x04\x12\x02@\x01\x88\x01\x01\x12!\n\x0cinput_stated\x18\x04 \x01(\x08R\x0binputStatedB\r\n\x0b_best_valueB\x0e\n\x0c_input_value"\x89\x01\n\nRunProcess\x12\x19\n\x03pid\x18\x01 \x01(\rR\x03pidB\x07\xbaH\x04*\x02 \x00\x12\x1d\n\x05epoch\x18\x02 \x01(\rR\x05epochB\x07\xbaH\x04*\x02 \x00\x12A\n\nstarted_at\x18\x03 \x01(\x0b2\x1a.google.protobuf.TimestampR\tstartedAtB\x06\xbaH\x03\xc8\x01\x01"\xcd\x07\n\x08Keyframe\x12(\n\x0bthrough_seq\x18\x01 \x01(\x04R\nthroughSeqB\x07\xbaH\x042\x02 \x00\x120\n\nlog_offset\x18\x02 \x01(\x04R\tlogOffsetB\x11\xbaH\x0e2\x0c\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7f(\x08\x12;\n\x05spans\x18\x03 \x03(\x0b2%.vibesys.store.v1.Keyframe.SpansEntryR\x05spans\x129\n\x07metrics\x18\x04 \x03(\x0b2\x1f.vibesys.store.v1.MetricHistoryR\x07metrics\x125\n\x07streams\x18\x05 \x03(\x0b2\x1b.vibesys.store.v1.StreamRefR\x07streams\x126\n\x06epochs\x18\x06 \x03(\x0b2\x1e.vibesys.store.v1.EpochVersionR\x06epochs\x12B\n\nlifecycles\x18\x07 \x03(\x0b2".vibesys.store.v1.LifecycleVersionR\nlifecycles\x124\n\x08failures\x18\x08 \x03(\x0b2\x18.vibesys.store.v1.RecordR\x08failures\x12)\n\x10failures_tracked\x18\t \x01(\x08R\x0ffailuresTracked\x1aW\n\nSpansEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x123\n\x05value\x18\x02 \x01(\x0b2\x1d.vibesys.store.v1.SpanHistoryR\x05value:\x028\x01:\xff\x02\xbaH\xfb\x02\x1a\xf8\x02\n\x1fkeyframe.failures_within_prefix\x12\x95\x01failures must be error notices of the prefix: sequence at most through_seq, at most one per epoch, and only a keyframe that tracks them may carry any\x1a\xbc\x01this.failures.all(f, f.seq <= this.through_seq && has(f.notice) && f.notice.severity >= 2) && this.failures.map(f, f.epoch).unique() && (this.failures.size() == 0 || this.failures_tracked)"H\n\x0bSpanHistory\x129\n\x08versions\x18\x01 \x03(\x0b2\x1d.vibesys.store.v1.SpanVersionR\x08versions"\\\n\x0bSpanVersion\x12\x19\n\x03seq\x18\x01 \x01(\x04R\x03seqB\x07\xbaH\x042\x02 \x00\x122\n\x04span\x18\x02 \x01(\x0b2\x16.vibesys.store.v1.SpanR\x04spanB\x06\xbaH\x03\xc8\x01\x01"m\n\rMetricHistory\x12#\n\x06series\x18\x01 \x01(\tR\x06seriesB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x127\n\x06points\x18\x02 \x03(\x0b2\x1f.vibesys.store.v1.MetricVersionR\x06points"g\n\rMetricVersion\x12\x19\n\x03seq\x18\x01 \x01(\x04R\x03seqB\x07\xbaH\x042\x02 \x00\x12;\n\x05point\x18\x02 \x01(\x0b2\x1d.vibesys.store.v1.MetricPointR\x05pointB\x06\xbaH\x03\xc8\x01\x01"\xd0\x02\n\x0cEpochVersion\x12\x19\n\x03seq\x18\x01 \x01(\x04R\x03seqB\x07\xbaH\x042\x02 \x00\x12<\n\x05epoch\x18\x02 \x01(\x0b2\x1e.vibesys.store.v1.EpochStartedR\x05epochB\x06\xbaH\x03\xc8\x01\x01\x12G\n\x12descriptors_sha256\x18\x03 \x01(\tR\x11descriptorsSha256B\x18\xbaH\x15r\x132\x11^([0-9a-f]{64})?$:\x9d\x01\xbaH\x99\x01\x1a\x96\x01\n\x1eepoch_version.descriptors_once\x125descriptors are inline or addressed by hash, not both\x1a=this.descriptors_sha256 == \'\' || !has(this.epoch.descriptors)"p\n\x10LifecycleVersion\x12\x19\n\x03seq\x18\x01 \x01(\x04R\x03seqB\x07\xbaH\x042\x02 \x00\x12A\n\tlifecycle\x18\x02 \x01(\x0b2\x1b.vibesys.store.v1.LifecycleR\tlifecycleB\x06\xbaH\x03\xc8\x01\x01BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
+    b'\n\x1fvibesys/store/v1/skeleton.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a"vibesys/store/v1/agent_attrs.proto\x1a\x1evibesys/store/v1/content.proto\x1a\x1cvibesys/store/v1/epoch.proto\x1a vibesys/store/v1/lifecycle.proto\x1a\x1dvibesys/store/v1/record.proto\x1a\x1bvibesys/store/v1/span.proto"t\n\nRunAddress\x121\n\x0cproject_root\x18\x01 \x01(\tR\x0bprojectRootB\x0e\xbaH\x0br\t\x10\x01(\x80\x80\x04:\x01/\x123\n\rlog_directory\x18\x02 \x01(\tR\x0clogDirectoryB\x0e\xbaH\x0br\t\x10\x01(\x80\x80\x04:\x01/"\xd2\x08\n\x07RunHead\x129\n\tlifecycle\x18\x01 \x01(\x0b2\x1b.vibesys.store.v1.LifecycleR\tlifecycle\x12\'\n\x08strategy\x18\x02 \x01(\tR\x08strategyB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12A\n\tobjective\x18\x03 \x01(\x0b2#.vibesys.store.v1.HeadlineObjectiveR\tobjective\x12\\\n\x0bspan_counts\x18\x04 \x03(\x0b2).vibesys.store.v1.RunHead.SpanCountsEntryR\nspanCountsB\x10\xbaH\r\x9a\x01\n"\x08r\x06\x10\x01(\x80\x80\x04\x122\n\x05usage\x18\x05 \x01(\x0b2\x1c.vibesys.store.v1.TokenUsageR\x05usage\x12@\n\x0cchart_points\x18\x06 \x03(\x0b2\x1d.vibesys.store.v1.MetricPointR\x0bchartPoints\x12\x1d\n\nneeds_user\x18\x07 \x01(\x08R\tneedsUser\x12(\n\rcommitted_seq\x18\x08 \x01(\x04H\x00R\x0ccommittedSeq\x88\x01\x01\x126\n\x07process\x18\t \x01(\x0b2\x1c.vibesys.store.v1.RunProcessR\x07process\x12-\n\x12awaiting_lifecycle\x18\n \x01(\x08R\x11awaitingLifecycle\x12\x14\n\x05epoch\x18\x0b \x01(\rR\x05epoch\x12E\n\x0bperformance\x18\x0c \x03(\x0b2#.vibesys.store.v1.SeriesPerformanceR\x0bperformance\x12-\n\x12performance_stated\x18\r \x01(\x08R\x11performanceStated\x1a=\n\x0fSpanCountsEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01B\x10\n\x0e_committed_seq:\xbe\x02\xbaH\xba\x02\x1af\n\x15run_head.chart_points\x12,chart_points must contain at most 256 points\x1a\x1fthis.chart_points.size() <= 256\x1a\xcf\x01\n\x12run_head.lifecycle\x12;head has either a lifecycle or an explicitly awaiting epoch\x1a|has(this.lifecycle) != this.awaiting_lifecycle && (!this.awaiting_lifecycle || (this.epoch > 0u && has(this.committed_seq)))"\xf5\x01\n\x11HeadlineObjective\x12B\n\x06series\x18\x01 \x01(\x0b2".vibesys.store.v1.MetricSeriesDeclR\x06seriesB\x06\xbaH\x03\xc8\x01\x01\x12+\n\nbest_value\x18\x02 \x01(\x01H\x00R\tbestValueB\x07\xbaH\x04\x12\x02@\x01\x88\x01\x01\x12-\n\x0binput_value\x18\x03 \x01(\x01H\x01R\ninputValueB\x07\xbaH\x04\x12\x02@\x01\x88\x01\x01\x12!\n\x0cinput_stated\x18\x04 \x01(\x08R\x0binputStatedB\r\n\x0b_best_valueB\x0e\n\x0c_input_value"\x89\x01\n\nRunProcess\x12\x19\n\x03pid\x18\x01 \x01(\rR\x03pidB\x07\xbaH\x04*\x02 \x00\x12\x1d\n\x05epoch\x18\x02 \x01(\rR\x05epochB\x07\xbaH\x04*\x02 \x00\x12A\n\nstarted_at\x18\x03 \x01(\x0b2\x1a.google.protobuf.TimestampR\tstartedAtB\x06\xbaH\x03\xc8\x01\x01"\xcd\x07\n\x08Keyframe\x12(\n\x0bthrough_seq\x18\x01 \x01(\x04R\nthroughSeqB\x07\xbaH\x042\x02 \x00\x120\n\nlog_offset\x18\x02 \x01(\x04R\tlogOffsetB\x11\xbaH\x0e2\x0c\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7f(\x08\x12;\n\x05spans\x18\x03 \x03(\x0b2%.vibesys.store.v1.Keyframe.SpansEntryR\x05spans\x129\n\x07metrics\x18\x04 \x03(\x0b2\x1f.vibesys.store.v1.MetricHistoryR\x07metrics\x125\n\x07streams\x18\x05 \x03(\x0b2\x1b.vibesys.store.v1.StreamRefR\x07streams\x126\n\x06epochs\x18\x06 \x03(\x0b2\x1e.vibesys.store.v1.EpochVersionR\x06epochs\x12B\n\nlifecycles\x18\x07 \x03(\x0b2".vibesys.store.v1.LifecycleVersionR\nlifecycles\x124\n\x08failures\x18\x08 \x03(\x0b2\x18.vibesys.store.v1.RecordR\x08failures\x12)\n\x10failures_tracked\x18\t \x01(\x08R\x0ffailuresTracked\x1aW\n\nSpansEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x123\n\x05value\x18\x02 \x01(\x0b2\x1d.vibesys.store.v1.SpanHistoryR\x05value:\x028\x01:\xff\x02\xbaH\xfb\x02\x1a\xf8\x02\n\x1fkeyframe.failures_within_prefix\x12\x95\x01failures must be error notices of the prefix: sequence at most through_seq, at most one per epoch, and only a keyframe that tracks them may carry any\x1a\xbc\x01this.failures.all(f, f.seq <= this.through_seq && has(f.notice) && f.notice.severity >= 2) && this.failures.map(f, f.epoch).unique() && (this.failures.size() == 0 || this.failures_tracked)"H\n\x0bSpanHistory\x129\n\x08versions\x18\x01 \x03(\x0b2\x1d.vibesys.store.v1.SpanVersionR\x08versions"\\\n\x0bSpanVersion\x12\x19\n\x03seq\x18\x01 \x01(\x04R\x03seqB\x07\xbaH\x042\x02 \x00\x122\n\x04span\x18\x02 \x01(\x0b2\x16.vibesys.store.v1.SpanR\x04spanB\x06\xbaH\x03\xc8\x01\x01"m\n\rMetricHistory\x12#\n\x06series\x18\x01 \x01(\tR\x06seriesB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x127\n\x06points\x18\x02 \x03(\x0b2\x1f.vibesys.store.v1.MetricVersionR\x06points"g\n\rMetricVersion\x12\x19\n\x03seq\x18\x01 \x01(\x04R\x03seqB\x07\xbaH\x042\x02 \x00\x12;\n\x05point\x18\x02 \x01(\x0b2\x1d.vibesys.store.v1.MetricPointR\x05pointB\x06\xbaH\x03\xc8\x01\x01"\xd0\x02\n\x0cEpochVersion\x12\x19\n\x03seq\x18\x01 \x01(\x04R\x03seqB\x07\xbaH\x042\x02 \x00\x12<\n\x05epoch\x18\x02 \x01(\x0b2\x1e.vibesys.store.v1.EpochStartedR\x05epochB\x06\xbaH\x03\xc8\x01\x01\x12G\n\x12descriptors_sha256\x18\x03 \x01(\tR\x11descriptorsSha256B\x18\xbaH\x15r\x132\x11^([0-9a-f]{64})?$:\x9d\x01\xbaH\x99\x01\x1a\x96\x01\n\x1eepoch_version.descriptors_once\x125descriptors are inline or addressed by hash, not both\x1a=this.descriptors_sha256 == \'\' || !has(this.epoch.descriptors)"p\n\x10LifecycleVersion\x12\x19\n\x03seq\x18\x01 \x01(\x04R\x03seqB\x07\xbaH\x042\x02 \x00\x12A\n\tlifecycle\x18\x02 \x01(\x0b2\x1b.vibesys.store.v1.LifecycleR\tlifecycleB\x06\xbaH\x03\xc8\x01\x01"\x81\x03\n\x11SeriesPerformance\x12#\n\x06series\x18\x01 \x01(\tR\x06seriesB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12-\n\x0binput_value\x18\x02 \x01(\x01H\x00R\ninputValueB\x07\xbaH\x04\x12\x02@\x01\x88\x01\x01\x12+\n\nbest_value\x18\x03 \x01(\x01H\x01R\tbestValueB\x07\xbaH\x04\x12\x02@\x01\x88\x01\x01\x129\n\x06points\x18\x04 \x03(\x0b2!.vibesys.store.v1.IdeaPerformanceR\x06points\x124\n\x05ideas\x18\x06 \x03(\x0b2\x1e.vibesys.store.v1.IdeaDecisionR\x05ideas\x12O\n\x07refusal\x18\x05 \x01(\x0e2$.vibesys.store.v1.PerformanceRefusalH\x02R\x07refusalB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x88\x01\x01B\x0e\n\x0c_input_valueB\r\n\x0b_best_valueB\n\n\x08_refusal"\x8f\x02\n\x0fIdeaPerformance\x120\n\x0fmeasurement_seq\x18\x01 \x01(\x04R\x0emeasurementSeqB\x07\xbaH\x042\x02 \x00\x12;\n\x05point\x18\x02 \x01(\x0b2\x1d.vibesys.store.v1.MetricPointR\x05pointB\x06\xbaH\x03\xc8\x01\x01\x12$\n\x04idea\x18\x03 \x01(\tH\x00R\x04ideaB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12C\n\x07outcome\x18\x04 \x01(\x0e2\x1d.vibesys.store.v1.IdeaOutcomeR\x07outcomeB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x19\n\x08new_best\x18\x05 \x01(\x08R\x07newBestB\x07\n\x05_idea"\xda\x01\n\x0cIdeaDecision\x12\x1f\n\x04idea\x18\x01 \x01(\tR\x04ideaB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12C\n\x07outcome\x18\x02 \x01(\x0e2\x1d.vibesys.store.v1.IdeaOutcomeR\x07outcomeB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x125\n\x0fmeasurement_seq\x18\x03 \x01(\x04H\x00R\x0emeasurementSeqB\x07\xbaH\x042\x02 \x00\x88\x01\x01\x12\x19\n\x08new_best\x18\x04 \x01(\x08R\x07newBestB\x12\n\x10_measurement_seq*d\n\x12PerformanceRefusal\x12#\n\x1fPERFORMANCE_REFUSAL_UNSPECIFIED\x10\x00\x12)\n%PERFORMANCE_REFUSAL_UNKNOWN_DIRECTION\x10\x01*\x89\x02\n\x0bIdeaOutcome\x12\x1c\n\x18IDEA_OUTCOME_UNSPECIFIED\x10\x00\x12\x18\n\x14IDEA_OUTCOME_PENDING\x10\x01\x12\x17\n\x13IDEA_OUTCOME_FAILED\x10\x02\x12\x15\n\x11IDEA_OUTCOME_KEPT\x10\x03\x12\x19\n\x15IDEA_OUTCOME_NOT_KEPT\x10\x04\x12\x1d\n\x19IDEA_OUTCOME_WITHIN_NOISE\x10\x05\x12!\n\x1dIDEA_OUTCOME_WORSE_THAN_INPUT\x10\x06\x12\x16\n\x12IDEA_OUTCOME_INPUT\x10\x07\x12\x1d\n\x19IDEA_OUTCOME_UNATTRIBUTED\x10\x08BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
     [
         validate_pb.desc(),
         timestamp_pb.desc(),
@@ -578,6 +827,11 @@ _DESC = file_desc(
         "MetricVersion": MetricVersion,
         "EpochVersion": EpochVersion,
         "LifecycleVersion": LifecycleVersion,
+        "SeriesPerformance": SeriesPerformance,
+        "IdeaPerformance": IdeaPerformance,
+        "IdeaDecision": IdeaDecision,
+        "PerformanceRefusal": PerformanceRefusal,
+        "IdeaOutcome": IdeaOutcome,
     },
 )
 

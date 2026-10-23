@@ -34,6 +34,7 @@ def fingerprint() -> str:
     """Large golden checks hash every input instead of repeating quadratic projection in CI."""
     paths = declarations()
     paths += sorted((REPOSITORY / "src/vibesys/records").glob("*.py"))
+    paths += sorted((REPOSITORY / "libs/vs-runlog/src/vs_runlog").glob("*.py"))
     paths += sorted((REPOSITORY / "proto/vibesys").rglob("*.proto"))
     paths += [Path(__file__), Path(__file__).with_name("retained_events.py")]
     digest = hashlib.sha256()

@@ -6,6 +6,7 @@ import {
   GetBlobsResponseSchema,
   HostService,
   RecordSchema,
+  type RunHead,
   RunLiveness,
   SkeletonResponseSchema,
   TailRequestSchema,
@@ -40,7 +41,11 @@ const encode = <S extends DescMessage>(schema: S, init: MessageInitShape<S>): nu
   ...toBinary(schema, create(schema, init)),
 ];
 
-export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixture {
+export function wire(
+  fixture: StoreRunFixture,
+  liveness?: RunLiveness,
+  head?: RunHead,
+): WireFixture {
   const epochRecord = fixture.records.find(record => record.body.case === 'epochStarted');
   if (epochRecord?.body.case !== 'epochStarted') throw new Error('Fixture has no native epoch');
   const runId = epochRecord.body.value.runId;
@@ -59,7 +64,7 @@ export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixt
       runId,
       projectRoot: epochRecord.body.value.projectRoot ?? '/project',
       liveness: liveness ?? (epochHasEnded(lifecycle) ? RunLiveness.ENDED : RunLiveness.ALIVE),
-      head: {
+      head: head ?? {
         strategy: 'fixture',
         epoch,
         lifecycle,

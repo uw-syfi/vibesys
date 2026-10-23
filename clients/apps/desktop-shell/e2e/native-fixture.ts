@@ -14,6 +14,7 @@ import {
   STORE_SCHEMA_HASH,
   type Record as StoreRecord,
   TailResponseSchema,
+  WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {parseFixture, type RunFixture, type StoreRunFixture} from '@vibesys/run-fixtures';
 import {gatewayScript, wire} from './fake-gateway.js';
@@ -33,7 +34,10 @@ const cache = join(
       STORE_SCHEMA_HASH,
       readFileSync(projector).toString(),
       readFileSync(join(root, 'tests/support/retained_events.py')).toString(),
-      ...files(join(root, 'src/vibesys/records'))
+      ...[
+        ...files(join(root, 'libs/vs-runlog/src/vs_runlog')),
+        ...files(join(root, 'src/vibesys/records')),
+      ]
         .filter(path => path.endsWith('.py'))
         .sort()
         .map(path => readFileSync(path).toString()),
@@ -130,7 +134,12 @@ export function nativeReplayScript(
     blobs: replay.blobs,
     streams: replay.streams,
   };
-  const input = wire(stored, fixture.state === 'live' ? RunLiveness.ALIVE : RunLiveness.ENDED);
+  const head = replay.batches.filter(batch => Number(batch.sourceSequence) <= through).at(-1)?.head;
+  const input = wire(
+    stored,
+    fixture.state === 'live' ? RunLiveness.ALIVE : RunLiveness.ENDED,
+    head,
+  );
   input.behavior = {
     ...(held ? {holdTail: true} : {}),
     ...(options.refuseActions ? {refuseActions: options.refuseActions} : {}),
@@ -140,33 +149,61 @@ export function nativeReplayScript(
       .filter(([source, rows]) => source > through && rows.length > 0)
       .map(([source, rows]) => [
         source,
-        [
-          ...toBinary(
-            TailResponseSchema,
-            create(TailResponseSchema, {
-              records: rows
-                .sort((a, b) => Number(a.seq - b.seq))
-                .map(row => toBinary(RecordSchema, row)),
-              throughSeq: rows.at(-1)?.seq ?? 0n,
-            }),
-          ),
-        ],
+        {
+          tail: [
+            ...toBinary(
+              TailResponseSchema,
+              create(TailResponseSchema, {
+                records: rows
+                  .sort((a, b) => Number(a.seq - b.seq))
+                  .map(row => toBinary(RecordSchema, row)),
+                throughSeq: rows.at(-1)?.seq ?? 0n,
+              }),
+            ),
+          ],
+          observation: replayObservation(replay, source, fixture.runId),
+        },
       ]),
   );
   return `if (!window.vibesysGateway) {${gatewayScript(input)}\n(${connectUpdates.toString()})(${JSON.stringify(updates)});}`;
 }
-function connectUpdates(updates: Record<string, number[]>): void {
+function connectUpdates(updates: Record<string, {tail: number[]; observation: number[]}>): void {
   const peer = window as unknown as {
-    fakeGateway: {append(bytes: number[]): void; disconnect(): void};
+    fakeGateway: {
+      append(bytes: number[]): void;
+      observe(bytes: number[]): void;
+      disconnect(): void;
+    };
     fakeHost: {emit(events: readonly {sequence?: number}[]): void; drop(): void};
   };
   peer.fakeHost.emit = events => {
     for (const event of events) {
-      const bytes = updates[String(event.sequence)];
-      if (bytes) peer.fakeGateway.append(bytes);
+      const update = updates[String(event.sequence)];
+      if (update) {
+        peer.fakeGateway.append(update.tail);
+        peer.fakeGateway.observe(update.observation);
+      }
     }
   };
   peer.fakeHost.drop = () => {
     peer.fakeGateway.disconnect();
   };
+}
+
+function replayObservation(
+  replay: import('@bufbuild/protobuf').MessageShape<typeof ClientReplaySchema>,
+  source: number,
+  runId: string,
+): number[] {
+  const head = replay.batches.find(batch => Number(batch.sourceSequence) === source)?.head;
+  return [
+    ...toBinary(
+      WatchRunsResponseSchema,
+      create(WatchRunsResponseSchema, {
+        runId,
+        head,
+        liveness: head?.lifecycle?.state.case === 'ended' ? RunLiveness.ENDED : RunLiveness.ALIVE,
+      }),
+    ),
+  ];
 }

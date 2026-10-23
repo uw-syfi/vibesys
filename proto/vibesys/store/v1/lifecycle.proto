@@ -4,6 +4,7 @@ package vibesys.store.v1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/any.proto";
+import "google/protobuf/descriptor.proto";
 import "vibesys/store/v1/common.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
@@ -38,10 +39,22 @@ enum DrainGoal {
 
 enum Outcome {
   OUTCOME_UNSPECIFIED = 0;
-  OUTCOME_FINISHED = 1;
-  OUTCOME_FAILED = 2;
-  OUTCOME_STOPPED = 3;
-  OUTCOME_INTERRUPTED = 4;
+  OUTCOME_FINISHED = 1 [(outcome_presentation) = {
+    status: "completed"
+    word: "Finished"
+  }];
+  OUTCOME_FAILED = 2 [(outcome_presentation) = {
+    status: "failed"
+    word: "Failed"
+  }];
+  OUTCOME_STOPPED = 3 [(outcome_presentation) = {
+    status: "stopped"
+    word: "Stopped"
+  }];
+  OUTCOME_INTERRUPTED = 4 [(outcome_presentation) = {
+    status: "stopped"
+    word: "Stopped"
+  }];
 }
 
 enum RunFailureKind {
@@ -154,6 +167,8 @@ message Ended {
   optional string interruption_reason = 8 [(buf.validate.field).string.max_bytes = 65536];
   // Strategy ending data, described by EpochStarted.descriptors.
   optional google.protobuf.Any detail = 9;
+  // Core-owned presentation shared by the card, sidebar and run page.
+  RunOutcomePresentation presentation = 10;
 }
 
 message RunFailure {
@@ -176,4 +191,27 @@ message RunFailure {
   optional int32 exit_code = 10;
   // Failure-specific strategy data, described by EpochStarted.descriptors.
   optional google.protobuf.Any detail = 11;
+}
+
+message RunOutcomePresentation {
+  string status = 1 [(buf.validate.field).string = {
+    max_bytes: 65536
+    in: [
+      "completed",
+      "failed",
+      "stopped"
+    ]
+  }];
+  string word = 2 [(buf.validate.field).string = {
+    max_bytes: 65536
+    in: [
+      "Finished",
+      "Failed",
+      "Stopped"
+    ]
+  }];
+}
+
+extend google.protobuf.EnumValueOptions {
+  RunOutcomePresentation outcome_presentation = 50001;
 }

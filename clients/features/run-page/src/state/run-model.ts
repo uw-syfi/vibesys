@@ -61,6 +61,7 @@ function sameFacts(a: RunFacts, b: RunFacts): boolean {
 export interface RunModel {
   /** Whether the reader has caught up with the committed prefix. */
   readonly progress?: LoadProgress | undefined;
+  readonly loadFailure?: string | undefined;
   /**
    * The input's measured value of the objective metric, read from the input gate itself: known
    * before any idea is measured, when no idea's measurement carries it.

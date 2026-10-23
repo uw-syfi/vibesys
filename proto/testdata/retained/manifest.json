@@ -9,5 +9,16 @@
     "measurement_seq": 14,
     "head_input_absent": true,
     "input_span": "input-gate"
+  },
+  "471ec600": {
+    "writer_commit": "471ec6007de08bedf072e906b6d9392057ba7167",
+    "producer": "retained facts records replayed through the previous writer before performance facts",
+    "input": 100,
+    "candidate": "gate-0",
+    "vs_baseline": 1.01,
+    "chart_reference": 100,
+    "measurement_seq": 14,
+    "head_input_absent": true,
+    "input_span": "input-gate"
   }
 }

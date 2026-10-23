@@ -2,22 +2,24 @@
 
 from vs_proto.api import (
     AgentTurnAttrs,
-    Direction,
     EpochStarted,
     HeadlineObjective,
     Keyframe,
+    Lifecycle,
     RunHead,
     RunProcess,
     TokenUsage,
+    outcome_presentation,
 )
 from vs_runlog._epoch import current_epoch
+from vs_runlog._performance import project_performance
 
 
 def project_head(state: Keyframe, process: RunProcess | None = None) -> RunHead | None:
     """Legacy-only logs have no strategy declaration and retain phase 1 reads."""
     epoch = _run_declaration(state)
     current = current_epoch(state)
-    lifecycle = current.lifecycle
+    lifecycle = project_lifecycle(current.lifecycle)
     if epoch is None or epoch.run is None:
         return None
     head = RunHead(
@@ -27,6 +29,8 @@ def project_head(state: Keyframe, process: RunProcess | None = None) -> RunHead 
         awaiting_lifecycle=lifecycle is None,
         committed_seq=state.through_seq,
         process=process,
+        performance=project_performance(state, epoch),
+        performance_stated=True,
     )
     if lifecycle and lifecycle.state and lifecycle.state.field == "running":
         hold = lifecycle.state.value.hold
@@ -48,27 +52,14 @@ def project_head(state: Keyframe, process: RunProcess | None = None) -> RunHead 
         points = next((h.points for h in state.metrics if h.series == objective.series), [])
         readings = [v.point for v in points if v.point is not None]
         head.objective = HeadlineObjective(series=declaration, input_stated=True)
-        input_value = _input_value(epoch)
+        performance = head.performance[0]
+        input_value = performance.input_value if performance.has_field("input_value") else None
         if input_value is not None:
             head.objective.input_value = input_value
-        if readings:
-            values = [p.value for p in readings]
-            head.objective.best_value = (
-                max(values) if objective.direction == Direction.MAX else min(values)
-            )
-            head.chart_points = readings[-256:]
+        if performance.has_field("best_value") and not performance.has_field("refusal"):
+            head.objective.best_value = performance.best_value
+        head.chart_points = readings[-256:]
     return head
-
-
-def _input_value(epoch: EpochStarted) -> float | None:
-    """The input's measurement of the objective, as the run states it.
-
-    The writer's projection has already passed retained records through the store upgrade.
-    """
-    fact = None if epoch.run is None else epoch.run.input_measurement
-    if fact is not None and fact.state is not None:
-        return fact.state.value.value if fact.state.field == "measured" else None
-    return None
 
 
 def _add_usage(total: TokenUsage | None, usage: TokenUsage) -> TokenUsage:
@@ -90,3 +81,15 @@ def _add_usage(total: TokenUsage | None, usage: TokenUsage) -> TokenUsage:
 
 def _run_declaration(state: Keyframe) -> EpochStarted | None:
     return next((v.epoch for v in reversed(state.epochs) if v.epoch and v.epoch.run), None)
+
+
+def project_lifecycle(lifecycle: Lifecycle | None) -> Lifecycle | None:
+    """Derive the terminal word once, retaining interruption diagnostics independently."""
+    if lifecycle is None:
+        return None
+    result = Lifecycle.from_binary(lifecycle.to_binary())
+    state = result.state
+    if state is not None and state.field == "ended":
+        ended = state.value
+        ended.presentation = outcome_presentation(ended.outcome)
+    return result

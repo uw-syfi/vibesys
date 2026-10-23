@@ -1,11 +1,13 @@
 /** Store-to-view values for existing run readers. No legacy event replay or UI dependencies. */
+import {getOption} from '@bufbuild/protobuf';
 import type {RunOverview} from '@vibesys/contracts';
 import type {LogStream, RunStatus} from '@vibesys/contracts/host-helper';
 import {
   Direction,
   DrainGoal,
   type Lifecycle,
-  Outcome,
+  OutcomeSchema,
+  outcome_presentation,
   type RunHead,
   StreamKind,
   StreamState,
@@ -26,6 +28,8 @@ export interface HeadlineReading {
   readonly series: {readonly name: string; readonly unit: string} | undefined;
   readonly inputValue: number | undefined;
   readonly bestValue: number | undefined;
+  readonly leader: string | undefined;
+  readonly measured: number | undefined;
 }
 
 export function readHeadline(head: RunHead | undefined, seq: bigint): HeadlineReading | undefined {
@@ -36,7 +40,13 @@ export function readHeadline(head: RunHead | undefined, seq: bigint): HeadlineRe
       ? {name: objective.series.name, unit: objective.series.unit}
       : undefined,
     inputValue: objective.inputValue,
-    bestValue: objective.bestValue,
+    bestValue: head.performanceStated ? objective.bestValue : undefined,
+    measured: head.performanceStated
+      ? head.performance[0]?.ideas.filter(idea => idea.measurementSeq !== undefined).length
+      : undefined,
+    leader: head.performanceStated
+      ? head.performance[0]?.points.filter(point => point.newBest).at(-1)?.idea
+      : undefined,
   };
 }
 
@@ -72,21 +82,26 @@ function lifecycleStatus(lifecycle: Lifecycle | undefined): RunStatus | null {
       return 'stopping';
     case 'parked':
       return 'paused';
-    case 'ended':
-      switch (lifecycle.state.value.outcome) {
-        case Outcome.FINISHED:
-          return 'completed';
-        case Outcome.FAILED:
-          return 'failed';
-        case Outcome.STOPPED:
-        case Outcome.INTERRUPTED:
-          return 'stopped';
-        default:
-          return null;
-      }
+    case 'ended': {
+      const status = endedPresentation(lifecycle).status;
+      if (status !== 'completed' && status !== 'failed' && status !== 'stopped')
+        throw new Error(`ended.presentation.status: unknown outcome ${status}`);
+      return status;
+    }
     default:
       return null;
   }
+}
+
+/** Seven-day retained lifecycles read the schema's vocabulary without a second mapping. */
+function endedPresentation(lifecycle: Lifecycle | undefined) {
+  const ended = lifecycle?.state.case === 'ended' ? lifecycle.state.value : undefined;
+  if (!ended) throw new Error('ended.outcome: absent lifecycle');
+  if (ended.presentation) return ended.presentation;
+  const value = OutcomeSchema.values.find(value => value.number === ended.outcome);
+  const presentation = value ? getOption(value, outcome_presentation) : undefined;
+  if (!presentation?.status) throw new Error(`ended.outcome: unknown outcome ${ended.outcome}`);
+  return presentation;
 }
 
 export function lifecycleState(lifecycle: Lifecycle | undefined) {
@@ -96,7 +111,9 @@ export function lifecycleState(lifecycle: Lifecycle | undefined) {
       ? 'Paused'
       : state?.case === 'draining' && state.value.goal === DrainGoal.PARK
         ? 'Pausing'
-        : undefined;
+        : state?.case === 'ended'
+          ? endedPresentation(lifecycle).word
+          : undefined;
   const reason =
     state?.case === 'ended'
       ? state.value.failure?.reason || state.value.summary || state.value.interruptionReason || null
@@ -203,3 +220,5 @@ export function skeletonPositions(skeleton: StoreHistory): readonly number[] {
   for (const history of skeleton.metrics) for (const point of history.points) seqs.add(point.seq);
   return [...seqs].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).map(screenSequence);
 }
+
+export {type PerformanceDecision, type PerformanceReading, readPerformance} from './performance.js';

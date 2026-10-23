@@ -58,7 +58,7 @@ from vs_decode.api import Unreadable, decode_json
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from vs_proto.api import HeadlineObjective, Keyframe, RunHead, Span
+    from vs_proto.api import Keyframe, RunHead, Span
 
 _OBJECT: Final[TypeAdapter[dict[str, JsonValue]]] = TypeAdapter(dict[str, JsonValue])
 _LINE_MAX_BYTES: Final = 16 * 1024 * 1024
@@ -555,8 +555,14 @@ def digest_store(
     """
     wire = import_module("vs_proto.api")
     objective = head.objective
-    best = None if objective is None else objective.best_value
-    input_value = None if objective is None else objective.input_value
+    best = (
+        None if objective is None or not objective.has_field("best_value") else objective.best_value
+    )
+    input_value = (
+        None
+        if objective is None or not objective.has_field("input_value")
+        else objective.input_value
+    )
     series = None if objective is None else objective.series
     minimize = series is not None and series.direction == wire.Direction.MIN
     ratio = _store_ratio(best, input_value, minimize=minimize)
@@ -567,7 +573,7 @@ def digest_store(
     }
     spans = {key: span for key, span in spans.items() if span is not None}
     ideas = _store_ideas(spans)
-    points = _store_points(skeleton, spans, ideas, objective)
+    points = _store_points(head)
     times = [span.started_at for span in spans.values()]
     times += [span.ended_at for span in spans.values() if span.ended_at is not None]
     times += [
@@ -599,9 +605,9 @@ def digest_store(
 
 
 def _store_ratio(value: float | None, input_value: float | None, *, minimize: bool) -> float | None:
-    if value is None or input_value is None or input_value == 0:
+    if value is None or input_value is None or input_value == 0 or (minimize and value == 0):
         return None
-    return input_value / value if minimize and value != 0 else value / input_value
+    return input_value / value if minimize else value / input_value
 
 
 def _store_ideas(spans: dict[str, Span]) -> dict[str, str]:
@@ -619,97 +625,57 @@ def _store_ideas(spans: dict[str, Span]) -> dict[str, str]:
     return ideas
 
 
-def _store_points(
-    skeleton: Keyframe,
-    spans: dict[str, Span],
-    ideas: dict[str, str],
-    objective: HeadlineObjective | None,
-) -> list[IdeaPoint]:
+def _store_points(head: RunHead) -> list[IdeaPoint]:
+    """The card renders exactly the writer's idea decisions, never reselects a best."""
     wire = import_module("vs_proto.api")
-    series = None if objective is None else objective.series
-    metric = None if series is None else series.name
-    input_value = None if objective is None else objective.input_value
-    minimize = series is not None and series.direction == wire.Direction.MIN
-    measured = _store_measurements(skeleton, spans, ideas, metric)
-    groups: dict[str, list[str]] = {}
-    for owner, idea in ideas.items():
-        groups.setdefault(idea, []).append(owner)
-    plotted = []
-    for idea, owners in groups.items():
-        reading = measured.get(idea)
-        active = any(
-            spans[owner].status
-            in {wire.SpanStatus.RUNNING, wire.SpanStatus.WAITING, wire.SpanStatus.PENDING}
-            for owner in owners
+    objective = head.objective
+    if objective is None or objective.series is None:
+        return []
+    series = next((item for item in head.performance if item.series == objective.series.name), None)
+    if series is None:
+        return []
+    verdicts = {
+        wire.IdeaOutcome.PENDING: IdeaVerdict.RUNNING,
+        wire.IdeaOutcome.FAILED: IdeaVerdict.FAILED,
+        wire.IdeaOutcome.KEPT: IdeaVerdict.KEPT,
+        wire.IdeaOutcome.NOT_KEPT: IdeaVerdict.NOT_BETTER,
+        wire.IdeaOutcome.WITHIN_NOISE: IdeaVerdict.NOT_BETTER,
+        wire.IdeaOutcome.WORSE_THAN_INPUT: IdeaVerdict.NOT_BETTER,
+    }
+    readings = {point.measurement_seq: point.point for point in series.points}
+    return [
+        IdeaPoint(
+            ratio=_store_ratio(
+                None if (reading := readings.get(idea.measurement_seq)) is None else reading.value,
+                series.input_value if series.has_field("input_value") else None,
+                minimize=objective.series.direction == wire.Direction.MIN,
+            ),
+            verdict=verdicts[idea.outcome],
         )
-        passed = any(_store_passed(spans[owner]) for owner in owners)
-        at = min(spans[owner].started_at for owner in owners) if reading is None else reading[0]
-        plotted.append((at, None if reading is None else reading[1], active, passed))
-    points = []
-    standing = input_value
-    for _, value, active, passed in sorted(plotted, key=lambda item: item[0]):
-        sets = (
-            not active
-            and passed
-            and value is not None
-            and (standing is None or (value < standing if minimize else value > standing))
-        )
-        if sets:
-            standing = value
-        verdict = (
-            IdeaVerdict.RUNNING
-            if active
-            else IdeaVerdict.KEPT
-            if sets
-            else IdeaVerdict.NOT_BETTER
-            if passed
-            else IdeaVerdict.FAILED
-        )
-        points.append(
-            IdeaPoint(ratio=_store_ratio(value, input_value, minimize=minimize), verdict=verdict)
-        )
-
-    return points
+        for idea in series.ideas
+        if idea.outcome in verdicts
+    ]
 
 
 def _store_ending(head: RunHead) -> tuple[RunEndingFact | None, RunClosing | None]:
-    wire = import_module("vs_proto.api")
     state = None if head.lifecycle is None else head.lifecycle.state
     if state is None or state.field != "ended":
         return None, None
     ended = state.value
-    outcome, closing = {
-        wire.Outcome.FINISHED: (None, RunClosing.FINISHED),
-        wire.Outcome.FAILED: (RunEndOutcome.FAILED, RunClosing.FAILED),
-        wire.Outcome.STOPPED: (RunEndOutcome.STOPPED, RunClosing.INTERRUPTED),
-        wire.Outcome.INTERRUPTED: (RunEndOutcome.STOPPED, RunClosing.INTERRUPTED),
-    }[ended.outcome]
+    presentation = ended.presentation
+    if presentation is None:
+        message = "ended.presentation: core outcome is absent"
+        raise ValueError(message)
+    match presentation.status:
+        case "completed":
+            outcome, closing = None, RunClosing.FINISHED
+        case "failed":
+            outcome, closing = RunEndOutcome.FAILED, RunClosing.FAILED
+        case "stopped":
+            outcome, closing = RunEndOutcome.STOPPED, RunClosing.INTERRUPTED
+        case _:
+            message = f"ended.presentation.status: unknown outcome {presentation.status}"
+            raise ValueError(message)
     return RunEndingFact(
         outcome=outcome, summary=ended.summary, resumable=ended.resumable, rounds_finished=0
     ), closing
-
-
-def _store_measurements(
-    skeleton: Keyframe, spans: dict[str, Span], ideas: dict[str, str], metric: str | None
-) -> dict[str, tuple[float, float, str]]:
-    measured = {}
-    for history in skeleton.metrics:
-        if history.series != metric:
-            continue
-        for version in history.points:
-            point = version.point
-            if point is None:
-                continue
-            at = point.span
-            seen = set()
-            while at and at not in ideas and at not in seen:
-                seen.add(at)
-                at = None if at not in spans else spans[at].parent
-            if at in ideas:
-                measured[ideas[at]] = (point.clock, point.value, at)
-    return measured
-
-
-def _store_passed(span: Span) -> bool:
-    label = span.label
-    return label is not None and label.verdict in {"passed", "accepted"}

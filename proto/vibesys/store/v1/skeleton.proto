@@ -61,6 +61,9 @@ message RunHead {
   bool awaiting_lifecycle = 10;
   // Canonical writer epoch, derived from run.log independently of process metadata.
   uint32 epoch = 11;
+  // Core decisions over this exact committed prefix, including unowned measurements.
+  repeated SeriesPerformance performance = 12;
+  bool performance_stated = 13;
 }
 
 // Values are absent until reported. The declaration supplies unit and direction.
@@ -151,4 +154,65 @@ message EpochVersion {
 message LifecycleVersion {
   uint64 seq = 1 [(buf.validate.field).uint64.gt = 0];
   Lifecycle lifecycle = 2 [(buf.validate.field).required = true];
+}
+
+// A refusal preserves readings without guessing how an unknown objective improves.
+enum PerformanceRefusal {
+  PERFORMANCE_REFUSAL_UNSPECIFIED = 0;
+  PERFORMANCE_REFUSAL_UNKNOWN_DIRECTION = 1;
+}
+
+enum IdeaOutcome {
+  IDEA_OUTCOME_UNSPECIFIED = 0;
+  IDEA_OUTCOME_PENDING = 1;
+  IDEA_OUTCOME_FAILED = 2;
+  IDEA_OUTCOME_KEPT = 3;
+  IDEA_OUTCOME_NOT_KEPT = 4;
+  IDEA_OUTCOME_WITHIN_NOISE = 5;
+  IDEA_OUTCOME_WORSE_THAN_INPUT = 6;
+  IDEA_OUTCOME_INPUT = 7;
+  IDEA_OUTCOME_UNATTRIBUTED = 8;
+}
+
+message SeriesPerformance {
+  string series = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional double input_value = 2 [(buf.validate.field).double.finite = true];
+  optional double best_value = 3 [(buf.validate.field).double.finite = true];
+  repeated IdeaPerformance points = 4;
+  repeated IdeaDecision ideas = 6;
+  optional PerformanceRefusal refusal = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message IdeaPerformance {
+  uint64 measurement_seq = 1 [(buf.validate.field).uint64.gt = 0];
+  MetricPoint point = 2 [(buf.validate.field).required = true];
+  optional string idea = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  IdeaOutcome outcome = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  bool new_best = 5;
+}
+
+// An idea still has an outcome when no gate produced a reading.
+message IdeaDecision {
+  string idea = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  IdeaOutcome outcome = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional uint64 measurement_seq = 3 [(buf.validate.field).uint64.gt = 0];
+  bool new_best = 4;
 }

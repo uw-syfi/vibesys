@@ -146,6 +146,7 @@ interface RowContext {
   readonly unit: string;
   /** The run measured its input: a multiple over it can be told. */
   readonly inputKnown: boolean;
+  readonly loadWord: string | undefined;
   readonly changed: ReadonlySet<string>;
   readonly bases: IdeaBases;
 }
@@ -189,11 +190,13 @@ function rowOf(item: Candidate, context: RowContext): IdeaRow {
     summary: summaryOf(item),
     outcome: item.outcome,
     state: stateOf(item),
-    figure,
+    figure: context.loadWord ?? figure,
     ...(figureTitle === undefined ? {} : {figureTitle}),
     figureTone: tone,
     runningSince: item.outcome === 'running' ? item.startedAt : null,
-    bar: barOf(item, context),
+    bar: context.loadWord
+      ? {value: 0, tone: 'muted', label: context.loadWord}
+      : barOf(item, context),
     badges: [
       ...(context.tree.best?.candidate === item.id
         ? [{label: context.tree.best.adopted ? 'adopted' : 'best', tone: 'ok' as const}]
@@ -231,7 +234,7 @@ const rowsMemo = new WeakMap<CandidateTree, ReadonlyMap<string, IdeaRow>>();
 export function ideaRowsById(model: RunModel): ReadonlyMap<string, IdeaRow> {
   const tree = model.candidates;
   const known = rowsMemo.get(tree);
-  if (known !== undefined) return known;
+  if (known !== undefined && !model.progress && !model.loadFailure) return known;
   const context: RowContext = {
     tree,
     path: new Set(tree.bestPath),
@@ -239,11 +242,14 @@ export function ideaRowsById(model: RunModel): ReadonlyMap<string, IdeaRow> {
     direction: model.direction,
     unit: unitOf(model),
     inputKnown: inputValueOf(tree.candidates) !== null,
+    loadWord:
+      model.loadFailure ??
+      (model.progress && model.progress.phase !== 'complete' ? 'Catching up' : undefined),
     changed: model.changed,
     bases: ideaBases(tree, model.direction),
   };
   const rows = new Map(tree.candidates.map(item => [item.id, rowOf(item, context)]));
-  rowsMemo.set(tree, rows);
+  if (!model.progress && !model.loadFailure) rowsMemo.set(tree, rows);
   return rows;
 }
 
@@ -277,10 +283,16 @@ const ideasMemo = new WeakMap<CandidateTree, {filter: IdeasFilter; view: IdeasVi
 /** The Ideas face of `model` under `filter`; the same object while neither changes. */
 export function ideasView(model: RunModel, filter: IdeasFilter, meter?: ViewMeter): IdeasView {
   const cached = ideasMemo.get(model.candidates);
-  if (cached !== undefined && sameFilter(cached.filter, filter)) return cached.view;
+  if (
+    cached !== undefined &&
+    !model.progress &&
+    !model.loadFailure &&
+    sameFilter(cached.filter, filter)
+  )
+    return cached.view;
   meter?.count(model.candidates.candidates.length);
   const view = buildIdeas(model, filter);
-  ideasMemo.set(model.candidates, {filter, view});
+  if (!model.progress && !model.loadFailure) ideasMemo.set(model.candidates, {filter, view});
   return view;
 }
 

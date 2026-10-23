@@ -8,7 +8,13 @@ import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 
-from server.host_api import RUN_EVENTS_FILE, RunClosing, RunDigest, RunEndOutcome
+from server.host_api import (
+    RUN_EVENTS_FILE,
+    RunClosing,
+    RunDigest,
+    RunDigestUnreadable,
+    RunEndOutcome,
+)
 from server.host_helper_os import FileProjects
 from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
@@ -106,7 +112,7 @@ def test_native_cards_ignore_a_contradictory_legacy_journal_and_cached_digest(
         best = head.objective.best_value
         expected = (
             None
-            if input_value == 0
+            if input_value == 0 or (minimize and best == 0)
             else input_value / best
             if minimize and best != 0
             else best / input_value
@@ -144,3 +150,24 @@ def test_native_cards_ignore_a_contradictory_legacy_journal_and_cached_digest(
         assert isinstance(latest, RunDigest)
         assert latest.ending is None
         assert latest.closing is None
+
+
+@pytest.mark.regression
+@example(head_bytes=None)
+@given(head_bytes=st.one_of(st.none(), st.binary(max_size=50)))
+def test_a_store_without_a_readable_head_never_uses_the_legacy_journal(
+    head_bytes: bytes | None,
+) -> None:
+    """Every missing/torn/corrupt head of a converted or native log is a typed refusal."""
+    with TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        path = Project.run_log_path_for(root, "run-a")
+        path.parent.mkdir(parents=True)
+        path.write_bytes(CORPUS.read_bytes())
+        if head_bytes is not None:
+            path.with_name("run.head").write_bytes(head_bytes)
+        (path.parent / RUN_EVENTS_FILE).write_text('{"type":"run_finished","sequence":1}\n')
+        projects = FileProjects(FakeGitRepositories().repository, SimThreads())
+        digest = projects.run_digest(root, "run-a")
+        assert isinstance(digest, RunDigestUnreadable)
+        assert "committed store" in digest.message

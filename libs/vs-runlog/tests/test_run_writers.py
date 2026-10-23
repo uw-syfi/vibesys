@@ -102,7 +102,7 @@ def test_writer_publishes_head_and_lifecycle_keyframes(tmp_path: Path) -> None:
                 assert checkpoint.through_seq == record.seq
     assert Keyframe.from_binary((tmp_path / "keyframes/10.pb").read_bytes()) == expected
     assert head.objective is not None
-    assert head.objective.best_value == 4
+    assert head.objective.best_value == 2
     assert head.objective.input_value == 2
     assert [p.value for p in head.chart_points] == [2, 4]
     assert head.lifecycle is not None

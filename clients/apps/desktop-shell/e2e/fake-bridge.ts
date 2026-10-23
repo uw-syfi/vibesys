@@ -301,12 +301,20 @@ export function installRequestBound(limit: number): void {
  * host's answer to what a run's journal says (`seed.digests`), or that it offers none.
  */
 export function installFakeDigests(seed: FakeBridgeSeed): void {
-  const digests = seed.digests;
+  let digests = seed.digests;
+  Object.assign(window, {
+    fakeRunDigests: {
+      set: (next: typeof digests) => {
+        digests = next;
+      },
+    },
+  });
   Object.assign((window as unknown as {vibesysWelcome: object}).vibesysWelcome, {
     runDigests: (host: string, _project: string, runIds: readonly string[]) => {
-      if (digests === undefined || seed.digestless?.includes(host) === true)
+      const current = digests;
+      if (current === undefined || seed.digestless?.includes(host) === true)
         return Promise.resolve({ok: true, value: {kind: 'unsupported'}});
-      const runs = new Map(runIds.flatMap(id => (id in digests ? [[id, digests[id]]] : [])));
+      const runs = new Map(runIds.flatMap(id => (id in current ? [[id, current[id]]] : [])));
       return Promise.resolve({ok: true, value: {kind: 'digests', runs}});
     },
   });

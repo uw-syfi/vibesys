@@ -80,7 +80,7 @@ export interface MetricTileView {
 export interface HeroView {
   /** One tile per performance measure; today the run's one objective metric. */
   readonly tiles: readonly MetricTileView[];
-  readonly measured: number;
+  readonly measured: number | null;
   /** The comparisons with no reading, each by its status word, in the task's order. */
   readonly baselineNotes: readonly BaselineNote[];
 }
@@ -92,6 +92,7 @@ function bestCandidate(model: RunModel): Candidate | null {
 
 /** The input's value: an idea's measurement carries it, else the input gate's own reading. */
 function inputValue(model: RunModel): number | null {
+  if (model.series) return model.headline?.inputValue ?? model.input ?? null;
   return inputValueOf(model.candidates.candidates) ?? model.input ?? null;
 }
 
@@ -201,7 +202,7 @@ function trendOf(
     performanceFold(candidates, direction, input);
   const last = fold.best.at(-1);
   // The input's own measurement is a point of the run: with nothing better yet it is the line.
-  if (last === undefined && input === null) return null;
+  if (last === undefined && input === null && fold.points.length === 0) return null;
   const starts = model.candidates.candidates.map(item => item.startedAt);
   const from = starts.length === 0 ? (model.latest ?? 0) : Math.min(...starts);
   const to = Math.max(from + 1, last?.at ?? from, model.latest ?? 0);
@@ -241,11 +242,12 @@ function axisTile(model: RunModel, axis: ObjectiveAxis): MetricTileView {
   const name = metricLabel(axis.name);
   const direction: Direction = axis.direction;
   const all = model.candidates.candidates;
-  const input =
+  const inferredInput =
     all
       .flatMap(item => item.measurement?.inputReadings ?? [])
       .find(reading => reading.name === axis.name)?.value ??
     (axis.name === model.overview?.objective.metric ? (model.input ?? null) : null);
+  const input = model.series ? (model.series.get(axis.name)?.input ?? null) : inferredInput;
   const unit =
     all
       .flatMap(item => [
@@ -257,14 +259,15 @@ function axisTile(model: RunModel, axis: ObjectiveAxis): MetricTileView {
   const passed = all
     .filter(item => item.outcome === 'passed' && readingOn(item, axis.name) !== undefined)
     .map(item => (readingOn(item, axis.name) as MeasuredReading).value);
-  const seriesBest = model.series?.get(axis.name)?.best.at(-1)?.value;
-  const value =
-    seriesBest ??
-    (passed.length === 0
+  const value = objectiveValue(
+    model,
+    axis.name,
+    passed.length === 0
       ? null
       : passed.reduce((best, next) =>
           (axis.direction === 'min' ? next < best : next > best) ? next : best,
-        ));
+        ),
+  );
   const vs = value === null || input === null || input === 0 ? null : value / input;
   const better = vs === null ? null : improvement(vs, direction);
   return {
@@ -351,6 +354,14 @@ function noInputWords(model: RunModel): string {
     : 'no input';
 }
 
+function objectiveValue(
+  model: RunModel,
+  metric: string | null | undefined,
+  fallback: number | null,
+): number | null {
+  return model.series ? (model.series.get(metric ?? '')?.value ?? null) : fallback;
+}
+
 /** The tile of the run's objective metric. */
 function objectiveTile(model: RunModel, best: CandidateMeasurement | null): MetricTileView {
   const metric = model.overview?.objective.metric;
@@ -360,11 +371,7 @@ function objectiveTile(model: RunModel, best: CandidateMeasurement | null): Metr
   // The objective's own reading when the benchmark reported it, else its headline: the first
   // reading, which is not always the objective's.
   const reading = named ? best?.readings.find(each => each.name === metric) : undefined;
-  const value =
-    model.series?.get(metric ?? '')?.best.at(-1)?.value ??
-    reading?.value ??
-    best?.metricValue ??
-    null;
+  const value = objectiveValue(model, metric, reading?.value ?? best?.metricValue ?? null);
   const vs = againstInput(value, input) ?? best?.vsBaseline ?? null;
   const better = vs === null ? null : improvement(vs, model.direction);
   const against = best?.against ?? null;
@@ -412,6 +419,28 @@ function writerObjectiveTile(model: RunModel, tile: MetricTileView): MetricTileV
   };
 }
 
+function measuredIdeas(model: RunModel): number | null {
+  return model.series
+    ? (model.headline?.measured ?? null)
+    : model.candidates.candidates.filter(item => item.measurement?.metricValue != null).length;
+}
+
+function settledTile(model: RunModel, tile: MetricTileView, objectives: number): MetricTileView {
+  const refusal = model.series?.get(tile.id)?.refusal;
+  if (refusal)
+    return {
+      ...tile,
+      figure: '–',
+      ratio: null,
+      note: 'Unavailable',
+      detail: refusal,
+      hint: '',
+    };
+  return model.headline && (objectives < 2 || tile.id === model.headline.series?.name)
+    ? writerObjectiveTile(model, tile)
+    : tile;
+}
+
 /**
  * The performance row at `model`. `objectives` are the run's, read from the whole run: a scrubbed
  * model of the run's first moments has no overview yet, and the row must not change its tiles.
@@ -421,7 +450,9 @@ export function heroView(
   objectives: readonly ObjectiveAxis[] = objectivesOf(model),
 ): HeroView {
   const leader = bestCandidate(model);
-  const catchingUp = model.progress !== undefined && model.progress.phase !== 'complete';
+  const catchingUp =
+    model.loadFailure !== undefined ||
+    (model.progress !== undefined && model.progress.phase !== 'complete');
   return {
     // A run that declares several objectives has a tile each (its gates carry a reading per
     // objective); any other run has the one tile of its objective metric.
@@ -434,18 +465,17 @@ export function heroView(
             ...tile,
             figure: '–',
             ratio: null,
-            note: 'Catching up',
-            detail: 'Reading the run’s committed history',
+            note: model.loadFailure ?? 'Catching up',
+            detail: model.loadFailure
+              ? 'The run’s history could not be read'
+              : 'Reading the run’s committed history',
             hint: '',
             trend: null,
           }
-        : model.headline && (objectives.length < 2 || tile.id === model.headline.series?.name)
-          ? writerObjectiveTile(model, tile)
-          : tile,
+        : settledTile(model, tile, objectives.length),
     ),
-    measured: model.candidates.candidates.filter(item => item.measurement?.metricValue != null)
-      .length,
-    baselineNotes: baselineNotes(model.baselines),
+    measured: catchingUp ? null : measuredIdeas(model),
+    baselineNotes: catchingUp ? [] : baselineNotes(model.baselines),
   };
 }
 
@@ -592,7 +622,7 @@ export function stripChartView(
   const points = fold.points.map(point => ({
     ...(point.unowned ? {} : {id: point.id}),
     ...(point.key === undefined ? {} : {key: point.key}),
-    label: `${point.title} · ${formatValue(point.value)} · ${point.best ? 'New best' : RESULT_WORDS[point.result]}`,
+    label: `${point.title} · ${formatValue(point.value)} · ${point.best ? 'New best' : (point.outcomeWord ?? RESULT_WORDS[point.result])}`,
     x: minutes(point.at),
     y: point.value,
     filled: point.result !== 'pending',
@@ -608,6 +638,7 @@ export function stripChartView(
   const last = steps.at(-1);
   if (last !== undefined && last.x < end) steps.push({x: end, y: last.y});
   const input = inputValue(model);
+  startFromInput(steps, model, input);
   const baselines = baselineReferences(model.baselines, metric).map(reference => ({
     y: reference.value,
     label: reference.label,
@@ -820,6 +851,14 @@ export function logStreamToFollow(
   }
   const scope = shownLogScope(route, resolveZoom(model, route));
   return scope === null ? null : streamToFollow(state, scope);
+}
+
+function startFromInput(
+  steps: {x: number; y: number}[],
+  model: RunModel,
+  input: number | null,
+): void {
+  if (model.series && input !== null) steps.unshift({x: 0, y: input});
 }
 
 function chartPerformance(model: RunModel, metric: string | null) {

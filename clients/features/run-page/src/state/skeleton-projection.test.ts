@@ -121,7 +121,7 @@ test('comparison links, adoption, baselines and capacity spans use the existing 
   expect(model.candidates.candidates[0]?.measurement?.metricValue).toBe(125);
   expect(model.candidates.candidates[0]?.measurement?.vsBaseline).toBe(1.25);
   expect(model.candidates.candidates[0]?.measurement?.against?.baseCommit).toBe('input');
-  expect(model.candidates.best).toEqual({candidate: 'idea-0', adopted: true});
+  expect(model.candidates.best).toBeNull(); // No core decision was supplied with this prefix.
   expect(model.baselines[0]?.value).toBe(50);
   expect(model.pauses).toEqual([
     {from: 0, to: 2, provider: 'provider-a', condition: 'rate_limited'},
@@ -444,6 +444,8 @@ test('a native metric headlines the writer fact even without candidate-shaped sp
   const head = create(RunHeadSchema, {
     epoch: 1,
     committedSeq: 2n,
+    performanceStated: true,
+    performance: [{series: 'throughput', inputValue: 100, bestValue: 321}],
     objective: {
       series: {name: 'throughput', unit: 'ops/s', direction: Direction.MAX},
       bestValue: 321,
@@ -511,6 +513,8 @@ for (const reversed of [false, true]) {
     const head = create(RunHeadSchema, {
       epoch: 1,
       committedSeq: seq,
+      performanceStated: true,
+      performance: [{series: 'throughput', inputValue: 100, bestValue: 320}],
       objective: {
         series: {name: 'throughput', unit: 'ops/s', direction: Direction.MAX},
         inputValue: 100,
@@ -526,7 +530,9 @@ for (const reversed of [false, true]) {
         expect(updated?.figure).toBe('3.20×');
         expect(updated?.detail).toBe('320 ops/s · input 100 ops/s');
         expect(tile.trend).not.toBeNull();
-        expect(updated?.trend).toEqual(tile.trend);
+        expect(updated?.trend?.reference).toBe(100);
+        expect(updated?.trend?.from).toBe(tile.trend?.from);
+        expect(updated?.trend?.to).toBe(tile.trend?.to);
       } else {
         expect(updated).toEqual(tile);
       }

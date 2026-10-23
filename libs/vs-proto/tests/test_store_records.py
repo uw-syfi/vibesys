@@ -58,6 +58,7 @@ def skeleton_examples() -> list[Message]:
     return [
         p.ReplayStore(),
         p.RunAddress(project_root="/project", log_directory="/state/logs"),
+        p.RunOutcomePresentation(status="stopped", word="Stopped"),
         p.RunHead(
             lifecycle=lifecycle,
             strategy="example",
@@ -74,6 +75,23 @@ def skeleton_examples() -> list[Message]:
             span_counts={"work": 1},
             usage=p.TokenUsage(input=1, cost_usd=0.1),
             chart_points=[metric_record.value],
+            performance_stated=True,
+            performance=[
+                p.SeriesPerformance(
+                    ideas=[p.IdeaDecision(idea="idea", outcome=p.IdeaOutcome.KEPT, new_best=True)],
+                    series="throughput",
+                    input_value=1.0,
+                    best_value=2.0,
+                    points=[
+                        p.IdeaPerformance(
+                            measurement_seq=1,
+                            point=metric_record.value,
+                            outcome=p.IdeaOutcome.KEPT,
+                            new_best=True,
+                        )
+                    ],
+                )
+            ],
             needs_user=True,
             committed_seq=1,
             process=p.RunProcess(pid=12, epoch=1, started_at=p.Timestamp(seconds=1)),

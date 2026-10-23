@@ -40,6 +40,7 @@ function toneOf(idea: Candidate): IdeaFocusView['tone'] {
 
 /** What the idea measured against the input; null when it measured nothing. */
 function measureOf(model: RunModel, idea: Candidate): Measure | null {
+  if (model.loadFailure || (model.progress && model.progress.phase !== 'complete')) return null;
   const measurement = idea.measurement;
   const value = measurement?.metricValue ?? null;
   const vs = measurement?.vsBaseline ?? null;

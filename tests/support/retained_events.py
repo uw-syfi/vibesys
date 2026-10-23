@@ -8,7 +8,8 @@ from typing import Any
 
 from vibesys.events import CoreEvent, CoreEventType
 from vibesys.records.api import MappedEvent, MappingState, map_event
-from vs_proto.api import ClientReplay, ClientReplayBatch, EpochStarted
+from vs_proto.api import ClientReplay, ClientReplayBatch, EpochStarted, Record
+from vs_runlog.api import fold_skeleton, project_head
 
 CORE_TYPES = frozenset(kind.value for kind in CoreEventType)
 
@@ -149,4 +150,24 @@ def replay_of(fixture: dict[str, Any]) -> ClientReplay:
                 raise ValueError(message)
             content.extend(stream.content)
     replay.streams.update({key: bytes(value) for key, value in streams.items()})
+    return project_heads(
+        replay, fixture.get("liveAfter") if fixture.get("state") == "live" else None
+    )
+
+
+def project_heads(replay: ClientReplay, from_source: int | None = None) -> ClientReplay:
+    """The current replay prefix's head is produced by the shipping writer projection."""
+    records: list[Record] = []
+    prefix = max(
+        (
+            index
+            for index, batch in enumerate(replay.batches)
+            if from_source is not None and batch.source_sequence <= from_source
+        ),
+        default=-1,
+    )
+    for index, batch in enumerate(replay.batches):
+        records.extend(Record.from_binary(wire) for wire in batch.records)
+        if index == len(replay.batches) - 1 or (from_source is not None and index >= prefix):
+            batch.head = project_head(fold_skeleton(records, log_offset=0))
     return replay

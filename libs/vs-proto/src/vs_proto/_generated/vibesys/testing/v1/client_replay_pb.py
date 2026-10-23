@@ -12,9 +12,12 @@ from protobuf import Message
 from protobuf._codegen import file_desc
 
 from ....buf.validate import validate_pb
+from ...store.v1 import skeleton_pb
 
 if TYPE_CHECKING:
     from protobuf import DescFile
+
+    from ...store.v1.skeleton_pb import RunHead
 
 
 _ClientReplayFields: TypeAlias = Literal["batches", "blobs", "streams"]
@@ -60,7 +63,7 @@ class ClientReplay(Message[_ClientReplayFields]):
         blobs: dict[str, bytes]
         streams: dict[str, bytes]
 
-_ClientReplayBatchFields: TypeAlias = Literal["source_sequence", "records"]
+_ClientReplayBatchFields: TypeAlias = Literal["source_sequence", "head", "records"]
 
 class ClientReplayBatch(Message[_ClientReplayBatchFields]):
     """
@@ -73,13 +76,17 @@ class ClientReplayBatch(Message[_ClientReplayBatchFields]):
             ```proto
             uint64 source_sequence = 1;
             ```
+        head:
+            ```proto
+            optional vibesys.store.v1.RunHead head = 3;
+            ```
         records:
             ```proto
             repeated bytes records = 2;
             ```
     """
 
-    __slots__ = ("source_sequence", "records")
+    __slots__ = ("source_sequence", "head", "records")
 
     if TYPE_CHECKING:
 
@@ -87,18 +94,21 @@ class ClientReplayBatch(Message[_ClientReplayBatchFields]):
             self,
             *,
             source_sequence: int = 0,
+            head: RunHead | None = None,
             records: list[bytes] | None = None,
         ) -> None:
             pass
 
         source_sequence: int
+        head: RunHead | None
         records: list[bytes]
 
 
 _DESC = file_desc(
-    b'\n&vibesys/testing/v1/client_replay.proto\x12\x12vibesys.testing.v1\x1a\x1bbuf/validate/validate.proto"\xd1\x02\n\x0cClientReplay\x12?\n\x07batches\x18\x01 \x03(\x0b2%.vibesys.testing.v1.ClientReplayBatchR\x07batches\x12A\n\x05blobs\x18\x02 \x03(\x0b2+.vibesys.testing.v1.ClientReplay.BlobsEntryR\x05blobs\x12G\n\x07streams\x18\x03 \x03(\x0b2-.vibesys.testing.v1.ClientReplay.StreamsEntryR\x07streams\x1a8\n\nBlobsEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\x0cR\x05value:\x028\x01\x1a:\n\x0cStreamsEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\x0cR\x05value:\x028\x01"y\n\x11ClientReplayBatch\x128\n\x0fsource_sequence\x18\x01 \x01(\x04R\x0esourceSequenceB\x0f\xbaH\x0c2\n\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7f\x12*\n\x07records\x18\x02 \x03(\x0cR\x07recordsB\x10\xbaH\r\x92\x01\n"\x08z\x06\x10\x01\x18\x80\x80@BEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/testing/v1;testingv1b\x06proto3',
+    b'\n&vibesys/testing/v1/client_replay.proto\x12\x12vibesys.testing.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fvibesys/store/v1/skeleton.proto"\xd1\x02\n\x0cClientReplay\x12?\n\x07batches\x18\x01 \x03(\x0b2%.vibesys.testing.v1.ClientReplayBatchR\x07batches\x12A\n\x05blobs\x18\x02 \x03(\x0b2+.vibesys.testing.v1.ClientReplay.BlobsEntryR\x05blobs\x12G\n\x07streams\x18\x03 \x03(\x0b2-.vibesys.testing.v1.ClientReplay.StreamsEntryR\x07streams\x1a8\n\nBlobsEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\x0cR\x05value:\x028\x01\x1a:\n\x0cStreamsEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\x0cR\x05value:\x028\x01"\xa8\x01\n\x11ClientReplayBatch\x128\n\x0fsource_sequence\x18\x01 \x01(\x04R\x0esourceSequenceB\x0f\xbaH\x0c2\n\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7f\x12-\n\x04head\x18\x03 \x01(\x0b2\x19.vibesys.store.v1.RunHeadR\x04head\x12*\n\x07records\x18\x02 \x03(\x0cR\x07recordsB\x10\xbaH\r\x92\x01\n"\x08z\x06\x10\x01\x18\x80\x80@BEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/testing/v1;testingv1b\x06proto3',
     [
         validate_pb.desc(),
+        skeleton_pb.desc(),
     ],
     {
         "ClientReplay": ClientReplay,

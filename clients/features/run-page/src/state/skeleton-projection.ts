@@ -19,7 +19,6 @@ import {
 } from '@vibesys/run-state/skeleton';
 import {AppendLog} from './append-log.js';
 import {EMPTY_TRACE_LOG} from './live.js';
-import {withLiveBest} from './live-best.js';
 import type {RunModel} from './run-model.js';
 import {type RunPageSeed, type RunPageState, runPageInitial} from './run-page.js';
 import {settleIdeas} from './settled-ideas.js';
@@ -47,24 +46,37 @@ export function projectSkeleton(
     head?: RunLivenessHint['head'];
     content?: SkeletonContent;
     progress?: LoadProgress;
+    loadFailure?: string | undefined;
   } = {},
 ): RunModel {
   const headline = readHeadline(options.head, seq);
   const view = seekSkeleton(skeleton, seq);
   const reading = readSkeleton(skeleton, view, objectiveText, options.content);
-  const candidates = withLiveBest(
-    settleIdeas(candidateTree(reading.spans), reading.comparisons),
-    reading.direction,
-  );
+  const tree = settleIdeas(candidateTree(reading.spans), reading.comparisons);
+  const leader = headline?.leader;
+  const bestPath: string[] = [];
+  const byId = new Map(tree.candidates.map(idea => [idea.id, idea]));
+  const seen = new Set<string>();
+  for (
+    let idea = byId.get(leader ?? '');
+    idea && !seen.has(idea.id);
+    idea = byId.get(idea.parent ?? '')
+  ) {
+    seen.add(idea.id);
+    bestPath.unshift(idea.id);
+  }
+  const candidates = {
+    ...tree,
+    best: leader
+      ? {candidate: leader, adopted: tree.best?.candidate === leader && tree.best.adopted}
+      : null,
+    bestPath,
+  };
   return {
     progress: options.progress,
+    loadFailure: options.loadFailure,
     headline,
-    series: skeletonPerformance(
-      view,
-      reading.spans,
-      candidates.candidates,
-      reading.overview?.objective.objectives ?? [],
-    ),
+    series: skeletonPerformance(view, reading.spans, candidates.candidates, options.head),
     input: reading.input,
     at: Number(seq),
     trace: {spans: new Map(reading.spans.map(span => [span.id, span])), sequence: Number(seq)},
@@ -161,7 +173,7 @@ export function skeletonScreenState(
     progress: whole.progress,
     recordDiagnostic: latestFailure(skeleton, ui.recordLog),
     lifecycleWord: lifecycle.word,
-    positionWord: positionWord(whole.progress, reading.latest),
+    positionWord: whole.loadFailure ?? positionWord(whole.progress, reading.latest),
     startupStages: reading.startup.map(step => ({
       id: step.stage,
       label: STARTUP_LABELS[step.stage],

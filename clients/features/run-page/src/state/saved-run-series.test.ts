@@ -26,7 +26,7 @@ for (let seed = 1; seed <= 12; seed += 1) {
         : [],
     );
     expect(values.length).toBeGreaterThan(0);
-    const best = minimize ? Math.min(...values) : Math.max(...values);
+    const best = undefined;
     const head = create(RunHeadSchema, {
       committedSeq,
       objective: {series: {name: 'throughput'}, bestValue: best, inputValue: 100},
@@ -44,12 +44,11 @@ for (let seed = 1; seed <= 12; seed += 1) {
     expect(chart?.points.map(point => point.y).sort((a, b) => a - b)).toEqual(
       [...values].sort((a, b) => a - b),
     );
-    expect(chart?.steps.at(-1)?.y).toBe(best);
+    expect(chart?.points.every(point => !point.label.includes('New best'))).toBe(true);
+    expect(chart?.steps.at(-1)?.y).toBe(100);
     expect(new Set(chart?.points.map(point => point.key)).size).toBe(values.length);
-    expect(heroView(projectSkeleton(load.skeleton, committedSeq)).tiles[0]?.figure).toBe(
-      heroView(model).tiles[0]?.figure,
-    );
-    expect(heroView(model).tiles[0]?.trend?.steps.at(-1)?.y).toBe(best);
+    expect(heroView(model).tiles[0]?.figure).toBe('–');
+    expect(heroView(model).tiles[0]?.trend?.steps.at(-1)?.y).toBe(100);
     expect(paintedSkeleton(load)).toBe(load.skeleton);
     expect(paintedSkeleton({...load, complete: false})).toBe(load.skeleton);
     const prefix = projectSkeleton(load.skeleton, committedSeq, '', {

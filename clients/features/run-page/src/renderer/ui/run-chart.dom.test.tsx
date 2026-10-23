@@ -91,6 +91,7 @@ async function rendered(
   const drawn = {
     sparklines: container.querySelectorAll('.vs-spark-line').length,
     charts: container.querySelectorAll('.vs-chart').length,
+    hasProgression: (heroView(whole, objectivesOf(whole)).tiles[0]?.trend?.steps.length ?? 0) > 0,
     points: skeleton.metrics.reduce((sum, series) => sum + series.points.length, 0),
     // Whether the tile claims a measured value: what it shows, the chart must draw from too.
     tileValue: heroView(whole, objectivesOf(whole)).tiles.some(tile => tile.figure !== '\u2013'),
@@ -194,7 +195,7 @@ test('the tile, the sparkline and the chart read one source, whoever measured th
   }
 });
 
-test('the sparkline and the chart are drawn iff the history holds a measured point', async () => {
+test('raw readings remain charted without inventing a best progression', async () => {
   for (const kind of ['short', 'live', 'facts'] as const) {
     for (const count of [1, 3]) {
       const made = storeRunFixture(kind, count, 1).records;
@@ -205,7 +206,7 @@ test('the sparkline and the chart are drawn iff the history holds a measured poi
         for (let length = 1; length <= records.length; length += 3) {
           const drawn = await rendered(records.slice(0, length));
           const label = `${kind} ${count} ideas, ${length} records, ${whose} points`;
-          expect(drawn.sparklines > 0, `sparkline: ${label}`).toBe(drawn.points > 0);
+          expect(drawn.sparklines > 0, `sparkline: ${label}`).toBe(drawn.hasProgression);
           expect(drawn.charts > 0, `chart: ${label}`).toBe(drawn.points > 0);
         }
     }

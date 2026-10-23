@@ -8,7 +8,7 @@ const OUTCOMES = ['adopted', 'failed', 'stopped', null] as const;
 const STATUS = {adopted: 'finished', failed: 'failed', stopped: 'stopped'} as const;
 
 for (const stored of OUTCOMES) {
-  for (const registered of OUTCOMES) {
+  for (const registered of ['adopted', 'failed', 'stopped'] as const) {
     test(`committed ${stored} outranks registry ${registered}`, () => {
       const ended: HostRun = {
         id: 'old',

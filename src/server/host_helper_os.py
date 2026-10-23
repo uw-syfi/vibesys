@@ -328,12 +328,12 @@ class FileProjects:
         return opened.root, tuple(runs)
 
     def run_digest(self, project_root: Path, run_id: str) -> RunDigest | RunDigestUnreadable | None:
-        """The committed native facts, or the journal for a run without a native head.
+        """Committed store facts, or the journal of a run never converted to the store.
 
         Native projections are cached by head bytes, never by a separate journal's age.
         """
         native = Project.run_log_path_for(project_root, run_id)
-        if native.with_name("run.head").exists():
+        if native.exists() or native.with_name("run.head").exists():
             return self._native_digest(native)
         journal = Project.log_directory_for(project_root, run_id) / RUN_EVENTS_FILE
         try:
@@ -363,7 +363,8 @@ class FileProjects:
             digest = import_module("server.run_digest_store").read_digest(path)
         except (OSError, ValueError) as exc:
             return RunDigestUnreadable(
-                message=f"the run's committed store could not be read: {exc}"
+                message="the run's committed store could not be read: "
+                + str(exc).replace("\n", " ")[:150]
             )
         else:
             self._native_digests[path] = (version, digest)

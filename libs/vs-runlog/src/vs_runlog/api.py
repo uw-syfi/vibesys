@@ -11,6 +11,7 @@ from vs_runlog._file import (
 )
 from vs_runlog._fold import fold_skeleton
 from vs_runlog._framing import ReadStop, RunLogStopReason, encode_frame
+from vs_runlog._head import project_head
 from vs_runlog._lock import (
     RunLaunchLockedError,
     RunLock,
@@ -47,6 +48,7 @@ __all__ = [
     "install_run_log",
     "observe_writer_identity",
     "open_run_log",
+    "project_head",
     "read_current_epoch",
     "read_run_head",
     "upgrade_skeleton",

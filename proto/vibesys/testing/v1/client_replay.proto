@@ -1,6 +1,9 @@
 syntax = "proto3";
 package vibesys.testing.v1;
+
 import "buf/validate/validate.proto";
+import "vibesys/store/v1/skeleton.proto";
+
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/testing/v1;testingv1";
 
 // Content-addressed browser fixture cache. Records remain the shipping Record
@@ -12,5 +15,9 @@ message ClientReplay {
 }
 message ClientReplayBatch {
   uint64 source_sequence = 1 [(buf.validate.field).uint64.lte = 9223372036854775807];
-  repeated bytes records = 2 [(buf.validate.field).repeated.items.bytes = {min_len: 1, max_len: 1048576}];
+  vibesys.store.v1.RunHead head = 3;
+  repeated bytes records = 2 [(buf.validate.field).repeated.items.bytes = {
+    min_len: 1
+    max_len: 1048576
+  }];
 }

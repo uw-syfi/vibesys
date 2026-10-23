@@ -12,6 +12,7 @@
  */
 import {
   Chart,
+  DotLegend,
   Fact,
   FactLine,
   MetricTile,
@@ -21,6 +22,7 @@ import {
   Row,
   Sparkline,
   Stack,
+  SwatchLegend,
   Text,
 } from '@vibesys/ui';
 import type {JSX} from 'react';
@@ -215,6 +217,7 @@ export function Hero(
               pick={id => props.zoom({type: 'open-idea', idea: id})}
               {...(props.hover === undefined ? {} : {hover: props.hover})}
             />
+            <ChartLegend chart={chart} />
           </Stack>
         )}
       </Row>
@@ -224,5 +227,26 @@ export function Hero(
       />
       <IdeaLine view={ideaFocusView(props.model, props.idea)} />
     </Stack>
+  );
+}
+
+function ChartLegend({
+  chart,
+}: {
+  readonly chart: NonNullable<ReturnType<typeof stripChartView>>;
+}): JSX.Element {
+  const items = [
+    ...(chart.steps.length > 0 ? [{label: 'Best value'}] : []),
+    ...(chart.points.some(point => point.tone === 'muted')
+      ? [{label: 'Other readings', muted: true}]
+      : []),
+  ];
+  return (
+    <Row gap="space-3" wrap>
+      <SwatchLegend label="Chart colors" items={items} />
+      {chart.points.some(point => point.tone === 'err') ? (
+        <DotLegend items={[{label: 'Failed readings', tone: 'err'}]} />
+      ) : null}
+    </Row>
   );
 }

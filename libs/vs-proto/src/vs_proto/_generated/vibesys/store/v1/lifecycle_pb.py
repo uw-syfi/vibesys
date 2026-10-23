@@ -6,11 +6,12 @@
 
 from __future__ import annotations
 
-from typing import Literal, NoReturn, TYPE_CHECKING, TypeAlias
+from typing import Final, Literal, NoReturn, TYPE_CHECKING, TypeAlias
 
-from protobuf import Enum, Message
+from protobuf import Enum, Extension, Message
 from protobuf._codegen import file_desc
-from protobuf.wkt.google.protobuf import any_pb
+from protobuf.wkt.google.protobuf import any_pb, descriptor_pb
+from protobuf.wkt.google.protobuf.descriptor_pb import EnumValueOptions
 
 from . import common_pb
 from ....buf.validate import validate_pb
@@ -224,7 +225,7 @@ class Draining(Message[_DrainingFields]):
 
         goal: DrainGoal
 
-_EndedFields: TypeAlias = Literal["outcome", "summary", "resumable", "failure", "signal", "interruption_reason", "detail"]
+_EndedFields: TypeAlias = Literal["outcome", "summary", "resumable", "failure", "signal", "interruption_reason", "detail", "presentation"]
 
 class Ended(Message[_EndedFields]):
     """
@@ -265,9 +266,15 @@ class Ended(Message[_EndedFields]):
             ```proto
             optional google.protobuf.Any detail = 9;
             ```
+        presentation:
+            Core-owned presentation shared by the card, sidebar and run page.
+
+            ```proto
+            optional vibesys.store.v1.RunOutcomePresentation presentation = 10;
+            ```
     """
 
-    __slots__ = ("outcome", "summary", "resumable", "failure", "signal", "interruption_reason", "detail")
+    __slots__ = ("outcome", "summary", "resumable", "failure", "signal", "interruption_reason", "detail", "presentation")
 
     if TYPE_CHECKING:
 
@@ -281,6 +288,7 @@ class Ended(Message[_EndedFields]):
             signal: int | None = None,
             interruption_reason: str | None = None,
             detail: Any | None = None,
+            presentation: RunOutcomePresentation | None = None,
         ) -> None:
             pass
 
@@ -291,6 +299,7 @@ class Ended(Message[_EndedFields]):
         signal: int
         interruption_reason: str
         detail: Any | None
+        presentation: RunOutcomePresentation | None
 
 _RunFailureFields: TypeAlias = Literal["kind", "reason", "code", "stage", "message", "exit_code", "detail"]
 
@@ -357,6 +366,40 @@ class RunFailure(Message[_RunFailureFields]):
         message: str
         exit_code: int
         detail: Any | None
+
+_RunOutcomePresentationFields: TypeAlias = Literal["status", "word"]
+
+class RunOutcomePresentation(Message[_RunOutcomePresentationFields]):
+    """
+    ```proto
+    message vibesys.store.v1.RunOutcomePresentation
+    ```
+
+    Attributes:
+        status:
+            ```proto
+            string status = 1;
+            ```
+        word:
+            ```proto
+            string word = 2;
+            ```
+    """
+
+    __slots__ = ("status", "word")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            status: str = "",
+            word: str = "",
+        ) -> None:
+            pass
+
+        status: str
+        word: str
 
 class StartupStage(Enum):
     """
@@ -550,12 +593,20 @@ class RunFailureKind(Enum):
     ENVIRONMENT_UNAVAILABLE = 4
     CONFIGURATION = 5
 
+ext_outcome_presentation: Final[Extension[EnumValueOptions, RunOutcomePresentation]] = Extension()
+"""
+```proto
+extend google.protobuf.EnumValueOptions { optional vibesys.store.v1.RunOutcomePresentation outcome_presentation = 50001 [json_name = "[vibesys.store.v1.outcome_presentation]"] }
+```
+"""
+
 
 _DESC = file_desc(
-    b'\n vibesys/store/v1/lifecycle.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19google/protobuf/any.proto\x1a\x1dvibesys/store/v1/common.proto"\xab\x02\n\tLifecycle\x128\n\x08starting\x18\x01 \x01(\x0b2\x1a.vibesys.store.v1.StartingH\x00R\x08starting\x125\n\x07running\x18\x02 \x01(\x0b2\x19.vibesys.store.v1.RunningH\x00R\x07running\x128\n\x08draining\x18\x03 \x01(\x0b2\x1a.vibesys.store.v1.DrainingH\x00R\x08draining\x122\n\x06parked\x18\x04 \x01(\x0b2\x18.vibesys.store.v1.ParkedH\x00R\x06parked\x12/\n\x05ended\x18\x05 \x01(\x0b2\x17.vibesys.store.v1.EndedH\x00R\x05endedB\x0e\n\x05state\x12\x05\xbaH\x02\x08\x01"\xf6\x05\n\x08Starting\x12@\n\x05stage\x18\x01 \x01(\x0e2\x1e.vibesys.store.v1.StartupStageR\x05stageB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12>\n\x05state\x18\x02 \x01(\x0e2\x1c.vibesys.store.v1.StageStateR\x05stateB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12;\n\x08progress\x18\x03 \x01(\x0b2\x1a.vibesys.store.v1.ProgressH\x00R\x08progress\x88\x01\x01\x12N\n\tcondition\x18\x04 \x01(\x0e2\x1f.vibesys.store.v1.WaitConditionH\x01R\tconditionB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x88\x01\x01\x12>\n\x0felapsed_seconds\x18\x05 \x01(\x01H\x02R\x0eelapsedSecondsB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01B\x0b\n\t_progressB\x0c\n\n_conditionB\x12\n\x10_elapsed_seconds:\xeb\x02\xbaH\xe7\x02\x1ar\n\x12starting.condition\x122condition is present exactly when state is waiting\x1a(has(this.condition) == (this.state == 2)\x1a\x83\x01\n\x18starting.elapsed_seconds\x127elapsed_seconds is absent exactly when state is running\x1a.has(this.elapsed_seconds) == (this.state != 1)\x1ak\n\x11starting.progress\x12.progress is present only when state is running\x1a&!has(this.progress) || this.state == 1"C\n\x07Running\x12/\n\x04hold\x18\x01 \x01(\x0b2\x16.vibesys.store.v1.HoldH\x00R\x04hold\x88\x01\x01B\x07\n\x05_hold"\x89\x01\n\x04Hold\x12<\n\x08operator\x18\x01 \x01(\x0b2\x1e.vibesys.store.v1.OperatorHoldH\x00R\x08operator\x122\n\rcapacity_span\x18\x02 \x01(\tH\x00R\x0ccapacitySpanB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04B\x0f\n\x06reason\x12\x05\xbaH\x02\x08\x01"\x0e\n\x0cOperatorHold"\x08\n\x06Parked"G\n\x08Draining\x12;\n\x04goal\x18\x01 \x01(\x0e2\x1b.vibesys.store.v1.DrainGoalR\x04goalB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00"\xb3\x06\n\x05Ended\x12?\n\x07outcome\x18\x01 \x01(\x0e2\x19.vibesys.store.v1.OutcomeR\x07outcomeB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12#\n\x07summary\x18\x03 \x01(\tR\x07summaryB\t\xbaH\x06r\x04(\x80\x80\x04\x12\x1c\n\tresumable\x18\x04 \x01(\x08R\tresumable\x12;\n\x07failure\x18\x06 \x01(\x0b2\x1c.vibesys.store.v1.RunFailureH\x00R\x07failure\x88\x01\x01\x12\x1b\n\x06signal\x18\x07 \x01(\x05H\x01R\x06signal\x88\x01\x01\x12?\n\x13interruption_reason\x18\x08 \x01(\tH\x02R\x12interruptionReasonB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x121\n\x06detail\x18\t \x01(\x0b2\x14.google.protobuf.AnyH\x03R\x06detail\x88\x01\x01B\n\n\x08_failureB\t\n\x07_signalB\x16\n\x14_interruption_reasonB\t\n\x07_detail:\xfd\x02\xbaH\xf9\x02\x1al\n\rended.failure\x121failure is present exactly when outcome is failed\x1a(has(this.failure) == (this.outcome == 2)\x1a\x80\x01\n\x0cended.signal\x123signal is positive and only present for interrupted\x1a;!has(this.signal) || (this.outcome == 4 && this.signal > 0)\x1a\x85\x01\n\x19ended.interruption_reason\x123interruption_reason is only present for interrupted\x1a3!has(this.interruption_reason) || this.outcome == 4J\x04\x08\x02\x10\x03J\x04\x08\x05\x10\x06R\x06reasonR\nuncompared"\xc8\x03\n\nRunFailure\x12@\n\x04kind\x18\x01 \x01(\x0e2 .vibesys.store.v1.RunFailureKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12!\n\x06reason\x18\x02 \x01(\tR\x06reasonB\t\xbaH\x06r\x04(\x80\x80\x04\x12$\n\x04code\x18\x07 \x01(\tH\x00R\x04codeB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12&\n\x05stage\x18\x08 \x01(\tH\x01R\x05stageB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12(\n\x07message\x18\t \x01(\tH\x02R\x07messageB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12 \n\texit_code\x18\n \x01(\x05H\x03R\x08exitCode\x88\x01\x01\x121\n\x06detail\x18\x0b \x01(\x0b2\x14.google.protobuf.AnyH\x04R\x06detail\x88\x01\x01B\x07\n\x05_codeB\x08\n\x06_stageB\n\n\x08_messageB\x0c\n\n_exit_codeB\t\n\x07_detailJ\x04\x08\x03\x10\x07R\x13workstreams_startedR\x11workstream_budgetR\x0fcandidates_keptR\x11adopted_candidate*\xbc\x01\n\x0cStartupStage\x12\x1d\n\x19STARTUP_STAGE_UNSPECIFIED\x10\x00\x12#\n\x1fSTARTUP_STAGE_PROBING_WORKSPACE\x10\x01\x12 \n\x1cSTARTUP_STAGE_BUILDING_IMAGE\x10\x02\x12 \n\x1cSTARTUP_STAGE_BUILDING_TOOLS\x10\x03\x12$\n STARTUP_STAGE_STARTING_CONTAINER\x10\x04*f\n\rWaitCondition\x12\x1e\n\x1aWAIT_CONDITION_UNSPECIFIED\x10\x00\x12\x19\n\x15WAIT_CONDITION_QUEUED\x10\x01\x12\x1a\n\x16WAIT_CONDITION_RUNNING\x10\x02*u\n\nStageState\x12\x1b\n\x17STAGE_STATE_UNSPECIFIED\x10\x00\x12\x17\n\x13STAGE_STATE_RUNNING\x10\x01\x12\x17\n\x13STAGE_STATE_WAITING\x10\x02\x12\x18\n\x14STAGE_STATE_FINISHED\x10\x03*Q\n\tDrainGoal\x12\x1a\n\x16DRAIN_GOAL_UNSPECIFIED\x10\x00\x12\x13\n\x0fDRAIN_GOAL_PARK\x10\x01\x12\x13\n\x0fDRAIN_GOAL_STOP\x10\x02*z\n\x07Outcome\x12\x17\n\x13OUTCOME_UNSPECIFIED\x10\x00\x12\x14\n\x10OUTCOME_FINISHED\x10\x01\x12\x12\n\x0eOUTCOME_FAILED\x10\x02\x12\x13\n\x0fOUTCOME_STOPPED\x10\x03\x12\x17\n\x13OUTCOME_INTERRUPTED\x10\x04*\xea\x01\n\x0eRunFailureKind\x12 \n\x1cRUN_FAILURE_KIND_UNSPECIFIED\x10\x00\x12%\n!RUN_FAILURE_KIND_BUDGET_EXHAUSTED\x10\x01\x12\x1d\n\x19RUN_FAILURE_KIND_DEADLINE\x10\x02\x12\x1e\n\x1aRUN_FAILURE_KIND_NO_RESULT\x10\x03\x12,\n(RUN_FAILURE_KIND_ENVIRONMENT_UNAVAILABLE\x10\x04\x12"\n\x1eRUN_FAILURE_KIND_CONFIGURATION\x10\x05BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
+    b'\n vibesys/store/v1/lifecycle.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19google/protobuf/any.proto\x1a google/protobuf/descriptor.proto\x1a\x1dvibesys/store/v1/common.proto"\xab\x02\n\tLifecycle\x128\n\x08starting\x18\x01 \x01(\x0b2\x1a.vibesys.store.v1.StartingH\x00R\x08starting\x125\n\x07running\x18\x02 \x01(\x0b2\x19.vibesys.store.v1.RunningH\x00R\x07running\x128\n\x08draining\x18\x03 \x01(\x0b2\x1a.vibesys.store.v1.DrainingH\x00R\x08draining\x122\n\x06parked\x18\x04 \x01(\x0b2\x18.vibesys.store.v1.ParkedH\x00R\x06parked\x12/\n\x05ended\x18\x05 \x01(\x0b2\x17.vibesys.store.v1.EndedH\x00R\x05endedB\x0e\n\x05state\x12\x05\xbaH\x02\x08\x01"\xf6\x05\n\x08Starting\x12@\n\x05stage\x18\x01 \x01(\x0e2\x1e.vibesys.store.v1.StartupStageR\x05stageB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12>\n\x05state\x18\x02 \x01(\x0e2\x1c.vibesys.store.v1.StageStateR\x05stateB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12;\n\x08progress\x18\x03 \x01(\x0b2\x1a.vibesys.store.v1.ProgressH\x00R\x08progress\x88\x01\x01\x12N\n\tcondition\x18\x04 \x01(\x0e2\x1f.vibesys.store.v1.WaitConditionH\x01R\tconditionB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x88\x01\x01\x12>\n\x0felapsed_seconds\x18\x05 \x01(\x01H\x02R\x0eelapsedSecondsB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01B\x0b\n\t_progressB\x0c\n\n_conditionB\x12\n\x10_elapsed_seconds:\xeb\x02\xbaH\xe7\x02\x1ar\n\x12starting.condition\x122condition is present exactly when state is waiting\x1a(has(this.condition) == (this.state == 2)\x1a\x83\x01\n\x18starting.elapsed_seconds\x127elapsed_seconds is absent exactly when state is running\x1a.has(this.elapsed_seconds) == (this.state != 1)\x1ak\n\x11starting.progress\x12.progress is present only when state is running\x1a&!has(this.progress) || this.state == 1"C\n\x07Running\x12/\n\x04hold\x18\x01 \x01(\x0b2\x16.vibesys.store.v1.HoldH\x00R\x04hold\x88\x01\x01B\x07\n\x05_hold"\x89\x01\n\x04Hold\x12<\n\x08operator\x18\x01 \x01(\x0b2\x1e.vibesys.store.v1.OperatorHoldH\x00R\x08operator\x122\n\rcapacity_span\x18\x02 \x01(\tH\x00R\x0ccapacitySpanB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04B\x0f\n\x06reason\x12\x05\xbaH\x02\x08\x01"\x0e\n\x0cOperatorHold"\x08\n\x06Parked"G\n\x08Draining\x12;\n\x04goal\x18\x01 \x01(\x0e2\x1b.vibesys.store.v1.DrainGoalR\x04goalB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00"\x81\x07\n\x05Ended\x12?\n\x07outcome\x18\x01 \x01(\x0e2\x19.vibesys.store.v1.OutcomeR\x07outcomeB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12#\n\x07summary\x18\x03 \x01(\tR\x07summaryB\t\xbaH\x06r\x04(\x80\x80\x04\x12\x1c\n\tresumable\x18\x04 \x01(\x08R\tresumable\x12;\n\x07failure\x18\x06 \x01(\x0b2\x1c.vibesys.store.v1.RunFailureH\x00R\x07failure\x88\x01\x01\x12\x1b\n\x06signal\x18\x07 \x01(\x05H\x01R\x06signal\x88\x01\x01\x12?\n\x13interruption_reason\x18\x08 \x01(\tH\x02R\x12interruptionReasonB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x121\n\x06detail\x18\t \x01(\x0b2\x14.google.protobuf.AnyH\x03R\x06detail\x88\x01\x01\x12L\n\x0cpresentation\x18\n \x01(\x0b2(.vibesys.store.v1.RunOutcomePresentationR\x0cpresentationB\n\n\x08_failureB\t\n\x07_signalB\x16\n\x14_interruption_reasonB\t\n\x07_detail:\xfd\x02\xbaH\xf9\x02\x1al\n\rended.failure\x121failure is present exactly when outcome is failed\x1a(has(this.failure) == (this.outcome == 2)\x1a\x80\x01\n\x0cended.signal\x123signal is positive and only present for interrupted\x1a;!has(this.signal) || (this.outcome == 4 && this.signal > 0)\x1a\x85\x01\n\x19ended.interruption_reason\x123interruption_reason is only present for interrupted\x1a3!has(this.interruption_reason) || this.outcome == 4J\x04\x08\x02\x10\x03J\x04\x08\x05\x10\x06R\x06reasonR\nuncompared"\xc8\x03\n\nRunFailure\x12@\n\x04kind\x18\x01 \x01(\x0e2 .vibesys.store.v1.RunFailureKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12!\n\x06reason\x18\x02 \x01(\tR\x06reasonB\t\xbaH\x06r\x04(\x80\x80\x04\x12$\n\x04code\x18\x07 \x01(\tH\x00R\x04codeB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12&\n\x05stage\x18\x08 \x01(\tH\x01R\x05stageB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12(\n\x07message\x18\t \x01(\tH\x02R\x07messageB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12 \n\texit_code\x18\n \x01(\x05H\x03R\x08exitCode\x88\x01\x01\x121\n\x06detail\x18\x0b \x01(\x0b2\x14.google.protobuf.AnyH\x04R\x06detail\x88\x01\x01B\x07\n\x05_codeB\x08\n\x06_stageB\n\n\x08_messageB\x0c\n\n_exit_codeB\t\n\x07_detailJ\x04\x08\x03\x10\x07R\x13workstreams_startedR\x11workstream_budgetR\x0fcandidates_keptR\x11adopted_candidate"\x91\x01\n\x16RunOutcomePresentation\x12=\n\x06status\x18\x01 \x01(\tR\x06statusB%\xbaH"r (\x80\x80\x04R\tcompletedR\x06failedR\x07stopped\x128\n\x04word\x18\x02 \x01(\tR\x04wordB$\xbaH!r\x1f(\x80\x80\x04R\x08FinishedR\x06FailedR\x07Stopped*\xbc\x01\n\x0cStartupStage\x12\x1d\n\x19STARTUP_STAGE_UNSPECIFIED\x10\x00\x12#\n\x1fSTARTUP_STAGE_PROBING_WORKSPACE\x10\x01\x12 \n\x1cSTARTUP_STAGE_BUILDING_IMAGE\x10\x02\x12 \n\x1cSTARTUP_STAGE_BUILDING_TOOLS\x10\x03\x12$\n STARTUP_STAGE_STARTING_CONTAINER\x10\x04*f\n\rWaitCondition\x12\x1e\n\x1aWAIT_CONDITION_UNSPECIFIED\x10\x00\x12\x19\n\x15WAIT_CONDITION_QUEUED\x10\x01\x12\x1a\n\x16WAIT_CONDITION_RUNNING\x10\x02*u\n\nStageState\x12\x1b\n\x17STAGE_STATE_UNSPECIFIED\x10\x00\x12\x17\n\x13STAGE_STATE_RUNNING\x10\x01\x12\x17\n\x13STAGE_STATE_WAITING\x10\x02\x12\x18\n\x14STAGE_STATE_FINISHED\x10\x03*Q\n\tDrainGoal\x12\x1a\n\x16DRAIN_GOAL_UNSPECIFIED\x10\x00\x12\x13\n\x0fDRAIN_GOAL_PARK\x10\x01\x12\x13\n\x0fDRAIN_GOAL_STOP\x10\x02*\xdb\x01\n\x07Outcome\x12\x17\n\x13OUTCOME_UNSPECIFIED\x10\x00\x12/\n\x10OUTCOME_FINISHED\x10\x01\x1a\x19\x8a\xb5\x18\x15\n\tcompleted\x12\x08Finished\x12(\n\x0eOUTCOME_FAILED\x10\x02\x1a\x14\x8a\xb5\x18\x10\n\x06failed\x12\x06Failed\x12+\n\x0fOUTCOME_STOPPED\x10\x03\x1a\x16\x8a\xb5\x18\x12\n\x07stopped\x12\x07Stopped\x12/\n\x13OUTCOME_INTERRUPTED\x10\x04\x1a\x16\x8a\xb5\x18\x12\n\x07stopped\x12\x07Stopped*\xea\x01\n\x0eRunFailureKind\x12 \n\x1cRUN_FAILURE_KIND_UNSPECIFIED\x10\x00\x12%\n!RUN_FAILURE_KIND_BUDGET_EXHAUSTED\x10\x01\x12\x1d\n\x19RUN_FAILURE_KIND_DEADLINE\x10\x02\x12\x1e\n\x1aRUN_FAILURE_KIND_NO_RESULT\x10\x03\x12,\n(RUN_FAILURE_KIND_ENVIRONMENT_UNAVAILABLE\x10\x04\x12"\n\x1eRUN_FAILURE_KIND_CONFIGURATION\x10\x05:\x80\x01\n\x14outcome_presentation\x18\xd1\x86\x03 \x01(\x0b2(.vibesys.store.v1.RunOutcomePresentation\x12!.google.protobuf.EnumValueOptionsR\x13outcomePresentationBAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
     [
         validate_pb.desc(),
         any_pb.desc(),
+        descriptor_pb.desc(),
         common_pb.desc(),
     ],
     {
@@ -568,12 +619,14 @@ _DESC = file_desc(
         "Draining": Draining,
         "Ended": Ended,
         "RunFailure": RunFailure,
+        "RunOutcomePresentation": RunOutcomePresentation,
         "StartupStage": StartupStage,
         "WaitCondition": WaitCondition,
         "StageState": StageState,
         "DrainGoal": DrainGoal,
         "Outcome": Outcome,
         "RunFailureKind": RunFailureKind,
+        "outcome_presentation": ext_outcome_presentation,
     },
 )
 

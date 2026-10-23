@@ -8,6 +8,7 @@ package testingv1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
+	v1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -87,6 +88,7 @@ func (x *ClientReplay) GetStreams() map[string][]byte {
 type ClientReplayBatch struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	SourceSequence uint64                 `protobuf:"varint,1,opt,name=source_sequence,json=sourceSequence,proto3" json:"source_sequence,omitempty"`
+	Head           *v1.RunHead            `protobuf:"bytes,3,opt,name=head,proto3" json:"head,omitempty"`
 	Records        [][]byte               `protobuf:"bytes,2,rep,name=records,proto3" json:"records,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -129,6 +131,13 @@ func (x *ClientReplayBatch) GetSourceSequence() uint64 {
 	return 0
 }
 
+func (x *ClientReplayBatch) GetHead() *v1.RunHead {
+	if x != nil {
+		return x.Head
+	}
+	return nil
+}
+
 func (x *ClientReplayBatch) GetRecords() [][]byte {
 	if x != nil {
 		return x.Records
@@ -140,7 +149,7 @@ var File_vibesys_testing_v1_client_replay_proto protoreflect.FileDescriptor
 
 const file_vibesys_testing_v1_client_replay_proto_rawDesc = "" +
 	"\n" +
-	"&vibesys/testing/v1/client_replay.proto\x12\x12vibesys.testing.v1\x1a\x1bbuf/validate/validate.proto\"\xd1\x02\n" +
+	"&vibesys/testing/v1/client_replay.proto\x12\x12vibesys.testing.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fvibesys/store/v1/skeleton.proto\"\xd1\x02\n" +
 	"\fClientReplay\x12?\n" +
 	"\abatches\x18\x01 \x03(\v2%.vibesys.testing.v1.ClientReplayBatchR\abatches\x12A\n" +
 	"\x05blobs\x18\x02 \x03(\v2+.vibesys.testing.v1.ClientReplay.BlobsEntryR\x05blobs\x12G\n" +
@@ -151,10 +160,11 @@ const file_vibesys_testing_v1_client_replay_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\fR\x05value:\x028\x01\x1a:\n" +
 	"\fStreamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\fR\x05value:\x028\x01\"y\n" +
+	"\x05value\x18\x02 \x01(\fR\x05value:\x028\x01\"\xa8\x01\n" +
 	"\x11ClientReplayBatch\x128\n" +
 	"\x0fsource_sequence\x18\x01 \x01(\x04B\x0f\xbaH\f2\n" +
-	"\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7fR\x0esourceSequence\x12*\n" +
+	"\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7fR\x0esourceSequence\x12-\n" +
+	"\x04head\x18\x03 \x01(\v2\x19.vibesys.store.v1.RunHeadR\x04head\x12*\n" +
 	"\arecords\x18\x02 \x03(\fB\x10\xbaH\r\x92\x01\n" +
 	"\"\bz\x06\x10\x01\x18\x80\x80@R\arecordsBEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/testing/v1;testingv1b\x06proto3"
 
@@ -176,16 +186,18 @@ var file_vibesys_testing_v1_client_replay_proto_goTypes = []any{
 	(*ClientReplayBatch)(nil), // 1: vibesys.testing.v1.ClientReplayBatch
 	nil,                       // 2: vibesys.testing.v1.ClientReplay.BlobsEntry
 	nil,                       // 3: vibesys.testing.v1.ClientReplay.StreamsEntry
+	(*v1.RunHead)(nil),        // 4: vibesys.store.v1.RunHead
 }
 var file_vibesys_testing_v1_client_replay_proto_depIdxs = []int32{
 	1, // 0: vibesys.testing.v1.ClientReplay.batches:type_name -> vibesys.testing.v1.ClientReplayBatch
 	2, // 1: vibesys.testing.v1.ClientReplay.blobs:type_name -> vibesys.testing.v1.ClientReplay.BlobsEntry
 	3, // 2: vibesys.testing.v1.ClientReplay.streams:type_name -> vibesys.testing.v1.ClientReplay.StreamsEntry
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	4, // 3: vibesys.testing.v1.ClientReplayBatch.head:type_name -> vibesys.store.v1.RunHead
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_testing_v1_client_replay_proto_init() }

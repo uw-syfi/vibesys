@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from tests.support.lineage_fixture import lineage_fixture
-from tests.support.retained_events import replay_of
+from tests.support.retained_events import project_heads, replay_of
 from tests.support.shared_scenarios import regenerate
 
 from vs_proto.api import (
@@ -48,7 +48,7 @@ def project_scenario(name: str) -> ClientReplay:
     for native in declaration.get("nativeLifecycles", []):
         _append(replay, Lifecycle.from_json(json.dumps(native)))
     fold_skeleton(_records(replay), log_offset=0)
-    return replay
+    return project_heads(replay)
 
 
 def _records(replay: ClientReplay) -> list[Record]:
@@ -83,7 +83,7 @@ def scenario_variants(name: str) -> dict[str, ClientReplay]:
     for transition in declaration.get("nativeTransitions", []):
         _append(current, Lifecycle.from_json(json.dumps(transition["lifecycle"])))
         fold_skeleton(_records(current), log_offset=0)
-        variants[transition["name"]] = ClientReplay.from_binary(current.to_binary())
+        variants[transition["name"]] = project_heads(ClientReplay.from_binary(current.to_binary()))
     return variants
 
 
@@ -115,6 +115,7 @@ def fingerprint() -> str:
     repository = ROOT.parents[4]
     paths = sorted(ROOT.glob("*.json"))
     paths += sorted((repository / "src/vibesys/records").glob("*.py"))
+    paths += sorted((repository / "libs/vs-runlog/src/vs_runlog").glob("*.py"))
     paths += sorted((repository / "proto/vibesys").rglob("*.proto"))
     paths += [
         Path(__file__),

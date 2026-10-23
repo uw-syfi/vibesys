@@ -23,27 +23,10 @@ export function useGatewayRun(options: {
   address: RunPageAddress;
 }) {
   const {seed, ports, schedule, address} = options;
-  const [snapshot, setSnapshot] = useState(() => getInitialSnapshot(gatewayRunMachine, {seed}));
-  const [actor, setActor] = useState<ReturnType<typeof startGatewayRun> | null>(null);
-  const latestSeed = useRef(seed);
-  const {host, runId} = seed.identity;
-  useEffect(() => {
-    latestSeed.current = seed;
-  }, [seed]);
-  useEffect(() => {
-    const started = startGatewayRun(ports, schedule, {
-      seed: {...latestSeed.current, identity: {host, runId}},
-    });
-    const subscription = started.subscribe(setSnapshot);
-    setActor(started);
-    setSnapshot(started.getSnapshot());
-    return () => {
-      subscription.unsubscribe();
-      started.stop();
-    };
-  }, [ports, schedule, host, runId]);
+  const {actor, snapshot} = useGatewayActor(seed, ports, schedule);
   const {route, zoom} = useZoom(`${seed.identity.host}/${seed.identity.runId}`, address);
   const {load, progress, ui, text, replies, transcripts} = snapshot.context;
+  const loadFailure = terminalLoadFailure(snapshot.context);
   const skeleton = paintedSkeleton(load);
   const {hint, writer} = useWriterFacts(snapshot.context);
   const at = ui.view.at === 'live' ? (skeleton?.throughSeq ?? 0n) : BigInt(ui.view.at);
@@ -58,11 +41,12 @@ export function useGatewayRun(options: {
           ? projectSkeleton(skeleton, skeleton.throughSeq ?? 0n, wholeText, {
               head: hint?.head,
               progress,
+              loadFailure,
               content: {text, replies, transcripts},
             })
           : null,
       ),
-    [skeleton, wholeText, hint?.head, progress, text, replies, transcripts],
+    [skeleton, wholeText, hint?.head, progress, loadFailure, text, replies, transcripts],
   );
   const modelRead = useMemo(
     () =>
@@ -73,13 +57,14 @@ export function useGatewayRun(options: {
               ? projectSkeleton(skeleton, at, objective, {
                   content: {text, replies, transcripts},
                   progress,
+                  loadFailure,
                 })
               : null,
           ),
-    [skeleton, at, objective, wholeRead, text, replies, transcripts, progress],
+    [skeleton, at, objective, wholeRead, text, replies, transcripts, progress, loadFailure],
   );
-  const {value: whole} = wholeRead;
-  const {value: model} = modelRead;
+  const {value: whole} = wholeRead,
+    {value: model} = modelRead;
   const stateRead = useMemo(
     () =>
       project(() =>
@@ -108,6 +93,34 @@ export function useGatewayRun(options: {
     dispatch: (action: import('../../state/index.js').RunPageAction) =>
       actor?.send({type: 'ui', action}),
   };
+}
+
+function useGatewayActor(seed: RunPageSeed, ports: GatewayRunPorts, schedule: ScheduleTimeout) {
+  const [snapshot, setSnapshot] = useState(() => getInitialSnapshot(gatewayRunMachine, {seed}));
+  const [actor, setActor] = useState<ReturnType<typeof startGatewayRun> | null>(null);
+  const latestSeed = useRef(seed);
+  const {host, runId} = seed.identity;
+  useEffect(() => {
+    latestSeed.current = seed;
+  }, [seed]);
+  useEffect(() => {
+    const started = startGatewayRun(ports, schedule, {
+      seed: {...latestSeed.current, identity: {host, runId}},
+    });
+    const subscription = started.subscribe(setSnapshot);
+    setActor(started);
+    setSnapshot(started.getSnapshot());
+    return () => {
+      subscription.unsubscribe();
+      started.stop();
+    };
+  }, [ports, schedule, host, runId]);
+  return {actor, snapshot};
+}
+
+function terminalLoadFailure(context: GatewayRunContext): string | undefined {
+  const state = loadView(context);
+  return state.kind === 'failed' ? state.word : undefined;
 }
 
 /** The one reading of the writer: the header and the controls both project these facts. */

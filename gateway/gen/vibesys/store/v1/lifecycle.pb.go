@@ -10,6 +10,7 @@ import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	descriptorpb "google.golang.org/protobuf/types/descriptorpb"
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	reflect "reflect"
 	sync "sync"
@@ -801,7 +802,9 @@ type Ended struct {
 	Signal             *int32  `protobuf:"varint,7,opt,name=signal,proto3,oneof" json:"signal,omitempty"`
 	InterruptionReason *string `protobuf:"bytes,8,opt,name=interruption_reason,json=interruptionReason,proto3,oneof" json:"interruption_reason,omitempty"`
 	// Strategy ending data, described by EpochStarted.descriptors.
-	Detail        *anypb.Any `protobuf:"bytes,9,opt,name=detail,proto3,oneof" json:"detail,omitempty"`
+	Detail *anypb.Any `protobuf:"bytes,9,opt,name=detail,proto3,oneof" json:"detail,omitempty"`
+	// Core-owned presentation shared by the card, sidebar and run page.
+	Presentation  *RunOutcomePresentation `protobuf:"bytes,10,opt,name=presentation,proto3" json:"presentation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -881,6 +884,13 @@ func (x *Ended) GetInterruptionReason() string {
 func (x *Ended) GetDetail() *anypb.Any {
 	if x != nil {
 		return x.Detail
+	}
+	return nil
+}
+
+func (x *Ended) GetPresentation() *RunOutcomePresentation {
+	if x != nil {
+		return x.Presentation
 	}
 	return nil
 }
@@ -978,11 +988,80 @@ func (x *RunFailure) GetDetail() *anypb.Any {
 	return nil
 }
 
+type RunOutcomePresentation struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Word          string                 `protobuf:"bytes,2,opt,name=word,proto3" json:"word,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunOutcomePresentation) Reset() {
+	*x = RunOutcomePresentation{}
+	mi := &file_vibesys_store_v1_lifecycle_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunOutcomePresentation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunOutcomePresentation) ProtoMessage() {}
+
+func (x *RunOutcomePresentation) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_lifecycle_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunOutcomePresentation.ProtoReflect.Descriptor instead.
+func (*RunOutcomePresentation) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_lifecycle_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *RunOutcomePresentation) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *RunOutcomePresentation) GetWord() string {
+	if x != nil {
+		return x.Word
+	}
+	return ""
+}
+
+var file_vibesys_store_v1_lifecycle_proto_extTypes = []protoimpl.ExtensionInfo{
+	{
+		ExtendedType:  (*descriptorpb.EnumValueOptions)(nil),
+		ExtensionType: (*RunOutcomePresentation)(nil),
+		Field:         50001,
+		Name:          "vibesys.store.v1.outcome_presentation",
+		Tag:           "bytes,50001,opt,name=outcome_presentation",
+		Filename:      "vibesys/store/v1/lifecycle.proto",
+	},
+}
+
+// Extension fields to descriptorpb.EnumValueOptions.
+var (
+	// optional vibesys.store.v1.RunOutcomePresentation outcome_presentation = 50001;
+	E_OutcomePresentation = &file_vibesys_store_v1_lifecycle_proto_extTypes[0]
+)
+
 var File_vibesys_store_v1_lifecycle_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_lifecycle_proto_rawDesc = "" +
 	"\n" +
-	" vibesys/store/v1/lifecycle.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19google/protobuf/any.proto\x1a\x1dvibesys/store/v1/common.proto\"\xab\x02\n" +
+	" vibesys/store/v1/lifecycle.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19google/protobuf/any.proto\x1a google/protobuf/descriptor.proto\x1a\x1dvibesys/store/v1/common.proto\"\xab\x02\n" +
 	"\tLifecycle\x128\n" +
 	"\bstarting\x18\x01 \x01(\v2\x1a.vibesys.store.v1.StartingH\x00R\bstarting\x125\n" +
 	"\arunning\x18\x02 \x01(\v2\x19.vibesys.store.v1.RunningH\x00R\arunning\x128\n" +
@@ -1017,7 +1096,7 @@ const file_vibesys_store_v1_lifecycle_proto_rawDesc = "" +
 	"\x06Parked\"G\n" +
 	"\bDraining\x12;\n" +
 	"\x04goal\x18\x01 \x01(\x0e2\x1b.vibesys.store.v1.DrainGoalB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04goal\"\xb3\x06\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04goal\"\x81\a\n" +
 	"\x05Ended\x12?\n" +
 	"\aoutcome\x18\x01 \x01(\x0e2\x19.vibesys.store.v1.OutcomeB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\aoutcome\x12#\n" +
@@ -1026,7 +1105,9 @@ const file_vibesys_store_v1_lifecycle_proto_rawDesc = "" +
 	"\afailure\x18\x06 \x01(\v2\x1c.vibesys.store.v1.RunFailureH\x00R\afailure\x88\x01\x01\x12\x1b\n" +
 	"\x06signal\x18\a \x01(\x05H\x01R\x06signal\x88\x01\x01\x12?\n" +
 	"\x13interruption_reason\x18\b \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x02R\x12interruptionReason\x88\x01\x01\x121\n" +
-	"\x06detail\x18\t \x01(\v2\x14.google.protobuf.AnyH\x03R\x06detail\x88\x01\x01:\xfd\x02\xbaH\xf9\x02\x1al\n" +
+	"\x06detail\x18\t \x01(\v2\x14.google.protobuf.AnyH\x03R\x06detail\x88\x01\x01\x12L\n" +
+	"\fpresentation\x18\n" +
+	" \x01(\v2(.vibesys.store.v1.RunOutcomePresentationR\fpresentation:\xfd\x02\xbaH\xf9\x02\x1al\n" +
 	"\rended.failure\x121failure is present exactly when outcome is failed\x1a(has(this.failure) == (this.outcome == 2)\x1a\x80\x01\n" +
 	"\fended.signal\x123signal is positive and only present for interrupted\x1a;!has(this.signal) || (this.outcome == 4 && this.signal > 0)\x1a\x85\x01\n" +
 	"\x19ended.interruption_reason\x123interruption_reason is only present for interrupted\x1a3!has(this.interruption_reason) || this.outcome == 4B\n" +
@@ -1053,7 +1134,10 @@ const file_vibesys_store_v1_lifecycle_proto_rawDesc = "" +
 	"\b_messageB\f\n" +
 	"\n" +
 	"_exit_codeB\t\n" +
-	"\a_detailJ\x04\b\x03\x10\aR\x13workstreams_startedR\x11workstream_budgetR\x0fcandidates_keptR\x11adopted_candidate*\xbc\x01\n" +
+	"\a_detailJ\x04\b\x03\x10\aR\x13workstreams_startedR\x11workstream_budgetR\x0fcandidates_keptR\x11adopted_candidate\"\x91\x01\n" +
+	"\x16RunOutcomePresentation\x12=\n" +
+	"\x06status\x18\x01 \x01(\tB%\xbaH\"r (\x80\x80\x04R\tcompletedR\x06failedR\astoppedR\x06status\x128\n" +
+	"\x04word\x18\x02 \x01(\tB$\xbaH!r\x1f(\x80\x80\x04R\bFinishedR\x06FailedR\aStoppedR\x04word*\xbc\x01\n" +
 	"\fStartupStage\x12\x1d\n" +
 	"\x19STARTUP_STAGE_UNSPECIFIED\x10\x00\x12#\n" +
 	"\x1fSTARTUP_STAGE_PROBING_WORKSPACE\x10\x01\x12 \n" +
@@ -1073,20 +1157,25 @@ const file_vibesys_store_v1_lifecycle_proto_rawDesc = "" +
 	"\tDrainGoal\x12\x1a\n" +
 	"\x16DRAIN_GOAL_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fDRAIN_GOAL_PARK\x10\x01\x12\x13\n" +
-	"\x0fDRAIN_GOAL_STOP\x10\x02*z\n" +
+	"\x0fDRAIN_GOAL_STOP\x10\x02*\xdb\x01\n" +
 	"\aOutcome\x12\x17\n" +
-	"\x13OUTCOME_UNSPECIFIED\x10\x00\x12\x14\n" +
-	"\x10OUTCOME_FINISHED\x10\x01\x12\x12\n" +
-	"\x0eOUTCOME_FAILED\x10\x02\x12\x13\n" +
-	"\x0fOUTCOME_STOPPED\x10\x03\x12\x17\n" +
-	"\x13OUTCOME_INTERRUPTED\x10\x04*\xea\x01\n" +
+	"\x13OUTCOME_UNSPECIFIED\x10\x00\x12/\n" +
+	"\x10OUTCOME_FINISHED\x10\x01\x1a\x19\x8a\xb5\x18\x15\n" +
+	"\tcompleted\x12\bFinished\x12(\n" +
+	"\x0eOUTCOME_FAILED\x10\x02\x1a\x14\x8a\xb5\x18\x10\n" +
+	"\x06failed\x12\x06Failed\x12+\n" +
+	"\x0fOUTCOME_STOPPED\x10\x03\x1a\x16\x8a\xb5\x18\x12\n" +
+	"\astopped\x12\aStopped\x12/\n" +
+	"\x13OUTCOME_INTERRUPTED\x10\x04\x1a\x16\x8a\xb5\x18\x12\n" +
+	"\astopped\x12\aStopped*\xea\x01\n" +
 	"\x0eRunFailureKind\x12 \n" +
 	"\x1cRUN_FAILURE_KIND_UNSPECIFIED\x10\x00\x12%\n" +
 	"!RUN_FAILURE_KIND_BUDGET_EXHAUSTED\x10\x01\x12\x1d\n" +
 	"\x19RUN_FAILURE_KIND_DEADLINE\x10\x02\x12\x1e\n" +
 	"\x1aRUN_FAILURE_KIND_NO_RESULT\x10\x03\x12,\n" +
 	"(RUN_FAILURE_KIND_ENVIRONMENT_UNAVAILABLE\x10\x04\x12\"\n" +
-	"\x1eRUN_FAILURE_KIND_CONFIGURATION\x10\x05BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
+	"\x1eRUN_FAILURE_KIND_CONFIGURATION\x10\x05:\x80\x01\n" +
+	"\x14outcome_presentation\x12!.google.protobuf.EnumValueOptions\x18ц\x03 \x01(\v2(.vibesys.store.v1.RunOutcomePresentationR\x13outcomePresentationBAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
 
 var (
 	file_vibesys_store_v1_lifecycle_proto_rawDescOnce sync.Once
@@ -1101,25 +1190,27 @@ func file_vibesys_store_v1_lifecycle_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_store_v1_lifecycle_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_vibesys_store_v1_lifecycle_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_vibesys_store_v1_lifecycle_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_vibesys_store_v1_lifecycle_proto_goTypes = []any{
-	(StartupStage)(0),    // 0: vibesys.store.v1.StartupStage
-	(WaitCondition)(0),   // 1: vibesys.store.v1.WaitCondition
-	(StageState)(0),      // 2: vibesys.store.v1.StageState
-	(DrainGoal)(0),       // 3: vibesys.store.v1.DrainGoal
-	(Outcome)(0),         // 4: vibesys.store.v1.Outcome
-	(RunFailureKind)(0),  // 5: vibesys.store.v1.RunFailureKind
-	(*Lifecycle)(nil),    // 6: vibesys.store.v1.Lifecycle
-	(*Starting)(nil),     // 7: vibesys.store.v1.Starting
-	(*Running)(nil),      // 8: vibesys.store.v1.Running
-	(*Hold)(nil),         // 9: vibesys.store.v1.Hold
-	(*OperatorHold)(nil), // 10: vibesys.store.v1.OperatorHold
-	(*Parked)(nil),       // 11: vibesys.store.v1.Parked
-	(*Draining)(nil),     // 12: vibesys.store.v1.Draining
-	(*Ended)(nil),        // 13: vibesys.store.v1.Ended
-	(*RunFailure)(nil),   // 14: vibesys.store.v1.RunFailure
-	(*Progress)(nil),     // 15: vibesys.store.v1.Progress
-	(*anypb.Any)(nil),    // 16: google.protobuf.Any
+	(StartupStage)(0),                     // 0: vibesys.store.v1.StartupStage
+	(WaitCondition)(0),                    // 1: vibesys.store.v1.WaitCondition
+	(StageState)(0),                       // 2: vibesys.store.v1.StageState
+	(DrainGoal)(0),                        // 3: vibesys.store.v1.DrainGoal
+	(Outcome)(0),                          // 4: vibesys.store.v1.Outcome
+	(RunFailureKind)(0),                   // 5: vibesys.store.v1.RunFailureKind
+	(*Lifecycle)(nil),                     // 6: vibesys.store.v1.Lifecycle
+	(*Starting)(nil),                      // 7: vibesys.store.v1.Starting
+	(*Running)(nil),                       // 8: vibesys.store.v1.Running
+	(*Hold)(nil),                          // 9: vibesys.store.v1.Hold
+	(*OperatorHold)(nil),                  // 10: vibesys.store.v1.OperatorHold
+	(*Parked)(nil),                        // 11: vibesys.store.v1.Parked
+	(*Draining)(nil),                      // 12: vibesys.store.v1.Draining
+	(*Ended)(nil),                         // 13: vibesys.store.v1.Ended
+	(*RunFailure)(nil),                    // 14: vibesys.store.v1.RunFailure
+	(*RunOutcomePresentation)(nil),        // 15: vibesys.store.v1.RunOutcomePresentation
+	(*Progress)(nil),                      // 16: vibesys.store.v1.Progress
+	(*anypb.Any)(nil),                     // 17: google.protobuf.Any
+	(*descriptorpb.EnumValueOptions)(nil), // 18: google.protobuf.EnumValueOptions
 }
 var file_vibesys_store_v1_lifecycle_proto_depIdxs = []int32{
 	7,  // 0: vibesys.store.v1.Lifecycle.starting:type_name -> vibesys.store.v1.Starting
@@ -1129,21 +1220,24 @@ var file_vibesys_store_v1_lifecycle_proto_depIdxs = []int32{
 	13, // 4: vibesys.store.v1.Lifecycle.ended:type_name -> vibesys.store.v1.Ended
 	0,  // 5: vibesys.store.v1.Starting.stage:type_name -> vibesys.store.v1.StartupStage
 	2,  // 6: vibesys.store.v1.Starting.state:type_name -> vibesys.store.v1.StageState
-	15, // 7: vibesys.store.v1.Starting.progress:type_name -> vibesys.store.v1.Progress
+	16, // 7: vibesys.store.v1.Starting.progress:type_name -> vibesys.store.v1.Progress
 	1,  // 8: vibesys.store.v1.Starting.condition:type_name -> vibesys.store.v1.WaitCondition
 	9,  // 9: vibesys.store.v1.Running.hold:type_name -> vibesys.store.v1.Hold
 	10, // 10: vibesys.store.v1.Hold.operator:type_name -> vibesys.store.v1.OperatorHold
 	3,  // 11: vibesys.store.v1.Draining.goal:type_name -> vibesys.store.v1.DrainGoal
 	4,  // 12: vibesys.store.v1.Ended.outcome:type_name -> vibesys.store.v1.Outcome
 	14, // 13: vibesys.store.v1.Ended.failure:type_name -> vibesys.store.v1.RunFailure
-	16, // 14: vibesys.store.v1.Ended.detail:type_name -> google.protobuf.Any
-	5,  // 15: vibesys.store.v1.RunFailure.kind:type_name -> vibesys.store.v1.RunFailureKind
-	16, // 16: vibesys.store.v1.RunFailure.detail:type_name -> google.protobuf.Any
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	17, // 14: vibesys.store.v1.Ended.detail:type_name -> google.protobuf.Any
+	15, // 15: vibesys.store.v1.Ended.presentation:type_name -> vibesys.store.v1.RunOutcomePresentation
+	5,  // 16: vibesys.store.v1.RunFailure.kind:type_name -> vibesys.store.v1.RunFailureKind
+	17, // 17: vibesys.store.v1.RunFailure.detail:type_name -> google.protobuf.Any
+	18, // 18: vibesys.store.v1.outcome_presentation:extendee -> google.protobuf.EnumValueOptions
+	15, // 19: vibesys.store.v1.outcome_presentation:type_name -> vibesys.store.v1.RunOutcomePresentation
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	19, // [19:20] is the sub-list for extension type_name
+	18, // [18:19] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_lifecycle_proto_init() }
@@ -1173,14 +1267,15 @@ func file_vibesys_store_v1_lifecycle_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_store_v1_lifecycle_proto_rawDesc), len(file_vibesys_store_v1_lifecycle_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   9,
-			NumExtensions: 0,
+			NumMessages:   10,
+			NumExtensions: 1,
 			NumServices:   0,
 		},
 		GoTypes:           file_vibesys_store_v1_lifecycle_proto_goTypes,
 		DependencyIndexes: file_vibesys_store_v1_lifecycle_proto_depIdxs,
 		EnumInfos:         file_vibesys_store_v1_lifecycle_proto_enumTypes,
 		MessageInfos:      file_vibesys_store_v1_lifecycle_proto_msgTypes,
+		ExtensionInfos:    file_vibesys_store_v1_lifecycle_proto_extTypes,
 	}.Build()
 	File_vibesys_store_v1_lifecycle_proto = out.File
 	file_vibesys_store_v1_lifecycle_proto_goTypes = nil
