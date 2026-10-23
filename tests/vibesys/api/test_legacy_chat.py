@@ -173,9 +173,9 @@ def test_every_journal_conversation_becomes_one_session_with_its_exchanges(
 
 
 @pytest.mark.regression
-@pytest.mark.parametrize("prefix", [1, 2])
+@pytest.mark.parametrize(("prefix", "continued"), [(1, False), (2, False), (2, True)])
 def test_retry_replaces_every_incomplete_import_prefix(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prefix: int
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prefix: int, *, continued: bool
 ) -> None:
     """A crash after creation or either side of an exchange cannot publish a truncated import."""
     monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "state"))
@@ -192,13 +192,18 @@ def test_retry_replaces_every_incomplete_import_prefix(
     complete = session(chat.project_root, chat.run_id, "default")
     directory = Project.chat_session_directory_for(chat.project_root, chat.run_id, "default")
     # A durable prefix left by the preceding importer, including its published commit fence.
-
+    if continued:
+        complete[1].body.value.event.value.request_id = "native-request"
     (directory / "session.log").write_bytes(
         b"VSRLOG01" + b"".join(encode_frame(r) for r in complete[:prefix])
     )
     head = RunHead.from_binary((directory / "run.head").read_bytes())
     head.committed_seq = prefix
     (directory / "run.head").write_bytes(head.to_binary())
-    assert import_legacy_chat(chat.project_root, chat.run_id, runtime) == ("default",)
-    assert session(chat.project_root, chat.run_id, "default") == complete
+    assert import_legacy_chat(chat.project_root, chat.run_id, runtime) == (
+        () if continued else ("default",)
+    )
+    assert session(chat.project_root, chat.run_id, "default") == (
+        complete[:prefix] if continued else complete
+    )
     assert journal.read_bytes() == data

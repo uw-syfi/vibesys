@@ -15,6 +15,7 @@ import json
 from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import datetime
+from itertools import islice
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
@@ -31,7 +32,7 @@ from vs_proto.api import (
     Timestamp,
     validate,
 )
-from vs_runlog.api import FileRunContent, FileRunLogWriter, RunLock
+from vs_runlog.api import FileRunContent, FileRunLogWriter, RunLock, RunLogReader
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -124,7 +125,22 @@ def _committed(directory: Path, records: int) -> bool:
         return False
     head = RunHead.from_binary(head_path.read_bytes())
     validate(head)
-    return head.committed_seq >= records and (directory / "session.log").exists()
+    log = directory / "session.log"
+    if not log.exists():
+        return False
+    if head.committed_seq >= records:
+        return True
+    with log.open("rb") as stream:
+        for record in islice(RunLogReader(stream), head.committed_seq):
+            body = record.body
+            event = body.value.event if body is not None and body.field == "chat" else None
+            if (
+                event is not None
+                and event.field == "message"
+                and not event.value.request_id.startswith("legacy-")
+            ):
+                return True
+    return False
 
 
 def _write(

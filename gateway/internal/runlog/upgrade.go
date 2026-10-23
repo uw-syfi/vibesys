@@ -54,7 +54,7 @@ func NewInputUpgrade(state *storev1.Keyframe) *InputUpgrade {
 		return u
 	}
 	UpgradeSkeleton(state)
-	if len(state.Epochs) > 0 {
+	if len(state.Epochs) > 0 && state.Epochs[len(state.Epochs)-1].GetEpoch() != nil {
 		u.epoch = proto.Clone(state.Epochs[len(state.Epochs)-1].Epoch).(*storev1.EpochStarted)
 	}
 	for _, history := range state.Spans {
@@ -101,6 +101,10 @@ func (u *InputUpgrade) apply(record *storev1.Record) bool {
 }
 
 func (u *InputUpgrade) declaration(epoch *storev1.EpochStarted) bool {
+	if epoch == nil {
+		u.epoch = nil
+		return false
+	}
 	changed := false
 	if epoch.GetRun() != nil && epoch.Run.InputMeasurement == nil && sameInput(u.epoch, epoch) && u.epoch.GetRun().GetInputMeasurement() != nil {
 		epoch.Run.InputMeasurement = proto.Clone(u.epoch.Run.InputMeasurement).(*storev1.InputMeasurement)
