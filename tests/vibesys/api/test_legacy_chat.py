@@ -207,3 +207,44 @@ def test_retry_replaces_every_incomplete_import_prefix(
         complete[:prefix] if continued else complete
     )
     assert journal.read_bytes() == data
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "state", ["complete log, old head", "complete log, no head", "leftover directory"]
+)
+def test_retry_after_an_interrupted_publish_reaches_the_full_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str
+) -> None:
+    """The log is renamed in before its head, so a crash between or before the renames retries."""
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "state"))
+    chat = chat_project(tmp_path / "project")
+    journal = Project.log_directory_for(chat.project_root, chat.run_id) / "run-events.jsonl"
+    journal.write_bytes(
+        journal_bytes(
+            [{"sequence": 1, "type": "chat", "text": "why?", "data": {"answer": "because"}}],
+            noise=False,
+        )
+    )
+    threads = SimThreads()
+    runtime = ChatRuntime(threads.clock, threads)
+    import_legacy_chat(chat.project_root, chat.run_id, runtime)
+    complete = session(chat.project_root, chat.run_id, "default")
+    directory = Project.chat_session_directory_for(chat.project_root, chat.run_id, "default")
+    head_path = directory / "run.head"
+    if state == "complete log, no head":
+        head_path.unlink()
+    else:
+        head = RunHead.from_binary(head_path.read_bytes())
+        head.committed_seq = 1
+        head_path.write_bytes(head.to_binary())
+    if state == "leftover directory":
+        leftover = directory / ".legacy-import-killed"
+        leftover.mkdir()
+        (leftover / "session.log").write_bytes(b"VSRLOG01")
+        (directory / "session.log").write_bytes(
+            b"VSRLOG01" + b"".join(encode_frame(r) for r in complete[:1])
+        )
+    assert import_legacy_chat(chat.project_root, chat.run_id, runtime) == ("default",)
+    assert session(chat.project_root, chat.run_id, "default") == complete
+    assert import_legacy_chat(chat.project_root, chat.run_id, runtime) == ()
