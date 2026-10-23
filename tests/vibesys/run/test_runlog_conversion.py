@@ -19,7 +19,15 @@ from vibesys.events import AgentOutputChunkData, CoreEventType, RunStartedData, 
 from vibesys.records.api import MappingState, map_event
 from vibesys.run import EventJournal
 from vibesys.run.runlog_tee import RunLogTee
-from vs_core.api import ENVELOPE_SCHEMA_VERSION, FlowState, RunEnvelope, Span, SpanStatus, SpanType
+from vs_core.api import (
+    ENVELOPE_SCHEMA_VERSION,
+    FlowState,
+    RunEnvelope,
+    Span,
+    SpanLabel,
+    SpanStatus,
+    SpanType,
+)
 from vs_core.api.testing import FAKE_REGISTRY
 from vs_project.api import Project, StoredEnvelope
 from vs_proto.api import (
@@ -205,19 +213,94 @@ def test_conversion_preserves_source_and_timestamps_and_is_idempotent(
     ]
 
 
-@pytest.mark.parametrize("with_old_event", [False, True])
-def test_empty_and_pretrace_journals_are_skipped(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, with_old_event: bool
-) -> None:
-    project, journal = journal_at(tmp_path, monkeypatch)
-    if with_old_event:
-        journal.emit(CoreEventType.RUN_STARTED)
-    else:
-        Project.event_journal_path_for(project.root, "run-1").touch()
+def test_empty_journal_is_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project, _ = journal_at(tmp_path, monkeypatch)
+    Project.event_journal_path_for(project.root, "run-1").touch()
     result = convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
     assert result.status is ConversionStatus.SKIPPED
-    assert ("predates" if with_old_event else "no events") in result.reason
+    assert "no events" in result.reason
     assert not Project.run_log_path_for(project.root, "run-1").exists()
+
+
+@given(chunks=st.integers(0, 4), ending=st.sampled_from(["run_finished", "run_failed"]))
+def test_a_journal_that_predates_the_run_trace_converts_with_the_events_it_has(
+    chunks: int, ending: str
+) -> None:
+    """The earliest journals have no span events; their run.log carries what they recorded."""
+    with TemporaryDirectory() as temporary, pytest.MonkeyPatch.context() as patch:
+        project, journal = journal_at(Path(temporary), patch)
+        journal.emit(
+            CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="single-agent", input="in")
+        )
+        for _ in range(chunks):
+            journal.emit(
+                CoreEventType.AGENT_OUTPUT_CHUNK,
+                data=AgentOutputChunkData(channel="assistant", content="output"),
+            )
+        journal.emit(CoreEventType(ending))
+        result = convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+        assert result.status is ConversionStatus.CONVERTED
+        with Project.run_log_path_for(project.root, "run-1").open("rb") as stream:
+            bodies = [r.body.field for r in RunLogReader(stream) if r.body is not None]
+        assert bodies[0] == "epoch_started"
+        assert "span" not in bodies
+        assert bodies[-1] == "lifecycle"
+        assert (
+            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+            is ConversionStatus.EXISTS
+        )
+
+
+@given(
+    roles=st.lists(
+        st.sampled_from(["orchestrator", "implementer", "judge", "profiler"]),
+        min_size=1,
+        max_size=5,
+    ),
+    model=st.sampled_from([None, "model-a"]),
+)
+def test_a_turn_span_without_an_agent_identity_converts_under_its_role(
+    roles: list[str], model: str | None
+) -> None:
+    """The first journals labelled a turn with role and model only; its role is its agent."""
+    with TemporaryDirectory() as temporary, pytest.MonkeyPatch.context() as patch:
+        project, journal = journal_at(Path(temporary), patch)
+        journal.emit(
+            CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="single-agent", input="in")
+        )
+        for index, role in enumerate(roles):
+            label = SpanLabel(
+                kind="agent_turn", title=role, attrs_json=json.dumps({"role": role, "model": model})
+            )
+            journal.emit(
+                CoreEventType.SPAN_STARTED,
+                data=SpanStartedData(
+                    span=Span(
+                        id=f"op:{index}/{role}.1",
+                        parent=None,
+                        type=SpanType.OPERATION,
+                        name=role,
+                        status=SpanStatus.RUNNING,
+                        started_at=float(index),
+                        label=label,
+                    )
+                ),
+            )
+        result = convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+        assert result.status is ConversionStatus.CONVERTED
+        turns = []
+        with Project.run_log_path_for(project.root, "run-1").open("rb") as stream:
+            for record in RunLogReader(stream):
+                if record.body is None or record.body.field != "span":
+                    continue
+                span = record.body.value.span
+                assert span is not None
+                assert span.label is not None
+                assert span.label.attrs is not None
+                turns.append(AgentTurnAttrs.from_binary(span.label.attrs.value))
+        assert [(turn.agent, turn.role, turn.model or None) for turn in turns] == [
+            (role, role, model) for role in roles
+        ]
 
 
 def test_conversion_replaces_torn_destination_only_after_success(
@@ -484,7 +567,7 @@ def test_bulk_reports_every_project_and_index_outcome_and_continues_after_failur
     assert rows["empty"].status is ConversionStatus.SKIPPED
     assert rows["old"].status is ConversionStatus.SKIPPED
     assert "unsupported journal event" in rows["old"].reason
-    assert "predates" in rows["pretrace"].reason
+    assert rows["pretrace"].status is ConversionStatus.CONVERTED
     assert rows[str(external_link)].status is ConversionStatus.CONVERTED
     assert rows[str(index / "broken")].status is ConversionStatus.FAILED
     assert rows[str(index / "unsupported")].status is ConversionStatus.SKIPPED

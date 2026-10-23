@@ -13,6 +13,8 @@ exist need to migrate; it is not a general converter.
 
 from __future__ import annotations
 
+import json
+from contextlib import closing
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -21,7 +23,7 @@ from typing import TYPE_CHECKING
 
 from vibesys.chat._legacy import import_legacy_chat
 from vibesys.chat._session import ChatRuntime
-from vibesys.events import CoreEvent, CoreEventType
+from vibesys.events import CoreEvent
 from vibesys.run.runlog_tee import JOURNAL_EVENT_MAX_BYTES, RunLogTee
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import Project, ProjectError
@@ -35,7 +37,7 @@ from vs_runlog.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
     from vs_sim.api import SleepingClock, Threads
 
@@ -65,7 +67,7 @@ class ConversionResult:
     reason: str
 
 
-def _events(path: Path) -> Iterator[tuple[bytes, CoreEvent]]:
+def _events(path: Path) -> Generator[tuple[bytes, CoreEvent]]:
     with path.open("rb") as stream:
         while line := stream.readline(JOURNAL_EVENT_MAX_BYTES + 1):
             event = decode_json(
@@ -77,6 +79,26 @@ def _events(path: Path) -> Iterator[tuple[bytes, CoreEvent]]:
                     raise _UnsupportedJournalError(message)
                 raise RunLogConversionError(event.details("journal event"))
             yield line, event
+
+
+def _with_agent_identity(line: bytes) -> bytes:
+    """Name the agent of a turn span whose older journal gave it no identity.
+
+    The first journals labelled a turn with its role and model only. Its role is the identity the
+    older agent events already get (``vibesys.records._agents``), so a turn of such a journal
+    counts under its role.
+    """
+    if b'"agent_turn"' not in line:
+        return line
+    event = json.loads(line)
+    label = (event.get("data") or {}).get("span", {}).get("label")
+    if label is None or label.get("kind") != "agent_turn":
+        return line
+    attrs = json.loads(label.get("attrs_json") or "{}")
+    if "agent" in attrs or "role" not in attrs:
+        return line
+    label["attrs_json"] = json.dumps({"agent": attrs["role"], **attrs}, separators=(",", ":"))
+    return json.dumps(event, separators=(",", ":")).encode() + b"\n"
 
 
 def _complete_sequence(path: Path) -> int:
@@ -168,20 +190,10 @@ def _convert_directory(
     journal = directory / "core-events.jsonl"
     if not journal.exists():
         return ConversionResult(ConversionStatus.SKIPPED, "journal is missing")
-    first = None
-    has_trace = False
-    for _, event in _events(journal):
-        if first is None:
-            first = event
-        has_trace |= event.type in (
-            CoreEventType.SPAN_STARTED,
-            CoreEventType.SPAN_UPDATED,
-            CoreEventType.SPAN_ENDED,
-        )
-    if first is None:
+    with closing(_events(journal)) as events:
+        empty = next(events, None) is None
+    if empty:
         return ConversionResult(ConversionStatus.SKIPPED, "journal has no events")
-    if not has_trace:
-        return ConversionResult(ConversionStatus.SKIPPED, "journal predates the run trace")
     with TemporaryDirectory(prefix=".convert-run-", dir=destination.parent) as temporary:
         staged = Path(temporary) / "run.log"
 
@@ -190,7 +202,7 @@ def _convert_directory(
             writer = FileRunLogWriter(staged, clock=clock, threads=threads)
             with RunLogTee(writer, content, run_id) as tee:
                 for line, _ in _events(journal):
-                    tee.append(line)
+                    tee.append(_with_agent_identity(line))
                 writer.checkpoint()
 
         install_run_log(staged, destination, prepare=prepare)
