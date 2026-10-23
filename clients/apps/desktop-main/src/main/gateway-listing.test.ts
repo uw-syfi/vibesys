@@ -107,7 +107,10 @@ test('missing or invalid projects stay listed as typed unknown projects', () => 
       const rows = dashboardRows(state, {now: 1700000000000});
       expect(rows).toHaveLength(1);
       expect(runsKnown(state, [hostKey(HOST)])).toBe('some');
-      expect(rows[0]).toMatchObject({project: null, row: {detail: 'Project unknown'}});
+      expect(rows[0]).toMatchObject({
+        project: null,
+        row: {title: 'Unknown project', detail: 'Project unknown'},
+      });
       expect(runProjectRoot(state, {host: hostKey(HOST), runId: 'run-a'})).toBeUndefined();
       expect(listing).toMatchObject({
         live: [],

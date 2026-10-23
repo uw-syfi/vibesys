@@ -86,7 +86,7 @@ export function dashboardRows(state: SidebarState, clock: Clock): readonly Dashb
           createdAt: run.startedAt * 1000,
           row: {
             run: ref,
-            title: run.runId,
+            title: 'Unknown project',
             detail: 'Project unknown',
             trail: null,
             tooltip: `${machine}: ${run.runId}: Project unknown`,
@@ -128,7 +128,7 @@ export function runLabels(
   return ({host, project, runId}) => {
     const at = created.get(JSON.stringify([host, runId]));
     return {
-      title: project === null ? runId : titleOf(state, {host, runId}, project),
+      title: project === null ? 'Unknown project' : titleOf(state, {host, runId}, project),
       began: at === undefined ? null : formatStarted(at, clock),
     };
   };
