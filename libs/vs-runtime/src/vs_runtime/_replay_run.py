@@ -174,11 +174,13 @@ class _LiveEpoch:
     def serve_controls(self) -> None:
         """Dispose of pending controls, then cancel the running children pause-now withdrew."""
         inbox = self.host.inbox
-        if inbox is None or self.host.runtime.paused:
-            # A parked epoch applies nothing more; the next epoch classifies the rest.
+        if inbox is None:
             return
         now = self.host.clock.now()
         self.poll_at = now + self.host.control_poll_seconds
+        if self.host.runtime.paused:
+            # A parked epoch applies nothing more; the next epoch classifies the rest.
+            return
         for disposition in apply_controls(self.host.runtime, inbox, now=now, at=_at(now)):
             applied = applied_control(disposition)
             for identity in () if applied is None else applied.withdrawn:

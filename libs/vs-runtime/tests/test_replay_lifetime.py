@@ -38,7 +38,7 @@ from vs_runtime.api.replay import (
     open_replay,
     replay_lifetime,
 )
-from vs_sim.api.testing import Sim
+from vs_sim.api.testing import Sim, VirtualClock
 
 from .test_replay_controls import control, two_turns
 from .test_replay_run import Reply, call, launch
@@ -56,6 +56,20 @@ if TYPE_CHECKING:
 
 Setup = Literal["opens", "enter_fails", "binding_fails"]
 TURN_SECONDS = 10
+
+
+class ZeroWakeGuardClock(VirtualClock):
+    """Keep a buggy zero-time loop finite while recording every immediate wake."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.zero_duration_wakes = 0
+
+    async def sleep(self, seconds: float) -> None:
+        if seconds == 0:
+            self.zero_duration_wakes += 1
+            seconds = 0.1
+        await super().sleep(seconds)
 
 
 def ending(_: object) -> ReplayEnding:
@@ -339,5 +353,45 @@ def test_live_pause_now_withdraws_then_cancels_and_parks(posted: int) -> None:
             await launched(flow, "resume", store, environment, sim)
         assert {span.id for span in raised.value.spans} >= set(applied.withdrawn)
         assert owner.invocations == invocations
+
+    sim.run(scenario())
+
+
+@pytest.mark.regression
+@example(stop_delay=30)
+@given(stop_delay=st.integers(min_value=1, max_value=30))
+def test_pause_now_slow_stop_does_not_busy_spin(stop_delay: int) -> None:
+    clock = ZeroWakeGuardClock()
+    sim = Sim(seed=0, clock=clock)
+    store, inbox, cancelled = FakeStateStore(), FakeControlInbox(), []
+
+    async def perform(span: Span) -> ReplayResult:
+        if span.replay_physical is not None:
+            try:
+                await sim.clock.sleep(TURN_SECONDS)
+            except asyncio.CancelledError:
+                cancelled.append(span.id)
+                await sim.clock.sleep(stop_delay)
+        return result(span)
+
+    owner = FakeReplayExecutor(perform)
+    environment = Environment(store, owner)
+    flow = ReplayPlan(two_turns(30, 30), replay.ReplayAllowance(), ending, (), (), ())
+
+    async def post() -> None:
+        await sim.clock.sleep(1)
+        inbox.post("control", control("pause_now").to_binary(), ended=lambda: None)
+
+    async def scenario() -> None:
+        poster = asyncio.create_task(post())
+        async with open_replay(
+            flow, launch("first"), resources(store, environment, sim, inbox)
+        ) as lifetime:
+            assert await drive_replay(lifetime) == ReplayParked()
+        await poster
+        assert len(cancelled) == 2
+        # Every later wake must advance to the next poll instead of rearming at zero.
+        assert len(sim.clock.sleeps) <= stop_delay + 20
+        assert clock.zero_duration_wakes <= 1
 
     sim.run(scenario())
