@@ -1,0 +1,9 @@
+{
+  "target_shared_prefix_tokens": 4096,
+  "requests": 4,
+  "concurrency": 4,
+  "max_tokens": 64,
+  "temperature": 0,
+  "warmup_iterations": 1,
+  "token_tolerance": 64
+}
