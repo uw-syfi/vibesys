@@ -33,6 +33,7 @@ from vs_sandbox.compute_backends import (
     SandboxKind,
     make_local_shell_sandbox,
 )
+from vs_sandbox.container_memory import ContainerMemoryCap
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -97,6 +98,7 @@ class TrainiumBackend:
         self._lprint = log or print
         self.image = image or DEFAULT_IMAGE
         self._docker = docker
+        self._memory = ContainerMemoryCap(docker)
         self._threads = threads
         self._launcher = launcher
         # No per-device selection; kept for protocol parity (read by
@@ -182,6 +184,8 @@ class TrainiumBackend:
             bind_mounts.append((str(host_tmp), _TMP_CONTAINER_PATH, False))
 
             return docker_sandbox(
+                # A runaway process dies inside its container, not the host.
+                memory_limit=self._memory.limit(),
                 host_workspace=host_workspace,
                 image=container_image or self.image,
                 gpus=None,  # Neuron uses --device, not --gpus

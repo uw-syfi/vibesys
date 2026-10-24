@@ -329,6 +329,7 @@ class DockerSandbox(WorkspaceSandbox):
         group_add: list[str] | None = None,
         entrypoint: str | None = None,
         shm_size: str | None = None,
+        memory_limit: int | None = None,
         auto_remove: bool = False,
         default_timeout: int = 300,
         start_timeout: int = 120,
@@ -380,6 +381,11 @@ class DockerSandbox(WorkspaceSandbox):
                 (e.g. ``neuronx-cc``, PyTorch dataloaders) exhaust with
                 "No space left on device".  ``None`` (default) uses Docker's
                 default.
+            memory_limit: Bytes the container may use, swap included (emits
+                ``--memory`` and ``--memory-swap``). A process past it is killed
+                inside the container instead of starving the host; compute
+                backends pass ``container_memory_limit`` of the Docker host's
+                memory. ``None`` (default) leaves the container unbounded.
             auto_remove: Ask Docker to remove the container and its writable
                 layer whenever it stops.
             default_timeout: Default command timeout in seconds.
@@ -465,6 +471,7 @@ class DockerSandbox(WorkspaceSandbox):
         self._group_add: list[str] = list(group_add or [])
         self._entrypoint = entrypoint
         self._shm_size = shm_size
+        self._memory_limit = memory_limit
         self._auto_remove = auto_remove
         self._default_timeout = default_timeout
         self._start_timeout = start_timeout
@@ -575,6 +582,7 @@ class DockerSandbox(WorkspaceSandbox):
         ]
         cmd.extend(self._label_arguments())
         cmd.extend(self._container_runtime_arguments())
+        cmd.extend(self._memory_arguments())
         # PID 1 is `sleep infinity`, which ignores SIGTERM as an init-less PID 1,
         # so `docker stop` would wait out its grace period and SIGKILL it. The
         # engine's init (`--init`) is PID 1 instead: it forwards SIGTERM, reaps
@@ -625,6 +633,13 @@ class DockerSandbox(WorkspaceSandbox):
     def _label_arguments(self) -> list[str]:
         """Return the ``docker run`` flags that label the container with its run."""
         return [] if self._run_id is None else ["--label", f"{RUN_ID_LABEL}={self._run_id}"]
+
+    def _memory_arguments(self) -> list[str]:
+        """Return the flags that cap the container's memory, swap included, when it has a cap."""
+        if self._memory_limit is None:
+            return []
+        limit = str(self._memory_limit)
+        return ["--memory", limit, "--memory-swap", limit]
 
     def _container_runtime_arguments(self) -> list[str]:
         """Return the ``docker run`` flags a docker-in-docker sandbox adds."""

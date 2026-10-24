@@ -42,6 +42,7 @@ from vs_sandbox.compute_backends import (
     SandboxKind,
     make_local_shell_sandbox,
 )
+from vs_sandbox.container_memory import ContainerMemoryCap
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -107,6 +108,7 @@ class RocmBackend:
         self._lprint = log or print
         self.image = image or DEFAULT_IMAGE
         self._docker = docker
+        self._memory = ContainerMemoryCap(docker)
         self._threads = threads
         self._launcher = launcher
         # No per-device auto-selection yet; pinning is via HIP_VISIBLE_DEVICES.
@@ -173,6 +175,8 @@ class RocmBackend:
         if kind is SandboxKind.DOCKER:
             devices = list(self._devices) if attach_accelerator else []
             return docker_sandbox(
+                # A runaway process dies inside its container, not the host.
+                memory_limit=self._memory.limit(),
                 host_workspace=host_workspace,
                 image=container_image or self.image,
                 gpus=None,  # ROCm uses --device, not --gpus

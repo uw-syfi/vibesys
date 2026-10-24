@@ -238,6 +238,10 @@ def _parse_exec(argv: tuple[str, ...]) -> _Exec:
     return _Exec(argv[index], env, workdir, user, tuple(argv[index + 1 :]))
 
 
+DEFAULT_MEMORY_TOTAL = 64 * 1024**3
+"""The host memory a fake daemon reports unless told otherwise: 64 GiB."""
+
+
 class FakeDockerEngine:
     """A :class:`~vs_sandbox.docker_cli.DockerCli` backed by local processes.
 
@@ -300,6 +304,7 @@ class FakeDockerEngine:
         self._state_dir = state_dir
         self._agent_ids = agent_ids
         self._runtimes = tuple(runtimes)
+        self._memory_total: int | None = DEFAULT_MEMORY_TOTAL
         self._nested_daemons_start = nested_daemons_start
         self._containers: dict[str, _Container] = {}
         self.calls: list[tuple[str, ...]] = []
@@ -346,6 +351,10 @@ class FakeDockerEngine:
         """
         self._removals_lost = count
 
+    def report_memory(self, total: int | None) -> None:
+        """Have ``docker info`` report *total* bytes of host memory; ``None`` fails to report it."""
+        self._memory_total = total
+
     def signal_requests_find_nothing(self, count: int) -> None:
         """Fault: the next *count* signal requests reach no process.
 
@@ -391,14 +400,24 @@ class FakeDockerEngine:
                 return self._end(arguments)
             case "ps":
                 return self._list(arguments)
-            case "info" if arguments[2:] == ("--format", "{{.ID}}"):
-                return docker_result(stdout=self.daemon_id + "\n")
             case "info":
-                runtimes = {name: {"path": name} for name in self._runtimes}
-                return subprocess.CompletedProcess(arguments, 0, json.dumps(runtimes) + "\n", "")
+                return self._info(arguments)
             case other:
                 message = f"FakeDockerEngine does not model `docker {other}`"
                 raise AssertionError(message)
+
+    def _info(self, arguments: tuple[str, ...]) -> DockerResult:
+        """Answer ``docker info``: the daemon's id, the host's memory, or its runtimes."""
+        match arguments[2:]:
+            case ("--format", "{{.ID}}"):
+                return docker_result(stdout=self.daemon_id + "\n")
+            case ("--format", "{{.MemTotal}}") if self._memory_total is None:
+                return docker_result(returncode=1, stderr="template: no MemTotal\n")
+            case ("--format", "{{.MemTotal}}"):
+                return docker_result(stdout=f"{self._memory_total}\n")
+            case _:
+                runtimes = {name: {"path": name} for name in self._runtimes}
+                return subprocess.CompletedProcess(arguments, 0, json.dumps(runtimes) + "\n", "")
 
     def spawn(self, argv: Sequence[str]) -> PipedProcess:
         """Start a ``docker exec`` whose program survives its client's death."""

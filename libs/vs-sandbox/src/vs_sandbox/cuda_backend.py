@@ -14,6 +14,7 @@ from vs_sandbox.compute_backends import (
     SandboxKind,
     make_local_shell_sandbox,
 )
+from vs_sandbox.container_memory import ContainerMemoryCap
 from vs_sandbox.gpu_monitor import (
     GpuContentionMonitor,
     GpuInfo,
@@ -89,6 +90,7 @@ class CudaBackend:
         self._threads = threads
         self._launcher = launcher
         self._docker = docker
+        self._memory = ContainerMemoryCap(docker)
         self._events = events
         self.log_dir = Path(log_dir)
         self._lprint = log or print
@@ -150,6 +152,8 @@ class CudaBackend:
             )
         elif kind is SandboxKind.DOCKER:
             sandbox = docker_sandbox_class(
+                # A runaway process dies inside its container, not the host.
+                memory_limit=self._memory.limit(),
                 host_workspace=host_workspace,
                 image=container_image or self.image,
                 gpus=self._docker_gpu_spec() if attach_accelerator else None,

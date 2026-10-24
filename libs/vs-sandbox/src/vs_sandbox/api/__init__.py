@@ -31,6 +31,10 @@ if TYPE_CHECKING:
         create_compute_backend,
         register_compute_backend,
     )
+    from vs_sandbox.container_memory import (
+        MIN_CONTAINER_MEMORY_RESERVE_BYTES,
+        container_memory_limit,
+    )
     from vs_sandbox.container_runtime import (
         ContainerRuntimeUnavailableError,
         NestedDaemonError,
@@ -155,6 +159,7 @@ __all__ = [
     "KIND_VERSION",
     "KNOWN_TOOLCHAINS",
     "KUBECTL_VERSION",
+    "MIN_CONTAINER_MEMORY_RESERVE_BYTES",
     "RUN_ID_LABEL",
     "RUST_TOOLCHAIN",
     "RUST_TOOLCHAIN_VERSION",
@@ -233,6 +238,7 @@ __all__ = [
     "backend_provided",
     "build_feature_image",
     "build_host_sandbox",
+    "container_memory_limit",
     "create_compute_backend",
     "declare_resources",
     "deduplicate_host_resources",
@@ -306,6 +312,11 @@ _LAZY_EXPORTS = {
     "backend_provided": ("compute_backends", "backend_provided"),
     "create_compute_backend": ("compute_backends", "create_compute_backend"),
     "register_compute_backend": ("compute_backends", "register_compute_backend"),
+    "MIN_CONTAINER_MEMORY_RESERVE_BYTES": (
+        "container_memory",
+        "MIN_CONTAINER_MEMORY_RESERVE_BYTES",
+    ),
+    "container_memory_limit": ("container_memory", "container_memory_limit"),
     "ContainerRuntimeUnavailableError": (
         "container_runtime",
         "ContainerRuntimeUnavailableError",
