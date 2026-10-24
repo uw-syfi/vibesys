@@ -82,6 +82,10 @@ checkpoint (~31 GB) needs at least TP=2.
   checkpoints to BF16 at load, or write an FP8 path in NKI.
 - **KV cache lives in HBM**, in the same ~24 GiB per core as the weights. Budget
   weights + cache + activation peak per core before choosing batch and context.
+- **Host RAM bounds compilation.** A `trn2.3xlarge` has 128 GiB of host memory
+  for the server, its compiles and everything else. A large graph's
+  `neuronx-cc` compile takes tens of GiB, so parallel compiles (one per rank)
+  can exceed it; see [`tensor-parallel.md`](tensor-parallel.md).
 - **Multi-core** (tensor parallelism across logical cores, one process per core)
   is required once weights + cache exceed one core; see
   [`tensor-parallel.md`](tensor-parallel.md). For a model that fits on one core,

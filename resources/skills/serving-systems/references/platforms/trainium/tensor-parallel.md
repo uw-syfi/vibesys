@@ -77,6 +77,14 @@ plane never introduces a new graph.
   decision.
 - **A core already owned by another process** (often a stale server) makes
   that rank fail with `Failed to initialize Neuron Runtime`.
+- **Every rank compiling at once can exhaust host RAM.** Each rank compiles its
+  own graphs with `neuronx-cc`, and a large shard's compile takes tens of GiB of
+  host memory: four ranks of a 27B BF16 decoder compiling together took 25 to
+  33 GiB each, 127 of a `trn2.3xlarge`'s 128 GiB. The container is capped below
+  the host's memory, so the compile is killed (exit 137, `Killed`) and the
+  server never starts. Compile one rank at a time: rank 0 compiles and warms
+  every bucket while the others wait at a barrier, then the others warm the same
+  buckets, loading identical graphs from the persistent NEFF cache.
 - **TP=4 for a model that fits on one core** often loses to 4 data-parallel
   replicas (one process each) for throughput; measure both.
 
