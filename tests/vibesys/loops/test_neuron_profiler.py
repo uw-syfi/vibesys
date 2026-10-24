@@ -6,6 +6,8 @@ Guarantees under test:
   ("model") mode records nothing under TorchNeuron's asynchronous execution.
 * Analysis points ``neuron-explorer view`` at the directory that holds the device
   trace, and names no NEFF itself, whatever else the capture root contains.
+* ``capture`` with ``device_profile`` false records a system profile only (mode
+  ``0``, no HBM reserved) and succeeds on the system trace alone.
 """
 
 from __future__ import annotations
@@ -21,14 +23,16 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 # A stand-in neuron-explorer: records its argv and device-profile mode, and for
-# ``inspect -o DIR`` lays out a session the way the real runtime does.
+# ``inspect -o DIR`` lays out a session the way the real runtime does: a system
+# trace always, a device trace (NTFF) only when device profiling is on.
 _FAKE_EXPLORER = """#!/bin/sh
 log="$(dirname "$0")/calls.log"
 printf '%s|mode=%s\\n' "$*" "${NEURON_RT_INSPECT_DEVICE_PROFILE:-unset}" >>"$log"
 if [ "$1" = "inspect" ]; then
   session="$3/i-0_pid_7/1234"
   mkdir -p "$session" "$3/neffs"
-  : >"$session/profile_nc_0_session_0.ntff"
+  : >"$session/ntrace.pb"
+  [ "${NEURON_RT_INSPECT_DEVICE_PROFILE:-0}" = "0" ] || : >"$session/profile_nc_0_session_0.ntff"
   : >"$session/neff_1_vnc_0.neff"
   : >"$session/neff_2_vnc_0.neff"
   : >"$3/neffs/barrier_0.neff"
@@ -84,3 +88,26 @@ def test_analysis_views_the_session_that_holds_the_device_trace(
     assert view_call[view_call.index("-d") + 1] == str(capture_root / "i-0_pid_7" / "1234")
     assert "-n" not in view_call
     assert "--neff-path" not in view_call
+
+
+def test_a_system_only_capture_reserves_no_device_profile_and_needs_no_device_trace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A workload too large for session profiling's HBM reservation is still capturable.
+
+    Session device profiling reserves about 4.75 GiB per trn2 logical core; a 27B model
+    using more than the remaining ~18.7 GiB failed to load under it in a live run.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    calls = _install_fake_explorer(bin_dir, monkeypatch)
+
+    asyncio.run(
+        neuron_server().call_tool(
+            "capture",
+            {"workload": "true", "out_dir": str(tmp_path / "capture"), "device_profile": False},
+        )
+    )
+
+    (inspect_call,) = calls.read_text().splitlines()
+    assert inspect_call.endswith("|mode=0")

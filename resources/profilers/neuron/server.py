@@ -54,6 +54,8 @@ def build_server() -> FastMCP:
         workload: str,
         out_dir: str = str(Path(tempfile.gettempdir()) / "neuronprof"),
         timeout: int = 1800,
+        *,
+        device_profile: bool = True,
     ) -> str:
         """Run a workload under ``neuron-explorer inspect`` with session device profiling.
 
@@ -64,9 +66,17 @@ def build_server() -> FastMCP:
                 process with the ``NEURON_RT_INSPECT_*`` variables instead.
             out_dir: Directory to write the NTFF/NEFF profiles into.
             timeout: Max seconds to let the workload run.
+            device_profile: False captures the system profile only, which reserves no
+                HBM; session device profiling reserves about 4.75 GiB per trn2 logical
+                core, so a workload that needs more than ~18.7 GiB per core fails to load
+                under it.
         """
         return _capture(
-            analyze_neuron.cmd_capture, out_dir=out_dir, workload=workload, timeout=timeout
+            analyze_neuron.cmd_capture,
+            out_dir=out_dir,
+            workload=workload,
+            timeout=timeout,
+            device_profile=device_profile,
         )
 
     @mcp.tool()

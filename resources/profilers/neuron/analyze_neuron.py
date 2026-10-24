@@ -65,8 +65,12 @@ _NEURON_BIN_DIRS = ("/opt/aws/neuron/bin",)
 
 # Device-profile mode for ``inspect``. The runtime's default ("model") captures
 # only synchronous executions, and native TorchNeuron executes asynchronously,
-# so it writes no NTFF; "session" records all device activity per core.
+# so it writes no NTFF; "session" records all device activity per core. Session
+# capture reserves about 4.75 GiB of HBM per logical core on trn2 (measured:
+# 23.5 GiB allocatable without it, 18.75 GiB with it), so a workload that needs
+# more than that captures a system profile only ("0"), which reserves none.
 _DEVICE_PROFILE_MODE = "session"
+_SYSTEM_ONLY_MODE = "0"
 
 
 def _explorer() -> str:
@@ -148,11 +152,14 @@ def cmd_capture(ns: argparse.Namespace) -> None:
     """Capture a system + device profile around a workload command.
 
     Runs ``neuron-explorer inspect -o <out_dir> <workload>`` with session
-    device profiling. The workload must itself *load and run* the Neuron model
-    (the runtime records the profile in that process) — e.g. a script that runs
-    a few compiled forwards. A benchmark client hitting a separately started
-    server records nothing: profile the server process instead.
+    device profiling, or with a system profile only when ``device_profile`` is
+    false (no HBM reserved; see ``_DEVICE_PROFILE_MODE``). The workload must
+    itself *load and run* the Neuron model (the runtime records the profile in
+    that process) — e.g. a script that runs a few compiled forwards. A benchmark
+    client hitting a separately started server records nothing: profile the
+    server process instead.
     """
+    device_profile = getattr(ns, "device_profile", True)
     out_dir = Path(ns.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     workload = ns.workload
@@ -175,16 +182,25 @@ def cmd_capture(ns: argparse.Namespace) -> None:
     # of -o. If that's the git-tracked /workspace, those root-owned, mode-600
     # files break the host-side per-round `git add -A`. Keeping cwd in the
     # out-dir (under /tmp) contains them.
-    env = {**os.environ, "NEURON_RT_INSPECT_DEVICE_PROFILE": _DEVICE_PROFILE_MODE}
+    mode = _DEVICE_PROFILE_MODE if device_profile else _SYSTEM_ONLY_MODE
+    env = {**os.environ, "NEURON_RT_INSPECT_DEVICE_PROFILE": mode}
     rc = run_command(cmd, timeout=ns.timeout, cwd=str(out_dir), env=env)
     ntff = _find_one(out_dir, ".ntff")
     neff = _find_one(out_dir, ".neff")
+    trace = _find_one(out_dir, "ntrace.pb")
     _print("\n--- capture artifacts ---")
     _print(f"output dir : {out_dir}")
-    _print(f"NTFF       : {ntff or '(none found — was the model executed on a NeuronCore?)'}")
+    if device_profile:
+        _print(f"NTFF       : {ntff or '(none found — was the model executed on a NeuronCore?)'}")
+    else:
+        _print("NTFF       : (system profile only: no device trace requested)")
     _print(f"NEFF       : {neff or '(none found — did the model compile + run on device?)'}")
-    if rc == 0 and ntff is None:
+    _print(f"ntrace.pb  : {trace or '(none found — did the runtime start?)'}")
+    if rc == 0 and device_profile and ntff is None:
         diagnostic = "inspect produced no NTFF profile"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
+    if rc == 0 and not device_profile and trace is None:
+        diagnostic = "inspect produced no system profile"
         raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
 
 
@@ -299,6 +315,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--workload", required=True, help="Shell command that drives the model.")
     p.add_argument("--timeout", type=int, default=1800)
+    p.add_argument(
+        "--system-only",
+        dest="device_profile",
+        action="store_false",
+        help="Capture the system profile only: reserves no HBM (session device profiling "
+        "reserves ~4.75 GiB per trn2 logical core).",
+    )
     p.set_defaults(func=cmd_capture)
 
     p = sub.add_parser("summary", help="summary-text report over a captured session.")

@@ -17,6 +17,20 @@ NEURON_RT_INSPECT_OUTPUT_DIR=/tmp/neuronprof \
 
 `session` captures all device activity per core into one NTFF. The default device mode (`1`/`model`) needs synchronous execution and produces **no** NTFF under TorchNeuron's asynchronous execution. Session traces grow fast (gigabytes per minute of load): keep the profiled window to seconds.
 
+**Device profiling costs HBM.** Session device profiling reserves about 4.75 GiB per logical core:
+
+| `NEURON_RT_INSPECT_DEVICE_PROFILE` | HBM allocatable per trn2 logical core (measured) |
+|:--|:--|
+| unset / `0` (system profile only) | 23.5 GiB |
+| `session` | 18.75 GiB |
+
+A server that needs more than about 18.7 GiB per core fails to load under device profiling (`NRT_RESOURCE`, `Failed to allocate resource`). Then capture in this order:
+
+1. The production configuration with `NEURON_RT_INSPECT_DEVICE_PROFILE=0`: per-execution device time per NEFF, host gaps between executions, collectives. No HBM reserved.
+2. Only for a kernel-level question, a session device profile of a smaller configuration that fits (fewer slots or a shorter context). Label it as not the production shape.
+
+Drivers older than the SDK's requirement disable host-to-device DMA notifications; `neuron-explorer` then reports `invalid DMA duration` and DMA timings are unreliable.
+
 **In process (a step loop).** `torch.profiler` with TorchNeuron's `NeuronConfig` adds PyTorch ops and the dispatch timeline:
 
 ```python

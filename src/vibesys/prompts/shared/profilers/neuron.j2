@@ -48,7 +48,7 @@ NeuronCores execute *compiled graphs* (NEFFs) that native TorchNeuron builds fro
        --out-dir /tmp/neuronprof \
        --workload "<command>"
      ```
-   Use any domain-specific capture recipe above when one is provided{% if benchmark_command is defined and benchmark_command %}, otherwise discover a short representative command from `{{ benchmark_command }} --help`{% endif %}. `session` device profiling is required: the default device mode writes no device trace under TorchNeuron's asynchronous execution. Session traces grow by gigabytes per minute, so keep the profiled load to seconds. If the out-dir holds **no NTFF/NEFF**, the candidate is not executing on the NeuronCore — record that as the headline finding.
+   Use any domain-specific capture recipe above when one is provided{% if benchmark_command is defined and benchmark_command %}, otherwise discover a short representative command from `{{ benchmark_command }} --help`{% endif %}. `session` device profiling is required: the default device mode writes no device trace under TorchNeuron's asynchronous execution. Session traces grow by gigabytes per minute, so keep the profiled load to seconds. Session device profiling reserves about 4.75 GiB of HBM per trn2 logical core; if the candidate fails to load under it (`NRT_RESOURCE`, `Failed to allocate resource`), capture the production configuration again with a system profile only (`NEURON_RT_INSPECT_DEVICE_PROFILE=0`, or `capture` with `device_profile=false`), which reserves none, and use a device profile only of a smaller configuration that fits, labeled as not the production shape. If the out-dir holds **no NTFF/NEFF**, the candidate is not executing on the NeuronCore — record that as the headline finding.
 
 ## Analysis toolkit — `{{ profiler_mcp_name }}` MCP tools OR shell
 
@@ -56,7 +56,7 @@ If the `{{ profiler_mcp_name }}` MCP server is attached to this round, call its 
 
 | MCP tool | Shell equivalent | Purpose |
 | -------- | ---------------- | ------- |
-| `capture(workload, out_dir)` | `analyze_neuron.py capture --workload "<cmd>" --out-dir <dir>` | Run a standalone workload under `neuron-explorer inspect` with session device profiling. |
+| `capture(workload, out_dir)` | `analyze_neuron.py capture --workload "<cmd>" --out-dir <dir>` | Run a standalone workload under `neuron-explorer inspect` with session device profiling; `device_profile=false` (`--system-only`) captures the system profile only. |
 | `summary(report)` | `analyze_neuron.py summary <dir>` | Engine utilization + top ops + DMA. Start here. |
 | `summary_json(report)` | `analyze_neuron.py summary-json <dir>` | Same, machine-readable. |
 | `operators(report)` | `analyze_neuron.py operators <dir>` | Per-operator/instruction breakdown. |
