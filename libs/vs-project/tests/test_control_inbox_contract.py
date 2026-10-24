@@ -15,6 +15,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 import pytest
@@ -33,9 +34,14 @@ from vs_project.api import (
     RequestState,
     RequestStatus,
     RunEnvironmentRecord,
+    StateNamespace,
     ended_unapplied,
 )
-from vs_project.api.testing import FakeControlInbox, run_execution_record
+from vs_project.api.testing import (
+    FakeControlInbox,
+    run_execution_record,
+    scratch_state_directory,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -388,3 +394,101 @@ def test_creating_a_state_file_never_replaces_one(tmp_path: Path) -> None:
     assert namespace.create_bytes("inbox/r1.json", b"first")
     assert not namespace.create_bytes("inbox/r1.json", b"second")
     assert namespace.read_bytes("inbox/r1.json") == b"first"
+
+
+class _CountingNamespace(StateNamespace):
+    """A real namespace that records which posting-order contents were read."""
+
+    def __init__(self, root: Path) -> None:
+        super().__init__(
+            project_root=root,
+            root=scratch_state_directory(root, "inbox-polling"),
+            portable=True,
+        )
+        self.order_contents_read: list[bytes | None] = []
+
+    def read_bytes(self, relative_path: str | PurePosixPath) -> bytes | None:
+        contents = super().read_bytes(relative_path)
+        if PurePosixPath(relative_path).parent == PurePosixPath("order"):
+            self.order_contents_read.append(contents)
+        return contents
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("rejected", [False, True], ids=["settled", "rejected"])
+def test_warm_polls_read_only_incrementally_discovered_order_contents(
+    tmp_path: Path, *, rejected: bool
+) -> None:
+    """#3100: a warm reader reads only new order contents and preserves posting order."""
+    namespace = _CountingNamespace(tmp_path)
+    writer = FileControlInbox(namespace)
+    writer.post("r1", b"{}", ended=_live)
+    if rejected:
+        assert writer.reject("r1", "refused")
+    else:
+        writer.settle("r1")
+    writer.post("z-pending", b"older", ended=_live)
+
+    reader = FileControlInbox(namespace)
+    pending = (InboxEntry("z-pending", b"older"),)
+    assert reader.pending() == pending
+    namespace.order_contents_read.clear()
+
+    assert reader.pending() == pending
+    assert namespace.order_contents_read == []
+
+    # A separate writer appends an id that sorts before the earlier pending request.
+    writer.post("a-pending", b"newer", ended=_live)
+    namespace.order_contents_read.clear()
+    pending += (InboxEntry("a-pending", b"newer"),)
+
+    assert reader.pending() == pending
+    assert namespace.order_contents_read == [b"a-pending"]
+    namespace.order_contents_read.clear()
+
+    assert reader.pending() == pending
+    assert namespace.order_contents_read == []
+
+    namespace.order_contents_read.clear()
+    assert FileControlInbox(namespace).pending() == pending
+    assert namespace.order_contents_read == [b"r1", b"z-pending", b"a-pending"]
+
+
+@pytest.mark.regression
+@given(requests=st.lists(_IDS, min_size=1, max_size=8))
+@example(requests=["z", "a", "z"])
+def test_incremental_order_discovery_keeps_the_lowest_sequence_for_each_request(
+    tmp_path_factory: pytest.TempPathFactory, requests: list[str]
+) -> None:
+    """Discover lower sequences last, including repeated records for the same request."""
+    namespace = _CountingNamespace(tmp_path_factory.mktemp("order"))
+    for request_id in dict.fromkeys(requests):
+        namespace.create_bytes(f"inbox/{request_id}.json", b"{}")
+    reader = FileControlInbox(namespace)
+
+    for sequence, request_id in reversed(tuple(enumerate(requests, start=1))):
+        namespace.create_bytes(f"order/{sequence:012d}", request_id.encode())
+        namespace.order_contents_read.clear()
+        reader.pending()
+        assert namespace.order_contents_read == [request_id.encode()]
+
+    assert reader.pending() == tuple(
+        InboxEntry(request_id, b"{}") for request_id in dict.fromkeys(requests)
+    )
+
+
+def test_an_order_read_failure_is_retried_after_the_entry_becomes_readable(tmp_path: Path) -> None:
+    namespace = _CountingNamespace(tmp_path)
+    namespace.create_bytes("inbox/z.json", b"z")
+    namespace.create_bytes("inbox/a.json", b"a")
+    namespace.create_bytes("order/000000000002", b"a")
+    unreadable = namespace.external_directory("order/000000000001")
+    reader = FileControlInbox(namespace)
+
+    with pytest.raises(ProjectStateError):
+        reader.pending()
+
+    unreadable.rmdir()
+    namespace.create_bytes("order/000000000001", b"z")
+
+    assert reader.pending() == (InboxEntry("z", b"z"), InboxEntry("a", b"a"))
