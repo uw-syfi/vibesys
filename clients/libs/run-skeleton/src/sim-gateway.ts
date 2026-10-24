@@ -80,6 +80,8 @@ export interface SimRun {
   readonly storedKeyframeLimit?: number;
   /** Checkpoints written before `Keyframe.failures_tracked`: no failure facts, flag false. */
   readonly legacyKeyframes?: boolean;
+  /** Checkpoints that track record facts but predate failure facts. */
+  readonly untrackedFailures?: boolean;
 }
 
 /** A fault the link injects into the n-th call of a method (0 is the first). */
@@ -149,6 +151,8 @@ export class SimGateway implements RunTransport {
     private readonly fault: (method: string, ordinal: number) => SimFault | undefined = () =>
       undefined,
   ) {
+    if (run.legacyKeyframes && run.untrackedFailures)
+      throw new Error('a checkpoint cannot be legacy and failure-untracked at once');
     this.#published = run.log === 'pending' ? [] : [...run.records];
   }
 
@@ -378,6 +382,9 @@ export class SimGateway implements RunTransport {
         version.startsEpoch = false;
         version.startedAt = undefined;
       }
+    } else if (this.run.untrackedFailures) {
+      keyframe.failures = [];
+      keyframe.failuresTracked = false;
     }
     const storedBytes = toBinary(KeyframeSchema, keyframe).length;
     const sets = new Map<string, Uint8Array>();

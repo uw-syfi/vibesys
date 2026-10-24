@@ -122,13 +122,10 @@ function recordPublisher(records: RecordsListener) {
   };
 }
 
-/** Pages of a record window each: how far back a failure is looked for; at most eight raw-record windows. */
-export const FAILURE_PAGES = 8;
-
 /**
  * Error notices of the current epoch before `before`, newest page first, from bounded reads of
  * the log: each page a Tail from its start, cancelled once it reaches the page after. It stops at
- * the first page holding one, at the epoch's start, or after FAILURE_PAGES pages.
+ * the first page holding one or at the epoch's start.
  */
 async function pageFailures(
   transport: RunTransport,
@@ -136,11 +133,7 @@ async function pageFailures(
   signal: AbortSignalLike,
 ): Promise<void> {
   let end = input.before;
-  for (
-    let page = 0;
-    end !== undefined && page < FAILURE_PAGES && end > input.epochStart;
-    page += 1
-  ) {
+  while (end !== undefined && end > input.epochStart) {
     const start = end - RECORD_WINDOW > input.epochStart ? end - RECORD_WINDOW : input.epochStart;
     const found = await readPage(transport, input, start, end, signal);
     if (found.length > 0) {
