@@ -76,6 +76,9 @@ class PollingEvaluationExecutor:
 
     Each submitted request evaluates its candidate snapshot in a fresh candidate
     workspace through the trusted ``Evaluation`` effects, one stage at a time.
+    Requests run one at a time, as ``availability`` reports (capacity 1): every request
+    executes on this host's one set of devices, so a second request stays queued until
+    the first has ended and released its workspace.
     Optional receipts retain evidence and cleanup obligations for fresh replay owners.
     """
 
@@ -102,6 +105,7 @@ class PollingEvaluationExecutor:
         self._workspaces = workspaces
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._lifecycle = LifecyclePublisher()
+        self._admission = asyncio.Lock()
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
         del requirements
@@ -133,7 +137,7 @@ class PollingEvaluationExecutor:
         if handle_id in self._tasks or self._lifecycle.observation(handle_id) is not None:
             return
         self._publish(handle_id, ExecutorObservation(state=EvaluationState.QUEUED))
-        self._tasks[handle_id] = asyncio.create_task(self._run(handle_id, request))
+        self._tasks[handle_id] = asyncio.create_task(self._admitted(handle_id, request))
 
     async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
         """Read process-local evidence without starting recovery tasks."""
@@ -198,6 +202,11 @@ class PollingEvaluationExecutor:
         active = tuple(handle_id for handle_id, task in self._tasks.items() if not task.done())
         await asyncio.gather(*(self.cancel(handle_id) for handle_id in active))
         await asyncio.gather(*self._tasks.values(), return_exceptions=True)
+
+    async def _admitted(self, handle_id: str, request: EvaluationRequest) -> None:
+        """Run ``request`` once no other request holds the host; it stays queued until then."""
+        async with self._admission:
+            await self._run(handle_id, request)
 
     async def _run(self, handle_id: str, request: EvaluationRequest) -> None:
         first = SemanticEvaluationStage.model_validate(request.stages[0].payload)
