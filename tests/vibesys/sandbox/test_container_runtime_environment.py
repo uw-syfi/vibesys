@@ -202,6 +202,27 @@ def test_a_docker_in_docker_task_gets_the_runtime_layer_and_a_same_path_workspac
         session.close()
 
 
+@pytest.mark.parametrize("docker_in_docker", [False, True])
+def test_the_notes_offer_reproducing_failures_exactly_when_the_editor_has_the_hardware(
+    tmp_path: Path, *, docker_in_docker: bool
+) -> None:
+    # Trusted evaluation runs on the same Docker host. An agent told that its editor
+    # says nothing about the target never reproduces a failing case on hardware it
+    # holds; one told it can, where it cannot, wastes its turn on a missing device.
+    runtimes = ("runc", "sysbox-runc") if docker_in_docker else ("runc",)
+    engine = _engine(tmp_path, runtimes)
+    backend = _DaemonBackend(engine)
+    request = _request(tmp_path, backend, docker_in_docker=docker_in_docker)
+
+    session = open_run_environment(_environment(engine, _RecordingBuildRunner()), request)
+    try:
+        offers = "reproduce the failing case" in session.view.prompt_notes
+        assert backend.accelerator_requests == [not docker_in_docker]
+        assert offers == backend.accelerator_requests[0]
+    finally:
+        session.close()
+
+
 def test_an_ordinary_task_keeps_the_workspace_mount_and_an_unchanged_image(
     tmp_path: Path,
 ) -> None:

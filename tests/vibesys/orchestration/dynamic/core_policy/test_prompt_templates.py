@@ -534,7 +534,10 @@ _READ_ONLY_GIT_NOTE = (
 def _docker_notes(*, git_writable: bool) -> str:
     """The notes every agent of a Docker run reads, rendered as the product renders them."""
     docker = render_template(
-        "docker/prompt_notes.j2", template_dir=PROMPTS_DIR / "environments", history_root=None
+        "docker/prompt_notes.j2",
+        template_dir=PROMPTS_DIR / "environments",
+        history_root=None,
+        hardware_attached=False,
     )
     view = RunEnvironmentView(
         paths=AgentPaths(), prompt_notes=str(docker), workspace_git_writable=git_writable

@@ -86,8 +86,9 @@ def test_modal_prompt_notes_snapshot() -> None:
 
 
 _DOCKER_PROMPT_NOTES_CASES = {
-    "no_history": {"history_root": None},
-    "with_history": {"history_root": Path("/opt/vibesys-history")},
+    "no_history": {"history_root": None, "hardware_attached": False},
+    "with_history": {"history_root": Path("/opt/vibesys-history"), "hardware_attached": False},
+    "hardware_attached": {"history_root": Path("/opt/vibesys-history"), "hardware_attached": True},
 }
 
 
@@ -130,7 +131,10 @@ def test_environment_templates_use_every_kwarg_their_call_site_passes() -> None:
             "modal/prompt_notes.j2",
             {"runtime_container_path": "/opt/vibesys-runtime/environment.md"},
         ),
-        ("docker/prompt_notes.j2", {"history_root": Path("/opt/vibesys-history")}),
+        (
+            "docker/prompt_notes.j2",
+            {"history_root": Path("/opt/vibesys-history"), "hardware_attached": True},
+        ),
         ("agent_notes.j2", {"environment_notes": "notes", "git_writable": False}),
     ]
     failures = []

@@ -290,6 +290,8 @@ def representative_context() -> dict[str, object]:
     # True renders the optional evaluation section of the core-policy prompts.
     context["agent_evaluation"] = True
     context["git_writable"] = True
+    # True renders the Docker notes' reproduce-on-this-hardware sentence.
+    context["hardware_attached"] = True
     for name in [
         "baseline_pending",
         "framework_benchmark_enabled",

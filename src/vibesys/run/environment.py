@@ -74,6 +74,11 @@ def open_run_environment(
                 "docker/prompt_notes.j2",
                 template_dir=_TEMPLATE_DIR,
                 history_root=request.git_history_root,
+                # Trusted evaluation runs on the same Docker host; whether the editor
+                # shares its hardware decides whether agents can reproduce failures here.
+                hardware_attached=environment.attaches_backend_accelerator(
+                    docker_in_docker=request.docker_in_docker
+                ),
             )
         )
     elif isinstance(facts, SlurmEnvironmentFacts):

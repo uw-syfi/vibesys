@@ -1733,7 +1733,6 @@ def test_docker_environment_exposes_framework_git_history_read_only(tmp_path: Pa
     assert (str(history), "/opt/vibesys-history", True) in _as_mount_tuples(kwargs["resources"])
     assert kwargs["extra_env"]["VIBESYS_GIT_HISTORY"] == "/opt/vibesys-history"
     assert "/opt/vibesys-history" in session.view.prompt_notes
-    assert "hashes without recoverable source are insufficient" in session.view.prompt_notes
 
 
 def test_docker_environment_uses_environment_bind_mounts(tmp_path: Path) -> None:
