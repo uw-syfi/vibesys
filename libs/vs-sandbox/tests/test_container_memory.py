@@ -19,6 +19,7 @@ from hypothesis import strategies as st
 from vs_sandbox.api import (
     MIN_CONTAINER_MEMORY_RESERVE_BYTES,
     ComputeBackend,
+    DockerSandbox,
     SandboxKind,
     container_memory_limit,
     create_compute_backend,
@@ -78,9 +79,12 @@ def _started_run(
         SandboxKind.DOCKER,
         host_workspace=str(workspace),
         log_path=None,
+        bind_mounts=[],
+        extra_env={},
         attach_accelerator=False,
         container_image="agent-image",
     )
+    assert isinstance(sandbox, DockerSandbox)
     sandbox.start(output=DISCARD)
     sandbox.stop()
     runs = [call for call in engine.calls if call[1] == "run"]
