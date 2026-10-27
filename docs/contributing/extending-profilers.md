@@ -46,6 +46,22 @@ executables outside that environment. Capture artifacts belong in the run's
 writable profile artifact directory, and NCU replay timings are diagnostic rather
 than scored benchmark results.
 
+FlashInfer is an opt-in alternative to NCU for CUDA kernel-writing
+(`--profiler flashinfer`). A kernel records per-block begin and end events with
+FlashInfer's `profiler.cuh` macros, which compile to nothing unless
+`FLASHINFER_ENABLE_PROFILER` is defined. The profiler agent builds an
+instrumented copy and saves the raw `uint64` buffer from its own GPU job; the
+bundled MCP server is pure Python and only decodes and summarizes that buffer
+(or a Chrome trace-event JSON file) per phase and per block. The
+`kernel-timeline-analysis` skill tells implementers where to put probes.
+
+`ncu_flashinfer` offers both in one session. Its definition stages the `ncu`
+and `flashinfer` packages as extra support kinds, and its server calls each
+package's `register_tools` on one MCP instance, prefixing the timeline tools
+with `timeline_` because both packages define `capabilities`. Its prompt reuses
+the macros in `profilers/_ncu_sections.j2` and `profilers/_flashinfer_sections.j2`,
+which the single-profiler prompts also render.
+
 rocprof is the `auto` default for kernel-writing on the ROCm backend when the
 run environment supports it. It uses the same MCP server and prompt as LLM
 serving; the kernel-writing domain's profiler guidance and the
