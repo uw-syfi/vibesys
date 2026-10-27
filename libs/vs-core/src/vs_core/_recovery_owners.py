@@ -183,18 +183,33 @@ def _workspace_owner(
     )
 
 
-def _session_created(record: RequestRecord, observation: Observation, session: SessionView) -> bool:
-    """The session is the one this completed ensure created, and it is busy with its first turn.
+_OWNED_UNACCEPTED = (SessionPhase.ACQUIRING, SessionPhase.EXECUTING, SessionPhase.TERMINAL)
+"""The session phases in which a session owns its ensure's resource without its acceptance."""
 
-    A session's own acceptance waits for that turn's reply, and the turn waits for recovery
-    to be ready, so recovery cannot wait for acceptance to recognise the ensure's resource.
+
+def _session_took_resource(
+    record: RequestRecord, observation: Observation, session: SessionView
+) -> bool:
+    """The session took this completed ensure's resource, and acceptance can no longer prove it.
+
+    A session busy with its first turn: its own acceptance waits for that turn's reply, and the
+    turn waits for recovery to be ready, so recovery cannot wait for acceptance to recognise the
+    ensure's resource.
+
+    A session that has ended: the sessions area took the resource from this ensure's answer and
+    settled it (a close ends a session only on proof that it released that very resource), and
+    the run's closure counts an ended session as settled, as it does an accepted one. No turn
+    accepts an ended session, and one whose every turn failed (each lost to an expired login,
+    say) never was accepted. Requiring acceptance left the ensure's check pending for good: an
+    inspection of the ensure can answer only that the session is gone, and recovery blocked.
+
     An idle session has no turn to wait on, so it needs its acceptance as before.
     """
     return (
         record.phase == RequestPhase.COMPLETED
         and observation.accepted
         and observation.status == ObservationStatus.SUCCEEDED
-        and session.phase in (SessionPhase.ACQUIRING, SessionPhase.EXECUTING)
+        and session.phase in _OWNED_UNACCEPTED
         and session.resource_id is not None
         and observation.resource_id == session.resource_id
     )
@@ -221,7 +236,7 @@ def known_owner(record: RequestRecord, context: RecordsContext, observation: Obs
         and (
             (session.accepted and session.resource_id is not None)
             or record.request_id in session.pending_records
-            or _session_created(record, observation, session)
+            or _session_took_resource(record, observation, session)
         )
         for session in context.sessions.sessions
     ):
