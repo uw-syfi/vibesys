@@ -172,6 +172,24 @@ PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
             tool=ProfilerTool("ncu", ProfilerSite.GPU_WORKLOAD),
             driver_tools=frozenset({"query_metrics"}),
         ),
+        # Reads the per-block timeline a kernel records with FlashInfer's profiler macros.
+        # The profiler agent builds and runs the instrumented kernel in its own GPU job, so
+        # the server is pure Python and needs no executable. Opt-in: ``auto`` keeps NCU.
+        ProfilerDefinition(
+            ProfilerKind.FLASHINFER,
+            frozenset({DomainName.KERNEL_WRITING}),
+            backends=frozenset({ComputeBackend.CUDA}),
+        ),
+        # NCU and the FlashInfer timeline in one session: its server registers both
+        # packages' tools, so both are staged beside it. Opt-in, like FlashInfer alone.
+        ProfilerDefinition(
+            ProfilerKind.NCU_FLASHINFER,
+            frozenset({DomainName.KERNEL_WRITING}),
+            backends=frozenset({ComputeBackend.CUDA}),
+            extra_support_kinds=frozenset({ProfilerKind.NCU, ProfilerKind.FLASHINFER}),
+            tool=ProfilerTool("ncu", ProfilerSite.GPU_WORKLOAD),
+            driver_tools=frozenset({"query_metrics"}),
+        ),
         # The rocprof MCP server also exposes the torch analyzer's tools
         # (torch.profiler traces are a useful cross-check alongside rocprofv3
         # captures), so torch_profiler/ is staged alongside rocprof_profiler/.

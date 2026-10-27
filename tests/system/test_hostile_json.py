@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, get_args
 
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
+from resources.profilers.flashinfer import flashinfer_trace
 from resources.profilers.rocprof import analyze_rocprof, att, counters
 from tests.server.support import REQUEST_TIME
 
@@ -221,6 +222,10 @@ def _rocprof_thread_trace(frame: bytes, dispatch: Path) -> None:
     att.load_instructions(dispatch)
 
 
+def _flashinfer_chrome_trace(frame: bytes, _: Path) -> None:
+    flashinfer_trace.decode_chrome_trace(frame)
+
+
 _RECIPES = {
     "version": 1,
     "recipes": [
@@ -369,6 +374,7 @@ _DECODERS = {
     "rocprof-json-report": _Decoder(_rocprof_json_report, (_capture_runtime.CaptureFailedError,)),
     "rocprof-counters": _Decoder(_rocprof_counters, (_capture_runtime.CaptureFailedError,)),
     "rocprof-thread-trace": _Decoder(_rocprof_thread_trace, (att.AttOutputNotFoundError,)),
+    "flashinfer-chrome-trace": _Decoder(_flashinfer_chrome_trace, (flashinfer_trace.TraceError,)),
 }
 
 

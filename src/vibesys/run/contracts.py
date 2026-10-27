@@ -61,6 +61,8 @@ class ProfilerKind(StrEnum):
     NONE = "none"
     NSYS = "nsys"
     NCU = "ncu"
+    FLASHINFER = "flashinfer"
+    NCU_FLASHINFER = "ncu_flashinfer"
     ROCPROF = "rocprof"
     OTEL = "otel"
     TORCH = "torch"

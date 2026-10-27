@@ -81,17 +81,12 @@ def _invoke(
 StrictFastMCP = importlib.import_module("strict_arguments").StrictFastMCP
 
 
-def build_server(
-    *,
-    runner: capture_runtime.CommandRunner = subprocess.run,
-    withheld: frozenset[str] = frozenset(),
-) -> FastMCP:
-    """Expose NCU availability and bounded report inspection.
+def register_tools(mcp: FastMCP, *, runner: capture_runtime.CommandRunner = subprocess.run) -> None:
+    """Register NCU availability and bounded report inspection on ``mcp``.
 
-    ``withheld`` names tools the run does not offer (those needing a GPU driver the
-    editor lacks); they are absent from the tool list, not rejected when called.
+    A server that offers NCU beside another profiler's tools registers these on its own
+    instance; ``build_server`` is the NCU-only server.
     """
-    mcp = StrictFastMCP("vibesys-ncu-profiler")
     invoke = functools.partial(_invoke, runner=runner)
 
     @mcp.tool()
@@ -161,6 +156,19 @@ def build_server(
             )
         return {"report": str(artifact.resolve()), "page": page, **result}
 
+
+def build_server(
+    *,
+    runner: capture_runtime.CommandRunner = subprocess.run,
+    withheld: frozenset[str] = frozenset(),
+) -> FastMCP:
+    """Expose NCU availability and bounded report inspection.
+
+    ``withheld`` names tools the run does not offer (those needing a GPU driver the
+    editor lacks); they are absent from the tool list, not rejected when called.
+    """
+    mcp = StrictFastMCP("vibesys-ncu-profiler")
+    register_tools(mcp, runner=runner)
     for name in sorted(withheld):
         mcp.remove_tool(name)  # a name the server lacks raises: a stale list must not pass silently
 

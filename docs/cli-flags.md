@@ -628,6 +628,8 @@ supported by this CLI.
 | `auto` | Let the runtime/backend pick the default profiler. |
 | `nsys` | NVIDIA Nsight Systems. Requires a CUDA/NVIDIA profiling environment. |
 | `ncu` | NVIDIA Nsight Compute for CUDA kernel-writing tasks. Selected by `auto` when the run environment supports it; use `none` to disable it. |
+| `flashinfer` | Per-block intra-kernel timelines recorded with FlashInfer's profiler macros, for CUDA kernel-writing tasks. Opt-in; `auto` does not select it. |
+| `ncu_flashinfer` | Both `ncu` and `flashinfer` in one profiler session: the NCU tools under their own names and the timeline tools with a `timeline_` prefix. CUDA kernel-writing only; opt-in. |
 | `rocprof` | AMD rocprofv3 / rocprof-compute toolkit. Requires a ROCm profiling environment. Selected by `auto` for ROCm LLM-serving and kernel-writing tasks when the run environment supports it. |
 | `torch` | PyTorch profiler. Used for in-process Python profiling and Modal GPU dispatch. |
 | `neuron` | AWS Neuron profiler for Trainium. |
