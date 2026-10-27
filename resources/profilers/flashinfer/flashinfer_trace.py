@@ -10,7 +10,9 @@ Two inputs carry the same model, a set of per-block tracks of named intervals:
   high half. Tag bits 0-1 are the event type (begin, end, instant), bits 2-11 the event
   index into the caller's name list, bits 24-31 the SM id. Each (block, group) writes
   every ``num_blocks * num_groups`` words starting at ``1 + block * num_groups + group``,
-  so the word's position, not its tag, names the writer.
+  so the word's position, not its tag, names the writer. Zero words are unused slots,
+  so a begin of event 0 by block 0 on SM 0 at timer value 0 is indistinguishable from
+  one and is dropped; the layout leaves no bit to tell them apart.
 * A Chrome trace-event JSON file (what ``ui.perfetto.dev`` opens), with complete ``X``
   events or ``B``/``E`` pairs; each ``(pid, tid)`` is a track, named by ``thread_name``
   metadata when present.

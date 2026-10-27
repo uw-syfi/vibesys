@@ -74,7 +74,8 @@ def _buffers(draw: st.DrawFn) -> tuple[bytes, list[list[tuple[int, int, int]]], 
             clock = end
             block = slot // num_groups
             for offset, (kind, stamp) in enumerate(((0, begin), (1, end))):
-                word = _tag(block % 256, block, index, kind) | ((stamp % _WRAP) << 32)
+                # SM ids from 1 keep every tag nonzero: an all-zero word is an unused slot.
+                word = _tag(block % 255 + 1, block, index, kind) | ((stamp % _WRAP) << 32)
                 words[slot + (2 * k + offset) * stride] = word
     data = struct.pack("<ii", num_blocks, num_groups) + struct.pack(f"<{len(words)}Q", *words)
     return data, writers, num_groups
