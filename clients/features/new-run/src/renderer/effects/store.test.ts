@@ -1018,6 +1018,57 @@ test('using the example project that is already there makes it the run project w
   expect(projectItem(store)).toBeUndefined();
 });
 
+test("an example's roles wait for its project and say so, then come with the first check", async () => {
+  const roles = ['multi-orchestrator', 'multi-judge'];
+  const {store, clock} = await chooseExample(FREE, {
+    helperFeatures: () =>
+      ok([...REQUIRED_HELPER_FEATURES, 'run_roles', 'example_destination'] as HelperFeature[]),
+    preflight: () => ok({kind: 'offered' as const, value: {checks: [], roles, backend: null}}),
+  });
+  // Nothing checks the inputs of a project not made yet: the roles say what they wait for.
+  expect(rolesView(store.getState().context)).toEqual({kind: 'waiting', on: 'project'});
+  const fix = projectItem(store)?.fix;
+  if (fix?.kind !== 'create_from_example') throw new Error('expected the create fix');
+  store.dispatch({type: 'fix', fix});
+  await settle();
+  clock.runDue();
+  await settle();
+  expect(rolesView(store.getState().context)).toEqual({kind: 'ready', roles});
+});
+
+test('a machine with no VibeSys checkout says so before the inputs exist, with the fix in Machines', async () => {
+  const describe: NewRunBridge['describeMachine'] = () =>
+    ok({
+      kind: 'offered' as const,
+      value: {
+        checkout: null,
+        hardware: {cpu_cores: 8, gpus: [], accelerator: 'cpu' as const},
+        docker: {reachable: true as const, version: '27'},
+        harness_clis: ['claude'],
+        runs: {live: 0, ended_today: 0},
+      },
+    });
+  const {store, clock} = await chooseExample(FREE, {describeMachine: describe});
+  const checkout = () => readiness(store.getState()).filter(item => item.id === 'checkout_found');
+  expect(checkout()).toEqual([
+    {
+      id: 'checkout_found',
+      state: 'fail',
+      label: 'VibeSys checkout',
+      detail: 'No VibeSys checkout on This Mac',
+      fix: {kind: 'choose_checkout'},
+    },
+  ]);
+  // Once the inputs are checked, their own checkout item is the one said (here: none failed).
+  const fix = projectItem(store)?.fix;
+  if (fix?.kind !== 'create_from_example') throw new Error('expected the create fix');
+  store.dispatch({type: 'fix', fix});
+  await settle();
+  clock.runDue();
+  await settle();
+  expect(checkout()).toEqual([]);
+});
+
 test('a destination taken when Create runs lands in the same state, not an error', async () => {
   const {store} = await chooseExample(FREE, {
     createFromExample: () => ok({kind: 'taken' as const}),
@@ -1164,6 +1215,9 @@ for (const login of LOGINS) {
     if (item !== undefined) expect(item.label).toBe('claude signed in on This Mac');
     // Only a CLI that says it is signed out is fixed in Settings, and holds Start closed.
     expect(item?.fix ?? null).toEqual(login.state === 'fail' ? {kind: 'open_logins'} : null);
+    if (login.state === 'fail') {
+      expect(item?.detail).toBe('Sign in once from a terminal on This Mac.');
+    }
     expect(startBlocked(store.getState()) !== undefined).toBe(login.state === 'fail');
     store.dispatch({type: 'start'});
     await settle();

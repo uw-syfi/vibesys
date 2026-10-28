@@ -6,20 +6,21 @@
  * coming back finds the page where it was left.
  */
 import {Button, Page, Row, SectionLayout, SidebarItem, Stack, Text} from '@vibesys/ui';
-import type {JSX} from 'react';
-import {isDone, type NewRunEvent, type NewRunSnapshot, type StepId} from '../../state/index.js';
+import {type JSX, useState} from 'react';
+import {
+  isDone,
+  type NewRunContext,
+  type NewRunEvent,
+  type NewRunSnapshot,
+  reviewWords,
+  type StepId,
+} from '../../state/index.js';
 import {PickPage} from './pick-page.js';
 import type {FolderCompletion} from './project-pages.js';
 import {Question} from './question.js';
-import {
-  ProblemBanner,
-  type ReviewLinks,
-  ReviewNav,
-  ReviewPage,
-  reviewWords,
-} from './review-page.js';
+import {ProblemBanner, type ReviewLinks, ReviewNav, ReviewPage} from './review-page.js';
 import {pickedWords, progressLine, type StepView, stepViews} from './steps.js';
-import {entriesIn, type MachineOption} from './view.js';
+import {entriesIn, type MachineOption, readiness} from './view.js';
 
 type Dispatch = (event: NewRunEvent) => void;
 type Marker = NonNullable<Parameters<typeof SidebarItem>[0]['marker']>;
@@ -111,10 +112,23 @@ function Steps(props: {
 }
 
 /** The New run screen over its store's snapshot. */
+/**
+ * Whether Review has been opened since the form was started: until it has, the step list says
+ * what Review holds, not how many of its checks fail (the screen's own memory, as a scroll is).
+ */
+function useReviewed(context: NewRunContext): boolean {
+  const [reviewed, setReviewed] = useState(context.at === 'review');
+  // Kept in step with the form while rendering, as React's "information from previous renders".
+  if (context.at === 'review' && !reviewed) setReviewed(true);
+  if (context.answers.from === null && context.at === 'pick' && reviewed) setReviewed(false);
+  return reviewed;
+}
+
 export function NewRunScreen(props: ScreenProps): JSX.Element {
   const {snapshot, dispatch} = props;
   const {context} = snapshot;
-  const views = stepViews(context, reviewWords(snapshot));
+  const failed = readiness(snapshot).filter(item => item.state === 'fail').length;
+  const views = stepViews(context, reviewWords(failed, useReviewed(context)));
   const {at} = context;
   const index = views.findIndex(view => view.id === at);
   return (

@@ -25,6 +25,7 @@ import {
   type NewRunContext,
   roleLabel,
   roleSummary,
+  rolesWaitWords,
 } from '../../state/index.js';
 import type {CardProps} from './card-props.js';
 import {destinationTaken, moreOptionsSummary, type RolesView, rolesView} from './view.js';
@@ -97,10 +98,12 @@ function RolesSection(props: CardProps): JSX.Element {
       </Text>
     );
   }
-  if (view.kind === 'pending') {
+  if (view.kind === 'pending' || view.kind === 'waiting') {
     return (
       <Text variant="small" tone="muted">
-        The roles are read from the machine with the first check of these inputs.
+        {view.kind === 'waiting'
+          ? rolesWaitWords(view.on).sentence
+          : 'The roles are read from the machine with the first check of these inputs.'}
       </Text>
     );
   }

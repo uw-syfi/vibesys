@@ -72,7 +72,9 @@ export {
   goalKey,
   type HelperFor,
   harnessLabel,
+  type InputsWait,
   inputsKey,
+  inputsWaitOn,
   joinWords,
   lastRun,
   missingFeatures,
@@ -105,6 +107,7 @@ export {
   measureOptions,
   nothingSetUp,
   sameTarget,
+  targetFacts,
 } from './measure.js';
 export {
   type DomainFilter,
@@ -117,6 +120,16 @@ export {
   whatItIs,
 } from './pick-words.js';
 export {type Problem, problemOf, type Step, StepFailure} from './problem.js';
+export {
+  OPEN_LOGINS_WORDS,
+  REVIEW_ROWS,
+  reviewWords,
+  rolesWaitWords,
+  SAME_MACHINE_WORDS,
+  setUpClusterWords,
+  signInWords,
+  WHERE_THE_PROJECT_IS,
+} from './review-words.js';
 export {
   agentWithRoles,
   formWithRoles,

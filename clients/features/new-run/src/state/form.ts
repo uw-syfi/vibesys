@@ -318,6 +318,21 @@ export function runInputs(form: Form): RunInputs | null {
   };
 }
 
+/** What the run's inputs still wait for before they can be checked. */
+export type InputsWait = 'project' | 'task' | 'agent' | 'arguments';
+
+/**
+ * The first thing the inputs wait for (an example not made into a project yet counts as no
+ * project), or null when `runInputs` has them all.
+ */
+export function inputsWaitOn(form: Form): InputsWait | null {
+  if (projectPath(form) === null) return 'project';
+  if (form.task === null) return 'task';
+  if (form.agent === null) return 'agent';
+  if (advancedProblem(form.advanced) !== null) return 'arguments';
+  return null;
+}
+
 /** The key of the inputs: checks for one key are not shown for another. */
 export function inputsKey(form: Form): string | null {
   const inputs = runInputs(form);

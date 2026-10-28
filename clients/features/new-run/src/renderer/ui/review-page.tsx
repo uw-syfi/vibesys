@@ -12,6 +12,8 @@ import {
   CheckList,
   type CheckState,
   Field,
+  KeyValue,
+  LabeledRow,
   Row,
   SegmentedControl,
   Select,
@@ -28,8 +30,14 @@ import {
   type NewRunEvent,
   type NewRunSnapshot,
   nothingSetUp,
+  OPEN_LOGINS_WORDS,
+  REVIEW_ROWS,
   roleHarnesses,
   roleModels,
+  SAME_MACHINE_WORDS,
+  setUpClusterWords,
+  targetFacts,
+  WHERE_THE_PROJECT_IS,
 } from '../../state/index.js';
 import {IdeasField, TimeLimitField} from './budget-fields.js';
 import type {CardProps} from './card-props.js';
@@ -76,7 +84,7 @@ function fixText(fix: ReadinessFix): string {
     case 'choose_checkout':
       return 'Choose it in Machines';
     case 'open_logins':
-      return 'Open Agent logins';
+      return OPEN_LOGINS_WORDS;
     case 'recheck':
       return 'Check again';
   }
@@ -151,7 +159,7 @@ function What(props: CardProps): JSX.Element {
   const {context, dispatch} = props;
   return (
     <Section title="What">
-      <Field row label="Task">
+      <LabeledRow label={REVIEW_ROWS.task}>
         <Row justify="between" gap="space-3">
           <Text variant="code">{pickedWords(context) ?? 'Not chosen'}</Text>
           <Button
@@ -162,10 +170,10 @@ function What(props: CardProps): JSX.Element {
             press={() => dispatch({type: 'go', step: 'pick'})}
           />
         </Row>
-      </Field>
-      <Field row label="Goal">
+      </LabeledRow>
+      <LabeledRow label={REVIEW_ROWS.goal}>
         <GoalRow context={context} />
-      </Field>
+      </LabeledRow>
     </Section>
   );
 }
@@ -176,7 +184,49 @@ function targetKey(target: MeasureTarget): string {
 }
 
 function targetWords(target: MeasureTarget): string {
-  return target.kind === 'same_machine' ? 'The same machine' : measureLabel(target);
+  return target.kind === 'same_machine' ? SAME_MACHINE_WORDS : measureLabel(target);
+}
+
+/** Where results are measured: a choice of what the machine has set up, with its facts. */
+function MeasuredOn(props: CardProps & {readonly links: ReviewLinks}): JSX.Element {
+  const {context, dispatch} = props;
+  const {machine, measure} = context.form;
+  const targets = measureOptions(context.compute);
+  const backend = backendOf(context);
+  const help = backend === null ? {} : {help: `With ${backendLabel(backend)}, as the task says`};
+  if (targets.length < 2) {
+    // Nothing else is set up: a select of one would offer no choice, so the row says what there
+    // is, and where more is set up.
+    return (
+      <LabeledRow label={REVIEW_ROWS.measuredOn} {...help}>
+        <Row justify="between" gap="space-3">
+          <Text>{targetWords(measure)}</Text>
+          {nothingSetUp(context.compute) ? (
+            <Button
+              variant="quiet"
+              size="sm"
+              text={setUpClusterWords(machineLabel(machine))}
+              press={() => props.links.setUp(machine)}
+            />
+          ) : null}
+        </Row>
+      </LabeledRow>
+    );
+  }
+  const facts = targetFacts(context.compute, measure);
+  return (
+    <Field row label={REVIEW_ROWS.measuredOn} {...help}>
+      <Select
+        value={targetKey(measure)}
+        options={targets.map(target => ({value: targetKey(target), label: targetWords(target)}))}
+        change={key => {
+          const target = targets.find(each => targetKey(each) === key);
+          if (target !== undefined) dispatch({type: 'measure', target});
+        }}
+      />
+      {facts.length === 0 ? null : <KeyValue items={facts} />}
+    </Field>
+  );
 }
 
 function Where(
@@ -193,14 +243,14 @@ function Where(
   const machines = props.machines.some(option => option.value === machine)
     ? props.machines
     : [...props.machines, {value: machine, label: name}];
-  const targets = measureOptions(context.compute);
-  const backend = backendOf(context);
   return (
     <Section title="Where">
-      <Field row label="Agent works on" {...(own ? {help: 'Where the project is'} : {})}>
-        {own ? (
+      {own ? (
+        <LabeledRow label={REVIEW_ROWS.worksOn} help={WHERE_THE_PROJECT_IS}>
           <Text>{here}</Text>
-        ) : (
+        </LabeledRow>
+      ) : (
+        <Field row label={REVIEW_ROWS.worksOn}>
           <Select
             value={machine}
             options={machines.map(option => ({
@@ -209,41 +259,9 @@ function Where(
             }))}
             change={next => dispatch({type: 'machine', machine: next})}
           />
-        )}
-      </Field>
-      <Field
-        row
-        label="Measured on"
-        {...(backend === null ? {} : {help: `With ${backendLabel(backend)}, as the task says`})}
-      >
-        {targets.length < 2 ? (
-          // Nothing else is set up: a select of one would offer no choice, so it says what there
-          // is, and where more is set up.
-          <Row justify="between" gap="space-3">
-            <Text>{targetWords(context.form.measure)}</Text>
-            {nothingSetUp(context.compute) ? (
-              <Button
-                variant="quiet"
-                size="sm"
-                text={`Set up a cluster on ${name}`}
-                press={() => props.links.setUp(machine)}
-              />
-            ) : null}
-          </Row>
-        ) : (
-          <Select
-            value={targetKey(context.form.measure)}
-            options={targets.map(target => ({
-              value: targetKey(target),
-              label: targetWords(target),
-            }))}
-            change={key => {
-              const target = targets.find(each => targetKey(each) === key);
-              if (target !== undefined) dispatch({type: 'measure', target});
-            }}
-          />
-        )}
-      </Field>
+        </Field>
+      )}
+      <MeasuredOn {...props} />
     </Section>
   );
 }
@@ -260,7 +278,7 @@ function AgentRows(
   const harnesses = roleHarnesses(offers, providers, agent.model);
   return (
     <>
-      <Field row label="Model">
+      <Field row label={REVIEW_ROWS.model}>
         <Select
           value={JSON.stringify([agent.provider, agent.model])}
           options={models.map(model => ({
@@ -281,10 +299,10 @@ function AgentRows(
           }}
         />
       </Field>
-      <Field row label="Runs in">
+      <LabeledRow label={REVIEW_ROWS.runsIn}>
         {harnesses.length > 1 ? (
           <SegmentedControl
-            label="Runs in"
+            label={REVIEW_ROWS.runsIn}
             size="sm"
             options={harnesses.map(provider => ({
               value: provider,
@@ -296,7 +314,7 @@ function AgentRows(
         ) : (
           <Text>{harnessLabel(offers, agent.provider)}</Text>
         )}
-      </Field>
+      </LabeledRow>
       <RoleAgents {...props} offers={offers} agent={agent} />
     </>
   );
@@ -358,13 +376,6 @@ function BeforeYouStart(props: {
       <CheckList items={items} />
     </Stack>
   );
-}
-
-/** What Review's one-line entry in the step list says: what needs the user, else what it holds. */
-export function reviewWords(snapshot: NewRunSnapshot): string {
-  const failed = readiness(snapshot).filter(item => item.state === 'fail').length;
-  if (failed === 0) return 'Machine, agent, limits';
-  return failed === 1 ? '1 check needs you' : `${failed} checks need you`;
 }
 
 export function ReviewPage(

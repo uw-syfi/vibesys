@@ -19,6 +19,8 @@ export const FAKE_OFFER: Pick<Offer, 'machine' | 'harnesses' | 'examples'> = {
     docker: {reachable: true, version: '27.3.1'},
     harness_clis: ['claude', 'codex'],
     harness_cli_names: {claude: 'Claude Code', codex: 'Codex'},
+    // A current helper says each installed CLI's login; an older one says nothing (see the specs).
+    harness_logins: {claude: 'signed_in'},
     runs: {live: 1, ended_today: 2},
   },
   harnesses: [

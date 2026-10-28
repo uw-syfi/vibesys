@@ -305,6 +305,19 @@ test('the examples table: a domain filter and a search narrow it, and Continue w
   await expect(continueButton(page)).not.toHaveAttribute('aria-disabled', 'true');
 });
 
+test('before Review is opened its step says what it holds, not how many checks fail', async ({
+  page,
+}) => {
+  await openAt(page, pageNamed('pick example chosen'));
+  const review = steps(page).getByRole('button').filter({hasText: 'Review and start'});
+  await expect(review).toContainText('Machine, agent, limits');
+  await proceed(page);
+  // Opened: the example is not a project yet, which needs the user.
+  await expect(review).toContainText('1 check needs you');
+  await main(page).getByRole('button', {name: 'Back', exact: true}).click();
+  await expect(review).toContainText('1 check needs you');
+});
+
 test('the steps show their answers and go back to them; Review waits for a pick', async ({
   page,
 }) => {
@@ -348,20 +361,29 @@ for (const width of [1440, 1000, 660]) {
   });
 }
 
-test('every step answer fits its line at 1440px', async ({page}) => {
-  await page.setViewportSize({width: 1440, height: 900});
-  await openAt(page, pageNamed('review roles'));
-  const slack = await page.evaluate(() =>
-    [...document.querySelectorAll('.vs-sidebar-text > *')].map(line => {
-      const range = document.createRange();
-      range.selectNodeContents(line);
-      const box = line.getBoundingClientRect();
-      return {text: line.textContent, slack: box.width - range.getBoundingClientRect().width};
-    }),
-  );
-  expect(slack.length).toBeGreaterThan(0);
-  for (const each of slack) expect(each.slack, each.text ?? '').toBeGreaterThanOrEqual(0);
-});
+for (const width of [1440, 1000, 660]) {
+  test(`the longest step answer has room to spare on one line at ${width}px`, async ({page}) => {
+    await page.setViewportSize({width, height: 900});
+    await openAt(page, pageNamed('review LLM'));
+    expect(await page.evaluate(() => window.innerWidth)).toBe(width);
+    // A narrow pane folds the steps into one line, which opens them.
+    const fold = page.locator('.vs-section-toggle');
+    if (await fold.isVisible()) await fold.click();
+    const slack = await page.evaluate(() =>
+      [...document.querySelectorAll('.vs-sidebar-text > *')].map(line => {
+        const range = document.createRange();
+        range.selectNodeContents(line);
+        const box = line.getBoundingClientRect();
+        return {text: line.textContent, slack: box.width - range.getBoundingClientRect().width};
+      }),
+    );
+    const answers = slack.filter(each =>
+      ['qwen3.5-9b-mi210', 'Machine, agent, limits', '1 check needs you'].includes(each.text ?? ''),
+    );
+    expect(answers.length).toBe(2);
+    for (const each of answers) expect(each.slack, each.text ?? '').toBeGreaterThan(24);
+  });
+}
 
 test('an unfinished run is a draft: it is offered on the Runs dashboard, kept across a reload, and discarded', async ({
   page,
@@ -692,6 +714,9 @@ test('Measured on: only what the machine has set up is offered, and the choice i
   ]);
   await expect(main(page).getByRole('button', {name: /^Set up a cluster on/})).toHaveCount(0);
   await measured.selectOption({label: 'Slurm · lab-h100'});
+  // The cluster's facts as Settings holds them sit under the choice.
+  await expect(main(page)).toContainText('SSH, lab-login');
+  await expect(main(page)).toContainText('4:00:00');
   await main(page).getByRole('button', {name: 'Create the project'}).click();
   await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
   await start(page).click();
@@ -748,7 +773,7 @@ test('an agent not signed in on the machine fails a check, closes Start, and its
 }) => {
   await openAt(page, pageNamed('review signed out'));
   const item = beforeYouStart(page).locator('li', {hasText: 'Claude Code signed in on host-b'});
-  await expect(item).toContainText('Installed, but not signed in.');
+  await expect(item).toContainText('Sign in once from a terminal on host-b.');
   await expect(start(page)).toHaveAttribute('aria-disabled', 'true');
   await expect(main(page)).toContainText('Fix the check under Before you start.');
   await item.getByRole('button', {name: 'Open Agent logins'}).click();
@@ -759,6 +784,20 @@ test('an agent not signed in on the machine fails a check, closes Start, and its
 test('an agent signed in on the machine is a passed check', async ({page}) => {
   await openAt(page, {...pageNamed('review project'), logins: {claude: 'signed_in'}});
   await expect(beforeYouStart(page)).toContainText('Claude Code signed in on host-b');
+  await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
+});
+
+test('a machine whose VibeSys predates the sign-in fact adds no sign-in check', async ({page}) => {
+  await openAt(
+    page,
+    pageNamed('review project'),
+    withNewRun(newRun => {
+      const {harness_logins: _logins, ...older} = newRun.machine as Record<string, unknown>;
+      return {...newRun, machine: older};
+    }),
+  );
+  await expect(beforeYouStart(page)).toContainText('Claude Code installed on host-b');
+  await expect(beforeYouStart(page)).not.toContainText('signed in on');
   await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
 });
 
