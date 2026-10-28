@@ -140,7 +140,7 @@ function uiItem(item: PanelItem, props: ChatPanelView): UiThreadItem {
           <Stack gap="space-2">
             <ChatMessage side="start" text={item.text} notice={FAILED_ANSWER} tone="err" />
             <Row gap="space-2">
-              <ErrorActions ask={() => askAboutError(failedAnswerReport(item.text))} />
+              <ErrorActions size="sm" ask={() => askAboutError(failedAnswerReport(item.text))} />
             </Row>
           </Stack>,
         );

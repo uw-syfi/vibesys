@@ -333,7 +333,7 @@ CSS of their own. An app imports `./tokens.css`, `./fonts.css` and `./components
 | `StatusDot` | `tone: 'neutral' \| 'live' \| 'ok' \| 'warn' \| 'err'`, `label` |
 | `Card` | `section?` (a titled region), `flush?` |
 | `Banner` | `title`, `tone?: 'neutral' \| 'ok' \| 'warn' \| 'err'`, `body?`, `actions?` |
-| `ErrorActions` | `ask?`, `copy?` (the text); goes in an error's `actions`: "Ask about this error" hands it to an assistant, "Copy details" writes `copy` to the clipboard and says whether that worked; nothing without either |
+| `ErrorActions` | `ask?`, `copy?` (the text), `size?`; goes in an error's `actions`: "Ask about this error" hands it to an assistant, "Copy details" writes `copy` to the clipboard and says whether that worked; nothing without either |
 | `Menu` | the trigger's `text` or `icon` + `label`, `items: {id, label, press \| href, danger?}[]`, `variant?`, `size?`; raised, keyboard navigable, closes on Esc, a choice or the focus leaving |
 | `Dialog` | `open`, `title`, `dismiss`, children, `actions?`; the native modal `<dialog>` at the `overlay` elevation |
 | `Table` | `label`, `columns: {key, header, cell(row), mono?, align?}[]`, `rows`, `rowKey`, `selected?`, `select?`; sticky header, scrolls sideways in its own focusable box |

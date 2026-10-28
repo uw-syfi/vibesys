@@ -29,7 +29,7 @@ export function FailureNote(props: {
       )}
       {props.ask === undefined ? null : (
         <Row gap="space-2">
-          <ErrorActions ask={props.ask} />
+          <ErrorActions ask={props.ask} size="sm" />
         </Row>
       )}
     </>
