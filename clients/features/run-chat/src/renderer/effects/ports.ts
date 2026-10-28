@@ -17,4 +17,6 @@ export interface RunChatPorts {
   control(request: DeliverRequest): Promise<ControlOutcome>;
   /** A control id that has not been used in this run. */
   newControlId(): string;
+  /** The most UTF-8 bytes a question may hold (the host's cap): an error question is cut to it. */
+  readonly maxQuestionBytes: number;
 }

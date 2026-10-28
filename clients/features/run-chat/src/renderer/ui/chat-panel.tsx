@@ -1,6 +1,7 @@
 import {
   Button,
   ChatMessage,
+  ErrorActions,
   Field,
   Menu,
   MenuBounds,
@@ -15,8 +16,10 @@ import {
 import type {JSX} from 'react';
 import {
   type ChatPanelView,
+  chatFailureReport,
   effectiveHarness,
   FAILED_ANSWER,
+  failedAnswerReport,
   modelOptions,
   type PanelItem,
   providerOptions,
@@ -125,11 +128,22 @@ function row(id: string, node: JSX.Element): UiThreadItem {
   return {kind: 'node', id, node};
 }
 
-function uiItem(item: PanelItem, roles: readonly string[]): UiThreadItem {
+function uiItem(item: PanelItem, props: ChatPanelView): UiThreadItem {
+  const {askAboutError} = props;
   switch (item.kind) {
     case 'question':
       return row(item.id, <ChatMessage side="end" text={item.text} />);
     case 'answer':
+      if (item.failed && !item.streaming && askAboutError !== undefined)
+        return row(
+          item.id,
+          <Stack gap="space-2">
+            <ChatMessage side="start" text={item.text} notice={FAILED_ANSWER} tone="err" />
+            <Row gap="space-2">
+              <ErrorActions ask={() => askAboutError(failedAnswerReport(item.text))} />
+            </Row>
+          </Stack>,
+        );
       return row(
         item.id,
         <ChatMessage
@@ -156,7 +170,8 @@ function uiItem(item: PanelItem, roles: readonly string[]): UiThreadItem {
           draft={item.card.draft}
           view={item.card.view}
           actions={item.card.actions}
-          roles={roles}
+          roles={props.roles}
+          {...(askAboutError === undefined ? {} : {askAboutError})}
         />,
       );
   }
@@ -165,10 +180,17 @@ function uiItem(item: PanelItem, roles: readonly string[]): UiThreadItem {
 /** One input and one send control; New steer turns what is typed into a steer card. */
 function Composer(props: ChatPanelView): JSX.Element {
   const {panel, dispatch} = props;
+  const {error} = panel;
+  const ask = props.askAboutError;
   const submit = (): void => dispatch({type: 'submit', threadId: props.shown});
   return (
     <Stack gap="space-3">
-      {panel.error === null ? null : <FailureNote failure={panel.error} />}
+      {error === null ? null : (
+        <FailureNote
+          failure={error}
+          {...(ask === undefined ? {} : {ask: () => ask(chatFailureReport(error))})}
+        />
+      )}
       <Field label="Message" hideLabel>
         <TextInput
           value={panel.composer}
@@ -210,7 +232,7 @@ function opensAt(items: readonly PanelItem[]): string | null {
 }
 
 function Panel(props: ChatPanelView): JSX.Element {
-  const items = props.items.map(item => uiItem(item, props.roles));
+  const items = props.items.map(item => uiItem(item, props));
   const opens = opensAt(props.items);
   return (
     <Stack gap="space-3" grow>

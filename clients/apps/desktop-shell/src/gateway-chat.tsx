@@ -10,7 +10,12 @@ import {
 import {sessionCore} from '@vibesys/feature-run-sessions/state';
 import {newRequestId} from '@vibesys/request-identity';
 import type {CoreState} from '@vibesys/run-state';
-import {chatControlIntent, createdSession, type HarnessOption} from '@vibesys/runs/chat';
+import {
+  CHAT_TEXT_MAX_BYTES,
+  chatControlIntent,
+  createdSession,
+  type HarnessOption,
+} from '@vibesys/runs/chat';
 import {addressedIntent, callFailure, runReference} from '@vibesys/runs/intents';
 import {Button, Stack, Text} from '@vibesys/ui';
 import {useEffect, useMemo} from 'react';
@@ -103,6 +108,7 @@ export function useGatewayChatState(
       }
     },
     newControlId: newRequestId,
+    maxQuestionBytes: CHAT_TEXT_MAX_BYTES,
   };
   const core = input.core
     ? {...sessionCore(input.core, threads.context), steerDeliveries: steers}

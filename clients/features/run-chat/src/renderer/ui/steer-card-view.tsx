@@ -14,9 +14,11 @@ import type {JSX} from 'react';
 import {
   type CardActions,
   type CardView,
+  type ErrorReport,
   parseTargetValue,
   STEER_MODES,
   type SteerDraft,
+  steerFailureReport,
   targetOptions,
   targetValue,
 } from '../../state/index.js';
@@ -28,6 +30,21 @@ interface CardProps {
   readonly actions: CardActions;
   /** The run's roles: what the target select lists after the whole run. */
   readonly roles: readonly string[];
+  /** Hands the card's failure to the chat; absent where the chat cannot ask. */
+  readonly askAboutError?: (report: ErrorReport) => void;
+}
+
+/** The card's failure, with the offer to ask the chat about it where it can. */
+function CardFailure(props: CardProps): JSX.Element | null {
+  const {error} = props.view;
+  const ask = props.askAboutError;
+  if (error === null) return null;
+  return (
+    <FailureNote
+      failure={error}
+      {...(ask === undefined ? {} : {ask: () => ask(steerFailureReport(error))})}
+    />
+  );
 }
 
 function Draft(props: CardProps): JSX.Element {
@@ -54,7 +71,7 @@ function Draft(props: CardProps): JSX.Element {
           change={actions.setMode}
         />
       </Row>
-      {view.error === null ? null : <FailureNote failure={view.error} />}
+      <CardFailure {...props} />
       <Row gap="space-3" align="start">
         <Button
           variant="primary"
@@ -92,7 +109,7 @@ export function SteerCardView(props: CardProps): JSX.Element | null {
               <Button variant="quiet" size="sm" text="Withdraw" press={actions.withdraw} />
             ) : null}
           </Row>
-          {view.error === null ? null : <FailureNote failure={view.error} />}
+          <CardFailure {...props} />
         </Stack>
       )}
     </Card>
