@@ -90,12 +90,22 @@ interface TimelineTick {
   readonly label: string;
 }
 
-export interface TimelineRows {
-  /** The whole axis (run start to the latest time reached) and the part in view. */
+/** A part of the run clock, in seconds. */
+export interface ClockSpan {
   readonly from: number;
   readonly to: number;
-  readonly view: {readonly from: number; readonly to: number};
+}
+
+export interface TimelineRows {
+  /** The whole axis (run start to the latest time reached). */
+  readonly from: number;
+  readonly to: number;
+  /** The part of the axis the range picks, which holds the rows, and the part of it in view. */
+  readonly range: ClockSpan;
+  readonly view: ClockSpan;
+  /** Ticks over the part in view, and the part in view in words: `7m to 22m`. */
   readonly ticks: readonly TimelineTick[];
+  readonly inView: string;
   readonly rows: readonly TimelineRow[];
   /** Failed ideas in range that are folded into the lane (0 when none are). */
   readonly folded: number;
@@ -254,6 +264,12 @@ function tickLabel(offset: number): string {
   return offset >= 86_400 ? `d${Math.floor(offset / 86_400) + 1}` : duration(offset);
 }
 
+/** From `from` to `to` seconds into the run, in the ticks' words; to the minute within one day. */
+function spanWords(from: number, to: number): string {
+  const [first, last] = [tickLabel(from), tickLabel(to)];
+  return first === last ? `${duration(from)} to ${duration(to)}` : `${first} to ${last}`;
+}
+
 /** Ticks at a round step from the run's start, no more than `MAX_TICKS` over the view. */
 function timelineTicks(
   start: number,
@@ -322,13 +338,15 @@ export function legendItems(legend: TimelineLegend): readonly {
 /**
  * The Timeline's rows over `range`: ideas that overlap the range, in the Ideas list's order. When
  * more than `FAILED_DENSE` failed ideas are in range and `expanded` is false, they fold into
- * one lane at the top.
+ * one lane at the top. When the reader zoomed or panned (`zoom`), also the part of the range they
+ * look at; a zoom reaching past the range is cut to it.
  */
 export function timelineRows(
   model: RunModel,
   range: TimelineRange,
   clock: RunClockView,
   expanded: boolean,
+  zoom: ClockSpan | null = null,
 ): TimelineRows {
   const all = model.candidates.candidates;
   const inputKnown = inputValueOf(all) !== null;
@@ -338,24 +356,42 @@ export function timelineRows(
   );
   const from = clock.start;
   const to = Math.max(reached, from + 1);
-  const view = range === 'all' ? {from, to} : {from: Math.max(from, to - RANGE_SECONDS[range]), to};
+  const span = range === 'all' ? {from, to} : {from: Math.max(from, to - RANGE_SECONDS[range]), to};
+  const view = zoom === null ? span : within(zoom, span);
   const inRange = ordered(all)
     .map(item => rowOf(item, clock.now, inputKnown, all, model.pauses))
-    .filter(row => row.end >= view.from && row.start <= view.to);
+    .filter(row => row.end >= span.from && row.start <= span.to);
   const failed = inRange.filter(row => row.outcome === 'err');
   const fold = !expanded && failed.length > FAILED_DENSE;
   const rows = fold ? [laneOf(failed), ...inRange.filter(row => row.outcome !== 'err')] : inRange;
   return {
     from,
     to,
+    range: span,
     view,
     ticks: timelineTicks(clock.start, view),
+    inView: spanWords(view.from - clock.start, view.to - clock.start),
     rows,
     folded: fold ? failed.length : 0,
     failedInRange: failed.length,
     total: all.length,
     legend: legendOf(rows),
   };
+}
+
+/** `zoom` cut to `span`; all of `span` when nothing of the zoom lies in it. */
+function within(zoom: ClockSpan, span: ClockSpan): ClockSpan {
+  const cut = {from: Math.max(span.from, zoom.from), to: Math.min(span.to, zoom.to)};
+  return cut.to > cut.from ? cut : span;
+}
+
+/**
+ * What the Timeline keeps of a zoom or pan to `next` over `range`: the part looked at, or null when
+ * it covers the whole range, so a live run's range keeps growing in view instead of stopping
+ * where the reader zoomed back out.
+ */
+export function timelineZoom(next: ClockSpan, range: ClockSpan): ClockSpan | null {
+  return next.from <= range.from && next.to >= range.to ? null : next;
 }
 
 /** One line of an idea's attempts. */

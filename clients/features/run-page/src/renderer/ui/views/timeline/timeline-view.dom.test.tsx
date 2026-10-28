@@ -206,3 +206,39 @@ test('the legend names a quota pause when a bar shows one, and only then', async
   expect(legend(shown.container)).toContain('Quota pause');
   await shown.unmount();
 });
+
+test('zoom and pan move what is in view within the range; a range or Whole range shows all of it', async () => {
+  const {container, unmount} = await mount(<TimelineView {...base(IDEAS, 3600)} selected="mid" />);
+  const ticks = () =>
+    [...container.querySelectorAll('.vs-gantt-tick')].map(each => each.textContent);
+  const press = (name: string) => {
+    const button = [...container.querySelectorAll('[aria-label="Time range"] button')].find(
+      each => each.textContent === name,
+    ) as HTMLButtonElement;
+    return act(async () => button.click());
+  };
+  const range = (label: string) => {
+    const input = [...container.querySelectorAll('input[type="radio"]')].find(
+      each => (each.parentElement?.textContent ?? '') === label,
+    ) as HTMLInputElement;
+    return act(async () => input.click());
+  };
+  const whole = ticks();
+  await press('Zoom in');
+  const zoomed = ticks();
+  expect(zoomed).not.toEqual(whole);
+  await press('Earlier');
+  expect(ticks()).not.toEqual(zoomed);
+  await press('Whole range');
+  expect(ticks()).toEqual(whole);
+  await press('Zoom in');
+  await range('Last day');
+  expect(ticks()).toEqual(whole);
+  // The idea opened beside the Timeline is its selected row.
+  expect(
+    rows(container)
+      .filter(row => row.getAttribute('aria-selected') === 'true')
+      .map(row => row.getAttribute('aria-label')),
+  ).toEqual(['mid']);
+  await unmount();
+});
