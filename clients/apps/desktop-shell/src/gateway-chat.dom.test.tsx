@@ -9,6 +9,7 @@ import type {HostKey} from '@vibesys/hosts';
 import {FakeGatewayBridge} from '@vibesys/ipc/testing';
 import {
   ChatRole,
+  ConfigurationFailedSchema,
   GetBlobsResponseSchema,
   HostCallRequestSchema,
   HostCallResponseSchema,
@@ -25,7 +26,7 @@ import {
 } from '@vibesys/proto';
 import {initialCoreState} from '@vibesys/run-state';
 import {CHAT_CATALOG_METHOD, CHAT_SESSIONS_METHOD} from '@vibesys/runs/chat';
-import {HOST_CALL_METHOD} from '@vibesys/runs/intents';
+import {HOST_CALL_METHOD, IntentRefused} from '@vibesys/runs/intents';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 
 /** Each seed renders the real panel, so a fixed, small sample of the seeds is enough per run. */
@@ -54,6 +55,7 @@ afterAll(async () => {
   await window.happyDOM.close();
 });
 
+type RefusalInit = MessageInitShape<typeof ConfigurationFailedSchema>;
 type Call = FakeGatewayBridge['calls'][number];
 
 /** The host: committed logs, and replies it releases only when the test says so. */
@@ -65,6 +67,9 @@ class Peer {
   readonly controls = new Map<string, {text: string; mode: SteerMode}>();
   readonly withdrawals: Array<{control: string; withdraws: string}> = [];
   readonly answered = new Set<Call>();
+  /** While set, the next host call of that kind is refused, as the host refuses a configuration. */
+  refuse: {call: 'createChatSession' | 'chatMessage' | 'postIntent'; failure: RefusalInit} | null =
+    null;
   /** The run's one reader: batches of the run log's records, as the page's fanout hands them out. */
   readonly runListeners = new Set<(records: readonly Uint8Array[]) => void>();
   readonly subscribeRun = (listener: (records: readonly Uint8Array[]) => void) => {
@@ -159,10 +164,20 @@ class Peer {
     else call.resolve(toBinary(GetBlobsResponseSchema, create(GetBlobsResponseSchema, {})));
   }
 
+  /** Refuse the call if the test asked for that kind to be refused, once. */
+  private refused(kind: string | undefined, reply: (result: object) => void): boolean {
+    if (this.refuse === null || kind !== this.refuse.call) return false;
+    const failure = this.refuse.failure;
+    this.refuse = null;
+    reply({result: {case: 'configurationFailed', value: failure}});
+    return true;
+  }
+
   private hostCall(call: Call): void {
     const method = fromBinary(HostCallRequestSchema, call.bytes).method;
     const reply = (result: Parameters<typeof create<typeof HostCallResponseSchema>>[1]) =>
       call.resolve(toBinary(HostCallResponseSchema, create(HostCallResponseSchema, result)));
+    if (this.refused(method.case, reply)) return;
     if (method.case === 'createChatSession') {
       const id = method.value.sessionId;
       if (!this.sessions.has(id)) {
@@ -541,4 +556,59 @@ async function steerRun(seed: number) {
 
 test('generated steers, refusals, deliveries, withdrawals and reconnects show on the cards what the run recorded', async () => {
   for (const seed of DOM_SEEDS) await steerRun(seed);
+});
+
+function leafTexts(container: Element): string[] {
+  return [...container.querySelectorAll('*')]
+    .filter(element => element.children.length === 0)
+    .map(element => element.textContent ?? '');
+}
+
+test("generated refusals of thread creation, questions and steers show the host's message and its diagnostic", async () => {
+  for (const seed of DOM_SEEDS) {
+    const random = new Seeded(seed);
+    const call = random.pick(['createChatSession', 'chatMessage', 'postIntent'] as const);
+    const stderr = random.bool()
+      ? ''
+      : [1, 2, 3].map(line => `stderr ${seed} line ${line}`).join('\n');
+    const failure = {
+      code: random.pick(['invalid_method', 'host_unsupported', 'chat_unavailable']),
+      stage: 'chat',
+      message: `The host refused ${seed}`,
+      stderr,
+    };
+    const screen = new Screen();
+    await screen.mount();
+    await act(async () => press(screen.container, 'Chat'));
+    await screen.settle();
+    await screen.release(random, true);
+    if (call !== 'createChatSession') {
+      await screen.ask(`hello ${seed}`);
+      await screen.drain(random);
+    }
+    screen.peer.refuse = {call, failure};
+    if (call === 'postIntent') {
+      await act(async () =>
+        type(screen.container.querySelector('textarea') as Element, `steer ${seed}`),
+      );
+      await act(async () => press(screen.container, 'New steer'));
+      await act(async () => press(screen.container, 'Send'));
+    } else await screen.ask(`question ${seed}`);
+    await screen.release(random, true);
+    const message = new IntentRefused(create(ConfigurationFailedSchema, failure)).message;
+    const texts = leafTexts(screen.container);
+    expect(texts).toContain(message);
+    expect(texts.filter(text => /^(IntentRefused|Error):/.test(text))).toEqual([]);
+    const details = [...screen.container.querySelectorAll('button')].filter(
+      button => button.textContent?.trim() === 'Details',
+    );
+    if (stderr === '') expect(details).toHaveLength(0);
+    else {
+      expect(details).toHaveLength(1);
+      await act(async () => press(screen.container, 'Details'));
+      const shown = screen.container.textContent ?? '';
+      for (const line of stderr.split('\n')) expect(shown).toContain(line);
+    }
+    await act(async () => screen.root.unmount());
+  }
 });
