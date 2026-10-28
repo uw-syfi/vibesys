@@ -21,7 +21,7 @@ import {
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {foldSkeleton, observeRun, seedSkeleton} from '@vibesys/run-skeleton';
-import {ChatPeer} from './chat-peer.js';
+import {ChatPeer, type Refusal} from './chat-peer.js';
 import type {WireFixture} from './fake-gateway.js';
 
 type Receive = (bytes: Uint8Array) => void;
@@ -197,6 +197,9 @@ class FixtureGateway {
       },
       appendChat: (bytes: number[]) => {
         this.chat.append(bytes);
+      },
+      refuseChat: (refusal: Refusal | undefined) => {
+        this.chat.refuse = refusal;
       },
       sendChatFrame: (bytes: number[]) => this.chat.publish(bytes),
       seedChat: (id: string, bytes: number[]) => this.chat.append(bytes, id),
