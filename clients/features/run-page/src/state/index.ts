@@ -182,6 +182,7 @@ export {
   routeFromQuery,
   routeLevel,
   routeQuery,
+  runRouteOf,
   type ZoomEvent,
   zoomMachine,
 } from './zoom.js';

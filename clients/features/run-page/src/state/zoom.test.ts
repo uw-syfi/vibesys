@@ -24,7 +24,8 @@ function randomRoute(random: Seeded): Route {
   const agent = opened === 2 ? random.pick(IDS) : null;
   const step = opened > 0 && random.bool() ? random.pick(IDS) : null;
   const item = step !== null && random.bool() ? random.pick(IDS) : null;
-  const mode = idea === null ? random.pick(RUN_MODES) : random.pick<RunMode>(['ideas', 'logs']);
+  const mode =
+    idea === null ? random.pick(RUN_MODES) : random.pick<RunMode>(['ideas', 'logs', 'timeline']);
   return {mode, idea, agent, step, item};
 }
 
@@ -107,7 +108,7 @@ function zoom(...events: ZoomMachineEvent[]): {route: Route; remembered: string[
 
 /** What a route must never say: two things open, an item without its step, a hidden idea. */
 function routeProblems(route: Route): string[] {
-  const hidden = route.mode === 'timeline' || route.mode === 'agents';
+  const hidden = route.mode === 'agents' || route.mode === 'usage';
   return [
     ...(route.idea !== null && route.agent !== null ? ['an idea and an agent open'] : []),
     ...(route.idea !== null && hidden
@@ -182,8 +183,8 @@ describe('the zoom machine', () => {
     expect(opened.remembered).toEqual(['idea=i2&step=s9', 'mode=logs&idea=i2&step=s9']);
   });
 
-  test('the Timeline and Agents faces replace an open idea, so the tab always changes the pane', () => {
-    for (const mode of ['timeline', 'agents'] as const) {
+  test('the Agents and Usage faces replace an open idea, so the tab always changes the pane', () => {
+    for (const mode of ['agents', 'usage'] as const) {
       const opened = zoom({type: 'open-idea', idea: 'i1'}, {type: 'mode', mode});
       expect(opened.route).toEqual({...RUN_ROUTE, mode});
       expect(opened.remembered).toEqual(['idea=i1', `mode=${mode}`]);
@@ -192,8 +193,64 @@ describe('the zoom machine', () => {
     expect(logs.route).toEqual({...RUN_ROUTE, mode: 'logs', idea: 'i1'});
   });
 
-  test('an address that opens an idea under the Timeline face shows the idea', () => {
-    expect(routeFromQuery('mode=timeline&idea=i1')).toEqual({...RUN_ROUTE, idea: 'i1'});
+  test('an idea opened from the Timeline keeps the Timeline beside it, and up returns there', () => {
+    const opened = zoom({type: 'mode', mode: 'timeline'}, {type: 'open-idea', idea: 'i1'});
+    expect(opened.route).toEqual({...RUN_ROUTE, mode: 'timeline', idea: 'i1'});
+    expect(opened.remembered).toEqual(['mode=timeline', 'mode=timeline&idea=i1']);
+    const back = zoom(
+      {type: 'mode', mode: 'timeline'},
+      {type: 'open-idea', idea: 'i1'},
+      {type: 'up'},
+    );
+    expect(back.route).toEqual({...RUN_ROUTE, mode: 'timeline'});
+    // Choosing the Timeline with an idea open keeps the idea; the Ideas tab brings the list back.
+    const switched = zoom({type: 'open-idea', idea: 'i1'}, {type: 'mode', mode: 'timeline'});
+    expect(switched.route).toEqual({...RUN_ROUTE, mode: 'timeline', idea: 'i1'});
+    expect(
+      zoom(
+        {type: 'mode', mode: 'timeline'},
+        {type: 'open-idea', idea: 'i1'},
+        {type: 'mode', mode: 'ideas'},
+      ).route,
+    ).toEqual({...RUN_ROUTE, idea: 'i1'});
+    // The Timeline lists ideas, not agents: it replaces an open agent.
+    expect(zoom({type: 'open-agent', agent: 'g1'}, {type: 'mode', mode: 'timeline'}).route).toEqual(
+      {...RUN_ROUTE, mode: 'timeline'},
+    );
+  });
+
+  test('a step opened on the Timeline goes up through its idea, beside the Timeline, to the Timeline', () => {
+    const step = zoom(
+      {type: 'mode', mode: 'timeline'},
+      {type: 'open-step', idea: 'i1', step: 's1'},
+    );
+    expect(step.route).toEqual({...RUN_ROUTE, mode: 'timeline', idea: 'i1', step: 's1'});
+    expect(routeUp(step.route)).toEqual({...RUN_ROUTE, mode: 'timeline', idea: 'i1'});
+    expect(routeUp(routeUp(step.route))).toEqual({...RUN_ROUTE, mode: 'timeline'});
+  });
+
+  test('from any opened idea, up leads to the face it was opened from', () => {
+    const runAbove = (route: Route): Route =>
+      routeLevel(route) === 'run' ? route : runAbove(routeUp(route));
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      for (let n = 0; n < 50; n += 1) {
+        const route = randomRoute(random);
+        if (route.idea === null) continue;
+        expect(runAbove(route)).toEqual({
+          ...RUN_ROUTE,
+          mode: route.mode === 'timeline' ? 'timeline' : 'ideas',
+        });
+      }
+    }
+  });
+
+  test('an address that opens an idea under the Timeline face shows the idea beside the Timeline', () => {
+    expect(routeFromQuery('mode=timeline&idea=i1')).toEqual({
+      ...RUN_ROUTE,
+      mode: 'timeline',
+      idea: 'i1',
+    });
   });
 
   test('an agent’s turn goes up to the agent, then to the Agents face', () => {
