@@ -40,13 +40,14 @@ export function useGatewayRun(options: {
         skeleton
           ? projectSkeleton(skeleton, skeleton.throughSeq ?? 0n, wholeText, {
               head: hint?.head,
+              hint,
               progress,
               loadFailure,
               content: {text, replies, transcripts},
             })
           : null,
       ),
-    [skeleton, wholeText, hint?.head, progress, loadFailure, text, replies, transcripts],
+    [skeleton, wholeText, hint, progress, loadFailure, text, replies, transcripts],
   );
   const modelRead = useMemo(
     () =>

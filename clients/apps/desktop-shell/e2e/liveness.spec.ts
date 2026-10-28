@@ -72,6 +72,7 @@ for (const width of [1000, 1440, 1920]) {
         hint,
       );
       await expect(page.getByText('Interrupted', {exact: true}).first()).toBeVisible();
+      await expect(page.getByRole('main').getByText('Running', {exact: true})).toHaveCount(0);
       await expect(page.getByText('Paused by you', {exact: true})).toHaveCount(0);
       await expect(page.getByText('Live', {exact: true})).toHaveCount(0);
       await expect(page.getByText('Disconnected', {exact: true})).toHaveCount(0);
