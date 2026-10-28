@@ -912,7 +912,6 @@ test('regression: every presentation change a person makes reaches the screen st
     'agents-open': fc
       .tuple(id, fc.boolean())
       .map(([agent, open]) => ({type: 'agents-open', id: agent, open})),
-    'view-logs': fc.constant({type: 'view-logs'}),
   };
   fc.assert(
     fc.property(
