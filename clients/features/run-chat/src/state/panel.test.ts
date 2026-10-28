@@ -146,6 +146,46 @@ describe('panelMachine', () => {
     expect(snapshot.context.userSteers[1]?.draft.text).toBe('');
   });
 
+  test('asking about an error opens the panel on a new thread and sends only that question', () => {
+    const snapshot = step(getInitialSnapshot(panelMachine), {
+      type: 'ask-new',
+      text: 'Q',
+      requestId: 'r-9',
+    });
+    expect(snapshot.value).toMatchObject({
+      visibility: 'open',
+      chat: 'creating',
+      catalogue: 'loading',
+    });
+    expect(snapshot.context.choice).toEqual({kind: 'new'});
+    expect(snapshot.context.pending).toEqual({threadId: null, text: 'Q', requestId: 'r-9'});
+  });
+
+  test('asking about an error mid-question replaces it and keeps the draft', () => {
+    let snapshot = step(opened(), {type: 'set-composer', text: 'why?'});
+    snapshot = step(snapshot, {type: 'submit', requestId: 'request-1', threadId: 'thread-1'});
+    snapshot = step(snapshot, {type: 'set-composer', text: 'draft'});
+    expect(snapshot.value).toMatchObject({chat: 'asking'});
+    snapshot = step(snapshot, {type: 'ask-new', text: 'Q', requestId: 'r-9'});
+    expect(snapshot.value).toMatchObject({chat: 'creating'});
+    expect(snapshot.context.pending?.text).toBe('Q');
+    expect(snapshot.context.composer).toBe('draft');
+    // Asked again while its thread is still being made, the newer question wins.
+    snapshot = step(snapshot, {type: 'ask-new', text: 'Q2', requestId: 'r-10'});
+    expect(snapshot.value).toMatchObject({chat: 'creating'});
+    expect(snapshot.context.pending).toEqual({threadId: null, text: 'Q2', requestId: 'r-10'});
+    // If it fails, the draft is not replaced by the question.
+    snapshot = step(snapshot, done('createThread', {ok: false, message: 'no', detail: null}));
+    expect(snapshot.context.composer).toBe('draft');
+  });
+
+  test('asking about an error with no text changes nothing', () => {
+    const closed = getInitialSnapshot(panelMachine);
+    const after = step(closed, {type: 'ask-new', text: ' ', requestId: 'r-9'});
+    expect(after.value).toEqual(closed.value);
+    expect(after.context).toEqual(closed.context);
+  });
+
   test('an empty composer submits nothing', () => {
     const snapshot = step(opened(), {type: 'submit', requestId: 'request-1', threadId: 'thread-1'});
     expect(snapshot.value).toMatchObject({chat: 'idle'});
@@ -168,6 +208,7 @@ describe('panelMachine', () => {
           {type: 'toggle-list'},
           {type: 'toggle-picker'},
           {type: 'submit', requestId: 'request-1', threadId: random.pick([null, 'a'])},
+          {type: 'ask-new', text: random.pick(['', 'Q']), requestId: 'r-x'},
           ...live.operations.map(operation =>
             live.done(
               operation,

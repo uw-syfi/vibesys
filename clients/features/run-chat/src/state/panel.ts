@@ -76,7 +76,12 @@ export type PanelMachineEvent =
       readonly type: 'submit';
       readonly threadId: string | null;
       readonly requestId: string;
-    };
+    }
+  /**
+   * Ask `text` in a new thread, whatever is shown or in flight, opening the panel: how an error is
+   * handed to the chat. The composer keeps what the user typed.
+   */
+  | {readonly type: 'ask-new'; readonly text: string; readonly requestId: string};
 
 function pendingQuestion(
   context: PanelContext,
@@ -108,12 +113,15 @@ export const panelInitial: PanelContext = {
   error: null,
 };
 
-/** The patch for an ask or a thread creation that did not go through: the text is the user's again. */
+/**
+ * The patch for an ask or a thread creation that did not go through: the text is the user's again,
+ * unless they have typed something since (or kept a draft through an `ask-new`), which stays.
+ */
 function failed(context: PanelContext, failure: ChatFailure): Partial<PanelContext> {
   return {
     pending: null,
     uncertain: context.pending,
-    composer: context.pending?.text ?? context.composer,
+    composer: context.composer === '' ? (context.pending?.text ?? '') : context.composer,
     error: failure,
   };
 }
@@ -142,6 +150,22 @@ export const panelMachine = setup({
   },
   guards: {
     hasThread: ({event}) => event.type === 'submit' && event.threadId !== null,
+    asksSomething: ({event}) => event.type === 'ask-new' && event.text.trim() !== '',
+  },
+  actions: {
+    /** `ask-new`: drop what is shown or in flight and create a thread for the question. */
+    askNew: assign(({event}) =>
+      event.type === 'ask-new'
+        ? {
+            choice: {kind: 'new' as const},
+            pending: {threadId: null, text: event.text, requestId: event.requestId},
+            uncertain: null,
+            error: null,
+            listOpen: false,
+            pickerOpen: false,
+          }
+        : {},
+    ),
   },
 }).createMachine({
   id: 'chatPanel',
@@ -172,14 +196,22 @@ export const panelMachine = setup({
     visibility: {
       initial: 'closed',
       states: {
-        closed: {on: {open: 'open', toggle: 'open'}},
+        closed: {
+          on: {open: 'open', toggle: 'open', 'ask-new': {guard: 'asksSomething', target: 'open'}},
+        },
         open: {on: {close: 'closed', toggle: 'closed'}},
       },
     },
     catalogue: {
       initial: 'idle',
       states: {
-        idle: {on: {open: 'loading', toggle: 'loading'}},
+        idle: {
+          on: {
+            open: 'loading',
+            toggle: 'loading',
+            'ask-new': {guard: 'asksSomething', target: 'loading'},
+          },
+        },
         loading: {
           invoke: {
             id: 'loadCatalogue',
@@ -223,6 +255,7 @@ export const panelMachine = setup({
       states: {
         idle: {
           on: {
+            'ask-new': {guard: 'asksSomething', target: 'creating', actions: 'askNew'},
             submit: [
               {
                 guard: ({context}) => context.composer.trim() === '',
@@ -248,6 +281,14 @@ export const panelMachine = setup({
           },
         },
         creating: {
+          on: {
+            'ask-new': {
+              guard: 'asksSomething',
+              target: 'creating',
+              reenter: true,
+              actions: 'askNew',
+            },
+          },
           invoke: {
             id: 'createThread',
             src: 'createThread',
@@ -286,6 +327,7 @@ export const panelMachine = setup({
           },
         },
         asking: {
+          on: {'ask-new': {guard: 'asksSomething', target: 'creating', actions: 'askNew'}},
           invoke: {
             id: 'ask',
             src: 'ask',
