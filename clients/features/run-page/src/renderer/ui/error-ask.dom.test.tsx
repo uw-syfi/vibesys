@@ -80,12 +80,14 @@ function failedRun() {
   return {state: skeletonScreenState(SEED, skeleton, whole, runPageInitial(SEED)), whole};
 }
 
-async function shown(state: RunPageState, chat: RunChatSlot): Promise<HTMLElement> {
+/** The Run screen for `state`, and how to take it down again. */
+async function shown(state: RunPageState, chat: RunChatSlot) {
   const {whole} = failedRun();
   const container = document.createElement('div');
   document.body.append(container);
+  const root = createRoot(container);
   await act(async () =>
-    createRoot(container).render(
+    root.render(
       <RunScreen
         state={state}
         model={whole}
@@ -98,7 +100,13 @@ async function shown(state: RunPageState, chat: RunChatSlot): Promise<HTMLElemen
       />,
     ),
   );
-  return container;
+  return {
+    container,
+    unmount: async () => {
+      await act(async () => root.unmount());
+      container.remove();
+    },
+  };
 }
 
 function asks(container: HTMLElement): HTMLButtonElement[] {
@@ -108,7 +116,7 @@ function asks(container: HTMLElement): HTMLButtonElement[] {
 test('the failed banner asks the chat about the failure, in its own words', async () => {
   const {state} = failedRun();
   const asked: ErrorReport[] = [];
-  const container = await shown(state, {
+  const {container, unmount} = await shown(state, {
     open: false,
     toggle: () => undefined,
     panel: null,
@@ -119,6 +127,7 @@ test('the failed banner asks the chat about the failure, in its own words', asyn
   expect(buttons[0]?.closest('.vs-banner')?.textContent).toContain('Git refused the workspace');
   await act(async () => buttons[0]?.click());
   expect(asked).toEqual([endedErrorReport(state) as ErrorReport]);
+  await unmount();
 });
 
 test('no chat that can ask, no offer', async () => {
@@ -130,16 +139,18 @@ test('no chat that can ask, no offer', async () => {
     unavailable: 'This machine cannot serve an ended run',
     askAboutError: () => undefined,
   });
-  expect(asks(unavailable)).toHaveLength(0);
+  expect(asks(unavailable.container)).toHaveLength(0);
+  await unavailable.unmount();
   const absent = await shown(state, {open: false, toggle: () => undefined, panel: null});
-  expect(asks(absent)).toHaveLength(0);
+  expect(asks(absent.container)).toHaveLength(0);
+  await absent.unmount();
 });
 
 test('a command the run did not take asks with its notice', async () => {
   const {state} = failedRun();
   const noticed = {...state, notice: 'The run is not running'};
   const asked: ErrorReport[] = [];
-  const container = await shown(noticed, {
+  const {container, unmount} = await shown(noticed, {
     open: false,
     toggle: () => undefined,
     panel: null,
@@ -150,4 +161,5 @@ test('a command the run did not take asks with its notice', async () => {
   );
   await act(async () => button?.click());
   expect(asked).toEqual([commandErrorReport(noticed) as ErrorReport]);
+  await unmount();
 });

@@ -75,6 +75,23 @@ describe('errorQuestion', () => {
     );
   });
 
+  test('a long where is cut to 256 bytes, on a code point, with an ellipsis', () => {
+    for (const character of ['a', 'é', '中', '😀']) {
+      const where = character.repeat(400);
+      const question = errorQuestion({where, message: 'No', detail: null}, 65_536);
+      const shown = question.slice(question.indexOf('(') + 1, question.indexOf('):'));
+      expect(shown.endsWith('…')).toBe(true);
+      const kept = shown.slice(0, -1);
+      expect(where.startsWith(kept)).toBe(true);
+      expect(bytes(kept)).toBeLessThanOrEqual(256);
+      expect(bytes(kept) + bytes(character)).toBeGreaterThan(256);
+    }
+    const short = 'x'.repeat(256);
+    expect(errorQuestion({where: short, message: 'No', detail: null}, 65_536)).toContain(
+      `(${short}):`,
+    );
+  });
+
   test('a cap too small for the question itself is refused', () => {
     expect(() => errorQuestion({where: 'x', message: 'y', detail: null}, 1000)).toThrow(RangeError);
   });
