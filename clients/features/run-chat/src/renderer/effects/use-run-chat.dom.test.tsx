@@ -383,7 +383,7 @@ test('asking about an error starts a new thread with the question and opens the 
   }
   await act(async () => root.render(<Probe />));
   const report = {
-    where: 'Run ended (Failed)',
+    where: 'Run ended: Failed',
     message: 'Git refused the workspace',
     detail: 'fatal: not a work tree',
   };

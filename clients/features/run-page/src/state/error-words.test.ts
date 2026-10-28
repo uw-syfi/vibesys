@@ -80,7 +80,9 @@ test('the ended banner asks in its own words: where names the header word, the m
   const failed = screen([FAILED]);
   const report = endedErrorReport(failed);
   const words = endedBannerWords(failed);
-  expect(report?.where).toBe(`Run ended (${words?.title})`);
+  expect(report?.where).toBe(`Run ended: ${words?.title}`);
+  // The question puts `where` in parentheses; it holds none of its own.
+  expect(report?.where).not.toMatch(/[()]/);
   expect(report?.where).toContain(headerView(failed).status.label);
   expect(report?.message).toContain('Git refused the workspace');
   expect(report?.message).toBe(words?.body);

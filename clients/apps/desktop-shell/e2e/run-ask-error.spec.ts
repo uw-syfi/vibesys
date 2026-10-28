@@ -40,7 +40,7 @@ test('the failed banner asks the run chat about the failure', async ({page}) => 
   await expect(panel(page)).toBeVisible();
   const reason = (fixture.end?.reason ?? '').slice(0, 80);
   expect(reason).not.toBe('');
-  await expect(question(page)).toContainText('Run ended (');
+  await expect(question(page)).toContainText('VibeSys app (Run ended: Failed):');
   await expect(question(page)).toContainText(reason);
   const after = await hostCalls(page);
   expect(count(after, 'createChatSession') - count(before, 'createChatSession')).toBe(1);

@@ -42,7 +42,7 @@ export function endedErrorReport(state: RunPageState): ErrorReport | null {
   const words = endedBannerWords(state);
   if (words === null || endedView(state)?.title === 'Finished') return null;
   return {
-    where: `Run ended (${words.title})`,
+    where: `Run ended: ${words.title}`,
     message: words.body === '' ? NO_REASON : words.body,
     detail: null,
   };
