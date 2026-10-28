@@ -24,11 +24,15 @@ import {
   RecordSchema,
   SteerMode,
   SteerTargetKind,
+  stringMaxBytes,
   TailRequestSchema,
   TailResponseSchema,
   validatedExactFromBinary,
 } from '@vibesys/proto';
 import {addressedIntent, IntentRefused, type RunReference} from '../intents/index.js';
+
+/** The most UTF-8 bytes a chat question may hold: the host contract's limit on its text. */
+export const CHAT_TEXT_MAX_BYTES: number = stringMaxBytes(ChatMessageRequestSchema.field.text);
 
 export type {
   ChatMessage,
