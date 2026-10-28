@@ -185,7 +185,7 @@ test('the header lets its buttons drop to a line of their own, so New chat never
 test('messages sit in the thread below the header, in a pane that keeps its own top edge', async () => {
   const items: ChatPanelView['items'] = [
     {kind: 'question', id: 'q', text: QUESTION},
-    {kind: 'answer', id: 'a', text: ANSWER, streaming: false},
+    {kind: 'answer', id: 'a', text: ANSWER, streaming: false, failed: false},
   ];
   const {container, unmount} = await mount(<ChatPanel {...viewOf(items)} />);
   const thread = container.querySelector('.vs-thread[data-plain]');

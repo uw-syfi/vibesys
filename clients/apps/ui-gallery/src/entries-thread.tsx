@@ -311,6 +311,12 @@ export const THREAD_ENTRIES: Readonly<
       <Stack>
         <ChatMessage side="end" text="What is the best idea so far?" />
         <ChatMessage side="start" text={REPLY} notice="Writing" />
+        <ChatMessage
+          side="start"
+          tone="err"
+          text="The provider refused the request: quota exhausted."
+          notice="Failed"
+        />
       </Stack>
     ),
   },

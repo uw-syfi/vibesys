@@ -16,9 +16,11 @@ import type {JSX} from 'react';
 import {
   type ChatPanelView,
   effectiveHarness,
+  FAILED_ANSWER,
   modelOptions,
   type PanelItem,
   providerOptions,
+  WRITING_ANSWER,
   withProvider,
 } from '../../state/index.js';
 import {ChatBoundary} from './chat-boundary.js';
@@ -133,7 +135,11 @@ function uiItem(item: PanelItem, roles: readonly string[]): UiThreadItem {
         <ChatMessage
           side="start"
           text={item.text}
-          {...(item.streaming ? {notice: 'Writing'} : {})}
+          {...(item.streaming
+            ? {notice: WRITING_ANSWER}
+            : item.failed
+              ? {notice: FAILED_ANSWER, tone: 'err' as const}
+              : {})}
         />,
       );
     case 'waiting':

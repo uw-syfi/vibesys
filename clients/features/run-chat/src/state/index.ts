@@ -8,7 +8,7 @@ export {
   type CardView,
   cardView,
 } from './card-view.js';
-export {DETAILS_LABEL} from './chat-words.js';
+export {DETAILS_LABEL, FAILED_ANSWER, WRITING_ANSWER} from './chat-words.js';
 export {
   type ControlDelivery,
   type DeliveryEvent,

@@ -235,12 +235,14 @@ class Peer {
   /** The agent's answer to the thread's latest question, failed or not, as the session log records it. */
   writeAnswer(sessionId: string, text: string, failed: boolean): void {
     const log = this.sessions.get(sessionId);
-    const asked = log?.findLast(
-      row =>
-        row.body.case === 'chat' &&
-        row.body.value.event.case === 'message' &&
-        row.body.value.event.value.role === ChatRole.USER,
-    );
+    const asked = log
+      ?.filter(
+        row =>
+          row.body.case === 'chat' &&
+          row.body.value.event.case === 'message' &&
+          row.body.value.event.value.role === ChatRole.USER,
+      )
+      .at(-1);
     if (
       log === undefined ||
       asked?.body.case !== 'chat' ||
