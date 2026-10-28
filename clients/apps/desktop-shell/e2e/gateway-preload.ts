@@ -207,6 +207,7 @@ class FixtureGateway {
         for (const finish of [...this.ended]) finish('SSH connection closed');
       },
       calls: () => this.calls,
+      hostCalls: () => this.chat.hostCalls,
       active: () => this.active,
       observe: (bytes: number[]) => {
         this.currentObservation = bytes;
@@ -267,7 +268,8 @@ function preloadOver(bridge: GatewayBridge): GatewayPortBridge {
         error => {
           if (cancelled) return;
           if (error instanceof GatewayError) receive(gatewayEnd(error.message, error.status));
-          else failed(String(error));
+          // As the main process sends it: the failure's message, not its class name.
+          else failed(error instanceof Error ? error.message : String(error));
         },
       );
       return {

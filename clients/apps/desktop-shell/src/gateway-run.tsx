@@ -8,7 +8,7 @@ import {
   RunScreen,
   useGatewayRun,
 } from '@vibesys/feature-run-page/renderer';
-import type {RunPageSeed} from '@vibesys/feature-run-page/state';
+import type {ErrorReport, RunPageSeed} from '@vibesys/feature-run-page/state';
 import type {RecordedProjectRoot} from '@vibesys/hosts';
 import type {GatewayBridge} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
@@ -16,7 +16,7 @@ import {type RecordsFanout, type RecordsListener, recordsFanout} from '@vibesys/
 import {gatewayContentCache} from '@vibesys/run-skeleton/cache';
 import {type GatewayReader, gatewayReader} from '@vibesys/run-skeleton/reader';
 import {Card, EmptyState, Page, Text} from '@vibesys/ui';
-import {type JSX, useMemo} from 'react';
+import {type JSX, useMemo, useRef} from 'react';
 import {useGatewayChat} from './gateway-chat.js';
 import {gatewayTransport} from './gateway-transport.js';
 
@@ -39,6 +39,9 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
   const {snapshot} = page;
   const {observation} = page.writer;
   const projectRoot = props.projectRoot;
+  // The chat is made after the controls (its readOnly reads `intents.steerable`), so the controls
+  // reach its asker through a ref set below, as `use-run-chat.ts` reads its ports through one.
+  const askRef = useRef<((report: ErrorReport) => void) | undefined>(undefined);
   const intents = useRunIntents({
     bridge,
     host: seed.identity.host,
@@ -49,6 +52,7 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
     refreshWriter: page.refreshWriter,
     writer: page.writer,
     schedule,
+    askAboutError: report => askRef.current?.(report),
   });
   const sessions = useGatewayChat({
     bridge,
@@ -61,6 +65,7 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
     epoch: observation?.epoch ?? 0n,
     readOnly: !intents.steerable,
   });
+  askRef.current = sessions.askAboutError;
   if (
     page.state === null ||
     page.model === null ||
