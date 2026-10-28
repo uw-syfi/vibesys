@@ -1,6 +1,7 @@
 import {unprovided} from '@vibesys/machine';
 import type {ChatMessageRequest, ChatMessageResponse, Record} from '@vibesys/runs/chat';
 import {copyChatRequest} from '@vibesys/runs/chat';
+import {callFailure} from '@vibesys/runs/intents';
 import {assign, fromCallback, setup} from 'xstate';
 import {type ChatBatch, type ChatHistory, emptyHistory, foldChat} from './fold.js';
 
@@ -133,7 +134,10 @@ export const runSessionsMachine = setup({
                 onDone: {target: 'idle', actions: assign({uncertain: false, current: null})},
                 onError: {
                   target: 'idle',
-                  actions: assign(({event}) => ({error: String(event.error), uncertain: true})),
+                  actions: assign(({event}) => ({
+                    error: callFailure(event.error).message,
+                    uncertain: true,
+                  })),
                 },
               },
               after: {
@@ -180,7 +184,7 @@ export const runSessionsMachine = setup({
                   actions: assign(({event}) => ({
                     contentFailed: true,
                     queue: [],
-                    error: String(event.error),
+                    error: callFailure(event.error).message,
                   })),
                 },
               },

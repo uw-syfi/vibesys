@@ -257,7 +257,7 @@ test('a failed question shows its message and a closed Details disclosure that o
   const {container, unmount} = await mount(<ChatPanel {...failureView('a\nb')} />);
   expect(container.textContent).toContain('Refused');
   expect(buttons(container)).toContain('Details');
-  expect(container.textContent).not.toContain('a\nb');
+  expect(container.querySelector('[role="log"]')).toBeNull();
   await act(async () =>
     [...container.querySelectorAll('button')]
       .find(button => button.textContent === 'Details')

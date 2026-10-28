@@ -217,10 +217,7 @@ export const steerCardMachine = setup({
                 target: 'idle',
                 actions: assign(({event}) => ({
                   withdrawId: null,
-                  error:
-                    event.output.kind === 'rejected'
-                      ? {message: event.output.message ?? 'Refused', detail: event.output.detail}
-                      : null,
+                  error: refusalFailure(event.output),
                 })),
               },
             ],

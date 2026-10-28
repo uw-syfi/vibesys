@@ -176,7 +176,9 @@ describe('steerCardMachine', () => {
           ...live.operations.map(operation =>
             live.done(
               operation,
-              random.bool() ? ACK : {kind: 'rejected', message: 'no', detail: null},
+              random.bool()
+                ? ACK
+                : {kind: 'rejected', message: 'no', detail: random.pick(['trace', null])},
             ),
           ),
           ...live.operations.map(operation => live.error(operation, new Error('lost'))),
@@ -219,6 +221,18 @@ describe('a card on a run that cannot take a steer', () => {
       code: 'run_read_only',
     });
     expect(snapshot.value).toBe('draft');
+    expect(snapshot.context.error).toEqual({message: 'Read only', detail: 'trace'});
+  });
+
+  test('a rejected withdrawal is worded as a rejected send is', () => {
+    let snapshot = settled(step(start(), {type: 'send', controlId: 'c-1'}), 'send', ACK);
+    snapshot = step(snapshot, delivery('c-1', {kind: 'delivered', idea: 1, where: null}));
+    snapshot = settled(step(snapshot, {type: 'withdraw', controlId: 'w-1'}), 'retract', {
+      kind: 'rejected',
+      message: 'This finished run is read-only',
+      detail: 'trace',
+      code: 'run_read_only',
+    });
     expect(snapshot.context.error).toEqual({message: 'Read only', detail: 'trace'});
   });
 

@@ -19,7 +19,7 @@ export {
   type IdeaOf,
   SENT,
 } from './delivery.js';
-export {type ChatFailure, thrownFailure} from './failure.js';
+export type {ChatFailure} from './failure.js';
 export {
   type AskInput,
   type ChatOutcome,

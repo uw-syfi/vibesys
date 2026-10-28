@@ -559,9 +559,11 @@ test('generated steers, refusals, deliveries, withdrawals and reconnects show on
 });
 
 function leafTexts(container: Element): string[] {
-  return [...container.querySelectorAll('*')]
-    .filter(element => element.children.length === 0)
-    .map(element => element.textContent ?? '');
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  const texts: string[] = [];
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode())
+    texts.push(node.textContent ?? '');
+  return texts;
 }
 
 test("generated refusals of thread creation, questions and steers show the host's message and its diagnostic", async () => {
