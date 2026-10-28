@@ -9,13 +9,13 @@ export {
   cardView,
 } from './card-view.js';
 export {
-  ASK_ABOUT_ERROR,
-  chatFailureReport,
   DETAILS_LABEL,
   type ErrorReport,
   errorQuestion,
   FAILED_ANSWER,
   failedAnswerReport,
+  HARNESS_LIST_UNREAD,
+  NO_HARNESS_OFFERED,
   steerFailureReport,
   WRITING_ANSWER,
 } from './chat-words.js';

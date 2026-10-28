@@ -33,7 +33,10 @@ test('the failed banner asks the run chat about the failure', async ({page}) => 
   const fixture = fixtureNamed(FIXTURE);
   await openFixture(page, fixture);
   const before = await hostCalls(page);
-  await page.getByRole('main').getByRole('button', {name: ASK}).first().click();
+  // One error, one offer.
+  const asks = page.getByRole('main').getByRole('button', {name: ASK});
+  await expect(asks).toHaveCount(1);
+  await asks.click();
   await expect(panel(page)).toBeVisible();
   const reason = (fixture.end?.reason ?? '').slice(0, 80);
   expect(reason).not.toBe('');
@@ -46,7 +49,7 @@ test('the failed banner asks the run chat about the failure', async ({page}) => 
   if (shots !== undefined) await page.screenshot({path: `${shots}/run-ask__asked.png`});
 });
 
-test('a question the host refused offers to ask about the refusal, in a new thread', async ({
+test('a question the host refused offers its details to copy, not a question that would fail too', async ({
   page,
 }) => {
   const fixture = fixtureNamed(FIXTURE);
@@ -63,15 +66,9 @@ test('a question the host refused offers to ask about the refusal, in a new thre
   await panel(page).getByRole('textbox', {name: 'Message'}).fill('Why?');
   await panel(page).getByRole('button', {name: 'Ask', exact: true}).click();
   await expect(panel(page).getByText('Chat is not available for this run.')).toBeVisible();
-  await controls.refuse(undefined);
-  const before = await hostCalls(page);
-  await panel(page).getByRole('button', {name: ASK}).click();
-  await expect(question(page)).toContainText('Run chat');
-  await expect(question(page)).toContainText('Chat is not available for this run.');
-  await expect(question(page)).toContainText('agent exited with status 2');
-  const after = await hostCalls(page);
-  expect(count(after, 'createChatSession') - count(before, 'createChatSession')).toBe(1);
-  expect(count(after, 'chatMessage') - count(before, 'chatMessage')).toBe(1);
+  await expect(panel(page).getByRole('button', {name: 'Copy details'})).toBeVisible();
+  await expect(panel(page).getByRole('button', {name: ASK})).toHaveCount(0);
+  await expect(panel(page).getByRole('textbox', {name: 'Message'})).toHaveValue('Why?');
   if (shots !== undefined) await page.screenshot({path: `${shots}/run-ask__chat-refusal.png`});
 });
 

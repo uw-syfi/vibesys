@@ -1,5 +1,5 @@
 import {ChatPanel, type RunChatPorts, useRunChat} from '@vibesys/feature-run-chat/renderer';
-import {runHarness} from '@vibesys/feature-run-chat/state';
+import {HARNESS_LIST_UNREAD, NO_HARNESS_OFFERED, runHarness} from '@vibesys/feature-run-chat/state';
 import {
   type ChatServicePorts,
   chatService,
@@ -18,7 +18,7 @@ import {
 } from '@vibesys/runs/chat';
 import {addressedIntent, callFailure, runReference} from '@vibesys/runs/intents';
 import {Button, Stack, Text} from '@vibesys/ui';
-import {useEffect, useMemo} from 'react';
+import {useEffect, useMemo, useRef} from 'react';
 
 function harnessEntry(option: HarnessOption) {
   return {
@@ -66,15 +66,19 @@ export function useGatewayChatState(
   const threads = useChatThreads(ports, input.projectRoot !== '');
   const steers = useSteerDeliveries(input.records, input.projectRoot !== '');
   const lifetime = useLifetime(ports);
+  // Why the panel had no harness to pick: the last list failed to arrive, or it listed none.
+  const noHarness = useRef<string>(HARNESS_LIST_UNREAD);
   const chatPorts: RunChatPorts = {
-    harnesses: async () => ({
-      kind: 'listed',
-      harnesses: (await service.catalog(newRequestId(), lifetime.signal)).map(harnessEntry),
-    }),
+    harnesses: async () => {
+      noHarness.current = HARNESS_LIST_UNREAD;
+      const offers = await service.catalog(newRequestId(), lifetime.signal);
+      noHarness.current = NO_HARNESS_OFFERED;
+      return {kind: 'listed', harnesses: offers.map(harnessEntry)};
+    },
     createThread: async (harness, signal, requestId) => {
       try {
         const choice = harness ?? (input.core ? runHarness(input.core) : null);
-        if (!choice) return {ok: false, message: 'Choose a harness and model', detail: null};
+        if (!choice) return {ok: false, message: noHarness.current, detail: null};
         const threadId = await service.create(`thread-${requestId}`, choice, signal);
         threads.created(createdSession(threadId, choice));
         threads.refresh();

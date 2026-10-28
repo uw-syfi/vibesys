@@ -4,11 +4,12 @@ import {type ChatFailure, DETAILS_LABEL} from '../../state/index.js';
 
 /**
  * A failure's message, and its diagnostic under a disclosure that starts closed. With `ask`, it
- * also offers to ask the chat about it.
+ * also offers to ask the chat about it; with `copy`, to copy that text.
  */
 export function FailureNote(props: {
   readonly failure: ChatFailure;
   readonly ask?: () => void;
+  readonly copy?: string;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const {message, detail} = props.failure;
@@ -27,9 +28,13 @@ export function FailureNote(props: {
           />
         </Collapsible>
       )}
-      {props.ask === undefined ? null : (
+      {props.ask === undefined && props.copy === undefined ? null : (
         <Row gap="space-2">
-          <ErrorActions ask={props.ask} size="sm" />
+          <ErrorActions
+            {...(props.ask === undefined ? {} : {ask: props.ask})}
+            {...(props.copy === undefined ? {} : {copy: props.copy})}
+            size="sm"
+          />
         </Row>
       )}
     </>

@@ -7,18 +7,18 @@ export const DETAILS_LABEL = 'Details';
 export const FAILED_ANSWER = 'Failed';
 /** The notice under an answer the agent is still writing. */
 export const WRITING_ANSWER = 'Writing';
-/** The action that hands an error to the run chat, in a new thread. */
-export const ASK_ABOUT_ERROR = 'Ask about this error';
+/**
+ * Why a new thread has no harness, when the run's own is unknown too: the panel picks from any
+ * harness the machine lists, so either the list could not be read or it was empty.
+ */
+export const HARNESS_LIST_UNREAD = 'The harness list could not be read';
+export const NO_HARNESS_OFFERED = 'This machine offers no harness to chat with';
 
 /** An error as the run chat is asked about it: where it happened, what it said, and its diagnostic. */
 export interface ErrorReport {
   readonly where: string;
   readonly message: string;
   readonly detail: string | null;
-}
-
-export function chatFailureReport(failure: ChatFailure): ErrorReport {
-  return {where: 'Run chat', ...failure};
 }
 
 export function failedAnswerReport(text: string): ErrorReport {

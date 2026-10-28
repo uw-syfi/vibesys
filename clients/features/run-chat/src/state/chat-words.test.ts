@@ -1,12 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
-import {
-  chatFailureReport,
-  type ErrorReport,
-  errorQuestion,
-  failedAnswerReport,
-  steerFailureReport,
-} from './index.js';
+import {type ErrorReport, errorQuestion, failedAnswerReport, steerFailureReport} from './index.js';
 
 const encoder = new TextEncoder();
 const bytes = (text: string): number => encoder.encode(text).length;
@@ -88,7 +82,6 @@ describe('errorQuestion', () => {
 
 test('each chat failure says where it happened', () => {
   const failure = {message: 'Refused', detail: 'trace'};
-  expect(chatFailureReport(failure)).toEqual({where: 'Run chat', ...failure});
   expect(steerFailureReport(failure)).toEqual({where: 'Steer', ...failure});
   expect(failedAnswerReport('quota exhausted')).toEqual({
     where: 'Run chat answer',

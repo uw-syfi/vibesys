@@ -16,7 +16,6 @@ import {
 import type {JSX} from 'react';
 import {
   type ChatPanelView,
-  chatFailureReport,
   effectiveHarness,
   FAILED_ANSWER,
   failedAnswerReport,
@@ -181,14 +180,14 @@ function uiItem(item: PanelItem, props: ChatPanelView): UiThreadItem {
 function Composer(props: ChatPanelView): JSX.Element {
   const {panel, dispatch} = props;
   const {error} = panel;
-  const ask = props.askAboutError;
   const submit = (): void => dispatch({type: 'submit', threadId: props.shown});
   return (
     <Stack gap="space-3">
+      {/* The chat's own request failed, and a question about it would fail the same way. */}
       {error === null ? null : (
         <FailureNote
           failure={error}
-          {...(ask === undefined ? {} : {ask: () => ask(chatFailureReport(error))})}
+          copy={[error.message, error.detail].filter(Boolean).join('\n\n')}
         />
       )}
       <Field label="Message" hideLabel>

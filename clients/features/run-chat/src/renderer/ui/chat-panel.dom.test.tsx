@@ -14,7 +14,6 @@ import {act, type JSX} from 'react';
 import {createRoot} from 'react-dom/client';
 import {
   type ChatPanelView,
-  chatFailureReport,
   EMPTY_DRAFT,
   type ErrorReport,
   failedAnswerReport,
@@ -285,6 +284,7 @@ test('a failed question without a diagnostic has no Details', async () => {
 });
 
 const ASK = 'Ask about this error';
+const COPY = 'Copy details';
 const REFUSED = {message: 'Refused', detail: 'trace'};
 const NOOP = () => undefined;
 
@@ -325,22 +325,19 @@ function failures(asked: ErrorReport[] | null): ChatPanelView {
   };
 }
 
-test('a failure in the panel offers to ask about it', async () => {
+test('a failed answer and a refused steer offer to ask about them; the chat’s own failure is copied', async () => {
   const asked: ErrorReport[] = [];
   const {container, unmount} = await mount(<ChatPanel {...failures(asked)} />);
   const asks = () =>
     [...container.querySelectorAll('button')].filter(button => button.textContent === ASK);
-  // One for the failed answer, one for the refused steer, one for the composer's failure.
-  expect(asks()).toHaveLength(3);
+  // A question about the composer's failure would go through the request that just failed.
+  expect(asks()).toHaveLength(2);
+  expect(buttons(container).filter(label => label === COPY)).toHaveLength(1);
   for (const button of asks()) await act(async () => button.click());
   expect(asked).toEqual(
-    expect.arrayContaining([
-      failedAnswerReport('quota exhausted'),
-      steerFailureReport(REFUSED),
-      chatFailureReport(REFUSED),
-    ]),
+    expect.arrayContaining([failedAnswerReport('quota exhausted'), steerFailureReport(REFUSED)]),
   );
-  expect(asked).toHaveLength(3);
+  expect(asked).toHaveLength(2);
   await unmount();
 });
 
