@@ -80,6 +80,7 @@ test('a request the run did not take asks the run chat about it', async ({page})
   await expect(page.getByText('Pause · Not confirmed')).toBeVisible();
   // The reason shows once, under its request, with one offer to ask about it.
   await expect(page.getByText('The run did not take the command', {exact: true})).toHaveCount(1);
+  await expect(page.getByText('Updates unavailable')).toHaveCount(0);
   await page.getByRole('main').getByRole('button', {name: ASK}).click();
   await expect(question(page)).toContainText('Pause request');
   await expect(question(page)).toContainText('The run did not take the command');

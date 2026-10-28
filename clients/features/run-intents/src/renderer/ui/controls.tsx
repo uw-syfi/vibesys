@@ -127,14 +127,20 @@ export function IntentControls(props: {
   );
 }
 
-/** Why the history may be incomplete or out of order, each with what the host said. */
+/**
+ * Why the history may be incomplete or out of order, each with what the host said. An unconfirmed
+ * post's reason is the error too; its row already says it, with its own offer, so it is said once.
+ */
 function Notices(props: {
   readonly warning: string | null;
   readonly error: string | null;
   readonly entries: readonly IntentRow[];
   readonly askAboutError?: ((report: ErrorReport) => void) | undefined;
 }): JSX.Element {
-  const {warning, error, askAboutError: ask} = props;
+  const {warning, askAboutError: ask} = props;
+  const error = props.entries.some(entry => shownReason(entry) === props.error)
+    ? null
+    : props.error;
   return (
     <>
       {warning ? (
@@ -148,18 +154,13 @@ function Notices(props: {
       {error ? (
         <Stack gap="space-1">
           <Text tone="err">Updates unavailable</Text>
-          {/* A failed post's reason is already under its row, with its own offer; say it once. */}
-          {props.entries.some(entry => shownReason(entry) === error) ? null : (
-            <>
-              <Text variant="small" tone="muted">
-                {error}
-              </Text>
-              {ask === undefined ? null : (
-                <Row gap="space-2">
-                  <ErrorActions ask={() => ask(updatesReport(error))} />
-                </Row>
-              )}
-            </>
+          <Text variant="small" tone="muted">
+            {error}
+          </Text>
+          {ask === undefined ? null : (
+            <Row gap="space-2">
+              <ErrorActions ask={() => ask(updatesReport(error))} />
+            </Row>
           )}
         </Stack>
       ) : null}

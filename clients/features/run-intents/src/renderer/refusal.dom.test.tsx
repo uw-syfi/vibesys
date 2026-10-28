@@ -51,8 +51,29 @@ interface Report {
   readonly detail: string | null;
 }
 
+type Call = FakeGatewayBridge['calls'][number];
+
 /** The controls of a running run, whose host refuses Pause; the container after the refusal. */
-async function refusedPause(askAboutError?: (report: Report) => void) {
+function refusedPause(askAboutError?: (report: Report) => void) {
+  return pausedWith(
+    call =>
+      call.resolve(
+        toBinary(
+          HostCallResponseSchema,
+          create(HostCallResponseSchema, {
+            result: {
+              case: 'configurationFailed',
+              value: {code: 'x', stage: 's', message: REASON, stderr: 'trace'},
+            },
+          }),
+        ),
+      ),
+    askAboutError,
+  );
+}
+
+/** The controls of a running run after Pause, whose post the host answers with `answer`. */
+async function pausedWith(answer: (call: Call) => void, askAboutError?: (report: Report) => void) {
   const bridge = new FakeGatewayBridge();
   const feed = new FakeRecords((record: StoreRecord) => toBinary(RecordSchema, record));
   const container = document.createElement('div');
@@ -86,19 +107,7 @@ async function refusedPause(askAboutError?: (report: Report) => void) {
   await act(async () => pause?.click());
   const call = bridge.calls.at(-1);
   if (call === undefined) throw new Error('Pause sent nothing');
-  await act(async () =>
-    call.resolve(
-      toBinary(
-        HostCallResponseSchema,
-        create(HostCallResponseSchema, {
-          result: {
-            case: 'configurationFailed',
-            value: {code: 'x', stage: 's', message: REASON, stderr: 'trace'},
-          },
-        }),
-      ),
-    ),
-  );
+  await act(async () => answer(call));
   return {
     container,
     unmount: async () => {
@@ -119,6 +128,19 @@ test('a refused request says why on the page, not in a tooltip', async () => {
   expect(textNodes(container)).toContain(REASON);
   expect(container.querySelector(`[title="${REASON}"]`)).toBeNull();
   expect(asks(container)).toHaveLength(0);
+  await unmount();
+});
+
+test('an unconfirmed request says why once, under its row, with one offer', async () => {
+  const reason = 'The run did not take the command';
+  const {container, unmount} = await pausedWith(
+    call => call.reject(new Error(reason)),
+    () => undefined,
+  );
+  expect(container.textContent).toContain('Pause · Not confirmed');
+  expect(textNodes(container).filter(text => text === reason)).toEqual([reason]);
+  expect(container.textContent).not.toContain('Updates unavailable');
+  expect(asks(container)).toHaveLength(1);
   await unmount();
 });
 
