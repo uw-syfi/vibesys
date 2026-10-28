@@ -5,6 +5,7 @@ import '@vibesys/ui/tokens.css';
 import '@vibesys/ui/fonts.css';
 import '@vibesys/ui/components.css';
 import {browserDraftMemory, browserMoreOptionsMemory} from '@vibesys/feature-new-run/renderer';
+import {browserPaneWidths} from '@vibesys/feature-run-page/renderer';
 import {pageAppearance} from '@vibesys/feature-settings/renderer';
 import {runOfWindow, type WelcomeBridge} from '@vibesys/ipc';
 import {Card, EmptyState, LinkOpener, Page} from '@vibesys/ui';
@@ -55,6 +56,7 @@ if (bridge === undefined) {
       moreOptions: browserMoreOptionsMemory(() => window.localStorage),
       // A window's own storage: another window starts its own New run.
       draft: browserDraftMemory(() => window.sessionStorage),
+      paneWidths: browserPaneWidths(() => window.localStorage),
     },
   );
   // A run window's page names its run in its query; the main window's has none.
