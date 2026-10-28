@@ -66,22 +66,7 @@ export function flowOfDraft(draft: Draft, entries: readonly CatalogueEntry[]): F
   return {answers: draft.answers, at: draft.at, form: moved};
 }
 
-const STEP_IDS: readonly StepId[] = [
-  'start',
-  'domain',
-  'model',
-  'hardware',
-  'structure',
-  'workload',
-  'example',
-  'variant',
-  'project',
-  'task',
-  'goal',
-  'where',
-  'agent',
-  'review',
-];
+const STEP_IDS: readonly StepId[] = ['pick', 'review'];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -99,7 +84,6 @@ const nullableText = (value: unknown): string | null | undefined =>
   value === null ? null : typeof value === 'string' ? value : undefined;
 
 const EFFORTS: readonly Effort[] = ['default', 'low', 'medium', 'high'];
-const DOMAIN_IDS = ['llm-serving', 'data-structures', 'databases', 'microservices'] as const;
 
 function parseOwnProject(value: unknown): Answers['project'] | undefined {
   if (value === null) return null;
@@ -110,41 +94,30 @@ function parseOwnProject(value: unknown): Answers['project'] | undefined {
   return {source, path};
 }
 
+function parseEntry(value: unknown): Answers['entry'] | undefined {
+  if (value === null) return null;
+  const fields = exact(value, ['example', 'task']);
+  const example = text(fields?.['example']);
+  const task = text(fields?.['task']);
+  return example === null || task === null ? undefined : {example, task};
+}
+
 function parseAnswers(value: unknown): Answers | null {
   const fields = exact(value, Object.keys(NO_ANSWERS));
   if (fields === null) return null;
   const from = fields['from'];
-  const domain = fields['domain'];
+  const entry = parseEntry(fields['entry']);
   const project = parseOwnProject(fields['project']);
-  const strings = ['model', 'hardware', 'structure', 'workload', 'example', 'variant', 'task'].map(
-    key => nullableText(fields[key]),
-  );
+  const task = nullableText(fields['task']);
   if (
     (from !== 'example' && from !== 'project') ||
-    (domain !== null && !DOMAIN_IDS.some(each => each === domain)) ||
+    entry === undefined ||
     project === undefined ||
-    strings.some(each => each === undefined) ||
-    typeof fields['goalSeen'] !== 'boolean'
+    task === undefined
   ) {
     return null;
   }
-  const [model, hardware, structure, workload, example, variant, task] = strings as (
-    | string
-    | null
-  )[];
-  return {
-    from,
-    domain: domain as Answers['domain'],
-    model: model ?? null,
-    hardware: hardware ?? null,
-    structure: structure ?? null,
-    workload: workload ?? null,
-    example: example ?? null,
-    variant: variant ?? null,
-    project,
-    task: task ?? null,
-    goalSeen: fields['goalSeen'],
-  };
+  return {from, entry, project, task};
 }
 
 function parsePick(value: unknown): AgentPick | null | undefined {

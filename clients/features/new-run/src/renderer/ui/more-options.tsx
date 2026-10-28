@@ -26,7 +26,6 @@ import {
   roleLabel,
   roleSummary,
 } from '../../state/index.js';
-import {TimeLimitField} from './budget-fields.js';
 import type {CardProps} from './card-props.js';
 import {destinationTaken, moreOptionsSummary, type RolesView, rolesView} from './view.js';
 
@@ -136,7 +135,7 @@ function ExampleDestination(props: CardProps): JSX.Element | null {
   );
 }
 
-/** More options: results, the reasoning effort of each role, extra arguments and where an example is copied to. */
+/** More options: results, the reasoning effort of each role, where an example is copied to, and extra arguments. */
 export function MoreOptions(props: CardProps): JSX.Element {
   const {context, dispatch} = props;
   const {machine, advanced, budget} = context.form;
@@ -151,7 +150,6 @@ export function MoreOptions(props: CardProps): JSX.Element {
       {...(open ? {} : {summary: problem ?? moreOptionsSummary(context)})}
     >
       <Stack gap="space-4">
-        <TimeLimitField {...props} />
         <Stack gap="space-2">
           <Text variant="body-strong">Results</Text>
           <SegmentedControl

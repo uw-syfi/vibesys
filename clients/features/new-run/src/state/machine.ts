@@ -1,12 +1,13 @@
 /**
  * The New run screen's control state, as a machine (docs/contributing/clients-architecture.md,
- * "State"); the guided form is data in its context (`answers`, the step `at`, and the run's
+ * "State"); the two-step form is data in its context (`answers`, the step `at`, and the run's
  * `form`, which the answers name: `flow.ts`). While editing, parallel regions load what the
  * machine offers (its facts, vetted harnesses, examples), the project's tasks, and the "Ready to
  * start" checks for the current inputs, debounced; one more region runs a fix or the start.
  * Changing an input re-enters the regions that depend on it, which stops their work in flight, and
  * a reply is applied only for the inputs it was asked for, so a slow reply never overwrites newer
- * state. Start is enabled only when the checks are for the current inputs and none fails.
+ * state. Start is enabled only when the checks are for the current inputs and none fails, and the
+ * machine does not say the agent's CLI is signed out.
  */
 import type {
   CreatedProject,
@@ -72,6 +73,7 @@ import {
 import {type Compute, formWithMeasure} from './measure.js';
 import {type Problem, problemOf, type Step} from './problem.js';
 import {formWithRoles, rolesAfter, rolesWithin} from './roles.js';
+import {agentLogin} from './sign-in.js';
 
 /** The fixes the screen performs itself; the rest are the shell's (Machines) or the user's. */
 export type ProjectFix =
@@ -127,7 +129,7 @@ export interface NewRunContext {
 export type NewRunEvent =
   | {readonly type: 'machine'; readonly machine: HostKey}
   | {readonly type: 'again'; readonly run: RecentRun}
-  /** Answer the question of the step shown; `advance` moves on to the next step. */
+  /** Answer the pick; `advance` moves on to the next step. */
   | {readonly type: 'answer'; readonly change: AnswerChange; readonly advance?: boolean}
   /** Show a step the answers reach. */
   | {readonly type: 'go'; readonly step: StepId}
@@ -150,7 +152,7 @@ export type NewRunEvent =
   | {readonly type: 'recheck'}
   /** The machine's helper could not be reached, so its examples are not coming. */
   | {readonly type: 'helper_failed'}
-  /** Check again: read the project's tasks and check the inputs once more. */
+  /** Check again: read the machine, the project's tasks and check the inputs once more. */
   | {readonly type: 'refresh'}
   /** Try again the load or check that failed (`problem`). */
   | {readonly type: 'retry'}
@@ -306,10 +308,8 @@ function afterPreflight(context: NewRunContext, answer: Offered<PreflightResult>
 function movedParts(context: NewRunContext, machine: HostKey) {
   const parts = freshParts(machine, context.recent);
   const own = context.answers.from === 'project';
-  const answers = own
-    ? {...context.answers, project: null, task: null, goalSeen: false}
-    : context.answers;
-  return {...parts, answers, at: context.at};
+  const answers = own ? {...context.answers, project: null, task: null} : context.answers;
+  return {...parts, answers, at: own ? 'pick' : context.at};
 }
 
 /** The project made from `example` at `path`. */
@@ -345,7 +345,8 @@ function fixed(context: NewRunContext, done: FixDone): Partial<NewRunContext> {
     return {form: {...form, project: createdProject(made, created.project)}};
   }
   if (created === null) return {};
-  if (answers.project?.path !== fix.source) return {};
+  // The copy replaces the project only while the run is still of it.
+  if (answers.from !== 'project' || answers.project?.path !== fix.source) return {};
   const copy = {source: 'folder', path: created.project} as const;
   return {answers: {...answers, project: copy}, form: {...form, project: copy}};
 }
@@ -359,7 +360,7 @@ function flowWithTasks(context: NewRunContext, list: readonly string[]): Flow {
   const named = flow.answers.task;
   const only = list.length === 1 ? list[0] : undefined;
   if (named !== null && !list.includes(named)) {
-    const answers = {...flow.answers, task: only ?? null, goalSeen: false};
+    const answers = {...flow.answers, task: only ?? null};
     return flowSettled(
       {...flow, answers, form: {...flow.form, task: only ?? null}},
       entriesOf(context),
@@ -435,7 +436,8 @@ export const newRunMachine = setup({
       context.form.project.example === event.example,
     mayStart: ({context}) =>
       checksPass(context.form, context.checks) &&
-      missingFeatures(context.helper, context.form.machine).length === 0,
+      missingFeatures(context.helper, context.form.machine).length === 0 &&
+      agentLogin(context.facts, context.form) !== 'signed_out',
     helperKnown: ({context}) => context.helper?.for === context.form.machine,
     offersChecks: ({context}) =>
       offers(context.helper, context.form.machine, 'preflight') &&
@@ -452,7 +454,7 @@ export const newRunMachine = setup({
       const {fix} = event;
       return fix.kind === 'create_from_example'
         ? context.form.project?.source === 'example' && context.form.project.example === fix.example
-        : context.answers.project?.path === fix.source;
+        : context.answers.from === 'project' && context.answers.project?.path === fix.source;
     },
     // An answer to the project question, or a change of path, changes which tasks are read.
     answersProject: ({event}) =>
@@ -513,7 +515,8 @@ export const newRunMachine = setup({
             ...freshParts(event.run.host, context.recent),
             ...fromFlow({
               answers: againAnswers(event.run),
-              at: 'review',
+              // A run without a task names nothing to review: its task is picked first.
+              at: event.run.task === null ? 'pick' : 'review',
               form: againForm(event.run),
             }),
             rerun: event.run.start ?? null,
@@ -532,9 +535,7 @@ export const newRunMachine = setup({
         next: {
           actions: assign(({context}) => fromFlow(flowNext(flowOf(context), entriesOf(context)))),
         },
-        back: {
-          actions: assign(({context}) => fromFlow(flowBack(flowOf(context), entriesOf(context)))),
-        },
+        back: {actions: assign(({context}) => fromFlow(flowBack(flowOf(context))))},
         recent: {actions: assign(({event}) => ({recent: event.recent}))},
         more_options: {
           actions: assign(({context, event}) => ({
@@ -586,6 +587,8 @@ export const newRunMachine = setup({
         facts: {
           initial: 'loading',
           on: {
+            // A login changed on the machine (Settings): read what it says now.
+            refresh: '.loading',
             retry: {
               guard: {type: 'failedAt', params: {step: 'describe'}},
               target: '.loading',

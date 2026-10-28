@@ -1,5 +1,4 @@
 import {describe, expect, test} from 'bun:test';
-import type {ExampleList, ExampleTask} from '@vibesys/contracts/host-helper';
 import {exampleCatalogue, exampleCatalogueWithoutDetails} from '@vibesys/run-fixtures';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {
@@ -9,246 +8,127 @@ import {
   chosenEntry,
   isDone,
   NO_ANSWERS,
-  nextStep,
-  openEntries,
   pruneAnswers,
   reachableSteps,
-  type StepId,
   stepIds,
 } from './answers.js';
-import {
-  allExamples,
-  type CatalogueEntry,
-  domainOptions,
-  entriesOf,
-  examplesOf,
-  hardwareGroups,
-  hasDetails,
-  modelGroups,
-  tasksOfExample,
-} from './catalogue.js';
+import {type CatalogueEntry, entriesOf} from './catalogue.js';
 import {type Flow, flowAnswer, flowBack, flowGo, flowNext, flowSettled, startFlow} from './flow.js';
 import {DEFAULT_BUDGET, type Form} from './form.js';
 
-const FACTS = {agent: true} as const;
-
-/** A catalogue drawn from the fixtures' shapes at random: which examples exist, and for what. */
-function randomCatalogue(random: Seeded): ExampleList {
-  const keep = exampleCatalogue.examples.filter(() => random.int(4) > 0);
-  const extra: ExampleTask[] = ['a', 'b', 'c'].slice(0, random.int(3) + 1).map(task => ({
-    task,
-    domain: 'llm-serving',
-    hardware: {accelerator: 'NVIDIA H100', count: 2, vendor: 'nvidia', backend: 'cuda'},
-    model: {name: 'Llama 3 8B Instruct', maker: 'meta'},
-    workload: null,
-    objectives: [],
-    goal: '# Goal\n',
-    goal_truncated: false,
-  }));
-  return {
-    ...exampleCatalogue,
-    examples: [
-      ...keep,
-      {
-        name: 'model-serving/generated',
-        category: 'model-serving',
-        tasks: extra.map(each => each.task),
-        external_repo: false,
-        task_details: extra,
-      },
-    ],
-  };
-}
-
-/** What each step asks for: the options the screen offers it, as the screen computes them. */
-function options(
-  step: StepId,
-  answers: Answers,
-  entries: readonly CatalogueEntry[],
-): AnswerChange[] {
-  switch (step) {
-    case 'start':
-      return [
-        {kind: 'from', from: 'example'},
-        {kind: 'from', from: 'project'},
-      ];
-    case 'domain':
-      return domainOptions(entries).map(({domain}) => ({kind: 'domain', domain}));
-    case 'model':
-      return modelGroups(entries).flatMap(group =>
-        group.models.map(model => ({kind: 'model' as const, model: model.name})),
-      );
-    case 'hardware':
-      return hardwareGroups(entries, answers.model ?? '')
-        .flatMap(group => group.options)
-        .map(option => ({kind: 'hardware', hardware: option.key}));
-    case 'structure':
-      return examplesOf(entries, 'data-structures').map(example => ({kind: 'structure', example}));
-    case 'workload':
-      return tasksOfExample(entries, answers.structure ?? '').map(entry => ({
-        kind: 'workload',
-        task: entry.task,
-      }));
-    case 'example':
-      return (
-        hasDetails(entries)
-          ? examplesOf(entries, answers.domain ?? 'databases')
-          : allExamples(entries)
-      ).map(example => ({kind: 'example', example}));
-    case 'variant':
-      return openEntries(answers, entries).map(entry => ({kind: 'variant', task: entry.task}));
-    case 'project':
-      return ['/p/a', '/p/b'].map(path => ({kind: 'project', project: {source: 'folder', path}}));
-    case 'task':
-      return ['mpmc', 'spsc'].map(task => ({kind: 'task', task}));
-    case 'goal':
-      return [{kind: 'goal'}];
-    case 'where':
-    case 'agent':
-    case 'review':
-      return [];
-  }
-}
-
-const FIELD: Readonly<Record<StepId, keyof Answers | null>> = {
-  start: 'from',
-  domain: 'domain',
-  model: 'model',
-  hardware: 'hardware',
-  structure: 'structure',
-  workload: 'workload',
-  example: 'example',
-  variant: 'variant',
-  project: 'project',
-  task: 'task',
-  goal: 'goalSeen',
-  where: null,
-  agent: null,
-  review: null,
-};
-
-/** Answers the form step by step as a person does: one valid option each, going on after each. */
-function walk(
-  random: Seeded,
-  entries: readonly CatalogueEntry[],
-): {answers: Answers; visited: StepId[]} {
-  let answers = NO_ANSWERS;
-  let at: StepId = 'start';
-  const visited: StepId[] = [];
-  for (let guard = 0; guard < 20 && at !== 'review'; guard += 1) {
-    visited.push(at);
-    const choices = options(at, answers, entries);
-    if (choices.length > 0) answers = answer(answers, random.pick(choices));
-    at = nextStep(at, reachableSteps(answers, entries, FACTS));
-  }
-  visited.push(at);
-  return {answers, visited};
-}
-
-/** The answers of `steps` are the same in `next` as in `before`. */
-function expectFields(
-  steps: readonly StepId[],
-  next: Answers,
-  before: Answers,
-  label: string,
-): void {
-  for (const step of steps) {
-    const field = FIELD[step];
-    if (field !== null) expect(next[field], `${label} ${step}`).toEqual(before[field]);
-  }
-}
-
-/** The answers of `steps` are cleared in `answers`. */
-function expectCleared(steps: readonly StepId[], answers: Answers, label: string): void {
-  for (const step of steps) {
-    const field = FIELD[step];
-    if (field !== null) expect(answers[field], `${label} ${step}`).toEqual(NO_ANSWERS[field]);
-  }
-}
-
 function entriesFrom(random: Seeded): readonly CatalogueEntry[] {
-  return entriesOf(random.bool() ? randomCatalogue(random) : exampleCatalogue);
+  const all = entriesOf(random.int(6) === 0 ? exampleCatalogueWithoutDetails : exampleCatalogue);
+  return all.filter(() => random.int(4) > 0);
 }
 
-describe('the guided form', () => {
-  test('every path of answers reaches Review, having asked exactly the steps it lists', () => {
-    for (const seed of SEEDS) {
-      const random = new Seeded(seed);
-      const entries =
-        random.int(8) === 0 ? entriesOf(exampleCatalogueWithoutDetails) : entriesFrom(random);
-      const {answers, visited} = walk(random, entries);
-      expect(visited.at(-1), `seed ${seed}`).toBe('review');
-      expect(visited, `seed ${seed}`).toEqual(stepIds(answers, entries));
-      // Every step before Review is answered, so Review is reached and the run is named.
-      for (const step of stepIds(answers, entries).slice(0, -1)) {
-        expect(isDone(step, answers, entries, FACTS), `seed ${seed} step ${step}`).toBe(true);
-      }
-      if (answers.from === 'example') {
-        expect(chosenEntry(answers, entries), `seed ${seed}`).not.toBeNull();
-      }
-    }
-  });
+/** One change a person can make on the pick page, or one naming a task no catalogue lists. */
+function changeOf(random: Seeded, entries: readonly CatalogueEntry[]): AnswerChange {
+  const listed = entries.length === 0 ? null : random.pick(entries);
+  switch (random.int(5)) {
+    case 0:
+      return {kind: 'from', from: random.pick(['example', 'project'] as const)};
+    case 1:
+      return listed === null
+        ? {kind: 'entry', example: 'gone/example', task: 'default'}
+        : {kind: 'entry', example: listed.example, task: listed.task};
+    case 2:
+      return {kind: 'entry', example: 'gone/example', task: random.pick(['default', 'mpmc'])};
+    case 3:
+      return {
+        kind: 'project',
+        project: {
+          source: random.pick(['recent', 'folder'] as const),
+          path: random.pick(['/a', '/b']),
+        },
+      };
+    default:
+      return {kind: 'task', task: random.pick(['mpmc', 'spsc'])};
+  }
+}
 
-  test('changing an earlier answer clears exactly the answers that followed it', () => {
-    for (const seed of SEEDS) {
-      const random = new Seeded(seed);
-      const entries = entriesFrom(random);
-      const {answers} = walk(random, entries);
-      const ids = stepIds(answers, entries);
-      const questions = ids.filter(
-        id => FIELD[id] !== null && options(id, answers, entries).length > 0,
-      );
-      const step = random.pick(questions);
-      const next = answer(answers, random.pick(options(step, answers, entries)));
-      if (next[FIELD[step] as keyof Answers] === answers[FIELD[step] as keyof Answers]) {
-        // The same answer again changes nothing at all.
-        expect(next, `seed ${seed}`).toBe(answers);
-        continue;
-      }
-      const at = ids.indexOf(step);
-      expectFields(ids.slice(0, at), next, answers, `seed ${seed}`);
-      expectCleared(ids.slice(at + 1), next, `seed ${seed}`);
-      // The steps up to the changed one are the same questions as before.
-      expect(stepIds(next, entries).slice(0, at + 1)).toEqual(ids.slice(0, at + 1));
-    }
-  });
+/** Whether the pick names a task the run can be of. */
+function picked(answers: Answers, entries: readonly CatalogueEntry[]): boolean {
+  if (answers.from === 'example') return chosenEntry(answers, entries) !== null;
+  return answers.from === 'project' && answers.project !== null && answers.task !== null;
+}
 
-  test('the steps that may be shown are a prefix of the steps, up to the first one unanswered', () => {
+/** `next` is `answers` with `change` made, and with only what depended on it cleared. */
+function expectChanged(answers: Answers, change: AnswerChange, next: Answers): void {
+  switch (change.kind) {
+    case 'from':
+      // Switching sides keeps both sides' answers.
+      expect(next).toEqual({...answers, from: change.from});
+      return;
+    case 'entry':
+      expect(next).toEqual({
+        ...answers,
+        from: 'example',
+        entry: {example: change.example, task: change.task},
+      });
+      return;
+    case 'project': {
+      const same =
+        answers.project?.source === change.project.source &&
+        answers.project.path === change.project.path;
+      expect(next.entry).toEqual(answers.entry);
+      expect(next.from).toBe('project');
+      expect(next.task).toBe(same ? answers.task : null);
+      return;
+    }
+    case 'task':
+      expect(next).toEqual(answers.project === null ? answers : {...answers, task: change.task});
+      return;
+  }
+}
+
+describe('the answers of the two-step form', () => {
+  test('Review is reached exactly when the pick names a listed example task or a project task', () => {
     for (const seed of SEEDS) {
       const random = new Seeded(seed);
       const entries = entriesFrom(random);
       let answers = NO_ANSWERS;
-      for (let turn = 0; turn < 12; turn += 1) {
-        const ids = stepIds(answers, entries);
-        const reached = reachableSteps(answers, entries, FACTS);
-        expect(reached).toEqual(ids.slice(0, reached.length));
-        const open = ids.find(id => !isDone(id, answers, entries, FACTS));
-        expect(reached.at(-1)).toBe(open ?? ids.at(-1));
-        const step = random.pick(reached);
-        const choices = options(step, answers, entries);
-        if (choices.length > 0) answers = answer(answers, random.pick(choices));
+      for (let turn = 0; turn < 16; turn += 1) {
+        answers = answer(answers, changeOf(random, entries));
+        const reached = reachableSteps(answers, entries);
+        expect(reached, `seed ${seed}`).toEqual(
+          picked(answers, entries) ? ['pick', 'review'] : ['pick'],
+        );
+        expect(isDone('pick', answers, entries)).toBe(picked(answers, entries));
+        expect(isDone('review', answers, entries)).toBe(false);
+        expect(stepIds()).toEqual(['pick', 'review']);
       }
     }
   });
 
-  test('pruning to a catalogue that lacks an answer clears it and what followed, nothing earlier', () => {
+  test('a change clears only what depended on it: the task when the project changes', () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const entries = entriesFrom(random);
+      let answers = NO_ANSWERS;
+      for (let turn = 0; turn < 16; turn += 1) {
+        const change = changeOf(random, entries);
+        const next = answer(answers, change);
+        expectChanged(answers, change, next);
+        // The same change again is no change at all.
+        expect(answer(next, change)).toBe(next);
+        answers = next;
+      }
+    }
+  });
+
+  test('pruning drops an example task the catalogue no longer lists, and nothing else', () => {
     for (const seed of SEEDS) {
       const random = new Seeded(seed);
       const entries = entriesOf(exampleCatalogue);
-      const {answers} = walk(random, entries);
-      if (answers.from !== 'example') continue;
-      expect(pruneAnswers(answers, entries)).toBe(answers);
+      let answers = NO_ANSWERS;
+      for (let turn = 0; turn < 6; turn += 1) answers = answer(answers, changeOf(random, entries));
       const fewer = entries.filter(() => random.bool());
       const pruned = pruneAnswers(answers, fewer);
-      const ids = stepIds(answers, entries).filter(id => id !== 'goal');
-      const firstGone = ids.findIndex(id => {
-        const field = FIELD[id];
-        return field !== null && answers[field] !== pruned[field];
-      });
-      if (firstGone < 0) continue;
-      expectFields(ids.slice(0, firstGone), pruned, answers, `seed ${seed}`);
-      expectCleared(ids.slice(firstGone), pruned, `seed ${seed}`);
-      // What the pruned answers still say is offered by the smaller catalogue.
+      const {entry} = answers;
+      const listed =
+        entry !== null &&
+        fewer.some(each => each.example === entry.example && each.task === entry.task);
+      expect(pruned).toEqual({...answers, entry: listed ? entry : null});
       expect(pruneAnswers(pruned, fewer)).toBe(pruned);
     }
   });
@@ -263,13 +143,6 @@ const FORM: Form = {
   measure: {kind: 'same_machine'},
   advanced: '',
 };
-
-/** One thing a person does at the step shown: answer it (and perhaps go on), or move. */
-function turnOf(random: Seeded, flow: Flow, entries: readonly CatalogueEntry[]): Flow {
-  const choices = options(flow.at, flow.answers, entries);
-  if (choices.length > 0) return flowAnswer(flow, random.pick(choices), random.bool(), entries);
-  return random.bool() ? flowNext(flow, entries) : flowBack(flow, entries);
-}
 
 /** The form's project and task are the ones the answers name. */
 function expectNamed(flow: Flow, entries: readonly CatalogueEntry[], label: string): void {
@@ -286,46 +159,52 @@ function expectNamed(flow: Flow, entries: readonly CatalogueEntry[], label: stri
   }
 }
 
-describe('the flow of the guided form', () => {
+describe('the flow of the two-step form', () => {
   test('the run names the project and task the answers name, and the step is always one reached', () => {
     for (const seed of SEEDS) {
       const random = new Seeded(seed);
       const entries = entriesFrom(random);
       let flow = startFlow(FORM);
       for (let turn = 0; turn < 14; turn += 1) {
-        flow = flowGo(flow, random.pick(reachableSteps(flow.answers, entries, FACTS)), entries);
-        flow = turnOf(random, flow, entries);
-        expect(reachableSteps(flow.answers, entries, FACTS), `seed ${seed}`).toContain(flow.at);
+        flow = flowGo(flow, random.pick(reachableSteps(flow.answers, entries)), entries);
+        switch (random.int(3)) {
+          case 0:
+            flow = flowAnswer(flow, changeOf(random, entries), random.bool(), entries);
+            break;
+          case 1:
+            flow = flowNext(flow, entries);
+            break;
+          default:
+            flow = flowBack(flow);
+        }
+        expect(reachableSteps(flow.answers, entries), `seed ${seed}`).toContain(flow.at);
         expectNamed(flow, entries, `seed ${seed}`);
       }
     }
   });
 
-  test('answering a question and going on shows the next step; answering it again keeps the flow', () => {
+  test('picking an example task and going on shows Review; picking it again keeps the flow', () => {
     const entries = entriesOf(exampleCatalogue);
-    const flow = flowAnswer(startFlow(FORM), {kind: 'from', from: 'example'}, true, entries);
-    expect(flow.at).toBe('domain');
-    const again = flowAnswer(flow, {kind: 'from', from: 'example'}, false, entries);
-    expect(again).toBe(flow);
+    const change = {kind: 'entry', example: 'data-structures/stack', task: 'mpmc'} as const;
+    const flow = flowAnswer(startFlow(FORM), change, true, entries);
+    expect(flow.at).toBe('review');
+    expect(flow.form.task).toBe('mpmc');
+    expect(flowAnswer(flow, change, false, entries)).toBe(flow);
+    expect(flowBack(flow).at).toBe('pick');
   });
 
-  test('a catalogue that no longer offers the chosen example clears it and moves the step back', () => {
+  test('a catalogue that no longer lists the picked task clears it and goes back to the pick', () => {
     const entries = entriesOf(exampleCatalogue);
-    let flow = startFlow(FORM);
-    for (const change of [
-      {kind: 'from', from: 'example'},
-      {kind: 'domain', domain: 'data-structures'},
-      {kind: 'structure', example: 'data-structures/stack'},
-      {kind: 'workload', task: 'mpmc'},
-    ] as const) {
-      flow = flowAnswer(flow, change, true, entries);
-    }
-    expect(flow.at).toBe('goal');
+    const flow = flowAnswer(
+      startFlow(FORM),
+      {kind: 'entry', example: 'data-structures/stack', task: 'mpmc'},
+      true,
+      entries,
+    );
     const settled = flowSettled(flow, []);
-    expect(settled.answers.domain).toBeNull();
+    expect(settled.answers.entry).toBeNull();
     expect(settled.form.project).toBeNull();
-    // With no catalogue the example path asks only for an example.
-    expect(settled.at).toBe('example');
+    expect(settled.at).toBe('pick');
     // Until the catalogue is known nothing is judged against it.
     expect(flowSettled(flow, null)).toBe(flow);
   });

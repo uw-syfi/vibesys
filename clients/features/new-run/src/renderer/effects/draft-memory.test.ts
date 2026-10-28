@@ -5,7 +5,7 @@ import {browserDraftMemory} from './draft-memory.js';
 const DRAFT = {
   machine: 'local',
   answers: {...NO_ANSWERS, from: 'example' as const},
-  at: 'domain' as const,
+  at: 'pick' as const,
   agent: null,
   budget: {rounds: null, timeLimitS: null, results: 'keep' as const},
   measure: {kind: 'same_machine' as const},

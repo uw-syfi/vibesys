@@ -1,4 +1,4 @@
-/** The two limits of a run: how many ideas it tries (on the Agent page) and how long it may take. */
+/** The two limits of a run, as Review's rows: how many ideas it tries and how long it may take. */
 
 import {Field, Select} from '@vibesys/ui';
 import type {JSX} from 'react';
@@ -33,6 +33,7 @@ export function IdeasField(props: CardProps): JSX.Element {
   const {rounds} = props.context.form.budget;
   return (
     <Field
+      row
       label="Ideas to try"
       help={rounds === null ? 'Task default' : `${rounds} ${rounds === 1 ? 'idea' : 'ideas'}`}
     >
@@ -56,7 +57,7 @@ export function IdeasField(props: CardProps): JSX.Element {
 export function TimeLimitField(props: CardProps): JSX.Element {
   const {timeLimitS} = props.context.form.budget;
   return (
-    <Field label="Time limit">
+    <Field row label="Time limit">
       <Select
         value={timeLimitS === null ? 'none' : String(timeLimitS)}
         options={withCurrent(

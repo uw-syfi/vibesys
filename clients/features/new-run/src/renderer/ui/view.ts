@@ -1,15 +1,15 @@
 /**
  * What the New run screen shows, derived from the machine's snapshot: the facts about the machine,
- * the "Ready to start" items, why Start is disabled, and the one-line summary of the run.
+ * the "Before you start" items, why Start is disabled, and the one-line summary of the run.
  */
-import {acceleratorName, type HostKey, hostFromKey, hostLabel} from '@vibesys/hosts';
+import {type HostKey, hostFromKey, hostLabel} from '@vibesys/hosts';
 import type {MeasureTarget} from '@vibesys/ipc';
 import type {RecentRun} from '@vibesys/runs';
-import type {BrandMarkName, CheckState, KeyValueItem} from '@vibesys/ui';
+import type {CheckState} from '@vibesys/ui';
 import {
-  type AgentMaker,
   type AgentPick,
   advancedProblem,
+  agentLogin,
   type Backend,
   type CatalogueEntry,
   type Check,
@@ -21,13 +21,11 @@ import {
   harnessLabel,
   inputsKey,
   type MachineDescription,
-  type Maker,
   missingFeatures,
   type NewRunContext,
   type NewRunSnapshot,
   offers,
   projectPath,
-  type Vendor,
 } from '../../state/index.js';
 import {type FailureWords, failureWords} from './cause-words.js';
 
@@ -48,33 +46,6 @@ export function entriesIn(context: NewRunContext): readonly CatalogueEntry[] {
 
 export function machineLabel(key: HostKey): string {
   return hostLabel(hostFromKey(key));
-}
-
-/** The facts the Machine card lists. */
-export function machineFacts(machine: MachineDescription): KeyValueItem[] {
-  const {hardware, docker, harness_clis, harness_cli_names, runs, checkout} = machine;
-  const gpus = hardware.gpus.map(gpu => gpu.model).join(', ');
-  return [
-    ...(checkout === null
-      ? []
-      : [{key: 'VibeSys', value: `${checkout.version} at ${checkout.root}`, mono: true}]),
-    {
-      key: 'Hardware',
-      value: `${hardware.cpu_cores} cores${gpus === '' ? '' : `, ${gpus}`} (${acceleratorName(hardware.accelerator)})`,
-    },
-    {
-      key: 'Docker',
-      value: 'reason' in docker ? `not reachable: ${docker.reason}` : docker.version,
-    },
-    {
-      key: 'Agent CLIs',
-      value:
-        harness_clis.length === 0
-          ? 'none'
-          : harness_clis.map(provider => harness_cli_names?.[provider] ?? provider).join(', '),
-    },
-    {key: 'Runs', value: `${runs.live} live, ${runs.ended_today} ended today`},
-  ];
 }
 
 /** The hardware in a line ("64 cores, MI300X"), for the Machine details while they are closed. */
@@ -155,66 +126,6 @@ export function projectLabels(paths: readonly string[]): ReadonlyMap<string, str
 }
 
 /**
- * The mark drawn beside a harness's name, or null for the generic glyph. The marks are
- * `simple-icons`'s, shown only beside the product's name to say which product runs; a harness
- * the package has no mark for (Codex today) has none.
- */
-export function harnessMark(provider: string): BrandMarkName | null {
-  switch (provider) {
-    case 'claude':
-      return 'claudecode';
-    case 'gemini':
-      return 'googlegemini';
-    case 'opencode':
-      return 'opencode';
-    default:
-      return null;
-  }
-}
-
-/** The mark of a maker of served models, or null: `simple-icons` has none for the rest, which show their name alone. */
-const MODEL_MAKER_MARKS: Readonly<Record<Maker, BrandMarkName | null>> = {
-  meta: 'meta',
-  qwen: null,
-  deepseek: 'deepseek',
-  zhipu: null,
-  moonshot: 'moonshotai',
-  ai2: null,
-  openai: null,
-  other: null,
-};
-
-export function modelMakerMark(maker: Maker): BrandMarkName | null {
-  return MODEL_MAKER_MARKS[maker];
-}
-
-/** The mark of a maker of the agent's own models, or null for one `simple-icons` has none for. */
-export function agentMakerMark(maker: AgentMaker | null): BrandMarkName | null {
-  switch (maker) {
-    case 'anthropic':
-      return 'anthropic';
-    case 'google':
-      return 'google';
-    case 'openai':
-    case null:
-      return null;
-  }
-}
-
-const VENDOR_MARKS: Readonly<Record<Vendor, BrandMarkName | null>> = {
-  nvidia: 'nvidia',
-  amd: 'amd',
-  aws: null,
-  apple: 'apple',
-  cpu: null,
-};
-
-/** The mark of a hardware vendor, or null: AWS and a plain CPU have none to draw. */
-export function vendorMark(vendor: Vendor): BrandMarkName | null {
-  return VENDOR_MARKS[vendor];
-}
-
-/**
  * What the Agent card shows of the roles: the table of the run's roles, or why there is none. The
  * roles are the run's orchestration's, read with the checks (`run_roles`); a machine whose helper
  * does not report them keeps every role as the run.
@@ -252,7 +163,7 @@ const CHECK_LABELS: Readonly<Record<Check['id'], string>> = {
   measurement_target: 'Where results are measured',
 };
 
-/** One "Ready to start" item, with the fix it offers named but not yet bound to an action. */
+/** One "Before you start" item, with the fix it offers named but not yet bound to an action. */
 export interface Readiness {
   readonly id: string;
   readonly state: CheckState;
@@ -276,6 +187,8 @@ export type ReadinessFix =
   /** The destination is taken: the user picks another name in More options. */
   | {readonly kind: 'rename_destination'}
   | {readonly kind: 'choose_checkout'}
+  /** The agent's CLI is signed out: Settings › Agent logins signs it in. */
+  | {readonly kind: 'open_logins'}
   | {readonly kind: 'recheck'};
 
 function checkFix(
@@ -413,24 +326,50 @@ function harnessItem(context: NewRunContext, machine: MachineDescription): Readi
   return {
     id: 'harness_installed',
     state: installed ? 'ok' : 'warn',
-    label: `${label} on ${name}`,
-    detail: installed ? `${label} is installed on ${name}.` : `${label} was not found on ${name}.`,
+    label: `${label} installed on ${name}`,
+    detail: installed ? `Found on ${name}.` : `${label} was not found on ${name}.`,
   };
 }
 
 /**
- * What the machine's own report says about the run: whether it has the hardware the task targets
- * and the agent's CLI. Both only advise (`warn`): the helper's checks decide whether Start is open.
+ * Whether the agent's CLI is signed in on the machine, as the machine says. Nothing is said of a
+ * CLI that is not installed (the item above warns), nor when the machine cannot tell.
+ */
+function signInItem(context: NewRunContext, machine: MachineDescription): Readiness | null {
+  const {agent} = context.form;
+  const offered = context.harnesses?.for === context.form.machine ? context.harnesses.list : null;
+  const login = agentLogin(context.facts, context.form);
+  if (agent === null || offered === null || login === null || login === 'unknown') return null;
+  if (!machine.harness_clis.includes(agent.provider)) return null;
+  const name = machineLabel(context.form.machine);
+  const label = `${harnessLabel(offered, agent.provider)} signed in on ${name}`;
+  return login === 'signed_in'
+    ? {id: 'agent_signed_in', state: 'ok', label, detail: `Signed in on ${name}.`}
+    : {
+        id: 'agent_signed_in',
+        state: 'fail',
+        label,
+        detail: 'Installed, but not signed in.',
+        fix: {kind: 'open_logins'},
+      };
+}
+
+/**
+ * What the machine's own report says about the run: whether it has the hardware the task targets,
+ * the agent's CLI, and whether that CLI is signed in. The first two only advise (`warn`); a CLI
+ * that says it is signed out fails, and Start stays closed until it is signed in.
  */
 function machineItems(context: NewRunContext): Readiness[] {
   const facts = context.facts?.for === context.form.machine ? context.facts.value : null;
   if (facts === null || facts.kind !== 'offered') return [];
-  return [hardwareItem(context, facts.value), harnessItem(context, facts.value)].flatMap(item =>
-    item === null ? [] : [item],
-  );
+  return [
+    hardwareItem(context, facts.value),
+    harnessItem(context, facts.value),
+    signInItem(context, facts.value),
+  ].flatMap(item => (item === null ? [] : [item]));
 }
 
-/** The "Ready to start" items for the inputs now. */
+/** The "Before you start" items for the inputs now. */
 export function readiness(snapshot: NewRunSnapshot): Readiness[] {
   const helper = helperItem(snapshot.context);
   const items = inputReadiness(snapshot);
@@ -459,15 +398,19 @@ export function startBlocked(snapshot: NewRunSnapshot): string | undefined {
   if (missingFeatures(context.helper, context.form.machine).length > 0) {
     return `VibeSys on ${machineLabel(context.form.machine)} needs an update`;
   }
-  if (checksPass(context.form, context.checks)) return undefined;
-  if (readiness(snapshot).some(item => item.state === 'fail')) {
-    return 'Fix the items marked above to start.';
+  const signedOut = agentLogin(context.facts, context.form) === 'signed_out';
+  if (checksPass(context.form, context.checks) && !signedOut) return undefined;
+  const failed = readiness(snapshot).filter(item => item.state === 'fail').length;
+  if (failed > 0) {
+    return failed === 1
+      ? 'Fix the check under Before you start.'
+      : `Fix the ${failed} checks under Before you start.`;
   }
   if (inputsKey(context.form) === null) return 'Choose a project, task and agent to start.';
   return 'Checking these inputs.';
 }
 
-/** The one-line state of "Ready to start", and whether its checks show by themselves. */
+/** The one-line state of "Before you start", and whether its checks show by themselves. */
 export interface ReadinessStatus {
   readonly state: CheckState;
   readonly text: string;
@@ -486,8 +429,7 @@ export function readinessStatus(items: readonly Readiness[]): ReadinessStatus {
   if (failed.length > 0) {
     return {
       state: 'fail',
-      text:
-        failed.length === 1 ? '1 check needs attention' : `${failed.length} checks need attention`,
+      text: failed.length === 1 ? '1 check needs you' : `${failed.length} checks need you`,
       open: true,
     };
   }
@@ -521,7 +463,6 @@ export function moreOptionsSummary(context: NewRunContext): string {
   const {form} = context;
   const changedRoles = (form.agent?.roles ?? []).filter(role => role.effort !== 'default').length;
   const parts = [
-    ...(form.budget.timeLimitS === null ? [] : ['time limit']),
     ...(form.budget.results === 'publish_github' ? ['publishes to GitHub'] : []),
     ...(changedRoles === 0 ? [] : [`reasoning effort of ${count(changedRoles, 'role')}`]),
     ...(form.advanced.trim() === '' ? [] : ['extra arguments']),

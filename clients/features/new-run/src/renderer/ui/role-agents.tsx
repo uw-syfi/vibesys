@@ -1,6 +1,6 @@
 /**
- * "Use a different agent for a role", on the Agent page and closed until it is opened (or while a
- * role already has its own agent). Each role is one grouped model select (maker, then generation
+ * "Use a different agent for a role", in Review's Agent rows, closed until it is opened (or while
+ * a role already has its own agent). Each role is one grouped model select (maker, then generation
  * or family, then model) and a harness select; a role stays on the run's agent until changed.
  */
 import type {HarnessOffer} from '@vibesys/ipc';

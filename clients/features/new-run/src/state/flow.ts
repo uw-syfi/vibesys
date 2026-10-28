@@ -1,8 +1,7 @@
 /**
- * The guided form as one value: its answers, the step shown, and the run's form that the answers
- * name (`Form.project` and `Form.task` are projections of the answers, written only here). Every
- * change to the answers goes through `flowAnswer`, so the form and the step cannot disagree with
- * them.
+ * The form as one value: its answers, the step shown, and the run's form that the answers name
+ * (`Form.project` and `Form.task` are projections of the answers, written only here). Every change
+ * to the answers goes through `flowAnswer`, so the form and the step cannot disagree with them.
  */
 import type {ExampleList} from '@vibesys/contracts/host-helper';
 import type {HostKey} from '@vibesys/hosts';
@@ -18,7 +17,6 @@ import {
   previousStep,
   pruneAnswers,
   reachableSteps,
-  type StepFacts,
   type StepId,
   stepAfterChange,
   stepIds,
@@ -105,14 +103,9 @@ export function formFor(form: Form, answers: Answers, entries: readonly Catalogu
   return named.project === form.project && named.task === form.task ? form : {...form, ...named};
 }
 
-/** What the steps need to know of the form beyond the answers. */
-export function factsOf(form: Form): StepFacts {
-  return {agent: form.agent !== null};
-}
-
 /** The flow for a fresh form: nothing answered, at the first step. */
 export function startFlow(form: Form): Flow {
-  return {answers: NO_ANSWERS, at: 'start', form};
+  return {answers: NO_ANSWERS, at: 'pick', form};
 }
 
 /**
@@ -127,11 +120,10 @@ export function flowAnswer(
 ): Flow {
   const answers = answer(flow.answers, change);
   const form = formFor(flow.form, answers, entries);
-  const facts = factsOf(form);
-  const reached = reachableSteps(answers, entries, facts);
+  const reached = reachableSteps(answers, entries);
   // The step the question was answered at may be gone with the answers it depended on.
   const wanted = advance ? nextStep(flow.at, reached) : flow.at;
-  const at = reached.includes(wanted) ? wanted : (reached.at(-1) ?? 'start');
+  const at = reached.includes(wanted) ? wanted : (reached.at(-1) ?? 'pick');
   return answers === flow.answers && form === flow.form && at === flow.at
     ? flow
     : {answers, at, form};
@@ -147,8 +139,7 @@ export function flowSettled(flow: Flow, entries: readonly CatalogueEntry[] | nul
   const known = entries ?? [];
   const answers = pruneAnswers(flow.answers, known);
   const form = formFor(flow.form, answers, known);
-  // The agent is chosen from what the machine lists, which may arrive after this: it never moves the step.
-  const at = stepAfterChange(flow.at, answers, known, {agent: true});
+  const at = stepAfterChange(flow.at, answers, known);
   return answers === flow.answers && form === flow.form && at === flow.at
     ? flow
     : {answers, at, form};
@@ -156,33 +147,29 @@ export function flowSettled(flow: Flow, entries: readonly CatalogueEntry[] | nul
 
 /** The flow shown at `step` when it is reached; else unchanged. */
 export function flowGo(flow: Flow, step: StepId, entries: readonly CatalogueEntry[]): Flow {
-  const reached = reachableSteps(flow.answers, entries, factsOf(flow.form));
+  const reached = reachableSteps(flow.answers, entries);
   return reached.includes(step) && step !== flow.at ? {...flow, at: step} : flow;
 }
 
 /** The flow one step on, when this step is answered. */
 export function flowNext(flow: Flow, entries: readonly CatalogueEntry[]): Flow {
-  const reached = reachableSteps(flow.answers, entries, factsOf(flow.form));
+  const reached = reachableSteps(flow.answers, entries);
   const at = nextStep(flow.at, reached);
   return at === flow.at ? flow : {...flow, at};
 }
 
 /** The flow one step back. */
-export function flowBack(flow: Flow, entries: readonly CatalogueEntry[]): Flow {
-  const at = previousStep(flow.at, stepIds(flow.answers, entries));
+export function flowBack(flow: Flow): Flow {
+  const at = previousStep(flow.at, stepIds());
   return at === flow.at ? flow : {...flow, at};
 }
 
-/**
- * The answers that name the run `run` was, for running it again: its project and task, the goal
- * taken as read, so the flow can open on Review.
- */
+/** The answers that name the run `run` was, for running it again: its project and task. */
 export function againAnswers(run: RecentRun): Answers {
   return {
     ...NO_ANSWERS,
     from: 'project',
     project: {source: 'recent', path: run.project},
     task: run.task,
-    goalSeen: run.task !== null,
   };
 }

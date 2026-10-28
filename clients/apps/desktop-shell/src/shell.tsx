@@ -164,6 +164,7 @@ export function createShellStores(
     machineSettings.dispatch({type: 'hosts', hosts});
   });
   followCompute(newRun.store, machineSettings);
+  followLogins(newRun.store, machineSettings);
   rereadOnReconnect(sidebar.store, machineSettings);
   let {recent, selection} = sidebar.store.getState();
   sidebar.store.subscribe(() => {
@@ -229,6 +230,25 @@ function followCompute(
   newRun.subscribe(follow);
   machineSettings.subscribe(follow);
   follow();
+}
+
+/**
+ * Whether the agent's CLI is signed in is what the machine says when New run reads it; a login read
+ * again in Settings (after signing in there) has New run read the machine again, so the two agree.
+ */
+function followLogins(
+  newRun: ShellStores['newRun'],
+  machineSettings: ShellStores['machineSettings'],
+): void {
+  let seen: unknown = null;
+  machineSettings.subscribe(() => {
+    const machine = newRun.getState().context.form.machine;
+    const logins = machineSettings.getState().views[machine]?.logins;
+    if (logins === undefined || logins.kind !== 'ready' || logins === seen) return;
+    const first = seen === null;
+    seen = logins;
+    if (!first) newRun.dispatch({type: 'refresh'});
+  });
 }
 
 /**
@@ -370,6 +390,7 @@ function NewRunRoute(props: {
         props.select({kind: 'settings'});
       }}
       setUp={machine => props.select({kind: 'settings', machine, section: 'clusters'})}
+      openLogins={machine => props.select({kind: 'settings', machine, section: 'logins'})}
     />
   );
 }

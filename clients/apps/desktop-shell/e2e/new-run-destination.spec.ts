@@ -5,7 +5,7 @@
  */
 import {expect, type Page, test} from '@playwright/test';
 import {REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
-import {choose, main, proceed} from './new-run-flow.js';
+import {main, pickExample} from './new-run-flow.js';
 import {type FakeHostWindow, openNewRun as open, SEED} from './world.js';
 
 const start = (page: Page) => main(page).getByRole('button', {name: 'Start run'});
@@ -32,18 +32,7 @@ async function reviewTheStack(
     },
   };
   await open(page, seed);
-  await choose(page, 'Start from', 'An example');
-  await proceed(page);
-  await choose(page, 'Domain', 'Data structures');
-  await proceed(page);
-  await choose(page, 'Structure', /stack/);
-  await proceed(page);
-  await choose(page, 'Workload', /Multiple producers, multiple consumers/);
-  await proceed(page);
-  await proceed(page, 'Looks right');
-  await proceed(page);
-  await proceed(page);
-  await expect(main(page).getByRole('heading', {name: 'Ready to start?'})).toBeVisible();
+  await pickExample(page, 'stack', 'mpmc');
 }
 
 async function startedProjects(page: Page): Promise<string[]> {

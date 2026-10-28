@@ -21,7 +21,7 @@ import {exampleCatalogue} from '@vibesys/run-fixtures';
 import type {RecentRun} from '@vibesys/runs';
 import type {Seeded} from '@vibesys/store/testing';
 import {createActor, fromPromise, SimulatedClock, type SnapshotFrom} from 'xstate';
-import {type AnswerChange, chosenEntry, NO_ANSWERS, stepIds} from './answers.js';
+import {type AnswerChange, chosenEntry, NO_ANSWERS, reachableSteps, stepIds} from './answers.js';
 import type {CatalogueEntry} from './catalogue.js';
 import type {Draft} from './draft.js';
 import {catalogueFor, examplesStatus} from './flow.js';
@@ -184,19 +184,15 @@ function answerChange(random: Seeded): AnswerChange {
   return random.pick<AnswerChange>([
     {kind: 'from', from: 'example'},
     {kind: 'from', from: 'project'},
-    {kind: 'domain', domain: random.pick(['llm-serving', 'data-structures', 'databases'] as const)},
-    {kind: 'model', model: random.pick(['Llama 3 8B Instruct', 'Qwen3.5 9B'])},
-    {kind: 'hardware', hardware: random.pick(['nvidia|NVIDIA H100|2', 'amd|AMD MI210|1'])},
-    {kind: 'structure', example: 'data-structures/stack'},
-    {kind: 'workload', task: random.pick(['mpmc', 'spsc'])},
+    {kind: 'entry', example: 'data-structures/stack', task: random.pick(['mpmc', 'spsc'])},
     {
-      kind: 'example',
+      kind: 'entry',
       example: random.pick(['database/kv-store', 'microservices/hotel-correctness']),
+      task: 'default',
     },
-    {kind: 'variant', task: random.pick(['from-scratch', 'vllm'])},
+    {kind: 'entry', example: 'model-serving/olmo-hybrid-prefix-caching', task: 'vllm'},
     {kind: 'project', project: {source: 'folder', path: random.pick(['/p/queue', '/p/kv'])}},
     {kind: 'task', task: random.pick(['mpmc', 'spsc'])},
-    {kind: 'goal'},
   ]);
 }
 
@@ -206,12 +202,12 @@ function agentEvent(random: Seeded): NewRunEvent {
   return {type: 'agent', provider, model: random.pick(vettedModels(OFFERS, provider))};
 }
 
-function inputEvent(random: Seeded, snapshot: SnapshotFrom<typeof newRunMachine>): NewRunEvent {
+function inputEvent(random: Seeded): NewRunEvent {
   return random.pick<NewRunEvent>([
     {type: 'machine', machine: random.pick(['local', 'ssh:gpu'])},
     {type: 'answer', change: answerChange(random), advance: random.bool()},
     {type: 'answer', change: answerChange(random), advance: random.bool()},
-    {type: 'go', step: random.pick(stepIds(snapshot.context.answers, []))},
+    {type: 'go', step: random.pick(stepIds())},
     {type: 'next'},
     {type: 'back'},
     {type: 'reset'},
@@ -359,7 +355,9 @@ function flowProblems(snapshot: Snapshot): string[] {
   const entries = catalogueFor(examples, form.machine);
   if (entries === null && answers.from === 'example') return [];
   const known = entries ?? [];
-  const problems = stepIds(answers, known).includes(at) ? [] : [`the step ${at} is not asked`];
+  const problems = reachableSteps(answers, known).includes(at)
+    ? []
+    : [`the step ${at} is not reached`];
   if (answers.from === 'example') return [...problems, ...exampleProblems(snapshot, known)];
   return [...problems, ...ownProblems(snapshot)];
 }
@@ -398,10 +396,10 @@ describe('newRunMachine', () => {
       {
         machine: newRunMachine,
         input: {machine: 'local', recent: RECENT, moreOpen: {}},
-        event: (random, live, snapshot) =>
+        event: (random, live) =>
           random.pick([
-            inputEvent(random, snapshot),
-            inputEvent(random, snapshot),
+            inputEvent(random),
+            inputEvent(random),
             ...live.operations.map(operation => live.done(operation, output(operation, random))),
             ...live.operations.map(operation => live.error(operation, new Error('refused'))),
             ...live.delays.map(delay => live.fire(delay)),
@@ -528,7 +526,7 @@ describe('newRunMachine', () => {
     expect(form.project).toBeNull();
     expect(form.task).toBeNull();
     expect(answers.from).toBeNull();
-    expect(at).toBe('start');
+    expect(at).toBe('pick');
     expect(form.agent).toMatchObject({provider: 'claude', model: 'claude-b'});
     expect(form.budget.rounds).toBe(4);
     actor.stop();
@@ -544,10 +542,10 @@ describe('newRunMachine', () => {
       advance: true,
     });
     await until(actor, snapshot => snapshot.context.answers.task === 'only');
-    const {answers, form, at} = actor.getSnapshot().context;
+    const {form, at} = actor.getSnapshot().context;
     expect(form.task).toBe('only');
-    expect(answers.goalSeen).toBe(false);
-    expect(at).toBe('task');
+    // The task answered itself: the pick stays shown until the user goes on.
+    expect(at).toBe('pick');
     actor.stop();
   });
 
@@ -576,8 +574,7 @@ describe('newRunMachine', () => {
         value: {task: 'one', objectives: [], goal: 'one', goal_truncated: false},
       },
     });
-    // Answering the goal as read asks nothing again; another task asks for its own.
-    send({kind: 'goal'});
+    // Another task asks for its own.
     send({kind: 'task', task: 'two'});
     await until(actor, snapshot => snapshot.context.goal?.for.includes('two') === true);
     expect(asked).toEqual(['/p/queue one', '/p/queue two']);
@@ -611,24 +608,21 @@ describe('newRunMachine', () => {
     const {answers, at, form} = actor.getSnapshot().context;
     expect(answers.task).toBeNull();
     expect(form.task).toBeNull();
-    expect(at).toBe('task');
+    expect(at).toBe('pick');
     actor.stop();
   });
 
-  test('an example answered through its questions is an example project until it is made', async () => {
+  test('an example task picked is an example project until it is made', async () => {
     const actor = liveActor({examples: {kind: 'offered', value: exampleCatalogue}});
     actor.start();
     await until(actor, snapshot => snapshot.matches({editing: {examples: 'ready'}}));
-    for (const change of [
-      {kind: 'from', from: 'example'},
-      {kind: 'domain', domain: 'data-structures'},
-      {kind: 'structure', example: 'data-structures/stack'},
-      {kind: 'workload', task: 'spsc'},
-    ] as const) {
-      actor.send({type: 'answer', change, advance: true});
-    }
+    actor.send({
+      type: 'answer',
+      change: {kind: 'entry', example: 'data-structures/stack', task: 'spsc'},
+      advance: true,
+    });
     let {form, at} = actor.getSnapshot().context;
-    expect(at).toBe('goal');
+    expect(at).toBe('review');
     expect(form.task).toBe('spsc');
     expect(form.project).toEqual({
       source: 'example',
@@ -649,14 +643,22 @@ describe('newRunMachine', () => {
       path: '/made/stack',
     });
     // Another task of the same example is in the project that was made, which is kept...
-    actor.send({type: 'go', step: 'workload'});
-    actor.send({type: 'answer', change: {kind: 'workload', task: 'mpmc'}});
+    actor.send({type: 'go', step: 'pick'});
+    actor.send({
+      type: 'answer',
+      change: {kind: 'entry', example: 'data-structures/stack', task: 'mpmc'},
+    });
     expect(actor.getSnapshot().context.form.project?.source).toBe('created');
     expect(actor.getSnapshot().context.form.task).toBe('mpmc');
     // ...and a different example is not in it.
-    actor.send({type: 'go', step: 'domain'});
-    actor.send({type: 'answer', change: {kind: 'domain', domain: 'databases'}});
-    expect(actor.getSnapshot().context.form.project).toBeNull();
+    actor.send({
+      type: 'answer',
+      change: {kind: 'entry', example: 'database/kv-store', task: 'default'},
+    });
+    expect(actor.getSnapshot().context.form.project).toMatchObject({
+      source: 'example',
+      example: 'database/kv-store',
+    });
     actor.stop();
   });
 
@@ -664,16 +666,14 @@ describe('newRunMachine', () => {
     const actor = liveActor({examples: {kind: 'offered', value: exampleCatalogue}});
     actor.start();
     await until(actor, snapshot => snapshot.matches({editing: {examples: 'ready'}}));
-    for (const change of [
-      {kind: 'from', from: 'example'},
-      {kind: 'domain', domain: 'databases'},
-      {kind: 'example', example: 'database/kv-store'},
-    ] as const) {
-      actor.send({type: 'answer', change, advance: true});
-    }
+    actor.send({
+      type: 'answer',
+      change: {kind: 'entry', example: 'database/kv-store', task: 'default'},
+      advance: true,
+    });
     actor.send({type: 'machine', machine: 'ssh:gpu'});
     await until(actor, snapshot => snapshot.matches({editing: {examples: 'ready'}}));
-    expect(actor.getSnapshot().context.answers.example).toBe('database/kv-store');
+    expect(actor.getSnapshot().context.answers.entry?.example).toBe('database/kv-store');
     expect(actor.getSnapshot().context.form.project?.source).toBe('example');
     actor.send({type: 'reset'});
     actor.send({type: 'answer', change: {kind: 'from', from: 'project'}, advance: true});
@@ -697,9 +697,8 @@ describe('newRunMachine', () => {
         from: 'project',
         project: {source: 'recent', path: '/q'},
         task: 'spsc',
-        goalSeen: true,
       },
-      at: 'where',
+      at: 'review',
       agent: null,
       budget: {rounds: 3, timeLimitS: null, results: 'keep'},
       measure: {kind: 'same_machine'},
@@ -709,7 +708,7 @@ describe('newRunMachine', () => {
     const actor = liveActor({machine: 'ssh:gpu', draft});
     actor.start();
     const {context} = actor.getSnapshot();
-    expect(context.at).toBe('where');
+    expect(context.at).toBe('review');
     expect(context.answers.task).toBe('spsc');
     expect(context.form).toMatchObject({
       machine: 'ssh:gpu',
@@ -720,8 +719,8 @@ describe('newRunMachine', () => {
     await until(actor, snapshot => snapshot.matches({editing: {harnesses: 'ready'}}));
     // The agent is chosen once the machine's harnesses are known.
     expect(actor.getSnapshot().context.form.agent).not.toBeNull();
-    actor.send({type: 'next'});
-    expect(actor.getSnapshot().context.at).toBe('agent');
+    actor.send({type: 'back'});
+    expect(actor.getSnapshot().context.at).toBe('pick');
     actor.stop();
   });
 });

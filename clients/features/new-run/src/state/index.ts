@@ -7,66 +7,32 @@ export type {
   RunOption,
 } from '@vibesys/contracts/host-helper';
 export {
-  type AgentGroup,
   type AgentMaker,
   agentGroups,
-  familiesIn,
-  type Generation,
-  generationsIn,
-  groupOf,
-  type ModelTier,
-  modelAtTier,
-  offersIn,
-  pickGroup,
-  pickHarness,
   type RoleModel,
   roleHarnesses,
   roleModels,
   roleProviders,
-  type Scope,
-  scopeOf,
-  tierOf,
-  tiersIn,
 } from './agents.js';
 export {
   type AnswerChange,
   type Answers,
   answer,
   chosenEntry,
+  type ExampleChoice,
   isDone,
   NO_ANSWERS,
   type OwnProject,
-  openEntries,
   reachableSteps,
-  type StepFacts,
   type StepId,
   stepIds,
 } from './answers.js';
 export {
-  allExamples,
   type CatalogueEntry,
   DOMAIN_WORDS,
   type Domain,
-  type DomainOption,
-  domainOptions,
-  entriesFor,
-  entriesOf,
   exampleLabel,
-  examplesOf,
-  type HardwareOption,
-  hardwareGroups,
-  hardwareKey,
   hardwareLabel,
-  hasDetails,
-  MAKER_NAMES,
-  type Maker,
-  type MakerGroup,
-  type ModelOption,
-  modelGroups,
-  tasksOfExample,
-  VENDOR_NAMES,
-  type Vendor,
-  type VendorGroup,
 } from './catalogue.js';
 export {DRAFT_KEY, type Draft, draftOf, flowOfDraft, parseDraft, storeDraft} from './draft.js';
 export {type Fit, fitOf, machineHardwareWords} from './fit.js';
@@ -78,7 +44,6 @@ export {
   type ExamplesStatus,
   examplesStatus,
   type Flow,
-  factsOf,
   flowAnswer,
   flowSettled,
   startFlow,
@@ -140,8 +105,17 @@ export {
   measureOptions,
   nothingSetUp,
   sameTarget,
-  targetFacts,
 } from './measure.js';
+export {
+  type DomainFilter,
+  domainFilters,
+  entryName,
+  fitWords,
+  goalSummary,
+  needsWords,
+  shownEntries,
+  whatItIs,
+} from './pick-words.js';
 export {type Problem, problemOf, type Step, StepFailure} from './problem.js';
 export {
   agentWithRoles,
@@ -153,3 +127,4 @@ export {
   rolesAfter,
   rolesWithin,
 } from './roles.js';
+export {agentLogin, type LoginState} from './sign-in.js';
