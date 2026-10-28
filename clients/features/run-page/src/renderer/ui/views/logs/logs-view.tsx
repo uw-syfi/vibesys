@@ -4,9 +4,18 @@
  * Streams come from the page state, joined to spans by the stream owner's `span_id`
  * (`state/scoped-logs.ts`). The shell follows the shown stream (`streamToFollow`): a view runs no effects.
  */
-import {Banner, Button, EmptyState, LogPane, PickList, PickRow} from '@vibesys/ui';
+import type {Candidate} from '@vibesys/run-state/candidates';
+import {Banner, Button, EmptyState, LogPane, PickList, PickRow, Stack} from '@vibesys/ui';
 import {type JSX, useMemo} from 'react';
-import {type RunPageAction, type RunPageState, stepKicker} from '../../../../state/index.js';
+import {
+  activityNow,
+  ideaActivities,
+  ideaActivity,
+  LIVE_LOGS,
+  type RunPageAction,
+  type RunPageState,
+  stepKicker,
+} from '../../../../state/index.js';
 import {
   ideaTitlesBySpan,
   type LogScope,
@@ -14,6 +23,7 @@ import {
   type ScopedLogs,
   scopedLogs,
 } from '../../../../state/scoped-logs.js';
+import {ActivityStatus} from '../../activity-status.js';
 import type {PaneHeader, ViewBase, ViewHeader} from '../props.js';
 
 export type {LogScope};
@@ -137,6 +147,8 @@ function StreamLogs(props: LogsViewProps): JSX.Element {
   );
   const logs = scopedLogs(state, scope, ideas);
   const {shown} = logs;
+  if (logs.notice !== null && scope.kind === 'idea' && scope.idea.outcome === 'running')
+    return <RunningIdeaLogs {...props} idea={scope.idea} />;
   if (logs.notice !== null)
     return <EmptyState title="No logs to show" body={props.emptyLabelsOnly ? '' : logs.notice} />;
   const stream = logs.streams.find(item => item.id === shown);
@@ -174,5 +186,37 @@ function StreamLogs(props: LogsViewProps): JSX.Element {
       <StreamRows logs={logs} byOwner={scope.kind === 'run'} dispatch={dispatch} />
       {pane}
     </>
+  );
+}
+
+/**
+ * A running idea with no log stream yet: what it is doing, and one way to its agent's live output,
+ * the current turn's step (whose transcript the step view follows), never a dead end.
+ */
+function RunningIdeaLogs(props: LogsViewProps & {readonly idea: Candidate}): JSX.Element {
+  const activity = ideaActivity(props.model, props.idea);
+  const turn = activity?.kind === 'turn' ? activity.step : null;
+  const body = turn === null ? LIVE_LOGS.gate : `${LIVE_LOGS.gate} ${LIVE_LOGS.turn}`;
+  const open = (step: string) =>
+    props.zoom({
+      type: 'jump',
+      route: {mode: 'ideas', idea: props.idea.id, agent: null, step, item: null},
+    });
+  return (
+    <Stack gap="space-3">
+      {activity === null ? null : (
+        <ActivityStatus
+          activity={activity}
+          now={activityNow(ideaActivities(props.model), props.clock.now)}
+        />
+      )}
+      <EmptyState
+        title={LIVE_LOGS.title}
+        body={props.emptyLabelsOnly ? '' : body}
+        {...(turn === null
+          ? {}
+          : {action: <Button text={LIVE_LOGS.open} press={() => open(turn.span)} />})}
+      />
+    </Stack>
   );
 }

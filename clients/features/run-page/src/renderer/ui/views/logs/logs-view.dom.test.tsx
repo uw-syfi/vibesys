@@ -266,3 +266,67 @@ test('a step’s Logs pane keeps the kicker of its step pane, so the role is sai
   expect(logsHeader(props)).toEqual({kicker: 'Agent turn'});
   expect(logsHeader({...props, scope: {kind: 'run'}})).toEqual({});
 });
+
+test('a running idea with no log says what it does and opens its agent’s live step, never a dead end', async () => {
+  const random = new Seeded(11);
+  for (let round = 0; round < 12; round++) {
+    const turn: CandidateStep = {
+      span: `t${round}`,
+      kind: 'agent_turn',
+      title: 'implementer',
+      role: 'implementer',
+      status: 'running',
+      startedAt: 2,
+      endedAt: null,
+    };
+    const working = random.bool();
+    const base = idea('a1', [attempt('a1', [])]);
+    const running = working ? {...base, running: [turn]} : base;
+    const container = document.createElement('div');
+    document.body.append(container);
+    const zooms: unknown[] = [];
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(
+        <LogsView
+          model={MODEL}
+          clock={CLOCK}
+          tokens={EMPTY_LEDGER}
+          who={new Map()}
+          zoom={event => zooms.push(event)}
+          state={pageState([])}
+          scope={{kind: 'idea', idea: running}}
+          dispatch={() => undefined}
+        />,
+      ),
+    );
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('No logs to show');
+    expect(text).toContain('No log output yet');
+    expect(text).toContain(working ? 'Implementer · Working' : 'Starting');
+    const open = [...container.querySelectorAll('button')].find(
+      button => button.textContent === 'Open live output',
+    );
+    expect(open === undefined).toBe(!working);
+    await act(async () => open?.click());
+    expect(zooms).toEqual(
+      working
+        ? [
+            {
+              type: 'jump',
+              route: {mode: 'ideas', idea: 'a1', agent: null, step: turn.span, item: null},
+            },
+          ]
+        : [],
+    );
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test('a settled idea with no log still says it has none', async () => {
+  const settled = {...idea('a1', [attempt('a1', [])]), outcome: 'passed' as const};
+  const shown = await show(pageState([]), {kind: 'idea', idea: settled});
+  expect(shown.text).toContain('No logs to show');
+  expect(shown.text).not.toContain('Open live output');
+});
