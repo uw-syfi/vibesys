@@ -93,6 +93,7 @@ async function press(element: Element, key: string): Promise<void> {
   await act(async () => {
     (element as HTMLElement).focus();
     element.dispatchEvent(new KeyboardEvent('keydown', {key, bubbles: true, cancelable: true}));
+    element.dispatchEvent(new KeyboardEvent('keyup', {key, bubbles: true, cancelable: true}));
   });
 }
 

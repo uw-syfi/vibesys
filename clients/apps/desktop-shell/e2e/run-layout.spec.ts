@@ -223,6 +223,34 @@ test('a person resizes the Ideas list by dragging or with the keys, and the app 
   expect(await width()).toBe(before + 104);
 });
 
+test('on a wide screen the Timeline beside an idea says the width it is drawn at, and a key never moves it against its way', async ({
+  page,
+}) => {
+  await open(page, 'queue-rs-live', 1920);
+  await page
+    .getByRole('radiogroup', {name: 'Show'})
+    .first()
+    .getByText('Timeline', {exact: true})
+    .click();
+  await page
+    .getByRole('listbox', {name: 'Ideas on the timeline'})
+    .getByRole('option', {name: /Wait-free consumer path/})
+    .click();
+  const pane = page.locator('.vs-pane[data-width="wide"]');
+  const handle = page.getByRole('separator', {name: 'Resize the timeline'});
+  const width = async (): Promise<number> => Math.round((await pane.boundingBox())?.width ?? 0);
+  const before = await width();
+  await expect(handle).toHaveAttribute('aria-valuenow', String(before));
+  await expect(handle).toHaveAttribute('aria-valuetext', `${before} pixels wide`);
+  expect(before).toBeLessThanOrEqual(Number(await handle.getAttribute('aria-valuemax')));
+  await handle.focus();
+  await page.keyboard.press('ArrowRight');
+  const wider = await width();
+  expect(wider).toBeGreaterThanOrEqual(before);
+  await page.keyboard.press('ArrowLeft');
+  expect(await width()).toBe(wider - 16);
+});
+
 test('the face switcher keeps its place and width from the Ideas face to the others and back', async ({
   page,
 }) => {

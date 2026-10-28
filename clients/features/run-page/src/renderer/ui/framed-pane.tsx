@@ -4,7 +4,7 @@
  */
 import {Pane, type PaneResize, type PaneWidth, Row} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
-import type {PaneRole, PaneSizes} from '../../state/index.js';
+import {type PaneRole, type PaneSizes, paneWidthWords} from '../../state/index.js';
 import type {PaneHeader} from './views/props.js';
 
 /**
@@ -22,6 +22,7 @@ export function paneResize(
     width: sizes.widths[role] ?? null,
     changeWidth: width => sizes.change(role, width),
     label,
+    widthWords: paneWidthWords,
     edge,
   };
 }

@@ -147,15 +147,16 @@ button.vs-crumb:focus-visible {
 }
 /* A list drawn over time keeps the larger share beside what it opened, which keeps room to read. */
 .vs-pane[data-width="wide"] {
-  flex: 0 0 clamp(var(--pane-min), 60%, calc(100% - var(--column-aside)));
+  flex: 0 0 clamp(var(--pane-min), 60%, min(var(--pane-max), calc(100% - var(--column-aside))));
 }
 /* What sits beside a master list takes the rest of the row, whatever the window's width. */
 .vs-pane[data-width="master"] ~ .vs-pane[data-width="list"] {
   flex: 1 1 var(--pane-list);
 }
-/* A pane the user resized: the width they gave it (`--pane-size`), leaving --pane-min beside it. */
+/* A pane the user resized: the width they gave it (`--pane-size`), at least --pane-min, and leaving
+   --pane-min beside it. */
 .vs-pane[data-width][data-sized] {
-  flex: 0 0 min(var(--pane-size), calc(100% - var(--pane-min) - var(--space-4)));
+  flex: 0 0 clamp(var(--pane-min), var(--pane-size), calc(100% - var(--pane-min) - var(--space-4)));
 }
 /* A list with nothing beside it is the whole row, not a card with dead space after it. */
 .vs-pane[data-width="master"]:not(:has(~ .vs-pane)) {

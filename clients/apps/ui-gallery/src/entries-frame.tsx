@@ -502,6 +502,8 @@ function NarrativeDemo(): JSX.Element {
   );
 }
 
+const widthWords = (width: number): string => `${width} pixels wide`;
+
 /** Panes a person resizes: a list at the width given to it, and a docked panel. */
 function PaneSeparatorDemo(): JSX.Element {
   const [list, setList] = useState<number | null>(null);
@@ -513,7 +515,12 @@ function PaneSeparatorDemo(): JSX.Element {
           kicker="ideas"
           title="7"
           width="master"
-          resize={{width: list, changeWidth: setList, label: 'Resize the ideas list'}}
+          resize={{
+            width: list,
+            changeWidth: setList,
+            label: 'Resize the ideas list',
+            widthWords,
+          }}
         >
           <Text tone="muted">Drag the grip, or focus it and press the arrows, Home or End.</Text>
         </Pane>
@@ -524,7 +531,7 @@ function PaneSeparatorDemo(): JSX.Element {
       <Dock
         label="Chat"
         side={<Text tone="muted">A docked panel resizes from its left edge.</Text>}
-        resize={{width: side, changeWidth: setSide, label: 'Resize the chat'}}
+        resize={{width: side, changeWidth: setSide, label: 'Resize the chat', widthWords}}
       >
         <Text>The screen keeps its content and narrows.</Text>
       </Dock>

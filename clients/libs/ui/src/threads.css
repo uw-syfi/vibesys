@@ -398,7 +398,7 @@
 }
 /* The panel's width as the user set it, leaving --pane-min of the screen beside it. */
 .vs-dock-side[data-sized] {
-  flex-basis: min(var(--pane-size), calc(100% - var(--pane-min)));
+  flex-basis: clamp(var(--pane-min), var(--pane-size), calc(100% - var(--pane-min)));
 }
 /* The panel's separator straddles its border and takes no room of its own. */
 .vs-dock > .vs-pane-separator {

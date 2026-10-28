@@ -29,3 +29,6 @@ export const RESIZE_WORDS = {
   now: 'Resize the running list',
   chat: 'Resize the chat',
 } as const;
+
+/** A pane's width as a screen reader says the separator's value. */
+export const paneWidthWords = (width: number): string => `${width} pixels wide`;

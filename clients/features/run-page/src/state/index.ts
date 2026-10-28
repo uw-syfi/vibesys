@@ -62,6 +62,7 @@ export {
   type PaneRole,
   type PaneSizes,
   type PaneWidths,
+  paneWidthWords,
   RESIZE_WORDS,
 } from './pane-words.js';
 export {
