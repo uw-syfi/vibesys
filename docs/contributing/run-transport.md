@@ -156,7 +156,7 @@ as `read_current_epoch`; clients consume the canonical response field directly. 
 
 ## Intents and epochs
 
-**Operator controls** are Pause, Pause now, Resume and Guidance. A viewer posts a typed intent
+**Operator controls** are Pause, Pause now, Resume and Steer. A viewer posts a typed intent
 through `HostCall` to the existing ordered inbox. Admission acknowledges persistence; the run's
 `IntentState` records application or refusal. Request IDs retain their disposition across retries.
 Scoped guidance and work-item actions continue to use the same inbox.
@@ -633,7 +633,7 @@ never deletes them; retention cleanup is separate from conversion.
 | RPC framework | gRPC | Connect: the benefit is browser and curl access, and the browser is dropped. Bidirectional streams (`Attach`) need HTTP/2 either way, and Node `http2` over our duplex is enough. Revisit if a browser client returns. |
 | Order of log append and `state.pb` swap | Log first, then swap, with `committed_seq` bounding what is served | Writing `state.pb` before the log: state would name records not yet on disk. |
 | Transcript form | One stream; the turn span's end records its final length | A sealed content-addressed blob copy when the turn ends: two forms for one fact. |
-| Run controls | Pause drains and exits; Pause now cancels and exits; Resume opens a new epoch; Guidance persists advice | A separate permanent ending control made useful completed runs impossible to continue. |
+| Run controls | Pause drains and exits; Pause now cancels and exits; Resume opens a new epoch; Steer persists advice | A separate permanent ending control made useful completed runs impossible to continue. |
 | Turn reply typing | Proto messages in phase 3; JSON text in one reserved field until then | Descriptor-rendered `Any` from phase 1 would force every reply model into proto before the core types move. |
 | Run-level warnings | A `Notice` record | Lines in the narration stream are unstructured; a span status cannot hold a warning with no span. |
 | Browser support | Dropped | A browser cannot hold ssh. A future browser client is a local `vibesys ui` process that reuses the same bridge. |
