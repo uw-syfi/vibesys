@@ -231,6 +231,12 @@ export const BAD_SCREENS: readonly BadScreen[] = [
     html: `<div style="${PAGE}"><div style="display:flex;flex-direction:column;height:240px"><div style="max-height:60px;overflow-y:auto"><div style="height:200px">rows</div></div><div style="margin-top:auto">Start</div></div></div>`,
   },
   {
+    name: 'a list capped short over its button, with the window empty below the button',
+    check: 'scroll-room',
+    message: /a region scrolls \(\d+ px of content in 60 px\) while it has \d+ px of room/,
+    html: `<div style="${PAGE}"><div style="display:flex;flex-direction:column"><div style="max-height:60px;overflow-y:auto"><div style="height:400px">rows</div></div></div><div>Start</div></div>`,
+  },
+  {
     name: 'a search box and a select in one row, the select pushed down by its label',
     check: 'control-row',
     message: /controls in one row do not line up: .* is 32 px high and .* 40 px/,

@@ -503,14 +503,16 @@ test('Run again opens Review with the run as it was started', async ({page}) => 
     initScript(installFakeNewRun, seed),
     initScript(installFakeRun, {streams: [], text: {}}),
   ]);
-  // A recent run is a finished one: the page offers Run again.
+  // A recent run is a finished one: its More actions offer Run again.
   await installGateway(page, wire(storeRunFixture('short')));
   await page.goto('./shell.html');
   await page
     .getByRole('main')
     .getByRole('button', {name: /^queue-rs · spsc/})
     .click();
-  await page.getByRole('button', {name: 'Run again', exact: true}).click();
+  await expect(page.getByRole('button', {name: 'Run again'})).toHaveCount(0);
+  await page.getByRole('button', {name: 'More actions'}).click();
+  await page.getByRole('menuitem', {name: 'Run again', exact: true}).click();
   await expect(question(page, 'Review and start')).toBeVisible();
   await expect(main(page).getByLabel('Model', {exact: true}).locator('option:checked')).toHaveText(
     'Sonnet 4.5',

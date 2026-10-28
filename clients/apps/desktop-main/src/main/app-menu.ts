@@ -8,7 +8,8 @@ export interface MenuActions {
 
 /**
  * The application menu. Settings holds its accelerator itself, so the shortcut works from any
- * window and focus.
+ * window and focus. About, the one place the app's version shows, is in the application menu on a
+ * Mac and in Help elsewhere.
  */
 export function applicationMenuTemplate(
   platform: NodeJS.Platform,
@@ -57,5 +58,6 @@ export function applicationMenuTemplate(
       ],
     },
     {role: 'windowMenu'},
+    ...(platform === 'darwin' ? [] : [{label: 'Help', submenu: [{role: 'about' as const}]}]),
   ];
 }

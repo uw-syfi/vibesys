@@ -1,5 +1,7 @@
 /** The words the run chat says, apart from the components that show them. */
+import {roleName} from '@vibesys/contracts';
 import type {ChatFailure} from './failure.js';
+import type {SteerDraft, SteerMode, SteerTargetKind} from './steer.js';
 
 /** The closed disclosure that holds a failure's diagnostic. */
 export const DETAILS_LABEL = 'Details';
@@ -13,6 +15,52 @@ export const WRITING_ANSWER = 'Writing';
  */
 export const HARNESS_LIST_UNREAD = 'The harness list could not be read';
 export const NO_HARNESS_OFFERED = 'This machine offers no harness to chat with';
+
+/** What a steer to the whole run does with each When choice. */
+const WHOLE_RUN_HELP: Readonly<Record<SteerMode, string>> = {
+  next_turn: 'Added once, to the prompt of the first agent to start a turn.',
+  standing:
+    "Added to every agent's prompt at each later turn, until it is withdrawn or the run ends.",
+  interrupt:
+    'Sent to one agent mid-turn if one is working and can take it, else added once to the next turn that starts.',
+};
+
+/** Whom a steer to one role, attempt or item reaches, by name, and what ends its standing guidance. */
+function addressee(
+  kind: Exclude<SteerTargetKind, 'run'>,
+  id: string,
+): {readonly name: string; readonly ends: string} {
+  switch (kind) {
+    case 'role':
+      return {name: `the ${roleName(id)}`, ends: 'the run'};
+    case 'attempt':
+      return {name: `attempt ${id}`, ends: 'the attempt'};
+    case 'item':
+      return {name: `item ${id}`, ends: 'the item'};
+  }
+}
+
+/**
+ * What a steer does with its When and To choices, in one sentence under the card's choices
+ * (`SteerMode` in the run protocol). Next turn reaches one turn: for the whole run, the first agent
+ * to start one. Every turn reaches each later turn of the target until the steer is withdrawn or
+ * the target ends. Now is offered to one running turn whose provider takes a message mid-turn,
+ * else it waits for the next turn. Withdrawing is said as a fact, not offered as a control: the
+ * card's Withdraw lasts only while the run's page is open.
+ */
+export function steerHelp(draft: Pick<SteerDraft, 'mode' | 'target'>): string {
+  const {kind, id} = draft.target;
+  if (kind === 'run') return WHOLE_RUN_HELP[draft.mode];
+  const who = addressee(kind, id ?? '');
+  switch (draft.mode) {
+    case 'next_turn':
+      return `Added once, to the prompt of ${who.name}'s next turn.`;
+    case 'standing':
+      return `Added to ${who.name}'s prompt at each later turn, until it is withdrawn or ${who.ends} ends.`;
+    case 'interrupt':
+      return `Sent to ${who.name} mid-turn if it is working and can take it, else added once to its next turn.`;
+  }
+}
 
 /** An error as the run chat is asked about it: where it happened, what it said, and its diagnostic. */
 export interface ErrorReport {

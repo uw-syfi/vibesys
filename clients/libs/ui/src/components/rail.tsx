@@ -50,7 +50,7 @@ function itemName(
 /**
  * A destination of the rail: an icon with its short label under it. `active` marks the current
  * screen. `badge` puts a count on the icon (named `badge.label` for assistive technology) and
- * `warning` a dot on it (named by the text); `hideLabel` leaves the icon alone, for the app's mark.
+ * `warning` a dot on it (named by the text); `hideLabel` leaves the icon alone, an icon-only item.
  */
 export function RailItem(props: {
   readonly icon: IconName;

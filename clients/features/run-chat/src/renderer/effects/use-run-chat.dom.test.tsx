@@ -10,7 +10,13 @@ import {type CoreState, initialCoreState, reduceEvent} from '@vibesys/run-state'
 import {Window} from 'happy-dom';
 import {act, type JSX} from 'react';
 import {createRoot} from 'react-dom/client';
-import {type AskInput, type DeliverRequest, errorQuestion} from '../../state/index.js';
+import {
+  type AskInput,
+  type DeliverRequest,
+  errorQuestion,
+  STEER_MODES,
+  steerHelp,
+} from '../../state/index.js';
 import {ChatPanel} from '../ui/chat-panel.js';
 import type {RunChatPorts} from './ports.js';
 import {type RunChatHost, useRunChat} from './use-run-chat.js';
@@ -237,6 +243,90 @@ test('New steer turns the typed text into a card whose target is picked from the
   ]);
   await act(async () => root.unmount());
 });
+
+test('the steer card says what each When choice does for its To choice, under the choices', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const sent: DeliverRequest[] = [];
+  function WithRoles(): JSX.Element {
+    const chat = useRunChat({
+      identity: 'run',
+      core: fold([THREAD]),
+      ports: fakePorts(sent),
+      roles: ['implementer'],
+    });
+    return (
+      <div>
+        <button type="button" onClick={chat.toggle}>
+          Chat
+        </button>
+        {chat.panel === null ? null : <ChatPanel {...chat.panel} />}
+      </div>
+    );
+  }
+  await act(async () => root.render(<WithRoles />));
+  await act(async () => press(container, 'Chat'));
+  await act(async () => press(container, 'New steer'));
+  const select = container.querySelector('select') as HTMLSelectElement;
+  for (const target of [
+    {kind: 'role', id: 'implementer'},
+    {kind: 'run', id: null},
+  ] as const) {
+    await act(async () => {
+      select.value = target.kind === 'run' ? 'run' : `role:${target.id}`;
+      select.dispatchEvent(new window.Event('change', {bubbles: true}) as unknown as Event);
+    });
+    // From the last choice back to the first, so every choice is a change.
+    for (const {value} of [...STEER_MODES].reverse()) {
+      const choice = container.querySelector(`input[type="radio"][value="${value}"]`);
+      await act(async () => (choice as HTMLInputElement).click());
+      expect((choice as HTMLInputElement).checked).toBe(true);
+      for (const {value: mode} of STEER_MODES)
+        expect(
+          container.textContent?.includes(steerHelp({mode, target})),
+          `${mode} under ${value} to ${target.kind}`,
+        ).toBe(mode === value);
+    }
+  }
+  expect(sent).toEqual([]);
+  await act(async () => root.unmount());
+});
+
+for (const how of ['Enter', 'Ask'] as const) {
+  test(`what is typed goes out as a question on ${how}, never as a steer`, async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const sent: DeliverRequest[] = [];
+    const asked: AskInput[] = [];
+    const ports: RunChatPorts = {
+      ...fakePorts(sent),
+      ask: input => {
+        asked.push(input);
+        return Promise.resolve({ok: true});
+      },
+    };
+    await act(async () => root.render(<Harness core={fold([THREAD])} ports={ports} />));
+    await act(async () => press(container, 'Chat'));
+    const box = container.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => type(box, "What's the progress right now?"));
+    await act(async () => {
+      if (how === 'Enter')
+        box.dispatchEvent(
+          new window.KeyboardEvent('keydown', {key: 'Enter', bubbles: true}) as unknown as Event,
+        );
+      else (container.querySelector('button[aria-label="Ask"]') as HTMLElement).click();
+    });
+    await act(async () => undefined);
+    expect(asked.map(each => [each.threadId, each.text])).toEqual([
+      ['t', "What's the progress right now?"],
+    ]);
+    expect(sent).toEqual([]);
+    expect(container.querySelector('[role="radiogroup"]')).toBeNull();
+    await act(async () => root.unmount());
+  });
+}
 
 function started(
   sequence: number,

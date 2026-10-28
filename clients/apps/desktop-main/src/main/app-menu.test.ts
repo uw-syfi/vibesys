@@ -51,6 +51,11 @@ describe('the application menu', () => {
     }
   });
 
+  test('property: on every platform, About (the app version) is in the menu once', () => {
+    for (const platform of PLATFORMS)
+      expect(build(platform).all.filter(item => item.role === 'about')).toHaveLength(1);
+  });
+
   test('View has no sidebar toggle: the shell has no sidebar', () => {
     expect(build('darwin').all.map(item => item.label)).not.toContain('Toggle Sidebar');
   });

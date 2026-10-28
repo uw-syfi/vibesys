@@ -20,10 +20,26 @@ import type {RunWriterFacts} from '@vibesys/runs/intents';
 import {FakeClock} from '@vibesys/transport/testing';
 import fc from 'fast-check';
 import {Window} from 'happy-dom';
-import {act, useState} from 'react';
+import {act, type JSX, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {FakeRecords} from './fake-records.js';
-import {RunIntents} from './index.js';
+import {useRunIntents} from './index.js';
+
+/** The run controls, and the steer the run chat's New steer may send, said as a mark. */
+function Controls(props: Parameters<typeof useRunIntents>[0]): JSX.Element {
+  const intents = useRunIntents(props);
+  return (
+    <>
+      {intents.controls}
+      {intents.steerable ? <output>Steer</output> : null}
+    </>
+  );
+}
+
+/** What the controls offer: their buttons, and Steer when the run chat may steer. */
+function offers(container: HTMLElement): string[] {
+  return [...container.querySelectorAll('button, output')].map(each => each.textContent ?? '');
+}
 
 const encodeRecord = (record: StoreRecord) => toBinary(RecordSchema, record);
 
@@ -90,7 +106,7 @@ const LABELS = new Map([
   [IntentAction.PAUSE, 'Pause'],
   [IntentAction.PAUSE_NOW, 'Pause now'],
   [IntentAction.RESUME, 'Resume'],
-  [IntentAction.STEER, 'Guidance'],
+  [IntentAction.STEER, 'Steer'],
 ]);
 
 function actionsOf(input: Input) {
@@ -166,15 +182,15 @@ function currentLifecycle(input: Input) {
 function historyRows(container: HTMLElement): string[] {
   return [...container.querySelectorAll('span')]
     .map(span => span.textContent ?? '')
-    .filter(text => /^(Pause(?: now)?|Resume|Guidance) · (Applied|Refused)/.test(text));
+    .filter(text => /^(Pause(?: now)?|Resume|Steer) · (Applied|Refused)/.test(text));
 }
 
 function verifyPermissions(container: HTMLElement, input: Input) {
-  const buttons = [...container.querySelectorAll('button')].map(button => button.textContent);
+  const buttons = offers(container);
   const live = ['starting', 'running', 'draining'].includes(input.state);
   expect(buttons.includes('Pause now')).toBe(live);
   expect(buttons.includes('Pause')).toBe(live && input.state !== 'draining');
-  expect(buttons.includes('Guidance')).toBe(input.state === 'running');
+  expect(buttons.includes('Steer')).toBe(input.state === 'running');
   // The host admits Resume after every ending; its ended flag is kept for older readers.
   expect(buttons.includes('Resume')).toBe(
     input.state === 'parked' || input.state === 'failed' || input.state === 'finished',
@@ -207,7 +223,7 @@ async function verifyHistory(input: Input, availabilityOnly = false) {
   const render = (epoch = input.epoch, lifecycle = currentLifecycle(input), replace = true) =>
     act(async () =>
       root.render(
-        <RunIntents
+        <Controls
           key={replace ? ++mount : mount}
           bridge={bridge}
           records={feed.subscribe}
@@ -367,7 +383,7 @@ function expectedButtons(facts: {
   if (live && value === RunLiveness.ALIVE) {
     if (facts.kind === 'starting' || facts.kind === 'running') buttons.push('Pause');
     buttons.push('Pause now');
-    if (facts.kind === 'running' || facts.kind === 'operatorHold') buttons.push('Guidance');
+    if (facts.kind === 'running' || facts.kind === 'operatorHold') buttons.push('Steer');
   }
   const stopped = !live;
   if (value !== RunLiveness.ALIVE && (stopped || value === RunLiveness.INTERRUPTED))
@@ -449,7 +465,7 @@ async function verifyInterleaving(steps: readonly Step[]) {
   const render = () =>
     act(async () =>
       root.render(
-        <RunIntents
+        <Controls
           bridge={bridge}
           records={feed.subscribe}
           host={'local' as HostKey}
@@ -467,9 +483,9 @@ async function verifyInterleaving(steps: readonly Step[]) {
       ),
     );
   const check = () => {
-    const shown = [...container.querySelectorAll('button')]
-      .map(button => button.textContent ?? '')
-      .filter(text => ['Pause', 'Pause now', 'Guidance', 'Resume'].includes(text));
+    const shown = offers(container).filter(text =>
+      ['Pause', 'Pause now', 'Steer', 'Resume'].includes(text),
+    );
     expect(shown.sort()).toEqual(expectedButtons(facts).sort());
     expect(
       historyRows(container).filter(text => text.endsWith('· Applied')).length,
@@ -535,7 +551,7 @@ test('property: unresolved facts keep their recovery deadline until the page re-
           const [value, setValue] = useState(RunLiveness.ALIVE);
           report = setValue;
           return (
-            <RunIntents
+            <Controls
               bridge={bridge}
               records={feed.subscribe}
               host={'local' as HostKey}
@@ -551,8 +567,7 @@ test('property: unresolved facts keep their recovery deadline until the page re-
             />
           );
         }
-        const labels = () =>
-          [...container.querySelectorAll('button')].map(button => button.textContent);
+        const labels = () => offers(container);
         const visible = () => {
           if (labels().length === 0) expect(container.textContent).toMatch(/catching up|unknown/i);
         };
@@ -615,7 +630,7 @@ test('property: confirming facts supersede Resume timeout in either order on eve
         const render = () =>
           act(async () =>
             root.render(
-              <RunIntents
+              <Controls
                 bridge={bridge}
                 records={feed.subscribe}
                 host={'local' as HostKey}
@@ -678,9 +693,8 @@ test('property: confirming facts supersede Resume timeout in either order on eve
           });
           expect(container.textContent).not.toContain('not confirmed');
           expect(
-            [...container.querySelectorAll('button')]
-              .map(each => each.textContent ?? '')
-              .filter(label => ['Pause', 'Pause now', 'Guidance', 'Resume'].includes(label))
+            offers(container)
+              .filter(label => ['Pause', 'Pause now', 'Steer', 'Resume'].includes(label))
               .sort(),
           ).toEqual(
             expectedButtons({
@@ -724,7 +738,7 @@ test('a page with no lifecycle yet is not asked to re-read: its own loader owns 
   try {
     await act(async () =>
       root.render(
-        <RunIntents
+        <Controls
           bridge={bridge}
           records={feed.subscribe}
           host={'local' as HostKey}

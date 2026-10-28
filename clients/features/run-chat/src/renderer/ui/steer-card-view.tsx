@@ -19,6 +19,7 @@ import {
   STEER_MODES,
   type SteerDraft,
   steerFailureReport,
+  steerHelp,
   targetOptions,
   targetValue,
 } from '../../state/index.js';
@@ -71,6 +72,9 @@ function Draft(props: CardProps): JSX.Element {
           change={actions.setMode}
         />
       </Row>
+      <Text variant="small" tone="muted">
+        {steerHelp(draft)}
+      </Text>
       <CardFailure {...props} />
       <Row gap="space-3" align="start">
         <Button

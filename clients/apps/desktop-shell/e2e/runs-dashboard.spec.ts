@@ -194,16 +194,14 @@ test('Group by regroups the same tiles by machine and task', async ({page}) => {
   await expect(tiles(page, 'Needs you')).toHaveCount(2);
 });
 
-test('the rail counts the runs that need the user, and Runs and the mark both go home', async ({
-  page,
-}) => {
+test('the rail counts the runs that need the user, and Runs goes to them', async ({page}) => {
   await open(page, dashboardWorld(MANY_RUNS));
   const rail = page.getByRole('navigation', {name: 'VibeSys'});
 
   await expect(rail.getByRole('button', {name: /^Runs/})).toHaveAccessibleName(/2 need you/);
   await rail.getByRole('button', {name: 'New', exact: true}).click();
   await expect(page.getByRole('heading', {name: 'Runs'})).toHaveCount(0);
-  await rail.getByRole('button', {name: 'VibeSys'}).click();
+  await rail.getByRole('button', {name: /^Runs/}).click();
   await expect(page.getByRole('heading', {name: 'Runs'})).toBeVisible();
   await expect(rail.getByRole('button', {name: /^Runs/})).toHaveAttribute('aria-current', 'page');
 });
@@ -410,6 +408,6 @@ test('an addressless run remains visible when its project is unknown', async ({p
     await page.screenshot({path: `${shots}/runs__unknown-project__1440.png`});
   await tile.getByRole('button', {name: /^Unknown project/}).click();
   await expect(page.getByText('Project unknown', {exact: true})).toBeVisible();
-  for (const name of ['Resume', 'Pause', 'Pause now', 'Guidance'])
+  for (const name of ['Resume', 'Pause', 'Pause now'])
     await expect(page.getByRole('button', {name, exact: true})).toHaveCount(0);
 });

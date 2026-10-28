@@ -240,8 +240,9 @@ test('every ended run offers Resume', async ({page}) => {
   await open(page, {...SEED, listings: [listed([], [stopped])]});
   await expect(page.getByText('Stopped by you.')).toBeVisible();
   await expect(page.getByRole('button', {name: 'Resume', exact: true})).toBeVisible();
-  await page.getByRole('button', {name: 'View logs'}).click();
-  await expect(
-    page.getByRole('radiogroup', {name: 'Show'}).getByRole('radio', {name: 'Logs'}),
-  ).toBeChecked();
+  // The run's logs are its Logs tab; the banner does not repeat it.
+  await expect(page.getByRole('button', {name: 'View logs'})).toHaveCount(0);
+  const show = page.getByRole('radiogroup', {name: 'Show'});
+  await show.getByText('Logs').click();
+  await expect(show.getByRole('radio', {name: 'Logs'})).toBeChecked();
 });

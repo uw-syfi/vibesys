@@ -146,7 +146,6 @@ const USER_ACTIONS: readonly RunPageAction[] = [
   {type: 'open-window'},
   {type: 'archive'},
   {type: 'run-again'},
-  {type: 'view-logs'},
   {type: 'select-stream', streamId: 's3'},
   {type: 'agents-open', id: 'boss', open: true},
   {type: 'agents-open', id: 'boss', open: false},
@@ -609,7 +608,7 @@ describe('the run page store', () => {
     });
     const shown = fold(state, [
       {type: 'log-view', streamId: 's5', view: narration},
-      {type: 'view-logs'},
+      {type: 'select-stream', streamId: 's5'},
     ]).state;
     expect(shown.followingLogs).toBe(true);
     expect(streamLines(shown, 's5')).toEqual([{text: '16:30:51 INFO run started', stream: 'out'}]);

@@ -82,7 +82,7 @@ async function openIntents(page: Page, options: {amendment?: boolean; history?: 
   await installGateway(page, intentWire(fixture, options.history));
   await openFixture(page, {...fixtureNamed('queue-rs-live'), runId: 'run-a'});
   if (options.history !== 'pending')
-    await expect(page.getByRole('button', {name: 'Guidance', exact: true})).toBeVisible();
+    await expect(page.getByRole('button', {name: 'Pause', exact: true})).toBeVisible();
   const outcome = async (index: number, result: 'applied' | 'refused'): Promise<void> => {
     const request = requests[index]?.request;
     if (!request) throw new Error('No posted intent');
@@ -257,7 +257,7 @@ test('Pause escalates to Pause now in the same epoch and waits for journal outco
     ),
   ).toEqual([]);
   await page.getByRole('button', {name: 'Settings', exact: true}).click();
-  await expect(page.getByRole('button', {name: 'Guidance', exact: true})).toHaveCount(0);
+  await expect(page.getByText('Request history', {exact: true})).toHaveCount(0);
   expect(await page.evaluate(() => (window as unknown as GatewayWindow).fakeGateway.active())).toBe(
     0,
   );
@@ -286,23 +286,6 @@ for (const kind of INTENT_REPLAYS) {
     });
   }
 }
-
-test('guidance opens beside the controls and posts the typed text', async ({page}) => {
-  await page.setViewportSize({width: 1000, height: 900});
-  const {requests} = await openIntents(page);
-  await page.getByRole('button', {name: 'Guidance', exact: true}).click();
-  const dialog = page.getByRole('dialog', {name: 'Guidance', exact: true});
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole('textbox', {name: 'Guidance', exact: true}).fill('Measure contention');
-  await capture(page, 'intent-guidance-1000');
-  await dialog.getByRole('button', {name: 'Send guidance'}).click();
-  await expect(dialog).not.toBeVisible();
-  await expect(page.getByText('Guidance · Pending', {exact: true})).toBeVisible();
-  expect(requests[0]?.request.intent).toMatchObject({
-    case: 'steer',
-    value: {text: 'Measure contention'},
-  });
-});
 
 test('live controls remain reachable and history follows pause, resume and finish', async ({
   page,

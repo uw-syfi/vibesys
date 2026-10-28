@@ -126,7 +126,6 @@ const GATEWAY_ACTIONS = {
   'ideas-pin': 'ui',
   'ideas-hover': 'ui',
   'agents-open': 'ui',
-  'view-logs': 'ui',
   record: 'gateway-ignored',
   'ask-pause-now': 'gateway-ignored',
   'cancel-pause-now': 'gateway-ignored',

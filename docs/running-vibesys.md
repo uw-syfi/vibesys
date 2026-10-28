@@ -542,7 +542,7 @@ reason. Each control is applied once, even across a crash or when the same contr
 over a client's socket: pass `--control-id ID` to resend the same control safely. An id, once
 used, keeps its control: sending a different control under it is refused.
 
-The run has four operator controls: Pause, Pause now, Resume and Guidance.
+The run has four operator controls: Pause, Pause now, Resume and Steer.
 
 Pause closes admission of new turns and independent evaluations, finishes the turns already
 in flight, and exits. Evaluations requested by those turns still run within the turns' original
@@ -561,7 +561,7 @@ is a separate change. Until project-edit protection lands, root restores and sna
 present at Resume fail with a prerequisite diagnostic and preserve those edits. Resumed adoption retains the candidate instead of replacing the checkout.
 
 Use `vibesys --resume <run-id>` to start the new epoch. A live writer must exit before another
-can launch. Guidance remains durable advice for upcoming work.
+can launch. A steer remains durable advice for upcoming work.
 
 In the terminal that started the run, Ctrl-C requests cancellation; a second Ctrl-C exits
 through teardown. Ctrl-Z suspends only the command while its run continues.

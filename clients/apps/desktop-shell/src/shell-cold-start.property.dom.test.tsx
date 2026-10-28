@@ -177,7 +177,7 @@ test('property: a cold start with any arrival order and timing never leaves Runs
         else if (holdsRuns) expect(says).not.toBe('none');
       };
       try {
-        await act(async () => root.render(<Shell stores={stores} version="0" />));
+        await act(async () => root.render(<Shell stores={stores} />));
         check();
         for (const [index, event] of order.entries()) {
           await act(async () => clock.advanceBy(gaps[index] ?? 1));
@@ -206,7 +206,7 @@ test('a listing that arrives long after the old four second bound finds the wind
   const container = document.createElement('div');
   const root = createRoot(container);
   try {
-    await act(async () => root.render(<Shell stores={stores} version="0" />));
+    await act(async () => root.render(<Shell stores={stores} />));
     await act(async () => clock.advanceBy(WAIT_MS * 10));
     await settle();
     expect(stores.sidebar.store.getState().selection.kind).toBe('runs');
@@ -227,7 +227,7 @@ test('the empty Runs screen offers New run, and pressing it is what opens New ru
   const container = document.createElement('div');
   const root = createRoot(container);
   try {
-    await act(async () => root.render(<Shell stores={stores} version="0" />));
+    await act(async () => root.render(<Shell stores={stores} />));
     for (const event of ARRIVALS) await act(async () => world.arrive(event));
     await settle();
     expect(runsScreenSays(container)).toBe('none');

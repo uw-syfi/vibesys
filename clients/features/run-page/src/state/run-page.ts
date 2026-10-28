@@ -251,8 +251,7 @@ export interface RunPageState {
   /** The wait for the record to leave `unlisted`. */
   readonly locate: Locate;
   /**
-   * Whether the page follows the selected stream's lines: set once a Logs face, or View logs,
-   * picks a stream.
+   * Whether the page follows the selected stream's lines: set once a Logs face picks a stream.
    */
   readonly followingLogs: boolean;
   readonly logProblem?: {readonly streamId: string; readonly message: string} | undefined;
@@ -319,7 +318,6 @@ export type RunPageAction =
   | {readonly type: 'ideas-pin'; readonly idea: string | null}
   | {readonly type: 'ideas-hover'; readonly idea: string | null}
   | {readonly type: 'agents-open'; readonly id: string; readonly open: boolean}
-  | {readonly type: 'view-logs'}
   | {readonly type: 'ask-pause-now'}
   | {readonly type: 'cancel-pause-now'}
   | {readonly type: 'confirm-pause-now'}
@@ -1082,14 +1080,6 @@ function commandStep(state: RunPageState, action: RunPageAction): RunPageStep | 
   }
 }
 
-/** The narration stream, which "View logs" opens; else the first stream. */
-function narration(state: RunPageState): string | null {
-  const streams =
-    state.logs.kind === 'idle' || state.logs.kind === 'failed' ? [] : state.logs.streams;
-  const found = streams.find(stream => stream.owner['kind'] === 'run_narration') ?? streams[0];
-  return found?.id ?? null;
-}
-
 function toggled(
   open: ReadonlySet<string>,
   action: {readonly id: string; readonly open: boolean},
@@ -1146,8 +1136,6 @@ export function runPageStep(state: RunPageState, action: RunPageAction): RunPage
         : {state: {...state, ideasHovered: action.idea}, requests: []};
     case 'agents-open':
       return {state: {...state, agentsOpen: toggled(state.agentsOpen, action)}, requests: []};
-    case 'view-logs':
-      return {state: {...state, followingLogs: true, selected: narration(state)}, requests: []};
     case 'chat':
       return withReader(state, isEndedRecord(state.record), (reader, ended, next) =>
         readerWanted(reader, action.open, ended, next),
