@@ -8,6 +8,7 @@ export {
   type CardView,
   cardView,
 } from './card-view.js';
+export {DETAILS_LABEL} from './chat-words.js';
 export {
   type ControlDelivery,
   type DeliveryEvent,
@@ -18,6 +19,7 @@ export {
   type IdeaOf,
   SENT,
 } from './delivery.js';
+export {type ChatFailure, thrownFailure} from './failure.js';
 export {
   type AskInput,
   type ChatOutcome,

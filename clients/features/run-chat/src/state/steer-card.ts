@@ -21,6 +21,7 @@ import {
   foldDelivery,
   SENT,
 } from './delivery.js';
+import {type ChatFailure, thrownFailure} from './failure.js';
 import {
   draftProblem,
   type SteerDraft,
@@ -35,16 +36,21 @@ import {
 /** The acknowledgment of one control command, as the shell reports it. */
 export type ControlOutcome =
   | {readonly kind: 'acknowledged'}
-  | {readonly kind: 'rejected'; readonly message: string | null; readonly code?: string | null};
+  | {
+      readonly kind: 'rejected';
+      readonly message: string | null;
+      readonly detail: string | null;
+      readonly code?: string | null;
+    };
 
 /** The diagnostic code of a server that refuses every command, as it serves a run that ended. */
 const READ_ONLY_CODE = 'run_read_only';
 
 /** What a refusal says: the client's word for a typed reason it knows, else the server's message. */
-function refusalWords(output: ControlOutcome): string | null {
+function refusalFailure(output: ControlOutcome): ChatFailure | null {
   if (output.kind !== 'rejected') return null;
-  if (output.code === READ_ONLY_CODE) return 'Read only';
-  return output.message ?? 'Refused';
+  const message = output.code === READ_ONLY_CODE ? 'Read only' : (output.message ?? 'Refused');
+  return {message, detail: output.detail};
 }
 
 export type DeliverRequest = SteerRequest | WithdrawRequest;
@@ -62,7 +68,7 @@ export interface SteerCardContext {
   /** The run cannot take a steer (it ended): the draft is kept, Send is off. */
   readonly readOnly: boolean;
   /** Why the last send or withdrawal was not taken; null when nothing failed. */
-  readonly error: string | null;
+  readonly error: ChatFailure | null;
 }
 
 export interface SteerCardInput {
@@ -166,7 +172,7 @@ export const steerCardMachine = setup({
             actions: assign(({event}) => ({
               controlId: null,
               delivery: SENT,
-              error: refusalWords(event.output),
+              error: refusalFailure(event.output),
             })),
           },
         ],
@@ -175,7 +181,7 @@ export const steerCardMachine = setup({
           actions: assign(({event}) => ({
             controlId: null,
             delivery: SENT,
-            error: String(event.error),
+            error: thrownFailure(event.error),
           })),
         },
       },
@@ -212,13 +218,15 @@ export const steerCardMachine = setup({
                 actions: assign(({event}) => ({
                   withdrawId: null,
                   error:
-                    event.output.kind === 'rejected' ? (event.output.message ?? 'Refused') : null,
+                    event.output.kind === 'rejected'
+                      ? {message: event.output.message ?? 'Refused', detail: event.output.detail}
+                      : null,
                 })),
               },
             ],
             onError: {
               target: 'idle',
-              actions: assign(({event}) => ({withdrawId: null, error: String(event.error)})),
+              actions: assign(({event}) => ({withdrawId: null, error: thrownFailure(event.error)})),
             },
           },
         },
@@ -232,7 +240,7 @@ export const steerCardMachine = setup({
                   withdrawId: null,
                   error:
                     event.type === 'delivery' && event.event.kind === 'refused'
-                      ? (event.event.reason ?? 'Refused')
+                      ? {message: event.event.reason ?? 'Refused', detail: null}
                       : null,
                 })),
               },

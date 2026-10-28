@@ -247,3 +247,30 @@ test('a live run keeps the question box, New chat and New steer', async () => {
   expect(buttons(container)).toEqual(expect.arrayContaining(['New chat', 'New steer']));
   await unmount();
 });
+
+function failureView(detail: string | null): ChatPanelView {
+  const view = viewOf([]);
+  return {...view, panel: {...view.panel, error: {message: 'Refused', detail}}};
+}
+
+test('a failed question shows its message and a closed Details disclosure that opens onto the diagnostic', async () => {
+  const {container, unmount} = await mount(<ChatPanel {...failureView('a\nb')} />);
+  expect(container.textContent).toContain('Refused');
+  expect(buttons(container)).toContain('Details');
+  expect(container.textContent).not.toContain('a\nb');
+  await act(async () =>
+    [...container.querySelectorAll('button')]
+      .find(button => button.textContent === 'Details')
+      ?.click(),
+  );
+  const lines = [...container.querySelectorAll('[role="log"] *')].map(node => node.textContent);
+  expect(lines).toEqual(expect.arrayContaining(['a', 'b']));
+  await unmount();
+});
+
+test('a failed question without a diagnostic has no Details', async () => {
+  const {container, unmount} = await mount(<ChatPanel {...failureView(null)} />);
+  expect(container.textContent).toContain('Refused');
+  expect(buttons(container)).not.toContain('Details');
+  await unmount();
+});

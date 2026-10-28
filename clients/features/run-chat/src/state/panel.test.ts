@@ -105,11 +105,27 @@ describe('panelMachine', () => {
     let snapshot = step(opened(), {type: 'set-composer', text: 'why?'});
     snapshot = step(snapshot, {type: 'submit', requestId: 'request-1', threadId: 'thread-1'});
     expect(snapshot.value).toMatchObject({chat: 'asking'});
-    snapshot = step(snapshot, done('ask', {ok: false, message: 'the run is not connected'}));
+    snapshot = step(
+      snapshot,
+      done('ask', {ok: false, message: 'the run is not connected', detail: 'stderr line'}),
+    );
     expect(snapshot.value).toMatchObject({chat: 'idle'});
     expect(snapshot.context.composer).toBe('why?');
-    expect(snapshot.context.error).toBe('the run is not connected');
+    expect(snapshot.context.error).toEqual({
+      message: 'the run is not connected',
+      detail: 'stderr line',
+    });
     expect(snapshot.context.pending).toBeNull();
+  });
+
+  test('a question whose call threw is a message without a diagnostic', () => {
+    let snapshot = step(opened(), {type: 'set-composer', text: 'why?'});
+    snapshot = step(snapshot, {type: 'submit', requestId: 'request-1', threadId: 'thread-1'});
+    snapshot = step(snapshot, {type: 'xstate.error.actor.ask', error: new Error('lost')});
+    expect(snapshot.context.error).toEqual({message: 'lost', detail: null});
+    snapshot = step(snapshot, {type: 'submit', requestId: 'request-2', threadId: 'thread-1'});
+    snapshot = step(snapshot, {type: 'xstate.error.actor.ask', error: 'gone'});
+    expect(snapshot.context.error).toEqual({message: 'gone', detail: null});
   });
 
   test('the Steer control turns the draft into a card and asks nothing', () => {
@@ -159,7 +175,7 @@ describe('panelMachine', () => {
                 ? LISTING
                 : random.bool()
                   ? {ok: true, threadId: 'new'}
-                  : {ok: false, message: 'no'},
+                  : {ok: false, message: 'no', detail: random.bool() ? 'trace' : null},
             ),
           ),
           ...live.operations.map(operation => live.error(operation, new Error('lost'))),
