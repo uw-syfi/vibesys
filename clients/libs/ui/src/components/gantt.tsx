@@ -216,39 +216,47 @@ function AxisRow(props: {
   );
 }
 
+function sameView(a: GanttView, b: GanttView): boolean {
+  const near = (x: number, y: number): boolean =>
+    Math.abs(x - y) <= 1e-9 * Math.max(1, Math.abs(y));
+  return near(a.from, b.from) && near(a.to, b.to);
+}
+
+/** The zoom and pan buttons; one that would not move the view is disabled, with why. */
 function ZoomBar(props: {
   readonly view: GanttView;
   readonly whole: GanttView;
+  readonly label: string | undefined;
   readonly change: (view: GanttView) => void;
 }): JSX.Element {
   const {view, whole, change} = props;
+  const step = (text: string, next: GanttView, reason: string): JSX.Element =>
+    sameView(next, view) ? (
+      <Button
+        size="sm"
+        variant="quiet"
+        text={text}
+        disabledReason={reason}
+        quietReason
+        press={() => undefined}
+      />
+    ) : (
+      <Button size="sm" variant="quiet" text={text} press={() => change(next)} />
+    );
   return (
     <div className="vs-gantt-zoom" role="toolbar" aria-label="Time range">
-      <Button
-        size="sm"
-        variant="quiet"
-        text="Zoom in"
-        press={() => change(zoomed(view, whole, ZOOM_STEP))}
-      />
-      <Button
-        size="sm"
-        variant="quiet"
-        text="Zoom out"
-        press={() => change(zoomed(view, whole, 1 / ZOOM_STEP))}
-      />
-      <Button
-        size="sm"
-        variant="quiet"
-        text="Earlier"
-        press={() => change(panned(view, whole, -PAN_STEP))}
-      />
-      <Button
-        size="sm"
-        variant="quiet"
-        text="Later"
-        press={() => change(panned(view, whole, PAN_STEP))}
-      />
-      <Button size="sm" variant="quiet" text="Whole range" press={() => change(whole)} />
+      {step('Zoom in', zoomed(view, whole, ZOOM_STEP), 'Zoomed in as far as it goes')}
+      {step('Zoom out', zoomed(view, whole, 1 / ZOOM_STEP), 'The whole range is in view')}
+      {step('Earlier', panned(view, whole, -PAN_STEP), 'The start is in view')}
+      {step('Later', panned(view, whole, PAN_STEP), 'The end is in view')}
+      {step('Whole range', whole, 'The whole range is in view')}
+      {props.label === undefined ? null : (
+        <span className="vs-gantt-view" role="status">
+          <Text variant="small" tone="muted">
+            {props.label}
+          </Text>
+        </span>
+      )}
     </div>
   );
 }
@@ -262,7 +270,9 @@ function ZoomBar(props: {
  *
  * Zoom and pan: `view` is the part of the axis in view (the whole axis unless given). With
  * `changeView` the Gantt offers Zoom in and out, Earlier and Later, and the keys + - 0 and the
- * Left and Right arrows do the same; bars clip at the edges of the view. Many rows read as plain
+ * Left and Right arrows do the same; bars clip at the edges of the view. A button that would not
+ * move the view is disabled. `viewLabel` says in words what is in view, beside the buttons, and is
+ * announced as it changes. Many rows read as plain
  * bars, without their pieces (`detail` `aggregate`, the default above 120 rows); zoom in to the
  * rows that matter, or pass `detail` `full`.
  */
@@ -279,6 +289,8 @@ export function Gantt(props: {
   readonly figureLabel?: string;
   readonly view?: GanttView;
   readonly changeView?: (view: GanttView) => void;
+  /** The part in view in words (`7m to 22m`), shown with the zoom buttons. */
+  readonly viewLabel?: string;
   readonly detail?: 'full' | 'aggregate';
   /** `fill` takes the height of its container; the default is at most a thread's. */
   readonly size?: 'default' | 'fill';
@@ -288,23 +300,26 @@ export function Gantt(props: {
   const strip = props.strip === true;
   const {rows, changeView} = props;
   const detail = props.detail ?? (rows.length > AGGREGATE_ABOVE ? 'aggregate' : 'full');
+  const selectedIndex = rows.findIndex(row => row.selected === true);
+  // A Gantt drawn with a row selected (opened beside what that row opened) opens at that row.
   const win = useWindowed({
     count: rows.length,
     keyOf: index => rows[index]?.id ?? String(index),
     estimate: SIZE['row-dense'],
     follow: false,
+    ...(selectedIndex < 0 ? {} : {startAt: selectedIndex}),
   });
   const playhead: StyleWithVars | null =
     props.playhead === undefined
       ? null
       : {'--gantt-from': percent(shareOf(props.playhead, view.from, view.to))};
-  const selectedIndex = rows.findIndex(row => row.selected === true);
   const stop = Math.max(0, selectedIndex);
   const drawn = stop >= win.first && stop < win.last;
   const focusStop = (event: FocusEvent<HTMLDivElement>): void => {
     if (event.target === event.currentTarget) win.reveal(stop, row => row.focus());
   };
   const keys = (event: KeyboardEvent<HTMLElement>): void => {
+    win.touched();
     navigationKeys(event, win, rows.length);
     if (changeView === undefined || event.defaultPrevented) return;
     const next = viewKey(event.key, view, whole);
@@ -315,7 +330,7 @@ export function Gantt(props: {
   return (
     <div className="vs-gantt" data-strip={strip || undefined} data-size={props.size ?? 'default'}>
       {strip || changeView === undefined ? null : (
-        <ZoomBar view={view} whole={whole} change={changeView} />
+        <ZoomBar view={view} whole={whole} label={props.viewLabel} change={changeView} />
       )}
       {strip || props.ticks === undefined ? null : (
         <AxisRow
@@ -333,6 +348,9 @@ export function Gantt(props: {
         tabIndex={drawn ? -1 : 0}
         onFocus={focusStop}
         onScroll={win.scrolled}
+        onWheel={win.touched}
+        onTouchMove={win.touched}
+        onPointerDown={win.touched}
         onKeyDown={keys}
       >
         <div aria-hidden="true" style={{height: win.before}} />

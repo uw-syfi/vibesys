@@ -7,12 +7,13 @@ import {afterAll, beforeAll, expect, test} from 'bun:test';
 import {EMPTY_LEDGER} from '@vibesys/run-state';
 import type {Candidate} from '@vibesys/run-state/candidates';
 import {Window} from 'happy-dom';
-import {act, type ReactNode} from 'react';
+import {act, type JSX, type ReactNode, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import type {ZoomEvent} from '../../../../state/index.js';
+import {TIMELINE_CONTROLS_DEFAULT} from '../../../../state/timeline-controls.js';
 import {idea, modelOf} from '../../../../state/timeline-fixtures.js';
 import {FAILED_DENSE} from '../../../../state/timeline-rows.js';
-import {TimelineView} from './timeline-view.js';
+import {TimelineView, type TimelineViewProps} from './timeline-view.js';
 
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
@@ -34,6 +35,12 @@ afterAll(async () => {
   }
   await window.happyDOM.close();
 });
+
+/** The Timeline as the page holds it: its range, folding and zoom kept between renders. */
+function Timeline(props: Omit<TimelineViewProps, 'controls' | 'change'>): JSX.Element {
+  const [controls, change] = useState(TIMELINE_CONTROLS_DEFAULT);
+  return <TimelineView {...props} controls={controls} change={change} />;
+}
 
 async function mount(
   node: ReactNode,
@@ -74,14 +81,14 @@ const IDEAS = [
 ];
 
 test('rows follow the Ideas list: running first, then newest first', async () => {
-  const {container, unmount} = await mount(<TimelineView {...base(IDEAS, 3600)} />);
+  const {container, unmount} = await mount(<Timeline {...base(IDEAS, 3600)} />);
   expect(names(container)).toEqual(['live', 'mid', 'bad', 'old']);
   await unmount();
 });
 
 test('a row opens its idea and a segment opens its step under that idea', async () => {
   const events: ZoomEvent[] = [];
-  const {container, unmount} = await mount(<TimelineView {...base(IDEAS, 3600, events)} />);
+  const {container, unmount} = await mount(<Timeline {...base(IDEAS, 3600, events)} />);
   const mid = rows(container).find(row => row.getAttribute('aria-label') === 'mid');
   await act(async () => mid?.click());
   const segments = [...(mid?.querySelectorAll('.vs-gantt-seg') ?? [])] as HTMLElement[];
@@ -100,7 +107,7 @@ test('a row opens its idea and a segment opens its step under that idea', async 
 
 test('Last hour keeps only the ideas that overlap the last hour', async () => {
   const many = [idea('long-ago', 'passed', 0, 600), idea('recent', 'passed', 90_000, 600)];
-  const {container, unmount} = await mount(<TimelineView {...base(many, 90_700)} />);
+  const {container, unmount} = await mount(<Timeline {...base(many, 90_700)} />);
   expect(names(container)).toEqual(['recent', 'long-ago']);
   const hour = [...container.querySelectorAll('input[type="radio"]')].find(
     each => (each.parentElement?.textContent ?? '') === 'Last hour',
@@ -116,7 +123,7 @@ test('many failed ideas fold into one lane that opens them', async () => {
     ...Array.from({length: FAILED_DENSE + 1}, (_, at) => idea(`r${at}`, 'failed', at * 10, 50)),
   ];
   const events: ZoomEvent[] = [];
-  const {container, unmount} = await mount(<TimelineView {...base(dense, 1000, events)} />);
+  const {container, unmount} = await mount(<Timeline {...base(dense, 1000, events)} />);
   expect(names(container)).toEqual([`+ ${FAILED_DENSE + 1} failed`, 'passed-one']);
   await act(async () => rows(container)[0]?.click());
   // The list is windowed, so what shows is the lane gone and the way to fold it back.
@@ -130,13 +137,13 @@ test('an opened idea shows the strip of its latest attempt; a run with no ideas 
   const events: ZoomEvent[] = [];
   const candidate = idea('mid', 'passed', 2000, 600);
   const opened = {...base([candidate], 3600, events), idea: candidate};
-  const {container, unmount} = await mount(<TimelineView {...opened} />);
+  const {container, unmount} = await mount(<Timeline {...opened} />);
   const segments = [...container.querySelectorAll('.vs-gantt-seg')] as HTMLElement[];
   await act(async () => segments[2]?.click());
   expect(events).toEqual([{type: 'open-step', step: 'mid-a-j'}]);
   await unmount();
 
-  const empty = await mount(<TimelineView {...base([], 100)} />);
+  const empty = await mount(<Timeline {...base([], 100)} />);
   expect(empty.container.textContent).toContain('No ideas yet');
   await empty.unmount();
 });
@@ -144,7 +151,7 @@ test('an opened idea shows the strip of its latest attempt; a run with no ideas 
 test('a long idea name is in full on the row’s name, for hover and assistive tech', async () => {
   const long = 'Per-core queues with work stealing and a batched, padded, cache-aligned ring';
   const {container, unmount} = await mount(
-    <TimelineView {...base([idea(long, 'passed', 0, 600)], 700)} />,
+    <Timeline {...base([idea(long, 'passed', 0, 600)], 700)} />,
   );
   expect(container.querySelector('[role="option"] .vs-gantt-name')?.getAttribute('title')).toBe(
     long,
@@ -171,7 +178,7 @@ test('a failed idea has no multiple to show, so its cell is a dash, as in the Id
     },
   };
   const fits = idea('fits', 'passed', 400, 100);
-  const {container, unmount} = await mount(<TimelineView {...base([long, failing, fits], 600)} />);
+  const {container, unmount} = await mount(<Timeline {...base([long, failing, fits], 600)} />);
   const figures = [...container.querySelectorAll('[role="option"] .vs-gantt-figure')].map(
     each => each.textContent,
   );
@@ -180,7 +187,7 @@ test('a failed idea has no multiple to show, so its cell is a dash, as in the Id
 });
 
 test('a legend names each role on the bars, in the color of its segments, and the gates', async () => {
-  const {container, unmount} = await mount(<TimelineView {...base(IDEAS, 3600)} />);
+  const {container, unmount} = await mount(<Timeline {...base(IDEAS, 3600)} />);
   const legend = container.querySelector('[aria-label="Bar colors"]');
   const entries = [...(legend?.querySelectorAll('li') ?? [])];
   expect(entries.map(each => each.textContent ?? '')).toEqual(['Implementer', 'Judge', 'Gate']);
@@ -196,13 +203,49 @@ test('a legend names each role on the bars, in the color of its segments, and th
 test('the legend names a quota pause when a bar shows one, and only then', async () => {
   const legend = (container: HTMLElement) =>
     [...container.querySelectorAll('[aria-label="Bar colors"] li')].map(item => item.textContent);
-  const quiet = await mount(<TimelineView {...base(IDEAS, 3600)} />);
+  const quiet = await mount(<Timeline {...base(IDEAS, 3600)} />);
   expect(legend(quiet.container)).not.toContain('Quota pause');
   await quiet.unmount();
   // The idea `mid` ran 2000 to 2600: a pause inside it cuts its bar and joins the legend.
   const pause = {from: 2100, to: 2300, provider: 'claude', condition: 'quota_exhausted' as const};
   const paused = {...base(IDEAS, 3600), model: {...modelOf(IDEAS), pauses: [pause]}};
-  const shown = await mount(<TimelineView {...paused} />);
+  const shown = await mount(<Timeline {...paused} />);
   expect(legend(shown.container)).toContain('Quota pause');
   await shown.unmount();
+});
+
+test('zoom and pan move what is in view within the range; a range or Whole range shows all of it', async () => {
+  const {container, unmount} = await mount(<Timeline {...base(IDEAS, 3600)} selected="mid" />);
+  const ticks = () =>
+    [...container.querySelectorAll('.vs-gantt-tick')].map(each => each.textContent);
+  const press = (name: string) => {
+    const button = [...container.querySelectorAll('[aria-label="Time range"] button')].find(
+      each => each.textContent === name,
+    ) as HTMLButtonElement;
+    return act(async () => button.click());
+  };
+  const range = (label: string) => {
+    const input = [...container.querySelectorAll('input[type="radio"]')].find(
+      each => (each.parentElement?.textContent ?? '') === label,
+    ) as HTMLInputElement;
+    return act(async () => input.click());
+  };
+  const whole = ticks();
+  await press('Zoom in');
+  const zoomed = ticks();
+  expect(zoomed).not.toEqual(whole);
+  await press('Earlier');
+  expect(ticks()).not.toEqual(zoomed);
+  await press('Whole range');
+  expect(ticks()).toEqual(whole);
+  await press('Zoom in');
+  await range('Last day');
+  expect(ticks()).toEqual(whole);
+  // The idea opened beside the Timeline is its selected row.
+  expect(
+    rows(container)
+      .filter(row => row.getAttribute('aria-selected') === 'true')
+      .map(row => row.getAttribute('aria-label')),
+  ).toEqual(['mid']);
+  await unmount();
 });

@@ -396,8 +396,19 @@
   min-width: 0;
   min-height: 0;
 }
+/* The panel's width as the user set it, leaving --pane-min of the screen beside it. */
+.vs-dock-side[data-sized] {
+  flex-basis: clamp(var(--pane-min), var(--pane-size), calc(100% - var(--pane-min)));
+}
+/* The panel's separator straddles its border and takes no room of its own. */
+.vs-dock > .vs-pane-separator {
+  z-index: 1;
+  flex-basis: var(--space-3);
+  margin: 0 calc(-1 * var(--space-3) / 2);
+}
 .vs-dock-side {
-  flex: 0 0 var(--pane-outline);
+  box-sizing: border-box;
+  flex: 0 0 var(--pane-dock);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -414,8 +425,12 @@
     top: 0;
     right: 0;
     bottom: 0;
-    width: min(100%, var(--pane-outline));
+    width: min(100%, var(--pane-dock));
     box-shadow: var(--elevation-overlay);
+  }
+  /* Lying over the screen, the panel keeps its default width: there is nothing to resize against. */
+  .vs-dock > .vs-pane-separator {
+    display: none;
   }
   /* What it covers is put away, not drawn under it: it keeps its place and its state. */
   .vs-dock:has(> .vs-dock-side) > .vs-dock-main {

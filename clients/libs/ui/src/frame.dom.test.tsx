@@ -380,6 +380,35 @@ describe('Gantt', () => {
     expect(opened).toEqual(['a', 'b']);
   });
 
+  test('a zoom button that would not move the view is disabled, and what is in view is said', async () => {
+    const asked: {from: number; to: number}[] = [];
+    const gantt = (view: {from: number; to: number}) => (
+      <Gantt
+        label="Over time"
+        from={0}
+        to={100}
+        rows={[row('a', {})]}
+        view={view}
+        changeView={next => asked.push(next)}
+        viewLabel={`${view.from} to ${view.to}`}
+      />
+    );
+    const disabled = (container: HTMLElement) =>
+      all(container, '[aria-label="Time range"] button')
+        .filter(button => button.getAttribute('aria-disabled') === 'true')
+        .map(button => button.textContent);
+    const {container, render} = await mount(gantt({from: 0, to: 100}));
+    expect(disabled(container)).toEqual(['Zoom out', 'Earlier', 'Later', 'Whole range']);
+    expect(one(container, '[role="status"]').textContent).toBe('0 to 100');
+    await click(
+      all(container, 'button').find(each => each.textContent === 'Zoom in') as HTMLElement,
+    );
+    expect(asked).toEqual([{from: 25, to: 75}]);
+    await render(gantt({from: 0, to: 50}));
+    expect(disabled(container)).toEqual(['Earlier']);
+    expect(one(container, '[role="status"]').textContent).toBe('0 to 50');
+  });
+
   test('without a selection the first row is the tab stop', async () => {
     const rows = ['a', 'b'].map(id => row(id, {}));
     const {container} = await mount(<Gantt label="Over time" from={0} to={10} rows={rows} />);
@@ -1007,6 +1036,23 @@ describe('at scale: windowed lists draw a bounded number of rows', () => {
     expect(last.getAttribute('aria-posinset')).toBe(String(MANY));
     await press(last, 'Enter');
     expect(opened).toEqual(['r9999']);
+  });
+
+  test('Gantt: drawn with a row selected anywhere in a long list, it opens with that row drawn', async () => {
+    // The Timeline is drawn again when an idea opens beside it: its row must be there to see.
+    for (const at of [0, 17, 40, 999]) {
+      const rows = Array.from({length: 1000}, (_, index) =>
+        row(`r${index}`, {selected: index === at}),
+      );
+      const {container} = await mount(<Gantt label="Over time" from={0} to={10} rows={rows} />);
+      const options = all(container, '[role="option"]');
+      expect(options.length).toBeLessThan(DRAWN_AT_MOST);
+      const selected = options.filter(option => option.getAttribute('aria-selected') === 'true');
+      expect(selected.map(option => option.getAttribute('aria-posinset'))).toEqual([
+        String(at + 1),
+      ]);
+      expect(selected[0]?.tabIndex).toBe(0);
+    }
   });
 
   test('Gantt: many rows read as bars without pieces unless asked for the detail', async () => {

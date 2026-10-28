@@ -2,9 +2,11 @@
  * The Timeline face: a Gantt over the run clock with zoom. At the run level (`idea` null) one row
  * per idea in the Ideas list's order (rows open ideas, segments open steps; an agent turn in its
  * role's color, a gate hatched, both named by the legend; the end of a bar coloured by outcome,
- * the ratio or verdict at the right);
+ * the ratio or verdict at the right; the idea opened beside it selected);
  * the range is the last hour, the last day or all, and a dense run folds its failed ideas into
- * one lane. For an opened idea, the strip of its latest attempt's steps.
+ * one lane. Within the range the reader zooms and pans (the Gantt's buttons and keys); choosing a
+ * range shows all of it again. The page keeps these controls, so the Timeline beside an idea it
+ * opened is the one the reader left. For an opened idea, the strip of its latest attempt's steps.
  */
 import type {Candidate} from '@vibesys/run-state/candidates';
 import {
@@ -18,13 +20,14 @@ import {
   SwatchLegend,
   Text,
 } from '@vibesys/ui';
-import {type JSX, useState} from 'react';
+import type {JSX} from 'react';
+import type {TimelineControls} from '../../../../state/timeline-controls.js';
 import {
   legendItems,
   TIMELINE_RANGES,
-  type TimelineRange,
   type TimelineRow,
   timelineRows,
+  timelineZoom,
 } from '../../../../state/timeline-rows.js';
 import type {ViewBase} from '../props.js';
 import {StepStrip} from './step-strip.js';
@@ -32,13 +35,21 @@ import {StepStrip} from './step-strip.js';
 export interface TimelineViewProps extends ViewBase {
   /** Null: the whole run, one row per idea; else that idea's steps. */
   readonly idea: Candidate | null;
+  /** The idea opened beside the whole run's timeline, whose row is selected. */
+  readonly selected?: string | null;
+  /** The range, folding and zoom the page keeps, and where a change goes. */
+  readonly controls: TimelineControls;
+  readonly change: (controls: TimelineControls) => void;
 }
 
-function RunTimeline(props: ViewBase): JSX.Element {
-  const {model, clock, zoom} = props;
-  const [range, setRange] = useState<TimelineRange>('all');
-  const [expanded, setExpanded] = useState(false);
-  const shown = timelineRows(model, range, clock, expanded);
+function RunTimeline(
+  props: ViewBase &
+    Pick<TimelineViewProps, 'controls' | 'change'> & {readonly selected: string | null},
+): JSX.Element {
+  const {model, clock, zoom, controls, change} = props;
+  const {range, expanded, looked} = controls;
+  const setExpanded = (next: boolean): void => change({...controls, expanded: next});
+  const shown = timelineRows(model, range, clock, expanded, looked);
   if (shown.total === 0) {
     return (
       <EmptyState
@@ -64,7 +75,7 @@ function RunTimeline(props: ViewBase): JSX.Element {
           size="sm"
           options={TIMELINE_RANGES}
           value={range}
-          change={setRange}
+          change={next => change({...controls, range: next, looked: null})}
         />
         <Text variant="small" tone="muted">
           {summary}
@@ -82,9 +93,11 @@ function RunTimeline(props: ViewBase): JSX.Element {
       <Gantt
         label="Ideas on the timeline"
         size="fill"
-        from={shown.from}
-        to={shown.to}
+        from={shown.range.from}
+        to={shown.range.to}
         view={shown.view}
+        changeView={next => change({...controls, looked: timelineZoom(next, shown.range)})}
+        viewLabel={shown.inView}
         {...(clock.now === null ? {} : {playhead: clock.now})}
         ticks={shown.ticks}
         nameLabel="idea"
@@ -97,6 +110,7 @@ function RunTimeline(props: ViewBase): JSX.Element {
           outcome: row.outcome,
           figure: row.figure,
           ...(row.figureTitle === undefined ? {} : {figureTitle: row.figureTitle}),
+          selected: row.id === props.selected,
           segments: row.segments.map(segment => {
             const {step} = segment;
             return {
@@ -115,7 +129,7 @@ function RunTimeline(props: ViewBase): JSX.Element {
 
 export function TimelineView(props: TimelineViewProps): JSX.Element {
   const {idea} = props;
-  if (idea === null) return <RunTimeline {...props} />;
+  if (idea === null) return <RunTimeline {...props} selected={props.selected ?? null} />;
   const attempt = idea.attempts.at(-1);
   if (attempt === undefined) return <EmptyState title="No steps yet" />;
   return (

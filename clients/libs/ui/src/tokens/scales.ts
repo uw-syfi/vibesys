@@ -27,7 +27,9 @@ export const SPACE: Readonly<Record<SpaceToken, number>> = {
 
 /**
  * Control and row heights (`control-sm`, `control`, `row`), the sidebar, page content widths, the
- * columns `Grid` and `Split` wrap at, and the small fixed sizes of the components: the hairline, the
+ * columns `Grid` and `Split` wrap at, pane widths (a list's default, the narrowest and widest a
+ * person may resize a pane to, which `pane-min` also keeps beside it, and the docked panel's
+ * default, `pane-dock`), and the small fixed sizes of the components: the hairline, the
  * focus ring and its offset, icons, the height of a compact wordmark, status dots and the ring of a live one, check boxes, a menu's
  * least width, and the heights of a log pane.
  */
@@ -52,6 +54,9 @@ export type SizeToken =
   | 'pane-list'
   | 'pane-outline'
   | 'pane-master'
+  | 'pane-min'
+  | 'pane-max'
+  | 'pane-dock'
   | 'panes-floor'
   | 'row-dense'
   | 'gantt-label'
@@ -90,7 +95,10 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'chart-height': 48,
   'pane-list': 380,
   'pane-outline': 340,
-  'pane-master': 480,
+  'pane-master': 400,
+  'pane-min': 340,
+  'pane-max': 960,
+  'pane-dock': 360,
   'panes-floor': 288,
   'row-dense': 28,
   'gantt-label': 220,

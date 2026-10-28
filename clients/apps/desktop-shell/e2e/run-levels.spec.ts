@@ -586,11 +586,25 @@ test('the timeline draws one row per idea; a segment opens its step, a row its i
   await expect(page.getByRole('listbox', {name: /steps over time$/})).toBeVisible();
   await check(page, 'ink-idea-steps');
 
-  // A row opens its idea.
+  // Up from the idea is the Timeline it was opened from.
   await page.keyboard.press('Escape');
-  await page.getByRole('radiogroup', {name: 'Show'}).getByText('Timeline', {exact: true}).click();
+  await expect(page.getByRole('radio', {name: 'Timeline'})).toBeChecked();
+  // A row opens its idea beside the Timeline, which stays as it was left (here zoomed in), its row
+  // selected; closing the idea leaves the Timeline.
+  const zoomBar = page.getByRole('toolbar', {name: 'Time range'});
+  await zoomBar.getByRole('button', {name: 'Zoom in'}).click();
+  const inView = (await zoomBar.getByRole('status').textContent()) ?? '';
   await gantt.getByRole('option', {name: /Wait-free consumer path/}).click();
+  await expect(zoomBar.getByRole('status')).toHaveText(inView);
   await expect(page.getByRole('heading', {name: 'Wait-free consumer path'})).toBeVisible();
+  await expect(gantt).toBeVisible();
+  await expect(gantt.getByRole('option', {selected: true})).toHaveAccessibleName(
+    /Wait-free consumer path/,
+  );
+  await check(page, 'ink-timeline-idea');
+  await page.getByRole('button', {name: 'Close idea'}).click();
+  await expect(page.getByRole('heading', {name: 'Wait-free consumer path'})).toHaveCount(0);
+  await expect(gantt).toBeVisible();
 });
 
 test('an idea’s Logs face shows its stream without a pick: the page follows what it shows', async ({

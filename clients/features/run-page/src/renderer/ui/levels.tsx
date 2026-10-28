@@ -1,8 +1,9 @@
 /**
  * The levels below the run, at most two side by side: the list chosen from on the left and what
- * was chosen on the right. An idea beside the ideas; an agent beside the agents; a step beside its
- * idea's steps (or the agents); an item (level 3) beside its step. The frame draws each pane (its
- * kicker, title and facts); the views (`views/`) draw what is in them.
+ * was chosen on the right. An idea beside the ideas or the Timeline it was opened from; an agent
+ * beside the agents; a step beside its idea's steps (or the agents); an item (level 3) beside its
+ * step. The list on the left is resizable, one width per kind of list (`PaneRole`). The frame
+ * draws each pane (its kicker, title and facts); the views (`views/`) draw what is in them.
  */
 
 import type {CoreState} from '@vibesys/run-state';
@@ -14,6 +15,8 @@ import {
   type HistoryProgress,
   ideaEffects,
   implementerOutcomes,
+  type PaneSizes,
+  RESIZE_WORDS,
   type ResolvedZoom,
   type RunMode,
   type RunPageAction,
@@ -23,8 +26,8 @@ import {
   stepTitle,
 } from '../../state/index.js';
 import {statusWords} from '../../state/span-words.js';
-import {FramedPane} from './framed-pane.js';
-import {agentFolds, IdeasList, IdeasPane, ModeSwitch, NowPane} from './run-level.js';
+import {FramedPane, paneResize} from './framed-pane.js';
+import {agentFolds, IdeasList, IdeasPane, ModeSwitch, NowPane, TimelinePane} from './run-level.js';
 import {
   AgentPane,
   type AgentPaneProps,
@@ -58,6 +61,8 @@ export interface LevelProps {
   readonly mode: RunMode;
   readonly dispatch: Dispatch;
   readonly loading: HistoryProgress | null;
+  /** The widths a person gave the panes; none: the panes keep their defaults. */
+  readonly panes?: PaneSizes | undefined;
 }
 
 function StepLoading(props: {readonly progress: HistoryProgress}): JSX.Element {
@@ -83,16 +88,24 @@ function stepChip(step: CandidateStep): {tone: 'live' | 'ok' | 'err' | 'neutral'
     : {tone: 'neutral', label: statusWords(step.status).label};
 }
 
-function logsOptions(main: string): {value: RunMode; label: string}[] {
+/**
+ * The detail's own view and its logs. The first keeps the mode it was opened in (a step opened
+ * from the Timeline goes back up to it); leaving the logs returns to the Ideas.
+ */
+function logsOptions(main: string, mode: RunMode): {value: RunMode; label: string}[] {
   return [
-    {value: 'ideas', label: main},
+    {value: mode === 'logs' ? 'ideas' : mode, label: main},
     {value: 'logs', label: 'Logs'},
   ];
 }
 
-/** Keep the Ideas master mounted while only the neighboring pane changes on selection. */
+/**
+ * The list an idea is opened from, kept mounted while only the pane beside it changes on
+ * selection: the Ideas, or the Timeline when the idea was opened there. Beside the Timeline the
+ * idea shows its steps only; its Logs are reached from the Ideas face, as before.
+ */
 export function IdeasWorkspace(props: LevelProps & {readonly idea: Candidate | null}): JSX.Element {
-  const {state, base, mode, idea, dispatch} = props;
+  const {state, base, mode, idea, dispatch, panes} = props;
   const outcomes = implementerOutcomes(props.core, base.model.candidates);
   const effects = ideaEffects(props.core, base.model.candidates);
   const view: IdeaViewProps | null =
@@ -108,13 +121,24 @@ export function IdeasWorkspace(props: LevelProps & {readonly idea: Candidate | n
     idea === null ? null : {...base, state, scope: {kind: 'idea', idea}, dispatch};
   return (
     <Panes>
-      <IdeasPane
-        state={state}
-        base={base}
-        core={props.core}
-        selected={idea?.id ?? null}
-        dispatch={dispatch}
-      />
+      {mode === 'timeline' && idea !== null ? (
+        <TimelinePane
+          state={state}
+          base={base}
+          selected={idea.id}
+          resize={paneResize(panes, 'wide', RESIZE_WORDS.timeline)}
+          dispatch={dispatch}
+        />
+      ) : (
+        <IdeasPane
+          state={state}
+          base={base}
+          core={props.core}
+          selected={idea?.id ?? null}
+          resize={paneResize(panes, 'master', RESIZE_WORDS.ideas)}
+          dispatch={dispatch}
+        />
+      )}
       {idea === null || view === null || logs === null ? (
         <NowPane base={base} />
       ) : (
@@ -133,7 +157,9 @@ export function IdeasWorkspace(props: LevelProps & {readonly idea: Candidate | n
                 label="Close idea"
                 press={() => base.zoom({type: 'up'})}
               />
-              <ModeSwitch mode={mode} options={logsOptions('Steps')} zoom={base.zoom} />
+              {mode === 'timeline' ? null : (
+                <ModeSwitch mode={mode} options={logsOptions('Steps', mode)} zoom={base.zoom} />
+              )}
             </Row>
           }
           meta={ideaHeader(view).meta}
@@ -175,7 +201,7 @@ function IdeaLevel(props: LevelProps & {readonly idea: Candidate}): JSX.Element 
         mono
         width="fill"
         enterKey={`idea ${idea.id}`}
-        actions={<ModeSwitch mode={mode} options={logsOptions('Steps')} zoom={base.zoom} />}
+        actions={<ModeSwitch mode={mode} options={logsOptions('Steps', mode)} zoom={base.zoom} />}
         meta={ideaHeader(view).meta}
         header={mode === 'logs' ? logsHeader(logs) : {}}
       >
@@ -226,6 +252,7 @@ function AgentsPane(props: LevelProps & {readonly selected: string | null}): JSX
       title={`${base.model.agents.agents.length}`}
       width="list"
       header={agentsHeader(view)}
+      resize={paneResize(props.panes, 'agents', RESIZE_WORDS.agents)}
     >
       <AgentsView {...view} />
     </FramedPane>
@@ -254,7 +281,7 @@ function StepPane(
       width="fill"
       enterKey={`step ${step.span}`}
       meta={<Chip label={chip.label} tone={chip.tone} dot />}
-      actions={<ModeSwitch mode={mode} options={logsOptions('Step')} zoom={base.zoom} />}
+      actions={<ModeSwitch mode={mode} options={logsOptions('Step', mode)} zoom={base.zoom} />}
       header={mode === 'logs' ? logsHeader(logs) : stepHeader(view)}
     >
       {mode === 'logs' ? (
@@ -272,12 +299,19 @@ function StepLevel(
   props: LevelProps & {readonly zoomed: ResolvedZoom; readonly step: CandidateStep},
 ): JSX.Element {
   const {base, zoomed, step} = props;
+  const resize = paneResize(props.panes, 'master', RESIZE_WORDS.steps);
   return (
     <Panes>
       {zoomed.idea === null ? (
         <AgentsPane {...props} selected={zoomed.agent?.id ?? null} />
       ) : (
-        <Pane kicker="steps" title={markdownToPlain(zoomed.idea.title)} mono width="master">
+        <Pane
+          kicker="steps"
+          title={markdownToPlain(zoomed.idea.title)}
+          mono
+          width="master"
+          {...(resize === undefined ? {} : {resize})}
+        >
           <StepList
             idea={zoomed.idea}
             selected={step.span}
@@ -319,6 +353,7 @@ function ItemLevel(
         title={stepTitle(step)}
         width="master"
         header={stepHeader(view)}
+        resize={paneResize(props.panes, 'master', RESIZE_WORDS.step)}
       >
         <StepView {...view} />
       </FramedPane>

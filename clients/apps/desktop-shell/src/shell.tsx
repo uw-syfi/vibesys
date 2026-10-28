@@ -37,7 +37,11 @@ import {
   NewRunScreen,
   type NewRunSnapshot,
 } from '@vibesys/feature-new-run/renderer';
-import type {RunPageNavigation, RunPagePage} from '@vibesys/feature-run-page/renderer';
+import type {
+  PaneWidthsMemory,
+  RunPageNavigation,
+  RunPagePage,
+} from '@vibesys/feature-run-page/renderer';
 import {RUN_ROUTE, routeQuery} from '@vibesys/feature-run-page/state';
 import {
   createGroupingStore,
@@ -84,6 +88,8 @@ export interface ShellStores {
   /** The page a run's live session runs in. */
   readonly page: RunPagePage;
   readonly newRunCompletion: ReturnType<typeof createNewRunStore>['completion'];
+  /** Where the Run screen keeps the pane widths a person set; none keeps them while it shows. */
+  readonly paneWidths: PaneWidthsMemory | undefined;
 }
 
 const DEFAULT_APPEARANCE = {mode: 'system', light: 'paper', dark: 'ink'} as const;
@@ -125,6 +131,8 @@ export interface ShellPreferences {
   readonly moreOptions?: MoreOptionsMemory;
   /** This window's unfinished New run, so leaving and coming back finds it; none keeps it this run only. */
   readonly draft?: DraftMemory;
+  /** The Run screen's pane widths, one per kind of pane; none keeps them while it shows. */
+  readonly paneWidths?: PaneWidthsMemory;
 }
 
 /**
@@ -202,6 +210,7 @@ export function createShellStores(
     bridge,
     schedule,
     page,
+    paneWidths: preferences.paneWidths,
   };
 }
 
@@ -322,6 +331,7 @@ function RunRoute(props: {
       schedule={stores.schedule}
       address={stores.page.address}
       navigation={place.navigation(run)}
+      paneWidths={stores.paneWidths}
     />
   );
 }

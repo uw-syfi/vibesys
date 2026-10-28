@@ -35,8 +35,10 @@ import {
   machineBlockWords,
   NO_MODEL_NAMES,
   type Offer,
+  type PaneSizes,
   pauseNowBannerView,
   predatesTraceWords,
+  RESIZE_WORDS,
   type ResolvedZoom,
   type Route,
   RUN_ROUTE,
@@ -51,6 +53,7 @@ import {
   runHasEnded,
   runNow,
   runPhase,
+  runRouteOf,
   runWallNow,
   stepLabel,
   streamLines,
@@ -61,6 +64,7 @@ import {
   usageRecords,
   whoBySpan,
 } from '../../state/index.js';
+import {paneResize} from './framed-pane.js';
 import {Hero} from './hero.js';
 import {
   HistoryLoading,
@@ -345,17 +349,10 @@ function Startup(props: {readonly state: RunPageState}): JSX.Element | null {
 }
 
 function crumbs(zoomed: ResolvedZoom, route: Route, zoom: Zoom): Crumb[] {
-  const top: Route = {
-    mode: route.agent === null ? 'ideas' : 'agents',
-    idea: null,
-    agent: null,
-    step: null,
-    item: null,
-  };
-  const items: {id: string; label: string; mono?: boolean; to: Route}[] = [
-    {id: 'run', label: 'Run', to: top},
-  ];
   const opened: Route = {...route, step: null, item: null};
+  const items: {id: string; label: string; mono?: boolean; to: Route}[] = [
+    {id: 'run', label: 'Run', to: runRouteOf(route)},
+  ];
   if (zoomed.idea !== null)
     items.push({id: 'idea', label: markdownToPlain(zoomed.idea.title), mono: true, to: opened});
   if (zoomed.agent !== null) {
@@ -470,7 +467,8 @@ function pendingRunScreen(
 
 /**
  * The run's header, overview, and current level over its summary and selected detail, with the
- * app's chat panel docked at its right edge when the user has opened it.
+ * app's chat panel docked at its right edge when the user has opened it. With `panes` a person
+ * resizes the lists and the chat panel, each kind to one width the app remembers.
  */
 export function RunScreen(props: {
   readonly state: RunPageState;
@@ -485,14 +483,21 @@ export function RunScreen(props: {
   readonly chat?: RunChatSlot;
   /** The host's names for the run's models; absent or without a model: its id shows. */
   readonly modelNames?: ModelNames;
+  /** The widths a person gave the panes; absent: every pane keeps its default and none resizes. */
+  readonly panes?: PaneSizes;
   /** App-owned run diagnostics, in the page’s scrolling body. */
   readonly toolbar?: ReactNode;
   readonly supplemental?: ReactNode;
 }): JSX.Element {
-  const {chat, ...rest} = props;
+  const {chat, panes, ...rest} = props;
+  const resize = paneResize(panes, 'chat', RESIZE_WORDS.chat, 'start');
   return (
-    <Dock label="Chat" side={chat?.open === true ? chat.panel : null}>
-      <RunScreenBody {...rest} chat={chat} />
+    <Dock
+      label="Chat"
+      side={chat?.open === true ? chat.panel : null}
+      {...(resize === undefined ? {} : {resize})}
+    >
+      <RunScreenBody {...rest} chat={chat} panes={panes} />
     </Dock>
   );
 }
@@ -543,6 +548,7 @@ function RunScreenBody(props: {
   readonly dispatch: Dispatch;
   readonly chat: RunChatSlot | undefined;
   readonly modelNames?: ModelNames;
+  readonly panes: PaneSizes | undefined;
   /** App-owned run diagnostics, in the page’s scrolling body. */
   readonly toolbar?: ReactNode;
   readonly supplemental?: ReactNode;
@@ -593,6 +599,7 @@ function RunScreenBody(props: {
     mode: route.mode,
     dispatch,
     loading: detail.loading ?? transcript,
+    panes: props.panes,
   };
   return (
     <Screen

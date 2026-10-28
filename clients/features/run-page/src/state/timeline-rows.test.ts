@@ -17,6 +17,7 @@ import {
   type TimelineRow,
   type TimelineRows,
   timelineRows,
+  timelineZoom,
   versusParent,
 } from './timeline-rows.js';
 
@@ -84,6 +85,33 @@ describe('timeline rows', () => {
     expect(ids('day').length).toBeLessThan(ids('all').length);
     expect(ids('all').length).toBe(30);
     for (const id of ids('hour')) expect(ids('day')).toContain(id);
+  });
+
+  test('a zoom shows a part of the range, never past it, with ticks only over that part', () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const ideas = randomIdeas(random);
+      const clock = {start: 0, now: ideas.length * 600 + 1000};
+      for (const range of ['hour', 'day', 'all'] as const) {
+        const whole = timelineRows(modelOf(ideas), range, clock, false);
+        const from = whole.range.from + random.int(2 * clock.now) - clock.now;
+        const zoom = {from, to: from + 1 + random.int(clock.now)};
+        const shown = timelineRows(modelOf(ideas), range, clock, false, zoom);
+        expect(shown.range).toEqual(whole.range);
+        expect(shown.rows.map(row => row.id)).toEqual(whole.rows.map(row => row.id));
+        expect(shown.view.from).toBeGreaterThanOrEqual(shown.range.from);
+        expect(shown.view.to).toBeLessThanOrEqual(shown.range.to);
+        expect(shown.view.to).toBeGreaterThan(shown.view.from);
+        for (const tick of shown.ticks) {
+          expect(tick.at).toBeGreaterThanOrEqual(shown.view.from);
+          expect(tick.at).toBeLessThanOrEqual(shown.view.to);
+        }
+        // Zoomed back out to the whole range, the view follows the range again; a part stays.
+        expect(timelineZoom(shown.range, shown.range)).toBeNull();
+        const part = {from: shown.range.from + 1, to: shown.range.to};
+        expect(timelineZoom(part, shown.range)).toEqual(part);
+      }
+    }
   });
 
   test('the figure is the ratio of a passed idea and empty while running', () => {

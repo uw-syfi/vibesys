@@ -1,7 +1,8 @@
 /**
  * The run level's panes (the performance row above them is `Hero`, drawn by the screen at every
  * level): the left one switches between Ideas, Timeline, Agents and Logs (`state.zoom` mode), the
- * right one is Now, what runs at this moment, each row a shortcut to its live step.
+ * right one is Now, what runs at this moment, each row a shortcut to its live step. The Ideas and
+ * the Timeline are also the lists an opened idea sits beside (`IdeasPane`, `TimelinePane`).
  */
 
 import type {CoreState} from '@vibesys/run-state';
@@ -12,6 +13,7 @@ import {
   Field,
   markdownToPlain,
   Pane,
+  type PaneResize,
   Panes,
   PickList,
   PickRow,
@@ -35,8 +37,10 @@ import {
   type NowItem,
   noIdeasWords,
   nowView,
+  type PaneSizes,
   predatesTraceWords,
   pressChip,
+  RESIZE_WORDS,
   type RunMode,
   type RunPageAction,
   type RunPageState,
@@ -46,7 +50,7 @@ import {
   usageRecords,
   type ZoomEvent,
 } from '../../state/index.js';
-import {FramedPane} from './framed-pane.js';
+import {FramedPane, paneResize} from './framed-pane.js';
 import {IdeaPickRow} from './idea-pick-row.js';
 import {type IdeasSort, IdeasTable} from './ideas-table.js';
 import {AgentsView, type AgentsViewProps} from './views/agents/agents-view.js';
@@ -225,6 +229,7 @@ export function IdeasPane(props: {
   readonly base: ViewBase;
   readonly core: CoreState | null;
   readonly selected: string | null;
+  readonly resize: PaneResize | undefined;
   readonly dispatch: Dispatch;
 }): JSX.Element {
   const outcomes = implementerOutcomes(props.core, props.base.model.candidates);
@@ -236,10 +241,54 @@ export function IdeasPane(props: {
       width="master"
       header={{}}
       fixed
+      resize={props.resize}
     >
       <IdeasFace {...props} outcomes={outcomes} effects={effects} modeControls />
     </FramedPane>
   );
+}
+
+/**
+ * The Timeline beside the idea one of its rows opened: the same face as at the run level, its row
+ * of the opened idea selected, in the larger share of the row so its bars stay readable.
+ */
+export function TimelinePane(props: {
+  readonly state: RunPageState;
+  readonly base: ViewBase;
+  readonly selected: string;
+  readonly resize: PaneResize | undefined;
+  readonly dispatch: Dispatch;
+}): JSX.Element {
+  const {base} = props;
+  const view: TimelineViewProps = {
+    ...base,
+    idea: null,
+    selected: props.selected,
+    ...timelineControls(props.state, props.dispatch),
+  };
+  return (
+    <FramedPane
+      kicker="timeline"
+      title={`${base.model.candidates.candidates.length}`}
+      width="wide"
+      header={timelineHeader(view)}
+      resize={props.resize}
+    >
+      <ModeSwitch mode="timeline" options={MODES} zoom={base.zoom} />
+      <TimelineView {...view} />
+    </FramedPane>
+  );
+}
+
+/** The Timeline's controls as the page keeps them, so every Timeline of the run shares them. */
+function timelineControls(
+  state: RunPageState,
+  dispatch: Dispatch,
+): Pick<TimelineViewProps, 'controls' | 'change'> {
+  return {
+    controls: state.timeline,
+    change: controls => dispatch({type: 'timeline-controls', controls}),
+  };
 }
 
 /** Where a Now row jumps: its live step, its idea, or its agent. */
@@ -254,12 +303,20 @@ function nowZoom(item: NowItem): ZoomEvent {
   }
 }
 
-export function NowPane(props: {readonly base: ViewBase}): JSX.Element | null {
-  const {base} = props;
+export function NowPane(props: {
+  readonly base: ViewBase;
+  readonly resize?: PaneResize | undefined;
+}): JSX.Element | null {
+  const {base, resize} = props;
   const items = nowView(base.model);
   if (items.length === 0) return null;
   return (
-    <Pane kicker="now" title={`${items.length}`} width="list">
+    <Pane
+      kicker="now"
+      title={`${items.length}`}
+      width="list"
+      {...(resize === undefined ? {} : {resize})}
+    >
       <PickList label="Running now" size="fill">
         {items.map(item => (
           <PickRow
@@ -311,7 +368,12 @@ function runFace(
   }
   switch (mode) {
     case 'timeline': {
-      const view: TimelineViewProps = {...base, idea: null};
+      const view: TimelineViewProps = {
+        ...base,
+        idea: null,
+        selected: null,
+        ...timelineControls(state, dispatch),
+      };
       return {header: timelineHeader(view), body: <TimelineView {...view} />};
     }
     case 'agents': {
@@ -369,12 +431,13 @@ const KICKERS: Readonly<Record<RunMode, string>> = {
   logs: 'logs',
 };
 
-/** The run level: the chosen face and Now. */
+/** The run level: the chosen face and Now, which a person may resize. */
 export function RunLevel(props: {
   readonly state: RunPageState;
   readonly base: ViewBase;
   readonly core: CoreState | null;
   readonly mode: RunMode;
+  readonly panes?: PaneSizes | undefined;
   readonly dispatch: Dispatch;
 }): JSX.Element {
   const {state, base, mode, dispatch} = props;
@@ -399,7 +462,9 @@ export function RunLevel(props: {
         <ModeSwitch mode={mode} options={MODES} zoom={base.zoom} />
         {face.body}
       </FramedPane>
-      {mode === 'usage' ? null : <NowPane base={base} />}
+      {mode === 'usage' ? null : (
+        <NowPane base={base} resize={paneResize(props.panes, 'now', RESIZE_WORDS.now, 'start')} />
+      )}
     </Panes>
   );
 }

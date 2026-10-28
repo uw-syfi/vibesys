@@ -10,13 +10,19 @@
  * the route shown. Only the window itself sends `restore` (its address on open, Back, Forward),
  * which sets the route the address already holds without pushing (`ZoomMachineEvent`).
  * The mode (`ideas`, `timeline`, `agents`, `usage`, `logs`) switches what the panes show and keeps the
- * level, except that Timeline, Agents and Usage list the whole run, so choosing one closes an open idea
- * or agent (an idea is only ever open in the Ideas or Logs mode). `up` goes one level up: from an item to its step, a step to its idea or agent, an idea or
- * agent to the run, and at the run back to the Ideas.
+ * level, except where the face cannot show what is open: Agents and Usage list the whole run, so
+ * choosing one closes an open idea or agent, and the Timeline, a list of ideas, closes an open
+ * agent. An idea is open in the Ideas, Logs or Timeline mode: opened from the Timeline it keeps the
+ * Timeline beside it, and going up from it returns there. `up` goes one level up: from an item to
+ * its step, a step to its idea or agent, an idea or agent to the run (its Timeline, Agents or
+ * Ideas face), and at the run back to the Ideas.
  */
 import {assign, setup} from 'xstate';
 
-/** What the run level's left pane shows, and at deeper levels whether the detail shows its logs. */
+/**
+ * What the run level's left pane shows; at deeper levels whether the detail shows its logs, and
+ * whether the idea was opened from the Timeline.
+ */
 export type RunMode = 'ideas' | 'timeline' | 'agents' | 'usage' | 'logs';
 export const RUN_MODES: readonly RunMode[] = ['ideas', 'timeline', 'agents', 'usage', 'logs'];
 
@@ -71,10 +77,16 @@ export function routeUp(route: Route): Route {
     case 'step':
       return {...route, step: null, item: null};
     case 'opened':
-      return {...RUN_ROUTE, mode: route.agent === null ? 'ideas' : 'agents'};
+      return runRouteOf(route);
     case 'run':
       return RUN_ROUTE;
   }
+}
+
+/** The run level an opened idea or agent goes up to: the face it was opened from. */
+export function runRouteOf(route: Route): Route {
+  if (route.agent !== null) return {...RUN_ROUTE, mode: 'agents'};
+  return {...RUN_ROUTE, mode: route.mode === 'timeline' ? 'timeline' : 'ideas'};
 }
 
 function sameRoute(a: Route, b: Route): boolean {
@@ -150,8 +162,9 @@ export const zoomMachine = setup({
     },
     mode: [
       {
-        // The Timeline, Agents and Usage faces list the whole run, so they replace an open idea or agent.
-        guard: ({context, event}) => listsRun(event.mode) && isOpen(context.route),
+        // A face that cannot show what is open replaces it: Agents and Usage list the whole run, and
+        // the Timeline lists ideas, not agents.
+        guard: ({context, event}) => hides(event.mode, context.route),
         target: '.run',
         actions: [assign(({event}) => ({route: {...RUN_ROUTE, mode: event.mode}})), 'remember'],
       },
@@ -233,18 +246,18 @@ export const zoomMachine = setup({
   },
 });
 
-/** Whether the face covers the whole run, which an open idea or agent would hide. */
-function listsRun(mode: RunMode): boolean {
-  return mode === 'timeline' || mode === 'agents' || mode === 'usage';
+/** Whether the face `mode` cannot show the idea or agent `route` has open. */
+function hides(mode: RunMode, route: Route): boolean {
+  if (mode === 'agents' || mode === 'usage') return route.idea !== null || route.agent !== null;
+  return mode === 'timeline' && route.agent !== null;
 }
 
-function isOpen(route: Route): boolean {
-  return route.idea !== null || route.agent !== null;
-}
-
-/** At a deeper level the mode only says whether the detail shows its logs. */
+/**
+ * At a deeper level the mode says only whether the detail shows its logs, and whether the idea
+ * was opened from the Timeline (which it then keeps beside it).
+ */
 function keptMode(mode: string | undefined): RunMode {
-  return mode === 'logs' ? 'logs' : 'ideas';
+  return mode === 'logs' || mode === 'timeline' ? mode : 'ideas';
 }
 
 const KEYS = ['idea', 'agent', 'step', 'item'] as const;

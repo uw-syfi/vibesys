@@ -14,6 +14,7 @@ export {
   type GatewayLogInput,
   type GatewayRunContext,
   type GatewayTranscriptInput,
+  type GatewayUiAction,
   gatewayRunMachine,
 } from './gateway-machine.js';
 export {type HistoryLoadingView, historyLoadingView} from './history-words.js';
@@ -56,6 +57,14 @@ export {
 export {type LoadView, loadView, paintedSkeleton} from './load-view.js';
 export {type ModelNames, modelNamesOf, NO_MODEL_NAMES} from './model-names.js';
 export {roleLabel, stepKicker, stepLabel, stepTitle} from './names.js';
+export {
+  PANE_ROLES,
+  type PaneRole,
+  type PaneSizes,
+  type PaneWidths,
+  paneWidthWords,
+  RESIZE_WORDS,
+} from './pane-words.js';
 export {
   objectivesOf,
   type ParetoAxisView,
@@ -182,6 +191,7 @@ export {
   routeFromQuery,
   routeLevel,
   routeQuery,
+  runRouteOf,
   type ZoomEvent,
   zoomMachine,
 } from './zoom.js';

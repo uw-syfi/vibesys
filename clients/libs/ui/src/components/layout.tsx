@@ -1,6 +1,7 @@
 import {type CSSProperties, type JSX, type ReactNode, useId, useState} from 'react';
 import type {SpaceToken} from '../tokens/index.js';
 import {Icon} from './icon.js';
+import {type PaneResize, useResizable} from './pane-separator.js';
 
 /** The page content's max width: `content` (1060), `wide` (1100) or `narrow` (900). */
 export type PageWidth = 'content' | 'wide' | 'narrow' | 'fill';
@@ -106,20 +107,38 @@ export function Page(props: {
 
 /**
  * A screen with a panel docked at its right edge, full height. The screen keeps all its content
- * and narrows to make room; with no `side` it fills the whole width. `label` names the panel.
+ * and narrows to make room; with no `side` it fills the whole width. `label` names the panel. With
+ * `resize` a separator at the panel's left edge sets its width (`PaneResize`, whose `edge` the
+ * panel ignores); where the panel lies over the screen, the separator is not drawn.
  */
 export function Dock(props: {
   readonly label: string;
   readonly side: ReactNode | null;
+  readonly resize?: PaneResize;
   readonly children: ReactNode;
 }): JSX.Element {
+  const sideId = useId();
+  const fit = useResizable(
+    props.resize === undefined ? undefined : {...props.resize, edge: 'start'},
+    sideId,
+  );
   return (
     <div className="vs-dock">
       <div className="vs-dock-main">{props.children}</div>
       {props.side === null ? null : (
-        <section className="vs-dock-side" aria-label={props.label}>
-          {props.side}
-        </section>
+        <>
+          {fit.separator}
+          <section
+            className="vs-dock-side"
+            id={sideId}
+            ref={fit.measure}
+            style={fit.style}
+            data-sized={fit.sized || undefined}
+            aria-label={props.label}
+          >
+            {props.side}
+          </section>
+        </>
       )}
     </div>
   );
