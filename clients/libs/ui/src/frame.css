@@ -1579,3 +1579,21 @@ button.vs-dotlegend-item:focus-visible {
   opacity: 0.6;
   vector-effect: non-scaling-stroke;
 }
+.vs-spark-key {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.vs-spark-key-mark {
+  flex: none;
+  box-sizing: border-box;
+  width: var(--space-5);
+  height: var(--focus-ring);
+}
+/* The key's own fill is the line's color, so the color the legend names is readable from it. */
+.vs-spark-key-mark[data-mark="line"] {
+  background: var(--accent);
+}
+.vs-spark-key-mark[data-mark="reference"] {
+  border-top: var(--hairline) dashed var(--muted);
+}

@@ -22,7 +22,8 @@ export const NOW = Date.parse('2026-10-17T12:00:00Z');
 const HOUR = 3_600_000;
 
 type Verdict = 'kept' | 'not_better' | 'failed' | 'running';
-type Phase = 'running' | 'paused' | 'completed' | 'failed' | 'stopped';
+/** How a run stands; `interrupted` ended when its machine went away, and its record says it stopped. */
+type Phase = 'running' | 'paused' | 'completed' | 'failed' | 'stopped' | 'interrupted';
 type Attention = 'none' | 'failed' | 'repeated_failure' | 'stalled';
 
 /** One run of a world: where it is, how it stands and what its digest says. */
@@ -53,11 +54,18 @@ export interface RunCase {
   readonly minutes?: number;
 }
 
-const ENDS: Readonly<Record<'completed' | 'failed' | 'stopped', string>> = {
+type Ended = Exclude<Phase, 'running' | 'paused'>;
+
+const ENDS: Readonly<Record<Ended, string>> = {
   completed: 'adopted',
   failed: 'failed',
   stopped: 'stopped',
+  interrupted: 'stopped',
 };
+
+function hasEnded(phase: Phase): phase is Ended {
+  return phase !== 'running' && phase !== 'paused';
+}
 
 /** A run's project: one folder per run, named as the run is, so every tile has its own title. */
 function projectOf(run: RunCase): string {
@@ -65,17 +73,17 @@ function projectOf(run: RunCase): string {
 }
 
 function server(run: RunCase): Record<string, unknown> {
-  const ended = run.phase === 'completed' || run.phase === 'failed' || run.phase === 'stopped';
+  const phase = run.phase === 'interrupted' ? 'stopped' : run.phase;
   return {
     id: `0000000000${run.runId.slice(-2)}`,
     projectRoot: projectOf(run),
     runId: run.runId,
-    status: run.phase,
-    phase: run.phase,
+    status: phase,
+    phase,
     paused: run.phase === 'paused' ? 'user' : null,
-    end: ended
+    end: hasEnded(run.phase)
       ? {
-          outcome: ENDS[run.phase as keyof typeof ENDS],
+          outcome: ENDS[run.phase],
           reason: run.endSummary ?? 'ended',
           resumable: false,
         }
@@ -85,8 +93,14 @@ function server(run: RunCase): Record<string, unknown> {
   };
 }
 
+/** How the journal says a run ended: its ending's outcome and its terminal event, none while it works. */
+function endOf(phase: Phase): {readonly outcome: string | null; readonly closing: string | null} {
+  if (!hasEnded(phase)) return {outcome: null, closing: null};
+  return {outcome: ENDS[phase], closing: phase === 'interrupted' ? 'interrupted' : 'finished'};
+}
+
 function digest(run: RunCase): Record<string, unknown> {
-  const over = run.phase === 'completed' || run.phase === 'failed' || run.phase === 'stopped';
+  const over = hasEnded(run.phase);
   const kept = run.points.flatMap(([ratio, verdict]) =>
     verdict === 'kept' && ratio !== null ? [ratio] : [],
   );
@@ -98,8 +112,7 @@ function digest(run: RunCase): Record<string, unknown> {
     adoptedRatio: run.adopted === undefined ? (over ? best : null) : run.adopted,
     bestSoFarRatio: over ? null : best,
     durationSeconds: (run.minutes ?? 40) * 60,
-    outcome: over ? ENDS[run.phase as keyof typeof ENDS] : null,
-    closing: over ? 'finished' : null,
+    ...endOf(run.phase),
     over,
     ...(run.endSummary === undefined ? {} : {endSummary: run.endSummary}),
     dashboard: {
@@ -209,7 +222,7 @@ export const ONE_RUN: readonly RunCase[] = [
   },
 ];
 
-/** Runs of every status, three tasks and two machines, two of them needing the user. */
+/** Runs of every status, one of them interrupted, on three tasks and two machines, two needing the user. */
 export const MANY_RUNS: readonly RunCase[] = [
   ...ONE_RUN,
   {
@@ -303,6 +316,20 @@ export const MANY_RUNS: readonly RunCase[] = [
     phase: 'stopped',
     ago: 40,
     points: [[0.9, 'not_better']],
+  },
+  {
+    runId: 'r-interrupted-10',
+    name: 'queue-rs-run10',
+    host: 'ssh:host-b',
+    task: 'spsc',
+    phase: 'interrupted',
+    ago: 12,
+    minutes: 12,
+    endSummary: 'The run was interrupted: its machine went away during the second round',
+    points: [
+      [1.1, 'kept'],
+      [null, 'failed'],
+    ],
   },
 ];
 

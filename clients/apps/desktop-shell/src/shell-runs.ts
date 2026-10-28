@@ -51,18 +51,15 @@ export function runInput(entry: DashboardRow, now: number): RunInput {
     task: entry.task ?? row.title,
     started: formatStarted(entry.createdAt, {now}),
     machine: entry.machine,
-    hardware: null,
-    agent: null,
     status: {
       kind: STATUS_KINDS[row.status],
       word: row.problem === null ? row.look.word : STATUS_WORDS[row.status],
     },
     // A machine's trouble is a note beside the run's own status, never its replacement.
     problem: row.problem?.text ?? null,
-    // A live run's `now` says what it does, not why it ended.
+    // A live run's `now` says what it does, not why it ended; a paused run's says who paused it.
     reason: row.status === 'live' ? null : row.now,
     ideas: digest?.ideas ?? null,
-    costUsd: null,
     seconds,
     best: digest === null ? null : (digest.adoptedRatio ?? digest.bestSoFarRatio),
     measured: dashboard?.best ?? null,

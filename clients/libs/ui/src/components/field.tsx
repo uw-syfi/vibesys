@@ -43,6 +43,8 @@ export function Field(props: {
   readonly hideLabel?: boolean;
   /** The label beside the control instead of above it, for a form read as rows (a review). */
   readonly row?: boolean;
+  /** Sets the label beside the control, small and muted, for a toolbar control with no help or error. */
+  readonly inline?: boolean;
   readonly children: ReactNode;
 }): JSX.Element {
   const id = useId();
@@ -52,7 +54,11 @@ export function Field(props: {
   const labelId = `${id}-label`;
   const wiring: FieldWiring = {id, labelId, describedBy, invalid: errorId !== undefined};
   return (
-    <div className="vs-field" data-row={props.row === true || undefined}>
+    <div
+      className="vs-field"
+      data-row={props.row === true || undefined}
+      data-inline={props.inline === true || undefined}
+    >
       <label
         className="vs-field-label"
         id={labelId}

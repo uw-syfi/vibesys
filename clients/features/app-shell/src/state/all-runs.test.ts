@@ -1,8 +1,10 @@
 import {describe, expect, test} from 'bun:test';
+import {SYNTHESIZED_TASK_NAME} from '@vibesys/contracts';
 import type {HostListing, HostRun, ListedRun, RunDigestEntry} from '@vibesys/hosts';
 import type {RecentRun} from '@vibesys/runs';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {
+  againRun,
   type Clock,
   dashboardRows,
   projectRunGaps,
@@ -160,6 +162,37 @@ describe('the Runs dashboard', () => {
       ['crashed', 'spsc'],
       ['unknown', null],
     ]);
+  });
+
+  test('runs a run again from its Recent record, else from what its machine lists of it', () => {
+    const remembered = {...opened('ssh:host-a', '/p/q', 'opened'), task: 'spsc'};
+    const {state, requests} = open([listed('ssh:host-a')], [remembered]);
+    const answered = sidebarStep(
+      state,
+      listedAction(listsOf(requests)[0]?.[2] as number, 'ssh:host-a', '/p/q', [
+        run('opened', 1),
+        run('listed-only', 2, 'mpsc'),
+        run('from-flags', 3, SYNTHESIZED_TASK_NAME),
+      ]),
+    ).state;
+    const again = (runId: string) => againRun(answered, {host: 'ssh:host-a', runId});
+
+    // Recent keeps what the app started the run with, so it is preferred.
+    expect(again('opened')).toBe(remembered);
+    // A run Recent no longer holds keeps its machine, project and task.
+    expect(again('listed-only')).toEqual({
+      host: 'ssh:host-a',
+      hostLabel: 'host-a',
+      project: '/p/q',
+      task: 'mpsc',
+      runId: 'listed-only',
+      instanceId: null,
+      attachedAt: NOW - 2 * HOUR,
+    });
+    // The one task of a project made from flags is nobody's choice.
+    expect(again('from-flags')?.task).toBeNull();
+    expect(again('never-listed')).toBeNull();
+    expect(againRun(answered, {host: 'ssh:host-b', runId: 'opened'})).toBeNull();
   });
 
   test('says why a failed run ended from its journal, which the registry no longer holds', () => {

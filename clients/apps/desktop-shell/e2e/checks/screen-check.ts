@@ -71,7 +71,7 @@ const REGISTRY_NAMES: readonly string[] = CODE_IDS.roles.map(roleName);
  * user's own identifiers, shown as they were typed, not code names the app made up.
  */
 const USER_NAMES: readonly string[] = [
-  ...Array.from({length: 9}, (_, index) => `queue-rs-run${index + 1}`),
+  ...Array.from({length: 10}, (_, index) => `queue-rs-run${index + 1}`),
   'queue-rs',
   'queue-rs-2',
   'remote-host',

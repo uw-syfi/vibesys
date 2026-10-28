@@ -395,6 +395,17 @@ export const BASIC_ENTRIES = {
         <Field row label="Time limit" help="The run stops here.">
           <TextInput value="2h" change={() => undefined} />
         </Field>
+        <Field label="Group by" inline>
+          <Select
+            value="status"
+            options={[
+              {value: 'status', label: 'Status'},
+              {value: 'machine', label: 'Machine'},
+            ]}
+            change={() => undefined}
+            size="sm"
+          />
+        </Field>
       </Grid>
     ),
   },
