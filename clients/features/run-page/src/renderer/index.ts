@@ -11,6 +11,11 @@ export type {
   SessionObserver,
 } from './effects/live-session.js';
 export {
+  browserPaneWidths,
+  type PaneWidthsMemory,
+  usePaneWidths,
+} from './effects/pane-widths.js';
+export {
   createRunPageStore,
   type RunPageLogs,
   type RunPagePorts,

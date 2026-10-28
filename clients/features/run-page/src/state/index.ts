@@ -94,6 +94,13 @@ export {
   vsInputOf,
 } from './objective-reading.js';
 export {
+  PANE_ROLES,
+  type PaneRole,
+  type PaneSizes,
+  type PaneWidths,
+  RESIZE_WORDS,
+} from './pane-words.js';
+export {
   objectivesOf,
   type ParetoAxisView,
   type ParetoPointView,
