@@ -78,6 +78,27 @@ export function Field(props: {
 }
 
 /**
+ * A term beside what it says, laid out as a `Field` with `row` but around no one control: a value,
+ * a value and a button, or a control that names itself. It is a description list, not a
+ * `<label>`, so it points at nothing it cannot focus.
+ */
+export function LabeledRow(props: {
+  readonly label: string;
+  readonly help?: string;
+  readonly children: ReactNode;
+}): JSX.Element {
+  return (
+    <dl className="vs-field" data-row>
+      <dt className="vs-field-label">{props.label}</dt>
+      <dd className="vs-field-value">
+        {props.children}
+        {props.help === undefined ? null : <p className="vs-help">{props.help}</p>}
+      </dd>
+    </dl>
+  );
+}
+
+/**
  * A text input; `mono` for paths and identifiers, `readOnly` for a value shown as set. With
  * `rows` above one it is a multi-line box of that height. `submit` is called on Enter; in a multi-line
  * box Shift+Enter still starts a new line.
