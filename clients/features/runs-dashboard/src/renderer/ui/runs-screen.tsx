@@ -191,14 +191,9 @@ export function RunsScreen(
               </Row>
             )}
             {tiles.length === 0 ? null : (
-              <Row gap="space-3" align="center">
-                <Text variant="small" tone="muted">
-                  {GROUP_LABEL}
-                </Text>
-                <Field label={GROUP_LABEL} hideLabel>
-                  <Select value={by} options={GROUP_OPTIONS} change={props.group} size="sm" />
-                </Field>
-              </Row>
+              <Field label={GROUP_LABEL} inline>
+                <Select value={by} options={GROUP_OPTIONS} change={props.group} size="sm" />
+              </Field>
             )}
           </Row>
         </Row>

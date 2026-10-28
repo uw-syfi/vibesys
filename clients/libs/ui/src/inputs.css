@@ -187,6 +187,20 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+.vs-field[data-inline] {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-3);
+}
+.vs-field[data-inline] > .vs-field-label {
+  margin-bottom: 0;
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  font-weight: var(--text-small-weight);
+  color: var(--muted);
+  white-space: nowrap;
+}
 .vs-input {
   box-sizing: border-box;
   width: 100%;

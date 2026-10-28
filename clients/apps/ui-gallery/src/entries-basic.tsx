@@ -390,6 +390,17 @@ export const BASIC_ENTRIES = {
         <Field label="Extra arguments" error="Unknown flag --fast.">
           <TextInput value="--fast" mono change={() => undefined} />
         </Field>
+        <Field label="Group by" inline>
+          <Select
+            value="status"
+            options={[
+              {value: 'status', label: 'Status'},
+              {value: 'machine', label: 'Machine'},
+            ]}
+            change={() => undefined}
+            size="sm"
+          />
+        </Field>
       </Grid>
     ),
   },
