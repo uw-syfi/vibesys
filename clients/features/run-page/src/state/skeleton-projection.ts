@@ -67,7 +67,7 @@ function endOpenSpans(
   };
   const trace = closeSpans(open, ending);
   const spans = [...trace.spans.values()];
-  const closedAt = latestTime(spans);
+  const closedAt = trace === open ? null : latestTime(spans);
   const latest =
     closedAt === null || (reading.latest !== null && reading.latest >= closedAt)
       ? reading.latest

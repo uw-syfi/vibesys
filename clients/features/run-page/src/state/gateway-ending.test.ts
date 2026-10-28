@@ -73,7 +73,21 @@ function ended(seed: number, state?: (typeof GOING)[number] | (typeof ENDINGS)[n
   return {skeleton, through: skeleton.throughSeq ?? 0n};
 }
 
-function lastIdeaOutcome(model: ReturnType<typeof projectSkeleton>) {
+type Model = ReturnType<typeof projectSkeleton>;
+
+function expectSpansEnded(open: Model, model: Model) {
+  for (const span of model.trace.spans.values()) {
+    const before = open.trace.spans.get(span.id);
+    if (before === undefined) throw new Error('span missing from the baseline');
+    expect(span.started_at).toBe(before.started_at);
+    if (OPEN.has(before.status)) {
+      if (span.ended_at == null) throw new Error('an open span was left without an end');
+      expect(span.ended_at).toBeGreaterThanOrEqual(span.started_at);
+    }
+  }
+}
+
+function lastIdeaOutcome(model: Model) {
   return model.candidates.candidates.at(-1)?.outcome;
 }
 
@@ -82,21 +96,15 @@ for (const seed of SEEDS.slice(0, 24)) {
     for (const ending of ENDINGS) {
       const {skeleton, through} = ended(seed, ending.state);
       const hint = 'hint' in ending ? ending.hint : undefined;
-      const open = projectSkeleton(skeleton, through);
+      const base = ended(seed);
+      const open = projectSkeleton(base.skeleton, base.through);
       const model = projectSkeleton(skeleton, through, '', {hint});
       const spans = [...model.trace.spans.values()];
       expect(spans.every(span => !OPEN.has(span.status))).toBe(true);
       expect(model.candidates.candidates.every(idea => idea.outcome !== 'running')).toBe(true);
       expect(nowView(model)).toEqual([]);
       expect(model.agents.agents.every(agent => agent.status !== 'running')).toBe(true);
-      for (const span of spans) {
-        const before = open.trace.spans.get(span.id);
-        expect(before).toBeDefined();
-        expect(span.started_at === before?.started_at).toBe(true);
-        if (span.ended_at != null && span.started_at != null) {
-          expect(span.ended_at >= span.started_at).toBe(true);
-        }
-      }
+      expectSpansEnded(open, model);
       for (const idea of open.candidates.candidates) {
         if (idea.outcome === 'running') continue;
         expect(model.candidates.candidates.find(item => item.id === idea.id)?.outcome).toBe(
@@ -116,13 +124,24 @@ for (const seed of SEEDS.slice(0, 24)) {
     }
   });
 
+  test(`property: a run with no lifecycle record closes nothing (seed ${seed})`, () => {
+    const records = fixture(seed)
+      .filter(record => record.body.case !== 'lifecycle')
+      .map((record, index) => create(RecordSchema, {...record, seq: BigInt(index + 1)}));
+    const skeleton = foldSkeleton(seedSkeleton(), records);
+    for (const hint of HINTS) {
+      const model = projectSkeleton(skeleton, skeleton.throughSeq ?? 0n, '', {hint});
+      expect(lastIdeaOutcome(model)).toBe('running');
+    }
+  });
+
   test(`property: scrubbing back on an ended run closes nothing (seed ${seed})`, () => {
     for (const ending of ENDINGS) {
       const {skeleton, through} = ended(seed, ending.state);
       const hint = 'hint' in ending ? ending.hint : undefined;
-      expect(projectSkeleton(skeleton, through - 1n, '', {hint})).toEqual(
-        projectSkeleton(skeleton, through - 1n),
-      );
+      const past = projectSkeleton(skeleton, through - 1n, '', {hint});
+      expect(past).toEqual(projectSkeleton(skeleton, through - 1n));
+      expect(lastIdeaOutcome(past)).toBe('running');
     }
   });
 
