@@ -268,8 +268,10 @@ test('property: every legacy ending renders the host-admitted Resume, regardless
         const state = runPageStep(loaded, {type: 'record', record: {kind: 'ended', run}}).state;
         const text = await screenText(state);
         expect(text).toContain('Resume');
-        // The run's logs are its Logs tab; the banner does not repeat it.
+        // The run's logs are its Logs tab and Run again is in More actions; the banner repeats
+        // neither.
         expect(text).not.toContain('View logs');
+        expect(text).not.toContain('Run again');
       },
     ),
     {numRuns: 12, seed: 3436, examples: [['completed', false]]},

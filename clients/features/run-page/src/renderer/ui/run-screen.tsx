@@ -196,7 +196,7 @@ function Header(props: {
     ...(header.archive.shown
       ? [{id: 'archive', label: 'Archive', press: () => dispatch({type: 'archive'})}]
       : []),
-    {id: 'again', label: 'Run again with changes', press: () => dispatch({type: 'run-again'})},
+    {id: 'again', label: 'Run again', press: () => dispatch({type: 'run-again'})},
   ];
   return (
     <Stack gap="space-2">
@@ -286,54 +286,35 @@ function EndedBanner(props: {
   const ended = endedView(state);
   const words = endedBannerWords(state);
   if (ended === null || words === null) return null;
-  const ask = askAction(props.chat, endedErrorReport(state));
-  // The run's logs are its Logs tab, which every ended run shows.
-  const again = (
-    <Button variant="secondary" text="Run again" press={() => dispatch({type: 'run-again'})} />
-  );
-  if (state.readOnly === true) {
-    // Resume belongs to the run controls, which know the writer; Run again needs no writer.
-    if (ended.title === 'Finished') return <Row gap="space-2">{again}</Row>;
-    return (
-      <Banner
-        tone={ended.tone}
-        title={words.title}
-        body={words.body}
-        actions={
-          <>
-            {again}
-            {ask}
-          </>
-        }
+  // The run's logs are its Logs tab, and Run again is in More actions. Resume belongs to the run
+  // controls where they know the writer (a read-only page).
+  const resume =
+    state.readOnly === true || ended.resume === null ? null : (
+      <Button
+        variant="primary"
+        text={ended.resume}
+        quietReason
+        {...(state.resumeStatus?.pending ? {disabledReason: 'Waiting for the run to start'} : {})}
+        press={() => dispatch({type: 'resume-ended'})}
       />
     );
-  }
-  const actions = (
-    <>
-      {ended.resume === null ? null : (
-        <Button
-          variant="primary"
-          text={ended.resume}
-          quietReason
-          {...(state.resumeStatus?.pending ? {disabledReason: 'Waiting for the run to start'} : {})}
-          press={() => dispatch({type: 'resume-ended'})}
-        />
-      )}
-      {again}
-    </>
-  );
-  if (ended.title === 'Finished') return <Row gap="space-2">{actions}</Row>;
+  if (ended.title === 'Finished') return resume === null ? null : <Row gap="space-2">{resume}</Row>;
+  const ask = askAction(props.chat, endedErrorReport(state));
   return (
     <Banner
       tone={ended.tone}
       title={words.title}
       body={words.body}
-      actions={
-        <>
-          {actions}
-          {ask}
-        </>
-      }
+      {...(resume === null && ask === null
+        ? {}
+        : {
+            actions: (
+              <>
+                {resume}
+                {ask}
+              </>
+            ),
+          })}
     />
   );
 }
