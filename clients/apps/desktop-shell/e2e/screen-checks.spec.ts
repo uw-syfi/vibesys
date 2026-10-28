@@ -23,8 +23,11 @@ test('a clean screen passes every check', async ({page}) => {
   expect(await screenCheck(page)).toEqual([]);
 });
 
-/** The run chat's column: a thread that scrolls in all the height left above the composer. */
-const FILLED_COLUMN = `<div style="font: 16px/20px monospace; padding: 8px; display: flex; flex-direction: column; gap: 8px; height: 200px">
+/**
+ * The run chat's column, as tall as the window like the app's dock: a thread that scrolls in all
+ * the height left above the composer.
+ */
+const FILLED_COLUMN = `<div style="font: 16px/20px monospace; padding: 8px; display: flex; flex-direction: column; gap: 8px; height: 100vh; box-sizing: border-box">
   <div>Chat</div>
   <div style="flex: 1; min-height: 0; display: flex; flex-direction: column">
     <div style="flex: 1; min-height: 0; overflow-y: auto"><div style="height: 400px">rows</div></div>
