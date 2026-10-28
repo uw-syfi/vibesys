@@ -11,6 +11,7 @@ import {
   Chip,
   ChoiceTiles,
   type Completion,
+  ErrorActions,
   Field,
   Grid,
   ICON_NAMES,
@@ -482,6 +483,26 @@ export const BASIC_ENTRIES = {
               <Button variant="primary" text="Try again" press={() => undefined} />
               <Button variant="quiet" text="Dismiss" press={() => undefined} />
             </>
+          }
+        />
+      </Stack>
+    ),
+  },
+  ErrorActions: {
+    render: () => (
+      <Stack>
+        <Banner
+          tone="err"
+          title="The request was not taken."
+          body="It could not be written."
+          actions={<ErrorActions ask={() => undefined} />}
+        />
+        <Banner
+          tone="err"
+          title="The list could not be read."
+          body="The connection was refused."
+          actions={
+            <ErrorActions copy={'The list could not be read.\n\nThe connection was refused.'} />
           }
         />
       </Stack>

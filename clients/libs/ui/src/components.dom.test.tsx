@@ -17,6 +17,7 @@ import {
   type ChoiceOption,
   ChoiceTiles,
   type Completion,
+  ErrorActions,
   Fact,
   FactLine,
   Field,
@@ -754,6 +755,58 @@ describe('ActionPanel', () => {
     expect(container.textContent).toContain('Start run');
     await click(status);
     expect(container.textContent).not.toContain('Every check passed.');
+  });
+});
+
+describe('ErrorActions', () => {
+  const buttons = (container: HTMLElement) =>
+    [...container.querySelectorAll('button')].map(button => button.textContent);
+
+  test('renders nothing with nothing to do', async () => {
+    const container = await mount(<ErrorActions />);
+    expect(container.innerHTML).toBe('');
+  });
+
+  test('ask is one button that asks once per press', async () => {
+    let asked = 0;
+    const container = await mount(<ErrorActions ask={() => (asked += 1)} />);
+    expect(buttons(container)).toEqual(['Ask about this error']);
+    await click(one(container, 'button'));
+    await click(one(container, 'button'));
+    expect(asked).toBe(2);
+  });
+
+  test('copy writes the text to the clipboard and says it did', async () => {
+    // Bun has a navigator of its own, so the page's (with its clipboard) is installed for this test.
+    const own = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    Object.defineProperty(globalThis, 'navigator', {configurable: true, value: window.navigator});
+    try {
+      const container = await mount(<ErrorActions copy={'a\nb'} />);
+      expect(buttons(container)).toEqual(['Copy details']);
+      await click(one(container, 'button'));
+      expect(await window.navigator.clipboard.readText()).toBe('a\nb');
+      expect(buttons(container)).toEqual(['Copied']);
+    } finally {
+      if (own !== undefined) Object.defineProperty(globalThis, 'navigator', own);
+    }
+  });
+
+  test('a clipboard that refuses says so, and new text can be copied afresh', async () => {
+    const own = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    const refusing = {clipboard: {writeText: () => Promise.reject(new Error('denied'))}};
+    Object.defineProperty(globalThis, 'navigator', {configurable: true, value: refusing});
+    try {
+      const container = document.createElement('div');
+      document.body.append(container);
+      const root = createRoot(container);
+      await act(async () => root.render(<ErrorActions copy="first" />));
+      await click(one(container, 'button'));
+      expect(buttons(container)).toEqual(['Could not copy']);
+      await act(async () => root.render(<ErrorActions copy="second" />));
+      expect(buttons(container)).toEqual(['Copy details']);
+    } finally {
+      if (own !== undefined) Object.defineProperty(globalThis, 'navigator', own);
+    }
   });
 });
 
