@@ -149,6 +149,24 @@ test('a run that failed says why in its record’s words, and offers to run it a
   );
 });
 
+test('Run again on a run Recent no longer holds starts New run from its project and task', async ({
+  page,
+}) => {
+  const world = dashboardWorld(MANY_RUNS);
+  // Recent keeps only the newest runs the user opened; this failed run is not among them.
+  const recent = (world.recent ?? []).filter(
+    each => (each as {readonly runId: string}).runId !== 'r-failed-07',
+  );
+  await open(page, {...world, recent});
+
+  const card = tiles(page, 'Needs you').filter({hasText: 'queue-rs-run7'});
+  await card.getByRole('button', {name: 'Run again', exact: true}).click();
+
+  const form = page.getByRole('main');
+  await expect(form).toContainText('/home/me/projects/queue-rs-run7');
+  await expect(form).toContainText('spsc');
+});
+
 test('a run with more ideas than its chart keeps still counts them all', async ({page}) => {
   await open(page, dashboardWorld(OMITTED_RUN));
 

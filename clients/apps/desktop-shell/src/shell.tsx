@@ -6,6 +6,7 @@
  */
 import {AppShell, createSidebarStore} from '@vibesys/feature-app-shell/renderer';
 import {
+  againRun,
   type Clock,
   type DashboardRow,
   dashboardRows,
@@ -60,7 +61,7 @@ import {shownTheme} from '@vibesys/feature-settings/state';
 import {createUsageStore, type SpendRunRef, UsageScreen} from '@vibesys/feature-usage/renderer';
 import {type HostKey, hostFromKey, hostLabel, hostsComeUp, problemWord} from '@vibesys/hosts';
 import {gatewayBridge, settled, type WelcomeBridge} from '@vibesys/ipc';
-import type {RecentRun, RunRef} from '@vibesys/runs';
+import type {RunRef} from '@vibesys/runs';
 import {sameRun} from '@vibesys/runs';
 import type {Store} from '@vibesys/store';
 import {applyTheme, Card, EmptyState, Page, type ThemeTarget, WindowFrame} from '@vibesys/ui';
@@ -182,7 +183,7 @@ export function createShellStores(
     }
     if (next.selection !== selection) {
       selection = next.selection;
-      followSelection(newRun.store, selection, next.recent);
+      followSelection(newRun.store, selection, next);
       if (selection.kind === 'settings' && selection.machine !== undefined) {
         machineSettings.dispatch({
           type: 'focus',
@@ -264,18 +265,19 @@ function rereadOnReconnect(
 
 /**
  * New run opened for a machine (Machines' "New run here") starts on it; opened to run a run again,
- * it starts from that run as the recent list records it (its place and options).
+ * it starts from that run (`againRun`): its place and options as Recent records them, else its
+ * place and task as its machine lists them.
  */
 function followSelection(
   newRun: ShellStores['newRun'],
   selection: Screen,
-  recent: readonly RecentRun[],
+  sidebar: SidebarState,
 ): void {
   if (selection.kind !== 'new-run') return;
   const again = selection.again;
   if (again !== undefined) {
-    const run = recent.find(each => sameRun(each, again));
-    if (run !== undefined) {
+    const run = againRun(sidebar, again);
+    if (run !== null) {
       newRun.dispatch({type: 'again', run});
       return;
     }

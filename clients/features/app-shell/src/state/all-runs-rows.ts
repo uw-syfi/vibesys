@@ -6,7 +6,7 @@
  */
 import {isSynthesizedTask} from '@vibesys/contracts';
 import {type HostKey, hostFromKey, hostLabel} from '@vibesys/hosts';
-import {type RecentRun, sameRun} from '@vibesys/runs';
+import {type RecentRun, type RunRef, sameRun} from '@vibesys/runs';
 import {type Clock, formatStarted} from './recent-words.js';
 import {
   dashboardRefs,
@@ -103,6 +103,30 @@ export function dashboardRows(state: SidebarState, clock: Clock): readonly Dashb
     });
   });
   return [...known, ...unknown].sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/**
+ * The run New run starts `run` again from: its Recent record, which keeps what the app started it
+ * with, else what the machines list of it (its machine, project and task, with no start options);
+ * null when neither knows its project. Recent keeps only the newest runs the user opened, while the
+ * dashboard lists every run, so a run can be pressed that Recent no longer holds.
+ */
+export function againRun(state: SidebarState, run: RunRef): RecentRun | null {
+  const recent = state.recent.find(each => sameRun(each, run));
+  if (recent !== undefined) return recent;
+  const listed = dashboardRefs(state).find(each =>
+    sameRun({host: each.host, runId: each.run.runId}, run),
+  );
+  if (listed === undefined) return null;
+  return {
+    host: listed.host,
+    hostLabel: hostLabel(hostFromKey(listed.host)),
+    project: listed.project,
+    task: chosenTask(listed.run.task),
+    runId: listed.run.runId,
+    instanceId: null,
+    attachedAt: listed.run.createdAt,
+  };
 }
 
 /** What a screen that lists runs by cost (Usage) calls one: its title, and when it began if the app knows. */
