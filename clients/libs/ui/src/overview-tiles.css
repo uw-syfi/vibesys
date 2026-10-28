@@ -8,26 +8,38 @@
 }
 .vs-overview-group-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
 }
+.vs-overview-group-aside {
+  margin-left: auto;
+}
 .vs-overview-tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--column-chart), 1fr));
-  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(min(var(--column-chart), 100%), 1fr));
+  gap: var(--space-4);
+}
+.vs-overview-tiles[data-wide] {
+  grid-template-columns: repeat(auto-fill, minmax(min(var(--column-metric), 100%), 1fr));
 }
 .vs-overview-tile {
   position: relative;
   box-sizing: border-box;
   display: flex;
+  flex-direction: column;
   min-width: 0;
   border: var(--hairline) solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--panel);
 }
-.vs-overview-tile[data-attention] {
+.vs-overview-tile[data-attention="err"] {
   border-color: var(--chip-err-border);
   background: var(--banner-err-bg);
+}
+.vs-overview-tile[data-attention="warn"] {
+  border-color: var(--chip-warn-border);
+  background: var(--banner-warn-bg);
 }
 .vs-overview-tile:hover {
   border-color: var(--muted);
@@ -37,10 +49,10 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
   min-width: 0;
   margin: 0;
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-4) var(--space-5);
   border: 0;
   border-radius: var(--radius-lg);
   background: transparent;
@@ -53,28 +65,21 @@
   outline: var(--focus-ring) solid var(--accent);
   outline-offset: var(--focus-offset);
 }
+/* The title over its facts line; each gives way with an ellipsis rather than wrap. */
 .vs-overview-tile-head {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
+  flex: 1;
+  flex-direction: column;
   min-width: 0;
-  /* A tile with no result keeps the head a result gives, so rows line up across a row of tiles. */
-  min-height: var(--row-dense);
-}
-/* The menu button sits in the head's row, in the corner: the head leaves it room. */
-.vs-overview-tile[data-menu] .vs-overview-tile-head {
-  padding-right: calc(var(--control-sm) - var(--space-4));
 }
 .vs-overview-tile-head > :first-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The result keeps its width and never breaks inside itself: the title gives way first. */
-.vs-overview-tile-head > :not(:first-child) {
-  flex: none;
-  white-space: nowrap;
+/* The menu button sits in the corner: the top row leaves it room. */
+.vs-overview-tile[data-menu] .vs-overview-tile-press > :first-child {
+  padding-right: calc(var(--control-sm) - var(--space-4));
 }
 .vs-overview-tile-line {
   display: block;
@@ -84,113 +89,52 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The result keeps its width and never breaks inside itself; its caption follows on the baseline. */
+.vs-overview-tile-result {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+  white-space: nowrap;
+}
 .vs-overview-tile-chart {
   display: block;
+  height: var(--chart-height);
 }
+/* The foot sits at the bottom, so feet line up across a row of tiles of different contents. */
 .vs-overview-tile-foot {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
   min-width: 0;
+  margin-top: auto;
 }
-/* The figures keep their width; the pill sits at the end. The note has a line of its own. */
-.vs-overview-tile-figures {
+.vs-overview-tile-foot > :first-child {
   flex: none;
-}
-.vs-overview-tile-foot > :last-child {
-  flex: none;
-  margin-left: auto;
 }
 .vs-overview-tile-menu {
   position: absolute;
-  top: 0;
-  right: 0;
+  top: var(--space-2);
+  right: var(--space-2);
 }
-.vs-result-chart {
-  position: relative;
-  display: block;
-  width: 100%;
-  height: var(--chart-height);
+.vs-attention-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
 }
-.vs-result-chart-plot {
-  position: absolute;
-  inset: var(--space-2) var(--space-3);
-}
-.vs-result-chart-lines {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-.vs-result-chart-base,
-.vs-result-chart-line {
-  vector-effect: non-scaling-stroke;
-}
-.vs-result-chart-base {
-  stroke: var(--muted);
-  stroke-width: 1;
-  stroke-dasharray: 3 3;
-  opacity: 0.7;
-}
-.vs-result-chart-line {
-  fill: none;
-  stroke: var(--text);
-  stroke-width: 1.5;
-}
-.vs-result-chart-mark {
-  position: absolute;
-  box-sizing: border-box;
-  width: var(--dot);
-  height: var(--dot);
-  transform: translate(-50%, -50%);
-  border-radius: var(--radius-full);
-}
-.vs-result-chart-mark[data-mark="kept"] {
-  background: var(--ok);
-}
-.vs-result-chart-mark[data-mark="not-better"] {
-  border: var(--focus-ring) solid var(--muted);
-  background: var(--panel);
-}
-.vs-result-chart-mark[data-mark="failed"] {
-  border-radius: 0;
-  background:
-    linear-gradient(45deg, transparent 43%, var(--err) 43% 57%, transparent 57%),
-    linear-gradient(-45deg, transparent 43%, var(--err) 43% 57%, transparent 57%);
-}
-.vs-result-chart-mark[data-mark="pending"] {
-  background: var(--accent);
-  box-shadow: 0 0 0 var(--dot-ring) var(--chip-accent-border);
-}
-.vs-result-key {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.vs-result-key-mark {
+.vs-attention-card-top > :last-child {
   flex: none;
-  box-sizing: border-box;
-  width: var(--dot);
-  height: var(--dot);
-  border-radius: var(--radius-full);
 }
-.vs-result-key-mark[data-mark="kept"] {
-  background: var(--ok);
+.vs-attention-card-why {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
-.vs-result-key-mark[data-mark="not-better"] {
-  border: var(--hairline) solid var(--muted);
-  background: var(--panel);
-}
-.vs-result-key-mark[data-mark="failed"] {
-  background: var(--err);
-}
-.vs-result-key-mark[data-mark="pending"] {
-  background: var(--accent);
-}
-.vs-result-key-mark[data-mark="line"] {
-  width: var(--space-5);
-  height: var(--focus-ring);
-  border-radius: 0;
-  background: var(--text);
+.vs-attention-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: 0 var(--space-5) var(--space-4);
 }

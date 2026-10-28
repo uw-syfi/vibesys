@@ -1,8 +1,8 @@
 import {
+  AttentionCard,
   Banner,
   Button,
   Card,
-  type ChartKeyItem,
   Chip,
   EmptyState,
   Field,
@@ -11,16 +11,28 @@ import {
   OverviewGroup,
   OverviewTile,
   Page,
-  ResultChart,
-  ResultChartKey,
   Row,
   Select,
   type SelectOption,
+  Sparkline,
+  SparklineKey,
   Stack,
   Text,
 } from '@vibesys/ui';
 import type {JSX} from 'react';
-import {BASE, type GroupBy, groupTiles, onMachine, type Tile} from '../../state/index.js';
+import {
+  CHART_KEY,
+  GROUP_BYS,
+  GROUP_LABEL,
+  GROUP_WORDS,
+  type GroupBy,
+  groupTiles,
+  type NeedsYou,
+  noRunsWord,
+  onMachine,
+  RUN_AGAIN,
+  type Tile,
+} from '../../state/index.js';
 
 /** An unfinished New run, as the dashboard offers it: what it is of so far, and where it stands. */
 export interface RunsDraft {
@@ -30,51 +42,78 @@ export interface RunsDraft {
   readonly discard: () => void;
 }
 
-const GROUP_OPTIONS: readonly SelectOption<GroupBy>[] = [
-  {value: 'status', label: 'Status'},
-  {value: 'machine', label: 'Machine'},
-  {value: 'task', label: 'Task'},
-  {value: 'agent', label: 'Agent'},
-];
-
-const CHART_KEY: readonly ChartKeyItem[] = [
-  {mark: 'kept', label: 'Kept'},
-  {mark: 'not-better', label: 'Not better'},
-  {mark: 'failed', label: 'Failed'},
-  {mark: 'pending', label: 'Running'},
-  {mark: 'line', label: 'Best so far'},
-];
-
-function TileOf(props: {
-  readonly tile: Tile;
+/** What a tile or card asks of the app, each handed the tile's id. */
+interface TileActions {
   readonly open: (id: string) => void;
+  /** Run an ended run again, from its place and options, in New run. */
+  readonly again: (id: string) => void;
   readonly menu: (id: string) => readonly MenuItem[];
-}): JSX.Element {
-  const {tile} = props;
-  const menu = props.menu(tile.id);
+}
+
+const GROUP_OPTIONS: readonly SelectOption<GroupBy>[] = GROUP_BYS.map(by => ({
+  value: by,
+  label: GROUP_WORDS[by],
+}));
+
+const KEY = (
+  <SparklineKey
+    label={CHART_KEY.label}
+    items={[
+      {mark: 'line', label: CHART_KEY.line},
+      {mark: 'reference', label: CHART_KEY.reference},
+    ]}
+  />
+);
+
+function menuOf(actions: TileActions, id: string): {readonly menu?: readonly MenuItem[]} {
+  const menu = actions.menu(id);
+  return menu.length === 0 ? {} : {menu};
+}
+
+function TileOf(props: {readonly tile: Tile; readonly actions: TileActions}): JSX.Element {
+  const {tile, actions} = props;
   return (
     <OverviewTile
       title={tile.title}
       hint={tile.hint}
-      result={tile.result}
       facts={tile.facts}
+      result={tile.result}
       chart={
         tile.chart === null ? null : (
-          <ResultChart
+          <Sparkline
             label={tile.chart.label}
-            points={tile.chart.points}
-            line={tile.chart.line}
-            reference={BASE}
+            steps={tile.chart.steps}
+            from={tile.chart.from}
+            to={tile.chart.to}
+            reference={tile.chart.base}
           />
         )
       }
-      figures={tile.figures}
-      note={tile.note}
-      noteFull={tile.noteFull}
       status={{tone: tile.status.tone, label: tile.status.label}}
-      attention={tile.attention}
-      {...(menu.length === 0 ? {} : {menu})}
-      press={() => props.open(tile.id)}
+      summary={tile.summary}
+      summaryHint={tile.summaryHint}
+      {...menuOf(actions, tile.id)}
+      press={() => actions.open(tile.id)}
+    />
+  );
+}
+
+function CardOf(props: {
+  readonly tile: Tile;
+  readonly needs: NeedsYou;
+  readonly actions: TileActions;
+}): JSX.Element {
+  const {tile, needs, actions} = props;
+  return (
+    <AttentionCard
+      title={tile.title}
+      hint={tile.hint}
+      facts={needs.facts}
+      status={{tone: needs.tone, label: needs.label}}
+      why={needs.why}
+      actions={needs.again ? [{text: RUN_AGAIN, press: () => actions.again(tile.id)}] : []}
+      {...menuOf(actions, tile.id)}
+      press={() => actions.open(tile.id)}
     />
   );
 }
@@ -101,32 +140,34 @@ function Draft(props: {readonly draft: RunsDraft}): JSX.Element {
 }
 
 /**
- * The Runs dashboard: a header row with the title, the chart key and a Group by select, then every
- * run's tile in groups on a grid that fills the width, the runs that need their user first, each
- * run in one group. With no run it says so, with a New run action, or while the machines are
- * still answering (`reading`) that it is reading. Pressing a tile opens its run (`open` is handed
- * the tile's id); `menu` is a tile's row menu.
+ * The Runs dashboard: a header row with the title and a Group by select, then the runs that need
+ * their user as cards that say why (and offer to run an ended one again), then every other run's
+ * tile in groups on a grid that fills the width, with the key to their charts at the head of the
+ * first group; each run is in one group. With no run it says so, with a New run action, or while
+ * the machines are still answering (`reading`) that it is reading. Pressing a tile or card opens
+ * its run (`open` is handed the tile's id); `menu` is a tile's row menu.
  */
-export function RunsScreen(props: {
-  readonly tiles: readonly Tile[];
-  readonly by: GroupBy;
-  /** The machine the runs are narrowed to (as a tile names it), shown as a chip; null for all. */
-  readonly machine: string | null;
-  readonly clearMachine: () => void;
-  readonly group: (by: GroupBy) => void;
-  readonly open: (id: string) => void;
-  readonly menu: (id: string) => readonly MenuItem[];
-  readonly draft: RunsDraft | null;
-  /** Whether the machines have not yet said what runs they hold. */
-  readonly reading: boolean;
-  readonly newRun: () => void;
-  /** What to say when saved runs could not be read; none when all were. */
-  readonly notice: {readonly title: string; readonly body: string} | null;
-}): JSX.Element {
+export function RunsScreen(
+  props: TileActions & {
+    readonly tiles: readonly Tile[];
+    readonly by: GroupBy;
+    /** The machine the runs are narrowed to (as a tile names it), shown as a chip; null for all. */
+    readonly machine: string | null;
+    readonly clearMachine: () => void;
+    readonly group: (by: GroupBy) => void;
+    readonly draft: RunsDraft | null;
+    /** Whether the machines have not yet said what runs they hold. */
+    readonly reading: boolean;
+    readonly newRun: () => void;
+    /** What to say when saved runs could not be read; none when all were. */
+    readonly notice: {readonly title: string; readonly body: string} | null;
+  },
+): JSX.Element {
   const {by, machine} = props;
   const tiles = onMachine(props.tiles, machine);
-  const tile = (each: Tile): JSX.Element => (
-    <TileOf key={each.id} tile={each} open={props.open} menu={props.menu} />
+  const groups = groupTiles(tiles, by);
+  const keyed = groups.find(group =>
+    group.tiles.some(tile => tile.chart !== null && tile.attention === null),
   );
   return (
     <Page
@@ -150,18 +191,20 @@ export function RunsScreen(props: {
               </Row>
             )}
             {tiles.length === 0 ? null : (
-              <>
-                <ResultChartKey label="Chart key" items={CHART_KEY} />
-                <Field label="Group by" hideLabel>
+              <Row gap="space-3" align="center">
+                <Text variant="small" tone="muted">
+                  {GROUP_LABEL}
+                </Text>
+                <Field label={GROUP_LABEL} hideLabel>
                   <Select value={by} options={GROUP_OPTIONS} change={props.group} size="sm" />
                 </Field>
-              </>
+              </Row>
             )}
           </Row>
         </Row>
       }
     >
-      <Stack gap="space-5">
+      <Stack gap="space-6">
         {props.notice === null ? null : (
           <Banner tone="warn" title={props.notice.title} body={props.notice.body} />
         )}
@@ -170,18 +213,26 @@ export function RunsScreen(props: {
           <LoadingBar label="Reading runs" />
         ) : (
           <EmptyState
-            title="No runs"
+            title={noRunsWord(machine)}
             action={<Button variant="secondary" text="New run" press={props.newRun} />}
           />
         )}
-        {groupTiles(tiles, by).map(group => (
+        {groups.map(group => (
           <OverviewGroup
             key={group.key}
             title={group.title}
-            count={group.tiles.length}
+            {...(group.count === null ? {} : {count: group.count})}
             {...(group.tone === null ? {} : {tone: group.tone})}
+            {...(group === keyed ? {aside: KEY} : {})}
+            wide={group.tiles.every(tile => tile.attention !== null)}
           >
-            {group.tiles.map(tile)}
+            {group.tiles.map(tile =>
+              tile.attention === null ? (
+                <TileOf key={tile.id} tile={tile} actions={props} />
+              ) : (
+                <CardOf key={tile.id} tile={tile} needs={tile.attention} actions={props} />
+              ),
+            )}
           </OverviewGroup>
         ))}
       </Stack>

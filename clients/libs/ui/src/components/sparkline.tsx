@@ -1,4 +1,5 @@
 import type {JSX} from 'react';
+import {Text} from './text.js';
 
 const WIDTH = 200;
 const HEIGHT = 36;
@@ -63,5 +64,30 @@ export function Sparkline(props: {
       )}
       {path === '' ? null : <path className="vs-spark-line" d={path} />}
     </svg>
+  );
+}
+
+/** One entry of a `SparklineKey`: the best-so-far `line` or the dashed `reference`, and its word. */
+export interface SparklineKeyItem {
+  readonly mark: 'line' | 'reference';
+  readonly label: string;
+}
+
+/** A one-line key to what a `Sparkline` draws: its line and its reference, each beside its word. */
+export function SparklineKey(props: {
+  readonly label: string;
+  readonly items: readonly SparklineKeyItem[];
+}): JSX.Element {
+  return (
+    <ul className="vs-dotlegend vs-spark-key" aria-label={props.label}>
+      {props.items.map(item => (
+        <li key={item.label} className="vs-dotlegend-item">
+          <span className="vs-spark-key-mark" data-mark={item.mark} aria-hidden="true" />
+          <Text variant="small" tone="muted">
+            {item.label}
+          </Text>
+        </li>
+      ))}
+    </ul>
   );
 }

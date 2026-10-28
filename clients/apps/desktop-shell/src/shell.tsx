@@ -418,7 +418,10 @@ function SettingsRoute(props: {
   );
 }
 
-/** The Runs dashboard over the tiles of `rows`: a tile opens its run, and its menu archives it or opens it in a window. */
+/**
+ * The Runs dashboard over the tiles of `rows`: a tile opens its run, a run that ended and needs its
+ * user can be run again from New run, and a tile's menu archives it or opens it in a window.
+ */
 function RunsRoute(props: {
   readonly rows: readonly DashboardRow[];
   readonly tiles: readonly Tile[];
@@ -442,6 +445,10 @@ function RunsRoute(props: {
       open={id => {
         const run = runOf(id);
         if (run !== null) select({kind: 'run', run});
+      }}
+      again={id => {
+        const run = runOf(id);
+        if (run !== null) select({kind: 'new-run', again: run});
       }}
       menu={id => {
         const run = runOf(id);

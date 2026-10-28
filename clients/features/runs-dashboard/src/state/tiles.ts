@@ -1,10 +1,31 @@
 /**
  * The Runs dashboard's tiles: a pure fold from what the app knows of each run (`RunInput`) to the
- * view of its tile (`Tile`), and from the tiles to the groups the screen shows. A tile's chart
- * plots every idea once, in the order the results landed, against the base (1.0), with a
- * best-so-far line that never falls; a run that needs its user (`attention`) says why in a word
- * or two (`note`) and is in the "Needs you" group, and in no other.
+ * view of its tile (`Tile`), and from the tiles to the groups the screen shows. A tile's chart is
+ * the best result so far over the ideas, in the order their results landed, against the base (1.0);
+ * a run that needs its user (`attention`) says why in a sentence and is in the "Needs you" group,
+ * and in no other.
  */
+import {
+  cardFacts,
+  chartLabel,
+  endedLine,
+  FAILED_WORD,
+  failedWhy,
+  failingWhy,
+  failingWord,
+  measuredCaption,
+  NEEDS_YOU_TITLE,
+  pausedLine,
+  quietWhy,
+  quietWord,
+  RATIO_CAPTION,
+  ratioWord,
+  reasonSentence,
+  STATUS_TITLES,
+  statusHeading,
+  withProblem,
+  workingLine,
+} from './runs-words.js';
 
 /** How an idea came out (the run digest's wording). */
 export type Verdict = 'kept' | 'not_better' | 'failed' | 'running';
@@ -44,18 +65,13 @@ export interface RunInput {
   /** When it started, worded; null when unknown. */
   readonly started: string | null;
   readonly machine: string;
-  /** The hardware it runs on (not on a tile) and the agent that drives it, when known. */
-  readonly hardware: string | null;
-  readonly agent: string | null;
   readonly status: {readonly kind: StatusKind; readonly word: string};
   /** Why the run's state cannot be read, in a word or two; null when it can. */
   readonly problem: string | null;
-  /** Why an ended run ended, in a line, when its record says; null when nothing does. */
+  /** Who paused a paused run, or why an ended run ended, in a line, when its record says; else null. */
   readonly reason: string | null;
   /** The ideas the run tried, when its journal records them. */
   readonly ideas: number | null;
-  /** What it has cost, in US dollars, when known. */
-  readonly costUsd: number | null;
   readonly seconds: number | null;
   /** The adopted result, or the best so far, as a multiple of the base; null when it has none. */
   readonly best: number | null;
@@ -74,17 +90,32 @@ export interface RunInput {
   readonly silentSeconds: number | null;
 }
 
-/** The mark of one idea on a tile's chart. */
-export type Mark = 'kept' | 'not-better' | 'failed' | 'pending';
-
-/** A tile's chart: one point per idea, and the best-so-far line with a value for each. */
+/** A tile's chart: the best result so far as steps over the ideas, against the base. */
 export interface TileChart {
-  readonly points: readonly {readonly y: number; readonly mark: Mark}[];
-  /** The best result so far after each idea, never below the base and never falling. */
-  readonly line: readonly number[];
+  /**
+   * From `x` on, the best so far is `y`: the base at 0, then one step after each idea (`x` is how
+   * many ideas came in), never below the base and never falling.
+   */
+  readonly steps: readonly {readonly x: number; readonly y: number}[];
+  /** The x range the steps are drawn over: before the first idea to after the last. */
+  readonly from: number;
+  readonly to: number;
   readonly base: number;
   /** For assistive technology. */
   readonly label: string;
+}
+
+/** Why a run needs its user, as its card says it. */
+export interface NeedsYou {
+  /** The pill: `Failed`, `Quiet 32m`, `3 failed in a row`. */
+  readonly label: string;
+  readonly tone: 'err' | 'warn';
+  /** Why, in a sentence. */
+  readonly why: string;
+  /** Where and when it ran, what it tried, its best and how long it took. */
+  readonly facts: string;
+  /** Whether the run has ended, so the card offers to run it again. */
+  readonly again: boolean;
 }
 
 /** One run's tile. */
@@ -93,75 +124,48 @@ export interface Tile {
   readonly title: string;
   /** The run id, for the pointer: a title names a run, the id tells it apart. */
   readonly hint: string;
-  readonly result: {readonly text: string; readonly tone: 'ok' | 'muted'} | null;
+  /** Where and when it ran. */
   readonly facts: string;
-  /** Null when the host offers no chart data (a chart-less tile). */
+  /** The best result and what it is (`best vs input`, a unit); null when it has none. */
+  readonly result: {
+    readonly text: string;
+    readonly tone: 'ok' | 'muted';
+    readonly caption: string;
+  } | null;
+  /** Null when the host offers no chart data, or the input was never measured to chart against. */
   readonly chart: TileChart | null;
-  readonly figures: string;
-  /**
-   * Why the run needs its user, else why its state cannot be read: a few words, cut at a word; or
-   * null. `noteFull` is the whole text, for the pointer.
-   */
-  readonly note: string | null;
-  readonly noteFull: string | null;
+  /** Where the run stands, in a line: `3 ideas working · 7 tried`, `Finished · 6 ideas in 40m`. */
+  readonly summary: string;
+  /** The summary with why an ended run ended, when its record says, for the pointer. */
+  readonly summaryHint: string;
   readonly status: {readonly kind: StatusKind; readonly tone: Tone; readonly label: string};
-  /** Whether the run needs its user (see `attentionOf`). */
-  readonly attention: boolean;
+  /** Why the run needs its user (see `attentionOf`); null when it does not. */
+  readonly attention: NeedsYou | null;
   readonly createdAt: number;
   readonly machine: string;
-  readonly agent: string | null;
   readonly task: string;
 }
 
 /** The base every result is measured against. */
 export const BASE = 1;
 
-const MARKS: Readonly<Record<Verdict, Mark>> = {
-  kept: 'kept',
-  not_better: 'not-better',
-  failed: 'failed',
-  running: 'pending',
-};
-
 /**
  * The chart of `points`: the best-so-far line starts at the base and rises with each kept idea's
- * result. A failed idea has no reading and sits on the base; one still running (no reading yet)
- * sits at the best so far; any other idea sits at its own result, or on the line without one.
+ * result, one step after each idea; the `omitted` ideas the host left out are counted in its label.
  */
 export function chartOf(points: readonly IdeaInput[], omitted: number): TileChart {
   let best = BASE;
-  const line: number[] = [];
-  const plotted = points.map(point => {
+  const steps = points.map((point, at) => {
     if (point.verdict === 'kept' && point.ratio !== null) best = Math.max(best, point.ratio);
-    line.push(best);
-    const y = point.verdict === 'failed' ? BASE : (point.ratio ?? best);
-    return {y, mark: MARKS[point.verdict]};
+    return {x: at + 1, y: best};
   });
-  const ideas = points.length + omitted;
   return {
-    points: plotted,
-    line,
+    steps: [{x: 0, y: BASE}, ...steps],
+    from: 0,
+    to: points.length + 1,
     base: BASE,
-    label: `Results of ${ideas} ${ideas === 1 ? 'idea' : 'ideas'} against the base, with the best so far`,
+    label: chartLabel(points.length + omitted),
   };
-}
-
-/** A multiple of the base with its unit: `1.42×`. */
-export function ratioWord(ratio: number): string {
-  return `${ratio.toFixed(2)}×`;
-}
-
-/** A span in its two largest units: `45s`, `52m`, `1h 05m`. */
-export function durationWord(seconds: number): string {
-  const whole = Math.max(0, Math.round(seconds));
-  if (whole < 60) return `${whole}s`;
-  const minutes = Math.floor(whole / 60);
-  if (minutes < 60) return `${minutes}m`;
-  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
-}
-
-function ideasWord(count: number): string {
-  return count === 1 ? '1 idea' : `${count} ideas`;
 }
 
 /** The tone of a status's dot. */
@@ -209,31 +213,26 @@ function unitOf(reading: MeasuredBest): string | null {
   return named === null || named === '' ? null : named.includes('_') ? metricName(named) : named;
 }
 
-/** A tile's headline, and what it is measured in when it is a value and not a multiple of the base. */
-function headlineOf(
-  input: RunInput,
-  chart: TileChart | null,
-): {readonly result: Tile['result']; readonly unit: string | null} {
-  const finalBest = chart === null ? null : (chart.line.at(-1) ?? null);
-  const best = input.best ?? (finalBest !== null && finalBest > BASE ? finalBest : null);
+/** The best result as a multiple of the base: the digest's, else the chart's when it beat the base. */
+function bestRatio(input: RunInput, chart: TileChart | null): number | null {
+  const finalBest = chart?.steps.at(-1)?.y ?? null;
+  return input.best ?? (finalBest !== null && finalBest > BASE ? finalBest : null);
+}
+
+/** A tile's headline: the best ratio to the input, else the best reading in its unit, else none. */
+function headlineOf(input: RunInput, best: number | null): Tile['result'] {
   if (best !== null) {
-    return {result: {text: ratioWord(best), tone: best > BASE ? 'ok' : 'muted'}, unit: null};
+    return {text: ratioWord(best), tone: best > BASE ? 'ok' : 'muted', caption: RATIO_CAPTION};
   }
   // No ratio to the input (it was not measured): the best reading itself, which beats nothing known.
   return input.measured === null
-    ? {result: null, unit: null}
+    ? null
     : {
-        result: {text: valueWord(input.measured.value), tone: 'muted'},
-        unit: unitOf(input.measured),
+        text: valueWord(input.measured.value),
+        tone: 'muted',
+        caption: measuredCaption(unitOf(input.measured)),
       };
 }
-
-/** The tone of a status pill that says a run needs its user: never the green of a good ending. */
-const ATTENTION_TONES: Readonly<Record<Exclude<Attention, 'none'>, Tone>> = {
-  failed: 'err',
-  repeated_failure: 'warn',
-  stalled: 'warn',
-};
 
 /**
  * Whether a run needs its user: the host's judgement, except that a run the app reads as no longer
@@ -245,22 +244,6 @@ export function attentionOf(input: RunInput): Attention {
   return 'none';
 }
 
-/** Why a run needs its user, in a word or two (`failed`, `stalled 32m`, `3 failed in a row`). */
-export function attentionWord(input: RunInput): string | null {
-  switch (input.attention) {
-    case 'none':
-      return null;
-    case 'failed':
-      return 'failed';
-    case 'repeated_failure':
-      return input.failedStreak > 1 ? `${input.failedStreak} failed in a row` : 'failing';
-    case 'stalled':
-      return input.silentSeconds === null
-        ? 'stalled'
-        : `stalled ${durationWord(input.silentSeconds)}`;
-  }
-}
-
 /** The first line of `text`, trimmed; null when it has none. */
 function firstLine(text: string | null): string | null {
   const line = text
@@ -270,75 +253,69 @@ function firstLine(text: string | null): string | null {
   return line === undefined || line === '' ? null : line;
 }
 
-/** The longest a tile's note runs, in characters, before it is cut at a word. */
-export const NOTE_MAX = 34;
-
-/** `text` cut at the last word boundary within `max` characters, with an ellipsis; whole when it fits. */
-function cutAtWord(text: string, max: number): string {
-  if (text.length <= max) return text;
-  const within = text.slice(0, max + 1);
-  const space = within.lastIndexOf(' ');
-  // One word longer than the room is kept whole: the tile's own ellipsis is the last resort.
-  const cut = space > 0 ? within.slice(0, space) : (text.split(' ')[0] ?? text);
-  return `${cut.replace(/[\s,;:.\-–—]+$/, '')}…`;
+/** Whether the run no longer works: what it did is done, and it can be run again. */
+function hasEnded(kind: StatusKind): boolean {
+  return kind !== 'running' && kind !== 'paused';
 }
 
-/** `SandboxLifecycleError` as words: `Sandbox lifecycle error`. */
-function classWords(name: string): string {
-  const words = name.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
-  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+/** Why an ended run ended, in the first line of what its record says; null for a working run. */
+function endReason(input: RunInput): string | null {
+  return hasEnded(input.status.kind) ? firstLine(input.reason) : null;
 }
 
-const ERROR_CLASS = /^([A-Z][A-Za-z0-9]*(?:Error|Exception|Failure|Interrupted))\s*:/;
-
-/**
- * A reason in a few words: an error's class (`NestedRepositoryError: ...` reads `Nested repository
- * error`), else the first clause of the line, cut at a word. The whole line is `full`.
- */
-function reasonWords(text: string): {readonly note: string; readonly full: string} {
-  const full = text.trim();
-  const named = ERROR_CLASS.exec(full);
-  const clause = (full.split(/[.;:](?:\s|$)|\s[-–—]\s/)[0] ?? full).trim();
-  const short = named?.[1] === undefined ? clause : classWords(named[1]);
-  return {note: cutAtWord(short === '' ? full : short, NOTE_MAX), full};
+/** Where the run stands, in a line; `ideas` is what it tried, left-out ideas included. */
+function summaryOf(input: RunInput, ideas: number | null): string {
+  const {kind, word} = input.status;
+  const working = (input.points ?? []).filter(point => point.verdict === 'running').length;
+  const line =
+    kind === 'running'
+      ? workingLine(working, ideas)
+      : kind === 'paused'
+        ? pausedLine(firstLine(input.reason) ?? word, ideas)
+        : kind === 'unknown'
+          ? endedLine(word, null, null)
+          : endedLine(word, ideas, input.seconds);
+  return withProblem(line, input.problem);
 }
 
-/**
- * The words of a failed or stopped run's tile: why it ended, when its record says, else nothing
- * (the status pill already says `failed`).
- */
-function endNote(input: RunInput): string | null {
-  return input.status.kind === 'failed' || input.status.kind === 'stopped'
-    ? firstLine(input.reason)
-    : null;
-}
-
-/** The words of `text`, lower case, so "Failed to start" holds the words "failed". */
-function wordsOf(text: string): string {
-  return ` ${text
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean)
-    .join(' ')} `;
-}
-
-/** The note of a tile unless the status pill already says it (a status is said once), with its full text. */
-function noteOf(
-  note: {readonly note: string; readonly full: string} | null,
-  status: {readonly kind: StatusKind; readonly word: string},
-): Pick<Tile, 'note' | 'noteFull'> {
+/** Why a run that needs its user does, as its card says it. */
+function needsYouOf(
+  input: RunInput,
+  attention: Exclude<Attention, 'none'>,
+  known: {readonly facts: string; readonly ideas: number | null; readonly best: number | null},
+): NeedsYou {
+  const failed = (input.points ?? []).filter(point => point.verdict === 'failed').length;
+  const reason = endReason(input);
   const said =
-    note !== null &&
-    (wordsOf(status.word).includes(wordsOf(note.note)) ||
-      (status.kind === 'failed' && wordsOf(note.note) === wordsOf('failed')));
-  return note === null || said
-    ? {note: null, noteFull: null}
-    : {note: note.note, noteFull: note.full};
-}
-
-/** A reason that is already a few words says itself whole. */
-function asNote(text: string | null): {readonly note: string; readonly full: string} | null {
-  return text === null ? null : {note: text, full: text};
+    attention === 'failed'
+      ? {
+          label: FAILED_WORD,
+          tone: 'err' as const,
+          why:
+            reason === null ? failedWhy(known.ideas, failed, known.best) : reasonSentence(reason),
+        }
+      : attention === 'repeated_failure'
+        ? {
+            label: failingWord(input.failedStreak),
+            tone: 'warn' as const,
+            why: failingWhy(input.failedStreak),
+          }
+        : {
+            label: quietWord(input.silentSeconds),
+            tone: 'warn' as const,
+            why: quietWhy(input.silentSeconds),
+          };
+  return {
+    ...said,
+    facts: cardFacts({
+      facts: known.facts,
+      ideas: known.ideas,
+      best: known.best === null ? null : ratioWord(known.best),
+      // A working run's time so far says less than how long it has been quiet.
+      seconds: hasEnded(input.status.kind) ? input.seconds : null,
+    }),
+    again: hasEnded(input.status.kind),
+  };
 }
 
 /** The tile of `input`. */
@@ -347,38 +324,31 @@ export function tileOf(input: RunInput): Tile {
   const chart = input.points === null ? null : chartOf(input.points, input.pointsOmitted);
   const ideas =
     input.ideas ?? (input.points === null ? null : input.points.length + input.pointsOmitted);
-  const figures = [
-    ...(ideas === null ? [] : [ideasWord(ideas)]),
-    ...(input.costUsd === null ? [] : [`$${input.costUsd.toFixed(2)}`]),
-    ...(input.seconds === null ? [] : [durationWord(input.seconds)]),
-  ].join(' · ');
-  const ended = endNote(input);
-  const {result, unit} = headlineOf(input, chart);
+  const best = bestRatio(input, chart);
+  const facts = [input.machine, input.started]
+    .filter((part): part is string => part !== null)
+    .join(' · ');
+  const summary = summaryOf(input, ideas);
+  const reason = endReason(input);
+  const needs = attention === 'none' ? null : needsYouOf(input, attention, {facts, ideas, best});
   return {
     id: input.id,
     title: input.title,
     hint: input.runId,
-    result,
-    facts: [input.machine, input.started, unit]
-      .filter((part): part is string => part !== null)
-      .join(' · '),
-    chart,
-    figures,
-    ...noteOf(
-      ended === null
-        ? asNote(attentionWord({...input, attention}) ?? input.problem)
-        : reasonWords(ended),
-      input.status,
-    ),
+    facts,
+    result: headlineOf(input, best),
+    // A run whose input was never measured has nothing to chart against it.
+    chart: best === null && input.measured !== null ? null : chart,
+    summary,
+    summaryHint: reason === null ? summary : `${summary}\n${reason}`,
     status: {
       kind: input.status.kind,
-      tone: attention === 'none' ? STATUS_TONES[input.status.kind] : ATTENTION_TONES[attention],
+      tone: needs === null ? STATUS_TONES[input.status.kind] : needs.tone,
       label: input.status.word,
     },
-    attention: attention !== 'none',
+    attention: needs,
     createdAt: input.createdAt,
     machine: input.machine,
-    agent: input.agent,
     task: input.task,
   };
 }
@@ -392,12 +362,12 @@ export function tilesOf(runs: readonly RunInput[]): Tile[] {
 
 /** The tiles of the runs that need their user, in the order given. */
 export function needsYou(tiles: readonly Tile[]): Tile[] {
-  return tiles.filter(tile => tile.attention);
+  return tiles.filter(tile => tile.attention !== null);
 }
 
 /** What the screen can group runs by. */
-export type GroupBy = 'status' | 'machine' | 'task' | 'agent';
-export const GROUP_BYS: readonly GroupBy[] = ['status', 'machine', 'task', 'agent'];
+export type GroupBy = 'status' | 'machine' | 'task';
+export const GROUP_BYS: readonly GroupBy[] = ['status', 'machine', 'task'];
 
 /** The tiles of the runs on `machine` (as a tile names it), or all of them when it is null. */
 export function onMachine(tiles: readonly Tile[], machine: string | null): Tile[] {
@@ -407,11 +377,16 @@ export function onMachine(tiles: readonly Tile[], machine: string | null): Tile[
 /** The key of the group of runs that need their user. */
 export const NEEDS_YOU = 'needs-you';
 
-/** One group of tiles, newest first. */
+/** The key of the one group the other runs make when they are grouped by status. */
+export const BY_STATUS = 'by-status';
+
+/** One group of tiles. */
 export interface TileGroup {
   readonly key: string;
   readonly title: string;
-  /** The status dot of a status group; other groups have none. */
+  /** The count beside the title; null when the title already counts its tiles. */
+  readonly count: number | null;
+  /** The group's dot; only "Needs you" has one. */
   readonly tone: Tone | null;
   readonly tiles: readonly Tile[];
 }
@@ -425,50 +400,50 @@ const STATUS_ORDER: readonly StatusKind[] = [
   'unknown',
 ];
 
-/** The word of a group of runs whose agent is not known. */
-export const UNKNOWN_GROUP = 'Unknown';
-
-const STATUS_TITLES: Readonly<Record<StatusKind, string>> = {
-  running: 'Running',
-  paused: 'Paused',
-  failed: 'Failed',
-  finished: 'Finished',
-  stopped: 'Stopped',
-  unknown: 'Unknown',
-};
-
+/** The runs grouped by status: one group, in status order, under a heading that counts each status. */
 function statusGroups(tiles: readonly Tile[]): TileGroup[] {
-  return STATUS_ORDER.flatMap(kind => {
-    const mine = tiles.filter(tile => tile.status.kind === kind);
-    if (mine.length === 0) return [];
-    return [{key: kind, title: STATUS_TITLES[kind], tone: STATUS_TONES[kind], tiles: mine}];
-  });
+  const byStatus = STATUS_ORDER.map(kind => ({
+    kind,
+    tiles: tiles.filter(tile => tile.status.kind === kind),
+  })).filter(each => each.tiles.length > 0);
+  if (byStatus.length === 0) return [];
+  const title = statusHeading(
+    byStatus.map(each => ({title: STATUS_TITLES[each.kind], count: each.tiles.length})),
+  );
+  return [
+    {key: BY_STATUS, title, count: null, tone: null, tiles: byStatus.flatMap(each => each.tiles)},
+  ];
 }
 
 function keyedGroups(tiles: readonly Tile[], by: Exclude<GroupBy, 'status'>): TileGroup[] {
   const groups = new Map<string, Tile[]>();
   for (const tile of tiles) {
-    const key =
-      by === 'machine' ? tile.machine : by === 'task' ? tile.task : (tile.agent ?? UNKNOWN_GROUP);
+    const key = by === 'machine' ? tile.machine : tile.task;
     groups.set(key, [...(groups.get(key) ?? []), tile]);
   }
   return [...groups.entries()]
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([key, mine]) => ({key, title: key, tone: null, tiles: mine}));
+    .map(([key, mine]) => ({key, title: key, count: mine.length, tone: null, tiles: mine}));
 }
 
 /**
- * `tiles` in groups: first "Needs you", the runs that need their user; then the rest grouped by
- * `by`: by status, in the order running, paused, failed, finished, stopped, unknown, each under
- * its status word with its dot; otherwise by name, in name order. Every tile is in exactly one
- * group (a run that needs its user is in "Needs you" and not in its status, machine, task or agent
- * group) and each group keeps the order the tiles came in; a group with no tile is left out.
+ * `tiles` in groups: first "Needs you", the runs that need their user; then the rest. By status the
+ * rest is one group in the order running, paused, failed, finished, stopped, unknown, under a
+ * heading that counts each status; otherwise one group per machine or task, in name order. Every
+ * tile is in exactly one group (a run that needs its user is in "Needs you" and nowhere else),
+ * tiles of one status, machine or task keep the order they came in, and no group is empty.
  */
 export function groupTiles(tiles: readonly Tile[], by: GroupBy): TileGroup[] {
   const attention = needsYou(tiles);
-  const rest = tiles.filter(tile => !tile.attention);
+  const rest = tiles.filter(tile => tile.attention === null);
   const groups = by === 'status' ? statusGroups(rest) : keyedGroups(rest, by);
-  return attention.length === 0
-    ? groups
-    : [{key: NEEDS_YOU, title: 'Needs you', tone: 'err', tiles: attention}, ...groups];
+  if (attention.length === 0) return groups;
+  const needing: TileGroup = {
+    key: NEEDS_YOU,
+    title: NEEDS_YOU_TITLE,
+    count: attention.length,
+    tone: 'err',
+    tiles: attention,
+  };
+  return [needing, ...groups];
 }

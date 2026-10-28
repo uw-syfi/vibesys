@@ -1,11 +1,12 @@
 import {
+  AttentionCard,
   OverviewGroup,
   OverviewTile,
   RailFrame,
   RailItem,
-  ResultChart,
-  ResultChartKey,
-  type SparkPoint,
+  Sparkline,
+  SparklineKey,
+  type SparkStep,
   Stack,
   Text,
 } from '@vibesys/ui';
@@ -14,54 +15,88 @@ import type {ComponentName, GalleryEntry} from './gallery-entry.js';
 
 const noop = (): void => undefined;
 
-const POINTS: readonly SparkPoint[] = [
-  {y: 1.12, mark: 'kept'},
-  {y: 0.96, mark: 'not-better'},
-  {y: 1, mark: 'failed'},
-  {y: 1.31, mark: 'kept'},
-  {y: 1.18, mark: 'not-better'},
-  {y: 1.42, mark: 'kept'},
-  {y: 1.42, mark: 'pending'},
+const STEPS: readonly SparkStep[] = [
+  {x: 0, y: 1.12},
+  {x: 3, y: 1.31},
+  {x: 5, y: 1.42},
 ];
-const LINE = [1.12, 1.12, 1.12, 1.31, 1.31, 1.42, 1.42];
 
-function Chart(props: {
-  readonly points?: readonly SparkPoint[];
-  readonly line?: readonly number[];
-}): JSX.Element {
+function Chart(props: {readonly steps?: readonly SparkStep[]}): JSX.Element {
   return (
-    <ResultChart
-      label="Results of 7 ideas against the base, with the best so far"
-      points={props.points ?? POINTS}
-      line={props.line ?? LINE}
+    <Sparkline
+      label="Best so far over 7 ideas, against the input"
+      steps={props.steps ?? STEPS}
+      from={0}
+      to={7}
       reference={1}
     />
   );
 }
 
+const KEY = (
+  <SparklineKey
+    label="Chart key"
+    items={[
+      {mark: 'line', label: 'best so far'},
+      {mark: 'reference', label: 'input'},
+    ]}
+  />
+);
+
 function Tiles(props: {readonly title: string}): JSX.Element {
   return (
-    <OverviewGroup title={props.title} count={2} tone="live">
+    <OverviewGroup title={props.title} aside={KEY}>
       <OverviewTile
-        title="mpmc"
-        result={{text: '1.42×', tone: 'ok'}}
-        facts="host-a · 8 cores · Codex"
+        title="queue-rs · mpmc"
+        facts="host-a · Oct 17 04:00"
+        result={{text: '1.42×', tone: 'ok', caption: 'best vs input'}}
         chart={<Chart />}
-        figures="7 ideas · $4.20 · 1h 05m"
-        note={null}
         status={{tone: 'live', label: 'running'}}
+        summary="3 ideas working · 7 tried"
         menu={[{id: 'archive', label: 'Archive', press: noop}]}
         press={noop}
       />
       <OverviewTile
+        title="a run whose title is longer than its tile is wide"
+        facts="host-b · Oct 16 03:00"
+        result={null}
+        chart={<Chart steps={[]} />}
+        status={{tone: 'warn', label: 'paused'}}
+        summary="Paused by you · 2 ideas tried"
+        press={noop}
+      />
+      <OverviewTile
         title="spsc"
-        result={{text: '0.91×', tone: 'muted'}}
         facts="host-b"
-        chart={<Chart points={POINTS.slice(0, 3)} line={LINE.slice(0, 3)} />}
-        figures="3 ideas · 12m"
-        note="3 failed in a row"
-        status={{tone: 'err', label: 'failed'}}
-        attention
+        result={{text: '287', tone: 'muted', caption: 'tok/s, best'}}
+        chart={null}
+        status={{tone: 'neutral', label: 'stopped'}}
+        summary="Stopped · 1 idea in 12m"
+        summaryHint={'Stopped · 1 idea in 12m\nThe machine went away during the second round'}
+        press={noop}
+      />
+    </OverviewGroup>
+  );
+}
+
+function Cards(): JSX.Element {
+  return (
+    <OverviewGroup title="Needs you" count={2} tone="err" wide>
+      <AttentionCard
+        title="queue-rs · spsc"
+        facts="host-a · Oct 17 00:00 · 3 ideas · 40m"
+        status={{tone: 'err', label: 'Failed'}}
+        why="All 3 ideas failed, so nothing beat the input."
+        actions={[{text: 'Run again with changes', press: noop}]}
+        menu={[{id: 'archive', label: 'Archive', press: noop}]}
+        press={noop}
+      />
+      <AttentionCard
+        title="queue-rs · mpmc"
+        facts="host-b · Oct 16 21:00 · 2 ideas · best 1.30×"
+        status={{tone: 'warn', label: 'Quiet 32m'}}
+        why="Still running, but nothing has been recorded for 32m. A long benchmark keeps writing output, so this much silence is worth a look, and this sentence runs past three lines to show the clamp."
+        actions={[]}
         press={noop}
       />
     </OverviewGroup>
@@ -70,7 +105,7 @@ function Tiles(props: {readonly title: string}): JSX.Element {
 
 export const OVERVIEW_ENTRIES: Pick<
   Record<ComponentName, GalleryEntry>,
-  'RailFrame' | 'RailItem' | 'ResultChart' | 'ResultChartKey' | 'OverviewTile' | 'OverviewGroup'
+  'RailFrame' | 'RailItem' | 'SparklineKey' | 'OverviewTile' | 'AttentionCard' | 'OverviewGroup'
 > = {
   RailFrame: {
     render: () => (
@@ -105,29 +140,15 @@ export const OVERVIEW_ENTRIES: Pick<
       </Stack>
     ),
   },
-  ResultChart: {
+  SparklineKey: {render: () => KEY},
+  OverviewTile: {render: () => <Tiles title="Running 2 · Paused 1 · Stopped 1" />},
+  AttentionCard: {render: () => <Cards />},
+  OverviewGroup: {
     render: () => (
       <Stack>
-        <Chart />
-        <Chart points={[]} line={[]} />
-        <Chart points={[{y: 1, mark: 'pending'}]} line={[1]} />
+        <Cards />
+        <Tiles title="Running 2 · Paused 1 · Stopped 1" />
       </Stack>
     ),
   },
-  ResultChartKey: {
-    render: () => (
-      <ResultChartKey
-        label="Chart key"
-        items={[
-          {mark: 'kept', label: 'Kept'},
-          {mark: 'not-better', label: 'Not better'},
-          {mark: 'failed', label: 'Failed'},
-          {mark: 'pending', label: 'Running'},
-          {mark: 'line', label: 'Best so far'},
-        ]}
-      />
-    ),
-  },
-  OverviewTile: {render: () => <Tiles title="Tiles" />},
-  OverviewGroup: {render: () => <Tiles title="Running" />},
 };

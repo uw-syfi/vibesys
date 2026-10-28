@@ -86,13 +86,10 @@ export {
 } from './components/narrative.js';
 export {NewBelow} from './components/new-below.js';
 export {
-  type ChartKeyItem,
+  type AttentionAction,
+  AttentionCard,
   OverviewGroup,
   OverviewTile,
-  ResultChart,
-  ResultChartKey,
-  type SparkMark,
-  type SparkPoint,
 } from './components/overview-tiles.js';
 export {type PaneResize, PaneSeparator} from './components/pane-separator.js';
 export {Pane, Panes, type PaneWidth} from './components/panes.js';
@@ -135,7 +132,12 @@ export {
   type SidebarTarget,
 } from './components/sidebar.js';
 export {Slider} from './components/slider.js';
-export {Sparkline, type SparkStep} from './components/sparkline.js';
+export {
+  Sparkline,
+  SparklineKey,
+  type SparklineKeyItem,
+  type SparkStep,
+} from './components/sparkline.js';
 export {type AreaLayer, StackedArea} from './components/stacked-area.js';
 export {type BarSegment, type StackedBar, StackedBars} from './components/stacked-bars.js';
 export {Chip, StatusDot, type StatusTone} from './components/status.js';

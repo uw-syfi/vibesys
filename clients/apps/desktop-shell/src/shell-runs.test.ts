@@ -21,7 +21,7 @@ test('each machine is counted its own runs, and the counts add up to every run l
 });
 
 test('every listed run has a tile in its grouping, however many, and the machines count them all', () => {
-  const GROUPS: readonly GroupBy[] = ['status', 'machine', 'task', 'agent'];
+  const GROUPS: readonly GroupBy[] = ['status', 'machine', 'task'];
   for (const seed of SEEDS) {
     const random = new Seeded(seed);
     const rows = Array.from({length: random.int(90)}, (_, index) => ({
