@@ -80,6 +80,7 @@ if TYPE_CHECKING:
 
     from pydantic import JsonValue
 
+    from server.host_machine_facts import LoginState
     from vs_sim.api import Connection, Listener, Network, ProbeResult, Threads, Worker
     from vs_sim.api.testing import SimThreads
 
@@ -190,6 +191,10 @@ class FakeAgentLogins:
 
     def list(self) -> tuple[AgentLogin, ...]:
         return self.logins
+
+    def states(self, providers: tuple[str, ...], *, within: float) -> dict[str, LoginState]:
+        del within  # Every login here answers at once.
+        return {login.provider: login.state for login in self.logins if login.provider in providers}
 
     def start(self, provider: str) -> LoginStarted | LoginUnavailable:
         self.started.append(provider)

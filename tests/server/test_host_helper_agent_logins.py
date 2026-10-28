@@ -200,6 +200,7 @@ def _adapter(
         ),
         (_COMMANDS if commands is None else commands).get,
         LoginStarter(launcher or FakePipedProcessLauncher(), threads, dict, LoginBounds()),
+        threads,
     )
 
 
