@@ -1038,6 +1038,23 @@ describe('at scale: windowed lists draw a bounded number of rows', () => {
     expect(opened).toEqual(['r9999']);
   });
 
+  test('Gantt: drawn with a row selected anywhere in a long list, it opens with that row drawn', async () => {
+    // The Timeline is drawn again when an idea opens beside it: its row must be there to see.
+    for (const at of [0, 17, 40, 999]) {
+      const rows = Array.from({length: 1000}, (_, index) =>
+        row(`r${index}`, {selected: index === at}),
+      );
+      const {container} = await mount(<Gantt label="Over time" from={0} to={10} rows={rows} />);
+      const options = all(container, '[role="option"]');
+      expect(options.length).toBeLessThan(DRAWN_AT_MOST);
+      const selected = options.filter(option => option.getAttribute('aria-selected') === 'true');
+      expect(selected.map(option => option.getAttribute('aria-posinset'))).toEqual([
+        String(at + 1),
+      ]);
+      expect(selected[0]?.tabIndex).toBe(0);
+    }
+  });
+
   test('Gantt: many rows read as bars without pieces unless asked for the detail', async () => {
     const piece = [{id: 's', start: 0, end: 5, kind: 'solid' as const, label: 's'}];
     const rows = Array.from({length: 200}, (_, index) => row(`r${index}`, {segments: piece}));
