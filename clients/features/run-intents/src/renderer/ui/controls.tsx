@@ -90,33 +90,15 @@ export function IntentControls(props: {
           )}
         />
       ) : null}
-      {props.warning ? (
-        <Text tone="warn" title={props.warning}>
-          Posting order unknown
-        </Text>
-      ) : null}
-      {props.error ? (
-        <Text tone="err" title={props.error}>
-          Updates unavailable
-        </Text>
-      ) : null}
+      <Notices warning={props.warning} error={props.error} entries={props.entries} />
       {props.entries.map(entry => (
-        <Row key={`${entry.source}:${entry.id}`} gap="space-2" wrap>
-          <Text {...(entry.reason ? {title: entry.reason} : {})}>
-            {ACTION_LABELS[entry.action]} · {STATUS_LABELS[entry.status]}
-            {entry.epoch !== null && entry.epoch < props.epoch ? ' · Earlier epoch' : ''}
-            {entry.epoch === props.epoch && entry.status === 'applied' && !entry.current
-              ? ' · Earlier action'
-              : ''}
-          </Text>
-          {entry.status === 'uncertain' ? (
-            <Button
-              {...(props.busy ? {disabledReason: 'Sending'} : {})}
-              press={() => props.retry(entry.id)}
-              text="Retry request"
-            />
-          ) : null}
-        </Row>
+        <RequestRow
+          key={`${entry.source}:${entry.id}`}
+          entry={entry}
+          epoch={props.epoch}
+          busy={props.busy}
+          retry={props.retry}
+        />
       ))}
       <Dialog
         open={props.guidanceOpen && props.actions.includes('steer')}
@@ -141,6 +123,81 @@ export function IntentControls(props: {
       </Dialog>
     </Stack>
   );
+}
+
+/** Why the history may be incomplete or out of order, each with what the host said. */
+function Notices(props: {
+  readonly warning: string | null;
+  readonly error: string | null;
+  readonly entries: readonly IntentRow[];
+}): JSX.Element {
+  const {warning, error} = props;
+  return (
+    <>
+      {warning ? (
+        <Stack gap="space-1">
+          <Text tone="warn">Posting order unknown</Text>
+          <Text variant="small" tone="muted">
+            {warning}
+          </Text>
+        </Stack>
+      ) : null}
+      {error ? (
+        <Stack gap="space-1">
+          <Text tone="err">Updates unavailable</Text>
+          {/* A failed post's reason is already under its row; say it once. */}
+          {props.entries.some(entry => shownReason(entry) === error) ? null : (
+            <Text variant="small" tone="muted">
+              {error}
+            </Text>
+          )}
+        </Stack>
+      ) : null}
+    </>
+  );
+}
+
+/** One request of the history: what it asked, where it got to, and why it stopped there. */
+function RequestRow(props: {
+  readonly entry: IntentRow;
+  readonly epoch: bigint;
+  readonly busy: boolean;
+  readonly retry: (requestId: string) => void;
+}): JSX.Element {
+  const {entry} = props;
+  const reason = shownReason(entry);
+  return (
+    <Stack gap="space-1">
+      <Row gap="space-2" wrap>
+        <Text>
+          {ACTION_LABELS[entry.action]} · {STATUS_LABELS[entry.status]}
+          {entry.epoch !== null && entry.epoch < props.epoch ? ' · Earlier epoch' : ''}
+          {entry.epoch === props.epoch && entry.status === 'applied' && !entry.current
+            ? ' · Earlier action'
+            : ''}
+        </Text>
+        {entry.status === 'uncertain' ? (
+          <Button
+            {...(props.busy ? {disabledReason: 'Sending'} : {})}
+            press={() => props.retry(entry.id)}
+            text="Retry request"
+          />
+        ) : null}
+      </Row>
+      {reason === null ? null : (
+        <Text variant="small" tone="err">
+          {reason}
+        </Text>
+      )}
+    </Stack>
+  );
+}
+
+/** The reason a refused or unconfirmed request shows under its row; null for the rest. */
+function shownReason(entry: IntentRow): string | null {
+  return (entry.status === 'refused' || entry.status === 'uncertain') && entry.reason
+    ? entry.reason
+    : null;
 }
 
 function WriterStatus({
