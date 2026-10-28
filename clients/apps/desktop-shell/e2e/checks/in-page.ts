@@ -646,19 +646,34 @@ function drawnChildren(element: Element): Element[] {
   );
 }
 
-/** The bottom edge, in the window, of what `element` may fill: its nearest clipping ancestor, else the window. */
+/**
+ * The bottom edge, in the window, of what `element` may fill: the top of what is drawn under it in
+ * what holds it (less the gap between them), and never past its nearest clipping ancestor, else
+ * the window.
+ */
 function roomBottom(element: Element): number {
-  for (let up = element.parentElement; up !== null; up = up.parentElement) {
+  let edge = Number.POSITIVE_INFINITY;
+  let inner = element;
+  for (let up = element.parentElement; up !== null; inner = up, up = up.parentElement) {
     const style = getComputedStyle(up);
+    if (edge === Number.POSITIVE_INFINITY) {
+      const bottom = inner.getBoundingClientRect().bottom;
+      const under = drawnChildren(up)
+        .filter(child => !['absolute', 'fixed'].includes(getComputedStyle(child).position))
+        .map(child => child.getBoundingClientRect())
+        .filter(rect => rect.height > 0 && rect.top >= bottom - 0.5)
+        .map(rect => rect.top);
+      if (under.length > 0) edge = Math.min(...under) - (Number.parseFloat(style.rowGap) || 0);
+    }
     if (style.overflowY !== 'visible') {
-      return (
+      const clip =
         up.getBoundingClientRect().bottom -
         Number.parseFloat(style.paddingBottom) -
-        Number.parseFloat(style.borderBottomWidth)
-      );
+        Number.parseFloat(style.borderBottomWidth);
+      return Math.min(edge, clip);
     }
   }
-  return innerHeight;
+  return Math.min(edge, innerHeight);
 }
 
 /** The height of `column` that its drawn children do not use, plus what lies below it in what holds it. */
