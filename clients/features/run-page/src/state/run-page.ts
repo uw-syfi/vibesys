@@ -39,6 +39,7 @@ import {
 } from './reader.js';
 import type {ResumeStatus} from './resume.js';
 import type {RunSummaryState, SummaryReply} from './run-summary.js';
+import {TIMELINE_CONTROLS_DEFAULT, type TimelineControls} from './timeline-controls.js';
 import {receiveTracePage, startTraceHistory, type TraceHistory} from './trace-history.js';
 import {USAGE_CONTROLS_DEFAULT, type UsageControls} from './usage-view.js';
 
@@ -265,6 +266,8 @@ export interface RunPageState {
   readonly ideas: IdeasFilter;
   /** The Usage face's controls. */
   readonly usage: UsageControls;
+  /** The Timeline's range, folding and zoom. */
+  readonly timeline: TimelineControls;
   /** The Ideas face's layout; null until the reader picks one (the face then picks by the run). */
   readonly ideasLayout: IdeasLayout | null;
   /** What the reader opened in the ideas tree (`ideaTree`'s keys). */
@@ -310,6 +313,7 @@ export type RunPageAction =
   | {readonly type: 'select-stream'; readonly streamId: string}
   | {readonly type: 'ideas-filter'; readonly filter: IdeasFilter}
   | {readonly type: 'usage-controls'; readonly controls: UsageControls}
+  | {readonly type: 'timeline-controls'; readonly controls: TimelineControls}
   | {readonly type: 'ideas-layout'; readonly layout: IdeasLayout}
   | {readonly type: 'ideas-open'; readonly key: string; readonly open: boolean}
   | {readonly type: 'ideas-pin'; readonly idea: string | null}
@@ -421,6 +425,7 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     selected: null,
     ideas: IDEAS_FILTER_DEFAULT,
     usage: USAGE_CONTROLS_DEFAULT,
+    timeline: TIMELINE_CONTROLS_DEFAULT,
     ideasLayout: null,
     ideasOpen: new Set(),
     ideasPinned: null,
@@ -1121,6 +1126,8 @@ export function runPageStep(state: RunPageState, action: RunPageAction): RunPage
       return {state: {...state, ideas: action.filter}, requests: []};
     case 'usage-controls':
       return {state: {...state, usage: action.controls}, requests: []};
+    case 'timeline-controls':
+      return {state: {...state, timeline: action.controls}, requests: []};
     case 'ideas-layout':
       return {state: {...state, ideasLayout: action.layout}, requests: []};
     case 'ideas-open':

@@ -27,9 +27,8 @@ import {roleSeries} from './role-series.js';
 import type {Direction, RunModel} from './run-model.js';
 import {duration, formatValue, ratio, TURNED_DOWN} from './span-reading.js';
 import {plain} from './span-words.js';
+import type {ClockSpan, TimelineRange} from './timeline-controls.js';
 
-/** How much of the run the Timeline shows. */
-export type TimelineRange = 'hour' | 'day' | 'all';
 export const TIMELINE_RANGES: readonly {readonly value: TimelineRange; readonly label: string}[] = [
   {value: 'hour', label: 'Last hour'},
   {value: 'day', label: 'Last day'},
@@ -88,12 +87,6 @@ export interface TimelineRow {
 interface TimelineTick {
   readonly at: number;
   readonly label: string;
-}
-
-/** A part of the run clock, in seconds. */
-export interface ClockSpan {
-  readonly from: number;
-  readonly to: number;
 }
 
 export interface TimelineRows {

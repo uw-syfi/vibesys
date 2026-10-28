@@ -116,6 +116,7 @@ function uiStep(state: RunPageState, action: RunPageAction): RunPageState {
     case 'view':
     case 'ideas-filter':
     case 'usage-controls':
+    case 'timeline-controls':
     case 'ideas-layout':
     case 'ideas-open':
     case 'ideas-pin':

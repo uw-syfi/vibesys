@@ -28,6 +28,8 @@ import {
   scrubberView,
   skeletonScreenState,
 } from '../../state/index.js';
+import type {TimelineControls} from '../../state/timeline-controls.js';
+import {TIMELINE_RANGES} from '../../state/timeline-rows.js';
 import {startGatewayRun} from '../index.js';
 
 const SEED = {
@@ -862,5 +864,31 @@ test('property: expiring or replayed lock hints cannot roll back committed write
       }
     }),
     {numRuns: 40, seed: 341808, examples: [[1, 0]]},
+  );
+});
+
+test('regression: any Timeline range, folding and zoom a person sets reaches the screen', () => {
+  // The machine passed only the presentation actions it listed, and dropped the Timeline's.
+  const controls: fc.Arbitrary<TimelineControls> = fc.record({
+    range: fc.constantFrom(...TIMELINE_RANGES.map(each => each.value)),
+    expanded: fc.boolean(),
+    looked: fc.option(
+      fc
+        .tuple(fc.nat(10_000), fc.integer({min: 1, max: 10_000}))
+        .map(([from, length]) => ({from, to: from + length})),
+      {nil: null},
+    ),
+  });
+  fc.assert(
+    fc.property(fc.array(controls, {minLength: 1, maxLength: 4}), changes => {
+      let snapshot = getInitialSnapshot(gatewayRunMachine, {seed: SEED});
+      for (const change of changes) {
+        snapshot = getNextSnapshot(gatewayRunMachine, snapshot, {
+          type: 'ui',
+          action: {type: 'timeline-controls', controls: change},
+        });
+        expect(snapshot.context.ui.timeline).toEqual(change);
+      }
+    }),
   );
 });

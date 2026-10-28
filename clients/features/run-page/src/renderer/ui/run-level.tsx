@@ -242,6 +242,17 @@ export function IdeasPane(props: {
   );
 }
 
+/** The Timeline's controls as the page keeps them, so every Timeline of the run shares them. */
+function timelineControls(
+  state: RunPageState,
+  dispatch: Dispatch,
+): Pick<TimelineViewProps, 'controls' | 'change'> {
+  return {
+    controls: state.timeline,
+    change: controls => dispatch({type: 'timeline-controls', controls}),
+  };
+}
+
 /** Where a Now row jumps: its live step, its idea, or its agent. */
 function nowZoom(item: NowItem): ZoomEvent {
   switch (item.open.kind) {
@@ -311,7 +322,12 @@ function runFace(
   }
   switch (mode) {
     case 'timeline': {
-      const view: TimelineViewProps = {...base, idea: null};
+      const view: TimelineViewProps = {
+        ...base,
+        idea: null,
+        selected: null,
+        ...timelineControls(state, dispatch),
+      };
       return {header: timelineHeader(view), body: <TimelineView {...view} />};
     }
     case 'agents': {

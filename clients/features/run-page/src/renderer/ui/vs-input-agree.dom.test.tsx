@@ -12,6 +12,7 @@ import {createRoot} from 'react-dom/client';
 import {IDEAS_FILTER_DEFAULT} from '../../state/ideas-view.js';
 import {EMPTY_TRACE_LOG, traceStep} from '../../state/live.js';
 import {createRunReader} from '../../state/run-model.js';
+import {TIMELINE_CONTROLS_DEFAULT} from '../../state/timeline-controls.js';
 import {IdeasTable} from './ideas-table.js';
 import {TimelineView} from './views/timeline/timeline-view.js';
 
@@ -89,7 +90,12 @@ test('over every fixture run an idea has the same `vs input` figure on the Ideas
       '.vs-pickrow-figure',
     );
     const timeline = await figuresOf(
-      <TimelineView {...base} idea={null} />,
+      <TimelineView
+        {...base}
+        idea={null}
+        controls={TIMELINE_CONTROLS_DEFAULT}
+        change={() => undefined}
+      />,
       '[aria-label="Ideas on the timeline"] [role="option"]',
       '.vs-gantt-name',
       '.vs-gantt-figure',
