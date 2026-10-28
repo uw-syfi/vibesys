@@ -237,6 +237,9 @@
   color: var(--muted);
   white-space: nowrap;
 }
+.vs-table td[data-nowrap] {
+  white-space: nowrap;
+}
 .vs-table [data-align="end"] {
   text-align: right;
 }

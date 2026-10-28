@@ -177,6 +177,39 @@
   color: var(--text);
   margin-bottom: var(--space-1);
 }
+.vs-field[data-row] {
+  display: grid;
+  grid-template-columns: var(--column-label) minmax(0, var(--column-main));
+  column-gap: var(--space-4);
+  row-gap: var(--space-1);
+  align-items: baseline;
+}
+.vs-field[data-row] > .vs-field-label {
+  margin-bottom: 0;
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  font-weight: var(--text-body-weight);
+  color: var(--muted);
+}
+.vs-field[data-row] > :not(.vs-field-label) {
+  grid-column: 2;
+}
+dl.vs-field {
+  margin: 0;
+}
+.vs-field-value {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  margin: 0;
+}
+@media (max-width: 720px) {
+  .vs-field[data-row] {
+    display: flex;
+    align-items: stretch;
+  }
+}
 .vs-field-label[data-hidden] {
   position: absolute;
   width: var(--hairline);

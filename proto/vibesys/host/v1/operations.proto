@@ -304,6 +304,11 @@ message MachineDescription {
   }];
   map<string, string> harness_cli_names = 5;
   RunCounts runs = 6 [(buf.validate.field) = {required: true}];
+  // Each of harness_clis by whether its CLI says it is signed in; a helper that predates it sends none.
+  map<string, AgentLoginState> harness_logins = 7 [(buf.validate.field).map.values.enum = {
+    defined_only: true
+    not_in: [0]
+  }];
 }
 
 message RunCounts {

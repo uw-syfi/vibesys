@@ -16,14 +16,9 @@ const INERT_BY_DESIGN: readonly {
   readonly why: string;
 }[] = [
   {
-    page: /^project$/,
+    page: /^pick projects$/,
     name: /^Folder on /,
     why: 'a path field that offers completions as it is typed in; "the folder field completes paths" drives it',
-  },
-  {
-    page: /^where/,
-    name: /^Same machine/,
-    why: 'the place measured on until another is chosen; it is already the chosen one',
   },
 ];
 

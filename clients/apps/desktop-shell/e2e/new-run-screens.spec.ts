@@ -6,7 +6,7 @@ import {main, NEW_RUN_PAGES, openAt} from './new-run-flow.js';
 import {SEED} from './world.js';
 
 /**
- * Every page of the guided New run, at the three window widths the app is used at: the layout
+ * Every page of New run, at the three window widths the app is used at: the layout
  * checks (controls in a row align, columns start at one top, nothing overflows or overlaps, and
  * the rest) hold on each. The width is the page's own `innerWidth`, read back, never assumed.
  * `SCREENS_DIR=<dir>` writes each page's screenshot (the page only) and a contact sheet.
@@ -37,11 +37,11 @@ for (const theme of THEMES) {
         );
         await expect(main(page).getByRole('heading', {level: 1})).toBeVisible();
         // The roles come with the first check of the run's inputs; the page is checked with them.
-        if (each.agent !== undefined && each.step === 'agent') {
+        if (each.agent !== undefined) {
           await expect(main(page).getByLabel('Judge model')).toBeVisible();
         }
         // The goal of the user's own task is read from the machine; the page is checked with it.
-        if (each.step === 'goal' && each.answers.from === 'project') {
+        if (each.step === 'review' && each.answers.from === 'project') {
           await expect(main(page)).toContainText('Higher is better');
         }
         expect(await screenCheck(page)).toEqual([]);

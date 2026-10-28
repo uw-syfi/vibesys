@@ -15,13 +15,14 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import StrEnum
-from functools import cache
+from functools import cache, partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from server.host_envelope import HelperReplyBase, HelperRequestBase
+from server.host_machine_facts import LoginState
 from vs_sim.api import ProcessTimeoutError
 
 if TYPE_CHECKING:
@@ -32,15 +33,6 @@ if TYPE_CHECKING:
 
 _Line = Annotated[str, StringConstraints(max_length=300, pattern=r"^[^\n\r]*$")]
 _Name = Annotated[str, StringConstraints(min_length=1, max_length=128)]
-
-
-class LoginState(StrEnum):
-    """Whether a harness is signed in, as far as its own tooling can say."""
-
-    SIGNED_IN = "signed_in"
-    SIGNED_OUT = "signed_out"
-    UNKNOWN = "unknown"
-    """Not installed, or the CLI offers no cheap check: not a problem to report as one."""
 
 
 class AccountLogin(BaseModel):
@@ -229,14 +221,17 @@ class AgentLibraryLogins:
         login_of: Callable[[str], ProviderLogin],
         command_of: Callable[[str], LoginCommand | None],
         starter: LoginStarter,
+        threads: Threads,
     ) -> None:
         """Bind how a CLI is probed, which command signs it in, and how that command is run.
 
-        ``provider_login_here`` and ``provider_login_command_here`` on a real host.
+        ``provider_login_here`` and ``provider_login_command_here`` on a real host; ``threads``
+        probe several CLIs at once and give ``states`` its clock.
         """
         self._login_of = login_of
         self._command_of = command_of
         self._starter = starter
+        self._threads = threads
 
     def providers(self) -> tuple[str, ...]:
         """The providers the vetted harnesses come from, in offer order."""
@@ -245,6 +240,31 @@ class AgentLibraryLogins:
     def list(self) -> tuple[AgentLogin, ...]:
         """Each provider's CLI probed for whether it is installed and signed in, and how."""
         return tuple(self._login(provider) for provider in self.providers())
+
+    def states(self, providers: tuple[str, ...], *, within: float) -> dict[str, LoginState]:
+        """Whether each of ``providers``' CLIs is signed in, for those answering within ``within``.
+
+        Every CLI is probed at once, each on its own worker; one that has not answered when
+        ``within`` seconds have passed is left out, and its probe ends on its own bound in the
+        background. A probe that fails is left out too. Never raises.
+        """
+        found: dict[str, LoginState] = {}
+        lock = self._threads.lock()
+
+        def probe(provider: str) -> None:
+            state = self._login(provider).state
+            with lock:
+                found[provider] = state
+
+        workers = [
+            self._threads.spawn(partial(probe, provider), name=f"login-probe-{provider}")
+            for provider in providers
+        ]
+        deadline = self._threads.now() + within
+        for worker in workers:
+            worker.join(max(0.0, deadline - self._threads.now()))
+        with lock:
+            return dict(found)
 
     def start(self, provider: str) -> LoginStarted | LoginUnavailable:
         """Run the harness's own login command, or say why it cannot be run from here.
@@ -512,6 +532,7 @@ def host_logins(processes: PipedProcessLauncher, threads: Threads) -> AgentLibra
         provider_login_here,
         provider_login_command_here,
         LoginStarter(processes, threads, launch_environment, LoginBounds()),
+        threads,
     )
 
 

@@ -57,8 +57,7 @@ for (const name of FIXTURE_NAMES) {
     for (const machine of onDashboard.keys()) expect(machines).toContain(machine);
 
     await nav(page).getByRole('button', {name: 'New', exact: true}).click();
-    await page.getByRole('radio', {name: /Your project/}).check();
-    await page.getByRole('button', {name: 'Continue'}).click();
+    await page.getByRole('button', {name: 'Open a folder…'}).click();
     const offered = await page
       .getByRole('combobox', {name: 'Machine'})
       .locator('option')

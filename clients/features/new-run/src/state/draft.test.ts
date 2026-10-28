@@ -25,20 +25,18 @@ const FORM: Form = {
 function draft(random: Seeded): Draft {
   const answers: Answers = random.pick<Answers>([
     {...NO_ANSWERS, from: 'project', project: {source: 'recent', path: '/p/a'}, task: 'mpmc'},
-    {...NO_ANSWERS, from: 'example', domain: 'llm-serving', model: 'Llama 3 8B Instruct'},
+    {...NO_ANSWERS, from: 'example'},
     {
       ...NO_ANSWERS,
       from: 'example',
-      domain: 'data-structures',
-      structure: 'data-structures/stack',
-      workload: 'spsc',
-      goalSeen: true,
+      entry: {example: 'data-structures/stack', task: 'spsc'},
+      project: {source: 'folder', path: '/p/b'},
     },
   ]);
   return {
     machine: random.pick(['local', 'ssh:host-a']),
     answers,
-    at: random.pick(['start', 'goal', 'review'] as const),
+    at: random.pick(['pick', 'review'] as const),
     agent: random.pick([null, FORM.agent]),
     budget: random.pick([DEFAULT_BUDGET, FORM.budget]),
     measure: random.pick<MeasureTarget>([
@@ -73,6 +71,14 @@ describe('the draft a window keeps', () => {
     expect(parseDraft(broken({budget: {rounds: 0, timeLimitS: null, results: 'keep'}}))).toBeNull();
     expect(parseDraft(broken({answers: {...NO_ANSWERS, from: 'sideways'}}))).toBeNull();
     expect(parseDraft(broken({answers: {from: 'example'}}))).toBeNull();
+    // A draft an older window kept, from before the form had two steps, is no draft.
+    expect(
+      parseDraft(broken({answers: {...NO_ANSWERS, from: 'example', domain: null}, at: 'pick'})),
+    ).toBeNull();
+    expect(parseDraft(broken({at: 'goal'}))).toBeNull();
+    expect(
+      parseDraft(broken({answers: {...NO_ANSWERS, from: 'example', entry: {example: 'x'}}})),
+    ).toBeNull();
     expect(parseDraft(broken({agent: {provider: 'claude'}}))).toBeNull();
   });
 
@@ -80,14 +86,12 @@ describe('the draft a window keeps', () => {
     const entries = entriesOf(exampleCatalogue);
     expect(draftOf(startFlow(FORM))).toBeNull();
     let flow = startFlow(FORM);
-    for (const change of [
-      {kind: 'from', from: 'example'},
-      {kind: 'domain', domain: 'data-structures'},
-      {kind: 'structure', example: 'data-structures/stack'},
-      {kind: 'workload', task: 'mpmc'},
-    ] as const) {
-      flow = flowAnswer(flow, change, true, entries);
-    }
+    flow = flowAnswer(
+      flow,
+      {kind: 'entry', example: 'data-structures/stack', task: 'mpmc'},
+      true,
+      entries,
+    );
     const kept = draftOf(flow);
     expect(kept).not.toBeNull();
     if (kept === null) return;
@@ -98,14 +102,12 @@ describe('the draft a window keeps', () => {
   test('where an example is copied to is kept with the draft', () => {
     const entries = entriesOf(exampleCatalogue);
     let flow = startFlow(FORM);
-    for (const change of [
-      {kind: 'from', from: 'example'},
-      {kind: 'domain', domain: 'data-structures'},
-      {kind: 'structure', example: 'data-structures/stack'},
-      {kind: 'workload', task: 'mpmc'},
-    ] as const) {
-      flow = flowAnswer(flow, change, true, entries);
-    }
+    flow = flowAnswer(
+      flow,
+      {kind: 'entry', example: 'data-structures/stack', task: 'mpmc'},
+      true,
+      entries,
+    );
     const moved = {
       ...flow,
       form: {

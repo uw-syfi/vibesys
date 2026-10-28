@@ -41,6 +41,8 @@ export function Field(props: {
   readonly errorHint?: string;
   /** Names the control to assistive technology and no one else, for a control in a toolbar row. */
   readonly hideLabel?: boolean;
+  /** The label beside the control instead of above it, for a form read as rows (a review). */
+  readonly row?: boolean;
   readonly children: ReactNode;
 }): JSX.Element {
   const id = useId();
@@ -50,7 +52,7 @@ export function Field(props: {
   const labelId = `${id}-label`;
   const wiring: FieldWiring = {id, labelId, describedBy, invalid: errorId !== undefined};
   return (
-    <div className="vs-field">
+    <div className="vs-field" data-row={props.row === true || undefined}>
       <label
         className="vs-field-label"
         id={labelId}
@@ -72,6 +74,27 @@ export function Field(props: {
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * A term beside what it says, laid out as a `Field` with `row` but around no one control: a value,
+ * a value and a button, or a control that names itself. It is a description list, not a
+ * `<label>`, so it points at nothing it cannot focus.
+ */
+export function LabeledRow(props: {
+  readonly label: string;
+  readonly help?: string;
+  readonly children: ReactNode;
+}): JSX.Element {
+  return (
+    <dl className="vs-field" data-row>
+      <dt className="vs-field-label">{props.label}</dt>
+      <dd className="vs-field-value">
+        {props.children}
+        {props.help === undefined ? null : <p className="vs-help">{props.help}</p>}
+      </dd>
+    </dl>
   );
 }
 

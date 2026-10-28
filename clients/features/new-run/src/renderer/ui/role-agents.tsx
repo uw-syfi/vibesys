@@ -1,6 +1,6 @@
 /**
- * "Use a different agent for a role", on the Agent page and closed until it is opened (or while a
- * role already has its own agent). Each role is one grouped model select (maker, then generation
+ * "Use a different agent for a role", in Review's Agent rows, closed until it is opened (or while
+ * a role already has its own agent). Each role is one grouped model select (maker, then generation
  * or family, then model) and a harness select; a role stays on the run's agent until changed.
  */
 import type {HarnessOffer} from '@vibesys/ipc';
@@ -20,6 +20,7 @@ import {
   roleModels,
   roleProviders,
   roleSummary,
+  rolesWaitWords,
 } from '../../state/index.js';
 import type {CardProps} from './card-props.js';
 import {NEEDS_UPDATE, roleAgentsChanged, rolesView} from './view.js';
@@ -118,9 +119,9 @@ export function RoleAgents(
   if (!helperOffers(context.helper, machine, 'run_role_agents')) {
     return <RoleStatus status={context.helper?.for === machine ? NEEDS_UPDATE : CHECKING} />;
   }
-  if (view.kind !== 'ready') {
-    return <RoleStatus status={view.kind === 'unsupported' ? NEEDS_UPDATE : CHECKING} />;
-  }
+  if (view.kind === 'unsupported') return <RoleStatus status={NEEDS_UPDATE} />;
+  if (view.kind === 'waiting') return <RoleStatus status={rolesWaitWords(view.on).short} />;
+  if (view.kind === 'pending') return <RoleStatus status={CHECKING} />;
   return (
     <Collapsible
       label={HEADING}

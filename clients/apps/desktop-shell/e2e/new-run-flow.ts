@@ -1,10 +1,10 @@
 /**
- * Driving the guided New run: choosing an answer, going on, and opening a page directly. A page is
- * opened by giving the window the draft that would have brought it there (the draft is the
- * window's own storage, which the page reads as it starts), so a check of every page does not
- * click through the pages before it.
+ * Driving New run: choosing an answer, going on, and opening a page directly. A page is opened by
+ * giving the window the draft that would have brought it there (the draft is the window's own
+ * storage, which the page reads as it starts), so a check of every page does not click through the
+ * pages before it.
  */
-import {expect, type Page} from '@playwright/test';
+import {expect, type Locator, type Page} from '@playwright/test';
 import {
   type AgentChoice,
   type Answers,
@@ -26,32 +26,24 @@ export interface NewRunPage {
   readonly agent?: AgentChoice;
   /** The machine the form is for, when not the world's own. */
   readonly machine?: string;
+  /** What the machine says of each harness CLI's login, when it says anything. */
+  readonly logins?: Readonly<Record<string, string>>;
 }
 
-const EXAMPLE = {...NO_ANSWERS, from: 'example' as const};
-const LLM = {
-  ...EXAMPLE,
-  domain: 'llm-serving' as const,
-  model: 'Qwen3.5 9B',
-  hardware: 'amd|AMD MI210|1',
+const EXAMPLES: Answers = {...NO_ANSWERS, from: 'example'};
+const LLM: Answers = {
+  ...EXAMPLES,
+  entry: {example: 'model-serving/qwen3.5-9b-mi210', task: 'default'},
 };
-const OLMO = {
-  ...EXAMPLE,
-  domain: 'llm-serving' as const,
-  model: 'Olmo Hybrid 7B',
-  hardware: 'nvidia|NVIDIA L4|1',
+const STRUCTURE: Answers = {
+  ...EXAMPLES,
+  entry: {example: 'data-structures/stack', task: 'mpmc'},
 };
-const STRUCTURE = {
-  ...EXAMPLE,
-  domain: 'data-structures' as const,
-  structure: 'data-structures/stack',
-  workload: 'mpmc',
-};
-const DATABASE = {...EXAMPLE, domain: 'databases' as const, example: 'database/kv-store'};
-const OWN = {
-  ...NO_ANSWERS,
-  from: 'project' as const,
-  project: {source: 'recent' as const, path: '/home/me/projects/queue-rs'},
+const DATABASE: Answers = {...EXAMPLES, entry: {example: 'database/kv-store', task: 'default'}};
+const PROJECTS: Answers = {...NO_ANSWERS, from: 'project'};
+const OWN: Answers = {
+  ...PROJECTS,
+  project: {source: 'recent', path: '/home/me/projects/queue-rs'},
   task: 'mpmc',
 };
 
@@ -68,39 +60,26 @@ const JUDGE_ON_SONNET: AgentChoice = {
 };
 
 export const NEW_RUN_PAGES: readonly NewRunPage[] = [
-  {name: 'start', step: 'start', answers: NO_ANSWERS},
-  {name: 'domain', step: 'domain', answers: EXAMPLE},
-  {name: 'model', step: 'model', answers: {...EXAMPLE, domain: 'llm-serving'}},
-  {name: 'hardware', step: 'hardware', answers: {...LLM, hardware: null}},
-  {name: 'variant', step: 'variant', answers: OLMO},
-  {name: 'structure', step: 'structure', answers: {...EXAMPLE, domain: 'data-structures'}},
-  {name: 'workload', step: 'workload', answers: {...STRUCTURE, workload: null}},
-  {name: 'example', step: 'example', answers: {...EXAMPLE, domain: 'databases'}},
-  {name: 'goal LLM', step: 'goal', answers: LLM},
-  {name: 'goal data structure', step: 'goal', answers: STRUCTURE},
-  {name: 'goal database', step: 'goal', answers: DATABASE},
-  {name: 'where', step: 'where', answers: {...LLM, goalSeen: true}},
-  {name: 'where clusters', step: 'where', answers: {...LLM, goalSeen: true}, machine: 'local'},
-  {name: 'agent', step: 'agent', answers: {...LLM, goalSeen: true}},
-  {name: 'agent project', step: 'agent', answers: {...OWN, goalSeen: true}},
-  {
-    name: 'agent roles',
-    step: 'agent',
-    answers: {...OWN, goalSeen: true},
-    agent: JUDGE_ON_SONNET,
-  },
-  {name: 'review', step: 'review', answers: {...LLM, goalSeen: true}},
-  {
-    name: 'review roles',
-    step: 'review',
-    answers: {...OWN, goalSeen: true},
-    agent: JUDGE_ON_SONNET,
-  },
-  {name: 'project', step: 'project', answers: {...NO_ANSWERS, from: 'project'}},
-  {name: 'task', step: 'task', answers: {...OWN, task: null}},
-  {name: 'goal project', step: 'goal', answers: OWN},
-  {name: 'review project', step: 'review', answers: {...OWN, goalSeen: true}},
+  {name: 'pick', step: 'pick', answers: NO_ANSWERS},
+  {name: 'pick examples', step: 'pick', answers: EXAMPLES},
+  {name: 'pick example chosen', step: 'pick', answers: STRUCTURE},
+  {name: 'pick projects', step: 'pick', answers: PROJECTS},
+  {name: 'pick project task', step: 'pick', answers: {...OWN, task: null}},
+  {name: 'review LLM', step: 'review', answers: LLM},
+  {name: 'review LLM clusters', step: 'review', answers: LLM, machine: 'local'},
+  {name: 'review data structure', step: 'review', answers: STRUCTURE},
+  {name: 'review database', step: 'review', answers: DATABASE},
+  {name: 'review project', step: 'review', answers: OWN},
+  {name: 'review roles', step: 'review', answers: OWN, agent: JUDGE_ON_SONNET},
+  {name: 'review signed out', step: 'review', answers: OWN, logins: {claude: 'signed_out'}},
 ];
+
+/** `seed` with the machine saying what `at` says of its harness CLIs' logins. */
+function withLogins(seed: FakeBridgeSeed, at: NewRunPage): FakeBridgeSeed {
+  if (at.logins === undefined || seed.newRun === undefined) return seed;
+  const machine = {...(seed.newRun.machine as object), harness_logins: at.logins};
+  return {...seed, newRun: {...seed.newRun, machine}};
+}
 
 /** The draft that has `answers` made and `step` shown, on the machine the world's runs are on. */
 function draftAt(page: NewRunPage, machine = 'ssh:host-b'): Draft {
@@ -127,7 +106,7 @@ export async function openAt(
     ([key, value]) => window.sessionStorage.setItem(key as string, value as string),
     [DRAFT_KEY, text],
   );
-  await openNewRun(page, seed);
+  await openNewRun(page, withLogins(seed, at));
   await expect(page.getByRole('navigation', {name: 'New run steps'})).toBeVisible();
   // The bundled fonts swap in after first paint (`font-display: swap`), and a width measured
   // before the swap differs by a pixel from one measured after it. The first layout has started
@@ -151,4 +130,20 @@ export async function choose(page: Page, group: string, name: string | RegExp): 
 /** Press Continue (or `label`) and wait for the page after it. */
 export async function proceed(page: Page, label = 'Continue'): Promise<void> {
   await main(page).getByRole('button', {name: label, exact: true}).click();
+}
+
+/** The examples table's row of `example`'s `task` (`default` when not given). */
+export function exampleRow(page: Page, example: string, task = 'default'): Locator {
+  const rows = main(page)
+    .getByRole('row')
+    .filter({has: page.getByText(example, {exact: true})});
+  return task === 'default' ? rows : rows.filter({has: page.getByText(task, {exact: true})});
+}
+
+/** On the pick page, pick `example`'s `task` and go on to Review. */
+export async function pickExample(page: Page, example: string, task = 'default'): Promise<void> {
+  await choose(page, 'Start from', 'Examples');
+  await exampleRow(page, example, task).click();
+  await proceed(page);
+  await expect(question(page, 'Review and start')).toBeVisible();
 }

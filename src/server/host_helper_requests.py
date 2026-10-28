@@ -173,6 +173,7 @@ if TYPE_CHECKING:
         TaskList,
     )
     from server.host_helper_readers import Readers
+    from server.host_machine_facts import LoginState
     from server.host_operation_reads import HostReadSource
     from server.host_operation_types_generated import RegistryReadRequest, UnmigratedHelperRequest
     from server.host_preflight import PreflightReport, RoleOption, RunOptions
@@ -433,6 +434,13 @@ class AgentLogins(Protocol):
 
     def list(self) -> tuple[AgentLogin, ...]:
         """Whether each harness is installed and signed in, and how."""
+        ...
+
+    def states(self, providers: tuple[str, ...], *, within: float) -> dict[str, LoginState]:
+        """Whether each of ``providers``' CLIs is signed in, for those answering within ``within``.
+
+        A CLI that has not answered in ``within`` seconds is left out; never raises.
+        """
         ...
 
     def start(self, provider: str) -> LoginStarted | LoginUnavailable:
@@ -987,9 +995,20 @@ def _machine_reply(
             return CheckoutInspectReply(request_id=request_id, inspection=inspection)
 
 
+LOGIN_WAIT_SECONDS: Final = 5.0
+"""How long ``machine.describe`` waits for the installed CLIs' logins, all probed at once.
+
+A CLI's version and status commands answer in about a second when it is healthy. Five seconds
+is the bound the machine's other probes each get (``PROBE_TIMEOUT_SECONDS``); with those few
+probes before it, describe stays well inside the client's 25 s cap even when a CLI hangs.
+"""
+
+
 def describe_machine(host: HelperHost) -> MachineDescription:
-    """What this machine offers runs: its checkout, hardware, Docker, harness CLIs and runs."""
+    """What this machine offers runs: its checkout, hardware, Docker, harness CLIs, logins and runs."""
     harness_clis = host.machine.harness_clis()
+    # A CLI that hangs is left out, which the app reads as "cannot tell".
+    logins = host.logins.states(harness_clis, within=LOGIN_WAIT_SECONDS)
     names = {
         option.provider: option.display.provider_name
         for option in host.harnesses()
@@ -1004,6 +1023,7 @@ def describe_machine(host: HelperHost) -> MachineDescription:
             provider: names[provider] for provider in harness_clis if provider in names
         },
         runs=run_counts(host.registry.read(), host.clock.now(), host.timezone),
+        harness_logins=logins,
     )
 
 

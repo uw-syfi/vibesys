@@ -1,12 +1,13 @@
-"""What a machine reports about itself: hardware, Docker, the checkout and its runs.
+"""What a machine reports about itself: hardware, Docker, harness logins, the checkout and its runs.
 
 The facts ``machine.describe`` carries (``server.host_api`` re-exports them): a closed
-``Accelerator`` set, ``Gpu`` and ``Hardware``, Docker's two answers, the helper's checkout
-and the run counts. Pydantic and the standard library only, so the host helper's light import
-path holds.
+``Accelerator`` set, ``Gpu`` and ``Hardware``, Docker's two answers, each harness's
+``LoginState``, the helper's checkout and the run counts. Pydantic and the standard library
+only, so the host helper's light import path holds.
 
 Public surface: ``Accelerator``, ``Gpu``, ``Hardware``, ``DockerReachable``,
-``DockerUnreachable``, ``MachineCheckout``, ``RunCounts``, ``MachineDescription``.
+``DockerUnreachable``, ``LoginState``, ``MachineCheckout``, ``RunCounts``,
+``MachineDescription``.
 """
 
 from __future__ import annotations
@@ -24,6 +25,15 @@ class Accelerator(StrEnum):
     CUDA = "cuda"
     ROCM = "rocm"
     METAL = "metal"
+
+
+class LoginState(StrEnum):
+    """Whether a harness is signed in, as far as its own tooling can say."""
+
+    SIGNED_IN = "signed_in"
+    SIGNED_OUT = "signed_out"
+    UNKNOWN = "unknown"
+    """Not installed, or the CLI offers no cheap check: not a problem to report as one."""
 
 
 class Gpu(BaseModel):
@@ -108,3 +118,6 @@ class MachineDescription(BaseModel):
     """Each of ``harness_clis`` as people call it ("Claude Code"), as agentshim names it; a
     helper that predates it sends none and a client shows the provider id."""
     runs: RunCounts
+    harness_logins: dict[str, LoginState] = Field(default_factory=dict)
+    """Each of ``harness_clis`` by whether its CLI says it is signed in (the probe
+    ``agent_logins.list`` runs); a helper that predates it sends none."""

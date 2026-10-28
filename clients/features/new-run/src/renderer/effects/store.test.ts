@@ -166,7 +166,7 @@ test('Start says why it waits: inputs missing, being checked, or an item to fix'
     'advanced',
     'fail',
   ]);
-  expect(startBlocked(store.getState())).toBe('Fix the items marked above to start.');
+  expect(startBlocked(store.getState())).toBe('Fix the check under Before you start.');
 });
 
 test('a task missing the build its evaluator requires fails Evaluator, fixed by checking again', async () => {
@@ -216,7 +216,7 @@ test('a task missing the build its evaluator requires fails Evaluator, fixed by 
     detail,
     fix: {kind: 'recheck'},
   });
-  expect(startBlocked(store.getState())).toBe('Fix the items marked above to start.');
+  expect(startBlocked(store.getState())).toBe('Fix the check under Before you start.');
 });
 
 test('a helper older than New run is never asked to check or start, and Start says why', async () => {
@@ -465,7 +465,7 @@ test('a dirty project shows the host detail and the host fix, with no app-writte
     detail: '2 uncommitted path(s) in the project',
   });
   expect(item?.detail).not.toContain('Commit or discard');
-  expect(startBlocked(state)).toBe('Fix the items marked above to start.');
+  expect(startBlocked(state)).toBe('Fix the check under Before you start.');
 });
 
 test('a project the host accepts is startable from New run', async () => {
@@ -610,7 +610,7 @@ test('a search without rounds fails the settings in words that name the Rounds c
     detail:
       'This search does not take a number of rounds. Clear Rounds, or change the search in Extra arguments, then check again.',
   });
-  expect(startBlocked(state)).toBe('Fix the items marked above to start.');
+  expect(startBlocked(state)).toBe('Fix the check under Before you start.');
 });
 
 test('rejected extra arguments are worded for Extra arguments, with the parser’s message as a detail', async () => {
@@ -949,14 +949,11 @@ async function chooseExample(
     started: () => undefined,
   });
   await settle();
-  for (const change of [
-    {kind: 'from', from: 'example'},
-    {kind: 'domain', domain: 'data-structures'},
-    {kind: 'structure', example: 'data-structures/stack'},
-    {kind: 'workload', task: 'spsc'},
-  ] as const) {
-    created.store.dispatch({type: 'answer', change, advance: true});
-  }
+  created.store.dispatch({
+    type: 'answer',
+    change: {kind: 'entry', example: 'data-structures/stack', task: 'spsc'},
+    advance: true,
+  });
   await settle();
   return {...created, clock};
 }
@@ -976,7 +973,7 @@ for (const {name, answer, fix} of DESTINATIONS) {
     }
     if (fix === 'use_created') expect(item?.fix).toMatchObject({path: '/made/stack'});
     expect(store.getState().context.problem).toBeNull();
-    expect(startBlocked(store.getState())).toBe('Fix the items marked above to start.');
+    expect(startBlocked(store.getState())).toBe('Fix the check under Before you start.');
     // What the screen says never has a home directory in it.
     expect(JSON.stringify(readiness(store.getState()))).not.toMatch(/\/home\/|\/Users\//);
   });
@@ -1019,6 +1016,57 @@ test('using the example project that is already there makes it the run project w
   expect(copied).toEqual([]);
   expect(asked).toContain('preflight');
   expect(projectItem(store)).toBeUndefined();
+});
+
+test("an example's roles wait for its project and say so, then come with the first check", async () => {
+  const roles = ['multi-orchestrator', 'multi-judge'];
+  const {store, clock} = await chooseExample(FREE, {
+    helperFeatures: () =>
+      ok([...REQUIRED_HELPER_FEATURES, 'run_roles', 'example_destination'] as HelperFeature[]),
+    preflight: () => ok({kind: 'offered' as const, value: {checks: [], roles, backend: null}}),
+  });
+  // Nothing checks the inputs of a project not made yet: the roles say what they wait for.
+  expect(rolesView(store.getState().context)).toEqual({kind: 'waiting', on: 'project'});
+  const fix = projectItem(store)?.fix;
+  if (fix?.kind !== 'create_from_example') throw new Error('expected the create fix');
+  store.dispatch({type: 'fix', fix});
+  await settle();
+  clock.runDue();
+  await settle();
+  expect(rolesView(store.getState().context)).toEqual({kind: 'ready', roles});
+});
+
+test('a machine with no VibeSys checkout says so before the inputs exist, with the fix in Machines', async () => {
+  const describe: NewRunBridge['describeMachine'] = () =>
+    ok({
+      kind: 'offered' as const,
+      value: {
+        checkout: null,
+        hardware: {cpu_cores: 8, gpus: [], accelerator: 'cpu' as const},
+        docker: {reachable: true as const, version: '27'},
+        harness_clis: ['claude'],
+        runs: {live: 0, ended_today: 0},
+      },
+    });
+  const {store, clock} = await chooseExample(FREE, {describeMachine: describe});
+  const checkout = () => readiness(store.getState()).filter(item => item.id === 'checkout_found');
+  expect(checkout()).toEqual([
+    {
+      id: 'checkout_found',
+      state: 'fail',
+      label: 'VibeSys checkout',
+      detail: 'No VibeSys checkout on This Mac',
+      fix: {kind: 'choose_checkout'},
+    },
+  ]);
+  // Once the inputs are checked, their own checkout item is the one said (here: none failed).
+  const fix = projectItem(store)?.fix;
+  if (fix?.kind !== 'create_from_example') throw new Error('expected the create fix');
+  store.dispatch({type: 'fix', fix});
+  await settle();
+  clock.runDue();
+  await settle();
+  expect(checkout()).toEqual([]);
 });
 
 test('a destination taken when Create runs lands in the same state, not an error', async () => {
@@ -1088,14 +1136,11 @@ async function measuredOn(hardware: keyof typeof MACHINES, target: MeasureTarget
     machine: store.getState().context.form.machine,
     compute: {kind: 'offered', value: computeSettings},
   });
-  for (const change of [
-    {kind: 'from', from: 'example'},
-    {kind: 'domain', domain: 'llm-serving'},
-    {kind: 'model', model: 'Qwen3.5 9B'},
-    {kind: 'hardware', hardware: 'amd|AMD MI210|1'},
-  ] as const) {
-    store.dispatch({type: 'answer', change, advance: true});
-  }
+  store.dispatch({
+    type: 'answer',
+    change: {kind: 'entry', example: 'model-serving/qwen3.5-9b-mi210', task: 'default'},
+    advance: true,
+  });
   store.dispatch({type: 'measure', target});
   await settle();
   return hardwareItem(store);
@@ -1122,3 +1167,73 @@ for (const [name, target] of MEASURED_ON) {
     }
   });
 }
+
+/** What the machine says of the agent CLI's login: a state, nothing (an older VibeSys), or no CLI. */
+const LOGINS = [
+  {name: 'signed in', installed: true, logins: {claude: 'signed_in'}, state: 'ok'},
+  {name: 'signed out', installed: true, logins: {claude: 'signed_out'}, state: 'fail'},
+  {name: 'unknown', installed: true, logins: {claude: 'unknown'}, state: null},
+  {name: 'not reported', installed: true, logins: undefined, state: null},
+  {name: 'not installed', installed: false, logins: {}, state: null},
+] as const;
+
+/** A store on a machine whose description says `logins`, with the inputs checked and passing. */
+async function signedIn(login: (typeof LOGINS)[number]) {
+  const clock = manualSchedule();
+  const asked: string[] = [];
+  const said = {logins: login.logins as Record<string, string> | undefined};
+  const bridge: NewRunBridge = {
+    ...fakeBridge(REQUIRED_HELPER_FEATURES, asked),
+    describeMachine: () =>
+      ok({
+        kind: 'offered' as const,
+        value: {
+          checkout: null,
+          hardware: {cpu_cores: 8, gpus: [], accelerator: 'cpu' as const},
+          docker: {reachable: true as const, version: '27'},
+          harness_clis: login.installed ? ['claude'] : [],
+          runs: {live: 0, ended_today: 0},
+          ...(said.logins === undefined
+            ? {}
+            : {harness_logins: said.logins as Record<string, 'signed_in'>}),
+        },
+      }),
+  };
+  const {store} = runAgain(bridge, recentRun('local', '/p', 2), {schedule: clock.schedule});
+  await settle();
+  clock.runDue();
+  await settle();
+  return {store, asked, said, clock};
+}
+
+for (const login of LOGINS) {
+  test(`an agent CLI ${login.name} on the machine: the sign-in check and Start agree`, async () => {
+    const {store, asked} = await signedIn(login);
+    expect(store.getState().matches({editing: {checks: 'ready'}})).toBe(true);
+    const item = readiness(store.getState()).find(each => each.id === 'agent_signed_in');
+    expect(item?.state ?? null).toBe(login.state);
+    if (item !== undefined) expect(item.label).toBe('claude signed in on This Mac');
+    // Only a CLI that says it is signed out is fixed in Settings, and holds Start closed.
+    expect(item?.fix ?? null).toEqual(login.state === 'fail' ? {kind: 'open_logins'} : null);
+    if (login.state === 'fail') {
+      expect(item?.detail).toBe('Sign in once from a terminal on This Mac.');
+    }
+    expect(startBlocked(store.getState()) !== undefined).toBe(login.state === 'fail');
+    store.dispatch({type: 'start'});
+    await settle();
+    expect(asked.includes('startRun')).toBe(login.state !== 'fail');
+  });
+}
+
+test('checking again reads the machine again, so a CLI signed in since then opens Start', async () => {
+  const {store, said, clock} = await signedIn(LOGINS[1]);
+  expect(startBlocked(store.getState())).toBe('Fix the check under Before you start.');
+  said.logins = {claude: 'signed_in'};
+  store.dispatch({type: 'refresh'});
+  await settle();
+  clock.runDue();
+  await settle();
+  const item = readiness(store.getState()).find(each => each.id === 'agent_signed_in');
+  expect(item?.state).toBe('ok');
+  expect(startBlocked(store.getState())).toBeUndefined();
+});

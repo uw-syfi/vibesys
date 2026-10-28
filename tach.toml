@@ -280,7 +280,7 @@ depends_on = ["server.host_compute", "vs_slurm"]
 [[modules]]
 # Provider login facts and bounded process ownership shared by native commands and the helper.
 path = "server.host_agent_logins"
-depends_on = ["server.host_envelope", "vs_agent", "vs_sim.api"]
+depends_on = ["server.host_envelope", "server.host_machine_facts", "vs_agent", "vs_sim.api"]
 
 [[modules]]
 # Where results are measured and a machine's compute settings, as helper messages. Pydantic only.

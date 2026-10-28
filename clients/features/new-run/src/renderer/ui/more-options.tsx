@@ -25,8 +25,8 @@ import {
   type NewRunContext,
   roleLabel,
   roleSummary,
+  rolesWaitWords,
 } from '../../state/index.js';
-import {TimeLimitField} from './budget-fields.js';
 import type {CardProps} from './card-props.js';
 import {destinationTaken, moreOptionsSummary, type RolesView, rolesView} from './view.js';
 
@@ -98,10 +98,12 @@ function RolesSection(props: CardProps): JSX.Element {
       </Text>
     );
   }
-  if (view.kind === 'pending') {
+  if (view.kind === 'pending' || view.kind === 'waiting') {
     return (
       <Text variant="small" tone="muted">
-        The roles are read from the machine with the first check of these inputs.
+        {view.kind === 'waiting'
+          ? rolesWaitWords(view.on).sentence
+          : 'The roles are read from the machine with the first check of these inputs.'}
       </Text>
     );
   }
@@ -136,7 +138,7 @@ function ExampleDestination(props: CardProps): JSX.Element | null {
   );
 }
 
-/** More options: results, the reasoning effort of each role, extra arguments and where an example is copied to. */
+/** More options: results, the reasoning effort of each role, where an example is copied to, and extra arguments. */
 export function MoreOptions(props: CardProps): JSX.Element {
   const {context, dispatch} = props;
   const {machine, advanced, budget} = context.form;
@@ -151,7 +153,6 @@ export function MoreOptions(props: CardProps): JSX.Element {
       {...(open ? {} : {summary: problem ?? moreOptionsSummary(context)})}
     >
       <Stack gap="space-4">
-        <TimeLimitField {...props} />
         <Stack gap="space-2">
           <Text variant="body-strong">Results</Text>
           <SegmentedControl

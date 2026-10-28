@@ -40,7 +40,7 @@ export {
 export {DotLegend, type LegendItem} from './components/dot-legend.js';
 export {ErrorActions} from './components/error-actions.js';
 export {Fact, FactLine} from './components/facts.js';
-export {Field, TextInput} from './components/field.js';
+export {Field, LabeledRow, TextInput} from './components/field.js';
 export {
   Gantt,
   type GanttRow,

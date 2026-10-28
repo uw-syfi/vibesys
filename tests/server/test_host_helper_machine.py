@@ -13,12 +13,14 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.server.host_helper_support import (
     VIBESYS_VERSION,
+    FakeAgentLogins,
     FakeCheckout,
     fake_host,
     quiet_machine,
     record,
 )
 
+from server.host_agent_logins import AgentLibraryLogins, AgentLogin, LoginBounds, LoginStarter
 from server.host_api import (
     Checkout,
     CheckoutFound,
@@ -39,19 +41,22 @@ from server.host_helper_machine import (
     HostMachineProbe,
     release_of,
 )
-from server.host_helper_requests import answer, run_counts
+from server.host_helper_requests import LOGIN_WAIT_SECONDS, answer, run_counts
 from server.host_machine_facts import (
     Accelerator,
     DockerReachable,
     DockerUnreachable,
     Gpu,
     Hardware,
+    LoginState,
     MachineCheckout,
     RunCounts,
 )
 from server.registry import FakeInstanceStore
+from vs_agent.api import LoginState as ProviderLoginState
+from vs_agent.api import ProviderLogin
 from vs_sim.api import ProbeResult
-from vs_sim.api.testing import ScriptedProbe, SimNetwork, SimThreads
+from vs_sim.api.testing import FakePipedProcessLauncher, ScriptedProbe, SimNetwork, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -335,6 +340,83 @@ def test_machine_describe_reports_the_checkout_hardware_docker_clis_and_runs() -
     assert reply.machine.harness_clis == ("claude",)
     assert reply.machine.harness_cli_names == {"claude": "Claude Code"}
     assert reply.machine.runs == RunCounts(live=1, ended_today=0)
+
+
+_PROVIDERS = ("claude", "codex")
+
+
+@given(
+    installed=st.frozensets(st.sampled_from(_PROVIDERS)),
+    states=st.fixed_dictionaries(
+        {provider: st.sampled_from(LoginState) for provider in _PROVIDERS}
+    ),
+)
+def test_machine_describe_reports_the_login_of_each_installed_harness_cli(
+    installed: frozenset[str], states: dict[str, LoginState]
+) -> None:
+    threads = SimThreads()
+    logins = tuple(
+        AgentLogin(
+            provider=provider,
+            provider_name=provider,
+            installed=provider in installed,
+            state=states[provider] if provider in installed else LoginState.UNKNOWN,
+            can_start_login=False,
+        )
+        for provider in _PROVIDERS
+    )
+    host = replace(
+        fake_host(threads, SimNetwork(threads)),
+        machine=quiet_machine(installed=installed),
+        logins=FakeAgentLogins(logins=logins),
+    )
+
+    reply = answer(MachineDescribeRequest(request_id="m", deadline_ms=5000), host, threads.event())
+
+    assert isinstance(reply, MachineDescribeReply)
+    assert reply.machine.harness_logins == {
+        provider: states[provider] for provider in reply.machine.harness_clis
+    }
+
+
+def test_machine_describe_answers_in_time_without_a_cli_whose_login_hangs() -> None:
+    threads = SimThreads()
+
+    def login_of(provider: str) -> ProviderLogin:
+        if provider == "claude":
+            threads.sleep(3600.0)  # Its status command hangs far past every bound.
+        return ProviderLogin(
+            provider=provider,
+            installed=True,
+            state=ProviderLoginState.SIGNED_IN,
+            credential=None,
+            api_key_variables=(),
+            detail="",
+        )
+
+    logins = AgentLibraryLogins(
+        login_of,
+        lambda _provider: None,
+        LoginStarter(FakePipedProcessLauncher(), threads, dict, LoginBounds()),
+        threads,
+    )
+    host = replace(
+        fake_host(threads, SimNetwork(threads)),
+        machine=quiet_machine(installed=frozenset(_PROVIDERS)),
+        logins=logins,
+    )
+
+    def describe() -> tuple[object, float]:
+        started = threads.now()
+        request = MachineDescribeRequest(request_id="m", deadline_ms=25_000)
+        return answer(request, host, threads.event()), threads.now() - started
+
+    reply, took = threads.run(describe)
+
+    assert isinstance(reply, MachineDescribeReply)
+    assert took <= LOGIN_WAIT_SECONDS
+    assert reply.machine.harness_clis == _PROVIDERS
+    assert reply.machine.harness_logins == {"codex": LoginState.SIGNED_IN}
 
 
 def test_checkout_inspect_expands_the_path_on_the_host(tmp_path: Path) -> None:

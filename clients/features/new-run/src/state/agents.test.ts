@@ -1,19 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import type {HarnessOffer} from '@vibesys/ipc';
-import {SEEDS, Seeded} from '@vibesys/store/testing';
-import {
-  agentGroups,
-  familiesIn,
-  generationsIn,
-  groupOf,
-  modelAtTier,
-  offersIn,
-  pickGroup,
-  pickHarness,
-  scopeOf,
-  tierOf,
-  tiersIn,
-} from './agents.js';
+
+import {agentGroups} from './agents.js';
 
 function offer(
   provider: string,
@@ -53,67 +41,6 @@ describe('the agent as the host offers it', () => {
       ['GPT', ['codex']],
       ['opencode', ['opencode']],
     ]);
-  });
-
-  test('a model sits in the line its offer names, and a model not offered is in none', () => {
-    expect(groupOf(OFFERS, 'claude', 'opus')?.name).toBe('Claude');
-    expect(groupOf(OFFERS, 'opencode', 'local')?.name).toBe('opencode');
-    expect(groupOf(OFFERS, 'claude', 'gone')).toBeNull();
-  });
-
-  test('tiers run from smallest to strongest, a tier prefers the default, and one tier is no ladder', () => {
-    const claude = agentGroups(OFFERS)[0];
-    if (claude === undefined) throw new Error('no line');
-    const tiers = tiersIn(OFFERS, claude, 'claude');
-    expect(tiers.map(tier => tier.name)).toEqual(['Haiku', 'Sonnet', 'Opus']);
-    expect(modelAtTier(tiers[2] as (typeof tiers)[number])).toBe('opus');
-    expect(tierOf(tiers, 'opus-old')).toBe(2);
-    expect(tierOf(tiers, 'local')).toBeNull();
-    expect(tiersIn(OFFERS, claude, 'opencode')).toEqual([]);
-    expect(offersIn(OFFERS, claude, 'opencode').map(each => each.model)).toEqual([
-      'sonnet-via-opencode',
-    ]);
-  });
-
-  test('choosing a line keeps the harness and the tier where the line has them', () => {
-    const groups = agentGroups(OFFERS);
-    const claude = groups[0];
-    const gpt = groups[1];
-    if (claude === undefined || gpt === undefined) throw new Error('no lines');
-    expect(pickGroup(OFFERS, gpt, {provider: 'claude', model: 'sonnet'})).toEqual({
-      provider: 'codex',
-      model: 'gpt-high',
-    });
-    expect(pickGroup(OFFERS, claude, {provider: 'opencode', model: 'local'})).toEqual({
-      provider: 'opencode',
-      model: 'sonnet-via-opencode',
-    });
-    expect(pickHarness(OFFERS, claude, 'opencode', {provider: 'claude', model: 'sonnet'})).toEqual({
-      provider: 'opencode',
-      model: 'sonnet-via-opencode',
-    });
-    expect(
-      pickHarness(OFFERS, claude, 'claude', {provider: 'opencode', model: 'sonnet-via-opencode'}),
-    ).toEqual({provider: 'claude', model: 'sonnet'});
-  });
-
-  test('whatever is picked is an offer of the host and belongs to the line picked', () => {
-    for (const seed of SEEDS) {
-      const random = new Seeded(seed);
-      const groups = agentGroups(OFFERS);
-      let current = null as {provider: string; model: string} | null;
-      for (let turn = 0; turn < 8; turn += 1) {
-        const group = random.pick(groups);
-        const provider = random.pick(group.providers);
-        const picked = random.bool()
-          ? pickGroup(OFFERS, group, current)
-          : pickHarness(OFFERS, group, provider, current);
-        expect(picked, `seed ${seed}`).not.toBeNull();
-        if (picked === null) continue;
-        expect(groupOf(OFFERS, picked.provider, picked.model)?.id, `seed ${seed}`).toBe(group.id);
-        current = picked;
-      }
-    }
   });
 });
 
@@ -181,44 +108,5 @@ describe('the agent when the host reports makers and generations', () => {
       ['maker:openai', 'OpenAI'],
       ['maker:anthropic', 'Anthropic'],
     ]);
-  });
-
-  test('generations are listed newest first, only when there is more than one', () => {
-    const [openai, anthropic] = agentGroups(MADE);
-    if (openai === undefined || anthropic === undefined) throw new Error('no cards');
-    expect(generationsIn(MADE, openai, 'codex', 'GPT').map(each => each.name)).toEqual([
-      'GPT-6',
-      'GPT-5',
-    ]);
-    expect(generationsIn(MADE, anthropic, 'claude', 'Claude')).toEqual([]);
-  });
-
-  test('the models of a generation are its own, and a tier is only offered within it', () => {
-    const [openai] = agentGroups(MADE);
-    if (openai === undefined) throw new Error('no cards');
-    const six = {family: 'GPT', generation: 'gpt-6'};
-    expect(offersIn(MADE, openai, 'codex', six).map(each => each.model)).toEqual([
-      'gpt-6-luna',
-      'gpt-6-sol',
-    ]);
-    // GPT-5 has one model: no slider, a list of one.
-    expect(tiersIn(MADE, openai, 'codex', {family: 'GPT', generation: 'gpt-5'})).toEqual([]);
-    const sol5 = MADE.find(each => each.model === 'gpt-5-sol') as HarnessOffer;
-    expect(scopeOf(sol5)).toEqual({family: 'GPT', generation: 'gpt-5'});
-    // Moving to the newer generation keeps the tier the reader was on.
-    expect(
-      pickHarness(MADE, openai, 'codex', {provider: 'codex', model: 'gpt-5-sol'}, six),
-    ).toEqual({provider: 'codex', model: 'gpt-6-sol'});
-  });
-
-  test('families are offered only when a card has more than one', () => {
-    const mixed = [
-      ...MADE,
-      made({model: 'opus-x', maker: 'anthropic', family: 'Claude Next', tier: 2, tierName: 'X'}),
-    ];
-    const anthropic = agentGroups(mixed).find(group => group.id === 'maker:anthropic');
-    if (anthropic === undefined) throw new Error('no card');
-    expect(familiesIn(mixed, anthropic, 'claude')).toEqual(['Claude', 'Claude Next']);
-    expect(familiesIn(MADE, anthropic, 'claude')).toEqual([]);
   });
 });

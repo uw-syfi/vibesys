@@ -16,6 +16,7 @@ import {
   Grid,
   ICON_NAMES,
   Icon,
+  LabeledRow,
   PathInput,
   Row,
   SectionLayout,
@@ -391,7 +392,28 @@ export const BASIC_ENTRIES = {
         <Field label="Extra arguments" error="Unknown flag --fast.">
           <TextInput value="--fast" mono change={() => undefined} />
         </Field>
+        <Field row label="Time limit" help="The run stops here.">
+          <TextInput value="2h" change={() => undefined} />
+        </Field>
       </Grid>
+    ),
+  },
+  LabeledRow: {
+    render: () => (
+      <Stack gap="space-3">
+        <LabeledRow label="Task">
+          <Row justify="between" gap="space-3">
+            <Text variant="code">queue-rs · mpmc</Text>
+            <Button variant="quiet" size="sm" text="Change" press={() => undefined} />
+          </Row>
+        </LabeledRow>
+        <LabeledRow label="Agent works on" help="Where the project is">
+          <Text>host-b · 64 cores, MI300X</Text>
+        </LabeledRow>
+        <Field row label="Time limit">
+          <TextInput value="2h" change={() => undefined} />
+        </Field>
+      </Stack>
     ),
   },
   TextInput: {
