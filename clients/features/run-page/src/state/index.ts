@@ -9,6 +9,15 @@ export type {UsageRecord} from '@vibesys/contracts/host-helper';
 export {ideaOfAttempt} from './attempt-ideas.js';
 export {type BaselineColumns, baselineColumns} from './baselines.js';
 export {
+  commandErrorReport,
+  diagnosticErrorReport,
+  type EndedBannerWords,
+  type ErrorReport,
+  endedBannerWords,
+  endedErrorReport,
+  shownDiagnostic,
+} from './error-words.js';
+export {
   type GatewayEvent,
   type GatewayInput,
   type GatewayLogInput,

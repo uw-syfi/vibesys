@@ -10,10 +10,10 @@ import {type CoreState, initialCoreState, reduceEvent} from '@vibesys/run-state'
 import {Window} from 'happy-dom';
 import {act, type JSX} from 'react';
 import {createRoot} from 'react-dom/client';
-import type {DeliverRequest} from '../../state/index.js';
+import {type AskInput, type DeliverRequest, errorQuestion} from '../../state/index.js';
 import {ChatPanel} from '../ui/chat-panel.js';
 import type {RunChatPorts} from './ports.js';
-import {useRunChat} from './use-run-chat.js';
+import {type RunChatHost, useRunChat} from './use-run-chat.js';
 
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
@@ -83,6 +83,7 @@ function fakePorts(sent: DeliverRequest[]): RunChatPorts {
       return Promise.resolve({kind: 'acknowledged'});
     },
     newControlId: () => `control-${++next}`,
+    maxQuestionBytes: 65536,
   };
 }
 
@@ -354,5 +355,45 @@ test('New chat opens an empty thread, and no thread in the Threads menu goes by 
   expect(container.textContent).not.toContain('Still writing the answer');
   expect(container.textContent).not.toContain('Writing');
   expect(container.textContent).not.toContain('Working');
+  await act(async () => root.unmount());
+});
+
+test('asking about an error starts a new thread with the question and opens the panel', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const created: string[] = [];
+  const asked: AskInput[] = [];
+  const ports: RunChatPorts = {
+    ...fakePorts([]),
+    createThread: (_harness, _signal, requestId) => {
+      created.push(requestId);
+      return Promise.resolve({ok: true, threadId: 't-new'});
+    },
+    ask: input => {
+      asked.push(input);
+      return Promise.resolve({ok: true});
+    },
+  };
+  let host: RunChatHost | null = null;
+  function Probe(): JSX.Element {
+    const chat = useRunChat({identity: 'run', core: fold([THREAD]), ports});
+    host = chat;
+    return chat.panel === null ? <div /> : <ChatPanel {...chat.panel} />;
+  }
+  await act(async () => root.render(<Probe />));
+  const report = {
+    where: 'Run ended: Failed',
+    message: 'Git refused the workspace',
+    detail: 'fatal: not a work tree',
+  };
+  expect((host as RunChatHost | null)?.open).toBe(false);
+  await act(async () => (host as RunChatHost | null)?.askAboutError?.(report));
+  await act(async () => undefined);
+  expect((host as RunChatHost | null)?.open).toBe(true);
+  expect(created).toHaveLength(1);
+  expect(asked).toHaveLength(1);
+  expect(asked[0]?.threadId).toBe('t-new');
+  expect(asked[0]?.text).toBe(errorQuestion(report, 65536));
   await act(async () => root.unmount());
 });

@@ -180,7 +180,10 @@ test('a run with no run.log is refused once, in words, and nothing retries it', 
       () => loadView(actor.getSnapshot().context).kind === 'failed',
     );
     expect(refused).toBeDefined();
-    expect(loadView(actor.getSnapshot().context)).toEqual({kind: 'failed', word: 'No run log'});
+    expect(loadView(actor.getSnapshot().context)).toMatchObject({
+      kind: 'failed',
+      word: 'No run log',
+    });
     const before = gateway.calls.length;
     await until(clock, () => false, 10 * MINUTE);
     expect(gateway.calls.length).toBe(before);
@@ -210,10 +213,7 @@ test('calls per open stay bounded while the link is down or refusing, and the en
     expect(liveness).toBeLessThanOrEqual(
       MAX_ATTEMPTS + 1 + Math.ceil((10 * MINUTE) / RETRY_CAP_MS),
     );
-    expect(loadView(actor.getSnapshot().context)).toEqual({
-      kind: 'failed',
-      word: expect.any(String),
-    });
+    expect(loadView(actor.getSnapshot().context)).toMatchObject({kind: 'failed'});
     actor.stop();
   }
 });
@@ -329,7 +329,7 @@ test('a run whose log is not created yet gives no content, and a deadline or a r
   await until(clock, () => false, MINUTE);
   expect(gateway.skeletons[0]?.complete).toBe(true);
   expect(gateway.skeletons[0]?.records).toHaveLength(0);
-  expect(loadView(actor.getSnapshot().context)).toEqual({kind: 'failed', word: 'No records'});
+  expect(loadView(actor.getSnapshot().context)).toMatchObject({kind: 'failed', word: 'No records'});
   actor.stop();
 });
 

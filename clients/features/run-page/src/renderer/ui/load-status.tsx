@@ -2,7 +2,7 @@
  * How far the run's history has loaded, in a bar and two numbers; the failure of that load as a
  * status word with Retry. The screen paints from the keyframe while the history follows.
  */
-import {Button, Card, LoadingBar, Meter, Stack, Text} from '@vibesys/ui';
+import {Button, Card, ErrorActions, LoadingBar, Meter, Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {LoadView} from '../../state/index.js';
 
@@ -41,7 +41,10 @@ export function LoadStatus(props: {
         <Card>
           <Stack gap="space-2" align="start">
             <Text variant="heading">{view.word}</Text>
-            <Button variant="secondary" text="Retry" press={props.retry} />
+            <Row gap="space-2" wrap>
+              <Button variant="secondary" text="Retry" press={props.retry} />
+              <ErrorActions copy={[view.word, view.detail].filter(Boolean).join('\n\n')} />
+            </Row>
           </Stack>
         </Card>
       );

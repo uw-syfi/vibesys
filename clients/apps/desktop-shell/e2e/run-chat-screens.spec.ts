@@ -313,6 +313,9 @@ test('an answer the provider failed is not drawn as a normal answer', async ({pa
   );
   await openPanel(page);
   await expect(panel(page).getByText('quota exhausted')).toBeVisible();
+  const answer = panel(page).locator('.vs-chat-message[data-side="start"]');
+  await expect(answer).toHaveAttribute('data-tone', 'err');
+  await expect(answer.getByText('Failed', {exact: true})).toBeVisible();
   await check(page, 'failed-answer');
 });
 
@@ -330,6 +333,10 @@ test('a question the host refuses shows why', async ({page}) => {
   });
   await panel(page).getByRole('textbox', {name: 'Message'}).fill('Why?');
   await panel(page).getByRole('button', {name: 'Ask', exact: true}).click();
+  await expect(panel(page).getByText('Chat is not available for this run.')).toBeVisible();
+  await expect(panel(page).getByText('IntentRefused')).toHaveCount(0);
   await settled(page);
   await check(page, 'refused-question');
+  await panel(page).getByRole('button', {name: 'Details', exact: true}).click();
+  await expect(panel(page).getByText('run `vs doctor`')).toBeVisible();
 });

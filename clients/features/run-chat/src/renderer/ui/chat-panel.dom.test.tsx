@@ -12,7 +12,14 @@ import {type CoreState, initialCoreState, reduceEvent} from '@vibesys/run-state'
 import {Window} from 'happy-dom';
 import {act, type JSX} from 'react';
 import {createRoot} from 'react-dom/client';
-import {type ChatPanelView, panelInitial} from '../../state/index.js';
+import {
+  type ChatPanelView,
+  EMPTY_DRAFT,
+  type ErrorReport,
+  failedAnswerReport,
+  panelInitial,
+  steerFailureReport,
+} from '../../state/index.js';
 import type {RunChatPorts} from '../effects/ports.js';
 import {useRunChat} from '../effects/use-run-chat.js';
 import {ChatPanel} from './chat-panel.js';
@@ -104,6 +111,7 @@ const PORTS: RunChatPorts = {
   ask: () => Promise.resolve({ok: true}),
   control: () => Promise.resolve({kind: 'acknowledged'}),
   newControlId: () => 'control-1',
+  maxQuestionBytes: 65536,
 };
 
 function Harness(props: {
@@ -185,7 +193,7 @@ test('the header lets its buttons drop to a line of their own, so New chat never
 test('messages sit in the thread below the header, in a pane that keeps its own top edge', async () => {
   const items: ChatPanelView['items'] = [
     {kind: 'question', id: 'q', text: QUESTION},
-    {kind: 'answer', id: 'a', text: ANSWER, streaming: false},
+    {kind: 'answer', id: 'a', text: ANSWER, streaming: false, failed: false},
   ];
   const {container, unmount} = await mount(<ChatPanel {...viewOf(items)} />);
   const thread = container.querySelector('.vs-thread[data-plain]');
@@ -272,5 +280,69 @@ test('a failed question without a diagnostic has no Details', async () => {
   const {container, unmount} = await mount(<ChatPanel {...failureView(null)} />);
   expect(container.textContent).toContain('Refused');
   expect(buttons(container)).not.toContain('Details');
+  await unmount();
+});
+
+const ASK = 'Ask about this error';
+const COPY = 'Copy details';
+const REFUSED = {message: 'Refused', detail: 'trace'};
+const NOOP = () => undefined;
+
+/** The panel with each failure it can show: the composer's, a failed answer, and a refused steer. */
+function failures(asked: ErrorReport[] | null): ChatPanelView {
+  const view = viewOf([
+    {kind: 'question', id: 'q', text: QUESTION},
+    {kind: 'answer', id: 'a', text: 'quota exhausted', streaming: false, failed: true},
+    {
+      kind: 'card',
+      card: {
+        id: 'c',
+        draft: {...EMPTY_DRAFT, text: 'keep bf16'},
+        view: {
+          phase: 'draft',
+          status: null,
+          sendBlocked: null,
+          withdrawable: false,
+          error: REFUSED,
+        },
+        actions: {
+          editText: NOOP,
+          setTarget: NOOP,
+          setMode: NOOP,
+          send: NOOP,
+          dismiss: NOOP,
+          withdraw: NOOP,
+        },
+      },
+    },
+  ]);
+  return {
+    ...view,
+    panel: {...view.panel, error: REFUSED},
+    ...(asked === null
+      ? {readOnly: true, canAsk: false}
+      : {askAboutError: (report: ErrorReport) => asked.push(report)}),
+  };
+}
+
+test('a failed answer and a refused steer offer to ask about them; the chat’s own failure is copied', async () => {
+  const asked: ErrorReport[] = [];
+  const {container, unmount} = await mount(<ChatPanel {...failures(asked)} />);
+  const asks = () =>
+    [...container.querySelectorAll('button')].filter(button => button.textContent === ASK);
+  // A question about the composer's failure would go through the request that just failed.
+  expect(asks()).toHaveLength(2);
+  expect(buttons(container).filter(label => label === COPY)).toHaveLength(1);
+  for (const button of asks()) await act(async () => button.click());
+  expect(asked).toEqual(
+    expect.arrayContaining([failedAnswerReport('quota exhausted'), steerFailureReport(REFUSED)]),
+  );
+  expect(asked).toHaveLength(2);
+  await unmount();
+});
+
+test('a panel that cannot ask offers no Ask about this error', async () => {
+  const {container, unmount} = await mount(<ChatPanel {...failures(null)} />);
+  expect(buttons(container)).not.toContain(ASK);
   await unmount();
 });

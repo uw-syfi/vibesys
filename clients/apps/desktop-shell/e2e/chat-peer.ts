@@ -23,6 +23,8 @@ export interface Refusal {
 
 export class ChatPeer {
   refuse: Refusal | undefined;
+  /** The host calls the page made, by kind (`createChatSession`, `chatMessage`, ...), in order. */
+  readonly hostCalls: string[] = [];
   readonly records = new Map<string, StoreRecord[]>();
   readonly watchers = new Map<string, Set<(bytes: Uint8Array) => void>>();
   constructor(bytes: number[]) {
@@ -68,6 +70,7 @@ export class ChatPeer {
     }
     if (method !== rpc('hostCall')) return undefined;
     const input = fromBinary(HostCallRequestSchema, bytes).method;
+    this.hostCalls.push(input.case ?? '');
     const refuse = this.refuse;
     if (refuse !== undefined && input.case === refuse.method) {
       const {code, message, stderr} = refuse;

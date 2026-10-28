@@ -73,6 +73,7 @@ describe('panelMachine', () => {
       requestId: 'request-1',
       threadId: 'thread-1',
       text: 'why?',
+      typed: true,
     });
   });
 
@@ -87,6 +88,7 @@ describe('panelMachine', () => {
       requestId: 'request-1',
       threadId: null,
       text: 'what is best?',
+      typed: true,
     });
     snapshot = step(snapshot, done('createThread', {ok: true, threadId: 'thread-7'}));
     expect(snapshot.value).toMatchObject({chat: 'asking'});
@@ -95,6 +97,7 @@ describe('panelMachine', () => {
       requestId: 'request-1',
       threadId: 'thread-7',
       text: 'what is best?',
+      typed: true,
     });
     snapshot = step(snapshot, done('ask', {ok: true}));
     expect(snapshot.value).toMatchObject({chat: 'idle'});
@@ -146,6 +149,95 @@ describe('panelMachine', () => {
     expect(snapshot.context.userSteers[1]?.draft.text).toBe('');
   });
 
+  test('asking about an error opens the panel on a new thread and sends only that question', () => {
+    const snapshot = step(getInitialSnapshot(panelMachine), {
+      type: 'ask-new',
+      text: 'Q',
+      requestId: 'r-9',
+    });
+    expect(snapshot.value).toMatchObject({
+      visibility: 'open',
+      chat: 'preparing',
+      catalogue: 'loading',
+    });
+    expect(snapshot.context.choice).toEqual({kind: 'new'});
+    expect(snapshot.context.pending).toEqual({
+      threadId: null,
+      text: 'Q',
+      requestId: 'r-9',
+      typed: false,
+    });
+    // The thread is made once the catalogue says which harness it runs on.
+    const listed = step(snapshot, done('loadCatalogue', LISTING));
+    expect(listed.value).toMatchObject({chat: 'creating', catalogue: 'ready'});
+    expect(listed.context.pending).toEqual({
+      threadId: null,
+      text: 'Q',
+      requestId: 'r-9',
+      typed: false,
+    });
+  });
+
+  test('asking about an error mid-question replaces it and keeps the draft', () => {
+    let snapshot = step(step(opened(), done('loadCatalogue', LISTING)), {
+      type: 'set-composer',
+      text: 'why?',
+    });
+    snapshot = step(snapshot, {type: 'submit', requestId: 'request-1', threadId: 'thread-1'});
+    snapshot = step(snapshot, {type: 'set-composer', text: 'draft'});
+    expect(snapshot.value).toMatchObject({chat: 'asking'});
+    snapshot = step(snapshot, {type: 'ask-new', text: 'Q', requestId: 'r-9'});
+    expect(snapshot.value).toMatchObject({chat: 'creating'});
+    expect(snapshot.context.pending?.text).toBe('Q');
+    expect(snapshot.context.composer).toBe('draft');
+    // Asked again while its thread is still being made, the newer question wins.
+    snapshot = step(snapshot, {type: 'ask-new', text: 'Q2', requestId: 'r-10'});
+    expect(snapshot.value).toMatchObject({chat: 'creating'});
+    expect(snapshot.context.pending).toEqual({
+      threadId: null,
+      text: 'Q2',
+      requestId: 'r-10',
+      typed: false,
+    });
+    // If it fails, the draft is not replaced by the question.
+    snapshot = step(snapshot, done('createThread', {ok: false, message: 'no', detail: null}));
+    expect(snapshot.context.composer).toBe('draft');
+  });
+
+  test("asking about an error mid-question puts the user's question back in an empty composer", () => {
+    for (const threadId of [null, 'thread-1']) {
+      let snapshot = step(step(opened(), done('loadCatalogue', LISTING)), {
+        type: 'set-composer',
+        text: 'why?',
+      });
+      snapshot = step(snapshot, {type: 'submit', requestId: 'request-1', threadId});
+      expect(snapshot.context.composer).toBe('');
+      snapshot = step(snapshot, {type: 'ask-new', text: 'Q', requestId: 'r-9'});
+      expect(snapshot.context.composer).toBe('why?');
+    }
+  });
+
+  test('a failed question about an error leaves an empty composer empty', () => {
+    let snapshot = step(getInitialSnapshot(panelMachine), {
+      type: 'ask-new',
+      text: 'Q',
+      requestId: 'r-9',
+    });
+    snapshot = step(snapshot, done('loadCatalogue', LISTING));
+    snapshot = step(snapshot, done('createThread', {ok: true, threadId: 'thread-7'}));
+    snapshot = step(snapshot, done('ask', {ok: false, message: 'no', detail: null}));
+    expect(snapshot.value).toMatchObject({chat: 'idle'});
+    expect(snapshot.context.error).toEqual({message: 'no', detail: null});
+    expect(snapshot.context.composer).toBe('');
+  });
+
+  test('asking about an error with no text changes nothing', () => {
+    const closed = getInitialSnapshot(panelMachine);
+    const after = step(closed, {type: 'ask-new', text: ' ', requestId: 'r-9'});
+    expect(after.value).toEqual(closed.value);
+    expect(after.context).toEqual(closed.context);
+  });
+
   test('an empty composer submits nothing', () => {
     const snapshot = step(opened(), {type: 'submit', requestId: 'request-1', threadId: 'thread-1'});
     expect(snapshot.value).toMatchObject({chat: 'idle'});
@@ -168,6 +260,7 @@ describe('panelMachine', () => {
           {type: 'toggle-list'},
           {type: 'toggle-picker'},
           {type: 'submit', requestId: 'request-1', threadId: random.pick([null, 'a'])},
+          {type: 'ask-new', text: random.pick(['', 'Q']), requestId: 'r-x'},
           ...live.operations.map(operation =>
             live.done(
               operation,
@@ -182,8 +275,12 @@ describe('panelMachine', () => {
         ]),
       invariants: ({value, context}) => {
         const chat = typeof value === 'object' ? value.chat : null;
-        const busy = chat === 'creating' || chat === 'asking';
-        return busy === (context.pending !== null) ? [] : ['pending and busy differ'];
+        const busy = chat === 'preparing' || chat === 'creating' || chat === 'asking';
+        return [
+          ...(busy === (context.pending !== null) ? [] : ['pending and busy differ']),
+          // Only the user's own words reach the composer, never a question made from an error.
+          ...(context.composer === 'Q' ? ['the question about an error is in the composer'] : []),
+        ];
       },
     });
   });

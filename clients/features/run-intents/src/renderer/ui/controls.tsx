@@ -1,22 +1,16 @@
 import {IntentAction, type RunIntentAction} from '@vibesys/runs/intents';
-import {Button, Dialog, Field, Row, Stack, Text, TextInput} from '@vibesys/ui';
+import {Button, Dialog, ErrorActions, Field, Row, Stack, Text, TextInput} from '@vibesys/ui';
 import type {JSX} from 'react';
-import type {IntentRow} from '../../state/index.js';
+import {
+  ACTION_LABELS,
+  type ErrorReport,
+  type IntentRow,
+  refusalReport,
+  shownReason,
+  updatesReport,
+} from '../../state/index.js';
 import {RelaunchAction, RelaunchStatus, type RelaunchView} from './relaunch.js';
 
-const ACTION_LABELS: Record<IntentAction, string> = {
-  [IntentAction.UNSPECIFIED]: 'Request',
-  [IntentAction.PAUSE]: 'Pause',
-  [IntentAction.PARK]: 'Pause',
-  [IntentAction.PAUSE_NOW]: 'Pause now',
-  [IntentAction.RESUME]: 'Resume',
-  [IntentAction.STOP]: 'Stop',
-  [IntentAction.STEER]: 'Guidance',
-  [IntentAction.WITHDRAW]: 'Withdraw guidance',
-  [IntentAction.CANCEL_ATTEMPT]: 'Cancel attempt',
-  [IntentAction.CANCEL_ITEM]: 'Cancel item',
-  [IntentAction.SET_MAX_PARALLEL]: 'Change parallelism',
-};
 const BUTTON_LABELS: Record<RunIntentAction, string> = {
   pause: 'Pause',
   pauseNow: 'Pause now',
@@ -45,6 +39,8 @@ export function IntentControls(props: {
   readonly edit: (text: string) => void;
   readonly send: (action: RunIntentAction) => void;
   readonly retry: (requestId: string) => void;
+  /** Hands an error to the run chat; absent where no chat can take it. */
+  readonly askAboutError?: ((report: ErrorReport) => void) | undefined;
 }): JSX.Element {
   return (
     <Stack gap="space-1">
@@ -90,33 +86,21 @@ export function IntentControls(props: {
           )}
         />
       ) : null}
-      {props.warning ? (
-        <Text tone="warn" title={props.warning}>
-          Posting order unknown
-        </Text>
-      ) : null}
-      {props.error ? (
-        <Text tone="err" title={props.error}>
-          Updates unavailable
-        </Text>
-      ) : null}
+      <Notices
+        warning={props.warning}
+        error={props.error}
+        entries={props.entries}
+        askAboutError={props.askAboutError}
+      />
       {props.entries.map(entry => (
-        <Row key={`${entry.source}:${entry.id}`} gap="space-2" wrap>
-          <Text {...(entry.reason ? {title: entry.reason} : {})}>
-            {ACTION_LABELS[entry.action]} · {STATUS_LABELS[entry.status]}
-            {entry.epoch !== null && entry.epoch < props.epoch ? ' · Earlier epoch' : ''}
-            {entry.epoch === props.epoch && entry.status === 'applied' && !entry.current
-              ? ' · Earlier action'
-              : ''}
-          </Text>
-          {entry.status === 'uncertain' ? (
-            <Button
-              {...(props.busy ? {disabledReason: 'Sending'} : {})}
-              press={() => props.retry(entry.id)}
-              text="Retry request"
-            />
-          ) : null}
-        </Row>
+        <RequestRow
+          key={`${entry.source}:${entry.id}`}
+          entry={entry}
+          epoch={props.epoch}
+          busy={props.busy}
+          retry={props.retry}
+          askAboutError={props.askAboutError}
+        />
       ))}
       <Dialog
         open={props.guidanceOpen && props.actions.includes('steer')}
@@ -139,6 +123,86 @@ export function IntentControls(props: {
           <TextInput rows={3} value={props.text} change={props.edit} />
         </Field>
       </Dialog>
+    </Stack>
+  );
+}
+
+/**
+ * Why the history may be incomplete or out of order, each with what the host said. An unconfirmed
+ * post's reason is the error too; its row already says it, with its own offer, so it is said once.
+ */
+function Notices(props: {
+  readonly warning: string | null;
+  readonly error: string | null;
+  readonly entries: readonly IntentRow[];
+  readonly askAboutError?: ((report: ErrorReport) => void) | undefined;
+}): JSX.Element {
+  const {warning, askAboutError: ask} = props;
+  const error = props.entries.some(entry => shownReason(entry) === props.error)
+    ? null
+    : props.error;
+  return (
+    <>
+      {warning ? (
+        <Stack gap="space-1">
+          <Text tone="warn">Posting order unknown</Text>
+          <Text variant="small" tone="muted">
+            {warning}
+          </Text>
+        </Stack>
+      ) : null}
+      {error ? (
+        <Stack gap="space-1">
+          <Text tone="err">Updates unavailable</Text>
+          <Text variant="small" tone="muted">
+            {error}
+          </Text>
+          {ask === undefined ? null : (
+            <Row gap="space-2">
+              <ErrorActions ask={() => ask(updatesReport(error))} />
+            </Row>
+          )}
+        </Stack>
+      ) : null}
+    </>
+  );
+}
+
+/** One request of the history: what it asked, where it got to, and why it stopped there. */
+function RequestRow(props: {
+  readonly entry: IntentRow;
+  readonly epoch: bigint;
+  readonly busy: boolean;
+  readonly retry: (requestId: string) => void;
+  readonly askAboutError?: ((report: ErrorReport) => void) | undefined;
+}): JSX.Element {
+  const {entry, askAboutError: ask} = props;
+  const reason = shownReason(entry);
+  const report = refusalReport(entry);
+  return (
+    <Stack gap="space-1">
+      <Row gap="space-2" wrap>
+        <Text>
+          {ACTION_LABELS[entry.action]} · {STATUS_LABELS[entry.status]}
+          {entry.epoch !== null && entry.epoch < props.epoch ? ' · Earlier epoch' : ''}
+          {entry.epoch === props.epoch && entry.status === 'applied' && !entry.current
+            ? ' · Earlier action'
+            : ''}
+        </Text>
+        {entry.status === 'uncertain' ? (
+          <Button
+            {...(props.busy ? {disabledReason: 'Sending'} : {})}
+            press={() => props.retry(entry.id)}
+            text="Retry request"
+          />
+        ) : null}
+        {ask === undefined || report === null ? null : <ErrorActions ask={() => ask(report)} />}
+      </Row>
+      {reason === null ? null : (
+        <Text variant="small" tone="err">
+          {reason}
+        </Text>
+      )}
     </Stack>
   );
 }

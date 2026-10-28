@@ -9,6 +9,7 @@ import {
   type CheckItem,
   CheckList,
   type CheckState,
+  ErrorActions,
   Row,
   Stack,
   Text,
@@ -189,9 +190,14 @@ export function ProblemBanner(props: {
       title={words.title}
       body={words.body}
       {...(words.detail === null ? {} : {hint: words.detail})}
-      {...(words.retry
-        ? {actions: <Button text="Try again" press={() => dispatch({type: 'retry'})} />}
-        : {})}
+      actions={
+        <>
+          {words.retry ? <Button text="Try again" press={() => dispatch({type: 'retry'})} /> : null}
+          <ErrorActions
+            copy={[words.title, words.body, words.detail].filter(Boolean).join('\n\n')}
+          />
+        </>
+      }
     />
   );
 }

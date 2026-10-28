@@ -12,7 +12,12 @@ export type LoadView =
       readonly detail: string;
     }
   | {readonly kind: 'reconnecting'}
-  | {readonly kind: 'failed'; readonly word: string};
+  | {
+      readonly kind: 'failed';
+      readonly word: string;
+      /** What the failure itself said (empty when it said nothing), for copying. */
+      readonly detail: string;
+    };
 
 const REFUSAL_WORDS: Readonly<Record<LoadRefusal, string>> = {
   'not-found': 'No run log',
@@ -39,12 +44,19 @@ function failureWord(failure: SkeletonLoadFailure): string {
   }
 }
 
+function causeText(failure: SkeletonLoadFailure): string {
+  if (!('cause' in failure) || failure.cause === undefined || failure.cause === null) return '';
+  return failure.cause instanceof Error ? failure.cause.message : String(failure.cause);
+}
+
 export function loadView(
   context: Pick<GatewayRunContext, 'progress' | 'failure' | 'terminal'>,
 ): LoadView {
   const {progress, failure, terminal} = context;
   if (failure !== undefined)
-    return terminal ? {kind: 'failed', word: failureWord(failure)} : {kind: 'reconnecting'};
+    return terminal
+      ? {kind: 'failed', word: failureWord(failure), detail: causeText(failure)}
+      : {kind: 'reconnecting'};
   switch (progress.phase) {
     case 'complete':
       return {kind: 'ready'};

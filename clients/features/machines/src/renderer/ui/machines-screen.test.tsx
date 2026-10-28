@@ -90,3 +90,8 @@ test('an unreachable machine says its status word, with the connection text on t
   expect(html).toContain(`title="The app couldn’t connect: ${RAW}"`);
   expect(html).not.toContain(`>${RAW}<`);
 });
+
+test('the machines that could not be read offer to copy the details', () => {
+  const html = screen({...initialMachines().state, listProblem: 'x'});
+  expect(html).toContain('>Copy details<');
+});

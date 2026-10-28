@@ -11,6 +11,7 @@ import {
   Card,
   Chip,
   EmptyState,
+  ErrorActions,
   Field,
   Grid,
   KeyValue,
@@ -232,7 +233,12 @@ function ClusterFormCard(props: FormProps): JSX.Element {
         <HardwareFields {...props} />
         <TestResult form={form} outdated={stale(form)} />
         {form.problem !== null && form.problem.field === null ? (
-          <Banner tone="err" title="The cluster was not saved." body={form.problem.text} />
+          <Banner
+            tone="err"
+            title="The cluster was not saved."
+            body={form.problem.text}
+            actions={<ErrorActions copy={`The cluster was not saved.\n\n${form.problem.text}`} />}
+          />
         ) : null}
         <FormActions {...props} />
       </Stack>
@@ -262,7 +268,16 @@ function TestResult(props: {
     );
   }
   if (test.kind === 'failed') {
-    return <Banner tone="err" title={STAGES[test.stage]} body={test.detail} />;
+    return (
+      <Banner
+        tone="err"
+        title={STAGES[test.stage]}
+        body={test.detail}
+        actions={
+          <ErrorActions copy={[STAGES[test.stage], test.detail].filter(Boolean).join('\n\n')} />
+        }
+      />
+    );
   }
   return (
     <Banner
@@ -373,7 +388,12 @@ function Clusters(props: {
         ) : null}
       </Row>
       {view.removeProblem === null ? null : (
-        <Banner tone="err" title="The cluster was not removed." body={view.removeProblem} />
+        <Banner
+          tone="err"
+          title="The cluster was not removed."
+          body={view.removeProblem}
+          actions={<ErrorActions copy={`The cluster was not removed.\n\n${view.removeProblem}`} />}
+        />
       )}
       {view.form === null ? null : (
         <ClusterFormCard host={host} machine={machine} form={view.form} dispatch={dispatch} />

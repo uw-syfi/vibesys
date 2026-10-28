@@ -333,6 +333,7 @@ CSS of their own. An app imports `./tokens.css`, `./fonts.css` and `./components
 | `StatusDot` | `tone: 'neutral' \| 'live' \| 'ok' \| 'warn' \| 'err'`, `label` |
 | `Card` | `section?` (a titled region), `flush?` |
 | `Banner` | `title`, `tone?: 'neutral' \| 'ok' \| 'warn' \| 'err'`, `body?`, `actions?` |
+| `ErrorActions` | `ask?`, `copy?` (the text), `size?`; goes in an error's `actions`: "Ask about this error" hands it to an assistant, "Copy details" writes `copy` to the clipboard and says whether that worked; nothing without either |
 | `Menu` | the trigger's `text` or `icon` + `label`, `items: {id, label, press \| href, danger?}[]`, `variant?`, `size?`; raised, keyboard navigable, closes on Esc, a choice or the focus leaving |
 | `Dialog` | `open`, `title`, `dismiss`, children, `actions?`; the native modal `<dialog>` at the `overlay` elevation |
 | `Table` | `label`, `columns: {key, header, cell(row), mono?, align?}[]`, `rows`, `rowKey`, `selected?`, `select?`; sticky header, scrolls sideways in its own focusable box |
@@ -443,8 +444,9 @@ Data folds and selectors, all pure and under `state/`:
 - `state/step-narrative.ts`, `state/turn-transcript.ts` and `state/turn-result.ts`: an opened
   step and the card its turn ends with.
 - `state/zoom.ts`: the route machine (run, idea or agent, step, item).
-- Words: `state/end-words.ts`, `state/history-words.ts`, `state/idea-words.ts`,
-  `state/span-words.ts`, `state/token-words.ts`, `state/metric-words.ts` and `state/names.ts`.
+- Words: `state/end-words.ts`, `state/error-words.ts`, `state/history-words.ts`,
+  `state/idea-words.ts`, `state/span-words.ts`, `state/token-words.ts`, `state/metric-words.ts`
+  and `state/names.ts`.
   User-visible wording is written in these, not in a component.
 - History and summary: `state/history-pager.ts` reads an ended run's journal in pages;
   `state/run-summary.ts` takes the host's `runs.summary` fold in its place.

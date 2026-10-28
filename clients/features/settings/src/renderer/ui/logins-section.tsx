@@ -4,7 +4,7 @@
  * credential is held, never the credential.
  */
 import type {AgentLogin} from '@vibesys/ipc';
-import {Banner, Button, Card, Chip, Row, Stack, Text} from '@vibesys/ui';
+import {Banner, Button, Card, Chip, ErrorActions, Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
   failureWords,
@@ -27,11 +27,16 @@ function Progress(props: {
   const {progress, machine, login} = props;
   if (progress === undefined || progress.kind === 'starting') return null;
   if (progress.kind === 'failed') {
+    const title = `Could not start the login on ${machine}.`;
+    const words = failureWords(progress);
     return (
       <Banner
         tone="err"
-        title={`Could not start the login on ${machine}.`}
-        {...failureWords(progress)}
+        title={title}
+        {...words}
+        actions={
+          <ErrorActions copy={[title, words.body, words.hint].filter(Boolean).join('\n\n')} />
+        }
       />
     );
   }

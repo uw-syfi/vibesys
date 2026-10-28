@@ -11,7 +11,12 @@ import {
 } from '@vibesys/runs/intents';
 import {type JSX, useEffect, useRef, useState} from 'react';
 import type {SnapshotFrom} from 'xstate';
-import {historyEpoch, intentRows, type runIntentsMachine} from '../state/index.js';
+import {
+  type ErrorReport,
+  historyEpoch,
+  intentRows,
+  type runIntentsMachine,
+} from '../state/index.js';
 import {intentsActor, type RunRecords} from './effects/controls.js';
 import {useRelaunch, useWriterRecovery} from './relaunch.js';
 import {IntentControls} from './ui/controls.js';
@@ -29,6 +34,8 @@ interface RunIntentsProps {
   /** The run's one reader, whose records feed the intent history. */
   readonly records: RunRecords;
   readonly refreshWriter?: () => void;
+  /** Hands a refusal or a failed update to the run chat; absent where no chat can take it. */
+  readonly askAboutError?: (report: ErrorReport) => void;
 }
 
 function useIntentActor(props: RunIntentsProps) {
@@ -130,6 +137,7 @@ export function useRunIntents(props: RunIntentsProps) {
       edit={setText}
       send={send}
       retry={requestId => current.current?.send({type: 'retry', requestId})}
+      askAboutError={props.askAboutError}
     />
   );
   const surface = intentSurface(props.enabled, controls);

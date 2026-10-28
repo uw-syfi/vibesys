@@ -2,6 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import type {RunEvent} from '@vibesys/contracts';
 import {event} from '@vibesys/contracts/testing';
 import {type CoreState, initialCoreState, reduceEvent, reduceSnapshot} from '@vibesys/run-state';
+import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {shownThread, threadEntries, threadItems} from './thread-view.js';
 
 const CHAT = {agent_kind: 'chat', round_label: 'experiment-chat'} as const;
@@ -160,5 +161,34 @@ describe('threads', () => {
     expect(shownThread(core, {kind: 'last'})).toBe('c');
     expect(shownThread(initialCoreState(), {kind: 'last'})).toBeNull();
     expect(shownThread(core, {kind: 'thread', id: 'gone'})).toBeNull();
+  });
+});
+
+describe('failed answers', () => {
+  const TONES = [undefined, 'normal', 'failure'] as const;
+
+  test('property: an answer is failed exactly when its transcript entry is a failure', () => {
+    for (const seed of SEEDS.slice(0, 100)) {
+      const random = new Seeded(seed);
+      const entries = Array.from({length: 1 + random.int(8)}, (_, index) => {
+        const tone = random.pick(TONES);
+        return {
+          id: String(index * 2 + 1),
+          kind: 'assistant' as const,
+          content: `answer ${index}`,
+          ...(tone === undefined ? {} : {tone}),
+        };
+      });
+      const base = initialCoreState();
+      const core: CoreState = {
+        ...base,
+        chatThreads: [{id: 't', title: '', provider: 'claude', model: 'opus'}],
+        chatTranscripts: {t: entries},
+      };
+      const failed = threadItems(core, 't', null).flatMap(item =>
+        item.kind === 'answer' ? [item.failed] : [],
+      );
+      expect(failed).toEqual(entries.map(entry => entry.tone === 'failure'));
+    }
   });
 });

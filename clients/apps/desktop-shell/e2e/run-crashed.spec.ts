@@ -20,7 +20,7 @@ test('the idea, the turn and the clock stop where the run did', async ({page}) =
   await openFixture(page, fixture);
   const main = page.getByRole('main');
   await expect(main.getByText('Running', {exact: true})).toHaveCount(0);
-  await expect(main.getByText(/run failed/i).first()).toBeVisible();
+  await expect(main.getByText('Failed', {exact: true}).first()).toBeVisible();
   await expect(main.getByText('input not measured')).toBeVisible();
   await shot(page, 'ideas');
   await page.getByRole('radiogroup', {name: 'Show'}).getByText('Agents').click();

@@ -216,9 +216,12 @@ async function recoverHistory(page: Page, pane: Locator, width: number, answer: 
     bytes => (window as unknown as GatewayWindow).fakeGateway.sendChatFrame(bytes),
     tail([create(RecordSchema, {...answer, seq: 10n})]),
   );
-  await expect(pane.getByText('Unavailable', {exact: true})).toBeVisible();
+  // The history's error is said inline, whole and without a class prefix.
+  const failure = pane.getByText('History unavailable', {exact: true});
+  await expect(failure).toBeVisible();
+  await expect(pane.getByText(/^(Error|IntentRefused):/)).toHaveCount(0);
   await captureSession(page, width, 'unavailable');
   await pane.getByRole('button', {name: 'Retry history'}).click();
-  await expect(pane.getByText('Unavailable', {exact: true})).not.toBeVisible();
+  await expect(failure).not.toBeVisible();
   await expect(pane.getByText('It reduces contention under load.', {exact: true})).toBeVisible();
 }

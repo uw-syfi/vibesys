@@ -85,4 +85,9 @@ export type {Accepted, OperationSignal, OperationTransport} from './operations.j
 export {outcomePresentation, projectLifecycle} from './outcome.js';
 export {projectMessage} from './project.js';
 export {API_SCHEMA_HASH, HOST_SCHEMA_HASH, STORE_SCHEMA_HASH, schemaHash} from './schema-hashes.js';
-export {validatedExactFromBinary, validatedFromBinary, validateHostPayload} from './validation.js';
+export {
+  stringMaxBytes,
+  validatedExactFromBinary,
+  validatedFromBinary,
+  validateHostPayload,
+} from './validation.js';

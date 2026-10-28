@@ -7,6 +7,7 @@ import {
   Chip,
   type Crumb,
   Dock,
+  ErrorActions,
   Fact,
   FactLine,
   LogPane,
@@ -25,6 +26,11 @@ import {
   adoptionTitles,
   clockAt,
   clockStart,
+  commandErrorReport,
+  diagnosticErrorReport,
+  type ErrorReport,
+  endedBannerWords,
+  endedErrorReport,
   endedView,
   type HistoryProgress,
   headerView,
@@ -55,6 +61,7 @@ import {
   runPhase,
   runRouteOf,
   runWallNow,
+  shownDiagnostic,
   stepLabel,
   streamLines,
   timelineView,
@@ -126,6 +133,15 @@ export interface RunChatSlot {
   readonly panel: ReactNode;
   /** Why Chat cannot open (the machine's VibeSys cannot serve an ended run); absent: it can. */
   readonly unavailable?: string;
+  /** Hands an error to the chat in a new thread; absent where the chat cannot ask. */
+  readonly askAboutError?: (report: ErrorReport) => void;
+}
+
+/** The offer to ask the run chat about `report`, where there is one and the chat can take it. */
+function askAction(chat: RunChatSlot | undefined, report: ErrorReport | null): JSX.Element | null {
+  const ask = chat?.unavailable === undefined ? chat?.askAboutError : undefined;
+  if (ask === undefined || report === null) return null;
+  return <ErrorActions ask={() => ask(report)} />;
 }
 
 /**
@@ -270,10 +286,13 @@ function EndedBanner(props: {
   readonly state: RunPageState;
   readonly dispatch: Dispatch;
   readonly zoom: Zoom;
+  readonly chat: RunChatSlot | undefined;
 }): JSX.Element | null {
   const {state, dispatch} = props;
   const ended = endedView(state);
-  if (ended === null) return null;
+  const words = endedBannerWords(state);
+  if (ended === null || words === null) return null;
+  const ask = askAction(props.chat, endedErrorReport(state));
   const logsAndAgain = (
     <>
       <Button
@@ -289,14 +308,18 @@ function EndedBanner(props: {
   );
   if (state.readOnly === true) {
     // Resume belongs to the run controls, which know the writer; logs and Run again need no writer.
-    const reason = state.record.kind === 'ended' ? state.record.run.reason : null;
     if (ended.title === 'Finished') return <Row gap="space-2">{logsAndAgain}</Row>;
     return (
       <Banner
         tone={ended.tone}
-        title={state.lifecycleWord ?? ended.title}
-        body={reason ?? ''}
-        actions={logsAndAgain}
+        title={words.title}
+        body={words.body}
+        actions={
+          <>
+            {logsAndAgain}
+            {ask}
+          </>
+        }
       />
     );
   }
@@ -323,7 +346,19 @@ function EndedBanner(props: {
     </>
   );
   if (ended.title === 'Finished') return <Row gap="space-2">{actions}</Row>;
-  return <Banner tone={ended.tone} title={ended.title} body={ended.reason} actions={actions} />;
+  return (
+    <Banner
+      tone={ended.tone}
+      title={words.title}
+      body={words.body}
+      actions={
+        <>
+          {actions}
+          {ask}
+        </>
+      }
+    />
+  );
 }
 
 function Startup(props: {readonly state: RunPageState}): JSX.Element | null {
@@ -403,6 +438,7 @@ function pendingRunScreen(
   zoom: Zoom,
   route: Route,
   header: ReactNode,
+  chat: RunChatSlot | undefined,
 ): JSX.Element | null {
   if (state.record.kind === 'unlisted') {
     const blocked = machineBlockWords(state);
@@ -442,7 +478,7 @@ function pendingRunScreen(
   if (loading !== null) {
     return (
       <Screen density="compact" header={header}>
-        <EndedBanner state={state} dispatch={dispatch} zoom={zoom} />
+        <EndedBanner state={state} dispatch={dispatch} zoom={zoom} chat={chat} />
         <HistoryLoading progress={loading} />
       </Screen>
     );
@@ -457,7 +493,7 @@ function pendingRunScreen(
   ) {
     return (
       <Screen density="compact" header={header}>
-        <EndedBanner state={state} dispatch={dispatch} zoom={zoom} />
+        <EndedBanner state={state} dispatch={dispatch} zoom={zoom} chat={chat} />
         <RunLoadError message={problem} retry={() => dispatch({type: 'retry-load'})} />
       </Screen>
     );
@@ -524,14 +560,47 @@ function RunHeader(
   );
 }
 
-function CommandStatus({state}: {readonly state: RunPageState}): JSX.Element {
+/** The run's latest recorded failure in this epoch, unless the ended banner says it already. */
+function DiagnosticBanner({
+  state,
+  chat,
+}: {
+  readonly state: RunPageState;
+  readonly chat: RunChatSlot | undefined;
+}): JSX.Element | null {
+  const row = shownDiagnostic(state);
+  if (row === null) return null;
+  const ask = askAction(chat, diagnosticErrorReport(state));
+  return (
+    <Banner
+      tone="warn"
+      title="Run diagnostic"
+      body={row.message}
+      {...(ask === null ? {} : {actions: ask})}
+    />
+  );
+}
+
+function CommandStatus({
+  state,
+  chat,
+}: {
+  readonly state: RunPageState;
+  readonly chat: RunChatSlot | undefined;
+}): JSX.Element {
+  const ask = askAction(chat, commandErrorReport(state));
   return (
     <>
       {state.resumeStatus === null ? null : (
         <Banner tone="neutral" title="Resume" body={state.resumeStatus.message} />
       )}
       {state.notice === null ? null : (
-        <Banner tone="err" title="The run did not take the command" body={state.notice} />
+        <Banner
+          tone="err"
+          title="The run did not take the command"
+          body={state.notice}
+          {...(ask === null ? {} : {actions: ask})}
+        />
       )}
     </>
   );
@@ -579,6 +648,7 @@ function RunScreenBody(props: {
       chat={props.chat}
       toolbar={props.toolbar}
     />,
+    props.chat,
   );
   if (pending !== null) return pending;
   const problem = historyProblem(state);
@@ -616,15 +686,13 @@ function RunScreenBody(props: {
     >
       {props.toolbar}
       <PauseNowBanner state={state} dispatch={dispatch} />
-      <CommandStatus state={state} />
-      <EndedBanner state={state} dispatch={dispatch} zoom={zoom} />
+      <CommandStatus state={state} chat={props.chat} />
+      <EndedBanner state={state} dispatch={dispatch} zoom={zoom} chat={props.chat} />
       {problem === null ? null : (
         <Banner tone="warn" title="The run’s history is not available" body={problem} />
       )}
       <Startup state={state} />
-      {state.recordDiagnostic ? (
-        <Banner tone="warn" title="Run diagnostic" body={state.recordDiagnostic.message} />
-      ) : null}
+      <DiagnosticBanner state={state} chat={props.chat} />
       {before === null ? (
         <Hero
           {...base}

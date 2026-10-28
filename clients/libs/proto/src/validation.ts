@@ -1,6 +1,14 @@
 /** The generated schema is the sole source of field validation rules. */
-import {type DescMessage, fromBinary, type MessageShape} from '@bufbuild/protobuf';
+import {
+  type DescField,
+  type DescMessage,
+  fromBinary,
+  getOption,
+  isFieldSet,
+  type MessageShape,
+} from '@bufbuild/protobuf';
 import {createValidator} from '@bufbuild/protovalidate';
+import {field as fieldRules, StringRulesSchema} from './generated/buf/validate/validate_pb.js';
 import {HostService} from './generated/vibesys/api/v1/host_pb.js';
 
 const validator = createValidator();
@@ -50,4 +58,15 @@ function rejectUnknownFields(value: unknown, path: string): void {
   for (const [key, nested] of Object.entries(record)) {
     if (key !== '$typeName' && key !== '$unknown') rejectUnknownFields(nested, `${path}.${key}`);
   }
+}
+
+/** The `max_bytes` a string field's buf.validate rule sets; throws naming the field if none. */
+export function stringMaxBytes(field: DescField): number {
+  const rules = getOption(field, fieldRules);
+  if (
+    rules.type.case !== 'string' ||
+    !isFieldSet(rules.type.value, StringRulesSchema.field.maxBytes)
+  )
+    throw new Error(`${field.parent.typeName}.${field.name}: no string max_bytes rule`);
+  return Number(rules.type.value.maxBytes);
 }

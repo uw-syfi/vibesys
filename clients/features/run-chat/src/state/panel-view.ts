@@ -4,6 +4,7 @@
  * from the run fold and the machines; the UI only draws it.
  */
 import type {CardView} from './card-view.js';
+import type {ErrorReport} from './chat-words.js';
 import type {PanelContext, PanelEvent} from './panel.js';
 import type {SteerDraft, SteerMode, SteerTarget} from './steer.js';
 import type {ThreadEntry, ThreadItem} from './thread-view.js';
@@ -47,5 +48,7 @@ export interface ChatPanelView {
    * machine's reader answers over the saved run. Without it the panel only shows the threads.
    */
   readonly canAsk: boolean;
+  /** Hands an error to the chat in a new thread; absent where the chat cannot ask. */
+  readonly askAboutError?: (report: ErrorReport) => void;
   readonly dispatch: (event: PanelEvent) => void;
 }
