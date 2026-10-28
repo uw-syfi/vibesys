@@ -329,34 +329,34 @@ describe('a run that needs you', () => {
     expect(why({best: 1.3, points: [lost, lost, lost]})).toBe('All 3 ideas failed.');
   });
 
-  test('says every idea failed only when every point did, and nothing beat the input only with no best', () => {
+  /** A run that failed with no reason in its record, whose points are as likely to be all failures. */
+  function failedRun(random: Seeded, at: number): RunInput {
     const lost: IdeaInput = {ratio: null, verdict: 'failed'};
+    const points = random.pick([
+      null,
+      ideas(random),
+      Array.from({length: random.int(5)}, () => lost),
+    ]);
+    return {...randomRun(random, at), status: failed, attention: 'failed', reason: null, points};
+  }
+
+  /** What a failed run's card says of its ideas holds of its points and its best. */
+  function expectHonest(input: RunInput): void {
+    const needs = tileOf(input).attention;
+    const all = /^(?:All (\d+) ideas|Its one idea) failed/.exec(needs?.why ?? '');
+    if (all !== null) {
+      const points = input.points ?? [];
+      expect(points.every(point => point.verdict === 'failed')).toBe(true);
+      expect(input.pointsOmitted).toBe(0);
+      expect(points.length).toBe(Number(all[1] ?? 1));
+    }
+    if (needs?.why.includes('nothing beat the input')) expect(needs.facts).not.toContain('best ');
+  }
+
+  test('says every idea failed only when every point did, and nothing beat the input only with no best', () => {
     for (const seed of SEEDS) {
       const random = new Seeded(seed);
-      for (let at = 0; at < 20; at += 1) {
-        const input = run(`run-${at}`, {
-          ...randomRun(random, at),
-          status: failed,
-          attention: 'failed',
-          reason: null,
-          points: random.pick([
-            null,
-            ideas(random),
-            Array.from({length: random.int(5)}, () => lost),
-          ]),
-        });
-        const needs = tileOf(input).attention;
-        const all = /^(?:All (\d+) ideas|Its one idea) failed/.exec(needs?.why ?? '');
-        if (all !== null) {
-          const points = input.points ?? [];
-          expect(points.every(point => point.verdict === 'failed')).toBe(true);
-          expect(input.pointsOmitted).toBe(0);
-          expect(points.length).toBe(Number(all[1] ?? 1));
-        }
-        if (needs?.why.includes('nothing beat the input')) {
-          expect(needs.facts).not.toContain('best ');
-        }
-      }
+      for (let at = 0; at < 20; at += 1) expectHonest(failedRun(random, at));
     }
   });
 
