@@ -84,5 +84,11 @@ export function modelOf(
     adoptionOpened: best !== null,
     bestPath: best?.candidate ? [best.candidate] : [],
   };
-  return {candidates: tree, direction: 'max', pauses: [], baselines: []} as unknown as RunModel;
+  return {
+    candidates: tree,
+    direction: 'max',
+    pauses: [],
+    baselines: [],
+    trace: {spans: new Map()},
+  } as unknown as RunModel;
 }

@@ -4,12 +4,14 @@ import {RunLiveness, type RunWriterFacts} from '@vibesys/runs/intents';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {getInitialSnapshot} from 'xstate';
 import {
+  followedDiffs,
   type GatewayRunContext,
   gatewayRunMachine,
   loadView,
   logStreamToFollow,
   paintedSkeleton,
   projectSkeleton,
+  type RunModel,
   type RunPageSeed,
   skeletonScreenState,
 } from '../../state/index.js';
@@ -79,6 +81,7 @@ export function useGatewayRun(options: {
   const projectionError = wholeRead.error ?? modelRead.error ?? stateRead.error;
   const follow = state && model ? logStreamToFollow(state, model, route) : null;
   useFollowedContent(actor, follow, skeleton, route.step);
+  useFollowedDiffs(actor, whole, route.idea);
   return {
     snapshot,
     writer,
@@ -171,6 +174,20 @@ function useFollowedContent(
         transcriptId && transcriptSpan ? {streamId: transcriptId, spanId: transcriptSpan} : null,
     });
   }, [actor, transcriptId, transcriptSpan]);
+}
+
+/** Read the diffs of the opened idea's attempts, and no other idea's. */
+function useFollowedDiffs(
+  actor: ReturnType<typeof startGatewayRun> | null,
+  whole: RunModel | null,
+  idea: string | null,
+): void {
+  const opened = whole?.candidates.candidates.find(each => each.id === idea);
+  const hashes = whole && opened ? followedDiffs(whole, opened.attempts) : [];
+  const key = hashes.join(' ');
+  useEffect(() => {
+    actor?.send({type: 'follow-diffs', hashes: key === '' ? [] : key.split(' ')});
+  }, [actor, key]);
 }
 
 function project<T>(read: () => T): {value: T | null; error: string | null} {

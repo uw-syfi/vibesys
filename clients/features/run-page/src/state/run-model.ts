@@ -57,6 +57,12 @@ function sameFacts(a: RunFacts, b: RunFacts): boolean {
   return a.comparisons === b.comparisons && a.baselines === b.baselines && a.pauses === b.pauses;
 }
 
+/** An attempt's diff as the run attached it: its blob, and its text once the page read it. */
+export interface AttemptDiff {
+  readonly hash: string;
+  readonly text: string | null;
+}
+
 /** The run at one sequence. */
 export interface RunModel {
   /** Whether the reader has caught up with the committed prefix. */
@@ -92,6 +98,8 @@ export interface RunModel {
    * ideas a page reads (its history, not news).
    */
   readonly changed: ReadonlySet<string>;
+  /** The diffs settled attempts attached, by workstream span (`attemptDiffs`); a reader of records. */
+  readonly diffs?: ReadonlyMap<string, AttemptDiff>;
 }
 
 const NOTHING_CHANGED: ReadonlySet<string> = new Set();

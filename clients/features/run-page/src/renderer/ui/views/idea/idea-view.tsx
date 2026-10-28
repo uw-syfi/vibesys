@@ -53,6 +53,7 @@ import {ActivityStatus} from '../../activity-status.js';
 import type {ViewBase, ViewHeader, Zoom} from '../props.js';
 import {StepStrip} from '../timeline/step-strip.js';
 import {whoBadge} from '../who-badge.js';
+import {ChangedFiles} from './changed-files.js';
 
 export interface IdeaViewProps extends ViewBase {
   readonly idea: Candidate;
@@ -231,6 +232,7 @@ export function IdeaView(props: IdeaViewProps): JSX.Element {
       {lines.length > 1 ? (
         <Attempts lines={lines} selected={attempt.span} choose={setChosen} />
       ) : null}
+      <ChangedFiles model={props.model} attempt={attempt} />
       <StepStrip
         idea={idea}
         attempt={attempt}

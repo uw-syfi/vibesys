@@ -1,4 +1,5 @@
 /** Skeleton readings are projected into the existing Run screen props; seeking is local. */
+
 import {type HostRun, recordedProjectRoot} from '@vibesys/hosts';
 import {
   type LoadProgress,
@@ -22,6 +23,7 @@ import {
 } from '@vibesys/run-state/skeleton';
 import {closeSpans, type RunEnding} from '@vibesys/run-state/trace';
 import {AppendLog} from './append-log.js';
+import {attemptDiffs} from './idea-files.js';
 import {EMPTY_TRACE_LOG} from './live.js';
 import type {RunModel} from './run-model.js';
 import {type RunPageSeed, type RunPageState, runPageInitial} from './run-page.js';
@@ -142,6 +144,7 @@ export function projectSkeleton(
     latest,
     inputGates: reading.inputFailures,
     changed: new Set(),
+    diffs: attemptDiffs(skeleton, seq, options.content?.text),
   };
 }
 /**

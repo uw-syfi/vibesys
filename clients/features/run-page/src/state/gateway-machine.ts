@@ -40,6 +40,7 @@ export interface GatewayTranscriptInput {
 export type GatewayEvent =
   | {type: 'refresh-writer'}
   | {type: 'follow-transcript'; selection: {spanId: string; streamId: string} | null}
+  | {type: 'follow-diffs'; hashes: readonly string[]}
   | {type: 'transcript'; spanId: string; transcript: NativeTranscript}
   | {type: 'ui'; action: RunPageAction}
   | {type: 'log'; streamId: string; text: string; offset: number; next: number}
@@ -72,6 +73,8 @@ export interface GatewayRunContext extends GatewayInput {
   error: string | null;
   selectedTranscript: {spanId: string; streamId: string} | null;
   transcripts: Readonly<Record<string, NativeTranscript>>;
+  /** The diff blobs of the opened idea's attempts: read on demand, never for every idea. */
+  followedDiffs: readonly string[];
 }
 
 function nextContentHash(context: GatewayRunContext): string {
@@ -83,6 +86,7 @@ function nextContentHash(context: GatewayRunContext): string {
   }
   return (
     [
+      ...context.followedDiffs,
       ...Object.values(context.transcripts).flatMap(nativeTranscriptHashes),
       ...Object.values(context.replies)
         .flat()
@@ -205,6 +209,7 @@ export const gatewayRunMachine = setup({
     error: null,
     selectedTranscript: null,
     transcripts: {},
+    followedDiffs: [],
   }),
   initial: 'active',
   states: {
@@ -242,6 +247,7 @@ export const gatewayRunMachine = setup({
           }),
         },
         records: {actions: 'receivedRecords'},
+        'follow-diffs': {actions: assign({followedDiffs: ({event}) => event.hashes})},
         retry: {target: '#gatewayRun.active', reenter: true},
         ui: {actions: assign({ui: ({context, event}) => uiStep(context.ui, event.action)})},
       },

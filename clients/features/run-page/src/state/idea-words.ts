@@ -205,3 +205,28 @@ export function summaryLine(summary: string): string {
   const sentence = /^(.+?[.!?])(?:\s|$)/.exec(line)?.[1] ?? line;
   return sentence.replace(/\.$/, '');
 }
+
+/** The words of an attempt's changed files on the idea's page. */
+export const CHANGED_FILES = {
+  title: 'files changed',
+  reading: 'Reading the diff…',
+  cut: "Past the diff's size limit: the run kept the file's name, not its changes.",
+} as const;
+
+/** How many lines `patch` adds and removes, as `+12 −3`. */
+export function changeCounts(patch: string): string {
+  let added = 0;
+  let removed = 0;
+  for (const line of patch.split('\n')) {
+    if (line.startsWith('+') && !line.startsWith('+++')) added += 1;
+    else if (line.startsWith('-') && !line.startsWith('---')) removed += 1;
+  }
+  return `+${added} −${removed}`;
+}
+
+/** `patch` as a Markdown code block, fenced past any backtick run inside it. */
+export function diffBlock(patch: string): string {
+  const longest = Math.max(0, ...(patch.match(/`+/g) ?? []).map(run => run.length));
+  const fence = '`'.repeat(Math.max(3, longest + 1));
+  return `${fence}diff\n${patch.replace(/\n$/, '')}\n${fence}`;
+}

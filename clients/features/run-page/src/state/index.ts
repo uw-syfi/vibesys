@@ -32,13 +32,14 @@ export {
 } from './idea-activity.js';
 export {type IdeaBase, type IdeaBases, ideaBases} from './idea-bases.js';
 export {effectWords, type IdeaEffect, type IdeaEffects, ideaEffects} from './idea-effects.js';
+export {attemptFiles, type ChangedFile, filePatches, followedDiffs} from './idea-files.js';
 export {type IdeaFocusView, ideaFocusView, ideaOutcomeLine, openIdeaId} from './idea-focus.js';
 export {
   type ImplementerOutcome,
   type ImplementerOutcomes,
   implementerOutcomes,
 } from './idea-outcomes.js';
-export {outcomeWords, summaryLine} from './idea-words.js';
+export {CHANGED_FILES, changeCounts, diffBlock, outcomeWords, summaryLine} from './idea-words.js';
 export {
   type BestLine,
   bestLine,

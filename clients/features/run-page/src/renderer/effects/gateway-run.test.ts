@@ -552,6 +552,63 @@ test('reply attachments load through the same verified content owner as objectiv
   ).toBe(true);
 });
 
+test('an attempt diff is read only once its idea is opened, through the same content owner', async () => {
+  const fixture = storeRunFixture('short', 1);
+  const skeleton = foldSkeleton(seedSkeleton(), fixture.records);
+  const span = Object.values(skeleton.spans)
+    .find(history => history.versions.at(-1)?.span?.label?.kind === 'workstream')
+    ?.versions.at(-1)?.span;
+  if (!span) throw new Error('fixture');
+  const diff = 'diff --git a/q.rs b/q.rs\n--- a/q.rs\n+++ b/q.rs\n@@ -1 +1 @@\n-a\n+b ✓\n';
+  const data = new TextEncoder().encode(diff);
+  const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', data)))
+    .map(value => value.toString(16).padStart(2, '0'))
+    .join('');
+  const seq = (skeleton.throughSeq ?? 0n) + 1n;
+  const transport = new FakeRunTransport({
+    ...fixture,
+    records: [
+      ...fixture.records,
+      create(RecordSchema, {
+        seq,
+        epoch: 1,
+        body: {
+          case: 'blob',
+          value: {
+            span: span.id,
+            role: 'diff',
+            blob: {sha256: hash, size: BigInt(data.length), mediaType: 'text/x-diff'},
+          },
+        },
+      }),
+    ],
+    blobs: {...fixture.blobs, [hash]: data},
+  });
+  const clock = new FakeClock();
+  const actor = startGatewayRun(
+    {reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule)},
+    clock.schedule,
+    {seed: SEED},
+  );
+  try {
+    await reached(
+      actor,
+      snapshot =>
+        snapshot.context.load?.skeleton.throughSeq === seq &&
+        snapshot.matches({active: {content: 'idle'}}),
+    );
+    expect(actor.getSnapshot().context.attemptedContent.has(hash)).toBe(false);
+    actor.send({type: 'follow-diffs', hashes: [hash]});
+    await reached(actor, snapshot => snapshot.context.text[hash] !== undefined);
+    const {load, text} = actor.getSnapshot().context;
+    if (!load) throw new Error('loaded history required');
+    const model = projectSkeleton(load.skeleton, seq, '', {content: {text}});
+    expect(model.diffs?.get(span.id)).toEqual({hash, text: diff});
+  } finally {
+    actor.stop();
+  }
+});
+
 async function expireAndRestoreWatch(
   actor: ReturnType<typeof startGatewayRun>,
   transport: FakeRunTransport,
