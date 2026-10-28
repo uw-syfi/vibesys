@@ -57,6 +57,13 @@ export {type LoadView, loadView, paintedSkeleton} from './load-view.js';
 export {type ModelNames, modelNamesOf, NO_MODEL_NAMES} from './model-names.js';
 export {roleLabel, stepKicker, stepLabel, stepTitle} from './names.js';
 export {
+  PANE_ROLES,
+  type PaneRole,
+  type PaneSizes,
+  type PaneWidths,
+  RESIZE_WORDS,
+} from './pane-words.js';
+export {
   objectivesOf,
   type ParetoAxisView,
   type ParetoPointView,
