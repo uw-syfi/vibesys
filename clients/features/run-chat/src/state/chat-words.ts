@@ -1,5 +1,6 @@
 /** The words the run chat says, apart from the components that show them. */
 import type {ChatFailure} from './failure.js';
+import type {SteerMode} from './steer.js';
 
 /** The closed disclosure that holds a failure's diagnostic. */
 export const DETAILS_LABEL = 'Details';
@@ -13,6 +14,17 @@ export const WRITING_ANSWER = 'Writing';
  */
 export const HARNESS_LIST_UNREAD = 'The harness list could not be read';
 export const NO_HARNESS_OFFERED = 'This machine offers no harness to chat with';
+
+/**
+ * What each When choice of a steer does, said under the card's choice: next turn reaches one turn
+ * of the target, standing every later turn until withdrawn, and interrupt a running turn whose
+ * provider takes a message mid-turn, else the next turn (`SteerMode` in the run protocol).
+ */
+export const STEER_MODE_HELP: Readonly<Record<SteerMode, string>> = {
+  next_turn: "Added to the agent's prompt at its next turn, once.",
+  standing: "Added to the agent's prompt at every turn from now until you withdraw it.",
+  interrupt: 'Sent to the agent mid-turn if it can take it, else added at its next turn.',
+};
 
 /** An error as the run chat is asked about it: where it happened, what it said, and its diagnostic. */
 export interface ErrorReport {

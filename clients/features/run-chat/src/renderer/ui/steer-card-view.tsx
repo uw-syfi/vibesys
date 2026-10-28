@@ -16,6 +16,7 @@ import {
   type CardView,
   type ErrorReport,
   parseTargetValue,
+  STEER_MODE_HELP,
   STEER_MODES,
   type SteerDraft,
   steerFailureReport,
@@ -71,6 +72,9 @@ function Draft(props: CardProps): JSX.Element {
           change={actions.setMode}
         />
       </Row>
+      <Text variant="small" tone="muted">
+        {STEER_MODE_HELP[draft.mode]}
+      </Text>
       <CardFailure {...props} />
       <Row gap="space-3" align="start">
         <Button
