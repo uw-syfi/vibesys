@@ -21,12 +21,15 @@ import {FakeClock} from '@vibesys/transport/testing';
 import fc from 'fast-check';
 import {getInitialSnapshot, getNextSnapshot, type SnapshotFrom} from 'xstate';
 import {
+  type GatewayUiAction,
   gatewayRunMachine,
   headerView,
   projectSkeleton,
   runHasEnded,
+  runPageStep,
   scrubberView,
   skeletonScreenState,
+  USAGE_CONTROLS_DEFAULT,
 } from '../../state/index.js';
 import type {TimelineControls} from '../../state/timeline-controls.js';
 import {TIMELINE_RANGES} from '../../state/timeline-rows.js';
@@ -867,8 +870,10 @@ test('property: expiring or replayed lock hints cannot roll back committed write
   );
 });
 
-test('regression: any Timeline range, folding and zoom a person sets reaches the screen', () => {
+test('regression: every presentation change a person makes reaches the screen state', () => {
   // The machine passed only the presentation actions it listed, and dropped the Timeline's.
+  // One arbitrary per action the gateway classifies as `ui`: a new one does not build until added.
+  const id = fc.constantFrom('a', 'b', 'c');
   const controls: fc.Arbitrary<TimelineControls> = fc.record({
     range: fc.constantFrom(...TIMELINE_RANGES.map(each => each.value)),
     expanded: fc.boolean(),
@@ -879,16 +884,47 @@ test('regression: any Timeline range, folding and zoom a person sets reaches the
       {nil: null},
     ),
   });
+  const actions: {readonly [K in GatewayUiAction['type']]: fc.Arbitrary<GatewayUiAction>} = {
+    view: fc
+      .oneof(fc.constant('live' as const), fc.nat(40))
+      .map(at => ({type: 'view', view: {at}})),
+    'select-stream': id.map(streamId => ({type: 'select-stream', streamId})),
+    'ideas-filter': fc
+      .record({
+        query: fc.string({maxLength: 4}),
+        passed: fc.boolean(),
+        running: fc.boolean(),
+        failed: fc.boolean(),
+      })
+      .map(filter => ({type: 'ideas-filter', filter})),
+    'usage-controls': fc
+      .constantFrom('cost' as const, 'tokens' as const)
+      .map(metric => ({type: 'usage-controls', controls: {...USAGE_CONTROLS_DEFAULT, metric}})),
+    'timeline-controls': controls.map(each => ({type: 'timeline-controls', controls: each})),
+    'ideas-layout': fc
+      .constantFrom('list' as const, 'tree' as const)
+      .map(layout => ({type: 'ideas-layout', layout})),
+    'ideas-open': fc
+      .tuple(id, fc.boolean())
+      .map(([key, open]) => ({type: 'ideas-open', key, open})),
+    'ideas-pin': fc.option(id, {nil: null}).map(idea => ({type: 'ideas-pin', idea})),
+    'ideas-hover': fc.option(id, {nil: null}).map(idea => ({type: 'ideas-hover', idea})),
+    'agents-open': fc
+      .tuple(id, fc.boolean())
+      .map(([agent, open]) => ({type: 'agents-open', id: agent, open})),
+    'view-logs': fc.constant({type: 'view-logs'}),
+  };
   fc.assert(
-    fc.property(fc.array(controls, {minLength: 1, maxLength: 4}), changes => {
-      let snapshot = getInitialSnapshot(gatewayRunMachine, {seed: SEED});
-      for (const change of changes) {
-        snapshot = getNextSnapshot(gatewayRunMachine, snapshot, {
-          type: 'ui',
-          action: {type: 'timeline-controls', controls: change},
-        });
-        expect(snapshot.context.ui.timeline).toEqual(change);
-      }
-    }),
+    fc.property(
+      fc.array(fc.oneof(...Object.values(actions)), {minLength: 1, maxLength: 8}),
+      changes => {
+        let snapshot = getInitialSnapshot(gatewayRunMachine, {seed: SEED});
+        for (const action of changes) {
+          const expected = runPageStep(snapshot.context.ui, action).state;
+          snapshot = getNextSnapshot(gatewayRunMachine, snapshot, {type: 'ui', action});
+          expect(snapshot.context.ui).toEqual(expected);
+        }
+      },
+    ),
   );
 });

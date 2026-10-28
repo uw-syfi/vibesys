@@ -110,24 +110,68 @@ function replyAttachments(
   return replies;
 }
 
-/** Presentation changes reuse the existing pure reducer; gateway commands never reach legacy ports. */
-function uiStep(state: RunPageState, action: RunPageAction): RunPageState {
-  switch (action.type) {
-    case 'view':
-    case 'ideas-filter':
-    case 'usage-controls':
-    case 'timeline-controls':
-    case 'ideas-layout':
-    case 'ideas-open':
-    case 'ideas-pin':
-    case 'ideas-hover':
-    case 'agents-open':
-    case 'select-stream':
-    case 'view-logs':
-      return runPageStep(state, action).state;
-    default:
-      return state;
+/**
+ * What the gateway screen does with each page action: a presentation change (`ui`) folds through
+ * the page's pure reducer; anything else belongs to the legacy page's effects and never reaches the
+ * gateway's ports. Every action type is classified, so a new one does not build until it is.
+ */
+const GATEWAY_ACTIONS = {
+  view: 'ui',
+  'select-stream': 'ui',
+  'ideas-filter': 'ui',
+  'usage-controls': 'ui',
+  'timeline-controls': 'ui',
+  'ideas-layout': 'ui',
+  'ideas-open': 'ui',
+  'ideas-pin': 'ui',
+  'ideas-hover': 'ui',
+  'agents-open': 'ui',
+  'view-logs': 'ui',
+  record: 'gateway-ignored',
+  'ask-pause-now': 'gateway-ignored',
+  'cancel-pause-now': 'gateway-ignored',
+  'confirm-pause-now': 'gateway-ignored',
+  'pause-now-failed': 'gateway-ignored',
+  'bound-elapsed': 'gateway-ignored',
+  locate: 'gateway-ignored',
+  streams: 'gateway-ignored',
+  'log-view': 'gateway-ignored',
+  pause: 'gateway-ignored',
+  'resume-ended': 'gateway-ignored',
+  'resume-status': 'gateway-ignored',
+  'open-window': 'gateway-ignored',
+  archive: 'gateway-ignored',
+  'run-again': 'gateway-ignored',
+  attached: 'gateway-ignored',
+  chat: 'gateway-ignored',
+  'reader-attached': 'gateway-ignored',
+  'reader-core': 'gateway-ignored',
+  session: 'gateway-ignored',
+  'run-core': 'gateway-ignored',
+  'run-data': 'gateway-ignored',
+  tick: 'gateway-ignored',
+  'command-refused': 'gateway-ignored',
+  history: 'gateway-ignored',
+  'trace-page': 'gateway-ignored',
+  summary: 'gateway-ignored',
+  'need-history': 'gateway-ignored',
+  'need-span': 'gateway-ignored',
+  'retry-load': 'gateway-ignored',
+  span: 'gateway-ignored',
+} as const satisfies Record<RunPageAction['type'], 'ui' | 'gateway-ignored'>;
+
+/** The page actions the gateway screen folds: its presentation changes. */
+export type GatewayUiAction = Extract<
+  RunPageAction,
+  {
+    readonly type: {
+      [K in keyof typeof GATEWAY_ACTIONS]: (typeof GATEWAY_ACTIONS)[K] extends 'ui' ? K : never;
+    }[keyof typeof GATEWAY_ACTIONS];
   }
+>;
+
+function uiStep(state: RunPageState, action: RunPageAction): RunPageState {
+  return GATEWAY_ACTIONS[action.type] === 'ui' ? runPageStep(state, action).state : state;
 }
 
 function receivedLog(
