@@ -8,7 +8,14 @@ from typing import TYPE_CHECKING, Self
 
 import vs_proto.api as p
 from vibesys.events import CoreEvent
-from vibesys.records.api import MappedEvent, MappingState, epoch_header, map_event
+from vibesys.records.api import (
+    MappedEvent,
+    MappingState,
+    attach_changes,
+    epoch_header,
+    map_event,
+    settled_attempts,
+)
 from vs_decode.api import Unreadable, decode_json
 from vs_runlog.api import current_epoch, epoch_has_ended, fold_skeleton
 
@@ -17,6 +24,7 @@ if TYPE_CHECKING:
     from datetime import datetime
     from types import TracebackType
 
+    from vibesys.workspace_changes import AttemptChanges
     from vs_runlog.api import FileRunContent, FileRunLogWriter
 
 # A journal observation can contain large content; the record cap applies only
@@ -70,6 +78,17 @@ class RunLogTee:
         self._live = checkout is not None
         self._project_root = ""
         self._tree_hash, self._dirty = ("", False) if checkout is None else checkout
+        self._read_changes: Callable[[str, str], AttemptChanges | None] | None = None
+
+    def follow_changes(self, read: Callable[[str, str], AttemptChanges | None]) -> None:
+        """Keep each attempt's changed files and diff on its workstream span once it settles.
+
+        ``read`` returns what a revision range changed, or None when the range is unreadable.
+
+        ponytail: ``read`` runs git under the journal's lock when an attempt settles, bounded by
+        the tracker's read timeout; a reader thread would free the lock if that ever shows.
+        """
+        self._read_changes = read
 
     def remember_project_root(self, project_root: str) -> None:
         """Record the canonical project root before the first event is mirrored."""
@@ -187,9 +206,24 @@ class RunLogTee:
             for record in result.records:
                 self._writer.append(record)
             self._state = result.state
+            self._attach_changes(result, event.timestamp)
         except BaseException:
             self.close()
             raise
+
+    def _attach_changes(self, result: MappedEvent, at: datetime) -> None:
+        """Place what each attempt that settled in ``result`` changed on its span."""
+        if self._read_changes is None:
+            return
+        for span, base, head in settled_attempts(result.records):
+            changes = self._read_changes(base, head)
+            if changes is None or self._state is None:
+                continue
+            placed = attach_changes(self._state, span, changes, at)
+            self._write_content(placed)
+            for record in placed.records:
+                self._writer.append(record)
+            self._state = placed.state
 
     def _write_content(self, result: MappedEvent) -> None:
         for blob in result.blobs:

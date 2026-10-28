@@ -34,6 +34,7 @@ from vibesys.run.profilers import WITHHELD_TOOLS_ENV, ProfilerToolOffer, profile
 from vibesys.run.queue_status import queue_status_reader, queue_status_service
 from vibesys.run.resources import open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
+from vibesys.workspace_changes import read_attempt_changes
 from vs_agent.api import (
     AgentSessionKey,
     AgentSessionState,
@@ -250,6 +251,9 @@ class _ProductHostFactory:
         )
         evaluation = stop_gated_evaluation(evaluation, self.integration.control)
         self.local_evaluation = evaluation
+        self.integration.events.follow_attempt_changes(
+            partial(read_attempt_changes, project.git, framework=policy.artifact_directories)
+        )
         self.facts = resources.facts
         self.comparisons = self._read_comparisons(resources)
         self.core_services = self._core_services(

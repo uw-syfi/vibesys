@@ -398,7 +398,7 @@ depends_on = ["vibesys.api._store", "vibesys.plugin_catalog", "vs_project", "vs_
 
 [[modules]]
 path = "vibesys.api._store"
-depends_on = ["vibesys.api.contracts", "vibesys.plugin_catalog", "vs_project", "vs_runtime", "vs_sim.api"]
+depends_on = ["vibesys.api.contracts", "vibesys.plugin_catalog", "vibesys.workspace_changes", "vs_project", "vs_runtime", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys.api.testing"
@@ -478,7 +478,7 @@ depends_on = []
 [[modules]]
 path = "vibesys.run"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys.run.runlog_tee", "vibesys.chat", "vs_runlog", "vs_proto", "vs_core", "vs_decode.api", "vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github", "vs_sandbox", "vs_project", "vs_slurm", "vs_sim.api", "vs_redaction.api"]
+depends_on = ["vibesys.run.runlog_tee", "vibesys.workspace_changes", "vibesys.chat", "vs_runlog", "vs_proto", "vs_core", "vs_decode.api", "vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github", "vs_sandbox", "vs_project", "vs_slurm", "vs_sim.api", "vs_redaction.api"]
 
 [[modules]]
 path = "vibesys.run.evaluation_identity"
@@ -498,7 +498,7 @@ depends_on = ["vibesys", "vibesys.inputs", "vs_project", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.host"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.comparisons", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_socket", "vibesys.run.queue_status", "vibesys.run.evaluation_identity", "vibesys.run.slurm_evaluation", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.run.contracts", "vibesys.run.core_services", "vibesys.run.measurement_events", "vs_mcp", "vs_sim.api"]
+depends_on = ["vibesys.workspace_changes", "vibesys", "vibesys.comparisons", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_socket", "vibesys.run.queue_status", "vibesys.run.evaluation_identity", "vibesys.run.slurm_evaluation", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.run.contracts", "vibesys.run.core_services", "vibesys.run.measurement_events", "vs_mcp", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys.run.evaluation_socket"
@@ -1949,15 +1949,23 @@ expose = ["ConversionResult", "ConversionStatus", "RunConversion", "convert_run"
 
 [[modules]]
 path = "vibesys.records"
-depends_on = ["vibesys", "vibesys.search_spans", "vs_core", "vs_decode.api", "vs_proto"]
+depends_on = ["vibesys", "vibesys.search_spans", "vibesys.workspace_changes", "vs_core", "vs_decode.api", "vs_proto"]
 
 [[interfaces]]
 from = ["vibesys.records"]
 expose = ["api", "api\\..*"]
 
 [[modules]]
+path = "vibesys.workspace_changes"
+depends_on = ["vs_project"]
+
+[[interfaces]]
+from = ["vibesys.workspace_changes"]
+expose = ["AttemptChanges", "DIFF_LIMIT", "RevisionDiffs", "WorkspaceChange", "WorkspaceChangeKind", "capped_diff", "is_user_change", "parse_name_status", "read_attempt_changes"]
+
+[[modules]]
 path = "vibesys.run.runlog_tee"
-depends_on = ["vibesys", "vibesys.records", "vs_decode.api", "vs_runlog", "vs_proto"]
+depends_on = ["vibesys", "vibesys.records", "vibesys.workspace_changes", "vs_decode.api", "vs_runlog", "vs_proto"]
 
 [[interfaces]]
 from = ["vibesys.run.runlog_tee"]

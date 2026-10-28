@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -11,12 +10,17 @@ from pydantic import BaseModel, ConfigDict
 
 from vibesys.api.contracts import RunStatus
 from vibesys.plugin_catalog import project_run, project_steer_targets
+from vibesys.workspace_changes import (
+    WorkspaceChange,
+    WorkspaceChangeKind,
+    is_user_change,
+    parse_name_status,
+)
 from vs_project.api import (
     GitRunHistory,
     GitTracker,
     NullGitTrackerEvents,
     ProjectStateError,
-    is_project_state_path,
     open_git_repository,
 )
 
@@ -33,15 +37,6 @@ if TYPE_CHECKING:
 _EFFECTIVE_OBJECTIVE = PurePosixPath("runtime/effective-objective.md")
 
 
-class WorkspaceChangeKind(StrEnum):
-    """A semantic file change between two recorded workspace revisions."""
-
-    ADDED = "added"
-    MODIFIED = "modified"
-    DELETED = "deleted"
-    RENAMED = "renamed"
-
-
 class RunDocument(BaseModel):
     """One immutable file from portable state, without its storage layout."""
 
@@ -49,16 +44,6 @@ class RunDocument(BaseModel):
 
     relative_path: PurePosixPath
     contents: bytes
-
-
-class WorkspaceChange(BaseModel):
-    """One user-visible workspace change between immutable checkpoints."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    path: str
-    kind: WorkspaceChangeKind
-    renamed_from: str | None = None
 
 
 class RunRecordFacts(BaseModel):
@@ -256,7 +241,9 @@ class _LocalRunRecord:
     def workspace_changes(self, base: str, head: str) -> tuple[WorkspaceChange, ...]:
         output = self._git_read(self._git.diff_name_status, base, head)
         return tuple(
-            change for change in _parse_name_status(output) if self._is_user_change(change)
+            change
+            for change in parse_name_status(output)
+            if is_user_change(change, self._framework_prefixes)
         )
 
     def workspace_patch(self, base: str, head: str, paths: tuple[str, ...]) -> str:
@@ -292,19 +279,6 @@ class _LocalRunRecord:
         if warning is None:
             raise RunRecordReadError.unavailable()
         raise RunRecordReadError(warning[0], detail=warning[1])
-
-    def _is_user_change(self, change: WorkspaceChange) -> bool:
-        paths = (
-            (change.path,) if change.renamed_from is None else (change.path, change.renamed_from)
-        )
-        return not any(self._is_framework_path(path) for path in paths)
-
-    def _is_framework_path(self, path: str) -> bool:
-        if is_project_state_path(path):
-            return True
-        return any(
-            path == prefix or path.startswith(f"{prefix}/") for prefix in self._framework_prefixes
-        )
 
 
 class _LocalRunStore:
@@ -342,37 +316,6 @@ class _LocalRunStore:
         return _LocalRunRecord(
             self._project, run_id, registry=self._registry, git=self._git, threads=self._threads
         )
-
-
-def _parse_name_status(output: str) -> tuple[WorkspaceChange, ...]:
-    """Parse Git's NUL-delimited name-status format into semantic changes."""
-    tokens = output.split("\0")
-    changes: list[WorkspaceChange] = []
-    index = 0
-    while index < len(tokens):
-        status = tokens[index]
-        if not status:
-            break
-        if status.startswith(("R", "C")) and index + 3 <= len(tokens):
-            renamed_from, path = tokens[index + 1], tokens[index + 2]
-            index += 3
-            kind = (
-                WorkspaceChangeKind.RENAMED if status.startswith("R") else WorkspaceChangeKind.ADDED
-            )
-            if kind is not WorkspaceChangeKind.RENAMED:
-                renamed_from = ""
-        elif index + 1 < len(tokens):
-            path = tokens[index + 1]
-            renamed_from = ""
-            index += 2
-            kind = {
-                "A": WorkspaceChangeKind.ADDED,
-                "D": WorkspaceChangeKind.DELETED,
-            }.get(status[:1], WorkspaceChangeKind.MODIFIED)
-        else:
-            break
-        changes.append(WorkspaceChange(path=path, kind=kind, renamed_from=renamed_from or None))
-    return tuple(changes)
 
 
 __all__ = [

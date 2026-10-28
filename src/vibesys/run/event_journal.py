@@ -29,8 +29,10 @@ from vs_runtime.api.infrastructure import (
 from vs_sim.api import SleepingClock, Threads, utc_datetime
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
+    from vibesys.workspace_changes import AttemptChanges
     from vs_project.api import Project
     from vs_runtime.api.infrastructure import ControlRequest
 
@@ -99,6 +101,11 @@ class EventJournal(DurableEventJournal[CoreEvent]):
         except Exception:
             self.close()
             logging.getLogger(__name__).exception("Run log tee disabled during initialization")
+
+    def follow_attempt_changes(self, read: Callable[[str, str], AttemptChanges | None]) -> None:
+        """Keep what each attempt changed on its span as it settles; nothing without a run log."""
+        if self._runlog is not None:
+            self._runlog.follow_changes(read)
 
     def attach(self, directory: Path, stream_id: str) -> None:
         """Attach the JSONL journal, then publish this writer's epoch if it is live.
