@@ -12,6 +12,7 @@ import {
   Card,
   Chip,
   EmptyState,
+  ErrorActions,
   Meter,
   Page,
   Row,
@@ -209,9 +210,22 @@ export function MachinesPage(props: {
     <Page header={header}>
       <Stack>
         {state.listProblem === null ? null : (
-          <Banner tone="err" title="The machines could not be read" body={state.listProblem} />
+          <Banner
+            tone="err"
+            title="The machines could not be read"
+            body={state.listProblem}
+            actions={
+              <ErrorActions copy={`The machines could not be read\n\n${state.listProblem}`} />
+            }
+          />
         )}
-        {state.actionProblem === null ? null : <Banner tone="err" title={state.actionProblem} />}
+        {state.actionProblem === null ? null : (
+          <Banner
+            tone="err"
+            title={state.actionProblem}
+            actions={<ErrorActions copy={state.actionProblem} />}
+          />
+        )}
         {state.listing !== null && state.machines.length === 0 ? (
           <Card>
             <EmptyState title="Reading" />

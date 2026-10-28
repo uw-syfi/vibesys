@@ -67,6 +67,19 @@ test('a run with no log is refused in words, with Retry and no retry storm', asy
   await expect.poll(skeletons).toBe(2);
 });
 
+test.describe('with the clipboard', () => {
+  test.use({permissions: ['clipboard-read', 'clipboard-write']});
+  test('a run with no log copies its details', async ({page}) => {
+    await openRun(page, {skeleton: {status: NOT_FOUND, message: 'run.log is missing'}});
+    const copy = page.getByRole('button', {name: 'Copy details', exact: true});
+    await copy.click();
+    await expect(page.getByRole('button', {name: 'Copied', exact: true})).toBeVisible();
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+    expect(copied.startsWith('No run log')).toBe(true);
+    expect(copied).toContain('run.log is missing');
+  });
+});
+
 test('a transient failure shows reconnecting, backs off, and ends in a status word', async ({
   page,
 }) => {

@@ -11,6 +11,7 @@ import {
   Card,
   Chip,
   EmptyState,
+  ErrorActions,
   Field,
   Grid,
   KeyValue,
@@ -359,7 +360,12 @@ export function MachinesScreen(props: {
     <Stack>
       <AddMachine state={state} dispatch={dispatch} />
       {state.listProblem === null ? null : (
-        <Banner tone="err" title="The machines could not be read" body={state.listProblem} />
+        <Banner
+          tone="err"
+          title="The machines could not be read"
+          body={state.listProblem}
+          actions={<ErrorActions copy={`The machines could not be read\n\n${state.listProblem}`} />}
+        />
       )}
       {machine === null ? (
         <NoMachine state={state} />

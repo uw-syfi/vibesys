@@ -15,7 +15,7 @@ import type {ScheduleTimeout} from '@vibesys/machine';
 import {type RecordsFanout, type RecordsListener, recordsFanout} from '@vibesys/run-skeleton';
 import {gatewayContentCache} from '@vibesys/run-skeleton/cache';
 import {type GatewayReader, gatewayReader} from '@vibesys/run-skeleton/reader';
-import {Card, EmptyState, Page, Text} from '@vibesys/ui';
+import {Card, EmptyState, ErrorActions, Page, Text} from '@vibesys/ui';
 import {type JSX, useMemo, useRef} from 'react';
 import {useGatewayChat} from './gateway-chat.js';
 import {gatewayTransport} from './gateway-transport.js';
@@ -76,7 +76,10 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
       <Page>
         <Card>
           {(snapshot.context.error ?? page.projectionError) ? (
-            <EmptyState title={snapshot.context.error ?? page.projectionError ?? ''} />
+            <EmptyState
+              title={snapshot.context.error ?? page.projectionError ?? ''}
+              action={<ErrorActions copy={snapshot.context.error ?? page.projectionError ?? ''} />}
+            />
           ) : (
             <LoadStatus view={page.load} retry={page.retry} />
           )}

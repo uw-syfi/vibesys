@@ -111,3 +111,10 @@ test('Agent logins draws labels, with each harness’s detail on its status', ()
   expect(html).toContain('title="Codex is not installed on host-b."');
   expect(html).toContain('title="Or set an API key on host-b"');
 });
+
+test('a cluster that was not removed offers to copy the details', () => {
+  const html = renderToStaticMarkup(
+    <ClustersSection {...props} view={view({removeProblem: 'read only'})} />,
+  );
+  expect(html).toContain('>Copy details<');
+});

@@ -3,6 +3,7 @@ import {
   Button,
   Card,
   EmptyState,
+  ErrorActions,
   Field,
   Grid,
   Page,
@@ -142,7 +143,12 @@ function AppContent(props: {
           Notifications
         </Text>
         {state.problem === null ? null : (
-          <Banner tone="err" title="Could not save the change." body={state.problem} />
+          <Banner
+            tone="err"
+            title="Could not save the change."
+            body={state.problem}
+            actions={<ErrorActions copy={`Could not save the change.\n\n${state.problem}`} />}
+          />
         )}
         <Card section="Run notifications">
           <Switch
@@ -160,7 +166,12 @@ function AppContent(props: {
         Appearance
       </Text>
       {state.problem === null ? null : (
-        <Banner tone="err" title="Could not save the change." body={state.problem} />
+        <Banner
+          tone="err"
+          title="Could not save the change."
+          body={state.problem}
+          actions={<ErrorActions copy={`Could not save the change.\n\n${state.problem}`} />}
+        />
       )}
       <Card section="Mode">
         <SegmentedControl
