@@ -53,6 +53,7 @@ function endOpenSpans(
   const open = {spans: new Map(reading.spans.map(span => [span.id, span])), sequence: Number(seq)};
   const atEnd =
     seq === (skeleton.throughSeq ?? 0n) &&
+    (options.hint?.head?.committedSeq ?? seq) <= seq &&
     (options.progress === undefined || options.progress.phase === 'complete');
   const life = atEnd ? observedLifecycle(skeleton, options.hint) : null;
   const status = life?.status == null ? null : endedSpanStatus(life.status);
