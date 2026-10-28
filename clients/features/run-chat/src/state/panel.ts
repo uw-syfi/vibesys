@@ -255,7 +255,7 @@ export const panelMachine = setup({
       states: {
         idle: {
           on: {
-            'ask-new': {guard: 'asksSomething', target: 'creating', actions: 'askNew'},
+            'ask-new': {guard: 'asksSomething', target: 'preparing', actions: 'askNew'},
             submit: [
               {
                 guard: ({context}) => context.composer.trim() === '',
@@ -270,7 +270,7 @@ export const panelMachine = setup({
                 })),
               },
               {
-                target: 'creating',
+                target: 'preparing',
                 actions: assign(({context, event}) => ({
                   pending: pendingQuestion(context, event),
                   composer: '',
@@ -280,15 +280,16 @@ export const panelMachine = setup({
             ],
           },
         },
+        /**
+         * A question for a new thread waits for the catalogue, which the thread's harness is chosen
+         * from: an `ask-new` can open the panel and ask in the same step.
+         */
+        preparing: {
+          always: {guard: ({context}) => context.catalogue.kind !== 'loading', target: 'creating'},
+          on: {'ask-new': {guard: 'asksSomething', target: 'preparing', actions: 'askNew'}},
+        },
         creating: {
-          on: {
-            'ask-new': {
-              guard: 'asksSomething',
-              target: 'creating',
-              reenter: true,
-              actions: 'askNew',
-            },
-          },
+          on: {'ask-new': {guard: 'asksSomething', target: 'preparing', actions: 'askNew'}},
           invoke: {
             id: 'createThread',
             src: 'createThread',
@@ -327,7 +328,7 @@ export const panelMachine = setup({
           },
         },
         asking: {
-          on: {'ask-new': {guard: 'asksSomething', target: 'creating', actions: 'askNew'}},
+          on: {'ask-new': {guard: 'asksSomething', target: 'preparing', actions: 'askNew'}},
           invoke: {
             id: 'ask',
             src: 'ask',

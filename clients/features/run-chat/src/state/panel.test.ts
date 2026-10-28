@@ -154,15 +154,22 @@ describe('panelMachine', () => {
     });
     expect(snapshot.value).toMatchObject({
       visibility: 'open',
-      chat: 'creating',
+      chat: 'preparing',
       catalogue: 'loading',
     });
     expect(snapshot.context.choice).toEqual({kind: 'new'});
     expect(snapshot.context.pending).toEqual({threadId: null, text: 'Q', requestId: 'r-9'});
+    // The thread is made once the catalogue says which harness it runs on.
+    const listed = step(snapshot, done('loadCatalogue', LISTING));
+    expect(listed.value).toMatchObject({chat: 'creating', catalogue: 'ready'});
+    expect(listed.context.pending).toEqual({threadId: null, text: 'Q', requestId: 'r-9'});
   });
 
   test('asking about an error mid-question replaces it and keeps the draft', () => {
-    let snapshot = step(opened(), {type: 'set-composer', text: 'why?'});
+    let snapshot = step(step(opened(), done('loadCatalogue', LISTING)), {
+      type: 'set-composer',
+      text: 'why?',
+    });
     snapshot = step(snapshot, {type: 'submit', requestId: 'request-1', threadId: 'thread-1'});
     snapshot = step(snapshot, {type: 'set-composer', text: 'draft'});
     expect(snapshot.value).toMatchObject({chat: 'asking'});
@@ -223,7 +230,7 @@ describe('panelMachine', () => {
         ]),
       invariants: ({value, context}) => {
         const chat = typeof value === 'object' ? value.chat : null;
-        const busy = chat === 'creating' || chat === 'asking';
+        const busy = chat === 'preparing' || chat === 'creating' || chat === 'asking';
         return busy === (context.pending !== null) ? [] : ['pending and busy differ'];
       },
     });
