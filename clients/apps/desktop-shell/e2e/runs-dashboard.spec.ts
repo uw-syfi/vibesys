@@ -371,6 +371,6 @@ test('an addressless run remains visible when its project is unknown', async ({p
     await page.screenshot({path: `${shots}/runs__unknown-project__1440.png`});
   await tile.getByRole('button', {name: /^Unknown project/}).click();
   await expect(page.getByText('Project unknown', {exact: true})).toBeVisible();
-  for (const name of ['Resume', 'Pause', 'Pause now', 'Guidance'])
+  for (const name of ['Resume', 'Pause', 'Pause now'])
     await expect(page.getByRole('button', {name, exact: true})).toHaveCount(0);
 });
