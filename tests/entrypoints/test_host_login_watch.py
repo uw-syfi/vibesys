@@ -60,6 +60,7 @@ def _library(
         ),
         lambda _provider: LoginCommand(("codex", "login", "--device-auth"), needs_terminal=False),
         LoginStarter(launcher, threads, dict, LoginBounds()),
+        threads,
     )
 
 
