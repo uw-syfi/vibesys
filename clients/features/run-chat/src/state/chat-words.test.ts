@@ -1,6 +1,15 @@
 import {describe, expect, test} from 'bun:test';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
-import {type ErrorReport, errorQuestion, failedAnswerReport, steerFailureReport} from './index.js';
+import {
+  type ErrorReport,
+  errorQuestion,
+  failedAnswerReport,
+  STEER_MODES,
+  type SteerMode,
+  type SteerTarget,
+  steerFailureReport,
+  steerHelp,
+} from './index.js';
 
 const encoder = new TextEncoder();
 const bytes = (text: string): number => encoder.encode(text).length;
@@ -104,5 +113,48 @@ test('each chat failure says where it happened', () => {
     where: 'Run chat answer',
     message: 'quota exhausted',
     detail: null,
+  });
+});
+
+describe('a steer card says what its When and To choices do', () => {
+  const TARGETS: readonly SteerTarget[] = [
+    {kind: 'run', id: null},
+    {kind: 'role', id: 'implementer'},
+    {kind: 'attempt', id: 'w2-a1'},
+    {kind: 'item', id: 'w4'},
+  ];
+  const CASES = TARGETS.flatMap(target => STEER_MODES.map(({value: mode}) => ({mode, target})));
+
+  test('in one sentence for every choice, each different', () => {
+    const lines = CASES.map(steerHelp);
+    for (const line of lines) expect(line).toMatch(/^[A-Z][^.]*\.$/);
+    expect(new Set(lines).size).toBe(CASES.length);
+  });
+
+  /** The words that name whom a choice reaches. */
+  const WHOLE_RUN: Record<SteerMode, string> = {
+    next_turn: 'the first agent to start a turn',
+    standing: 'every agent',
+    interrupt: 'one agent',
+  };
+  function reaches(mode: SteerMode, target: SteerTarget): string {
+    if (target.kind === 'run') return WHOLE_RUN[mode];
+    return target.kind === 'role' ? 'the Implementer' : `${target.kind} ${target.id}`;
+  }
+
+  test('naming whom it reaches: one first agent, every agent, or the target by name', () => {
+    for (const {mode, target} of CASES)
+      expect(steerHelp({mode, target})).toContain(reaches(mode, target));
+  });
+
+  test('every turn ends when withdrawn or when its target or the run ends, and offers no control', () => {
+    for (const {mode, target} of CASES) {
+      const line = steerHelp({mode, target});
+      expect(line).not.toContain('you withdraw');
+      if (mode !== 'standing') continue;
+      expect(line).toContain('until it is withdrawn or');
+      const ends = target.kind === 'attempt' || target.kind === 'item' ? target.kind : 'run';
+      expect(line).toContain(`the ${ends} ends`);
+    }
   });
 });

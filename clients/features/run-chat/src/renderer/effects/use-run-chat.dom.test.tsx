@@ -14,8 +14,8 @@ import {
   type AskInput,
   type DeliverRequest,
   errorQuestion,
-  STEER_MODE_HELP,
   STEER_MODES,
+  steerHelp,
 } from '../../state/index.js';
 import {ChatPanel} from '../ui/chat-panel.js';
 import type {RunChatPorts} from './ports.js';
@@ -244,23 +244,50 @@ test('New steer turns the typed text into a card whose target is picked from the
   await act(async () => root.unmount());
 });
 
-test('the steer card says what each When choice does, under the choice', async () => {
+test('the steer card says what each When choice does for its To choice, under the choices', async () => {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
   const sent: DeliverRequest[] = [];
-  await act(async () => root.render(<Harness core={fold([THREAD])} ports={fakePorts(sent)} />));
+  function WithRoles(): JSX.Element {
+    const chat = useRunChat({
+      identity: 'run',
+      core: fold([THREAD]),
+      ports: fakePorts(sent),
+      roles: ['implementer'],
+    });
+    return (
+      <div>
+        <button type="button" onClick={chat.toggle}>
+          Chat
+        </button>
+        {chat.panel === null ? null : <ChatPanel {...chat.panel} />}
+      </div>
+    );
+  }
+  await act(async () => root.render(<WithRoles />));
   await act(async () => press(container, 'Chat'));
   await act(async () => press(container, 'New steer'));
-  const helps = Object.entries(STEER_MODE_HELP);
-  expect(helps.map(([mode]) => mode).sort()).toEqual(STEER_MODES.map(each => each.value).sort());
-  // From the last choice back to the first, so every choice is a change.
-  for (const {value} of [...STEER_MODES].reverse()) {
-    const choice = container.querySelector(`input[type="radio"][value="${value}"]`);
-    await act(async () => (choice as HTMLInputElement).click());
-    expect((choice as HTMLInputElement).checked).toBe(true);
-    for (const [mode, help] of helps)
-      expect(container.textContent?.includes(help), `${mode} under ${value}`).toBe(mode === value);
+  const select = container.querySelector('select') as HTMLSelectElement;
+  for (const target of [
+    {kind: 'role', id: 'implementer'},
+    {kind: 'run', id: null},
+  ] as const) {
+    await act(async () => {
+      select.value = target.kind === 'run' ? 'run' : `role:${target.id}`;
+      select.dispatchEvent(new window.Event('change', {bubbles: true}) as unknown as Event);
+    });
+    // From the last choice back to the first, so every choice is a change.
+    for (const {value} of [...STEER_MODES].reverse()) {
+      const choice = container.querySelector(`input[type="radio"][value="${value}"]`);
+      await act(async () => (choice as HTMLInputElement).click());
+      expect((choice as HTMLInputElement).checked).toBe(true);
+      for (const {value: mode} of STEER_MODES)
+        expect(
+          container.textContent?.includes(steerHelp({mode, target})),
+          `${mode} under ${value} to ${target.kind}`,
+        ).toBe(mode === value);
+    }
   }
   expect(sent).toEqual([]);
   await act(async () => root.unmount());

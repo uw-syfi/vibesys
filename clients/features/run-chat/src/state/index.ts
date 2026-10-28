@@ -16,8 +16,8 @@ export {
   failedAnswerReport,
   HARNESS_LIST_UNREAD,
   NO_HARNESS_OFFERED,
-  STEER_MODE_HELP,
   steerFailureReport,
+  steerHelp,
   WRITING_ANSWER,
 } from './chat-words.js';
 export {

@@ -16,10 +16,10 @@ import {
   type CardView,
   type ErrorReport,
   parseTargetValue,
-  STEER_MODE_HELP,
   STEER_MODES,
   type SteerDraft,
   steerFailureReport,
+  steerHelp,
   targetOptions,
   targetValue,
 } from '../../state/index.js';
@@ -73,7 +73,7 @@ function Draft(props: CardProps): JSX.Element {
         />
       </Row>
       <Text variant="small" tone="muted">
-        {STEER_MODE_HELP[draft.mode]}
+        {steerHelp(draft)}
       </Text>
       <CardFailure {...props} />
       <Row gap="space-3" align="start">
