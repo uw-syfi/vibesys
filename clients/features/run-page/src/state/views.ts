@@ -627,7 +627,7 @@ export function viewedRun(state: RunPageState): ViewedRun {
 const NO_RECORDS: readonly UsageRecord[] = [];
 
 /** The span status a run's registry status settles open spans with; null for a status not final. */
-function endedSpanStatus(status: HostRun['phase']): RunEnding['status'] | null {
+export function endedSpanStatus(status: HostRun['phase']): RunEnding['status'] | null {
   switch (status) {
     case 'failed':
       return 'failed';
