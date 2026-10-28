@@ -1,6 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {checkMachine} from '@vibesys/machine/testing';
 import {getInitialSnapshot, getNextSnapshot} from 'xstate';
+import {cardView} from './card-view.js';
 import {type DeliveryEvent, deliveryEnded} from './delivery.js';
 import {EMPTY_DRAFT, STEER_MODES} from './steer.js';
 import {
@@ -107,9 +108,13 @@ describe('steerCardMachine', () => {
 
   test('a command the run did not take returns the card to its draft with the reason', () => {
     let snapshot = step(start(), {type: 'send', controlId: 'c-1'});
-    snapshot = settled(snapshot, 'send', {kind: 'rejected', message: 'no such role'});
+    snapshot = settled(snapshot, 'send', {
+      kind: 'rejected',
+      message: 'no such role',
+      detail: null,
+    });
     expect(snapshot.value).toBe('draft');
-    expect(snapshot.context.error).toBe('no such role');
+    expect(snapshot.context.error).toEqual({message: 'no such role', detail: null});
     expect(snapshot.context.controlId).toBeNull();
     snapshot = step(snapshot, {type: 'send', controlId: 'c-2'});
     expect(snapshot.context.error).toBeNull();
@@ -123,7 +128,7 @@ describe('steerCardMachine', () => {
     snapshot = step(snapshot, delivery('w-1', {kind: 'refused', reason: 'not in force'}));
     expect(snapshot.value).toEqual({sent: 'idle'});
     expect(inForce(snapshot.context)).toBe(true);
-    expect(snapshot.context.error).toBe('not in force');
+    expect(snapshot.context.error).toEqual({message: 'not in force', detail: null});
   });
 
   test('Withdraw is only for a standing steer that is in force', () => {
@@ -169,7 +174,12 @@ describe('steerCardMachine', () => {
           delivery(random.pick(controls), {kind: 'delivered', idea: random.int(5), where: null}),
           delivery(random.pick(controls), {kind: 'refused', reason: null}),
           ...live.operations.map(operation =>
-            live.done(operation, random.bool() ? ACK : {kind: 'rejected', message: 'no'}),
+            live.done(
+              operation,
+              random.bool()
+                ? ACK
+                : {kind: 'rejected', message: 'no', detail: random.pick(['trace', null])},
+            ),
           ),
           ...live.operations.map(operation => live.error(operation, new Error('lost'))),
         ]),
@@ -207,9 +217,36 @@ describe('a card on a run that cannot take a steer', () => {
     snapshot = settled(snapshot, 'send', {
       kind: 'rejected',
       message: 'This finished run is read-only',
+      detail: 'trace',
       code: 'run_read_only',
     });
     expect(snapshot.value).toBe('draft');
-    expect(snapshot.context.error).toBe('Read only');
+    expect(snapshot.context.error).toEqual({message: 'Read only', detail: 'trace'});
+  });
+
+  test('a rejected withdrawal is worded as a rejected send is', () => {
+    let snapshot = settled(step(start(), {type: 'send', controlId: 'c-1'}), 'send', ACK);
+    snapshot = step(snapshot, delivery('c-1', {kind: 'delivered', idea: 1, where: null}));
+    snapshot = settled(step(snapshot, {type: 'withdraw', controlId: 'w-1'}), 'retract', {
+      kind: 'rejected',
+      message: 'This finished run is read-only',
+      detail: 'trace',
+      code: 'run_read_only',
+    });
+    expect(snapshot.context.error).toEqual({message: 'Read only', detail: 'trace'});
+  });
+
+  test('a rejected send carries the host message and its diagnostic to the card view', () => {
+    const rejection = {kind: 'rejected', message: 'No', detail: 'trace', code: null} as const;
+    const snapshot = settled(step(start(), {type: 'send', controlId: 'c-1'}), 'send', rejection);
+    expect(cardView(snapshot.context, 'draft').error).toEqual({message: 'No', detail: 'trace'});
+    const readOnly = settled(step(start(), {type: 'send', controlId: 'c-1'}), 'send', {
+      ...rejection,
+      code: 'run_read_only',
+    });
+    expect(cardView(readOnly.context, 'draft').error).toEqual({
+      message: 'Read only',
+      detail: 'trace',
+    });
   });
 });

@@ -1,5 +1,6 @@
 import {unprovided} from '@vibesys/machine';
 import type {ChatSessionCreated} from '@vibesys/runs/chat';
+import {callFailure} from '@vibesys/runs/intents';
 import {assign, fromCallback, setup} from 'xstate';
 import {type ChatHistory, emptyHistory} from './fold.js';
 
@@ -77,7 +78,7 @@ export const threadsMachine = setup({
             },
             onError: {
               target: 'failed',
-              actions: assign(({event}) => ({listError: String(event.error)})),
+              actions: assign(({event}) => ({listError: callFailure(event.error).message})),
             },
           },
           after: {

@@ -22,6 +22,7 @@ import {
 } from '@vibesys/proto';
 import type {RunFixture} from '@vibesys/run-fixtures';
 import {intentReplay} from '@vibesys/run-fixtures';
+import type {Refusal} from './chat-peer.js';
 import {nativeRecords} from './native-fixture.js';
 
 /** One step of a steer's life, as the old journeys named them. */
@@ -62,6 +63,17 @@ export class Controls {
         ),
       ];
     });
+  }
+
+  /** From now on the host refuses that chat call (until called with `undefined`). */
+  async refuse(refusal: Refusal | undefined): Promise<void> {
+    await this.page.evaluate(
+      payload =>
+        (
+          window as unknown as {fakeGateway: {refuseChat(refusal: Refusal | undefined): void}}
+        ).fakeGateway.refuseChat(payload),
+      refusal,
+    );
   }
 
   /** The control id of the newest post. */

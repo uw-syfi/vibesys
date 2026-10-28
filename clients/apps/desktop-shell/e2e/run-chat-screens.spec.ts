@@ -294,3 +294,42 @@ test('a new chat shows the harness picker and an empty thread', async ({page}) =
   await models.focus();
   await check(page, 'picker-open');
 });
+
+test('an answer the provider failed is not drawn as a normal answer', async ({page}) => {
+  await open(page, 1440);
+  const from = firstSequence();
+  await emitChat(
+    page,
+    [
+      created(from),
+      answered(
+        from + 1,
+        'What is the best idea?',
+        'The provider refused the request: quota exhausted.',
+        from,
+      ),
+    ],
+    {failed: [`turn-${from}`]},
+  );
+  await openPanel(page);
+  await expect(panel(page).getByText('quota exhausted')).toBeVisible();
+  await check(page, 'failed-answer');
+});
+
+test('a question the host refuses shows why', async ({page}) => {
+  const controls = await open(page, 1440);
+  await emit(page, conversation(firstSequence()));
+  await openPanel(page);
+  await controls.refuse({
+    method: 'chatMessage',
+    code: 'chat_unavailable',
+    message: 'Chat is not available for this run.',
+    stderr: ['agent exited with status 2', 'no provider is configured', 'run `vs doctor`'].join(
+      '\n',
+    ),
+  });
+  await panel(page).getByRole('textbox', {name: 'Message'}).fill('Why?');
+  await panel(page).getByRole('button', {name: 'Ask', exact: true}).click();
+  await settled(page);
+  await check(page, 'refused-question');
+});

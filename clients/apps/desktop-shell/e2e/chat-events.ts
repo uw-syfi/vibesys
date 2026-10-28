@@ -17,8 +17,11 @@ type ChatEvent = NonNullable<MessageInitShape<typeof ChatRecordSchema>['event']>
 const histories = new WeakMap<Page, Map<string, StoreRecord[]>>();
 
 const chatBody = (event: ChatEvent): Body => ({case: 'chat', value: {event}});
-const messageBody = (requestId: string, role: ChatRole, text: string): Body =>
-  chatBody({case: 'message', value: {requestId, role, content: {case: 'text', value: text}}});
+const messageBody = (requestId: string, role: ChatRole, text: string, failed = false): Body =>
+  chatBody({
+    case: 'message',
+    value: {requestId, role, content: {case: 'text', value: text}, failed},
+  });
 
 function hasUserMessage(records: readonly StoreRecord[], requestId: string): boolean {
   return records.some(
@@ -44,6 +47,7 @@ function bodiesOf(
   id: string,
   records: readonly StoreRecord[],
   batch: readonly RunEvent[],
+  failed: ReadonlySet<string>,
 ): Body[] {
   const requestId =
     event.invocation_id ??
@@ -61,7 +65,10 @@ function bodiesOf(
     ];
   if (data?.kind === 'agent_execution_started') return question(data.user_prompt ?? '');
   if (data?.kind === 'chat')
-    return [...question(event.text ?? ''), messageBody(requestId, ChatRole.ASSISTANT, data.answer)];
+    return [
+      ...question(event.text ?? ''),
+      messageBody(requestId, ChatRole.ASSISTANT, data.answer, failed.has(requestId)),
+    ];
   if (data?.kind === 'agent_output_chunk' && data.channel === 'assistant')
     return [
       ...question(askedLater(batch, requestId)),
@@ -83,7 +90,13 @@ function bodiesOf(
   return [];
 }
 
-export async function emitChat(page: Page, events: readonly RunEvent[]): Promise<void> {
+/** `options.failed` names the turns (by request id) whose answer the provider failed. */
+export async function emitChat(
+  page: Page,
+  events: readonly RunEvent[],
+  options: {readonly failed?: readonly string[]} = {},
+): Promise<void> {
+  const failed = new Set(options.failed);
   const sessions = histories.get(page) ?? new Map<string, StoreRecord[]>();
   histories.set(page, sessions);
   const updates = new Map<string, StoreRecord[]>();
@@ -93,7 +106,7 @@ export async function emitChat(page: Page, events: readonly RunEvent[]): Promise
     sessions.set(id, records);
     const batch = updates.get(id) ?? [];
     updates.set(id, batch);
-    for (const body of bodiesOf(event, id, records, events)) {
+    for (const body of bodiesOf(event, id, records, events, failed)) {
       const record = create(RecordSchema, {
         seq: BigInt(records.length + 1),
         epoch: 1,

@@ -13,7 +13,16 @@ import {
   TailResponseSchema,
 } from '@vibesys/proto';
 
+/** A host call the peer answers with a configuration failure instead of its result. */
+export interface Refusal {
+  readonly method: 'createChatSession' | 'chatMessage';
+  readonly code: string;
+  readonly message: string;
+  readonly stderr: string;
+}
+
 export class ChatPeer {
+  refuse: Refusal | undefined;
   readonly records = new Map<string, StoreRecord[]>();
   readonly watchers = new Map<string, Set<(bytes: Uint8Array) => void>>();
   constructor(bytes: number[]) {
@@ -59,6 +68,16 @@ export class ChatPeer {
     }
     if (method !== rpc('hostCall')) return undefined;
     const input = fromBinary(HostCallRequestSchema, bytes).method;
+    const refuse = this.refuse;
+    if (refuse !== undefined && input.case === refuse.method) {
+      const {code, message, stderr} = refuse;
+      return toBinary(
+        HostCallResponseSchema,
+        create(HostCallResponseSchema, {
+          result: {case: 'configurationFailed', value: {code, stage: 'chat', message, stderr}},
+        }),
+      );
+    }
     if (input.case === 'createChatSession') {
       const request = input.value;
       if (!this.records.has(request.sessionId))

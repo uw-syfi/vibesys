@@ -22,6 +22,7 @@ import {
   withProvider,
 } from '../../state/index.js';
 import {ChatBoundary} from './chat-boundary.js';
+import {FailureNote} from './failure-note.js';
 import {SteerCardView} from './steer-card-view.js';
 
 /** The harness, then the model: the two choices of a new chat in one compact row. */
@@ -161,11 +162,7 @@ function Composer(props: ChatPanelView): JSX.Element {
   const submit = (): void => dispatch({type: 'submit', threadId: props.shown});
   return (
     <Stack gap="space-3">
-      {panel.error === null ? null : (
-        <Text variant="small" tone="err">
-          {panel.error}
-        </Text>
-      )}
+      {panel.error === null ? null : <FailureNote failure={panel.error} />}
       <Field label="Message" hideLabel>
         <TextInput
           value={panel.composer}

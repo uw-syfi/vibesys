@@ -5,10 +5,13 @@ import {
   ChatMessageRequestSchema,
   ChatMessageResponseSchema,
   ChatRole,
+  ConfigurationFailedSchema,
   RecordSchema,
 } from '@vibesys/proto';
+import {IntentRefused} from '@vibesys/runs/intents';
+import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {getInitialSnapshot, getNextSnapshot} from 'xstate';
-import {emptyHistory, foldChat, runSessionsMachine} from './index.js';
+import {emptyHistory, foldChat, runSessionsMachine, threadsMachine} from './index.js';
 
 const request = create(ChatMessageRequestSchema, {
   projectRoot: '/project',
@@ -136,4 +139,33 @@ test('a stalled content read has a bounded queue and can reopen from its last fo
   snapshot = getNextSnapshot(runSessionsMachine, snapshot, {type: 'toggle'});
   snapshot = getNextSnapshot(runSessionsMachine, snapshot, {type: 'toggle'});
   expect(snapshot.context.contentFailed).toBe(false);
+});
+
+test('a failed thread list or question shows the failure by its message, never an Error: or IntentRefused: prefix', () => {
+  for (const seed of SEEDS.slice(0, 30)) {
+    const random = new Seeded(seed);
+    const message = `host said ${seed}`;
+    const failure = random.bool()
+      ? new Error(message)
+      : new IntentRefused(
+          create(ConfigurationFailedSchema, {code: 'invalid_method', message, stderr: 'trace'}),
+        );
+    const listing = getNextSnapshot(threadsMachine, getInitialSnapshot(threadsMachine, undefined), {
+      type: 'xstate.error.actor.list',
+      error: failure,
+    } as never);
+    expect(listing.context.listError).toBe(message);
+    const sending = getNextSnapshot(
+      runSessionsMachine,
+      getNextSnapshot(runSessionsMachine, getInitialSnapshot(runSessionsMachine, {enabled: true}), {
+        type: 'toggle',
+      }),
+      {type: 'send', request},
+    );
+    const posted = getNextSnapshot(runSessionsMachine, sending, {
+      type: 'xstate.error.actor.post',
+      error: failure,
+    } as never);
+    expect(posted.context.error).toBe(message);
+  }
 });

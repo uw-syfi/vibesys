@@ -9,6 +9,7 @@
 import type {HarnessChoice, HarnessListing} from '@vibesys/ipc';
 import {unprovided} from '@vibesys/machine';
 import {assign, setup} from 'xstate';
+import {type ChatFailure, thrownFailure} from './failure.js';
 import {type Catalogue, catalogueOf, defaultChoice} from './picker.js';
 import {EMPTY_DRAFT, type SteerDraft} from './steer.js';
 import type {ThreadChoice} from './thread-view.js';
@@ -16,7 +17,7 @@ import type {ThreadChoice} from './thread-view.js';
 /** How a thread creation or an ask ended. */
 export type ChatOutcome<T> =
   | ({readonly ok: true} & T)
-  | {readonly ok: false; readonly message: string};
+  | {readonly ok: false; readonly message: string; readonly detail: string | null};
 
 export interface AskInput {
   readonly requestId: string;
@@ -44,7 +45,7 @@ export interface PanelContext {
   readonly pending: PendingQuestion | null;
   readonly uncertain: PendingQuestion | null;
   readonly userSteers: readonly UserSteer[];
-  readonly error: string | null;
+  readonly error: ChatFailure | null;
 }
 
 interface PendingQuestion {
@@ -108,17 +109,17 @@ export const panelInitial: PanelContext = {
 };
 
 /** The patch for an ask or a thread creation that did not go through: the text is the user's again. */
-function failed(context: PanelContext, message: string): Partial<PanelContext> {
+function failed(context: PanelContext, failure: ChatFailure): Partial<PanelContext> {
   return {
     pending: null,
     uncertain: context.pending,
     composer: context.pending?.text ?? context.composer,
-    error: message,
+    error: failure,
   };
 }
 
-function outcomeMessage(output: ChatOutcome<unknown>): string {
-  return output.ok ? '' : output.message;
+function outcomeFailure(output: ChatOutcome<unknown>): ChatFailure {
+  return output.ok ? {message: '', detail: null} : {message: output.message, detail: output.detail};
 }
 
 /** The pair a new thread is made with: the user's pick, else the best preferred pair offered. */
@@ -274,13 +275,13 @@ export const panelMachine = setup({
               {
                 target: 'idle',
                 actions: assign(({context, event}) =>
-                  failed(context, outcomeMessage(event.output)),
+                  failed(context, outcomeFailure(event.output)),
                 ),
               },
             ],
             onError: {
               target: 'idle',
-              actions: assign(({context, event}) => failed(context, String(event.error))),
+              actions: assign(({context, event}) => failed(context, thrownFailure(event.error))),
             },
           },
         },
@@ -302,13 +303,13 @@ export const panelMachine = setup({
               {
                 target: 'idle',
                 actions: assign(({context, event}) =>
-                  failed(context, outcomeMessage(event.output)),
+                  failed(context, outcomeFailure(event.output)),
                 ),
               },
             ],
             onError: {
               target: 'idle',
-              actions: assign(({context, event}) => failed(context, String(event.error))),
+              actions: assign(({context, event}) => failed(context, thrownFailure(event.error))),
             },
           },
         },
