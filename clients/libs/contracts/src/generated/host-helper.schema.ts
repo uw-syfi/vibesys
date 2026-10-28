@@ -4191,6 +4191,13 @@ const hostHelperSchema: Record<string, unknown> = {
         },
         "runs": {
           "$ref": "#/$defs/RunCounts"
+        },
+        "harness_logins": {
+          "additionalProperties": {
+            "$ref": "#/$defs/LoginState"
+          },
+          "title": "Harness Logins",
+          "type": "object"
         }
       },
       "required": [

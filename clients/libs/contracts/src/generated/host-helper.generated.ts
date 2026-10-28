@@ -722,6 +722,10 @@ export type Reason1 = string;
 export type HarnessClis = string[];
 export type Live = number;
 export type EndedToday = number;
+/**
+ * Whether a harness is signed in, as far as its own tooling can say.
+ */
+export type LoginState = "signed_in" | "signed_out" | "unknown";
 export type RequestId56 = string;
 export type Type56 = "checkout.inspect";
 export type Inspection = CheckoutFound | CheckoutNotFound | CheckoutTooOld;
@@ -909,10 +913,6 @@ export type Type65 = "agent_logins.list";
 export type Provider4 = string;
 export type ProviderName1 = string;
 export type Installed = boolean;
-/**
- * Whether a harness is signed in, as far as its own tooling can say.
- */
-export type LoginState = "signed_in" | "signed_out" | "unknown";
 export type How = (AccountLogin | ApiKeyLogin) | null;
 export type Kind30 = "account";
 export type Kind31 = "api_key";
@@ -2288,6 +2288,7 @@ export interface MachineDescription {
   harness_clis: HarnessClis;
   harness_cli_names?: HarnessCliNames;
   runs: RunCounts;
+  harness_logins?: HarnessLogins;
 }
 /**
  * The VibeSys checkout this helper runs from, which starts runs on this machine.
@@ -2336,6 +2337,9 @@ export interface HarnessCliNames {
 export interface RunCounts {
   live: Live;
   ended_today: EndedToday;
+}
+export interface HarnessLogins {
+  [k: string]: LoginState;
 }
 /**
  * What the path holds.
