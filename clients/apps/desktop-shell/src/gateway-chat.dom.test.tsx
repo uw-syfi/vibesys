@@ -232,6 +232,38 @@ class Peer {
     } else throw new Error('Unexpected host call');
   }
 
+  /** The agent's answer to the thread's latest question, failed or not, as the session log records it. */
+  writeAnswer(sessionId: string, text: string, failed: boolean): void {
+    const log = this.sessions.get(sessionId);
+    const asked = log?.findLast(
+      row =>
+        row.body.case === 'chat' &&
+        row.body.value.event.case === 'message' &&
+        row.body.value.event.value.role === ChatRole.USER,
+    );
+    if (
+      log === undefined ||
+      asked?.body.case !== 'chat' ||
+      asked.body.value.event.case !== 'message'
+    )
+      throw new Error(`no question in ${sessionId}`);
+    const requestId = asked.body.value.event.value.requestId;
+    this.record(log, {
+      case: 'chat',
+      value: {
+        event: {
+          case: 'message',
+          value: {
+            requestId,
+            role: ChatRole.ASSISTANT,
+            content: {case: 'text', value: text},
+            failed,
+          },
+        },
+      },
+    });
+  }
+
   /** What the run writes about a control, as the run log records it. */
   writeIntent(
     controlId: string,
@@ -611,6 +643,35 @@ test("generated refusals of thread creation, questions and steers show the host'
       const shown = screen.container.textContent ?? '';
       for (const line of stderr.split('\n')) expect(shown).toContain(line);
     }
+    await act(async () => screen.root.unmount());
+  }
+});
+
+test('generated threads show each failed answer as failed and the rest as answers', async () => {
+  for (const seed of DOM_SEEDS) {
+    const random = new Seeded(seed);
+    const screen = new Screen();
+    await screen.mount();
+    await act(async () => press(screen.container, 'Chat'));
+    await screen.settle();
+    await screen.release(random, true);
+    const failed: boolean[] = [];
+    for (let turn = 0; turn < 1 + random.int(4); turn++) {
+      await screen.ask(`question ${seed}-${turn}`);
+      await screen.drain(random);
+      const thread = screen.peer.created.at(-1);
+      if (thread === undefined) throw new Error('no thread was created');
+      failed.push(random.bool());
+      await act(async () =>
+        screen.peer.writeAnswer(thread, `answer ${seed}-${turn}`, failed.at(-1) === true),
+      );
+      await screen.settle();
+    }
+    const answers = [
+      ...screen.container.querySelectorAll<HTMLElement>('.vs-chat-message[data-side="start"]'),
+    ];
+    expect(answers.map(answer => answer.getAttribute('data-tone') === 'err')).toEqual(failed);
+    expect(answers.map(answer => leafTexts(answer).includes('Failed'))).toEqual(failed);
     await act(async () => screen.root.unmount());
   }
 });

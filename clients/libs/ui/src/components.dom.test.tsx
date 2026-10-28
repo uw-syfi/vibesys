@@ -12,6 +12,7 @@ import {
   Button,
   Chart,
   type ChartPoint,
+  ChatMessage,
   Checkbox,
   type ChoiceOption,
   ChoiceTiles,
@@ -753,6 +754,21 @@ describe('ActionPanel', () => {
     expect(container.textContent).toContain('Start run');
     await click(status);
     expect(container.textContent).not.toContain('Every check passed.');
+  });
+});
+
+describe('ChatMessage', () => {
+  test('a failed message carries the err tone and its notice; others carry the default tone', async () => {
+    const container = await mount(
+      <>
+        <ChatMessage side="start" text="Refused" tone="err" notice="Failed" />
+        <ChatMessage side="start" text="Fine" />
+      </>,
+    );
+    const [failed, fine] = [...container.querySelectorAll<HTMLElement>('.vs-chat-message')];
+    expect(failed?.getAttribute('data-tone')).toBe('err');
+    expect(failed?.querySelector('.vs-text')?.getAttribute('data-tone')).toBe('err');
+    expect(fine?.getAttribute('data-tone')).toBe('default');
   });
 });
 
