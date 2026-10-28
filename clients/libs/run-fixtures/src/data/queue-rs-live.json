@@ -1379,5 +1379,24 @@
       },
       "sequence": 54
     }
-  ]
+  ],
+  "changes": {
+    "r0..r1": {
+      "files": [
+        {
+          "path": "benches/throughput.rs",
+          "kind": "modified"
+        },
+        {
+          "path": "src/queue/mod.rs",
+          "kind": "modified"
+        },
+        {
+          "path": "src/queue/ring.rs",
+          "kind": "modified"
+        }
+      ],
+      "diff": "diff --git a/benches/throughput.rs b/benches/throughput.rs\nindex 41c0d2e..9a7f310 100644\n--- a/benches/throughput.rs\n+++ b/benches/throughput.rs\n@@ -8 +8 @@ fn producers_and_consumers(c: &mut Criterion) {\n-    let queue = Queue::with_capacity(1024);\n+    let queue = Queue::with_capacity(4096);\ndiff --git a/src/queue/mod.rs b/src/queue/mod.rs\nindex 3f2a9c1..8e4d7b0 100644\n--- a/src/queue/mod.rs\n+++ b/src/queue/mod.rs\n@@ -1,11 +1,17 @@\n-use std::sync::Mutex;\n+mod ring;\n+\n+use ring::Slot;\n+use std::sync::atomic::AtomicUsize;\n \n pub struct Queue<T> {\n-    items: Mutex<std::collections::VecDeque<T>>,\n+    slots: Box<[Slot<T>]>,\n+    head: AtomicUsize,\n+    tail: AtomicUsize,\n }\n \n impl<T> Queue<T> {\n     pub fn with_capacity(capacity: usize) -> Self {\n-        Self { items: Mutex::new(std::collections::VecDeque::with_capacity(capacity)) }\n+        let slots = (0..capacity).map(Slot::new).collect();\n+        Self { slots, head: AtomicUsize::new(0), tail: AtomicUsize::new(0) }\n     }\n }\ndiff --git a/src/queue/ring.rs b/src/queue/ring.rs\nindex 1a2b3c4..5b1c2e4 100644\n--- a/src/queue/ring.rs\n+++ b/src/queue/ring.rs\n@@ -1 +1,14 @@\n-// The ring arrives with the wait-free queue.\n+use std::sync::atomic::{AtomicUsize, Ordering};\n+\n+/// One slot of the ring: its value and the sequence that says whose turn it is.\n+pub struct Slot<T> {\n+    pub sequence: AtomicUsize,\n+    pub value: std::cell::UnsafeCell<Option<T>>,\n+}\n+\n+impl<T> Slot<T> {\n+    pub fn new(index: usize) -> Self {\n+        Self { sequence: AtomicUsize::new(index), value: std::cell::UnsafeCell::new(None) }\n+    }\n+    pub fn ready(&self, turn: usize) -> bool { self.sequence.load(Ordering::Acquire) == turn }\n+}\n"
+    }
+  }
 }

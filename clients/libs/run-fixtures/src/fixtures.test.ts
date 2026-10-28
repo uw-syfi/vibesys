@@ -6,6 +6,7 @@ import {
   FIXTURE_NAMES,
   findLeaks,
   fixtureNamed,
+  parseFixture,
   type RunFixture,
   splitLive,
   weeksRun,
@@ -168,5 +169,26 @@ describe('each scenario shows its case', () => {
 
   it('14 days: is the same run every time', () => {
     expect(weeksRun()).toEqual(weeksRun());
+  });
+});
+
+describe('what an attempt changed', () => {
+  it('is keyed by its revision range, and a malformed entry names its path', () => {
+    const live = fixtureNamed('queue-rs-live');
+    expect(live.changes?.['r0..r1']?.files.map(file => file.path)).toEqual([
+      'benches/throughput.rs',
+      'src/queue/mod.rs',
+      'src/queue/ring.rs',
+    ]);
+    const raw = JSON.parse(JSON.stringify(live)) as Record<string, unknown>;
+    const cases: [unknown, string][] = [
+      [{r1: {files: [{path: 'a', kind: 'added'}], diff: 'x'}}, 'fixture.changes.r1: expected'],
+      [{'r0..r1': {files: [], diff: 'x'}}, 'fixture.changes.r0..r1.files: expected'],
+      [{'r0..r1': {files: [{path: 'a'}], diff: 'x'}}, 'fixture.changes.r0..r1.files[0].kind'],
+      [{'r0..r1': {files: [{path: 'a', kind: 'added'}]}}, 'fixture.changes.r0..r1.diff'],
+    ];
+    for (const [changes, message] of cases) {
+      expect(() => parseFixture({...raw, changes})).toThrow(message);
+    }
   });
 });

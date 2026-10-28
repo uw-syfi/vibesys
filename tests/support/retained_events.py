@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
 from vibesys.events import CoreEvent, CoreEventType
-from vibesys.records.api import MappedEvent, MappingState, map_event
+from vibesys.records.api import (
+    MappedEvent,
+    MappingState,
+    attach_changes,
+    map_event,
+    settled_attempts,
+)
+from vibesys.workspace_changes import AttemptChanges, WorkspaceChange
 from vs_proto.api import ClientReplay, ClientReplayBatch, EpochStarted, Record
 from vs_runlog.api import fold_skeleton, project_head
 
@@ -79,6 +87,31 @@ def _project(state: MappingState, event: dict[str, Any], original: dict[str, Any
         raise FixtureRefusedError(message) from error
 
 
+def _changed(
+    projected: MappedEvent, fixture: dict[str, Any], original: dict[str, Any]
+) -> MappedEvent:
+    """``projected`` and, as the run log tee adds them, the changes of the attempts it settled."""
+    records, blobs = list(projected.records), list(projected.blobs)
+    state = projected.state
+    for span, base, head in settled_attempts(projected.records):
+        changes = fixture.get("changes", {}).get(f"{base}..{head}")
+        if changes is None:
+            continue
+        placed = attach_changes(
+            state,
+            span,
+            AttemptChanges(
+                files=tuple(WorkspaceChange.model_validate(file) for file in changes["files"]),
+                diff=changes["diff"],
+            ),
+            datetime.fromisoformat(original["timestamp"]),
+        )
+        records.extend(placed.records)
+        blobs.extend(placed.blobs)
+        state = placed.state
+    return replace(projected, state=state, records=tuple(records), blobs=tuple(blobs))
+
+
 def _units(fixture: dict[str, Any]) -> dict[str, str]:
     """Native fixture headers declare units from the canonical scenario, before any readings."""
     objective = fixture.get("objective")
@@ -128,7 +161,7 @@ def replay_of(fixture: dict[str, Any]) -> ClientReplay:
         event = core_event(original)
         if event is None:
             continue
-        projected = _project(state, event, original)
+        projected = _changed(_project(state, event, original), fixture, original)
         state = projected.state
         for record in projected.records:
             value = None if record.body is None else record.body.value

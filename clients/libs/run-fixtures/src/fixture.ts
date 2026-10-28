@@ -52,6 +52,11 @@ export interface RunFixture {
    * past it arrive once the client has resubscribed.
    */
   readonly dropAfter?: number;
+  /**
+   * What each settled attempt changed, by its revision range (`base..head`): the run reads it
+   * from its repository, which a fixture does not have. The projector places it on the attempt.
+   */
+  readonly changes?: Readonly<Record<string, FixtureChanges>>;
   /** A finished run: how it ended. */
   readonly end?: {
     readonly outcome: EndOutcome;
@@ -69,6 +74,7 @@ const KEYS: ReadonlySet<string> = new Set([
   'events',
   'liveAfter',
   'dropAfter',
+  'changes',
   'end',
 ]);
 const NAME = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
@@ -143,6 +149,39 @@ function parseEvents(value: unknown): RunEvent[] {
   });
 }
 
+/** A revision range's changed files (path and git's change kind) and its unified diff. */
+interface FixtureChanges {
+  readonly files: readonly {readonly path: string; readonly kind: string}[];
+  readonly diff: string;
+}
+
+function parseChanges(value: unknown): NonNullable<RunFixture['changes']> {
+  const ranges = record(value, 'fixture.changes');
+  return Object.fromEntries(
+    Object.entries(ranges).map(([range, entry]) => {
+      const path = `fixture.changes.${range}`;
+      if (!/^[^.]+\.\.[^.]+$/.test(range)) throw new Error(`${path}: expected base..head`);
+      const changes = record(entry, path);
+      const files = changes['files'];
+      if (!Array.isArray(files) || files.length === 0)
+        throw new Error(`${path}.files: expected a non-empty array`);
+      return [
+        range,
+        {
+          files: files.map((file, index) => {
+            const item = record(file, `${path}.files[${index}]`);
+            return {
+              path: text(item, 'path', `${path}.files[${index}]`),
+              kind: text(item, 'kind', `${path}.files[${index}]`),
+            };
+          }),
+          diff: text(changes, 'diff', path),
+        },
+      ];
+    }),
+  );
+}
+
 /** A live run may stream and drop but not end; a finished run ends and does not stream. */
 function checkStanding(
   object: Record<string, unknown>,
@@ -197,6 +236,7 @@ export function parseFixture(value: unknown): RunFixture {
     events,
     ...(liveAfter === undefined ? {} : {liveAfter}),
     ...(dropAfter === undefined ? {} : {dropAfter}),
+    ...(object['changes'] === undefined ? {} : {changes: parseChanges(object['changes'])}),
     ...(object['end'] === undefined ? {} : {end: parseEnd(object['end'])}),
   };
 }
