@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from server.host_envelope import HelperReplyBase, HelperRequestBase
+from server.host_machine_facts import LoginState
 from vs_sim.api import ProcessTimeoutError
 
 if TYPE_CHECKING:
@@ -32,15 +33,6 @@ if TYPE_CHECKING:
 
 _Line = Annotated[str, StringConstraints(max_length=300, pattern=r"^[^\n\r]*$")]
 _Name = Annotated[str, StringConstraints(min_length=1, max_length=128)]
-
-
-class LoginState(StrEnum):
-    """Whether a harness is signed in, as far as its own tooling can say."""
-
-    SIGNED_IN = "signed_in"
-    SIGNED_OUT = "signed_out"
-    UNKNOWN = "unknown"
-    """Not installed, or the CLI offers no cheap check: not a problem to report as one."""
 
 
 class AccountLogin(BaseModel):

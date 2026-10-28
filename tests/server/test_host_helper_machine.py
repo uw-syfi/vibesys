@@ -13,12 +13,14 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.server.host_helper_support import (
     VIBESYS_VERSION,
+    FakeAgentLogins,
     FakeCheckout,
     fake_host,
     quiet_machine,
     record,
 )
 
+from server.host_agent_logins import AgentLogin
 from server.host_api import (
     Checkout,
     CheckoutFound,
@@ -46,6 +48,7 @@ from server.host_machine_facts import (
     DockerUnreachable,
     Gpu,
     Hardware,
+    LoginState,
     MachineCheckout,
     RunCounts,
 )
@@ -335,6 +338,43 @@ def test_machine_describe_reports_the_checkout_hardware_docker_clis_and_runs() -
     assert reply.machine.harness_clis == ("claude",)
     assert reply.machine.harness_cli_names == {"claude": "Claude Code"}
     assert reply.machine.runs == RunCounts(live=1, ended_today=0)
+
+
+_PROVIDERS = ("claude", "codex")
+
+
+@given(
+    installed=st.frozensets(st.sampled_from(_PROVIDERS)),
+    states=st.fixed_dictionaries(
+        {provider: st.sampled_from(LoginState) for provider in _PROVIDERS}
+    ),
+)
+def test_machine_describe_reports_the_login_of_each_installed_harness_cli(
+    installed: frozenset[str], states: dict[str, LoginState]
+) -> None:
+    threads = SimThreads()
+    logins = tuple(
+        AgentLogin(
+            provider=provider,
+            provider_name=provider,
+            installed=provider in installed,
+            state=states[provider] if provider in installed else LoginState.UNKNOWN,
+            can_start_login=False,
+        )
+        for provider in _PROVIDERS
+    )
+    host = replace(
+        fake_host(threads, SimNetwork(threads)),
+        machine=quiet_machine(installed=installed),
+        logins=FakeAgentLogins(logins=logins),
+    )
+
+    reply = answer(MachineDescribeRequest(request_id="m", deadline_ms=5000), host, threads.event())
+
+    assert isinstance(reply, MachineDescribeReply)
+    assert reply.machine.harness_logins == {
+        provider: states[provider] for provider in reply.machine.harness_clis
+    }
 
 
 def test_checkout_inspect_expands_the_path_on_the_host(tmp_path: Path) -> None:

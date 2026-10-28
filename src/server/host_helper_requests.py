@@ -988,8 +988,11 @@ def _machine_reply(
 
 
 def describe_machine(host: HelperHost) -> MachineDescription:
-    """What this machine offers runs: its checkout, hardware, Docker, harness CLIs and runs."""
+    """What this machine offers runs: its checkout, hardware, Docker, harness CLIs, logins and runs."""
     harness_clis = host.machine.harness_clis()
+    # ponytail: the installed CLIs' logins are probed one after another inside describe's budget;
+    # probe them concurrently if a slow status command ever pushes describe past it.
+    logins = {login.provider: login.state for login in host.logins.list()}
     names = {
         option.provider: option.display.provider_name
         for option in host.harnesses()
@@ -1004,6 +1007,9 @@ def describe_machine(host: HelperHost) -> MachineDescription:
             provider: names[provider] for provider in harness_clis if provider in names
         },
         runs=run_counts(host.registry.read(), host.clock.now(), host.timezone),
+        harness_logins={
+            provider: logins[provider] for provider in harness_clis if provider in logins
+        },
     )
 
 
