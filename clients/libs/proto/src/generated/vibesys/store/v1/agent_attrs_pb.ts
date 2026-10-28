@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/store/v1/agent_attrs.proto.
  */
 export const file_vibesys_store_v1_agent_attrs: GenFile = /*@__PURE__*/
-  fileDesc("CiJ2aWJlc3lzL3N0b3JlL3YxL2FnZW50X2F0dHJzLnByb3RvEhB2aWJlc3lzLnN0b3JlLnYxIsEFCg5BZ2VudFR1cm5BdHRycxIaCgVhZ2VudBgBIAEoCUILukgIcgYQASiAgAQSGQoEcm9sZRgCIAEoCUILukgIcgYQASiAgAQSHwoFbW9kZWwYAyABKAlCC7pICHIGEAEogIAESACIAQESJAoKc3RhcnRlZF9ieRgEIAMoCUIQukgNkgEKIghyBhABKICABBIaCgVzdGFnZRgFIAEoCUILukgIcgYQASiAgAQSFAoHYXR0ZW1wdBgGIAEoDUgBiAEBEiIKCHByb3ZpZGVyGAcgASgJQgu6SAhyBhABKICABEgCiAEBEioKEHJlYXNvbmluZ19lZmZvcnQYCCABKAlCC7pICHIGEAEogIAESAOIAQESKQoPaGFybmVzc192ZXJzaW9uGAkgASgJQgu6SAhyBhABKICABEgEiAEBEjAKBXVzYWdlGAogASgLMhwudmliZXN5cy5zdG9yZS52MS5Ub2tlblVzYWdlSAWIAQESHQoKcmVwbHlfanNvbhgLIAEoCUIJukgGcgQogIAEEh4KEXRyYW5zY3JpcHRfbGVuZ3RoGAwgASgESAaIAQESLgoKc3RhcnRlZF9hdBgNIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kZWRfYXQYDiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEj4KBmNsaWVudBgPIAEoDjIdLnZpYmVzeXMuc3RvcmUudjEuQWdlbnRDbGllbnRCCrpIB4IBBBABIABIB4gBAUIICgZfbW9kZWxCCgoIX2F0dGVtcHRCCwoJX3Byb3ZpZGVyQhMKEV9yZWFzb25pbmdfZWZmb3J0QhIKEF9oYXJuZXNzX3ZlcnNpb25CCAoGX3VzYWdlQhQKEl90cmFuc2NyaXB0X2xlbmd0aEIJCgdfY2xpZW50IqgCCgpUb2tlblVzYWdlEhIKBWlucHV0GAEgASgESACIAQESFwoKY2FjaGVfcmVhZBgCIAEoBEgBiAEBEhsKDmNhY2hlX2NyZWF0aW9uGAMgASgESAKIAQESEwoGb3V0cHV0GAQgASgESAOIAQESFgoJcmVhc29uaW5nGAUgASgESASIAQESJwoIY29zdF91c2QYBiABKAFCELpIDRILQAEpAAAAAAAAAABIBYgBARIYCgtkdXJhdGlvbl9tcxgHIAEoBEgGiAEBQggKBl9pbnB1dEINCgtfY2FjaGVfcmVhZEIRCg9fY2FjaGVfY3JlYXRpb25CCQoHX291dHB1dEIMCgpfcmVhc29uaW5nQgsKCV9jb3N0X3VzZEIOCgxfZHVyYXRpb25fbXMqYQoLQWdlbnRDbGllbnQSHAoYQUdFTlRfQ0xJRU5UX1VOU1BFQ0lGSUVEEAASGQoVQUdFTlRfQ0xJRU5UX1NDUklQVEVEEAESGQoVQUdFTlRfQ0xJRU5UX1BST1ZJREVSEAJCQVo/Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp]);
+  fileDesc("CiJ2aWJlc3lzL3N0b3JlL3YxL2FnZW50X2F0dHJzLnByb3RvEhB2aWJlc3lzLnN0b3JlLnYxIoYGCg5BZ2VudFR1cm5BdHRycxIaCgVhZ2VudBgBIAEoCUILukgIcgYQASiAgAQSGQoEcm9sZRgCIAEoCUILukgIcgYQASiAgAQSHwoFbW9kZWwYAyABKAlCC7pICHIGEAEogIAESACIAQESJAoKc3RhcnRlZF9ieRgEIAMoCUIQukgNkgEKIghyBhABKICABBIaCgVzdGFnZRgFIAEoCUILukgIcgYQASiAgAQSFAoHYXR0ZW1wdBgGIAEoDUgBiAEBEiIKCHByb3ZpZGVyGAcgASgJQgu6SAhyBhABKICABEgCiAEBEioKEHJlYXNvbmluZ19lZmZvcnQYCCABKAlCC7pICHIGEAEogIAESAOIAQESKQoPaGFybmVzc192ZXJzaW9uGAkgASgJQgu6SAhyBhABKICABEgEiAEBEjAKBXVzYWdlGAogASgLMhwudmliZXN5cy5zdG9yZS52MS5Ub2tlblVzYWdlSAWIAQESHQoKcmVwbHlfanNvbhgLIAEoCUIJukgGcgQogIAEEh4KEXRyYW5zY3JpcHRfbGVuZ3RoGAwgASgESAaIAQESLgoKc3RhcnRlZF9hdBgNIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kZWRfYXQYDiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEj4KBmNsaWVudBgPIAEoDjIdLnZpYmVzeXMuc3RvcmUudjEuQWdlbnRDbGllbnRCCrpIB4IBBBABIABIB4gBARI2CghhY3Rpdml0eRgQIAEoCzIfLnZpYmVzeXMuc3RvcmUudjEuQWdlbnRBY3Rpdml0eUgIiAEBQggKBl9tb2RlbEIKCghfYXR0ZW1wdEILCglfcHJvdmlkZXJCEwoRX3JlYXNvbmluZ19lZmZvcnRCEgoQX2hhcm5lc3NfdmVyc2lvbkIICgZfdXNhZ2VCFAoSX3RyYW5zY3JpcHRfbGVuZ3RoQgkKB19jbGllbnRCCwoJX2FjdGl2aXR5IoIBCg1BZ2VudEFjdGl2aXR5Eh4KBHRvb2wYASABKAlCC7pICHIGEAEogIAESACIAQESHgoEdG9kbxgCIAEoCUILukgIcgYQASiAgARIAYgBARIfCgVzaW5jZRgDIAEoAUIQukgNEgtAASkAAAAAAAAAAEIHCgVfdG9vbEIHCgVfdG9kbyKoAgoKVG9rZW5Vc2FnZRISCgVpbnB1dBgBIAEoBEgAiAEBEhcKCmNhY2hlX3JlYWQYAiABKARIAYgBARIbCg5jYWNoZV9jcmVhdGlvbhgDIAEoBEgCiAEBEhMKBm91dHB1dBgEIAEoBEgDiAEBEhYKCXJlYXNvbmluZxgFIAEoBEgEiAEBEicKCGNvc3RfdXNkGAYgASgBQhC6SA0SC0ABKQAAAAAAAAAASAWIAQESGAoLZHVyYXRpb25fbXMYByABKARIBogBAUIICgZfaW5wdXRCDQoLX2NhY2hlX3JlYWRCEQoPX2NhY2hlX2NyZWF0aW9uQgkKB19vdXRwdXRCDAoKX3JlYXNvbmluZ0ILCglfY29zdF91c2RCDgoMX2R1cmF0aW9uX21zKmEKC0FnZW50Q2xpZW50EhwKGEFHRU5UX0NMSUVOVF9VTlNQRUNJRklFRBAAEhkKFUFHRU5UX0NMSUVOVF9TQ1JJUFRFRBABEhkKFUFHRU5UX0NMSUVOVF9QUk9WSURFUhACQkFaP2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2dhdGV3YXkvZ2VuL3ZpYmVzeXMvc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp]);
 
 /**
  * Attrs for agent_turn, including the final usage and transcript byte length.
@@ -103,6 +103,14 @@ export type AgentTurnAttrs = Message<"vibesys.store.v1.AgentTurnAttrs"> & {
    * @generated from field: optional vibesys.store.v1.AgentClient client = 15;
    */
   client?: AgentClient | undefined;
+
+  /**
+   * What the turn is doing while it runs. Absent before its first tool call or todo list, and
+   * on turns recorded before activity was written.
+   *
+   * @generated from field: optional vibesys.store.v1.AgentActivity activity = 16;
+   */
+  activity?: AgentActivity | undefined;
 };
 
 /**
@@ -111,6 +119,43 @@ export type AgentTurnAttrs = Message<"vibesys.store.v1.AgentTurnAttrs"> & {
  */
 export const AgentTurnAttrsSchema: GenMessage<AgentTurnAttrs> = /*@__PURE__*/
   messageDesc(file_vibesys_store_v1_agent_attrs, 0);
+
+/**
+ * A running turn's activity, derived from its tool calls, tool results and todo list. A turn
+ * writes a change at most once per two seconds of run clock; a change inside that interval is
+ * written with the run's next record, keeping the time it began.
+ *
+ * @generated from message vibesys.store.v1.AgentActivity
+ */
+export type AgentActivity = Message<"vibesys.store.v1.AgentActivity"> & {
+  /**
+   * The newest tool still running, as the agent named it. Absent between tool calls.
+   *
+   * @generated from field: optional string tool = 1;
+   */
+  tool?: string | undefined;
+
+  /**
+   * The todo item the agent marked in progress. Absent when it has none.
+   *
+   * @generated from field: optional string todo = 2;
+   */
+  todo?: string | undefined;
+
+  /**
+   * When this activity began, on the span clock (as Span.started_at).
+   *
+   * @generated from field: double since = 3;
+   */
+  since: number;
+};
+
+/**
+ * Describes the message vibesys.store.v1.AgentActivity.
+ * Use `create(AgentActivitySchema)` to create a new message.
+ */
+export const AgentActivitySchema: GenMessage<AgentActivity> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_agent_attrs, 1);
 
 /**
  * Absence means unreported. A reported zero stays present on the wire.
@@ -159,7 +204,7 @@ export type TokenUsage = Message<"vibesys.store.v1.TokenUsage"> & {
  * Use `create(TokenUsageSchema)` to create a new message.
  */
 export const TokenUsageSchema: GenMessage<TokenUsage> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_agent_attrs, 1);
+  messageDesc(file_vibesys_store_v1_agent_attrs, 2);
 
 /**
  * Who ran a turn: a scripted agent, or a provider. Absence is an older turn.

@@ -31,7 +31,7 @@ from server.events import (
     json_value,
 )
 from vibesys.api import AgentExecutionStartedData as CoreAgentExecutionStartedData
-from vibesys.api import CoreEvent
+from vibesys.api import CoreEvent, TurnActivity
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -116,8 +116,7 @@ class ExecutionTracker:
         self._condition = condition
         self._journal = journal
         self._active: dict[str, ActiveAgentExecution] = {}
-        self._todo_summaries: dict[str, str] = {}
-        self._active_tools: dict[str, list[str]] = {}
+        self._turns: dict[str, TurnActivity] = {}
         self._controlled_ids: set[str] = set()
         self._emitted_lifecycle_ids: set[str] = set()
         self._current_kind: str | None = None
@@ -503,68 +502,43 @@ class ExecutionTracker:
         self._active.pop(execution_id, None)
         self._controlled_ids.discard(execution_id)
         self._emitted_lifecycle_ids.discard(execution_id)
-        self._todo_summaries.pop(execution_id, None)
-        self._active_tools.pop(execution_id, None)
+        self._turns.pop(execution_id, None)
 
     def _activity_for_presentation(
         self, event_type: EventType, data: EventData, execution_id: str
     ) -> AgentExecutionActivityData | None:
-        if event_type is EventType.AGENT_OUTPUT_CHUNK and isinstance(data, AgentOutputChunkData):
-            return self._output_activity(data, execution_id)
-        if event_type is EventType.TOOL_CALL and isinstance(data, ToolCallData):
-            return self._tool_call_activity(data, execution_id)
-        if event_type is EventType.TODO_UPDATE and isinstance(data, TodoUpdateData):
-            return self._todo_activity(data, execution_id)
-        if event_type is EventType.TOOL_RESULT and isinstance(data, ToolResultData):
-            return self._tool_result_activity(data, execution_id)
+        """Fold the event into the turn's activity (``vibesys.api.TurnActivity``) and word it.
+
+        Text output says only whether the agent thinks or answers, and only between tool calls; a
+        todo list changes what is said only between tool calls too.
+        """
+        with self._condition:
+            turn = self._turns.get(execution_id, TurnActivity())
+            if event_type is EventType.AGENT_OUTPUT_CHUNK and isinstance(
+                data, AgentOutputChunkData
+            ):
+                return None if turn.tool is not None else _text_activity(data)
+            if event_type is EventType.TOOL_CALL and isinstance(data, ToolCallData):
+                self._turns[execution_id] = turn.called(data.tool)
+                return _presented(self._turns[execution_id])
+            if event_type is EventType.TODO_UPDATE and isinstance(data, TodoUpdateData):
+                self._turns[execution_id] = turn.planned(data.todos)
+                return None if turn.tool is not None else _presented(self._turns[execution_id])
+            if (
+                event_type is EventType.TOOL_RESULT
+                and isinstance(data, ToolResultData)
+                and execution_id in self._active
+            ):
+                self._turns[execution_id] = turn.returned(data.tool)
+                return _presented(self._turns[execution_id])
         return None
 
-    def _output_activity(
-        self, data: AgentOutputChunkData, execution_id: str
-    ) -> AgentExecutionActivityData | None:
-        with self._condition:
-            if self._active_tools.get(execution_id):
-                return None
-        return _text_activity(data)
 
-    def _tool_call_activity(
-        self, data: ToolCallData, execution_id: str
-    ) -> AgentExecutionActivityData:
-        with self._condition:
-            self._active_tools.setdefault(execution_id, []).append(data.tool)
-        return AgentExecutionActivityData(mode="tool", summary=f"Using {data.tool}", tool=data.tool)
-
-    def _todo_activity(
-        self, data: TodoUpdateData, execution_id: str
-    ) -> AgentExecutionActivityData | None:
-        current = next((todo.content for todo in data.todos if todo.status == "in_progress"), None)
-        with self._condition:
-            if current is None:
-                self._todo_summaries.pop(execution_id, None)
-                if self._active_tools.get(execution_id):
-                    return None
-                return AgentExecutionActivityData(mode="thinking", summary="Thinking")
-            self._todo_summaries[execution_id] = current
-            if self._active_tools.get(execution_id):
-                return None
-        return AgentExecutionActivityData(mode="thinking", summary=current)
-
-    def _tool_result_activity(
-        self, data: ToolResultData, execution_id: str
-    ) -> AgentExecutionActivityData | None:
-        with self._condition:
-            if execution_id not in self._active:
-                return None
-            tools = self._active_tools.get(execution_id, [])
-            if data.tool in tools:
-                tools.remove(data.tool)
-            remaining_tool = tools[-1] if tools else None
-            todo_summary = self._todo_summaries.get(execution_id)
-        if remaining_tool is not None:
-            return AgentExecutionActivityData(
-                mode="tool", summary=f"Using {remaining_tool}", tool=remaining_tool
-            )
-        return AgentExecutionActivityData(mode="thinking", summary=todo_summary or "Thinking")
+def _presented(turn: TurnActivity) -> AgentExecutionActivityData:
+    """The server's words for a turn's activity: the tool it runs, else its todo, else Thinking."""
+    if turn.tool is not None:
+        return AgentExecutionActivityData(mode="tool", summary=f"Using {turn.tool}", tool=turn.tool)
+    return AgentExecutionActivityData(mode="thinking", summary=turn.todo or "Thinking")
 
 
 def _attempt_from_label(round_label: str) -> int | None:

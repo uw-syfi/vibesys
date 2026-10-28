@@ -125,6 +125,7 @@ from vs_proto._generated.vibesys.search.v1.run_pb import (
 )
 from vs_proto._generated.vibesys.store.v1 import replay_pb as replay
 from vs_proto._generated.vibesys.store.v1.agent_attrs_pb import (
+    AgentActivity,
     AgentClient,
     AgentTurnAttrs,
     TokenUsage,
@@ -271,6 +272,7 @@ __all__ = [
     "STORE_SCHEMA_HASH",
     "AcceptedRequest",
     "AdoptionAttrs",
+    "AgentActivity",
     "AgentClient",
     "AgentTurnAttrs",
     "Attempt",

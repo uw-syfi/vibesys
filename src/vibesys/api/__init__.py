@@ -135,6 +135,7 @@ if TYPE_CHECKING:
     from vibesys.plugin_catalog import OrchestrationRegistry
     from vibesys.repository import RepositoryVisibility
     from vibesys.run import CoreAgentEventSink
+    from vibesys.turn_activity import TurnActivity
     from vs_agent.api import (
         AgentBackend,
         AgentSpec,
@@ -244,6 +245,7 @@ _MODULES: dict[str, str] = {
         ("vibesys.plugin_catalog", ("OrchestrationRegistry ")),
         ("vibesys.repository", ("RepositoryVisibility ")),
         ("vibesys.run", ("CoreAgentEventSink ")),
+        ("vibesys.turn_activity", ("TurnActivity ")),
         ("vs_agent.api", ("AgentBackend AgentSpec Harness check_harness harnesses vetted_models ")),
         (
             "vs_runtime.api.infrastructure",
@@ -420,6 +422,7 @@ __all__ = [
     "ToolCallData",
     "ToolResultData",
     "ToolResultPayload",
+    "TurnActivity",
     "WinnerSelectedData",
     "WireSpan",
     "WithdrawRequest",

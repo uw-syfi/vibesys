@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import vibesys.events as e
 import vs_proto.api as p
-from vibesys.records import _agents, _capacity, _control, _lifecycle, _strategy
+from vibesys.records import _activity, _agents, _capacity, _control, _lifecycle, _strategy
 from vibesys.records._common import Projection
 from vibesys.records._spans import project_span
 from vs_decode.api import Unreadable, decode_json
@@ -22,10 +22,11 @@ DROPS: dict[e.CoreEventType, str] = {
     e.CoreEventType.EXPERIMENTS_CHANGED: "refetch hint; typed lifecycle and spans own readiness",
     e.CoreEventType.INVOCATION_STARTED: "duplicate of agent_execution_started",
     e.CoreEventType.INVOCATION_FINISHED: "duplicate of agent_execution_finished",
-    e.CoreEventType.AGENT_EXECUTION_ACTIVITY_CHANGED: "derived from transcript tail",
+    e.CoreEventType.AGENT_EXECUTION_ACTIVITY_CHANGED: (
+        "server presentation event; the turn span's activity attrs derive from its tool calls and todos"
+    ),
     e.CoreEventType.PHASE_STARTED: "turn and workstream spans own phase work",
     e.CoreEventType.PHASE_FINISHED: "turn and workstream spans own phase work",
-    e.CoreEventType.TODO_UPDATE: "OQ13: no consumer",
     e.CoreEventType.USAGE_UPDATE: "OQ13: in-flight context snapshot has no consumer",
     e.CoreEventType.ITERATIONS_CHANGED: "refetch hint; iterations are a client span fold",
     e.CoreEventType.JUDGE_RESULT: "no producer; workstream verdict owns the result",
@@ -35,6 +36,11 @@ DROPS: dict[e.CoreEventType, str] = {
     e.CoreEventType.ACTION_APPLIED: "legacy action text has no request identity; phase 3 supplies typed actions",
     e.CoreEventType.WORKSPACE_SNAPSHOT: "workstream attrs own revision and parent_revision",
 }
+
+
+def _tool(projection: Projection) -> None:
+    _agents.transcript(projection)
+    _activity.observe(projection)
 
 
 def _span(projection: Projection) -> None:
@@ -56,6 +62,9 @@ MAPPERS: dict[e.CoreEventType, Callable[[Projection], None]] = {
     **_control.MAPPERS,
     **_lifecycle.MAPPERS,
     **_strategy.MAPPERS,
+    e.CoreEventType.TOOL_CALL: _tool,
+    e.CoreEventType.TOOL_RESULT: _tool,
+    e.CoreEventType.TODO_UPDATE: _activity.observe,
     e.CoreEventType.SPAN_STARTED: _span,
     e.CoreEventType.SPAN_UPDATED: _span,
     e.CoreEventType.SPAN_ENDED: _span,
@@ -91,4 +100,7 @@ def map_event(state: MappingState, event: e.CoreEvent) -> MappedEvent:
             projection.event = deferred
             MAPPERS[deferred.type](projection)
         projection.event = event
+    # After the event: a change it made to a held turn supersedes the held one, never follows it.
+    if not (projection.final or projection.epoch_ended):
+        _activity.flush(projection)
     return projection.result()

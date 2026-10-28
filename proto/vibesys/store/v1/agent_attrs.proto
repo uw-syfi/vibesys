@@ -63,6 +63,30 @@ message AgentTurnAttrs {
     defined_only: true
     not_in: [0]
   }];
+  // What the turn is doing while it runs. Absent before its first tool call or todo list, and
+  // on turns recorded before activity was written.
+  optional AgentActivity activity = 16;
+}
+
+// A running turn's activity, derived from its tool calls, tool results and todo list. A turn
+// writes a change at most once per two seconds of run clock; a change inside that interval is
+// written with the run's next record, keeping the time it began.
+message AgentActivity {
+  // The newest tool still running, as the agent named it. Absent between tool calls.
+  optional string tool = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  // The todo item the agent marked in progress. Absent when it has none.
+  optional string todo = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  // When this activity began, on the span clock (as Span.started_at).
+  double since = 3 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
 }
 
 // Absence means unreported. A reported zero stays present on the wire.

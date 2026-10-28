@@ -152,6 +152,7 @@ class RunLogTee:
             wall_span_clock=True,
             clock_epochs=(*epochs, (at.timestamp(), clock)),
             intents=tuple(intents.items()),
+            activities=(),
             spans=tuple(
                 (key, history.versions[-1].span.to_binary())
                 for key, history in fold_skeleton(records, log_offset=0).spans.items()

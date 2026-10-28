@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
 
-_AgentTurnAttrsFields: TypeAlias = Literal["agent", "role", "model", "started_by", "stage", "attempt", "provider", "reasoning_effort", "harness_version", "usage", "reply_json", "transcript_length", "started_at", "ended_at", "client"]
+_AgentTurnAttrsFields: TypeAlias = Literal["agent", "role", "model", "started_by", "stage", "attempt", "provider", "reasoning_effort", "harness_version", "usage", "reply_json", "transcript_length", "started_at", "ended_at", "client", "activity"]
 
 class AgentTurnAttrs(Message[_AgentTurnAttrsFields]):
     """
@@ -98,9 +98,16 @@ class AgentTurnAttrs(Message[_AgentTurnAttrsFields]):
             ```proto
             optional vibesys.store.v1.AgentClient client = 15;
             ```
+        activity:
+            What the turn is doing while it runs. Absent before its first tool call or todo list, and
+            on turns recorded before activity was written.
+
+            ```proto
+            optional vibesys.store.v1.AgentActivity activity = 16;
+            ```
     """
 
-    __slots__ = ("agent", "role", "model", "started_by", "stage", "attempt", "provider", "reasoning_effort", "harness_version", "usage", "reply_json", "transcript_length", "started_at", "ended_at", "client")
+    __slots__ = ("agent", "role", "model", "started_by", "stage", "attempt", "provider", "reasoning_effort", "harness_version", "usage", "reply_json", "transcript_length", "started_at", "ended_at", "client", "activity")
 
     if TYPE_CHECKING:
 
@@ -122,6 +129,7 @@ class AgentTurnAttrs(Message[_AgentTurnAttrsFields]):
             started_at: Timestamp | None = None,
             ended_at: Timestamp | None = None,
             client: AgentClient | None = None,
+            activity: AgentActivity | None = None,
         ) -> None:
             pass
 
@@ -140,6 +148,57 @@ class AgentTurnAttrs(Message[_AgentTurnAttrsFields]):
         started_at: Timestamp | None
         ended_at: Timestamp | None
         client: AgentClient
+        activity: AgentActivity | None
+
+_AgentActivityFields: TypeAlias = Literal["tool", "todo", "since"]
+
+class AgentActivity(Message[_AgentActivityFields]):
+    """
+    A running turn's activity, derived from its tool calls, tool results and todo list. A turn
+    writes a change at most once per two seconds of run clock; a change inside that interval is
+    written with the run's next record, keeping the time it began.
+
+    ```proto
+    message vibesys.store.v1.AgentActivity
+    ```
+
+    Attributes:
+        tool:
+            The newest tool still running, as the agent named it. Absent between tool calls.
+
+            ```proto
+            optional string tool = 1;
+            ```
+        todo:
+            The todo item the agent marked in progress. Absent when it has none.
+
+            ```proto
+            optional string todo = 2;
+            ```
+        since:
+            When this activity began, on the span clock (as Span.started_at).
+
+            ```proto
+            double since = 3;
+            ```
+    """
+
+    __slots__ = ("tool", "todo", "since")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            tool: str | None = None,
+            todo: str | None = None,
+            since: float = 0,
+        ) -> None:
+            pass
+
+        tool: str
+        todo: str
+        since: float
 
 _TokenUsageFields: TypeAlias = Literal["input", "cache_read", "cache_creation", "output", "reasoning", "cost_usd", "duration_ms"]
 
@@ -236,13 +295,14 @@ class AgentClient(Enum):
 
 
 _DESC = file_desc(
-    b'\n"vibesys/store/v1/agent_attrs.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto"\xdb\x06\n\x0eAgentTurnAttrs\x12!\n\x05agent\x18\x01 \x01(\tR\x05agentB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12\x1f\n\x04role\x18\x02 \x01(\tR\x04roleB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12&\n\x05model\x18\x03 \x01(\tH\x00R\x05modelB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12/\n\nstarted_by\x18\x04 \x03(\tR\tstartedByB\x10\xbaH\r\x92\x01\n"\x08r\x06\x10\x01(\x80\x80\x04\x12!\n\x05stage\x18\x05 \x01(\tR\x05stageB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12\x1d\n\x07attempt\x18\x06 \x01(\rH\x01R\x07attempt\x88\x01\x01\x12,\n\x08provider\x18\x07 \x01(\tH\x02R\x08providerB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12;\n\x10reasoning_effort\x18\x08 \x01(\tH\x03R\x0freasoningEffortB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x129\n\x0fharness_version\x18\t \x01(\tH\x04R\x0eharnessVersionB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x127\n\x05usage\x18\n \x01(\x0b2\x1c.vibesys.store.v1.TokenUsageH\x05R\x05usage\x88\x01\x01\x12(\n\nreply_json\x18\x0b \x01(\tR\treplyJsonB\t\xbaH\x06r\x04(\x80\x80\x04\x120\n\x11transcript_length\x18\x0c \x01(\x04H\x06R\x10transcriptLength\x88\x01\x01\x129\n\nstarted_at\x18\r \x01(\x0b2\x1a.google.protobuf.TimestampR\tstartedAt\x125\n\x08ended_at\x18\x0e \x01(\x0b2\x1a.google.protobuf.TimestampR\x07endedAt\x12F\n\x06client\x18\x0f \x01(\x0e2\x1d.vibesys.store.v1.AgentClientH\x07R\x06clientB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x88\x01\x01B\x08\n\x06_modelB\n\n\x08_attemptB\x0b\n\t_providerB\x13\n\x11_reasoning_effortB\x12\n\x10_harness_versionB\x08\n\x06_usageB\x14\n\x12_transcript_lengthB\t\n\x07_client"\xf1\x02\n\nTokenUsage\x12\x19\n\x05input\x18\x01 \x01(\x04H\x00R\x05input\x88\x01\x01\x12"\n\ncache_read\x18\x02 \x01(\x04H\x01R\tcacheRead\x88\x01\x01\x12*\n\x0ecache_creation\x18\x03 \x01(\x04H\x02R\rcacheCreation\x88\x01\x01\x12\x1b\n\x06output\x18\x04 \x01(\x04H\x03R\x06output\x88\x01\x01\x12!\n\treasoning\x18\x05 \x01(\x04H\x04R\treasoning\x88\x01\x01\x120\n\x08cost_usd\x18\x06 \x01(\x01H\x05R\x07costUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12$\n\x0bduration_ms\x18\x07 \x01(\x04H\x06R\ndurationMs\x88\x01\x01B\x08\n\x06_inputB\r\n\x0b_cache_readB\x11\n\x0f_cache_creationB\t\n\x07_outputB\x0c\n\n_reasoningB\x0b\n\t_cost_usdB\x0e\n\x0c_duration_ms*a\n\x0bAgentClient\x12\x1c\n\x18AGENT_CLIENT_UNSPECIFIED\x10\x00\x12\x19\n\x15AGENT_CLIENT_SCRIPTED\x10\x01\x12\x19\n\x15AGENT_CLIENT_PROVIDER\x10\x02BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
+    b'\n"vibesys/store/v1/agent_attrs.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto"\xaa\x07\n\x0eAgentTurnAttrs\x12!\n\x05agent\x18\x01 \x01(\tR\x05agentB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12\x1f\n\x04role\x18\x02 \x01(\tR\x04roleB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12&\n\x05model\x18\x03 \x01(\tH\x00R\x05modelB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12/\n\nstarted_by\x18\x04 \x03(\tR\tstartedByB\x10\xbaH\r\x92\x01\n"\x08r\x06\x10\x01(\x80\x80\x04\x12!\n\x05stage\x18\x05 \x01(\tR\x05stageB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12\x1d\n\x07attempt\x18\x06 \x01(\rH\x01R\x07attempt\x88\x01\x01\x12,\n\x08provider\x18\x07 \x01(\tH\x02R\x08providerB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12;\n\x10reasoning_effort\x18\x08 \x01(\tH\x03R\x0freasoningEffortB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x129\n\x0fharness_version\x18\t \x01(\tH\x04R\x0eharnessVersionB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x127\n\x05usage\x18\n \x01(\x0b2\x1c.vibesys.store.v1.TokenUsageH\x05R\x05usage\x88\x01\x01\x12(\n\nreply_json\x18\x0b \x01(\tR\treplyJsonB\t\xbaH\x06r\x04(\x80\x80\x04\x120\n\x11transcript_length\x18\x0c \x01(\x04H\x06R\x10transcriptLength\x88\x01\x01\x129\n\nstarted_at\x18\r \x01(\x0b2\x1a.google.protobuf.TimestampR\tstartedAt\x125\n\x08ended_at\x18\x0e \x01(\x0b2\x1a.google.protobuf.TimestampR\x07endedAt\x12F\n\x06client\x18\x0f \x01(\x0e2\x1d.vibesys.store.v1.AgentClientH\x07R\x06clientB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x88\x01\x01\x12@\n\x08activity\x18\x10 \x01(\x0b2\x1f.vibesys.store.v1.AgentActivityH\x08R\x08activity\x88\x01\x01B\x08\n\x06_modelB\n\n\x08_attemptB\x0b\n\t_providerB\x13\n\x11_reasoning_effortB\x12\n\x10_harness_versionB\x08\n\x06_usageB\x14\n\x12_transcript_lengthB\t\n\x07_clientB\x0b\n\t_activity"\x95\x01\n\rAgentActivity\x12$\n\x04tool\x18\x01 \x01(\tH\x00R\x04toolB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12$\n\x04todo\x18\x02 \x01(\tH\x01R\x04todoB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12&\n\x05since\x18\x03 \x01(\x01R\x05sinceB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00B\x07\n\x05_toolB\x07\n\x05_todo"\xf1\x02\n\nTokenUsage\x12\x19\n\x05input\x18\x01 \x01(\x04H\x00R\x05input\x88\x01\x01\x12"\n\ncache_read\x18\x02 \x01(\x04H\x01R\tcacheRead\x88\x01\x01\x12*\n\x0ecache_creation\x18\x03 \x01(\x04H\x02R\rcacheCreation\x88\x01\x01\x12\x1b\n\x06output\x18\x04 \x01(\x04H\x03R\x06output\x88\x01\x01\x12!\n\treasoning\x18\x05 \x01(\x04H\x04R\treasoning\x88\x01\x01\x120\n\x08cost_usd\x18\x06 \x01(\x01H\x05R\x07costUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12$\n\x0bduration_ms\x18\x07 \x01(\x04H\x06R\ndurationMs\x88\x01\x01B\x08\n\x06_inputB\r\n\x0b_cache_readB\x11\n\x0f_cache_creationB\t\n\x07_outputB\x0c\n\n_reasoningB\x0b\n\t_cost_usdB\x0e\n\x0c_duration_ms*a\n\x0bAgentClient\x12\x1c\n\x18AGENT_CLIENT_UNSPECIFIED\x10\x00\x12\x19\n\x15AGENT_CLIENT_SCRIPTED\x10\x01\x12\x19\n\x15AGENT_CLIENT_PROVIDER\x10\x02BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
     [
         validate_pb.desc(),
         timestamp_pb.desc(),
     ],
     {
         "AgentTurnAttrs": AgentTurnAttrs,
+        "AgentActivity": AgentActivity,
         "TokenUsage": TokenUsage,
         "AgentClient": AgentClient,
     },

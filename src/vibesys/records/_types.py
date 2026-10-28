@@ -8,7 +8,21 @@ from typing import TYPE_CHECKING
 from rpds import HashTrieSet
 
 if TYPE_CHECKING:
+    from vibesys.turn_activity import TurnActivity
     from vs_proto.api import Record
+
+
+@dataclass(frozen=True)
+class ActivityMark:
+    """A running turn's activity, when it began, and the run clock its span last said one.
+
+    ``held`` marks an activity its span does not say yet: it changed inside the write interval.
+    """
+
+    activity: TurnActivity
+    since: float
+    written_at: float | None = None
+    held: bool = False
 
 
 @dataclass(frozen=True)
@@ -48,6 +62,7 @@ class MappingState:
     source_pending: HashTrieSet[int] = field(default_factory=HashTrieSet)
     ending: bytes | None = None
     pending: tuple[bytes, ...] = ()
+    activities: tuple[tuple[str, ActivityMark], ...] = ()
 
 
 @dataclass(frozen=True)

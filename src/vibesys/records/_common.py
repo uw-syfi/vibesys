@@ -76,6 +76,7 @@ class Projection:
         self.streams: list[StreamWrite] = []
         self.ending = state.ending
         self.pending = list(state.pending)
+        self.activities = dict(state.activities)
         self.final = False
         self.epoch_ended = state.epoch_ended
         self.header = (
@@ -310,5 +311,6 @@ class Projection:
             source_pending=pending,
             ending=self.ending,
             pending=tuple(self.pending),
+            activities=tuple(self.activities.items()),
         )
         return MappedEvent(state, tuple(self.records), tuple(self.blobs), tuple(self.streams))

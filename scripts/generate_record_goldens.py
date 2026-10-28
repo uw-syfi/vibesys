@@ -89,6 +89,7 @@ def attrs_examples() -> dict[str, Message]:
                 cost_usd=0.25,
                 duration_ms=500,
             ),
+            activity=p.AgentActivity(tool="Edit", todo="Pad the ring", since=12.5),
         ),
         "planning_call": p.PlanningAttrs(call=1),
         "workstream": p.WorkstreamAttrs(

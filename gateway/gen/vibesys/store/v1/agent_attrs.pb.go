@@ -93,9 +93,12 @@ type AgentTurnAttrs struct {
 	// Set when the turn ends. The transcript stays a stream, never a second blob.
 	TranscriptLength *uint64 `protobuf:"varint,12,opt,name=transcript_length,json=transcriptLength,proto3,oneof" json:"transcript_length,omitempty"`
 	// Wall timestamps reported by execution events, independent of elapsed span clocks.
-	StartedAt     *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
-	EndedAt       *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=ended_at,json=endedAt,proto3" json:"ended_at,omitempty"`
-	Client        *AgentClient           `protobuf:"varint,15,opt,name=client,proto3,enum=vibesys.store.v1.AgentClient,oneof" json:"client,omitempty"`
+	StartedAt *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	EndedAt   *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=ended_at,json=endedAt,proto3" json:"ended_at,omitempty"`
+	Client    *AgentClient           `protobuf:"varint,15,opt,name=client,proto3,enum=vibesys.store.v1.AgentClient,oneof" json:"client,omitempty"`
+	// What the turn is doing while it runs. Absent before its first tool call or todo list, and
+	// on turns recorded before activity was written.
+	Activity      *AgentActivity `protobuf:"bytes,16,opt,name=activity,proto3,oneof" json:"activity,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -235,6 +238,79 @@ func (x *AgentTurnAttrs) GetClient() AgentClient {
 	return AgentClient_AGENT_CLIENT_UNSPECIFIED
 }
 
+func (x *AgentTurnAttrs) GetActivity() *AgentActivity {
+	if x != nil {
+		return x.Activity
+	}
+	return nil
+}
+
+// A running turn's activity, derived from its tool calls, tool results and todo list. A turn
+// writes a change at most once per two seconds of run clock; a change inside that interval is
+// written with the run's next record, keeping the time it began.
+type AgentActivity struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The newest tool still running, as the agent named it. Absent between tool calls.
+	Tool *string `protobuf:"bytes,1,opt,name=tool,proto3,oneof" json:"tool,omitempty"`
+	// The todo item the agent marked in progress. Absent when it has none.
+	Todo *string `protobuf:"bytes,2,opt,name=todo,proto3,oneof" json:"todo,omitempty"`
+	// When this activity began, on the span clock (as Span.started_at).
+	Since         float64 `protobuf:"fixed64,3,opt,name=since,proto3" json:"since,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentActivity) Reset() {
+	*x = AgentActivity{}
+	mi := &file_vibesys_store_v1_agent_attrs_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentActivity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentActivity) ProtoMessage() {}
+
+func (x *AgentActivity) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_agent_attrs_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentActivity.ProtoReflect.Descriptor instead.
+func (*AgentActivity) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_agent_attrs_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *AgentActivity) GetTool() string {
+	if x != nil && x.Tool != nil {
+		return *x.Tool
+	}
+	return ""
+}
+
+func (x *AgentActivity) GetTodo() string {
+	if x != nil && x.Todo != nil {
+		return *x.Todo
+	}
+	return ""
+}
+
+func (x *AgentActivity) GetSince() float64 {
+	if x != nil {
+		return x.Since
+	}
+	return 0
+}
+
 // Absence means unreported. A reported zero stays present on the wire.
 type TokenUsage struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -251,7 +327,7 @@ type TokenUsage struct {
 
 func (x *TokenUsage) Reset() {
 	*x = TokenUsage{}
-	mi := &file_vibesys_store_v1_agent_attrs_proto_msgTypes[1]
+	mi := &file_vibesys_store_v1_agent_attrs_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -263,7 +339,7 @@ func (x *TokenUsage) String() string {
 func (*TokenUsage) ProtoMessage() {}
 
 func (x *TokenUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_agent_attrs_proto_msgTypes[1]
+	mi := &file_vibesys_store_v1_agent_attrs_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -276,7 +352,7 @@ func (x *TokenUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenUsage.ProtoReflect.Descriptor instead.
 func (*TokenUsage) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_agent_attrs_proto_rawDescGZIP(), []int{1}
+	return file_vibesys_store_v1_agent_attrs_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *TokenUsage) GetInput() uint64 {
@@ -332,7 +408,7 @@ var File_vibesys_store_v1_agent_attrs_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_agent_attrs_proto_rawDesc = "" +
 	"\n" +
-	"\"vibesys/store/v1/agent_attrs.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xdb\x06\n" +
+	"\"vibesys/store/v1/agent_attrs.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xaa\a\n" +
 	"\x0eAgentTurnAttrs\x12!\n" +
 	"\x05agent\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x05agent\x12\x1f\n" +
 	"\x04role\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x04role\x12&\n" +
@@ -354,7 +430,8 @@ const file_vibesys_store_v1_agent_attrs_proto_rawDesc = "" +
 	"started_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x125\n" +
 	"\bended_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt\x12F\n" +
 	"\x06client\x18\x0f \x01(\x0e2\x1d.vibesys.store.v1.AgentClientB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\aR\x06client\x88\x01\x01B\b\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\aR\x06client\x88\x01\x01\x12@\n" +
+	"\bactivity\x18\x10 \x01(\v2\x1f.vibesys.store.v1.AgentActivityH\bR\bactivity\x88\x01\x01B\b\n" +
 	"\x06_modelB\n" +
 	"\n" +
 	"\b_attemptB\v\n" +
@@ -363,7 +440,14 @@ const file_vibesys_store_v1_agent_attrs_proto_rawDesc = "" +
 	"\x10_harness_versionB\b\n" +
 	"\x06_usageB\x14\n" +
 	"\x12_transcript_lengthB\t\n" +
-	"\a_client\"\xf1\x02\n" +
+	"\a_clientB\v\n" +
+	"\t_activity\"\x95\x01\n" +
+	"\rAgentActivity\x12$\n" +
+	"\x04tool\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\x04tool\x88\x01\x01\x12$\n" +
+	"\x04todo\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x01R\x04todo\x88\x01\x01\x12&\n" +
+	"\x05since\x18\x03 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\x05sinceB\a\n" +
+	"\x05_toolB\a\n" +
+	"\x05_todo\"\xf1\x02\n" +
 	"\n" +
 	"TokenUsage\x12\x19\n" +
 	"\x05input\x18\x01 \x01(\x04H\x00R\x05input\x88\x01\x01\x12\"\n" +
@@ -401,23 +485,25 @@ func file_vibesys_store_v1_agent_attrs_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_store_v1_agent_attrs_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_vibesys_store_v1_agent_attrs_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_vibesys_store_v1_agent_attrs_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_vibesys_store_v1_agent_attrs_proto_goTypes = []any{
 	(AgentClient)(0),              // 0: vibesys.store.v1.AgentClient
 	(*AgentTurnAttrs)(nil),        // 1: vibesys.store.v1.AgentTurnAttrs
-	(*TokenUsage)(nil),            // 2: vibesys.store.v1.TokenUsage
-	(*timestamppb.Timestamp)(nil), // 3: google.protobuf.Timestamp
+	(*AgentActivity)(nil),         // 2: vibesys.store.v1.AgentActivity
+	(*TokenUsage)(nil),            // 3: vibesys.store.v1.TokenUsage
+	(*timestamppb.Timestamp)(nil), // 4: google.protobuf.Timestamp
 }
 var file_vibesys_store_v1_agent_attrs_proto_depIdxs = []int32{
-	2, // 0: vibesys.store.v1.AgentTurnAttrs.usage:type_name -> vibesys.store.v1.TokenUsage
-	3, // 1: vibesys.store.v1.AgentTurnAttrs.started_at:type_name -> google.protobuf.Timestamp
-	3, // 2: vibesys.store.v1.AgentTurnAttrs.ended_at:type_name -> google.protobuf.Timestamp
+	3, // 0: vibesys.store.v1.AgentTurnAttrs.usage:type_name -> vibesys.store.v1.TokenUsage
+	4, // 1: vibesys.store.v1.AgentTurnAttrs.started_at:type_name -> google.protobuf.Timestamp
+	4, // 2: vibesys.store.v1.AgentTurnAttrs.ended_at:type_name -> google.protobuf.Timestamp
 	0, // 3: vibesys.store.v1.AgentTurnAttrs.client:type_name -> vibesys.store.v1.AgentClient
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	2, // 4: vibesys.store.v1.AgentTurnAttrs.activity:type_name -> vibesys.store.v1.AgentActivity
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_agent_attrs_proto_init() }
@@ -427,13 +513,14 @@ func file_vibesys_store_v1_agent_attrs_proto_init() {
 	}
 	file_vibesys_store_v1_agent_attrs_proto_msgTypes[0].OneofWrappers = []any{}
 	file_vibesys_store_v1_agent_attrs_proto_msgTypes[1].OneofWrappers = []any{}
+	file_vibesys_store_v1_agent_attrs_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_store_v1_agent_attrs_proto_rawDesc), len(file_vibesys_store_v1_agent_attrs_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   2,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
