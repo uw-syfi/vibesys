@@ -45,58 +45,89 @@ function textNodes(container: Element): string[] {
   return texts;
 }
 
-test('a refused request says why on the page, not in a tooltip', async () => {
+interface Report {
+  readonly where: string;
+  readonly message: string;
+  readonly detail: string | null;
+}
+
+/** The controls of a running run, whose host refuses Pause; the container after the refusal. */
+async function refusedPause(askAboutError?: (report: Report) => void) {
   const bridge = new FakeGatewayBridge();
   const feed = new FakeRecords((record: StoreRecord) => toBinary(RecordSchema, record));
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
-  try {
-    await act(async () =>
-      root.render(
-        <RunIntents
-          bridge={bridge}
-          records={feed.subscribe}
-          host={'local' as HostKey}
-          projectRoot={recordedProjectRoot('/project')}
-          runId="run-1"
-          enabled
-          writer={{
-            observation: {
-              epoch: 1n,
-              lifecycle: create(LifecycleSchema, {state: {case: 'running', value: {}}}),
-            },
-            liveness: {epoch: 1n, value: RunLiveness.ALIVE},
-            fresh: true,
-          }}
-          schedule={new FakeClock().schedule}
-        />,
+  await act(async () =>
+    root.render(
+      <RunIntents
+        bridge={bridge}
+        records={feed.subscribe}
+        host={'local' as HostKey}
+        projectRoot={recordedProjectRoot('/project')}
+        runId="run-1"
+        enabled
+        writer={{
+          observation: {
+            epoch: 1n,
+            lifecycle: create(LifecycleSchema, {state: {case: 'running', value: {}}}),
+          },
+          liveness: {epoch: 1n, value: RunLiveness.ALIVE},
+          fresh: true,
+        }}
+        schedule={new FakeClock().schedule}
+        {...(askAboutError === undefined ? {} : {askAboutError})}
+      />,
+    ),
+  );
+  const pause = [...container.querySelectorAll('button')].find(
+    button => button.textContent === 'Pause',
+  );
+  await act(async () => pause?.click());
+  const call = bridge.calls.at(-1);
+  if (call === undefined) throw new Error('Pause sent nothing');
+  await act(async () =>
+    call.resolve(
+      toBinary(
+        HostCallResponseSchema,
+        create(HostCallResponseSchema, {
+          result: {
+            case: 'configurationFailed',
+            value: {code: 'x', stage: 's', message: REASON, stderr: 'trace'},
+          },
+        }),
       ),
-    );
-    const pause = [...container.querySelectorAll('button')].find(
-      button => button.textContent === 'Pause',
-    );
-    await act(async () => pause?.click());
-    const call = bridge.calls.at(-1);
-    if (call === undefined) throw new Error('Pause sent nothing');
-    await act(async () =>
-      call.resolve(
-        toBinary(
-          HostCallResponseSchema,
-          create(HostCallResponseSchema, {
-            result: {
-              case: 'configurationFailed',
-              value: {code: 'x', stage: 's', message: REASON, stderr: 'trace'},
-            },
-          }),
-        ),
-      ),
-    );
-    expect(container.textContent).toContain('Pause · Refused');
-    expect(textNodes(container)).toContain(REASON);
-    expect(container.querySelector(`[title="${REASON}"]`)).toBeNull();
-  } finally {
-    await act(async () => root.unmount());
-    container.remove();
-  }
+    ),
+  );
+  return {
+    container,
+    unmount: async () => {
+      await act(async () => root.unmount());
+      container.remove();
+    },
+  };
+}
+
+const asks = (container: Element) =>
+  [...container.querySelectorAll('button')].filter(
+    button => button.textContent === 'Ask about this error',
+  );
+
+test('a refused request says why on the page, not in a tooltip', async () => {
+  const {container, unmount} = await refusedPause();
+  expect(container.textContent).toContain('Pause · Refused');
+  expect(textNodes(container)).toContain(REASON);
+  expect(container.querySelector(`[title="${REASON}"]`)).toBeNull();
+  expect(asks(container)).toHaveLength(0);
+  await unmount();
+});
+
+test('a refused request offers to ask the run chat about it, with its diagnostic', async () => {
+  const asked: Report[] = [];
+  const {container, unmount} = await refusedPause(report => asked.push(report));
+  const buttons = asks(container);
+  expect(buttons).toHaveLength(1);
+  await act(async () => buttons[0]?.click());
+  expect(asked).toEqual([{where: 'Pause request', message: REASON, detail: 'trace'}]);
+  await unmount();
 });

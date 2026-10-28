@@ -1,22 +1,16 @@
 import {IntentAction, type RunIntentAction} from '@vibesys/runs/intents';
-import {Button, Dialog, Field, Row, Stack, Text, TextInput} from '@vibesys/ui';
+import {Button, Dialog, ErrorActions, Field, Row, Stack, Text, TextInput} from '@vibesys/ui';
 import type {JSX} from 'react';
-import type {IntentRow} from '../../state/index.js';
+import {
+  ACTION_LABELS,
+  type ErrorReport,
+  type IntentRow,
+  refusalReport,
+  shownReason,
+  updatesReport,
+} from '../../state/index.js';
 import {RelaunchAction, RelaunchStatus, type RelaunchView} from './relaunch.js';
 
-const ACTION_LABELS: Record<IntentAction, string> = {
-  [IntentAction.UNSPECIFIED]: 'Request',
-  [IntentAction.PAUSE]: 'Pause',
-  [IntentAction.PARK]: 'Pause',
-  [IntentAction.PAUSE_NOW]: 'Pause now',
-  [IntentAction.RESUME]: 'Resume',
-  [IntentAction.STOP]: 'Stop',
-  [IntentAction.STEER]: 'Guidance',
-  [IntentAction.WITHDRAW]: 'Withdraw guidance',
-  [IntentAction.CANCEL_ATTEMPT]: 'Cancel attempt',
-  [IntentAction.CANCEL_ITEM]: 'Cancel item',
-  [IntentAction.SET_MAX_PARALLEL]: 'Change parallelism',
-};
 const BUTTON_LABELS: Record<RunIntentAction, string> = {
   pause: 'Pause',
   pauseNow: 'Pause now',
@@ -45,6 +39,8 @@ export function IntentControls(props: {
   readonly edit: (text: string) => void;
   readonly send: (action: RunIntentAction) => void;
   readonly retry: (requestId: string) => void;
+  /** Hands an error to the run chat; absent where no chat can take it. */
+  readonly askAboutError?: ((report: ErrorReport) => void) | undefined;
 }): JSX.Element {
   return (
     <Stack gap="space-1">
@@ -90,7 +86,12 @@ export function IntentControls(props: {
           )}
         />
       ) : null}
-      <Notices warning={props.warning} error={props.error} entries={props.entries} />
+      <Notices
+        warning={props.warning}
+        error={props.error}
+        entries={props.entries}
+        askAboutError={props.askAboutError}
+      />
       {props.entries.map(entry => (
         <RequestRow
           key={`${entry.source}:${entry.id}`}
@@ -98,6 +99,7 @@ export function IntentControls(props: {
           epoch={props.epoch}
           busy={props.busy}
           retry={props.retry}
+          askAboutError={props.askAboutError}
         />
       ))}
       <Dialog
@@ -130,8 +132,9 @@ function Notices(props: {
   readonly warning: string | null;
   readonly error: string | null;
   readonly entries: readonly IntentRow[];
+  readonly askAboutError?: ((report: ErrorReport) => void) | undefined;
 }): JSX.Element {
-  const {warning, error} = props;
+  const {warning, error, askAboutError: ask} = props;
   return (
     <>
       {warning ? (
@@ -145,11 +148,18 @@ function Notices(props: {
       {error ? (
         <Stack gap="space-1">
           <Text tone="err">Updates unavailable</Text>
-          {/* A failed post's reason is already under its row; say it once. */}
+          {/* A failed post's reason is already under its row, with its own offer; say it once. */}
           {props.entries.some(entry => shownReason(entry) === error) ? null : (
-            <Text variant="small" tone="muted">
-              {error}
-            </Text>
+            <>
+              <Text variant="small" tone="muted">
+                {error}
+              </Text>
+              {ask === undefined ? null : (
+                <Row gap="space-2">
+                  <ErrorActions ask={() => ask(updatesReport(error))} />
+                </Row>
+              )}
+            </>
           )}
         </Stack>
       ) : null}
@@ -163,9 +173,11 @@ function RequestRow(props: {
   readonly epoch: bigint;
   readonly busy: boolean;
   readonly retry: (requestId: string) => void;
+  readonly askAboutError?: ((report: ErrorReport) => void) | undefined;
 }): JSX.Element {
-  const {entry} = props;
+  const {entry, askAboutError: ask} = props;
   const reason = shownReason(entry);
+  const report = refusalReport(entry);
   return (
     <Stack gap="space-1">
       <Row gap="space-2" wrap>
@@ -183,6 +195,7 @@ function RequestRow(props: {
             text="Retry request"
           />
         ) : null}
+        {ask === undefined || report === null ? null : <ErrorActions ask={() => ask(report)} />}
       </Row>
       {reason === null ? null : (
         <Text variant="small" tone="err">
@@ -191,13 +204,6 @@ function RequestRow(props: {
       )}
     </Stack>
   );
-}
-
-/** The reason a refused or unconfirmed request shows under its row; null for the rest. */
-function shownReason(entry: IntentRow): string | null {
-  return (entry.status === 'refused' || entry.status === 'uncertain') && entry.reason
-    ? entry.reason
-    : null;
 }
 
 function WriterStatus({

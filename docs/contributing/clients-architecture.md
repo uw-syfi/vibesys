@@ -442,8 +442,9 @@ Data folds and selectors, all pure and under `state/`:
 - `state/step-narrative.ts`, `state/turn-transcript.ts` and `state/turn-result.ts`: an opened
   step and the card its turn ends with.
 - `state/zoom.ts`: the route machine (run, idea or agent, step, item).
-- Words: `state/end-words.ts`, `state/history-words.ts`, `state/idea-words.ts`,
-  `state/span-words.ts`, `state/token-words.ts`, `state/metric-words.ts` and `state/names.ts`.
+- Words: `state/end-words.ts`, `state/error-words.ts`, `state/history-words.ts`,
+  `state/idea-words.ts`, `state/span-words.ts`, `state/token-words.ts`, `state/metric-words.ts`
+  and `state/names.ts`.
   User-visible wording is written in these, not in a component.
 - History and summary: `state/history-pager.ts` reads an ended run's journal in pages;
   `state/run-summary.ts` takes the host's `runs.summary` fold in its place.
