@@ -17,16 +17,19 @@ import {
   readHeadline,
   readSkeleton,
   type SkeletonContent,
+  type SkeletonReading,
   skeletonPositions,
 } from '@vibesys/run-state/skeleton';
+import {closeSpans, type RunEnding} from '@vibesys/run-state/trace';
 import {AppendLog} from './append-log.js';
 import {EMPTY_TRACE_LOG} from './live.js';
 import type {RunModel} from './run-model.js';
 import {type RunPageSeed, type RunPageState, runPageInitial} from './run-page.js';
 import {settleIdeas} from './settled-ideas.js';
 import {skeletonPerformance} from './skeleton-performance.js';
-import {duration} from './span-reading.js';
+import {duration, latestTime} from './span-reading.js';
 import {STARTUP_LABELS} from './startup-stages.js';
+import {endedSpanStatus} from './views.js';
 
 export {skeletonPositions} from '@vibesys/run-state/skeleton';
 
@@ -40,6 +43,44 @@ export function recordedRunRoot(skeleton: Skeleton | undefined) {
   return undefined;
 }
 
+/** The spans of the reading, with the open ones ended when the run's end is in view. */
+function endOpenSpans(
+  skeleton: Skeleton,
+  seq: bigint,
+  reading: SkeletonReading,
+  options: {progress?: LoadProgress | undefined; hint?: RunLivenessHint | undefined},
+) {
+  const open = {spans: new Map(reading.spans.map(span => [span.id, span])), sequence: Number(seq)};
+  const atEnd =
+    seq === (skeleton.throughSeq ?? 0n) &&
+    (options.hint?.head?.committedSeq ?? seq) <= seq &&
+    (options.progress === undefined || options.progress.phase === 'complete');
+  const life = atEnd ? observedLifecycle(skeleton, options.hint) : null;
+  const status = life?.status == null ? null : endedSpanStatus(life.status);
+  if (life === null || status === null) {
+    return {trace: open, spans: reading.spans, latest: reading.latest};
+  }
+  const ending: RunEnding = {
+    status,
+    reason: life.reason,
+    heardAt: null,
+    turns: reading.core.usageRecords,
+  };
+  const trace = closeSpans(open, ending);
+  const spans = [...trace.spans.values()];
+  const closedAt = trace === open ? null : latestTime(spans);
+  const latest =
+    closedAt === null || (reading.latest !== null && reading.latest >= closedAt)
+      ? reading.latest
+      : closedAt;
+  return {trace, spans, latest};
+}
+
+/**
+ * The skeleton at `seq` as the screen's run model. At the live end of a fully loaded history, the
+ * spans an ended or interrupted run left open end with it (`closeSpans`); a past position or a
+ * history still loading is a prefix and closes nothing.
+ */
 export function projectSkeleton(
   skeleton: Skeleton,
   seq: bigint,
@@ -49,6 +90,7 @@ export function projectSkeleton(
     content?: SkeletonContent;
     progress?: LoadProgress;
     loadFailure?: string | undefined;
+    hint?: RunLivenessHint | undefined;
   } = {},
 ): RunModel {
   const head =
@@ -58,8 +100,9 @@ export function projectSkeleton(
   const headline = readHeadline(head, seq);
   const view = seekSkeleton(skeleton, seq);
   const reading = readSkeleton(skeleton, view, objectiveText, options.content);
+  const {trace, spans, latest} = endOpenSpans(skeleton, seq, reading, options);
   const tree = coreIdeaMeasurements(
-    settleIdeas(candidateTree(reading.spans), reading.comparisons),
+    settleIdeas(candidateTree(spans), reading.comparisons),
     head,
     seq,
   );
@@ -86,17 +129,17 @@ export function projectSkeleton(
     progress: options.progress,
     loadFailure: options.loadFailure,
     headline,
-    series: skeletonPerformance(view, reading.spans, candidates.candidates, head),
+    series: skeletonPerformance(view, spans, candidates.candidates, head),
     input: reading.input,
     at: Number(seq),
-    trace: {spans: new Map(reading.spans.map(span => [span.id, span])), sequence: Number(seq)},
+    trace,
     overview: reading.overview,
     direction: reading.direction,
     candidates,
-    agents: agentGraph(reading.spans),
+    agents: agentGraph(spans),
     pauses: reading.pauses,
     baselines: reading.baselines,
-    latest: reading.latest,
+    latest,
     inputGates: reading.inputFailures,
     changed: new Set(),
   };

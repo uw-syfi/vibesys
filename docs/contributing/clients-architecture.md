@@ -415,7 +415,9 @@ change this screen at the same time.
 The per-host transport-v2 setting selects an additive reader. `@vibesys/run-skeleton` owns
 Skeleton and Tail loading, local history lookup, content caching and log following. The pure
 `@vibesys/run-state/skeleton` adapter translates sought store values into the existing screen's
-span, measurement and usage values. `state/skeleton-projection.ts` builds the shared `RunModel`;
+span, measurement and usage values. `state/skeleton-projection.ts` builds the shared `RunModel`
+and, at the live end of a fully loaded history, ends the spans an ended or interrupted run left
+open (`closeSpans`), as the session path's reader does;
 `state/gateway-machine.ts` owns the reader's setting, content requests and selected log stream.
 The desktop shell injects the generic Electron byte bridge. With the setting off, the existing
 run session and screen store remain the read path.
