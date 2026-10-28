@@ -27,7 +27,8 @@ export const SPACE: Readonly<Record<SpaceToken, number>> = {
 
 /**
  * Control and row heights (`control-sm`, `control`, `row`), the sidebar, page content widths, the
- * columns `Grid` and `Split` wrap at, and the small fixed sizes of the components: the hairline, the
+ * columns `Grid` and `Split` wrap at, the label column of a `Field` read as a row, and the small
+ * fixed sizes of the components: the hairline, the
  * focus ring and its offset, icons, the height of a compact wordmark, status dots and the ring of a live one, check boxes, a menu's
  * least width, and the heights of a log pane.
  */
@@ -48,6 +49,7 @@ export type SizeToken =
   | 'column-figure'
   | 'column-metric'
   | 'column-chart'
+  | 'column-label'
   | 'chart-height'
   | 'pane-list'
   | 'pane-outline'
@@ -87,6 +89,7 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'column-figure': 320,
   'column-metric': 360,
   'column-chart': 248,
+  'column-label': 152,
   'chart-height': 48,
   'pane-list': 380,
   'pane-outline': 340,

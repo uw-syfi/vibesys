@@ -146,7 +146,7 @@ const ATTEMPTS: readonly Attempt[] = [
 const COLUMNS: readonly TableColumn<Attempt>[] = [
   {key: 'id', header: 'ID', cell: row => row.id, mono: true},
   {key: 'title', header: 'Hypothesis', cell: row => row.title},
-  {key: 'outcome', header: 'Outcome', cell: row => row.outcome},
+  {key: 'outcome', header: 'Outcome', cell: row => row.outcome, nowrap: true},
   {key: 'delta', header: 'vs baseline', cell: row => row.delta, mono: true, align: 'end'},
   {key: 'took', header: 'Took', cell: row => row.took, mono: true, align: 'end'},
 ];

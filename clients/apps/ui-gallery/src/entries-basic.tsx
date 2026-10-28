@@ -390,6 +390,9 @@ export const BASIC_ENTRIES = {
         <Field label="Extra arguments" error="Unknown flag --fast.">
           <TextInput value="--fast" mono change={() => undefined} />
         </Field>
+        <Field row label="Time limit" help="The run stops here.">
+          <TextInput value="2h" change={() => undefined} />
+        </Field>
       </Grid>
     ),
   },

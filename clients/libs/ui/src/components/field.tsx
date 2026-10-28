@@ -41,6 +41,8 @@ export function Field(props: {
   readonly errorHint?: string;
   /** Names the control to assistive technology and no one else, for a control in a toolbar row. */
   readonly hideLabel?: boolean;
+  /** The label beside the control instead of above it, for a form read as rows (a review). */
+  readonly row?: boolean;
   readonly children: ReactNode;
 }): JSX.Element {
   const id = useId();
@@ -50,7 +52,7 @@ export function Field(props: {
   const labelId = `${id}-label`;
   const wiring: FieldWiring = {id, labelId, describedBy, invalid: errorId !== undefined};
   return (
-    <div className="vs-field">
+    <div className="vs-field" data-row={props.row === true || undefined}>
       <label
         className="vs-field-label"
         id={labelId}

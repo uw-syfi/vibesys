@@ -9,6 +9,8 @@ export interface TableColumn<Row> {
   /** Mono and muted, for identifiers, numbers and durations. */
   readonly mono?: boolean;
   readonly align?: 'start' | 'end';
+  /** Kept on one line, for short values that read wrong broken ("2× NVIDIA H100"). */
+  readonly nowrap?: boolean;
   /** Shown only when the table has room: it hides below `NARROW` of its own width. */
   readonly wide?: boolean;
   /** The column that names the row: it keeps a readable width, and the table scrolls instead. */
@@ -102,6 +104,7 @@ export function Table<Row>(props: {
                     data-mono-id={column.mono}
                     data-align={column.align}
                     data-wide={column.wide === true || undefined}
+                    data-nowrap={column.nowrap === true || undefined}
                     data-lead={column.lead === true || undefined}
                     data-control={column.control === true || undefined}
                   >

@@ -177,6 +177,28 @@
   color: var(--text);
   margin-bottom: var(--space-1);
 }
+.vs-field[data-row] {
+  display: grid;
+  grid-template-columns: var(--column-label) minmax(0, var(--column-main));
+  column-gap: var(--space-4);
+  row-gap: var(--space-1);
+  align-items: baseline;
+}
+.vs-field[data-row] > .vs-field-label {
+  margin-bottom: 0;
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  font-weight: var(--text-body-weight);
+  color: var(--muted);
+}
+.vs-field[data-row] > :not(.vs-field-label) {
+  grid-column: 2;
+}
+@media (max-width: 720px) {
+  .vs-field[data-row] {
+    display: flex;
+  }
+}
 .vs-field-label[data-hidden] {
   position: absolute;
   width: var(--hairline);
