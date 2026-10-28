@@ -122,7 +122,6 @@ function uiStep(state: RunPageState, action: RunPageAction): RunPageState {
     case 'ideas-hover':
     case 'agents-open':
     case 'select-stream':
-    case 'view-logs':
       return runPageStep(state, action).state;
     default:
       return state;

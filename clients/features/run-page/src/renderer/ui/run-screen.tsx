@@ -45,7 +45,6 @@ import {
   predatesTraceWords,
   type ResolvedZoom,
   type Route,
-  RUN_ROUTE,
   type RunModel,
   type RunPageAction,
   type RunPageState,
@@ -281,7 +280,6 @@ function PauseNowBanner(props: {
 function EndedBanner(props: {
   readonly state: RunPageState;
   readonly dispatch: Dispatch;
-  readonly zoom: Zoom;
   readonly chat: RunChatSlot | undefined;
 }): JSX.Element | null {
   const {state, dispatch} = props;
@@ -289,22 +287,13 @@ function EndedBanner(props: {
   const words = endedBannerWords(state);
   if (ended === null || words === null) return null;
   const ask = askAction(props.chat, endedErrorReport(state));
-  const logsAndAgain = (
-    <>
-      <Button
-        variant="secondary"
-        text="View logs"
-        press={() => {
-          dispatch({type: 'view-logs'});
-          props.zoom({type: 'jump', route: {...RUN_ROUTE, mode: 'logs'}});
-        }}
-      />
-      <Button variant="secondary" text="Run again" press={() => dispatch({type: 'run-again'})} />
-    </>
+  // The run's logs are its Logs tab, which every ended run shows.
+  const again = (
+    <Button variant="secondary" text="Run again" press={() => dispatch({type: 'run-again'})} />
   );
   if (state.readOnly === true) {
-    // Resume belongs to the run controls, which know the writer; logs and Run again need no writer.
-    if (ended.title === 'Finished') return <Row gap="space-2">{logsAndAgain}</Row>;
+    // Resume belongs to the run controls, which know the writer; Run again needs no writer.
+    if (ended.title === 'Finished') return <Row gap="space-2">{again}</Row>;
     return (
       <Banner
         tone={ended.tone}
@@ -312,7 +301,7 @@ function EndedBanner(props: {
         body={words.body}
         actions={
           <>
-            {logsAndAgain}
+            {again}
             {ask}
           </>
         }
@@ -330,15 +319,7 @@ function EndedBanner(props: {
           press={() => dispatch({type: 'resume-ended'})}
         />
       )}
-      <Button
-        variant="secondary"
-        text="View logs"
-        press={() => {
-          dispatch({type: 'view-logs'});
-          props.zoom({type: 'jump', route: {...RUN_ROUTE, mode: 'logs'}});
-        }}
-      />
-      <Button variant="secondary" text="Run again" press={() => dispatch({type: 'run-again'})} />
+      {again}
     </>
   );
   if (ended.title === 'Finished') return <Row gap="space-2">{actions}</Row>;
@@ -438,7 +419,6 @@ function openedDetail(
 function pendingRunScreen(
   state: RunPageState,
   dispatch: Dispatch,
-  zoom: Zoom,
   route: Route,
   header: ReactNode,
   chat: RunChatSlot | undefined,
@@ -481,7 +461,7 @@ function pendingRunScreen(
   if (loading !== null) {
     return (
       <Screen density="compact" header={header}>
-        <EndedBanner state={state} dispatch={dispatch} zoom={zoom} chat={chat} />
+        <EndedBanner state={state} dispatch={dispatch} chat={chat} />
         <HistoryLoading progress={loading} />
       </Screen>
     );
@@ -496,7 +476,7 @@ function pendingRunScreen(
   ) {
     return (
       <Screen density="compact" header={header}>
-        <EndedBanner state={state} dispatch={dispatch} zoom={zoom} chat={chat} />
+        <EndedBanner state={state} dispatch={dispatch} chat={chat} />
         <RunLoadError message={problem} retry={() => dispatch({type: 'retry-load'})} />
       </Screen>
     );
@@ -633,7 +613,6 @@ function RunScreenBody(props: {
   const pending = pendingRunScreen(
     state,
     dispatch,
-    zoom,
     route,
     <Header
       state={state}
@@ -680,7 +659,7 @@ function RunScreenBody(props: {
       {props.toolbar}
       <PauseNowBanner state={state} dispatch={dispatch} />
       <CommandStatus state={state} chat={props.chat} />
-      <EndedBanner state={state} dispatch={dispatch} zoom={zoom} chat={props.chat} />
+      <EndedBanner state={state} dispatch={dispatch} chat={props.chat} />
       {problem === null ? null : (
         <Banner tone="warn" title="The run’s history is not available" body={problem} />
       )}

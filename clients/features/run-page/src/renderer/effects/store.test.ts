@@ -488,7 +488,7 @@ test('time is carried while an attached run is at its live end, whatever the scr
   expect(clock.pending).toBe(1);
   const start = runNow(store.getState()) ?? 0;
   // Every action that shows a log once stopped the clock.
-  const faces: RunPageAction[] = [{type: 'view-logs'}, {type: 'select-stream', streamId: 's1'}];
+  const faces: RunPageAction[] = [{type: 'select-stream', streamId: 's1'}];
   for (const [index, action] of faces.entries()) {
     store.dispatch(action);
     expect(clock.pending).toBe(1);
