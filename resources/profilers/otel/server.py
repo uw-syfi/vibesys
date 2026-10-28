@@ -1,4 +1,4 @@
-"""MCP tools for normalized servicebench OpenTelemetry reports."""
+"""MCP tools for normalized evaluator OpenTelemetry reports."""
 
 import importlib
 import math
@@ -188,7 +188,7 @@ class WaterfallSpan(BaseModel):
 
 
 class RepresentativeTrace(BaseModel):
-    """Representative complete trace selected by servicebench."""
+    """Representative complete trace selected by the trusted evaluator."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -367,7 +367,7 @@ def _validate_contributors(
 
 
 class TraceGraphReport(BaseModel):
-    """Strict schema-v2 trace graph emitted by servicebench."""
+    """Strict schema-v2 trace graph emitted by the trusted evaluator."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -908,7 +908,7 @@ def build_server() -> FastMCP:
 
     @mcp.tool()
     def reports(root: str = ".") -> list[str]:
-        """Find normalized servicebench OTel reports below a workspace path."""
+        """Find normalized evaluator OTel reports below a workspace path."""
         return find_reports(root)
 
     @mcp.tool()
@@ -923,7 +923,7 @@ def build_server() -> FastMCP:
 
     @mcp.tool()
     def trace_graphs(root: str = ".") -> list[str]:
-        """Find versioned servicebench trace graphs below a workspace path."""
+        """Find versioned evaluator trace graphs below a workspace path."""
         return find_trace_graphs(root)
 
     @mcp.tool()
