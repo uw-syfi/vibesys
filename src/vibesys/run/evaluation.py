@@ -583,22 +583,10 @@ class _EvaluationAdapter:
         elif len(result.row) == 1:
             name = next(iter(result.row))
         else:
-            names = ", ".join(sorted(result.row))
-            feedback = (
-                f"benchmark evaluator reported metrics {names} but the task configures no "
-                "objectives, so no headline metric is defined; declare the optimized metrics "
-                "in objectives.toml"
-            )
-            return BenchmarkEvaluation(
-                executed=result.executed,
-                feedback=feedback,
-                operator_feedback=redact_diagnostic_tail(
-                    feedback,
-                    max_chars=GATE_FEEDBACK_TAIL_CHARS,
-                ),
-                failure_kind=BenchmarkFailureKind.WORKLOAD,
-                row=result.row,
-            )
+            # Core searches rank the complete row using their own TaskTerms. The
+            # polling executor deliberately supplies no scalar objective here;
+            # absence of a requested headline is not a failed measurement.
+            return BenchmarkEvaluation(executed=result.executed, row=result.row)
         objective = next((item for item in objectives if item.name == name), None)
         declaration = result.metrics.get(name)
         direction = (

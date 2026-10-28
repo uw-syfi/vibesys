@@ -252,12 +252,12 @@ def test_multiple_metrics_without_objectives_have_no_implicit_headline(tmp_path:
     _write_project(project_root, protocol_row=row)
     result, integration = _run_project(project_root, body)
     try:
-        assert not result.passed
+        assert result.passed
         assert result.row == row
         assert result.metric_name is None
-        assert result.feedback is not None
-        assert "no headline metric is defined" in result.feedback
-        assert "objectives.toml" in result.feedback
+        assert result.metric_value is None
+        assert result.feedback is None
+        assert result.failure_kind is None
     finally:
         integration.close()
 
