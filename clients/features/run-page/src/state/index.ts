@@ -15,6 +15,7 @@ export {
   type ErrorReport,
   endedBannerWords,
   endedErrorReport,
+  shownDiagnostic,
 } from './error-words.js';
 export {
   type GatewayEvent,

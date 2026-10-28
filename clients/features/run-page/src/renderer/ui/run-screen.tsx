@@ -58,6 +58,7 @@ import {
   runNow,
   runPhase,
   runWallNow,
+  shownDiagnostic,
   stepLabel,
   streamLines,
   timelineView,
@@ -554,7 +555,7 @@ function RunHeader(
   );
 }
 
-/** The run's latest recorded failure in this epoch, with the offer to ask about it. */
+/** The run's latest recorded failure in this epoch, unless the ended banner says it already. */
 function DiagnosticBanner({
   state,
   chat,
@@ -562,13 +563,14 @@ function DiagnosticBanner({
   readonly state: RunPageState;
   readonly chat: RunChatSlot | undefined;
 }): JSX.Element | null {
-  if (state.recordDiagnostic === undefined) return null;
+  const row = shownDiagnostic(state);
+  if (row === null) return null;
   const ask = askAction(chat, diagnosticErrorReport(state));
   return (
     <Banner
       tone="warn"
       title="Run diagnostic"
-      body={state.recordDiagnostic.message}
+      body={row.message}
       {...(ask === null ? {} : {actions: ask})}
     />
   );

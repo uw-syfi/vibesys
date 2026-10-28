@@ -4,6 +4,7 @@
  * the banner never disagree.
  */
 
+import type {RecordRow} from '@vibesys/run-state/records';
 import type {RunPageState} from './run-page.js';
 import {endedView} from './views.js';
 
@@ -49,12 +50,23 @@ export function endedErrorReport(state: RunPageState): ErrorReport | null {
 }
 
 /**
+ * The diagnostic the Run diagnostic banner shows, or null: none was recorded, or it repeats the
+ * reason the ended banner already shows (one message per failure).
+ */
+export function shownDiagnostic(state: RunPageState): RecordRow | null {
+  const row = state.recordDiagnostic;
+  if (row === undefined) return null;
+  const ended = endedBannerWords(state);
+  return ended !== null && ended.body !== '' && row.message.includes(ended.body) ? null : row;
+}
+
+/**
  * The Run diagnostic banner's error, or null without one. Null too when the diagnostic is the
  * run's own ending, which the ended banner already asks about: one offer per error.
  */
 export function diagnosticErrorReport(state: RunPageState): ErrorReport | null {
-  const row = state.recordDiagnostic;
-  if (row === undefined) return null;
+  const row = shownDiagnostic(state);
+  if (row === null) return null;
   if (row.body === 'lifecycle' && endedErrorReport(state) !== null) return null;
   return {where: 'Run diagnostic', message: row.message, detail: `Record ${row.seq}: ${row.event}`};
 }

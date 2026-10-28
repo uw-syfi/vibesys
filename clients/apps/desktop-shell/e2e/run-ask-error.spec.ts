@@ -33,7 +33,8 @@ test('the failed banner asks the run chat about the failure', async ({page}) => 
   const fixture = fixtureNamed(FIXTURE);
   await openFixture(page, fixture);
   const before = await hostCalls(page);
-  // One error, one offer.
+  // One error, one message, one offer: the Run diagnostic would repeat the banner's reason.
+  await expect(page.getByText('Run diagnostic')).toHaveCount(0);
   const asks = page.getByRole('main').getByRole('button', {name: ASK});
   await expect(asks).toHaveCount(1);
   await asks.click();

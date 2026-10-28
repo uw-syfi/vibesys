@@ -23,6 +23,7 @@ import {
   projectSkeleton,
   type RunPageState,
   runPageInitial,
+  shownDiagnostic,
   skeletonScreenState,
 } from './index.js';
 
@@ -130,6 +131,30 @@ test('a diagnostic that is the run ending is asked about once, from the ended ba
   expect(failed.recordDiagnostic?.body).toBe('lifecycle');
   expect(endedErrorReport(failed)).not.toBeNull();
   expect(diagnosticErrorReport(failed)).toBeNull();
+});
+
+test('a diagnostic is shown unless it repeats the reason the ended banner gives', () => {
+  const failed = screen([FAILED], undefined, true);
+  expect(failed.recordDiagnostic?.message).toContain(endedBannerWords(failed)?.body ?? '?');
+  expect(shownDiagnostic(failed)).toBeNull();
+  const noticed = screen(
+    [
+      lifecycle({state: {case: 'running', value: {}}}),
+      {
+        case: 'notice',
+        value: create(NoticeSchema, {
+          severity: Severity.ERROR,
+          code: NoticeCode.INPUT_MEASUREMENT_FAILED,
+          message: 'Measurement unavailable',
+        }),
+      },
+    ],
+    undefined,
+    true,
+  );
+  expect(noticed.recordDiagnostic).toBeDefined();
+  expect(shownDiagnostic(noticed)).toBe(noticed.recordDiagnostic ?? null);
+  expect(shownDiagnostic(screen([]))).toBeNull();
 });
 
 test('a command the run did not take asks with its notice', () => {
