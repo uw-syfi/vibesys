@@ -5,8 +5,10 @@ import type {RunPageAddress, RunPageNavigation} from '@vibesys/feature-run-page/
 import {
   type GatewayRunPorts,
   LoadStatus,
+  type PaneWidthsMemory,
   RunScreen,
   useGatewayRun,
+  usePaneWidths,
 } from '@vibesys/feature-run-page/renderer';
 import {type RunPageSeed, runPageProblems} from '@vibesys/feature-run-page/state';
 import type {RecordedProjectRoot} from '@vibesys/hosts';
@@ -35,6 +37,7 @@ interface GatewayRunProps {
   readonly navigation: RunPageNavigation;
   /** Where this run's problems go while its screen is up. */
   readonly problems: ProblemBoard;
+  readonly paneWidths?: PaneWidthsMemory | undefined;
 }
 
 export function GatewayRun(props: GatewayRunProps): JSX.Element {
@@ -44,6 +47,7 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
     [bridge, subscriptions, seed.identity.host, schedule],
   );
   const page = useGatewayRun({seed, ports, schedule, address});
+  const panes = usePaneWidths(props.paneWidths);
   const {snapshot} = page;
   const reported = useMemo(
     () => (page.state === null ? [] : runPageProblems(page.state)),
@@ -113,6 +117,7 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
       }}
       chat={sessions}
       loading={page.load.kind === 'loading' || page.load.kind === 'reconnecting'}
+      panes={panes}
       toolbar={intents.controls}
       {...(props.navigation.runs === undefined ? {} : {runs: props.navigation.runs})}
       supplemental={

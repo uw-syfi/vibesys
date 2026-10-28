@@ -49,6 +49,7 @@ import {
 } from '@vibesys/feature-new-run/renderer';
 import type {
   RunPageAddress,
+  PaneWidthsMemory,
   RunPageNavigation,
   RunPagePage,
 } from '@vibesys/feature-run-page/renderer';
@@ -126,6 +127,8 @@ export interface ShellStores {
   readonly newRunCompletion: ReturnType<typeof createNewRunStore>['completion'];
   /** The problems the window's screens report, shown as toasts by `ProblemHost`. */
   readonly problems: ProblemBoard;
+  /** Where the Run screen keeps the pane widths a person set; none keeps them while it shows. */
+  readonly paneWidths: PaneWidthsMemory | undefined;
 }
 
 const DEFAULT_APPEARANCE = {mode: 'system', light: 'paper', dark: 'ink'} as const;
@@ -168,6 +171,8 @@ export interface ShellPreferences {
   readonly moreOptions?: MoreOptionsMemory;
   /** This window's unfinished New run, so leaving and coming back finds it; none keeps it this run only. */
   readonly draft?: DraftMemory;
+  /** The Run screen's pane widths, one per kind of pane; none keeps them while it shows. */
+  readonly paneWidths?: PaneWidthsMemory;
 }
 
 /**
@@ -259,6 +264,7 @@ export function createShellStores(
     schedule,
     page,
     problems,
+    paneWidths: preferences.paneWidths,
   };
 }
 
@@ -412,6 +418,7 @@ function RunRoute(props: {
       address={address}
       navigation={place.navigation(run)}
       problems={stores.problems}
+      paneWidths={stores.paneWidths}
     />
   );
 }
