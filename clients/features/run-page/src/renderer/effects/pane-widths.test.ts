@@ -30,7 +30,8 @@ test('a stored value that is not a width is no width, so its pane keeps its defa
   }
   const mixed = JSON.stringify({
     master: 420,
-    list: '380',
+    now: '380',
+    agents: 0,
     wide: -5,
     chat: Number.MAX_VALUE * 2,
     sidebar: 300,

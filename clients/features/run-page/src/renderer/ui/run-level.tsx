@@ -463,7 +463,7 @@ export function RunLevel(props: {
         {face.body}
       </FramedPane>
       {mode === 'usage' ? null : (
-        <NowPane base={base} resize={paneResize(props.panes, 'list', RESIZE_WORDS.now, 'start')} />
+        <NowPane base={base} resize={paneResize(props.panes, 'now', RESIZE_WORDS.now, 'start')} />
       )}
     </Panes>
   );

@@ -1,14 +1,15 @@
 /**
- * The Run screen's panes a person can resize, and what each one's separator says it resizes.
+ * The Run screen's panes a person can resize, and what each one's separator says.
  *
  * A role is remembered as one width (by the app, `PaneSizes`): `master` is the list at the left of
- * a level (the Ideas, an idea's steps, a step beside its item), `list` a narrower list (the agents,
- * what runs now), `wide` the Timeline beside the idea it opened, and `chat` the chat panel. A role
- * keeps its width at every level, so moving between levels moves no pane.
+ * a level (the Ideas, an idea's steps, a step beside its item), `agents` the Agents list, `now`
+ * what runs now (at the right, resized from its left edge), `wide` the Timeline beside the idea it
+ * opened, and `chat` the chat panel. A role keeps its width at every level, so moving between
+ * levels moves no pane.
  */
 
-export type PaneRole = 'master' | 'list' | 'wide' | 'chat';
-export const PANE_ROLES: readonly PaneRole[] = ['master', 'list', 'wide', 'chat'];
+export type PaneRole = 'master' | 'agents' | 'now' | 'wide' | 'chat';
+export const PANE_ROLES: readonly PaneRole[] = ['master', 'agents', 'now', 'wide', 'chat'];
 
 /** The width a person gave each role, in pixels; a role without one keeps its default width. */
 export type PaneWidths = Readonly<Partial<Record<PaneRole, number>>>;

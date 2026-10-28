@@ -252,7 +252,7 @@ function AgentsPane(props: LevelProps & {readonly selected: string | null}): JSX
       title={`${base.model.agents.agents.length}`}
       width="list"
       header={agentsHeader(view)}
-      resize={paneResize(props.panes, 'list', RESIZE_WORDS.agents)}
+      resize={paneResize(props.panes, 'agents', RESIZE_WORDS.agents)}
     >
       <AgentsView {...view} />
     </FramedPane>

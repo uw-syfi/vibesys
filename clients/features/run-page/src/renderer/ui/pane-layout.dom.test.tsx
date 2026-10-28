@@ -141,7 +141,7 @@ test('each list beside what it opened resizes, and the new width goes to its kin
     {mode: 'ideas', idea: IDEA, name: 'Resize the ideas list', key: 'ArrowRight', role: 'master'},
     {mode: 'timeline', idea: IDEA, name: 'Resize the timeline', key: 'ArrowRight', role: 'wide'},
     // Now sits at the right of a run-level face: Left widens it.
-    {mode: 'agents', idea: null, name: 'Resize the running list', key: 'ArrowLeft', role: 'list'},
+    {mode: 'agents', idea: null, name: 'Resize the running list', key: 'ArrowLeft', role: 'now'},
   ] as const;
   for (const each of cases) {
     const changes: [PaneRole, number][] = [];
