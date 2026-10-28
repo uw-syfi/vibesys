@@ -106,7 +106,10 @@
   --chart-height: 48px;
   --pane-list: 380px;
   --pane-outline: 340px;
-  --pane-master: 480px;
+  --pane-master: 400px;
+  --pane-min: 340px;
+  --pane-max: 960px;
+  --pane-dock: 360px;
   --panes-floor: 288px;
   --row-dense: 28px;
   --gantt-label: 220px;

@@ -94,6 +94,7 @@ export {
   type SparkMark,
   type SparkPoint,
 } from './components/overview-tiles.js';
+export {type PaneResize, PaneSeparator} from './components/pane-separator.js';
 export {Pane, Panes, type PaneWidth} from './components/panes.js';
 export {
   type ParetoAxis,

@@ -105,17 +105,22 @@ button.vs-crumb:focus-visible {
   container-type: inline-size;
 }
 /* Too narrow for a list and the idea it opened side by side (the detail would wrap words and clip
-   its tabs): the opened pane takes the row, and its close button brings the list back. */
+   its tabs): the opened pane takes the row, and its close button brings the list back. A pane's
+   separator, if it has one, sits between it and its neighbour, so these rules look past it. */
 @container (max-width: 640px) {
   /* The Ideas list also carries the running ideas; keep it readable when Now cannot fit beside it. */
-  .vs-panes > .vs-pane[data-width="master"] + .vs-pane[data-width="list"] {
+  .vs-panes > .vs-pane[data-width="master"] ~ .vs-pane[data-width="list"] {
     display: none;
   }
-  .vs-panes > .vs-pane[data-width="master"]:has(+ .vs-pane[data-width="fill"]) {
+  .vs-panes > .vs-pane:is([data-width="master"], [data-width="wide"]):has(~ .vs-pane[data-width="fill"]) {
     display: none;
   }
-  .vs-panes > .vs-pane[data-width="master"]:not(:has(+ .vs-pane[data-width="fill"])) {
+  .vs-panes > .vs-pane[data-width="master"]:not(:has(~ .vs-pane[data-width="fill"])) {
     flex: 1 1 auto;
+  }
+  /* One pane takes the row, or two keep their own widths: there is nothing to resize. */
+  .vs-panes > .vs-pane-separator {
+    display: none;
   }
 }
 .vs-pane {
@@ -136,18 +141,83 @@ button.vs-crumb:focus-visible {
 }
 .vs-pane[data-width="master"] {
   /* A share of the row, bounded, and never shrunk: the list is the same width before and after
-     an idea opens beside it, and wide enough for a title when the window is. */
-  flex: 0 0 clamp(var(--pane-outline), 42%, var(--pane-master));
+     an idea opens beside it, and wide enough for a title when the window is; what it opened gets
+     the rest. */
+  flex: 0 0 clamp(var(--pane-min), 42%, var(--pane-master));
 }
-/* The list beside what one of its rows opened (the steps of an idea, a turn's transcript): rows are
-   short, so the opened pane gets the room. */
+/* A list drawn over time keeps the larger share beside what it opened, which keeps room to read. */
+.vs-pane[data-width="wide"] {
+  flex: 0 0 clamp(var(--pane-min), 60%, calc(100% - var(--column-aside)));
+}
 /* What sits beside a master list takes the rest of the row, whatever the window's width. */
-.vs-pane[data-width="master"] + .vs-pane[data-width="list"] {
+.vs-pane[data-width="master"] ~ .vs-pane[data-width="list"] {
   flex: 1 1 var(--pane-list);
 }
+/* A pane the user resized: the width they gave it (`--pane-size`), leaving --pane-min beside it. */
+.vs-pane[data-width][data-sized] {
+  flex: 0 0 min(var(--pane-size), calc(100% - var(--pane-min) - var(--space-4)));
+}
 /* A list with nothing beside it is the whole row, not a card with dead space after it. */
-.vs-pane[data-width="master"]:only-child {
+.vs-pane[data-width="master"]:not(:has(~ .vs-pane)) {
   flex: 1 1 auto;
+}
+/* The handle between two panes that resizes one of them: it lies in the gap between them and takes
+   no room of its own, a grip at its middle, a line down it while pointed at, held or focused. */
+.vs-pane-separator {
+  position: relative;
+  flex: 0 0 var(--space-4);
+  align-self: stretch;
+  height: auto;
+  margin: 0 calc(-1 * var(--space-4));
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: col-resize;
+  touch-action: none;
+  -webkit-app-region: no-drag;
+}
+.vs-pane-separator::before,
+.vs-pane-separator::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  transition: background var(--duration-fast) var(--easing);
+}
+.vs-pane-separator::before {
+  top: 0;
+  bottom: 0;
+  width: var(--hairline);
+}
+.vs-pane-separator::after {
+  top: calc(50% - var(--control-sm) / 2);
+  width: var(--space-2);
+  height: var(--control-sm);
+  border-radius: var(--radius-full);
+  background: var(--line);
+}
+.vs-pane-separator:hover::before,
+.vs-pane-separator:active::before {
+  background: var(--line);
+}
+.vs-pane-separator:hover::after,
+.vs-pane-separator:active::after {
+  background: var(--muted);
+}
+.vs-pane-separator:focus-visible {
+  outline: none;
+}
+.vs-pane-separator:focus-visible::before,
+.vs-pane-separator:focus-visible::after {
+  background: var(--accent);
+}
+.vs-pane-separator:focus-visible::before {
+  width: var(--focus-ring);
+}
+/* With nothing beside the pane it would resize (the other pane has nothing to show), it is not drawn. */
+.vs-pane-separator:first-child,
+.vs-pane-separator:last-child {
+  display: none;
 }
 .vs-pane[data-width="outline"] {
   flex: 0 1 var(--pane-outline);

@@ -502,6 +502,36 @@ function NarrativeDemo(): JSX.Element {
   );
 }
 
+/** Panes a person resizes: a list at the width given to it, and a docked panel. */
+function PaneSeparatorDemo(): JSX.Element {
+  const [list, setList] = useState<number | null>(null);
+  const [side, setSide] = useState<number | null>(300);
+  return (
+    <Stack gap="space-5">
+      <Panes>
+        <Pane
+          kicker="ideas"
+          title="7"
+          width="master"
+          resize={{width: list, changeWidth: setList, label: 'Resize the ideas list'}}
+        >
+          <Text tone="muted">Drag the grip, or focus it and press the arrows, Home or End.</Text>
+        </Pane>
+        <Pane kicker="idea" title="Pad the head and tail counters" width="fill">
+          <Text tone="muted">What the list opened takes the rest of the row.</Text>
+        </Pane>
+      </Panes>
+      <Dock
+        label="Chat"
+        side={<Text tone="muted">A docked panel resizes from its left edge.</Text>}
+        resize={{width: side, changeWidth: setSide, label: 'Resize the chat'}}
+      >
+        <Text>The screen keeps its content and narrows.</Text>
+      </Dock>
+    </Stack>
+  );
+}
+
 /** The frame: a screen that never scrolls as a whole, its panes and lists, and a time axis. */
 export const FRAME_ENTRIES = {
   Screen: {render: () => <ScreenDemo />},
@@ -525,6 +555,7 @@ export const FRAME_ENTRIES = {
       </Text>
     ),
   },
+  PaneSeparator: {render: () => <PaneSeparatorDemo />},
   Pane: {
     render: () => (
       <Text tone="muted">
