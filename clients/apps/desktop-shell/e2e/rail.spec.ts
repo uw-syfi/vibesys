@@ -88,7 +88,7 @@ function openSettingsFromMenu(page: Page) {
 
 test.use({colorScheme: 'dark', viewport: {width: 1440, height: 900}});
 
-test('the rail is the one navigation: the mark, New, Runs, Machines, Usage, and Settings below', async ({
+test('the rail is the one navigation: New, Runs, Machines, Usage, and Settings below', async ({
   page,
 }) => {
   await open(page);
@@ -99,7 +99,7 @@ test('the rail is the one navigation: the mark, New, Runs, Machines, Usage, and 
     .evaluateAll(buttons =>
       buttons.map(button => button.getAttribute('aria-label') ?? button.textContent?.trim() ?? ''),
     );
-  expect(names).toEqual(['VibeSys', 'New', 'Runs', 'Machines', 'Usage', 'Settings']);
+  expect(names).toEqual(['New', 'Runs', 'Machines', 'Usage', 'Settings']);
   await expect(page.getByRole('navigation')).toHaveCount(1);
 });
 
@@ -227,19 +227,6 @@ test('saved runs that could not be read are said on the dashboard, and the reada
   await expect(notice).toContainText('runs[16].task must be a task name');
   await expect(notice).toContainText('runs[17].instanceId');
   expect(await screenCheck(page)).toEqual([]);
-});
-
-test('the rail starts with the app logo, whose tooltip is the version, and it goes home', async ({
-  page,
-}) => {
-  await open(page);
-  const mark = sidebar(page).getByRole('button', {name: 'VibeSys'});
-
-  await expect(mark).toHaveAttribute('title', /^VibeSys \S+$/);
-  await expect(mark.locator('svg.vs-icon path')).toHaveCount(1);
-  await sidebar(page).getByRole('button', {name: 'New', exact: true}).click();
-  await mark.click();
-  await expect(page.getByRole('heading', {name: 'Runs'})).toBeVisible();
 });
 
 test('a band across the top is as tall as the window controls, and the rail and the page start below it', async ({

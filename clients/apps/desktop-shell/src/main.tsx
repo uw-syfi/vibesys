@@ -69,11 +69,7 @@ if (bridge === undefined) {
   createRoot(root).render(
     <StrictMode>
       <LinkOpener open={openExternal}>
-        {run === null ? (
-          <Shell stores={stores} version={String(import.meta.env['VITE_APP_VERSION'])} />
-        ) : (
-          <RunWindow stores={stores} run={run} />
-        )}
+        {run === null ? <Shell stores={stores} /> : <RunWindow stores={stores} run={run} />}
       </LinkOpener>
     </StrictMode>,
   );
