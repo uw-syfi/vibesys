@@ -3,6 +3,8 @@ import {EmptyState, markdownToPlain, PickList, PickRow, type RowBadge, Stack} fr
 import {type JSX, useMemo} from 'react';
 import {vsInputCell} from '../../state/idea-words.js';
 import {
+  activityLine,
+  activityNow,
   ageWords,
   baselineColumns,
   effectWords,
@@ -10,10 +12,12 @@ import {
   type IdeaRow,
   type IdeasFilter,
   type ImplementerOutcomes,
+  ideaActivities,
   ideasView,
   noIdeasWords,
   type RunModel,
   type RunPageAction,
+  summaryLine,
 } from '../../state/index.js';
 import type {ViewBase} from './views/props.js';
 
@@ -34,22 +38,29 @@ function effectOf(id: string, effects: IdeaEffects): string {
 }
 
 /**
- * The line under an idea's title: what its status badge does not say. What it built on (`from
- * best`), the framework's verdict on its effect against that base (`within noise of its base`),
- * why it failed when the span says, and what the implementer reported.
+ * The line under an idea's title: what its status badge does not say. While it runs, what it is
+ * doing (`live`, the activity line). Once settled, the first sentence of what its implementer
+ * reported, then what it built on (`from best`), the framework's verdict on its effect against
+ * that base (`within noise of its base`), why it failed when the span says, and the implementer's
+ * outcome when it reported no summary.
  */
 export function subtitleOf(
   row: IdeaRow,
   outcomes: ImplementerOutcomes,
   effects: IdeaEffects,
+  live: string | null = null,
 ): string {
+  if (row.outcome === 'running' && live !== null) return live;
   const why = row.state.label.replace(/^failed(?:\s*·\s*)?/i, '').trim();
-  const reported = outcomes.get(row.id)?.outcome?.label ?? '';
+  const reported = outcomes.get(row.id);
+  const summary =
+    reported?.summary == null ? '' : markdownToPlain(summaryLine(reported.summary)).trim();
   const parts = [
+    summary,
     fromWords(row),
     effectOf(row.id, effects),
     row.outcome === 'failed' ? why : '',
-    reported,
+    summary === '' ? (reported?.outcome?.label ?? '') : '',
   ];
   return capitalized(parts.filter(part => part !== '').join(' · '));
 }
@@ -105,6 +116,8 @@ export function IdeasTable(props: {
   const {base, filter, sort} = props;
   const rows = useMemo(() => sortedIdeas(base.model, filter, sort), [base.model, filter, sort]);
   const columns = useMemo(() => baselineColumns(base.model), [base.model]);
+  const activities = useMemo(() => ideaActivities(base.model), [base.model]);
+  const now = activityNow(activities, base.clock.now);
   if (rows.length === 0) {
     const words = noIdeasWords(filter);
     return <EmptyState title={words.title} body={words.body} />;
@@ -125,7 +138,13 @@ export function IdeasTable(props: {
         }}
       >
         {rows.map(row => {
-          const subtitle = subtitleOf(row, props.outcomes, props.effects);
+          const activity = activities.get(row.id);
+          const subtitle = subtitleOf(
+            row,
+            props.outcomes,
+            props.effects,
+            activity === undefined ? null : activityLine(activity, now),
+          );
           const cell = vsInputCell({figure: row.figure, tone: row.figureTone});
           return (
             <PickRow

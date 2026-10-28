@@ -26,6 +26,8 @@ import {effectWords, type IdeaEffect} from '../../../../state/idea-effects.js';
 import type {ImplementerOutcome} from '../../../../state/idea-outcomes.js';
 import {standingOf, statusLabel} from '../../../../state/idea-words.js';
 import {
+  activityNow,
+  ideaActivities,
   ideaOutcomeLine,
   roleLabel,
   spendOf,
@@ -47,6 +49,7 @@ import {
 import {roleSeries} from '../../../../state/role-series.js';
 import {plain, statusWords} from '../../../../state/span-words.js';
 import {type AttemptLine, attemptLines, endOf} from '../../../../state/timeline-rows.js';
+import {ActivityStatus} from '../../activity-status.js';
 import type {ViewBase, ViewHeader, Zoom} from '../props.js';
 import {StepStrip} from '../timeline/step-strip.js';
 import {whoBadge} from '../who-badge.js';
@@ -207,8 +210,13 @@ export function IdeaView(props: IdeaViewProps): JSX.Element {
   const attempt = idea.attempts.find(each => each.span === chosen) ?? latest;
   if (attempt === undefined) return <EmptyState title="No steps yet" />;
   const number = idea.attempts.indexOf(attempt) + 1;
+  const activities = ideaActivities(props.model);
+  const activity = activities.get(idea.id);
   return (
     <Stack gap="space-3">
+      {activity === undefined ? null : (
+        <ActivityStatus activity={activity} now={activityNow(activities, clock.now)} />
+      )}
       <Stack gap="space-1">
         <Text variant="small">{ideaOutcomeLine(props.model, idea)}</Text>
         <BaseAndEffect {...props} />

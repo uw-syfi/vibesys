@@ -6,6 +6,13 @@
  */
 
 export type {UsageRecord} from '@vibesys/contracts/host-helper';
+export {
+  activityAge,
+  activityLine,
+  activityWords,
+  LIVE_LOGS,
+  QUIET_AFTER,
+} from './activity-words.js';
 export {ideaOfAttempt} from './attempt-ideas.js';
 export {type BaselineColumns, baselineColumns} from './baselines.js';
 export {
@@ -17,6 +24,12 @@ export {
   gatewayRunMachine,
 } from './gateway-machine.js';
 export {type HistoryLoadingView, historyLoadingView} from './history-words.js';
+export {
+  activityNow,
+  type IdeaActivity,
+  ideaActivities,
+  ideaActivity,
+} from './idea-activity.js';
 export {type IdeaBase, type IdeaBases, ideaBases} from './idea-bases.js';
 export {effectWords, type IdeaEffect, type IdeaEffects, ideaEffects} from './idea-effects.js';
 export {type IdeaFocusView, ideaFocusView, ideaOutcomeLine, openIdeaId} from './idea-focus.js';
@@ -25,7 +38,7 @@ export {
   type ImplementerOutcomes,
   implementerOutcomes,
 } from './idea-outcomes.js';
-export {outcomeWords} from './idea-words.js';
+export {outcomeWords, summaryLine} from './idea-words.js';
 export {
   type BestLine,
   bestLine,

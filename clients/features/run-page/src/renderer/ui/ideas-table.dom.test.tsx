@@ -60,6 +60,25 @@ test('the line under an idea carries its effect verdict, never its status again'
   );
 });
 
+test('a settled idea leads with what its implementer reported; a running one with what it does', () => {
+  const model = modelOfShape(SHAPE);
+  const rows = ideasView(model, {query: '', passed: true, running: true, failed: true}).rows;
+  const passed = rows.find(item => item.outcome === 'passed');
+  if (passed === undefined) throw new Error('fixture needs a passed idea');
+  const from = subtitleOf(passed, new Map(), new Map());
+  const reported = (summary: string | null) =>
+    new Map([[passed.id, {outcome: {label: 'nominated', tone: 'ok' as const}, summary}]]);
+  expect(subtitleOf(passed, reported('**Swapped** the mutex. Then measured.'), new Map())).toBe(
+    `Swapped the mutex · ${from.charAt(0).toLowerCase()}${from.slice(1)}`,
+  );
+  // With no summary, the outcome the implementer chose is still said.
+  expect(subtitleOf(passed, reported(null), new Map())).toBe(`${from} · nominated`);
+  const running = {...passed, outcome: 'running' as const};
+  expect(
+    subtitleOf(running, reported('Done.'), new Map(), 'Implementer · Using Edit · 4s ago'),
+  ).toBe('Implementer · Using Edit · 4s ago');
+});
+
 async function shown(compared = false) {
   const container = document.createElement('div');
   document.body.append(container);

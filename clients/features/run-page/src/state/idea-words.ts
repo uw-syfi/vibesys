@@ -190,3 +190,18 @@ export function vsInputCell(figure: {readonly figure: string; readonly tone: Ide
     ? figure
     : {figure: '–', tone: 'muted'};
 }
+
+/**
+ * What an implementer reported, as one line under its idea: the first sentence of its summary's
+ * first line, without list or heading marks or the closing period. Markdown inline marks stay for
+ * the renderer to strip. Empty when the summary has no words.
+ */
+export function summaryLine(summary: string): string {
+  const line =
+    summary
+      .split('\n')
+      .map(each => each.replace(/^\s*(?:#{1,6}|>|[*+-]|\d+[.)])\s+/, '').trim())
+      .find(each => each !== '') ?? '';
+  const sentence = /^(.+?[.!?])(?:\s|$)/.exec(line)?.[1] ?? line;
+  return sentence.replace(/\.$/, '');
+}

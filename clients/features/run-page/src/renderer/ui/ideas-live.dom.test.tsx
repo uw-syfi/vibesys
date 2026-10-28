@@ -108,8 +108,10 @@ test('the list says what each idea built on, marks the leader Best, and says eac
     badge: 'Failed',
     line: 'From best',
   });
-  // Still taking in runs: no verdict yet, so never a provisional "within noise".
-  expect(byTitle('Combine adjacent slots')?.line).toBe('From its own work · measuring');
+  // Still taking in runs: the line says what it does now, never a provisional "within noise".
+  expect(byTitle('Combine adjacent slots')?.line).toMatch(
+    /^Measuring · correctness \+ benchmark · running \d+[smh]/,
+  );
   expect(screen.container.textContent).not.toMatch(/turned down/i);
   await screen.done();
 });
