@@ -87,7 +87,7 @@ function Cards(): JSX.Element {
         facts="host-a · Oct 17 00:00 · 3 ideas · 40m"
         status={{tone: 'err', label: 'Failed'}}
         why="All 3 ideas failed, so nothing beat the input."
-        actions={[{text: 'Run again with changes', press: noop}]}
+        actions={[{text: 'Run again', press: noop}]}
         menu={[{id: 'archive', label: 'Archive', press: noop}]}
         press={noop}
       />

@@ -132,7 +132,7 @@ export interface Tile {
     readonly tone: 'ok' | 'muted';
     readonly caption: string;
   } | null;
-  /** Null when the host offers no chart data, or the input was never measured to chart against. */
+  /** Null when the host offers no chart data, the run has no idea yet, or the input was never measured. */
   readonly chart: TileChart | null;
   /** Where the run stands, in a line: `3 ideas working · 7 tried`, `Finished · 6 ideas in 40m`. */
   readonly summary: string;
@@ -219,11 +219,16 @@ function bestRatio(input: RunInput, chart: TileChart | null): number | null {
   return input.best ?? (finalBest !== null && finalBest > BASE ? finalBest : null);
 }
 
-/** A tile's headline: the best ratio to the input, else the best reading in its unit, else none. */
-function headlineOf(input: RunInput, best: number | null): Tile['result'] {
+/**
+ * A tile's headline: the best ratio to the input; else, with ideas charted, the input itself; else
+ * the best reading in its unit; else none.
+ */
+function headlineOf(input: RunInput, best: number | null, charted: boolean): Tile['result'] {
   if (best !== null) {
     return {text: ratioWord(best), tone: best > BASE ? 'ok' : 'muted', caption: RATIO_CAPTION};
   }
+  // Ideas charted against the input and none beat it: the best so far is the input itself.
+  if (charted) return {text: ratioWord(BASE), tone: 'muted', caption: RATIO_CAPTION};
   // No ratio to the input (it was not measured): the best reading itself, which beats nothing known.
   return input.measured === null
     ? null
@@ -278,13 +283,22 @@ function summaryOf(input: RunInput, ideas: number | null): string {
   return withProblem(line, input.problem);
 }
 
+/**
+ * How many ideas the run tried when every one of them failed, from its points alone (the digest's
+ * own count of ideas is another source); null when one did not fail or some were left out.
+ */
+function allFailed(input: RunInput): number | null {
+  const points = input.points;
+  if (points === null || points.length === 0 || input.pointsOmitted > 0) return null;
+  return points.every(point => point.verdict === 'failed') ? points.length : null;
+}
+
 /** Why a run that needs its user does, as its card says it. */
 function needsYouOf(
   input: RunInput,
   attention: Exclude<Attention, 'none'>,
   known: {readonly facts: string; readonly ideas: number | null; readonly best: number | null},
 ): NeedsYou {
-  const failed = (input.points ?? []).filter(point => point.verdict === 'failed').length;
   const reason = endReason(input);
   const said =
     attention === 'failed'
@@ -292,7 +306,9 @@ function needsYouOf(
           label: FAILED_WORD,
           tone: 'err' as const,
           why:
-            reason === null ? failedWhy(known.ideas, failed, known.best) : reasonSentence(reason),
+            reason === null
+              ? failedWhy({allFailed: allFailed(input), ideas: known.ideas, best: known.best})
+              : reasonSentence(reason),
         }
       : attention === 'repeated_failure'
         ? {
@@ -331,14 +347,16 @@ export function tileOf(input: RunInput): Tile {
   const summary = summaryOf(input, ideas);
   const reason = endReason(input);
   const needs = attention === 'none' ? null : needsYouOf(input, attention, {facts, ideas, best});
+  // A chart needs an idea, and an input measured to draw it against.
+  const shown =
+    (input.points?.length ?? 0) === 0 || (best === null && input.measured !== null) ? null : chart;
   return {
     id: input.id,
     title: input.title,
     hint: input.runId,
     facts,
-    result: headlineOf(input, best),
-    // A run whose input was never measured has nothing to chart against it.
-    chart: best === null && input.measured !== null ? null : chart,
+    result: headlineOf(input, best, shown !== null),
+    chart: shown,
     summary,
     summaryHint: reason === null ? summary : `${summary}\n${reason}`,
     status: {

@@ -53,7 +53,7 @@ test('groups every run of every machine by status, the runs that need the user f
   await expect(stalled).toContainText('host-b');
   await expect(stalled).toContainText('Quiet 32m');
   await expect(stalled).toContainText('Still running, but it has recorded nothing for 32m.');
-  await expect(stalled.getByRole('button', {name: 'Run again with changes'})).toHaveCount(0);
+  await expect(stalled.getByRole('button', {name: 'Run again', exact: true})).toHaveCount(0);
   const failed = tiles(page, 'Needs you').filter({hasText: 'spsc'});
   await expect(failed).toContainText('Failed');
   await expect(failed).toContainText('All 3 ideas failed, so nothing beat the input.');
@@ -141,7 +141,7 @@ test('a run that failed says why in its record’s words, and offers to run it a
     'The agent was interrupted because the machine went away during the second round',
   ]);
   const card = tiles(page, 'Needs you').filter({hasText: 'queue-rs-a'});
-  await card.getByRole('button', {name: 'Run again with changes'}).click();
+  await card.getByRole('button', {name: 'Run again', exact: true}).click();
   const rail = page.getByRole('navigation', {name: 'VibeSys'});
   await expect(rail.getByRole('button', {name: 'New', exact: true})).toHaveAttribute(
     'aria-current',

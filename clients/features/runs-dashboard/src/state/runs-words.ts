@@ -88,16 +88,24 @@ export function quietWord(silentSeconds: number | null): string {
 
 /**
  * Why a failed run needs its user when its record gives no reason: what its ideas came to.
- * `failed` is how many of them failed; `best` the best result, as a multiple of the input.
+ * `allFailed` is how many ideas there were when every one of them failed (none otherwise), `ideas`
+ * how many it tried, and `best` its best result as a multiple of the input. It says nothing beat
+ * the input only when there is no best.
  */
-export function failedWhy(ideas: number | null, failed: number, best: number | null): string {
+export function failedWhy(parts: {
+  readonly allFailed: number | null;
+  readonly ideas: number | null;
+  readonly best: number | null;
+}): string {
+  const {allFailed, ideas, best} = parts;
+  const nothing = best === null ? ', so nothing beat the input' : '';
+  if (allFailed !== null) {
+    return allFailed === 1
+      ? `Its one idea failed${nothing}.`
+      : `All ${allFailed} ideas failed${nothing}.`;
+  }
   if (ideas === null) return 'The run failed, and its record does not say why.';
   if (ideas === 0) return 'The run failed before it tried an idea.';
-  if (failed === ideas) {
-    return ideas === 1
-      ? 'Its one idea failed, so nothing beat the input.'
-      : `All ${ideas} ideas failed, so nothing beat the input.`;
-  }
   return best === null
     ? `The run failed after ${ideasWord(ideas)}.`
     : `The run failed after ${ideasWord(ideas)}; the best was ${ratioWord(best)}.`;
@@ -151,7 +159,7 @@ export function cardFacts(parts: {
 }
 
 /** What a card offers a run that has ended. */
-export const RUN_AGAIN = 'Run again with changes';
+export const RUN_AGAIN = 'Run again';
 
 /** The title of the group of runs that need their user. */
 export const NEEDS_YOU_TITLE = 'Needs you';

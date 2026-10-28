@@ -160,6 +160,12 @@ describe('a tile', () => {
     expect(tileOf(run('a', {best: 1.424})).result).toEqual({text: '1.42×', tone: 'ok', caption});
     expect(tileOf(run('a', {best: 0.9})).result).toEqual({text: '0.90×', tone: 'muted', caption});
     expect(tileOf(run('a', {best: null, points: []})).result).toBeNull();
+    // Ideas that did not beat the input leave the input as the best so far.
+    expect(tileOf(run('a', {points: [{ratio: 0.9, verdict: 'not_better'}]})).result).toEqual({
+      text: '1.00×',
+      tone: 'muted',
+      caption,
+    });
     // With no best from the digest, the chart's best when it beat the input.
     expect(tileOf(run('a', {points: [{ratio: 2, verdict: 'kept'}]})).result?.text).toBe('2.00×');
   });
@@ -182,7 +188,9 @@ describe('a tile', () => {
     expect(tileOf(run('a', {best: 1.5, measured})).result?.text).toBe('1.50×');
     // With no ratio to the input there is nothing to chart against it.
     expect(tileOf(run('a', {measured, points: [{ratio: null, verdict: 'kept'}]})).chart).toBeNull();
-    expect(tileOf(run('a', {best: 1.5, measured})).chart).not.toBeNull();
+    expect(
+      tileOf(run('a', {best: 1.5, measured, points: [{ratio: 1.5, verdict: 'kept'}]})).chart,
+    ).not.toBeNull();
   });
 
   test('says where and when it ran, leaving out what is unknown, under the title it is given', () => {
@@ -239,6 +247,15 @@ describe('a tile', () => {
       const tile = tileOf(run('a', {status: {kind, word: kind}, reason: `${why}\nsecond line`}));
       const ended = kind !== 'running' && kind !== 'paused';
       expect(tile.summaryHint).toBe(ended ? `${tile.summary}\n${why}` : tile.summary);
+    }
+  });
+
+  test('draws a chart only for a run with an idea, and never without a headline', () => {
+    expect(tileOf(run('a', {points: []})).chart).toBeNull();
+    for (const seed of SEEDS) {
+      for (const tile of randomTiles(new Seeded(seed), 20)) {
+        if (tile.chart !== null) expect(tile.result).not.toBeNull();
+      }
     }
   });
 
@@ -304,6 +321,43 @@ describe('a run that needs you', () => {
     expect(why({points: [kept, lost]})).toBe('The run failed after 2 ideas; the best was 1.20×.');
     expect(why({points: [lost], pointsOmitted: 2})).toBe('The run failed after 3 ideas.');
     expect(why({points: null})).toBe('The run failed, and its record does not say why.');
+    // The digest's count of ideas is another source than the points: it never makes them all fail.
+    expect(why({ideas: 2, points: [lost, lost, kept]})).toBe(
+      'The run failed after 2 ideas; the best was 1.20×.',
+    );
+    // A best from the digest is never contradicted by "nothing beat the input".
+    expect(why({best: 1.3, points: [lost, lost, lost]})).toBe('All 3 ideas failed.');
+  });
+
+  test('says every idea failed only when every point did, and nothing beat the input only with no best', () => {
+    const lost: IdeaInput = {ratio: null, verdict: 'failed'};
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      for (let at = 0; at < 20; at += 1) {
+        const input = run(`run-${at}`, {
+          ...randomRun(random, at),
+          status: failed,
+          attention: 'failed',
+          reason: null,
+          points: random.pick([
+            null,
+            ideas(random),
+            Array.from({length: random.int(5)}, () => lost),
+          ]),
+        });
+        const needs = tileOf(input).attention;
+        const all = /^(?:All (\d+) ideas|Its one idea) failed/.exec(needs?.why ?? '');
+        if (all !== null) {
+          const points = input.points ?? [];
+          expect(points.every(point => point.verdict === 'failed')).toBe(true);
+          expect(input.pointsOmitted).toBe(0);
+          expect(points.length).toBe(Number(all[1] ?? 1));
+        }
+        if (needs?.why.includes('nothing beat the input')) {
+          expect(needs.facts).not.toContain('best ');
+        }
+      }
+    }
   });
 
   test('a working run says how long it has been quiet, or how many ideas failed in a row', () => {
