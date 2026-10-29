@@ -14,15 +14,48 @@ import type {
   HelperFeature,
   Message,
   Request,
+  RunEventKinds,
+  RunStartCompensationFailure,
 } from './generated/host-helper.generated.js';
 import hostHelperSchema from './generated/host-helper.schema.js';
 import {type Schema, type SchemaWalk, validateSchema} from './schema-walker.js';
 
 export type {
+  AccountLogin,
+  AgentLogin,
+  AgentLoginsListReply,
+  AgentLoginsListRequest,
+  AgentLoginsStartReply,
+  AgentLoginsStartRequest,
+  ApiKeyLogin,
+  Backend,
   ChannelEnd,
   ChannelEndOutcome,
+  Check,
   Checkout,
+  CheckoutInspectReply,
+  ClusterHardware,
+  ClusterTestFailed,
+  ClusterTestPassed,
+  ComputeAddClusterReply,
+  ComputeAddClusterRequest,
+  ComputeListReply,
+  ComputeListRequest,
+  ComputeRemoveClusterReply,
+  ComputeRemoveClusterRequest,
+  ComputeSettings,
+  ComputeTestClusterReply,
+  ComputeTestClusterRequest,
+  CreatedProject,
   DetachedLaunchFailure,
+  ExampleDestination,
+  ExampleHardware,
+  ExampleList,
+  ExampleModel,
+  ExampleObjective,
+  ExampleSummary,
+  ExampleTask,
+  ExampleWorkload,
   FailureReason,
   HarnessChoice,
   HarnessesListReply,
@@ -31,38 +64,76 @@ export type {
   HelperError,
   HelperErrorCode,
   HelperFeature,
+  IdeaVerdict,
   InstanceInspection,
   InstanceInspectionMetadata,
   InstanceList,
   InstanceStatus,
   InstanceStopResult,
   InstancesChanged,
+  ListedCluster,
   LiveInstanceRecord,
+  LogChunk,
+  LoginStarted,
+  LoginUnavailable,
+  LogOffset,
+  LogPipe,
+  LogPipeSpan,
+  LogStream,
+  LogsListReply,
+  LogsListRequest,
+  LogsReadReply,
+  LogsReadRequest,
+  LogTail,
+  MachineDescription,
   Message as HelperMessage,
+  ModalStatus,
+  ModalTarget,
   PathEntry,
   PathsCompleteReply,
   Request as HelperRequest,
+  RunAttention,
+  RunClosing,
   RunConnectReply,
+  RunDigest,
+  RunDigestUnreadable,
+  RunEndingFact,
+  RunEventKinds,
   RunList,
+  RunOption,
   RunPhase,
+  RunPreflightReply,
+  RunPreflightRequest,
   RunRole,
+  RunStartCompensationFailure,
   RunStartReply,
+  RunStartRequest,
   RunStatus,
   RunSummary,
+  RunsSummaryReply,
+  RunsSummaryRequest,
+  RunTerminal,
+  SameMachine,
+  SlurmClusterSettings,
+  SlurmTarget,
   StopOutcome,
+  TaskGoal,
   TaskList,
+  TokenTally,
+  TurnReply,
   UnreadableRecord,
+  UsageRecord,
+  UsageWindowReply,
+  UsageWindowRequest,
 } from './generated/host-helper.generated.js';
 
 const STRICT: SchemaWalk = {documents: [hostHelperSchema], strict: true};
 const properties = hostHelperSchema['properties'] as Record<string, Schema>;
 const MESSAGE = properties['message'] as Schema;
 const CHANNEL_END = properties['channel_end'] as Schema;
+const COMPENSATION_FAILURE = properties['compensation_failure'] as Schema;
 const REQUEST = properties['request'] as Schema;
 const definitions = hostHelperSchema['$defs'] as Record<string, Schema>;
-const logTail = definitions['AvailableLogTail'] as Schema;
-const logProperties = logTail['properties'] as Record<string, Schema>;
-const logText = logProperties['text'] as Schema;
 const featureByRequest = hostHelperSchema['x-vibesys-feature-by-request'] as Readonly<
   Partial<Record<Request['type'], HelperFeature>>
 >;
@@ -103,8 +174,22 @@ export function helperFeaturesForRequest(request: {
   return [...features];
 }
 
-/** Maximum UTF-8 bytes in an available instance log tail, generated from Python's contract. */
-export const INSTANCE_LOG_TAIL_BYTES = logText['x-vibesys-max-utf8-bytes'] as number;
+/**
+ * The event `type`s each kind a `runs.read_events` can select holds (its `kinds`): the one
+ * definition, from Python's contract. A client keeps no second list of them.
+ */
+export const RUN_EVENT_TYPES_BY_KINDS = hostHelperSchema[
+  'x-vibesys-event-types-by-kinds'
+] as Readonly<Record<RunEventKinds, readonly string[]>>;
+
+const logsRead = definitions['LogsReadRequest'] as Schema;
+const logsReadProperties = logsRead['properties'] as Record<string, Schema>;
+
+/** The most bytes one `logs.read` returns (its `max_bytes` bound), from Python's contract. */
+export const LOGS_READ_MAX_BYTES = (logsReadProperties['max_bytes'] as Schema)['maximum'] as number;
+
+/** The longest one `logs.read` waits at the end of an open stream (its `wait_ms` bound). */
+export const LOGS_WAIT_MAX_MS = (logsReadProperties['wait_ms'] as Schema)['maximum'] as number;
 
 /** The helper protocol versions this client speaks (`hello`'s `client_versions`). */
 export const HELPER_CLIENT_VERSIONS: readonly [number, number] = [1, 1];
@@ -131,6 +216,13 @@ export function parseChannelEnd(line: string): ChannelEnd {
   const value = parseJson(line, 'channel end');
   validateSchema(value, CHANNEL_END, 'channel end', STRICT);
   return value as ChannelEnd;
+}
+
+/** Parse the typed stderr report for an undisclosed start whose cleanup failed. */
+export function parseRunStartCompensationFailure(line: string): RunStartCompensationFailure {
+  const value = parseJson(line, 'run start compensation failure');
+  validateSchema(value, COMPENSATION_FAILURE, 'run start compensation failure', STRICT);
+  return value as RunStartCompensationFailure;
 }
 
 function parseJson(line: string, path: string): unknown {

@@ -116,8 +116,6 @@ def _format_gate(event: RunEvent, data: GateFinishedData) -> str:
 
 def _format_judge(event: RunEvent, data: JudgeResultData) -> str:
     lines = [f"Judge verdict: {data.verdict} (attempt {data.attempt}){_where(event)}"]
-    if data.skipped:
-        lines.append(f"Skipped: {data.skip_reason or 'no reason recorded'}")
     if data.feedback:
         lines.append("Feedback: " + _clip(data.feedback))
     return "\n".join(lines)

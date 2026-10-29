@@ -13,6 +13,7 @@ from vs_core.api import (
     DecisionId,
     DispatchAuthorized,
     EnsureSession,
+    EpochResumed,
     Flow,
     FlowState,
     InputRecord,
@@ -38,6 +39,7 @@ from vs_core.api import (
     Value,
     initial_state,
     recover,
+    step,
     trace_step,
     within,
 )
@@ -71,6 +73,8 @@ class ShellTraceTransitions:
         self.with_requests = with_requests
 
     def step(self, state: CoreState, event: CoreEvent) -> Transition:
+        if isinstance(event, EpochResumed):
+            return step(state, event)
         frames = []
         if isinstance(event, RecoveryStarted):
             change = recover(

@@ -24,8 +24,13 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 
 from vs_core.api import Scope, WorkspaceRef
+from vs_project.api import NestedRepositoryError
 from vs_runtime._session_operation import await_session_operation
-from vs_runtime._workspace_access import AccessGrant, enforce_workspace_access
+from vs_runtime._workspace_access import (
+    AccessGrant,
+    AccessNotRestoredError,
+    enforce_workspace_access,
+)
 from vs_runtime.contracts import RuntimeContractError
 
 if TYPE_CHECKING:
@@ -42,6 +47,17 @@ type WorkspaceLookup = Callable[[WorkspaceRef | Scope], Awaitable[AccessGuardedW
 
 class AccessSettlementError(RuntimeContractError):
     """Access cannot be settled or a new baseline cannot be taken yet; retry after it is."""
+
+
+class AccessUnrestorableError(AccessSettlementError):
+    """A turn's writes cannot be judged or undone; retrying cannot help.
+
+    Either they survived a complete revert, or the workspace holds a nested repository
+    that host Git refuses to read, so no snapshot or diff of it can be taken.
+
+    The workspace stays fenced, so no later turn can take those writes as its baseline,
+    and every turn that needs the workspace is refused for good, naming the paths.
+    """
 
 
 class AccessViolation(BaseModel):
@@ -70,6 +86,8 @@ class AccessReceipt(BaseModel):
     """Recorded before the revert starts, so a crash during it cannot lose the finding."""
     settled: bool = False
     """True once the workspace provably holds only what the grant allows."""
+    unrestorable: tuple[str, ...] = ()
+    """Paths a complete revert left behind (see ``AccessUnrestorableError``)."""
 
 
 class AccessKey(BaseModel):
@@ -131,6 +149,19 @@ class AccessSettlement:
     def require_clear(self, workspace: Path, key: AccessKey) -> None:
         """Raise unless ``blocking`` is empty: no new baseline may adopt unjudged writes."""
         blocking = self.blocking(workspace, key)
+        stuck = [
+            (other, receipt)
+            for other in blocking
+            if (receipt := self.receipt(other)) is not None and receipt.unrestorable
+        ]
+        if stuck:
+            raise AccessUnrestorableError(
+                "the workspace holds writes outside a turn's access that could not be undone: "
+                + "; ".join(
+                    f"{receipt.grant.role_id} ({other.text}): {', '.join(receipt.unrestorable)}"
+                    for other, receipt in stuck
+                )
+            )
         if blocking:
             message = (
                 "the workspace has invocations whose writes are not judged: "
@@ -151,41 +182,74 @@ class AccessSettlement:
         before this returns, so before any dispatch can start.
         """
         self._in_flight.add(key)
-        if self.receipt(key) is not None:
-            return  # a replay keeps the first baseline, never the tree the turn left
+        begun = False
         try:
+            receipt = self.receipt(key)
+            if receipt is not None:
+                # A replay keeps the first baseline, never the tree the turn left. Repair
+                # an interrupted first begin that wrote the receipt before its workspace
+                # index; no provider call could have followed a begin that did not return.
+                if not receipt.settled:
+                    self._track(Path(receipt.workspace_path), key, add=True)
+                begun = True
+                return
             self.require_clear(workspace.path, key)
-        except AccessSettlementError:
-            self._in_flight.discard(key)
-            raise
-        try:
-            baseline = await await_session_operation(
-                asyncio.create_task(workspace.snapshot(f"{key.text}-input"))
+            try:
+                baseline = await await_session_operation(
+                    asyncio.create_task(workspace.snapshot(f"{key.text}-input"))
+                )
+            except NestedRepositoryError as error:
+                raise AccessUnrestorableError(_nested_message(error)) from error
+            except RuntimeContractError as error:
+                raise AccessSettlementError(str(error)) from error
+            receipt = AccessReceipt(
+                workspace=workspace_ref,
+                grant=grant,
+                baseline=baseline,
+                workspace_path=str(workspace.path),
             )
-        except RuntimeContractError as error:
-            self._in_flight.discard(key)
-            raise AccessSettlementError(str(error)) from error
-        receipt = AccessReceipt(
-            workspace=workspace_ref,
-            grant=grant,
-            baseline=baseline,
-            workspace_path=str(workspace.path),
-        )
 
-        def keep_first(stored: AccessReceipt | None) -> tuple[AccessReceipt | None, None]:
-            return (receipt if stored is None else None), None
+            def keep_first(stored: AccessReceipt | None) -> tuple[AccessReceipt | None, None]:
+                return (receipt if stored is None else None), None
 
-        with self._store.exclusive():
-            self._store.modify(_ACCESS, "access", key.text, AccessReceipt, keep_first)
-            self._track(workspace.path, key, add=True)
+            with self._store.exclusive():
+                self._store.modify(_ACCESS, "access", key.text, AccessReceipt, keep_first)
+                self._track(workspace.path, key, add=True)
+            begun = True
+        finally:
+            if not begun:
+                self._in_flight.discard(key)
 
     def fence(self, key: AccessKey) -> None:
-        """The writer's fate is unknown: leave its durable fence in place.
+        """End this host's live ownership, exposing any remaining durable fence.
 
-        The record written by ``begin`` keeps the workspace out of snapshots once the
-        invocation is no longer in flight here; only ``settle`` clears it.
+        The record written by ``begin`` keeps the workspace out of snapshots once
+        the invocation is no longer in flight here. ``settle`` is the only operation
+        that clears that durable record, so this is safe after every post-begin exit,
+        including successful settlement, cancellation, and an unexpected exception.
         """
         self._in_flight.discard(key)
+
+    async def restore_interrupted(self, key: AccessKey) -> None:
+        """Restore the retained input of a writer the environment proved terminated.
+
+        The original access receipt retains the pre-dispatch content. Repeating
+        this after an interrupted restoration uses that same baseline, never the
+        unknown invocation's partially modified tree. Callers keep the physical
+        child unfinished until this operation returns.
+        """
+        receipt = self.receipt(key)
+        if receipt is None:
+            return
+        workspace = await self._workspace_for(receipt.workspace)
+        if workspace is None:
+            problem = "the interrupted turn's retained workspace is unavailable"
+            raise AccessSettlementError(problem)
+        await self.settle(key)
+        await workspace.restore_for_agent(receipt.baseline, preserve_paths=())
+        if await workspace.pending_changes():
+            problem = "the interrupted turn's retained input could not be restored"
+            raise AccessSettlementError(problem)
 
     async def settle(self, key: AccessKey) -> AccessViolation | None:
         """Revert the unauthorized writes of a writer proven ended; its violation, if any.
@@ -194,9 +258,18 @@ class AccessSettlement:
         the workspace. Raises ``AccessSettlementError`` when the revert cannot finish;
         the workspace then stays fenced and a retry resumes the same restoration.
         """
+        # Settlement is terminal for this host's writer ownership. Release it before
+        # any lookup, workspace I/O, or receipt write can fail; the durable receipt then
+        # remains visible to snapshots and peer turns in this same process.
+        self._in_flight.discard(key)
         receipt = self.receipt(key)
-        if receipt is None or receipt.settled:
-            return None if receipt is None else receipt.violation
+        if receipt is None:
+            return None
+        if receipt.settled:
+            # A prior call may have recorded settlement and then failed while removing
+            # the workspace index. Retrying finishes that release idempotently.
+            self._track(Path(receipt.workspace_path), key, add=False)
+            return receipt.violation
         workspace = await self._workspace_for(receipt.workspace)
         if workspace is None:
             message = "the turn's workspace is gone before its access settled"
@@ -216,6 +289,28 @@ class AccessSettlement:
                     )
                 )
             )
+        except AccessNotRestoredError as error:
+            self._store.replace(
+                _ACCESS,
+                "access",
+                key.text,
+                (self.receipt(key) or receipt).model_copy(update={"unrestorable": error.paths}),
+            )
+            message = f"workspace access could not be restored: {error}"
+            raise AccessUnrestorableError(message) from error
+        except NestedRepositoryError as error:
+            # The turn ended and left a repository host Git must not read, so its writes
+            # can be neither read nor reverted, and reading again finds the same tree:
+            # this workspace is fenced for good, and the turn alone fails.
+            self._store.replace(
+                _ACCESS,
+                "access",
+                key.text,
+                (self.receipt(key) or receipt).model_copy(
+                    update={"unrestorable": error.paths or (_UNCHECKABLE_TREE,)}
+                ),
+            )
+            raise AccessUnrestorableError(_nested_message(error)) from error
         except RuntimeContractError as error:
             message = f"workspace access is not restored: {error}"
             raise AccessSettlementError(message) from error
@@ -225,7 +320,6 @@ class AccessSettlement:
                 _ACCESS, "access", key.text, latest.model_copy(update={"settled": True})
             )
             self._track(Path(receipt.workspace_path), key, add=False)
-        self._in_flight.discard(key)
         return latest.violation
 
     def _unsettled(self, workspace: Path) -> tuple[AccessKey, ...]:
@@ -259,6 +353,13 @@ def access_unproven(store: ReceiptStore, key: AccessKey) -> str | None:
     if not receipt.settled:
         return "the turn's workspace access has not been settled yet"
     return None
+
+
+_UNCHECKABLE_TREE = "(the work tree is too large to check)"
+
+
+def _nested_message(error: NestedRepositoryError) -> str:
+    return f"the workspace cannot be read by host Git: {error}"
 
 
 def _workspace_key(workspace: Path) -> str:

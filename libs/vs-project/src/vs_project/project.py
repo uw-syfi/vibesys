@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Self
 
@@ -13,14 +14,17 @@ from vs_project._layout import (
     TaskDirectory,
     TaskName,
     TasksRoot,
+    project_root_for_log_directory,
 )
-from vs_project._state import ProjectState
+from vs_project._state import ProjectState, _state_home, validate_run_id
+from vs_project._state_io import publish_run_link
 from vs_project._state_store import LocalStateStore
 from vs_sim.api import ProcessTimeoutError
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from vs_project._admission import FileAdmissionStore
     from vs_project._git_process import Git
     from vs_project._state_io import StoreDurabilityEffects
     from vs_project.api.state_store import (
@@ -79,7 +83,7 @@ class Project:
         self,
         run_id: str,
         *,
-        fault_plan: Iterable[CommitFault] = (),
+        fault_plan: Iterable[CommitFault | None] = (),
         lease_fault_plan: Iterable[CommitFault | None] = (),
         observation_fault_plan: Iterable[ObservationFault | None] = (),
         effects: StoreDurabilityEffects | None = None,
@@ -122,6 +126,14 @@ class Project:
         ):
             return None
         return self.state_store(run_id).load()
+
+    @staticmethod
+    def admissions(*, home: Path | None = None) -> FileAdmissionStore:
+        """Open this host user's retained admissions, independent of any project root."""
+        user_home = home or Path.home()
+        return import_module("vs_project._admission").FileAdmissionStore(
+            user_home / ".vibesys" / "admissions" / "v1", durable_root=user_home
+        )
 
     def is_initialized(self) -> bool:
         """Return whether this project has repository-native task configuration."""
@@ -186,6 +198,96 @@ class Project:
     def log_directory_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Return a run log destination, including before a root is materialized."""
         return ProjectState.log_directory_for(project_root, run_id)
+
+    @classmethod
+    def from_log_directory(
+        cls, directory: Path | str, *, recorded_root: Path | str | None = None
+    ) -> Self | None:
+        """Resolve the physical run layout; a recorded root may only confirm its key.
+
+        Repository-local runs belong to their current enclosing project. External
+        runs resolve only when a recorded root reproduces their directory key.
+        """
+        root = project_root_for_log_directory(directory, recorded_root=recorded_root)
+        return cls.open(root) if root is not None else None
+
+    @classmethod
+    def run_head_path_for(cls, project_root: Path | str, run_id: str) -> Path:
+        """Return the writer's published head beside its canonical log."""
+        return cls.log_directory_for(project_root, run_id) / "run.head"
+
+    @classmethod
+    def run_log_path_for(cls, project_root: Path | str, run_id: str) -> Path:
+        """Return the transport log beside the authoritative JSONL journal."""
+        return cls.log_directory_for(project_root, run_id) / "run.log"
+
+    @classmethod
+    def chat_session_directory_for(
+        cls, project_root: Path | str, run_id: str, session_id: str
+    ) -> Path:
+        """A run-owned chat session, retained with the run's log directory."""
+        return ProjectState.chat_session_directory_for(project_root, run_id, session_id)
+
+    @classmethod
+    def run_blobs_directory_for(cls, project_root: Path | str, run_id: str) -> Path:
+        """Return immutable run-transport content, beside the authoritative journal."""
+        return cls.log_directory_for(project_root, run_id) / "blobs"
+
+    @classmethod
+    def event_journal_path_for(cls, project_root: Path | str, run_id: str) -> Path:
+        """Return the authoritative core-event journal for one run."""
+        return cls.log_directory_for(project_root, run_id) / "core-events.jsonl"
+
+    def retained_event_journal(self, run_id: str, *, max_bytes: int) -> bytes | None:
+        """Read the original bounded JSONL journal for a semantic restart, without writing."""
+        # lint-waiver: LW-337003 [PLC0415]; hello never reads a retained journal.
+        # > An eager import exceeds the host helper module budget; a dynamic loader
+        # > hides this dependency from tach and adds indirection to its only caller.
+        from vs_project._retained import read_retained_bytes  # noqa: PLC0415
+
+        return read_retained_bytes(
+            self.event_journal_path_for(self.root, run_id), max_bytes=max_bytes
+        )
+
+    @classmethod
+    def publish_run_for(cls, project_root: Path | str, run_id: str) -> Path:
+        """Atomically publish a host discovery link to this run's log directory."""
+        validate_run_id(run_id)
+        directory = cls.log_directory_for(project_root, run_id)
+        import_module("vs_project._run_address").publish_address(
+            _state_home() / "run-addresses" / f"{run_id}.pb",
+            directory,
+            Path(project_root).expanduser().resolve(),
+        )
+        return publish_run_link(_state_home() / "runs" / run_id, directory)
+
+    @staticmethod
+    def indexed_run_directories() -> tuple[Path, ...]:
+        """List all host discovery entries, including damaged and dangling entries.
+
+        Maintenance callers must report unsupported entries rather than silently
+        ignoring them. No state or index is created by this read.
+        """
+        index = _state_home() / "runs"
+        return tuple(sorted(index.iterdir())) if index.is_dir() else ()
+
+    @classmethod
+    def logged_run_ids_for(cls, project_root: Path | str) -> tuple[str, ...]:
+        """Return the ids of the runs with logs on this machine under ``project_root``, sorted.
+
+        The log store is keyed by the project's root path, not by what the checkout
+        records, so a run that never committed its manifest is still named here.
+        """
+        return ProjectState.logged_run_ids_for(project_root)
+
+    @classmethod
+    def log_streams_directory_for(cls, project_root: Path | str, run_id: str) -> Path:
+        """Return where a run's log store (``vs_logs``) keeps its streams.
+
+        The run writes there and the host helper reads there; both ask here, so the
+        layout has one owner.
+        """
+        return cls.log_directory_for(project_root, run_id) / "streams"
 
     @classmethod
     def agent_homes_directory_for(cls, project_root: Path | str, run_id: str) -> Path:

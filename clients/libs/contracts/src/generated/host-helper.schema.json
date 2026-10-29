@@ -1,5 +1,430 @@
 {
   "$defs": {
+    "Accelerator": {
+      "description": "How a machine's GPUs run work; a closed set, ``cpu`` when it has none.",
+      "enum": [
+        "cpu",
+        "cuda",
+        "rocm",
+        "metal"
+      ],
+      "title": "Accelerator",
+      "type": "string"
+    },
+    "AcceleratorVendor": {
+      "description": "Who makes the hardware a task targets.",
+      "enum": [
+        "nvidia",
+        "amd",
+        "aws",
+        "apple",
+        "cpu"
+      ],
+      "title": "AcceleratorVendor",
+      "type": "string"
+    },
+    "AccountLogin": {
+      "additionalProperties": false,
+      "description": "Signed in with a person's account (a subscription login).",
+      "properties": {
+        "kind": {
+          "const": "account",
+          "default": "account",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "AccountLogin",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
+    },
+    "AgentLogin": {
+      "additionalProperties": false,
+      "description": "One harness's login on the machine.",
+      "properties": {
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "provider_name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Provider Name",
+          "type": "string"
+        },
+        "installed": {
+          "title": "Installed",
+          "type": "boolean"
+        },
+        "state": {
+          "$ref": "#/$defs/LoginState"
+        },
+        "how": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "account": "#/$defs/AccountLogin",
+                  "api_key": "#/$defs/ApiKeyLogin"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/AccountLogin"
+                },
+                {
+                  "$ref": "#/$defs/ApiKeyLogin"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "How"
+        },
+        "api_key_variables": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Api Key Variables",
+          "type": "array"
+        },
+        "detail": {
+          "default": "",
+          "maxLength": 300,
+          "pattern": "^[^\\n\\r]*$",
+          "title": "Detail",
+          "type": "string"
+        },
+        "can_start_login": {
+          "title": "Can Start Login",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "provider",
+        "provider_name",
+        "installed",
+        "state",
+        "can_start_login"
+      ],
+      "title": "AgentLogin",
+      "type": "object"
+    },
+    "AgentLoginsListReply": {
+      "additionalProperties": false,
+      "description": "The logins, in the order ``harnesses.list`` offers the providers.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "agent_logins.list",
+          "default": "agent_logins.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "logins": {
+          "items": {
+            "$ref": "#/$defs/AgentLogin"
+          },
+          "title": "Logins",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "logins"
+      ],
+      "title": "AgentLoginsListReply",
+      "type": "object"
+    },
+    "AgentLoginsListRequest": {
+      "additionalProperties": false,
+      "description": "Each vetted harness's login on this machine.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "agent_logins.list",
+          "default": "agent_logins.list",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type"
+      ],
+      "title": "AgentLoginsListRequest",
+      "type": "object"
+    },
+    "AgentLoginsStartReply": {
+      "additionalProperties": false,
+      "description": "What starting the login did.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "agent_logins.start",
+          "default": "agent_logins.start",
+          "title": "Type",
+          "type": "string"
+        },
+        "result": {
+          "discriminator": {
+            "mapping": {
+              "started": "#/$defs/LoginStarted",
+              "unavailable": "#/$defs/LoginUnavailable"
+            },
+            "propertyName": "outcome"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LoginStarted"
+            },
+            {
+              "$ref": "#/$defs/LoginUnavailable"
+            }
+          ],
+          "title": "Result"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "result"
+      ],
+      "title": "AgentLoginsStartReply",
+      "type": "object"
+    },
+    "AgentLoginsStartRequest": {
+      "additionalProperties": false,
+      "description": "Start the harness's own login on this machine.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "agent_logins.start",
+          "default": "agent_logins.start",
+          "title": "Type",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "provider"
+      ],
+      "title": "AgentLoginsStartRequest",
+      "type": "object"
+    },
+    "AgentSpend": {
+      "additionalProperties": false,
+      "description": "What one kind of agent spent in the window: a role on a harness and model.\n\nA part the journal did not record for a turn is ``None``, so the turns of an execution whose\nstart is missing form their own entry.",
+      "properties": {
+        "role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Role"
+        },
+        "harness": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Harness"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Model"
+        },
+        "cost_usd": {
+          "minimum": 0,
+          "title": "Cost Usd",
+          "type": "number"
+        },
+        "turns": {
+          "minimum": 0,
+          "title": "Turns",
+          "type": "integer"
+        },
+        "unpriced_turns": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Unpriced Turns",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "role",
+        "harness",
+        "model",
+        "cost_usd",
+        "turns"
+      ],
+      "title": "AgentSpend",
+      "type": "object"
+    },
+    "ApiKeyLogin": {
+      "additionalProperties": false,
+      "description": "Signed in with an API key; where it is held is named, the key never.",
+      "properties": {
+        "kind": {
+          "const": "api_key",
+          "default": "api_key",
+          "title": "Kind",
+          "type": "string"
+        },
+        "variable": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Variable"
+        },
+        "file": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "File"
+        }
+      },
+      "title": "ApiKeyLogin",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
+    },
+    "ArgumentsRejected": {
+      "additionalProperties": false,
+      "description": "The run's argument parser refused the extra arguments; ``problem`` is its message (raw).",
+      "properties": {
+        "kind": {
+          "const": "arguments_rejected",
+          "default": "arguments_rejected",
+          "title": "Kind",
+          "type": "string"
+        },
+        "problem": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Problem",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "problem"
+      ],
+      "title": "ArgumentsRejected",
+      "type": "object"
+    },
+    "ArgumentsUnrecognized": {
+      "additionalProperties": false,
+      "description": "Extra arguments the run's search does not take, in the order given (raw).",
+      "properties": {
+        "kind": {
+          "const": "arguments_unrecognized",
+          "default": "arguments_unrecognized",
+          "title": "Kind",
+          "type": "string"
+        },
+        "arguments": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Arguments",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "arguments"
+      ],
+      "title": "ArgumentsUnrecognized",
+      "type": "object"
+    },
     "AvailableLogTail": {
       "additionalProperties": false,
       "description": "A bounded suffix of one instance's regular ``server.log`` file.",
@@ -26,6 +451,93 @@
         "truncated"
       ],
       "title": "AvailableLogTail",
+      "type": "object"
+    },
+    "Backend": {
+      "description": "A compute backend a task targets (``vs_sandbox.ComputeBackend``'s values); closed.",
+      "enum": [
+        "cpu",
+        "cuda",
+        "rocm",
+        "metal",
+        "trainium"
+      ],
+      "title": "Backend",
+      "type": "string"
+    },
+    "BackendUnavailable": {
+      "additionalProperties": false,
+      "description": "The machine cannot run the compute backend the task targets.\n\nA fact, not a sentence: the client words it for its own controls, the CLI for its flags.",
+      "properties": {
+        "kind": {
+          "const": "backend_unavailable",
+          "default": "backend_unavailable",
+          "title": "Kind",
+          "type": "string"
+        },
+        "task": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Task",
+          "type": "string"
+        },
+        "backend": {
+          "$ref": "#/$defs/Backend"
+        },
+        "declared": {
+          "items": {
+            "$ref": "#/$defs/Backend"
+          },
+          "title": "Declared",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "task",
+        "backend",
+        "declared"
+      ],
+      "title": "BackendUnavailable",
+      "type": "object"
+    },
+    "BestReading": {
+      "additionalProperties": false,
+      "description": "The measured value of the run's best idea so far, in the run's own metric.\n\nIt is what the run page shows as the best idea's value when no ratio to the input can be worded\n(the input was not measured): the reading of the last ``kept`` idea of the chart, with the\nobjective's ``metric`` id and ``unit`` as the journal's ``run_started`` names them (either may be\n``None``: a run names no unit, or its journal predates the overview).",
+      "properties": {
+        "value": {
+          "title": "Value",
+          "type": "number"
+        },
+        "metric": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Metric"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Unit"
+        }
+      },
+      "required": [
+        "value",
+        "metric",
+        "unit"
+      ],
+      "title": "BestReading",
       "type": "object"
     },
     "ChannelEnd": {
@@ -69,6 +581,181 @@
       "title": "ChannelEndOutcome",
       "type": "string"
     },
+    "Check": {
+      "additionalProperties": false,
+      "description": "One preflight check: its state, one line of detail, and the action that fixes it.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/CheckId"
+        },
+        "state": {
+          "$ref": "#/$defs/CheckState"
+        },
+        "detail": {
+          "maxLength": 300,
+          "minLength": 1,
+          "pattern": "^[^\\n\\r]*$",
+          "title": "Detail",
+          "type": "string"
+        },
+        "fix": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "choose_checkout": "#/$defs/ChooseCheckout",
+                  "configure_compute": "#/$defs/ConfigureCompute",
+                  "copy_out": "#/$defs/CopyOut",
+                  "declare_build": "#/$defs/DeclareBuild",
+                  "edit_setting": "#/$defs/EditSetting",
+                  "start_docker": "#/$defs/StartDocker"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ChooseCheckout"
+                },
+                {
+                  "$ref": "#/$defs/CopyOut"
+                },
+                {
+                  "$ref": "#/$defs/EditSetting"
+                },
+                {
+                  "$ref": "#/$defs/StartDocker"
+                },
+                {
+                  "$ref": "#/$defs/DeclareBuild"
+                },
+                {
+                  "$ref": "#/$defs/ConfigureCompute"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fix"
+        },
+        "cause": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "arguments_rejected": "#/$defs/ArgumentsRejected",
+                  "arguments_unrecognized": "#/$defs/ArgumentsUnrecognized",
+                  "backend_unavailable": "#/$defs/BackendUnavailable",
+                  "config_invalid": "#/$defs/ConfigInvalid",
+                  "github_unavailable": "#/$defs/GitHubUnavailable",
+                  "measurement_target_misfit": "#/$defs/MeasurementTargetMisfit",
+                  "measurement_target_not_configured": "#/$defs/MeasurementTargetNotConfigured",
+                  "model_not_vetted": "#/$defs/ModelNotVetted",
+                  "option_not_accepted": "#/$defs/OptionNotAccepted",
+                  "project_dirty": "#/$defs/ProjectDirty",
+                  "roles_not_declared": "#/$defs/RolesNotDeclared",
+                  "sysbox_missing": "#/$defs/SysboxMissing",
+                  "task_image_unsupported": "#/$defs/TaskImageUnsupported",
+                  "task_needs_provisioning": "#/$defs/TaskNeedsProvisioning",
+                  "task_not_found": "#/$defs/TaskNotFound",
+                  "task_unusable": "#/$defs/TaskUnusable"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/BackendUnavailable"
+                },
+                {
+                  "$ref": "#/$defs/ProjectDirty"
+                },
+                {
+                  "$ref": "#/$defs/TaskNotFound"
+                },
+                {
+                  "$ref": "#/$defs/TaskUnusable"
+                },
+                {
+                  "$ref": "#/$defs/TaskNeedsProvisioning"
+                },
+                {
+                  "$ref": "#/$defs/TaskImageUnsupported"
+                },
+                {
+                  "$ref": "#/$defs/SysboxMissing"
+                },
+                {
+                  "$ref": "#/$defs/ConfigInvalid"
+                },
+                {
+                  "$ref": "#/$defs/RolesNotDeclared"
+                },
+                {
+                  "$ref": "#/$defs/ModelNotVetted"
+                },
+                {
+                  "$ref": "#/$defs/ArgumentsRejected"
+                },
+                {
+                  "$ref": "#/$defs/ArgumentsUnrecognized"
+                },
+                {
+                  "$ref": "#/$defs/OptionNotAccepted"
+                },
+                {
+                  "$ref": "#/$defs/GitHubUnavailable"
+                },
+                {
+                  "$ref": "#/$defs/MeasurementTargetNotConfigured"
+                },
+                {
+                  "$ref": "#/$defs/MeasurementTargetMisfit"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cause"
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "detail"
+      ],
+      "title": "Check",
+      "type": "object"
+    },
+    "CheckId": {
+      "description": "What a preflight check is about; closed.",
+      "enum": [
+        "checkout_found",
+        "project_own_repository",
+        "project_clean",
+        "settings_valid",
+        "docker_reachable",
+        "agent_image",
+        "evaluator_available",
+        "measurement_target"
+      ],
+      "title": "CheckId",
+      "type": "string"
+    },
+    "CheckState": {
+      "description": "How a check came out; Start is enabled exactly when none is ``fail``.",
+      "enum": [
+        "ok",
+        "warn",
+        "fail"
+      ],
+      "title": "CheckState",
+      "type": "string"
+    },
     "Checkout": {
       "additionalProperties": false,
       "description": "The VibeSys source checkout the helper runs from.",
@@ -106,6 +793,744 @@
         "dirty"
       ],
       "title": "Checkout",
+      "type": "object"
+    },
+    "CheckoutFound": {
+      "additionalProperties": false,
+      "description": "A VibeSys checkout at least ``MIN_CHECKOUT_VERSION``.\n\n``compatible`` says whether it ships the host helper this app starts from a checkout.",
+      "properties": {
+        "state": {
+          "const": "found",
+          "default": "found",
+          "title": "State",
+          "type": "string"
+        },
+        "root": {
+          "title": "Root",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Commit"
+        },
+        "dirty": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dirty"
+        },
+        "compatible": {
+          "title": "Compatible",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "state",
+        "root",
+        "version",
+        "commit",
+        "dirty",
+        "compatible"
+      ],
+      "title": "CheckoutFound",
+      "type": "object"
+    },
+    "CheckoutInspectReply": {
+      "additionalProperties": false,
+      "description": "What the path holds.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "checkout.inspect",
+          "default": "checkout.inspect",
+          "title": "Type",
+          "type": "string"
+        },
+        "inspection": {
+          "discriminator": {
+            "mapping": {
+              "found": "#/$defs/CheckoutFound",
+              "not_found": "#/$defs/CheckoutNotFound",
+              "too_old": "#/$defs/CheckoutTooOld"
+            },
+            "propertyName": "state"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/CheckoutFound"
+            },
+            {
+              "$ref": "#/$defs/CheckoutNotFound"
+            },
+            {
+              "$ref": "#/$defs/CheckoutTooOld"
+            }
+          ],
+          "title": "Inspection"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "inspection"
+      ],
+      "title": "CheckoutInspectReply",
+      "type": "object"
+    },
+    "CheckoutInspectRequest": {
+      "additionalProperties": false,
+      "description": "Whether ``path`` holds a VibeSys checkout, and whether this app can use it.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "checkout.inspect",
+          "default": "checkout.inspect",
+          "title": "Type",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "path"
+      ],
+      "title": "CheckoutInspectRequest",
+      "type": "object"
+    },
+    "CheckoutNotFound": {
+      "additionalProperties": false,
+      "description": "The path holds no VibeSys checkout (or does not exist).",
+      "properties": {
+        "state": {
+          "const": "not_found",
+          "default": "not_found",
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "title": "CheckoutNotFound",
+      "type": "object",
+      "required": [
+        "state"
+      ]
+    },
+    "CheckoutTooOld": {
+      "additionalProperties": false,
+      "description": "A VibeSys checkout older than this app supports: ``version`` is below ``min``.",
+      "properties": {
+        "state": {
+          "const": "too_old",
+          "default": "too_old",
+          "title": "State",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "min": {
+          "title": "Min",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "version",
+        "min"
+      ],
+      "title": "CheckoutTooOld",
+      "type": "object"
+    },
+    "ChooseCheckout": {
+      "additionalProperties": false,
+      "description": "Pick another VibeSys checkout for this machine.",
+      "properties": {
+        "kind": {
+          "const": "choose_checkout",
+          "default": "choose_checkout",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "ChooseCheckout",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
+    },
+    "ClusterHardware": {
+      "additionalProperties": false,
+      "description": "What a cluster's nodes offer, as ``sinfo`` lists it or as its operator states it.",
+      "properties": {
+        "accelerator": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Accelerator"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gpu_models": {
+          "default": [],
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[^\\n\\r]*$",
+            "type": "string"
+          },
+          "title": "Gpu Models",
+          "type": "array"
+        },
+        "gpus_per_node": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Gpus Per Node",
+          "type": "integer"
+        }
+      },
+      "title": "ClusterHardware",
+      "type": "object"
+    },
+    "ClusterSource": {
+      "description": "Which file of the machine a listed cluster lives in.",
+      "enum": [
+        "vibesys",
+        "slurm_toml"
+      ],
+      "title": "ClusterSource",
+      "type": "string"
+    },
+    "ClusterTestFailed": {
+      "additionalProperties": false,
+      "description": "The cluster did not pass; ``detail`` is one line saying how.",
+      "properties": {
+        "outcome": {
+          "const": "failed",
+          "default": "failed",
+          "title": "Outcome",
+          "type": "string"
+        },
+        "stage": {
+          "$ref": "#/$defs/ClusterTestStage"
+        },
+        "detail": {
+          "maxLength": 300,
+          "minLength": 1,
+          "pattern": "^[^\\n\\r]*$",
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "stage",
+        "detail"
+      ],
+      "title": "ClusterTestFailed",
+      "type": "object"
+    },
+    "ClusterTestPassed": {
+      "additionalProperties": false,
+      "description": "The cluster answered: what its scheduler lists, and the hardware read from it.",
+      "properties": {
+        "outcome": {
+          "const": "passed",
+          "default": "passed",
+          "title": "Outcome",
+          "type": "string"
+        },
+        "hardware": {
+          "$ref": "#/$defs/ClusterHardware"
+        },
+        "partitions": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[^\\n\\r]*$",
+            "type": "string"
+          },
+          "title": "Partitions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "outcome",
+        "hardware",
+        "partitions"
+      ],
+      "title": "ClusterTestPassed",
+      "type": "object"
+    },
+    "ClusterTestStage": {
+      "description": "Which step of a connection test failed.",
+      "enum": [
+        "reach",
+        "scheduler",
+        "workspace"
+      ],
+      "title": "ClusterTestStage",
+      "type": "string"
+    },
+    "ComputeAddClusterReply": {
+      "additionalProperties": false,
+      "description": "The settings after the cluster was saved.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "compute.add_cluster",
+          "default": "compute.add_cluster",
+          "title": "Type",
+          "type": "string"
+        },
+        "settings": {
+          "$ref": "#/$defs/ComputeSettings"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "settings"
+      ],
+      "title": "ComputeAddClusterReply",
+      "type": "object"
+    },
+    "ComputeAddClusterRequest": {
+      "additionalProperties": false,
+      "description": "Save ``cluster``, once it passes the test again; a name already set up is refused.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "compute.add_cluster",
+          "default": "compute.add_cluster",
+          "title": "Type",
+          "type": "string"
+        },
+        "cluster": {
+          "$ref": "#/$defs/SlurmClusterSettings"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "cluster"
+      ],
+      "title": "ComputeAddClusterRequest",
+      "type": "object"
+    },
+    "ComputeListReply": {
+      "additionalProperties": false,
+      "description": "The machine's compute settings.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "compute.list",
+          "default": "compute.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "settings": {
+          "$ref": "#/$defs/ComputeSettings"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "settings"
+      ],
+      "title": "ComputeListReply",
+      "type": "object"
+    },
+    "ComputeListRequest": {
+      "additionalProperties": false,
+      "description": "The machine's compute settings.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "compute.list",
+          "default": "compute.list",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type"
+      ],
+      "title": "ComputeListRequest",
+      "type": "object"
+    },
+    "ComputeRemoveClusterReply": {
+      "additionalProperties": false,
+      "description": "The settings after the cluster was removed.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "compute.remove_cluster",
+          "default": "compute.remove_cluster",
+          "title": "Type",
+          "type": "string"
+        },
+        "settings": {
+          "$ref": "#/$defs/ComputeSettings"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "settings"
+      ],
+      "title": "ComputeRemoveClusterReply",
+      "type": "object"
+    },
+    "ComputeRemoveClusterRequest": {
+      "additionalProperties": false,
+      "description": "Remove the cluster ``name`` from the settings file this helper edits.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "compute.remove_cluster",
+          "default": "compute.remove_cluster",
+          "title": "Type",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "name"
+      ],
+      "title": "ComputeRemoveClusterRequest",
+      "type": "object"
+    },
+    "ComputeSettings": {
+      "additionalProperties": false,
+      "description": "What the machine offers as places to measure: its clusters and its Modal token.",
+      "properties": {
+        "config_path": {
+          "title": "Config Path",
+          "type": "string"
+        },
+        "clusters": {
+          "items": {
+            "$ref": "#/$defs/ListedCluster"
+          },
+          "title": "Clusters",
+          "type": "array"
+        },
+        "modal": {
+          "$ref": "#/$defs/ModalStatus"
+        }
+      },
+      "required": [
+        "config_path",
+        "clusters",
+        "modal"
+      ],
+      "title": "ComputeSettings",
+      "type": "object"
+    },
+    "ComputeTestClusterReply": {
+      "additionalProperties": false,
+      "description": "What testing the cluster found.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "compute.test_cluster",
+          "default": "compute.test_cluster",
+          "title": "Type",
+          "type": "string"
+        },
+        "result": {
+          "discriminator": {
+            "mapping": {
+              "failed": "#/$defs/ClusterTestFailed",
+              "passed": "#/$defs/ClusterTestPassed"
+            },
+            "propertyName": "outcome"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ClusterTestPassed"
+            },
+            {
+              "$ref": "#/$defs/ClusterTestFailed"
+            }
+          ],
+          "title": "Result"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "result"
+      ],
+      "title": "ComputeTestClusterReply",
+      "type": "object"
+    },
+    "ComputeTestClusterRequest": {
+      "additionalProperties": false,
+      "description": "Test whether ``cluster`` can be reached from the machine, and read its hardware.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "compute.test_cluster",
+          "default": "compute.test_cluster",
+          "title": "Type",
+          "type": "string"
+        },
+        "cluster": {
+          "$ref": "#/$defs/SlurmClusterSettings"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "cluster"
+      ],
+      "title": "ComputeTestClusterRequest",
+      "type": "object"
+    },
+    "ConfigInvalid": {
+      "additionalProperties": false,
+      "description": "The run's configuration (``agent.toml`` and what overrides it) is not valid.",
+      "properties": {
+        "kind": {
+          "const": "config_invalid",
+          "default": "config_invalid",
+          "title": "Kind",
+          "type": "string"
+        },
+        "problem": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Problem",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "problem"
+      ],
+      "title": "ConfigInvalid",
+      "type": "object"
+    },
+    "ConfigureCompute": {
+      "additionalProperties": false,
+      "description": "Set up the cluster or Modal on the machine, in that machine's compute settings.",
+      "properties": {
+        "kind": {
+          "const": "configure_compute",
+          "default": "configure_compute",
+          "title": "Kind",
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SlurmTarget"
+            },
+            {
+              "$ref": "#/$defs/ModalTarget"
+            }
+          ],
+          "title": "Target"
+        }
+      },
+      "required": [
+        "kind",
+        "target"
+      ],
+      "title": "ConfigureCompute",
+      "type": "object"
+    },
+    "CopyOut": {
+      "additionalProperties": false,
+      "description": "Copy the project into its own repository (``project.copy_out``), at the suggested path.",
+      "properties": {
+        "kind": {
+          "const": "copy_out",
+          "default": "copy_out",
+          "title": "Kind",
+          "type": "string"
+        },
+        "suggested_path": {
+          "title": "Suggested Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "suggested_path"
+      ],
+      "title": "CopyOut",
+      "type": "object"
+    },
+    "CreatedProject": {
+      "additionalProperties": false,
+      "description": "A project made in its own new Git repository, and its tasks.",
+      "properties": {
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "tasks": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tasks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "project",
+        "tasks"
+      ],
+      "title": "CreatedProject",
+      "type": "object"
+    },
+    "DeclareBuild": {
+      "additionalProperties": false,
+      "description": "Declare a ``[build]`` producing ``outputs`` in the task manifest at ``manifest``.",
+      "properties": {
+        "kind": {
+          "const": "declare_build",
+          "default": "declare_build",
+          "title": "Kind",
+          "type": "string"
+        },
+        "manifest": {
+          "title": "Manifest",
+          "type": "string"
+        },
+        "outputs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Outputs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "manifest",
+        "outputs"
+      ],
+      "title": "DeclareBuild",
       "type": "object"
     },
     "DetachedLaunchFailure": {
@@ -174,6 +1599,532 @@
       "title": "DetachedLaunchFailure",
       "type": "object"
     },
+    "DockerReachable": {
+      "additionalProperties": false,
+      "description": "Docker's daemon answered, with its server version.",
+      "properties": {
+        "reachable": {
+          "const": true,
+          "default": true,
+          "title": "Reachable",
+          "type": "boolean"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "title": "DockerReachable",
+      "type": "object"
+    },
+    "DockerUnreachable": {
+      "additionalProperties": false,
+      "description": "Docker could not be reached, and why, in one line.",
+      "properties": {
+        "reachable": {
+          "const": false,
+          "default": false,
+          "title": "Reachable",
+          "type": "boolean"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "title": "DockerUnreachable",
+      "type": "object"
+    },
+    "EditSetting": {
+      "additionalProperties": false,
+      "description": "Edit the named setting.",
+      "properties": {
+        "kind": {
+          "const": "edit_setting",
+          "default": "edit_setting",
+          "title": "Kind",
+          "type": "string"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "key"
+      ],
+      "title": "EditSetting",
+      "type": "object"
+    },
+    "EndRecord": {
+      "additionalProperties": false,
+      "description": "How a run ended, as its tombstone reports it: the sidebar's Recent row and the ended banner.\n\n``resumable`` is retained for older readers; current controls permit every ending.\nLaunch checks storage and writer exclusion; ``resume_from_round`` is the next round\n(a crashed server did not say). ``uncompared``: the run adopted a candidate never compared\nwith the input (it failed its own measurement), whichever ``outcome`` ended it.",
+      "properties": {
+        "outcome": {
+          "$ref": "#/$defs/RunEndOutcome"
+        },
+        "reason": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": "^[^\\n\\r]*$",
+          "title": "Reason",
+          "type": "string"
+        },
+        "resumable": {
+          "title": "Resumable",
+          "type": "boolean"
+        },
+        "resume_from_round": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resume From Round"
+        },
+        "uncompared": {
+          "default": false,
+          "title": "Uncompared",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "outcome",
+        "reason",
+        "resumable"
+      ],
+      "title": "EndRecord",
+      "type": "object"
+    },
+    "ExampleDestination": {
+      "description": "What is at the place an example would be copied to.",
+      "enum": [
+        "absent",
+        "empty",
+        "example_project",
+        "occupied"
+      ],
+      "title": "ExampleDestination",
+      "type": "string"
+    },
+    "ExampleDomain": {
+      "description": "What an example task optimizes; the first question New run asks.",
+      "enum": [
+        "llm-serving",
+        "data-structures",
+        "databases",
+        "microservices"
+      ],
+      "title": "ExampleDomain",
+      "type": "string"
+    },
+    "ExampleHardware": {
+      "additionalProperties": false,
+      "description": "The hardware a task targets.",
+      "properties": {
+        "accelerator": {
+          "title": "Accelerator",
+          "type": "string"
+        },
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "vendor": {
+          "$ref": "#/$defs/AcceleratorVendor"
+        },
+        "backend": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Backend"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "accelerator",
+        "count",
+        "vendor",
+        "backend"
+      ],
+      "title": "ExampleHardware",
+      "type": "object"
+    },
+    "ExampleList": {
+      "additionalProperties": false,
+      "description": "``vibesys example list --json``: every catalogued example, by category then name.",
+      "properties": {
+        "version": {
+          "const": 1,
+          "default": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "checkout": {
+          "title": "Checkout",
+          "type": "string"
+        },
+        "examples": {
+          "items": {
+            "$ref": "#/$defs/ExampleSummary"
+          },
+          "title": "Examples",
+          "type": "array"
+        }
+      },
+      "required": [
+        "checkout",
+        "examples"
+      ],
+      "title": "ExampleList",
+      "type": "object"
+    },
+    "ExampleModel": {
+      "additionalProperties": false,
+      "description": "The model an LLM-serving task serves.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "maker": {
+          "$ref": "#/$defs/ModelMaker"
+        }
+      },
+      "required": [
+        "name",
+        "maker"
+      ],
+      "title": "ExampleModel",
+      "type": "object"
+    },
+    "ExampleObjective": {
+      "additionalProperties": false,
+      "description": "One axis the task's ``objectives.toml`` declares.",
+      "properties": {
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "max",
+            "min"
+          ],
+          "title": "Direction",
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric",
+        "direction"
+      ],
+      "title": "ExampleObjective",
+      "type": "object"
+    },
+    "ExampleSummary": {
+      "additionalProperties": false,
+      "description": "One example in ``vibesys example list --json``.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "category": {
+          "title": "Category",
+          "type": "string"
+        },
+        "tasks": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tasks",
+          "type": "array"
+        },
+        "external_repo": {
+          "title": "External Repo",
+          "type": "boolean"
+        },
+        "task_details": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ExampleTask"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Details"
+        }
+      },
+      "required": [
+        "name",
+        "category",
+        "tasks",
+        "external_repo"
+      ],
+      "title": "ExampleSummary",
+      "type": "object"
+    },
+    "ExampleTask": {
+      "additionalProperties": false,
+      "description": "What one task of an example is about, read from its ``vibesys.input.toml`` and goal file.",
+      "properties": {
+        "task": {
+          "title": "Task",
+          "type": "string"
+        },
+        "objectives": {
+          "items": {
+            "$ref": "#/$defs/ExampleObjective"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "goal": {
+          "maxLength": 32000,
+          "title": "Goal",
+          "type": "string"
+        },
+        "goal_truncated": {
+          "title": "Goal Truncated",
+          "type": "boolean"
+        },
+        "domain": {
+          "$ref": "#/$defs/ExampleDomain"
+        },
+        "hardware": {
+          "$ref": "#/$defs/ExampleHardware"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExampleModel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workload": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExampleWorkload"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "task",
+        "objectives",
+        "goal",
+        "goal_truncated",
+        "domain",
+        "hardware",
+        "model",
+        "workload"
+      ],
+      "title": "ExampleTask",
+      "type": "object"
+    },
+    "ExampleWorkload": {
+      "additionalProperties": false,
+      "description": "The workload a data-structure task drives.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description"
+      ],
+      "title": "ExampleWorkload",
+      "type": "object"
+    },
+    "ExamplesDestinationReply": {
+      "additionalProperties": false,
+      "description": "What the destination holds.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "examples.destination",
+          "default": "examples.destination",
+          "title": "Type",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ExampleDestination"
+        },
+        "project": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Project"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "state",
+        "project"
+      ],
+      "title": "ExamplesDestinationReply",
+      "type": "object"
+    },
+    "ExamplesDestinationRequest": {
+      "additionalProperties": false,
+      "description": "What ``project.create_from_example`` would find at ``destination`` for ``example``.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "examples.destination",
+          "default": "examples.destination",
+          "title": "Type",
+          "type": "string"
+        },
+        "example": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Example",
+          "type": "string"
+        },
+        "destination": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Destination",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "example",
+        "destination"
+      ],
+      "title": "ExamplesDestinationRequest",
+      "type": "object"
+    },
+    "ExamplesListReply": {
+      "additionalProperties": false,
+      "description": "The checkout's example catalog.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "examples.list",
+          "default": "examples.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "listing": {
+          "$ref": "#/$defs/ExampleList"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "listing"
+      ],
+      "title": "ExamplesListReply",
+      "type": "object"
+    },
+    "ExamplesListRequest": {
+      "additionalProperties": false,
+      "description": "The examples of the checkout this helper runs from, with their tasks.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "examples.list",
+          "default": "examples.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "with_catalogue": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Catalogue"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type"
+      ],
+      "title": "ExamplesListRequest",
+      "type": "object"
+    },
     "FailureReason": {
       "additionalProperties": false,
       "description": "Why a run failed: the diagnostic it ended with.",
@@ -199,6 +2150,78 @@
       "title": "FailureReason",
       "type": "object"
     },
+    "GitHubUnavailable": {
+      "additionalProperties": false,
+      "description": "The run publishes to GitHub, and this machine has no signed-in account; ``problem`` is raw.",
+      "properties": {
+        "kind": {
+          "const": "github_unavailable",
+          "default": "github_unavailable",
+          "title": "Kind",
+          "type": "string"
+        },
+        "problem": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Problem",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "problem"
+      ],
+      "title": "GitHubUnavailable",
+      "type": "object"
+    },
+    "Gpu": {
+      "additionalProperties": false,
+      "description": "One GPU as its vendor's tool names it.",
+      "properties": {
+        "vendor": {
+          "title": "Vendor",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        }
+      },
+      "required": [
+        "vendor",
+        "model"
+      ],
+      "title": "Gpu",
+      "type": "object"
+    },
+    "Hardware": {
+      "additionalProperties": false,
+      "description": "The machine's processors.",
+      "properties": {
+        "cpu_cores": {
+          "exclusiveMinimum": 0,
+          "title": "Cpu Cores",
+          "type": "integer"
+        },
+        "gpus": {
+          "items": {
+            "$ref": "#/$defs/Gpu"
+          },
+          "title": "Gpus",
+          "type": "array"
+        },
+        "accelerator": {
+          "$ref": "#/$defs/Accelerator"
+        }
+      },
+      "required": [
+        "cpu_cores",
+        "gpus",
+        "accelerator"
+      ],
+      "title": "Hardware",
+      "type": "object"
+    },
     "HarnessChoice": {
       "additionalProperties": false,
       "description": "One agent CLI provider and one model it runs.",
@@ -219,6 +2242,92 @@
       "title": "HarnessChoice",
       "type": "object"
     },
+    "HarnessDisplay": {
+      "additionalProperties": false,
+      "description": "How a provider and model pair reads, as agentshim names it.",
+      "properties": {
+        "provider_name": {
+          "title": "Provider Name",
+          "type": "string"
+        },
+        "model_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Name"
+        },
+        "family": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Family"
+        },
+        "tier": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tier"
+        },
+        "tier_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tier Name"
+        },
+        "maker": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Maker"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "generation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelGeneration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "provider_name"
+      ],
+      "title": "HarnessDisplay",
+      "type": "object"
+    },
     "HarnessOption": {
       "additionalProperties": false,
       "description": "A vetted provider and model pair a run may start with.",
@@ -234,6 +2343,17 @@
         "default": {
           "type": "boolean",
           "title": "Default"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HarnessDisplay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -297,6 +2417,18 @@
           "default": "harnesses.list",
           "title": "Type",
           "type": "string"
+        },
+        "with_generations": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Generations"
         }
       },
       "required": [
@@ -530,7 +2662,26 @@
         "run_gone",
         "connect_denied",
         "connect_failed",
+        "unknown_instance",
+        "unknown_log_stream",
+        "log_store_corrupt",
+        "unknown_example",
+        "examples_unavailable",
+        "destination_exists",
+        "destination_nested",
+        "not_nested",
+        "project_create_failed",
+        "unknown_run",
         "unvetted_harness",
+        "unknown_cluster",
+        "cluster_exists",
+        "cluster_read_only",
+        "cluster_test_failed",
+        "cluster_invalid",
+        "compute_config_unreadable",
+        "modal_not_configured",
+        "unknown_provider",
+        "reader_failed",
         "internal"
       ],
       "title": "HelperErrorCode",
@@ -542,10 +2693,144 @@
         "instances_watch",
         "paths_complete",
         "instances_inspect",
-        "harnesses"
+        "logs",
+        "logs_cancel",
+        "harnesses",
+        "logs_by_span",
+        "run_history",
+        "run_summary",
+        "run_history_pages",
+        "run_span_events",
+        "run_tail",
+        "run_trace_events",
+        "machine_describe",
+        "checkout_inspect",
+        "preflight",
+        "run_options",
+        "examples",
+        "run_roles",
+        "project_clean",
+        "run_backend",
+        "run_causes",
+        "example_catalogue",
+        "run_digest",
+        "run_dashboard",
+        "harness_generations",
+        "run_role_agents",
+        "measurement_target",
+        "machine_compute",
+        "agent_logins",
+        "project_goal",
+        "example_destination",
+        "usage_window",
+        "run_trace",
+        "run_ending",
+        "chat_ended_runs",
+        "chat_ended_run_questions"
       ],
       "title": "HelperFeature",
       "type": "string"
+    },
+    "IdeaPoint": {
+      "additionalProperties": false,
+      "description": "One idea of a run on the performance chart: its result against the input and its verdict.\n\n``ratio`` is worded like ``RunDigest.adopted_ratio`` (an improvement over the input, for a\n``min`` objective the input's value over the result's); ``None`` when the idea has no\nmeasurement against the input (it failed before one, or still works).\n\n``at`` is when the idea's result landed, by the journal's event clock: the time of the gate event\nthat last wrote the reading the idea is plotted by, else of the idea's last event; ``None`` when\nthe journal's event has no readable time. It is the one definition of when a ``kept`` idea became\nthe best (``usage.window`` counts new bests by it); the span clock orders the chart but is not a\ntime of day.",
+      "properties": {
+        "ratio": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ratio"
+        },
+        "verdict": {
+          "$ref": "#/$defs/IdeaVerdict"
+        },
+        "at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "At"
+        }
+      },
+      "required": [
+        "ratio",
+        "verdict"
+      ],
+      "title": "IdeaPoint",
+      "type": "object"
+    },
+    "IdeaVerdict": {
+      "description": "What a run's idea came to, as the run page's chart marks it.",
+      "enum": [
+        "kept",
+        "not_better",
+        "failed",
+        "running"
+      ],
+      "title": "IdeaVerdict",
+      "type": "string"
+    },
+    "InputGate": {
+      "additionalProperties": false,
+      "description": "One gate that finished before the run's first idea began: how the run's input measured.\n\nA projection of the journal's ``gate_finished`` events that come before the first workstream\nspan (a gate under an idea belongs to the idea, and its span carries it), and a pass of a gate\nthat stood failed after it (the input's gate tried again). The client reads a\ngate's short reason from ``output_tail`` itself, as it does for a journal it folds.",
+      "properties": {
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "gate": {
+          "title": "Gate",
+          "type": "string"
+        },
+        "recipe": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Recipe"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "output_tail": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Output Tail"
+        }
+      },
+      "required": [
+        "sequence",
+        "gate",
+        "recipe",
+        "passed",
+        "output_tail"
+      ],
+      "title": "InputGate",
+      "type": "object"
     },
     "InspectionState": {
       "description": "What one coherent registry observation proved about an instance.",
@@ -756,11 +3041,11 @@
     },
     "InstanceList": {
       "additionalProperties": false,
-      "description": "``vibesys instances list --json``: the detached servers on this node (version 4).",
+      "description": "``vibesys instances list --json``: the detached servers on this node (version 5).",
       "properties": {
         "version": {
-          "const": 4,
-          "default": 4,
+          "const": 5,
+          "default": 5,
           "title": "Version",
           "type": "integer"
         },
@@ -907,7 +3192,7 @@
     },
     "InstancesInspectRequest": {
       "additionalProperties": false,
-      "description": "Inspect one detached server without starting another host process.",
+      "description": "Inspect one detached server without starting another host process.\n\n``include_log`` is deprecated: it asks for a tail of ``server.log``, the detached\nserver's raw output, which is for a person at a terminal. No client UI may depend on\nit; a run's logs come from its log store through ``logs.list`` and ``logs.read``. The\nhelper keeps answering it so older clients keep working, and removes it at the next\nhelper protocol version (2).",
       "properties": {
         "request_id": {
           "maxLength": 128,
@@ -1137,13 +3422,32 @@
       "title": "InstancesWatchRequest",
       "type": "object"
     },
+    "JsonValue": {},
+    "ListedCluster": {
+      "additionalProperties": false,
+      "description": "A cluster set up on the machine, and the file it comes from.",
+      "properties": {
+        "cluster": {
+          "$ref": "#/$defs/SlurmClusterSettings"
+        },
+        "source": {
+          "$ref": "#/$defs/ClusterSource"
+        }
+      },
+      "required": [
+        "cluster",
+        "source"
+      ],
+      "title": "ListedCluster",
+      "type": "object"
+    },
     "LiveInstanceRecord": {
       "additionalProperties": false,
-      "description": "What a detached server publishes about itself (version 4).\n\n``run_id`` is allocated by the launcher before the server starts, so the\nrecord names its run from the first time it is published. ``phase`` is the\nrun's lifecycle as the server folds it from its journal. When the server\nexits it leaves its last record, with an ended phase and ``ended_at``, as a\ntombstone the registry keeps for a day.",
+      "description": "What a detached server publishes about itself (version 5).\n\n``run_id`` is allocated by the launcher before the server starts, so the\nrecord names its run from the first time it is published. ``phase`` is the\nrun's lifecycle as the server folds it from its journal, and ``paused`` who\npaused it while it is paused. When the server exits it leaves its last\nrecord, with an ended phase, ``ended_at`` and ``end``, as a tombstone the\nregistry keeps for a day.",
       "properties": {
         "version": {
-          "const": 4,
-          "default": 4,
+          "const": 5,
+          "default": 5,
           "title": "Version",
           "type": "integer"
         },
@@ -1198,6 +3502,28 @@
           "default": null,
           "title": "Ended At"
         },
+        "paused": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PauseCause"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "end": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EndRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "hostname": {
           "title": "Hostname",
           "type": "string"
@@ -1241,6 +3567,792 @@
       "title": "LiveInstanceRecord",
       "type": "object"
     },
+    "LogChunk": {
+      "additionalProperties": false,
+      "description": "Bytes ``[offset, next_offset)`` of a stream, decoded as UTF-8 text.\n\nThe helper cuts a chunk that more bytes follow after the last line end in\nits window, or, with no line end there, before a character the window\nsplits; so ``data`` decodes without loss except for bytes that are not\nUTF-8, which become U+FFFD. ``next_offset - offset`` counts bytes.",
+      "properties": {
+        "offset": {
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "data": {
+          "title": "Data",
+          "type": "string",
+          "x-vibesys-max-utf8-bytes": 196608
+        },
+        "next_offset": {
+          "minimum": 0,
+          "title": "Next Offset",
+          "type": "integer"
+        },
+        "eof": {
+          "title": "Eof",
+          "type": "boolean"
+        },
+        "closed": {
+          "title": "Closed",
+          "type": "boolean"
+        },
+        "truncated_before": {
+          "title": "Truncated Before",
+          "type": "boolean"
+        },
+        "pipes": {
+          "items": {
+            "$ref": "#/$defs/LogPipeSpan"
+          },
+          "title": "Pipes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "offset",
+        "data",
+        "next_offset",
+        "eof",
+        "closed",
+        "truncated_before",
+        "pipes"
+      ],
+      "title": "LogChunk",
+      "type": "object"
+    },
+    "LogOffset": {
+      "additionalProperties": false,
+      "description": "Read from this byte offset of the stream.",
+      "properties": {
+        "offset": {
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "offset"
+      ],
+      "title": "LogOffset",
+      "type": "object"
+    },
+    "LogPipe": {
+      "description": "Which of a command's output pipes wrote some bytes.",
+      "enum": [
+        "stdout",
+        "stderr"
+      ],
+      "title": "LogPipe",
+      "type": "string"
+    },
+    "LogPipeSpan": {
+      "additionalProperties": false,
+      "description": "Bytes ``[offset, offset + length)`` of a stream were written by ``pipe``.",
+      "properties": {
+        "offset": {
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "length": {
+          "exclusiveMinimum": 0,
+          "title": "Length",
+          "type": "integer"
+        },
+        "pipe": {
+          "$ref": "#/$defs/LogPipe"
+        }
+      },
+      "required": [
+        "offset",
+        "length",
+        "pipe"
+      ],
+      "title": "LogPipeSpan",
+      "type": "object"
+    },
+    "LogStream": {
+      "additionalProperties": false,
+      "description": "One recorded log stream of an instance, as its store indexes it.",
+      "properties": {
+        "id": {
+          "pattern": "^[0-9]{6,12}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "owner": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Owner",
+          "type": "object"
+        },
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "retained_start": {
+          "minimum": 0,
+          "title": "Retained Start",
+          "type": "integer"
+        },
+        "size": {
+          "minimum": 0,
+          "title": "Size",
+          "type": "integer"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LogStreamOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "command",
+        "retained_start",
+        "size",
+        "outcome"
+      ],
+      "title": "LogStream",
+      "type": "object"
+    },
+    "LogStreamOutcome": {
+      "description": "How a stream was closed.",
+      "enum": [
+        "ended",
+        "failed",
+        "abandoned"
+      ],
+      "title": "LogStreamOutcome",
+      "type": "string"
+    },
+    "LogTail": {
+      "additionalProperties": false,
+      "description": "Read the last ``tail_bytes`` bytes the stream holds, from the first line start in them.",
+      "properties": {
+        "tail_bytes": {
+          "maximum": 65536,
+          "minimum": 1,
+          "title": "Tail Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tail_bytes"
+      ],
+      "title": "LogTail",
+      "type": "object"
+    },
+    "LoginNodeReach": {
+      "additionalProperties": false,
+      "description": "The machine is a login node of the cluster: its own scheduler commands reach it.",
+      "properties": {
+        "kind": {
+          "const": "login_node",
+          "default": "login_node",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "LoginNodeReach",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
+    },
+    "LoginStarted": {
+      "additionalProperties": false,
+      "description": "The harness's own login was started on the machine.",
+      "properties": {
+        "outcome": {
+          "const": "started",
+          "default": "started",
+          "title": "Outcome",
+          "type": "string"
+        },
+        "instruction": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "pattern": "^[^\\n\\r]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Instruction"
+        }
+      },
+      "title": "LoginStarted",
+      "type": "object",
+      "required": [
+        "outcome"
+      ]
+    },
+    "LoginState": {
+      "description": "Whether a harness is signed in, as far as its own tooling can say.",
+      "enum": [
+        "signed_in",
+        "signed_out",
+        "unknown"
+      ],
+      "title": "LoginState",
+      "type": "string"
+    },
+    "LoginUnavailable": {
+      "additionalProperties": false,
+      "description": "The login was not started, and why.",
+      "properties": {
+        "outcome": {
+          "const": "unavailable",
+          "default": "unavailable",
+          "title": "Outcome",
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/$defs/LoginUnavailableReason"
+        },
+        "command": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "pattern": "^[^\\n\\r]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command"
+        },
+        "detail": {
+          "default": "",
+          "maxLength": 300,
+          "pattern": "^[^\\n\\r]*$",
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "reason"
+      ],
+      "title": "LoginUnavailable",
+      "type": "object"
+    },
+    "LoginUnavailableReason": {
+      "description": "Why a login could not be started.",
+      "enum": [
+        "not_installed",
+        "no_login_command",
+        "needs_terminal",
+        "start_failed"
+      ],
+      "title": "LoginUnavailableReason",
+      "type": "string"
+    },
+    "LogsCancelReply": {
+      "additionalProperties": false,
+      "description": "The withdrawal was taken: a read ``read_id`` named that was still waiting stops waiting.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "logs.cancel",
+          "default": "logs.cancel",
+          "title": "Type",
+          "type": "string"
+        },
+        "read_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Read Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "read_id"
+      ],
+      "title": "LogsCancelReply",
+      "type": "object"
+    },
+    "LogsCancelRequest": {
+      "additionalProperties": false,
+      "description": "Withdraw the ``logs.read`` whose request id is ``read_id``: a wait it is in ends now.\n\nThe read still answers, with what it holds (an empty chunk at the end of the\nstream), and its worker returns, so the channel can admit another request.\nNaming a read that already answered, or no read, is not an error: withdrawal\nraces the reply by nature. Admitted even when the channel's workers are full.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "logs.cancel",
+          "default": "logs.cancel",
+          "title": "Type",
+          "type": "string"
+        },
+        "read_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Read Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "read_id"
+      ],
+      "title": "LogsCancelRequest",
+      "type": "object"
+    },
+    "LogsListReply": {
+      "additionalProperties": false,
+      "description": "The instance's streams, oldest first.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "logs.list",
+          "default": "logs.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "streams": {
+          "items": {
+            "$ref": "#/$defs/LogStream"
+          },
+          "title": "Streams",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "streams"
+      ],
+      "title": "LogsListReply",
+      "type": "object"
+    },
+    "LogsListRequest": {
+      "additionalProperties": false,
+      "description": "The log streams recorded for one instance, live or ended.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "logs.list",
+          "default": "logs.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "instance_id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Instance Id",
+          "type": "string"
+        },
+        "span_id": {
+          "anyOf": [
+            {
+              "pattern": "^(flow|op):\\S*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Span Id"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "instance_id"
+      ],
+      "title": "LogsListRequest",
+      "type": "object"
+    },
+    "LogsReadReply": {
+      "additionalProperties": false,
+      "description": "One chunk of the stream.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "logs.read",
+          "default": "logs.read",
+          "title": "Type",
+          "type": "string"
+        },
+        "chunk": {
+          "$ref": "#/$defs/LogChunk"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "chunk"
+      ],
+      "title": "LogsReadReply",
+      "type": "object"
+    },
+    "LogsReadRequest": {
+      "additionalProperties": false,
+      "description": "One bounded chunk of a stream; at the end of an open stream, wait up to ``wait_ms`` for more.\n\nA wait ends as soon as bytes arrive or the stream closes, and always before\nthe request's deadline, so a follower keeps exactly one read in flight.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "logs.read",
+          "default": "logs.read",
+          "title": "Type",
+          "type": "string"
+        },
+        "instance_id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Instance Id",
+          "type": "string"
+        },
+        "stream_id": {
+          "pattern": "^[0-9]{6,12}$",
+          "title": "Stream Id",
+          "type": "string"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LogOffset"
+            },
+            {
+              "$ref": "#/$defs/LogTail"
+            }
+          ],
+          "title": "Start"
+        },
+        "max_bytes": {
+          "maximum": 65536,
+          "minimum": 4,
+          "title": "Max Bytes",
+          "type": "integer"
+        },
+        "wait_ms": {
+          "default": 0,
+          "maximum": 30000,
+          "minimum": 0,
+          "title": "Wait Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "instance_id",
+        "stream_id",
+        "start",
+        "max_bytes"
+      ],
+      "title": "LogsReadRequest",
+      "type": "object"
+    },
+    "MachineCheckout": {
+      "additionalProperties": false,
+      "description": "The VibeSys checkout this helper runs from, which starts runs on this machine.",
+      "properties": {
+        "root": {
+          "title": "Root",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Commit"
+        },
+        "dirty": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dirty"
+        }
+      },
+      "required": [
+        "root",
+        "version",
+        "commit",
+        "dirty"
+      ],
+      "title": "MachineCheckout",
+      "type": "object"
+    },
+    "MachineDescribeReply": {
+      "additionalProperties": false,
+      "description": "The machine's description.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "machine.describe",
+          "default": "machine.describe",
+          "title": "Type",
+          "type": "string"
+        },
+        "machine": {
+          "$ref": "#/$defs/MachineDescription"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "machine"
+      ],
+      "title": "MachineDescribeReply",
+      "type": "object"
+    },
+    "MachineDescribeRequest": {
+      "additionalProperties": false,
+      "description": "What this host offers runs: its checkout, hardware, Docker, harness CLIs and runs.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "machine.describe",
+          "default": "machine.describe",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type"
+      ],
+      "title": "MachineDescribeRequest",
+      "type": "object"
+    },
+    "MachineDescription": {
+      "additionalProperties": false,
+      "description": "What one machine offers runs.",
+      "properties": {
+        "checkout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MachineCheckout"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hardware": {
+          "$ref": "#/$defs/Hardware"
+        },
+        "docker": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DockerReachable"
+            },
+            {
+              "$ref": "#/$defs/DockerUnreachable"
+            }
+          ],
+          "title": "Docker"
+        },
+        "harness_clis": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Harness Clis",
+          "type": "array"
+        },
+        "harness_cli_names": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Harness Cli Names",
+          "type": "object"
+        },
+        "runs": {
+          "$ref": "#/$defs/RunCounts"
+        }
+      },
+      "required": [
+        "checkout",
+        "hardware",
+        "docker",
+        "harness_clis",
+        "runs"
+      ],
+      "title": "MachineDescription",
+      "type": "object"
+    },
+    "Maker": {
+      "description": "Who made a model: the closed set of makers whose models a provider's CLI runs.",
+      "enum": [
+        "anthropic",
+        "openai",
+        "google"
+      ],
+      "title": "Maker",
+      "type": "string"
+    },
+    "MeasurementTargetMisfit": {
+      "additionalProperties": false,
+      "description": "The target's hardware cannot run the compute backend the task targets.",
+      "properties": {
+        "kind": {
+          "const": "measurement_target_misfit",
+          "default": "measurement_target_misfit",
+          "title": "Kind",
+          "type": "string"
+        },
+        "target": {
+          "discriminator": {
+            "mapping": {
+              "modal": "#/$defs/ModalTarget",
+              "same_machine": "#/$defs/SameMachine",
+              "slurm": "#/$defs/SlurmTarget"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SameMachine"
+            },
+            {
+              "$ref": "#/$defs/SlurmTarget"
+            },
+            {
+              "$ref": "#/$defs/ModalTarget"
+            }
+          ],
+          "title": "Target"
+        },
+        "backend": {
+          "$ref": "#/$defs/Backend"
+        },
+        "offered": {
+          "$ref": "#/$defs/Accelerator"
+        }
+      },
+      "required": [
+        "kind",
+        "target",
+        "backend",
+        "offered"
+      ],
+      "title": "MeasurementTargetMisfit",
+      "type": "object"
+    },
+    "MeasurementTargetNotConfigured": {
+      "additionalProperties": false,
+      "description": "The cluster is not set up on the machine, or Modal has no token there.",
+      "properties": {
+        "kind": {
+          "const": "measurement_target_not_configured",
+          "default": "measurement_target_not_configured",
+          "title": "Kind",
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SlurmTarget"
+            },
+            {
+              "$ref": "#/$defs/ModalTarget"
+            }
+          ],
+          "title": "Target"
+        }
+      },
+      "required": [
+        "kind",
+        "target"
+      ],
+      "title": "MeasurementTargetNotConfigured",
+      "type": "object"
+    },
     "MissingLogTail": {
       "additionalProperties": false,
       "description": "The instance has no retained ``server.log`` file.",
@@ -1257,6 +4369,191 @@
       "required": [
         "state"
       ]
+    },
+    "ModalStatus": {
+      "additionalProperties": false,
+      "description": "Whether Modal is set up on the machine; the token itself is never sent.",
+      "properties": {
+        "token_present": {
+          "title": "Token Present",
+          "type": "boolean"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModalTokenSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "token_present"
+      ],
+      "title": "ModalStatus",
+      "type": "object"
+    },
+    "ModalTarget": {
+      "additionalProperties": false,
+      "description": "Measure on Modal, with the token present on the machine.",
+      "properties": {
+        "kind": {
+          "const": "modal",
+          "default": "modal",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "ModalTarget",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
+    },
+    "ModalTokenSource": {
+      "description": "Where the machine holds its Modal token.",
+      "enum": [
+        "environment",
+        "profile"
+      ],
+      "title": "ModalTokenSource",
+      "type": "string"
+    },
+    "ModelGeneration": {
+      "additionalProperties": false,
+      "description": "One generation of a maker's models, and where it ranks among the maker's.",
+      "properties": {
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "order": {
+          "minimum": 1,
+          "title": "Order",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "order"
+      ],
+      "title": "ModelGeneration",
+      "type": "object"
+    },
+    "ModelMaker": {
+      "description": "Who made a served model; ``OTHER`` for a maker with no entry yet.",
+      "enum": [
+        "meta",
+        "qwen",
+        "deepseek",
+        "zhipu",
+        "moonshot",
+        "ai2",
+        "openai",
+        "other"
+      ],
+      "title": "ModelMaker",
+      "type": "string"
+    },
+    "ModelNotVetted": {
+      "additionalProperties": false,
+      "description": "A model, or none, outside the vetted models of its provider.",
+      "properties": {
+        "kind": {
+          "const": "model_not_vetted",
+          "default": "model_not_vetted",
+          "title": "Kind",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Model"
+        },
+        "vetted": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Vetted",
+          "type": "array"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Role"
+        },
+        "fallback": {
+          "title": "Fallback",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "provider",
+        "model",
+        "vetted",
+        "role",
+        "fallback"
+      ],
+      "title": "ModelNotVetted",
+      "type": "object"
+    },
+    "OptionNotAccepted": {
+      "additionalProperties": false,
+      "description": "The run's search does not take a typed option the screen set (for instance rounds).",
+      "properties": {
+        "kind": {
+          "const": "option_not_accepted",
+          "default": "option_not_accepted",
+          "title": "Kind",
+          "type": "string"
+        },
+        "option": {
+          "$ref": "#/$defs/RunOption"
+        }
+      },
+      "required": [
+        "kind",
+        "option"
+      ],
+      "title": "OptionNotAccepted",
+      "type": "object"
     },
     "PathEntry": {
       "additionalProperties": false,
@@ -1372,6 +4669,15 @@
       "title": "PathsCompleteRequest",
       "type": "object"
     },
+    "PauseCause": {
+      "description": "Who paused a paused run.",
+      "enum": [
+        "user",
+        "quota"
+      ],
+      "title": "PauseCause",
+      "type": "string"
+    },
     "PingReply": {
       "additionalProperties": false,
       "description": "The channel is alive.",
@@ -1427,6 +4733,268 @@
       "title": "PingRequest",
       "type": "object"
     },
+    "ProjectCopyOutReply": {
+      "additionalProperties": false,
+      "description": "The project copied out into its own repository.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "project.copy_out",
+          "default": "project.copy_out",
+          "title": "Type",
+          "type": "string"
+        },
+        "created": {
+          "$ref": "#/$defs/CreatedProject"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "created"
+      ],
+      "title": "ProjectCopyOutReply",
+      "type": "object"
+    },
+    "ProjectCopyOutRequest": {
+      "additionalProperties": false,
+      "description": "Copy ``source``, a folder inside another Git repository, into its own new one at ``destination``.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "project.copy_out",
+          "default": "project.copy_out",
+          "title": "Type",
+          "type": "string"
+        },
+        "source": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        },
+        "destination": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Destination",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "source",
+        "destination"
+      ],
+      "title": "ProjectCopyOutRequest",
+      "type": "object"
+    },
+    "ProjectCreateFromExampleReply": {
+      "additionalProperties": false,
+      "description": "The project made from the example.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "project.create_from_example",
+          "default": "project.create_from_example",
+          "title": "Type",
+          "type": "string"
+        },
+        "created": {
+          "$ref": "#/$defs/CreatedProject"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "created"
+      ],
+      "title": "ProjectCreateFromExampleReply",
+      "type": "object"
+    },
+    "ProjectCreateFromExampleRequest": {
+      "additionalProperties": false,
+      "description": "Copy ``example`` into its own new Git repository at ``destination`` (absent or empty).",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "project.create_from_example",
+          "default": "project.create_from_example",
+          "title": "Type",
+          "type": "string"
+        },
+        "example": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Example",
+          "type": "string"
+        },
+        "destination": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Destination",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "example",
+        "destination"
+      ],
+      "title": "ProjectCreateFromExampleRequest",
+      "type": "object"
+    },
+    "ProjectDirty": {
+      "additionalProperties": false,
+      "description": "The project's repository has changes a run cannot start beside.\n\nA fact, not a sentence: the client words it. ``paths`` are relative to the project, sorted.",
+      "properties": {
+        "kind": {
+          "const": "project_dirty",
+          "default": "project_dirty",
+          "title": "Kind",
+          "type": "string"
+        },
+        "project": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Project",
+          "type": "string"
+        },
+        "paths": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Paths",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "project",
+        "paths"
+      ],
+      "title": "ProjectDirty",
+      "type": "object"
+    },
+    "ProjectTaskGoalReply": {
+      "additionalProperties": false,
+      "description": "The task's goal and objectives.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "project.task_goal",
+          "default": "project.task_goal",
+          "title": "Type",
+          "type": "string"
+        },
+        "goal": {
+          "$ref": "#/$defs/TaskGoal"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "goal"
+      ],
+      "title": "ProjectTaskGoalReply",
+      "type": "object"
+    },
+    "ProjectTaskGoalRequest": {
+      "additionalProperties": false,
+      "description": "The goal text and objectives of one task of a project.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "project.task_goal",
+          "default": "project.task_goal",
+          "title": "Type",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "task": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Task",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "project",
+        "task"
+      ],
+      "title": "ProjectTaskGoalRequest",
+      "type": "object"
+    },
+    "ReasoningEffort": {
+      "description": "A role's reasoning effort; ``default`` keeps the configured one.",
+      "enum": [
+        "default",
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "ReasoningEffort",
+      "type": "string"
+    },
     "ResumeLatest": {
       "additionalProperties": false,
       "description": "Resume the project's current or latest run; the launch resolves it before detaching.",
@@ -1458,6 +5026,89 @@
       ],
       "title": "ResumeRun",
       "type": "object"
+    },
+    "RoleOption": {
+      "additionalProperties": false,
+      "description": "One agent role's model and reasoning effort; ``model`` ``None`` keeps the run's model.",
+      "properties": {
+        "role": {
+          "maxLength": 64,
+          "pattern": "^[a-z0-9][a-z0-9._-]*$",
+          "title": "Role",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "reasoning_effort": {
+          "$ref": "#/$defs/ReasoningEffort",
+          "default": "default"
+        }
+      },
+      "required": [
+        "role"
+      ],
+      "title": "RoleOption",
+      "type": "object"
+    },
+    "RolesNotDeclared": {
+      "additionalProperties": false,
+      "description": "The configuration names agent roles the run's orchestration does not declare.",
+      "properties": {
+        "kind": {
+          "const": "roles_not_declared",
+          "default": "roles_not_declared",
+          "title": "Kind",
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Roles",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "roles"
+      ],
+      "title": "RolesNotDeclared",
+      "type": "object"
+    },
+    "RunAttention": {
+      "description": "Why a run needs its user, judged from its journal, its server and the time now.",
+      "enum": [
+        "none",
+        "failed",
+        "repeated_failure",
+        "stalled"
+      ],
+      "title": "RunAttention",
+      "type": "string"
+    },
+    "RunClosing": {
+      "description": "The journal's last word on a run: the terminal event it ends with, if it has one.",
+      "enum": [
+        "finished",
+        "failed",
+        "interrupted"
+      ],
+      "title": "RunClosing",
+      "type": "string"
     },
     "RunConnectReply": {
       "additionalProperties": false,
@@ -1536,6 +5187,274 @@
       "title": "RunConnectRequest",
       "type": "object"
     },
+    "RunCounts": {
+      "additionalProperties": false,
+      "description": "Runs on this machine: live now, and ended since the host's local midnight.",
+      "properties": {
+        "live": {
+          "minimum": 0,
+          "title": "Live",
+          "type": "integer"
+        },
+        "ended_today": {
+          "minimum": 0,
+          "title": "Ended Today",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "live",
+        "ended_today"
+      ],
+      "title": "RunCounts",
+      "type": "object"
+    },
+    "RunDashboard": {
+      "additionalProperties": false,
+      "description": "What a run's tile draws, folded from the journal in the digest's pass.\n\n``points`` are the run page's chart (``performanceFold``): the ideas in the order their results\nlanded (the idea's measurement time, else when its last attempt ended or began; ties in the\norder the ideas began), each with its verdict. A run with more than ``DASHBOARD_MAX_POINTS``\nideas keeps the newest points of the verdicts that matter to the line: the oldest ideas that\nare not ``kept`` go first, then the oldest ``kept`` ones, and ``points_omitted`` counts the\nideas left out (the ideas count is ``len(points) + points_omitted``). ``failed_streak`` counts\nthe ideas at the end of the order that failed, with none passing since (a running idea is\nskipped), over every idea and not only the ones kept. ``last_event_at`` is the journal's last\nevent, the only time fact a stalled run is judged from (``RunAttention``). ``best`` is the\nreading of the best idea so far (``BestReading``); absent when no idea was kept with a reading.",
+      "properties": {
+        "points": {
+          "items": {
+            "$ref": "#/$defs/IdeaPoint"
+          },
+          "maxItems": 64,
+          "title": "Points",
+          "type": "array"
+        },
+        "points_omitted": {
+          "minimum": 0,
+          "title": "Points Omitted",
+          "type": "integer"
+        },
+        "failed_streak": {
+          "minimum": 0,
+          "title": "Failed Streak",
+          "type": "integer"
+        },
+        "last_event_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Event At"
+        },
+        "best": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BestReading"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "points",
+        "points_omitted",
+        "failed_streak",
+        "last_event_at"
+      ],
+      "title": "RunDashboard",
+      "type": "object"
+    },
+    "RunDigest": {
+      "additionalProperties": false,
+      "description": "What a run's journal says at a glance, for a list row; never a replay of the run.\n\n``ideas`` counts the ideas the run page counts (one per hypothesis, probes excluded) and\n``adopted_ratio`` is the result the run's adoption span names, as the run page headlines it:\nan improvement over the input (for a ``min`` objective, the input's value over the result's);\n``None`` when the run adopted nothing. The best raw reading of a gate is not it: that may be\nan idea that later failed. ``best_so_far_ratio`` is what the page headlines before the run has\nopened an adoption (while it works): the best idea that passed and beat the input, worded as an\nimprovement the same way; ``None`` before one does and once an adoption exists. ``ideas`` is\n``None`` for a journal that predates the run trace (``TraceFormat.PREDATES_TRACE``): it\nrecords rounds, not ideas, so no count is true. ``duration_s`` runs from the journal's first\nevent to the last step it recorded; ``None`` for a run with no events. ``ending`` is the run's\nending record and ``closing`` its terminal event: both ``None`` for a run still going or one\nwhose server died without a word; they are how an ending is known once its tombstone expired.",
+      "properties": {
+        "kind": {
+          "const": "digest",
+          "default": "digest",
+          "title": "Kind",
+          "type": "string"
+        },
+        "ideas": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ideas"
+        },
+        "adopted_ratio": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Adopted Ratio"
+        },
+        "best_so_far_ratio": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Best So Far Ratio"
+        },
+        "duration_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Duration S"
+        },
+        "ending": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunEndingFact"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "closing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunClosing"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dashboard": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunDashboard"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind",
+        "ideas",
+        "adopted_ratio",
+        "best_so_far_ratio",
+        "duration_s",
+        "ending",
+        "closing"
+      ],
+      "title": "RunDigest",
+      "type": "object"
+    },
+    "RunDigestUnreadable": {
+      "additionalProperties": false,
+      "description": "A run whose journal exists and could not be read; ``message`` says why, in one line.",
+      "properties": {
+        "kind": {
+          "const": "unreadable",
+          "default": "unreadable",
+          "title": "Kind",
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": "^[^\\n\\r]*$",
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "title": "RunDigestUnreadable",
+      "type": "object"
+    },
+    "RunEndOutcome": {
+      "description": "Why a run ended, on its tombstone: vs-core's ``EndReason`` members and one of the shell's.\n\nThe first eight are ``vs_core``'s ``EndReason`` values, copied because this module\nmay not import the core (``tests/server/test_run_end_record.py`` keeps them equal).",
+      "enum": [
+        "adopted",
+        "kept-input",
+        "no-winner",
+        "adoption-failed",
+        "stopped",
+        "deadline",
+        "finish-refused",
+        "failed",
+        "force_stopped"
+      ],
+      "title": "RunEndOutcome",
+      "type": "string"
+    },
+    "RunEndingFact": {
+      "additionalProperties": false,
+      "description": "How a run's durable record stood as it ended, as its server reports it to the record.\n\n``outcome`` is core's end reason when the run recorded a result, ``None`` when it ended\nwithout one; ``summary`` is core's account of that result and ``uncompared`` its fact that\nthe adopted candidate was never compared with the input.",
+      "properties": {
+        "outcome": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunEndOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "summary": {
+          "default": "",
+          "title": "Summary",
+          "type": "string"
+        },
+        "resumable": {
+          "title": "Resumable",
+          "type": "boolean"
+        },
+        "rounds_finished": {
+          "minimum": 0,
+          "title": "Rounds Finished",
+          "type": "integer"
+        },
+        "uncompared": {
+          "default": false,
+          "title": "Uncompared",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "outcome",
+        "resumable",
+        "rounds_finished"
+      ],
+      "title": "RunEndingFact",
+      "type": "object"
+    },
+    "RunEventKinds": {
+      "description": "A closed set of event types ``runs.read_events`` can select (``EVENT_TYPES_BY_KINDS``).",
+      "enum": [
+        "trace"
+      ],
+      "title": "RunEventKinds",
+      "type": "string"
+    },
     "RunList": {
       "additionalProperties": false,
       "description": "A project's runs, oldest first.",
@@ -1559,9 +5478,75 @@
       "title": "RunList",
       "type": "object"
     },
+    "RunOption": {
+      "description": "A typed New run option (``RunOptions``); closed.",
+      "enum": [
+        "rounds",
+        "time_limit",
+        "results",
+        "role_model",
+        "role_reasoning_effort",
+        "role_agent"
+      ],
+      "title": "RunOption",
+      "type": "string"
+    },
+    "RunOptions": {
+      "additionalProperties": false,
+      "description": "What the New run screen sets on a run; ``None`` (or no role) keeps the configuration.",
+      "properties": {
+        "rounds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rounds"
+        },
+        "time_limit_s": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Time Limit S"
+        },
+        "results": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunResults"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "roles": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RoleOption"
+          },
+          "title": "Roles",
+          "type": "array"
+        }
+      },
+      "title": "RunOptions",
+      "type": "object"
+    },
     "RunPhase": {
       "additionalProperties": false,
-      "description": "A run's lifecycle status with the detail its status needs.\n\n``stage`` (and, when the stage reports it, ``progress``) says where a\n``starting`` run is; ``reason`` says why a ``failed`` one ended. None of\nthem is present for any other status.",
+      "description": "A run's lifecycle status with the detail its status needs.\n\n``stage`` (and, when the stage reports it, ``progress``) says where a ``starting`` run is;\n``reason`` says why a ``failed`` one ended. None of them is present for any other status.",
       "properties": {
         "status": {
           "$ref": "#/$defs/RunStatus"
@@ -1606,6 +5591,347 @@
       "title": "RunPhase",
       "type": "object"
     },
+    "RunPreflightReply": {
+      "additionalProperties": false,
+      "description": "Every check, in ``CheckId`` order; Start is enabled exactly when none is ``fail``.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "run.preflight",
+          "default": "run.preflight",
+          "title": "Type",
+          "type": "string"
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/Check"
+          },
+          "title": "Checks",
+          "type": "array"
+        },
+        "roles": {
+          "anyOf": [
+            {
+              "items": {
+                "maxLength": 64,
+                "pattern": "^[a-z0-9][a-z0-9._-]*$",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Roles"
+        },
+        "backend": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Backend"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "checks"
+      ],
+      "title": "RunPreflightReply",
+      "type": "object"
+    },
+    "RunPreflightRequest": {
+      "additionalProperties": false,
+      "description": "Whether the run ``run.start`` would launch with these inputs can start, check by check.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "run.preflight",
+          "default": "run.preflight",
+          "title": "Type",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "task": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task"
+        },
+        "args": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Args",
+          "type": "array"
+        },
+        "harness": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HarnessChoice"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "options": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "agents": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/HarnessChoice"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agents"
+        },
+        "measure_on": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "modal": "#/$defs/ModalTarget",
+                  "same_machine": "#/$defs/SameMachine",
+                  "slurm": "#/$defs/SlurmTarget"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/SameMachine"
+                },
+                {
+                  "$ref": "#/$defs/SlurmTarget"
+                },
+                {
+                  "$ref": "#/$defs/ModalTarget"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Measure On"
+        },
+        "with_roles": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Roles"
+        },
+        "with_project_clean": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Project Clean"
+        },
+        "with_backend": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Backend"
+        },
+        "with_causes": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Causes"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "project"
+      ],
+      "title": "RunPreflightRequest",
+      "type": "object"
+    },
+    "RunReaderReply": {
+      "additionalProperties": false,
+      "description": "The server for ``run.connect``: the run's live one, else a read-only one.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "run.reader",
+          "default": "run.reader",
+          "title": "Type",
+          "type": "string"
+        },
+        "instance_id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Instance Id",
+          "type": "string"
+        },
+        "read_only": {
+          "title": "Read Only",
+          "type": "boolean"
+        },
+        "chat": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chat"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "instance_id",
+        "read_only"
+      ],
+      "title": "RunReaderReply",
+      "type": "object"
+    },
+    "RunReaderRequest": {
+      "additionalProperties": false,
+      "description": "The server to read and chat with run ``run_id`` of ``project`` through.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "run.reader",
+          "default": "run.reader",
+          "title": "Type",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "with_chat": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Chat"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "project",
+        "run_id"
+      ],
+      "title": "RunReaderRequest",
+      "type": "object"
+    },
+    "RunResults": {
+      "description": "Where a run's results go: kept on the machine, or also published to GitHub.",
+      "enum": [
+        "keep",
+        "publish_github"
+      ],
+      "title": "RunResults",
+      "type": "string"
+    },
     "RunRole": {
       "description": "Which run-protocol connection a run channel carries (``WP-ROLES``).",
       "enum": [
@@ -1615,6 +5941,72 @@
       ],
       "title": "RunRole",
       "type": "string"
+    },
+    "RunSpend": {
+      "additionalProperties": false,
+      "description": "What one run spent in the window; only runs that had a turn end in it are listed.",
+      "properties": {
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "task": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Task"
+        },
+        "cost_usd": {
+          "minimum": 0,
+          "title": "Cost Usd",
+          "type": "number"
+        },
+        "unpriced_turns": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Unpriced Turns",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "task",
+        "cost_usd"
+      ],
+      "title": "RunSpend",
+      "type": "object"
+    },
+    "RunStartCompensationEvidence": {
+      "discriminator": {
+        "mapping": {
+          "stop_failed": "#/$defs/StopFailedCompensationFailure",
+          "stop_unconfirmed": "#/$defs/StopUnconfirmedCompensationFailure",
+          "worker_start_refused": "#/$defs/WorkerStartRefusedCompensationFailure"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/WorkerStartRefusedCompensationFailure"
+        },
+        {
+          "$ref": "#/$defs/StopFailedCompensationFailure"
+        },
+        {
+          "$ref": "#/$defs/StopUnconfirmedCompensationFailure"
+        }
+      ]
+    },
+    "RunStartCompensationFailure": {
+      "$ref": "#/$defs/RunStartCompensationEvidence",
+      "description": "One strict stderr line preserving an undisclosed instance cleanup failure.\n\nA successful ``run.start`` reply could not reach the client, so only this\ndiagnostic can tell an operator which live instance may need recovery. The\ndiscriminated variants make result presence and nonterminal outcomes part of\nthe generated schema rather than Python-only validation.",
+      "title": "RunStartCompensationFailure"
     },
     "RunStartReply": {
       "additionalProperties": false,
@@ -1723,6 +6115,62 @@
             }
           ],
           "default": null
+        },
+        "options": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "agents": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/HarnessChoice"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agents"
+        },
+        "measure_on": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "modal": "#/$defs/ModalTarget",
+                  "same_machine": "#/$defs/SameMachine",
+                  "slurm": "#/$defs/SlurmTarget"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/SameMachine"
+                },
+                {
+                  "$ref": "#/$defs/SlurmTarget"
+                },
+                {
+                  "$ref": "#/$defs/ModalTarget"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Measure On"
         }
       },
       "required": [
@@ -1869,6 +6317,43 @@
             }
           ],
           "title": "Instance Id"
+        },
+        "digest": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "digest": "#/$defs/RunDigest",
+                  "unreadable": "#/$defs/RunDigestUnreadable"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/RunDigest"
+                },
+                {
+                  "$ref": "#/$defs/RunDigestUnreadable"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Digest"
+        },
+        "attention": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunAttention"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -1880,6 +6365,162 @@
         "instance_id"
       ],
       "title": "RunSummary",
+      "type": "object"
+    },
+    "RunTerminal": {
+      "additionalProperties": false,
+      "description": "How the run's journal ended: the last terminal event it records, and what it said.",
+      "properties": {
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/RunTerminalKind"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "maxLength": 16000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Message"
+        }
+      },
+      "required": [
+        "sequence",
+        "kind",
+        "message"
+      ],
+      "title": "RunTerminal",
+      "type": "object"
+    },
+    "RunTerminalKind": {
+      "description": "Which terminal event ended a run's journal.",
+      "enum": [
+        "finished",
+        "failed",
+        "interrupted"
+      ],
+      "title": "RunTerminalKind",
+      "type": "string"
+    },
+    "RunsEventsForSpanReply": {
+      "additionalProperties": false,
+      "description": "One page of a span's recorded events, oldest first.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "runs.events_for_span",
+          "default": "runs.events_for_span",
+          "title": "Type",
+          "type": "string"
+        },
+        "events": {
+          "items": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          "title": "Events",
+          "type": "array"
+        },
+        "next_sequence": {
+          "exclusiveMinimum": 0,
+          "title": "Next Sequence",
+          "type": "integer"
+        },
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "total": {
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "events",
+        "next_sequence",
+        "complete",
+        "total"
+      ],
+      "title": "RunsEventsForSpanReply",
+      "type": "object"
+    },
+    "RunsEventsForSpanRequest": {
+      "additionalProperties": false,
+      "description": "A page of the recorded events of one run-trace span, from its journal on disk.\n\nThe events of ``span_id`` and of every span beneath it, oldest first: an event belongs\nto the span it names in ``span_id`` and, when it names none, to the span whose\n``invocation`` is its ``execution_id``. For an agent turn that is the turn's output, tool\ncalls and results, activity and usage; for a flow, those of every turn under it. Span\nevents themselves are not included: the trace already carries them.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "runs.events_for_span",
+          "default": "runs.events_for_span",
+          "title": "Type",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "span_id": {
+          "pattern": "^(flow|op):\\S*$",
+          "title": "Requested Span Id",
+          "type": "string"
+        },
+        "from_sequence": {
+          "default": 1,
+          "exclusiveMinimum": 0,
+          "title": "From Sequence",
+          "type": "integer"
+        },
+        "max": {
+          "maximum": 2000,
+          "minimum": 1,
+          "title": "Max",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "project",
+        "run_id",
+        "span_id",
+        "max"
+      ],
+      "title": "RunsEventsForSpanRequest",
       "type": "object"
     },
     "RunsListReply": {
@@ -1935,6 +6576,35 @@
         "project": {
           "title": "Project",
           "type": "string"
+        },
+        "digest_runs": {
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 100,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Digest Runs"
+        },
+        "with_dashboard": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Dashboard"
         }
       },
       "required": [
@@ -1945,6 +6615,709 @@
       ],
       "title": "RunsListRequest",
       "type": "object"
+    },
+    "RunsReadEventsReply": {
+      "additionalProperties": false,
+      "description": "One page of a run's recorded events, oldest first.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "runs.read_events",
+          "default": "runs.read_events",
+          "title": "Type",
+          "type": "string"
+        },
+        "events": {
+          "items": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          "title": "Events",
+          "type": "array"
+        },
+        "next_sequence": {
+          "exclusiveMinimum": 0,
+          "title": "Next Sequence",
+          "type": "integer"
+        },
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "total_events": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Events"
+        },
+        "total_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Bytes"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "events",
+        "next_sequence",
+        "complete"
+      ],
+      "title": "RunsReadEventsReply",
+      "type": "object"
+    },
+    "RunsReadEventsRequest": {
+      "additionalProperties": false,
+      "description": "A page of one run's recorded events, from its journal on disk, live or ended.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "runs.read_events",
+          "default": "runs.read_events",
+          "title": "Type",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "from_sequence": {
+          "exclusiveMinimum": 0,
+          "title": "From Sequence",
+          "type": "integer"
+        },
+        "max": {
+          "maximum": 2000,
+          "minimum": 1,
+          "title": "Max",
+          "type": "integer"
+        },
+        "with_totals": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Totals"
+        },
+        "kinds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunEventKinds"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "project",
+        "run_id",
+        "from_sequence",
+        "max"
+      ],
+      "title": "RunsReadEventsRequest",
+      "type": "object"
+    },
+    "RunsReadTailReply": {
+      "additionalProperties": false,
+      "description": "The newest events before the request's ``before_sequence``, oldest first.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "runs.read_tail",
+          "default": "runs.read_tail",
+          "title": "Type",
+          "type": "string"
+        },
+        "events": {
+          "items": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          "title": "Events",
+          "type": "array"
+        },
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "last_sequence": {
+          "minimum": 0,
+          "title": "Last Sequence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "events",
+        "complete",
+        "last_sequence"
+      ],
+      "title": "RunsReadTailReply",
+      "type": "object"
+    },
+    "RunsReadTailRequest": {
+      "additionalProperties": false,
+      "description": "The newest recorded events of one run before a sequence, from its journal on disk.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "runs.read_tail",
+          "default": "runs.read_tail",
+          "title": "Type",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "before_sequence": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Before Sequence"
+        },
+        "tail": {
+          "maximum": 2000,
+          "minimum": 1,
+          "title": "Tail",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "project",
+        "run_id",
+        "tail"
+      ],
+      "title": "RunsReadTailRequest",
+      "type": "object"
+    },
+    "RunsSummaryReply": {
+      "additionalProperties": false,
+      "description": "One page of a run's summary: the client's fold of its journal, to ``through_sequence``.\n\nEvery field equals what a client reading the whole journal up to ``through_sequence`` folds\nitself, which is the contract the helper's tests hold it to:\n\n- ``spans``: the run trace (``foldTrace``): each span as its latest span event left it, in\n  the order the spans started, so each comes after its parent;\n- ``overview``: the ``overview`` of the last ``run_started`` event that declares one\n  (``foldOverview``), with no unit or direction a live server adds from run state;\n- ``replies``: the last typed reply of each agent-turn span, by ``agent_execution_finished``\n  events with a ``span_id``, in the order the spans first replied (``implementerOutcomes``);\n- ``tokens`` and ``usage``: the run's spend, folded from ``turn_usage_recorded`` events by\n  summing (``ledgerWith``): ``tokens`` over every turn, those the trace names and those it\n  does not, ``usage`` over each turn span that is named, in the order the spans first spent;\n- ``records``: one ``UsageRecord`` per ``turn_usage_recorded`` event, in journal order, whose\n  tokens sum to ``tokens`` (``server.run_usage``);\n- ``input_gates``: the ``gate_finished`` events before the first ``span_started`` of a\n  workstream span, and after it the passes of a gate that stood failed (a retry of the input's\n  gate: ``foldInputGates``), a client's reading of how the run's input measured;\n- ``terminal``: the last ``run_finished``, ``run_failed`` or ``run_interrupted`` event;\n- the idea rows, the measurement points and the chart are folds of ``spans`` and ``replies``\n  the client already owns (``CandidateFold``, ``performanceFold``); nothing duplicates them.\n\nAn event at or before the last folded sequence is skipped whole, as the client skips it. The\nrun level is final at ``through_sequence``. Events after it are the live tail: read them with\n``runs.read_events`` from ``through_sequence + 1``, or subscribe after ``through_sequence``. A\nrun still writing can move between the pages of one read: every page names its\n``through_sequence``, and a read whose pages disagree starts again.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "runs.summary",
+          "default": "runs.summary",
+          "title": "Type",
+          "type": "string"
+        },
+        "through_sequence": {
+          "minimum": 0,
+          "title": "Through Sequence",
+          "type": "integer"
+        },
+        "event_count": {
+          "minimum": 0,
+          "title": "Event Count",
+          "type": "integer"
+        },
+        "journal_bytes": {
+          "minimum": 0,
+          "title": "Journal Bytes",
+          "type": "integer"
+        },
+        "trace": {
+          "$ref": "#/$defs/TraceFormat"
+        },
+        "rounds_finished": {
+          "minimum": 0,
+          "title": "Rounds Finished",
+          "type": "integer"
+        },
+        "span_count": {
+          "minimum": 0,
+          "title": "Span Count",
+          "type": "integer"
+        },
+        "reply_count": {
+          "minimum": 0,
+          "title": "Reply Count",
+          "type": "integer"
+        },
+        "usage_count": {
+          "minimum": 0,
+          "title": "Usage Count",
+          "type": "integer"
+        },
+        "record_count": {
+          "minimum": 0,
+          "title": "Record Count",
+          "type": "integer"
+        },
+        "tokens": {
+          "$ref": "#/$defs/TokenTally"
+        },
+        "overview": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Overview"
+        },
+        "input_gates": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/InputGate"
+              },
+              "maxItems": 32,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Gates"
+        },
+        "terminal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunTerminal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "spans": {
+          "items": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          "title": "Spans",
+          "type": "array"
+        },
+        "replies": {
+          "items": {
+            "$ref": "#/$defs/TurnReply"
+          },
+          "title": "Replies",
+          "type": "array"
+        },
+        "schemas": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          "title": "Schemas",
+          "type": "object"
+        },
+        "usage": {
+          "items": {
+            "$ref": "#/$defs/SpanTokens"
+          },
+          "title": "Usage",
+          "type": "array"
+        },
+        "records": {
+          "items": {
+            "$ref": "#/$defs/UsageRecord"
+          },
+          "title": "Records",
+          "type": "array"
+        },
+        "next_offset": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Next Offset"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "through_sequence",
+        "event_count",
+        "journal_bytes",
+        "trace",
+        "rounds_finished",
+        "span_count",
+        "reply_count",
+        "usage_count",
+        "record_count",
+        "tokens",
+        "overview",
+        "spans",
+        "replies",
+        "schemas",
+        "usage",
+        "records",
+        "next_offset"
+      ],
+      "title": "RunsSummaryReply",
+      "type": "object"
+    },
+    "RunsSummaryRequest": {
+      "additionalProperties": false,
+      "description": "One page of a run's summary: what its run level shows, as of the journal's end now.\n\nThe summary is the journal's fold the client would compute itself (see\n``RunsSummaryReply``), kept beside the journal so a read costs what the summary holds, not\nwhat the journal does. Its items (every span, then every reply) are read in pages: start at\n``offset`` 0 and continue at each page's ``next_offset`` until it is ``None``.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "runs.summary",
+          "default": "runs.summary",
+          "title": "Type",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "with_ending": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Ending"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "project",
+        "run_id"
+      ],
+      "title": "RunsSummaryRequest",
+      "type": "object"
+    },
+    "SameMachine": {
+      "additionalProperties": false,
+      "description": "Measure on the machine the agent works on.",
+      "properties": {
+        "kind": {
+          "const": "same_machine",
+          "default": "same_machine",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "SameMachine",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
+    },
+    "SlurmClusterSettings": {
+      "additionalProperties": false,
+      "description": "One Slurm cluster as its machine reaches and uses it.",
+      "properties": {
+        "name": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "reach": {
+          "discriminator": {
+            "mapping": {
+              "login_node": "#/$defs/LoginNodeReach",
+              "ssh": "#/$defs/SshReach"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SshReach"
+            },
+            {
+              "$ref": "#/$defs/LoginNodeReach"
+            }
+          ],
+          "title": "Reach"
+        },
+        "workspace": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Workspace",
+          "type": "string"
+        },
+        "partition": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\n\\r]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Partition"
+        },
+        "nodes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nodes"
+        },
+        "time_limit": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9][0-9:-]{0,31}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Time Limit"
+        },
+        "sbatch_options": {
+          "default": [],
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[^\\n\\r]*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Sbatch Options",
+          "type": "array"
+        },
+        "hardware": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClusterHardware"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name",
+        "reach",
+        "workspace"
+      ],
+      "title": "SlurmClusterSettings",
+      "type": "object"
+    },
+    "SlurmTarget": {
+      "additionalProperties": false,
+      "description": "Measure on the Slurm cluster ``compute.list`` names ``cluster``.",
+      "properties": {
+        "kind": {
+          "const": "slurm",
+          "default": "slurm",
+          "title": "Kind",
+          "type": "string"
+        },
+        "cluster": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$",
+          "title": "Cluster",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "cluster"
+      ],
+      "title": "SlurmTarget",
+      "type": "object"
+    },
+    "SpanTokens": {
+      "additionalProperties": false,
+      "description": "The tokens the turns of one agent-turn span spent, summed.",
+      "properties": {
+        "span_id": {
+          "title": "Span Id",
+          "type": "string"
+        },
+        "tally": {
+          "$ref": "#/$defs/TokenTally"
+        }
+      },
+      "required": [
+        "span_id",
+        "tally"
+      ],
+      "title": "SpanTokens",
+      "type": "object"
+    },
+    "SshReach": {
+      "additionalProperties": false,
+      "description": "The cluster is reached from the machine over SSH, by a host alias in its ``~/.ssh/config``.",
+      "properties": {
+        "kind": {
+          "const": "ssh",
+          "default": "ssh",
+          "title": "Kind",
+          "type": "string"
+        },
+        "host": {
+          "maxLength": 255,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@-]*$",
+          "title": "Host",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "host"
+      ],
+      "title": "SshReach",
+      "type": "object"
+    },
+    "StartDocker": {
+      "additionalProperties": false,
+      "description": "Start Docker on the machine.",
+      "properties": {
+        "kind": {
+          "const": "start_docker",
+          "default": "start_docker",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "StartDocker",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
     },
     "StartupProgress": {
       "additionalProperties": false,
@@ -1984,11 +7357,61 @@
       "description": "Where a starting run is, in the order it gets there.\n\nDeclaration order is the order: a starting run only moves to a later stage.",
       "enum": [
         "resolving",
+        "probing_workspace",
         "building_image",
+        "building_tools",
         "starting_container"
       ],
       "title": "StartupStage",
       "type": "string"
+    },
+    "StopFailedCompensationFailure": {
+      "additionalProperties": false,
+      "description": "The registry stop raised before returning typed evidence.",
+      "properties": {
+        "type": {
+          "const": "run.start_compensation_failed",
+          "title": "Type",
+          "type": "string"
+        },
+        "exit_status": {
+          "const": 12,
+          "title": "Exit Status",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "detail": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "kind": {
+          "const": "stop_failed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "instance_id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Instance Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "exit_status",
+        "request_id",
+        "detail",
+        "kind",
+        "instance_id"
+      ],
+      "title": "StopFailedCompensationFailure",
+      "type": "object"
     },
     "StopOutcome": {
       "description": "What ``vibesys instances stop`` observed.",
@@ -2010,6 +7433,155 @@
       ],
       "title": "StopRoute",
       "type": "string"
+    },
+    "StopUnconfirmedCompensationFailure": {
+      "additionalProperties": false,
+      "description": "The registry returned a typed result that does not prove terminal cleanup.\n\nThe stop result is the one source of the instance identity in this variant,\nso a serialized report cannot carry two identities that disagree.",
+      "properties": {
+        "type": {
+          "const": "run.start_compensation_failed",
+          "title": "Type",
+          "type": "string"
+        },
+        "exit_status": {
+          "const": 12,
+          "title": "Exit Status",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "detail": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "kind": {
+          "const": "stop_unconfirmed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "stop_result": {
+          "$ref": "#/$defs/UnconfirmedInstanceStopResult"
+        }
+      },
+      "required": [
+        "type",
+        "exit_status",
+        "request_id",
+        "detail",
+        "kind",
+        "stop_result"
+      ],
+      "title": "StopUnconfirmedCompensationFailure",
+      "type": "object"
+    },
+    "SysboxMissing": {
+      "additionalProperties": false,
+      "description": "The task runs Docker inside its sandbox, which needs a runtime this machine's Docker lacks.",
+      "properties": {
+        "kind": {
+          "const": "sysbox_missing",
+          "default": "sysbox_missing",
+          "title": "Kind",
+          "type": "string"
+        },
+        "task": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Task",
+          "type": "string"
+        },
+        "problem": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Problem",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "task",
+        "problem"
+      ],
+      "title": "SysboxMissing",
+      "type": "object"
+    },
+    "TaskGoal": {
+      "additionalProperties": false,
+      "description": "What a task is for: its goal text and the axes it declares, read from its files.",
+      "properties": {
+        "task": {
+          "title": "Task",
+          "type": "string"
+        },
+        "objectives": {
+          "items": {
+            "$ref": "#/$defs/ExampleObjective"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "goal": {
+          "maxLength": 32000,
+          "title": "Goal",
+          "type": "string"
+        },
+        "goal_truncated": {
+          "title": "Goal Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "task",
+        "objectives",
+        "goal",
+        "goal_truncated"
+      ],
+      "title": "TaskGoal",
+      "type": "object"
+    },
+    "TaskImageUnsupported": {
+      "additionalProperties": false,
+      "description": "The task's Dockerfile cannot be used the way this run would run; ``problem`` is raw text.",
+      "properties": {
+        "kind": {
+          "const": "task_image_unsupported",
+          "default": "task_image_unsupported",
+          "title": "Kind",
+          "type": "string"
+        },
+        "task": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Task"
+        },
+        "problem": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Problem",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "task",
+        "problem"
+      ],
+      "title": "TaskImageUnsupported",
+      "type": "object"
     },
     "TaskList": {
       "additionalProperties": false,
@@ -2040,6 +7612,64 @@
       "title": "TaskList",
       "type": "object"
     },
+    "TaskNeedsProvisioning": {
+      "additionalProperties": false,
+      "description": "The task needs inputs copied into a project of its own, which this run does not do.",
+      "properties": {
+        "kind": {
+          "const": "task_needs_provisioning",
+          "default": "task_needs_provisioning",
+          "title": "Kind",
+          "type": "string"
+        },
+        "task": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Task",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "task"
+      ],
+      "title": "TaskNeedsProvisioning",
+      "type": "object"
+    },
+    "TaskNotFound": {
+      "additionalProperties": false,
+      "description": "The project has no task of that name.",
+      "properties": {
+        "kind": {
+          "const": "task_not_found",
+          "default": "task_not_found",
+          "title": "Kind",
+          "type": "string"
+        },
+        "task": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Task",
+          "type": "string"
+        },
+        "available": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Available",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "task",
+        "available"
+      ],
+      "title": "TaskNotFound",
+      "type": "object"
+    },
     "TaskSummary": {
       "additionalProperties": false,
       "description": "One task of a project.",
@@ -2053,6 +7683,44 @@
         "name"
       ],
       "title": "TaskSummary",
+      "type": "object"
+    },
+    "TaskUnusable": {
+      "additionalProperties": false,
+      "description": "The task's files cannot be loaded; ``problem`` is the loader's own account (raw text).",
+      "properties": {
+        "kind": {
+          "const": "task_unusable",
+          "default": "task_unusable",
+          "title": "Kind",
+          "type": "string"
+        },
+        "task": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Task"
+        },
+        "problem": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Problem",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "task",
+        "problem"
+      ],
+      "title": "TaskUnusable",
       "type": "object"
     },
     "TasksListReply": {
@@ -2119,6 +7787,167 @@
       "title": "TasksListRequest",
       "type": "object"
     },
+    "TokenTally": {
+      "additionalProperties": false,
+      "description": "Tokens spent, counted as the run protocol's ``turn_usage_recorded`` reports them.\n\nA count the provider did not report is ``None``, not zero: a sum is ``None`` until some turn\nreports the count, and then adds only the turns that did, so a reader can tell \"none\" from\n\"zero\" and a sum over turns with a missing count is a lower bound.",
+      "properties": {
+        "input": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Input"
+        },
+        "cache_read": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cache Read"
+        },
+        "cache_write": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cache Write"
+        },
+        "output": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Output"
+        },
+        "reasoning": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reasoning"
+        }
+      },
+      "required": [
+        "input",
+        "cache_read",
+        "cache_write",
+        "output",
+        "reasoning"
+      ],
+      "title": "TokenTally",
+      "type": "object"
+    },
+    "TraceFormat": {
+      "description": "Whether a journal records the run trace, the spans a run's ideas and measurements are read from.",
+      "enum": [
+        "recorded",
+        "predates_trace"
+      ],
+      "title": "TraceFormat",
+      "type": "string"
+    },
+    "TurnReply": {
+      "additionalProperties": false,
+      "description": "The typed reply an agent turn ended with, its schema named by ``schema_id``.\n\n``kind``, the schema and ``value`` are the three fields of the run protocol's ``AgentReply``;\nthe schema is carried once per page in ``schemas`` because it is the repeated, large part.",
+      "properties": {
+        "span_id": {
+          "title": "Span Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Schema Id",
+          "type": "string"
+        },
+        "value": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "span_id",
+        "kind",
+        "schema_id",
+        "value"
+      ],
+      "title": "TurnReply",
+      "type": "object"
+    },
+    "UnconfirmedInstanceStopResult": {
+      "additionalProperties": false,
+      "description": "A complete stop result whose outcome does not prove terminal cleanup.",
+      "properties": {
+        "version": {
+          "const": 1,
+          "default": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "stopping",
+            "still_running",
+            "unsupported"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "route": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StopRoute"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "outcome"
+      ],
+      "title": "UnconfirmedInstanceStopResult",
+      "type": "object"
+    },
     "UnreadableRecord": {
       "additionalProperties": false,
       "description": "A registry entry this reader cannot interpret; ``version`` is ``None`` if it has none.",
@@ -2146,6 +7975,425 @@
       ],
       "title": "UnreadableRecord",
       "type": "object"
+    },
+    "UsageRecord": {
+      "additionalProperties": false,
+      "description": "What one agent turn spent, and who and when it was: the one definition of a usage record.\n\nA projection of the journal (``server.run_usage``): a ``turn_usage_recorded`` event joined to\nthe ``agent_execution_started`` of its ``execution_id``. A value the journal does not hold is\n``None``, never a guess: a turn whose execution start is missing has no role, harness, model,\neffort, version or start. The run is a field so records of many runs fold together without\nchanging the fold. ``role`` and ``harness`` are open sets (the roles of a run's flow, the\nproviders agentshim runs) owned elsewhere, so this contract names no list of them.",
+      "properties": {
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Run Id"
+        },
+        "execution_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Execution Id"
+        },
+        "span_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Span Id"
+        },
+        "round_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Round Label"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Role"
+        },
+        "harness": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Harness"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Model"
+        },
+        "client": {
+          "anyOf": [
+            {
+              "enum": [
+                "scripted",
+                "provider"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client"
+        },
+        "reasoning_effort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reasoning Effort"
+        },
+        "harness_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Harness Version"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Started At"
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ended At"
+        },
+        "tokens": {
+          "$ref": "#/$defs/TokenTally"
+        },
+        "cost_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cost Usd"
+        },
+        "duration_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Duration Ms"
+        }
+      },
+      "required": [
+        "run_id",
+        "execution_id",
+        "span_id",
+        "round_label",
+        "role",
+        "harness",
+        "model",
+        "reasoning_effort",
+        "harness_version",
+        "started_at",
+        "ended_at",
+        "tokens",
+        "cost_usd",
+        "duration_ms"
+      ],
+      "title": "UsageRecord",
+      "type": "object"
+    },
+    "UsageWindowReply": {
+      "additionalProperties": false,
+      "description": "What the Usage page shows for one window.\n\nCosts are the sums of the turns' reported ``cost_usd`` (a turn that reported none counts in\n``unpriced_turns`` and adds nothing, so a total is a lower bound while it is not zero). A turn\nwith no recorded end time cannot be placed in a window: it counts in ``untimed_turns`` and\nnowhere else. ``new_bests`` counts the ideas kept (``IdeaVerdict.KEPT``) whose result landed in\nthe window, and ``cost_per_new_best_usd`` is ``spent_usd`` over it, ``None`` when there is none.\nA run's kept ideas beyond ``DASHBOARD_MAX_POINTS`` are not counted.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "usage.window",
+          "default": "usage.window",
+          "title": "Type",
+          "type": "string"
+        },
+        "since": {
+          "format": "date-time",
+          "title": "Since",
+          "type": "string"
+        },
+        "until": {
+          "format": "date-time",
+          "title": "Until",
+          "type": "string"
+        },
+        "spent_usd": {
+          "minimum": 0,
+          "title": "Spent Usd",
+          "type": "number"
+        },
+        "spend_per_hour_usd": {
+          "minimum": 0,
+          "title": "Spend Per Hour Usd",
+          "type": "number"
+        },
+        "tokens": {
+          "$ref": "#/$defs/TokenTally"
+        },
+        "turns": {
+          "minimum": 0,
+          "title": "Turns",
+          "type": "integer"
+        },
+        "unpriced_turns": {
+          "minimum": 0,
+          "title": "Unpriced Turns",
+          "type": "integer"
+        },
+        "untimed_turns": {
+          "minimum": 0,
+          "title": "Untimed Turns",
+          "type": "integer"
+        },
+        "new_bests": {
+          "minimum": 0,
+          "title": "New Bests",
+          "type": "integer"
+        },
+        "cost_per_new_best_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cost Per New Best Usd"
+        },
+        "by_run": {
+          "items": {
+            "$ref": "#/$defs/RunSpend"
+          },
+          "maxItems": 100,
+          "title": "By Run",
+          "type": "array"
+        },
+        "by_agent": {
+          "items": {
+            "$ref": "#/$defs/AgentSpend"
+          },
+          "maxItems": 64,
+          "title": "By Agent",
+          "type": "array"
+        },
+        "agents_omitted": {
+          "minimum": 0,
+          "title": "Agents Omitted",
+          "type": "integer"
+        },
+        "missing_runs": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 100,
+          "title": "Missing Runs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "since",
+        "until",
+        "spent_usd",
+        "spend_per_hour_usd",
+        "tokens",
+        "turns",
+        "unpriced_turns",
+        "untimed_turns",
+        "new_bests",
+        "cost_per_new_best_usd",
+        "by_run",
+        "by_agent",
+        "agents_omitted",
+        "missing_runs"
+      ],
+      "title": "UsageWindowReply",
+      "type": "object"
+    },
+    "UsageWindowRequest": {
+      "additionalProperties": false,
+      "description": "What the named runs of a project spent in ``[since, until)``.\n\n``until`` is \"now\" for the reply: the helper reads no clock for it, so a client names the time it\nis asking at (or the end of a past window) and the answer is a function of the journals and\nthese two instants. A turn is placed at the time it ended (``UsageRecord.ended_at``).",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "usage.window",
+          "default": "usage.window",
+          "title": "Type",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "run_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 100,
+          "title": "Run Ids",
+          "type": "array"
+        },
+        "since": {
+          "format": "date-time",
+          "title": "Since",
+          "type": "string"
+        },
+        "until": {
+          "format": "date-time",
+          "title": "Until",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "project",
+        "run_ids",
+        "since",
+        "until"
+      ],
+      "title": "UsageWindowRequest",
+      "type": "object"
+    },
+    "WorkerStartRefusedCompensationFailure": {
+      "additionalProperties": false,
+      "description": "The helper could not start the worker that owns the compensating stop.",
+      "properties": {
+        "type": {
+          "const": "run.start_compensation_failed",
+          "title": "Type",
+          "type": "string"
+        },
+        "exit_status": {
+          "const": 12,
+          "title": "Exit Status",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "detail": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "kind": {
+          "const": "worker_start_refused",
+          "title": "Kind",
+          "type": "string"
+        },
+        "instance_id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Instance Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "exit_status",
+        "request_id",
+        "detail",
+        "kind",
+        "instance_id"
+      ],
+      "title": "WorkerStartRefusedCompensationFailure",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -2154,19 +8402,42 @@
     "request": {
       "discriminator": {
         "mapping": {
+          "agent_logins.list": "#/$defs/AgentLoginsListRequest",
+          "agent_logins.start": "#/$defs/AgentLoginsStartRequest",
+          "checkout.inspect": "#/$defs/CheckoutInspectRequest",
+          "compute.add_cluster": "#/$defs/ComputeAddClusterRequest",
+          "compute.list": "#/$defs/ComputeListRequest",
+          "compute.remove_cluster": "#/$defs/ComputeRemoveClusterRequest",
+          "compute.test_cluster": "#/$defs/ComputeTestClusterRequest",
+          "examples.destination": "#/$defs/ExamplesDestinationRequest",
+          "examples.list": "#/$defs/ExamplesListRequest",
           "harnesses.list": "#/$defs/HarnessesListRequest",
           "hello": "#/$defs/HelloRequest",
           "instances.inspect": "#/$defs/InstancesInspectRequest",
           "instances.list": "#/$defs/InstancesListRequest",
           "instances.unwatch": "#/$defs/InstancesUnwatchRequest",
           "instances.watch": "#/$defs/InstancesWatchRequest",
+          "logs.cancel": "#/$defs/LogsCancelRequest",
+          "logs.list": "#/$defs/LogsListRequest",
+          "logs.read": "#/$defs/LogsReadRequest",
+          "machine.describe": "#/$defs/MachineDescribeRequest",
           "paths.complete": "#/$defs/PathsCompleteRequest",
           "ping": "#/$defs/PingRequest",
+          "project.copy_out": "#/$defs/ProjectCopyOutRequest",
+          "project.create_from_example": "#/$defs/ProjectCreateFromExampleRequest",
+          "project.task_goal": "#/$defs/ProjectTaskGoalRequest",
           "run.connect": "#/$defs/RunConnectRequest",
+          "run.preflight": "#/$defs/RunPreflightRequest",
+          "run.reader": "#/$defs/RunReaderRequest",
           "run.start": "#/$defs/RunStartRequest",
           "run.stop": "#/$defs/RunStopRequest",
+          "runs.events_for_span": "#/$defs/RunsEventsForSpanRequest",
           "runs.list": "#/$defs/RunsListRequest",
-          "tasks.list": "#/$defs/TasksListRequest"
+          "runs.read_events": "#/$defs/RunsReadEventsRequest",
+          "runs.read_tail": "#/$defs/RunsReadTailRequest",
+          "runs.summary": "#/$defs/RunsSummaryRequest",
+          "tasks.list": "#/$defs/TasksListRequest",
+          "usage.window": "#/$defs/UsageWindowRequest"
         },
         "propertyName": "type"
       },
@@ -2208,7 +8479,76 @@
           "$ref": "#/$defs/PathsCompleteRequest"
         },
         {
+          "$ref": "#/$defs/LogsListRequest"
+        },
+        {
+          "$ref": "#/$defs/LogsReadRequest"
+        },
+        {
+          "$ref": "#/$defs/LogsCancelRequest"
+        },
+        {
           "$ref": "#/$defs/HarnessesListRequest"
+        },
+        {
+          "$ref": "#/$defs/RunsReadEventsRequest"
+        },
+        {
+          "$ref": "#/$defs/RunsEventsForSpanRequest"
+        },
+        {
+          "$ref": "#/$defs/RunsReadTailRequest"
+        },
+        {
+          "$ref": "#/$defs/RunsSummaryRequest"
+        },
+        {
+          "$ref": "#/$defs/MachineDescribeRequest"
+        },
+        {
+          "$ref": "#/$defs/CheckoutInspectRequest"
+        },
+        {
+          "$ref": "#/$defs/RunPreflightRequest"
+        },
+        {
+          "$ref": "#/$defs/ExamplesListRequest"
+        },
+        {
+          "$ref": "#/$defs/ProjectCreateFromExampleRequest"
+        },
+        {
+          "$ref": "#/$defs/ProjectCopyOutRequest"
+        },
+        {
+          "$ref": "#/$defs/ComputeListRequest"
+        },
+        {
+          "$ref": "#/$defs/ComputeTestClusterRequest"
+        },
+        {
+          "$ref": "#/$defs/ComputeAddClusterRequest"
+        },
+        {
+          "$ref": "#/$defs/ComputeRemoveClusterRequest"
+        },
+        {
+          "$ref": "#/$defs/AgentLoginsListRequest"
+        },
+        {
+          "$ref": "#/$defs/AgentLoginsStartRequest"
+        },
+        {
+          "$ref": "#/$defs/ProjectTaskGoalRequest"
+        },
+        {
+          "$ref": "#/$defs/ExamplesDestinationRequest"
+        },
+        {
+          "$ref": "#/$defs/UsageWindowRequest"
+        },
+        {
+          "$ref": "#/$defs/RunReaderRequest"
         }
       ],
       "title": "Request"
@@ -2216,7 +8556,16 @@
     "message": {
       "discriminator": {
         "mapping": {
+          "agent_logins.list": "#/$defs/AgentLoginsListReply",
+          "agent_logins.start": "#/$defs/AgentLoginsStartReply",
+          "checkout.inspect": "#/$defs/CheckoutInspectReply",
+          "compute.add_cluster": "#/$defs/ComputeAddClusterReply",
+          "compute.list": "#/$defs/ComputeListReply",
+          "compute.remove_cluster": "#/$defs/ComputeRemoveClusterReply",
+          "compute.test_cluster": "#/$defs/ComputeTestClusterReply",
           "error": "#/$defs/HelperError",
+          "examples.destination": "#/$defs/ExamplesDestinationReply",
+          "examples.list": "#/$defs/ExamplesListReply",
           "harnesses.list": "#/$defs/HarnessesListReply",
           "hello": "#/$defs/HelloReply",
           "instances.changed": "#/$defs/InstancesChanged",
@@ -2224,13 +8573,27 @@
           "instances.list": "#/$defs/InstancesListReply",
           "instances.unwatch": "#/$defs/InstancesUnwatchReply",
           "instances.watch": "#/$defs/InstancesWatchReply",
+          "logs.cancel": "#/$defs/LogsCancelReply",
+          "logs.list": "#/$defs/LogsListReply",
+          "logs.read": "#/$defs/LogsReadReply",
+          "machine.describe": "#/$defs/MachineDescribeReply",
           "paths.complete": "#/$defs/PathsCompleteReply",
           "ping": "#/$defs/PingReply",
+          "project.copy_out": "#/$defs/ProjectCopyOutReply",
+          "project.create_from_example": "#/$defs/ProjectCreateFromExampleReply",
+          "project.task_goal": "#/$defs/ProjectTaskGoalReply",
           "run.connect": "#/$defs/RunConnectReply",
+          "run.preflight": "#/$defs/RunPreflightReply",
+          "run.reader": "#/$defs/RunReaderReply",
           "run.start": "#/$defs/RunStartReply",
           "run.stop": "#/$defs/RunStopReply",
+          "runs.events_for_span": "#/$defs/RunsEventsForSpanReply",
           "runs.list": "#/$defs/RunsListReply",
-          "tasks.list": "#/$defs/TasksListReply"
+          "runs.read_events": "#/$defs/RunsReadEventsReply",
+          "runs.read_tail": "#/$defs/RunsReadTailReply",
+          "runs.summary": "#/$defs/RunsSummaryReply",
+          "tasks.list": "#/$defs/TasksListReply",
+          "usage.window": "#/$defs/UsageWindowReply"
         },
         "propertyName": "type"
       },
@@ -2272,7 +8635,76 @@
           "$ref": "#/$defs/PathsCompleteReply"
         },
         {
+          "$ref": "#/$defs/LogsListReply"
+        },
+        {
+          "$ref": "#/$defs/LogsReadReply"
+        },
+        {
+          "$ref": "#/$defs/LogsCancelReply"
+        },
+        {
           "$ref": "#/$defs/HarnessesListReply"
+        },
+        {
+          "$ref": "#/$defs/RunsReadEventsReply"
+        },
+        {
+          "$ref": "#/$defs/RunsEventsForSpanReply"
+        },
+        {
+          "$ref": "#/$defs/RunsReadTailReply"
+        },
+        {
+          "$ref": "#/$defs/RunsSummaryReply"
+        },
+        {
+          "$ref": "#/$defs/MachineDescribeReply"
+        },
+        {
+          "$ref": "#/$defs/CheckoutInspectReply"
+        },
+        {
+          "$ref": "#/$defs/RunPreflightReply"
+        },
+        {
+          "$ref": "#/$defs/ExamplesListReply"
+        },
+        {
+          "$ref": "#/$defs/ProjectCreateFromExampleReply"
+        },
+        {
+          "$ref": "#/$defs/ProjectCopyOutReply"
+        },
+        {
+          "$ref": "#/$defs/ComputeListReply"
+        },
+        {
+          "$ref": "#/$defs/ComputeTestClusterReply"
+        },
+        {
+          "$ref": "#/$defs/ComputeAddClusterReply"
+        },
+        {
+          "$ref": "#/$defs/ComputeRemoveClusterReply"
+        },
+        {
+          "$ref": "#/$defs/AgentLoginsListReply"
+        },
+        {
+          "$ref": "#/$defs/AgentLoginsStartReply"
+        },
+        {
+          "$ref": "#/$defs/ProjectTaskGoalReply"
+        },
+        {
+          "$ref": "#/$defs/ExamplesDestinationReply"
+        },
+        {
+          "$ref": "#/$defs/UsageWindowReply"
+        },
+        {
+          "$ref": "#/$defs/RunReaderReply"
         },
         {
           "$ref": "#/$defs/InstancesChanged"
@@ -2285,12 +8717,16 @@
     },
     "channel_end": {
       "$ref": "#/$defs/ChannelEnd"
+    },
+    "compensation_failure": {
+      "$ref": "#/$defs/RunStartCompensationFailure"
     }
   },
   "required": [
     "request",
     "message",
-    "channel_end"
+    "channel_end",
+    "compensation_failure"
   ],
   "title": "HostHelperDocument",
   "type": "object",
@@ -2299,11 +8735,80 @@
     "instances.watch": "instances_watch",
     "instances.unwatch": "instances_watch",
     "paths.complete": "paths_complete",
-    "harnesses.list": "harnesses"
+    "logs.list": "logs",
+    "logs.read": "logs",
+    "logs.cancel": "logs_cancel",
+    "harnesses.list": "harnesses",
+    "runs.read_events": "run_history",
+    "runs.events_for_span": "run_span_events",
+    "runs.read_tail": "run_tail",
+    "runs.summary": "run_trace",
+    "machine.describe": "machine_describe",
+    "checkout.inspect": "checkout_inspect",
+    "run.preflight": "preflight",
+    "project.task_goal": "project_goal",
+    "examples.destination": "example_destination",
+    "examples.list": "examples",
+    "project.create_from_example": "examples",
+    "project.copy_out": "examples",
+    "compute.list": "machine_compute",
+    "compute.test_cluster": "machine_compute",
+    "compute.add_cluster": "machine_compute",
+    "compute.remove_cluster": "machine_compute",
+    "agent_logins.list": "agent_logins",
+    "agent_logins.start": "agent_logins",
+    "usage.window": "usage_window",
+    "run.reader": "chat_ended_runs"
   },
   "x-vibesys-feature-by-field": {
     "run.start": {
-      "harness": "harnesses"
+      "harness": "harnesses",
+      "options": "run_options",
+      "agents": "run_role_agents",
+      "measure_on": "measurement_target"
+    },
+    "run.preflight": {
+      "harness": "harnesses",
+      "options": "run_options",
+      "agents": "run_role_agents",
+      "measure_on": "measurement_target",
+      "with_roles": "run_roles",
+      "with_backend": "run_backend",
+      "with_causes": "run_causes",
+      "with_project_clean": "project_clean"
+    },
+    "harnesses.list": {
+      "with_generations": "harness_generations"
+    },
+    "logs.list": {
+      "span_id": "logs_by_span"
+    },
+    "runs.read_events": {
+      "with_totals": "run_history_pages",
+      "kinds": "run_trace_events"
+    },
+    "runs.summary": {
+      "offset": "run_summary",
+      "with_ending": "run_ending"
+    },
+    "runs.list": {
+      "digest_runs": "run_digest",
+      "with_dashboard": "run_dashboard"
+    },
+    "examples.list": {
+      "with_catalogue": "example_catalogue"
+    },
+    "run.reader": {
+      "with_chat": "chat_ended_run_questions"
     }
+  },
+  "x-vibesys-event-types-by-kinds": {
+    "trace": [
+      "span_started",
+      "span_updated",
+      "span_ended",
+      "run_started",
+      "gate_finished"
+    ]
   }
 }

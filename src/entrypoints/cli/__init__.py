@@ -7,8 +7,8 @@ this package is the shared surface between them.
 
 The loop is picked by ``--outer-loop {agent, profile-guided, plain, evolve}``:
 
-  "agent" / "profile-guided": orchestrated hypothesis loops. Their policy
-             memory lives below ``roadmap/`` and ``profile/``.
+  "agent" / "profile-guided": orchestrated hypothesis loops. The designer's
+             roadmap is kept in the run's state; the profiler's findings travel in its reply.
   "plain": issue-driven outer loop on the core lifecycle. Its issue board (a local
              issues.json, or GitHub issues) is filled by the performance evaluator
              and the judge, and the implementer works one issue at a time.
@@ -23,8 +23,11 @@ mode entries share.
 
 from __future__ import annotations
 
+import os
+import secrets
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from entrypoints.cli.args import (
@@ -37,13 +40,14 @@ from entrypoints.cli.args import (
     _parse_cli_objective,
     _parse_runs_dir,
 )
+from entrypoints.cli.compare import run as run_compare
 from entrypoints.cli.config import (
     _load_config_or_default,
     _prepare_experiment_repository,
     load_config_and_skills,
 )
 from entrypoints.cli.constants import _OUTER_LOOPS
-from entrypoints.cli.environment import run_environment_spec_from_args
+from entrypoints.cli.environment import TaskImageBuild, run_environment_spec_from_args
 from entrypoints.cli.errors import _configuration_error, _RunArgumentParser
 from entrypoints.cli.inputs import (
     _apply_bundle_profiler_default,
@@ -59,8 +63,15 @@ from entrypoints.cli.loops import (
     _run_request,
     _validate_evolve,
     _validate_plain,
+    validated_run_request,
 )
-from entrypoints.cli.resume import _resolve_resume_args
+from entrypoints.cli.preflight import run_preflight
+from entrypoints.cli.resume import (
+    _load_resume_selection,
+    _recorded_cli_selection,
+    _resolve_resume_args,
+)
+from entrypoints.control import control_main, time_ordered_id
 from vibesys.api import ConfigurationError, RunRequest, boot_trace
 from vibesys.api.request import (
     generate_experiment_name,
@@ -68,7 +79,7 @@ from vibesys.api.request import (
     with_operator_constraints,
 )
 from vs_project.api import generate_run_id
-from vs_sim.api import MonotonicClock, SystemClock, utc_datetime
+from vs_sim.api import MonotonicClock, SystemClock, follow_launcher, utc_datetime
 
 if TYPE_CHECKING:
     import argparse
@@ -106,6 +117,7 @@ __all__ = [
     "_validate_agent",
     "_validate_target_inputs",
     "_with_operator_constraints",
+    "build_reader_request",
     "build_run_request",
     "configuration_error",
     "dispatch",
@@ -116,7 +128,7 @@ __all__ = [
     "parse_runs_dir",
     "render_configuration_error",
     "run_environment_spec_from_args",
-    "start_boot_trace",
+    "start_process",
 ]
 
 
@@ -132,7 +144,7 @@ class CliInvocation:
 class _LoopCommand:
     """Parser and validation for one CLI outer-loop selection."""
 
-    build_parser: Callable[[], argparse.ArgumentParser]
+    build_parser: Callable[[], _RunArgumentParser]
     validate: Callable[[argparse.Namespace], None]
 
 
@@ -154,6 +166,25 @@ def build_run_request(invocation: CliInvocation) -> RunRequest:
     return _build_run_request(invocation.args)
 
 
+def build_reader_request(project_root: Path, run_id: str) -> RunRequest:
+    """Restore saved settings without switching branches, resuming or building images."""
+    invocation = parse_cli_invocation(
+        [
+            "--project",
+            str(project_root),
+            "--resume",
+            run_id,
+        ],
+        read_only=True,
+    )
+    request = validated_run_request(invocation.args, read_only=True)[0]
+    environment = run_environment_spec_from_args(
+        invocation.args,
+        task_image=TaskImageBuild(backend=request.backend, allow_build=False),
+    )
+    return request.model_copy(update={"run_environment": environment})
+
+
 def _explicit_cli_dests(
     parser: argparse.ArgumentParser,
     argv: list[str],
@@ -171,17 +202,33 @@ def _explicit_cli_dests(
     )
 
 
-def parse_cli_invocation(argv: list[str]) -> CliInvocation:
+def parse_cli_invocation(argv: list[str], *, read_only: bool = False) -> CliInvocation:
     """Parse and validate one invocation without printing or exiting."""
+    if argv and argv[0] == "relaunch":
+        argv = argv[1:]
+        if _option_from_argv(argv, "--resume") is None:
+            _configuration_error(
+                "relaunch requires --resume RUN",
+                code="relaunch_requires_run",
+                stage="resume_resolution",
+            )
     loop_kind, remaining = _extract_loop_selection(argv)
+    selection = None
+    if any(argument == "--resume" or argument.startswith("--resume=") for argument in remaining):
+        probe, _ = _LOOP_COMMANDS[loop_kind].build_parser().parse_known_args(remaining)
+        _normalize_runs_dir(probe)
+        selection = _load_resume_selection(probe)
+        explicit_loop, _ = _extract_flag(argv, "--outer-loop")
+        if selection is not None and explicit_loop is None:
+            loop_kind, _ = _recorded_cli_selection(selection.manifest.orchestration.id)
     command = _LOOP_COMMANDS[loop_kind]
     parser = command.build_parser()
     parser.prog = f"vibesys --outer-loop {loop_kind}"
-    args = parser.parse_args(remaining)
+    args = parser.parse_run_arguments(remaining)
     args.outer_loop = loop_kind
     args.explicit_cli_dests = _explicit_cli_dests(parser, remaining)
     _normalize_runs_dir(args)
-    _resolve_resume_args(args, loop_kind=loop_kind)
+    _resolve_resume_args(args, loop_kind=loop_kind, selection=selection, read_only=read_only)
     command.validate(args)
     _allocate_run_id(args)
     return CliInvocation(loop_kind=loop_kind, args=args)
@@ -202,8 +249,13 @@ def _allocate_run_id(args: argparse.Namespace) -> None:
     args.run_id = generate_run_id(args.exp_name, now=utc_datetime(SystemClock()))
 
 
-def start_boot_trace() -> None:
-    """Time this process's boot stages from here on, on the real clocks."""
+def start_process() -> None:
+    """Begin a run process: follow its launcher, then time its boot stages on the real clocks.
+
+    Started by the ``vibesys`` launcher, the process hangs up when the launcher exits, by
+    any means (``follow_launcher``).
+    """
+    follow_launcher(os.environ)
     boot_trace.install(boot_trace.BootTrace(wall=SystemClock(), elapsed=MonotonicClock()))
 
 
@@ -211,6 +263,21 @@ def dispatch(argv: list[str], runs: Runs | None = None) -> None:
     """Parse and run one headless VibeSys invocation, on ``runs`` or the default launcher."""
     if argv and argv[0] == "validate":
         _run_validate(argv[1:])
+        return
+    if argv and argv[0] == "compare":
+        raise SystemExit(run_compare(argv[1:]))
+    if argv and argv[0] == "control":
+        raise SystemExit(
+            control_main(
+                argv[1:],
+                cwd=Path.cwd(),
+                new_control_id=lambda: time_ordered_id(SystemClock().now(), secrets.token_hex(4)),
+                out=sys.stdout,
+                err=sys.stderr,
+            )
+        )
+    if argv and argv[0] == "preflight":
+        run_preflight(argv[1:], lambda arguments: parse_cli_invocation(arguments).args)
         return
     with boot_trace.span("dispatch"), boot_trace.span("parse_cli_invocation"):
         invocation = parse_cli_invocation(argv)

@@ -104,6 +104,22 @@ Unknown keys inside `partial` and `progress` are rejected like any other
 unknown key. `partial` was added to protocol 2 as an optional key, so a stream
 without it is unchanged.
 
+- `error_kind` (string, optional): why the run produced no row, from a closed
+  set. A reader rejects any other value as `INVALID_RECORD`, naming the key.
+  - `"transient"` (the default when the key is absent): the record says nothing
+    about whether measuring again could help. Every `error` written before
+    kinds existed reads as this, so a stream without the key is unchanged.
+  - `"requirement_not_met"`: the measured revision lacks a capability the task
+    requires, so the failure is deterministic and measuring it again cannot
+    help. The framework never measures the same revision again.
+- `requirement` (string, no whitespace): names the unmet capability (for
+  example `prefix_cache`). Required with `"requirement_not_met"` and rejected
+  with any other kind, as `INVALID_RECORD` naming the key.
+
+```json
+{"kind":"error","message":"no prefix-cache hits","error_kind":"requirement_not_met","requirement":"prefix_cache"}
+```
+
 ## Serialization
 
 - One record per line, UTF-8, newline-terminated.

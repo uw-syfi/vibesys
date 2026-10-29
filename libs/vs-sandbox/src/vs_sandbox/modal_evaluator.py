@@ -67,6 +67,7 @@ _OUTPUT_END_MARKER = "__VIBESYS_OUTPUT_END__"
 _TRUSTED_SETUP_FAILURE_EXIT_CODE = 96
 _EVALUATOR_BOOTSTRAP_FAILURE_EXIT_CODE = 97
 _EVALUATOR_PACKAGE_STAGE_PATH = ".vibesys-evaluator-package"
+_EVALUATOR_GO_MODULES_STAGE_PATH = ".vibesys-evaluator-go-modules"
 _EVALUATOR_TOOLS_STAGE_PATH = ".vibesys-evaluator-tools"
 _EVALUATOR_TOOLCHAINS_STAGE_PATH = ".vibesys-evaluator-toolchains"
 _FRAMEWORK_BIN_STAGE_PATH = ".bin"
@@ -607,6 +608,7 @@ def _build_stage_archive(
             relative_path = Path(relative)
             reserved_paths = (
                 Path(_EVALUATOR_PACKAGE_STAGE_PATH),
+                Path(_EVALUATOR_GO_MODULES_STAGE_PATH),
                 Path(_EVALUATOR_TOOLS_STAGE_PATH),
                 Path(_EVALUATOR_TOOLCHAINS_STAGE_PATH),
                 Path(_FRAMEWORK_BIN_STAGE_PATH),
@@ -617,6 +619,7 @@ def _build_stage_archive(
                 for child in workspace_root.iterdir():
                     if child.name not in {
                         _EVALUATOR_PACKAGE_STAGE_PATH,
+                        _EVALUATOR_GO_MODULES_STAGE_PATH,
                         _EVALUATOR_TOOLS_STAGE_PATH,
                         _EVALUATOR_TOOLCHAINS_STAGE_PATH,
                         _FRAMEWORK_BIN_STAGE_PATH,

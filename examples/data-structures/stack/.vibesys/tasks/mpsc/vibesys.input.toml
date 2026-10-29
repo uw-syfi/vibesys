@@ -1,4 +1,5 @@
 version = 1
+backends = ["cpu"]
 
 [agent]
 domain = "generic"
@@ -26,3 +27,15 @@ timeout_seconds = 300
 [benchmark.result]
 json_argument = "--output-json"
 metric = "total_ops_per_sec"
+
+[catalogue]
+domain = "data-structures"
+
+[catalogue.hardware]
+accelerator = "CPU"
+count = 1
+vendor = "cpu"
+
+[catalogue.workload]
+name = "Multiple producers, single consumer"
+description = "A bounded stack where several threads add items and one thread removes them; checked for linearizability, scored in operations per second."

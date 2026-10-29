@@ -5,6 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -12,11 +13,13 @@ from vs_core.api import (
     ArtifactId,
     ArtifactRef,
     ClockAdvanced,
+    ContractError,
     ControlId,
     ControlInput,
     Flow,
     FlowState,
     InputId,
+    PauseOwner,
     RunControlEvent,
     Scope,
     ScopeInputTarget,
@@ -133,6 +136,55 @@ def test_mixed_queue_commits_input_occurrences_controls_and_wakes_in_order(
         restarted.submit(SessionInputReceived(input=row.input), now_at=100)
         assert restarted.advance()
     assert restarted.record.envelope.core.sessions.inputs == before_inputs
+
+
+def test_an_operator_control_core_refuses_is_set_aside_and_the_run_goes_on() -> None:
+    """Core refuses a control the bridge judged against an older state; the loop goes on.
+
+    Here a wait for capacity reaches a run that is not paused. The control is set aside
+    with core's reason for the control bridge, which answers the operator; core records
+    nothing for it. Before, the refusal propagated out of the loop and ended the run.
+    """
+    shell = ticking_runtime(FakeStateStore())
+    shell.start("first", now_at=0, lease_duration=100)
+    before = shell.record
+    refused = ControlInput(
+        control_id=ControlId(root="op-w1"), action="resume", when="capacity_returns"
+    )
+    steer = ControlInput(control_id=ControlId(root="op-s1"), action="steer")
+    shell.submit(RunControlEvent(control=refused, now_at=1), now_at=1)
+    shell.submit(RunControlEvent(control=steer, now_at=2), now_at=2)
+
+    assert shell.advance()
+    assert shell.record == before
+    assert shell.advance()
+    assert [c.control_id.root for c in shell.record.envelope.core.run.controls] == ["op-s1"]
+    assert [(error.control, error.detail) for error in shell.take_refused()] == [
+        (refused, "only a paused run waits for capacity")
+    ]
+    assert shell.take_refused() == ()
+
+
+def test_a_control_core_holds_with_another_payload_still_fails_the_loop() -> None:
+    """Regression (R2 of the #3091 re-check): only core's ``control_refusal`` is set aside.
+
+    A control under an identity core holds for a different control is a defect in whatever
+    built it (the control bridge), not a refusal an operator can be told about. Before, the
+    loop dropped every rejected control, so this became a warning and the run went on.
+    """
+    shell = ticking_runtime(FakeStateStore())
+    shell.start("first", now_at=0, lease_duration=100)
+    steer = ControlInput(control_id=ControlId(root="op-x"), action="steer")
+    shell.submit(RunControlEvent(control=steer, now_at=1), now_at=1)
+    assert shell.advance()
+    clash = ControlInput(
+        control_id=ControlId(root="op-x"), action="pause", owner=PauseOwner.OPERATOR
+    )
+    shell.submit(RunControlEvent(control=clash, now_at=2), now_at=2)
+
+    with pytest.raises(ContractError, match="control identity payload conflict"):
+        shell.advance()
+    assert shell.take_refused() == ()
 
 
 def test_disk_reopen_loads_identical_complete_runtime_record(tmp_path: Path) -> None:

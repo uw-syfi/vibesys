@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from vibesys.api.auxiliary import AuxiliaryAgentLaunch, ManagedAgent
-    from vibesys.run.integration import RunResources
+    from vibesys.run.integration import AuxiliaryResources
     from vs_agent.api import (
         AgentClientProtocol,
         AgentEventSink,
@@ -45,7 +45,7 @@ class SessionAgents(Protocol):
 
     def open_environment(
         self,
-        resources: RunResources,
+        resources: AuxiliaryResources,
         *,
         mounts: tuple[HostResource, ...] = (),
         agent_backend: str | None = None,
@@ -57,7 +57,7 @@ class SessionAgents(Protocol):
     def create_agent(
         self,
         launch: AuxiliaryAgentLaunch,
-        resources: RunResources,
+        resources: AuxiliaryResources,
         agent_events: AgentEventSink,
     ) -> ManagedAgent:
         """Open one conversation and transfer its resource ownership."""
@@ -87,6 +87,7 @@ class SessionImplementations:
     """The host's threads, sockets and processes the run's environments and evaluations run on."""
     profiler_preflight: ProfilerPreflight
     """Checks native profiler availability on the host."""
+    checkout: tuple[str, bool] = ("", False)
     stateless_tool_servers: Mapping[str, Callable[[object], ToolServerDescriptor | None]] | None = (
         None
     )

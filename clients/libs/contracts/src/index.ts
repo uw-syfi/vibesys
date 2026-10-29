@@ -4,6 +4,9 @@
  * that turns untrusted wire text into those types, and the error taxonomy that validator and the
  * transports report through. Runtime neutral: no DOM, no Node.
  */
+
+export {CHAT_AGENT_KIND, isChatAgentKind} from './agent-kinds.js';
+export {CODE_IDS, declaredRoleName, roleName, wordsOfId} from './display-names.js';
 export {
   BackendClientError,
   type BackendErrorKind,
@@ -13,10 +16,8 @@ export {
 export type {
   ActiveExecutions,
   ActiveExecutionsChunkMessage,
+  AgentReply,
   AgentStatusData,
-  ChatModelOption,
-  ChatOptions,
-  ChatProviderOptions,
   DesignFileChange,
   DesignPatch,
   DesignRound,
@@ -31,14 +32,18 @@ export type {
   IterationResult,
   IterationSummary,
   IterationUnavailable,
+  LogOwner,
+  NarrationLevel,
+  NarrationLine,
   ProtocolRequest,
   ProtocolResponse,
   RequestInput,
   RunEvent,
+  RunOverview,
   RunSnapshot,
   RunStatus,
   ServerMessage,
-  TuiDefaults,
+  Span,
 } from './protocol.js';
 export {PROTOCOL_VERSION} from './protocol.js';
 export {
@@ -47,5 +52,8 @@ export {
   parseServerMessage,
   responseError,
   streamFailure,
+  validateAgentReply,
   validateRunEvent,
+  validateRunSnapshot,
 } from './protocol-parse.js';
+export {isSynthesizedTask, SYNTHESIZED_TASK_NAME} from './synthesized-task.js';

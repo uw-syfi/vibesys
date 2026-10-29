@@ -12,11 +12,11 @@ import pytest
 from pydantic import ValidationError
 from tests.support.core_plugins import failing_plugin
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
-from tests.support.real_git import REAL_PROCESSES
+from tests.support.real_git import NO_GIT, REAL_PROCESSES
 from tests.support.task_project import write_task
 
 from entrypoints.production import production_timing
-from launch import LaunchSettings, create_session, default_runs
+from launch import LaunchSettings, built_in_orchestrations, create_session, default_runs
 from launch.agents import BuiltInSessionAgents
 from launch.testing import FakeSessionAgents
 from vibesys.api import (
@@ -36,7 +36,11 @@ from vs_agent.api import NULL_AGENT_EVENT_SINK, AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
-from vs_runtime.api.infrastructure import HostEnvironmentFacts, RunEnvironmentPresentation
+from vs_runtime.api.infrastructure import (
+    HostEnvironmentFacts,
+    RunEnvironmentPresentation,
+    RunEnvironmentSessionRole,
+)
 from vs_sandbox.api import EnvironmentBindMount, ProjectPathPolicy
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock
@@ -58,6 +62,7 @@ class _EnvironmentRequest:
     agent_backend: str | None = "stub"
     cli_provider: str | None = "codex"
     project_path_policy: ProjectPathPolicy = field(default_factory=ProjectPathPolicy)
+    session_role: RunEnvironmentSessionRole = RunEnvironmentSessionRole.ROOT
 
 
 class _EnvironmentSession:
@@ -68,6 +73,7 @@ class _EnvironmentSession:
             return _identity_path(host)
 
         self.sandbox = SimpleNamespace(agent_path=agent_path)
+        self.capture_commands = self.sandbox
         self.view = SimpleNamespace(cli_sandboxed=False, isolated=False)
         self.close_count = 0
         self.close_failures = close_failures
@@ -138,13 +144,23 @@ def _resumable_client(**_kwargs: object) -> FakeAgentClient:
 
 @pytest.fixture(params=[False, True], ids=["built-in", "fake"])
 def agent_settings(request: pytest.FixtureRequest) -> LaunchSettings:
+    network = UnixNetwork()
     return LaunchSettings(
         blocking=ThreadBlockingRunner(),
-        network=UnixNetwork(),
+        network=network,
         timing=production_timing(),
         processes=REAL_PROCESSES,
         piped_processes=FakePipedProcessLauncher(),
-        agents=FakeSessionAgents(OsThreads()) if request.param else None,
+        agents=(
+            FakeSessionAgents(
+                OsThreads(),
+                network=network,
+                repository=NO_GIT,
+                registry=built_in_orchestrations(),
+            )
+            if request.param
+            else None
+        ),
         backend_factory=host_container_backend,
     )
 
@@ -280,6 +296,7 @@ def test_ready_projection_exposes_no_runtime_resources(tmp_path: Path) -> None:
     assert observed == [
         RunReady(
             record=observed[0].record,
+            project_root=Project.open(tmp_path / "project").root,
             log_directory=tmp_path / "logs",
             frontend_state_directory=observed[0].frontend_state_directory,
             agent_provider="codex",
@@ -423,10 +440,15 @@ def test_auxiliary_selection_rejected_before_environment_acquisition(
     launch = AuxiliaryAgentLaunch.model_validate(
         _launch(evidence).model_dump() | {"provider": provider}
     )
-    agents = agent_settings.agents or BuiltInSessionAgents(client_factory=_resumable_client)
+    agents = agent_settings.agents or BuiltInSessionAgents(
+        client_factory=_resumable_client,
+        network=agent_settings.network,
+        git=NO_GIT,
+        registry=built_in_orchestrations(),
+    )
 
     with pytest.raises(ValueError, match=provider):
-        agents.create_agent(launch, resources, NULL_AGENT_EVENT_SINK)
+        agents.create_agent(launch, resources.auxiliary(), NULL_AGENT_EVENT_SINK)
 
     assert environment.requests == []
     assert environment.sessions == []

@@ -12,25 +12,30 @@ from dataclasses import dataclass, field
 from vibesys.candidates.api import STOPPED as STOPPED_TEXT
 from vibesys.candidates.api import (
     Baseline,
-    Measured,
     assessment,
     gates_of,
     improves_on,
+    input_metrics,
     measurement,
     settle_for,
     space_of,
 )
 from vibesys.hypothesis import HypothesisOutcome
 from vibesys.hypothesis.cadence import keeps_hypothesis_active
-from vibesys.metrics import AcceptedReading, reading_of
+from vibesys.metrics import AcceptedReading, MetricRow, reading_of
+from vibesys.orchestration.dynamic.models import UnappliedPart
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
 from vibesys.orchestration.dynamic.search._parents import ParentSnapshot
 from vibesys.orchestration.dynamic.search._values import (
     AgentName,
     Blocker,
     BlockerKind,
+    CombineSource,
+    DropReason,
     Failure,
     FailureKind,
+    MergeOutcome,
+    MergeSource,
     Proof,
     RoundRecord,
     Unreachable,
@@ -42,6 +47,7 @@ from vs_core.api.search import (
     AssessmentKind,
     AttemptBudget,
     AttemptId,
+    AttemptRef,
     EvidenceKind,
     Failed,
     FailureReason,
@@ -51,6 +57,7 @@ from vs_core.api.search import (
     RevisionRef,
     Settle,
     Settlement,
+    SpanId,
     TaskTerms,
     Value,
     WaitRefusal,
@@ -75,7 +82,26 @@ class WorkstreamStart(Value):
     prior: RoundRecord | None
     """The previous round of the same hypothesis, when this workstream continues it."""
     config: DynamicConfig
-    baseline: Baseline
+    baseline: Baseline | None
+    """The input's measurement when the workstream started; None while it was still being measured."""
+    merge: tuple[MergeSource, ...] = ()
+    """For a merge: the candidates to merge into ``parent`` (main), in order."""
+    combine: tuple[CombineSource, ...] = ()
+    """For a combine: the parts to apply onto ``parent`` (main), in order, fixed at scheduling."""
+    rebase_onto: RevisionRef | None = None
+    """The run's main, when it advanced past the base of the hypothesis this continues."""
+    parent_main: RevisionRef | None = None
+    """Where ``parent``'s own change against main starts (`RunRecord.main_base_at`): a main, or a
+    merged candidate of its lineage. A catch-up applies main's change from it to ``rebase_onto``.
+    None in a start scheduled by an older build."""
+    started_by: tuple[str, ...] = ()
+    """The agents whose reply planned this workstream (the planner, or the outliner of a step):
+    they start its agents. Empty when no agent's reply is known to have planned it."""
+
+    @property
+    def main_base(self) -> RevisionRef | None:
+        """Where this workstream's own change starts: its catch-up main, else its parent's start."""
+        return self.rebase_onto or self.parent_main
 
     @property
     def attempt(self) -> AttemptId:
@@ -89,14 +115,20 @@ class WorkstreamStart(Value):
 
     @property
     def implements(self) -> bool:
-        """Whether the workstream makes a candidate, rather than looking at the parent."""
+        """Whether the workstream implements a hypothesis, rather than merging or looking."""
         return self.plan.kind is WorkKind.IMPLEMENT
 
     @property
     def workspace(self) -> WorkspacePlan:
-        """An implementer works in an isolated child of the parent; others only read it."""
-        mode = WorkspaceMode.ISOLATED_CHILD if self.implements else WorkspaceMode.READ_ONLY_REVISION
+        """An implementer or a merger works in an isolated child of the parent; a profiler reads it."""
+        writes = self.plan.kind in {WorkKind.IMPLEMENT, WorkKind.MERGE}
+        mode = WorkspaceMode.ISOLATED_CHILD if writes else WorkspaceMode.READ_ONLY_REVISION
         return WorkspacePlan(mode=mode, base=self.parent)
+
+    @property
+    def review_always(self) -> bool:
+        """Whether every candidate is reviewed: a plan step accepted on review alone."""
+        return not self.plan.measured
 
     @property
     def turns(self) -> int:
@@ -125,6 +157,10 @@ class Candidate(Value):
     next_step: str = ""
     revision: RevisionRef | None = None
     """The revision core retained for the turn; None when no checkpoint was awaited or none exists."""
+    unapplied: tuple[UnappliedPart, ...] = ()
+    """For a combine: what the implementer could not apply, naming only the combine's parts."""
+    unattributed: tuple[UnappliedPart, ...] = ()
+    """The reply's ``unapplied`` entries that named no part of the combine (`RoundRecord`)."""
 
 
 class Verdict(Value):
@@ -152,6 +188,15 @@ class Unmeasured(Value):
     result: Result | None = None
 
 
+class MergeReport(Value):
+    """What the merger answered, with the commit core checkpointed when it merged."""
+
+    outcome: MergeOutcome
+    summary: str = ""
+    reason: str = ""
+    revision: RevisionRef | None = None
+
+
 class Evidence(Value):
     """The trusted readings of a candidate, and the evidence they were decoded from."""
 
@@ -169,6 +214,8 @@ class Closing(Value):
     evidence: Evidence = Evidence()
     cause: Failure | None = None
     unreachable: Unreachable | None = None
+    merge: MergeReport | None = None
+    """What a merge workstream's merger answered."""
 
     @property
     def readings(self) -> tuple[AcceptedReading, ...]:
@@ -177,8 +224,19 @@ class Closing(Value):
 
     @property
     def candidate(self) -> RevisionRef | None:
-        """The revision the attempt retained, if any."""
+        """The revision the attempt retained, if any: a merge's commit, else the candidate's."""
+        if self.merge is not None:
+            return self.merge.revision
         return None if self.result is None else self.result.candidate.revision
+
+    def scored(self, plan: WorkPlan) -> bool:
+        """Whether settling it compares a candidate with the input, so needs its measurement.
+
+        Only a measured candidate is compared. A plan step accepted on its own checks
+        (``evaluate = "none"``) never is, and a closing with a failure cause is ineligible however
+        its candidate measured: both settle at once, without waiting for the input's measurement.
+        """
+        return plan.measured and self.candidate is not None and self.cause is None
 
     @property
     def review_passed(self) -> bool | None:
@@ -213,6 +271,16 @@ class Work:
     """The latest candidate the implementer made, reviewed or not."""
     workspace: Workspace | None = None
     """The workspace once it opened; None before, and when the workstream never got one."""
+    baseline: Baseline | None = None
+    """The input's measurement once the workstream has it (see `_measure.the_input`)."""
+    input_wait_since: float | None = None
+    """When, on the run clock, the workstream first waited on something that needs the input."""
+    overdue_reported: bool = False
+    """Whether its wait for the input has passed the run's limit (`_measure.while_input_pending`)."""
+    merged: MergeReport | None = None
+    """The merger's commit, once it made one, so a failed measurement still settles with it."""
+    gate: tuple[SpanId, str] | None = None
+    """The span of the trusted measurement once it was issued, and the stages it measures."""
 
     def ended(self, ended: "WorkEndedError") -> Closing:
         """The closing of work that did not finish: what it carried, with the failure."""
@@ -221,11 +289,12 @@ class Work:
             evidence=Evidence(proof=ended.proof),
             cause=ended.failure,
             unreachable=ended.unreachable,
+            merge=self.merged,
         )
 
     def stopped(self) -> Closing:
         """The closing of work the operator stopped."""
-        return Closing(result=self.carried, cause=STOPPED)
+        return Closing(result=self.carried, cause=STOPPED, merge=self.merged)
 
 
 class WorkEndedError(Exception):
@@ -247,6 +316,8 @@ class WorkEndedError(Exception):
 
 STOPPED = Failure(kind=FailureKind.STOPPED)
 """How an operator stop ends a workstream."""
+RESTARTED = Failure(kind=FailureKind.NOT_MEASURED, dropped=DropReason.RESTARTED)
+"""How a workstream ends whose workspace a restart after a code change could not give back."""
 
 
 @dataclass(frozen=True)
@@ -267,6 +338,7 @@ class WorkstreamDone:
     result: Result | None = None
     evidence: Evidence = field(default_factory=Evidence)
     unreachable: Unreachable | None = None
+    merge: MergeReport | None = None
 
     @classmethod
     def stopped(cls, start: WorkstreamStart) -> "WorkstreamDone":
@@ -279,6 +351,28 @@ class WorkstreamDone:
     ) -> "WorkstreamDone":
         """No workspace was admitted: the slot is refunded."""
         return cls(start, failure=failure, refunded=True, withheld=withheld)
+
+    @classmethod
+    def lost(
+        cls,
+        start: WorkstreamStart,
+        workspace: AttemptRef,
+        result: Result | None,
+        merge: MergeReport | None = None,
+    ) -> "WorkstreamDone":
+        """Resumed after a code change without its workspace: the restart settled it.
+
+        The restart settled it as the workstream's salvage said: a candidate's or a merger's
+        code is kept as work in progress, unmeasured (`salvage_of`); its settlement reached no
+        flow, so main does not move to a lost merge's commit.
+        """
+        return cls(
+            start,
+            failure=RESTARTED,
+            generation=workspace.generation,
+            result=result,
+            merge=merge,
+        )
 
     @classmethod
     def closed(
@@ -295,17 +389,22 @@ class WorkstreamDone:
             result=closing.result,
             evidence=closing.evidence,
             unreachable=closing.unreachable,
+            merge=closing.merge,
         )
 
 
 # -- what a workstream asserts when it closes ----------------------------------------------------------
 
 
-def assertion(w: WorkstreamStart, closing: Closing, terms: TaskTerms) -> Settle:
+def assertion(
+    w: WorkstreamStart, closing: Closing, terms: TaskTerms, baseline: Baseline | None
+) -> Settle:
     """The assessments, eligibility and retention the closing proposes for the workspace.
 
     A profile workstream measures a revision without proposing one, so it settles as ineligible
-    and discarded. A candidate is eligible when it passed the task's gates and beats the input.
+    and discarded. A candidate, an implementer's or a merger's commit, is retained when it passed
+    accuracy and is eligible when it passed the task's gates and beats the input, so a closing
+    that is scored (`Closing.scored`) needs the input's measurement (``baseline``).
     """
     if w.plan.kind is WorkKind.PROFILE:
         profile = reading_of(closing.readings, EvidenceKind.PROFILING)
@@ -316,25 +415,100 @@ def assertion(w: WorkstreamStart, closing: Closing, terms: TaskTerms) -> Settle:
             outcome="failed" if closing.cause is not None else "succeeded",
             candidate=None,
         )
-    space = space_of(terms)
-    benchmark = reading_of(closing.readings, EvidenceKind.BENCHMARK)
-    seen = w.baseline.reading if isinstance(w.baseline, Measured) else None
-    beats = improves_on(
-        measurement(None if benchmark is None else benchmark.headline()),
-        measurement(seen.metrics[0] if seen is not None and seen.metrics else None),
-        space=space,
-        when_input_unmeasured=True,
-    )
+    if not w.plan.measured:
+        return _unmeasured_step(closing, terms)
+    if closing.cause is not None and closing.cause.kind is FailureKind.NOT_MEASURED:
+        return _not_measured(closing, terms)
+    if closing.scored(w.plan) and baseline is None:
+        message = "a candidate is scored only once the input's measurement is known"
+        raise ValueError(message)
     return settle_for(
         closing,
         gates=gates_of(terms),
-        beats_input=beats,
+        beats_input=beats_input(closing, terms, baseline),
         unsettled=UNSETTLED,
+    )
+
+
+def headline(closing: Closing) -> MetricRow | None:
+    """The candidate's headline benchmark value, when it was measured."""
+    benchmark = reading_of(closing.readings, EvidenceKind.BENCHMARK)
+    return None if benchmark is None else benchmark.headline()
+
+
+def input_headline(baseline: Baseline | None) -> MetricRow | None:
+    """The input's headline value: the first number of the bar a candidate must beat, if any."""
+    bar = input_metrics(baseline)
+    return bar[0] if bar else None
+
+
+def beats_input(closing: Closing, terms: TaskTerms, baseline: Baseline | None) -> bool:
+    """Whether the candidate's headline improves on the input's bar (no bar is beaten).
+
+    The bar is `input_metrics`: a measured input's benchmark, or that of one that failed only
+    its accuracy check. With no bar the candidate is judged on the task's gates alone, and a
+    run that adopts it says so (`RunRecord.ending`).
+    """
+    return improves_on(
+        measurement(headline(closing)),
+        measurement(input_headline(baseline)),
+        space=space_of(terms),
+        when_input_unmeasured=True,
     )
 
 
 UNSETTLED = frozenset({HypothesisOutcome.BLOCKED, HypothesisOutcome.IMPLEMENTATION_FAILED})
 """The implementer's own outcomes that make a candidate ineligible however it measured."""
+
+
+def salvage_of(closing: Closing, terms: TaskTerms) -> Settle:
+    """How a workspace settles if a restart cannot give it back to its workstream.
+
+    ``closing`` carries what the workstream had made: its latest candidate, or a merger's
+    commit. It settles as a candidate dropped unmeasured: never eligible, its code kept as work
+    in progress.
+    """
+    return _not_measured(closing.model_copy(update={"cause": RESTARTED}), terms)
+
+
+def _unmeasured_step(closing: Closing, terms: TaskTerms) -> Settle:
+    """The settlement of a plan step accepted on review alone (``evaluate = "none"``).
+
+    Its candidate is never measured, so never winner-eligible. When the judge accepted it and
+    nothing failed, it is retained as work in progress: the revision the steps that depend on it
+    build on. Anything else is discarded, as an unmeasured candidate is.
+    """
+    settled = settle_for(closing, gates=gates_of(terms), beats_input=False, unsettled=UNSETTLED)
+    accepted = (
+        closing.candidate is not None
+        and closing.cause is None
+        and closing.review_passed is True
+        and closing.outcome not in UNSETTLED
+    )
+    if not accepted:
+        return settled.model_copy(update={"eligible": False})
+    return settled.model_copy(
+        update={"retention": "wip", "candidate": closing.candidate, "eligible": False}
+    )
+
+
+def _not_measured(closing: Closing, terms: TaskTerms) -> Settle:
+    """The settlement of a candidate dropped from the evaluation queue unmeasured.
+
+    It is never eligible, but the code is kept as work in progress: a newer candidate that
+    superseded it was built on it, and a plan step may still build on it.
+    """
+    settled = settle_for(closing, gates=gates_of(terms), beats_input=False, unsettled=UNSETTLED)
+    if closing.candidate is None:
+        return settled.model_copy(update={"eligible": False, "outcome": "cancelled"})
+    return settled.model_copy(
+        update={
+            "retention": "wip",
+            "candidate": closing.candidate,
+            "eligible": False,
+            "outcome": "cancelled",
+        }
+    )
 
 
 # -- how a workstream ends ---------------------------------------------------------------------------
@@ -400,6 +574,8 @@ def blocked_failure(blocker: Blocker) -> Failure:
             return Failure(kind=FailureKind.IMPLEMENTATION_FAILED)
         case BlockerKind.REJECTED:
             return Failure(kind=FailureKind.REVIEW_REJECTED)
+        case BlockerKind.REPLY_REJECTED:
+            return Failure(kind=FailureKind.INVALID_REPLY, role=AgentName.IMPLEMENTER)
         case BlockerKind.NO_REPLY:
             if blocker.turn_failure is not None:
                 return Failure(
@@ -462,6 +638,8 @@ def round_of(done: WorkstreamDone) -> RoundRecord:
         failure_tail=_failing_tail(done),
         settlement=None if settlement is None else settlement.settlement_id,
         kept_active=kept,
+        unapplied=() if result is None else result.candidate.unapplied,
+        unattributed=() if result is None else result.candidate.unattributed,
     )
 
 

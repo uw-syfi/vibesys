@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from vs_evaluator_protocol.errors import ReasonCode, reject
 from vs_evaluator_protocol.records import (
     PROTOCOL_VERSION,
+    ErrorKind,
     ErrorRecord,
     Hello,
     Result,
@@ -37,12 +38,18 @@ class Measurement:
 
     `partial` is what a failed run measured before it stopped, exactly as its
     `error` record reported it; it is never set on a measured row.
+
+    `error_kind` is why a failed run produced no row (`ErrorKind`), and
+    `requirement` the capability a `REQUIREMENT_NOT_MET` failure lacks. Both are
+    set on a failure only, and `requirement` exactly for that kind.
     """
 
     metrics: Mapping[str, MetricSpec] | None
     values: Mapping[str, float] | None = None
     failure: str | None = None
     partial: PartialMeasurement | None = None
+    error_kind: ErrorKind | None = None
+    requirement: str | None = None
 
     def __post_init__(self) -> None:
         """Reject an outcome that is neither exactly a row nor a failure."""
@@ -54,6 +61,12 @@ class Measurement:
             raise ValueError(message)
         if self.partial is not None and self.failure is None:
             message = "only a failed measurement carries a partial measurement"
+            raise ValueError(message)
+        if (self.failure is None) != (self.error_kind is None):
+            message = "a failed measurement carries its error kind, and a measured row does not"
+            raise ValueError(message)
+        if (self.error_kind is ErrorKind.REQUIREMENT_NOT_MET) != (self.requirement is not None):
+            message = "a measurement names its unmet requirement exactly when it is not met"
             raise ValueError(message)
 
     @property
@@ -85,14 +98,12 @@ def read_measurement(records: Iterable[Record]) -> Measurement:
                 # cannot declare anything until that configuration loads, and
                 # a failure before then must still reach the framework as a
                 # reason rather than as a missing file.
-                return Measurement(metrics=None, failure=record.message, partial=record.partial)
+                return _failed(None, record)
             # A hello may still arrive; whether this is HELLO_NOT_FIRST or
             # MISSING_HELLO is only decided once the stream is exhausted.
             continue
         elif isinstance(record, ErrorRecord):
-            return Measurement(
-                metrics=hello.metrics, failure=record.message, partial=record.partial
-            )
+            return _failed(hello.metrics, record)
         else:
             values = _read_values(record, hello=hello, values=values, position=position)
 
@@ -101,6 +112,17 @@ def read_measurement(records: Iterable[Record]) -> Measurement:
     if values is None:
         reject(ReasonCode.NO_OUTCOME, "stream has neither a result nor an error record")
     return Measurement(metrics=hello.metrics, values=values)
+
+
+def _failed(metrics: Mapping[str, MetricSpec] | None, record: ErrorRecord) -> Measurement:
+    """The failed measurement an `error` record reports, with its kind and requirement."""
+    return Measurement(
+        metrics=metrics,
+        failure=record.message,
+        partial=record.partial,
+        error_kind=record.error_kind,
+        requirement=record.requirement,
+    )
 
 
 def check_objectives(hello: Hello, objective_names: Set[str]) -> None:

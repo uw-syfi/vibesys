@@ -143,20 +143,21 @@ class Faulted:
     """A world whose measurements and turns go the way `Outcomes` says, over the scripted world.
 
     With ``stop_at`` the operator's stop arrives while the ``stop_at``-th request executes,
-    the way a control arrives mid-run in production (the shell admits it between steps).
+    the way a control arrives mid-run in production (the shell admits it between steps); a tuple
+    stops the run at each of those requests, across the hosts a resume starts.
     """
 
     def __init__(
         self,
         outcomes: Outcomes | None = None,
         *,
-        stop_at: int | None = None,
+        stop_at: int | tuple[int, ...] | None = None,
         base: SkeletonScript | None = None,
     ) -> None:
         """Layer ``outcomes`` over ``base`` (a plain scripted world by default)."""
         self._base = base or SkeletonScript()
         self._outcomes = outcomes or Outcomes()
-        self._stop_at = stop_at
+        self._stops = (stop_at,) if isinstance(stop_at, int) else stop_at or ()
         self._shell: CoreRuntime[Any] | None = None
         self.requests = 0
         self._submitted = 0
@@ -164,6 +165,8 @@ class Faulted:
         self._infrastructure: set[str] = set()
         self.stopped = False
         self.executed: Counter[str] = Counter()
+        self.kinds: list[str] = []
+        """The kind of every request the run executed, in order: where a stop point lands."""
 
     def attach(self, shell: CoreRuntime[Any], clock: object) -> None:
         """Hear the shell once it exists: the operator's stop is submitted to it, as a control is."""
@@ -174,17 +177,18 @@ class Faulted:
         """Answer from the generated outcome when there is one, else from the scripted world."""
         if request.request_id is not None:
             self.executed[request.request_id.root] += 1
+        self.kinds.append(request.kind)
         self._maybe_stop(core)
         faulted = self._measurement(request) or self._job(request, core) or self._turn(request)
         return self._base(request, core) if faulted is None else faulted
 
     def _maybe_stop(self, core: CoreState) -> None:
         position, self.requests = self.requests, self.requests + 1
-        if self._stop_at != position or self._shell is None:
+        if position not in self._stops or self._shell is None:
             return
         self.stopped = True
         control = ControlInput(
-            control_id=ControlId(root="stop"), action="stop", mode=StopMode.DRAIN
+            control_id=ControlId(root=f"stop-{position}"), action="stop", mode=StopMode.DRAIN
         )
         self._shell.submit(
             RunControlEvent(control=control, now_at=core.run.now_at), now_at=core.run.now_at

@@ -30,12 +30,13 @@ def turn_result(
     observation: Observation,
     *,
     reply: TurnObserved | None = None,
-    lost: bool = False,
+    loss: TurnFailureKind | None = None,
 ) -> TurnResult:
     """The terminal result of a turn, with its failure kind and bounded executor text.
 
     ``reply`` is the turn's observation as core accepted it: its output, and whether it
-    still carries the suspension core recorded.
+    still carries the suspension core recorded. A ``lost`` turn core ended while the run's
+    capacity gate ``held`` it was lost to its provider, not by its transport.
     """
     output_schema = None if reply is None else reply.output_schema
     output_json = None if reply is None else reply.output_json
@@ -48,12 +49,11 @@ def turn_result(
             output_json=output_json,
             suspending=suspending,
         )
-    if lost:
-        failure = TurnFailureKind.TRANSPORT_LOST
-    elif observation.status == ObservationStatus.CANCELLED:
-        failure = TurnFailureKind.CANCELLED
-    else:
-        failure = TurnFailureKind.PROVIDER_FAILED
+    failure = loss or (
+        TurnFailureKind.CANCELLED
+        if observation.status == ObservationStatus.CANCELLED
+        else TurnFailureKind.PROVIDER_FAILED
+    )
     return TurnResult(
         invocation=ref,
         observation=observation,

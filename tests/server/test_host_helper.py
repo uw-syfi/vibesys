@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from pydantic import ValidationError
 from tests.server.host_helper_support import (
     HOME,
     VIBESYS_VERSION,
@@ -26,16 +27,19 @@ from tests.server.host_helper_support import (
     ChannelClient,
     FakeDirectories,
     FakeRunLauncher,
+    accept_operator,
     fake_host,
     record,
     serve_on,
 )
 
 from server.host_api import (
+    COMPENSATION_FAILURE_EXIT_STATUS,
     HELPER_PROTOCOL_VERSIONS,
     PATHS_COMPLETE_CAP,
     ChannelEnd,
     ChannelEndOutcome,
+    CompensationFailureKind,
     DetachedLaunchFailure,
     HelloRequest,
     HelperError,
@@ -46,6 +50,7 @@ from server.host_api import (
     InstancesChanged,
     InstancesInspectReply,
     InstancesInspectRequest,
+    InstanceStopResult,
     LiveInstanceRecord,
     PathsCompleteReply,
     PathsCompleteRequest,
@@ -54,9 +59,11 @@ from server.host_api import (
     ResumeRun,
     RunConnectReply,
     RunPhase,
+    RunStartCompensationFailure,
     RunStartReply,
     RunStartRequest,
     RunStatus,
+    StopOutcome,
     parse_helper_request,
 )
 from server.host_helper import (
@@ -86,24 +93,32 @@ from server.host_helper import (
 )
 from server.host_helper_requests import (
     PathHints,
-    ProjectRun,
     ScannedEntry,
     answer,
     launch_arguments,
     negotiate,
-    run_summaries,
     select_completions,
     split_prefix,
 )
-from server.registry import FakeInstanceStore, LiveRegistry, StopEffects
+from server.host_run_reads import ProjectRun, run_summaries
+from server.registry import FakeInstanceStore, FakeStopIntents, LiveRegistry, StopEffects
 from server.relay import EXIT_STATUS
 from vs_decode.api import Unreadable
-from vs_sim.api.testing import HANG_GUARD_S, FakeProcessSignaller, SimNetwork, SimThreads, examples
+from vs_sim.api import WorkerStartRefusedError
+from vs_sim.api.testing import (
+    HANG_GUARD_S,
+    FakeProcessSignaller,
+    RefusingReservableThreads,
+    SimNetwork,
+    SimThreads,
+    examples,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vs_sim.api import Event, Listener
+    from server.registry import StopRequester
+    from vs_sim.api import Event, Listener, ProcessSignaller, ReservableThreads, WorkerReservation
 
 ALL_FEATURES = tuple(feature.value for feature in HelperFeature)
 
@@ -133,9 +148,14 @@ def _request(
 # ----- negotiation -----
 
 
-@given(st.integers(1, 5), st.integers(1, 5), st.lists(st.text(max_size=20), max_size=4))
-def test_hello_picks_the_highest_shared_version_and_the_known_features(
-    low: int, high: int, extra: list[str]
+@given(
+    st.integers(1, 5),
+    st.integers(1, 5),
+    st.lists(st.text(max_size=20), max_size=4),
+    st.frozensets(st.sampled_from(list(HelperFeature))),
+)
+def test_hello_picks_the_highest_shared_version_and_the_offered_features(
+    low: int, high: int, extra: list[str], offered: frozenset[HelperFeature]
 ) -> None:
     request = HelloRequest(
         request_id="h",
@@ -145,11 +165,11 @@ def test_hello_picks_the_highest_shared_version_and_the_known_features(
         app_version="a",
     )
     helper_low, helper_high = HELPER_PROTOCOL_VERSIONS
-    outcome = negotiate(request, VIBESYS_VERSION)
+    outcome = negotiate(request, VIBESYS_VERSION, offered)
     if low <= high and max(low, helper_low) <= min(high, helper_high):
         assert not isinstance(outcome, HelperError)
         assert outcome.version == min(high, helper_high)
-        assert outcome.features == frozenset(HelperFeature)
+        assert outcome.features == offered
     else:
         assert isinstance(outcome, HelperError)
         assert outcome.code is HelperErrorCode.INCOMPATIBLE
@@ -501,7 +521,7 @@ def test_a_late_successful_start_owns_its_slot_until_compensation_finishes() -> 
     )
 
     assert outputs == (StopStartedRun("start", started.id),)
-    assert state.compensating == frozenset({"start"})
+    assert state.compensating == {"start": started.id}
     state, outputs = step(
         state,
         Received(_line(_request("ping", "overflow")), 1.0),
@@ -511,7 +531,8 @@ def test_a_late_successful_start_owns_its_slot_until_compensation_finishes() -> 
     assert isinstance(outputs[0].message, HelperError)
     assert outputs[0].message.code is HelperErrorCode.CHANNEL_BUSY
 
-    state, outputs = step(state, CompensationFinished("start"), "v")
+    stopped = InstanceStopResult(id=started.id, outcome=StopOutcome.STOPPED)
+    state, outputs = step(state, CompensationFinished("start", stopped), "v")
     assert outputs == ()
     _, outputs = step(
         state,
@@ -565,6 +586,7 @@ def test_inspection_executes_through_the_host_helper_registry_interface() -> Non
             instance_id="0123456789ab",
         ),
         host,
+        threads.event(),
     )
 
     assert isinstance(reply, InstancesInspectReply)
@@ -607,8 +629,11 @@ def test_a_prefix_splits_into_the_directory_listed_and_the_name_matched(prefix: 
 
 
 def _complete(directories: FakeDirectories, prefix: str) -> PathsCompleteReply | HelperError:
-    host = fake_host(SimThreads(), SimNetwork(SimThreads()), directories=directories)
-    reply = answer(PathsCompleteRequest(request_id="c", deadline_ms=1, prefix=prefix), host)
+    threads = SimThreads()
+    host = fake_host(threads, SimNetwork(threads), directories=directories)
+    reply = answer(
+        PathsCompleteRequest(request_id="c", deadline_ms=1, prefix=prefix), host, threads.event()
+    )
     assert isinstance(reply, PathsCompleteReply | HelperError)
     return reply
 
@@ -724,7 +749,7 @@ def test_a_start_launches_in_the_resolved_project_and_returns_the_launch(tmp_pat
     threads = SimThreads()
     host = fake_host(threads, SimNetwork(threads), launcher=launcher)
     request = RunStartRequest(request_id="s", deadline_ms=1, project=str(project), task="spsc")
-    reply = answer(request, host)
+    reply = answer(request, host, threads.event())
     assert reply == RunStartReply(request_id="s", launch=started)
     assert launcher.calls == [(project.resolve(), ("--detach", "--task", "spsc"))]
 
@@ -746,7 +771,7 @@ def test_project_errors_are_typed_and_name_the_path(
     launcher = host.launcher
     project = make(tmp_path)
     request = parse_helper_request_dict(_request(method, "r", project=str(project)))
-    reply = answer(request, host)
+    reply = answer(request, host, threads.event())
     assert isinstance(reply, HelperError)
     assert reply.code is code
     assert reply.path is not None
@@ -766,9 +791,15 @@ def test_tasks_and_runs_of_a_project(tmp_path: Path) -> None:
     threads = SimThreads()
     host = fake_host(threads, SimNetwork(threads))
     tasks = answer(
-        parse_helper_request_dict(_request("tasks.list", "t", project=str(project))), host
+        parse_helper_request_dict(_request("tasks.list", "t", project=str(project))),
+        host,
+        threads.event(),
     )
-    runs = answer(parse_helper_request_dict(_request("runs.list", "r", project=str(project))), host)
+    runs = answer(
+        parse_helper_request_dict(_request("runs.list", "r", project=str(project))),
+        host,
+        threads.event(),
+    )
     assert tasks.model_dump(mode="json")["tasks"]["tasks"] == [{"name": "spsc"}]
     assert runs.model_dump(mode="json")["runs"] == {
         "project_root": str(project.resolve()),
@@ -875,6 +906,100 @@ class _GatedStoppingRequester:
         return True
 
 
+@dataclass(frozen=True)
+class _RaisingStopRequester:
+    """A stop boundary that fails before it can acknowledge the request."""
+
+    def request_stop(self, socket_path: str) -> bool:
+        del socket_path
+        message = "control stop failed"
+        raise OSError(message)
+
+
+@dataclass(frozen=True)
+class _ExitingStopRequester:
+    """A stop boundary whose worker exits outside the Exception hierarchy."""
+
+    def request_stop(self, socket_path: str) -> bool:
+        del socket_path
+        raise SystemExit
+
+
+class _UnprintableStopError(BaseException):
+    """A boundary failure whose diagnostic formatter also fails."""
+
+    def __str__(self) -> str:
+        raise RuntimeError
+
+
+@dataclass(frozen=True)
+class _UnprintableStopRequester:
+    """A stop boundary that raises a failure unsafe to interpolate."""
+
+    def request_stop(self, socket_path: str) -> bool:
+        del socket_path
+        raise _UnprintableStopError
+
+
+@dataclass(frozen=True)
+class _RejectingStopRequester:
+    """A control socket that does not acknowledge the stop request."""
+
+    def request_stop(self, socket_path: str) -> bool:
+        del socket_path
+        return False
+
+
+@dataclass(frozen=True)
+class _AcknowledgingStopRequester:
+    """A server that accepts a stop but remains live past the bounded wait."""
+
+    def request_stop(self, socket_path: str) -> bool:
+        del socket_path
+        return True
+
+
+@dataclass(frozen=True)
+class _UnsupportedProcessSignaller:
+    """A host that cannot signal by a stable process identity."""
+
+    def exists(self, pid: int) -> bool:
+        del pid
+        return True
+
+    def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
+        del pid, current
+        raise NotImplementedError("stable process signalling is unavailable")
+
+
+def _failed_compensation_components(
+    scenario: str,
+    threads: SimThreads,
+    started: LiveInstanceRecord,
+    release: Callable[[], None],
+) -> tuple[StopRequester, ProcessSignaller, ReservableThreads]:
+    """Select the deterministic boundary failure for one compensation scenario."""
+    requester: StopRequester = _RejectingStopRequester()
+    signaller: ProcessSignaller = FakeProcessSignaller(set())
+    channel_threads: ReservableThreads = threads
+    if scenario == "stop_raises":
+        requester = _RaisingStopRequester()
+    elif scenario == "stop_base_exception":
+        requester = _ExitingStopRequester()
+    elif scenario == "unprintable_stop_exception":
+        requester = _UnprintableStopRequester()
+    elif scenario == "still_running":
+        signaller = FakeProcessSignaller({started.pid})
+    elif scenario == "stopping":
+        requester = _AcknowledgingStopRequester()
+    elif scenario == "unsupported":
+        signaller = _UnsupportedProcessSignaller()
+    else:
+        requester = _StoppingRequester(release)
+        channel_threads = RefusingReservableThreads(threads, {"helper-stop-started": 1})
+    return requester, signaller, channel_threads
+
+
 @dataclass
 class _RejectRunStartOutput:
     """Writes ordinary replies to the client but rejects a successful start reply."""
@@ -919,6 +1044,7 @@ def test_a_start_that_finishes_after_its_deadline_is_stopped_before_channel_exit
             signaller=FakeProcessSignaller(set()),
             clock=threads,
             pause=threads.sleep,
+            intents=FakeStopIntents(),
         ),
     )
 
@@ -969,6 +1095,7 @@ def test_an_undeliverable_successful_start_is_stopped_before_channel_exit(
             signaller=FakeProcessSignaller(set()),
             clock=threads,
             pause=threads.sleep,
+            intents=FakeStopIntents(),
         ),
     )
 
@@ -998,6 +1125,152 @@ def test_an_undeliverable_successful_start_is_stopped_before_channel_exit(
     assert still_live is None
 
 
+@pytest.mark.parametrize(
+    ("scenario", "expected_kind", "expected_outcome"),
+    [
+        ("stop_raises", CompensationFailureKind.STOP_FAILED, None),
+        ("stop_base_exception", CompensationFailureKind.STOP_FAILED, None),
+        ("unprintable_stop_exception", CompensationFailureKind.STOP_FAILED, None),
+        ("still_running", CompensationFailureKind.STOP_UNCONFIRMED, StopOutcome.STILL_RUNNING),
+        ("stopping", CompensationFailureKind.STOP_UNCONFIRMED, StopOutcome.STOPPING),
+        ("unsupported", CompensationFailureKind.STOP_UNCONFIRMED, StopOutcome.UNSUPPORTED),
+        ("worker_refused", CompensationFailureKind.WORKER_START_REFUSED, None),
+    ],
+)
+@pytest.mark.parametrize("seed", range(4))
+def test_failed_undeliverable_start_compensation_reports_the_live_instance(
+    scenario: str,
+    expected_kind: CompensationFailureKind,
+    expected_outcome: StopOutcome | None,
+    seed: int,
+    tmp_path: Path,
+) -> None:
+    project = _project(tmp_path / f"{scenario}-{seed}")
+    threads = SimThreads(schedule_seed=seed)
+    network = SimNetwork(threads)
+    store = FakeInstanceStore()
+    started = record("0123456789ab", project_root=str(project))
+    hold = store.hold(started.id)
+
+    def launch(_project: Path, _arguments: tuple[str, ...]) -> LiveInstanceRecord:
+        hold.publish(started)
+        return started
+
+    requester, signaller, channel_threads = _failed_compensation_components(
+        scenario, threads, started, hold.release
+    )
+
+    host = replace(
+        fake_host(threads, network, store=store, launcher=FakeRunLauncher(launch)),
+        stop_effects=StopEffects(
+            requester=requester,
+            signaller=signaller,
+            clock=threads,
+            pause=threads.sleep,
+            intents=FakeStopIntents(),
+        ),
+    )
+
+    def main() -> tuple[int | None, bytes, int, LiveInstanceRecord | None]:
+        client = ChannelClient(threads)
+        output = _RejectRunStartOutput(client)
+        errors = ByteBuffer()
+
+        def run() -> None:
+            client.status = serve_channel(
+                host=host,
+                source=client,
+                output=output,
+                errors=errors,
+                threads=channel_threads,
+            )
+
+        worker = threads.spawn(run, name="helper")
+        client.send(_hello())
+        client.receive()
+        client.send(_request("run.start", "s", project=str(project)))
+        worker.join(HANG_GUARD_S)
+        assert not worker.is_alive()
+        return client.status, bytes(errors.data), output.rejected, host.registry.find(started.id)
+
+    status, error_bytes, rejected, still_live = threads.run(main)
+    lines = error_bytes.splitlines()
+    assert len(lines) == 1
+    failure = RunStartCompensationFailure.model_validate_json(lines[0])
+    assert status == COMPENSATION_FAILURE_EXIT_STATUS
+    assert rejected == 1
+    assert failure.request_id == "s"
+    assert failure.instance_id == started.id
+    assert failure.kind is expected_kind
+    assert (failure.stop_result.outcome if failure.stop_result is not None else None) is (
+        expected_outcome
+    )
+    if scenario == "unprintable_stop_exception":
+        assert failure.root.detail == "_UnprintableStopError"
+    assert still_live == started
+    assert threads.errors == []
+
+
+_UNCONFIRMED_STOP_RESULT: dict[str, Any] = {
+    "version": 1,
+    "id": "0123456789ab",
+    "outcome": "still_running",
+    "route": "signal",
+}
+_UNCONFIRMED_COMPENSATION: dict[str, Any] = {
+    "type": "run.start_compensation_failed",
+    "exit_status": COMPENSATION_FAILURE_EXIT_STATUS,
+    "request_id": "s",
+    "kind": "stop_unconfirmed",
+    "detail": "the stop remains in progress",
+    "stop_result": _UNCONFIRMED_STOP_RESULT,
+}
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {key: value for key, value in _UNCONFIRMED_COMPENSATION.items() if key != "stop_result"},
+        {**_UNCONFIRMED_COMPENSATION, "instance_id": "ffffffffffff"},
+        {
+            **_UNCONFIRMED_COMPENSATION,
+            "stop_result": {
+                **_UNCONFIRMED_STOP_RESULT,
+                "outcome": "stopped",
+            },
+        },
+        {
+            **_UNCONFIRMED_COMPENSATION,
+            "stop_result": {
+                **_UNCONFIRMED_STOP_RESULT,
+                "outcome": "not_running",
+            },
+        },
+        {
+            "type": "run.start_compensation_failed",
+            "exit_status": COMPENSATION_FAILURE_EXIT_STATUS,
+            "request_id": "s",
+            "instance_id": "0123456789ab",
+            "kind": "stop_failed",
+            "detail": "stop raised",
+            "stop_result": _UNCONFIRMED_STOP_RESULT,
+        },
+    ],
+    ids=[
+        "unconfirmed-without-result",
+        "duplicate-mismatched-instance",
+        "stopped-is-terminal",
+        "not-running-is-terminal",
+        "failed-stop-with-result",
+    ],
+)
+def test_compensation_failure_contract_rejects_incoherent_evidence(
+    document: dict[str, Any],
+) -> None:
+    with pytest.raises(ValidationError):
+        RunStartCompensationFailure.model_validate(document)
+
+
 def test_a_late_successful_start_owns_compensation_until_input_can_close() -> None:
     state, _ = step(ChannelState(), Received(_line(_hello()), 0.0), "v")
     state, _ = step(state, Answered("h", PingReply(request_id="h")), "v")
@@ -1012,10 +1285,36 @@ def test_a_late_successful_start_owns_compensation_until_input_can_close() -> No
     state, outputs = step(state, Answered("s", RunStartReply(request_id="s", launch=started)), "v")
 
     assert outputs == (StopStartedRun("s", started.id),)
-    assert state.compensating == frozenset({"s"})
-    state, outputs = step(state, CompensationFinished("s"), "v")
+    assert state.compensating == {"s": started.id}
+    stopped = InstanceStopResult(id=started.id, outcome=StopOutcome.STOPPED)
+    state, outputs = step(state, CompensationFinished("s", stopped), "v")
     assert outputs == (Close(),)
     assert not state.starting
+
+
+@pytest.mark.parametrize("outcome", list(StopOutcome))
+def test_compensation_releases_ownership_only_for_a_terminal_stop_result(
+    outcome: StopOutcome,
+) -> None:
+    instance_id = "0123456789ab"
+    state = ChannelState(
+        compensating={"s": instance_id},
+        input_ended=True,
+    )
+    result = InstanceStopResult(id=instance_id, outcome=outcome)
+
+    state, outputs = step(state, CompensationFinished("s", result), "v")
+
+    assert state.compensating == {}
+    assert outputs == (Close(),)
+    if outcome in {StopOutcome.STOPPED, StopOutcome.NOT_RUNNING}:
+        assert state.compensation_failures == ()
+    else:
+        (failure,) = state.compensation_failures
+        assert failure.instance_id == instance_id
+        assert failure.kind is CompensationFailureKind.STOP_UNCONFIRMED
+        assert failure.stop_result is not None
+        assert failure.stop_result.model_dump() == result.model_dump()
 
 
 def test_a_run_channel_stays_busy_until_an_expired_start_is_compensated() -> None:
@@ -1040,7 +1339,7 @@ def test_relay_handoff_waits_for_late_start_compensation(seed: int, tmp_path: Pa
     project = _project(tmp_path / f"p{seed}")
     threads = SimThreads(schedule_seed=seed)
     network = SimNetwork(threads)
-    listener = network.listen("run.sock")
+    listener = network.listen("/run.sock")
     store = FakeInstanceStore()
     launch_permit = threads.event()
     stop_entered = threads.event()
@@ -1067,11 +1366,12 @@ def test_relay_handoff_waits_for_late_start_compensation(seed: int, tmp_path: Pa
             signaller=FakeProcessSignaller(set()),
             clock=threads,
             pause=threads.sleep,
+            intents=FakeStopIntents(),
         ),
     )
 
     def serve_run() -> None:
-        connection = listener.accept(HANG_GUARD_S)
+        connection = accept_operator(listener)
         assert connection.recv(1, HANG_GUARD_S) == b"x"
         server_received.set()
         connection.close()
@@ -1213,7 +1513,7 @@ def test_run_connect_relays_bytes_both_ways_including_ones_sent_early(
     seen: dict[str, bytes] = {}
 
     def serve(listener: Listener) -> None:
-        connection = listener.accept(HANG_GUARD_S)
+        connection = accept_operator(listener)
         received = bytearray()
         while len(received) < len(upstream):
             chunk = connection.recv(len(upstream) - len(received), HANG_GUARD_S)
@@ -1224,7 +1524,7 @@ def test_run_connect_relays_bytes_both_ways_including_ones_sent_early(
         connection.close()
 
     def main() -> tuple[dict[str, Any], int | None, bytes, bytes]:
-        listener = network.listen("run.sock")
+        listener = network.listen("/run.sock")
         server = threads.spawn(lambda: serve(listener), name="server")
         client = ChannelClient(threads)
         errors = ByteBuffer()
@@ -1252,6 +1552,131 @@ def test_run_connect_relays_bytes_both_ways_including_ones_sent_early(
     assert relayed == downstream
     assert status == EXIT_STATUS[ChannelEndOutcome.SERVER_CLOSED]
     assert ChannelEnd.model_validate_json(errors).outcome is ChannelEndOutcome.SERVER_CLOSED
+
+
+def test_relay_worker_refusal_returns_one_typed_channel_end() -> None:
+    """A handed-over channel reports startup refusal instead of losing the worker error."""
+    threads = SimThreads(schedule_seed=0)
+    channel_threads = RefusingReservableThreads(threads, {"relay-downstream": 1})
+    network = SimNetwork(threads)
+    store = FakeInstanceStore()
+    store.hold("0123456789ab").publish(record("0123456789ab", run_id="run-7"))
+    errors = ByteBuffer()
+    server_received: list[bytes] = []
+
+    def serve(listener: Listener) -> None:
+        connection = accept_operator(listener)
+        server_received.append(connection.recv(1, HANG_GUARD_S))
+
+    def main() -> tuple[dict[str, Any], int | None]:
+        listener = network.listen("/run.sock")
+        server = threads.spawn(lambda: serve(listener), name="server")
+        client = ChannelClient(threads)
+
+        def run_helper() -> None:
+            client.status = serve_channel(
+                host=fake_host(channel_threads, network, store=store),
+                source=client,
+                output=client,
+                errors=errors,
+                threads=channel_threads,
+            )
+
+        helper = threads.spawn(run_helper, name="helper")
+        client.send(_hello())
+        client.receive()
+        connect = _line(_request("run.connect", "c", instance_id="0123456789ab", role="control"))
+        client.send(connect + b"\n" + b'{"type":"command.stop"}\n')
+        connected = client.receive()
+        helper.join(HANG_GUARD_S)
+        server.join(HANG_GUARD_S)
+        assert not helper.is_alive()
+        assert not server.is_alive()
+        return connected, client.status
+
+    connected, status = threads.run(main)
+    assert connected == {
+        "type": "run.connect",
+        "request_id": "c",
+        "run_id": "run-7",
+        "protocol_version": 1,
+    }
+    assert server_received == [b""]
+    assert status == EXIT_STATUS[ChannelEndOutcome.CONNECT_FAILED]
+    assert ChannelEnd.model_validate_json(errors.data) == ChannelEnd(
+        outcome=ChannelEndOutcome.CONNECT_FAILED,
+        exit_status=EXIT_STATUS[ChannelEndOutcome.CONNECT_FAILED],
+        detail="relay copy worker start was refused",
+    )
+
+
+class _ReservationAcquisitionRefusedThreads(RefusingReservableThreads):
+    """Refuse the dispatcher's native preparation before returning a reservation."""
+
+    def __init__(self, delegate: SimThreads) -> None:
+        super().__init__(delegate, {})
+
+    def reserve(
+        self, target: Callable[[], object], *, name: str, daemon: bool = True
+    ) -> WorkerReservation:
+        del target, daemon
+        raise WorkerStartRefusedError(f"vs-sim-worker-starter-for-{name}")
+
+
+def test_dispatcher_bootstrap_refusal_returns_one_typed_channel_end_without_command_io() -> None:
+    """The public helper closes a failed relay startup without leaking its raw refusal."""
+    threads = SimThreads(schedule_seed=0)
+    channel_threads = _ReservationAcquisitionRefusedThreads(threads)
+    network = SimNetwork(threads)
+    store = FakeInstanceStore()
+    store.hold("0123456789ab").publish(record("0123456789ab", run_id="run-7"))
+    errors = ByteBuffer()
+    server_received: list[bytes] = []
+
+    def serve(listener: Listener) -> None:
+        connection = accept_operator(listener)
+        server_received.append(connection.recv(1, HANG_GUARD_S))
+
+    def main() -> tuple[dict[str, Any], int | None]:
+        listener = network.listen("/run.sock")
+        server = threads.spawn(lambda: serve(listener), name="server")
+        client = ChannelClient(threads)
+
+        def run_helper() -> None:
+            client.status = serve_channel(
+                host=fake_host(channel_threads, network, store=store),
+                source=client,
+                output=client,
+                errors=errors,
+                threads=channel_threads,
+            )
+
+        helper = threads.spawn(run_helper, name="helper")
+        client.send(_hello())
+        client.receive()
+        connect = _line(_request("run.connect", "c", instance_id="0123456789ab", role="control"))
+        client.send(connect + b"\n" + b'{"type":"command.stop"}\n')
+        connected = client.receive()
+        helper.join(HANG_GUARD_S)
+        server.join(HANG_GUARD_S)
+        assert not helper.is_alive()
+        assert not server.is_alive()
+        return connected, client.status
+
+    connected, status = threads.run(main)
+    assert connected == {
+        "type": "run.connect",
+        "request_id": "c",
+        "run_id": "run-7",
+        "protocol_version": 1,
+    }
+    assert server_received == [b""]
+    assert status == EXIT_STATUS[ChannelEndOutcome.CONNECT_FAILED]
+    assert ChannelEnd.model_validate_json(errors.data) == ChannelEnd(
+        outcome=ChannelEndOutcome.CONNECT_FAILED,
+        exit_status=EXIT_STATUS[ChannelEndOutcome.CONNECT_FAILED],
+        detail="relay copy worker start was refused",
+    )
 
 
 def test_run_connect_to_a_server_that_is_gone_is_a_typed_error_and_the_channel_lives_on() -> None:

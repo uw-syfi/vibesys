@@ -1,7 +1,7 @@
 """Composed history, publication and dispatch regressions through the public API."""
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -12,7 +12,7 @@ from .test_resume_dispatch_proof import digest
 
 
 def publication_state(*, facts: bool = True) -> tuple[core.CoreState, core.Continuation]:
-    state, wait = fixture(settled=True)
+    state, wait = fixture(settled=True, history=False)
     owner = state.attempts.attempts[0]
     predecessor = state.sessions.invocations[0]
     assert owner.admission_id is not None
@@ -205,6 +205,20 @@ def dispatch_publication(state: core.CoreState, wait: core.Continuation) -> core
     )
 
 
+def assert_refused(result: core.Transition, wait: core.Continuation) -> None:
+    """Core refuses a resume it could never dispatch: it cancels the wait and says why."""
+    assert [event for event in result.events if not isinstance(event, core.TurnSuspended)] == [
+        core.ResumeRefused(
+            continuation_id=wait.continuation_id,
+            invocation=wait.invocation,
+            reason=core.ResumeRefusal.HISTORY_UNAVAILABLE,
+        )
+    ]
+    stored = result.state.evaluation.continuations[0]
+    assert stored.phase == core.ContinuationPhase.CANCELLED
+    assert stored.authorization_receipt is None
+
+
 def test_actual_suspension_publication_survives_restart_and_authorizes_dispatch() -> None:
     state, wait = publication_state()
     published = core.step(state, core.TurnSuspended(continuation=wait))
@@ -229,7 +243,7 @@ def test_actual_suspension_publication_survives_restart_and_authorizes_dispatch(
     assert core.step(recovered, core.TurnSuspended(continuation=wait)).events == ()
 
 
-@pytest.mark.parametrize("proof", ["exact", "missing", "unavailable", "duplicate"])
+@pytest.mark.parametrize("proof", ["exact", "grown", "missing", "unavailable", "duplicate"])
 @given(ordinal=st.integers(min_value=1, max_value=3))
 def test_second_yield_captures_previous_publication_separately_from_paid_cycle(
     proof: str,
@@ -321,6 +335,19 @@ def test_second_yield_captures_previous_publication_separately_from_paid_cycle(
                 }
             ),
         )
+    kept = owner.evaluation_history
+    if proof == "grown":
+        # The scope submitted again after the publication (core's own base run, say), and
+        # that run has not ended: the stored history is unavailable past the cursor.
+        kept = kept.model_copy(
+            update={
+                "availability": core.EvaluationHistoryAvailability.UNAVAILABLE,
+                "covered_submissions": (
+                    *kept.covered_submissions,
+                    core.RequestId(root="late-base-run"),
+                ),
+            }
+        )
     state = state.model_copy(
         update={
             "attempts": core.AttemptsState(
@@ -329,6 +356,7 @@ def test_second_yield_captures_previous_publication_separately_from_paid_cycle(
                         update={
                             "checkpoints": (*owner.checkpoints, checkpoint),
                             "charges": (*owner.charges, charge),
+                            "evaluation_history": kept,
                         }
                     ),
                 )
@@ -361,8 +389,9 @@ def test_second_yield_captures_previous_publication_separately_from_paid_cycle(
     result = core.step(state, core.TurnSuspended(continuation=second))
     stored = result.state.evaluation.continuations[-1]
     assert current.evaluation_prefix == core.EvaluationHistoryCursor()
-    assert stored.preceding_submission == (receipt.history_cursor if proof == "exact" else None)
-    if proof == "exact":
+    published = proof in ("exact", "grown")
+    assert stored.preceding_submission == (receipt.history_cursor if published else None)
+    if published:
         assert stored.preceding_submission != current.evaluation_prefix
     assert (
         roundtrip(result.state).evaluation.continuations[-1].preceding_submission
@@ -419,15 +448,13 @@ def test_missing_scientific_or_submission_facts_never_certify_publication_histor
             }
         )
     result = core.step(state, core.TurnSuspended(continuation=wait))
-    receipt = result.state.evaluation.continuations[0].authorization_receipt
-    assert receipt is not None
     if facts and missing == -1:
+        receipt = result.state.evaluation.continuations[0].authorization_receipt
+        assert receipt is not None
         assert receipt.history_cursor is not None
         dispatch_publication(result.state, wait)
     else:
-        assert receipt.history_cursor is None
-        with pytest.raises(core.ContractError, match="complete unexhausted"):
-            dispatch_publication(result.state, wait)
+        assert_refused(result, wait)
 
 
 @pytest.mark.parametrize(
@@ -489,12 +516,7 @@ def test_history_certification_requires_exact_submission_identity_and_budget(
             ),
         }
     )
-    result = core.step(state, core.TurnSuspended(continuation=wait))
-    receipt = result.state.evaluation.continuations[0].authorization_receipt
-    assert receipt is not None
-    assert receipt.history_cursor is None
-    with pytest.raises(core.ContractError, match="complete unexhausted"):
-        dispatch_publication(result.state, wait)
+    assert_refused(core.step(state, core.TurnSuspended(continuation=wait)), wait)
 
 
 @pytest.mark.parametrize(
@@ -597,15 +619,13 @@ def test_registered_history_requires_declared_codec_bound_measurement_identity(
         }
     )
     result = core.step(state, core.TurnSuspended(continuation=wait))
-    receipt = result.state.evaluation.continuations[0].authorization_receipt
-    assert receipt is not None
     if fault == "exact":
+        receipt = result.state.evaluation.continuations[0].authorization_receipt
+        assert receipt is not None
         assert receipt.history_cursor is not None
         dispatch_publication(result.state, wait)
     else:
-        assert receipt.history_cursor is None
-        with pytest.raises(core.ContractError, match="complete unexhausted"):
-            dispatch_publication(result.state, wait)
+        assert_refused(result, wait)
 
 
 @pytest.mark.parametrize("fault", ["exact", "missing", "foreign-run", "duplicate", "generation"])
@@ -682,14 +702,13 @@ def test_history_correlates_source_admission_with_its_canonical_submission(
         }
     )
     result = core.step(state, core.TurnSuspended(continuation=wait))
-    receipt = result.state.evaluation.continuations[0].authorization_receipt
-    assert receipt is not None
-    assert (receipt.history_cursor is not None) == exact
     if exact:
+        receipt = result.state.evaluation.continuations[0].authorization_receipt
+        assert receipt is not None
+        assert receipt.history_cursor is not None
         assert dispatch_publication(result.state, wait).events == ()
     else:
-        with pytest.raises(core.ContractError, match="complete unexhausted"):
-            dispatch_publication(result.state, wait)
+        assert_refused(result, wait)
 
 
 def test_published_receipt_survives_valid_parking_and_confirmed_reopen_without_republication() -> (
@@ -731,3 +750,298 @@ def test_published_receipt_survives_valid_parking_and_confirmed_reopen_without_r
     assert resumed.events == ()
     assert resumed.state.evaluation.continuations[0].phase == core.ContinuationPhase.AUTHORIZED
     assert resumed.state.evaluation.continuations[0].authorization_receipt == receipt
+
+
+@pytest.mark.regression
+@example(index=0, later=1, delay=0.001)
+@given(
+    index=st.integers(min_value=0, max_value=2),
+    later=st.integers(min_value=1, max_value=5),
+    delay=st.floats(min_value=0.001, max_value=60.0),
+)
+def test_a_job_polled_again_after_its_end_keeps_its_submission_in_certified_history(
+    index: int, later: int, delay: float
+) -> None:
+    """A poll in flight when a job ended answers again; the ledger keeps the first answer.
+
+    The job's view of its end then differs from its submission's record only by a newer
+    sequence, event and time. That is the same conclusion read later, so it must not make
+    the attempt's history unavailable and strand the resume that waits on it.
+    """
+    state, wait = publication_state()
+    job = state.evaluation.jobs[index]
+    assert job.observation is not None
+    again = job.observation.model_copy(
+        update={
+            "sequence": job.observation.sequence + later,
+            "event_id": core.EventId(root=f"{job.observation.event_id.root}:again:{later}"),
+            "observed_at": job.observation.observed_at + delay,
+        }
+    )
+    jobs = tuple(
+        row.model_copy(update={"observation": again}) if row is job else row
+        for row in state.evaluation.jobs
+    )
+    state = state.model_copy(
+        update={"evaluation": state.evaluation.model_copy(update={"jobs": jobs})}
+    )
+    result = core.step(state, core.TurnSuspended(continuation=wait))
+    receipt = result.state.evaluation.continuations[0].authorization_receipt
+    assert receipt is not None
+    assert receipt.history_cursor is not None
+    dispatch_publication(result.state, wait)
+
+
+class End(core.Value):
+    """How one of the three measurements ended: what its job and submission row hold."""
+
+    status: core.ObservationStatus
+    accepted: bool
+    facts: bool
+    """Whether the executor reported scientific facts. Only an accepted job can."""
+
+    @property
+    def provable(self) -> bool:
+        """Whether a history record can state this end.
+
+        Only a success owes facts, and only an accepted job can have succeeded.
+        """
+        if self.status != core.ObservationStatus.SUCCEEDED:
+            return True
+        return self.accepted and self.facts
+
+
+_ENDS = st.tuples(
+    *(
+        st.builds(
+            End,
+            status=st.sampled_from(
+                (
+                    core.ObservationStatus.SUCCEEDED,
+                    core.ObservationStatus.FAILED,
+                    core.ObservationStatus.CANCELLED,
+                    core.ObservationStatus.REJECTED,
+                )
+            ),
+            accepted=st.booleans(),
+            facts=st.booleans(),
+        ).filter(lambda end: end.accepted or not end.facts),
+    )
+    * 3
+)
+
+
+def ended_as(ends: tuple[End, ...]) -> tuple[core.CoreState, core.Continuation]:
+    """The publication state, its three measurements ended as ``ends`` say."""
+    state, wait = publication_state()
+    by_request = dict(zip((job.submission_id for job in state.evaluation.jobs), ends, strict=True))
+
+    def ended(observation: core.Observation | None, end: End) -> core.Observation:
+        assert observation is not None
+        return observation.model_copy(update={"status": end.status, "accepted": end.accepted})
+
+    jobs = tuple(
+        job.model_copy(
+            update={"observation": ended(job.observation, by_request[job.submission_id])}
+        )
+        for job in state.evaluation.jobs
+    )
+    records = tuple(
+        row.model_copy(
+            update={
+                "observation": ended(row.observation, by_request[row.request_id]),
+                "evaluation_result": row.evaluation_result
+                if by_request[row.request_id].facts
+                else None,
+            }
+        )
+        if row.request_id in by_request
+        else row
+        for row in state.records.records
+    )
+    return state.model_copy(
+        update={
+            "evaluation": state.evaluation.model_copy(update={"jobs": jobs}),
+            "records": state.records.model_copy(update={"records": records}),
+        }
+    ), wait
+
+
+@example(
+    ends=(
+        End(status=core.ObservationStatus.SUCCEEDED, accepted=True, facts=False),
+        End(status=core.ObservationStatus.SUCCEEDED, accepted=True, facts=True),
+        End(status=core.ObservationStatus.FAILED, accepted=True, facts=True),
+    )
+)
+@example(ends=(End(status=core.ObservationStatus.FAILED, accepted=True, facts=False),) * 3)
+@example(ends=(End(status=core.ObservationStatus.SUCCEEDED, accepted=False, facts=False),) * 3)
+@given(ends=_ENDS)
+def test_history_is_complete_exactly_when_every_accepted_success_carries_its_facts(
+    ends: tuple[End, ...],
+) -> None:
+    """The runtime withholds facts for a job that failed or was cancelled, by design.
+
+    Such a submission is a conclusive record without facts, not missing history; a failure
+    that did report facts keeps them. A success without facts, or one the executor never
+    accepted, leaves the history unavailable (and core used to raise building its record). Run r2 crashed when one ambiguous failure left history
+    unavailable while the attempt read as settled.
+    """
+    state, wait = ended_as(ends)
+    result = core.step(state, core.TurnSuspended(continuation=wait))
+    history = result.state.attempts.attempts[0].evaluation_history
+    complete = all(end.provable for end in ends)
+    assert (history.availability == core.EvaluationHistoryAvailability.COMPLETE) == complete
+    recorded = {record.submission_id: record for record in history.records}
+    for job, end in zip(state.evaluation.jobs, ends, strict=True):
+        if not end.provable:
+            assert job.submission_id not in recorded
+            continue
+        record = recorded[job.submission_id]
+        assert record.terminal_observation.status == end.status
+        assert bool(record.stages) == end.facts
+
+
+@pytest.mark.regression
+@example(
+    ends=(
+        End(status=core.ObservationStatus.SUCCEEDED, accepted=True, facts=False),
+        End(status=core.ObservationStatus.SUCCEEDED, accepted=True, facts=True),
+        End(status=core.ObservationStatus.SUCCEEDED, accepted=True, facts=True),
+    )
+)
+@given(ends=_ENDS)
+def test_core_authorizes_a_resume_only_when_its_dispatch_would_be_accepted(
+    ends: tuple[End, ...],
+) -> None:
+    """Authorization and the resume's dispatch apply one rule, so an authorized resume runs.
+
+    Core used to authorize once every submission had ended, then refuse the resume's dispatch
+    because the history was not complete, which halted the run. A history that can never be
+    complete now ends the wait with a typed refusal instead, and nothing is authorized.
+    """
+    state, wait = ended_as(ends)
+    result = core.step(state, core.TurnSuspended(continuation=wait))
+    authorized = [event for event in result.events if isinstance(event, core.ResumeAuthorized)]
+    if authorized:
+        assert authorized[0].history_cursor is not None
+        dispatch_publication(result.state, wait)
+    else:
+        assert_refused(result, wait)
+    # One of the two always happens: a settled wait never stays waiting.
+    assert result.state.evaluation.continuations[0].phase != core.ContinuationPhase.WAITING
+
+
+def _authorized_before_a_late_submission(
+    late: core.ObservationStatus,
+) -> tuple[core.CoreState, core.Continuation]:
+    """A resume core authorized on two settled submissions, then a third in the same scope.
+
+    Core itself can submit in an attempt's scope after it authorized the resume: a close call
+    found in evidence that arrives after its job ended earns the base one more run
+    (``_base_runs``). That run is core's, not the attempt's, so its observation leaves the
+    stored history as it was.
+    """
+    state, wait = publication_state()
+    late_job = state.evaluation.jobs[2]
+    late_budget = state.evaluation.submission_budgets[2]
+    late_record = state.records.records[3]
+    state = state.model_copy(
+        update={
+            "evaluation": state.evaluation.model_copy(
+                update={
+                    "jobs": state.evaluation.jobs[:2],
+                    "submission_budgets": state.evaluation.submission_budgets[:2],
+                }
+            ),
+            "records": state.records.model_copy(update={"records": state.records.records[:3]}),
+        }
+    )
+    wait = wait.model_copy(update={"jobs": wait.jobs[:2]})
+    published = core.step(state, core.TurnSuspended(continuation=wait))
+    assert any(isinstance(event, core.ResumeAuthorized) for event in published.events)
+    state = published.state
+    assert late_job.observation is not None
+    admission = state.attempts.attempts[0].admission_id
+    pending = late_job.observation.model_copy(
+        update={
+            "status": core.ObservationStatus.PENDING,
+            "terminal": False,
+            "admission_id": admission,
+        }
+    )
+    request = late_record.request.model_copy(update={"admission_id": admission})
+    late_job = late_job.model_copy(
+        update={
+            "observation": pending,
+            "status": core.ObservationStatus.PENDING,
+            "terminal": False,
+            "wait": core.WaitOn(timer=0.0),
+        }
+    )
+    late_record = late_record.model_copy(
+        update={
+            "request": request,
+            "payload_digest": digest(request),
+            "phase": core.RequestPhase.DISPATCHED,
+            "observation": pending,
+            "evaluation_result": None,
+        }
+    )
+    state = state.model_copy(
+        update={
+            "evaluation": state.evaluation.model_copy(
+                update={
+                    "jobs": (*state.evaluation.jobs, late_job),
+                    "submission_budgets": (*state.evaluation.submission_budgets, late_budget),
+                    # Core's own run of the base, earned by a close call of the first job.
+                    "core_runs": (
+                        *state.evaluation.core_runs,
+                        core.CoreRun(
+                            request_id=late_job.submission_id,
+                            scope=late_job.scope,
+                            candidate=state.evaluation.jobs[0].submission_id,
+                            candidate_input="candidate-input",
+                            fresh_when_asked=0,
+                        ),
+                    ),
+                }
+            ),
+            "records": state.records.model_copy(
+                update={"records": (*state.records.records, late_record)}
+            ),
+        }
+    )
+    assert late_job.resource_id is not None
+    observed = pending.model_copy(
+        update={
+            "event_id": core.EventId(root="late-observation"),
+            "sequence": pending.sequence + 1,
+            "observed_at": pending.observed_at + 1.0,
+            "status": late,
+        }
+    )
+    state = core.step(
+        state, core.JobObserved(resource_id=late_job.resource_id, observation=observed)
+    ).state
+    return state, wait
+
+
+@pytest.mark.regression
+@example(late=core.ObservationStatus.PENDING)
+@given(late=st.sampled_from((core.ObservationStatus.PENDING, core.ObservationStatus.UNKNOWN)))
+def test_a_submission_made_after_authorization_never_refuses_the_authorized_resume(
+    late: core.ObservationStatus,
+) -> None:
+    """The resume's dispatch checks the history core published, not what the scope did since.
+
+    Core used to require the attempt's whole stored history to be complete at dispatch, so a
+    submission core made in the scope between authorization and dispatch left it unavailable
+    and the dispatch raised, halting the run. Core's own runs are now no part of the attempt's
+    history at all, so the history the dispatch reads is the one published.
+    """
+    state, wait = _authorized_before_a_late_submission(late)
+    history = state.attempts.attempts[0].evaluation_history
+    assert history.availability == core.EvaluationHistoryAvailability.COMPLETE
+    assert len(history.covered_submissions) == 2
+    assert dispatch_publication(state, wait).events == ()

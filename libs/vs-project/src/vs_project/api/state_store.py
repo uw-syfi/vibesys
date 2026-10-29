@@ -137,6 +137,15 @@ class StateStore(Protocol):
     errors propagate and grant no dispatch authority until reconciliation.
     """
 
+    def observe(self) -> StoreRecord | None:
+        """Read one atomic published record without locking or synchronizing it.
+
+        Observation grants no durability or dispatch authority. Use load and the
+        fenced operations for recovery and execution. A concurrent publication
+        yields either whole version, including a quarantined record.
+        """
+        ...
+
     def load(self) -> StoreRecord | None:
         """Load the latest whole record, including a blocked quarantine."""
         ...

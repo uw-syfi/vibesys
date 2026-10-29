@@ -319,6 +319,10 @@ class SimNetwork:
         self._connections = 0
         self._fired: list[FiredFault] = []
 
+    def now(self) -> float:
+        """Seconds on the same virtual timeline as this network's blocking calls."""
+        return self.threads.now()
+
     @property
     def fired(self) -> tuple[FiredFault, ...]:
         """The faults that fired so far, in order."""

@@ -1,16 +1,12 @@
 import {describe, expect, test} from 'bun:test';
-import {
-  INSTANCE_LOG_TAIL_BYTES,
-  type InstanceInspection,
-  type LiveInstanceRecord,
-} from '@vibesys/contracts/host-helper';
+import type {InstanceInspection, LiveInstanceRecord} from '@vibesys/contracts/host-helper';
 import {inspectionReply} from './inspection.js';
 
 const ID = '0123456789ab';
 
 function record(id = ID): LiveInstanceRecord {
   return {
-    version: 4,
+    version: 5,
     id,
     status: 'serving',
     phase: {status: 'running', stage: null, progress: null, reason: null},
@@ -115,10 +111,12 @@ describe('inspectionReply', () => {
     ).toContain('top-level paths do not match');
   });
 
-  test('bounds diagnostics by UTF-8 bytes rather than JavaScript characters', () => {
-    const text = 'é'.repeat(INSTANCE_LOG_TAIL_BYTES / 2 + 1);
-    expect(problem(inspection({log: {state: 'available', text, truncated: true}}))).toContain(
-      `${INSTANCE_LOG_TAIL_BYTES} UTF-8 bytes`,
+  test('refuses a server log tail the app never asks for', () => {
+    expect(
+      problem(inspection({log: {state: 'available', text: 'tail', truncated: false}})),
+    ).toContain('server log the app did not ask for');
+    expect(problem(inspection({log: {state: 'missing'}}))).toContain(
+      'server log the app did not ask for',
     );
   });
 });

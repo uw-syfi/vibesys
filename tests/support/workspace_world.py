@@ -64,17 +64,40 @@ if TYPE_CHECKING:
         WorkspaceResourceProvider,
     )
     from vs_sandbox.api import CommandRunner, ComputeBackendImpl
-    from vs_sim.api import BlockingRunner
+    from vs_sim.api import BlockingRunner, Threads
 
 RUN_ID = "workspace-requests"
+
+
+@dataclass(frozen=True)
+class ExecutionTopology:
+    """The threads and blocking boundary one system-test world shares.
+
+    Keeping the pair together prevents a simulated world from sending work to a real
+    executor, where a simulator-backed lock could be used by unrelated worker threads.
+    """
+
+    threads: Threads
+    blocking: BlockingRunner
+
+    @classmethod
+    def production(cls) -> ExecutionTopology:
+        """Use the production thread and blocking implementations."""
+        return cls(threads=OsThreads(), blocking=ThreadBlockingRunner())
 
 
 @dataclass
 class _Session:
     sandbox: CommandRunner = field(default_factory=FakeCommandRunner)
     view: RunEnvironmentView = field(
-        default_factory=lambda: RunEnvironmentView(paths=AgentPaths(), cli_sandboxed=True)
+        default_factory=lambda: RunEnvironmentView(
+            paths=AgentPaths(), workspace_git_writable=True, cli_sandboxed=True
+        )
     )
+
+    @property
+    def capture_commands(self) -> CommandRunner:
+        return self.sandbox
 
     def __enter__(self) -> _Session:
         return self
@@ -107,6 +130,7 @@ class WorkspaceEnv:
 
     project: Project
     factory: WorkspaceResourceProvider
+    execution: ExecutionTopology
     hosts: list[RuntimeWorkspaces] = field(default_factory=list)
     git_disk: FakeGitRepositories | Git = REAL_GIT
     """The in-memory repositories of a world on ``GitKind.FAKE``; ``REAL_GIT`` on real Git."""
@@ -114,11 +138,13 @@ class WorkspaceEnv:
     def start_host(self, runner: BlockingRunner | None = None) -> RuntimeWorkspaces:
         """Start another host over the same disk state, as after a process restart.
 
-        *runner* runs the host's blocking operations (worker threads by default).
+        *runner* overrides the world's blocking boundary for this host.
         """
         runtime = create_workspace_runtime(
             workspace_resources=self.factory,
-            blocking=BlockingOperations(runner or ThreadBlockingRunner()),
+            blocking=BlockingOperations(
+                self.execution.blocking if runner is None else runner, self.execution.threads
+            ),
             validation_passes=MemoryValidationPasses(),
         )
         self.hosts.append(runtime.workspaces)
@@ -151,6 +177,8 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
     wrap_git: Callable[[GitRepository], GitRepository] | None = None,
     events: WorkspaceResourceEventSink | None = None,
     system: EnvironmentSystem | None = None,
+    unread_paths: tuple[str, ...] = (),
+    execution: ExecutionTopology | None = None,
 ) -> Iterator[WorkspaceEnv]:
     """A fresh run with one started host. The caller closes ``env.hosts`` (async) before exit.
 
@@ -163,8 +191,12 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
     case can stand between the run and Git, for example to kill the host at a Git step.
     ``events`` observes workspace resource events (for example a reported baseline drift);
     the default discards them. ``system`` is the host the environments run on; the default
-    starts nothing (:func:`~vs_runtime.api.testing.idle_environment_system`).
+    starts nothing (:func:`~vs_runtime.api.testing.idle_environment_system`). ``unread_paths``
+    are the workspace paths the task's evaluation never reads (``[workspace] unread``).
+    ``execution`` keeps threads and blocking operations on one scheduler; production
+    implementations are used by default.
     """
+    active_execution = execution if execution is not None else ExecutionTopology.production()
     disk = FakeGitRepositories() if git is GitKind.FAKE else REAL_GIT
     root = tmp_path / "project"
     root.mkdir()
@@ -224,15 +256,20 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
             factory = WorkspaceResourceFactory(
                 project,
                 environment,
-                evaluation_plan=TrustedEvaluationPlan(),
+                evaluation_plan=TrustedEvaluationPlan(unread_paths=unread_paths),
                 memory_paths=memory_paths,
                 skill_source_dirs=(),
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
                 events=events or (lambda _event: None),
-                threads=OsThreads(),
-                blocking=ThreadBlockingRunner(),
+                threads=active_execution.threads,
+                blocking=active_execution.blocking,
             )
-            env = WorkspaceEnv(project.project, factory, git_disk=disk)
+            env = WorkspaceEnv(
+                project.project,
+                factory,
+                execution=active_execution,
+                git_disk=disk,
+            )
             env.start_host()
             yield env

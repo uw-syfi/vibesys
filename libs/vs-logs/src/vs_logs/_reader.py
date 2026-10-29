@@ -51,8 +51,8 @@ class StreamInfo[OwnerT]:
     """Every byte ever written; the next byte gets this offset."""
     outcome: StreamOutcome | None
     """How it was closed, or ``None`` while it is open."""
-    adopted: bool
-    """It is a file someone else writes, read as-is."""
+    degraded: bool
+    """The store failed to write some of its bytes (a full disk), so they are missing."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,7 +117,7 @@ class LogReader[OwnerT]:
         extent = self._extent(entry)
         window = plan_read(extent.retained_start, extent.size, start, max_bytes)
         data = _gather(extent.pieces, window.start, window.end)
-        marks = () if entry.opened.adopted_path is not None else self._marks(stream_id)
+        marks = self._marks(stream_id)
         return LogChunk(
             stream_id=stream_id,
             offset=window.start,
@@ -160,18 +160,10 @@ class LogReader[OwnerT]:
             retained_start=extent.retained_start,
             size=extent.size,
             outcome=entry.closed,
-            adopted=entry.opened.adopted_path is not None,
+            degraded=entry.degraded,
         )
 
     def _extent(self, entry: IndexEntry) -> _Extent:
-        adopted = entry.opened.adopted_path
-        if adopted is not None:
-            source = self._volume.external(adopted)
-            try:
-                size = source.size()
-            except FileNotFoundError:
-                return _Extent(0, 0, ())
-            return _Extent(0, size, ((0, source),))
         stream_id = entry.opened.stream_id
         starts = sorted(
             start

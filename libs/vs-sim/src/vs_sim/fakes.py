@@ -8,10 +8,10 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from vs_sim.concurrency import WorkerStartRefusedError
+from vs_sim.concurrency import WorkerReservationStateError, WorkerStartRefusedError
 from vs_sim.gate import arrival
 from vs_sim.loopback_http import HttpReply
-from vs_sim.output import DISCARD, OutputStream
+from vs_sim.output import OutputStream
 from vs_sim.processes import (
     ForegroundChild,
     PipedProcess,
@@ -29,7 +29,16 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_sim.clock import Sleeper
-    from vs_sim.concurrency import Condition, Event, Lock, ThreadLocal, Threads, Worker
+    from vs_sim.concurrency import (
+        Condition,
+        Event,
+        Lock,
+        ReservableThreads,
+        ThreadLocal,
+        Threads,
+        Worker,
+        WorkerReservation,
+    )
     from vs_sim.output import OutputSink
     from vs_sim.probes import ProbeResult
     from vs_sim.processes import ProcessRun
@@ -39,7 +48,9 @@ class RefusingThreads:
     """A Threads Fake that delegates every operation except scripted worker starts.
 
     ``refusals`` maps a worker name to how many matching starts should fail. The
-    wrapper leaves the delegate's scheduling and synchronization semantics intact.
+    wrapper leaves the delegate's scheduling and synchronization semantics intact. It
+    intentionally implements only the general :class:`Threads` role; use
+    :class:`RefusingReservableThreads` when callers need pre-start ownership.
     """
 
     def __init__(self, delegate: Threads, refusals: Mapping[str, int]) -> None:
@@ -49,11 +60,16 @@ class RefusingThreads:
 
     def spawn(self, target: Callable[[], object], *, name: str, daemon: bool = True) -> Worker:
         """Refuse a scripted start, otherwise spawn it through the delegate."""
-        remaining = self._remaining.get(name, 0)
-        if remaining > 0:
-            self._remaining[name] = remaining - 1
+        if self._refuses(name):
             raise WorkerStartRefusedError(name)
         return self._delegate.spawn(target, name=name, daemon=daemon)
+
+    def _refuses(self, name: str) -> bool:
+        remaining = self._remaining.get(name, 0)
+        if remaining <= 0:
+            return False
+        self._remaining[name] = remaining - 1
+        return True
 
     def lock(self) -> Lock:
         """Return a lock from the delegate."""
@@ -86,6 +102,54 @@ class RefusingThreads:
     def run_async[T](self, main: Coroutine[object, object, T]) -> T:
         """Run an async entrypoint through the delegate."""
         return self._delegate.run_async(main)
+
+
+class RefusingReservableThreads(RefusingThreads):
+    """A ReservableThreads Fake that scripts both direct and reserved start refusals."""
+
+    def __init__(self, delegate: ReservableThreads, refusals: Mapping[str, int]) -> None:
+        """Wrap a reservable delegate without narrowing :class:`RefusingThreads`."""
+        super().__init__(delegate, refusals)
+        self._reservable_delegate = delegate
+
+    def reserve(
+        self, target: Callable[[], object], *, name: str, daemon: bool = True
+    ) -> WorkerReservation:
+        """Prepare a worker whose start applies the same scripted refusal."""
+        return _RefusingWorkerReservation(
+            self._refuses,
+            self._reservable_delegate.reserve(target, name=name, daemon=daemon),
+        )
+
+
+class _RefusingWorkerReservation:
+    def __init__(
+        self,
+        refuses: Callable[[str], bool],
+        reservation: WorkerReservation,
+    ) -> None:
+        self._refuses = refuses
+        self._reservation = reservation
+        self._attempted = False
+        self._settled = False
+
+    @property
+    def name(self) -> str:
+        return self._reservation.name
+
+    def start(self) -> None:
+        if self._attempted or self._settled:
+            raise WorkerReservationStateError(self.name)
+        self._attempted = True
+        if self._refuses(self.name):
+            raise WorkerStartRefusedError(self.name)
+        self._reservation.start()
+
+    def settle(self) -> None:
+        if self._settled:
+            return
+        self._reservation.settle()
+        self._settled = True
 
 
 class InlineBlockingRunner:
@@ -211,15 +275,24 @@ class FakeSignalSource:
 class FakeProcessSignaller:
     """Stable process signalling over an in-memory set of live process IDs."""
 
-    def __init__(self, live_pids: set[int]) -> None:
-        """Treat exactly ``live_pids`` as openable process identities."""
+    def __init__(
+        self, live_pids: set[int], *, held_locks: dict[int, set[Path]] | None = None
+    ) -> None:
+        """Treat exactly ``live_pids`` as openable identities with their held flocks."""
         self.live_pids = set(live_pids)
+        self.held_locks = {} if held_locks is None else held_locks
         self.opened: list[int] = []
         self.terminated: list[int] = []
 
     def exists(self, pid: int) -> bool:
         """Whether ``pid`` is one of the live ids."""
         return pid in self.live_pids
+
+    def owns_lock(self, pid: int, path: Path) -> bool:
+        """A live process owns only the exact flocks registered for it."""
+        if pid not in self.live_pids:
+            raise ProcessLookupError(pid)
+        return path in self.held_locks.get(pid, set())
 
     def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
         """Open ``pid``, evaluate ``current``, and record a permitted termination."""
@@ -335,9 +408,7 @@ class FakeProcesses:
     first_pid: int = 1000
     """The process ID of the first run; each later run gets the next one."""
 
-    def run(
-        self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
-    ) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
         """Record ``spec``, let its running time pass, and end it the way its script says."""
         pid = self.first_pid + len(self.ran)
         self.ran.append(spec)
@@ -392,9 +463,7 @@ class RefusingProcesses:
     A test that does need a command to run scripts it with :class:`FakeProcesses` instead.
     """
 
-    def run(
-        self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
-    ) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
         """Fail: this test runs no process."""
         del timeout, output
         message = f"this test runs no process, but ran {' '.join(spec.argv)}"
@@ -583,7 +652,7 @@ class ScriptedStreamingCommand:
         *,
         cwd: Path,
         timeout_seconds: float,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> subprocess.CompletedProcess[str]:
         """Record the call and play the scripted command."""
         command = tuple(argv)

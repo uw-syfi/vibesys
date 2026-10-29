@@ -76,6 +76,7 @@ from vs_runtime.api.core import (
     ObservationFactory,
     OperationCatalog,
     OperationEntry,
+    ReceiptEvidenceLedger,
     ReceiptStore,
     RegisteredOperationRequests,
     RuntimeWorkspaceRequests,
@@ -262,7 +263,9 @@ class _WorkspaceWorld(_ReleasesItself):
     def host(self, epoch: int, life: HostLife, blocking: BlockingRunner) -> FenceHost:
         store = ReceiptStore(life.namespace(self._env.receipts_namespace()), threads=OsThreads())
         workspaces = self._env.start_host(blocking)
-        executor = RuntimeWorkspaceRequests(workspaces, store, SettledRunInvocations(), blocking)
+        executor = RuntimeWorkspaceRequests(
+            workspaces, store, SettledRunInvocations(), blocking, ReceiptEvidenceLedger(store)
+        )
         return _Host(cast("Any", executor), epoch)
 
     def created(self) -> int:

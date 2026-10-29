@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -31,12 +32,12 @@ func testFixture() (graph, plan) {
 		NativeChecks:         nativeChecks{Commands: map[string][][]string{"go": {{"go", "test", "./..."}}}, TimeoutSeconds: 1},
 		NativeCheckOverrides: map[string]nativeCheckOverride{},
 		CheckGroups: map[string]execution.Suite{
-			"python": {Name: "python", TriggerJob: "python", IncludeInTest: true, Language: "python", Directory: ".", Commands: [][]string{{"uv", "run", "pytest"}}, TimeoutSeconds: 1},
-			"tui":    {Name: "tui", TriggerJob: "tui", IncludeInTest: true, Language: "typescript", Directory: "clients", Collection: "pnpm_packages", Commands: [][]string{{"pnpm", "test:clients"}}, PackageCommands: [][]string{{"pnpm", "--filter", "{package}", "test"}}, TimeoutSeconds: 1},
+			"python":  {Name: "python", TriggerJob: "python", IncludeInTest: true, Language: "python", Directory: ".", Commands: [][]string{{"uv", "run", "pytest"}}, TimeoutSeconds: 1},
+			"clients": {Name: "clients", TriggerJob: "clients", IncludeInTest: true, Language: "typescript", Directory: "clients", Collection: "pnpm_packages", Commands: [][]string{{"pnpm", "test:clients"}}, PackageCommands: [][]string{{"pnpm", "--filter", "{package}", "test"}}, TimeoutSeconds: 1},
 		},
 	}
 	p := plan{
-		Jobs:        map[string]bool{"python": true, "tui": true, "evaluators": true},
+		Jobs:        map[string]bool{"python": true, "clients": true, "evaluators": true},
 		Components:  map[string][]string{"native:a": {"changed apps/a/main.go"}},
 		Collections: map[string][]string{"pnpm_packages": {"@example/z", "@example/a"}},
 	}
@@ -45,14 +46,14 @@ func testFixture() (graph, plan) {
 
 func TestSelectedTestChecksUsePackagesAndNativeTargets(t *testing.T) {
 	g, p := testFixture()
-	checks, targets, err := selectedTestChecks(g, p)
+	checks, targets, _, _, err := selectedTestChecks(g, p, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := [][]string{
-		{"uv", "run", "pytest"},
 		{"pnpm", "--filter", "@example/a", "test"},
 		{"pnpm", "--filter", "@example/z", "test"},
+		{"uv", "run", "pytest"},
 	}
 	got := make([][]string, 0, len(checks))
 	for _, check := range checks {
@@ -62,8 +63,8 @@ func TestSelectedTestChecksUsePackagesAndNativeTargets(t *testing.T) {
 		t.Fatalf("commands = %v, targets = %v", got, targets)
 	}
 	delete(p.Collections, "pnpm_packages")
-	checks, _, err = selectedTestChecks(g, p)
-	if err != nil || !reflect.DeepEqual(checks[1].Args, []string{"pnpm", "test:clients"}) {
+	checks, _, _, _, err = selectedTestChecks(g, p, false)
+	if err != nil || !reflect.DeepEqual(checks[0].Args, []string{"pnpm", "test:clients"}) {
 		t.Fatalf("fallback command = %v, err = %v", checks, err)
 	}
 }
@@ -76,25 +77,17 @@ func TestSelectedTestsRunAndDryRun(t *testing.T) {
 		nativeCalls++
 		return nil
 	}
-	if err := runSelectedTests(t.TempDir(), g, p, true, runner, nativeRun); err != nil {
+	if err := runSelectedTests(t.TempDir(), g, p, true, false, runner, nativeRun); err != nil {
 		t.Fatal(err)
 	}
 	if len(runner.checks) != 0 || nativeCalls != 0 {
 		t.Fatalf("dry-run executed %d suite checks and %d native checks", len(runner.checks), nativeCalls)
 	}
-	if err := runSelectedTests(t.TempDir(), g, p, false, runner, nativeRun); err != nil {
+	if err := runSelectedTests(t.TempDir(), g, p, false, false, runner, nativeRun); err != nil {
 		t.Fatal(err)
 	}
 	if len(runner.checks) != 3 || nativeCalls != 1 {
 		t.Fatalf("executed %d suite checks and %d native checks", len(runner.checks), nativeCalls)
-	}
-}
-
-func TestMissingSelectedSuiteFails(t *testing.T) {
-	g, p := testFixture()
-	delete(g.CheckGroups, "python")
-	if _, _, err := selectedTestChecks(g, p); err == nil {
-		t.Fatal("missing selected suite accepted")
 	}
 }
 
@@ -103,21 +96,23 @@ func TestSelectedTestChecksRejectsUnknownLanguage(t *testing.T) {
 	suite := g.CheckGroups["python"]
 	suite.Language = "unknown"
 	g.CheckGroups["python"] = suite
-	if _, _, err := selectedTestChecks(g, p); err == nil || !strings.Contains(err.Error(), `unknown language "unknown"`) {
+	if _, _, _, _, err := selectedTestChecks(g, p, false); err == nil || !strings.Contains(err.Error(), `unknown language "unknown"`) {
 		t.Fatalf("error = %v", err)
 	}
 }
 
 func TestInvalidTestSuiteConfiguration(t *testing.T) {
 	g, _ := testFixture()
-	g.Jobs = []string{"python", "tui"}
+	g.Jobs = []string{"python", "clients"}
 	g.Collections = []collectionSpec{{Name: "pnpm_packages"}}
 	tests := []execution.Suite{
 		{Name: "unknown", TriggerJob: "unknown", IncludeInTest: true, Language: "python", Directory: ".", TimeoutSeconds: 1, Commands: [][]string{{"pytest"}}},
 		{Name: "python", Language: "python", Directory: "../escape", TimeoutSeconds: 1, Commands: [][]string{{"pytest"}}},
 		{Name: "python", Language: "python", Directory: ".", TimeoutSeconds: 0, Commands: [][]string{{"pytest"}}},
-		{Name: "tui", Language: "typescript", Directory: "clients", Collection: "missing", TimeoutSeconds: 1, Commands: [][]string{{"pnpm"}}, PackageCommands: [][]string{{"pnpm", "{package}"}}},
+		{Name: "clients", Language: "typescript", Directory: "clients", Collection: "missing", TimeoutSeconds: 1, Commands: [][]string{{"pnpm"}}, PackageCommands: [][]string{{"pnpm", "{package}"}}},
 		{Name: "python", Language: "python", Directory: ".", TimeoutSeconds: 1, Commands: [][]string{{"pytest"}}, Env: map[string]string{"BAD-KEY": "value"}},
+		{Name: "both", TriggerJob: "python", IncludeInTest: true, IncludeInChecks: true, Language: "python", Directory: ".", TimeoutSeconds: 1, Commands: [][]string{{"pytest"}}},
+		{Name: "skip", LocalSkip: "needs Docker", Language: "python", Directory: ".", TimeoutSeconds: 1, Commands: [][]string{{"pytest"}}},
 	}
 	for _, suite := range tests {
 		g.CheckGroups = map[string]execution.Suite{}
@@ -163,9 +158,9 @@ func TestRunCheckGroupRejectsUnknownAndInvalidCollections(t *testing.T) {
 	}{
 		{"unknown group", "missing", "", "unknown check group"},
 		{"unexpected selection", "python", `["@example/a"]`, "does not use a collection"},
-		{"malformed selection", "tui", `{"name":"@example/a"}`, "JSON array"},
-		{"unregistered selection", "tui", `["@example/missing"]`, "unregistered collection value"},
-		{"duplicate selection", "tui", `["@example/a","@example/a"]`, "duplicate collection value"},
+		{"malformed selection", "clients", `{"name":"@example/a"}`, "JSON array"},
+		{"unregistered selection", "clients", `["@example/missing"]`, "unregistered collection value"},
+		{"duplicate selection", "clients", `["@example/a","@example/a"]`, "duplicate collection value"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runner := &recordingRunner{}
@@ -182,11 +177,11 @@ func TestRunCheckGroupRejectsUnknownAndInvalidCollections(t *testing.T) {
 
 func TestRunCheckGroupUsesAlwaysAndSelectedPackageCommands(t *testing.T) {
 	g, _ := testFixture()
-	tui := g.CheckGroups["tui"]
-	tui.AlwaysCommands = [][]string{{"pnpm", "check:ts"}}
-	g.CheckGroups["tui"] = tui
+	clients := g.CheckGroups["clients"]
+	clients.AlwaysCommands = [][]string{{"pnpm", "check:ts"}}
+	g.CheckGroups["clients"] = clients
 	runner := &recordingRunner{}
-	if err := runCheckGroup(t.TempDir(), g, "tui", `["@example/z"]`, false, runner); err != nil {
+	if err := runCheckGroup(t.TempDir(), g, "clients", `["@example/z"]`, false, runner); err != nil {
 		t.Fatal(err)
 	}
 	want := [][]string{{"pnpm", "check:ts"}, {"pnpm", "--filter", "@example/z", "test"}}
@@ -196,22 +191,80 @@ func TestRunCheckGroupUsesAlwaysAndSelectedPackageCommands(t *testing.T) {
 	}
 }
 
-func TestSelectedJobWithoutRunnableChecksFails(t *testing.T) {
+func TestSelectedJobWithoutLocalTargetIsSkipped(t *testing.T) {
+	// real_tiers has no check group included in test and no native target.
+	withReal := func(p plan, jobs ...string) plan {
+		for _, job := range jobs {
+			p.Jobs[job] = true
+		}
+		return p
+	}
+	cases := []struct {
+		name        string
+		jobs        map[string]bool
+		wantSkipped []string
+		wantChecks  int
+		wantNative  int
+	}{
+		{"untargeted job alone", map[string]bool{"real_tiers": true}, []string{"real_tiers"}, 0, 0},
+		{"mixed with runnable jobs", map[string]bool{"real_tiers": true, "python": true, "clients": true, "evaluators": true}, []string{"real_tiers"}, 3, 1},
+		{"two untargeted jobs", map[string]bool{"real_tiers": true, "slurm": true, "python": true}, []string{"real_tiers", "slurm"}, 1, 0},
+		{"runnable jobs only", map[string]bool{"python": true, "clients": true, "evaluators": true}, []string{}, 3, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g, p := testFixture()
+			p.Jobs = map[string]bool{}
+			withReal(p, keys(tc.jobs)...)
+			if _, ok := tc.jobs["evaluators"]; !ok {
+				p.Components = map[string][]string{}
+			}
+			runner := &recordingRunner{}
+			nativeCalls := 0
+			nativeRun := func(_ context.Context, _, _ string, _ []string, _ []string) error {
+				nativeCalls++
+				return nil
+			}
+			_, _, skipped, _, err := selectedTestChecks(g, p, false)
+			if err != nil || !reflect.DeepEqual(skipped, tc.wantSkipped) {
+				t.Fatalf("skipped = %v, err = %v, want %v", skipped, err, tc.wantSkipped)
+			}
+			if err := runSelectedTests(t.TempDir(), g, p, false, false, runner, nativeRun); err != nil {
+				t.Fatalf("run failed: %v", err)
+			}
+			if len(runner.checks) != tc.wantChecks || nativeCalls != tc.wantNative {
+				t.Fatalf("ran %d checks and %d native, want %d and %d", len(runner.checks), nativeCalls, tc.wantChecks, tc.wantNative)
+			}
+		})
+	}
+}
+
+func TestSkippedJobDoesNotMaskRunnableFailure(t *testing.T) {
 	g, p := testFixture()
-	delete(g.CheckGroups, "python")
-	if _, _, err := selectedTestChecks(g, p); err == nil || !strings.Contains(err.Error(), `selected job "python"`) {
-		t.Fatalf("error = %v", err)
+	p.Jobs["real_tiers"] = true
+	runner := &failingRunner{}
+	if err := runSelectedTests(t.TempDir(), g, p, false, false, runner, nil); err == nil {
+		t.Fatal("failing runnable group reported success")
 	}
-	delete(p.Components, "native:a")
-	delete(p.Jobs, "python")
-	if _, _, err := selectedTestChecks(g, p); err == nil || !strings.Contains(err.Error(), `selected job "evaluators"`) {
-		t.Fatalf("error = %v", err)
+}
+
+type failingRunner struct{}
+
+func (failingRunner) Run(context.Context, string, execution.Check) error {
+	return fmt.Errorf("boom")
+}
+
+func keys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
 	}
+	return out
 }
 
 func TestPolicyRejectsJobWithoutRunnableChecks(t *testing.T) {
 	g, _ := testFixture()
-	g.Jobs = []string{"python", "tui", "evaluators", "orphan"}
+	g.Jobs = []string{"python", "clients", "evaluators", "orphan"}
 	if err := g.validateRunnableJobs(); err == nil || !strings.Contains(err.Error(), `job "orphan"`) {
 		t.Fatalf("error = %v", err)
 	}

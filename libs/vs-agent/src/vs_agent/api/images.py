@@ -7,9 +7,11 @@ optional runner seam; they do not inspect the packaged Feature.
 
 from vs_agent.agent_feature import AGENT_FEATURES_PROJECT, AGENT_USER, AGENT_WORKDIR, agent_feature
 from vs_agent.images import (
+    AGENT_IMAGE_REPOSITORY,
     DEFAULT_AGENT_IMAGE_REGISTRY,
     DEFAULT_IMAGE_BUILD_TIMEOUT_SECONDS,
     DOCKER_OUTPUT_TAIL_CHARACTERS,
+    TASK_IMAGE_REPOSITORY,
     BuildProgressSink,
     DockerBuildResult,
     DockerBuildRunner,
@@ -24,16 +26,22 @@ from vs_agent.images import (
     agent_image_is_pushed,
     build_task_image,
     ensure_pushed,
+    is_task_image_reference,
+    local_image_id,
     push_agent_image,
+    task_image_inputs,
+    task_image_reference,
 )
 
 __all__ = [
     "AGENT_FEATURES_PROJECT",
+    "AGENT_IMAGE_REPOSITORY",
     "AGENT_USER",
     "AGENT_WORKDIR",
     "DEFAULT_AGENT_IMAGE_REGISTRY",
     "DEFAULT_IMAGE_BUILD_TIMEOUT_SECONDS",
     "DOCKER_OUTPUT_TAIL_CHARACTERS",
+    "TASK_IMAGE_REPOSITORY",
     "BuildProgressSink",
     "DockerBuildResult",
     "DockerBuildRunner",
@@ -49,5 +57,9 @@ __all__ = [
     "agent_image_is_pushed",
     "build_task_image",
     "ensure_pushed",
+    "is_task_image_reference",
+    "local_image_id",
     "push_agent_image",
+    "task_image_inputs",
+    "task_image_reference",
 ]

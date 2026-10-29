@@ -29,10 +29,10 @@
       "path": "../../features/hosts/tsconfig.main.json"
     },
     {
-      "path": "../../features/run-control/tsconfig.main.json"
+      "path": "../../features/machines/tsconfig.main.json"
     },
     {
-      "path": "../../features/start-run/tsconfig.state.json"
+      "path": "../../features/run-control/tsconfig.main.json"
     },
     {
       "path": "../../libs/hosts/tsconfig.lib.json"
@@ -41,10 +41,28 @@
       "path": "../../libs/ipc/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/run-history/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/runs/tsconfig.lib.json"
     },
     {
       "path": "../../libs/transport/tsconfig.lib.json"
+    },
+    {
+      "path": "../../features/app-shell/tsconfig.main.json"
+    },
+    {
+      "path": "../../features/settings/tsconfig.main.json"
+    },
+    {
+      "path": "../../features/new-run/tsconfig.main.json"
+    },
+    {
+      "path": "../../libs/ui/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/runs/tsconfig.intents.json"
     }
   ]
 }

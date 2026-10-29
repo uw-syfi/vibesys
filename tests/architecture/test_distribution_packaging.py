@@ -24,20 +24,10 @@ if TYPE_CHECKING:
     from tests.support.distribution_build import BuiltDistributions, BuiltWheel
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-INTERNAL_DISTRIBUTIONS = {
-    "vs-async-ops",
-    "vs-evaluator-protocol",
-    "vs-evaluation",
-    "vs-github",
-    "vs-issue-tracker",
-    "vs-core",
-    "vs-project",
-    "vs-prompts",
-    "vs-runtime",
-    "vs-sandbox",
-    "vs-slurm",
-    "vs-mcp",
-}
+INTERNAL_DISTRIBUTIONS = frozenset(
+    tomllib.loads(project.read_text())["project"]["name"]
+    for project in (PROJECT_ROOT / "libs").glob("*/pyproject.toml")
+)
 INTERNAL_IMPORT_PACKAGES = {
     "vs_async_ops",
     "vs_evaluator_protocol",
@@ -361,14 +351,6 @@ def test_root_metadata_declares_internal_runtime_dependencies_directly() -> None
     libraries = sorted((PROJECT_ROOT / "libs").iterdir())
     assert libraries
     assert all((library / "pyproject.toml").is_file() for library in libraries)
-
-
-def test_frontend_payload_belongs_to_the_entrypoints_package() -> None:
-    pyproject = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())
-    package_data = pyproject["tool"]["setuptools"]["package-data"]
-
-    assert "_tui/**/*" in package_data["entrypoints"]
-    assert "_tui/**/*" not in package_data["vibesys"]
 
 
 @pytest.mark.xdist_group("built_wheel")

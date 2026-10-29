@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import shlex
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
+from vs_agent.api import AgentExecutionCancelledError
 from vs_evaluation.api import (
     MAX_EVIDENCE_SUMMARY_CHARS,
     STAGE_OUTPUT_TAIL_CHARS,
@@ -30,6 +32,7 @@ from vs_evaluation.api import (
     ExecutorObservation,
     ExecutorPoll,
     ExecutorRejectedError,
+    ExecutorSubmissionError,
     PartialMeasurement,
     PollPhase,
     ResourceRequirements,
@@ -39,8 +42,13 @@ from vs_evaluation.api import (
     TrustedEvidence,
     evidence_identity,
     is_finished,
+    same_work,
 )
+from vs_redaction.api import redact_diagnostic_tail
+from vs_runtime._evaluation_failure_text import render_stage_output_with_service_log
 from vs_runtime._failure_classification import RecordState, classify, is_unsettled, signal_of
+from vs_runtime._host_path_masking import mask_observation, private_paths
+from vs_runtime._measurement_progress import StageRun
 from vs_runtime._trusted_evaluation import (
     TrustedEvaluationPlan,
     build_trusted_benchmark_command,
@@ -56,6 +64,7 @@ from vs_sandbox.api.slurm import (
     SlurmExecutionMetadata,
     SlurmStagePayload,
     SlurmTargetLifecycle,
+    open_ledger_attachment,
     profile_capture_descriptor,
     require_profile_fields,
     split_profile_stats,
@@ -63,14 +72,24 @@ from vs_sandbox.api.slurm import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from contextlib import AbstractContextManager
     from pathlib import Path
 
-    from vs_runtime.contracts import CandidateWorkspace, Workspaces
-    from vs_sandbox.api.slurm import SlurmExecutionPolicy
-    from vs_sim.api import Clock, Processes, Sleeper
-    from vs_slurm.api import Cluster, SlurmConfig
+    from vs_runtime._evaluation_recovery import EvaluationWorkspaceAcquisitions
+    from vs_runtime._measurement_progress import StageOutputOpener
+    from vs_runtime._run_control import RunControlChannel
+    from vs_runtime.contracts import Checkout, MeasuredCheckouts
+    from vs_sandbox.api.slurm import (
+        SlurmExecutionPolicy,
+        SlurmLedgerAttachment,
+        SlurmStageOutputOpener,
+    )
+    from vs_sim.api import BlockingRunner, Clock, OutputSink, Processes, Sleeper
+    from vs_slurm.api import Cluster, SlurmConfig, WorkspaceRootProof
 
 _CLEANUP_FAILURE = "cleanup failed"
+SERVICE_LOG_SUMMARY_CHARS = 2_000
+"""The most service log a failed stage's summary keeps; its own output matters more."""
 
 type StageFailureText = Callable[[Sequence[tuple[str | None, EvidenceKind]], str | None], str]
 
@@ -87,11 +106,23 @@ def _completed(raw: SlurmCommandResult, metadata: SlurmExecutionMetadata | None)
     )
 
 
+def _redacted_service_log(step: EvaluationStepResult) -> str | None:
+    """The step's service log tail, credential-redacted and bounded like the output tails."""
+    if step.service_log_tail is None:
+        return None
+    return redact_diagnostic_tail(step.service_log_tail, max_chars=STAGE_OUTPUT_TAIL_CHARS) or None
+
+
 def _stage_failure_kind(evidence: TrustedEvidence) -> StageFailureKind:
     """An ambiguous stage ran and was cut short; every other unsettled one lost its result."""
     if evidence.failure_kind is BenchmarkFailureKind.AMBIGUOUS:
         return StageFailureKind.EXECUTION
     return StageFailureKind.COLLECTION
+
+
+def _first_defined(*values: str | None) -> str | None:
+    """Return the first supplied projection, preserving an explicitly empty safe value."""
+    return next((value for value in values if value is not None), None)
 
 
 class _DurableSemanticSubmission(BaseModel):
@@ -103,7 +134,7 @@ class _DurableSemanticSubmission(BaseModel):
 
 @dataclass(slots=True)
 class _Execution:
-    workspace: CandidateWorkspace
+    workspace: Checkout
     executor: SlurmEvaluationExecutor
 
 
@@ -116,27 +147,53 @@ class SemanticSlurmEvaluationExecutor:
         policy: SlurmExecutionPolicy,
         plan: SlurmEvaluationPlan,
         trusted_plan: TrustedEvaluationPlan,
-        workspaces: Workspaces,
+        workspaces: MeasuredCheckouts,
         namespace: EvaluationStateNamespace,
         handle_root: Path,
         *,
         stage_failure_text: StageFailureText,
         clock: Clock,
         sleeper: Sleeper,
+        blocking: BlockingRunner,
+        processes: Processes,
         admission: SharedSlurmAdmission | None = None,
         cluster: Cluster | None = None,
-        processes: Processes | None = None,
+        ledger: SlurmLedgerAttachment | None = None,
+        ledger_identity: tuple[str, str] | None = None,
+        stage_output: StageOutputOpener | None = None,
+        root_proof: WorkspaceRootProof | None = None,
+        control: RunControlChannel | None = None,
+        recovery: EvaluationWorkspaceAcquisitions | None = None,
     ) -> None:
         """Bind external Slurm policy to semantic evaluation state.
 
         ``clock`` times job deadlines; ``sleeper`` paces the polls of running jobs. Each
         executor uses ``cluster``, or reaches the configured cluster by starting ``processes``.
+        ``blocking`` owns calls into that synchronous cluster.
+
+        When the operator's policy enables the evaluation ledger (#2757), evaluations
+        go through ``ledger``, or through the project's ledger on the configured
+        cluster, which ``ledger_identity`` (the project id and the run id) names.
+
+        ``stage_output`` opens each stage's stream, which the stage's output on the cluster
+        reaches at each poll while the job runs and in full when it settles.
+
+        ``root_proof`` is the run's workspace-root probe; no evaluation is submitted
+        before it proves the root, and none at all once it failed.
+
+        ``recovery`` is the dormant replay acquisition service. Its durable manifest
+        guards inherited backing before any acquisition; existing positional callers
+        keep their current lifecycle until the atomic production cutover.
         """
+        self._acquisitions = recovery
+        self._control = control
+        self._root_proof = root_proof
         self._stage_failure_text = stage_failure_text
         self._clock = clock
         self._sleeper = sleeper
         self._config = config
         self._policy = policy
+        self._private_paths = private_paths(config, policy.private_paths())
         self._plan = plan
         self._trusted_plan = trusted_plan
         self._workspaces = workspaces
@@ -145,8 +202,13 @@ class SemanticSlurmEvaluationExecutor:
         self._admission = admission or SharedSlurmAdmission(config.evaluation_capacity)
         self._cluster = cluster
         self._processes = processes
+        self._stage_output = stage_output
+        self._blocking = blocking
         self._executions: dict[str, _Execution] = {}
         self._lock = asyncio.Lock()
+        # Set by ``close``: no submission makes a new candidate executor after it.
+        self._closing = False
+        self._ledger = ledger if ledger is not None else self._open_ledger(ledger_identity)
         self._availability = self._make_executor(workspaces.root.path)
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
@@ -167,6 +229,7 @@ class SemanticSlurmEvaluationExecutor:
         # or candidate worktree exists. Each refusal is a typed rejection so the
         # requester resolves at once; any other exception reads as an ambiguous
         # submission and leaves the requester waiting.
+        self._refuse_if_closing(handle_id)
         try:
             provider_request = self._provider_request(request)
             record = self._record(request)
@@ -175,9 +238,14 @@ class SemanticSlurmEvaluationExecutor:
         except ValueError as error:
             raise ExecutorRejectedError(str(error)) from error
         existing = self._load(handle_id)
-        if existing is not None and existing != record:
+        if existing is not None and (
+            existing.snapshot != record.snapshot or not same_work(existing.request, record.request)
+        ):
             message = f"semantic Slurm handle {handle_id!r} has different work"
             raise ExecutorRejectedError(message)
+        if existing is not None and existing != record:
+            # The same work, recorded before its stages named their purpose.
+            self._namespace.save(self._path(handle_id), record)
         if existing is None:
             # The revision to measure is named by a search, often from an agent's reply. A
             # revision the repository does not hold can never run, so refuse it before a
@@ -186,7 +254,7 @@ class SemanticSlurmEvaluationExecutor:
                 message = f"candidate revision {record.snapshot!r} is not a commit of this run"
                 raise ExecutorRejectedError(message)
             self._namespace.save(self._path(handle_id), record)
-        execution = await self._execution(handle_id, record)
+        execution = await self._execution(handle_id, record, fresh=existing is None)
         await execution.executor.submit(provider_request, handle_id=handle_id)
 
     async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
@@ -194,9 +262,7 @@ class SemanticSlurmEvaluationExecutor:
         record = self._load(handle_id)
         if record is None:
             return None
-        execution = self._executions.get(handle_id)
-        executor = execution.executor if execution is not None else self._availability
-        observed = await executor.inspect_only(handle_id)
+        observed = await self._retained_executor(handle_id).inspect_only(handle_id)
         return (
             None
             if observed is None
@@ -208,7 +274,7 @@ class SemanticSlurmEvaluationExecutor:
         record = self._load(handle_id)
         if record is None:
             return ExecutorPoll(phase=PollPhase.UNSUBMITTED)
-        polled = await self._availability.poll(handle_id)
+        polled = await self._retained_executor(handle_id).poll(handle_id)
         if polled.terminal is None:
             return polled
         return polled.model_copy(
@@ -217,12 +283,27 @@ class SemanticSlurmEvaluationExecutor:
             }
         )
 
+    async def recover(self, handle_id: str) -> ExecutorPoll:
+        """Inspect retained provider work without trusting a missing semantic request."""
+        if self._load(handle_id) is None:
+            provider = await self._availability.poll(handle_id)
+            if provider.phase is not PollPhase.UNSUBMITTED:
+                return ExecutorPoll(
+                    phase=PollPhase.UNKNOWN,
+                    detail="retained Slurm work is missing its semantic evaluation request",
+                )
+            return provider
+        return await self.poll(handle_id)
+
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
-        """Recover the candidate worktree and provider handle on demand."""
+        """Inspect retained work by identity without reacquiring its backing."""
+        execution = self._executions.get(handle_id)
+        if execution is None:
+            polled = await self.poll(handle_id)
+            return polled.terminal or await self.inspect_only(handle_id)
         record = self._load(handle_id)
         if record is None:
             return None
-        execution = await self._execution(handle_id, record)
         observed = await execution.executor.inspect(handle_id)
         return (
             None
@@ -230,24 +311,31 @@ class SemanticSlurmEvaluationExecutor:
             else self._semantic_observation(handle_id, record.request, observed)
         )
 
+    def _retained_executor(self, handle_id: str) -> SlurmEvaluationExecutor:
+        execution = self._executions.get(handle_id)
+        return self._availability if execution is None else execution.executor
+
     async def wait_for_change(self, handle_id: str, timeout_s: float) -> None:
-        """Wait boundedly for provider progress when the handle is known."""
-        record = self._load(handle_id)
-        if record is None:
-            return
-        execution = await self._execution(handle_id, record)
-        await execution.executor.wait_for_change(handle_id, timeout_s)
+        """A bounded wait needs no writable candidate or new recovery task."""
+        execution = self._executions.get(handle_id)
+        if execution is None:
+            # Retained work has no process-local notification producer. The
+            # injected timer paces the caller's next authoritative inspection.
+            await self._sleeper.sleep(max(0, timeout_s))
+        else:
+            await execution.executor.wait_for_change(handle_id, timeout_s)
 
     async def cancel(self, handle_id: str) -> None:
-        """Cancel a provider job, recovering its durable handle if needed."""
-        record = self._load(handle_id)
-        if record is None:
-            return
-        execution = await self._execution(handle_id, record)
-        await execution.executor.cancel(handle_id)
+        """Cancel the recorded provider identity without acquiring candidate backing."""
+        await self._retained_executor(handle_id).cancel(handle_id)
 
     async def close(self) -> None:
-        """Release candidate worktrees after provider tasks have settled."""
+        """Refuse new submissions, then release candidate worktrees once provider tasks settled.
+
+        A submission already holding its candidate executor is refused by that
+        executor's own ``close``.
+        """
+        self._closing = True
         async with self._lock:
             cleanups = tuple(
                 cleanup
@@ -277,17 +365,87 @@ class SemanticSlurmEvaluationExecutor:
             raise ValueError(message)
         return _DurableSemanticSubmission(request=request, snapshot=next(iter(snapshots)))
 
-    async def _execution(self, handle_id: str, record: _DurableSemanticSubmission) -> _Execution:
+    async def _execution(
+        self,
+        handle_id: str,
+        record: _DurableSemanticSubmission,
+        *,
+        fresh: bool,
+    ) -> _Execution:
         async with self._lock:
             existing = self._executions.get(handle_id)
             if existing is not None:
                 return existing
-            workspace = await self._workspaces.create_candidate(record.snapshot)
-            execution = _Execution(workspace, self._make_executor(workspace.path))
+            # Closing during admission must not leave an unowned candidate executor.
+            self._refuse_if_closing(handle_id)
+            held = (
+                nullcontext()
+                if self._acquisitions is None
+                else self._acquisitions.acquire(
+                    handle_id,
+                    str(self._workspaces.root.path),
+                    fresh=fresh,
+                    live=tuple(self._executions),
+                )
+            )
+            with held:
+                workspace = await self._workspaces.create_measured_candidate(record.snapshot)
+            executor = self._make_executor(
+                workspace.path,
+                self._stage_streams(record.request),
+                candidate=record.snapshot,
+            )
+            execution = _Execution(workspace, executor)
             self._executions[handle_id] = execution
             return execution
 
-    def _make_executor(self, workspace: Path) -> SlurmEvaluationExecutor:
+    def _refuse_if_closing(self, handle_id: str) -> None:
+        """Refuse a submission once ``close`` began: ambiguous, so a resume may submit it."""
+        if self._closing:
+            message = f"semantic Slurm evaluation {handle_id!r} arrived while closing"
+            raise ExecutorSubmissionError(RuntimeError(message))
+
+    def _open_ledger(self, identity: tuple[str, str] | None) -> SlurmLedgerAttachment | None:
+        """The run's attachment to its project's ledger, if the operator enabled one."""
+        policy = self._policy.ledger
+        if policy is None:
+            return None
+        if identity is None or self._processes is None:
+            message = "the evaluation ledger needs the project and run identity and a transport"
+            raise ValueError(message)
+        project, run = identity
+        return open_ledger_attachment(
+            self._config,
+            policy,
+            project=project,
+            holder=run,
+            clock=self._clock,
+            processes=self._processes,
+            state_root=self._handle_root / "ledger",
+        )
+
+    def _stage_streams(self, request: EvaluationRequest) -> SlurmStageOutputOpener | None:
+        """The provider's per-stage opener, naming each stage as its progress reports do."""
+        opener = self._stage_output
+        if opener is None:
+            return None
+        purposes = {
+            step.name: SemanticEvaluationStage.model_validate(step.payload).purpose
+            for step in request.stages
+        }
+
+        def open_stage(handle_id: str, stage_id: str) -> AbstractContextManager[OutputSink]:
+            return opener(StageRun(handle_id, stage_id, purpose=purposes.get(stage_id)))
+
+        return open_stage
+
+    def _make_executor(
+        self,
+        workspace: Path,
+        stage_output: SlurmStageOutputOpener | None = None,
+        *,
+        candidate: str | None = None,
+    ) -> SlurmEvaluationExecutor:
         return SlurmEvaluationExecutor(
             self._config,
             workspace=workspace,
@@ -301,7 +459,23 @@ class SemanticSlurmEvaluationExecutor:
             admission=self._admission,
             cluster=self._cluster,
             processes=self._processes,
+            ledger=self._ledger,
+            ledger_candidate=candidate,
+            stage_output=stage_output,
+            root_proof=self._root_proof,
+            before_dispatch=self._admit_execution,
+            blocking=self._blocking,
         )
+
+    def _admit_execution(self, request: EvaluationRequest) -> None:
+        if self._control is not None:
+            try:
+                self._control.start_execution(
+                    lambda: None,
+                    evaluation_id=request.key,
+                )
+            except AgentExecutionCancelledError as error:
+                raise ExecutorRejectedError(str(error)) from error
 
     def _supported_evidence_kinds(self) -> tuple[str, ...]:
         """Return the kinds this plan has a command for.
@@ -374,8 +548,17 @@ class SemanticSlurmEvaluationExecutor:
     def _semantic_observation(
         self, handle_id: str, request: EvaluationRequest, observed: ExecutorObservation
     ) -> ExecutorObservation:
+        observed = mask_observation(observed, self._private_paths)
         results: list[EvaluationStepResult] = []
         failed_checks: list[tuple[str | None, EvidenceKind]] = []
+        operator_failed_checks: list[tuple[str | None, EvidenceKind]] = []
+        operator_observed_failure = (
+            None
+            if observed.failure is None
+            else observed.operator_failure
+            if observed.operator_failure is not None
+            else redact_diagnostic_tail(observed.failure, max_chars=MAX_EVIDENCE_SUMMARY_CHARS)
+        )
         metadata = (
             SlurmCommandResult.model_validate(observed.stage_results[0].result).execution_metadata
             if observed.stage_results and observed.stage_results[0].result is not None
@@ -384,13 +567,34 @@ class SemanticSlurmEvaluationExecutor:
         infrastructure_failure = metadata is None or metadata.aggregate_unknown is not None
         for step, raw_step in zip(request.stages, observed.stage_results, strict=False):
             if raw_step.result is None:
-                results.append(raw_step.model_copy(update={"name": step.name}))
+                operator_step_failure = (
+                    None
+                    if raw_step.failure is None
+                    else raw_step.operator_failure
+                    if raw_step.operator_failure is not None
+                    else redact_diagnostic_tail(
+                        raw_step.failure, max_chars=MAX_EVIDENCE_SUMMARY_CHARS
+                    )
+                )
+                results.append(
+                    raw_step.model_copy(
+                        update={
+                            "name": step.name,
+                            "operator_failure": operator_step_failure,
+                            "service_log_tail": _redacted_service_log(raw_step),
+                        }
+                    )
+                )
                 continue
             stage = SemanticEvaluationStage.model_validate(step.payload)
             raw = SlurmCommandResult.model_validate(raw_step.result)
             completed = _completed(raw, metadata)
-            evidence = self._evidence(
-                stage, raw, raw_step.failure, handle_id=handle_id, metadata=metadata
+            evidence, operator_evidence_summary = self._evidence(
+                stage,
+                raw,
+                raw_step,
+                handle_id=handle_id,
+                metadata=metadata,
             )
             # A job that exited cleanly can still hold a benchmark whose evaluator died
             # before writing its result, so the evidence's own kind counts too. An
@@ -398,33 +602,70 @@ class SemanticSlurmEvaluationExecutor:
             # once more, but its evidence stays: it is the last tail if it happens again.
             completed &= not is_unsettled(evidence.failure_kind)
             infrastructure_failure |= not completed
+            operator_step_failure = (
+                None
+                if raw_step.failure is None
+                else raw_step.operator_failure
+                if raw_step.operator_failure is not None
+                else redact_diagnostic_tail(raw_step.failure, max_chars=MAX_EVIDENCE_SUMMARY_CHARS)
+            )
             if evidence.outcome is EvidenceOutcome.FAILED:
                 failed_checks.append((evidence.semantic_summary, stage.kind))
+                operator_failed_checks.append(
+                    (
+                        operator_evidence_summary,
+                        stage.kind,
+                    )
+                )
             results.append(
                 EvaluationStepResult(
                     name=step.name,
                     state=StageState.SUCCEEDED if completed else StageState.FAILED,
                     result=evidence.model_dump(mode="json"),
+                    operator_summary=operator_evidence_summary,
                     duration_s=raw_step.duration_s,
-                    stdout_tail=raw.stdout[-STAGE_OUTPUT_TAIL_CHARS:] or None,
-                    stderr_tail=raw.stderr[-STAGE_OUTPUT_TAIL_CHARS:] or None,
+                    host=raw_step.host,
+                    stdout_tail=(
+                        redact_diagnostic_tail(raw.stdout, max_chars=STAGE_OUTPUT_TAIL_CHARS)
+                        or None
+                    ),
+                    stderr_tail=(
+                        redact_diagnostic_tail(raw.stderr, max_chars=STAGE_OUTPUT_TAIL_CHARS)
+                        or None
+                    ),
+                    service_log_tail=None if completed else _redacted_service_log(raw_step),
                     failure_kind=None if completed else _stage_failure_kind(evidence),
                     failure=(
                         None
                         if completed
                         else raw_step.failure or observed.failure or evidence.semantic_summary
                     ),
+                    operator_failure=(
+                        None
+                        if completed
+                        else _first_defined(
+                            operator_step_failure,
+                            operator_observed_failure,
+                            operator_evidence_summary,
+                            f"{stage.kind.value} command failed",
+                        )
+                    ),
                 )
             )
         has_semantic_result = any(item.result is not None for item in results)
         skipped = any(item.state is StageState.SKIPPED for item in results)
         failure = observed.failure
+        operator_failure = operator_observed_failure
         if infrastructure_failure and observed.state in {
             EvaluationState.SUCCEEDED,
             EvaluationState.FAILED,
         }:
             state = EvaluationState.FAILED
             failure = self._stage_failure_text(failed_checks, observed.failure)
+            operator_failure = redact_diagnostic_tail(
+                self._stage_failure_text(operator_failed_checks, operator_observed_failure),
+                max_chars=MAX_EVIDENCE_SUMMARY_CHARS,
+            )
         elif observed.state is EvaluationState.FAILED and has_semantic_result and not skipped:
             state = EvaluationState.SUCCEEDED
         elif skipped and has_semantic_result:
@@ -433,6 +674,10 @@ class SemanticSlurmEvaluationExecutor:
             # diagnostics are the failure the submitting agent reads.
             state = EvaluationState.FAILED
             failure = self._stage_failure_text(failed_checks, observed.failure)
+            operator_failure = redact_diagnostic_tail(
+                self._stage_failure_text(operator_failed_checks, operator_observed_failure),
+                max_chars=MAX_EVIDENCE_SUMMARY_CHARS,
+            )
         else:
             state = observed.state
         return ExecutorObservation(
@@ -440,22 +685,29 @@ class SemanticSlurmEvaluationExecutor:
             current_stage=None if is_finished(state) else observed.current_stage,
             stage_results=tuple(results),
             failure=None if state is EvaluationState.SUCCEEDED else failure,
+            operator_failure=None if state is EvaluationState.SUCCEEDED else operator_failure,
+            run_environment_unavailable=state is EvaluationState.FAILED
+            and observed.run_environment_unavailable,
         )
 
     def _evidence(
         self,
         stage: SemanticEvaluationStage,
         raw: SlurmCommandResult,
-        failure: str | None,
+        raw_step: EvaluationStepResult,
         *,
         handle_id: str,
         metadata: SlurmExecutionMetadata | None,
-    ) -> TrustedEvidence:
+    ) -> tuple[TrustedEvidence, str | None]:
+        failure = raw_step.failure
+        service_log_tail = raw_step.service_log_tail
         passed = _completed(raw, metadata) and raw.exit_code == 0
         service_not_ready = metadata is not None and metadata.service_not_ready
         metrics: tuple[EvidenceMetric, ...] = ()
         summary: str | None = None
+        operator_summary: str | None = None
         partial: PartialMeasurement | None = None
+        unmet: str | None = None
         # Whose fault a failure is follows from how the stage ended and what its evaluator
         # wrote (`classify`). Only a benchmark has a result record to read; every other
         # stage's exit status is its whole outcome.
@@ -473,15 +725,24 @@ class SemanticSlurmEvaluationExecutor:
                 raw.output, contract, frozenset(), exited_cleanly=passed
             )
             partial = decoded.partial
+            unmet = decoded.requirement
             # The evaluator's own stop reason leads, as on the local executor;
             # the raw output tail would end with its command line instead.
             summary = decoded.reason
+            operator_summary = (
+                None
+                if decoded.reason is None
+                else redact_diagnostic_tail(decoded.reason, max_chars=MAX_EVIDENCE_SUMMARY_CHARS)
+            )
             if decoded.violation is not None:
                 # A clean exit with no valid record still leaves the output the evaluator
                 # printed before it stopped, which is all that says what happened.
                 failure = f"{failure or raw.output}\n{decoded.violation}"
                 if passed:
                     summary = failure
+                    operator_summary = redact_diagnostic_tail(
+                        failure, max_chars=MAX_EVIDENCE_SUMMARY_CHARS
+                    )
             passed = decoded.passed
             record = decoded.record
             metrics = tuple(
@@ -506,15 +767,26 @@ class SemanticSlurmEvaluationExecutor:
                 failure = str(exc)
             else:
                 summary = text[-MAX_EVIDENCE_SUMMARY_CHARS:] or None
+                operator_summary = (
+                    redact_diagnostic_tail(text, max_chars=MAX_EVIDENCE_SUMMARY_CHARS) or None
+                )
                 metrics = () if stats is None else stats.metrics()
         if not passed and summary is None:
-            # The provider's stage failure already holds the stage output plus the
-            # server log tail; keep its end, where the cause usually is.
-            detail = failure or raw.output
+            # The stage's own output ends the text, where its verdict is and where the
+            # agent's excerpt cuts; the capped service log precedes it.
+            detail = render_stage_output_with_service_log(
+                failure or raw.output, (service_log_tail or "")[-SERVICE_LOG_SUMMARY_CHARS:]
+            )
             summary = detail[-MAX_EVIDENCE_SUMMARY_CHARS:] or f"{stage.kind.value} command failed"
+            operator_summary = (
+                redact_diagnostic_tail(detail, max_chars=MAX_EVIDENCE_SUMMARY_CHARS)
+                or f"{stage.kind.value} command failed"
+            )
         outcome = EvidenceOutcome.PASSED if passed else EvidenceOutcome.FAILED
         if summary is not None:
             summary = summary[-MAX_EVIDENCE_SUMMARY_CHARS:]
+        if operator_summary is not None:
+            operator_summary = operator_summary[-MAX_EVIDENCE_SUMMARY_CHARS:]
         evidence_id = evidence_identity(
             stage,
             EvidenceResultIdentity(
@@ -523,6 +795,7 @@ class SemanticSlurmEvaluationExecutor:
                 summary=summary,
                 metrics=metrics,
                 partial=partial,
+                unmet_requirement=unmet,
             ),
         )
         return TrustedEvidence(
@@ -537,8 +810,9 @@ class SemanticSlurmEvaluationExecutor:
             metrics=metrics,
             partial_measurement=partial,
             failure_kind=None if passed else classify(signal, record),
+            unmet_requirement=None if passed else unmet,
             accepted_round=0,
-        )
+        ), operator_summary
 
     def _load(self, handle_id: str) -> _DurableSemanticSubmission | None:
         return self._namespace.load_optional(self._path(handle_id), _DurableSemanticSubmission)

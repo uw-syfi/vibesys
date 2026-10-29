@@ -39,6 +39,24 @@ The workflow generates two key artifacts:
 - **NEFF file**: Compiled kernel binary, generated during execution
 - **NTFF file**: Execution trace captured by neuron-explorer
 
+## Where outputs go (the shared project-root contract)
+
+`$NEURON_PROJECT_ROOT` names the PROJECT directory this analysis belongs to; everything this
+skill generates lands under `<root>/agent_artifacts/`, and it defaults to the cwd, so an ordinary
+interactive run needs no extra input. It is the SAME input the rest of this family takes — the
+parallelism-planner and hardware-entitlement skills accept it as `--project-root`, the
+vllm-neuron profiling skill writes its profiles under it — which is what lets one run's plan,
+per-operator floor, profile and ingested parquet sit in a single evidence trail instead of four
+unrelated directories.
+
+```
+an explicit `-s` / output path you pass to neuron-explorer   (if given)
+  else $NEURON_PROJECT_ROOT/agent_artifacts/data/profiles/<run-name>/   (NEFF, NTFF, summary JSON)
+    else $PWD/agent_artifacts/data/profiles/<run-name>/   (NEFF, NTFF, summary JSON)
+```
+
+The relative paths in the examples below (`./profiles/run_001/profile.ntff`) are relative to the project root. Capture must run on the Trainium box that owns the device, so when that box is not your project directory, pass the output path explicitly and copy the pair back into `<root>/agent_artifacts/data/profiles/` — the querying skill then finds it where every other skill looks.
+
 ## Prerequisites
 
 Before profiling kernels, resolve the NKI virtual environment path:
@@ -309,6 +327,7 @@ See `examples/basic-profiling-workflow.py` for a complete end-to-end profiling s
 | Skill | Purpose |
 |-------|---------|
 | `/neuron-nki-profile-querying` | Detailed profile querying and analysis |
+| `/neuron-explorer-profile-schema` | Reference for the parquet schema produced by `neuron-explorer` |
 | `/neuron-nki-debugging` | Debug compilation errors |
 | `/neuron-nki-docs` | Look up API documentation |
 | `/neuron-nki-writing` | Write NKI kernels |

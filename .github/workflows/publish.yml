@@ -1,36 +1,18 @@
-name: Build and publish release wheels
+name: Build and publish release wheel
 
 on:
   pull_request:
     branches: [main]
-    # This matrix builds and clean-room-verifies three release wheels, one of
-    # them on a paid macOS runner. That is the wall-clock long pole of a pull
-    # request (issue #474), and almost none of it is about the diff: a wheel
-    # is a copy of tracked files plus a bundled TUI payload, so only a change
-    # to the packaging machinery, its metadata, or the bundle's own inputs can
-    # change the verdict.
-    #
-    # Listed positively rather than as `paths-ignore`, because the safe default
-    # for a new path is "does not affect the wheel". A `release` event ignores
-    # path filters entirely, so the production build is untouched by this list.
     paths:
-      # Wheel metadata and the resolved dependency set.
       - 'pyproject.toml'
       - 'uv.lock'
-      # The build itself: what gets staged, under which platform tag, and the
-      # contracts every built wheel is checked against.
       - 'setup.py'
       - 'MANIFEST.in'
       - 'packaging/**'
-      # The bundled TUI payload: the workspace `pnpm build:clients` builds and
-      # `pnpm deploy` stages, and the launcher that resolves it.
-      - 'clients/**'
-      - 'src/entrypoints/launcher.py'
-      # Licenses whose digests the wheel verifier compares.
-      - 'LICENSE'
-      - 'third_party/bun/LICENSE'
-      # By exact filename, not `.github/workflows/**`, so an edit to this
-      # workflow still runs the full matrix.
+      - 'src/**'
+      - 'libs/**'
+      - 'resources/**'
+      - 'sdk/**'
       - '.github/workflows/publish.yml'
   release:
     types: [published]
@@ -43,12 +25,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release-context:
-    name: Validate release context
+  build:
+    name: Build and verify universal wheel
     runs-on: ubuntu-24.04
-
+    timeout-minutes: 10
     steps:
-      - name: Check out the release source
+      - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -60,9 +42,6 @@ jobs:
         with:
           version: "0.9.24"
           enable-cache: true
-          # Same narrowing as .github/workflows/test.yml: `uv sync`
-          # installs exactly what uv.lock pins, so keying on the lock
-          # keeps the cache across pyproject edits that do not move it.
           cache-dependency-glob: uv.lock
 
       - name: Set up Python
@@ -75,139 +54,31 @@ jobs:
         run: |
           if [[ "$EVENT_NAME" == release ]]; then
             uv run python packaging/check_release_version.py --tag "refs/tags/$RELEASE_TAG"
+            git fetch --no-tags origin main
+            release_commit="$(git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}")"
+            git merge-base --is-ancestor "$release_commit" origin/main
           else
             uv run python packaging/check_release_version.py
           fi
 
-      - name: Require the released commit to be on main
-        if: github.event_name == 'release'
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: |
-          git fetch --no-tags origin main
-          release_commit="$(git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}")"
-          git merge-base --is-ancestor "$release_commit" origin/main
-
-  build:
-    name: Build ${{ matrix.target }}
-    # Not gated on release-context: that job only sanity-checks version
-    # metadata and shares no output the build steps consume, so making the
-    # (much longer) per-platform builds wait on it is pure serialization.
-    # aggregate below still requires both to succeed.
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: linux-x86_64
-            runner: ubuntu-24.04
-          - target: linux-aarch64
-            runner: ubuntu-24.04-arm
-          - target: macos-arm64
-            runner: macos-14
-    runs-on: ${{ matrix.runner }}
-
-    steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          submodules: false
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          version: "0.9.24"
-          enable-cache: true
-          # Same narrowing as .github/workflows/test.yml: `uv sync`
-          # installs exactly what uv.lock pins, so keying on the lock
-          # keeps the cache across pyproject edits that do not move it.
-          cache-dependency-glob: uv.lock
-
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-
-      - name: Enable pnpm 11.11.0
-        run: |
-          corepack enable
-          corepack install --global pnpm@11.11.0
-
-      # Resolved after pnpm exists rather than hardcoded: the store location
-      # is pnpm's to choose, and a wrong path caches an empty directory
-      # silently. Same pattern as the `tui` job in test.yml.
-      - name: Locate the pnpm store
-        run: echo "PNPM_STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
-
-      - name: Cache the pnpm store
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ env.PNPM_STORE_PATH }}
-          # Keyed on matrix.target, not runner.os: linux-x86_64 and
-          # linux-aarch64 share an OS but not an architecture, and OpenTUI's
-          # native optional dependencies differ per architecture.
-          key: pnpm-store-${{ matrix.target }}-${{ hashFiles('clients/pnpm-lock.yaml') }}
-          restore-keys: pnpm-store-${{ matrix.target }}-
-
-      - name: Install Python dependencies
-        run: uv sync --dev
-
-      # `uv tool install` below installs from a bare wheel file, so it has no
-      # lockfile to read: it re-resolves every dependency fresh against
-      # PyPI's latest at that moment, floating past whatever uv.lock pinned.
-      # That drift has real cost, not just a correctness gap: it can land on
-      # a version with no prebuilt wheel for this platform and fall back to
-      # compiling from source. Observed on macos-x86_64: an unconstrained
-      # resolve picked cryptography 49.0.0, which has no prebuilt wheel here
-      # and took 4m17s to build from source, while uv.lock's pinned 46.0.5
-      # installs from a prebuilt wheel in seconds. Export uv.lock's own
-      # resolution as a constraints file so the verification step targets
-      # the same, already-known-good versions instead of floating.
-      - name: Export dependency constraints for release verification
+      - name: Export pinned runtime dependencies
         run: |
           uv export --no-dev --no-editable --no-emit-project --no-hashes \
             --no-header --no-annotate \
             -o "$RUNNER_TEMP/release-verify-constraints.txt"
 
-      - name: Fetch verified Bun 1.4.2
-        env:
-          TARGET: ${{ matrix.target }}
-        run: python3 packaging/fetch_bun.py --target "$TARGET" --output "$RUNNER_TEMP/vibesys-bun/bin/bun"
-
-      - name: Build one native wheel
-        env:
-          TARGET: ${{ matrix.target }}
+      - name: Build universal wheel
         run: |
           mkdir -p dist/release
-          uv run python packaging/build_release_wheel.py \
-            --target "$TARGET" \
-            --bun "$RUNNER_TEMP/vibesys-bun/bin/bun" \
-            --output-dir dist/release
+          uv build --wheel --out-dir dist/release
+          uv run python packaging/check_release_version.py --wheel-dir dist/release
 
-      - name: Verify static and native compatibility contracts
-        env:
-          TARGET: ${{ matrix.target }}
+      - name: Verify wheel in a clean installation
         run: |
           set -- dist/release/*.whl
           test "$#" -eq 1
-          test -f "$1"
-          uv run python packaging/verify_release_wheel.py "$1" --target "$TARGET"
-          uv run python packaging/audit_release_wheel.py "$1" --target "$TARGET"
-          if [[ "$TARGET" == linux-* ]]; then
-            uv run auditwheel show "$1"
-          fi
-
-      - name: Verify the installed wheel with a sanitized PATH
-        run: |
-          set -- dist/release/*.whl
           wheel="$(cd "$(dirname "$1")" && pwd -P)/$(basename "$1")"
-          runtime_parent="$(cd "$RUNNER_TEMP" && pwd -P)"
-          runtime_root="$runtime_parent/vibesys-installed"
+          runtime_root="$(cd "$RUNNER_TEMP" && pwd -P)/vibesys-installed"
           bootstrap_bin="$runtime_root/bootstrap-bin"
           tool_bin="$runtime_root/tool-bin"
           tool_root="$runtime_root/tools"
@@ -217,8 +88,7 @@ jobs:
           test -z "$(find "$install_home" -mindepth 1 -print -quit)"
           test -z "$(find "$verify_home" -mindepth 1 -print -quit)"
           cp "$(command -v uv)" "$bootstrap_bin/uv"
-          cp "$GITHUB_WORKSPACE/packaging/verify_installed_release.py" \
-            "$runtime_root/verify_installed_release.py"
+          cp packaging/verify_installed_release.py "$runtime_root/verify_installed_release.py"
           install_wheel="$runtime_root/$(basename "$wheel")"
           cp "$wheel" "$install_wheel"
           python_path="$(uv python find 3.12)"
@@ -237,78 +107,7 @@ jobs:
             VIBESYS_RELEASE_RUNTIME_ROOT="$runtime_root" \
             "$tool_root/vibesys/bin/python" "$runtime_root/verify_installed_release.py"
 
-      - name: Verify Linux x86-64 in the Docker clean room
-        if: matrix.target == 'linux-x86_64'
-        run: ./packaging/test_release_wheel.sh dist/release/*.whl
-
-      - name: Upload one target wheel
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: release-wheel-${{ matrix.target }}
-          path: dist/release/*.whl
-          if-no-files-found: error
-
-  aggregate:
-    name: Verify release artifact set
-    needs: [release-context, build]
-    runs-on: ubuntu-24.04
-    permissions:
-      actions: read
-      contents: read
-
-    steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          submodules: false
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          version: "0.9.24"
-          enable-cache: true
-          # Same narrowing as .github/workflows/test.yml: `uv sync`
-          # installs exactly what uv.lock pins, so keying on the lock
-          # keeps the cache across pyproject edits that do not move it.
-          cache-dependency-glob: uv.lock
-
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Download all target wheels
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: release-wheel-*
-          path: dist/release
-          merge-multiple: true
-
-      - name: Require exact versions and statically verify all wheels
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: |
-          if [[ "$EVENT_NAME" == release ]]; then
-            uv run python packaging/check_release_version.py \
-              --tag "refs/tags/$RELEASE_TAG" --wheel-dir dist/release
-          else
-            uv run python packaging/check_release_version.py --wheel-dir dist/release
-          fi
-          PYTHONPATH=packaging uv run python - <<'PY'
-          from pathlib import Path
-          from check_release_version import check_release_version
-          from verify_release_wheel import verify_wheel
-          from wheel_targets import TARGETS
-
-          root = Path.cwd()
-          wheel_dir = root / "dist" / "release"
-          version = check_release_version(None, source_root=root)
-          for target in TARGETS.values():
-              wheel = wheel_dir / f"vibesys-{version}-py3-none-{target.wheel_platform}.whl"
-              verify_wheel(wheel, root, target)
-          PY
-
-      - name: Upload aggregate-verified release artifact
+      - name: Upload verified wheel
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-dist
@@ -318,24 +117,24 @@ jobs:
   publish:
     name: Publish to PyPI
     if: github.event_name == 'release'
-    needs: aggregate
+    needs: build
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     environment: pypi
     permissions:
       actions: read
       id-token: write
-
     steps:
-      - name: Download only the aggregate-verified artifact
+      - name: Download verified wheel
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-dist
           path: dist/release
 
-      - name: Require exactly three wheels and no sdist
+      - name: Require exactly one wheel and no sdist
         run: |
-          test "$(find dist/release -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 3
-          test "$(find dist/release -maxdepth 1 -type f -name '*.whl' | wc -l | tr -d ' ')" -eq 3
+          test "$(find dist/release -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 1
+          test "$(find dist/release -maxdepth 1 -type f -name '*.whl' | wc -l | tr -d ' ')" -eq 1
 
       - name: Publish with PyPI Trusted Publishing
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2

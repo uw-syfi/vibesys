@@ -93,11 +93,16 @@ class EvaluationInputs:
     """A strategy that offers profile work was denied it: the plan names a profile command and a
     profiler is chosen, but the run environment has no framework-side capture."""
     profile_fields: tuple[ProfileField, ...]
+    build_seconds: float | None
     accuracy_seconds: float | None
     benchmark_seconds: float | None
     profile_seconds: float | None
     benchmark_needs_accuracy: bool = True
     """The task requires a benchmark to pass the accuracy gate (``requires_accuracy``)."""
+    builds: bool = False
+    """The task declares a candidate build, measured before its other gates."""
+    dedicated_measurement_resources: bool = False
+    """The trusted executor runs each measurement on hosts it holds alone."""
 
 
 def evaluation_inputs(run: ResolvedRun) -> EvaluationInputs:
@@ -120,10 +125,13 @@ def evaluation_inputs(run: ResolvedRun) -> EvaluationInputs:
         profile_measurement=wants_profile_work and run.environment.captures_profile,
         profile_capture_withheld=wants_profile_work and not run.environment.captures_profile,
         profile_fields=run.environment.supported_profile_fields,
+        build_seconds=None if plan.build is None else plan.build.timeout_seconds,
         accuracy_seconds=plan.accuracy_timeout_seconds,
         benchmark_seconds=plan.benchmark_timeout_seconds,
         profile_seconds=plan.profile_timeout_seconds,
         benchmark_needs_accuracy=EvidenceKind.BENCHMARK in plan.accuracy_gated,
+        builds=plan.build is not None,
+        dedicated_measurement_resources=run.environment.dedicated_measurement_resources,
     )
 
 
@@ -133,10 +141,20 @@ def agent_evaluation_policy(
     """The plan an agent measures with: the run's configured gates, once each.
 
     It is built from the same recipe as the strategy's own trusted measurement plans, so an
-    agent measurement and a trusted one share one identity.
+    agent measurement's identity equals the strategy's official one in everything but the
+    purpose (``local-validation``). Core lets an official measurement reuse the scope's one
+    agent run of the same measured input (``vs_core``'s ``_measurement_reuse``). A task's build
+    stage, when the recipe has one, comes first: the gates after it load what it built.
     """
+    builds = any(item.stage_id == "build" for item in recipe.stages)
     configured = tuple(
-        name for name, enabled in (("accuracy", accuracy), ("benchmark", benchmark)) if enabled
+        name
+        for name, enabled in (
+            ("build", builds and (accuracy or benchmark)),
+            ("accuracy", accuracy),
+            ("benchmark", benchmark),
+        )
+        if enabled
     )
     return AgentEvaluationPolicy.from_recipe(recipe.only(configured))
 
@@ -209,6 +227,7 @@ def domain_prompt_sections(
         accuracy_command=facts.accuracy_command,
         runtime_notes=facts.environment_notes,
         profile_execution=facts.profile_execution.value,
+        profiler_id=facts.profiler_id,
         workspace_sources=facts.workspace_sources,
     )
     return {role.value: text for role, text in sections.items()}

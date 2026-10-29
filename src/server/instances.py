@@ -18,7 +18,8 @@ from vs_decode.api import Unreadable, decode_json
 from vs_sim.api import utc_datetime
 
 if TYPE_CHECKING:
-    from vs_sim.api import Clock, Connection, Network
+    from vs_project.api import OperatorDialer
+    from vs_sim.api import Clock, Connection
 
 CONTROL_REPLY_TIMEOUT_SECONDS = 5.0
 """How long the complete connect, send, and acknowledgment exchange may take."""
@@ -30,13 +31,13 @@ class ControlSocketStopRequester:
 
     This is the same command an attached client sends, so the run stops at its
     next controlled boundary with its state persisted, exactly as a stop from
-    the TUI does. Only the socket's owner can dial it: the socket is ``0600``
-    inside the ``0700`` registry root.
+    the client does. The socket serves only a connection that presents the operator key,
+    which ``network`` (an ``OperatorDialer``) does on every connect.
     """
 
     def __init__(
         self,
-        network: Network,
+        network: OperatorDialer,
         *,
         clock: Clock,
         deadline_clock: Clock,
@@ -74,7 +75,7 @@ class ControlSocketStopRequester:
         )
         if isinstance(response, Unreadable):
             return False
-        return response.ok and response.ack is not None and response.ack.action == "stop"
+        return response.ok and response.ack is not None and response.ack.action == "pause_now"
 
     def _remaining(self, deadline: float) -> float:
         """Return time left on ``deadline``; fail once the whole call is out of time."""

@@ -2,7 +2,6 @@ import nki
 import nki.isa as nisa
 import nki.language as nl
 
-
 def kernel_assert(condition, message=""):
     """Validate kernel preconditions (raises at trace time)."""
     assert condition, message
@@ -50,7 +49,7 @@ def cumulative_product_sum(deltaA, deltaBu):
         data1=deltaBu_tile,
         initial=0,
         op0=nl.multiply,
-        op1=nl.add,
+        op1=nl.add
     )
 
     # Store to HBM
@@ -58,12 +57,10 @@ def cumulative_product_sum(deltaA, deltaBu):
 
     return output
 
-
 # Simple test function
 def test_associative_scan():
     """Test associative scan against PyTorch reference."""
     import torch
-
     channels, seq_len = 128, 256
 
     deltaA = torch.ones(channels, seq_len) * 0.9
@@ -72,7 +69,7 @@ def test_associative_scan():
     # PyTorch reference
     result_torch = torch.zeros(channels, seq_len)
     for i in range(seq_len):
-        prev = result_torch[:, i - 1] if i > 0 else 0
+        prev = result_torch[:, i-1] if i > 0 else 0
         result_torch[:, i] = deltaA[:, i] * prev + deltaBu[:, i]
 
     # NKI kernel
@@ -81,7 +78,6 @@ def test_associative_scan():
     # Compare
     assert torch.allclose(result_torch, result_nki, rtol=1e-3)
     print("✓ Associative scan test passed")
-
 
 if __name__ == "__main__":
     test_associative_scan()

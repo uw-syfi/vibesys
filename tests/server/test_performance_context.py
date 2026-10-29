@@ -13,6 +13,15 @@ from server.api.protocol import PerformanceQuery
 from vibesys.api.contracts import RunStatus
 from vibesys.api.hypothesis import RoundRecord
 from vibesys.api.metrics import MetricComparison, MetricSpace
+from vibesys.events import (
+    BenchmarkVersions,
+    CoreEventType,
+    EvaluatorIdentity,
+    EventStatus,
+    ObjectiveOverview,
+    RunOverview,
+)
+from vibesys.events import RunStartedData as CoreRunStartedData
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.hypothesis.readmodel import project_run_view
 from vibesys.hypothesis.state import (
@@ -254,3 +263,50 @@ def test_summarize_objective_bounds_a_long_paragraph() -> None:
     assert summary is not None
     assert len(summary) <= 280
     assert summary.endswith("…")
+
+
+def _overview() -> RunOverview:
+    return RunOverview(
+        objective=ObjectiveOverview(
+            text="# Objective\n\nMake the queue fast.\n",
+            metric="total_ops_per_sec",
+            correctness_check=("python", "check.py"),
+        ),
+        benchmarks=BenchmarkVersions(evaluator=EvaluatorIdentity(name="queue-eval", version="1.2")),
+    )
+
+
+def test_the_snapshot_carries_the_declared_overview_with_the_measured_unit_and_direction(
+    tmp_path: Path,
+) -> None:
+    project, run_id = _project_run(tmp_path / "project", ("total_ops_per_sec:max",))
+    parts = build_server_parts(
+        project.state.log_directory(run_id), record=run_record(project, run_id)
+    )
+    assert parts.api.snapshot().overview is None
+    declared = _overview()
+    parts.core_events.emit(
+        CoreEventType.RUN_STARTED,
+        status=EventStatus.ACTIVE,
+        data=CoreRunStartedData(outer_loop="dynamic", input="queue", overview=declared),
+    )
+    assert parts.api.snapshot().overview == declared  # nothing measured yet
+
+    measured = HypothesisState(
+        metrics=_configuration(("total_ops_per_sec:max",)),
+        hypotheses=[
+            _hypothesis("H-01", 1, measurement=_measurement(1, unit="ops/s")),
+        ],
+    )
+    parts.publish_committed_view(_view(measured))
+    overview = parts.api.snapshot().overview
+    assert overview is not None
+    assert overview.objective == declared.objective.model_copy(
+        update={"unit": "ops/s", "direction": "max"}
+    )
+    assert overview.benchmarks == declared.benchmarks
+
+    replayed = build_server_parts(
+        project.state.log_directory(run_id), record=run_record(project, run_id)
+    )
+    assert replayed.api.snapshot().overview == declared  # the journal replays the declaration

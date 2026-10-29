@@ -2,7 +2,7 @@
   "id": "helper-project-missing",
   "protocol": "host-helper",
   "title": "Project requests on a missing directory",
-  "description": "tasks.list, runs.list and run.start naming a directory that does not exist are each answered project_missing with the path, and nothing is launched.",
+  "description": "tasks.list, runs.list, runs.read_events, project.task_goal and run.start naming a directory that does not exist are each answered project_missing with the path, and nothing is launched.",
   "role": "control",
   "transports": [
     "stdio"
@@ -20,7 +20,9 @@
         ],
         "features": [
           "instances_watch",
-          "paths_complete"
+          "paths_complete",
+          "project_goal",
+          "run_history"
         ],
         "app_version": "conformance"
       }
@@ -33,7 +35,9 @@
         "protocol_version": 1,
         "features": [
           "instances_watch",
-          "paths_complete"
+          "paths_complete",
+          "project_goal",
+          "run_history"
         ]
       }
     },
@@ -68,6 +72,44 @@
       "expect": {
         "type": "error",
         "request_id": "r",
+        "code": "project_missing"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "runs.read_events",
+        "request_id": "e",
+        "deadline_ms": 10000,
+        "project": "/nonexistent-vibesys-conformance/project",
+        "run_id": "20261010-120000-11111111-run",
+        "from_sequence": 1,
+        "max": 100
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "e",
+        "code": "project_missing"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "project.task_goal",
+        "request_id": "g",
+        "deadline_ms": 10000,
+        "project": "/nonexistent-vibesys-conformance/project",
+        "task": "default"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "g",
         "code": "project_missing"
       }
     },

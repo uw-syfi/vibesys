@@ -15,6 +15,7 @@ from vibesys.inputs import (
     load_project_task,
     load_task,
 )
+from vibesys.run.overview import overview_of
 from vibesys.run.workspace_policy import materialization_source
 from vs_project.api import Project, ProjectLayoutError
 from vs_runtime.api.infrastructure import ProjectMaterializer, SDKRoots
@@ -478,3 +479,25 @@ def test_workspace_source_destination_cannot_use_excluded_path(tmp_path: Path) -
         materializer.materialize_git_source(materialization_source(source))
 
     assert not (root / "repos").exists()
+
+
+def test_every_example_task_declares_its_overview(
+    example_input_bundles: tuple[InputBundle, ...],
+) -> None:
+    assert example_input_bundles
+    for bundle in example_input_bundles:
+        overview = overview_of(bundle)
+        manifest = bundle.manifest
+        assert overview.overview_version == 1
+        assert overview.objective.text == bundle.objective
+        assert overview.objective.correctness_check == bundle.accuracy_command
+        result = manifest.benchmark.result
+        declared = manifest.metric or (None if result is None else result.metric)
+        assert overview.objective.metric == declared
+        package = None if manifest.evaluator is None else manifest.evaluator.package_requirement
+        evaluator = overview.benchmarks.evaluator
+        assert (evaluator is None) == (package is None)
+        if evaluator is not None and package is not None:
+            assert (evaluator.name, evaluator.version) == (package.name, package.version)
+        # unit and direction are the measurements' facts, not the bundle's
+        assert (overview.objective.unit, overview.objective.direction) == (None, None)

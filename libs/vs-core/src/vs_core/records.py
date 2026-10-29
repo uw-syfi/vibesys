@@ -6,7 +6,8 @@ from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from . import _host_epochs, _request_ledger, _request_recovery
+from . import _host_epochs, _request_ledger, _request_recovery, _turn_holds
+from ._ledger_compaction import spent_answer
 from .types.kernel import AreaChange
 from .types.records import (
     BlockedRecordStalled,
@@ -22,6 +23,7 @@ from .types.records import (
     RequestPrepared,
     RequestUndispatchable,
     RetryDue,
+    TurnHeld,
 )
 
 if TYPE_CHECKING:
@@ -41,7 +43,9 @@ def _observation(
     facts are not persisted in the request ledger. Recovery preserves ledger
     fields; the wrapper merges outputs before the kernel registers any request.
     """
-    if isinstance(event, RequestObserved) and _request_ledger.is_late(state, event):
+    if isinstance(event, RequestObserved) and (
+        _request_ledger.is_late(state, event) or spent_answer(state, event)
+    ):
         return AreaChange(state=state)
     ledger = _request_ledger.advance(state, context, event)
     if isinstance(event, RequestObserved):
@@ -72,6 +76,7 @@ EVENT_TO_SUBAREA: Mapping[type[RecordsEvent], Reducer] = MappingProxyType(
         BlockedRecordStalled: _request_ledger.advance,
         HostRenewed: _host_epochs.renewed,
         RecoveryCheckWaitLapsed: _request_recovery.advance,
+        TurnHeld: _turn_holds.held,
     }
 )
 

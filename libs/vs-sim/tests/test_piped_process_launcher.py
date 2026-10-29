@@ -68,10 +68,13 @@ def test_a_bounded_read_returns_unterminated_output_without_waiting_for_eof() ->
 def test_a_timed_wait_does_not_hold_back_a_signal_from_another_caller() -> None:
     process = SubprocessPipedProcessLauncher().start(
         _python(
+            # Blocked, then taken with sigwait: a handler followed by signal.pause() loses
+            # a SIGTERM that lands after the handler check and before pause() blocks.
             "import signal, sys\n"
-            "signal.signal(signal.SIGTERM, lambda *_: sys.exit(3))\n"
+            "signal.pthread_sigmask(signal.SIG_BLOCK, [signal.SIGTERM])\n"
             "print('ready', flush=True)\n"
-            "signal.pause()\n"
+            "signal.sigwait([signal.SIGTERM])\n"
+            "sys.exit(3)\n"
         )
     )
     assert process.stdout.readline() == "ready\n"
@@ -88,10 +91,10 @@ def test_terminate_group_reaches_descendants_and_signals_after_reaping_are_no_op
         _python(
             "import signal, subprocess, sys\n"
             "child = subprocess.Popen([sys.executable, '-c', 'import signal; signal.pause()'])\n"
-            "signal.signal(signal.SIGTERM, "
-            "lambda *_: sys.exit(7 if child.wait() == -signal.SIGTERM else 1))\n"
+            "signal.pthread_sigmask(signal.SIG_BLOCK, [signal.SIGTERM])\n"
             "print('ready', flush=True)\n"
-            "signal.pause()\n"
+            "signal.sigwait([signal.SIGTERM])\n"
+            "sys.exit(7 if child.wait() == -signal.SIGTERM else 1)\n"
         )
     )
     assert process.stdout.readline() == "ready\n"

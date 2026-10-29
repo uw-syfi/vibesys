@@ -1,7 +1,9 @@
 version = 1
+backends = ["rocm"]
 
 [agent]
 domain = "llm-serving"
+interface = "service"
 
 [evaluator]
 name = "vibesys-evaluator-request-factory"
@@ -37,3 +39,60 @@ result_protocol = 2
 # This diagnostic command does not enter session_runner preflight or warmup.
 command = ["uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/profile.py", "--base-url", "http://127.0.0.1:VIBESYS_DYNAMIC_PORT/v1"]
 timeout_seconds = 120
+
+[catalogue]
+domain = "llm-serving"
+
+[catalogue.hardware]
+accelerator = "AMD MI210"
+count = 1
+vendor = "amd"
+
+[catalogue.model]
+name = "Qwen3.5 9B"
+maker = "qwen"
+
+# Comparison baselines: mature engines measured once with this task's own benchmark
+# (`vibesys compare`), shown beside the input as "vs vLLM" / "vs SGLang", never a
+# candidate. Hidden from agents (visible_to_agents defaults to false).
+
+[[comparison]]
+name = "vllm"
+label = "vLLM"
+image = "docker://vllm/vllm-openai-rocm@sha256:14f6a575e1fb0a580b0f633c09e06f648709d60405b85f6a7ff3f80d49f39905"
+# Tuned launch: TRITON_ATTN because vLLM's default ROCM_ATTN cannot use its custom
+# paged-attention kernel for the chunked-prefill/decode path on this model and GPU.
+serve = [
+  "vllm", "serve", "Qwen/Qwen3.5-9B",
+  "--dtype", "bfloat16",
+  "--max-model-len", "16384",
+  "--gpu-memory-utilization", "0.95",
+  "--max-num-seqs", "256",
+  "--max-num-batched-tokens", "16384",
+  "--attention-backend", "TRITON_ATTN",
+  "--async-scheduling",
+  "--enable-prefix-caching",
+  "--enable-prompt-tokens-details",
+  "--port", "${PORT}",
+]
+ready_timeout_seconds = 3600
+
+[[comparison]]
+name = "sglang"
+label = "SGLang"
+image = "docker://lmsysorg/sglang@sha256:58b6bc333f527c88fe5ff1b4bd8d17e82214eabcb3044549117159878967c930"
+# session_runner speaks SGLang's native token endpoint, which needs the server's
+# --skip-tokenizer-init and --stream-output.
+serve = [
+  "python3", "-m", "sglang.launch_server",
+  "--model-path", "Qwen/Qwen3.5-9B",
+  "--dtype", "bfloat16",
+  "--context-length", "16384",
+  "--mem-fraction-static", "0.9",
+  "--skip-tokenizer-init",
+  "--stream-output",
+  "--host", "127.0.0.1",
+  "--port", "${PORT}",
+]
+benchmark_args = ["--backend", "sglang-tokens"]
+ready_timeout_seconds = 3600

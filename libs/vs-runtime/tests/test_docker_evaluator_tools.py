@@ -11,11 +11,16 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vs_runtime.api.infrastructure import (
+    SANDBOX_EVALUATOR_GO_MODULES_ROOT,
     SANDBOX_EVALUATOR_TOOLS_ROOT,
     DockerToolBuilder,
+    EvaluatorGoModule,
+    EvaluatorGoModuleError,
     TrustedEvaluatorRequirements,
     docker_evaluator_tools_root,
     evaluator_container_setup,
+    evaluator_go_module_ready_path,
+    evaluator_go_module_setup_command,
     prepare_docker_evaluator_resources,
 )
 from vs_sandbox.api import (
@@ -60,6 +65,20 @@ def _requirements(tmp_path: Path) -> TrustedEvaluatorRequirements:
         package_root=tmp_path / "evaluator-package",
         tools={"check-tool": _tool()},
         tools_root=tmp_path / "operator-tools",
+    )
+
+
+def _go_requirements(tmp_path: Path) -> TrustedEvaluatorRequirements:
+    package_root = tmp_path / "evaluator-package"
+    package_root.mkdir()
+    return TrustedEvaluatorRequirements(
+        package_root=package_root,
+        toolchains=frozenset({"go"}),
+        go_module=EvaluatorGoModule(
+            root=package_root,
+            cache_root=tmp_path / "operator-go-modules" / ("a" * 64),
+            package_digest="sha256:" + "a" * 64,
+        ),
     )
 
 
@@ -126,6 +145,129 @@ def test_empty_requirements_do_not_require_cache_or_builder_paths(tmp_path: Path
         == ()
     )
     assert backend.creations == []
+
+
+def test_verified_go_module_cache_is_reverified_in_target_image_then_mounted_read_only(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    requirements = _go_requirements(tmp_path)
+    module = requirements.go_module
+    assert module is not None
+    module.cache_root.mkdir(parents=True)
+    evaluator_go_module_ready_path(module, module.cache_root).mkdir()
+    log_dir = tmp_path / "logs"
+    backend = FakeComputeBackend(threads=SimThreads())
+    sandbox = FakeLifecycleRunner()
+    backend.script_sandbox(
+        SandboxKind.DOCKER,
+        str(log_dir / "evaluator-go-module-builder-workspace"),
+        sandbox,
+    )
+
+    resources = prepare_docker_evaluator_resources(
+        requirements,
+        workspace,
+        builder=DockerToolBuilder(backend=backend, log_dir=log_dir, image=_IMAGE),
+    )
+
+    assert resources == (
+        HostResource(
+            module.cache_root,
+            HostResourceAccess.READ_ONLY,
+            "evaluator Go module cache",
+            str(SANDBOX_EVALUATOR_GO_MODULES_ROOT),
+        ),
+    )
+    assert len(backend.creations) == 1
+    assert any(
+        "mod verify" in call.command and "GOPROXY=off" in call.command for call in sandbox.calls
+    )
+
+
+@pytest.mark.parametrize("damage", ["missing", "modified"])
+def test_matching_go_module_receipt_never_bypasses_offline_content_validation(
+    tmp_path: Path,
+    damage: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    log_dir = tmp_path / "logs"
+    requirements = _go_requirements(tmp_path)
+    module = requirements.go_module
+    assert module is not None
+    module.cache_root.mkdir(parents=True)
+    evaluator_go_module_ready_path(module, module.cache_root).mkdir()
+    (module.cache_root / "damaged-module.txt").write_text(damage, encoding="utf-8")
+    backend = FakeComputeBackend(threads=SimThreads())
+    sandbox = FakeLifecycleRunner()
+    for command in evaluator_container_setup(requirements):
+        sandbox.script(command, DEFAULT_RESULT)
+    validation = evaluator_go_module_setup_command(
+        requirements,
+        runtime_package_root="/opt/vibesys-evaluator-package",
+        runtime_cache_root=str(SANDBOX_EVALUATOR_GO_MODULES_ROOT),
+    )
+    sandbox.script(
+        validation,
+        CommandResult(output=f"{damage} module content", exit_code=1),
+    )
+    backend.script_sandbox(
+        SandboxKind.DOCKER,
+        str(log_dir / "evaluator-go-module-builder-workspace"),
+        sandbox,
+    )
+
+    with pytest.raises(
+        EvaluatorGoModuleError,
+        match=rf"target-image Go module setup failed: {damage} module content",
+    ):
+        prepare_docker_evaluator_resources(
+            requirements,
+            workspace,
+            builder=DockerToolBuilder(backend=backend, log_dir=log_dir, image=_IMAGE),
+        )
+
+    assert any(call.command == validation for call in sandbox.calls)
+    assert sandbox.stop_count == 1
+
+
+def test_missing_go_module_cache_uses_the_target_image_and_fails_if_not_published(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    log_dir = tmp_path / "logs"
+    requirements = _go_requirements(tmp_path)
+    backend = FakeComputeBackend(threads=SimThreads())
+    sandbox = FakeLifecycleRunner()
+    backend.script_sandbox(
+        SandboxKind.DOCKER,
+        str(log_dir / "evaluator-go-module-builder-workspace"),
+        sandbox,
+    )
+
+    with pytest.raises(EvaluatorGoModuleError, match="did not publish"):
+        prepare_docker_evaluator_resources(
+            requirements,
+            workspace,
+            builder=DockerToolBuilder(backend=backend, log_dir=log_dir, image=_IMAGE),
+        )
+
+    assert len(backend.creations) == 1
+    creation = backend.creations[0]
+    assert creation.container_image == _IMAGE
+    assert creation.attach_accelerator is False
+    assert creation.ephemeral is True
+    assert (
+        str(requirements.package_root),
+        "/opt/vibesys-evaluator-package",
+        True,
+    ) in creation.bind_mounts
+    assert sandbox.start_count == 1
+    assert sandbox.stop_count == 1
+    assert any("GOPROXY=off" in call.command for call in sandbox.calls)
 
 
 def test_declared_tools_require_an_operator_owned_cache_root(tmp_path: Path) -> None:

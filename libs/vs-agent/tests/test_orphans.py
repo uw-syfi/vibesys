@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 def _start(engine: FakeDockerEngine, run_id: str | None) -> str:
     label = [] if run_id is None else ["--label", f"{RUN_ID_LABEL}={run_id}"]
-    result = engine.run(["docker", "run", "-d", *label, "image"], timeout_seconds=1)
+    result = engine.run(["docker", "run", "-d", *label, "image"], timeout_seconds=1, output=DISCARD)
     return result.stdout.strip()
 
 
@@ -113,7 +113,7 @@ class _BrokenDocker:
         self._returncode = returncode
 
     def run(
-        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink = DISCARD
+        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink
     ) -> DockerResult:
         del output
         if self._returncode is None:
@@ -141,7 +141,7 @@ class _RemovalAnswers:
         self._stderr = stderr
 
     def run(
-        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink = DISCARD
+        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink
     ) -> DockerResult:
         del output
         if argv[1] == "ps":

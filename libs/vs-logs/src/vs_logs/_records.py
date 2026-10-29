@@ -3,7 +3,9 @@
 The index (``index.jsonl``) is append-only: one ``opened`` record per stream, then at most
 one ``closed`` record. A stream's pipe marks (``<stream>/pipes.jsonl``) record where the
 writing pipe changed. A reader ignores a trailing line without its newline: the writer is
-still appending it.
+still appending it, or a short write (a full disk) left it torn. A store that opens the
+index cuts such a line first (:func:`complete_length`), so its own records start on a
+line of their own.
 """
 
 from __future__ import annotations
@@ -86,8 +88,8 @@ class OpenedRecord(_Record):
     stream_id: StreamId
     owner: JsonValue
     command: str
-    adopted_path: str | None = None
-    """For a file someone else writes, where it is; the store holds no segments for it."""
+    adopted_path: None = Field(default=None, exclude=True)
+    """Always null: stores before 2026-10-16 wrote it, so their indexes still decode."""
 
 
 class ClosedRecord(_Record):
@@ -96,6 +98,11 @@ class ClosedRecord(_Record):
     kind: Literal["closed"] = "closed"
     stream_id: StreamId
     outcome: StreamOutcome
+    degraded: bool = False
+    """The store failed to write some of the stream's bytes, so the stream lacks them.
+
+    Written only when true, so a stream that lost nothing is recorded as before.
+    """
 
 
 type IndexRecord = Annotated[OpenedRecord | ClosedRecord, Field(discriminator="kind")]
@@ -111,7 +118,8 @@ class PipeRecord(_Record):
 
 def encode_index(record: OpenedRecord | ClosedRecord) -> bytes:
     """One index line, with its newline."""
-    return record.model_dump_json().encode() + b"\n"
+    quiet = isinstance(record, ClosedRecord) and not record.degraded
+    return record.model_dump_json(exclude={"degraded"} if quiet else None).encode() + b"\n"
 
 
 def encode_pipe(mark: MarkPipe) -> bytes:
@@ -129,9 +137,13 @@ def read_all(source: ByteSource) -> bytes:
     return b"".join(parts)
 
 
+def complete_length(data: bytes) -> int:
+    """How many bytes of ``data`` its complete lines take: up to and with its last newline."""
+    return data.rfind(b"\n") + 1
+
+
 def _complete_lines(data: bytes) -> list[bytes]:
-    end = data.rfind(b"\n")
-    return [line for line in data[: end + 1].split(b"\n") if line] if end >= 0 else []
+    return [line for line in data[: complete_length(data)].split(b"\n") if line]
 
 
 def decode_index(data: bytes, *, where: str) -> list[OpenedRecord | ClosedRecord]:
@@ -168,6 +180,8 @@ class IndexEntry:
 
     opened: OpenedRecord
     closed: StreamOutcome | None
+    degraded: bool = False
+    """Its close recorded that the store lost some of its bytes."""
 
 
 def fold_index(records: list[OpenedRecord | ClosedRecord]) -> dict[str, IndexEntry]:
@@ -185,5 +199,7 @@ def fold_index(records: list[OpenedRecord | ClosedRecord]) -> dict[str, IndexEnt
                 if entry is None:
                     message = f"log stream {record.stream_id} is closed but was never opened"
                     raise CorruptLogError(message)
-                entries[record.stream_id] = IndexEntry(entry.opened, record.outcome)
+                entries[record.stream_id] = IndexEntry(
+                    entry.opened, record.outcome, record.degraded
+                )
     return entries

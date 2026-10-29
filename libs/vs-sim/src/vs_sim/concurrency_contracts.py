@@ -1,32 +1,62 @@
-"""Contract suites for :class:`~vs_sim.concurrency.Threads` and :class:`~vs_sim.network.Network`.
+"""Test-side contracts and exact native probes for concurrency interfaces.
 
 Subclass a suite, name the subclass ``Test<Variant>`` and implement the one factory. The
 factory receives the case's seed: a simulator uses it as the schedule seed, so the
 property cases below explore one interleaving per seed; a real implementation ignores it.
 Every case drives the implementation through its interface only, bounds each wait by
 :data:`~vs_sim.waits.HANG_GUARD_S` (a hang guard, never what a case synchronizes on) and
-asserts outcomes, never durations.
+asserts outcomes, never durations. Implementation probes are exported only through
+``vs_sim.api.testing`` and preserve the production adapter around the exact injected fault.
 """
 
 from __future__ import annotations
 
 import asyncio
+import errno
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from vs_sim.concurrency import (
+    OsThreads,
+    WorkerReservationStateError,
+    _OsWorkerStarter,
+    _ProcessWorkerStarter,
+)
 from vs_sim.randomness import SeededRandom
 from vs_sim.waits import HANG_GUARD_S
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_sim.concurrency import Event, Threads, Worker
-    from vs_sim.network import Connection, Network
+    from vs_sim.concurrency import Event, ReservableThreads, Threads, Worker
+    from vs_sim.network import Connection, DeadlineNetwork
 
 _CASES = 12
 """Seeded cases per property: the same draws every run."""
 
 type Program = Callable[[], Any]
+
+
+class OsThreadsBootstrapProbe:
+    """Production ``OsThreads`` with a counted prefix of refused dispatcher starts."""
+
+    def __init__(self, *, refusals: int) -> None:
+        """Refuse the first ``refusals`` dispatcher launches and count every attempt."""
+        if refusals < 0:
+            message = "refusals must not be negative"
+            raise ValueError(message)
+        self._remaining = refusals
+        self.attempts = 0
+        self.threads = OsThreads(_starter=_ProcessWorkerStarter(self._launch))
+
+    def _launch(self, starter: _OsWorkerStarter) -> None:
+        """Refuse the scripted prefix, then launch the real native dispatcher."""
+        self.attempts += 1
+        if self._remaining > 0:
+            self._remaining -= 1
+            message = "scripted native dispatcher start refusal"
+            raise RuntimeError(message)
+        starter.launch()
 
 
 @dataclass(frozen=True)
@@ -42,6 +72,15 @@ class ThreadsUnderTest:
     """Whether ``sleep(d)`` moves ``now`` by exactly ``d`` and sleeps overlap."""
 
 
+@dataclass(frozen=True)
+class ReservableThreadsUnderTest:
+    """A :class:`ReservableThreads` and the means to run a program on it."""
+
+    threads: ReservableThreads
+    run: Callable[[Program], Any]
+    """Run the function as the program's first thread and return its result."""
+
+
 def _join(worker: Worker) -> None:
     worker.join(HANG_GUARD_S)
     if worker.is_alive():
@@ -53,6 +92,84 @@ def _wait(event: Event, what: str) -> None:
     if not event.wait(HANG_GUARD_S):
         message = f"{what} did not happen within {HANG_GUARD_S:g} s"
         raise AssertionError(message)
+
+
+class ReservableThreadsContract:
+    """Cases for the narrower :class:`~vs_sim.concurrency.ReservableThreads` role."""
+
+    def reservable_threads_under_test(self, seed: int) -> ReservableThreadsUnderTest:
+        """A fresh reservable implementation; ``seed`` selects simulated scheduling."""
+        raise NotImplementedError
+
+    def test_a_reserved_target_cannot_run_before_start_and_settle_owns_its_end(self) -> None:
+        """Preparation has no effect; after start, settlement proves the target ended."""
+        for seed in range(_CASES):
+            subject = self.reservable_threads_under_test(seed)
+
+            def program(
+                subject: ReservableThreadsUnderTest = subject,
+            ) -> tuple[list[str], list[str]]:
+                ran: list[str] = []
+                reservation = subject.threads.reserve(
+                    lambda: ran.append("ran"),
+                    name="reserved",
+                )
+                before = list(ran)
+                reservation.start()
+                reservation.settle()
+                return before, ran
+
+            assert subject.run(program) == ([], ["ran"]), seed
+
+    def test_a_reserved_worker_accepts_exactly_one_start_attempt(self) -> None:
+        """A caller cannot repeat even a successful reservation start."""
+        for seed in range(_CASES):
+            subject = self.reservable_threads_under_test(seed)
+
+            def program(
+                subject: ReservableThreadsUnderTest = subject,
+            ) -> tuple[bool, list[str]]:
+                ran: list[str] = []
+                reservation = subject.threads.reserve(
+                    lambda: ran.append("ran"),
+                    name="reserved-once",
+                )
+                reservation.start()
+                try:
+                    reservation.start()
+                except WorkerReservationStateError:
+                    refused = True
+                else:
+                    refused = False
+                reservation.settle()
+                return refused, ran
+
+            assert subject.run(program) == (True, ["ran"]), seed
+
+    def test_settling_an_unstarted_reservation_consumes_it(self) -> None:
+        """Settlement is terminal even when no native or simulated worker was started."""
+        for seed in range(_CASES):
+            subject = self.reservable_threads_under_test(seed)
+
+            def program(
+                subject: ReservableThreadsUnderTest = subject,
+            ) -> tuple[bool, list[str]]:
+                ran: list[str] = []
+                reservation = subject.threads.reserve(
+                    lambda: ran.append("ran"),
+                    name="settled-before-start",
+                )
+                reservation.settle()
+                reservation.settle()
+                try:
+                    reservation.start()
+                except WorkerReservationStateError:
+                    refused = True
+                else:
+                    refused = False
+                return refused, ran
+
+            assert subject.run(program) == (True, []), seed
 
 
 class ThreadsContract:
@@ -444,9 +561,9 @@ class ThreadsContract:
 
 @dataclass(frozen=True)
 class NetworkUnderTest:
-    """A network, the threads it blocks with, and a source of bindable addresses."""
+    """A deadline network, the threads it blocks with, and bindable addresses."""
 
-    network: Network
+    network: DeadlineNetwork
     threads: ThreadsUnderTest
     address: Callable[[str], str]
     """An address this network can bind, for a short name."""
@@ -573,6 +690,39 @@ class NetworkContract:
             return accept_timed_out, recv_timed_out, closed_refuses
 
         assert subject.threads.run(program) == (True, True, True)
+
+    def test_timed_io_on_a_locally_closed_connection_raises_os_error(self) -> None:
+        """Bounded sends and receives report a local close through the public contract."""
+        subject = self.network_under_test(0)
+
+        def program() -> tuple[Exception | None, Exception | None]:
+            address = subject.address("closed")
+            listener = subject.network.listen(address)
+            client = subject.network.connect(address, HANG_GUARD_S)
+            server_side = listener.accept(HANG_GUARD_S)
+            client.close()
+            errors: list[Exception | None] = []
+            try:
+                for operation in (
+                    lambda: client.send(b"x", subject.threads.tick),
+                    lambda: client.recv(1, subject.threads.tick),
+                ):
+                    try:
+                        operation()
+                    except (OSError, ValueError) as error:
+                        errors.append(error)
+                    else:
+                        errors.append(None)
+            finally:
+                server_side.close()
+                listener.close()
+            return errors[0], errors[1]
+
+        send_error, recv_error = subject.threads.run(program)
+        assert isinstance(send_error, OSError)
+        assert isinstance(recv_error, OSError)
+        assert (send_error.errno, send_error.strerror) == (errno.EBADF, "connection closed")
+        assert (recv_error.errno, recv_error.strerror) == (errno.EBADF, "connection closed")
 
     def test_a_recv_timeout_bounds_only_that_recv(self) -> None:
         """A ``send`` after a timed-out ``recv`` waits for a slow reader instead of timing out.

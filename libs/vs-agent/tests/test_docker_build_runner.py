@@ -188,6 +188,7 @@ def test_runner_drains_large_multiline_and_unterminated_streams_into_bounded_tai
             ("docker", "build"),
             cwd=tmp_path,
             timeout=30,
+            output=DISCARD,
         )
     )
 
@@ -307,7 +308,11 @@ def test_timeout_kills_reaps_and_closes_the_fake_process_group(tmp_path: Path) -
     with pytest.raises(TaskImageBuildError, match="budget of 7 seconds ran out"):
         threads.run(
             lambda: build_task_image(
-                dockerfile, command_runner=runner, timeout=7, clock=ManualClock()
+                dockerfile,
+                command_runner=runner,
+                timeout=7,
+                clock=ManualClock(),
+                output=DISCARD,
             )
         )
 
@@ -331,7 +336,7 @@ def test_normal_exit_and_inherited_writer_share_one_cleanup_deadline(tmp_path: P
     started_at = threads.now()
 
     with pytest.raises(RuntimeError, match="output pipes did not settle"):
-        runner.run(("docker", "build"), cwd=tmp_path, timeout=30)
+        runner.run(("docker", "build"), cwd=tmp_path, timeout=30, output=DISCARD)
 
     assert threads.now() - started_at <= 5
     assert process.wait_timeouts == [30, 2.5]
@@ -362,7 +367,7 @@ def test_runtime_kill_failure_does_not_skip_remaining_cleanup(tmp_path: Path) ->
     )
 
     with pytest.raises(ProcessTimeoutError) as caught:
-        runner.run(("docker", "build"), cwd=tmp_path, timeout=7)
+        runner.run(("docker", "build"), cwd=tmp_path, timeout=7, output=DISCARD)
 
     assert any("RuntimeError" in note for note in caught.value.__notes__)
     assert process.output_cancellations == 1
@@ -396,7 +401,7 @@ def test_timeout_preserves_original_error_when_cleanup_fails(
 
     def exercise() -> None:
         with pytest.raises(ProcessTimeoutError) as caught:
-            runner.run(("docker", "build"), cwd=tmp_path, timeout=7)
+            runner.run(("docker", "build"), cwd=tmp_path, timeout=7, output=DISCARD)
         assert any(cleanup_error in note for note in caught.value.__notes__)
 
     threads.run(exercise)
@@ -448,6 +453,8 @@ def test_an_agent_image_build_that_never_finishes_is_stopped_with_its_output() -
     def start(request: PipedStart) -> _FakePipedProcess:
         if request.argv[1] == "build":
             return stalled
+        if request.argv[-1].startswith("vibesys-agent-build:"):
+            return _FakePipedProcess(wait_results=(1,))  # not built yet, so the build runs
         return _FakePipedProcess(stdout=_IMAGE_ID)
 
     threads = SimThreads()
@@ -456,7 +463,11 @@ def test_an_agent_image_build_that_never_finishes_is_stopped_with_its_output() -
     with pytest.raises(ImageBuildTimeoutError) as caught:
         threads.run(
             lambda: agent_image(
-                "python:3.12-bookworm", command_runner=runner, timeout=240, clock=ManualClock()
+                "python:3.12-bookworm",
+                command_runner=runner,
+                timeout=240,
+                clock=ManualClock(),
+                output=DISCARD,
             )
         )
 
@@ -478,7 +489,7 @@ def test_a_stopped_task_build_reports_the_output_tail_and_running_step(tail: str
             *,
             cwd: Path,
             timeout: float,
-            output: OutputSink = DISCARD,
+            output: OutputSink,
         ) -> DockerCommandResult:
             del cwd
             output.write(OutputStream.STDERR, b"#4 [2/9] RUN pip install torch\n")
@@ -489,7 +500,11 @@ def test_a_stopped_task_build_reports_the_output_tail_and_running_step(tail: str
         dockerfile.write_text("FROM scratch\n", encoding="utf-8")
         with pytest.raises(ImageBuildTimeoutError) as caught:
             build_task_image(
-                dockerfile, command_runner=StallingRunner(), timeout=30, clock=ManualClock()
+                dockerfile,
+                command_runner=StallingRunner(),
+                timeout=30,
+                clock=ManualClock(),
+                output=DISCARD,
             )
 
     assert caught.value.step == "step 2/9: RUN pip install torch"
@@ -516,7 +531,7 @@ class _BudgetedRunner:
         *,
         cwd: Path,
         timeout: float,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> DockerCommandResult:
         del cwd, output
         duration = self._durations[min(len(self.timeouts), len(self._durations) - 1)]
@@ -541,7 +556,13 @@ def test_no_docker_command_is_given_more_than_the_budget_that_remains(
     runner = _BudgetedRunner(clock, durations)
 
     with contextlib.suppress(ImageBuildTimeoutError):
-        agent_image("python:3.12-bookworm", command_runner=runner, timeout=budget, clock=clock)
+        agent_image(
+            "python:3.12-bookworm",
+            command_runner=runner,
+            timeout=budget,
+            clock=clock,
+            output=DISCARD,
+        )
 
     assert runner.timeouts
     for started, timeout in zip(runner.starts, runner.timeouts, strict=True):

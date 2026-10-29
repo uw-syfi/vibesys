@@ -1,0 +1,17 @@
+[package]
+name = "stitch-profiler-perf"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+stitch-core = { path = "../../../crates/stitch-core" }
+stitch-importer-api = { path = "../../../crates/stitch-importer-api" }
+stitch-session = { path = "../../../crates/stitch-session" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+stitch-source-api = { path = "../../../crates/stitch-source-api" }

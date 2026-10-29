@@ -198,7 +198,7 @@ def resolve_core_resume[S: StrategyState](
         envelope = record.envelope
         if envelope.core.run.run_id.root != selected.run_id:
             raise ContractError(("run_id",), "core envelope differs from selected run")
-        if envelope.core.run.declaration != search.declaration:
+        if not envelope.core.run.declaration.resumable_as(search.declaration):
             raise ContractError(
                 ("declaration",), "offered strategy differs from durable declaration"
             )

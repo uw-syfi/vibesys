@@ -1,0 +1,246 @@
+syntax = "proto3";
+
+package vibesys.api.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/api/v1/host_call.proto";
+import "vibesys/api/v1/host_mutate_generated.proto";
+import "vibesys/api/v1/host_read_generated.proto";
+import "vibesys/api/v1/host_watch_generated.proto";
+import "vibesys/store/v1/chat.proto";
+import "vibesys/store/v1/skeleton.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1";
+
+// HostService is a stateless view over a host user's run files.
+// API schemas require an exact hash match, with no compatibility negotiation.
+service HostService {
+  // Hello compares the client and gateway API schema hashes. A mismatch fails
+  // with gRPC FAILED_PRECONDITION and a message naming both well-formed hashes.
+  rpc HostCall(HostCallRequest) returns (HostCallResponse);
+  // Read runs one registered catalog operation. The runner deadline is that operation's cap.
+  rpc Read(ReadRequest) returns (ReadResponse);
+  // Watch runs one registered stream. The host keeps it until completion or cancellation.
+  // Closing a panel drops the client's subscription and does not cancel this stream.
+  rpc Watch(WatchRequest) returns (stream WatchResponse);
+  // Mutate runs one registered unary admission or idempotent write. An admission
+  // keeps running after the caller disconnects, until the operation cap.
+  rpc Mutate(MutateRequest) returns (MutateResponse);
+  rpc Hello(HelloRequest) returns (HelloResponse);
+  rpc ListChatSessions(ListChatSessionsRequest) returns (ListChatSessionsResponse);
+  // Tail follows the log live until the client cancels, starting at from_seq
+  // (inclusive). Record bytes pass through unchanged; only seq is decoded.
+  rpc Tail(TailRequest) returns (stream TailResponse);
+  rpc Skeleton(SkeletonRequest) returns (SkeletonResponse);
+  rpc WatchRuns(WatchRunsRequest) returns (stream WatchRunsResponse);
+  rpc GetBlobs(GetBlobsRequest) returns (GetBlobsResponse);
+  rpc TailStream(TailStreamRequest) returns (stream TailStreamResponse);
+}
+
+message HelloRequest {
+  string api_schema_hash = 1 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+}
+
+message HelloResponse {
+  string api_schema_hash = 1 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  string gateway_version = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+}
+
+// Sequence zero remains valid for phase 1 logs; signed bounds leave cursor
+// arithmetic and file offsets in the same domain in every implementation.
+message TailRequest {
+  string run_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  uint64 from_seq = 2 [(buf.validate.field).uint64.lte = 9223372036854775807];
+  // Empty selects run.log; otherwise select sessions/<id>/session.log.
+  string session_id = 3 [(buf.validate.field).string.pattern = "^([A-Za-z0-9][A-Za-z0-9_-]{0,127})?$"];
+}
+
+message TailResponse {
+  option (buf.validate.message).cel = {
+    id: "tail_head_prefix"
+    message: "head must state performance for exactly through_seq"
+    expression: "!has(this.head) || (has(this.head.committed_seq) && this.head.committed_seq == this.through_seq && this.head.performance_stated)"
+  };
+  // Each element is one encoded vibesys.store.v1.Record, without log framing.
+  repeated bytes records = 1 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 1048576
+    items: {
+      bytes: {
+        min_len: 1
+        max_len: 1048576
+      }
+    }
+  }];
+  // The last sequence delivered in this response.
+  uint64 through_seq = 2 [(buf.validate.field).uint64.lte = 9223372036854775806];
+  // Canonical facts of exactly through_seq; absent for session and phase 1 logs.
+  vibesys.store.v1.RunHead head = 3;
+}
+
+message SkeletonRequest {
+  string run_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  // Descriptor sets the client already holds. The reply names each epoch's set
+  // by hash and sends the bytes only of sets not listed here.
+  repeated string known_descriptors_sha256 = 2 [(buf.validate.field).repeated = {
+    max_items: 64
+    unique: true
+    items: {
+      string: {pattern: "^[0-9a-f]{64}$"}
+    }
+  }];
+}
+
+// One EpochStarted.descriptors set, addressed by the SHA-256 of its encoded
+// bytes. data is exactly the bytes that hash covers, so a reader verifies it
+// without re-encoding.
+message DescriptorSet {
+  string sha256 = 1 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  bytes data = 2 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 1048576
+  }];
+}
+
+// A bounded committed prefix, at most 1 MiB encoded. No keyframe means replay
+// from the beginning; a keyframe larger than the budget once its descriptors are
+// addressed by hash is omitted. Records that do not fit (including a single
+// large record) are delivered through Tail. Every epoch of the keyframe names its
+// descriptors by EpochVersion.descriptors_sha256; descriptor_sets carries the
+// ones the request did not list.
+message SkeletonResponse {
+  optional bytes keyframe = 1 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 1048576
+  }];
+  repeated bytes records = 2 [(buf.validate.field).repeated = {
+    max_items: 1048576
+    items: {
+      bytes: {
+        min_len: 1
+        max_len: 1048576
+      }
+    }
+  }];
+  // Published boundary, or the last included sequence for a phase 1 run.
+  uint64 committed_seq = 3 [(buf.validate.field).uint64.lte = 9223372036854775806];
+  // First sequence not included. Continue with Tail(from_seq = next_seq).
+  uint64 next_seq = 4 [(buf.validate.field).uint64.lte = 9223372036854775807];
+  // True when the frozen readable prefix was included in full. Both bool
+  // values are valid, including an empty prefix requiring a Tail continuation.
+  bool complete = 5;
+  repeated string sessions = 6 [(buf.validate.field).repeated = {
+    max_items: 1048576
+    unique: true
+    items: {
+      string: {pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"}
+    }
+  }];
+  repeated DescriptorSet descriptor_sets = 7 [(buf.validate.field).repeated.max_items = 64];
+  // Core facts at committed_seq, including the retained-writer read upgrade.
+  vibesys.store.v1.RunHead head = 8;
+}
+
+message WatchRunsRequest {}
+
+// Initial entries precede an initial_complete marker. Later entries replace by
+// run_id; removed is a tombstone. A phase 1 run has no head and UNSPECIFIED liveness.
+message WatchRunsResponse {
+  option (buf.validate.message).cel = {
+    id: "watch_runs.shape"
+    message: "run_id, head, liveness, removed and initial_complete must form an entry, tombstone, initial marker or heartbeat"
+    expression: "(this.initial_complete || this.heartbeat) ? (!(this.initial_complete && this.heartbeat) && this.run_id == '' && !has(this.head) && this.liveness == 0 && !this.removed) : (this.run_id != '' && (this.removed ? (!has(this.head) && this.liveness == 0) : (!has(this.head) || this.liveness != 0)))"
+  };
+  // head is absent for phase 1 runs, tombstones and the initial marker.
+  // UNSPECIFIED represents unknown phase 1 liveness and marker/tombstone absence.
+  string run_id = 1 [(buf.validate.field).string.pattern = "^([A-Za-z0-9][A-Za-z0-9_-]{0,127})?$"];
+  vibesys.store.v1.RunHead head = 2;
+  RunLiveness liveness = 3 [(buf.validate.field).enum.defined_only = true];
+  bool removed = 4;
+  bool initial_complete = 5;
+  // Emitted at least every five seconds, after all preceding run observations.
+  // A receiver expires its facts after thirty seconds without a frame.
+  bool heartbeat = 6;
+  // Canonical host-side project directory. Older gateways may omit it; those entries have no
+  // address and cannot enter project-dependent listings. Markers and tombstones omit it.
+  optional string project_root = 7 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+    prefix: "/"
+  }];
+}
+
+enum RunLiveness {
+  RUN_LIVENESS_UNSPECIFIED = 0;
+  RUN_LIVENESS_ALIVE = 1;
+  RUN_LIVENESS_INTERRUPTED = 2;
+  RUN_LIVENESS_ENDED = 3;
+  // A cleanly drained epoch. The saved run can be relaunched.
+  RUN_LIVENESS_PARKED = 4;
+}
+
+// Malformed hashes reject the whole request before filesystem access. File
+// lookup/content failures for admitted hashes remain per-result errors.
+message GetBlobsRequest {
+  string run_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  repeated string sha256 = 2 [(buf.validate.field).repeated = {
+    max_items: 256
+    items: {
+      string: {pattern: "^[0-9a-f]{64}$"}
+    }
+  }];
+  string session_id = 3 [(buf.validate.field).string.pattern = "^([A-Za-z0-9][A-Za-z0-9_-]{0,127})?$"];
+}
+
+// At most 16 MiB of blob content per response. Each requested hash has a result
+// in request order, including duplicates and failures; retry omitted content in
+// a smaller request. error_code is a google.rpc.Code number, zero on success.
+message GetBlobsResponse {
+  repeated BlobResult blobs = 1 [(buf.validate.field).repeated.max_items = 256];
+}
+
+message BlobResult {
+  option (buf.validate.message).cel = {
+    id: "blob_result.outcome"
+    message: "error_code, error_message and data must describe success or failure"
+    expression: "this.error_code == 0 ? this.error_message == '' : (this.data.size() == 0 && this.error_message != '')"
+  };
+  string sha256 = 1 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  bytes data = 2 [(buf.validate.field).bytes.max_len = 16777216];
+  int32 error_code = 3 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 16
+  }];
+  string error_message = 4 [(buf.validate.field).string.max_bytes = 65536];
+}
+
+message TailStreamRequest {
+  string run_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  string stream_id = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$"];
+  uint64 from_offset = 3 [(buf.validate.field).uint64.lte = 9223372036854775807];
+}
+
+message TailStreamResponse {
+  option (buf.validate.message).cel = {
+    id: "tail_stream.offset"
+    message: "next_offset must cover data"
+    expression: "this.next_offset >= uint(this.data.size())"
+  };
+  bytes data = 1 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 65536
+  }];
+  uint64 next_offset = 2 [(buf.validate.field).uint64.lte = 9223372036854775807];
+}
+
+// Only committed session metadata is exposed. Empty sessions created before a
+// first question remain discoverable. Listing never starts an agent.
+message ListChatSessionsRequest {
+  string run_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+}
+message ListChatSessionsResponse {
+  repeated vibesys.store.v1.ChatSessionCreated sessions = 1 [(buf.validate.field).repeated.max_items = 4096];
+}

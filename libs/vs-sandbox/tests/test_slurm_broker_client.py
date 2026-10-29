@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from vs_sandbox.api.slurm import BrokeredProcesses, BrokerReplyError
 from vs_sim.api import ProcessOutcome, ProcessSpec, ProcessTimedOut
@@ -31,6 +33,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_sim.api import Connection
+from vs_sim.api import DISCARD
 
 ADDRESS = "slurm-broker.sock"
 TIMEOUT_S = 30.0
@@ -53,7 +56,7 @@ _FRAME_BOUND = 16 * 1024 * 1024
 _Completed = ProcessOutcome
 _TimedOut = ProcessTimedOut
 
-type Broker = Callable[[Connection], None]
+type Broker = Callable[[Connection, SimThreads], None]
 """What the scripted broker does once it has read the request line."""
 
 
@@ -68,7 +71,12 @@ def _read_request(connection: Connection) -> bytes:
 
 
 def _call(
-    broker: Broker, *, seed: int | None, buffer: int | None = None, serve: bool = True
+    broker: Broker,
+    *,
+    seed: int | None,
+    buffer: int | None = None,
+    serve: bool = True,
+    request_read_delay: float = 0.0,
 ) -> tuple[_Completed | OSError | _TimedOut, float, bytes]:
     """What the client returns or raises against ``broker``, the virtual time it took,
     and the request line the broker read."""
@@ -76,6 +84,7 @@ def _call(
     threads = SimThreads(clock, schedule_seed=seed)
     network = SimNetwork(threads, buffer_bytes=buffer)
     request: list[bytes] = [b""]
+    finished_at = [clock.now()]
 
     def program() -> _Completed | OSError | _TimedOut:
         listener = network.listen(ADDRESS) if serve else None
@@ -84,15 +93,18 @@ def _call(
             assert listener is not None
             connection = listener.accept(HANG_GUARD_S)
             try:
+                threads.sleep(request_read_delay)
                 request[0] = _read_request(connection)
-                broker(connection)
+                broker(connection, threads)
             finally:
                 connection.close()
 
         worker = threads.spawn(respond, name="broker") if serve else None
         try:
             run = BrokeredProcesses(Path(ADDRESS), "token", network=network).run(
-                ProcessSpec(("ssh", "--", "cluster", "hostname")), timeout=TIMEOUT_S
+                ProcessSpec(("ssh", "--", "cluster", "hostname")),
+                timeout=TIMEOUT_S,
+                output=DISCARD,
             )
         except OSError as error:
             # Anything else escapes and fails the test.
@@ -101,6 +113,7 @@ def _call(
             assert isinstance(run, (_Completed, _TimedOut)), run
             return run
         finally:
+            finished_at[0] = clock.now()
             if worker is not None:
                 worker.join(HANG_GUARD_S)
             if listener is not None:
@@ -108,11 +121,11 @@ def _call(
 
     start = clock.now()
     outcome = threads.run(program)
-    return outcome, clock.now() - start, request[0]
+    return outcome, finished_at[0] - start, request[0]
 
 
 def _replying(frame: bytes) -> Broker:
-    def broker(connection: Connection) -> None:
+    def broker(connection: Connection, _threads: SimThreads) -> None:
         with suppress(OSError):
             connection.send(frame + b"\n", HANG_GUARD_S)
 
@@ -154,7 +167,7 @@ def test_a_well_formed_result_is_the_completed_process() -> None:
 
 @pytest.mark.parametrize("sent", [b"", b'{"ok":true,"res'])
 def test_a_broker_that_hangs_up_without_a_whole_reply_is_a_reply_error(sent: bytes) -> None:
-    outcome, _, _ = _call(lambda connection: connection.send(sent, HANG_GUARD_S), seed=5)
+    outcome, _, _ = _call(lambda connection, _threads: connection.send(sent, HANG_GUARD_S), seed=5)
 
     assert isinstance(outcome, BrokerReplyError)
     assert "without a reply" in str(outcome)
@@ -162,10 +175,10 @@ def test_a_broker_that_hangs_up_without_a_whole_reply_is_a_reply_error(sent: byt
 
 @pytest.mark.parametrize("seed", [None, 11])
 def test_a_silent_broker_is_a_timeout_after_the_call_timeout(seed: int | None) -> None:
-    def silent(connection: Connection) -> None:
-        # Wait for the client to give up and hang up; the guard only bounds a hang.
-        with suppress(OSError, TimeoutError):
-            connection.recv(1, HANG_GUARD_S)
+    def silent(connection: Connection, _threads: SimThreads) -> None:
+        # EOF proves the client closes its side when the shared deadline expires; the
+        # timeout only guards a client that never releases the connection.
+        assert connection.recv(1, HANG_GUARD_S) == b""
 
     outcome, took, _ = _call(silent, seed=seed)
 
@@ -180,12 +193,38 @@ def test_a_broker_nobody_serves_is_file_not_found() -> None:
     assert isinstance(outcome, FileNotFoundError)
 
 
+@given(
+    request_read_delay=st.floats(min_value=1.0, max_value=TIMEOUT_S * 0.35),
+    trickle_interval=st.floats(min_value=TIMEOUT_S * 0.2, max_value=TIMEOUT_S * 0.45),
+)
+def test_request_send_and_every_partial_reply_share_one_deadline(
+    request_read_delay: float, trickle_interval: float
+) -> None:
+    def trickle(connection: Connection, threads: SimThreads) -> None:
+        with suppress(OSError, TimeoutError):
+            for _ in range(8):
+                connection.send(b"x", HANG_GUARD_S)
+                threads.sleep(trickle_interval)
+
+    outcome, took, request = _call(
+        trickle,
+        seed=None,
+        buffer=8,
+        request_read_delay=request_read_delay,
+    )
+
+    assert isinstance(outcome, _TimedOut)
+    assert outcome.timeout == TIMEOUT_S
+    assert took == pytest.approx(TIMEOUT_S)
+    assert request.endswith(b"\n")
+
+
 @pytest.mark.parametrize("seed", [None, 13])
 def test_a_reply_that_never_ends_is_cut_off_at_the_frame_bound(seed: int | None) -> None:
     sent = [0]
     chunk = b"x" * (1 << 16)
 
-    def endless(connection: Connection) -> None:
+    def endless(connection: Connection, _threads: SimThreads) -> None:
         # A bounded buffer makes each send wait for the client to read, so the broker
         # stops once the client hangs up; the cap only guards a client that never would.
         with suppress(OSError, TimeoutError):

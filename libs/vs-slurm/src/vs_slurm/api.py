@@ -9,8 +9,12 @@ gateways can provide a versioned JSON connector executable.
 
 from typing import Protocol
 
-from .cluster import SlurmCluster
+from vs_sim.api import ByteSource, OutputStream
+
+from .cluster import SlurmCluster, recorded_job_ids
 from .cluster_types import (
+    OBSERVED_CANCEL_CALLS,
+    ClusterCall,
     ClusterCancelOutcome,
     ClusterCancelRequested,
     ClusterCollected,
@@ -29,14 +33,17 @@ from .cluster_types import (
 from .cluster_types import validate_operation_id as validate_cluster_operation_id
 from .config import (
     PORT_PLACEHOLDER,
+    MinimalJob,
     SlurmConfig,
     SlurmConfigError,
     SlurmConnectorTransport,
+    SlurmJobResources,
     SlurmLocalTransport,
     SlurmService,
     SlurmSshTransport,
     SlurmTransport,
     load_slurm_config,
+    minimal_job,
     shell_join_with_port,
 )
 from .connector_protocol import (
@@ -51,12 +58,113 @@ from .connector_protocol import (
     SlurmConnectorResponse,
     SlurmConnectorSyncToRequest,
 )
+from .errors import (
+    SlurmError,
+    SlurmSbatchFailedError,
+    SlurmSubmissionRejectedError,
+    SlurmTransferInterruptedError,
+    SlurmTransportFailedError,
+    SlurmWorkspaceRootProbeError,
+)
 from .fake_cluster import FakeCluster, SecondsRange, SlurmTimingProfile
 from .fake_connector import REQUESTS_FILE, FakeConnector
+from .fake_ledger import FakeEvaluationLedger
 from .identity import runtime_content_identity
+from .job_teardown import PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE
+from .ledger import (
+    BATCH_RESULT_LAYOUT,
+    LEDGER_FORMAT_VERSION,
+    MAX_WITHDRAWAL_WINDOW_SECONDS,
+    AttachJob,
+    AwaitWithdrawal,
+    CheckJob,
+    ClaimAttempt,
+    Leased,
+    LeaseVerdict,
+    LedgerArtifact,
+    LedgerEntry,
+    LedgerError,
+    LedgerLabels,
+    LedgerLease,
+    LedgerPolicy,
+    LedgerRecord,
+    LedgerStage,
+    LedgerState,
+    ResolveSubmission,
+    Settlement,
+    SubmitBoundJob,
+    SubmitStep,
+    Unleased,
+    UnreadableLease,
+    WithdrawalMark,
+    WithdrawalUndone,
+    check_transition,
+    claim_expired,
+    decode_lease,
+    decode_record,
+    evaluation_key,
+    handle_of_job,
+    held_by_others,
+    job_of_handle,
+    lease_verdict,
+    ledger_operation_id,
+    settlement,
+    submit_step,
+    transitioned,
+    validate_holder,
+    validate_project,
+)
+from .ledger import encode as encode_ledger_document
+from .ledger_actions import (
+    CLOCK_SKEW_SECONDS,
+    EndedJobless,
+    JobMayRun,
+    Kept,
+    NotInLedger,
+    OrphanChecks,
+    WithdrawalTiming,
+    Withdrawer,
+    Withdrawn,
+    WithdrawOutcome,
+    WithdrawUnknown,
+    relinquish,
+    settle,
+    sweep_unleased,
+    sweep_withdrawer,
+    take_over_jobless,
+    undo_expired_withdrawal,
+    withdraw,
+    withdrawal_window_seconds,
+)
+from .ledger_listing import (
+    ENTRY_ID_LENGTH,
+    EntryPhase,
+    LedgerListing,
+    LedgerRow,
+    Resolved,
+    Unresolved,
+    entry_id,
+    list_entries,
+    resolve_entries,
+)
+from .ledger_store import RemoteEvaluationLedger
+from .queue_view import (
+    NodeGpus,
+    OwnJob,
+    QueuedJob,
+    QueueSnapshot,
+    QueueViewError,
+    gpu_count,
+    parse_queue_snapshot,
+    queue_snapshot_command,
+    sbatch_partitions,
+)
 from .recorded_traces import CANCEL_REACTIONS, LIFETIMES
+from .remote_file import MAX_READ_BYTES as MAX_REMOTE_READ_BYTES
+from .remote_file import RemoteFileAnswerError, SlurmFileSource
 from .runner import (
     SERVICE_NOT_READY_EXIT_CODE,
+    STAGE_TIMEOUT_EXIT_CODES,
     SchedulerReading,
     SlurmArtifactTarget,
     SlurmBatchHandle,
@@ -65,14 +173,12 @@ from .runner import (
     SlurmBatchStage,
     SlurmBatchStageResult,
     SlurmBatchWaitResult,
-    SlurmError,
     SlurmFileArtifact,
     SlurmJobHandle,
     SlurmJobRequest,
     SlurmJobResult,
     SlurmJobRunner,
     SlurmJobWaitResult,
-    SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
 )
 from .scheduler_read import READ_END as SCHEDULER_READ_END
@@ -122,22 +228,48 @@ from .transport_broker import (
     slurm_transport_broker_available,
     slurm_transport_broker_policy,
 )
+from .workspace_probe import (
+    WorkspaceRootProbeQueued,
+    WorkspaceRootProbeWatch,
+    probe_workspace_root,
+)
+from .workspace_proof import (
+    WorkspaceRootProbeFailed,
+    WorkspaceRootProbeProven,
+    WorkspaceRootProbeReport,
+    WorkspaceRootProbeRetrying,
+    WorkspaceRootProof,
+)
 
 __all__ = [
+    "BATCH_RESULT_LAYOUT",
     "CANCEL_REACTIONS",
+    "CLOCK_SKEW_SECONDS",
     "DEFAULT_COMMAND_SECONDS",
+    "ENTRY_ID_LENGTH",
     "INITIAL_LIFE",
+    "LEDGER_FORMAT_VERSION",
     "LIFETIMES",
     "MAX_CONNECTOR_REQUEST_BYTES",
     "MAX_CONNECTOR_RESPONSE_BYTES",
+    "MAX_REMOTE_READ_BYTES",
     "MAX_TRANSPORT_STREAM_BYTES",
+    "MAX_WITHDRAWAL_WINDOW_SECONDS",
+    "OBSERVED_CANCEL_CALLS",
     "PORT_PLACEHOLDER",
+    "PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE",
     "REQUESTS_FILE",
     "SCHEDULER_READ_END",
     "SERVICE_NOT_READY_EXIT_CODE",
     "SLURM_CONNECTOR_REQUEST",
+    "STAGE_TIMEOUT_EXIT_CODES",
     "AccountingRow",
+    "AttachJob",
+    "AwaitWithdrawal",
+    "CheckJob",
+    "ClaimAttempt",
     "Cluster",
+    "ClusterCall",
     "ClusterCancelOutcome",
     "ClusterCancelRequested",
     "ClusterCollectOutcome",
@@ -155,19 +287,52 @@ __all__ = [
     "Completing",
     "EndOutcome",
     "Ended",
+    "EndedJobless",
+    "EntryPhase",
+    "EvaluationLedger",
     "FakeCluster",
     "FakeConnector",
+    "FakeEvaluationLedger",
     "IssuedCommand",
     "JobLife",
+    "JobMayRun",
+    "Kept",
+    "LeaseVerdict",
+    "Leased",
+    "LedgerArtifact",
+    "LedgerEntry",
+    "LedgerError",
+    "LedgerLabels",
+    "LedgerLease",
+    "LedgerListing",
+    "LedgerPolicy",
+    "LedgerRecord",
+    "LedgerRow",
+    "LedgerStage",
+    "LedgerState",
+    "MinimalJob",
     "NoAccountingRow",
+    "NodeGpus",
+    "NotInLedger",
     "NotInQueue",
     "Notice",
+    "OrphanChecks",
+    "OwnJob",
     "QueueRow",
+    "QueueSnapshot",
+    "QueueViewError",
     "Queued",
+    "QueuedJob",
+    "RemoteEvaluationLedger",
+    "RemoteFileAnswerError",
+    "ResolveSubmission",
+    "Resolved",
     "Running",
+    "SchedulerQueue",
     "SchedulerReading",
     "SchedulerTrace",
     "SecondsRange",
+    "Settlement",
     "SlurmArtifactTarget",
     "SlurmBatchHandle",
     "SlurmBatchRequest",
@@ -187,8 +352,10 @@ __all__ = [
     "SlurmConnectorTransport",
     "SlurmError",
     "SlurmFileArtifact",
+    "SlurmFileSource",
     "SlurmJobHandle",
     "SlurmJobRequest",
+    "SlurmJobResources",
     "SlurmJobResult",
     "SlurmJobRunner",
     "SlurmJobStatus",
@@ -196,39 +363,104 @@ __all__ = [
     "SlurmLocalTransport",
     "SlurmPhase",
     "SlurmRawState",
+    "SlurmSbatchFailedError",
     "SlurmService",
     "SlurmSshTransport",
     "SlurmStatus",
     "SlurmSubmissionRejectedError",
     "SlurmTimingProfile",
+    "SlurmTransferInterruptedError",
     "SlurmTransport",
     "SlurmTransportBrokerPolicy",
+    "SlurmTransportFailedError",
     "SlurmTransportRequestError",
     "SlurmTreeArtifact",
+    "SlurmWorkspaceRootProbeError",
     "Step",
+    "SubmitBoundJob",
+    "SubmitStep",
     "TraceConnector",
     "TraceStep",
     "Unknown",
+    "Unleased",
+    "UnreadableLease",
+    "Unresolved",
+    "WithdrawOutcome",
+    "WithdrawUnknown",
+    "WithdrawalMark",
+    "WithdrawalTiming",
+    "WithdrawalUndone",
+    "Withdrawer",
+    "Withdrawn",
+    "WorkspaceRootProbeFailed",
+    "WorkspaceRootProbeProven",
+    "WorkspaceRootProbeQueued",
+    "WorkspaceRootProbeReport",
+    "WorkspaceRootProbeRetrying",
+    "WorkspaceRootProbeWatch",
+    "WorkspaceRootProof",
     "advance",
     "advance_with_notice",
+    "check_transition",
+    "claim_expired",
+    "decode_lease",
+    "decode_record",
+    "encode_ledger_document",
+    "entry_id",
+    "evaluation_key",
+    "gpu_count",
+    "handle_of_job",
+    "held_by_others",
+    "job_of_handle",
+    "lease_verdict",
+    "ledger_operation_id",
     "life_for_status",
+    "list_entries",
     "load_slurm_config",
+    "minimal_job",
     "needs_accounting",
     "observe",
     "observe_with_notice",
     "parse_accounting_row",
     "parse_queue_row",
+    "parse_queue_snapshot",
     "phase_of",
+    "probe_workspace_root",
+    "queue_snapshot_command",
+    "recorded_job_ids",
+    "relinquish",
+    "resolve_entries",
     "runtime_content_identity",
+    "sbatch_partitions",
+    "settle",
+    "settlement",
     "shell_join_with_port",
     "slurm_transport_broker_available",
     "slurm_transport_broker_policy",
     "split_framed_scheduler_query",
     "status_of",
+    "submit_step",
+    "sweep_unleased",
+    "sweep_withdrawer",
+    "take_over_jobless",
+    "transitioned",
     "tree_content_identity",
+    "undo_expired_withdrawal",
     "unframed_output",
     "validate_cluster_operation_id",
+    "validate_holder",
+    "validate_project",
+    "withdraw",
+    "withdrawal_window_seconds",
 ]
+
+
+class SchedulerQueue(Protocol):
+    """Reads the queue this user's jobs wait in; ``SlurmJobRunner`` is the real one."""
+
+    def read_queue(self) -> QueueSnapshot:
+        """One read-only reading; raises ``SlurmError`` or ``QueueViewError`` when it fails."""
+        ...
 
 
 class Cluster(Protocol):
@@ -249,8 +481,21 @@ class Cluster(Protocol):
         """Observe scheduler evidence without submitting work."""
         ...
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
-        """Record cancellation intent, leaving confirmation to inspect."""
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
+        """Record cancellation intent, leaving confirmation to inspect.
+
+        ``observed`` is a reading the caller just took of this target. When it
+        shows the job queued or running, the scancel is the cancel's first
+        transport call (``OBSERVED_CANCEL_CALLS``), with no fresh scheduler read
+        before it; the rest of the cancel follows as without it. A reading of
+        another job is Unknown, and nothing is cancelled.
+        """
         ...
 
     def collect(
@@ -261,4 +506,77 @@ class Cluster(Protocol):
         observed: ClusterObservation | None = None,
     ) -> ClusterCollectOutcome:
         """Collect terminal evidence, preserving partial results as Unknown."""
+        ...
+
+    def stage_output(
+        self, handle: SlurmBatchHandle, index: int, stream: OutputStream
+    ) -> ByteSource:
+        """What stage ``index`` of the batch has written to ``stream`` so far, as it grows.
+
+        The source reads the stage's output file where the job writes it; it raises
+        ``FileNotFoundError`` until the stage has started. Reading it never changes the job.
+        """
+        ...
+
+
+class EvaluationLedger(Protocol):
+    """A project's durable evaluation records, shared by every process of the project.
+
+    Implementations: ``RemoteEvaluationLedger`` (the cluster's shared filesystem)
+    and ``FakeEvaluationLedger``; both pass ``tests/test_ledger_contract.py``.
+    Every method raises ``LedgerError`` when the storage cannot be read or
+    written: the request's state is then unknown, never absent.
+    """
+
+    def read(self, key: str) -> LedgerEntry | None:
+        """The request's current attempt, its revision and every lease, or None if never asked for.
+
+        A lease removed while it is read is absent, never an error.
+        """
+        ...
+
+    def claim(self, record: LedgerRecord) -> LedgerRecord:
+        """Create ``record``'s attempt atomically unless it exists; return the stored attempt.
+
+        Of two processes claiming one attempt, exactly one gets its own record back.
+        """
+        ...
+
+    def replace(self, current: LedgerEntry, record: LedgerRecord) -> bool:
+        """Compare-and-swap: write ``record`` as the revision after ``current``.
+
+        True when it was written. False when another writer already moved the
+        attempt past ``current``: the caller reads the request again and decides
+        anew. Raises ``LedgerError`` for a change ``check_transition`` refuses.
+        """
+        ...
+
+    def write_withdrawal(
+        self, current: LedgerEntry, document: WithdrawalMark | WithdrawalUndone
+    ) -> bool:
+        """Compare-and-swap: write ``document`` as the withdrawal revision after ``current``'s.
+
+        True when it was written; False when another withdrawal revision of the
+        attempt was written since ``current`` was read. Raises ``LedgerError``
+        for a revision ``check_withdrawal`` refuses. Never touches the record.
+        """
+        ...
+
+    def renew(self, key: str, lease: LedgerLease) -> None:
+        """Write the holder's lease on the request; only that holder writes it."""
+        ...
+
+    def release(self, key: str, holder: str) -> None:
+        """Drop the holder's lease on the request."""
+        ...
+
+    def list_keys(self) -> tuple[str, ...]:
+        """Every request key the project's ledger holds."""
+        ...
+
+    def operator_file_sha256(self, path: str) -> str | None:
+        """The SHA-256 of a file on the cluster's filesystem (a setup script), None if absent.
+
+        A job reads such a file at run time, so its content is part of the key.
+        """
         ...

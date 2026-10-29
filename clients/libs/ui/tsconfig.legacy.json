@@ -1,0 +1,23 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [],
+    "jsx": "react-jsx",
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.legacy.tsbuildinfo"
+  },
+  "include": [
+    "src/legacy/**/*.ts",
+    "src/legacy/**/*.tsx"
+  ],
+  "exclude": [
+    "src/legacy/**/*.test.ts",
+    "src/legacy/**/*.test.tsx"
+  ]
+}

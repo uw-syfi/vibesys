@@ -35,7 +35,7 @@ from vs_evaluation.api import (
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
 from vs_sim.api import DISCARD, OutputSink, ProcessOutcome, ProcessRun, ProcessSpec, yield_now
-from vs_sim.api.testing import ManualClock, examples
+from vs_sim.api.testing import NO_PROCESSES, InlineBlockingRunner, ManualClock, examples
 from vs_slurm.api import (
     CANCEL_REACTIONS,
     LIFETIMES,
@@ -47,6 +47,7 @@ from vs_slurm.api import (
     ClusterTarget,
     FakeCluster,
     SchedulerTrace,
+    SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchResult,
     SlurmCluster,
@@ -63,9 +64,10 @@ from vs_slurm.api import SlurmBatchStageResult as _StageResult
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_sim.api import Sleeper
+    from vs_sim.api import ByteSource, OutputStream, Sleeper
 
 _POLL_INTERVAL_S = 10.0
+_BLOCKING = InlineBlockingRunner()
 # The executor waits this long for a cancelled job to end before it leaves the
 # evaluation CANCELING. It exceeds every recorded teardown.
 _CONFIRMATION_S = 120.0
@@ -105,9 +107,15 @@ class _ObservedCluster:
     def inspect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterInspectOutcome:
         return self._inner.inspect(target, by_job_id=by_job_id)
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
         self.scancels += 1
-        return self._inner.cancel(target, by_job_id=by_job_id)
+        return self._inner.cancel(target, by_job_id=by_job_id, observed=observed)
 
     def collect(
         self,
@@ -117,6 +125,11 @@ class _ObservedCluster:
         observed: ClusterObservation | None = None,
     ) -> ClusterCollectOutcome:
         return self._inner.collect(target, by_job_id=by_job_id, observed=observed)
+
+    def stage_output(
+        self, handle: SlurmBatchHandle, index: int, stream: OutputStream
+    ) -> ByteSource:
+        return self._inner.stage_output(handle, index, stream)
 
 
 class _TimelineFake(FakeCluster):
@@ -169,16 +182,14 @@ class _Faults:
         """Fail the ``index``-th command from now (0 is the next one) with a transport error."""
         self._countdown = index
 
-    def run(
-        self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
-    ) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
         del output
         if self._countdown is not None:
             if self._countdown == 0:
                 self._countdown = None
                 return ProcessOutcome(255, b"", b"connection lost")
             self._countdown -= 1
-        return self._inner.run(spec, timeout=timeout)
+        return self._inner.run(spec, timeout=timeout, output=DISCARD)
 
 
 @dataclass
@@ -296,6 +307,8 @@ def _executor(world: _World, sleeper: Sleeper | None = None) -> SlurmEvaluationE
         handle_root=world.root / "handles",
         cluster=world.cluster,
         sleeper=sleeper or world.clock,
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
         cancel_confirmation_seconds=_CONFIRMATION_S,
         # The job deadline is not under test here, and worlds leap the scheduler clock far
         # past it; a separate clock that never moves keeps it out of every outcome.
@@ -604,14 +617,16 @@ async def _poll_with_dropped_command(spec: _WorldSpec, delay_s: float, position:
             world.clock.advance(delay_s)
             world.faults.drop_command(position)
             polled = await reader.poll(handle.id)
+            # Every fault is one transient transport error and the job is known: the
+            # other source (queue or accounting) answers. An ended job's poll also
+            # downloads its results; one cut short reads nothing, so that poll is
+            # unknown and the next one, with no fault, collects the job whole.
+            again = await reader.poll(handle.id) if polled.phase is PollPhase.UNKNOWN else None
         finally:
             release.set()
             await submitter.close()
-        # Every fault is one transient transport error and the job is known: the
-        # other source (queue or accounting) answers. Ended jobs also collect files,
-        # which is a different boundary.
-        if polled.phase is not PollPhase.ENDED:
-            assert polled.phase is not PollPhase.UNKNOWN, polled.detail
+        if again is not None:
+            assert again.phase is PollPhase.ENDED, polled.detail
 
 
 @pytest.mark.parametrize("spec", _FAULT_WORLDS, ids=lambda spec: spec.label)

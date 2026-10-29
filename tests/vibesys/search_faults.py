@@ -5,10 +5,11 @@ opens the ordinary way and in the ways that are particular to it (a plan with no
 checkpoint core declined). What core does to *any* wait is the same for every search: it refuses
 the decision with any `RejectionCode`, loses it, lets it time out; a turn's transport drops, the
 provider fails it, the reply is not JSON or breaks its model, the prompt does not render, the
-agent suspends it to wait for an evaluation (where the view offers that), or replies with its
-reply model filled with odd values drawn from the model's schema; an operation's owner reports a
-failure; a measurement leaves no evidence; the adoption of the winner fails. `FAULTS` lists those
-once, so a new search is held to all of them by registering its host, not by copying a menu.
+agent suspends it to wait for an evaluation (where the view offers that) and core resumes it or
+refuses its resume for good, or replies with its reply model filled with odd values drawn from
+the model's schema; an operation's owner reports a failure; a measurement leaves no evidence;
+the adoption of the winner fails. `FAULTS` lists those once, so a new search is held to all of
+them by registering its host, not by copying a menu.
 
 `play` runs one generated story: each step picks an open wait and answers it the host's way
 (``variant``) or with a fault, the operator may stop (draining or cancelling) before any step, and
@@ -43,15 +44,18 @@ from vs_core.api import (
     ReplyError,
     ReplyErrorCode,
     RequestTurn,
+    ResumeRefusal,
     Retained,
     RetainedCandidate,
     RevisionRef,
     Settle,
+    SpanStatus,
     StartAttempt,
     StopMode,
     TurnFailureKind,
     Wait,
     Withdraw,
+    operation_span,
 )
 from vs_sim.api import SeededRandom
 
@@ -112,6 +116,15 @@ def _suspendable(run: FlowRun[Any], asked: Asked) -> bool:
 
 def _suspended(run: FlowRun[Any], asked: Asked) -> None:
     run.resume_ready(run.suspend(asked))
+
+
+def _resume_refused(reason: ResumeRefusal) -> Fault:
+    """The turn suspended, and the history its evaluations left can never back its resume."""
+    return Fault(
+        f"resume-refused({reason.value})",
+        _suspendable,
+        lambda run, asked: run.resume_refused(run.suspend(asked), reason),
+    )
 
 
 def _refused(code: RejectionCode) -> Fault:
@@ -318,6 +331,7 @@ FAULTS: tuple[Fault, ...] = (
     ),
     Fault("render-failed", _turn, lambda run, asked: run.fail(asked, FailureReason.RENDER_FAILED)),
     Fault("suspended", _suspendable, _suspended),
+    *(_resume_refused(reason) for reason in ResumeRefusal),
     Fault("odd-reply", _turn, _odd),
     Fault("odd-reply", _turn, _odd),
     Fault("odd-reply", _turn, _odd),
@@ -430,6 +444,7 @@ def play(
         raise AssertionError(message)
     assert_flow_closed(host)
     _assert_winner_earned(run)
+    _assert_adoption_labelled(run)
     finishes = [item for item in run.decisions if isinstance(item, Finish)]
     assert len(finishes) == 1, f"{len(finishes)} finishes: {run.timeline()}"
     if stopped:
@@ -457,6 +472,43 @@ def _assert_winner_earned(run: FlowRun[Any]) -> None:
             revision = item.selection.revision
             assert revision in eligible, f"won without an eligible settle: {run.timeline()}"
             assert revision in measured, f"won without an official measurement: {run.timeline()}"
+
+
+def _assert_adoption_labelled(run: FlowRun[Any]) -> None:
+    """The span that adopts a winner names the candidate, and its verdict says how it went.
+
+    Whatever core answers (it adopts, refuses, loses the proposal, the operator stops), the
+    proposal's span is an adoption of exactly the selection proposed; once core has answered it
+    is adopted or not adopted, as the run's own result says.
+    """
+    trace = run.trace()
+    finished = run.finished
+    for item in run.decisions:
+        if not (isinstance(item, Wait) and isinstance(item.request, ProposeWinner)):
+            continue
+        proposal = item.request
+        span = trace.span(operation_span(proposal.decision_id))
+        assert span is not None, run.timeline()
+        assert span.label is not None, f"{span.id} is not labelled: {run.timeline()}"
+        assert span.label.kind == "adoption", run.timeline()
+        attrs = json.loads(span.label.attrs_json or "{}")
+        selection = proposal.selection
+        candidate = (
+            selection.revision.revision_id.root
+            if isinstance(selection, RetainedCandidate)
+            else None
+        )
+        assert attrs["candidate"] == candidate, run.timeline()
+        if attrs["metric_value"] is not None and attrs["vs_baseline"] is not None:
+            assert attrs["vs_baseline"] > 0, run.timeline()
+        verdict = span.label.verdict
+        assert verdict in {None, "adopted", "not_adopted"}, run.timeline()
+        if span.status is SpanStatus.DONE:
+            assert verdict is not None, f"{span.id} was answered without a verdict"
+        if verdict == "not_adopted":
+            assert span.label.reason, run.timeline()
+        if finished is not None and finished.result.selection == selection:
+            assert verdict == "adopted", run.timeline()
 
 
 def assert_flow_closed(host: SearchHost) -> None:

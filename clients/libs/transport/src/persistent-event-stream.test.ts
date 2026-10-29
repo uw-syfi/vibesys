@@ -147,6 +147,8 @@ class StubTransport implements StreamTransport {
   protocolErrorBeforeRefusal = false;
   /** Whether the next accepted dial emits a protocol fault and then one invalid later frame. */
   faultThenBatchOnNextSubscribe = false;
+  /** Whether an accepted dial emits its ack and terminal fault in one observer turn. */
+  ackThenFaultOnNextSubscribe = false;
   /** Errors upcoming dials fail with, consumed in order before `refuseSubscribes`. */
   readonly scriptedDialFailures: Error[] = [];
   readonly scriptedCloseFailures: Error[] = [];
@@ -256,6 +258,22 @@ class StubTransport implements StreamTransport {
       this.faultThenBatchOnNextSubscribe = false;
       onMessage({type: 'protocol_error', code: 'stream_failed', message: 'Replay failed'});
       onMessage({type: 'event_batch', events: [], history_after_sequence: 0});
+    }
+    if (this.ackThenFaultOnNextSubscribe) {
+      this.ackThenFaultOnNextSubscribe = false;
+      try {
+        onMessage({
+          type: 'subscribed',
+          request_id: 'request-1',
+          run_id: 'run-1',
+          latest_sequence: 0,
+        });
+        onMessage({type: 'protocol_error', code: 'stream_failed', message: 'Replay failed'});
+      } catch (error) {
+        // Both shipped transports contain observer failures, retire their
+        // socket, and notify the disconnect observer with the exact error.
+        onDisconnect(error instanceof Error ? error : new Error(String(error)));
+      }
     }
     if (armed !== null) {
       onMessage({
@@ -925,7 +943,37 @@ describe('PersistentEventStream', () => {
     transport.refuseSubscribes = 1;
     transport.protocolErrorBeforeRefusal = true;
     transport.deliverOnNextSubscribe([], 0);
-    const {callbacks, messages} = harness({cursor: 0, reconnect: true});
+    const {callbacks, messages, states} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+
+    await stream.subscribe(callbacks);
+
+    expect(transport.subscribeCalls).toEqual([
+      {afterSequence: 0, tail: 1_000, storeId: undefined},
+      {afterSequence: 0, tail: undefined, storeId: undefined},
+    ]);
+    expect(messages.map(({message}) => message.type)).toEqual(['event_batch']);
+    expect(states).toEqual([]);
+    expect(transport.subscriptions).toEqual([{closed: false}]);
+
+    // The consumed probe fault did not latch the stream as failed: a later
+    // real outage still reports, reconnects, and clears normally.
+    transport.sever();
+    await stream.settle();
+    expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
+    expect(transport.subscribeCalls.at(-1)).toEqual({
+      afterSequence: 0,
+      tail: undefined,
+      storeId: undefined,
+    });
+    await stream.close();
+  });
+
+  it('still publishes the unadorned fallback protocol error when that fallback fails', async () => {
+    const transport = new StubTransport();
+    transport.refuseSubscribes = 2;
+    transport.protocolErrorBeforeRefusal = true;
+    const {callbacks, messages, states} = harness({cursor: 0, reconnect: true});
     const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: []});
 
     await stream.subscribe(callbacks);
@@ -934,9 +982,33 @@ describe('PersistentEventStream', () => {
       {afterSequence: 0, tail: 1_000, storeId: undefined},
       {afterSequence: 0, tail: undefined, storeId: undefined},
     ]);
-    expect(messages.map(({message}) => message.type)).toEqual(['protocol_error', 'event_batch']);
-    expect(transport.subscriptions).toEqual([{closed: false}]);
+    expect(messages.map(({message}) => message.type)).toEqual(['protocol_error']);
+    expect(states.map(state => state.status)).toEqual(['disconnected']);
+  });
+
+  it('retires an accepted capability dial when its post-ack fault observer fails', async () => {
+    const transport = new StubTransport();
+    transport.ackThenFaultOnNextSubscribe = true;
+    const observerFailure = new Error('protocol observer failed');
+    const observed: ServerMessage[] = [];
+    const {callbacks: base, states} = harness({cursor: 0, reconnect: false});
+    const callbacks: PersistentEventStreamCallbacks = {
+      ...base,
+      onMessage: (message, context) => {
+        base.onMessage(message, context);
+        observed.push(message);
+        if (message.type === 'protocol_error') throw observerFailure;
+      },
+    };
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: []});
+
+    await stream.subscribe(callbacks);
+
+    expect(observed.map(message => message.type)).toEqual(['subscribed', 'protocol_error']);
+    expect(states).toEqual([]);
+    expect(transport.subscriptions).toEqual([{closed: true}]);
     await stream.close();
+    expect(transport.subscriptions).toEqual([{closed: true}]);
   });
 
   it('reports a boot failure and does not arm the reconnect loop', async () => {
@@ -1061,7 +1133,7 @@ describe('PersistentEventStream', () => {
   it('falls back to a plain resume when the server rejects the store field', async () => {
     const transport = new StubTransport();
     const env = {cursor: 0, reconnect: true, storeId: ''};
-    const {callbacks, states} = harness(env);
+    const {callbacks, messages, states} = harness(env);
     const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     await stream.subscribe(callbacks);
     transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
@@ -1080,6 +1152,7 @@ describe('PersistentEventStream', () => {
       {afterSequence: 1, tail: undefined, storeId: 'run-store'},
       {afterSequence: 1, tail: undefined, storeId: undefined},
     ]);
+    expect(messages.map(({message}) => message.type)).toEqual(['event_batch']);
     expect(states.at(-1)?.status).toBe('connected');
     expect(transport.subscriptions[1]?.closed).toBe(false);
   });

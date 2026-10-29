@@ -9,20 +9,25 @@ from typing import TYPE_CHECKING, Annotated, Literal, Never, TypeAliasType
 from pydantic import ConfigDict, Field, FiniteFloat, TypeAdapter, model_validator
 
 from server.api.iterations import MAX_ITERATION_PAGE_SIZE, IterationSlice
-from server.chat.options import ChatOptions
 from server.control_envelope import (
+    CommandAckEnvelope,
     ProtocolModel,
     Request,
     ResponseEnvelope,
     StopCommand,
 )
 from server.diagnostics import Diagnostic, DiagnosticScope, exception_to_diagnostic
-from server.events import ChatThreadId, RunEvent
+from server.events import ChatThreadId, RunEvent, RunOverview, WireSpan
 from server.execution import ActiveAgentExecution
-from server.host_api import PROTOCOL_VERSION
+from server.host_api import PROTOCOL_VERSION, HarnessChoice
 from server.run_lifecycle import RunStatus
-from server.settings import InteractiveSetupDefaults
-from vibesys.api import IterationUnavailable
+from vibesys.api import (
+    ControlAction,
+    ControlRequest,
+    IterationUnavailable,
+    ResumeWhen,
+    check_one_way_to_resume,
+)
 from vibesys.api.hypothesis import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -121,6 +126,15 @@ class ResumeCommand(Request):
     # A run paused on a provider capacity limit may switch to its configured
     # fallback provider as it resumes. Ignored when the run has no fallback.
     fallback: bool = False
+    # ``capacity_returns`` keeps a run paused on a provider capacity limit paused until
+    # capacity should be back (``quota_waiting``), then resumes it; ``now`` resumes at once
+    # and ends such a wait. A server without the field rejects it (``WP-CAPABILITY-PROBE``).
+    when: ResumeWhen = "now"
+
+    @model_validator(mode="after")
+    def _one_way_to_resume(self) -> ResumeCommand:
+        check_one_way_to_resume(fallback=self.fallback, when=self.when)
+        return self
 
 
 class SteerCommand(Request):
@@ -128,6 +142,19 @@ class SteerCommand(Request):
 
     type: Literal["command.steer"] = "command.steer"
     text: str = Field(min_length=1)
+
+
+class ControlCommand(Request):
+    """Send one operator control in the schema every control ingress shares.
+
+    ``control`` is a ``vibesys.api.ControlRequest``, the request the headless inbox carries
+    too, so a client and ``vibesys control`` say the same things. The single-action commands
+    above remain; the server turns each into the same request. A server that predates this
+    command rejects it (``WP-CAPABILITY-PROBE``).
+    """
+
+    type: Literal["command.control"] = "command.control"
+    control: ControlRequest
 
 
 class SnapshotQuery(Request):
@@ -155,32 +182,15 @@ class ChatQuery(Request):
 class ChatThreadCreateQuery(Request):
     """Create a new experiment-chat thread with its own agent selection.
 
-    Omitted fields resolve to the run's configured provider and model. The
-    response carries the resolved settings and thread identity.
+    ``harness`` is a provider and model pair from the helper's ``harnesses.list`` catalogue,
+    the same one New run draws on. Omitted, the thread runs the run's own provider and model.
+    The response carries the resolved settings and thread identity.
     """
 
     type: Literal["query.chat_thread_create"] = "query.chat_thread_create"
-    provider: str | None = None
-    model: str | None = None
+    harness: HarnessChoice | None = None
     # Without a title the server derives one from the thread's first message.
     title: str | None = None
-
-
-class ChatOptionsQuery(Request):
-    """Request the agent selections this run's experiment chat offers."""
-
-    type: Literal["query.chat_options"] = "query.chat_options"
-
-
-class TuiDefaultsQuery(Request):
-    """Request the launch-directory configuration defaults a TUI applies.
-
-    A terminal client resolves its theme from the run's configuration. Asking
-    over the control channel keeps TOML parsing in the server and saves the
-    launcher an extra Python process on the boot path.
-    """
-
-    type: Literal["query.tui_defaults"] = "query.tui_defaults"
 
 
 class HistoryQuery(Request):
@@ -301,8 +311,6 @@ ProtocolRequest = Annotated[
     | SnapshotQuery
     | ChatQuery
     | ChatThreadCreateQuery
-    | ChatOptionsQuery
-    | TuiDefaultsQuery
     | HistoryQuery
     | PerformanceQuery
     | ExperimentQuery
@@ -310,7 +318,8 @@ ProtocolRequest = Annotated[
     | DesignQuery
     | DesignPatchQuery
     | EventsQuery
-    | SubscribeRequest,
+    | SubscribeRequest
+    | ControlCommand,
     Field(discriminator="type"),
 ]
 
@@ -341,6 +350,17 @@ class RunSnapshot(ProtocolModel):
     # CHAT event, so a client that folds only a tail cannot rebuild the
     # registry from the events it holds.
     chat_threads: list[ChatThreadInfo] = Field(default_factory=list)
+    # The thread a chat opens on: the one asked in, or created, most recently. None is the
+    # default thread, which also stands when no thread exists. Server-owned like the registry:
+    # a client folding only a tail cannot know which thread was last used.
+    last_chat_thread_id: ChatThreadId | None = None
+    # The run trace: every span of the run as its latest span event left it, each after its
+    # parent. Folding the run's span events by span id gives the same list.
+    spans: list[WireSpan] = Field(default_factory=list)
+    # The run's objective and what measures it, as its run_started event declared them, with
+    # the unit and direction its measurements add. None before the run started (or for a run
+    # that predates the overview).
+    overview: RunOverview | None = None
 
 
 class ChatResult(ProtocolModel):
@@ -464,9 +484,10 @@ class HypothesisEntry(ProtocolModel):
     # records predating provenance tracking, which keep reading as deliberate
     # absolute measurements.
     perf_delta_reason: PerfDeltaReason | None = None
-    # Integration, not truth: the framework's explicit retention decision.
-    # None means legacy or not yet assessed, never "official evaluation ran".
-    kept: bool | None = None
+    # Integration, not truth: the framework's decision that this idea is the best so far
+    # (its trusted measurement beat what stood). None means legacy or not yet assessed,
+    # never "official evaluation ran".
+    best: bool | None = None
     # Orchestrator strategy is separate from empirical resolution and
     # candidate retention. It is structured server state, not roadmap prose.
     strategy_disposition: Literal["available", "parked", "abandoned"] | None = None
@@ -549,17 +570,19 @@ class DesignPatch(ProtocolModel):
     truncated: bool = False
 
 
+class CommandAck(CommandAckEnvelope):
+    """Acknowledgment of a requested run command; ``action`` is the control's tag."""
+
+    action: ControlAction
+
+
 class Response(ResponseEnvelope):
     """Response envelope for all protocol requests."""
 
+    ack: CommandAck | None = None
+
     chat: ChatResult | None = None
     chat_thread: ChatThreadInfo | None = None
-    # None means the run has not attached its agent selection yet, which is
-    # distinct from a run that offers no provider at all.
-    chat_options: ChatOptions | None = None
-    # None means this server was started without a defaults provider, so the
-    # client keeps its own built-in defaults. It never means "no defaults".
-    tui_defaults: InteractiveSetupDefaults | None = None
     snapshot: RunSnapshot | None = None
     events: list[RunEvent] = Field(default_factory=list)
     performance: list[PerformanceRound] = Field(default_factory=list)

@@ -4,7 +4,7 @@
  * The welcome view is a trusted app page, but its requests are still input: every request is
  * parsed by `@vibesys/ipc`'s `parseWelcomeRequest`, which validates every value (host keys, paths,
  * ids, task names) before anything reaches a host, or throws naming what is wrong.
- * `bindWelcomeIpc` answers the channels only for the welcome view's own web contents.
+ * `WelcomeRouter` answers the channels only for each window's own welcome web contents.
  */
 import {ConnectionError} from '@vibesys/connection';
 import {
@@ -51,70 +51,126 @@ function failure(error: unknown): WelcomeResult<never> {
     ok: false,
     error: error instanceof Error ? error.message : String(error),
     authNeeded: error instanceof ConnectionError && error.reason === 'auth',
+    // The connection's own cause, typed, so a screen words it and keeps the raw text for a tooltip.
+    ...(error instanceof ConnectionError ? {cause: error.reason} : {}),
   };
 }
 
+/** What one window's trusted surface asks of the app, and how its documents lose authority. */
+export interface WelcomeBinding {
+  /** The window's welcome surface: which WebContents is current, and when its documents change. */
+  readonly document: WelcomeDocument;
+  /** The page that surface loads; a sender on another page is refused. */
+  readonly url: string;
+  readonly answer: (request: WelcomeRequest, rendererGeneration: string) => Promise<unknown>;
+  /** Settle a replaced document's asynchronous cleanup; a rejection still counts as settled. */
+  readonly retire: (rendererGeneration: string) => Promise<void>;
+}
+
 /**
- * Answer every welcome channel with `answer`, for `welcome` (the welcome view's web contents on
- * `url`) only; any other sender is refused. Each request carries the invoking Electron frame's
- * process/routing identity. `revoke` synchronously removes each replaced document's authority;
- * a replacement document cannot issue work until `retire` has settled every asynchronous cleanup
- * belonging to the prior identities. A `retire` implementation owns reporting its cleanup
- * failures; rejection still counts as settlement and cannot skip a sibling generation or poison a
- * later document's barrier.
+ * One window's admission: its documents' generations, the epoch every replacement advances (even
+ * when Electron cannot identify the retiring frame), and the barrier a replacement document waits
+ * on until every prior identity's cleanup has settled. A `retire` implementation owns reporting
+ * its cleanup failures; rejection still counts as settlement and cannot skip a sibling generation
+ * or poison a later document's barrier.
  */
-export function bindWelcomeIpc(
-  ipc: WelcomeIpc,
-  welcome: WelcomeDocument,
-  url: string,
-  answer: (request: WelcomeRequest, rendererGeneration: string) => Promise<unknown>,
-  revoke: (rendererGeneration: string) => void,
-  retire: (rendererGeneration: string) => Promise<void>,
-): void {
-  let alive = true;
-  /** Every replacement advances this even when Electron cannot identify the retiring frame. */
-  let documentEpoch = 0;
-  let activeGenerations = new Set<string>();
-  const retiredGenerations = new Set<string>();
-  let retirement = Promise.resolve();
-  const retireCurrent = (retiringGeneration: string | null = null): void => {
-    documentEpoch += 1;
-    if (retiringGeneration !== null) activeGenerations.add(retiringGeneration);
-    const retiring = [...activeGenerations];
-    activeGenerations = new Set();
-    for (const generation of retiring) {
-      retiredGenerations.add(generation);
-      revoke(generation);
+class WindowAdmission {
+  readonly #binding: WelcomeBinding;
+  #alive = true;
+  #documentEpoch = 0;
+  #activeGenerations = new Set<string>();
+  readonly #retiredGenerations = new Set<string>();
+  #retirement = Promise.resolve();
+
+  constructor(binding: WelcomeBinding, destroyed: () => void) {
+    this.#binding = binding;
+    binding.document.onNewDocument(generation => this.#retireCurrent(generation));
+    binding.document.onDestroyed(() => {
+      this.#alive = false;
+      this.#retireCurrent();
+      destroyed();
+    });
+  }
+
+  /** Whether `event` came from this window's current welcome document on its page. */
+  admits(event: WelcomeInvokeEvent): boolean {
+    return (
+      event.senderId === this.#binding.document.currentId() &&
+      isSameAppPage(event.senderUrl, this.#binding.url)
+    );
+  }
+
+  async handle(
+    channel: string,
+    event: WelcomeInvokeEvent,
+    args: readonly unknown[],
+  ): Promise<WelcomeResult<unknown>> {
+    const requestGeneration = event.rendererGeneration;
+    const requestEpoch = this.#documentEpoch;
+    try {
+      if (requestGeneration === null) throw new Error('welcome view document is unavailable');
+      await this.#retirement;
+      if (
+        !this.#alive ||
+        requestEpoch !== this.#documentEpoch ||
+        this.#retiredGenerations.has(requestGeneration)
+      )
+        throw new Error('welcome view was replaced');
+      this.#activeGenerations.add(requestGeneration);
+      return {
+        ok: true,
+        value: await this.#binding.answer(parseWelcomeRequest(channel, args), requestGeneration),
+      };
+    } catch (error) {
+      return failure(error);
     }
-    retirement = retirement.then(async () => {
-      await Promise.allSettled(retiring.map(async generation => retire(generation)));
+  }
+
+  #retireCurrent(retiringGeneration: string | null = null): void {
+    this.#documentEpoch += 1;
+    if (retiringGeneration !== null) this.#activeGenerations.add(retiringGeneration);
+    const retiring = [...this.#activeGenerations];
+    this.#activeGenerations = new Set();
+    for (const generation of retiring) {
+      this.#retiredGenerations.add(generation);
+    }
+    this.#retirement = this.#retirement.then(async () => {
+      await Promise.allSettled(retiring.map(async generation => this.#binding.retire(generation)));
     });
-  };
-  welcome.onNewDocument(retireCurrent);
-  welcome.onDestroyed(() => {
-    alive = false;
-    retireCurrent();
-  });
-  for (const channel of Object.values(WELCOME_CHANNELS)) {
-    ipc.handle(channel, async (event, ...args) => {
-      if (event.senderId !== welcome.currentId() || !isSameAppPage(event.senderUrl, url)) {
-        return failure(new Error('not the welcome view'));
-      }
-      const requestGeneration = event.rendererGeneration;
-      const requestEpoch = documentEpoch;
-      try {
-        if (requestGeneration === null) throw new Error('welcome view document is unavailable');
-        await retirement;
-        if (!alive || requestEpoch !== documentEpoch || retiredGenerations.has(requestGeneration))
-          throw new Error('welcome view was replaced');
-        activeGenerations.add(requestGeneration);
-        return {
-          ok: true,
-          value: await answer(parseWelcomeRequest(channel, args), requestGeneration),
-        };
-      } catch (error) {
-        return failure(error);
-      }
-    });
+  }
+}
+
+/**
+ * The welcome channels, answered for every window's trusted surface. Electron allows one handler
+ * per channel, so the router registers each channel once and routes every request by its sender:
+ * to the window whose current welcome document sent it, on that window's page; any other sender is
+ * refused. Each request carries the invoking frame's process/routing identity, and each window's
+ * documents lose authority on their own (`WindowAdmission`). A window's binding ends when its
+ * native window closes.
+ */
+export class WelcomeRouter {
+  readonly #windows = new Set<WindowAdmission>();
+
+  constructor(ipc: WelcomeIpc) {
+    for (const channel of Object.values(WELCOME_CHANNELS)) {
+      ipc.handle(channel, async (event, ...args) => {
+        const window = [...this.#windows].find(each => each.admits(event));
+        if (window === undefined) return failure(new Error('not the welcome view'));
+        return window.handle(channel, event, args);
+      });
+    }
+  }
+
+  /** Share the app's current-window admission with other IPC surfaces. */
+  admits(event: WelcomeInvokeEvent): boolean {
+    return [...this.#windows].some(window => window.admits(event));
+  }
+
+  /** Answer `binding`'s window from now until its native window closes. */
+  bind(binding: WelcomeBinding): void {
+    const window: WindowAdmission = new WindowAdmission(binding, () =>
+      this.#windows.delete(window),
+    );
+    this.#windows.add(window);
   }
 }

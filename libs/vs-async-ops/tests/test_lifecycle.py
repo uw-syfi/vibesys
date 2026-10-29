@@ -70,6 +70,50 @@ class _BlockingStore:
         return await self.delegate.records()
 
 
+class _ReplaceFailedError(RuntimeError):
+    """A scripted transient durable-transition failure."""
+
+
+class _GetFailedError(RuntimeError):
+    """A scripted transient durable-read failure."""
+
+
+class _FailingStore:
+    """Faithful in-memory store with scripted transient read and replace failures."""
+
+    def __init__(self) -> None:
+        self.delegate = InMemoryOperationStore()
+        self._get_failures: dict[str, int] = {}
+        self._failures: dict[str, int] = {}
+
+    def fail_next_get(self, operation_id: str) -> None:
+        self._get_failures[operation_id] = self._get_failures.get(operation_id, 0) + 1
+
+    def fail_next_interruption(self, operation_id: str) -> None:
+        self._failures[operation_id] = self._failures.get(operation_id, 0) + 1
+
+    async def create(self, record: OperationHandle) -> None:
+        await self.delegate.create(record)
+
+    async def get(self, operation_id: str) -> OperationHandle | None:
+        remaining = self._get_failures.get(operation_id, 0)
+        if remaining > 0:
+            self._get_failures[operation_id] = remaining - 1
+            raise _GetFailedError(operation_id)
+        return await self.delegate.get(operation_id)
+
+    async def replace(self, record: OperationHandle, *, expected_revision: int) -> None:
+        operation_id = record.request.operation_id
+        remaining = self._failures.get(operation_id, 0)
+        if record.state is OperationState.INTERRUPTED and remaining > 0:
+            self._failures[operation_id] = remaining - 1
+            raise _ReplaceFailedError(operation_id)
+        await self.delegate.replace(record, expected_revision=expected_revision)
+
+    async def records(self) -> tuple[OperationHandle, ...]:
+        return await self.delegate.records()
+
+
 class _CancellationRunner:
     """Expose runner cancellation and task-unwind order."""
 
@@ -89,6 +133,10 @@ class _CancellationRunner:
         except asyncio.CancelledError:
             self.events.append("task-canceled")
             raise
+
+    async def wait_started(self) -> None:
+        """Wait until the product-owned execution reaches this Fake."""
+        await self.started.wait()
 
     async def cancel(self, operation_id: str) -> None:
         del operation_id
@@ -433,6 +481,96 @@ async def test_close_cancels_runner_before_task_and_rejects_later_submit() -> No
     assert runner.events == ["runner-cancel", "task-canceled"]
     with pytest.raises(OperationCoordinatorClosedError):
         await coordinator.submit(_request("too-late"))
+
+
+@pytest.mark.asyncio
+async def test_close_retries_only_the_interruption_left_nonterminal() -> None:
+    """A failed durable transition remains owned after admission has closed."""
+    runner = FakeOperationRunner()
+    store = _FailingStore()
+    coordinator = OperationCoordinator(
+        runner,
+        store,
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
+    )
+    await coordinator.submit(_request("retry", "retry"))
+    await coordinator.submit(_request("settled", "settled"))
+    await runner.wait_started("retry")
+    await runner.wait_started("settled")
+    store.fail_next_interruption("retry")
+
+    with pytest.raises(_ReplaceFailedError, match="retry"):
+        await coordinator.close()
+
+    assert (await coordinator.status("retry")).state is OperationState.RUNNING
+    assert (await coordinator.status("settled")).state is OperationState.INTERRUPTED
+    assert runner.canceled == ["retry", "settled"]
+    with pytest.raises(OperationCoordinatorClosedError):
+        await coordinator.submit(_request("too-late"))
+
+    await coordinator.close()
+    await coordinator.close()
+
+    assert (await coordinator.status("retry")).state is OperationState.INTERRUPTED
+    assert runner.canceled == ["retry", "settled", "retry"]
+
+
+@pytest.mark.asyncio
+async def test_close_retry_keeps_the_task_owned_after_a_pre_cancellation_failure() -> None:
+    """A store failure before task capture cannot let live work outlast close."""
+    runner = _CancellationRunner()
+    store = _FailingStore()
+    coordinator = OperationCoordinator(
+        runner,
+        store,
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
+    )
+    await coordinator.submit(_request("pre-cancel-failure"))
+    await runner.wait_started()
+    store.fail_next_get("pre-cancel-failure")
+
+    with pytest.raises(_GetFailedError, match="pre-cancel-failure"):
+        await coordinator.close()
+
+    assert runner.events == []
+    await coordinator.close()
+
+    assert runner.events == ["runner-cancel", "task-canceled"]
+    assert (await coordinator.status("pre-cancel-failure")).state is OperationState.INTERRUPTED
+
+
+@pytest.mark.asyncio
+async def test_concurrent_close_callers_share_cancellation_safe_cleanup() -> None:
+    """No close caller reports completion while the authoritative attempt is blocked."""
+    runner = _CancellationRunner(block_cancel=True)
+    coordinator = OperationCoordinator(
+        runner,
+        InMemoryOperationStore(),
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
+    )
+    await coordinator.submit(_request("shared-close"))
+    await runner.wait_started()
+
+    first = asyncio.create_task(coordinator.close())
+    await arrival(runner.cancel_entered.wait(), first)
+    second = asyncio.create_task(coordinator.close())
+    await yield_now()
+    assert not second.done()
+
+    first.cancel()
+    await yield_now()
+    assert not first.done()
+    assert not second.done()
+    runner.cancel_release.set()
+    first_result, second_result = await asyncio.gather(first, second, return_exceptions=True)
+
+    assert isinstance(first_result, asyncio.CancelledError)
+    assert second_result is None
+    assert runner.events == ["runner-cancel", "task-canceled"]
+    assert (await coordinator.status("shared-close")).state is OperationState.INTERRUPTED
 
 
 @pytest.mark.asyncio

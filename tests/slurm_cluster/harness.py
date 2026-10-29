@@ -25,7 +25,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, cast
 
-from tests.slurm_cluster.cluster import SlurmCluster, build_image, docker
+from tests.slurm_cluster.cluster import SlurmCluster, build_image, docker, wait_until
 
 from vibesys.run.environment import open_run_environment
 from vs_project.api import RunResourceRequest
@@ -35,6 +35,7 @@ from vs_runtime.api.infrastructure import (
     RunEnvironment,
     RunEnvironmentRequest,
     RunEnvironmentSession,
+    RunEnvironmentSessionRole,
     SlurmEnvironment,
     TrustedEvaluatorRequirements,
 )
@@ -47,6 +48,11 @@ from vs_sim.api import (
     OsThreads,
     SubprocessPipedProcessLauncher,
     UnixNetwork,
+)
+from vs_slurm.api import (
+    WorkspaceRootProbeFailed,
+    WorkspaceRootProbeProven,
+    WorkspaceRootProbeReport,
 )
 
 if TYPE_CHECKING:
@@ -62,6 +68,8 @@ BENCHMARK_OUTPUT_ARGUMENT = "--output"
 #: The kinds in which the agent runs its own GPU commands.
 GPU_KINDS = ("slurm-local-gpu", "slurm-gpu-alias")
 ALL_KINDS = ("slurm", "slurm-local", "slurm-local-gpu", "slurm-gpu-alias")
+#: The kinds with a local transport, whose root session probes the workspace root.
+LOCAL_KINDS = ("slurm-local", "slurm-local-gpu", "slurm-gpu-alias")
 #: The container's own ``/tmp``, where the framework's benchmark result is relayed to.
 CONTAINER_TMP = "/tmp"  # noqa: S108  # lint-waiver: LW-960011 [S108]; the framework result location is fixed, and it is this directory in the agent container.
 # > A tempfile call would name the test process's directory, not the container's.
@@ -93,7 +101,7 @@ class PrebuiltImageRunner:
         *,
         cwd: Path,
         timeout: float,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> subprocess.CompletedProcess[str]:
         """Return the scripted outcome for ``docker build`` or ``docker image inspect``."""
         del cwd, timeout, output
@@ -116,7 +124,7 @@ class OpenRun:
         self, command: str, *, cancel: threading.Event | None = None, timeout: int | None = None
     ) -> CommandResult:
         """Run a scripted *command* as the agent, in the container, and return its result."""
-        return self.session.sandbox.execute(command, timeout=timeout, cancel=cancel)
+        return self.session.sandbox.execute(command, timeout=timeout, cancel=cancel, output=DISCARD)
 
     @property
     def has_gpu_commands(self) -> bool:
@@ -345,7 +353,12 @@ def make_candidate_request(
     base = make_request(cluster, directory, run_id)
     workspace = worktrees / f"candidate-{run_id}" / "workspace"
     workspace.mkdir(parents=True)
-    return replace(base, workspace=workspace, run_owned_roots=(worktrees,))
+    return replace(
+        base,
+        workspace=workspace,
+        run_owned_roots=(),
+        session_role=RunEnvironmentSessionRole.CHILD,
+    )
 
 
 @contextmanager
@@ -361,9 +374,31 @@ def open_run(
     run_id = f"t{secrets.token_hex(5)}"
     environment = make_environment(kind, cluster, directory, image_id)
     lines: list[str] = []
-    request = make_request(cluster, directory, run_id, accuracy=accuracy, log=lines.append)
+    probe: list[WorkspaceRootProbeReport] = []
+    request = replace(
+        make_request(cluster, directory, run_id, accuracy=accuracy, log=lines.append),
+        workspace_root_probe=probe.append,
+    )
     with _opened(kind, cluster, environment, request) as run:
+        if kind in LOCAL_KINDS:
+            _await_settled_probe(probe, cluster)
         yield replace(run, log_lines=tuple(lines))
+
+
+def _await_settled_probe(reports: list[WorkspaceRootProbeReport], cluster: SlurmCluster) -> None:
+    """Wait for the run's workspace-root probe to end and its job to leave the queue.
+
+    The probe runs beside the run, so its job can still be in the queue when a test's
+    own job starts; a test that picks "the running job" must not pick the probe's.
+    """
+    wait_until(
+        lambda: any(
+            isinstance(report, WorkspaceRootProbeProven | WorkspaceRootProbeFailed)
+            for report in reports
+        ),
+        what="the workspace-root probe to settle",
+    )
+    cluster.wait_for_empty_queue()
 
 
 @contextmanager

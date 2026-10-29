@@ -9,9 +9,10 @@ frontier.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, assert_never
 
-from vibesys.candidates.api import reading
+from vibesys.candidates.api import Unmeasurable, failure, input_metrics
+from vibesys.events import WorkstreamFailureKind
 from vibesys.hypothesis import derive_hypothesis_title
 from vibesys.hypothesis.readmodel import (
     AgentRunProjection,
@@ -19,8 +20,9 @@ from vibesys.hypothesis.readmodel import (
     HypothesisView,
     RoundView,
 )
-from vibesys.orchestration.dynamic.search.api import FailureKind
+from vibesys.orchestration.dynamic.search.api import DropReason, FailureKind, workstream_key
 from vibesys.run.contracts import (
+    InputFailureSummary,
     IterationKind,
     IterationMetric,
     IterationStatus,
@@ -69,16 +71,38 @@ def project_run_snapshot(snapshot: RunSnapshot, *, experiment_revision: int) -> 
             _summary(view, record) for view, record in zip(projection.rounds, rounds, strict=True)
         ),
         experiment_revision=experiment_revision,
+        input_failure=_input_failure(snapshot),
+    )
+
+
+def _input_failure(snapshot: RunSnapshot) -> InputFailureSummary | None:
+    """Why the input failed its trusted measurement, once it has; None while pending or trusted."""
+    baseline = snapshot.baseline
+    why = None if baseline is None else failure(baseline)
+    if why is None:
+        return None
+    again = isinstance(baseline, Unmeasurable) and baseline.first_attempt is not None
+    return InputFailureSummary(
+        kind=why.kind.value,
+        stage=why.stage,
+        output=why.output,
+        attempts=2 if again else 1,
+        compared=bool(input_metrics(baseline)),
     )
 
 
 def _baseline_metrics(snapshot: RunSnapshot) -> tuple[MetricRow, ...]:
-    found = reading(snapshot.baseline)
-    return () if found is None else found.metrics
+    """The bar candidates are compared with, as the comparison and the planner read it."""
+    return input_metrics(snapshot.baseline)
 
 
 def _workstream_iterations(snapshot: RunSnapshot) -> IterationTree:
-    """Expose workstreams in the order they were scheduled, whatever order they completed in."""
+    """Expose workstreams in the order they were scheduled, whatever order they completed in.
+
+    A node is named by the workstream's key (its schedule position and work ID), never by the
+    work ID alone: a hypothesis that goes on (``continue_hypothesis``) runs as a new workstream
+    under the same planner-chosen ID, and each of those workstreams is its own node.
+    """
     rounds = {record.sequence: record for item in snapshot.hypotheses for record in item.rounds}
     nodes: list[IterationSummary] = []
     for sequence, work_id, title, finished in sorted(
@@ -95,7 +119,7 @@ def _workstream_iterations(snapshot: RunSnapshot) -> IterationTree:
         key=lambda entry: entry[0],
     ):
         record = rounds.get(sequence)
-        root_id = f"workstream:{work_id}"
+        root_id = f"workstream:{workstream_key(sequence, work_id)}"
         status = _workstream_status(finished, record)
         nodes.append(
             IterationSummary(
@@ -213,7 +237,59 @@ def _failure_text(failure: Failure) -> str:
     ):
         if reason is not None:
             return reason.value
-    return ""
+    if failure.dropped is not None:
+        return f"{failure.kind.value}: {failure.dropped.value}"
+    return failure.kind.value
+
+
+def _operator_failure_text(failure: Failure) -> str:
+    """Project evaluator output safely without changing the policy's captured text."""
+    if failure.operator_output is not None:
+        return failure.operator_output
+    if failure.output:
+        return failure.kind.value
+    return _failure_text(failure)
+
+
+def _event_failure_kind(failure: Failure) -> WorkstreamFailureKind:
+    """Translate search reasons to the frozen operator vocabulary exhaustively."""
+    kind = failure.kind
+    match kind:
+        case FailureKind.NOT_MEASURED:
+            return (
+                WorkstreamFailureKind.STOPPED
+                if failure.dropped is DropReason.STOPPED
+                else WorkstreamFailureKind.ENDED
+            )
+        case FailureKind.MERGE_REFUSED:
+            return WorkstreamFailureKind.REFUSED
+        case FailureKind.MERGE_UNSOUND:
+            return WorkstreamFailureKind.NO_TRUSTED_EVIDENCE
+        case FailureKind.MERGE_REGRESSED:
+            return WorkstreamFailureKind.REVIEW_REJECTED
+        case (
+            FailureKind.STOPPED
+            | FailureKind.PARENT_UNVERIFIED
+            | FailureKind.REFUSED
+            | FailureKind.ENDED
+            | FailureKind.OUT_OF_BUDGET
+            | FailureKind.TURN_FAILED
+            | FailureKind.INVALID_REPLY
+            | FailureKind.RENDER_FAILED
+            | FailureKind.WAIT_REFUSED
+            | FailureKind.CHECKPOINT_DECLINED
+            | FailureKind.NO_CHANGED_CANDIDATE
+            | FailureKind.IMPLEMENTATION_FAILED
+            | FailureKind.REVIEW_REJECTED
+            | FailureKind.NO_TRUSTED_EVIDENCE
+            | FailureKind.EVIDENCE_REFUSED
+            | FailureKind.EVIDENCE_UNDECODABLE
+            | FailureKind.PROFILE_CAPTURE_UNAVAILABLE
+            | FailureKind.TURN_LIMIT
+            | FailureKind.REPEATED_TURN
+        ):
+            return WorkstreamFailureKind(kind.value)
+    assert_never(kind)
 
 
 def _round_failure_summary(failure: Failure | None) -> RoundFailureSummary | None:
@@ -221,11 +297,12 @@ def _round_failure_summary(failure: Failure | None) -> RoundFailureSummary | Non
     if failure is None:
         return None
     return RoundFailureSummary(
-        kind=failure.kind.value,
+        kind=_event_failure_kind(failure).value,
         role=failure.role.value if failure.role is not None else None,
         turns=failure.turns,
         limit=failure.limit,
         text=_failure_text(failure),
+        operator_text=_operator_failure_text(failure),
     )
 
 
@@ -307,7 +384,7 @@ def _hypothesis_view(
         perf_metric_name=headline.name if headline is not None else None,
         perf_direction=headline.direction if headline is not None else None,
         perf_baseline_value=comparable.value if comparable is not None else None,
-        kept=True if snapshot.leading == item.hypothesis_id else None,
+        best=True if snapshot.leading == item.hypothesis_id else None,
         strategy_disposition=item.strategy.value,
         strategy_reason=item.reason or None,
         active=active,

@@ -1,7 +1,7 @@
 """The designer's reply, ``OrchestratorPlan``, is decoded strictly.
 
 The plan is agent output: a key the schema does not declare is a misspelled field (say
-``revert_to_round_number``), and accepting it would run the round on that field's default.
+``base_round_number``), and accepting it would run the round on that field's default.
 """
 
 from __future__ import annotations
@@ -38,8 +38,7 @@ _PLANS = st.builds(
     recommended_skills=st.lists(_SKILLS, max_size=2),
     task=_TEXT,
     pass_criteria=_TEXT,
-    request_official_evaluation=st.booleans(),
-    revert_to_round=st.none() | st.integers(min_value=0, max_value=50),
+    base_round=st.none() | st.integers(min_value=0, max_value=50),
     reasoning=_TEXT,
 )
 _UNKNOWN_KEYS = st.from_regex(r"[a-z][a-z_]{0,15}", fullmatch=True).filter(

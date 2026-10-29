@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -15,15 +16,19 @@ from server.host_api import (
     HelperErrorCode,
     LiveInstanceRecord,
 )
+from server.host_examples import ProjectLookupError
 from server.host_helper_os import (
     FileProjects,
     GitCheckoutProbe,
     OsDirectories,
+    ProjectStopIntents,
     SubprocessRunLauncher,
 )
-from server.host_helper_requests import PathHints, ProjectLookupError, ScannedEntry
+from server.host_helper_requests import PathHints, ScannedEntry
+from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_project.api.testing import FakeGitRepositories, run_execution_record
 from vs_sim.api import ProbeResult, ProcessSpec
-from vs_sim.api.testing import FakeProcessLauncher, ProcessScript, ScriptedProbe
+from vs_sim.api.testing import FakeProcessLauncher, ProcessScript, ScriptedProbe, SimThreads
 
 
 def test_a_scan_marks_directories_and_links_to_them_and_stops_at_its_limit(
@@ -100,7 +105,7 @@ def test_expansion_touches_only_a_leading_tilde() -> None:
 
 
 def test_projects_report_missing_and_uninitialized_directories(tmp_path: Path) -> None:
-    projects = FileProjects()
+    projects = FileProjects(FakeGitRepositories().repository, SimThreads())
     with pytest.raises(ProjectLookupError) as missing:
         projects.tasks(tmp_path / "missing")
     with pytest.raises(ProjectLookupError) as bare:
@@ -165,3 +170,34 @@ def test_a_checkout_is_described_by_git_or_left_unknown() -> None:
     assert GitCheckoutProbe(Path("/src"), clean).describe() == Checkout(
         root="/src", commit=None, dirty=False
     )
+
+
+def _project_with_run(root: Path) -> str:
+    project = Project.open(root)
+    project.state.create_project("stop", now=datetime(2026, 1, 1, tzinfo=UTC))
+    manifest = project.state.new_run_manifest(
+        "stop",
+        branch="test",
+        vibesys_version="test",
+        run_environment=RunEnvironmentRecord(name="docker"),
+        execution=run_execution_record(),
+        orchestration=OrchestrationDescriptor(id="dynamic", config_version=1, options={}),
+        trusted_input_baseline="a" * 40,
+        now=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    project.state.create_run(manifest)
+    return manifest.run_id
+
+
+def test_a_force_stop_is_recorded_in_the_runs_project(tmp_path: Path) -> None:
+    run_id = _project_with_run(tmp_path)
+
+    ProjectStopIntents().record(record("0123456789ab", run_id=run_id, project_root=str(tmp_path)))
+
+    assert Project.open(tmp_path).state.stop_requested(run_id)
+
+
+def test_a_stop_for_a_project_that_is_gone_is_left_unrecorded(tmp_path: Path) -> None:
+    ProjectStopIntents().record(record("0123456789ab", project_root=str(tmp_path / "gone")))
+
+    assert not (tmp_path / "gone").exists()

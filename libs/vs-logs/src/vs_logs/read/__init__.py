@@ -7,7 +7,9 @@ logs are for humans, and product code never reads them back for facts.
 store an in-process :class:`~vs_logs.api.LogStore` writes. A read starts at
 :class:`FromOffset` or at :class:`Tail` and returns at most ``max_bytes`` as a
 :class:`LogChunk`, labeled with the pipe that wrote each span and flagged
-``truncated_before`` (asked-for bytes were evicted), ``eof`` and ``closed``. Every byte is
+``truncated_before`` (asked-for bytes were evicted), ``eof`` and ``closed``. A listing or
+read raises :class:`CorruptLogError` when the index holds a complete record that does not
+decode; a torn last line (a short write) is ignored. Every byte is
 read through ``vs_sim.api.ByteSource``, so the reader never assumes local files.
 """
 
@@ -20,8 +22,10 @@ from vs_logs._reader import (
     open_log_directory,
     reader_of,
 )
+from vs_logs._records import CorruptLogError
 
 __all__ = [
+    "CorruptLogError",
     "FromOffset",
     "LogChunk",
     "LogReader",

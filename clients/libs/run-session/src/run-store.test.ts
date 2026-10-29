@@ -133,6 +133,41 @@ test('keeps the last complete execution checkpoint across a fragmented rebootstr
   expect(store.getState().executionStatuses).toEqual({});
 });
 
+test('empty standalone event actions cannot settle a deferred execution checkpoint', () => {
+  for (const type of ['events', 'response-events'] as const) {
+    const store = createRunStore();
+    const checkpointId = 'e'.repeat(64);
+    store.dispatch({
+      type: 'batch',
+      message: eventBatch([event(1, 'server_ready')], {
+        active_executions: null,
+        active_executions_checkpoint_id: checkpointId,
+        through_sequence: 1,
+      }),
+      reconciliation: {kind: 'extend', historyFloor: 0},
+      activeExecutionCheckpoint: {kind: 'deferred', checkpointId},
+    });
+    const deferred = store.getState();
+    let notifications = 0;
+    store.subscribe(() => {
+      notifications += 1;
+    });
+
+    store.dispatch({type, events: []});
+    expect(store.getState()).toBe(deferred);
+    expect(notifications).toBe(0);
+
+    store.dispatch({
+      type: 'batch',
+      message: eventBatch([], {active_executions: [], through_sequence: 1}),
+      reconciliation: {kind: 'extend', historyFloor: 0},
+      activeExecutionCheckpoint: {kind: 'complete', checkpointId},
+    });
+    expect(store.getState().activeExecutions).toEqual({});
+    expect(notifications).toBe(1);
+  }
+});
+
 test('completes a fragmented rebootstrap with the ordinary rebootstrap state', () => {
   const createPreviousStore = () => {
     const store = createRunStore();
@@ -463,6 +498,120 @@ test('fragmented rebootstrap never carries status across sequence spaces', () =>
 
   expect(fragmented.getState()).toEqual(ordinary.getState());
   expect(fragmented.getState().executionStatuses).toEqual({});
+});
+
+describe('trace publication ownership', () => {
+  test('accepts a first historical snapshot behind the event cursor, then rejects an older base', () => {
+    const store = createRunStore();
+    store.dispatch({
+      type: 'events',
+      events: [event(5, 'server_ready', {run_id: 'run-1'})],
+    });
+
+    const historical = store.dispatchWithOutcome({
+      type: 'snapshot',
+      snapshot: {run_id: 'run-1', sequence: 4, status: 'running'},
+    });
+    const older = store.dispatchWithOutcome({
+      type: 'snapshot',
+      snapshot: {run_id: 'run-1', sequence: 3, status: 'running'},
+    });
+
+    expect(historical.snapshot).toBe('stale');
+    expect(historical.trace).toMatchObject({kind: 'snapshot', snapshot: {sequence: 4}});
+    expect(older.snapshot).toBe('stale');
+    expect(older.trace).toBeNull();
+  });
+
+  test('publishes only the accepted part of a mixed-run batch with its rejection', () => {
+    const store = createRunStore();
+    const outcome = store.dispatchWithOutcome({
+      type: 'batch',
+      message: eventBatch(
+        [event(1, 'server_ready', {run_id: 'run-1'}), event(2, 'server_ready', {run_id: 'run-2'})],
+        {store_id: 'store-1', through_sequence: 2, history_after_sequence: 0},
+      ),
+      reconciliation: {kind: 'extend', historyFloor: 0},
+    });
+
+    expect(store.getState()).toMatchObject({runId: 'run-1', sequence: 1});
+    expect(outcome.trace).toMatchObject({kind: 'events', events: [{sequence: 1}]});
+    expect(outcome.runIdentityRejection).toMatchObject({
+      expectedRunId: 'run-1',
+      receivedRunId: 'run-2',
+    });
+  });
+
+  test('preserves a base only across the same store with explicit same-run proof', () => {
+    const store = createRunStore();
+    store.dispatch({
+      type: 'batch',
+      message: eventBatch([event(1, 'server_ready', {run_id: 'run-1'})], {
+        store_id: 'store-1',
+        through_sequence: 1,
+        history_after_sequence: 0,
+      }),
+      reconciliation: {kind: 'extend', historyFloor: 0},
+    });
+    store.dispatch({
+      type: 'snapshot',
+      snapshot: {run_id: 'run-1', sequence: 1, status: 'running'},
+    });
+
+    const proven = store.dispatchWithOutcome({
+      type: 'batch',
+      message: eventBatch([event(2, 'server_ready', {run_id: 'run-1'})], {
+        store_id: 'store-1',
+        through_sequence: 2,
+        history_after_sequence: 0,
+        rebootstrap: true,
+      }),
+      reconciliation: {kind: 'rebootstrap', historyFloor: 0},
+    });
+    const unknown = store.dispatchWithOutcome({
+      type: 'batch',
+      message: eventBatch([event(3, 'server_ready')], {
+        store_id: 'store-1',
+        through_sequence: 3,
+        history_after_sequence: 0,
+        rebootstrap: true,
+      }),
+      reconciliation: {kind: 'rebootstrap', historyFloor: 0},
+    });
+
+    expect(proven.trace).toMatchObject({kind: 'rebootstrap', base: 'preserve'});
+    expect(unknown.trace).toMatchObject({kind: 'rebootstrap', base: 'reset'});
+  });
+
+  test('resets a base when a different store proves the same run', () => {
+    const store = createRunStore();
+    store.dispatch({
+      type: 'batch',
+      message: eventBatch([event(1, 'server_ready', {run_id: 'run-1'})], {
+        store_id: 'store-1',
+        through_sequence: 1,
+        history_after_sequence: 0,
+      }),
+      reconciliation: {kind: 'extend', historyFloor: 0},
+    });
+    store.dispatch({
+      type: 'snapshot',
+      snapshot: {run_id: 'run-1', sequence: 1, status: 'running'},
+    });
+
+    const replacement = store.dispatchWithOutcome({
+      type: 'batch',
+      message: eventBatch([event(1, 'server_ready', {run_id: 'run-1'})], {
+        store_id: 'store-2',
+        through_sequence: 1,
+        history_after_sequence: 0,
+        rebootstrap: true,
+      }),
+      reconciliation: {kind: 'rebootstrap', historyFloor: 0},
+    });
+
+    expect(replacement.trace).toMatchObject({kind: 'rebootstrap', base: 'reset'});
+  });
 });
 
 describe('iteration navigation ownership', () => {

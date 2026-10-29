@@ -26,6 +26,129 @@ _GIT = Git(OsProcesses())
 # Each export is reviewed as deterministic value construction or transformation.
 # Approving a module does not approve future exports or its imported dependencies.
 PURE_EXPORTS = {
+    # Immutable epoch facts and the pure lifecycle predicate perform no I/O.
+    "vs_runlog.api": frozenset({"CurrentEpoch", "epoch_has_ended"}),
+    # Reflection, immutable schema options and validation operate only on in-memory values.
+    "copy": frozenset({"deepcopy"}),
+    "vs_proto.api.replay": frozenset(
+        {
+            "OperationKey",
+            "KeyComponent",
+            "ReplayFieldKind",
+            "ReplayPolicyDrift",
+            "ReplayResources",
+            "AccountingDimension",
+            "AccountingEvidence",
+            "AccountingObservation",
+            "AccountingOccurrence",
+            "AccountingOccurrenceKind",
+            "AccountingQuantity",
+            "AccountingCoverage",
+            "ext_replay_field",
+            "ext_replay_set",
+            "ext_replay_context",
+        }
+    ),
+    **{
+        f"vs_proto.api.replay.{name}": frozenset({"from_binary", "desc"})
+        for name in (
+            "OperationReplay",
+            "ReplayAllowance",
+            "ReplayPolicy",
+            "ReplayNotice",
+            "ReplayAcknowledgement",
+            "ReplayPolicyDrift",
+            "ReplayPhysical",
+            "WriterBacking",
+            "WriterIdentity",
+            "WriterManifest",
+            "WriterTerminationProof",
+            "WriterReconciliation",
+            "ReplayToolSubmission",
+            "ReplayToolAcknowledgement",
+            "ReplayTurnWait",
+            "ReplayTurnBound",
+            "ReplayTurnPermit",
+            "ReplayControl",
+            "ReplayControlApplied",
+            "ReplayControlDisposition",
+            "ReplaySteer",
+            "AccountingEvidence",
+            "AccountingObservation",
+            "AccountingCoverage",
+        )
+    },
+    # Operator control dispositions are closed protobuf enums.
+    "vs_proto.api.replay.ReplayControlStale": frozenset({"EPOCH", "TURN"}),
+    "vs_proto.api.replay.AccountingDimension": frozenset(
+        {"MONEY_USD", "INPUT_TOKENS", "CACHE_READ_TOKENS", "CACHE_CREATION_TOKENS", "OUTPUT_TOKENS"}
+    ),
+    "vs_proto.api.replay.AccountingOccurrenceKind": frozenset({"INVOCATION"}),
+    # Exact rational arithmetic over in-memory values.
+    "fractions": frozenset({"Fraction"}),
+    # These generated request codecs only transform retained in-memory values.
+    "vs_proto.api.replay_agent": frozenset({"ReplayAgentRequest"}),
+    "vs_proto.api.replay_agent.ReplayAgentRequest": frozenset({"from_binary", "desc"}),
+    "vs_proto.api.replay_evaluation": frozenset({"ReplayEvaluationRequest"}),
+    "vs_proto.api.replay_evaluation.ReplayEvaluationRequest": frozenset({"from_binary", "desc"}),
+    "protobuf.wkt.google.protobuf.any_pb.Any": frozenset({"from_binary"}),
+    "vs_proto.api.replay.KeyComponentKind": frozenset(
+        {"PARENT", "ITEM", "SAMPLE", "REVISION", "RECORDED_POSITION"}
+    ),
+    "vs_proto.api.replay.ReplayFieldKind": frozenset({"IDENTITY", "POLICY"}),
+    "protobuf": frozenset(
+        {
+            "Message",
+            "DescMessage",
+            "DescEnum",
+            "DescFieldValue",
+            "DescFieldValueEnum",
+            "Oneof",
+            "DescFieldValueList",
+            "DescFieldValueMap",
+            "DescFieldValueMessage",
+        }
+    ),
+    "protobuf.wkt.google.protobuf.descriptor_pb": frozenset(
+        {"DescriptorProto", "FileDescriptorProto", "FileDescriptorSet"}
+    ),
+    "protobuf.wkt.google.protobuf.descriptor_pb.FileDescriptorProto": frozenset({"from_binary"}),
+    "protobuf.wkt.google.protobuf.any_pb": frozenset({"Any"}),
+    "protovalidate": frozenset({"validate"}),
+    "vs_proto.api": frozenset(
+        {
+            "replay",
+            "core_iterations",
+            "replay_agent",
+            "replay_evaluation",
+            "Record",
+            "Change",
+            "EpochStarted",
+            "RUN_LOG_MAX_RECORD_BYTES",
+            "ReplayStore",
+            "Span",
+            "SpanStatus",
+            "validate",
+        }
+    ),
+    **{
+        f"vs_proto.api.{name}": frozenset({"from_binary"})
+        for name in ("EpochStarted", "ReplayStore", "Span", "Record")
+    },
+    "vs_proto.api.Change": frozenset({"STARTED", "UPDATED", "ENDED"}),
+    "vs_proto.api.SpanStatus": frozenset({"STOPPED", "RUNNING", "DONE"}),
+    "vs_proto.api.core_iterations": frozenset(
+        {"IterationRequest", "IterationGranted", "IterationCompletion", "IterationCompleted"}
+    ),
+    **{
+        f"vs_proto.api.core_iterations.{name}": frozenset({"from_binary", "desc"})
+        for name in (
+            "IterationRequest",
+            "IterationGranted",
+            "IterationCompletion",
+            "IterationCompleted",
+        )
+    },
     # Decoding bytes already in memory is a pure function of them; ``read_json`` reads a file
     # and stays out of this list.
     "vs_decode.api": frozenset(
@@ -66,7 +189,26 @@ PURE_EXPORTS = {
             "TemplateBody",
             "TextBody",
             "board_operation_registrations",
+            # The roadmap's data contracts: its items, the pure rules every implementation
+            # enforces, and the roadmap operations' request and outcome values. The roadmap
+            # implementations (`DocumentRoadmap`, `FakeRoadmap`) are not.
+            "PutRoadmapItems",
+            "ROADMAP_PUT_KIND",
+            "ROADMAP_READ_KIND",
+            "ReadRoadmap",
+            "RoadmapItem",
+            "RoadmapItemKind",
+            "RoadmapItemsPut",
+            "RoadmapSnapshot",
+            "RoadmapStatus",
+            "merged",
+            "roadmap_operation_registrations",
+            "roadmap_problem",
         }
+    ),
+    "vs_issue_tracker.api.RoadmapItemKind": frozenset({"MAJOR", "MINOR"}),
+    "vs_issue_tracker.api.RoadmapStatus": frozenset(
+        {"ABANDONED", "DONE", "IN_PROGRESS", "PARKED", "TODO"}
     ),
     "vs_issue_tracker.api.IssueStatus": frozenset({"BLOCKED", "CLOSED", "IN_PROGRESS", "OPEN"}),
     "vs_issue_tracker.api.IssueType": frozenset({"BUG", "FEATURE", "PERF"}),
@@ -100,7 +242,7 @@ PURE_EXPORTS = {
     # Scope managers that only run the code they wrap; they open nothing themselves.
     "contextlib": frozenset({"asynccontextmanager", "contextmanager", "suppress"}),
     "dataclasses": frozenset(
-        {"asdict", "astuple", "dataclass", "field", "fields", "is_dataclass", "replace"}
+        {"asdict", "astuple", "dataclass", "Field", "field", "fields", "is_dataclass", "replace"}
     ),
     "enum": frozenset({"Enum", "IntEnum", "IntFlag", "Flag", "StrEnum", "auto", "unique"}),
     "functools": frozenset(
@@ -256,6 +398,7 @@ PURE_EXPORTS = {
             "Field",
             "FiniteFloat",
             "InstanceOf",
+            "GetCoreSchemaHandler",
             "Json",
             "JsonValue",
             "NonNegativeFloat",
@@ -281,7 +424,9 @@ PURE_EXPORTS = {
             "model_validator",
         }
     ),
-    "pydantic.dataclasses": frozenset({"dataclass"}),
+    "pydantic.fields": frozenset({"FieldInfo"}),
+    # Class introspection and forward-schema compilation are deterministic and perform no I/O.
+    "pydantic.dataclasses": frozenset({"dataclass", "is_pydantic_dataclass", "rebuild_dataclass"}),
     "pydantic.json_schema": frozenset({"GenerateJsonSchema", "JsonSchemaValue"}),
     "re": frozenset(
         {
@@ -338,6 +483,7 @@ PURE_EXPORTS = {
             "Union",
             "Unpack",
             "assert_never",
+            "final",
             "cast",
             "get_args",
             "get_origin",
@@ -346,7 +492,7 @@ PURE_EXPORTS = {
             "runtime_checkable",
         }
     ),
-    "types": frozenset({"MappingProxyType", "NoneType", "UnionType"}),
+    "types": frozenset({"GenericAlias", "MappingProxyType", "NoneType", "UnionType"}),
     "unicodedata": frozenset(
         {
             "category",
@@ -385,6 +531,7 @@ PURE_BUILTINS = frozenset(
         "RuntimeError",
         "StopIteration",
         "TypeError",
+        "UnicodeDecodeError",
         "ValueError",
         "ZeroDivisionError",
         "abs",

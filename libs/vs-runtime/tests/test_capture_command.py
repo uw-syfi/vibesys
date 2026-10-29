@@ -83,6 +83,41 @@ async def test_a_command_that_exits_nonzero_is_reported_not_raised() -> None:
     assert (outcome["status"], outcome["exit_code"], outcome["output"]) == ("succeeded", 2, "boom")
 
 
+async def test_a_failed_capture_exposes_only_its_prebounded_diagnostic() -> None:
+    """Attribution cannot recover a secret split by the raw stream's prefix/tail cap."""
+    owner, _, commands = _owner({"r1"})
+    secret = "s" * 240
+    commands.script(
+        CommandResult(
+            output=f"prefix API_TOKEN={secret[:20]}...[truncated]...{secret[-20:]} tail",
+            exit_code=7,
+            truncated=True,
+            diagnostic_output="prefix API_TOKEN=[REDACTED] tail",
+        )
+    )
+
+    outcome = await owner.capture(_request("r1"), "id")
+
+    assert outcome["output"] == "prefix API_TOKEN=[REDACTED] tail"
+    assert secret[:20] not in str(outcome["output"])
+    assert secret[-20:] not in str(outcome["output"])
+
+
+async def test_a_successful_capture_keeps_raw_protocol_output() -> None:
+    owner, _, commands = _owner({"r1"})
+    commands.script(
+        CommandResult(
+            output="protocol-token",
+            exit_code=0,
+            diagnostic_output="[REDACTED]",
+        )
+    )
+
+    outcome = await owner.capture(_request("r1"), "id")
+
+    assert outcome["output"] == "protocol-token"
+
+
 async def test_an_infrastructure_failure_propagates_and_still_discards_the_candidate() -> None:
     owner, workspaces, commands = _owner({"r1"})
     commands.script(RuntimeError("sandbox lost"))

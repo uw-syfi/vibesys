@@ -31,6 +31,9 @@ members = [
     "vs-mcp",
     "vs-project",
     "vs-prompts",
+    "vs-proto",
+    "vs-redaction",
+    "vs-runlog",
     "vs-runtime",
     "vs-sandbox",
     "vs-sim",
@@ -39,11 +42,11 @@ members = [
 
 [[package]]
 name = "agentshim"
-version = "0.15.7"
+version = "0.23.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/d6/c7/bc40e328588d088a78e1c54f4726d963315541ab7f99a280e70c2476875c/agentshim-0.15.7.tar.gz", hash = "sha256:9c25c8c01180115622d7f9de25dbe2884c15bd201365172b496bc1d6fa42d64b", size = 251468, upload-time = "2026-10-09T19:46:17.007Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4b/3e/3b0c6fd78131fdfd9dffc7c7f6fc89789c886ad043d547288dcd3142f7f7/agentshim-0.23.0.tar.gz", hash = "sha256:8792bc42ed9beb00c4989b7b4aa6024bffebb429029dd86cad6531ab12f24b15", size = 286942, upload-time = "2026-10-20T07:42:23.386Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f2/2c/5b6dbe42cb81896ea2ac3b970024dcb5afdb5853f2e728769f17b36f36b4/agentshim-0.15.7-py3-none-any.whl", hash = "sha256:6c02a1145296d34c2fe895bd7de422da16aeab769b03e91f5b1382f9f136360a", size = 294243, upload-time = "2026-10-09T19:46:15.227Z" },
+    { url = "https://files.pythonhosted.org/packages/67/f5/f53b81a877d68e15f11f6e769862e844366842385b41a8924ff0a2fbb500/agentshim-0.23.0-py3-none-any.whl", hash = "sha256:35793cec7b052eea0d7cd13a3354ad55a09f94bb952a6eb789faef82e4fe9ac0", size = 332025, upload-time = "2026-10-20T07:42:21.736Z" },
 ]
 
 [[package]]
@@ -213,6 +216,23 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/21/28/9b3f50ce0e048515135495f198351908d99540d69bfdc8c1d15b73dc55ce/blinker-1.9.0.tar.gz", hash = "sha256:b4ce2265a7abece45e7cc896e98dbebe6cead56bcf805a3d23136d145f5445bf", size = 22460, upload-time = "2024-11-08T17:25:47.436Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/10/cb/f2ad4230dc2eb1a74edf38f1a38b9b52277f75bef262d8908e60d957e13c/blinker-1.9.0-py3-none-any.whl", hash = "sha256:ba0efaa9080b619ff2f3459d1d500c57bddea4a6b424b60a91141db6fd2f08bc", size = 8458, upload-time = "2024-11-08T17:25:46.184Z" },
+]
+
+[[package]]
+name = "buf-bin"
+version = "1.73.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2d/22/71a832d2f3c80b077b82c317098ceb51c07dd20b62b247e9122b3747e428/buf_bin-1.73.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:456c7795e3ede8fa073ce56899651e453c2f975163dd18b76fcba4c6c12f54cb", size = 15554152, upload-time = "2026-09-11T14:04:34.421Z" },
+    { url = "https://files.pythonhosted.org/packages/24/1f/c1059e7f4a3740c0762eefcc1284c177744f499219f7d3798952b5468805/buf_bin-1.73.0-py3-none-macosx_11_0_x86_64.whl", hash = "sha256:f566d4ac4215d06dbb978843601cc45b5a9bb7bc4cdfa748774578b670661e47", size = 16732239, upload-time = "2026-09-11T14:04:37.68Z" },
+    { url = "https://files.pythonhosted.org/packages/a1/6c/26b99911b3034663e7efcfcd29a54e9de9d5e5f82f6d284c71c285ce125a/buf_bin-1.73.0-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.musllinux_1_1_aarch64.whl", hash = "sha256:d3bcee4b1f19d48c538065b3caaa640219a1d8ac85bd1549fe7c3068acf16800", size = 14733585, upload-time = "2026-09-11T14:04:40.31Z" },
+    { url = "https://files.pythonhosted.org/packages/20/5c/4687974d896cab1c6d06b27cafa3372473aea0f939a8bafff728d938127b/buf_bin-1.73.0-py3-none-manylinux2014_armv7l.manylinux_2_17_armv7l.musllinux_1_1_armv7l.whl", hash = "sha256:58b6da0fd524590ae66d44f79f26377a159bc9677d44715980ce60daa6f832ac", size = 14924340, upload-time = "2026-09-11T14:04:43.239Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/73/b6c5f7a14d74eb5086fce8fd4d393479b37a5df2de2ccc22821af86110a5/buf_bin-1.73.0-py3-none-manylinux2014_ppc64le.manylinux_2_17_ppc64le.musllinux_1_1_ppc64le.whl", hash = "sha256:ed50126575ec9e915c75e86690b738732c84212f9b52e6399c3b1790765ce77c", size = 14434360, upload-time = "2026-09-11T14:04:45.887Z" },
+    { url = "https://files.pythonhosted.org/packages/fd/ed/cdd586312b325047059eeb832aeec045b7edd6e515431a4ef8b053995ac8/buf_bin-1.73.0-py3-none-manylinux2014_s390x.manylinux_2_17_s390x.musllinux_1_1_s390x.whl", hash = "sha256:013e7d9e7aed9c128d96566193fa2f64ef3a7b3f271bc68630870371d78193fa", size = 15713990, upload-time = "2026-09-11T14:04:48.649Z" },
+    { url = "https://files.pythonhosted.org/packages/17/27/0a1f324b8371cbdd95fe5a8898164b23272a921bb25193fac58788496444/buf_bin-1.73.0-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.musllinux_1_1_x86_64.whl", hash = "sha256:f1d1a7ced285077860e205dd92a77333d8b4ed0f9ac39304a45ae72282c5aadc", size = 16326643, upload-time = "2026-09-11T14:04:51.809Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/84/8f77ca63094c5c89c112903c7def93b415860a37a2b82424ff4617bec2ad/buf_bin-1.73.0-py3-none-manylinux_2_17_riscv64.musllinux_1_2_riscv64.whl", hash = "sha256:b6596e3f81933ec18831c9eee7d01fb4466524842cc73e8e8c6b0422d285f935", size = 14933023, upload-time = "2026-09-11T14:04:54.912Z" },
+    { url = "https://files.pythonhosted.org/packages/ef/51/8f025597d411e9490b29599d7088c51179cd200170728d4698c585212b44/buf_bin-1.73.0-py3-none-win_amd64.whl", hash = "sha256:24004a8c22a55a0a5b732ff6d5462921ce735d03a403f59878dd159f5893b46c", size = 16667697, upload-time = "2026-09-11T14:04:58.235Z" },
+    { url = "https://files.pythonhosted.org/packages/33/ac/65748603c46ab40b85fdf03dbfbb4c5812c2f0d4ea5457184732b55e9877/buf_bin-1.73.0-py3-none-win_arm64.whl", hash = "sha256:ef4bd08ff1af592046059f6866c0e91cf8898cde4bd18873b1cf8afac182df76", size = 14816019, upload-time = "2026-09-11T14:05:01.499Z" },
 ]
 
 [[package]]
@@ -865,6 +885,34 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e0/db/3ca813cbacb23ab6fe46ff38a9b5ef8e73e970c8051f2ce903aacafe0446/gitpython-3.1.62.tar.gz", hash = "sha256:1791de66309bc0c7cfca40bf8d2e3de7ca091cbf94e6051be1ad0722c61062af", size = 231728, upload-time = "2026-09-07T02:57:21.155Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d6/0b/29d7965215f8ef830a7ca1f42997fe13e5693d85e9edb18f938d063ef5f2/gitpython-3.1.62-py3-none-any.whl", hash = "sha256:7002251225e10e29d2e1f49e6532613fe5d5d9f0b6f1f02997a52b38fe56899e", size = 222753, upload-time = "2026-09-07T02:57:19.762Z" },
+]
+
+[[package]]
+name = "google-crc32c"
+version = "1.9.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/fa/25/9cb0c1c31c45b893eb8f11ae70b3f4309432d59b5acaebca5dbe791729a4/google_crc32c-1.9.0.tar.gz", hash = "sha256:7b8c84c3d159ab6817fe3f74e6e6cef099c3f95dcec3abc0d8afb1404642efbe", size = 14857, upload-time = "2026-09-24T21:39:32.067Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e4/5d/0730e1b3a14d054d1466f2fec88dadf978509c749a3d96d8b069cc56d38a/google_crc32c-1.9.0-cp312-cp312-macosx_12_0_arm64.whl", hash = "sha256:53fdafef58e230d0c946ab5f8446d123d9f548230a73b29c8b41c9546f268bc1", size = 31961, upload-time = "2026-09-24T21:19:01.724Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/32/d085abaf2fd907121975b92245bb3480fb8be40c37d03f9d6c41857f84c3/google_crc32c-1.9.0-cp312-cp312-macosx_12_0_x86_64.whl", hash = "sha256:8b91f41645b15a720357183fa5716682ada441873e3c462c15f9714be36f146b", size = 31804, upload-time = "2026-09-24T21:22:25.81Z" },
+    { url = "https://files.pythonhosted.org/packages/94/78/dd1935432337e5da7af391a6fc9f161c1c8e9b9002a402b9190135fe1b59/google_crc32c-1.9.0-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:16865b477d7941712cb0e0aad8ad4815e984fb5fc16d3fdaef7d986e26e53c95", size = 37775, upload-time = "2026-09-24T21:38:09.249Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/43/9db03635bb10188d93dcbab9baa2a8670a0da4e868b4370cdbd98d65fed8/google_crc32c-1.9.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:3abb18297d9ef0ab120531838be0e6d68c9fa876570e11c229c48f2edac23ce7", size = 36347, upload-time = "2026-09-24T21:38:10.141Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/eb/94dee516c846bd9382c3f566d8f8e5fb9e90599e45afeb697f9fc2533528/google_crc32c-1.9.0-cp312-cp312-win_amd64.whl", hash = "sha256:fb63a8d7fa2e95dcff1ca16af2f4d88b526fa5ff72d1696285884ac2d49b6963", size = 35097, upload-time = "2026-09-24T21:39:28.934Z" },
+    { url = "https://files.pythonhosted.org/packages/3f/34/cb484e8b6174f130f8c6dc79c733a9dd8869b410ad6511fb6104c46b973a/google_crc32c-1.9.0-cp313-cp313-macosx_12_0_arm64.whl", hash = "sha256:f1dc17d987ddcc5eba12a7ce48f0eb93141dea236b170c1101151396edf2f0cf", size = 31960, upload-time = "2026-09-24T21:19:02.454Z" },
+    { url = "https://files.pythonhosted.org/packages/af/25/3e8e567bd48448e225ea27318ccf2b94e05124e7b8b97b13eaec9e127199/google_crc32c-1.9.0-cp313-cp313-macosx_12_0_x86_64.whl", hash = "sha256:f894a2877650b56201d26a012a257b76d54a68834dc3913a93830ca8a047b075", size = 31803, upload-time = "2026-09-24T21:22:27.008Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/18/bee0dd59ae622482dc6463636c79e4bde7c954d061c859c9256362c9931a/google_crc32c-1.9.0-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:4488f1553a9ab7e86cdedc833374a7e904031803b995dc0bd0be48c271fa6556", size = 37776, upload-time = "2026-09-24T21:38:11.056Z" },
+    { url = "https://files.pythonhosted.org/packages/fd/b6/e76e80fed5f2558273c7839e622f98095c9b36c719c7147e38e3c055cb70/google_crc32c-1.9.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:0568b17ed90ac596f29400d99e243fd0cc6276766183def888d1bf8d1dc13827", size = 36350, upload-time = "2026-09-24T21:38:12.138Z" },
+    { url = "https://files.pythonhosted.org/packages/87/34/165542bfa99dfef91a76471cc48cce74b8ff4e295722896087ab2b8e8611/google_crc32c-1.9.0-cp313-cp313-win_amd64.whl", hash = "sha256:8583ec21d56b565d68ab2963cc7e21b3b271247c29b04286068255ef65f221bd", size = 35090, upload-time = "2026-09-24T21:39:29.764Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/eb/43ea41f4061a1cad87b2b6559c98e960e45bf551fe66f83d833b98aaf0c9/google_crc32c-1.9.0-cp314-cp314-macosx_12_0_arm64.whl", hash = "sha256:6a3b2c8a343c570ed8100a7627c20badfd92c6caa2067093a86be45af27f5b1b", size = 31963, upload-time = "2026-09-24T21:19:03.208Z" },
+    { url = "https://files.pythonhosted.org/packages/45/d2/a968c0c29ccd2b0c980ff4f9e3f7035cee28c23a1c57541825cc8221858c/google_crc32c-1.9.0-cp314-cp314-macosx_12_0_x86_64.whl", hash = "sha256:13179f7e3282617923e957b8e54b8f9c3968030f48640a9f47fd7c5c38c4a215", size = 31805, upload-time = "2026-09-24T21:22:27.917Z" },
+    { url = "https://files.pythonhosted.org/packages/03/73/388e493d6c3e252e37165d22efe5a1361f872a24425391b999822861b23a/google_crc32c-1.9.0-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:265233aff33d835f5b909584fe36ab29647b598c271b661a300001099109e53e", size = 37925, upload-time = "2026-09-24T21:38:13.32Z" },
+    { url = "https://files.pythonhosted.org/packages/98/36/190d32caa363ef25d685f422ed1bbf93ff1140fb22fd4d90f24cec209977/google_crc32c-1.9.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:dee799544cae42a42b17a88e38b59cf2c271051dc001da2117a8ff240ffa0548", size = 36495, upload-time = "2026-09-24T21:38:14.211Z" },
+    { url = "https://files.pythonhosted.org/packages/d3/fd/81cefea6adae7bd92abb23d4567d199f6485a20ec0a305ca5fa04c52b9c5/google_crc32c-1.9.0-cp314-cp314-win_amd64.whl", hash = "sha256:af73200fa9791ccd380f3598235dba8d82b8af0905df045b3dc60b59836e8ddd", size = 35535, upload-time = "2026-09-24T21:39:30.52Z" },
+    { url = "https://files.pythonhosted.org/packages/c5/18/19d4f17f3f33f8fdffcb3e1e69219d6f7ec2c359c160867b04dac1d0a64d/google_crc32c-1.9.0-cp315-cp315-macosx_12_0_arm64.whl", hash = "sha256:e6e8be8a94436079cb5340f6d495d9d7ba30124d8b952703994c739c7c06e236", size = 31977, upload-time = "2026-09-24T21:19:03.976Z" },
+    { url = "https://files.pythonhosted.org/packages/81/b4/8010372c4b46f2ee2352dfdb630c397570cd85522a315df024ad2f9459aa/google_crc32c-1.9.0-cp315-cp315-macosx_12_0_x86_64.whl", hash = "sha256:f2b64641bca27497b986b9d87883014035aa904cb4fa333407c6752b3afee9ba", size = 31809, upload-time = "2026-09-24T21:22:29.1Z" },
+    { url = "https://files.pythonhosted.org/packages/c5/f8/7e33845d6b90ce1cf37cfabf25cb859277c7d3533ef1b6b1e1ca58581549/google_crc32c-1.9.0-cp315-cp315-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:f97c3806dcea41c29c04965347b0e12481561b75e0045dc7a4f69d75dec5d9b1", size = 38359, upload-time = "2026-09-24T21:38:14.983Z" },
+    { url = "https://files.pythonhosted.org/packages/36/ff/556b2423f449a7515af6b8222a4d7833cbe09ff3e8d2f0b80471f5f6d02e/google_crc32c-1.9.0-cp315-cp315-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:0abe7e202c25909869c35672ab0f2fe748a7acf276eb78577332a7c38999740f", size = 36858, upload-time = "2026-09-24T21:38:15.799Z" },
+    { url = "https://files.pythonhosted.org/packages/40/71/4733f1b7c921d04a2bb9b9916cf66498bf7ad0860a06289413830da83192/google_crc32c-1.9.0-cp315-cp315-win_amd64.whl", hash = "sha256:5695c8b9327e040b2aba12c6659b0acb5995314ef0af0192da66e662e011103b", size = 35534, upload-time = "2026-09-24T21:39:31.337Z" },
 ]
 
 [[package]]
@@ -1982,6 +2030,93 @@ wheels = [
 ]
 
 [[package]]
+name = "protobuf-py"
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "protobuf-py-ext", marker = "(platform_machine == 'arm64' and platform_python_implementation == 'CPython' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (platform_machine == 'x86_64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (platform_machine == 'AMD64' and platform_python_implementation == 'CPython' and sys_platform == 'win32') or (platform_machine == 'ARM64' and platform_python_implementation == 'CPython' and sys_platform == 'win32')" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/71/2a/6a08d3a3ddbfd745f987c5ff22129a979ea74319fbfe5b9d59c7a6730d25/protobuf_py-0.6.0.tar.gz", hash = "sha256:be6b8d84ba54380ca5e5e50f20e4dd42df81c845cf9dc8c021f147d8c516b341", size = 161533, upload-time = "2026-09-30T06:45:41.388Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0e/d2/6271d5682d244b5b771f72fe7536a0c7e680e14300ea58f7d033fce813a8/protobuf_py-0.6.0-py3-none-any.whl", hash = "sha256:2aba52a2d017487901cb4b8a7983e64a7bd369128c2ca86cafa4dd03da31012e", size = 216054, upload-time = "2026-09-30T06:44:46.94Z" },
+]
+
+[[package]]
+name = "protobuf-py-ext"
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b4/6c/a1f6a1a50dfc3f14ddb9e54f9a769bc589b85b5e394bab2bb78f67d2dc42/protobuf_py_ext-0.6.0.tar.gz", hash = "sha256:03f61ccfcad52a2d784aec9bb0b6088e0e32f144a6c3ab3deed12f17f1f0d0bb", size = 58124, upload-time = "2026-09-30T06:45:42.602Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e1/f1/b02c02586e96ad8d4534187713d1fdfca32c471f09ed36dcef7c1debc0d6/protobuf_py_ext-0.6.0-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:6609132191e992ae7a211bf1988bb02c8fa323c915fb0b8b23914dae12c8cc97", size = 469480, upload-time = "2026-09-30T06:44:57.064Z" },
+    { url = "https://files.pythonhosted.org/packages/29/c1/9f3203e0714e021e8d70c95c7a2a048bd4baacf9cf27ae1b5e2dc056fd45/protobuf_py_ext-0.6.0-cp311-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:64a3075e96fea0107cbe2a0e7103dd35f5566e98088463b4572c70fb737bbede", size = 478330, upload-time = "2026-09-30T06:44:58.588Z" },
+    { url = "https://files.pythonhosted.org/packages/07/5b/9520fc2d5be143cc9b54cda777551c60f1a9ea2c1efd0c0fa1701f3cb044/protobuf_py_ext-0.6.0-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8e03b2aa768ea7185feab4267eee2a5d5fe5fa39c389f02689a6f5b7869c174c", size = 504049, upload-time = "2026-09-30T06:45:00.025Z" },
+    { url = "https://files.pythonhosted.org/packages/6d/6f/7f69494f11c05c0cbc225d391cac2ae2b129be8be7818f48ef6ee4d7e407/protobuf_py_ext-0.6.0-cp311-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:afc419f235195e07d7c095c992935251b9207b2e0f6283c9324f9d6243eef401", size = 657357, upload-time = "2026-09-30T06:45:01.778Z" },
+    { url = "https://files.pythonhosted.org/packages/ae/a1/f6048540d29565ebaedf70b5271da23173cc26c23edf09727b789ddd012e/protobuf_py_ext-0.6.0-cp311-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:ee8e0d5893a4d26e2c7e535a38c4e34be699469fcb182338626cc7bf4d6ea078", size = 716603, upload-time = "2026-09-30T06:45:03.629Z" },
+    { url = "https://files.pythonhosted.org/packages/0c/7b/a0d587cdf856c3413f57a028621f469c749c3d23bbf29a947e9f258f97f0/protobuf_py_ext-0.6.0-cp311-abi3-win_amd64.whl", hash = "sha256:b5be43ebf9ec28aa7e3734bf07c0ea4ae50c2e7554b9299ea08433549052e8d2", size = 440643, upload-time = "2026-09-30T06:45:05.086Z" },
+    { url = "https://files.pythonhosted.org/packages/c6/51/f29c03261a837072e8da59956fea097a57a1dab222cf11c07547446f01df/protobuf_py_ext-0.6.0-cp311-abi3-win_arm64.whl", hash = "sha256:a9e50e205f7c366febf1d12ab183b5a3034793441faaa57cab4fe9a8a1c0e1dc", size = 420484, upload-time = "2026-09-30T06:45:06.843Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/4a/03bd5ea7651e69bfb1b77fba67bfbb53f379b96e1f968679b389a4128692/protobuf_py_ext-0.6.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:f41c6125be464504431d642edb04276435e1728851871b10374208700a5deefe", size = 471377, upload-time = "2026-09-30T06:45:08.249Z" },
+    { url = "https://files.pythonhosted.org/packages/da/f3/41c51bc78bd233092dc46aeeff4de012c04489e3fd26d6b501dd4e926228/protobuf_py_ext-0.6.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:ff7193d7dd89c35ccb703f6b8d92b2f6f0630d23c112f0855de08ccdf21f67b8", size = 478394, upload-time = "2026-09-30T06:45:09.775Z" },
+    { url = "https://files.pythonhosted.org/packages/72/80/583fdc2a8d3017adfde4222f1d5e5a98db670b47410f564f112d4638095c/protobuf_py_ext-0.6.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:ccddb3a74691fc03c24c598940da3c5dfeb4b1df122b02ec095fd72373706003", size = 500456, upload-time = "2026-09-30T06:45:11.267Z" },
+    { url = "https://files.pythonhosted.org/packages/9f/88/5f472867f51ac00113ac8c604f75b8e8b942c1a4ca09c100145ed9a74281/protobuf_py_ext-0.6.0-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:607c014c8eaae9fe8860a989e5ba003e7befa82ce20f820e74c7fa4877fab01e", size = 656660, upload-time = "2026-09-30T06:45:12.8Z" },
+    { url = "https://files.pythonhosted.org/packages/ba/c0/646b66943f660ae5d00019fb4efcf9305656a3d4525f38323181334cc158/protobuf_py_ext-0.6.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:97c474474711f487db5425230f92a7bbba3b3c36ea8c287f1a47be00fcb22174", size = 713533, upload-time = "2026-09-30T06:45:14.319Z" },
+    { url = "https://files.pythonhosted.org/packages/54/71/131125d553e4bf526965ebc06a354f26d9ca3baf54118c5ad8421978b6e0/protobuf_py_ext-0.6.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:a05c984234ad74b84e764fa7eb01b00c2258ed55195202ae67fdfa1b551533b5", size = 471478, upload-time = "2026-09-30T06:45:15.819Z" },
+    { url = "https://files.pythonhosted.org/packages/fb/d4/a7fcb16d83b7e37aa2561760faa78faca0be56ecef7bc2a9ce0b646c583f/protobuf_py_ext-0.6.0-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:62f197bec48889c9824bb3f4597aa6b0d45dd2ba89680246d0ddd724aff49281", size = 479518, upload-time = "2026-09-30T06:45:17.16Z" },
+    { url = "https://files.pythonhosted.org/packages/9c/69/f385581d4f0f25a9c0271de640be0183e725574ca1166d32bdf798740299/protobuf_py_ext-0.6.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:669519bdf23713494e7247ee89dbd57cf1b9c32071ee69fe0ab5e6eeadd42477", size = 501274, upload-time = "2026-09-30T06:45:18.707Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/45/e635f1a7e70438aa2f563321e30a11012cae05aa6ad6c2ac72bbd5369ad6/protobuf_py_ext-0.6.0-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:df1eea6f53d6f78b031e94b08e98e2492d35cfb49d7d2b2639b2d472c48b4de7", size = 657613, upload-time = "2026-09-30T06:45:20.507Z" },
+    { url = "https://files.pythonhosted.org/packages/29/a1/e698f967e10c377187064b0d67ea64f561d164e0a55d29385a180495b9a8/protobuf_py_ext-0.6.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:8ebcf2610c2cee06f9fbcca8be352848bf4e927e1cf58d902905487a7e249c4b", size = 714222, upload-time = "2026-09-30T06:45:22.073Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/26/d09e892ab83420ddd52e5ae86507675c411a3fae038f022dc7e82eba7cf9/protobuf_py_ext-0.6.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:561bda3d588a0ef756cccaba546ef04dbd0bd167556afbd83aea2be76b05aadc", size = 469655, upload-time = "2026-09-30T06:45:23.908Z" },
+    { url = "https://files.pythonhosted.org/packages/25/2e/f6c327625cb2ac1ba472452c5ae60563a126b9340ae8d46b7e5a6c2360db/protobuf_py_ext-0.6.0-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:e55f9a1c4329c05638a4adfc1754be6c5aaef790965bf704b431e925f1801d71", size = 477421, upload-time = "2026-09-30T06:45:25.59Z" },
+    { url = "https://files.pythonhosted.org/packages/cd/74/0078a5ed1fdebd82772817b8dfd5cc5fbec4c3c51d63356a5a7f9d0c53a7/protobuf_py_ext-0.6.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:69aad94e7bda448b3d0f5752ace8f2d745562dba9e50f4c2e3b4fb3d2969d9bc", size = 499937, upload-time = "2026-09-30T06:45:27.392Z" },
+    { url = "https://files.pythonhosted.org/packages/fb/92/f7b5a35d2c8804c13edeec22e9cbc084cff2c11ada58aeb896c97f9fc94b/protobuf_py_ext-0.6.0-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:b26888854d3c4b55a161defaacfb2ef895e85662cee3cacd95d56efa29344e3b", size = 655561, upload-time = "2026-09-30T06:45:28.933Z" },
+    { url = "https://files.pythonhosted.org/packages/01/c4/3c54994605801ac565f6f156a55e348c5f08cd5592650356e69f68d61c05/protobuf_py_ext-0.6.0-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:15888690bf4064ecc657623f98a13d8b4ee223cbd790c0b8c48f29530ac47c7e", size = 713156, upload-time = "2026-09-30T06:45:30.493Z" },
+    { url = "https://files.pythonhosted.org/packages/41/6a/99667bcfc5a4b914095e8d522a31bdf0cde56655d3d29ff739fa412ed064/protobuf_py_ext-0.6.0-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:6607d37c86f454f8fa02d54186730befe4f73fa19943d2b09123c9b3747856af", size = 458472, upload-time = "2026-09-30T06:45:31.955Z" },
+    { url = "https://files.pythonhosted.org/packages/7a/5e/6b585e3dfaf1efc60c3566b51dcd9a52fb7de990386f041e9bf8e48d9fa8/protobuf_py_ext-0.6.0-cp314-cp314t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:b1cc666423d220b95fae7e6f92c77ed7245b78c71bc50191f671cae021a8db25", size = 466913, upload-time = "2026-09-30T06:45:33.594Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/51/ca7535b71b330e1ff8577d0e352ee48250c9df307644319bdced1b743b84/protobuf_py_ext-0.6.0-cp314-cp314t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:5f9a107f2d760b5a5ca7d240d32456bae358455c9195d28237ff6be679d3633e", size = 489980, upload-time = "2026-09-30T06:45:35.103Z" },
+    { url = "https://files.pythonhosted.org/packages/45/8b/154c22e66322e99a1ffd94b6d2f7ece89da367fe9b57ad1b1a54a1c4d23c/protobuf_py_ext-0.6.0-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:0c4827ce9f96a83b72c5db86466f149dcc16b2f15a7ee601e6b1938f9b04e44f", size = 646208, upload-time = "2026-09-30T06:45:36.831Z" },
+    { url = "https://files.pythonhosted.org/packages/b7/9b/3a5a66f64a5262cbb2609a02d1ab74b2f4da90ea537ca260b10a8c3bb6e8/protobuf_py_ext-0.6.0-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:005b95df22c72366c30a9adc9dc2d962017a2f0779583da70bb29770b09ad346", size = 703607, upload-time = "2026-09-30T06:45:38.512Z" },
+]
+
+[[package]]
+name = "protoc-gen-py"
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "protobuf-py" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/24/f6/6500dddceb5cfc53ad54e7410efc933ba5098879aab853ab2a86ad42fae3/protoc_gen_py-0.6.0.tar.gz", hash = "sha256:bbabd23eb5ba148cc7d968f04046363a524b085ec0320035032840853d61400a", size = 10994, upload-time = "2026-09-30T06:45:43.802Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6f/05/53533263fce2309f22397bde30200239b452156114926e143cee625f4a6b/protoc_gen_py-0.6.0-py3-none-any.whl", hash = "sha256:97557d104ad0d98e1927be91a9fde875d63f7d64574f7ace9b5d02ffe9285222", size = 12434, upload-time = "2026-09-30T06:45:39.83Z" },
+]
+
+[[package]]
+name = "protovalidate"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "protobuf-py" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c6/73/f9ec1cbeb4caf28e695e966ba5b13397c598f523170d305ec05d03309b03/protovalidate-2.0.0.tar.gz", hash = "sha256:f2fce76be2afc91f1c2f57b0d1bba26a1681cf687ba387a3a4bea6a69e13a805", size = 18878241, upload-time = "2026-08-19T01:09:50.795Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d6/eb/3e599ef96878cf389927ad2d041c7c6d7cd76ea8d91a77819523c78d2afc/protovalidate-2.0.0-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:fd00fbe5297165f55aa208159e28eac27db5821bb255a65d53f659dcb4eba0cd", size = 2729581, upload-time = "2026-08-19T01:09:23.417Z" },
+    { url = "https://files.pythonhosted.org/packages/1d/ee/88f2f3a1bb548809e7c4cb000e0beee86bf3702f47b85009c23c4ecbfd75/protovalidate-2.0.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:156efdcc8a7db502f92180f5dff6dea200f8297aa2280abff2b6ca695a62a694", size = 2542469, upload-time = "2026-08-19T01:09:25.368Z" },
+    { url = "https://files.pythonhosted.org/packages/64/23/5967208bb04833d566fe932f87e00bece53a30bfc5a54009a56dbf64932e/protovalidate-2.0.0-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:6109644d4d7be9e49e77198deac274881a281e168a0d2edefa38063e4247280e", size = 3323752, upload-time = "2026-08-19T01:09:26.892Z" },
+    { url = "https://files.pythonhosted.org/packages/66/b5/fe5c545bb2daee3d098360604e5c34e6419c9b1e6341890a86e89da4c055/protovalidate-2.0.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:fe8c9e237b9f034269f134d4ee0a872689b38e1c8113668a351f9f12bcfcf62e", size = 3588717, upload-time = "2026-08-19T01:09:28.308Z" },
+    { url = "https://files.pythonhosted.org/packages/8b/dd/677c2adb9a6ca5e7122a4558c469738c93eb88d720fd291b03a6a6bdb375/protovalidate-2.0.0-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:be86a8253fd64a250d8e15598fcebdf3b1fd6384f6ef1f1d412b4b5cb7d47686", size = 9569483, upload-time = "2026-08-19T01:09:29.933Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/d6/7650ad5e8f23a6e0b8e4e36ea8e33c2d3ebf5a8746d49b7c3cee1d156e2a/protovalidate-2.0.0-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:c88442347f2b01fc7a5d67280a99730135310400b039fe63a5ec1581c26ea8b8", size = 10139193, upload-time = "2026-08-19T01:09:32.01Z" },
+    { url = "https://files.pythonhosted.org/packages/76/b0/35bde6aa90d2205ae3913e023751067acaf724a3a1e9325cc4d5abcd44ce/protovalidate-2.0.0-cp310-abi3-win_amd64.whl", hash = "sha256:4d4c48b64918f9da1b11cebc66cbe248a942dc42ccbfb27c32834faf9ef68348", size = 2733195, upload-time = "2026-08-19T01:09:33.872Z" },
+    { url = "https://files.pythonhosted.org/packages/53/66/1b88effa91f586a4ca13614ca753d1d0ac89728970f6939e85f8adc47aa7/protovalidate-2.0.0-cp310-abi3-win_arm64.whl", hash = "sha256:7dbd2115b0be40139badff0da80fdc4b9d2b08944ccf072bbdefaceeaabac1de", size = 2604461, upload-time = "2026-08-19T01:09:35.44Z" },
+    { url = "https://files.pythonhosted.org/packages/df/13/604ace01a46ee76615b6c00bffb2e52bd9f4239d8df1f35a80114fd72b34/protovalidate-2.0.0-cp314-cp314t-macosx_10_12_x86_64.whl", hash = "sha256:c543314a58605419c6ebcfed9559bfbf73ec34e0f8c1e42f25a93a5d32fac29d", size = 2728591, upload-time = "2026-08-19T01:09:36.846Z" },
+    { url = "https://files.pythonhosted.org/packages/dc/24/1d69b31c89868f4047a0b9bc367077d55a89b9fe42831309d3f24291fb89/protovalidate-2.0.0-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:9d632d66535c29d86eaa6d7148b66d8e9ce76cf6475f1c820b39bc197e67d356", size = 2533581, upload-time = "2026-08-19T01:09:38.254Z" },
+    { url = "https://files.pythonhosted.org/packages/c3/1e/8260ab04a9bcb50393dc9b34cf977f7b85d50daf7a6b78118f37ad428547/protovalidate-2.0.0-cp314-cp314t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:fb63d5c09687248ba583b917b368ce6e214890a1e86831dc80ed54e72967718b", size = 3319591, upload-time = "2026-08-19T01:09:39.855Z" },
+    { url = "https://files.pythonhosted.org/packages/be/2d/3ffc43b6bdec33232041311b9aa58a7e67b097ca03b807ac099f46b9e750/protovalidate-2.0.0-cp314-cp314t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8ce2601b2734cc0a5e8fce1d8c39dfcabec8033a271ddb140e9eb3488765dae2", size = 3583669, upload-time = "2026-08-19T01:09:41.4Z" },
+    { url = "https://files.pythonhosted.org/packages/40/2b/233c0a97ff1941592e271bb38b95df5fc538a5e3bae48745f45ec040e404/protovalidate-2.0.0-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:c3e105e5304fe74295a4f52d0aace8382f7b1934dcbbb396fa21f475e7d1a5d3", size = 9565307, upload-time = "2026-08-19T01:09:42.956Z" },
+    { url = "https://files.pythonhosted.org/packages/42/b2/02960bc493fc67b9d215c47437645a2581e220cafc817be535fff5f939c3/protovalidate-2.0.0-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:ffc55c8988f00bfd2a01cc951fb31a217ccd07e27b5b0d23d811be8754e562d7", size = 10134757, upload-time = "2026-08-19T01:09:45.315Z" },
+    { url = "https://files.pythonhosted.org/packages/f3/33/a922f91110f8ef7eb58da6bf2c883c6592a31af641a17039f51e626ce02b/protovalidate-2.0.0-cp314-cp314t-win_amd64.whl", hash = "sha256:5ef05e596a5a7b333b33d45c02c81a95db6d6c291c520716c36031a691925647", size = 2726317, upload-time = "2026-08-19T01:09:47.329Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/d1/2bfed5e8228d1c90e651a879fad7136e06e82dee2ea0d9063b82f87c2104/protovalidate-2.0.0-cp314-cp314t-win_arm64.whl", hash = "sha256:1e797abc70fb89513d2556a85c89d066c8204f2f5b84944f0a485d5e0c87567b", size = 2597755, upload-time = "2026-08-19T01:09:48.909Z" },
+]
+
+[[package]]
 name = "pycparser"
 version = "3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2840,6 +2975,15 @@ wheels = [
 ]
 
 [[package]]
+name = "types-protobuf"
+version = "7.35.1.20260906"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e1/6c/e3e5b3e10bc328126a39637c138f9ebfd734bf14342b9f3540039b4ab995/types_protobuf-7.35.1.20260906.tar.gz", hash = "sha256:efd1a3862d4c967dad5512ef8d56b1530ac84f182c41735b94004756518c4998", size = 69895, upload-time = "2026-09-06T06:35:28.308Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/44/4e/f63e826c68f77ef875506d72f225918800346545ee99847bc28f3394f18d/types_protobuf-7.35.1.20260906-py3-none-any.whl", hash = "sha256:5155e48569e0dabff303fdf578db96cd31ea9a4a63b18018a4ceac6b0ae17462", size = 86419, upload-time = "2026-09-06T06:35:27.247Z" },
+]
+
+[[package]]
 name = "types-toml"
 version = "0.10.8.20260408"
 source = { registry = "https://pypi.org/simple" }
@@ -2899,15 +3043,23 @@ dependencies = [
     { name = "agentshim" },
     { name = "cbor2" },
     { name = "cryptography" },
+    { name = "google-crc32c" },
     { name = "huggingface-hub" },
     { name = "jinja2" },
+    { name = "jsonschema" },
     { name = "mcp" },
     { name = "modal" },
     { name = "openevolve" },
+    { name = "protobuf" },
+    { name = "protobuf-py" },
+    { name = "protovalidate" },
     { name = "pydantic" },
+    { name = "pydantic-core" },
     { name = "pygit2" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
+    { name = "rpds-py" },
+    { name = "typing-extensions" },
     { name = "websockets" },
 ]
 
@@ -2919,6 +3071,7 @@ dev = [
     { name = "diff-cover" },
     { name = "hypothesis" },
     { name = "matplotlib" },
+    { name = "protobuf" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -2929,8 +3082,13 @@ dev = [
     { name = "tach" },
     { name = "twine" },
     { name = "ty" },
+    { name = "types-protobuf" },
     { name = "vs-bench" },
     { name = "vs-dst" },
+]
+proto = [
+    { name = "buf-bin" },
+    { name = "protoc-gen-py" },
 ]
 test = [
     { name = "hypothesis" },
@@ -2940,18 +3098,26 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", specifier = ">=0.15.7,<0.16" },
+    { name = "agentshim", specifier = ">=0.23.0,<0.24" },
     { name = "cbor2", specifier = "<6" },
     { name = "cryptography", specifier = "<50" },
+    { name = "google-crc32c", specifier = ">=1.7,<2" },
     { name = "huggingface-hub" },
     { name = "jinja2", specifier = ">=3.1" },
+    { name = "jsonschema", specifier = ">=4.23,<5" },
     { name = "mcp", specifier = ">=1.0,<2" },
     { name = "modal", specifier = ">=1.4.2" },
     { name = "openevolve", specifier = "==0.3.1" },
+    { name = "protobuf", specifier = "==6.33.5" },
+    { name = "protobuf-py", specifier = "==0.6.0" },
+    { name = "protovalidate", specifier = "==2.0.0" },
     { name = "pydantic", specifier = ">=2" },
+    { name = "pydantic-core" },
     { name = "pygit2", specifier = ">=1.18,<2" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "pyyaml", specifier = ">=6" },
+    { name = "rpds-py", specifier = ">=0.30,<0.31" },
+    { name = "typing-extensions", specifier = ">=4.12" },
     { name = "websockets", specifier = ">=14.2,<15" },
 ]
 
@@ -2963,6 +3129,7 @@ dev = [
     { name = "diff-cover" },
     { name = "hypothesis" },
     { name = "matplotlib", specifier = ">=3.10.8" },
+    { name = "protobuf", specifier = "==6.33.5" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -2973,8 +3140,13 @@ dev = [
     { name = "tach", specifier = "==0.35.1" },
     { name = "twine" },
     { name = "ty", specifier = "==0.0.75" },
+    { name = "types-protobuf", specifier = "==7.35.1.20260906" },
     { name = "vs-bench", editable = "sdk/vs-bench" },
     { name = "vs-dst", editable = "libs/vs-dst" },
+]
+proto = [
+    { name = "buf-bin", specifier = "==1.73.0" },
+    { name = "protoc-gen-py", specifier = "==0.6.0" },
 ]
 test = [
     { name = "hypothesis" },
@@ -2989,6 +3161,7 @@ source = { editable = "libs/vs-agent" }
 dependencies = [
     { name = "agentshim" },
     { name = "pydantic" },
+    { name = "pydantic-core" },
     { name = "vs-decode" },
     { name = "vs-faults" },
     { name = "vs-mcp" },
@@ -3000,8 +3173,9 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", specifier = ">=0.15.7,<0.16" },
+    { name = "agentshim", specifier = ">=0.23.0,<0.24" },
     { name = "pydantic", specifier = ">=2" },
+    { name = "pydantic-core" },
     { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-faults", editable = "libs/vs-faults" },
     { name = "vs-mcp", editable = "libs/vs-mcp" },
@@ -3017,10 +3191,14 @@ version = "0.1.0"
 source = { editable = "libs/vs-async-ops" }
 dependencies = [
     { name = "pydantic" },
+    { name = "vs-sim" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2" },
+    { name = "vs-sim", editable = "libs/vs-sim" },
+]
 
 [[package]]
 name = "vs-bench"
@@ -3051,11 +3229,19 @@ name = "vs-core"
 version = "0.1.0"
 source = { editable = "libs/vs-core" }
 dependencies = [
+    { name = "protobuf-py" },
     { name = "pydantic" },
+    { name = "vs-proto" },
+    { name = "vs-runlog" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+requires-dist = [
+    { name = "protobuf-py", specifier = "==0.6.0" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "vs-proto", editable = "libs/vs-proto" },
+    { name = "vs-runlog", editable = "libs/vs-runlog" },
+]
 
 [[package]]
 name = "vs-decode"
@@ -3094,6 +3280,7 @@ name = "vs-evaluation"
 version = "0.1.0"
 source = { editable = "libs/vs-evaluation" }
 dependencies = [
+    { name = "mcp" },
     { name = "pydantic" },
     { name = "vs-decode" },
     { name = "vs-evaluator-protocol" },
@@ -3104,6 +3291,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "mcp", specifier = ">=1.0,<2" },
     { name = "pydantic", specifier = ">=2" },
     { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-evaluator-protocol", editable = "libs/vs-evaluator-protocol" },
@@ -3222,6 +3410,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pygit2" },
     { name = "vs-decode" },
+    { name = "vs-proto" },
     { name = "vs-sim" },
 ]
 
@@ -3230,6 +3419,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2" },
     { name = "pygit2", specifier = ">=1.18,<2" },
     { name = "vs-decode", editable = "libs/vs-decode" },
+    { name = "vs-proto", editable = "libs/vs-proto" },
     { name = "vs-sim", editable = "libs/vs-sim" },
 ]
 
@@ -3245,11 +3435,51 @@ dependencies = [
 requires-dist = [{ name = "jinja2", specifier = ">=3.1" }]
 
 [[package]]
+name = "vs-proto"
+version = "0.1.0"
+source = { editable = "libs/vs-proto" }
+dependencies = [
+    { name = "protobuf" },
+    { name = "protobuf-py" },
+    { name = "protovalidate" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "protobuf", specifier = "==6.33.5" },
+    { name = "protobuf-py", specifier = "==0.6.0" },
+    { name = "protovalidate", specifier = "==2.0.0" },
+]
+
+[[package]]
+name = "vs-redaction"
+version = "0.1.0"
+source = { editable = "libs/vs-redaction" }
+
+[[package]]
+name = "vs-runlog"
+version = "0.1.0"
+source = { editable = "libs/vs-runlog" }
+dependencies = [
+    { name = "google-crc32c" },
+    { name = "vs-proto" },
+    { name = "vs-sim" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "google-crc32c", specifier = ">=1.7,<2" },
+    { name = "vs-proto", editable = "libs/vs-proto" },
+    { name = "vs-sim", editable = "libs/vs-sim" },
+]
+
+[[package]]
 name = "vs-runtime"
 version = "0.1.0"
 source = { editable = "libs/vs-runtime" }
 dependencies = [
     { name = "jinja2" },
+    { name = "protobuf-py" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "vs-agent" },
@@ -3263,6 +3493,9 @@ dependencies = [
     { name = "vs-mcp" },
     { name = "vs-project" },
     { name = "vs-prompts" },
+    { name = "vs-proto" },
+    { name = "vs-redaction" },
+    { name = "vs-runlog" },
     { name = "vs-sandbox" },
     { name = "vs-sim" },
     { name = "vs-slurm" },
@@ -3271,6 +3504,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "jinja2", specifier = ">=3.1" },
+    { name = "protobuf-py", specifier = "==0.6.0" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pyyaml", specifier = ">=6" },
     { name = "vs-agent", editable = "libs/vs-agent" },
@@ -3284,6 +3518,9 @@ requires-dist = [
     { name = "vs-mcp", editable = "libs/vs-mcp" },
     { name = "vs-project", editable = "libs/vs-project" },
     { name = "vs-prompts", editable = "libs/vs-prompts" },
+    { name = "vs-proto", editable = "libs/vs-proto" },
+    { name = "vs-redaction", editable = "libs/vs-redaction" },
+    { name = "vs-runlog", editable = "libs/vs-runlog" },
     { name = "vs-sandbox", editable = "libs/vs-sandbox" },
     { name = "vs-sim", editable = "libs/vs-sim" },
     { name = "vs-slurm", editable = "libs/vs-slurm" },
@@ -3301,6 +3538,7 @@ dependencies = [
     { name = "vs-decode" },
     { name = "vs-evaluation" },
     { name = "vs-project" },
+    { name = "vs-redaction" },
     { name = "vs-sim" },
     { name = "vs-slurm" },
 ]
@@ -3314,6 +3552,7 @@ requires-dist = [
     { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-evaluation", editable = "libs/vs-evaluation" },
     { name = "vs-project", editable = "libs/vs-project" },
+    { name = "vs-redaction", editable = "libs/vs-redaction" },
     { name = "vs-sim", editable = "libs/vs-sim" },
     { name = "vs-slurm", editable = "libs/vs-slurm" },
 ]

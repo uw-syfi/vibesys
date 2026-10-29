@@ -2,6 +2,7 @@
 
 import json
 from hashlib import sha256
+from itertools import product
 from typing import ClassVar, Literal
 
 import pytest
@@ -396,6 +397,8 @@ def test_recovery_inspects_unfinished_authority_without_replaying_payload(
     assert reload(result.state) == result.state
 
 
+@pytest.mark.regression
+@example(events=[(1, 0), (2, 0)])
 @example(events=[(0, 0), (1, 0)])
 @given(st.lists(st.tuples(st.integers(0, 5), st.integers(0, 99)), min_size=1, max_size=30))
 def test_startup_sequences_preserve_ownership_and_deduplicate_inspection(
@@ -1499,15 +1502,43 @@ def registered_record(
     ), descriptor
 
 
-@given(
-    lifecycle=st.sampled_from(list(LifecycleClass)),
-    phase=st.sampled_from(list(RequestPhase)),
-    flags=st.tuples(st.booleans(), st.booleans(), st.booleans(), st.booleans()),
-)
+@pytest.mark.parametrize("lifecycle", list(LifecycleClass))
+@pytest.mark.parametrize("phase", list(RequestPhase))
+@pytest.mark.parametrize("flags", list(product((False, True), repeat=4)))
 def test_ambiguous_acceptance_never_replays_any_lifecycle_class(
     lifecycle: LifecycleClass, phase: RequestPhase, flags: tuple[bool, bool, bool, bool]
 ) -> None:
-    """F3/F4/F5 mechanism: Unknown cannot become accepted, terminated or released."""
+    """Exhaust every class, phase and flag set; Unknown never proves external completion.
+
+    A blocked query's recovery check is terminal because core already ended the query,
+    not because its ambiguous observation proves acceptance, termination or release.
+    Every other ambiguous record still needs inspection. Neither case replays work or
+    changes the recorded observation or its owners.
+    """
+    _assert_ambiguous_recovery(lifecycle, phase, flags)
+
+
+@pytest.mark.regression
+@given(
+    lifecycle=st.just(LifecycleClass.QUERY),
+    phase=st.just(RequestPhase.BLOCKED),
+    flags=st.tuples(st.booleans(), st.booleans(), st.booleans(), st.booleans()),
+)
+@example(
+    lifecycle=LifecycleClass.QUERY,
+    phase=RequestPhase.BLOCKED,
+    flags=(False, False, False, False),
+)
+def test_ambiguous_blocked_query_settles_only_its_recovery_check(
+    lifecycle: LifecycleClass, phase: RequestPhase, flags: tuple[bool, bool, bool, bool]
+) -> None:
+    """Pin the input that contradicted the old, overbroad recovery property."""
+    _assert_ambiguous_recovery(lifecycle, phase, flags)
+
+
+def _assert_ambiguous_recovery(
+    lifecycle: LifecycleClass, phase: RequestPhase, flags: tuple[bool, bool, bool, bool]
+) -> None:
     terminal, released, accepted, complete = flags
     if lifecycle == LifecycleClass.SESSION_TURN:
         original = turn_record()
@@ -1547,11 +1578,14 @@ def test_ambiguous_acceptance_never_replays_any_lifecycle_class(
         for check in result.state.records.recovery.checks
         if check.target == original.request_id
     )
-    assert check.resolution == "pending"
-    assert any(
-        isinstance(request, InspectRequest) and request.target == original.request_id
+    ended_query = lifecycle == LifecycleClass.QUERY and phase == RequestPhase.BLOCKED
+    assert check.resolution == ("terminal" if ended_query else "pending")
+    inspections = [
+        request
         for request in result.requests
-    )
+        if isinstance(request, InspectRequest) and request.target == original.request_id
+    ]
+    assert bool(inspections) == (not ended_query)
     assert all(isinstance(request, InspectRequest) for request in result.requests)
     assert unaddressed(result.state.records.records[0]) == original
     assert result.state.sessions == state.sessions

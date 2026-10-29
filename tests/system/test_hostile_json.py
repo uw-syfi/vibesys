@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, get_args
 
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
+from resources.profilers.flashinfer import flashinfer_trace
 from resources.profilers.rocprof import analyze_rocprof, att, counters
 from tests.server.support import REQUEST_TIME
 
@@ -44,9 +45,13 @@ from server.host_api import (
 )
 from server.host_helper import ChannelState, Received, Send, step
 from server.transport.discovery import WebInstanceRecord
+from vibesys.api.importing import FactImportError, ImportSource, SourceFormat, import_run_facts
+from vibesys.api.transport import convert_run
 from vibesys.run import CoreAgentEventSink
+from vs_core.api.testing import FAKE_REGISTRY
 from vs_decode.api import Unreadable, decode_json, read_json
 from vs_evaluator_protocol.api import ProtocolError, parse_records
+from vs_project.api import Project
 from vs_runtime.api import CommandResult
 from vs_runtime.api.infrastructure import (
     LocalValidationRecipeError,
@@ -70,6 +75,7 @@ from vs_sim.api.testing import (
     FakeProcesses,
     ManualClock,
     ProcessScript,
+    SimThreads,
     hostile_json_frames,
 )
 from vs_slurm.api import SlurmConfig, SlurmConnectorTransport, slurm_transport_broker_policy
@@ -216,6 +222,10 @@ def _rocprof_thread_trace(frame: bytes, dispatch: Path) -> None:
     att.load_instructions(dispatch)
 
 
+def _flashinfer_chrome_trace(frame: bytes, _: Path) -> None:
+    flashinfer_trace.decode_chrome_trace(frame)
+
+
 _RECIPES = {
     "version": 1,
     "recipes": [
@@ -312,8 +322,30 @@ def _connector_broker_request(frame: bytes, workspace: Path) -> None:
     )
 
 
+def _convert_run_journal(frame: bytes, directory: Path) -> None:
+    project_root = directory / "conversion-project"
+    project_root.mkdir(exist_ok=True)
+    with pytest.MonkeyPatch.context() as environment:
+        environment.setenv("VIBESYS_STATE_HOME", str(directory / "conversion-home"))
+        journal = Project.event_journal_path_for(project_root, "run-1")
+        journal.parent.mkdir(parents=True, exist_ok=True)
+        journal.write_bytes(frame)
+        convert_run(Project.open(project_root), "run-1", clock=ManualClock(), threads=SimThreads())
+
+
+def _retained_facts(frame: bytes, _: Path) -> None:
+    import_run_facts(
+        "run",
+        (ImportSource("retained.json", SourceFormat.RUNTIME, frame),),
+        strategy="single",
+        registry=FAKE_REGISTRY,
+    )
+
+
 _DECODERS = {
+    "retained-facts": _Decoder(_retained_facts, (FactImportError,)),
     "decode-json": _Decoder(_decode_json_file),
+    "runlog-conversion": _Decoder(_convert_run_journal, (ValueError,)),
     "slurm-connector-broker": _Decoder(_connector_broker_request, (PermissionError,)),
     "protocol-request": _Decoder(_decode_request),
     "instance-record": _Decoder(_parse_record),
@@ -342,6 +374,7 @@ _DECODERS = {
     "rocprof-json-report": _Decoder(_rocprof_json_report, (_capture_runtime.CaptureFailedError,)),
     "rocprof-counters": _Decoder(_rocprof_counters, (_capture_runtime.CaptureFailedError,)),
     "rocprof-thread-trace": _Decoder(_rocprof_thread_trace, (att.AttOutputNotFoundError,)),
+    "flashinfer-chrome-trace": _Decoder(_flashinfer_chrome_trace, (flashinfer_trace.TraceError,)),
 }
 
 

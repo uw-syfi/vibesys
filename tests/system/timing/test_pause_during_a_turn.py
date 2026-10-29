@@ -1,4 +1,4 @@
-"""A pause is read while a turn runs, not only when a request finishes.
+"""An internal quota hold is read while a turn runs, not only when a request finishes.
 
 Turns last minutes, so a loop that read its controls only between requests would pause long
 after the operator asked. The pause is acted on within one control poll and the turn goes on.
@@ -47,14 +47,14 @@ def _into_the_turn(seconds: float) -> Callable[[TurnTimeline, object], bool]:
 @_SETTINGS
 @example(poll=7.0, seconds=20.0)
 @given(poll=st.sampled_from([1.0, 7.0, 30.0]), seconds=st.floats(min_value=1.0, max_value=90.0))
-def test_a_pause_during_a_long_turn_is_acted_on_within_one_control_poll(
+def test_a_quota_hold_during_a_long_turn_is_acted_on_within_one_control_poll(
     poll: float, seconds: float
 ) -> None:
     timed = run_timed(
         StaggeredStrategy(config=StaggeredConfig(workers=1)),
         Plan(
             duration=lambda _worker, _ordinal: _TURN_S,
-            pause_when=_into_the_turn(seconds),
+            quota_hold_when=_into_the_turn(seconds),
             control_poll_s=poll,
         ),
     )

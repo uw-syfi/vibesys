@@ -74,7 +74,7 @@ export async function discoverSshConfigAliases(
   return walker.result;
 }
 
-/** Null is an opaque Match context; arrays are conjunctions of Host pattern lists. */
+/** Null is an opaque Match context; arrays are conjunctions of original-alias pattern lists. */
 type HostGate = readonly (readonly string[])[] | null;
 
 class SshConfigWalker {
@@ -262,10 +262,14 @@ function gateMatches(gate: HostGate, alias: string): boolean {
   return gate?.every(patterns => sshHostPatternsMatch(patterns, alias)) ?? false;
 }
 
-/** Evaluate only Match predicates whose result depends solely on the candidate alias. */
+/**
+ * Evaluate only Match predicates whose result depends solely on the original candidate alias.
+ * `host` uses the effective HostName after connection-time processing, which discovery does not
+ * own; every mixed or otherwise stateful predicate therefore remains opaque too.
+ */
 function matchGate(conditions: readonly string[], inheritedGate: HostGate): HostGate {
   if (conditions.length === 1 && conditions[0]?.toLowerCase() === 'all') return inheritedGate;
-  if (conditions.length !== 2 || conditions[0]?.toLowerCase() !== 'host') return null;
+  if (conditions.length !== 2 || conditions[0]?.toLowerCase() !== 'originalhost') return null;
   const patterns = conditions[1]?.split(',').filter(pattern => pattern !== '') ?? [];
   if (patterns.length === 0) return null;
   return inheritedGate === null ? null : [...inheritedGate, patterns];

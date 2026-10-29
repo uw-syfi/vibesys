@@ -16,7 +16,14 @@
     "src/**/*.test.ts",
     "src/rounds/**",
     "src/performance/**",
-    "src/transcript/**"
+    "src/transcript/**",
+    "src/trace/**",
+    "src/overview/**",
+    "src/candidates/**",
+    "src/agents/**",
+    "src/usage/**",
+    "src/records/**",
+    "src/skeleton/**"
   ],
   "references": [
     {

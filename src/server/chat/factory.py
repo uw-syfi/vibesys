@@ -10,7 +10,6 @@ from server.chat.manager import (
     ChatThreadHandle,
     TerminalChatResource,
 )
-from server.chat.options import ChatRunSettings
 from server.chat.prompts import (
     experiment_chat_continuation_prompt,
     experiment_chat_system_prompt,
@@ -19,10 +18,11 @@ from server.chat.session import (
     ExperimentChatDependencies,
     ExperimentChatSession,
 )
+from server.chat.settings import ChatRunSettings
 from server.chat.transcript import FileChatTranscriptStore
 from server.events import ChatThreadCreatedData, ChatThreadId
 from server.run_attachment import AgentSelection, RunAttachment
-from vibesys.api import AuxiliaryAgentLaunch
+from vibesys.api import AuxiliaryAgentLaunch, AuxiliarySkills
 from vs_sim.api import CloseOnce, ReleaseStack, utc_datetime
 
 if TYPE_CHECKING:
@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 
     from server.controller import RunController
     from server.execution import ExecutionTracker
+    from server.host_api import HarnessChoice
     from vibesys.api import ManagedAgent
     from vs_sim.api import Clock, Released, Threads
 
@@ -83,6 +84,7 @@ def build_chat_agent(
             model=selection.model,
             system_prompt=experiment_chat_system_prompt(),
             continuation_prompt=experiment_chat_continuation_prompt(),
+            skills=AuxiliarySkills.CHAT,
         )
     )
 
@@ -114,7 +116,6 @@ class ExperimentChatFactory:
             provider=attachment.agent_defaults.provider,
             model=attachment.agent_defaults.model,
             agent_providers=attachment.agent_providers,
-            role_models=attachment.agent_defaults.role_models,
         )
         self._session = session
         self._build_agent = build_agent
@@ -136,7 +137,6 @@ class ExperimentChatFactory:
                 raise _factory_started_error()
             transcripts = FileChatTranscriptStore.open(self._chat_state_dir)
             self._transcripts = transcripts
-            self._manager.set_run_settings(self._defaults)
             self._manager.set_thread_factory(self._create_thread)
         default = self._build_session(
             None,
@@ -180,13 +180,9 @@ class ExperimentChatFactory:
     def _create_thread(
         self,
         thread_id: ChatThreadId,
-        provider: str | None,
-        model: str | None,
+        harness: HarnessChoice | None,
     ) -> ChatThreadHandle:
-        selection = self._resolve_selection(
-            provider=provider,
-            model=model,
-        )
+        selection = self._resolve_selection(harness)
         session = self._build_session(thread_id, selection)
         return ChatThreadHandle(
             spec=ChatThreadCreatedData(
@@ -199,15 +195,10 @@ class ExperimentChatFactory:
             close=session.close,
         )
 
-    def _resolve_selection(
-        self,
-        *,
-        provider: str | None,
-        model: str | None,
-    ) -> AgentSelection:
+    def _resolve_selection(self, harness: HarnessChoice | None) -> AgentSelection:
         """Resolve one chat thread's agent choice against the attached run."""
-        resolved_provider = provider or self._defaults.provider
-        resolved_model = model or self._defaults.model
+        resolved_provider = self._defaults.provider if harness is None else harness.provider
+        resolved_model = self._defaults.model if harness is None else harness.model
         supported = self._defaults.agent_providers
         if resolved_provider not in supported:
             message = (

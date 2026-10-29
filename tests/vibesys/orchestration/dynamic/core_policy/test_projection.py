@@ -3,12 +3,13 @@
 The search publishes a `RunSnapshot`; `project_run_snapshot` turns it into the iteration tree,
 the rounds and the agent projection frontends read. Its properties are stated over generated
 snapshots: one workstream node per scheduled workstream in the order it was scheduled, a
-status that follows how it ended, the leader marked kept, and a metric shown only when a
+status that follows how it ended, the leader marked best, and a metric shown only when a
 trusted evaluation measured it.
 """
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -42,7 +43,11 @@ from vibesys.plugin_registration import OrchestrationRegistration, project_run
 from vibesys.run.contracts import (
     IterationKind,
     IterationStatus,
+    IterationSummary,
     IterationTree,
+    IterationUnavailable,
+    IterationUnavailableReason,
+    PluginProjection,
     RunStatus,
     RunView,
 )
@@ -90,15 +95,21 @@ _FAILURES = st.sampled_from(
 
 @st.composite
 def _snapshots(draw: st.DrawFn) -> RunSnapshot:
-    """A run in progress: workstreams scheduled in order, some running, some finished."""
+    """A run in progress: workstreams scheduled in order, some running, some finished.
+
+    A workstream may name a hypothesis an earlier one already worked on (it goes on under the same
+    planner-chosen ID), so one hypothesis may own several workstreams and rounds.
+    """
     finished: list[FinishedWork] = []
     running: list[Running] = []
-    hypotheses: list[HypothesisRecord] = []
+    hypotheses: dict[str, HypothesisRecord] = {}
     for sequence in range(1, draw(st.integers(0, 5)) + 1):
+        work_id = draw(st.sampled_from((f"w{sequence}", "w1", "w2")))
         plan = WorkPlan(
             kind=WorkKind.IMPLEMENT,
-            work_id=f"w{sequence}",
+            work_id=work_id,
             title=draw(st.sampled_from(("", f"Title {sequence}"))),
+            continue_hypothesis=work_id in hypotheses,
         )
         rounds: tuple[RoundRecord, ...] = ()
         if draw(st.booleans()):
@@ -111,7 +122,7 @@ def _snapshots(draw: st.DrawFn) -> RunSnapshot:
                 rounds = (
                     RoundRecord(
                         sequence=sequence,
-                        attempt=AttemptId(root=f"attempt-{sequence}"),
+                        attempt=AttemptId(root=f"attempt:{work_id}:{sequence}"),
                         review_passed=draw(st.none() | st.booleans()),
                         metrics=tuple(draw(st.lists(_row, max_size=2))),
                         failure=draw(_FAILURES),
@@ -121,26 +132,25 @@ def _snapshots(draw: st.DrawFn) -> RunSnapshot:
                 finished.append(FinishedWork(sequence=sequence, plan=plan, parent=_PARENT))
         else:
             running.append(Running(sequence=sequence, plan=plan))
-        hypotheses.append(
+        prior = hypotheses.get(work_id)
+        hypotheses[work_id] = (
             HypothesisRecord(
-                hypothesis_id=plan.work_id,
+                hypothesis_id=work_id,
                 title=plan.title,
                 hypothesis="claim",
                 first_sequence=sequence,
                 rounds=rounds,
             )
+            if prior is None
+            else prior.model_copy(update={"rounds": (*prior.rounds, *rounds)})
         )
-    leading = (
-        draw(st.none() | st.sampled_from([item.hypothesis_id for item in hypotheses]))
-        if hypotheses
-        else None
-    )
+    leading = draw(st.none() | st.sampled_from(sorted(hypotheses))) if hypotheses else None
     baseline = draw(
         st.sampled_from((NotConfigured(), Measured(reading=InputReading(accuracy_passed=True))))
     )
     return RunSnapshot(
         baseline=baseline,
-        hypotheses=tuple(hypotheses),
+        hypotheses=tuple(hypotheses.values()),
         finished=tuple(finished),
         running=tuple(running),
         leading=leading,
@@ -172,6 +182,7 @@ def test_projection_copies_recorded_rounds_and_only_measured_numbers(
     for item in view.rounds:
         record = by_sequence[item.round_number]
         measured = bool(record.metrics)
+        assert item.attempts == 1
         assert item.official_evaluation is measured
         assert (item.perf_metric is not None) is measured
         if measured:
@@ -200,9 +211,8 @@ def test_every_scheduled_workstream_is_one_node_in_the_order_it_was_scheduled(
         + [(item.sequence, item.plan) for item in snapshot.running],
         key=lambda entry: entry[0],
     )
-    assert [(node.id, node.ordinal) for node in roots] == [
-        (f"workstream:{plan.work_id}", sequence) for sequence, plan in scheduled
-    ]
+    assert [node.ordinal for node in roots] == [sequence for sequence, _ in scheduled]
+    assert len({node.id for node in tree.nodes}) == len(tree.nodes)
     assert all(node.kind is IterationKind.WORKSTREAM for node in roots)
     assert [node.label for node in roots] == [plan.title or plan.work_id for _, plan in scheduled]
 
@@ -226,16 +236,41 @@ def test_each_recorded_round_is_an_attempt_under_its_workstream(snapshot: RunSna
         assert root.child_count == sum(node.parent_id == root.id for node in attempts)
 
 
+def test_profile_and_merge_workstreams_are_iterations_but_not_rounds() -> None:
+    """Non-implementation workstreams consume slots without claiming round events."""
+    plans = (
+        WorkPlan(kind=WorkKind.PROFILE, work_id="profile-input", question="where is time spent?"),
+        WorkPlan(kind=WorkKind.MERGE, work_id="merge-best", candidates=("a", "b")),
+    )
+    snapshot = RunSnapshot(
+        baseline=NotConfigured(),
+        finished=tuple(
+            FinishedWork(sequence=sequence, plan=plan, parent=_PARENT)
+            for sequence, plan in enumerate(plans, start=1)
+        ),
+    )
+
+    projection = project_run_snapshot(snapshot, experiment_revision=1)
+
+    assert projection.rounds == ()
+    assert isinstance(projection.iterations, IterationTree)
+    assert [(node.kind, node.id) for node in projection.iterations.nodes] == [
+        (IterationKind.WORKSTREAM, "workstream:000001.profile-input"),
+        (IterationKind.WORKSTREAM, "workstream:000002.merge-best"),
+    ]
+
+
 @settings(max_examples=examples(pr=10, nightly=100), deadline=None)
 @given(_snapshots())
 def test_a_workstream_status_follows_how_it_ended(snapshot: RunSnapshot) -> None:
     tree = project_run_snapshot(snapshot, experiment_revision=1).iterations
     assert isinstance(tree, IterationTree)
     status = {node.id: node.status for node in tree.nodes}
+    workstream = {node.ordinal: node.status for node in _workstreams(tree)}
     rounds = {record.sequence: record for record in _rounds(snapshot)}
 
     for item in snapshot.running:
-        assert status[f"workstream:{item.plan.work_id}"] is IterationStatus.ACTIVE
+        assert workstream[item.sequence] is IterationStatus.ACTIVE
     for item in snapshot.finished:
         record = rounds.get(item.sequence)
         failure = item.failure if record is None else record.failure or item.failure
@@ -249,9 +284,48 @@ def test_a_workstream_status_follows_how_it_ended(snapshot: RunSnapshot) -> None
             expected = IterationStatus.FAILED
         else:
             expected = IterationStatus.COMPLETED
-        assert status[f"workstream:{item.plan.work_id}"] is expected
+        assert workstream[item.sequence] is expected
         if record is not None:
             assert status[record.attempt.root] is expected
+
+
+def test_a_hypothesis_that_goes_on_is_a_second_workstream_beside_its_first() -> None:
+    """Regression: a continued hypothesis made two nodes with one ID, and the run died.
+
+    A live run planned ``design-kernel-path`` as workstream 6 and continued it as workstream 7;
+    projecting the record raised ``nodes[...].id duplicates 'workstream:design-kernel-path'``
+    from inside the commit observer.
+    """
+    hypothesis = "design-kernel-path"
+    first = WorkPlan(kind=WorkKind.IMPLEMENT, work_id=hypothesis, title="Audit the kernel path")
+    again = first.model_copy(update={"title": "CUDA graphs", "continue_hypothesis": True})
+    snapshot = RunSnapshot(
+        baseline=NotConfigured(),
+        hypotheses=(
+            HypothesisRecord(
+                hypothesis_id=hypothesis,
+                title=first.title,
+                hypothesis="claim",
+                first_sequence=6,
+                rounds=(
+                    RoundRecord(sequence=6, attempt=AttemptId(root=f"attempt:{hypothesis}:6")),
+                ),
+            ),
+        ),
+        finished=(FinishedWork(sequence=6, plan=first, parent=_PARENT),),
+        running=(Running(sequence=7, plan=again),),
+    )
+
+    tree = project_run_snapshot(snapshot, experiment_revision=1).iterations
+
+    assert isinstance(tree, IterationTree)
+    roots = _workstreams(tree)
+    assert [(node.ordinal, node.label, node.status) for node in roots] == [
+        (6, "Audit the kernel path", IterationStatus.COMPLETED),
+        (7, "CUDA graphs", IterationStatus.ACTIVE),
+    ]
+    assert roots[0].id != roots[1].id
+    assert [node.parent_id for node in tree.nodes if node.parent_id is not None] == [roots[0].id]
 
 
 def _single_round_snapshot(failure: Failure) -> RunSnapshot:
@@ -307,13 +381,13 @@ def test_a_failures_text_reflects_its_own_kind_not_only_no_trusted_evidence() ->
 
 @settings(max_examples=examples(pr=10, nightly=60), deadline=None)
 @given(_snapshots())
-def test_only_the_leader_is_kept_and_only_running_work_is_active(snapshot: RunSnapshot) -> None:
+def test_only_the_leader_is_best_and_only_running_work_is_active(snapshot: RunSnapshot) -> None:
     view = agent_projection(
         _run_view(project_run_snapshot(snapshot, experiment_revision=1).payload)
     )
 
     assert view is not None
-    assert [item.hypothesis_id for item in view.hypotheses if item.kept] == (
+    assert [item.hypothesis_id for item in view.hypotheses if item.best] == (
         [] if snapshot.leading is None else [snapshot.leading]
     )
     running = {item.plan.work_id for item in snapshot.running}
@@ -344,7 +418,7 @@ def _project_with_run(root: Path) -> tuple[Project, str]:
 
 def _published(snapshot: RunSnapshot) -> FlowState:
     """The state of a started dynamic search whose last publication is ``snapshot``."""
-    state = begin(config(), restarting=False).run.state
+    state = begin(config(), restarting=False, input_first=False).run.state
     return state.model_copy(
         update={"live": state.live.model_copy(update={"published": snapshot.model_dump_json()})}
     )
@@ -422,7 +496,7 @@ def test_a_run_without_a_record_has_identity_and_status_only_and_stays_unopened(
 
 def test_a_record_that_published_nothing_projects_to_an_empty_run(tmp_path: Path) -> None:
     project, run_id = _project_with_run(tmp_path)
-    state = begin(config(), restarting=False).run.state
+    state = begin(config(), restarting=False, input_first=False).run.state
     _commit(project, run_id, state)
 
     view = dynamic_projector().view(project, run_id, status=RunStatus.ACTIVE, loop="dynamic")
@@ -469,3 +543,41 @@ def test_a_plugin_registers_the_projector(tmp_path: Path) -> None:
 
     assert agent_projection(view) is not None
     assert [item.number for item in view.rounds] == [1]
+
+
+def test_a_projection_that_fails_validation_is_a_view_that_says_so(tmp_path: Path) -> None:
+    """Readers (the run listing, the iteration and experiment queries, the commit observer) get a
+    valid view naming the failure, never the projection's exception."""
+    project, run_id = _project_with_run(tmp_path)
+    record = _commit(project, run_id, _published(_snapshot()))
+
+    node = IterationSummary(
+        id="same",
+        kind=IterationKind.WORKSTREAM,
+        label="same",
+        ordinal=1,
+        status=IterationStatus.ACTIVE,
+    )
+
+    def invalid(_state: FlowState, _revision: int) -> PluginProjection:
+        return PluginProjection(
+            payload={}, iterations=IterationTree(revision="r", nodes=(node, node))
+        )
+
+    projector = dataclasses.replace(dynamic_projector(), project=invalid)
+
+    stored = projector.view(project, run_id, status=RunStatus.FAILED, loop="dynamic")
+    live = projector.project_committed("dynamic", record, run_id=run_id)
+
+    assert live is not None
+    for view in (stored, live):
+        assert view.projection_failure is not None
+        assert "duplicates 'same'" in view.projection_failure
+        assert isinstance(view.iterations, IterationUnavailable)
+        assert view.iterations.reason is IterationUnavailableReason.PROJECTION_INVALID
+        assert view.projection is None
+        assert view.experiment_revision == record.envelope.revision
+    assert stored.status is RunStatus.FAILED
+    sound = dynamic_projector().project_committed("dynamic", record, run_id=run_id)
+    assert sound is not None
+    assert sound.projection_failure is None

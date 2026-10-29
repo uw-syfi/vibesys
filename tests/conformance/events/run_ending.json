@@ -1,0 +1,14 @@
+{
+  "protocol_version": 1,
+  "type": "run_ending",
+  "sequence": 44,
+  "run_id": "run-conformance",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "data": {
+    "kind": "run_ending",
+    "reason": "deadline",
+    "summary": "deadline: the run deadline passed",
+    "resumable": false,
+    "rounds_finished": 3
+  }
+}

@@ -56,6 +56,8 @@ This document provides a comprehensive hierarchical index of all NKI (Neuron Ker
 - [nki.language - Memory Operations](../programming/api/api-nki-language-memory.md) - Memory buffers (sbuf, psum, hbm)
 - [nki.language - Dimension Operations](../programming/api/api-nki-language-dims.md) - Dimension handling
 - [nki.language - Data Types](../programming/api/api-nki-language-types.md) - Supported data types
+- [nki.language - Operators](../programming/api/api-nki-language-operators.md) - Op specifiers (add, mul, gelu, relu, comparison/bitwise/logical, ...)
+- [nki.language - Tiled & Blocked Layouts](../programming/api/api-nki-language-layout.md) - On-chip tile/block layouts (tiles, blocks, alloc_tiles, alloc_blocks, NkiTileGrid, NkiBlockGrid)
 - [nki.language - Miscellaneous](../programming/api/api-nki-language-misc.md) - Other language APIs
 
 #### nki.isa Module
@@ -66,9 +68,16 @@ This document provides a comprehensive hierarchical index of all NKI (Neuron Ker
 - [nki.isa - Memory Operations](../programming/api/api-nki-isa-memory.md) - DMA instructions (dma_copy, dma_transpose)
 - [nki.isa - Utility Functions](../programming/api/api-nki-isa-utility.md) - Utility instructions (iota, memset, affine_select)
 - [nki.isa - Miscellaneous](../programming/api/api-nki-isa-misc.md) - Other ISA APIs
+- [nki.isa - Local Collective (LNC)](../programming/api/api-nki-isa-local-collective.md) - core_barrier, sendrecv
+
+#### nki.collectives Module
+- [nki.collectives](../programming/api/api-nki-collectives.md) - Collective communication (all_gather, all_reduce, all_to_all, collective_permute, reduce_scatter, ...)
 
 #### Shared APIs
 - [nki.api.shared](../programming/api/nki.api.shared.md) - Shared data types and operators
+
+#### NkiTensor
+- [NkiTensor View Methods](../programming/api/api-nki-tensor.md) - Composable tensor view methods (slice, select, permute, reshape, ap, etc.)
 
 #### Tools
 - [NKI Tools](../programming/api/api-nki-tools.md) - Development and debugging tools
@@ -112,6 +121,7 @@ This document provides a comprehensive hierarchical index of all NKI (Neuron Ker
 - [NKI 0.3.0 Update Guide](../reference/migration/nki-030-update-guide.md) - Updating from NKI 0.2.0 to 0.3.0 (GA)
 - [NKI Migration Guide (Beta 1 to Beta 2)](../reference/migration/nki-migration-guide.md) - Upgrading from Beta 1 to Beta 2
 - [Block Dimension Migration Guide](../reference/migration/nki_block_dimension_migration_guide.md) - Block dimension changes
+- [NKI 0.6.0 Dynamic Loop Migration Guide](../reference/migration/nki-060-dynamic-loop-migration-guide.md) - Migrate dynamic_range / bare `while reg:` to nl.fori_loop / nl.while_loop (Parsing→Tracing)
 
 ### 5.3 NKI Library Kernels
 Pre-built reference kernels for common operations:

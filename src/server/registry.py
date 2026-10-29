@@ -21,6 +21,7 @@ Layout under ``instance_root``::
 
     instances/<id>.lock   lifetime lock, published only once held
     instances/<id>.json   LiveInstanceRecord, written by the holder; its tombstone after
+    readers/<id>.lock, readers/<id>.json   the same for a read-only server (``READERS_DIRECTORY``)
     runs/<id>/control.sock, runs/<id>/server.log, runs/<id>/inspection.json
 
 The module is light: it imports the standard library, Pydantic, the record
@@ -33,7 +34,7 @@ in ``server.instances`` and reaches ``LiveRegistry.stop`` through the
 Public surface: the lock primitives (``LockState``, ``probe_lock``,
 ``LifetimeLock``, ``try_lock``, ``unlock``, ``FLOCK_AVAILABLE``), which the web
 gateway's claim in ``server.transport.discovery`` also uses; ``instance_root``
-and the per-instance paths; ``InstanceStore`` with its ``FileInstanceStore``
+and the per-instance paths; ``INSTANCES_DIRECTORY`` and ``READERS_DIRECTORY``; ``InstanceStore`` with its ``FileInstanceStore``
 and ``FakeInstanceStore`` implementations; ID-scoped log and immutable
 inspection-metadata stores; ``InstanceInspector``; the ``StopRequester``
 interface and the ``StopEffects`` a stop uses; the pure ``judge`` and
@@ -47,18 +48,18 @@ import platform
 import re
 import stat
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Final, Protocol
 
 from server.host_api import (
     INSPECTION_LOG_TAIL_BYTES,
-    INSTANCE_ID_PATTERN,
     RECORD_VERSION,
     AvailableLogTail,
+    EndRecord,
     FailureReason,
     InspectionState,
     InstanceInspection,
@@ -68,6 +69,7 @@ from server.host_api import (
     InstanceStopResult,
     LiveInstanceRecord,
     MissingLogTail,
+    RunEndOutcome,
     RunPhase,
     RunStatus,
     StopOutcome,
@@ -75,6 +77,7 @@ from server.host_api import (
     UnreadableRecord,
     parse_record,
 )
+from server.host_envelope import INSTANCE_ID_PATTERN
 from vs_decode.api import Unreadable, ValidationOptions, decode_json
 from vs_project.api import ensure_private_directory, user_runtime_root
 from vs_sim.api import sync_descriptor
@@ -93,6 +96,11 @@ FLOCK_AVAILABLE = fcntl is not None
 """Whether this platform has BSD ``flock``; every lock here needs it."""
 
 _INSTANCE_ID = re.compile(INSTANCE_ID_PATTERN)
+
+INSTANCES_DIRECTORY: Final = "instances"
+"""Where live runs register under the registry root."""
+READERS_DIRECTORY: Final = "readers"
+"""Where read-only servers register under the registry root, apart from the runs."""
 _RECORD_SUFFIX = ".json"
 _LOCK_SUFFIX = ".lock"
 _STOP_POLL_SECONDS = 0.05
@@ -112,6 +120,9 @@ CRASHED = FailureReason(
     message="The server exited without recording how its run ended; see its log.",
 )
 """The reason a listing records for a server that died without a tombstone."""
+CRASHED_END = EndRecord(outcome=RunEndOutcome.FAILED, reason=CRASHED.message, resumable=True)
+"""A crashed server's ``end``: its durable run state is where the server left it, so a
+resume is offered; the round it continues from is unknown, since the server said nothing."""
 _INSPECTION_METADATA_BYTES = 32 * 1024
 _INSPECTION_METADATA_NAME = "inspection.json"
 
@@ -374,6 +385,8 @@ def crashed(record: LiveInstanceRecord, ended_at: float | None = None) -> LiveIn
             **record.model_dump(),
             "phase": RunPhase(status=RunStatus.FAILED, reason=CRASHED),
             "ended_at": ended_at,
+            "paused": None,
+            "end": CRASHED_END,
         }
     )
 
@@ -518,6 +531,29 @@ class InstanceMetadataStore(Protocol):
     def publish(self, metadata: InstanceInspectionMetadata) -> None:
         """Publish one snapshot atomically; an unlike existing value is a conflict."""
         ...
+
+
+class StopIntents(Protocol):
+    """Durably records the operator's stop of a run, before its server is signalled.
+
+    Contract: never raises. A server is signalled whether or not the record could be
+    written; a run whose project could not take it resumes as after a crash.
+    """
+
+    def record(self, record: LiveInstanceRecord) -> None:
+        """Note that ``record``'s run was stopped by the operator."""
+        ...
+
+
+@dataclass
+class FakeStopIntents:
+    """A ``StopIntents`` that keeps the run ids it was told, in order."""
+
+    recorded: list[str] = field(default_factory=list)
+
+    def record(self, record: LiveInstanceRecord) -> None:
+        """Keep ``record``'s run id."""
+        self.recorded.append(record.run_id)
 
 
 class StopRequester(Protocol):
@@ -924,10 +960,14 @@ def _write_record(path: Path, record: LiveInstanceRecord) -> None:
 class FileInstanceStore:
     """The registry on a node-local filesystem under ``root``."""
 
-    def __init__(self, root: Path) -> None:
-        """Use ``root/instances`` (created private) for locks and records."""
+    def __init__(self, root: Path, *, directory: str = INSTANCES_DIRECTORY) -> None:
+        """Use ``root/<directory>`` (created private) for locks and records.
+
+        Runs register in ``instances``; read-only servers that let Chat read ended runs
+        (``server.host_helper_readers``) register in ``readers``, so no listing of runs sees them.
+        """
         self._root = root
-        self._directory = root / "instances"
+        self._directory = root / directory
         ensure_private_directory(self._directory, os.getuid())
 
     def ids(self) -> tuple[str, ...]:
@@ -1159,12 +1199,13 @@ def _inspection_state(observation: InstanceObservation, now: float) -> Inspectio
 
 @dataclass(frozen=True)
 class StopEffects:
-    """The I/O one ``LiveRegistry.stop`` uses: ask, signal, and wait."""
+    """The I/O one ``LiveRegistry.stop`` uses: ask, record the stop, signal, and wait."""
 
     requester: StopRequester
     signaller: ProcessSignaller
     clock: Clock
     pause: Callable[[float], None]
+    intents: StopIntents
 
 
 class LiveRegistry:
@@ -1270,6 +1311,9 @@ class LiveRegistry:
                 outcome=StopOutcome.STOPPED if released else StopOutcome.STOPPING,
                 route=StopRoute.CONTROL_SOCKET,
             )
+        # A signalled server cannot commit its run's stop, so the request is kept durably
+        # first: a resume then only finishes the drain and ends the run.
+        effects.intents.record(record)
         try:
             sent = effects.signaller.terminate_if_current(
                 record.pid, lambda: self._held(instance_id)

@@ -1,0 +1,20 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.cache.json"
+    },
+    {
+      "path": "./tsconfig.test.json"
+    },
+    {
+      "path": "./tsconfig.testing.json"
+    },
+    {
+      "path": "./tsconfig.reader.json"
+    }
+  ]
+}

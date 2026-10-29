@@ -61,6 +61,8 @@ class ProfilerKind(StrEnum):
     NONE = "none"
     NSYS = "nsys"
     NCU = "ncu"
+    FLASHINFER = "flashinfer"
+    NCU_FLASHINFER = "ncu_flashinfer"
     ROCPROF = "rocprof"
     OTEL = "otel"
     TORCH = "torch"
@@ -153,6 +155,7 @@ class RunStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     STOPPED = "stopped"
+    PARKED = "parked"
 
 
 class RunResult(BaseModel):
@@ -163,8 +166,15 @@ class RunResult(BaseModel):
     run_id: str
     loop: str
     succeeded: bool
-    status: Literal[RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.STOPPED] = RunStatus.FAILED
+    status: Literal[RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.STOPPED, RunStatus.PARKED] = (
+        RunStatus.FAILED
+    )
     failure: RunFailure | None = None
+    uncompared: bool = False
+    """The run adopted a candidate never compared with the input: the input failed its own
+    measurement, so the candidate was judged on the task's gates alone."""
+    stop_reason: str | None = None
+    """Why a stopped run stopped, as its record says; None when the stop left no reason."""
 
     @model_validator(mode="before")
     @classmethod
@@ -184,6 +194,9 @@ class RunResult(BaseModel):
         if self.failure is not None and self.status is not RunStatus.FAILED:
             message = "only a failed RunResult carries a failure"
             raise ValueError(message)
+        if self.stop_reason is not None and self.status is not RunStatus.STOPPED:
+            message = "only a stopped RunResult carries a stop reason"
+            raise ValueError(message)
         return self
 
 
@@ -192,9 +205,9 @@ class RoundFailureSummary(BaseModel):
 
     ``kind`` is a plain string rather than a policy's own closed failure
     enum: this module stays below every policy in the dependency graph, so it
-    carries the enum's value, not the enum. ``WORKSTREAM_FINISHED``'s wiring
-    is the one place that turns it back into the wire's
-    ``WorkstreamFailureKind``.
+    carries the normalized ``WorkstreamFailureKind`` value. Each policy owns
+    its exhaustive translation before constructing this summary; the run
+    validates that value when publishing ``WORKSTREAM_FINISHED``.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -204,6 +217,31 @@ class RoundFailureSummary(BaseModel):
     turns: int | None = None
     limit: int | None = None
     text: str = ""
+    operator_text: str | None = None
+    """Credential-safe projection used only by the public run event."""
+
+
+class InputFailureSummary(BaseModel):
+    """Why the run's input revision failed its own trusted measurement, strategy-neutral.
+
+    Like `RoundFailureSummary`, ``kind`` carries a policy enum's value (the candidates
+    library's ``InputFailureKind``), not the enum; ``INPUT_MEASUREMENT_FAILED``'s wiring turns it
+    back into the wire's ``InputMeasurementFailureKind``. ``stage`` names the gate stage whose
+    reading failed, when one did; ``output`` is what that stage printed, unredacted, so it is
+    redacted before it reaches an event.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    kind: str
+    stage: str | None = None
+    output: str = ""
+    attempts: int = Field(default=1, ge=1, le=2)
+    """How many times the input was measured: twice when the first failure showed no fault of
+    the input and it was measured again."""
+    compared: bool = False
+    """Whether candidates are still compared with the input: its benchmark passed although its
+    accuracy check failed, so its numbers stay the bar."""
 
 
 class RoundSummary(BaseModel):
@@ -400,6 +438,8 @@ class IterationUnavailableReason(StrEnum):
 
     EXTERNAL_STATE_UNAVAILABLE = "external_state_unavailable"
     POLICY_NOT_MAPPED = "policy_not_mapped"
+    PROJECTION_INVALID = "projection_invalid"
+    """The policy's projection of the committed state failed validation: a product bug."""
     STATE_UNAVAILABLE = "state_unavailable"
 
 
@@ -411,6 +451,8 @@ class IterationUnavailable(BaseModel):
     kind: Literal["unavailable"] = "unavailable"
     schema_version: Literal[1] = 1
     reason: IterationUnavailableReason
+    detail: str | None = None
+    """For an operator, what went wrong (for `PROJECTION_INVALID`, the validation error)."""
 
 
 IterationProjection = Annotated[IterationTree | IterationUnavailable, Field(discriminator="kind")]
@@ -427,6 +469,8 @@ class PluginProjection(BaseModel):
     )
     rounds: tuple[RoundSummary, ...] = ()
     experiment_revision: int | None = None
+    input_failure: InputFailureSummary | None = None
+    """Why the input failed its trusted measurement; None while it is pending or measured."""
 
 
 class RunView(BaseModel):
@@ -443,9 +487,23 @@ class RunView(BaseModel):
     )
     rounds: tuple[RoundSummary, ...] = ()
     experiment_revision: int | None = None
+    input_failure: InputFailureSummary | None = None
+    """Why the input failed its trusted measurement; None while it is pending or measured."""
+
+    @property
+    def projection_failure(self) -> str | None:
+        """Why the policy's projection of the committed state failed validation; None if not."""
+        iterations = self.iterations
+        if (
+            isinstance(iterations, IterationUnavailable)
+            and iterations.reason is IterationUnavailableReason.PROJECTION_INVALID
+        ):
+            return iterations.detail or iterations.reason.value
+        return None
 
 
 __all__ = [
+    "InputFailureSummary",
     "IterationKind",
     "IterationMetric",
     "IterationProjection",

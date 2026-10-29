@@ -2,8 +2,8 @@
  * The run fold's reducers: a snapshot, an ordered batch, a rebootstrap, a replayed prefix, or one
  * event, each folded with run identity, the stream cursor, and replay provenance kept consistent.
  */
-import type {RunEvent, RunSnapshot} from '@vibesys/contracts';
-import {applyChatEvent, retainRegisteredChatThreads, upsertChatThread} from './chat.js';
+import {isChatAgentKind, type RunEvent, type RunSnapshot} from '@vibesys/contracts';
+import {applyChatEvent, registerSnapshotChat, retainRegisteredChatThreads} from './chat.js';
 import {applyDiagnosticEvent, upsertDiagnostic} from './diagnostics.js';
 import {
   applyExecutionEventData,
@@ -45,6 +45,20 @@ import {TranscriptFolder} from './transcript-folder.js';
 export interface ActiveExecutionCheckpointFold {
   readonly kind: 'deferred' | 'complete';
   readonly checkpointId: string;
+}
+
+/** One rejected run identity observed while folding an otherwise partially accepted input. */
+export interface RunIdentityRejection {
+  readonly expectedRunId: string;
+  readonly receivedRunId: string;
+  readonly summary: string;
+}
+
+/** State and the exact identity-accepted event subset produced by one authoritative fold. */
+export interface EventFold {
+  readonly state: CoreState;
+  readonly acceptedEvents: readonly RunEvent[];
+  readonly rejection: RunIdentityRejection | null;
 }
 
 function withoutDeferredExecutionCheckpoint(state: CoreState): CoreState {
@@ -118,11 +132,15 @@ function foldRoutedEventsDuringCheckpoint(
   state: CoreState,
   events: readonly RunEvent[],
   route: DeliveryRoute,
-): CoreState {
+): EventFold {
   const pending = coreStateProvenance(state).activeExecutionCheckpoint;
   if (pending === undefined) {
     const batch = foldIdentityAwareBatch(state, events, route);
-    return retainReplayDeliveries(state, batch.state, batch.retainedDeliveries);
+    return {
+      state: retainReplayDeliveries(state, batch.state, batch.retainedDeliveries),
+      acceptedEvents: batch.acceptedEvents,
+      rejection: batch.rejection,
+    };
   }
   const working = cloneCoreStateWith(state, {
     activeExecutions: pending.activeExecutions,
@@ -130,18 +148,22 @@ function foldRoutedEventsDuringCheckpoint(
   });
   const batch = foldIdentityAwareBatch(working, events, route);
   const retained = retainReplayDeliveries(state, batch.state, batch.retainedDeliveries);
-  return cloneCoreStateWith(retained, {
-    activeExecutions: state.activeExecutions,
-    executionStatuses: state.executionStatuses,
-    provenance: {
-      ...coreStateProvenance(retained),
-      activeExecutionCheckpoint: {
-        ...pending,
-        activeExecutions: retained.activeExecutions,
-        executionStatuses: retained.executionStatuses,
+  return {
+    state: cloneCoreStateWith(retained, {
+      activeExecutions: state.activeExecutions,
+      executionStatuses: state.executionStatuses,
+      provenance: {
+        ...coreStateProvenance(retained),
+        activeExecutionCheckpoint: {
+          ...pending,
+          activeExecutions: retained.activeExecutions,
+          executionStatuses: retained.executionStatuses,
+        },
       },
-    },
-  });
+    }),
+    acceptedEvents: batch.acceptedEvents,
+    rejection: batch.rejection,
+  };
 }
 
 interface CheckpointMetadataDecision {
@@ -226,34 +248,52 @@ function isRunLifetimeBoundary(event: RunEvent): boolean {
   }
 }
 
-/** The transcript for one chat thread; unknown threads read as empty. */
-export function reduceSnapshot(state: CoreState, snapshot: RunSnapshot): CoreState {
+/** Whether a snapshot changed the liveness projection owned by core state. */
+export type SnapshotFoldDisposition = 'accepted' | 'foreign' | 'stale';
+
+/** One snapshot fold and its independent liveness disposition. */
+export interface SnapshotFold {
+  readonly state: CoreState;
+  readonly disposition: SnapshotFoldDisposition;
+  readonly rejection: RunIdentityRejection | null;
+}
+
+/**
+ * Fold a snapshot and report whether it advanced liveness. Thread registration can still be
+ * retained from a stale snapshot, so state identity alone cannot recover this fact. Consumers of
+ * snapshot-backed historical projections must compare against their own last accepted snapshot,
+ * not this liveness disposition: an event can race ahead of a still-useful historical snapshot.
+ */
+export function foldSnapshot(state: CoreState, snapshot: RunSnapshot): SnapshotFold {
   const identity = foldRunIdentity(state, snapshot.run_id, snapshot.sequence);
-  if (!identity.accepted) return publishCoreState(identity.state);
+  if (!identity.accepted) {
+    return {
+      state: publishCoreState(identity.state),
+      disposition: 'foreign',
+      rejection: identity.rejection,
+    };
+  }
   state = identity.state;
   // The thread registry is a server projection of history already written, and
   // under a tail bootstrap it names threads created before the replay window.
   // Boot issues the snapshot query and the subscription concurrently, so the
   // batch usually lands first and the liveness guard below would otherwise drop
   // the registry entirely. Applying it to a stale snapshot is always safe.
-  const registered = (snapshot.chat_threads ?? []).reduce(
-    (current, thread) =>
-      upsertChatThread(current, {
-        id: thread.thread_id,
-        title: thread.title ?? '',
-        provider: thread.provider,
-        model: thread.model,
-      }),
-    state,
-  );
-  if (snapshot.sequence < registered.sequence) return publishCoreState(registered);
+  const registered = registerSnapshotChat(state, snapshot);
+  if (snapshot.sequence < registered.sequence) {
+    return {state: publishCoreState(registered), disposition: 'stale', rejection: null};
+  }
   // Boot issues the snapshot query and the subscription concurrently, so a
   // snapshot can arrive after the events it was taken alongside. Once the fold
   // has seen the run end, a snapshot no newer than the fold cannot un-end it;
   // a genuinely newer one (a resumed run) still applies.
   const previousSnapshotSequence = coreStateProvenance(registered).activeExecutionSnapshotSequence;
   if (snapshotCannotAdvanceLiveness(registered, snapshot.sequence, previousSnapshotSequence)) {
-    return publishCoreState(registered);
+    return {
+      state: publishCoreState(registered),
+      disposition: 'stale',
+      rejection: null,
+    };
   }
   const pending = coreStateProvenance(registered).activeExecutionCheckpoint;
   const supersedesPending =
@@ -290,7 +330,12 @@ export function reduceSnapshot(state: CoreState, snapshot: RunSnapshot): CoreSta
       },
     });
   }
-  return publishCoreState(next);
+  return {state: publishCoreState(next), disposition: 'accepted', rejection: null};
+}
+
+/** Fold a snapshot for callers that need state but not its publication disposition. */
+export function reduceSnapshot(state: CoreState, snapshot: RunSnapshot): CoreState {
+  return foldSnapshot(state, snapshot).state;
 }
 
 function snapshotCannotAdvanceLiveness(
@@ -315,14 +360,14 @@ function snapshotCannotAdvanceLiveness(
  * identity folds its accepted events and diagnostic, but not its checkpoint or
  * history metadata because those cannot be attributed to the owned run.
  */
-export function reduceEventBatch(
+export function foldEventBatch(
   state: CoreState,
   events: readonly RunEvent[],
   activeExecutions?: ActiveExecutionCheckpoint | null,
   throughSequence?: number,
   historyAfterSequence?: number,
   activeExecutionCheckpoint?: ActiveExecutionCheckpointFold,
-): CoreState {
+): EventFold {
   if (activeExecutionCheckpoint?.kind === 'deferred' && activeExecutions !== null) {
     throw new Error('A deferred active-execution fold requires a null checkpoint');
   }
@@ -336,7 +381,7 @@ export function reduceEventBatch(
   const batch = foldIdentityAwareBatch(working, events);
   const retained = retainReplayDeliveries(working, batch.state, batch.retainedDeliveries);
   if (!batch.acceptsMetadata && activeExecutionCheckpoint === undefined) {
-    return publishCoreState(retained);
+    return eventFold(publishCoreState(retained), batch);
   }
   const metadata = checkpointMetadataDecision(
     state,
@@ -350,14 +395,17 @@ export function reduceEventBatch(
       ? snapshotSafe
       : cloneCoreStateWith(snapshotSafe, {historyAfterSequence});
   if (activeExecutionCheckpoint?.kind === 'deferred') {
-    return publishCoreState(
-      deferExecutionCheckpoint(
-        state,
-        reduced,
-        activeExecutionCheckpoint.checkpointId,
-        metadata.acceptsIdentity,
-        metadata.throughSequence,
+    return eventFold(
+      publishCoreState(
+        deferExecutionCheckpoint(
+          state,
+          reduced,
+          activeExecutionCheckpoint.checkpointId,
+          metadata.acceptsIdentity,
+          metadata.throughSequence,
+        ),
       ),
+      batch,
     );
   }
   const checkpointApplied =
@@ -367,7 +415,29 @@ export function reduceEventBatch(
   const reconciled = !checkpointApplied
     ? reduced
     : reconcileActiveExecutions(reduced, activeExecutions, metadata.throughSequence);
-  return publishCoreState(finishExecutionCheckpoint(reconciled, checkpointApplied));
+  return eventFold(
+    publishCoreState(finishExecutionCheckpoint(reconciled, checkpointApplied)),
+    batch,
+  );
+}
+
+/** Fold a batch for callers that need state but not its accepted publication subset. */
+export function reduceEventBatch(
+  state: CoreState,
+  events: readonly RunEvent[],
+  activeExecutions?: ActiveExecutionCheckpoint | null,
+  throughSequence?: number,
+  historyAfterSequence?: number,
+  activeExecutionCheckpoint?: ActiveExecutionCheckpointFold,
+): CoreState {
+  return foldEventBatch(
+    state,
+    events,
+    activeExecutions,
+    throughSequence,
+    historyAfterSequence,
+    activeExecutionCheckpoint,
+  ).state;
 }
 
 /**
@@ -385,14 +455,14 @@ export function reduceEventBatch(
  * because a concurrent snapshot query supplies threads that no replayed tail
  * carries. A changed, unknown, or mixed identity starts with a fresh registry.
  */
-export function reduceEventRebootstrap(
+export function foldEventRebootstrap(
   state: CoreState,
   events: readonly RunEvent[],
   activeExecutions: ActiveExecutionCheckpoint | null | undefined,
   throughSequence: number | undefined,
   historyAfterSequence: number,
   activeExecutionCheckpoint?: ActiveExecutionCheckpointFold,
-): CoreState {
+): EventFold {
   if (activeExecutionCheckpoint?.kind === 'deferred' && activeExecutions !== null) {
     throw new Error('A deferred active-execution fold requires a null checkpoint');
   }
@@ -437,17 +507,39 @@ export function reduceEventRebootstrap(
       ? reduced
       : retainRegisteredChatThreads(reduced, state.chatThreads);
   if (activeExecutionCheckpoint?.kind === 'deferred') {
-    return publishCoreState(
-      deferExecutionCheckpoint(
-        state,
-        registered,
-        activeExecutionCheckpoint.checkpointId,
-        metadata.acceptsIdentity,
-        metadata.throughSequence,
+    return eventFold(
+      publishCoreState(
+        deferExecutionCheckpoint(
+          state,
+          registered,
+          activeExecutionCheckpoint.checkpointId,
+          metadata.acceptsIdentity,
+          metadata.throughSequence,
+        ),
       ),
+      batch,
     );
   }
-  return publishCoreState(withoutDeferredExecutionCheckpoint(registered));
+  return eventFold(publishCoreState(withoutDeferredExecutionCheckpoint(registered)), batch);
+}
+
+/** Fold a rebootstrap for callers that need state but not its accepted publication subset. */
+export function reduceEventRebootstrap(
+  state: CoreState,
+  events: readonly RunEvent[],
+  activeExecutions: ActiveExecutionCheckpoint | null | undefined,
+  throughSequence: number | undefined,
+  historyAfterSequence: number,
+  activeExecutionCheckpoint?: ActiveExecutionCheckpointFold,
+): CoreState {
+  return foldEventRebootstrap(
+    state,
+    events,
+    activeExecutions,
+    throughSequence,
+    historyAfterSequence,
+    activeExecutionCheckpoint,
+  ).state;
 }
 
 /**
@@ -566,7 +658,7 @@ function boundaryFor(
 
 export function reduceEvent(state: CoreState, event: RunEvent): CoreState {
   if (coreStateProvenance(state).activeExecutionCheckpoint !== undefined) {
-    return publishCoreState(foldRoutedEventsDuringCheckpoint(state, [event], 'stream'));
+    return publishCoreState(foldRoutedEventsDuringCheckpoint(state, [event], 'stream').state);
   }
   const folded = foldEvent(state, event, null);
   return publishCoreState(
@@ -591,8 +683,14 @@ export function reduceEvent(state: CoreState, event: RunEvent): CoreState {
  * are recorded in `foldedOutOfBand`, so the subscription's copies fold once
  * and only advance the cursor over them.
  */
+export function foldResponseEvents(state: CoreState, events: readonly RunEvent[]): EventFold {
+  const folded = foldRoutedEventsDuringCheckpoint(state, events, 'response');
+  return {...folded, state: publishCoreState(folded.state)};
+}
+
+/** Fold response events for callers that need state but not their accepted publication subset. */
 export function reduceResponseEvents(state: CoreState, events: readonly RunEvent[]): CoreState {
-  return publishCoreState(foldRoutedEventsDuringCheckpoint(state, events, 'response'));
+  return foldResponseEvents(state, events).state;
 }
 
 /** Merge status replay with staged status, keeping the newest event per execution. */
@@ -613,6 +711,7 @@ function mergeExecutionStatuses(
 interface RunIdentityFold {
   state: CoreState;
   accepted: boolean;
+  rejection: RunIdentityRejection | null;
 }
 
 interface IdentityAwareBatchFold {
@@ -620,8 +719,16 @@ interface IdentityAwareBatchFold {
   state: CoreState;
   /** Deliveries that changed the projection and must participate in prefix replay. */
   retainedDeliveries: readonly ReplayDelivery[];
+  /** Events whose identity was accepted, whether or not their sequence changed core state. */
+  acceptedEvents: readonly RunEvent[];
   /** Whether checkpoint and history metadata describe one accepted identity. */
   acceptsMetadata: boolean;
+  /** The last rejected identity in the batch, if any. */
+  rejection: RunIdentityRejection | null;
+}
+
+function eventFold(state: CoreState, batch: IdentityAwareBatchFold): EventFold {
+  return {state, acceptedEvents: batch.acceptedEvents, rejection: batch.rejection};
 }
 
 /**
@@ -644,7 +751,9 @@ function foldReplayDeliveries(
   const folder = new TranscriptFolder();
   let folded = state;
   let acceptsMetadata = true;
+  let rejection: RunIdentityRejection | null = null;
   const retainedDeliveries: ReplayDelivery[] = [];
+  const acceptedEvents: RunEvent[] = [];
   for (const delivery of deliveries) {
     const {event, route} = delivery;
     const before = folded;
@@ -653,16 +762,20 @@ function foldReplayDeliveries(
     folded = identity.state;
     if (!identity.accepted) {
       acceptsMetadata = false;
+      rejection = identity.rejection;
       if (folded !== before) retainedDeliveries.push(delivery);
       continue;
     }
+    acceptedEvents.push(event);
     folded = foldAcceptedEvent(folded, event, folder, route);
     if (folded !== before) retainedDeliveries.push(delivery);
   }
   return {
     state: folder.commit(folded),
     retainedDeliveries,
+    acceptedEvents,
     acceptsMetadata,
+    rejection,
   };
 }
 
@@ -673,11 +786,11 @@ function foldRunIdentity(
   sequence: number,
 ): RunIdentityFold {
   const runId = incoming === undefined || incoming === null || incoming === '' ? null : incoming;
-  if (runId === null) return {state, accepted: true};
+  if (runId === null) return {state, accepted: true, rejection: null};
   if (state.runId === null) {
-    return {state: cloneCoreStateWith(state, {runId}), accepted: true};
+    return {state: cloneCoreStateWith(state, {runId}), accepted: true, rejection: null};
   }
-  if (runId === state.runId) return {state, accepted: true};
+  if (runId === state.runId) return {state, accepted: true, rejection: null};
   const diagnostic: CoreDiagnostic = {
     id: 'core-state:run-identity-mismatch',
     code: 'run_identity_mismatch',
@@ -698,6 +811,11 @@ function foldRunIdentity(
       diagnostics: upsertDiagnostic(state.diagnostics, diagnostic),
     }),
     accepted: false,
+    rejection: {
+      expectedRunId: state.runId,
+      receivedRunId: runId,
+      summary: diagnostic.summary,
+    },
   };
 }
 
@@ -749,7 +867,7 @@ function foldAcceptedEvent(
   // that session's status block to every chat chunk it publishes, so folding
   // one would report the chat's token count as the run's. The same exclusion
   // covers chat `usage_update` events, which `applyRunFacts` never sees.
-  if (event.agent_kind === 'chat') return applyChatEvent(next, event, folder);
+  if (isChatAgentKind(event.agent_kind)) return applyChatEvent(next, event, folder);
   next = applyRunEventData(next, event, sequence, dataHandlers);
   if (event.agent_kind) (next as MutableCoreState).agentKind = event.agent_kind;
   if (event.round_label) (next as MutableCoreState).roundLabel = event.round_label;

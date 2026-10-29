@@ -66,8 +66,8 @@ class MetricComparison(StrEnum):
     ``WITHIN_NOISE`` means both readings exist on the same axis and their
     difference does not exceed the declared measurement tolerance, so the
     comparison ran and found no result. ``INCOMPARABLE`` means the comparison
-    could not run at all: a reading is missing, or the axis has no known
-    direction. Consumers that collapse them still have to say so explicitly.
+    could not run at all: a reading is missing, the axis has no known
+    direction, or the runs give no estimate of the noise. Consumers that collapse them still have to say so explicitly.
     """
 
     BETTER = "better"
@@ -364,6 +364,8 @@ class EvidenceReading(Value):
     metrics: tuple[MetricRow, ...] = ()
     partial: PartialRow | None = None
     feedback: str = ""
+    unmet_requirement: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    """The capability a failed benchmark's evaluator named as unmet, when it named one."""
 
     def headline(self) -> MetricRow | None:
         """The first reported metric, the benchmark's headline reading."""

@@ -6,16 +6,22 @@ import asyncio
 import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Never
 
-from vs_runtime.contracts import RunCleanupError
+from vs_runtime.contracts import CaptureStopUnconfirmedError, RunCleanupError
+from vs_sandbox.api import CommandExecutionSettledError
 from vs_sim.api import AsyncCloseOnce, ReleaseStack
+
+_CAPTURE_WORKER_FAILED = "capture worker failed without settlement proof"
+_CAPTURE_SIGNAL_FAILED = "capture cancellation could not be signalled"
+_CAPTURE_DRAIN_FAILED = "capture worker could not be drained"
+_CAPTURE_DRAIN_OUTCOME_FAILED = "capture worker failed while cancellation was draining"
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
     from vs_runtime._workspaces import OwnedWorkspaces
-    from vs_sim.api import BlockingRunner, Released
+    from vs_sim.api import BlockingRunner, Event, Released, Threads
 
 
 def _runtime_closed_error() -> RuntimeError:
@@ -26,12 +32,19 @@ def _cleanup_failure(errors: list[BaseException]) -> RunCleanupError:
     return RunCleanupError("run cleanup failed", tuple(errors))
 
 
+def _unconfirmed_capture(detail: str, cause: BaseException) -> CaptureStopUnconfirmedError:
+    error = CaptureStopUnconfirmedError()
+    error.add_note(f"{detail}: {type(cause).__name__}: {cause}")
+    return error
+
+
 class BlockingOperations:
     """Run synchronous effects without racing run teardown."""
 
-    def __init__(self, runner: BlockingRunner) -> None:
-        """Run operations on ``runner``."""
+    def __init__(self, runner: BlockingRunner, threads: Threads) -> None:
+        """Run operations on ``runner`` with cancellation signals from ``threads``."""
         self._runner = runner
+        self._threads = threads
         self._tasks: set[asyncio.Task] = set()
         self._closed = False
 
@@ -61,6 +74,92 @@ class BlockingOperations:
             raise
         finally:
             self._tasks.discard(task)
+
+    async def run_cancellable[Result](
+        self,
+        operation: Callable[[Event], Result],
+    ) -> Result:
+        """Run one cooperative operation, signal cancellation, and drain it.
+
+        A confirmed stop preserves asyncio cancellation unless the drained
+        worker reports a typed local failure after settlement. An unconfirmed
+        capture stop wins instead, because callers must retain resources that
+        the worker may still be using.
+        """
+        if self._closed:
+            raise _runtime_closed_error()
+        cancel = self._threads.event()
+        task = asyncio.create_task(self._runner.run(operation, cancel))
+        self._tasks.add(task)
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError as cancelled:
+            await self._cancel_and_drain(task, cancel, cancelled)
+        except CaptureStopUnconfirmedError:
+            raise
+        except CommandExecutionSettledError:
+            raise
+        except BaseException as error:
+            raise _unconfirmed_capture(_CAPTURE_WORKER_FAILED, error) from error
+        finally:
+            if task.done():
+                self._tasks.discard(task)
+
+    @staticmethod
+    async def _cancel_and_drain[Result](
+        task: asyncio.Task[Result], cancel: Event, cancelled: asyncio.CancelledError
+    ) -> Never:
+        """Signal and drain one worker, failing closed on either boundary."""
+        try:
+            cancel.set()
+        except BaseException as signal_error:
+            if task.done():
+                BlockingOperations._raise_cancellable_outcome(
+                    task,
+                    cancelled,
+                    detail=_CAPTURE_SIGNAL_FAILED,
+                    boundary_error=signal_error,
+                )
+            raise _unconfirmed_capture(_CAPTURE_SIGNAL_FAILED, signal_error) from signal_error
+        try:
+            await _wait_until_done(task)
+        except BaseException as drain_error:
+            raise _unconfirmed_capture(_CAPTURE_DRAIN_FAILED, drain_error) from drain_error
+        BlockingOperations._raise_cancellable_outcome(
+            task,
+            cancelled,
+            detail=_CAPTURE_DRAIN_OUTCOME_FAILED,
+            boundary_error=None,
+        )
+
+    @staticmethod
+    def _raise_cancellable_outcome[Result](
+        task: asyncio.Task[Result],
+        cancelled: asyncio.CancelledError,
+        *,
+        detail: str,
+        boundary_error: BaseException | None,
+    ) -> Never:
+        """Preserve typed worker evidence when a cancelled caller drains it."""
+        if task.cancelled():
+            raise CaptureStopUnconfirmedError from cancelled
+        error = task.exception()
+        if isinstance(error, (CaptureStopUnconfirmedError, CommandExecutionSettledError)):
+            if boundary_error is not None:
+                error.add_note(
+                    "capture cancellation signalling also failed: "
+                    f"{type(boundary_error).__name__}: {boundary_error}"
+                )
+            raise error from cancelled
+        if error is not None:
+            unconfirmed = _unconfirmed_capture(detail, error)
+            if boundary_error is not None:
+                unconfirmed.add_note(
+                    "capture cancellation signalling also failed: "
+                    f"{type(boundary_error).__name__}: {boundary_error}"
+                )
+            raise unconfirmed from error
+        raise cancelled from boundary_error
 
     def begin_close(self) -> None:
         """Reject new work before owned tasks are drained."""

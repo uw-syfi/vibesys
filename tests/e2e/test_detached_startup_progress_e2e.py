@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.server.support import CONTROL_KEY
 from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from entrypoints.detached_run import RecordPublisher
@@ -128,6 +129,7 @@ def _serve(
                     run_id="run-1",
                     runs=production_runs(),
                     socket_path=socket_path,
+                    control_key=CONTROL_KEY,
                     detach=True,
                     observer=publisher,
                     platform=Platform.real(),

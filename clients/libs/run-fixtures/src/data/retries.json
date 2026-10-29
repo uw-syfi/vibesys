@@ -1,0 +1,1294 @@
+{
+  "format": 1,
+  "name": "retries",
+  "description": "Ideas whose implementer turn was retried: reasons, counts and one still retrying.",
+  "runId": "20261015-180000",
+  "state": "live",
+  "objective": {
+    "text": "Maximize trusted end-to-end throughput of the MPMC queue. Every candidate must pass the 100-trial correctness check.",
+    "metric": "total_ops_per_sec",
+    "unit": "ops/s",
+    "direction": "max"
+  },
+  "events": [
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 1,
+      "timestamp": "2026-10-15T16:30:51+00:00",
+      "type": "run_started",
+      "data": {
+        "kind": "run_started",
+        "outer_loop": "iterate",
+        "input": "objectives/queue.md",
+        "max_rounds": 6,
+        "expected_roles": [
+          "orchestrator",
+          "implementer",
+          "judge"
+        ],
+        "overview": {
+          "objective": {
+            "text": "Maximize trusted end-to-end throughput of the MPMC queue. Every candidate must pass the 100-trial correctness check.",
+            "metric": "total_ops_per_sec",
+            "unit": "ops/s",
+            "direction": "max",
+            "correctness_check": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 2,
+      "timestamp": "2026-10-15T16:30:52+00:00",
+      "type": "run_configured",
+      "data": {
+        "kind": "run_configured",
+        "run_log_path": "logs/20261015-180000",
+        "project_root": "project",
+        "model": "claude-opus-5",
+        "objective": "Raise queue throughput",
+        "search_policy": "beam",
+        "benchmark_contract": true,
+        "pareto_objectives": null,
+        "source": "loop"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 3,
+      "timestamp": "2026-10-15T16:30:53+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root#1",
+          "parent": null,
+          "type": "flow",
+          "name": "dynamic",
+          "status": "running",
+          "started_at": 0
+        }
+      }
+    },
+    {
+      "type": "span_ended",
+      "timestamp": "2026-10-15T16:30:53+00:00",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:input-measurement",
+          "parent": "flow:root#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "done",
+          "started_at": 3,
+          "ended_at": 4,
+          "label": {
+            "kind": "gate",
+            "title": "input benchmark",
+            "verdict": "passed",
+            "attrs_json": "{\"stage\":\"benchmark\",\"metric_value\":10000000,\"vs_baseline\":1,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":10000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}"
+          }
+        }
+      },
+      "sequence": 4
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 5,
+      "timestamp": "2026-10-15T16:31:01+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/plan#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "plan",
+          "status": "running",
+          "started_at": 10,
+          "ended_at": 50,
+          "label": {
+            "kind": "planning_call",
+            "title": "planning call 1",
+            "attrs_json": "{\"call\":1}"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 6,
+      "timestamp": "2026-10-15T16:31:41+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "flow:root/plan#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "plan",
+          "status": "done",
+          "started_at": 10,
+          "ended_at": 50,
+          "label": {
+            "kind": "planning_call",
+            "title": "planning call 1",
+            "attrs_json": "{\"call\":1}"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 7,
+      "timestamp": "2026-10-15T16:32:31+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/ws-1#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "running",
+          "started_at": 100,
+          "label": {
+            "kind": "workstream",
+            "title": "Settled after one retry",
+            "attrs_json": "{\"hypothesis_id\":\"H1\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 8,
+      "timestamp": "2026-10-15T16:32:32+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w1-turn",
+          "parent": "flow:root/ws-1#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 101,
+          "attempts": [
+            {
+              "n": 1,
+              "of": 2,
+              "started_at": 101,
+              "ended_at": 126,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 2,
+              "of": 2,
+              "started_at": 131
+            }
+          ],
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w1-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 9,
+      "timestamp": "2026-10-15T16:33:02+00:00",
+      "type": "span_updated",
+      "data": {
+        "kind": "span_updated",
+        "span": {
+          "id": "op:w1-turn",
+          "parent": "flow:root/ws-1#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 101,
+          "attempts": [
+            {
+              "n": 1,
+              "of": 2,
+              "started_at": 101,
+              "ended_at": 126,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 2,
+              "of": 2,
+              "started_at": 131
+            }
+          ],
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w1-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 10,
+      "timestamp": "2026-10-15T16:38:32+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w1-turn",
+          "parent": "flow:root/ws-1#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "done",
+          "started_at": 101,
+          "ended_at": 461,
+          "attempts": [
+            {
+              "n": 1,
+              "of": 2,
+              "started_at": 101,
+              "ended_at": 126,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 2,
+              "of": 2,
+              "started_at": 131,
+              "ended_at": 461,
+              "outcome": "done"
+            }
+          ],
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w1-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 11,
+      "timestamp": "2026-10-15T16:38:33+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w1-gate",
+          "parent": "flow:root/ws-1#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "running",
+          "started_at": 462,
+          "ended_at": 699,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":13000000,\"vs_baseline\":1.3,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":13000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 12,
+      "timestamp": "2026-10-15T16:42:30+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w1-gate",
+          "parent": "flow:root/ws-1#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "done",
+          "started_at": 462,
+          "ended_at": 699,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":13000000,\"vs_baseline\":1.3,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":13000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 13,
+      "timestamp": "2026-10-15T16:42:31+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "flow:root/ws-1#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "done",
+          "started_at": 100,
+          "ended_at": 700,
+          "label": {
+            "kind": "workstream",
+            "title": "Settled after one retry",
+            "attrs_json": "{\"hypothesis_id\":\"H1\",\"parent_revision\":\"r0\",\"base_round\":null,\"revision\":\"r1\"}",
+            "verdict": "passed",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 14,
+      "timestamp": "2026-10-15T16:32:41+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/ws-2#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "running",
+          "started_at": 110,
+          "label": {
+            "kind": "workstream",
+            "title": "Settled after two retries",
+            "attrs_json": "{\"hypothesis_id\":\"H2\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 15,
+      "timestamp": "2026-10-15T16:32:42+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w2-turn",
+          "parent": "flow:root/ws-2#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 111,
+          "attempts": [
+            {
+              "n": 1,
+              "of": 3,
+              "started_at": 111,
+              "ended_at": 136,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 2,
+              "of": 3,
+              "started_at": 141,
+              "ended_at": 166,
+              "outcome": "again",
+              "reason": "build failed: missing Send bound"
+            },
+            {
+              "n": 3,
+              "of": 3,
+              "started_at": 171
+            }
+          ],
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w2-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 16,
+      "timestamp": "2026-10-15T16:33:42+00:00",
+      "type": "span_updated",
+      "data": {
+        "kind": "span_updated",
+        "span": {
+          "id": "op:w2-turn",
+          "parent": "flow:root/ws-2#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 111,
+          "attempts": [
+            {
+              "n": 1,
+              "of": 3,
+              "started_at": 111,
+              "ended_at": 136,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 2,
+              "of": 3,
+              "started_at": 141,
+              "ended_at": 166,
+              "outcome": "again",
+              "reason": "build failed: missing Send bound"
+            },
+            {
+              "n": 3,
+              "of": 3,
+              "started_at": 171
+            }
+          ],
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w2-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 17,
+      "timestamp": "2026-10-15T16:38:42+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w2-turn",
+          "parent": "flow:root/ws-2#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "done",
+          "started_at": 111,
+          "ended_at": 471,
+          "attempts": [
+            {
+              "n": 1,
+              "of": 3,
+              "started_at": 111,
+              "ended_at": 136,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 2,
+              "of": 3,
+              "started_at": 141,
+              "ended_at": 166,
+              "outcome": "again",
+              "reason": "build failed: missing Send bound"
+            },
+            {
+              "n": 3,
+              "of": 3,
+              "started_at": 171,
+              "ended_at": 471,
+              "outcome": "done"
+            }
+          ],
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w2-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 18,
+      "timestamp": "2026-10-15T16:38:43+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w2-gate",
+          "parent": "flow:root/ws-2#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "running",
+          "started_at": 472,
+          "ended_at": 709,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":9000000,\"vs_baseline\":0.9,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":9000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "slower"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 19,
+      "timestamp": "2026-10-15T16:42:40+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w2-gate",
+          "parent": "flow:root/ws-2#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "done",
+          "started_at": 472,
+          "ended_at": 709,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":9000000,\"vs_baseline\":0.9,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":9000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "slower"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 20,
+      "timestamp": "2026-10-15T16:42:41+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "flow:root/ws-2#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "done",
+          "started_at": 110,
+          "ended_at": 710,
+          "label": {
+            "kind": "workstream",
+            "title": "Settled after two retries",
+            "attrs_json": "{\"hypothesis_id\":\"H2\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "verdict": "failed",
+            "reason": "turned_down",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 21,
+      "timestamp": "2026-10-15T16:32:51+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/ws-3#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "running",
+          "started_at": 120,
+          "label": {
+            "kind": "workstream",
+            "title": "Gave up after four retries",
+            "attrs_json": "{\"hypothesis_id\":\"H3\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 22,
+      "timestamp": "2026-10-15T16:32:52+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w3-turn",
+          "parent": "flow:root/ws-3#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 121,
+          "attempts": [
+            {
+              "n": 1,
+              "of": 5,
+              "started_at": 121,
+              "ended_at": 146,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 2,
+              "of": 5,
+              "started_at": 151,
+              "ended_at": 176,
+              "outcome": "again",
+              "reason": "build failed: missing Send bound"
+            },
+            {
+              "n": 3,
+              "of": 5,
+              "started_at": 181,
+              "ended_at": 206,
+              "outcome": "again",
+              "reason": "the correctness check timed out after 600 s"
+            },
+            {
+              "n": 4,
+              "of": 5,
+              "started_at": 211,
+              "ended_at": 236,
+              "outcome": "again",
+              "reason": "the agent ended its turn without a reply"
+            },
+            {
+              "n": 5,
+              "of": 5,
+              "started_at": 241
+            }
+          ],
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-3\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w3-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 23,
+      "timestamp": "2026-10-15T16:34:52+00:00",
+      "type": "span_updated",
+      "data": {
+        "kind": "span_updated",
+        "span": {
+          "id": "op:w3-turn",
+          "parent": "flow:root/ws-3#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 121,
+          "attempts": [
+            {
+              "n": 1,
+              "of": 5,
+              "started_at": 121,
+              "ended_at": 146,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 2,
+              "of": 5,
+              "started_at": 151,
+              "ended_at": 176,
+              "outcome": "again",
+              "reason": "build failed: missing Send bound"
+            },
+            {
+              "n": 3,
+              "of": 5,
+              "started_at": 181,
+              "ended_at": 206,
+              "outcome": "again",
+              "reason": "the correctness check timed out after 600 s"
+            },
+            {
+              "n": 4,
+              "of": 5,
+              "started_at": 211,
+              "ended_at": 236,
+              "outcome": "again",
+              "reason": "the agent ended its turn without a reply"
+            },
+            {
+              "n": 5,
+              "of": 5,
+              "started_at": 241
+            }
+          ],
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-3\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w3-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 24,
+      "timestamp": "2026-10-15T16:38:52+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w3-turn",
+          "parent": "flow:root/ws-3#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "failed",
+          "started_at": 121,
+          "ended_at": 481,
+          "attempts": [
+            {
+              "n": 1,
+              "of": 5,
+              "started_at": 121,
+              "ended_at": 146,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 2,
+              "of": 5,
+              "started_at": 151,
+              "ended_at": 176,
+              "outcome": "again",
+              "reason": "build failed: missing Send bound"
+            },
+            {
+              "n": 3,
+              "of": 5,
+              "started_at": 181,
+              "ended_at": 206,
+              "outcome": "again",
+              "reason": "the correctness check timed out after 600 s"
+            },
+            {
+              "n": 4,
+              "of": 5,
+              "started_at": 211,
+              "ended_at": 236,
+              "outcome": "again",
+              "reason": "the agent ended its turn without a reply"
+            },
+            {
+              "n": 5,
+              "of": 5,
+              "started_at": 241,
+              "ended_at": 481,
+              "outcome": "done"
+            }
+          ],
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-3\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w3-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 25,
+      "timestamp": "2026-10-15T16:42:51+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "flow:root/ws-3#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "failed",
+          "started_at": 120,
+          "ended_at": 720,
+          "label": {
+            "kind": "workstream",
+            "title": "Gave up after four retries",
+            "attrs_json": "{\"hypothesis_id\":\"H3\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "verdict": "failed",
+            "reason": "turn-limit",
+            "links": []
+          },
+          "failure": {
+            "kind": "outcome",
+            "message": "the idea could not be implemented"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 26,
+      "timestamp": "2026-10-15T16:33:01+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/ws-4#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "running",
+          "started_at": 130,
+          "label": {
+            "kind": "workstream",
+            "title": "Retrying now",
+            "attrs_json": "{\"hypothesis_id\":\"H4\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 27,
+      "timestamp": "2026-10-15T16:33:02+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w4-turn",
+          "parent": "flow:root/ws-4#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 131,
+          "attempts": [
+            {
+              "n": 1,
+              "of": 3,
+              "started_at": 131,
+              "ended_at": 156,
+              "outcome": "again",
+              "reason": "build failed: missing Send bound"
+            },
+            {
+              "n": 2,
+              "of": 3,
+              "started_at": 161,
+              "ended_at": 186,
+              "outcome": "again",
+              "reason": "the correctness check timed out after 600 s"
+            },
+            {
+              "n": 3,
+              "of": 3,
+              "started_at": 191
+            }
+          ],
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-4\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w4-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 28,
+      "timestamp": "2026-10-15T16:34:02+00:00",
+      "type": "span_updated",
+      "data": {
+        "kind": "span_updated",
+        "span": {
+          "id": "op:w4-turn",
+          "parent": "flow:root/ws-4#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 131,
+          "attempts": [
+            {
+              "n": 1,
+              "of": 3,
+              "started_at": 131,
+              "ended_at": 156,
+              "outcome": "again",
+              "reason": "build failed: missing Send bound"
+            },
+            {
+              "n": 2,
+              "of": 3,
+              "started_at": 161,
+              "ended_at": 186,
+              "outcome": "again",
+              "reason": "the correctness check timed out after 600 s"
+            },
+            {
+              "n": 3,
+              "of": 3,
+              "started_at": 191
+            }
+          ],
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-4\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w4-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 29,
+      "timestamp": "2026-10-15T16:33:11+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/ws-5#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "running",
+          "started_at": 140,
+          "label": {
+            "kind": "workstream",
+            "title": "Same reason four times",
+            "attrs_json": "{\"hypothesis_id\":\"H5\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 30,
+      "timestamp": "2026-10-15T16:33:12+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w5-turn",
+          "parent": "flow:root/ws-5#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 141,
+          "attempts": [
+            {
+              "n": 1,
+              "of": 5,
+              "started_at": 141,
+              "ended_at": 166,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 2,
+              "of": 5,
+              "started_at": 171,
+              "ended_at": 196,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 3,
+              "of": 5,
+              "started_at": 201,
+              "ended_at": 226,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 4,
+              "of": 5,
+              "started_at": 231,
+              "ended_at": 256,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 5,
+              "of": 5,
+              "started_at": 261
+            }
+          ],
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-5\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w5-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 31,
+      "timestamp": "2026-10-15T16:35:12+00:00",
+      "type": "span_updated",
+      "data": {
+        "kind": "span_updated",
+        "span": {
+          "id": "op:w5-turn",
+          "parent": "flow:root/ws-5#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 141,
+          "attempts": [
+            {
+              "n": 1,
+              "of": 5,
+              "started_at": 141,
+              "ended_at": 166,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 2,
+              "of": 5,
+              "started_at": 171,
+              "ended_at": 196,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 3,
+              "of": 5,
+              "started_at": 201,
+              "ended_at": 226,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 4,
+              "of": 5,
+              "started_at": 231,
+              "ended_at": 256,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 5,
+              "of": 5,
+              "started_at": 261
+            }
+          ],
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-5\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w5-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 32,
+      "timestamp": "2026-10-15T16:39:12+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w5-turn",
+          "parent": "flow:root/ws-5#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "done",
+          "started_at": 141,
+          "ended_at": 501,
+          "attempts": [
+            {
+              "n": 1,
+              "of": 5,
+              "started_at": 141,
+              "ended_at": 166,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 2,
+              "of": 5,
+              "started_at": 171,
+              "ended_at": 196,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 3,
+              "of": 5,
+              "started_at": 201,
+              "ended_at": 226,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 4,
+              "of": 5,
+              "started_at": 231,
+              "ended_at": 256,
+              "outcome": "again",
+              "reason": "build failed: borrow error in lib.rs"
+            },
+            {
+              "n": 5,
+              "of": 5,
+              "started_at": 261,
+              "ended_at": 501,
+              "outcome": "done"
+            }
+          ],
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-5\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w5-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 33,
+      "timestamp": "2026-10-15T16:39:13+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w5-gate",
+          "parent": "flow:root/ws-5#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "running",
+          "started_at": 502,
+          "ended_at": 739,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":16000000,\"vs_baseline\":1.6,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":16000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 34,
+      "timestamp": "2026-10-15T16:43:10+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w5-gate",
+          "parent": "flow:root/ws-5#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "done",
+          "started_at": 502,
+          "ended_at": 739,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":16000000,\"vs_baseline\":1.6,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":16000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 35,
+      "timestamp": "2026-10-15T16:43:11+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "flow:root/ws-5#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "done",
+          "started_at": 140,
+          "ended_at": 740,
+          "label": {
+            "kind": "workstream",
+            "title": "Same reason four times",
+            "attrs_json": "{\"hypothesis_id\":\"H5\",\"parent_revision\":\"r0\",\"base_round\":null,\"revision\":\"r5\"}",
+            "verdict": "passed",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-180000",
+      "sequence": 36,
+      "timestamp": "2026-10-15T16:45:51+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:adopt",
+          "parent": "flow:root#1",
+          "type": "operation",
+          "name": "adopt",
+          "status": "running",
+          "started_at": 900,
+          "label": {
+            "kind": "adoption",
+            "title": "r5",
+            "attrs_json": "{\"candidate\":\"r5\",\"metric_value\":16000000,\"vs_baseline\":1.6}"
+          }
+        }
+      }
+    }
+  ]
+}

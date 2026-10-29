@@ -35,6 +35,7 @@ from vs_core.api import (
 )
 from vs_runtime.api.core import (
     ExecutionResult,
+    ReceiptEvidenceLedger,
     ReceiptStore,
     RuntimeWorkspaceRequests,
     StoreWorkspaceReceipts,
@@ -64,7 +65,7 @@ if TYPE_CHECKING:
 # (`--depth=nightly`) searches deeper.
 
 _ROOT = WorkspaceMode.EXCLUSIVE_ROOT
-_ARTIFACT_DIR = "roadmap"
+_ARTIFACT_DIR = "profile"
 _PLAN = f"{_ARTIFACT_DIR}/plan.md"
 _NEVER = 10**6
 _WRITES_PER_REQUEST = 9
@@ -154,7 +155,11 @@ class Host:
 
     def executor(self, store: ReceiptStore) -> RuntimeWorkspaceRequests:
         return RuntimeWorkspaceRequests(
-            self.env.hosts[-1], store, SettledRunInvocations(), blocking=InlineBlockingRunner()
+            self.env.hosts[-1],
+            store,
+            SettledRunInvocations(),
+            blocking=InlineBlockingRunner(),
+            evidence=ReceiptEvidenceLedger(store),
         )
 
     async def run(

@@ -1,0 +1,8 @@
+{
+  "protocol_version": 1,
+  "type": "comparisons_read",
+  "sequence": 3,
+  "run_id": "run-conformance",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "text": "vLLM 66.2 tok/s"
+}

@@ -25,6 +25,8 @@
  * argument vector, so This Mac and an ssh host start the helper the same way.
  */
 
+import type {CheckoutProblem} from '../state/host-connection.js';
+
 /** Directories probed for `uv` when it is on neither the host's PATH nor a login shell's. */
 const PROBED_DIRECTORIES = [
   '$HOME/.local/bin',
@@ -98,6 +100,12 @@ export function remoteBootstrap(checkout: string, uv: string | null): string {
   return ['sh', '-c', `'${BOOTSTRAP_SCRIPT}'`, ROLE, datum(checkout), datum(uv ?? '')].join(' ');
 }
 
+/** Carry a POSIX command through any login shell using the bootstrap's existing hex codec. */
+export function remoteCommand(script: string): string {
+  if (script.includes('\0')) throw new Error('a remote command contains a NUL');
+  return ['sh', '-c', `'${DECODE} exec /bin/sh -c "$1"'`, 'vibesys-command', hex(script)].join(' ');
+}
+
 /** The local argument vector (for `/bin/sh`) that starts the helper from `checkout`. */
 export function localBootstrap(checkout: string, uv: string | null): readonly string[] {
   return ['-c', BOOTSTRAP_SCRIPT, ROLE, datum(checkout), datum(uv ?? '')];
@@ -121,34 +129,42 @@ const NOT_CHECKOUT: Readonly<Record<string, (where: string) => string>> = {
 
 /**
  * What a bootstrap that exited before its helper answered `hello` means, for the user: the checkout
- * at `where` (`PATH on HOST`), from its exit `status` and the `lines` it printed. Null unless the
- * status is a reserved one and its own line is among `lines`: another program that happens to
- * exit with a reserved status is not a bootstrap report.
+ * at `where` (`PATH on HOST`), from its exit `status` and the `lines` it printed, and which
+ * checkout problem it is (`missing`: no VibeSys checkout at the path; `too-old`: one that predates
+ * the helper; null: the checkout is fine and something else is missing). Null unless the status is
+ * a reserved one and its own line is among `lines`: another program that happens to exit with a
+ * reserved status is not a bootstrap report.
  */
 export function bootstrapProblem(
   status: number | null,
   lines: readonly string[],
   where: string,
-): string | null {
+): {readonly message: string; readonly checkout: CheckoutProblem | null} | null {
   const said = lines.map(line => line.trim());
   switch (status) {
     case predates: {
       const line = said.find(text => text === 'predates' || text.startsWith('predates '));
       if (line === undefined) return null;
       const version = line.slice('predates'.length).trim() || 'unknown';
-      return `The VibeSys checkout ${where} predates the desktop helper (version ${version}). Update it, then try again.`;
+      return {
+        message: `The VibeSys checkout ${where} predates the desktop helper (version ${version}). Update it, then try again.`,
+        checkout: 'too-old',
+      };
     }
     case notCheckout: {
       const line = said.find(text => Object.hasOwn(NOT_CHECKOUT, text));
-      return line === undefined ? null : (NOT_CHECKOUT[line]?.(where) ?? null);
+      const message = line === undefined ? undefined : NOT_CHECKOUT[line]?.(where);
+      return message === undefined ? null : {message, checkout: 'missing'};
     }
     case noUv:
       if (!said.includes('missing')) return null;
-      return (
-        `uv was not found ${where.slice(where.indexOf(' on ') + 1)}; tried the PATH of a ` +
-        `non-interactive shell, the login shell's PATH, and ${PROBED_DIRECTORIES.map(d => `${d}/uv`).join(', ')}. ` +
-        'Install uv there (https://docs.astral.sh/uv/) or put it on the PATH.'
-      );
+      return {
+        checkout: null,
+        message:
+          `uv was not found ${where.slice(where.indexOf(' on ') + 1)}; tried the PATH of a ` +
+          `non-interactive shell, the login shell's PATH, and ${PROBED_DIRECTORIES.map(d => `${d}/uv`).join(', ')}. ` +
+          'Install uv there (https://docs.astral.sh/uv/) or put it on the PATH.',
+      };
     default:
       return null;
   }

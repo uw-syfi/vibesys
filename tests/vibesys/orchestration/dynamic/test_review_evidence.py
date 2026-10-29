@@ -24,9 +24,7 @@ from vs_sim.api.testing import examples
 
 CANDIDATE = revision("candidate")
 LIMIT = 1500
-KINDS = st.sampled_from(
-    [EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK, EvidenceKind.LOCAL_VALIDATION]
-)
+KINDS = st.sampled_from([EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK])
 
 
 @settings(max_examples=examples(pr=8, nightly=100))

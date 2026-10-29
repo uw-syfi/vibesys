@@ -48,6 +48,7 @@ type Keeps = Literal["checkpoint", "reply"]
 
 PEER = core.Role(
     name="peer",
+    title="Peer",
     prompt="toy/peer.j2",
     reply=Result,
     workspace=core.WorkspaceMode.ISOLATED_CHILD,

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Annotated, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from vibesys.hypothesis import DecidedFrom
 from vibesys.orchestration.evolve.population import OpenEvolveSelectorConfig
 from vibesys.orchestration.review import Verdict
 from vs_core.api.search import RevisionReply
@@ -39,7 +40,9 @@ class JudgeResponse(BaseModel):
     feedback: str = Field(
         description="Specific actionable feedback for the mutator. Empty string if passing."
     )
-    verdict: Verdict = Field(description="PASS if all criteria are met, FAIL otherwise.")
+    verdict: Annotated[Verdict, DecidedFrom("cited_evidence")] = Field(
+        description="PASS if all criteria are met, FAIL otherwise."
+    )
 
 
 class OpenEvolveOverrides(TypedDict, total=False):

@@ -5,7 +5,9 @@
   "globalDependencies": [
     "tools/tsconfig.base.json",
     "tools/scripts/run_bun_tests.mjs",
-    "tools/scripts/run_node_tests.mjs"
+    "tools/scripts/run_node_tests.mjs",
+    "tools/scripts/run_node_suite.mjs",
+    "tools/scripts/test_runner_config.mjs"
   ],
   "tasks": {
     "transit": {

@@ -43,6 +43,7 @@ class _ArgsOptions(TypedDict, total=False):
 
 NKI_WRAPPER_DIR = PROJECT_ROOT / "resources" / "skills" / "neuron-agentic-development"
 NKI_SKILL_NAMES = {
+    "neuron-explorer-profile-schema",
     "neuron-nki-debugging",
     "neuron-nki-docs",
     "neuron-nki-profile-querying",
@@ -347,6 +348,8 @@ def test_all_repository_skill_metadata_is_valid() -> None:
     assert metadata["kernel-performance"].domains == (DomainName.KERNEL_WRITING,)
     assert metadata["kernel-ncu-analysis"].domains == (DomainName.KERNEL_WRITING,)
     assert metadata["kernel-ncu-analysis"].backends == (ComputeBackend.CUDA,)
+    assert metadata["kernel-timeline-analysis"].domains == (DomainName.KERNEL_WRITING,)
+    assert metadata["kernel-timeline-analysis"].backends == (ComputeBackend.CUDA,)
     assert metadata["kernel-rocprof-analysis"].domains == (DomainName.KERNEL_WRITING,)
     assert metadata["kernel-rocprof-analysis"].backends == (ComputeBackend.ROCM,)
     assert set(metadata) >= NKI_SKILL_NAMES
@@ -370,11 +373,12 @@ def test_kernel_skills_follow_domain_and_backend(tmp_path: Path) -> None:
     )
 
     shared = {"kernel-correctness", "kernel-performance"}
-    analysis = {"kernel-ncu-analysis", "kernel-rocprof-analysis"}
-    assert shared | {"kernel-ncu-analysis"} <= _skill_names(kernel_skills)
+    cuda_analysis = {"kernel-ncu-analysis", "kernel-timeline-analysis"}
+    analysis = cuda_analysis | {"kernel-rocprof-analysis"}
+    assert shared | cuda_analysis <= _skill_names(kernel_skills)
     assert "kernel-rocprof-analysis" not in _skill_names(kernel_skills)
     assert shared | {"kernel-rocprof-analysis"} <= _skill_names(rocm_skills)
-    assert "kernel-ncu-analysis" not in _skill_names(rocm_skills)
+    assert cuda_analysis.isdisjoint(_skill_names(rocm_skills))
     assert (shared | analysis).isdisjoint(_skill_names(serving_skills))
     assert (shared | analysis).isdisjoint(_skill_names(rocm_serving_skills))
     assert analysis.isdisjoint(_skill_names(trainium_skills))

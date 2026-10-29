@@ -736,7 +736,7 @@ Prior to Trainium2, DMA descriptor generation was handled in two ways. They were
 
 In comparison, the new hardware-based DGE in Trainium2 generates descriptors on demand without requiring additional memory storage. It also frees up GpsimdE to perform useful computation. Therefore, it is recommended to leverage hardware-based DGE on Trainium2 whenever possible to initiate a DMA transfer.
 
-NKI programmers can invoke hardware-based DGE on NeuronCore-v3 using `nisa.dma_copy` and `nisa.dma_transpose` APIs, by setting `dge_mode=nisa.dge_mode.hw_dge`. The compute engine to initiate a DGE command (Sync Engine or ScalarE) is currently determined by NKI compiler (subject to changes).
+NKI programmers can invoke hardware-based DGE on NeuronCore-v3 using `nisa.dma_copy` and `nisa.dma_transpose` APIs, by setting `dge_mode=nisa.dge_mode.hwdge`. The compute engine to initiate a DGE command (Sync Engine or ScalarE) is currently determined by NKI compiler (subject to changes).
 
 > **Note**
 >

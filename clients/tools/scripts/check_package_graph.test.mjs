@@ -9,6 +9,7 @@ import {
   owningEntry,
   packageGraphErrors,
   RULES,
+  STRICT_LINT_PLUGINS,
   workspaceSpecifiers,
 } from './check_package_graph.mjs';
 
@@ -83,6 +84,72 @@ function desktopMainPackage() {
   };
 }
 
+/** The design system's package: components, the token table and the generated stylesheet. */
+function uiPackage() {
+  return {
+    manifest: {
+      name: '@vibesys/ui',
+      vibesys: {
+        layer: 'foundation',
+        entries: {'.': 'dom', './tokens': 'neutral', './tokens.css': 'dom'},
+      },
+      exports: {
+        '.': source('index'),
+        './tokens': source('tokens/index'),
+        './tokens.css': {'@vibesys/source': './src/tokens.css', default: './src/tokens.css'},
+      },
+      dependencies: {react: '19.1.1'},
+    },
+    files: {
+      'src/index.ts': "import 'react';\nexport const button = 1;\n",
+      'src/index.test.ts': "test('a button for any run', () => {});\n",
+      'src/tokens/index.ts': 'export const space = 4;\n',
+      'src/tokens.css': ':root { --accent: blue; }\n',
+      'tsconfig.lib.json': project({lib: ['ES2022', 'DOM'], include: ['src']}),
+      'tsconfig.tokens.json': project({include: ['src/tokens']}),
+    },
+  };
+}
+
+/** A strict feature: UI from `@vibesys/ui` only, a machine, no stylesheet. */
+function strictScreenPackage() {
+  return {
+    manifest: {
+      name: '@vibesys/feature-screen',
+      vibesys: {
+        layer: 'feature',
+        entries: {'./state': 'neutral', './renderer': 'dom'},
+      },
+      exports: {'./state': source('state/index'), './renderer': source('renderer/index')},
+      dependencies: {
+        '@vibesys/contracts': 'workspace:*',
+        '@vibesys/ui': 'workspace:*',
+        react: '19.1.1',
+        xstate: '5.33.2',
+      },
+    },
+    files: {
+      'src/state/index.ts':
+        "import {setup} from 'xstate';\nimport type {RunEvent} from '@vibesys/contracts';\n" +
+        'export const machine = setup({});\nexport type S = RunEvent;\n',
+      'src/renderer/index.ts':
+        "import 'react/jsx-runtime';\nimport {button} from '@vibesys/ui';\n" +
+        "import {space} from '@vibesys/ui/tokens';\nexport const r = [button, space];\n",
+      // Tests are not UI: a strict package's tests may use any test library.
+      'src/renderer/index.test.ts': "import '@radix-ui/react-dialog';\nimport './index.js';\n",
+      'tsconfig.state.json': project({
+        include: ['src/state'],
+        references: ['../../libs/contracts/tsconfig.lib.json'],
+      }),
+      'tsconfig.renderer.json': project({
+        lib: ['ES2022', 'DOM'],
+        include: ['src/renderer'],
+        references: ['./tsconfig.state.json', '../../libs/ui/tsconfig.lib.json'],
+      }),
+    },
+  };
+}
+
 /** The valid workspace: one package per layer shape the design uses. */
 function validWorkspace() {
   return {
@@ -97,23 +164,7 @@ function validWorkspace() {
         'tsconfig.lib.json': project({include: ['src']}),
       },
     },
-    ui: {
-      manifest: {
-        name: '@vibesys/ui',
-        vibesys: {layer: 'foundation', entries: {'.': 'dom', './tokens.css': 'dom'}},
-        exports: {
-          '.': source('index'),
-          './tokens.css': {'@vibesys/source': './src/tokens.css', default: './src/tokens.css'},
-        },
-        dependencies: {react: '19.1.1'},
-      },
-      files: {
-        'src/index.ts': "import 'react';\nexport const button = 1;\n",
-        'src/index.test.ts': "test('a button for any run', () => {});\n",
-        'src/tokens.css': ':root { --accent: blue; }\n',
-        'tsconfig.lib.json': project({lib: ['ES2022', 'DOM'], include: ['src']}),
-      },
-    },
+    ui: uiPackage(),
     connection: {
       manifest: {
         name: '@vibesys/connection',
@@ -171,6 +222,7 @@ function validWorkspace() {
         }),
       },
     },
+    screen: strictScreenPackage(),
     'desktop-main': desktopMainPackage(),
     'web-app': {
       manifest: {
@@ -209,6 +261,18 @@ async function materialize(t, workspace) {
   await writeFile(
     join(root, 'pnpm-workspace.yaml'),
     `packages:\n${patterns.map(pattern => `  - "${pattern}"\n`).join('')}`,
+  );
+  const includes = [
+    'features/**/src/**/*.ts',
+    'features/**/src/**/*.tsx',
+    'apps/**/src/**/*.ts',
+    'apps/**/src/**/*.tsx',
+    '!**/*.test.ts',
+    '!**/*.test.tsx',
+  ];
+  await writeFile(
+    join(root, 'biome.json'),
+    JSON.stringify({overrides: [{includes, plugins: STRICT_LINT_PLUGINS}]}),
   );
   await mkdir(join(root, 'tools'), {recursive: true});
   await writeFile(join(root, 'tools', 'tsconfig.base.json'), JSON.stringify(BASE));
@@ -298,6 +362,12 @@ const RULE_CASES = {
   'layer-matches-folder': workspace => {
     workspace.misfiled = misfiledLibrary('apps/misfiled');
   },
+  'strict-no-stylesheets': workspace => {
+    workspace.screen.files['src/renderer/screen.css'] = '.screen { color: red; }\n';
+  },
+  'strict-imports': workspace => {
+    workspace.screen.files['src/renderer/index.ts'] += "import '@radix-ui/react-dialog';\n";
+  },
 };
 
 /** A leaf foundation library filed at `directory`, which nothing depends on. */
@@ -330,24 +400,6 @@ for (const [rule, mutate] of Object.entries(RULE_CASES)) {
     for (const error of errors) assert.ok(error.startsWith(`${rule}: `), error);
   });
 }
-
-test('legacy packages skip only the per-entry project rules', async t => {
-  const workspace = validWorkspace();
-  workspace.legacy = {
-    directory: 'tui',
-    manifest: {
-      name: '@vibesys/tui',
-      vibesys: {layer: 'app', entries: {'.': 'dom'}},
-      dependencies: {'@vibesys/connection': 'workspace:*'},
-    },
-    files: {'src/index.ts': "import '@vibesys/connection';\n"},
-  };
-  const errors = packageGraphErrors(await materialize(t, workspace));
-  assert.deepEqual(
-    errors.map(error => error.split(':')[0]),
-    ['runtime-reachability'],
-  );
-});
 
 test('a preload reaches neither a Node entry nor a Node builtin', async t => {
   const workspace = validWorkspace();
@@ -388,9 +440,6 @@ const EXTERNAL_CASES = {
   },
   'a Node builtin in a neutral entry': workspace => {
     workspace.contracts.files['src/index.ts'] += "import 'node:fs';\n";
-  },
-  'the terminal UI runtime outside an app': workspace => {
-    workspace.contracts.files['src/index.ts'] += "import '@opentui/core';\n";
   },
   'React declared by a package with no dom entry': workspace => {
     workspace.contracts.manifest.dependencies = {'react-dom': '19.1.1'};
@@ -488,7 +537,7 @@ test('a bucket name is allowed above the domain layer and as part of a longer wo
   assert.deepEqual(packageGraphErrors(await materialize(t, workspace)), []);
 });
 
-test('a feature may publish its views stylesheet, as a dom asset only', async t => {
+test('a feature stylesheet is a dom asset but violates the design rule', async t => {
   const workspace = validWorkspace();
   const feature = workspace['stop-run'];
   feature.manifest.vibesys.entries['./styles.css'] = 'dom';
@@ -497,7 +546,10 @@ test('a feature may publish its views stylesheet, as a dom asset only', async t 
     default: './src/renderer/styles.css',
   };
   feature.files['src/renderer/styles.css'] = '.stop-button { color: red; }\n';
-  assert.deepEqual(packageGraphErrors(await materialize(t, workspace)), []);
+  assert.deepEqual(
+    packageGraphErrors(await materialize(t, workspace)).map(error => error.split(':')[0]),
+    ['strict-no-stylesheets', 'strict-no-stylesheets'],
+  );
   feature.manifest.vibesys.entries['./styles.css'] = 'neutral';
   const errors = packageGraphErrors(await materialize(t, workspace));
   assert.deepEqual(
@@ -552,7 +604,7 @@ for (const [name, directory, declare] of FOLDER_CASES) {
   });
 }
 
-test('layer-matches-folder accepts each library layer in libs and the deprecated tui outside', async t => {
+test('layer-matches-folder accepts each library layer in libs ', async t => {
   const workspace = validWorkspace();
   // Named for a concept each, so the bucket-names rule has nothing to say.
   const libraries = {foundation: 'alpha', core: 'beta', domain: 'gamma', service: 'delta'};
@@ -562,31 +614,207 @@ test('layer-matches-folder accepts each library layer in libs and the deprecated
     library.manifest.vibesys.layer = layer;
     workspace[name] = library;
   }
-  workspace.legacy = {
-    directory: 'tui',
-    manifest: {
-      name: '@vibesys/tui',
-      vibesys: {layer: 'app', entries: {'.': 'dom'}},
-    },
-    files: {'src/index.ts': 'export {};\n'},
-  };
   const errors = packageGraphErrors(await materialize(t, workspace));
-  assert.deepEqual(
-    errors.map(error => error.split(':')[0]),
-    [],
+  assert.deepEqual(errors, []);
+});
+
+// Design rules S2 and S6 apply to every feature and app. Each case changes one valid workspace
+// and must be reported by the named rule with its location and fix.
+
+const strictRules = errors => errors.filter(error => error.startsWith('strict-'));
+
+async function strictErrorsOf(t, mutate) {
+  const workspace = validWorkspace();
+  mutate(workspace);
+  return strictRules(packageGraphErrors(await materialize(t, workspace)));
+}
+
+test('declarations rejects the obsolete design marker', async t => {
+  const workspace = validWorkspace();
+  workspace.screen.manifest.vibesys.design = 'strict';
+  const errors = packageGraphErrors(await materialize(t, workspace));
+  assert.deepEqual(errors, [
+    'declarations: features/screen/package.json: unknown key vibesys.design',
+  ]);
+});
+
+test('declarations still rejects an unknown vibesys key', async t => {
+  const workspace = validWorkspace();
+  workspace.screen.manifest.vibesys.theme = 'strict';
+  const errors = packageGraphErrors(await materialize(t, workspace));
+  assert.deepEqual(errors, [
+    'declarations: features/screen/package.json: unknown key vibesys.theme',
+  ]);
+});
+
+const STYLESHEET_CASES = {
+  'a CSS file': workspace => {
+    workspace.screen.files['src/renderer/screen.css'] = '.a { color: red; }\n';
+  },
+  'a CSS module': workspace => {
+    workspace.screen.files['src/renderer/screen.module.css'] = '.a { color: red; }\n';
+  },
+  'a Sass file': workspace => {
+    workspace.screen.files['src/renderer/nested/screen.scss'] = '.a { .b { color: red; } }\n';
+  },
+  'a stylesheet outside src': workspace => {
+    workspace.screen.files['styles/theme.less'] = '@a: red;\n';
+  },
+  'a stylesheet export': workspace => {
+    workspace.screen.manifest.vibesys.entries['./styles.css'] = 'dom';
+    workspace.screen.manifest.exports['./styles.css'] = {
+      '@vibesys/source': './src/renderer/styles.css',
+      default: './src/renderer/styles.css',
+    };
+    workspace.screen.files['src/renderer/styles.css'] = '.a { color: red; }\n';
+  },
+};
+
+for (const [name, mutate] of Object.entries(STYLESHEET_CASES)) {
+  test(`strict-no-stylesheets rejects ${name}, naming the file and the fix`, async t => {
+    const errors = await strictErrorsOf(t, mutate);
+    assert.notEqual(errors.length, 0);
+    for (const error of errors) {
+      assert.match(
+        error,
+        /^strict-no-stylesheets: features\/screen\/\S+: .*\(S2\).*@vibesys\/ui/,
+        error,
+      );
+    }
+  });
+}
+
+test('an unmarked feature still cannot ship a stylesheet', async t => {
+  const workspace = validWorkspace();
+  workspace.screen.files['src/renderer/screen.css'] = '.a { color: red; }\n';
+  const errors = packageGraphErrors(await materialize(t, workspace));
+  assert.ok(errors.some(error => error.startsWith('strict-no-stylesheets: features/screen/')));
+});
+
+test('an unmarked app cannot import a component kit', async t => {
+  const workspace = validWorkspace();
+  workspace['web-app'].files['src/index.ts'] += "import 'lucide-react';\n";
+  const errors = packageGraphErrors(await materialize(t, workspace));
+  assert.ok(errors.some(error => error.startsWith('strict-imports: apps/web-app/src/index.ts:')));
+});
+
+const RENDERER = 'features/screen/src/renderer/index.ts';
+
+/** A strict import of `specifier` appended to a file: it lands on line 5. */
+function importing(file, specifier) {
+  return {
+    mutate: workspace => {
+      const path = file.replace('features/screen/', '');
+      workspace.screen.files[path] += `import '${specifier}';\n`;
+    },
+    where: `${file}:5`,
+    names: specifier,
+  };
+}
+
+const IMPORT_CASES = {
+  'a component kit': importing(RENDERER, '@radix-ui/react-dialog'),
+  'a utility class helper': importing(RENDERER, 'class-variance-authority'),
+  'CSS-in-JS': importing(RENDERER, 'styled-components'),
+  'an icon package': importing(RENDERER, 'lucide-react'),
+  'the stylesheet entry of @vibesys/ui': importing(RENDERER, '@vibesys/ui/tokens.css'),
+};
+
+for (const [name, {mutate, where, names}] of Object.entries(IMPORT_CASES)) {
+  test(`strict-imports rejects ${name}, naming the file, line and fix`, async t => {
+    const errors = await strictErrorsOf(t, mutate);
+    const found = errors.filter(error => error.startsWith(`strict-imports: ${where}: `));
+    assert.equal(found.length, 1, errors.join('\n'));
+    assert.ok(found[0].includes(names), found[0]);
+    assert.match(found[0], /\(S6\)/);
+    assert.match(found[0], /@vibesys\/ui/);
+  });
+}
+
+test('strict-imports rejects a UI kit declared in the manifest, naming the key', async t => {
+  const errors = await strictErrorsOf(t, workspace => {
+    workspace.screen.manifest.dependencies['lucide-react'] = '1.0.0';
+  });
+  assert.equal(errors.length, 1, errors.join('\n'));
+  assert.match(
+    errors[0],
+    /^strict-imports: features\/screen\/package\.json: dependencies\["lucide-react"\] \(S6\)/,
   );
 });
 
-test('the deprecated allowlist is by directory, so another top-level package is rejected', async t => {
+test('strict-imports allows the listed libraries, react-dom and tests', async t => {
   const workspace = validWorkspace();
-  workspace.legacy = {
-    directory: 'tui-clone',
-    manifest: {name: '@vibesys/tui', vibesys: {layer: 'app', entries: {'.': 'dom'}}},
-    files: {'src/index.ts': 'export {};\n'},
+  workspace['run-skeleton'] = {
+    manifest: {
+      name: '@vibesys/run-skeleton',
+      vibesys: {layer: 'domain', entries: {'.': 'neutral'}},
+      exports: {'.': source('index')},
+    },
+    files: {
+      'src/index.ts': 'export const skeleton = 1;\n',
+      'tsconfig.lib.json': project({include: ['src']}),
+    },
   };
+  workspace.screen.manifest.dependencies['@vibesys/run-skeleton'] = 'workspace:*';
+  workspace.screen.files['src/renderer/index.ts'] += "import '@vibesys/run-skeleton';\n";
+  workspace.screen.files['tsconfig.renderer.json'].references.push({
+    path: '../../libs/run-skeleton/tsconfig.lib.json',
+  });
+  workspace.screen.files['src/renderer/index.ts'] +=
+    "import 'react-dom/client';\nimport '@vibesys/connection';\nimport '@vibesys/ui';\n";
+  workspace.screen.manifest.dependencies['@vibesys/connection'] = 'workspace:*';
+  workspace.screen.manifest.dependencies['react-dom'] = '19.1.1';
+  workspace.screen.files['tsconfig.renderer.json'].references.push({
+    path: '../../libs/connection/tsconfig.lib.json',
+  });
   const errors = packageGraphErrors(await materialize(t, workspace));
-  assert.deepEqual(
-    errors.map(error => error.split(':')[0]),
-    ['layer-matches-folder'],
-  );
+  assert.deepEqual(strictRules(errors), []);
+});
+
+test('a strict app imports the generated stylesheets of @vibesys/ui', async t => {
+  const workspace = validWorkspace();
+  const app = workspace['web-app'];
+  app.manifest.dependencies = {'@vibesys/ui': 'workspace:*'};
+  app.files['tsconfig.lib.json'].references = [{path: '../../libs/ui/tsconfig.lib.json'}];
+  app.files['src/index.ts'] =
+    "import {button} from '@vibesys/ui';\nimport '@vibesys/ui/tokens.css';\nexport const a = button;\n";
+  app.files['src/index.test.ts'] = "import '@radix-ui/react-dialog';\n";
+  assert.deepEqual(strictRules(packageGraphErrors(await materialize(t, workspace))), []);
+});
+
+test('an app composes feature screens without marker declarations', async t => {
+  const workspace = validWorkspace();
+  const app = workspace['web-app'];
+  app.manifest.dependencies = {'@vibesys/feature-screen': 'workspace:*'};
+  app.files['tsconfig.lib.json'].references = [
+    {path: '../../features/screen/tsconfig.renderer.json'},
+  ];
+  app.files['src/index.ts'] =
+    "import {r} from '@vibesys/feature-screen/renderer';\nexport const a = r;\n";
+  assert.deepEqual(strictRules(packageGraphErrors(await materialize(t, workspace))), []);
+
+  app.manifest.dependencies['@vibesys/feature-stop-run'] = 'workspace:*';
+  app.files['src/index.ts'] += "import '@vibesys/feature-stop-run/renderer';\n";
+  assert.deepEqual(strictRules(packageGraphErrors(await materialize(t, workspace))), []);
+});
+
+test('strict packages can allocate request identities through the neutral foundation entry', async t => {
+  const workspace = validWorkspace();
+  workspace['request-identity'] = {
+    manifest: {
+      name: '@vibesys/request-identity',
+      vibesys: {layer: 'foundation', entries: {'.': 'neutral'}},
+      exports: {'.': source('index')},
+    },
+    files: {
+      'src/index.ts': 'export const newRequestId = () => "id";\n',
+      'tsconfig.lib.json': project({include: ['src']}),
+    },
+  };
+  workspace.screen.manifest.dependencies['@vibesys/request-identity'] = 'workspace:*';
+  workspace.screen.files['src/renderer/index.ts'] += "import '@vibesys/request-identity';\n";
+  workspace.screen.files['tsconfig.renderer.json'].references.push({
+    path: '../../libs/request-identity/tsconfig.lib.json',
+  });
+  assert.deepEqual(strictRules(packageGraphErrors(await materialize(t, workspace))), []);
 });

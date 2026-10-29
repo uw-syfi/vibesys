@@ -99,7 +99,10 @@ def test_ncu_is_unavailable_on_non_cuda_backends(backend: ComputeBackend) -> Non
         domain=DomainName.KERNEL_WRITING,
         backend=backend,
         environment_default_profiler_kind=ProfilerKind.NSYS,
-    ) is (ProfilerKind.ROCPROF if backend is ComputeBackend.ROCM else ProfilerKind.NONE)
+    ) is {
+        ComputeBackend.ROCM: ProfilerKind.ROCPROF,
+        ComputeBackend.TRAINIUM: ProfilerKind.NEURON,
+    }.get(backend, ProfilerKind.NONE)
     with pytest.raises(ValueError, match="Profiler 'ncu' is not supported"):
         resolve_profiler_kind(
             ProfilerKind.NCU,
@@ -107,6 +110,45 @@ def test_ncu_is_unavailable_on_non_cuda_backends(backend: ComputeBackend) -> Non
             backend=backend,
             environment_default_profiler_kind=ProfilerKind.NSYS,
         )
+
+
+@pytest.mark.parametrize("kind", [ProfilerKind.FLASHINFER, ProfilerKind.NCU_FLASHINFER])
+@pytest.mark.parametrize("domain", tuple(DomainName))
+@pytest.mark.parametrize("backend", tuple(ComputeBackend))
+def test_flashinfer_kinds_are_opt_in_for_cuda_kernel_writing_only(
+    kind: ProfilerKind, domain: DomainName, backend: ComputeBackend
+) -> None:
+    fits = domain is DomainName.KERNEL_WRITING and backend is ComputeBackend.CUDA
+    assert (kind in allowed_profiler_kinds(domain, backend)) is fits
+    for environment_default in _ENVIRONMENT_DEFAULTS:
+        try:
+            auto = resolve_profiler_choice(
+                ProfilerKind.AUTO,
+                domain=domain,
+                backend=backend,
+                environment_default_profiler_kind=environment_default,
+            )
+        except ValueError:
+            continue  # no profiler fits this combination; auto picked nothing, so not this kind
+        assert auto.kind is not kind
+    if fits:
+        assert (
+            resolve_profiler_kind(
+                kind,
+                domain=domain,
+                backend=backend,
+                environment_default_profiler_kind=ProfilerKind.NSYS,
+            )
+            is kind
+        )
+    else:
+        with pytest.raises(ValueError, match=f"Profiler {kind.value!r} is not supported"):
+            resolve_profiler_kind(
+                kind,
+                domain=domain,
+                backend=backend,
+                environment_default_profiler_kind=ProfilerKind.NSYS,
+            )
 
 
 def test_rocprof_is_default_for_rocm_kernel_writing_and_can_be_disabled() -> None:
@@ -208,6 +250,7 @@ def _expected_resolved(
         return {
             ComputeBackend.CUDA: ProfilerKind.NCU,
             ComputeBackend.ROCM: ProfilerKind.ROCPROF,
+            ComputeBackend.TRAINIUM: ProfilerKind.NEURON,
         }.get(backend, ProfilerKind.NONE)
     if allowed == frozenset({ProfilerKind.NONE}):
         return ProfilerKind.NONE
@@ -458,12 +501,22 @@ def test_rocprof_profiler_domains_and_preflight() -> None:
 
 def test_extra_support_kinds_default_empty_and_are_runnable_kinds() -> None:
     for kind, definition in PROFILER_DEFINITIONS.items():
-        if kind is ProfilerKind.ROCPROF:
+        if kind in {ProfilerKind.ROCPROF, ProfilerKind.NCU_FLASHINFER}:
             continue
         assert definition.extra_support_kinds == frozenset()
     for definition in PROFILER_DEFINITIONS.values():
         for extra_kind in definition.extra_support_kinds:
             assert extra_kind in PROFILER_DEFINITIONS
+
+
+def test_ncu_flashinfer_stages_both_parts_and_withholds_what_ncu_withholds() -> None:
+    combined = PROFILER_DEFINITIONS[ProfilerKind.NCU_FLASHINFER]
+    ncu = PROFILER_DEFINITIONS[ProfilerKind.NCU]
+    assert combined.extra_support_kinds == frozenset({ProfilerKind.NCU, ProfilerKind.FLASHINFER})
+    assert combined.tool == ncu.tool
+    assert combined.driver_tools == ncu.driver_tools
+    assert combined.domains == ncu.domains
+    assert combined.backends == ncu.backends
 
 
 @pytest.mark.parametrize("kind", [ProfilerKind.AUTO, ProfilerKind.NONE])
@@ -596,3 +649,23 @@ def test_auto_picks_a_profiler_that_fits_the_backend_or_says_why_it_picked_none(
     native = {ProfilerKind.LINUX_CPU, ProfilerKind.MACOS_CPU}
     if backend is not ComputeBackend.CPU:
         assert choice.kind not in native
+
+
+def test_neuron_is_default_for_trainium_kernel_writing_and_can_be_disabled() -> None:
+    assert ProfilerKind.NEURON in allowed_profiler_kinds(
+        DomainName.KERNEL_WRITING, ComputeBackend.TRAINIUM
+    )
+    for requested, expected in (
+        (ProfilerKind.AUTO, ProfilerKind.NEURON),
+        (ProfilerKind.NEURON, ProfilerKind.NEURON),
+        (ProfilerKind.NONE, ProfilerKind.NONE),
+    ):
+        assert (
+            resolve_profiler_kind(
+                requested,
+                domain=DomainName.KERNEL_WRITING,
+                backend=ComputeBackend.TRAINIUM,
+                environment_default_profiler_kind=ProfilerKind.NEURON,
+            )
+            is expected
+        )

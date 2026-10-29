@@ -1,7 +1,7 @@
 /**
  * How the window loads the bundled web UI, as pure functions of URLs and paths.
  *
- * The UI ships inside the app (`dist/ui`, the page bundles `scripts/copy-ui.mjs` copies in) and is
+ * The UI ships inside the app (`dist/ui`, the page bundle `scripts/copy-ui.mjs` copies in) and is
  * served from the privileged `app://vibesys` origin. That origin is the only one the window may navigate
  * to; it has no network access at all (`CONTENT_SECURITY_POLICY` here, and the main process cancels
  * every http(s) and ws(s) request), because the page reaches its server only through the preload
@@ -12,10 +12,8 @@ import {extname, isAbsolute, join, normalize, relative, sep} from 'node:path';
 export const APP_SCHEME = 'app';
 const APP_HOST = 'vibesys';
 const APP_ORIGIN = `${APP_SCHEME}://${APP_HOST}`;
-/** The page the window opens. */
-export const APP_ENTRY_URL = `${APP_ORIGIN}/desktop.html`;
-/** The stable welcome surface that may invoke welcome IPC. */
-export const WELCOME_URL = `${APP_ORIGIN}/welcome.html`;
+/** The app shell, the one page the windows show (a run window's URL adds the run in its query). */
+export const SHELL_URL = `${APP_ORIGIN}/shell.html`;
 
 /**
  * Same-origin scripts, styles, and images only; no connections of any kind. React's inline style

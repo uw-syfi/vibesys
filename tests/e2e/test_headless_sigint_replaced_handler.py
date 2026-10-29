@@ -14,7 +14,7 @@ import signal
 from typing import cast
 
 from entrypoints.run import supervise
-from vibesys.api import RunResult, RunSession, RunStatus
+from vibesys.api import RunResult, RunSession, RunStatus, StopMode
 from vibesys.api.testing import FakeRunHandle
 from vs_sim.api import LoopSignalSource
 from vs_sim.api.testing import run_in_child
@@ -31,7 +31,7 @@ class _SelfInterruptingSession:
 
     def __init__(self) -> None:
         self.stop_requested = asyncio.Event()
-        self.stop_calls = 0
+        self.stops: list[str] = []
 
     def start(self) -> None:
         pass
@@ -44,12 +44,12 @@ class _SelfInterruptingSession:
         await self.stop_requested.wait()
         return RunResult(run_id="signalled", loop="test", succeeded=False, status=RunStatus.STOPPED)
 
-    def stop(self) -> None:
-        self.stop_calls += 1
+    def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
+        self.stops.append(mode.value)
         self.stop_requested.set()
 
 
-def _drain_after_real_sigint() -> tuple[RunStatus, int, bool]:
+def _drain_after_real_sigint() -> tuple[RunStatus, list[str], bool]:
     signal.signal(signal.SIGINT, _replacement_handler)
     session = _SelfInterruptingSession()
 
@@ -60,12 +60,14 @@ def _drain_after_real_sigint() -> tuple[RunStatus, int, bool]:
         return (await supervise(handle, signals=LoopSignalSource())).status
 
     status = asyncio.run(execute())
-    return status, session.stop_calls, signal.getsignal(signal.SIGINT) is _replacement_handler
+    restored = signal.getsignal(signal.SIGINT) is _replacement_handler
+    return status, session.stops, restored
 
 
 def test_ctrl_c_drains_the_run_even_when_a_dependency_replaced_the_sigint_handler() -> None:
-    status, stop_calls, handler_restored = run_in_child(_drain_after_real_sigint)
+    """Ctrl-C reaches the run as one stop that cancels its work in flight (``StopMode.CANCEL``)."""
+    status, stops, handler_restored = run_in_child(_drain_after_real_sigint)
 
     assert status is RunStatus.STOPPED
-    assert stop_calls == 1
+    assert stops == [StopMode.CANCEL.value]
     assert handler_restored

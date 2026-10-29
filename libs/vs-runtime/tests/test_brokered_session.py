@@ -45,7 +45,11 @@ class _Session(_CloseRecord):
 
     def __post_init__(self) -> None:
         self.sandbox = FakeCommandRunner()
-        self.view = RunEnvironmentView(paths=AgentPaths())
+        self.view = RunEnvironmentView(paths=AgentPaths(), workspace_git_writable=True)
+
+    @property
+    def capture_commands(self) -> CommandRunner:
+        return self.sandbox
 
     def __enter__(self) -> _Session:
         return self

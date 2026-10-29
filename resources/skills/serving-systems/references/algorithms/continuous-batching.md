@@ -37,7 +37,7 @@ The KV-storage strategy is the part that diverges, because it follows the backen
 |:--|:--|:--|
 | `cuda` | Remove padding from *attention* (variable-length packing or paged KV); bucket the *batch* dimension for graph capture | Padding wastes HBM and FLOPs; a capture miss costs an eager fallback, in microseconds |
 | `rocm` | As cuda | Same shape model |
-| `trainium` | Bucket **both** batch and sequence extent; pad up to the bucket | `neuronx-cc` compiles per shape, so a bucket miss costs a compile — minutes, not microseconds |
+| `trainium` | Bucket **both** batch and sequence extent; pad up to the bucket | `torch.compile(backend="neuron")` has no dynamic shapes and compiles per shape, so a bucket miss costs a compile — seconds to minutes, not microseconds |
 | `metal` | Unified memory, no separate device pool | Nothing to page; pressure is system-wide, not device-local |
 
 Both accelerator families bucket and pad — what differs is **granularity** (batch only vs. batch *and* sequence extent) and the **cost of a miss** (eager fallback vs. a compile). That difference is large enough to change the design: on `cuda` you push padding out of attention and accept a shape ladder for capture; on `trainium` padding to a bucket is the answer at every level, and the CUDA advice to eliminate it will fight the compiler.

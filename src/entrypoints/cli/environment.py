@@ -2,20 +2,34 @@
 
 from __future__ import annotations
 
+import sys
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from entrypoints.cli.errors import _configuration_error
 from vibesys.api.request import (
     RunEnvironmentSpec,
+    TaskImageFacts,
+    backend_default_image,
     build_task_image,
+    derived_environment_name,
+    editor_image_plan,
+    is_task_image_reference,
+    local_image_id,
     make_run_environment_spec,
     supported_profilers,
+    task_image_inputs,
+    task_image_reference,
 )
-from vs_sim.api import MonotonicClock
+from vs_agent.api.images import SubprocessDockerBuildRunner
+from vs_sim.api import DISCARD, MonotonicClock
 
 if TYPE_CHECKING:
     import argparse
+
+    from vibesys.api import ComputeBackend
+    from vibesys.api.request import DockerBuildRunner, EditorImagePlan
 
 
 class RunEnvironmentSelectionError(ValueError):
@@ -44,7 +58,7 @@ def _requested_environment(
     )
 
 
-def _task_docker_conflicts(
+def _docker_in_docker_conflicts(
     requested: str, selected: str | None, explicit: frozenset[str]
 ) -> list[str]:
     conflicts: list[str] = []
@@ -59,12 +73,108 @@ def _task_docker_conflicts(
     return conflicts
 
 
+@dataclass(frozen=True)
+class TaskImageBuild:
+    """Build the task Dockerfile, when there is one, for a launch on *backend*.
+
+    The Dockerfile is built on *backend*'s default image, passed as
+    ``BASE_IMAGE``. *runner* runs the Docker commands; ``None`` runs the real
+    Docker CLI. *platform* is the host platform the run opens on, which decides
+    whether a host-only backend derives the host environment. ``allow_build=False``
+    resolves a saved image for a reader without rebuilding a missing one.
+    """
+
+    backend: ComputeBackend
+    runner: DockerBuildRunner | None = None
+    platform: str = sys.platform
+    allow_build: bool = True
+
+
+def _task_image_facts(
+    dockerfile: Path,
+    recorded: str | None,
+    launch: Literal["fresh", "resume"],
+    build: TaskImageBuild,
+) -> TaskImageFacts:
+    """Read what the plan needs: the inputs' reference and whether the recorded image is local."""
+    base_image = backend_default_image(build.backend)
+    reference = task_image_reference(dockerfile, base_image=base_image)
+    if launch == "fresh" or recorded is None:
+        return TaskImageFacts(reference=reference, base_image=base_image)
+    return TaskImageFacts(
+        reference=reference,
+        base_image=base_image,
+        recorded_is_reference=is_task_image_reference(recorded),
+        recorded_inputs_match=task_image_inputs(recorded) == task_image_inputs(reference),
+        recorded_id=local_image_id(
+            recorded,
+            command_runner=build.runner or SubprocessDockerBuildRunner(),
+            output=DISCARD,
+            clock=MonotonicClock(),
+        ),
+    )
+
+
+def _editor_image(
+    environment: str,
+    *,
+    dockerfile: Path | None,
+    image: str | None,
+    launch: Literal["fresh", "resume"],
+    build: TaskImageBuild | None,
+) -> EditorImagePlan:
+    """Decide the editor image and perform the build the decision asks for.
+
+    The refusals run first, without reading or building anything, so an
+    environment that cannot honor the task image fails before a build.
+    """
+    plan = editor_image_plan(
+        environment, task_dockerfile=dockerfile, image=image, launch=launch, facts=None
+    )
+    if dockerfile is None or build is None:
+        return plan
+    plan = editor_image_plan(
+        environment,
+        task_dockerfile=dockerfile,
+        image=image,
+        launch=launch,
+        facts=_task_image_facts(dockerfile, image, launch, build),
+    )
+    if plan.build is not None and not build.allow_build:
+        message = f"the saved task image {image} is unavailable; a chat reader cannot rebuild it"
+        raise ValueError(message)
+    if plan.notice is not None:
+        sys.stderr.write(f"{plan.notice}\n")
+    if plan.build is None:
+        return plan
+    built = build_task_image(
+        plan.build.dockerfile,
+        base_image=plan.build.base_image,
+        command_runner=build.runner,
+        clock=MonotonicClock(),
+        output=DISCARD,
+    )
+    return replace(plan, image_id=plan.resolve(built))
+
+
+def _image_option(image: str | None) -> dict[str, object]:
+    """The Slurm editor's ``image`` option, present only when there is one to pin."""
+    return {} if image is None else {"image": image}
+
+
 def run_environment_spec_from_args(
     args: argparse.Namespace,
     *,
-    build_task_docker_image: bool = False,
+    task_image: TaskImageBuild | None = None,
 ) -> RunEnvironmentSpec:
-    """Resolve the requested run environment from CLI and external operator config."""
+    """Resolve the requested run environment from CLI and external operator config.
+
+    With *task_image*, a task Dockerfile is built (or, on resume, reused); its
+    reference becomes the recorded ``image`` and its immutable ID the spec's
+    ``image_id``, which the environment runs. Without it (validation) nothing
+    is built, but the same decision runs, so an unsupported combination fails
+    either way.
+    """
     bundle = getattr(args, "input_bundle", None)
     selected = getattr(args, "run_environment", None)
     explicit = getattr(args, "explicit_cli_dests", frozenset())
@@ -88,29 +198,31 @@ def run_environment_spec_from_args(
     docker_in_docker = bundle is not None and bundle.docker_in_docker
     resuming = getattr(args, "resume", None) is not None
     requested_environment = _requested_environment(args, selected, slurm_config)
-    if (dockerfile_path is not None or docker_in_docker) and not resuming:
-        conflicts = _task_docker_conflicts(requested_environment, selected, explicit)
+    if docker_in_docker and not resuming:
+        conflicts = _docker_in_docker_conflicts(requested_environment, selected, explicit)
         if conflicts:
             joined = ", ".join(conflicts)
-            declared = (
-                f"task Dockerfile {dockerfile_path}"
-                if dockerfile_path is not None
-                else "task key [environment] docker_in_docker = true"
+            _exception_message_2 = (
+                f"task key [environment] docker_in_docker = true cannot be combined with {joined}"
             )
-            _exception_message_2 = f"{declared} cannot be combined with {joined}"
             raise ValueError(_exception_message_2)
 
-    task_image = None
-    # A resumed run with no recorded image (such as one migrated from the retired
-    # host environment) keeps it: building one would contradict the record.
-    keeps_recorded_image = resuming and args.docker_image is None
-    if (
-        dockerfile_path is not None
-        and requested_environment == "docker"
-        and build_task_docker_image
-        and not keeps_recorded_image
-    ):
-        task_image = build_task_image(dockerfile_path, clock=MonotonicClock())
+    # The environment the run will open: Metal on macOS derives the host one,
+    # which refuses a task image, so ask before building it.
+    plan = _editor_image(
+        (
+            derived_environment_name(
+                requested_environment, task_image.backend, platform=task_image.platform
+            )
+            if task_image is not None
+            else requested_environment
+        ),
+        dockerfile=dockerfile_path,
+        image=args.docker_image,
+        launch="resume" if resuming else "fresh",
+        build=task_image,
+    )
+    image = plan.image
 
     if requested_environment == "slurm-gpu":
         return RunEnvironmentSpec(
@@ -118,9 +230,12 @@ def run_environment_spec_from_args(
             options={
                 "config_path": str(
                     slurm_config or Path("~/.config/vibesys/slurm-gpu.toml").expanduser()
-                )
+                ),
+                **_image_option(image),
             },
             resources=bundle.manifest.resources if bundle is not None else None,
+            task_dockerfile=plan.task_dockerfile,
+            image_id=plan.image_id,
         )
     if requested_environment == "slurm":
         return RunEnvironmentSpec(
@@ -128,22 +243,29 @@ def run_environment_spec_from_args(
             options={
                 "config_path": str(
                     slurm_config or Path("~/.config/vibesys/slurm.toml").expanduser()
-                )
+                ),
+                **_image_option(image),
             },
+            task_dockerfile=plan.task_dockerfile,
+            image_id=plan.image_id,
         )
 
-    return make_run_environment_spec(
-        docker_image=task_image or args.docker_image,
-        use_modal=requested_environment == "modal",
-        modal_gpu=args.modal_gpu,
-        modal_model_volume=args.modal_model_volume,
-        modal_app=args.modal_app,
-        modal_entrypoint=bundle.modal_entrypoint if bundle is not None else None,
-        use_skypilot=requested_environment == "skypilot",
-        cluster_profile=getattr(args, "cluster_profile", None),
-        cluster_profiles_file=getattr(args, "cluster_profiles_file", None),
-        skypilot_executable=getattr(args, "skypilot_executable", "sky"),
-        resources=bundle.manifest.resources if bundle is not None else None,
+    return replace(
+        make_run_environment_spec(
+            docker_image=image,
+            use_modal=requested_environment == "modal",
+            modal_gpu=args.modal_gpu,
+            modal_model_volume=args.modal_model_volume,
+            modal_app=args.modal_app,
+            modal_entrypoint=bundle.modal_entrypoint if bundle is not None else None,
+            use_skypilot=requested_environment == "skypilot",
+            cluster_profile=getattr(args, "cluster_profile", None),
+            cluster_profiles_file=getattr(args, "cluster_profiles_file", None),
+            skypilot_executable=getattr(args, "skypilot_executable", "sky"),
+            resources=bundle.manifest.resources if bundle is not None else None,
+        ),
+        task_dockerfile=plan.task_dockerfile,
+        image_id=plan.image_id,
     )
 
 

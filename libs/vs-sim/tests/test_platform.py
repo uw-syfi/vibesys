@@ -6,7 +6,7 @@ import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 
-from vs_sim.api import ProcessOutcome, ProcessSpec, utc_datetime
+from vs_sim.api import DISCARD, ProcessOutcome, ProcessSpec, utc_datetime
 from vs_sim.api.testing import (
     SIM_MONOTONIC_ORIGIN,
     SIM_WALL_EPOCH,
@@ -35,7 +35,7 @@ def test_blocking_work_on_a_simulated_platform_sleeps_in_virtual_time(
 
     def work() -> ProcessOutcome:
         platform.threads.sleep(seconds)
-        run = platform.processes.run(ProcessSpec(("true",)), timeout=None)
+        run = platform.processes.run(ProcessSpec(("true",)), timeout=None, output=DISCARD)
         assert isinstance(run, ProcessOutcome)
         return run
 

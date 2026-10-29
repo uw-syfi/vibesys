@@ -115,6 +115,7 @@ def _probe_script(workspace: Path, readonly_path: Path, unlisted_path: Path) -> 
     written = workspace / "written-by-probe.txt"
     return (
         f"printf ok > {written}; printf 'write_ws=%s\\n' $?; "
+        f"cat {readonly_path} >/dev/null 2>&1; printf 'read_ro=%s\\n' $?; "
         f"(printf x > {readonly_path}) 2>/dev/null; printf 'write_ro=%s\\n' $?; "
         f"cat {unlisted_path} >/dev/null 2>&1; printf 'read_unlisted=%s\\n' $?; "
         "printf 'uid=%s\\n' \"$(id -u)\"; "
@@ -179,7 +180,8 @@ class TestSandboxConformance:
         # Write inside the workspace succeeds.
         assert fields["write_ws"] == "0"
         assert (workspace / "written-by-probe.txt").read_text() == "ok"
-        # Write to the declared read-only resource fails, and nothing changed.
+        # The declared read-only resource is readable but cannot be changed.
+        assert fields["read_ro"] == "0"
         assert fields["write_ro"] != "0"
         assert readonly_path.read_text() == '{"k": "v"}\n'
         # The unlisted path is unreadable (or, on bubblewrap, simply absent).

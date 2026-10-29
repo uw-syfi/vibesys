@@ -21,6 +21,17 @@ ENABLE_ENV = "VIBESYS_MINIMAL_CONTAINER"
 BASES_ENV = "VIBESYS_MINIMAL_CONTAINER_BASES"
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Accept explicit Docker image cache sources through pytest's validated CLI."""
+    parser.addoption(
+        "--image-cache-from",
+        action="append",
+        default=[],
+        metavar="IMAGE",
+        help="Docker image carrying inline build cache (repeat for multiple sources)",
+    )
+
+
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Skip the tier unless it is enabled; keep it on one xdist worker.
 
@@ -85,7 +96,11 @@ def editor(
     patch = pytest.MonkeyPatch()
     patch.setenv("ANTHROPIC_API_KEY", "sk-test-minimal-container")
     try:
-        with open_editor(base, tmp_path_factory.mktemp(f"editor-{base.name}")) as opened:
+        with open_editor(
+            base,
+            tmp_path_factory.mktemp(f"editor-{base.name}"),
+            image_cache_from=tuple(request.config.getoption("--image-cache-from")),
+        ) as opened:
             yield opened
     finally:
         patch.undo()

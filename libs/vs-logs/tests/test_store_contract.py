@@ -13,13 +13,13 @@ from vs_logs.api.testing import (
     LogStoreContract,
     LogStoreUnderTest,
     bytes_by_pipe,
+    no_warning,
     read_everything,
 )
 from vs_logs.read import open_log_directory, reader_of
 from vs_sim.api.testing import OutputSinkContract, OutputSinkUnderTest, SimThreads
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
     from vs_logs.api import LogStore
@@ -33,41 +33,34 @@ class TestFileLogStore(LogStoreContract):
 
     def store_under_test(self, limits: LogLimits) -> LogStoreUnderTest:
         directory = self._factory.mktemp("logs")
-        external = self._factory.mktemp("external")
         threads = SimThreads()
 
-        def append_to(name: str) -> Callable[[bytes], None]:
-            def append(data: bytes) -> None:
-                with (external / name).open("ab") as stream:
-                    stream.write(data)
-
-            return append
+        def store() -> LogStore[ContractOwner]:
+            return FileLogStore(
+                directory, CONTRACT_OWNER, threads=threads, warn=no_warning, limits=limits
+            )
 
         return LogStoreUnderTest(
-            store=FileLogStore(directory, CONTRACT_OWNER, threads=threads, limits=limits),
-            reader=open_log_directory(directory, CONTRACT_OWNER),
-            reopen=lambda: FileLogStore(directory, CONTRACT_OWNER, threads=threads, limits=limits),
-            append_external=append_to,
-            external_path=lambda name: str(external / name),
+            store=store(), reader=open_log_directory(directory, CONTRACT_OWNER), reopen=store
         )
 
 
 class TestMemoryLogStore(LogStoreContract):
     def store_under_test(self, limits: LogLimits) -> LogStoreUnderTest:
         threads = SimThreads()
-        store = MemoryLogStore(CONTRACT_OWNER, threads=threads, limits=limits)
+        store = MemoryLogStore(CONTRACT_OWNER, threads=threads, warn=no_warning, limits=limits)
 
         def reopen() -> LogStore[ContractOwner]:
             return MemoryLogStore(
-                CONTRACT_OWNER, threads=threads, limits=limits, volume=store.memory_volume
+                CONTRACT_OWNER,
+                threads=threads,
+                warn=no_warning,
+                limits=limits,
+                volume=store.memory_volume,
             )
 
         return LogStoreUnderTest(
-            store=store,
-            reader=reader_of(store, CONTRACT_OWNER),
-            reopen=reopen,
-            append_external=lambda name: lambda data: store.append_external(f"ext/{name}", data),
-            external_path=lambda name: f"ext/{name}",
+            store=store, reader=reader_of(store, CONTRACT_OWNER), reopen=reopen
         )
 
 
@@ -83,7 +76,9 @@ def _sink_under_test(
 
 class TestMemoryStreamIsAnOutputSink(OutputSinkContract):
     def sink_under_test(self) -> OutputSinkUnderTest:
-        store = MemoryLogStore(CONTRACT_OWNER, threads=SimThreads(), limits=LogLimits())
+        store = MemoryLogStore(
+            CONTRACT_OWNER, threads=SimThreads(), warn=no_warning, limits=LogLimits()
+        )
         return _sink_under_test(store, reader_of(store, CONTRACT_OWNER))
 
 
@@ -94,5 +89,5 @@ class TestFileStreamIsAnOutputSink(OutputSinkContract):
 
     def sink_under_test(self) -> OutputSinkUnderTest:
         directory: Path = self._factory.mktemp("sink")
-        store = FileLogStore(directory, CONTRACT_OWNER, threads=SimThreads())
+        store = FileLogStore(directory, CONTRACT_OWNER, threads=SimThreads(), warn=no_warning)
         return _sink_under_test(store, open_log_directory(directory, CONTRACT_OWNER))

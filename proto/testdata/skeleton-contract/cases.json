@@ -1,0 +1,159 @@
+{
+  "constants": {
+    "keyframeCandidates": 4,
+    "replyBytes": 1048576,
+    "maxStoredKeyframe": 16777216
+  },
+  "selection": [
+    {
+      "name": "the newest checkpoint that fits is sent",
+      "checkpoints": [
+        {
+          "through": 4,
+          "fits": true
+        },
+        {
+          "through": 10,
+          "fits": true
+        }
+      ],
+      "chosen": 10
+    },
+    {
+      "name": "an older checkpoint stands in when the newest does not fit",
+      "checkpoints": [
+        {
+          "through": 4,
+          "fits": true
+        },
+        {
+          "through": 10,
+          "fits": false
+        }
+      ],
+      "chosen": 4
+    },
+    {
+      "name": "a checkpoint stored over the read limit is skipped though its addressed reply fits",
+      "checkpoints": [
+        {
+          "through": 2,
+          "fits": true
+        },
+        {
+          "through": 6,
+          "fits": true,
+          "stored": "over"
+        }
+      ],
+      "chosen": 2
+    },
+    {
+      "name": "the read limit skips only the oversized checkpoint",
+      "checkpoints": [
+        {
+          "through": 2,
+          "fits": true
+        },
+        {
+          "through": 4,
+          "fits": false
+        },
+        {
+          "through": 6,
+          "fits": true,
+          "stored": "over"
+        }
+      ],
+      "chosen": 2
+    },
+    {
+      "name": "four checkpoints are tried, newest first",
+      "checkpoints": [
+        {
+          "through": 1,
+          "fits": true
+        },
+        {
+          "through": 2,
+          "fits": false
+        },
+        {
+          "through": 3,
+          "fits": false
+        },
+        {
+          "through": 4,
+          "fits": false
+        },
+        {
+          "through": 5,
+          "fits": true
+        }
+      ],
+      "chosen": 5
+    },
+    {
+      "name": "a fifth-oldest checkpoint is never reached",
+      "checkpoints": [
+        {
+          "through": 1,
+          "fits": true
+        },
+        {
+          "through": 2,
+          "fits": false
+        },
+        {
+          "through": 3,
+          "fits": false
+        },
+        {
+          "through": 4,
+          "fits": false
+        },
+        {
+          "through": 5,
+          "fits": false
+        }
+      ],
+      "chosen": 0
+    },
+    {
+      "name": "no checkpoint fits: the client replays",
+      "checkpoints": [
+        {
+          "through": 3,
+          "fits": false
+        }
+      ],
+      "chosen": 0
+    },
+    {
+      "name": "no checkpoint at all",
+      "checkpoints": [],
+      "chosen": 0
+    }
+  ],
+  "logs": [
+    {
+      "name": "a run directory whose run.log is not created yet answers an empty complete prefix",
+      "log": "pending",
+      "skeleton": {
+        "status": 0,
+        "complete": true,
+        "committedSeq": 0,
+        "nextSeq": 0,
+        "records": 0,
+        "keyframe": false
+      }
+    },
+    {
+      "name": "a run the index does not know is NotFound",
+      "log": "unindexed",
+      "skeleton": {
+        "status": 5
+      }
+    }
+  ]
+}

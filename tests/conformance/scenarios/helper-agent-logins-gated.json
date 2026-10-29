@@ -1,0 +1,68 @@
+{
+  "id": "helper-agent-logins-gated",
+  "protocol": "host-helper",
+  "title": "The agent login messages need the agent_logins feature",
+  "description": "After a hello that negotiated no features, agent_logins.list and agent_logins.start are answered feature_not_negotiated, so a client that did not ask never sees a machine's logins or starts one.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": []
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "agent_logins.list",
+        "request_id": "a0",
+        "deadline_ms": 30000
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "a0",
+        "code": "feature_not_negotiated"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "agent_logins.start",
+        "request_id": "a1",
+        "deadline_ms": 30000,
+        "provider": "claude"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "a1",
+        "code": "feature_not_negotiated"
+      }
+    }
+  ]
+}

@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from vs_sim.api import OutputSink, Released
 
 
-def start_sandbox(sandbox: CommandRunner, *, output: OutputSink = DISCARD) -> None:
+def start_sandbox(sandbox: CommandRunner, *, output: OutputSink) -> None:
     """Start a sandbox that owns an execution environment.
 
     The base :class:`CommandRunner` contract intentionally has no lifecycle because
@@ -44,7 +44,7 @@ def execute_as_root(
     command: str,
     *,
     timeout: int | None = None,
-    output: OutputSink = DISCARD,
+    output: OutputSink,
 ) -> CommandResult:
     """Run *command* as root inside a started container sandbox.
 
@@ -101,7 +101,7 @@ class SandboxSession[ViewT]:
 
     @classmethod
     def start(
-        cls, sandbox: CommandRunner, view: ViewT, *, output: OutputSink = DISCARD
+        cls, sandbox: CommandRunner, view: ViewT, *, output: OutputSink
     ) -> SandboxSession[ViewT]:
         """Start a sandbox and own its cleanup for the session lifetime.
 
@@ -139,7 +139,7 @@ class BeforeReadyContext:
     """
 
     sandbox: CommandRunner
-    output: OutputSink = DISCARD
+    output: OutputSink
 
 
 class SandboxLifecycleHooks:
@@ -179,7 +179,7 @@ class SandboxLifecycle:
 
     def before_ready(self, sandbox: CommandRunner) -> None:
         """Run every provider's hook, stopping at the first failure."""
-        context = BeforeReadyContext(sandbox=sandbox)
+        context = BeforeReadyContext(sandbox=sandbox, output=DISCARD)
         for provider in self._hooks:
             try:
                 provider.before_ready(context)

@@ -11,14 +11,20 @@ the application ``backend_factory`` seam.
 from __future__ import annotations
 
 import inspect
+import os
+import re
 from functools import partial
 from io import StringIO
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from vs_sandbox.api import (
     BeforeReadyContext,
+    ComputeBackend,
     ComputeBackendImpl,
     CudaBackend,
     LocalBackend,
@@ -26,20 +32,21 @@ from vs_sandbox.api import (
     SandboxKind,
     SandboxLifecycleHooks,
     TrainiumBackend,
+    accelerator_unavailable,
+    create_compute_backend,
 )
 from vs_sandbox.api.testing import FakeComputeBackend, ScriptedDockerCli
-from vs_sim.api import OsThreads
+from vs_sim.api import DISCARD, OsThreads, ProbeResult
 from vs_sim.api.testing import (
     FakePipedProcessLauncher,
     ManualClock,
     PipedStart,
     ScriptedProbe,
     SimThreads,
+    examples,
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from vs_sandbox.api import CommandRunner
     from vs_sim.api import PipedProcess
 
@@ -115,7 +122,7 @@ class TestComputeBackendContract:
         )
 
         assert sandbox.id
-        result = sandbox.execute("printf hello")
+        result = sandbox.execute("printf hello", output=DISCARD)
         assert result.exit_code in (0, None)
 
     def test_make_monitor_and_reselect_device_are_no_ops_without_a_device(
@@ -174,3 +181,55 @@ def test_every_backend_declares_ensure_accelerator_available(
     the raising behavior itself with a fake telemetry.
     """
     assert callable(backend_class.ensure_accelerator_available)
+
+
+_GPU_ROWS = st.lists(
+    st.tuples(st.integers(0, 7), st.integers(0, 81920), st.integers(0, 100)), max_size=3
+).map(
+    lambda rows: "".join(f"{i}, GPU-{i}, NVIDIA A100, {used}, 81920, {u}\n" for i, used, u in rows)
+)
+_NVIDIA_SMI = st.one_of(
+    st.none(),
+    st.builds(ProbeResult, st.sampled_from([0, 9]), _GPU_ROWS | st.text(max_size=40)),
+)
+
+
+@given(
+    backend=st.sampled_from(list(ComputeBackend)),
+    answer=_NVIDIA_SMI,
+    pinned=st.sampled_from(["", "0"]),
+)
+@settings(max_examples=examples(pr=60, nightly=400))
+def test_accelerator_unavailable_answers_as_the_backend_itself_decides(
+    backend: ComputeBackend, answer: ProbeResult | None, pinned: str
+) -> None:
+    """A check made before the run (``vibesys preflight``) agrees with the run's own check.
+
+    The pinned device is an input (``CUDA_VISIBLE_DEVICES``), set for the example and
+    restored after it.
+    """
+    previous = os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+    if pinned:
+        os.environ["CUDA_VISIBLE_DEVICES"] = pinned
+    try:
+        probe = ScriptedProbe(lambda argv: answer if argv[0] == "nvidia-smi" else None)
+        implementation = create_compute_backend(
+            backend,
+            Path("/nonexistent/logs"),
+            log=lambda _line: None,
+            docker=ScriptedDockerCli(),
+            threads=SimThreads(),
+            launcher=FakePipedProcessLauncher(_printf_shell),
+            clock=ManualClock(),
+            probe=probe,
+        )
+        reason = accelerator_unavailable(backend, probe)
+        if reason is None:
+            implementation.ensure_accelerator_available()
+        else:
+            with pytest.raises(Exception, match=re.escape(reason)):
+                implementation.ensure_accelerator_available()
+    finally:
+        os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+        if previous is not None:
+            os.environ["CUDA_VISIBLE_DEVICES"] = previous

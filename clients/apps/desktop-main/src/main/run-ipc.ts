@@ -1,11 +1,11 @@
 /**
- * Admission for the run page's privileged protocol connection.
+ * Admission for a shell document's privileged protocol connection to its run.
  *
  * Electron wiring translates an incoming MessagePort into `PendingRunPort`; this module owns the
- * decision to start and expose that port, or close it without handing it to a run page.
+ * decision to start and expose that port, or close it without handing it to a window.
  *
  * `ipcMain` is one process-wide channel, shared by every open window: a connect Electron delivers
- * to it is not scoped to the window whose run page actually sent it. Admission is therefore one
+ * to it is not scoped to the window whose document actually sent it. Admission is therefore one
  * registry of competing windows, not one independent listener per window — a second window's
  * listener would otherwise see the first window's rightfully admitted connect, fail its own
  * sender-id check, and close the port out from under the window that just started it.
@@ -13,7 +13,7 @@
 import type {RelayPort} from '@vibesys/feature-run-control/main';
 import {isSameAppPage} from './app-assets.js';
 
-/** A renderer port that has not crossed the run-page authority boundary yet. */
+/** A renderer port that has not crossed the run authority boundary yet. */
 export interface PendingRunPort extends RelayPort {
   start(): void;
 }
@@ -30,9 +30,9 @@ export interface RunIpc {
   onConnect(listener: (event: RunConnectEvent) => void): void;
 }
 
-/** One window's admission claim: its current run page, and where it hands off an admitted port. */
+/** One window's admission claim: its run-showing document, and where it hands off an admitted port. */
 export interface RunPageAdmission {
-  /** This window's current run-page webContents id, or null while it shows none. */
+  /** This window's run-showing webContents id, or null while its surface binds no run. */
   currentSenderId(): number | null;
   /** Hand an admitted port to this window's run. */
   connect(port: RelayPort): void;
@@ -101,11 +101,12 @@ function describe(error: unknown): string {
 }
 
 /**
- * The one `ipcMain` listener this process installs for `expectedUrl`'s connect channel.
+ * The one `ipcMain` listener this process installs for the connect channel of the pages that show
+ * runs (`expectedUrl`: the app shell, which shows a run in its own document).
  *
  * Every open window registers its admission for as long as it exists; `register`'s return value
  * withdraws it, which every registrant must call exactly once. A connect is admitted by whichever
- * registered window's current run page sent it; a port no registered window claims is refused and
+ * registered window's run-showing document sent it; a port no registered window claims is refused and
  * closed here, never handed to more than one window and never silently dropped. `connect` is called
  * with the admitted port's feature-owned side, with its message and close listeners already
  * installed synchronously; only then does this boundary start Electron's queued delivery.
@@ -122,6 +123,10 @@ export class RunIpcRegistry {
   }
 
   /** Compete `page`'s admission for every future connect; its return value withdraws it. */
+  #expected(senderUrl: string | null): boolean {
+    return isSameAppPage(senderUrl, this.#expectedUrl);
+  }
+
   register(page: RunPageAdmission): () => void {
     this.#pages.add(page);
     return () => this.#pages.delete(page);
@@ -130,7 +135,7 @@ export class RunIpcRegistry {
   #admit(event: RunConnectEvent): void {
     const port = event.port;
     if (port === null) return;
-    if (isSameAppPage(event.senderUrl, this.#expectedUrl)) {
+    if (this.#expected(event.senderUrl)) {
       for (const page of this.#pages) {
         if (page.currentSenderId() !== event.senderId) continue;
         this.#activate(port, page);
@@ -150,7 +155,7 @@ export class RunIpcRegistry {
     } catch (error) {
       if (adopted === null) port.close();
       else adopted.dispose();
-      this.#log(`could not activate the run page connection: ${describe(error)}`);
+      this.#log(`could not activate the run connection: ${describe(error)}`);
     }
   }
 }

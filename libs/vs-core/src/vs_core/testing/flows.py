@@ -1,8 +1,8 @@
 """Drive a flow search by hand, as a script: no asyncio, no clock, no core.
 
 ``FlowRun`` plays the host. It starts the search, keeps the list of waits the search has
-opened, answers the prompt renders by itself (they are core's own business) and delivers the
-events a story names::
+opened, answers the prompt renders by itself (they are core's own business), answers at once
+the owned operations a story hands to ``own``, and delivers the events a story names::
 
     run = FlowRun.start(search, config, facts)
     asked = run.expect_turn("worker")          # the next turn request that matches
@@ -14,8 +14,10 @@ events a story names::
 
 ``FlowRun.start(..., restarting=True)`` round-trips the state through JSON into a new driver
 after every step, so any story can be repeated as a crash-at-every-step test; a
-``RestartPolicy`` instead restarts after the steps it names. ``FakeView`` is
-the ``RunView`` the search reads: set the clock, attempts and settlements on it.
+``RestartPolicy`` instead restarts after the steps it names, and with ``changes`` each of its
+restarts is also a code change (``code_changed`` makes a changed definition), so every flow
+restarts from its latest checkpoint. ``FakeView`` is the ``RunView`` the search reads: set the
+clock, attempts and settlements on it.
 
 ``FAKE_OPERATIONS`` and ``fake_search`` are the namespace and the decorator a test search uses;
 ``Prompt`` is the context its renders carry, so a turn request can be told by its prompt.
@@ -24,8 +26,8 @@ the ``RunView`` the search reads: set the clock, attempts and settlements on it.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, ClassVar, Literal, TypedDict, Unpack
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict, Unpack
 
 from vs_core.api import (
     AdoptionFailed,
@@ -64,11 +66,15 @@ from vs_core.api import (
     RequestId,
     RequestTurn,
     ResumeAuthorized,
+    ResumeFailed,
     ResumeReady,
+    ResumeRefusal,
+    ResumeRefused,
     Scope,
     Settlement,
     SettlementId,
     StartAttempt,
+    StopLifted,
     StopRequested,
     StrategyOperations,
     TimeReached,
@@ -97,7 +103,21 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import Decision, Role, RunFacts, RunView, SearchDef, Seconds, Within
+    from vs_core.api import (
+        Decision,
+        Flow,
+        NoWinner,
+        OperationRequest,
+        Role,
+        RunFacts,
+        RunTrace,
+        RunView,
+        SearchDef,
+        Seconds,
+        SpanKind,
+        Uncompared,
+        Within,
+    )
     from vs_core.flows._define import Root
     from vs_core.types.agents import Checkpoint
 
@@ -136,10 +156,38 @@ FAKE_REGISTRY = FAKE_OPERATIONS.registry()
 
 
 def fake_search[C](
-    name: str, config: type[C], roles: tuple[Role, ...] = ()
+    name: str,
+    config: type[C],
+    roles: tuple[Role, ...] = (),
+    spans: tuple[SpanKind, ...] = (),
+    *,
+    snapshot: type[Any] | None = None,
 ) -> Callable[[Root[C]], SearchDef[C]]:
     """``@search`` over the fake namespace: renders are answered by ``FlowRun``."""
-    return search(name, config=config, operations=FAKE_OPERATIONS, roles=roles)
+    return search(
+        name,
+        config=config,
+        operations=FAKE_OPERATIONS,
+        roles=roles,
+        spans=spans,
+        snapshot=snapshot,
+    )
+
+
+def code_changed[C](definition: SearchDef[C]) -> SearchDef[C]:
+    """``definition`` with one more journaled read where its root starts: changed code.
+
+    Its journal and the original's diverge at their first step, as they do after a change that
+    alters a prompt or a decision: a run resumed under the other one restarts every flow from
+    its latest checkpoint. Changing back is a code change again.
+    """
+    root = definition.root
+
+    async def changed(ctx: Flow, start: C) -> NoWinner | Uncompared | None:
+        ctx.clock.now()
+        return await root(ctx, start)
+
+    return replace(definition, root=changed)
 
 
 @dataclass
@@ -167,6 +215,9 @@ class RestartPolicy:
     every: bool = False
     after_stop: bool = False
     """Also restart after every step once the run was told to stop."""
+    changes: tuple[SearchDef[Any], ...] = ()
+    """When given, every restart is also a code change: the run goes on under the next of these
+    definitions, in turn (``(code_changed(search), search)`` alternates two codes)."""
 
     def after(self, step: int, *, stopped: bool) -> bool:
         """Whether the run restarts after its ``step``-th event, once told to stop or not."""
@@ -242,6 +293,7 @@ class FlowRun[C]:
         self._open: list[Asked] = []
         self._sleeps: list[Seconds] = []
         self._prompts: dict[ArtifactId, tuple[str, Value]] = {}
+        self._owners: dict[str, Callable[[OperationRequest], BaseModel]] = {}
         self._queue: list[Event] = []
         self.finished: Finish | None = None
         """The ``Finish`` the search issued, once it did."""
@@ -287,6 +339,10 @@ class FlowRun[C]:
     def waiting(self) -> tuple[Waiting, ...]:
         """What each suspended flow waits for, as data: its path and its sources."""
         return self.driver.waiting(self.state)
+
+    def trace(self) -> RunTrace:
+        """The run's spans: every flow task and awaited operation so far."""
+        return self.driver.trace(self.state)
 
     def timeline(self) -> str:
         """The run so far as one line: ``worker.1:Plan ws-1/work.1:failed(timed-out) stop t=30``."""
@@ -365,6 +421,16 @@ class FlowRun[C]:
             evidence=(),
         )
         self.send(ResumeReady(authorization=authorization))
+
+    def resume_refused(self, continuation: Continuation, reason: ResumeRefusal) -> None:
+        """Core will never resume a suspended turn: the history its evaluations left is unusable."""
+        self._timeline.append("resume-refused")
+        refusal = ResumeRefused(
+            continuation_id=continuation.continuation_id,
+            invocation=continuation.invocation,
+            reason=reason,
+        )
+        self.send(ResumeFailed(refusal=refusal))
 
     def reply_raw(self, asked: Asked, output_json: str) -> None:
         """The agent answered with text that may not be its reply model (a correction follows)."""
@@ -478,6 +544,16 @@ class FlowRun[C]:
         result = self._operation_result(request.request, outcome)
         self.answer(asked, OperationFinished(decision=asked.decision, result=result))
 
+    def own(self, kind: str, perform: Callable[[OperationRequest], BaseModel]) -> None:
+        """Answer every operation of ``kind`` at once with ``perform``'s outcome, from now on.
+
+        For an owned operation a story is not about: its waits never show among the open ones.
+        Any such wait already open is answered now.
+        """
+        self._owners[kind] = perform
+        for asked in [item for item in self._open if self._owned(item.request)]:
+            self.finish_operation(asked, self._perform(asked.request))
+
     def published[M: BaseModel](self, model: type[M]) -> M | None:
         """What the flow last published with ``ctx.publish``, as ``model``."""
         return self.driver.published(self.state, model)
@@ -488,6 +564,17 @@ class FlowRun[C]:
         self.send(
             StopRequested(
                 control=ControlInput(control_id=ControlId(root=control), action="stop", mode=mode)
+            )
+        )
+
+    def lift_stop(self, control: str = "resume") -> None:
+        """The operator resumes the run, which lifts the stop that stood."""
+        self._timeline.append(control)
+        self.send(
+            StopLifted(
+                control=ControlInput(
+                    control_id=ControlId(root=control), action="resume", when="now"
+                )
             )
         )
 
@@ -504,10 +591,17 @@ class FlowRun[C]:
         self._pump()
 
     def restart(self) -> None:
-        """Round-trip the state through JSON and continue with a new driver."""
+        """Round-trip the state through JSON and continue with a new driver.
+
+        Under a ``RestartPolicy`` with ``changes`` the new driver runs the next changed code.
+        """
         self.restarts += 1
         self.state = FlowState.model_validate_json(encode_json(self.state))
-        self.driver = self.driver.fresh()
+        changes = self.restarting.changes if isinstance(self.restarting, RestartPolicy) else ()
+        if changes:
+            self.swap(changes[(self.restarts - 1) % len(changes)])
+        else:
+            self.driver = self.driver.fresh()
 
     def swap(self, search: SearchDef[C]) -> None:
         """Continue the run under another definition of the search: the code changed on resume."""
@@ -534,6 +628,12 @@ class FlowRun[C]:
             match decision:
                 case Wait(request=Operation(request=render) as operation) if self._renders(render):
                     self._render(operation, render)  # ty: ignore[invalid-argument-type]
+                case Wait(request=Operation() as operation) if self._owned(operation):
+                    self._sequence += 1
+                    result = self._operation_result(operation.request, self._perform(operation))
+                    self._queue.append(
+                        OperationFinished(decision=operation.decision_id, result=result)
+                    )
                 case Wait(request=ProposeWinner() as proposal) if self.adopting:
                     self._open.append(Asked(proposal.decision_id, proposal, None))
                     self._queue.append(self._adopted(proposal))
@@ -553,6 +653,15 @@ class FlowRun[C]:
             if found is not None:
                 return found
         return None, None
+
+    def _owned(self, request: object) -> bool:
+        return isinstance(request, Operation) and request.request.kind in self._owners
+
+    def _perform(self, request: object) -> BaseModel:
+        if not isinstance(request, Operation):
+            message = f"{type(request).__name__} is not an operation"
+            raise TypeError(message)
+        return self._owners[request.request.kind](request.request)
 
     def _renders(self, request: object) -> bool:
         """Whether ``request`` asks to render a prompt: the namespace's render operation."""

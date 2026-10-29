@@ -26,6 +26,7 @@ from vs_project.api import PrivateDirectoryError, ensure_private_directory
 from vs_sandbox.api import EnvironmentBindMount
 
 _SOCKET_NAME = "evaluation.sock"
+_QUEUE_STATUS_SOCKET_NAME = "queue-status.sock"
 
 
 class EvaluationSocketDirectoryError(PermissionError):
@@ -71,6 +72,21 @@ def prepare_evaluation_socket(project_root: Path, run_id: str, *, owner: int | N
     return directory / _SOCKET_NAME
 
 
+def prepare_agent_tool_socket(project_root: Path, run_id: str, name: str) -> Path:
+    """Create the private directory as ``prepare_evaluation_socket`` does; the socket ``name``.
+
+    A host service an agent's tool server dials listens beside the evaluation service, so the
+    one mounted directory reaches all of them from every agent container. ``name`` is a file
+    name, short enough that the whole path stays within a unix socket path's limit.
+    """
+    return prepare_evaluation_socket(project_root, run_id).with_name(name)
+
+
+def prepare_queue_status_socket(project_root: Path, run_id: str) -> Path:
+    """The queue status service's socket, in the directory ``prepare_agent_tool_socket`` makes."""
+    return prepare_agent_tool_socket(project_root, run_id, _QUEUE_STATUS_SOCKET_NAME)
+
+
 def evaluation_socket_mount(
     project_root: Path, run_id: str, *, owner: int | None = None
 ) -> EnvironmentBindMount:
@@ -93,6 +109,8 @@ __all__ = [
     "evaluation_socket_directory",
     "evaluation_socket_mount",
     "evaluation_socket_path",
+    "prepare_agent_tool_socket",
     "prepare_evaluation_socket",
+    "prepare_queue_status_socket",
     "remove_evaluation_socket",
 ]

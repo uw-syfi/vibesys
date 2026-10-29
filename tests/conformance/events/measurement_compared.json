@@ -1,0 +1,8 @@
+{
+  "protocol_version": 1,
+  "type": "measurement_compared",
+  "sequence": 11,
+  "run_id": "run-conformance",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "text": "better: 1.12x the base (noise 0.03)"
+}

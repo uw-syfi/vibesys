@@ -27,15 +27,30 @@ type Check struct {
 // collection; PackageCommands run once for each value. Commands run when the
 // collection is empty, or when no collection is set.
 type Suite struct {
-	Name            string            `toml:"name"`
-	TriggerJob      string            `toml:"trigger_job"`
-	IncludeInTest   bool              `toml:"include_in_test"`
-	Language        string            `toml:"language"`
-	Directory       string            `toml:"directory"`
-	AlwaysCommands  [][]string        `toml:"always_commands"`
-	Commands        [][]string        `toml:"commands"`
-	PackageCommands [][]string        `toml:"package_commands"`
-	Collection      string            `toml:"collection"`
+	Name          string `toml:"name"`
+	TriggerJob    string `toml:"trigger_job"`
+	IncludeInTest bool   `toml:"include_in_test"`
+	// IncludeInChecks selects the group in `repoctl test` when TriggerJob is
+	// selected, and in `repoctl test --checks-only`. An empty TriggerJob
+	// selects it on every change. Mutually exclusive with IncludeInTest.
+	IncludeInChecks bool `toml:"include_in_checks"`
+	// LocalSkip keeps the group out of `repoctl test` and is the reason
+	// `--dry-run` prints. CI still runs the group. Requires TriggerJob.
+	LocalSkip       string     `toml:"local_skip"`
+	Language        string     `toml:"language"`
+	Directory       string     `toml:"directory"`
+	AlwaysCommands  [][]string `toml:"always_commands"`
+	Commands        [][]string `toml:"commands"`
+	PackageCommands [][]string `toml:"package_commands"`
+	Collection      string     `toml:"collection"`
+	// LocalPaths narrows `repoctl test` only (never `run-checks`, which CI
+	// uses): when set, the group runs locally only if a changed path equals or
+	// is under one of these repository-relative paths.
+	LocalPaths []string `toml:"local_paths"`
+	// LocalComponents extends LocalPaths with the roots and files of the named
+	// components, so a path list that CI also selects on is declared once, in
+	// components.toml, and cannot drift from this group's local selection.
+	LocalComponents []string          `toml:"local_components"`
 	Env             map[string]string `toml:"env"`
 	TimeoutSeconds  int               `toml:"timeout_seconds"`
 }

@@ -1,0 +1,70 @@
+{
+  "id": "helper-logs-follow",
+  "protocol": "host-helper",
+  "title": "Follow an open stream at its end",
+  "description": "A read at the end of an open stream waits up to wait_ms for bytes and, when none arrive, answers an empty chunk at the same offset before the request's deadline.",
+  "role": "logs",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "logs"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "logs"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "f",
+        "deadline_ms": 10000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "offset": 66
+        },
+        "max_bytes": 65536,
+        "wait_ms": 2000
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "f",
+        "chunk": {
+          "offset": 66,
+          "data": "",
+          "next_offset": 66,
+          "eof": true,
+          "closed": false,
+          "truncated_before": false,
+          "pipes": []
+        }
+      }
+    }
+  ]
+}

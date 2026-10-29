@@ -12,7 +12,10 @@ that takes no signals) is reported as stuck, once. The real signals are in ``tes
 
 from __future__ import annotations
 
-from hypothesis import given, settings
+import sys
+
+import pytest
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from entrypoints.main_thread_interrupt import STUCK_SECONDS, MainThreadInterrupt
@@ -53,11 +56,12 @@ def _interruptions(
                     first_interruption.set()
 
         threads.spawn(main_thread, name="main-thread")
-        for _ in range(requests):
-            interrupt.request()
-        wait_or_fail(first_interruption, "the main thread's interruption")
-        # Let every resend still on its way reach the main thread.
+        for index in range(requests):
+            threads.spawn(interrupt.request, name=f"request-{index}")
+            wait_or_fail(first_interruption, "the main thread taking the request")
+        # A taken wake keeps resending without raising again during cleanup.
         threads.sleep(1.0)
+        interrupt.finish()
         return len(interrupted), len(sent), stuck
 
     return threads.run(run)
@@ -83,3 +87,66 @@ def test_every_request_ends_with_exactly_one_interruption_however_many_wakes_are
         assert stuck[0] >= STUCK_SECONDS
     else:
         assert stuck == []
+
+
+class _Finalizer:
+    def __init__(self, interrupt: MainThreadInterrupt) -> None:
+        self.interrupt = interrupt
+
+    def __del__(self) -> None:
+        self.interrupt.take()
+
+
+def _discard(interrupt: MainThreadInterrupt) -> None:
+    # Explicit reference release delivers the exception synchronously, with no GC scheduling.
+    finalizer = _Finalizer(interrupt)
+    del finalizer
+
+
+@pytest.mark.regression
+@example(discarded=1)
+@given(discarded=st.integers(1, 10))
+def test_recovery_retries_every_discarded_interruption_and_protects_cleanup(
+    discarded: int,
+) -> None:
+    threads = SimThreads()
+    interrupt = MainThreadInterrupt(lambda: None, threads, lambda _waited: None)
+    previous = sys.unraisablehook
+
+    with interrupt.recovering():
+        for _ in range(discarded):
+            _discard(interrupt)
+        with pytest.raises(KeyboardInterrupt):
+            interrupt.take()
+        # A delivered exception is still unwinding: further wakes must leave cleanup alone.
+        interrupt.take()
+    assert sys.unraisablehook is previous
+    interrupt.take()
+
+
+def test_recovery_forwards_another_scopes_exception_and_restores_hooks_on_error() -> None:
+    threads = SimThreads()
+    outer = MainThreadInterrupt(lambda: None, threads, lambda _waited: None)
+    inner = MainThreadInterrupt(lambda: None, threads, lambda _waited: None)
+    previous = sys.unraisablehook
+
+    def recover() -> None:
+        with outer.recovering():
+            forward()
+
+    def forward() -> None:
+        outer_hook = sys.unraisablehook
+        with inner.recovering():
+            # The inner scope must forward the outer scope's discarded exception.
+            _discard(outer)
+            with pytest.raises(KeyboardInterrupt):
+                inner.take()
+            inner.take()
+        assert sys.unraisablehook is outer_hook
+        outer.take()
+
+    with pytest.raises(KeyboardInterrupt):
+        recover()
+    assert sys.unraisablehook is previous
+    outer.take()
+    inner.take()

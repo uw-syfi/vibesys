@@ -1,0 +1,107 @@
+/* The rail frame: a narrow rail of destinations beside the page. Imported by components.css. */
+
+.vs-rail-frame {
+  --titlebar-row: max(var(--chrome-inset-height, var(--space-0)), var(--control));
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg);
+}
+.vs-rail-band {
+  flex: none;
+  box-sizing: border-box;
+  height: var(--titlebar-row);
+  /* The band holds the window's own controls and moves the window. */
+  -webkit-app-region: drag;
+  border-bottom: var(--hairline) solid var(--line);
+  background: var(--bg);
+}
+.vs-rail-body {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+}
+.vs-rail {
+  box-sizing: border-box;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  justify-content: space-between;
+  width: var(--rail);
+  max-height: 100%;
+  padding: var(--space-3) var(--space-1) var(--space-4);
+  /* The rail's background moves the window; its controls stay controls. */
+  -webkit-app-region: drag;
+  border-right: var(--hairline) solid var(--line);
+  background: var(--panel-2);
+}
+.vs-rail-group {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+.vs-rail-item {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--control);
+  margin: 0;
+  padding: var(--space-3) var(--space-0);
+  border: var(--hairline) solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.vs-rail-item .vs-text {
+  color: inherit;
+  white-space: nowrap;
+}
+.vs-rail-item:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.vs-rail-item[data-active] {
+  border-color: var(--line);
+  background: var(--selection);
+  color: var(--text);
+}
+.vs-rail-item:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-rail-icon {
+  position: relative;
+  display: flex;
+}
+.vs-rail-badge {
+  position: absolute;
+  top: calc(var(--space-3) * -1);
+  left: var(--space-4);
+  box-sizing: border-box;
+  min-width: var(--space-5);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--err);
+  color: var(--bg);
+  font-family: var(--text-caption-family);
+  font-size: var(--text-caption-size);
+  line-height: var(--text-caption-line);
+  font-weight: var(--text-caption-weight);
+  text-align: center;
+}
+.vs-rail-dot {
+  position: absolute;
+  top: calc(var(--space-2) * -1);
+  right: calc(var(--space-2) * -1);
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: var(--radius-full);
+  background: var(--warn);
+}

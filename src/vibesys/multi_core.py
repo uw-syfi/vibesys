@@ -26,7 +26,6 @@ from vibesys.core_wiring import (
     agent_evaluation_policy,
     domain_prompt_sections,
     evaluation_inputs,
-    operation_catalog,
 )
 from vibesys.hypothesis import HypothesisState
 from vibesys.multi_roles import CORE_ROLES
@@ -44,10 +43,17 @@ from vibesys.plugin_registration import (
     OrchestrationRegistration,
     RuntimeRecordProjector,
 )
-from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR
-from vibesys.run.contracts import IterationTree, PluginProjection
+from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR, core_protocol_variables
+from vibesys.serial_roadmap import roadmap_entries
 from vibesys.serial_search.api import PROMPTS_DIR as SERIAL_SEARCH_PROMPTS
-from vs_core.api import FlowDriver, FlowState, MeasurementRecipe, RevisionRef
+from vs_core.api import (
+    FlowDriver,
+    FlowState,
+    MeasurementRecipe,
+    OperationRegistry,
+    RevisionRef,
+    policy_of,
+)
 from vs_core.api import RunFacts as CoreRunFacts
 from vs_runtime.api import (
     CoreOperation,
@@ -57,8 +63,6 @@ from vs_runtime.api import (
     ValidationRecipeArtifact,
 )
 from vs_runtime.api.core import (
-    OperationCatalog,
-    OperationPorts,
     RuntimeRecord,
     operation_roles,
 )
@@ -66,6 +70,7 @@ from vs_runtime.api.core import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from vibesys.run.contracts import PluginProjection
     from vs_core.api import TaskTerms
     from vs_runtime.api import CoreRunContext
 
@@ -73,29 +78,32 @@ type MultiRunLaunch = MultiLaunch | ProfileGuidedMultiLaunch
 
 # The label of the snapshot that retains a verified revision.
 RETENTION_LABEL = "verified"
-# The directories the run-scoped turns may write: the designer's roadmap and the profiler's evidence.
-ARTIFACT_DIRECTORIES = ("roadmap", "profile")
 
 
-def multi_operation_catalog(ports: OperationPorts) -> OperationCatalog:
-    """The operations the multi search requires, each owned by the production owner of its role."""
-    return operation_catalog(OPERATIONS, ports)
+def _registry() -> OperationRegistry:
+    """The codec of every operation a run records: the kit's and the roadmap's."""
+    registry = multi.registry()
+    if registry is None:
+        message = "the multi search registers operations"
+        raise ValueError(message)
+    return registry
 
 
-def multi_projector(plugin_id: str) -> RuntimeRecordProjector[FlowState]:
+def multi_projector(plugin_id: str) -> RuntimeRecordProjector[FlowState, HypothesisState]:
     """Read a multi run's published record from its committed runtime record."""
 
-    def project(state: FlowState, revision: int) -> PluginProjection:
-        record = FlowDriver.published(state, HypothesisState)
-        if record is None:
-            return PluginProjection(payload={}, iterations=IterationTree.from_nodes(()), rounds=())
+    def published(state: FlowState) -> HypothesisState | None:
+        return FlowDriver.published(state, HypothesisState)
+
+    def project(record: HypothesisState, revision: int) -> PluginProjection:
         return project_run_snapshot(record, experiment_revision=revision)
 
     return RuntimeRecordProjector(
         plugin_id=plugin_id,
         state_type=FlowState,
         record_type=RuntimeRecord[FlowState],
-        operations=OPERATIONS.registry(),
+        operations=_registry(),
+        published=published,
         project=project,
     )
 
@@ -110,12 +118,14 @@ def _task_terms(
         launch.metric_space,
         Measuring(
             stage_seconds={
+                "build": evaluation.build_seconds,
                 "accuracy": evaluation.accuracy_seconds,
                 "benchmark": evaluation.benchmark_seconds,
                 "profile": evaluation.profile_seconds,
             },
             queue_allowance=float(context.queue_allowance_seconds),
             benchmark_needs_accuracy=evaluation.benchmark_needs_accuracy,
+            builds=evaluation.builds,
             profile_fields=(
                 tuple(item.value for item in evaluation.profile_fields)
                 if evaluation.profile_measurement
@@ -148,6 +158,7 @@ def _plan_for(launch_type: type[MultiRunLaunch]) -> Callable[[CoreRunContext], C
             evaluator_digest=evaluation.evaluator_digest,
             workload_digest=evaluation.workload_digest,
             environment_digest=evaluation.environment_digest,
+            dedicated_measurement_resources=evaluation.dedicated_measurement_resources,
             task=terms,
         )
         profiler_id = context.facts.profiler_id
@@ -168,7 +179,8 @@ def _plan_for(launch_type: type[MultiRunLaunch]) -> Callable[[CoreRunContext], C
             facts=facts,
             limits=limits_for(budget(config), context),
             deadline_seconds=run_deadline_at(context.max_run_seconds),
-            prompt_variables=run_prompt_variables(
+            prompt_variables=core_protocol_variables(policy_of(facts))
+            | run_prompt_variables(
                 objective=facts.objective,
                 environment_notes=context.facts.environment_notes,
                 agent_evaluation=True,
@@ -208,7 +220,8 @@ def multi_core_policy(launch_type: type[MultiRunLaunch]) -> CorePolicy:
         retention_label=RETENTION_LABEL,
         prompt_templates=Path(prompts.__file__).parent,
         prompt_fallback_roots=(SERIAL_SEARCH_PROMPTS, CORE_PROTOCOL_DIR, PROMPTS_DIR / "shared"),
-        artifact_directories=ARTIFACT_DIRECTORIES,
+        owned_operations=roadmap_entries,
+        span_kinds=multi.spans,
     )
 
 

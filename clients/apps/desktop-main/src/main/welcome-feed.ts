@@ -3,15 +3,14 @@
  * needed for an authoritative bootstrap snapshot are retained beside that sequence.
  */
 import type {HostKey, HostListing} from '@vibesys/hosts';
-import type {ChromeState, WelcomeEvent, WelcomeOverview} from '@vibesys/ipc';
-import type {RecentRun} from '@vibesys/runs';
+import type {PreferencesView, WelcomeEvent, WelcomeOverview} from '@vibesys/ipc';
+import type {RecentRun, SkippedRecent} from '@vibesys/runs';
 
 export interface WelcomeSnapshotValues {
-  readonly settingsProblem: string | null;
   /** A disk read used until this process has published a newer Recent value. */
   readonly recent: readonly RecentRun[];
-  readonly chrome: ChromeState;
-  readonly host: HostKey;
+  /** The entries that disk read left out of `recent`. */
+  readonly skippedRecent: readonly SkippedRecent[];
 }
 
 /** The single sequence and retained state behind the welcome snapshot-plus-stream handoff. */
@@ -20,8 +19,8 @@ export class WelcomeFeed {
   #recent: readonly RecentRun[] | null = null;
   readonly #listings = new Map<HostKey, HostListing>();
 
-  chrome(value: ChromeState): WelcomeEvent<ChromeState> {
-    return this.#next(value);
+  hostSettings(): WelcomeEvent<null> {
+    return this.#next(null);
   }
 
   recent(value: readonly RecentRun[]): WelcomeEvent<readonly RecentRun[]> {
@@ -29,7 +28,7 @@ export class WelcomeFeed {
     return this.#next(value);
   }
 
-  showHost(value: HostKey): WelcomeEvent<HostKey> {
+  preferences(value: PreferencesView): WelcomeEvent<PreferencesView> {
     return this.#next(value);
   }
 
@@ -53,7 +52,9 @@ export class WelcomeFeed {
   snapshot(values: WelcomeSnapshotValues): WelcomeOverview {
     return {
       ...values,
+      // A published list is of a file the store wrote, which it does while every entry is readable.
       recent: this.#recent ?? values.recent,
+      skippedRecent: this.#recent === null ? values.skippedRecent : [],
       listings: [...this.#listings.values()],
       eventCursor: this.#sequence,
     };

@@ -20,7 +20,7 @@
 import {spawn} from 'node:child_process';
 import {homedir} from 'node:os';
 import type {ScheduleTimeout} from '@vibesys/transport';
-import {bootstrapUv, localBootstrap, remoteBootstrap} from './bootstrap.js';
+import {bootstrapUv, localBootstrap, remoteBootstrap, remoteCommand} from './bootstrap.js';
 import {ConnectionError} from './helper-channel.js';
 import {
   fromChild,
@@ -278,6 +278,14 @@ export class SshLink implements Link {
     );
   }
 
+  /** A binary channel over this link's existing SSH master and host configuration. */
+  spawnCommand(command: string): SpawnedProcess {
+    return this.#ssh(
+      ['-T', '-o', 'ControlMaster=no', '-o', 'BatchMode=yes', '--', this.#options.alias],
+      remoteCommand(command),
+    );
+  }
+
   heard(line: string): void {
     this.#uv = bootstrapUv(line) ?? this.#uv;
   }
@@ -482,6 +490,10 @@ export class SshLink implements Link {
         'ControlPersist=30m',
         '-o',
         'ConnectTimeout=20',
+        // Every helper channel is a session on this master, so this compresses all of them. A
+        // run's journal is text that shrinks 8-20x; an 8 MB history reads in less than half the time.
+        '-o',
+        'Compression=yes',
         '--',
         this.#options.alias,
         'true',

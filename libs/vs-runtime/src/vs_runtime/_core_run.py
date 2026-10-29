@@ -27,13 +27,10 @@ makes it non-decreasing and never below the last time core committed.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from vs_core.api import (
-    ArtifactId,
-    ArtifactRef,
     AttemptPhase,
     ClockAdvanced,
     ContinuationPhase,
@@ -52,21 +49,19 @@ from vs_core.api import (
     unreleased_records,
 )
 from vs_runtime._core_loop import LeaseUnavailableError
-from vs_runtime._steer_delivery import SteerConsumption, steer_input, unrecorded_steers
+from vs_runtime._mid_turn_steering import MidTurnSteering
 from vs_runtime._workspace_holds import core_workspace_holds
+from vs_sim.api import yield_now
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from vs_core.api import CoreEvent
+    from vs_runtime._control_bridge import RunControlBridge
     from vs_runtime._core_loop import CoreRuntime, PublicationDelivery
     from vs_runtime._core_requests import ExecutorRefusal
-    from vs_runtime._run_control import RunControlChannel
     from vs_runtime._workspace_holds import WorkspaceHolds
     from vs_sim.api import SleepingClock, Threads
-
-
-type ControlAction = Literal["pause", "resume", "stop", "steer"]
 
 
 #: Name of the task that renews the lease while a drain is in flight; fakes recognize it.
@@ -90,16 +85,23 @@ class RunTiming:
     ``threads`` is the blocking time (monotonic reads, sleeps, locks) that code on
     worker threads, such as an agent turn, waits on. A production entrypoint builds
     both from the real implementations; a simulated run builds them from one simulation.
+    ``control_poll_seconds`` is how often an idle loop reads the operator's controls (pause
+    and steer; a stop never waits for it). Production reads them every second; a simulated
+    run of many hours may read them less often, so its loop takes fewer idle steps.
     """
 
     clock: SleepingClock
     lease_seconds: float
     threads: Threads
+    control_poll_seconds: float = 1.0
 
     def __post_init__(self) -> None:
-        """Reject a lease that could never be held."""
+        """Reject a lease that could never be held, and a control poll that never comes."""
         if self.lease_seconds <= 0:
             message = "lease_seconds must be positive"
+            raise ValueError(message)
+        if self.control_poll_seconds <= 0:
+            message = "control_poll_seconds must be positive"
             raise ValueError(message)
 
 
@@ -118,14 +120,6 @@ class NextWake(Protocol):
 def core_next_wake(core: CoreState) -> float | None:
     """The default: core's own schedule, the due time of its next paced job poll."""
     return project(core).next_observe_at
-
-
-class SteerArtifacts(Protocol):
-    """Where the text of a steer control lives; the control carries only its digest."""
-
-    def put(self, ref: ArtifactRef, text: str) -> None:
-        """Store the text under the reference before the control is submitted."""
-        ...
 
 
 class StallNotes(Protocol):
@@ -156,7 +150,10 @@ class RunLoopConfig:
     recovery_poll_interval: float = 1.0
     max_dispatches: int = 100_000
     max_concurrent: int | None = None
-    """Requests the shell executes at once; None takes the run's ``Limits.max_parallel``."""
+    """Requests the shell executes at once; None takes the run's ``Limits.max_parallel``.
+
+    An operator's limit (``set_max_parallel``) is never above it, so the shell keeps its
+    width: a lower limit admits nothing new and does not slow the attempts already running."""
 
     def __post_init__(self) -> None:
         """Reject intervals that would let the loop spin or lose its lease."""
@@ -180,91 +177,6 @@ class RunOutcome:
     status: RunStatus
     result: RunResultProposal | None
     refusal: ExecutorRefusal | None = None
-
-
-class RunControlBridge:
-    """Turns the cooperative ``RunControlChannel`` mailbox into core control events.
-
-    The channel is level-triggered (a pause flag, a stop flag, a queue of steer texts).
-    Each ``poll`` emits one event per change since the last poll, with stable
-    identities ``control-<n>`` that continue the count of controls core already holds,
-    so a resumed run never reuses an identity. A stop carries no result: the search
-    adopts its last choice and ends the run itself.
-    """
-
-    def __init__(
-        self,
-        channel: RunControlChannel,
-        steer: SteerArtifacts,
-    ) -> None:
-        """Bind the mailbox and the steer text store."""
-        self._channel = channel
-        self._steer = steer
-        self._count = 0
-        self._consumption = SteerConsumption()
-        self._started = False
-        self._paused = False
-        self._stopped = False
-
-    def watch_stop(self, listener: Callable[[], object]) -> Callable[[], None]:
-        """Call ``listener`` (on the requesting thread) at each stop request; returns unsubscribe.
-
-        Only wakes the loop so it reads the channel now; the stop reaches core through
-        ``poll`` like every control.
-        """
-        return self._channel.on_stop_requested(listener)
-
-    def poll(self, core: CoreState, now_at: float) -> tuple[CoreEvent, ...]:
-        """Controls requested since the last poll, in submission order.
-
-        Each steer control is followed by the session input that delivers it to the next
-        turn (``_steer_delivery``), and a steer control whose input core never recorded
-        gets that input too.
-        """
-        self._consumption.newly_delivered(core, self._report_consumed)
-        if not self._started:
-            self._started = True
-            self._count = len(core.run.controls)
-            self._paused = core.run.status == RunStatus.PAUSED
-            self._stopped = any(c.action == "stop" for c in core.run.controls)
-        events: list[CoreEvent] = list(unrecorded_steers(core, now_at))
-        for text in self._channel.take_pending_steer():
-            control = self._event("steer", now_at, text=text)
-            events += (control, steer_input(core, control.control, now_at))
-        if self._stopped:
-            return tuple(events)
-        if self._channel.stop_requested():
-            self._stopped = True
-            events.append(self._event("stop", now_at, mode=self._channel.stop_mode()))
-        elif self._channel.pause_requested() != self._paused:
-            self._paused = not self._paused
-            events.append(self._event("pause" if self._paused else "resume", now_at))
-        return tuple(events)
-
-    def _report_consumed(self, role: str, round_label: str, execution_id: str) -> None:
-        self._channel.notify_steer_consumed(
-            agent_kind=role, round_label=round_label, execution_id=execution_id
-        )
-
-    def _event(
-        self,
-        action: ControlAction,
-        now_at: float,
-        *,
-        text: str | None = None,
-        mode: StopMode | None = None,
-    ) -> RunControlEvent:
-        self._count += 1
-        identity = ControlId(root=f"control-{self._count}")
-        artifact = None
-        if text is not None:
-            artifact = ArtifactRef(
-                artifact_id=ArtifactId(root=f"steer-{identity.root}"),
-                digest=hashlib.sha256(text.encode()).hexdigest(),
-            )
-            self._steer.put(artifact, text)
-        control = ControlInput(control_id=identity, action=action, mode=mode, artifact=artifact)
-        return RunControlEvent(control=control, now_at=now_at)
 
 
 class CoreHeldWorkspaces(Protocol):
@@ -296,8 +208,21 @@ class CoreRunHost:
 
 
 def start_core(host: CoreRunHost, config: RunLoopConfig) -> None:
-    """Take the lease and commit the new-epoch recovery, at the clock's current time."""
-    host.shell.start(config.host_id, now_at=host.clock.now(), lease_duration=config.lease_duration)
+    """Take the lease and commit writer recovery, at the clock's time after decoding."""
+    host.shell.prepare_start(config.host_id)
+    _take_lease(host, config)
+
+
+def _take_lease(host: CoreRunHost, config: RunLoopConfig) -> None:
+    host.shell.start(
+        config.host_id,
+        now_at=host.clock.now(),
+        lease_duration=config.lease_duration,
+        resume=host.controls is not None and host.controls.resumes_run,
+    )
+
+
+_PASSES_TO_WAKE_A_DUE_TIMER = 3
 
 
 async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) -> None:
@@ -309,13 +234,29 @@ async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) ->
     in clock time: a simulated clock makes it instant. Raises ``LeaseUnavailableError``
     naming the bound when the lease is still held after it.
 
+    The stored run is decoded and validated before the clock is read for the lease, with the
+    loop free to run in between (see ``CoreRuntime.prepare_start``).
+
     Once started, the host's ``workspaces`` follow core's recovered state: worktrees a
-    stopped host left that core no longer references are discarded now.
+    stopped host left that core no longer references are discarded now. If following or
+    sweeping those workspaces fails or is cancelled, startup releases its newly acquired
+    lease before propagating the interruption.
     """
     give_up_at = host.clock.now() + config.lease_duration
     while True:
+        # Take in the stored run first, then let the loop run, then read the clock for the
+        # lease: decoding a long run takes seconds, and the lease term should not include it.
+        # No lease is held yet, so the yields serve the loop's other tasks (the control
+        # watcher, a server), not the heartbeat, and they keep the decode and the start out of
+        # one unbroken hold on the loop. A task whose timer fell due during the decode needs
+        # two passes (the timer fires, then its future wakes the task); three leave one to
+        # spare, a margin that rests on asyncio's scheduling, not on a contract. Yielding
+        # waits on no clock.
+        host.shell.prepare_start(config.host_id)
+        for _ in range(_PASSES_TO_WAKE_A_DUE_TIMER):
+            await yield_now()
         try:
-            start_core(host, config)
+            _take_lease(host, config)
         except LeaseUnavailableError as error:
             remaining = give_up_at - host.clock.now()
             if remaining <= 0:
@@ -328,7 +269,19 @@ async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) ->
             await host.clock.sleep(min(config.recovery_poll_interval, remaining))
         else:
             break
-    await _follow_core(host)
+    try:
+        await _follow_core(host)
+    except BaseException as start_error:
+        try:
+            host.shell.release_lease(now_at=host.clock.now())
+        except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-114090 [BLE001]; cancellation and other startup failures must retain their identity if lease rollback also fails.
+            # > Catching only Exception would let an unexpected BaseException from the release
+            # > boundary replace startup; separate handlers would duplicate one rollback rule.
+            start_error.add_note(
+                "Additional error while releasing the lease after core startup failed: "
+                f"{type(cleanup_error).__name__}: {cleanup_error}"
+            )
+        raise
 
 
 async def _follow_core(host: CoreRunHost) -> None:
@@ -349,6 +302,9 @@ async def drive_core(
     stall_notes: StallNotes = no_stall_notes,
 ) -> RunOutcome:
     """Run a started shell until its run is terminal, an executor is refused, or it fails.
+
+    A run the operator's stop ended is terminal but resumable: the resume this process stands
+    for (``RunControlBridge``'s lift) reopens it before the loop starts.
 
     Each iteration: renew the lease when a third of it has passed, submit controls and
     the deadline stop, deliver the clock, settle the shell, ask the strategy once recovery
@@ -382,14 +338,13 @@ class _Loop:
         self._delivery = host.delivery
         self._clock = host.clock
         self._controls = host.controls
+        steering = host.shell.steering
+        self._steering = None if steering is None else MidTurnSteering(steering)
         self._config = config
         self._next_wake = next_wake
         self._stall_notes = stall_notes
         self._time = self._core().run.now_at
-        self._renewed_at = self._read()
-        self._deadline_stop = any(
-            c.control_id.root == "deadline" for c in self._core().run.controls
-        )
+        self._deadline_stop = False
         self._first_dispatch = self._shell.dispatched
         self._lease: asyncio.Task[None] | None = None
         # Set when the operator asks to stop, so a wait that has requests running ends now.
@@ -431,7 +386,7 @@ class _Loop:
                 raise failure
 
     async def _iterate(self) -> RunOutcome:
-        while self._core().run.status != RunStatus.TERMINAL:
+        while self._core().run.status not in (RunStatus.TERMINAL, RunStatus.PARKED):
             self._raise_if_lease_lost()
             now = self._read()
             self._renew(now)
@@ -442,18 +397,33 @@ class _Loop:
             self._shell.submit(ClockAdvanced(now_at=now), now_at=now)
             before = self._signature()
             refusal = await self._settle(now)
+            self._settle_controls()
             if refusal is None and self._core().records.recovery.phase == RecoveryPhase.READY:
                 self._shell.flush(now_at=now)
                 refusal = await self._settle(now)
             if refusal is not None:
                 # Requests already running finish and commit before the refusal ends the run.
-                await self._shell.finish_in_flight(self._delivery, now_at=now, refusal=refusal)
+                await self._shell.finish_in_flight(
+                    self._delivery, now_at=now, refusal=refusal, upkeep=self._keep_lease
+                )
+                self._settle_controls()
                 return self._outcome(refusal)
-            if self._core().run.status == RunStatus.TERMINAL:
+            # Before the loop can exit: a control the commit that ended the run refused is
+            # answered now, since no later poll will see it.
+            self._settle_controls()
+            if self._core().run.status in (RunStatus.TERMINAL, RunStatus.PARKED):
                 break
             if self._signature() == before:
                 await self._wait(now)
         return self._outcome()
+
+    def _settle_controls(self) -> None:
+        """Tell the control bridge what core committed and which of its controls it refused."""
+        refused = self._shell.take_refused()
+        if self._controls is not None:
+            self._controls.settled(
+                self._core(), running=bool(self._shell.in_flight), refused=refused
+            )
 
     def _slots(self) -> int:
         return self._config.max_concurrent or self._core().run.limits.max_parallel
@@ -467,6 +437,7 @@ class _Loop:
                 now_at=now,
                 max_dispatches=remaining,
                 max_concurrent=self._slots(),
+                upkeep=self._keep_lease,
             )
         finally:
             self._raise_if_lease_lost()
@@ -503,8 +474,18 @@ class _Loop:
                 self._renew_now(self._read())
             self._shell.record_renewal()
 
+    def _keep_lease(self) -> None:
+        """Renew between two commits of one settle when due, and tell core, as the heartbeat does.
+
+        The heartbeat is a task on this loop, so it runs only when the loop is free; a settle
+        whose commits each take seconds (the whole record is rewritten on this thread) would
+        otherwise outlast the lease before the heartbeat could renew it.
+        """
+        self._renew(self._read())
+        self._shell.record_renewal()
+
     def _renewal_due(self) -> float:
-        return self._renewed_at + self._config.lease_duration / 3
+        return self._shell.lease_renewed_at + self._config.lease_duration / 3
 
     def _renew(self, now: float) -> None:
         if now >= self._renewal_due():
@@ -512,11 +493,12 @@ class _Loop:
 
     def _renew_now(self, now: float) -> None:
         self._shell.renew(now_at=now, lease_duration=self._config.lease_duration)
-        self._renewed_at = now
 
     def _due_controls(self, now: float) -> tuple[CoreEvent, ...]:
         core = self._core()
         events: list[CoreEvent] = list(self._controls.poll(core, now) if self._controls else ())
+        if self._steering is not None:
+            events.extend(self._steering.poll(core, now))
         live = core.run.status in (RunStatus.RUNNING, RunStatus.PAUSED)
         if (
             now >= core.run.deadline_at
@@ -528,7 +510,9 @@ class _Loop:
             events.append(
                 RunControlEvent(
                     control=ControlInput(
-                        control_id=ControlId(root="deadline"), action="stop", mode=StopMode.DRAIN
+                        control_id=ControlId(root=f"deadline:{core.records.recovery.epoch}"),
+                        action="stop",
+                        mode=StopMode.DRAIN,
                     ),
                     now_at=now,
                 )
@@ -537,12 +521,14 @@ class _Loop:
             events.append(
                 RunControlEvent(
                     control=ControlInput(
-                        control_id=ControlId(root=_RECOVERY_BLOCKED),
+                        control_id=ControlId(
+                            root=f"{_RECOVERY_BLOCKED}:{core.records.recovery.epoch}"
+                        ),
                         action="stop",
                         mode=StopMode.CANCEL,
                     ),
                     result=RunResultProposal(
-                        outcome="blocked", reason="recovery blocked: outcome unknown"
+                        outcome="blocked", reason=_recovery_blocked_reason(core)
                     ),
                     now_at=now,
                 )
@@ -562,7 +548,10 @@ class _Loop:
         return (
             core.records.recovery.phase == RecoveryPhase.BLOCKED
             and core.run.result is None
-            and not any(c.control_id.root == _RECOVERY_BLOCKED for c in core.run.controls)
+            and not any(
+                c.control_id.root == f"{_RECOVERY_BLOCKED}:{core.records.recovery.epoch}"
+                for c in core.run.controls
+            )
             and (
                 (
                     not self._shell.in_flight
@@ -620,7 +609,10 @@ class _Loop:
         # would only wait out the deadline before the same stall.
         recovering = core.records.recovery.phase != RecoveryPhase.READY and not (
             core.records.recovery.phase == RecoveryPhase.BLOCKED
-            and any(c.control_id.root == _RECOVERY_BLOCKED for c in core.run.controls)
+            and any(
+                c.control_id.root == f"{_RECOVERY_BLOCKED}:{core.records.recovery.epoch}"
+                for c in core.run.controls
+            )
         )
         past_deadline = now >= core.run.deadline_at
         if due is None and not paused and (not recovering or past_deadline):
@@ -678,6 +670,14 @@ class _Loop:
 
 
 _RECOVERY_BLOCKED = "recovery-blocked"
+
+
+def _recovery_blocked_reason(core: CoreState) -> str:
+    """Why the run ends blocked: the records whose outcome recovery could not learn, named."""
+    blocked = sorted(
+        check.target.root for check in core.records.recovery.checks if check.resolution == "blocked"
+    )
+    return f"recovery blocked: outcome unknown for {', '.join(blocked)}"
 
 
 def _noop() -> None:

@@ -72,6 +72,66 @@ host = "my-cluster"
 commands on `PATH`. Every transport process has the hard deadline configured by
 `transport_timeout_seconds`.
 
+`dedicated_measurement_resources` (default `false`) declares that each
+measurement job gets its GPUs and CPU cores to itself through the scheduler,
+though it may share the host with other jobs. Set it for a shared GPU node
+where `sbatch_arguments` allocate whole GPUs and cores (for example
+`--gres=gpu:4 -c 64`) but cannot pass `--exclusive` without taking the whole
+node from other users. A bare `--exclusive` as the last node-sharing option in
+`sbatch_arguments` implies it (`--exclusive=user`, `--exclusive=mcs`,
+`--exclusive=topo`, `--oversubscribe`, `--share` and `-s` share nodes, so they
+do not count). When it holds, an official measurement of a task that opts in
+may reuse the agent's own run of the identical input instead of queuing a
+second job; leave it `false` unless the declaration is
+true, because it is the only evidence that the two runs faced the same
+conditions.
+
+Every job is submitted with `--no-requeue`, after the operator's
+`sbatch_arguments`, and `--requeue` there is rejected: VibeSys retries a failed
+job itself, and a scheduler requeue would rerun stages that already finished.
+A job's service and its command each run in a session of their own (so the
+compute node needs `setsid`, which util-linux provides). When the job script
+exits, it sends SIGTERM to every process of both sessions, SIGKILL
+`service_stop_grace_seconds` later (1 to 20, default 20), and then waits until
+none of them is left, for at most `process_exit_wait_seconds` (1 to 1800,
+default 120). A process Slurm finds still running when the script has exited
+can make Slurm's step kill fail ("Kill task failed") and drain the node; a CUDA
+process holding a large GPU allocation can take tens of seconds to exit after
+SIGKILL. A zombie does not count as running, unless it still has threads: a
+process whose main thread exited shows as a zombie while its other threads run,
+and a CUDA process releases the GPU only when its last thread exits. When a
+process outlives the wait, the script lists it (`ps` output) on the job's stderr
+and exits with code 71 (`PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE`), so the
+evaluation is not reused; a service that never became ready keeps its code 70.
+Both commands start with the environment variable `VS_SLURM_JOB_PROCESS` set to
+a token unique to the job script, so a descendant that left their sessions with
+`setsid` (Ray and daemons do) is found by that marker, and its own session joins
+the job's; a process found that way gets SIGTERM too while the grace lasts. A
+process also needs the job's own `SLURM_JOB_ID` to match, so a nested job that a
+command submitted, which inherits the marker, is left alone. Not found: a
+descendant that leaves the sessions and also clears its environment
+(`env -i setsid ...`), or that is already exiting when teardown starts; Slurm's
+own step kill still ends it, but the script does not wait for it.
+Reading another process's environment can block while that process is stuck in
+the kernel, so each read, and the `ps` report, is cut off after a few seconds.
+A process of the job's user whose environment read was cut off for the whole
+wait counts as possibly the job's: the script names it and exits with code 71.
+
+The grace plus the wait must be shorter than a `--time`/`-t` limit in
+`sbatch_arguments`: an explicit wait that does not fit is rejected, and the
+default wait shrinks to the limit minus the grace minus 1 second. VibeSys's
+own run deadline, `job_timeout_seconds`, is not checked against them, but should
+leave the same room after the command ends: a cancel during teardown no longer
+interrupts the script, and Slurm kills it KillWait (30 s by default) later.
+Slurm's own SIGTERM, at a cancel or the time limit, runs the same teardown, and
+the grace keeps the script's SIGKILL 10 s ahead of Slurm's default KillWait.
+A setup script is sourced into the job script itself, so a background process
+it starts is not part of either session and is left to Slurm. What the setup
+script exports reaches the service and every stage, including a stage that is a
+`bash -c`: the job script unsets `SSH_CLIENT` and `SSH2_CLIENT` first, because a
+`bash` built for sshd that sees them re-reads the login rc files and re-exports
+the login values over the setup's.
+
 The local machine needs OpenSSH and rsync. The login host needs rsync and the
 Slurm commands named by the configuration, and `remote_workspace_root` must be
 writable and visible from compute nodes.

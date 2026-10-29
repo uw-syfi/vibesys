@@ -14,14 +14,16 @@
 
 """PyTorch reference implementations for the rmsnorm_tkg kernel."""
 
+from typing import Optional
+
 import torch
 
 
 def rms_norm_torch_ref(
     hidden: torch.Tensor,
-    gamma: torch.Tensor | None,
+    gamma: Optional[torch.Tensor],
     eps: float = 1e-6,
-    hidden_actual: int | None = None,
+    hidden_actual: Optional[int] = None,
     **_,
 ) -> torch.Tensor:
     """
@@ -56,11 +58,11 @@ def rmsnorm_tkg_torch_ref_lnc1(
     gamma: torch.Tensor,
     output: torch.Tensor,
     eps: float = 1e-6,
-    hidden_actual: int | None = None,
+    hidden_actual: Optional[int] = None,
     hidden_dim_tp: bool = False,
     single_core_forced: bool = False,
     use_heap_memory: bool = False,
-    sbm: object | None = None,
+    sbm: Optional[object] = None,
 ) -> dict[str, torch.Tensor]:
     """Torch reference for rmsnorm_tkg kernel (LNC1 output layout).
 
@@ -106,11 +108,11 @@ def rmsnorm_tkg_torch_ref(
     gamma: torch.Tensor,
     output: torch.Tensor,
     eps: float = 1e-6,
-    hidden_actual: int | None = None,
+    hidden_actual: Optional[int] = None,
     hidden_dim_tp: bool = False,
     single_core_forced: bool = False,
     use_heap_memory: bool = False,
-    sbm: object | None = None,
+    sbm: Optional[object] = None,
 ) -> dict[str, torch.Tensor]:
     """Torch reference for rmsnorm_tkg kernel (LNC2 output layout).
 

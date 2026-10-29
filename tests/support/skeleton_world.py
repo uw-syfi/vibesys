@@ -31,7 +31,12 @@ from tests.support.skeleton_strategy import (
     Implementation,
     SkeletonStrategy,
 )
-from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_env
+from tests.support.workspace_world import (
+    RUN_ID,
+    ExecutionTopology,
+    WorkspaceEnv,
+    open_workspace_env,
+)
 
 from vs_agent.api import AgentClient
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider
@@ -41,6 +46,8 @@ from vs_core.api import (
     Limits,
     RunFacts,
     RunStatus,
+    Scope,
+    TaskTerms,
     TurnSpec,
 )
 from vs_core.api.testing import sample_limits
@@ -79,13 +86,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
 from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
-from vs_sim.api.testing import (
-    ManualClock,
-    SimBlockingRunner,
-    clock_from,
-    current_virtual_clock,
-    loop_threads,
-)
+from vs_sim.api.testing import NO_PROCESSES, ManualClock, clock_from, current_virtual_clock
 from vs_slurm.api import (
     SlurmConfig,
     SlurmSshTransport,
@@ -111,15 +112,18 @@ if TYPE_CHECKING:
         CommitObserver,
         ExecutionContext,
         Inspection,
+        TurnSteering,
         TurnYields,
     )
-    from vs_runtime.api.infrastructure import RuntimeWorkspaces
-    from vs_sim.api import Clock, SleepingClock
+    from vs_runtime.api.infrastructure import RunControlChannel, RuntimeWorkspaces
+    from vs_sim.api import Clock, SleepingClock, Threads
 
 LEASE = 100.0
-# A Slurm job that has not ended this long after it was submitted is cancelled and fails: well
-# inside the run deadline (1000 s), so a job that never leaves the queue cannot outlive the run.
+# A Slurm job that runs this long, or waits this long in the queue, is cancelled and fails: well
+# inside the run deadline (1000 s), so a job that never leaves the queue fails on its own queue
+# deadline instead of running into the run's.
 JOB_TIMEOUT_S = 300
+QUEUE_TIMEOUT_S = 300
 
 
 @dataclass
@@ -200,7 +204,8 @@ class World:
     timed: tuple[Clock, float] | None = None
     job_clock: Clock = field(default_factory=ManualClock)
     """What Slurm job deadlines count on: by default a clock that never moves, so none expires.
-    A world on a virtual loop hands its run clock, so a job outliving ``JOB_TIMEOUT_S`` fails."""
+    A world on a virtual loop hands its run clock, so a job running past ``JOB_TIMEOUT_S``, or queued
+    past ``QUEUE_TIMEOUT_S``, fails."""
     polls: list[str] = field(default_factory=list)
     during_submit: Callable[[], Awaitable[None]] | None = None
     limits: Limits = field(default_factory=lambda: sample_limits(reconciliation_bound=300.0))
@@ -222,6 +227,11 @@ class World:
     times the store's file writes and directory syncs."""
     evaluations: list[SemanticSlurmEvaluationExecutor] = field(default_factory=list)
     """The evaluation executor of every process started, which a host closes at exit."""
+    control: RunControlChannel | None = None
+    task: TaskTerms | None = None
+    """What the task fixes about measuring and comparing, when the world's run has terms."""
+    steering: Callable[[TurnSteering], TurnSteering] | None = None
+    """Wraps the turn steering of each process started, so a test sees what reaches the turn."""
 
     def initial(self) -> CoreState:
         """The state of a run that has not started, from the real baseline commit."""
@@ -236,6 +246,7 @@ class World:
             evaluator_digest=DIGEST,
             workload_digest=DIGEST,
             environment_digest=DIGEST,
+            task=self.task,
         )
         return new_core_state(
             RUN_ID,
@@ -260,6 +271,7 @@ class World:
                 remote_workspace_root="/runs",
                 transport=SlurmSshTransport(host="test"),
                 job_timeout_seconds=JOB_TIMEOUT_S,
+                queue_timeout_seconds=QUEUE_TIMEOUT_S,
             ),
             SlurmExecutionPolicy(),
             SlurmEvaluationPlan(
@@ -281,6 +293,9 @@ class World:
             clock=self.job_clock,
             sleeper=_LoopPacing(),
             cluster=self.cluster,
+            control=self.control,
+            blocking=self.env.execution.blocking,
+            processes=NO_PROCESSES,
         )
         self.evaluations.append(evaluation)
         if self.timed is not None:
@@ -290,13 +305,10 @@ class World:
         if self.gate is not None:
             # The gated namespace delegates all but the execution-record writes to the real one.
             receipts = cast("StateNamespace", FaultingReceipts(receipts, self.gate))
-        # Blocking work runs on the loop's simulated threads: it overlaps the loop as it does
-        # in production, in an order the schedule seed fixes.
-        threads = loop_threads()
         bindings = core_bindings(
             receipts=receipts,
             workspaces=workspaces,
-            measurement=MeasurementServices(evaluation),
+            measurement=MeasurementServices(evaluation, control=self.control),
             sessions=SessionServices(
                 self.agents.sessions(),
                 self.agents.resolver,
@@ -305,8 +317,8 @@ class World:
                 else self.yields(workspaces, self.env.receipts_namespace()),
             ),
             operations=self.operations,
-            threads=threads,
-            blocking=SimBlockingRunner(threads),
+            threads=self.env.execution.threads,
+            blocking=self.env.execution.blocking,
         )
         # The skeleton checks for orphan waits after every commit, so a stall fails where it starts.
         bindings = dataclasses.replace(bindings, check_liveness=True)
@@ -324,6 +336,8 @@ class World:
         bindings = self.bindings()
         if self.commits is not None:
             bindings = dataclasses.replace(bindings, commits=self.commits)
+        if self.steering is not None and bindings.steering is not None:
+            bindings = dataclasses.replace(bindings, steering=self.steering(bindings.steering))
         store = self.store if self.store is not None else self.env.project.state_store(RUN_ID)
         if self.gate is not None:
             store = FaultingStore(store, self.gate)
@@ -466,20 +480,23 @@ class CandidateResolver(FakeSessionResolver):
     """Resolves turns to the candidate worktree the writer commits in."""
 
     writer: CandidateWriter | None = None
+    control: RunControlChannel | None = None
 
     def agent_spec(
         self, turn: TurnSpec, workspace: AccessGuardedWorkspace
     ) -> AgentSessionSpec | None:
         """The Fake provider's session configuration over the live candidate worktree."""
         assert self.writer is not None
+        if self.control is not None:
+            scope = turn.workspace if isinstance(turn.workspace, Scope) else turn.workspace.scope
+            self.control.prepare_execution(turn.invocation_id.root, scope)
         spec = super().agent_spec(turn, workspace)
         assert spec is not None
         return dataclasses.replace(spec, workspace=self.writer.worktree())
 
 
-def _open_agents(root: Path) -> SessionHost:
+def _open_agents(root: Path, threads: Threads) -> SessionHost:
     writer = CandidateWriter(root)
-    threads = loop_threads()
     client = AgentClient(
         FakeProvider(answer=writer.answer, on_turn=writer, threads=threads),
         clock=ManualClock(),
@@ -537,14 +554,23 @@ def open_skeleton_world(  # noqa: PLR0913  # lint-waiver: LW-731842 [PLR0913]; e
     timed: tuple[Clock, float] | None = None,
     agents: Callable[[Path], SessionHost] | None = None,
     git: GitKind = GitKind.FAKE,
+    unread_paths: tuple[str, ...] = (),
+    execution: ExecutionTopology | None = None,
 ) -> Iterator[World]:
     """A fresh run on in-memory Git (or ``git=GitKind.REAL``, real Git) with the Fake Slurm cluster.
 
+    ``execution`` owns the threads and blocking boundary of every component in the world.
     Closes every host on exit.
     """
-    with open_workspace_env(tmp_path, git=git) as env:
+    with open_workspace_env(
+        tmp_path, git=git, unread_paths=unread_paths, execution=execution
+    ) as env:
         vcs = world_git(tmp_path / "project", env.git_disk)
-        hosted = (agents or _open_agents)(tmp_path / "project")
+        hosted = (
+            _open_agents(tmp_path / "project", env.execution.threads)
+            if agents is None
+            else agents(tmp_path / "project")
+        )
         if isinstance(hosted.resolver, CandidateResolver) and hosted.resolver.writer is not None:
             hosted.resolver.writer.use(vcs)
         yield World(

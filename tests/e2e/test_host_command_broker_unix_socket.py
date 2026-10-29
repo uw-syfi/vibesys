@@ -26,6 +26,7 @@ from vs_sandbox.api.slurm import (
     BrokerTransport,
     GpuCommand,
     GpuCommands,
+    GpuJobOutcome,
     GpuJobRequest,
     HostCommandBroker,
     RunRoots,
@@ -65,14 +66,14 @@ class _Launcher:
         *,
         write: Callable[[bytes], None],
         cancel: Event,
-    ) -> int:
+    ) -> GpuJobOutcome:
         del request, command
         write(b"gpu job\n")
         self.started.set()
         if self._block:
             wait_or_fail(cancel, "the broker to cancel the job")
             self.cancelled.set()
-        return 3
+        return GpuJobOutcome(3)
 
 
 @contextmanager

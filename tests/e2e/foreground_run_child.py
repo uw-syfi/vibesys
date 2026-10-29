@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import faulthandler
+import gc
 import os
 import signal
 import sys
@@ -23,7 +24,8 @@ from typing import TYPE_CHECKING, ClassVar
 import server.runtime as runtime_module
 from entrypoints import cli
 from entrypoints.server import main
-from vs_sim.api.testing import send_to_thread
+from vs_project.api import user_runtime_root
+from vs_sim.api.testing import send_to_thread, wait_or_fail
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -35,6 +37,8 @@ class BlockedRuntime:
     transports = 1
     self_target: ClassVar[int | None] = None
     """Index of the owned thread this process signals itself, or ``None`` to await a parent."""
+    discard_wake_in_gc: ClassVar[bool] = False
+    """Deliver the first wake inside a GC callback that discards its exception."""
     cleanups: ClassVar[list[bool]] = []
     """For each finished run, whether shutdown had been requested by the time it cleaned up."""
 
@@ -59,15 +63,42 @@ class BlockedRuntime:
                 thread.native_id for thread in threading.enumerate() if thread.native_id is not None
             ]
             print("driving", *owned, flush=True)  # noqa: T201  # lint-waiver: LW-155506 [T201]; the parent test reads the child's observations from stdout
-            if self.self_target is not None:
+            if self.discard_wake_in_gc:
+                _signal_during_gc()
+            elif self.self_target is not None:
                 send_to_thread(os.getpid(), owned[self.self_target % len(owned)], signal.SIGTERM)
             await asyncio.sleep(0)
             await asyncio.Event().wait()
 
         asyncio.run(serve_forever())
 
-    def shutdown(self) -> None:
+    def interrupt(self) -> bool:
+        """No run control is installed: a Ctrl-C ends the server as SIGTERM does."""
+        return False
+
+    def shutdown(self, number: signal.Signals | None = None) -> None:
+        del number
         self.stopping.set()
+
+
+def _signal_during_gc() -> None:
+    """Keep the first wake inside a GC callback, where Python discards its exception."""
+    entered = False
+
+    def callback(phase: str, _info: dict[str, int]) -> None:
+        nonlocal entered
+        if phase != "start" or entered:
+            return
+        entered = True
+        send_to_thread(os.getpid(), threading.get_native_id(), signal.SIGTERM)
+        # Only the wake's KeyboardInterrupt releases this wait. The collector discards it.
+        wait_or_fail(threading.Event(), "the first wake inside a GC callback")
+
+    gc.callbacks.append(callback)
+    try:
+        gc.collect()
+    finally:
+        gc.callbacks.remove(callback)
 
 
 def _serve(transports: int) -> None:
@@ -83,15 +114,20 @@ def _serve(transports: int) -> None:
         resolved_run_id="run-1",
         resolved_project_root=Path("/unused/project"),
     )
-    main(["--control-socket", "/unused/control.sock", "--local"])
+    # Inside the runtime root: the server refuses a control socket anywhere else.
+    socket = user_runtime_root(os.environ, os.getuid()) / "unused" / "control.sock"
+    main(["--control-socket", str(socket), "--local"])
 
 
-def interrupted_run(transports: int, target: int) -> tuple[list[bool], str]:
+def interrupted_run(
+    transports: int, target: int, *, discard_wake_in_gc: bool = False
+) -> tuple[list[bool], str]:
     """Serve a foreground run that signals itself; return its cleanups and how it ended.
 
     Call through ``run_in_child``: it installs signal handlers and swaps module attributes.
     """
     BlockedRuntime.self_target = target
+    BlockedRuntime.discard_wake_in_gc = discard_wake_in_gc
     try:
         _serve(transports)
     except KeyboardInterrupt:

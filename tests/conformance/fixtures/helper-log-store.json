@@ -1,0 +1,27 @@
+{
+  "description": "The log store the helper-logs-* scenarios assume, seeded by every runner that executes them. Each stream's writes are applied in order, then bytes before evict_before are evicted, then it is closed with outcome (null leaves it open). Stream ids are the ones a vs_logs store assigns in opening order.",
+  "instances": {
+    "0123456789ab": [
+      {
+        "id": "000001",
+        "owner": {"kind": "startup_step", "step": "image_build"},
+        "command": "docker build .",
+        "writes": [
+          {"pipe": "stdout", "text": "Step 1/8 : FROM python\nStep 2/8 : WORKDIR /app\nStep 3/8 : RUN make"}
+        ],
+        "evict_before": 0,
+        "outcome": null
+      },
+      {
+        "id": "000002",
+        "owner": {"kind": "server_process"},
+        "command": "vibesys",
+        "writes": [
+          {"pipe": "stderr", "text": "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\n"}
+        ],
+        "evict_before": 14,
+        "outcome": "failed"
+      }
+    ]
+  }
+}

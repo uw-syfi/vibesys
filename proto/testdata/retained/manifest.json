@@ -1,0 +1,84 @@
+{
+  "64c1a8b7": {
+    "writer_commit": "64c1a8b7fa850be42bab901b1723ed562dab6fa7",
+    "producer": "storeRunFixture('facts') with comparison/adoption spans omitted and dense sequences",
+    "input": 100,
+    "candidate": "gate-0",
+    "vs_baseline": 1.01,
+    "chart_reference": 100,
+    "measurement_seq": 14,
+    "head_input_absent": true,
+    "input_span": "input-gate",
+    "best": 102,
+    "ratio": 1.02,
+    "measured": 2
+  },
+  "471ec600": {
+    "writer_commit": "471ec6007de08bedf072e906b6d9392057ba7167",
+    "producer": "retained facts records replayed through the previous writer before performance facts",
+    "input": 100,
+    "candidate": "gate-0",
+    "vs_baseline": 1.01,
+    "chart_reference": 100,
+    "measurement_seq": 14,
+    "head_input_absent": true,
+    "input_span": "input-gate",
+    "best": 102,
+    "ratio": 1.02,
+    "measured": 2
+  },
+  "0064a1bc": {
+    "writer_commit": "0064a1bc69059a4b289d0f0c3cf510253bc0949b",
+    "producer": "64c1a8b7 retained records and two intents, followed by 1100 warning notices in epoch 1; dense sequences through the previous FileRunLogWriter",
+    "input": 100,
+    "candidate": "gate-0",
+    "vs_baseline": 1.01,
+    "chart_reference": 100,
+    "measurement_seq": 14,
+    "head_input_absent": true,
+    "input_span": "input-gate",
+    "intent_ids": [
+      "old-guidance",
+      "old-refusal"
+    ],
+    "epoch_starts": [
+      1
+    ],
+    "best": 102,
+    "ratio": 1.02,
+    "measured": 2
+  },
+  "438bfd3d": {
+    "writer_commit": "438bfd3de4b20304206ee9fa0a0e3cdf224bd588",
+    "producer": "retained facts records with canonical project_root replayed through the preceding writer and Project publisher; index symlink relocated with its logs",
+    "input": 100,
+    "candidate": "gate-0",
+    "vs_baseline": 1.01,
+    "chart_reference": 100,
+    "measurement_seq": 14,
+    "head_input_absent": false,
+    "input_span": "input-gate",
+    "project_root": "/projects/unvisited project",
+    "index_project_absent": true,
+    "best": 102,
+    "ratio": 1.02,
+    "measured": 2
+  },
+  "f0e0f620": {
+    "writer_commit": "f0e0f62018bcafd82a02a3d7fab7ba511e2f648c",
+    "producer": "64c1a8b7 retained facts with project_root removed from the input records, replayed through the actual pre-project_root writer; no sidecar",
+    "input": 100,
+    "candidate": "gate-0",
+    "vs_baseline": 1.01,
+    "chart_reference": 100,
+    "measurement_seq": 14,
+    "head_input_absent": true,
+    "input_span": "input-gate",
+    "best": 102,
+    "ratio": 1.02,
+    "measured": 2,
+    "project_root": "/projects/unvisited project",
+    "index_project_absent": true,
+    "epoch_project_absent": true
+  }
+}

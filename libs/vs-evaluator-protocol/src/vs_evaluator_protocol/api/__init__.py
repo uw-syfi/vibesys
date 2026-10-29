@@ -2,7 +2,9 @@
 
 ``Hello``, ``MetricSpec``, ``Result``, and ``ErrorRecord`` define the versioned
 record stream; an ``ErrorRecord`` may carry a ``PartialMeasurement`` (with its
-``Progress``) of what a failed run measured before it stopped. ``parse_records`` validates its lines; ``read_measurement``
+``Progress``) of what a failed run measured before it stopped, and an ``ErrorKind``
+(with the unmet ``requirement`` it names) saying whether measuring again could help.
+``parse_records`` validates its lines; ``read_measurement``
 reduces the stream to a ``Measurement``. ``check_objectives`` validates metric
 names required by a caller. Invalid streams raise ``ProtocolError`` with a
 ``ReasonCode``. Evaluator execution and scoring belong to the caller.
@@ -16,6 +18,7 @@ from vs_evaluator_protocol.measurement import (
 )
 from vs_evaluator_protocol.records import (
     PROTOCOL_VERSION,
+    ErrorKind,
     ErrorRecord,
     Hello,
     MetricSpec,
@@ -29,6 +32,7 @@ from vs_evaluator_protocol.records import (
 
 __all__ = [
     "PROTOCOL_VERSION",
+    "ErrorKind",
     "ErrorRecord",
     "Hello",
     "Measurement",

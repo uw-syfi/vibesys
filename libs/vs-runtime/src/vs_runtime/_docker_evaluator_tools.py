@@ -10,10 +10,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from vs_runtime._trusted_evaluation_preparation import (
+    SANDBOX_EVALUATOR_GO_MODULES_ROOT,
     SANDBOX_EVALUATOR_TOOLS_ROOT,
+    EvaluatorGoModuleError,
     TrustedEvaluatorRequirements,
     docker_evaluator_tools_root,
     evaluator_container_setup,
+    evaluator_go_module_ready_path,
+    evaluator_go_module_setup_command,
+    required_evaluator_go_module_cache_root,
 )
 from vs_sandbox.api import (
     BeforeReadyContext,
@@ -76,6 +81,19 @@ def prepare_docker_evaluator_resources(
     *,
     builder: DockerToolBuilder,
 ) -> tuple[HostResource, ...]:
+    """Build missing evaluator dependencies and return verified read-only resources."""
+    resources = list(_prepare_docker_evaluator_tools(requirements, workspace, builder=builder))
+    if requirements.go_module is not None:
+        resources.append(_prepare_docker_go_module(requirements, workspace, builder=builder))
+    return tuple(resources)
+
+
+def _prepare_docker_evaluator_tools(
+    requirements: TrustedEvaluatorRequirements,
+    workspace: Path,
+    *,
+    builder: DockerToolBuilder,
+) -> tuple[HostResource, ...]:
     """Build missing evaluator tools and return verified read-only resources.
 
     Tool caches are keyed by the immutable target image. A cache miss starts
@@ -100,12 +118,14 @@ def prepare_docker_evaluator_resources(
         opened = (
             nullcontext(DISCARD) if builder.output is None else builder.output(tuple(sorted(tools)))
         )
+        # The build's stream stays open until the build is verified, so a build that
+        # publishes too little ends its stream as failed.
         with opened as output:
             _build_evaluator_tools(requirements, builder, host_parent, output)
-        try:
-            prepare_evaluator_tools(tools, host_parent, command_runner=_require_builder)
-        except _EvaluatorToolBuildRequiredError as exc:
-            raise EvaluatorToolError.builder_incomplete() from exc
+            try:
+                prepare_evaluator_tools(tools, host_parent, command_runner=_require_builder)
+            except _EvaluatorToolBuildRequiredError as exc:
+                raise EvaluatorToolError.builder_incomplete() from exc
 
     return tuple(
         HostResource(
@@ -116,6 +136,102 @@ def prepare_docker_evaluator_resources(
         )
         for name, spec in tools.items()
     )
+
+
+def _prepare_docker_go_module(
+    requirements: TrustedEvaluatorRequirements,
+    workspace: Path,
+    *,
+    builder: DockerToolBuilder,
+) -> HostResource:
+    """Prepare and offline-verify one Go cache in the target image before mounting it."""
+    module = requirements.go_module
+    package_root = requirements.package_root
+    if module is None or package_root is None:
+        message = "evaluator package declares no Go module"
+        raise ValueError(message)
+    cache_root = required_evaluator_go_module_cache_root(requirements, workspace)
+    _build_evaluator_go_module(requirements, builder, cache_root)
+    if not evaluator_go_module_ready_path(module, cache_root).is_dir():
+        raise EvaluatorGoModuleError.builder_incomplete()
+    return HostResource(
+        cache_root,
+        HostResourceAccess.READ_ONLY,
+        "evaluator Go module cache",
+        str(SANDBOX_EVALUATOR_GO_MODULES_ROOT),
+    )
+
+
+def _build_evaluator_go_module(
+    requirements: TrustedEvaluatorRequirements,
+    builder_spec: DockerToolBuilder,
+    cache_root: Path,
+) -> None:
+    package_root = requirements.package_root
+    if package_root is None:
+        message = "evaluator Go module requires a package root"
+        raise ValueError(message)
+    cache_root.mkdir(parents=True, exist_ok=True)
+    builder_workspace = builder_spec.log_dir / "evaluator-go-module-builder-workspace"
+    builder_workspace.mkdir(parents=True, exist_ok=True)
+    builder = builder_spec.backend.make_sandbox(
+        SandboxKind.DOCKER,
+        host_workspace=str(builder_workspace),
+        log_path=builder_spec.log_dir / "evaluator-go-module-builder.log",
+        bind_mounts=[
+            (str(cache_root), str(SANDBOX_EVALUATOR_GO_MODULES_ROOT), False),
+            (str(package_root), "/opt/vibesys-evaluator-package", True),
+        ],
+        extra_env={},
+        attach_accelerator=False,
+        ephemeral=True,
+        container_image=builder_spec.image,
+    )
+    opened = (
+        nullcontext(DISCARD)
+        if builder_spec.output is None
+        else builder_spec.output(("go-modules",))
+    )
+    with opened as output:
+        try:
+            start_sandbox(builder, output=output)
+            go_requirements = TrustedEvaluatorRequirements(
+                package_root=package_root,
+                toolchains=frozenset({"go"}),
+                go_module=requirements.go_module,
+            )
+            for command in evaluator_container_setup(go_requirements):
+                setup = execute_as_root(builder, command, timeout=_SETUP_TIMEOUT_S, output=output)
+                if setup.exit_code != 0:
+                    detail = (setup.output or "setup command failed").strip()
+                    raise EvaluatorGoModuleError.toolchain_setup_failed(detail)
+            command = evaluator_go_module_setup_command(
+                requirements,
+                runtime_package_root="/opt/vibesys-evaluator-package",
+                runtime_cache_root=str(SANDBOX_EVALUATOR_GO_MODULES_ROOT),
+            )
+            prepared = builder.execute(command, timeout=_SETUP_TIMEOUT_S, output=output)
+            if prepared.exit_code != 0:
+                detail = (prepared.output or "Go module setup failed").strip()
+                raise EvaluatorGoModuleError.module_setup_failed(detail)
+            ownership = builder.execute(
+                shlex.join(
+                    (
+                        "sh",
+                        "-c",
+                        'owner=$(stat -c "%u:%g" -- "$1") && chown -R "$owner" -- "$1"',
+                        "vibesys-chown",
+                        str(SANDBOX_EVALUATOR_GO_MODULES_ROOT),
+                    )
+                ),
+                timeout=120,
+                output=DISCARD,
+            )
+            if ownership.exit_code != 0:
+                detail = (ownership.output or "chown failed").strip()
+                raise EvaluatorGoModuleError.ownership_failed(detail)
+        finally:
+            stop_sandbox(builder)
 
 
 def _build_evaluator_tools(
@@ -177,6 +293,7 @@ def _build_evaluator_tools(
                     )
                 ),
                 timeout=120,
+                output=DISCARD,
             )
             if ownership.exit_code != 0:
                 detail = (ownership.output or "chown failed").strip()

@@ -1,20 +1,8 @@
 [
   {
-    "path": ".agents/skills/hunt-client-bugs/SKILL.md",
-    "rule": "skill-lines",
-    "count": 434,
-    "reason": "Over the SKILL.md line limit since before the convention; move depth to references/."
-  },
-  {
-    "path": ".agents/skills/hunt-client-bugs/scripts/tuidrv.sh",
-    "rule": "unrun-script",
-    "count": 1,
-    "reason": "A manual helper that no test or CI step runs; give it a test or turn it into a reference."
-  },
-  {
     "path": ".agents/skills/review-pr/SKILL.md",
     "rule": "skill-lines",
-    "count": 169,
+    "count": 166,
     "reason": "Over the SKILL.md line limit since before the convention; move depth to references/."
   },
   {

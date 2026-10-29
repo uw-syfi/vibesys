@@ -240,18 +240,3 @@ def kept_marks(marks: tuple[MarkPipe, ...], offset: int) -> tuple[MarkPipe, ...]
     ordered = sorted(marks, key=lambda mark: mark.at)
     before = [mark for mark in ordered if mark.at <= offset]
     return tuple(before[-1:] + [mark for mark in ordered if mark.at > offset])
-
-
-@dataclass(frozen=True, slots=True)
-class Fetch:
-    """Read at most ``max_bytes`` from ``offset`` of the followed source."""
-
-    offset: int
-    max_bytes: int
-
-
-def follow_step(have: int, size: int, max_bytes: int) -> Fetch | None:
-    """What to fetch next when ``have`` bytes were copied and the source holds ``size``."""
-    if size <= have:
-        return None
-    return Fetch(have, min(max_bytes, size - have))

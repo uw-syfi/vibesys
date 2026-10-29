@@ -1,6 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {basename, dirname} from 'node:path';
 import {ConnectionManager} from '@vibesys/connection';
+import {idleRunWatch} from '@vibesys/connection/testing';
 import {SettingsStore, SshConfigSyntaxError} from '@vibesys/settings';
 import {FakeClock} from '@vibesys/transport/testing';
 import {Hosts, SshConfigDiscoveryError, type SshConfigFilesystem} from './index.js';
@@ -57,6 +58,7 @@ function fileError(code: string, path: string): Error {
 /** The public feature over a deterministic config graph; discovery must never open a connection. */
 function subject(filesystem: SshConfigFilesystem): Hosts {
   return new Hosts({
+    runs: idleRunWatch(),
     manager: new ConnectionManager({
       linkFor: () => {
         throw new Error('alias discovery must not open a host connection');
@@ -68,6 +70,7 @@ function subject(filesystem: SshConfigFilesystem): Hosts {
     settings: new SettingsStore({
       settingsPath: '/unused/hosts.json',
       recentPath: '/unused/recent.json',
+      preferencesPath: '/unused/preferences.json',
       log: () => {},
     }),
     localCheckout: '/vibesys',
@@ -174,20 +177,65 @@ describe('Hosts.aliases OpenSSH includes', () => {
     await expect(subject(filesystem).aliases()).resolves.toEqual(['gpu-1', 'visible']);
   });
 
-  test('discovers aliases selected by a statically evaluable Match host predicate', async () => {
-    const global = `${HOME}/.ssh/global.conf`;
+  test('does not evaluate Match host against the original alias after HostName changes it', async () => {
     const conditional = `${HOME}/.ssh/match-host.conf`;
     const filesystem = new FakeSshConfigFilesystem({
       [ROOT]: [
-        'Include global.conf',
-        'Match host gpu-*,!gpu-bad',
+        'Host gpu-*',
+        '  HostName actual.example',
+        'Match host gpu-*',
         '  Include match-host.conf',
       ].join('\n'),
-      [global]: 'Host visible',
-      [conditional]: 'Host gpu-box gpu-bad cpu-box',
+      [conditional]: 'Host gpu-prod',
     });
 
-    await expect(subject(filesystem).aliases()).resolves.toEqual(['visible', 'gpu-box']);
+    await expect(subject(filesystem).aliases()).resolves.toEqual([]);
+  });
+
+  test('evaluates Match originalhost pattern lists against aliases without case sensitivity', async () => {
+    const global = `${HOME}/.ssh/global.conf`;
+    const conditional = `${HOME}/.ssh/match-originalhost.conf`;
+    const filesystem = new FakeSshConfigFilesystem({
+      [ROOT]: [
+        'Include global.conf',
+        'Match OrIgInAlHoSt GPU-*,!gpu-BAD',
+        '  Include match-originalhost.conf',
+      ].join('\n'),
+      [global]: 'Host visible',
+      [conditional]: 'Host gpu-box GPU-BAD GPU-UPPER cpu-box',
+    });
+
+    await expect(subject(filesystem).aliases()).resolves.toEqual([
+      'visible',
+      'gpu-box',
+      'GPU-UPPER',
+    ]);
+  });
+
+  test('fails closed for Match predicates that need connection state or unknown semantics', async () => {
+    const opaqueConditions = [
+      'host gpu-*',
+      'originalhost gpu-* user someone',
+      'exec "true"',
+      'user someone',
+      'localnetwork 10.0.0.0/8',
+      'canonical',
+      'final',
+      'unknown gpu-*',
+    ];
+
+    for (const conditions of opaqueConditions) {
+      const conditional = `${HOME}/.ssh/opaque.conf`;
+      const filesystem = new FakeSshConfigFilesystem({
+        [ROOT]: `Match ${conditions}\n  Include opaque.conf`,
+        [conditional]: 'Host gpu-prod',
+      });
+
+      expect({conditions, aliases: await subject(filesystem).aliases()}).toEqual({
+        conditions,
+        aliases: [],
+      });
+    }
   });
 
   test('does not interpret bracket expressions as OpenSSH Host wildcards', async () => {
@@ -300,6 +348,7 @@ describe('Hosts.aliases OpenSSH includes', () => {
       [included]: 'Host home-relative',
     });
     const hosts = new Hosts({
+      runs: idleRunWatch(),
       manager: new ConnectionManager({
         linkFor: () => {
           throw new Error('alias discovery must not connect');
@@ -311,6 +360,7 @@ describe('Hosts.aliases OpenSSH includes', () => {
       settings: new SettingsStore({
         settingsPath: '/unused/hosts.json',
         recentPath: '/unused/recent.json',
+        preferencesPath: '/unused/preferences.json',
         log: () => {},
       }),
       localCheckout: '/vibesys',

@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import shlex
 import tomllib
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import urlparse
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -20,11 +22,19 @@ from pydantic import (
 )
 
 from vibesys.config import BUNDLED_RESOURCES
-from vibesys.constants import DomainName
-from vs_project.api import Project, RunResourceRequest
+from vibesys.constants import ComputeBackend, DomainName
+from vibesys.inputs._plan import TaskPlan, check_plan_documents, plan_toml_lines
+from vs_project.api import (
+    CatalogueInput,
+    ComparisonInput,
+    Project,
+    RunResourceRequest,
+    check_comparisons_are_distinct,
+)
 from vs_runtime.api.infrastructure import (
     EvaluatorPackageNotFoundError,
     EvaluatorPackageRequirement,
+    check_unread_paths,
     resolve_evaluator_package,
 )
 
@@ -115,6 +125,15 @@ class WorkspaceInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sources: tuple[WorkspaceSource, ...] = ()
+    unread: tuple[str, ...] = ()
+    """Workspace paths (files or directories) the evaluation never reads, such as agent notes.
+
+    A commit that changes only these is the same measured input as one an earlier run
+    already measured, so the runs of both are samples of one measurement and the official
+    measurement can reuse them instead of running again (see ``docs/running-vibesys.md``).
+    """
+
+    _check_unread = field_validator("unread")(check_unread_paths)
 
 
 class WorkspaceSource(BaseModel):
@@ -276,12 +295,44 @@ class BenchmarkCommand(InputCommand):
         return self
 
 
+class BuildCommand(BaseModel):
+    """The candidate's own build step: argv run from the root of the measured checkout.
+
+    The build is candidate code. The framework runs it confined, in a fresh checkout of the
+    measured commit, before the trusted check and measure stages, and then verifies the
+    outputs the evaluator package requires (``candidate_outputs``). It is never an evaluator
+    entrypoint: an entrypoint is trusted evaluator code, a build is not.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    command: tuple[str, ...]
+    timeout_seconds: int | None = Field(default=None, gt=0)
+
+    @field_validator("command")
+    @classmethod
+    def _non_empty_command(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if not value:
+            message = "command must contain at least one argv element"
+            raise ValueError(message)
+        if any(not part for part in value):
+            message = "command elements must be non-empty strings"
+            raise ValueError(message)
+        if Path(value[0]).is_absolute():
+            message = "command executable must be a program name or a project-relative path"
+            raise ValueError(message)
+        return value
+
+
 class AgentInput(BaseModel):
     """Agent-loop metadata declared by an input bundle."""
 
     model_config = ConfigDict(extra="forbid")
 
     domain: DomainName
+    interface: Literal["inprocess", "service"] | None = None
+    """How the evaluator reaches the candidate; the ``--interface`` flag overrides it, and
+    ``inprocess`` is the default when neither says."""
 
 
 class ProfileGuidedInput(BaseModel):
@@ -343,24 +394,163 @@ class EnvironmentInput(BaseModel):
     docker_in_docker: StrictBool = False
 
 
+class StageKind(StrEnum):
+    """A kind of stage a task's measurement can run.
+
+    The registry of executable kinds. A stage is an ordered, recorded operation named by its
+    kind and labelled for people; a new kind (an evaluation SDK's, say) is a new member here
+    and an executor that runs it, not a new fixed slot in the task model.
+    """
+
+    BUILD = "build"
+    CHECK = "check"
+    MEASURE = "measure"
+
+
+class StageDeclaration(BaseModel):
+    """One stage of a task's measurement as the task declares it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: StageKind
+    label: str = Field(min_length=1)
+    timeout_seconds: int | None = Field(default=None, gt=0)
+
+
+_SHORT_FORM = {"check": "accuracy", "measure": "benchmark"}
+"""Each short-form stage key and the existing-form key it compiles to."""
+
+
 class InputManifest(BaseModel):
-    """Versioned evaluator-command manifest for an input bundle."""
+    """Versioned evaluator-command manifest for an input bundle.
+
+    A task declares its evaluation in one of two forms that compile to the same model: the
+    short form (``build``, ``check``, ``measure``, ``metric``) or the existing form
+    (``[accuracy]``, ``[benchmark]``, optionally ``[build]``). ``check`` is the accuracy
+    stage and ``measure`` the benchmark stage; a short-form ``measure`` speaks evaluator
+    result protocol 2 unless it declares a ``result`` contract. ``stages`` is the compiled,
+    ordered list of what one measurement runs.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     version: Literal[1]
+    backends: tuple[ComputeBackend, ...] = ()
+    """The compute backends the task targets, in preference order; the run takes its backend from
+    them (one it can run on the host, when several). Empty means undeclared: the run falls back
+    to ``[backend].name`` in ``agent.toml`` (default ``cuda``), or to ``[resources]``'s
+    ``accelerator_backend`` when the task declares those resources."""
     agent: AgentInput
     profile_guided: ProfileGuidedInput | None = None
-    accuracy: InputCommand
-    benchmark: BenchmarkCommand
+    build: BuildCommand | None = None
+    """The candidate's confined build, run once per measured commit before check and measure."""
+    accuracy: InputCommand = Field(validation_alias=AliasChoices("accuracy", "check"))
+    benchmark: BenchmarkCommand = Field(validation_alias=AliasChoices("benchmark", "measure"))
+    metric: str | None = Field(default=None, min_length=1)
+    """The headline metric the measure stage reports."""
     profile: InputCommand | None = None
     resources: RunResourceRequest | None = None
     environment: EnvironmentInput | None = None
     workspace: WorkspaceInput | None = None
     evaluator: EvaluatorInput | None = None
+    plan: TaskPlan | None = None
+    """The design a plan-mode run follows; inert otherwise."""
+    catalogue: CatalogueInput | None = None
+    """What an example task is about, for the catalogue a client offers; inert for a run."""
+    comparison: tuple[ComparisonInput, ...] = ()
+    """The engines measured beside the input with the task's benchmark (``[[comparison]]``)."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _compile_short_form(cls, data: object) -> object:
+        """Refuse a stage declared in both forms; a short-form measure defaults to protocol 2."""
+        if not isinstance(data, dict):
+            return data
+        mixed = [
+            f"{short} and {existing}"
+            for short, existing in _SHORT_FORM.items()
+            if short in data and existing in data
+        ]
+        if mixed:
+            message = (
+                f"declare each stage once: {', '.join(mixed)} name the same stage; use the "
+                "short form (build, check, measure, metric) or the existing form "
+                "([accuracy], [benchmark]), not both"
+            )
+            raise ValueError(message)
+        measure = data.get("measure")
+        if isinstance(measure, dict) and "result" not in measure:
+            return {**data, "measure": {"result_protocol": 2, **measure}}
+        return data
+
+    @model_validator(mode="after")
+    def _comparisons_fit_the_task(self) -> InputManifest:
+        """Comparisons are distinct, and run as servers the benchmark reaches over HTTP."""
+        check_comparisons_are_distinct(self.comparison)
+        if self.comparison and self.agent.interface != "service":
+            names = ", ".join(repr(c.name) for c in self.comparison)
+            message = (
+                f"comparison {names}: a baseline is a server the benchmark reaches over HTTP, "
+                'so the task must declare [agent] interface = "service"'
+            )
+            raise ValueError(message)
+        return self
+
+    @model_validator(mode="after")
+    def _backends_agree(self) -> InputManifest:
+        """``backends`` names each backend once and contains ``[resources]``'s backend."""
+        repeated = sorted({b for b in self.backends if self.backends.count(b) > 1})
+        if repeated:
+            message = f"backends names each backend once; repeated: {', '.join(repeated)}"
+            raise ValueError(message)
+        resources = self.resources
+        if (
+            self.backends
+            and resources is not None
+            and ComputeBackend(resources.accelerator_backend) not in self.backends
+        ):
+            message = (
+                f"resources.accelerator_backend {resources.accelerator_backend!r} is not one of "
+                f"backends ({', '.join(self.backends)}); declare it there or change the resources"
+            )
+            raise ValueError(message)
+        return self
+
+    @property
+    def declared_backends(self) -> tuple[ComputeBackend, ...]:
+        """The backends the task targets: ``backends``, else its ``[resources]``' one, else none."""
+        if self.backends:
+            return self.backends
+        if self.resources is not None:
+            return (ComputeBackend(self.resources.accelerator_backend),)
+        return ()
+
+    @property
+    def stages(self) -> tuple[StageDeclaration, ...]:
+        """What one measurement of a candidate runs, in order, whichever form declared it."""
+        declared: tuple[tuple[StageKind, BuildCommand | InputCommand | None], ...] = (
+            (StageKind.BUILD, self.build),
+            (StageKind.CHECK, self.accuracy),
+            (StageKind.MEASURE, self.benchmark),
+        )
+        return tuple(
+            StageDeclaration(kind=kind, label=kind.value, timeout_seconds=command.timeout_seconds)
+            for kind, command in declared
+            if command is not None
+        )
 
     @model_validator(mode="after")
     def _validate_cross_references(self) -> InputManifest:
+        if (
+            self.metric is not None
+            and self.benchmark.result is not None
+            and self.benchmark.result.metric != self.metric
+        ):
+            message = (
+                f"metric {self.metric!r} disagrees with benchmark.result.metric "
+                f"{self.benchmark.result.metric!r}; declare the headline metric once"
+            )
+            raise ValueError(message)
         uses_entrypoint = any(
             command.entrypoint is not None
             for command in (self.accuracy, self.benchmark, self.profile)
@@ -399,20 +589,57 @@ def _toml_array(values: tuple[str, ...]) -> str:
 
 def render_input_manifest(manifest: InputManifest) -> str:
     """Serialize a validated input manifest as deterministic TOML."""
-    lines = [
-        f"version = {manifest.version}",
+    lines = [f"version = {manifest.version}"]
+    if manifest.metric is not None:
+        lines.append(f"metric = {_toml_string(manifest.metric)}")
+    if manifest.backends:
+        lines.append(f"backends = {_toml_array(tuple(str(b) for b in manifest.backends))}")
+    lines += [
         "",
         "[agent]",
         f"domain = {_toml_string(manifest.agent.domain.value)}",
     ]
+    if manifest.agent.interface is not None:
+        lines.append(f"interface = {_toml_string(manifest.agent.interface)}")
     _append_profile_guided(lines, manifest)
+    _append_build(lines, manifest)
     _append_accuracy(lines, manifest)
     _append_environment_and_resources(lines, manifest)
     _append_benchmark(lines, manifest)
     _append_profile(lines, manifest)
     _append_workspace_sources(lines, manifest)
     _append_evaluator(lines, manifest)
+    _append_comparisons(lines, manifest)
+    if manifest.plan is not None:
+        lines += plan_toml_lines(manifest.plan)
     return "\n".join(lines) + "\n"
+
+
+def _append_comparisons(lines: list[str], manifest: InputManifest) -> None:
+    for comparison in manifest.comparison:
+        lines.extend(
+            [
+                "",
+                "[[comparison]]",
+                f"name = {_toml_string(comparison.name)}",
+                f"label = {_toml_string(comparison.label)}",
+            ]
+        )
+        if comparison.image is not None:
+            lines.append(f"image = {_toml_string(comparison.image)}")
+        if comparison.dockerfile is not None:
+            lines.append(f"dockerfile = {_toml_string(comparison.dockerfile)}")
+        lines.append(f"serve = {_toml_array(comparison.serve)}")
+        if comparison.env:
+            env = ", ".join(
+                f"{_toml_string(key)} = {_toml_string(value)}"
+                for key, value in comparison.env.items()
+            )
+            lines.append(f"env = {{ {env} }}")
+        if comparison.benchmark_args:
+            lines.append(f"benchmark_args = {_toml_array(comparison.benchmark_args)}")
+        lines.append(f"ready_timeout_seconds = {comparison.ready_timeout_seconds}")
+        lines.append(f"visible_to_agents = {str(comparison.visible_to_agents).lower()}")
 
 
 def _append_profile(lines: list[str], manifest: InputManifest) -> None:
@@ -444,6 +671,14 @@ def _append_profile_guided(lines: list[str], manifest: InputManifest) -> None:
                 (f"min_relative_improvement = {manifest.profile_guided.min_relative_improvement}"),
             ]
         )
+
+
+def _append_build(lines: list[str], manifest: InputManifest) -> None:
+    if manifest.build is None:
+        return
+    lines.extend(["", "[build]", f"command = {_toml_array(manifest.build.command)}"])
+    if manifest.build.timeout_seconds is not None:
+        lines.append(f"timeout_seconds = {manifest.build.timeout_seconds}")
 
 
 def _append_accuracy(lines: list[str], manifest: InputManifest) -> None:
@@ -529,6 +764,8 @@ def _append_benchmark(lines: list[str], manifest: InputManifest) -> None:
 
 
 def _append_workspace_sources(lines: list[str], manifest: InputManifest) -> None:
+    if manifest.workspace is not None and manifest.workspace.unread:
+        lines.extend(["", "[workspace]", f"unread = {_toml_array(manifest.workspace.unread)}"])
     if manifest.workspace is not None:
         for source in manifest.workspace.sources:
             lines.extend(
@@ -592,6 +829,8 @@ class InputBundle(BaseModel):
     evaluator_path: Path | None
     evaluator_package_digest: str | None = None
     evaluator_package_root: Path | None = None
+    candidate_outputs: tuple[str, ...] = ()
+    """The files the evaluator package requires a candidate's build to produce."""
     resolved_accuracy_command: tuple[str, ...]
     resolved_benchmark_command: tuple[str, ...]
     resolved_profile_command: tuple[str, ...] | None = None
@@ -601,6 +840,26 @@ class InputBundle(BaseModel):
     def objective(self) -> str:
         """Read the objective text from its declared file."""
         return self.objective_path.read_text()
+
+    @property
+    def missing_build(self) -> str | None:
+        """Why the task cannot be measured for want of a build, or None.
+
+        A task whose evaluator requires candidate outputs must declare the ``[build]`` that
+        produces them; without one every measurement, the baseline's included, fails.
+        """
+        if not self.candidate_outputs or self.manifest.build is not None:
+            return None
+        outputs = ", ".join(self.candidate_outputs)
+        manifest = (
+            self.manifest_path.relative_to(self.root)
+            if self.manifest_path.is_relative_to(self.root)
+            else self.manifest_path
+        )
+        return (
+            f"the evaluator requires the candidate build output {outputs}, but the task "
+            f"declares no build: add a [build] whose command produces it to {manifest}"
+        )
 
     @property
     def accuracy_command(self) -> tuple[str, ...]:
@@ -616,6 +875,11 @@ class InputBundle(BaseModel):
     def profile_command(self) -> tuple[str, ...] | None:
         """Return the trusted diagnostic workload, independent of benchmark gates."""
         return self.resolved_profile_command
+
+    @property
+    def declared_backends(self) -> tuple[ComputeBackend, ...]:
+        """The compute backends the task targets (see ``InputManifest.declared_backends``)."""
+        return self.manifest.declared_backends
 
     @property
     def domain(self) -> DomainName:
@@ -676,6 +940,11 @@ class InputBundle(BaseModel):
         return environment.modal.entrypoint
 
     @property
+    def plan(self) -> TaskPlan | None:
+        """Return the implementation plan the task declares, if any."""
+        return self.manifest.plan
+
+    @property
     def workspace_sources(self) -> tuple[WorkspaceSource, ...]:
         """Return the pinned workspace sources declared by the manifest."""
         if self.manifest.workspace is None:
@@ -728,6 +997,9 @@ def load_project_task(project: Project, task: TaskDirectory) -> InputBundle:
     evaluator_package, resolved_commands = _resolve_evaluator_commands(root, manifest)
     reference_path = _resolve_reference_path(task)
     evaluator_path = _resolve_evaluator_source_path(task, manifest)
+    if manifest.plan is not None:
+        check_plan_documents(task, manifest.plan)
+    _check_comparison_dockerfiles(task, manifest)
 
     return InputBundle(
         root=root,
@@ -742,6 +1014,9 @@ def load_project_task(project: Project, task: TaskDirectory) -> InputBundle:
             evaluator_package.digest if evaluator_package is not None else None
         ),
         evaluator_package_root=(evaluator_package.root if evaluator_package is not None else None),
+        candidate_outputs=(
+            evaluator_package.metadata.candidate_outputs if evaluator_package is not None else ()
+        ),
         resolved_accuracy_command=resolved_commands[0],
         resolved_benchmark_command=resolved_commands[1],
         resolved_profile_command=(resolved_commands[2] if manifest.profile is not None else None),
@@ -882,6 +1157,26 @@ def _resolve_reference_path(task: TaskDirectory) -> Path | None:
         message = f"reference path is not a directory: {reference_path}"
         raise ValueError(message)
     return reference_path if reference_path.exists() else None
+
+
+def _check_comparison_dockerfiles(task: TaskDirectory, manifest: InputManifest) -> None:
+    """Each comparison's Dockerfile is a file in the task, and never the task's own image."""
+    for comparison in manifest.comparison:
+        if comparison.dockerfile is None:
+            continue
+        path = task.resolve(comparison.dockerfile, must_exist=False)
+        if not path.is_file():
+            message = (
+                f"comparison {comparison.name!r}: dockerfile {comparison.dockerfile!r} "
+                f"is not a file in the task: {path}"
+            )
+            raise FileNotFoundError(message)
+        if task.dockerfile_path is not None and path == task.dockerfile_path.resolve():
+            message = (
+                f"comparison {comparison.name!r}: dockerfile {comparison.dockerfile!r} is the "
+                "task's own image; a comparison needs its own Dockerfile"
+            )
+            raise ValueError(message)
 
 
 def _resolve_evaluator_source_path(task: TaskDirectory, manifest: InputManifest) -> Path | None:

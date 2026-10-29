@@ -14,21 +14,32 @@ does not know, or one it cannot parse, is ``UnreadableRecord``, never dropped
 and never a failure of the whole listing: two checkouts on one host share one
 registry.
 
-Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``,
-``INSTANCE_ID_PATTERN``, ``InstanceId``, ``RunId``, ``RunStatus``,
-``StartupStage``, ``StartupProgress``, ``StartupFact``, ``FailureReason``,
-``RunPhase``, ``InstanceStatus``,
-``LiveInstanceRecord``, ``UnreadableRecord``, ``parse_record``,
-``InstanceList``, ``StopOutcome``, ``StopRoute``, ``InstanceStopResult``,
-``DetachedLaunchErrorCode``, ``DetachedLaunchFailure``, ``TaskSummary``,
-``TaskList``, the inspection documents, and the host helper's messages:
-``HELPER_PROTOCOL_VERSIONS``, ``HELPER_REQUEST_FEATURES``,
-``HELPER_FIELD_FEATURES``, ``request_features``, ``HelperFeature``,
-``HelperRequest`` (``parse_helper_request``) and its members, ``HelperMessage``
-and its members, ``HelperErrorCode``, the harness choice (``HarnessOption``,
-``HarnessChoice``, and the run flags ``CLI_PROVIDER_FLAG``, ``MODEL_FLAG``,
-``UNVETTED_MODEL_FLAG``), and a relayed channel's end: ``ChannelEndOutcome``,
-``ChannelEnd``.
+Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``, ``InstanceId``,
+``RunId``, ``RunStatus``, ``StartupStage``, ``StartupProgress``, ``StartupFact``, ``FailureReason``,
+``RunPhase``, ``InstanceStatus``, ``RunEndOutcome``, ``EndRecord``, ``RunEndingFact``, ``RunClosing``,
+``RunDigest``, ``RunDigestUnreadable``, ``one_line``, ``END_REASON_MAX_CHARACTERS``, ``PauseCause``,
+``LiveInstanceRecord``, ``UnreadableRecord``, ``parse_record``, ``InstanceList``, ``StopOutcome``,
+``StopRoute``, ``InstanceStopResult``, ``DetachedLaunchErrorCode``, ``DetachedLaunchFailure``,
+the inspection documents, and the host helper's messages:
+the log streams' ``LogStream``, ``LogStreamOutcome``, ``LogChunk``, ``LogPipeSpan``,
+``LogPipe``, ``LogOffset``, ``LogTail`` and limits
+(``LOGS_READ_MAX_BYTES``, ``LOGS_READ_MIN_BYTES``, ``LOGS_WAIT_MAX_MS``),
+``HELPER_PROTOCOL_VERSIONS``, ``HELPER_REQUEST_FEATURES``, ``HELPER_FIELD_FEATURES``,
+``request_features``, ``HelperFeature``, ``HelperRequest`` (``parse_helper_request``) and its
+members, the run history read's limit (``RUN_EVENTS_READ_MAX_BYTES``), ``RUN_EVENTS_FILE``, the run
+history's messages (``server.host_run_events``), the run reader's (``server.host_run_reader``), the run summary's messages
+(``server.host_run_summary``, which also holds the usage window's), the run tile's dashboard
+(``server.host_run_dashboard``), the machine facts (``server.host_machine_facts``: ``Accelerator``,
+``Gpu``, ``Hardware``, ``DockerReachable``, ``DockerUnreachable``, ``MachineCheckout``,
+``RunCounts``, ``MachineDescription``) and checkout inspection (``CheckoutFound``,
+``CheckoutNotFound``, ``CheckoutTooOld``, ``CheckoutInspection``), ``HelperMessage`` and its
+members, ``HelperErrorCode``, the harness choice (``HarnessOption``, ``HarnessChoice``,
+``RoleAgents``, and the run flags ``CLI_PROVIDER_FLAG``, ``MODEL_FLAG``, ``ROLE_PROVIDER_FLAG``,
+``UNVETTED_MODEL_FLAG``, ``RUN_ENVIRONMENT_FLAG``, ``SLURM_CONFIG_FLAG``), where results are
+measured, compute settings and agent logins (``server.host_compute``,
+``server.host_agent_logins``), and a relayed channel's end: ``ChannelEndOutcome``, ``ChannelEnd``.
+An undeliverable successful start whose compensating stop cannot be proved terminal reports
+``RunStartCompensationFailure`` on the helper's diagnostic stream.
 
 The helper's messages follow ``docs/contributing/desktop-connection.md``
 ("Handshake and versioning"): strict within a negotiated version, additive
@@ -46,12 +57,15 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
     JsonValue,
+    NonNegativeFloat,
     NonNegativeInt,
     PositiveInt,
+    RootModel,
     StringConstraints,
     TypeAdapter,
     ValidationError,
@@ -59,6 +73,62 @@ from pydantic import (
     model_validator,
 )
 
+from server.host_agent_logins import (
+    AgentLoginsListReply,
+    AgentLoginsListRequest,
+    AgentLoginsStartReply,
+    AgentLoginsStartRequest,
+)
+from server.host_compute import (
+    ComputeAddClusterReply,
+    ComputeAddClusterRequest,
+    ComputeListReply,
+    ComputeListRequest,
+    ComputeRemoveClusterReply,
+    ComputeRemoveClusterRequest,
+    ComputeTestClusterReply,
+    ComputeTestClusterRequest,
+    MeasurementTarget,
+)
+from server.host_envelope import (
+    HelperErrorCode,
+    HelperFeature,
+    HelperReplyBase,
+    HelperRequestBase,
+    InstanceId,
+    RequestId,
+    RunId,
+    SpanId,
+)
+from server.host_examples import (
+    CreatedProject,
+    ExampleList,
+    ExamplesDestinationReply,
+    ExamplesDestinationRequest,
+    ProjectTaskGoalReply,
+    ProjectTaskGoalRequest,
+    TasksListReply,
+    TasksListRequest,
+)
+from server.host_harness import HarnessChoice, HarnessOption, generation_conflict
+from server.host_machine_facts import MachineDescription
+from server.host_preflight import Backend, Check, RoleName, RunOptions
+from server.host_run_dashboard import RunAttention, RunClosing, RunDashboard
+from server.host_run_events import (
+    RunsEventsForSpanReply,
+    RunsEventsForSpanRequest,
+    RunsReadEventsReply,
+    RunsReadEventsRequest,
+    RunsReadTailReply,
+    RunsReadTailRequest,
+)
+from server.host_run_reader import RunReaderReply, RunReaderRequest
+from server.host_run_summary import (
+    RunsSummaryReply,
+    RunsSummaryRequest,
+    UsageWindowReply,
+    UsageWindowRequest,
+)
 from vs_decode.api import Unreadable, decode_json
 
 PROTOCOL_VERSION = 1
@@ -68,15 +138,8 @@ Defined here, not in ``server.api.protocol``, so a record can name it without
 importing the run protocol; the protocol module re-exports it.
 """
 
-INSTANCE_ID_PATTERN = r"^[0-9a-f]{12}$"
-InstanceId = Annotated[str, StringConstraints(pattern=INSTANCE_ID_PATTERN)]
-"""A registry key: 12 lowercase hex digits, so it is never a path fragment."""
-
-RunId = Annotated[str, StringConstraints(min_length=1)]
-"""The durable run a server drives; ``vs_project`` owns its full syntax."""
-
-RECORD_VERSION = 4
-"""The registry record version this checkout writes; it also reads version 3."""
+RECORD_VERSION = 5
+"""The registry record version this checkout writes; it also reads versions 3 and 4."""
 
 
 class RunStatus(StrEnum):
@@ -126,8 +189,12 @@ class StartupStage(StrEnum):
 
     RESOLVING = "resolving"
     """The server validates the request, its configuration, and the project."""
+    PROBING_WORKSPACE = "probing_workspace"
+    """A scheduler job proves the workspace root is shared with the compute nodes."""
     BUILDING_IMAGE = "building_image"
     """The agent image is being built (the first build on a host takes minutes)."""
+    BUILDING_TOOLS = "building_tools"
+    """The image is built; the evaluator tools it lacks in cache are being built."""
     STARTING_CONTAINER = "starting_container"
     """The image is built; the agent's container is being started."""
 
@@ -173,9 +240,8 @@ class StartupFact(BaseModel):
 class RunPhase(BaseModel):
     """A run's lifecycle status with the detail its status needs.
 
-    ``stage`` (and, when the stage reports it, ``progress``) says where a
-    ``starting`` run is; ``reason`` says why a ``failed`` one ended. None of
-    them is present for any other status.
+    ``stage`` (and, when the stage reports it, ``progress``) says where a ``starting`` run is;
+    ``reason`` says why a ``failed`` one ended. None of them is present for any other status.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -207,14 +273,12 @@ class RunPhase(BaseModel):
     ) -> RunPhase:
         """Return the phase after one observed fact: a status change, a failure, or a startup step.
 
-        The fold is monotone: an ended phase absorbs every fact, and ``failed``
-        is entered only with its reason, from the failure's diagnostic, so a
-        status change to ``failed`` waits for the event that says why. A
-        failure while the run is past ``resolving`` names the startup stage it
-        failed in. ``starting`` only moves to a later stage (a startup fact of
-        an earlier stage, or after ``starting``, changes nothing), and keeps
-        its stage until the run leaves it. The statuses themselves move by
-        ``server.run_lifecycle``'s rules; this projects them.
+        The fold is monotone: an ended phase absorbs every fact, and ``failed`` is entered only with
+        its reason, from the failure's diagnostic, so a status change to ``failed`` waits for the
+        event that says why. A failure while the run is past ``resolving`` names the startup stage
+        it failed in. ``starting`` only moves to a later stage (a startup fact of an earlier stage,
+        or after ``starting``, changes nothing), and keeps its stage until the run leaves it. The
+        statuses themselves move by ``server.run_lifecycle``'s rules; this projects them.
         """
         if self.status.has_ended:
             return self
@@ -246,6 +310,101 @@ _MAX_IDENTITY_CHARACTERS = 255
 _StartedAt = Annotated[float, Field(ge=0, le=ECMASCRIPT_DATE_MAX_SECONDS, allow_inf_nan=False)]
 
 
+class RunEndOutcome(StrEnum):
+    """Why a run ended, on its tombstone: vs-core's ``EndReason`` members and one of the shell's.
+
+    The first eight are ``vs_core``'s ``EndReason`` values, copied because this module
+    may not import the core (``tests/server/test_run_end_record.py`` keeps them equal).
+    """
+
+    ADOPTED = "adopted"
+    """The chosen candidate was adopted."""
+    KEPT_INPUT = "kept-input"
+    """Nothing beat the input, and the input was adopted as it stood."""
+    NO_WINNER = "no-winner"
+    """The search ended with no winner."""
+    ADOPTION_FAILED = "adoption-failed"
+    """Core would not adopt the chosen winner."""
+    STOPPED = "stopped"
+    """The operator stopped the run."""
+    DEADLINE = "deadline"
+    """The run deadline passed."""
+    FINISH_REFUSED = "finish-refused"
+    """Core refused the result."""
+    FAILED = "failed"
+    """The run failed: an error, a crash, or a run environment that could run none of its work."""
+    FORCE_STOPPED = "force_stopped"
+    """The server was terminated (a force stop) and ended without reaching a safe point."""
+
+
+END_REASON_MAX_CHARACTERS = 200
+"""The longest ``EndRecord.reason``; a longer account is cut to this with an ellipsis."""
+
+OneLine = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=END_REASON_MAX_CHARACTERS, pattern=r"^[^\n\r]*$"),
+]
+
+
+def one_line(text: str) -> str | None:
+    """The first non-blank line of ``text``, cut to ``END_REASON_MAX_CHARACTERS``; ``None`` if blank."""
+    line = next((each.strip() for each in text.splitlines() if each.strip()), None)
+    if line is None or len(line) <= END_REASON_MAX_CHARACTERS:
+        return line
+    return line[: END_REASON_MAX_CHARACTERS - 1] + "\u2026"
+
+
+class EndRecord(BaseModel):
+    """How a run ended, as its tombstone reports it: the sidebar's Recent row and the ended banner.
+
+    ``resumable`` is retained for older readers; current controls permit every ending.
+    Launch checks storage and writer exclusion; ``resume_from_round`` is the next round
+    (a crashed server did not say). ``uncompared``: the run adopted a candidate never compared
+    with the input (it failed its own measurement), whichever ``outcome`` ended it.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    outcome: RunEndOutcome
+    reason: OneLine
+    resumable: bool
+    resume_from_round: PositiveInt | None = None
+    uncompared: bool = False
+
+    @model_validator(mode="after")
+    def _round_only_when_resumable(self) -> EndRecord:
+        if self.resume_from_round is not None and not self.resumable:
+            message = "resume_from_round is set only when the run is resumable"
+            raise ValueError(message)
+        return self
+
+
+class RunEndingFact(BaseModel):
+    """How a run's durable record stood as it ended, as its server reports it to the record.
+
+    ``outcome`` is core's end reason when the run recorded a result, ``None`` when it ended
+    without one; ``summary`` is core's account of that result and ``uncompared`` its fact that
+    the adopted candidate was never compared with the input.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    outcome: RunEndOutcome | None
+    summary: str = ""
+    resumable: bool
+    rounds_finished: NonNegativeInt
+    uncompared: bool = False
+
+
+class PauseCause(StrEnum):
+    """Who paused a paused run."""
+
+    USER = "user"
+    """An operator's pause."""
+    QUOTA = "quota"
+    """A provider capacity limit (``quota_paused``)."""
+
+
 class InstanceStatus(StrEnum):
     """How far a live server has come; run status itself is on its socket."""
 
@@ -256,18 +415,19 @@ class InstanceStatus(StrEnum):
 
 
 class LiveInstanceRecord(BaseModel):
-    """What a detached server publishes about itself (version 4).
+    """What a detached server publishes about itself (version 5).
 
     ``run_id`` is allocated by the launcher before the server starts, so the
     record names its run from the first time it is published. ``phase`` is the
-    run's lifecycle as the server folds it from its journal. When the server
-    exits it leaves its last record, with an ended phase and ``ended_at``, as a
-    tombstone the registry keeps for a day.
+    run's lifecycle as the server folds it from its journal, and ``paused`` who
+    paused it while it is paused. When the server exits it leaves its last
+    record, with an ended phase, ``ended_at`` and ``end``, as a tombstone the
+    registry keeps for a day.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    version: Literal[4] = RECORD_VERSION
+    version: Literal[5] = RECORD_VERSION
     id: InstanceId
     status: InstanceStatus
     phase: RunPhase
@@ -278,21 +438,32 @@ class LiveInstanceRecord(BaseModel):
     pid: PositiveInt
     started_at: _StartedAt
     ended_at: float | None = None
+    paused: PauseCause | None = None
+    """Who paused the run; a version 5 server sets it whenever ``phase`` is ``paused``."""
+    end: EndRecord | None = None
+    """How the run ended. A version 5 server sets it on every tombstone, and a crashed
+    server's burial does; it is absent on a tombstone upgraded from version 4 and when a
+    completed run reported no ending."""
     hostname: str
     protocol_version: Literal[1] = PROTOCOL_VERSION
     vibesys_version: str
     vibesys_root: str | None = None
     """Absolute path of the VibeSys source checkout this server runs from.
 
-    ``None`` when the server runs from an installed distribution rather than a
-    checkout. A client uses it to suggest the checkout it should run
-    ``vibesys`` from on this host.
+    ``None`` when the server runs from an installed distribution rather than a checkout. A client
+    uses it to suggest the checkout it should run ``vibesys`` from on this host.
     """
 
     @model_validator(mode="after")
     def _ended_matches_phase(self) -> LiveInstanceRecord:
         if self.ended_at is not None and not self.phase.status.has_ended:
             message = "ended_at is set only on a record whose phase has ended"
+            raise ValueError(message)
+        if self.end is not None and not self.phase.status.has_ended:
+            message = "end is set only on a record whose phase has ended"
+            raise ValueError(message)
+        if self.paused is not None and self.phase.status is not RunStatus.PAUSED:
+            message = "paused is set only on a record whose phase is paused"
             raise ValueError(message)
         return self
 
@@ -306,8 +477,6 @@ class UnreadableRecord(BaseModel):
     version: int | None
 
 
-_UPGRADED_RECORD_VERSION = 3
-"""The earlier record version this reader still reads, through ``_upgrade_v3``."""
 _JSON_OBJECT: TypeAdapter[dict[str, JsonValue]] = TypeAdapter(dict[str, JsonValue])
 MAX_RECORD_BYTES = 1024 * 1024
 """The largest instance record ``parse_record`` reads; a longer one is unreadable."""
@@ -325,13 +494,39 @@ def _upgrade_v3(record: LiveInstanceRecord) -> LiveInstanceRecord | None:
     return record
 
 
+def _upgrade_v4(record: LiveInstanceRecord) -> LiveInstanceRecord | None:
+    """A version 4 record read as version 5, or ``None`` if it uses what version 4 lacked.
+
+    Version 5 only added ``paused`` and ``end``, both optional, so a version 4
+    record is a version 5 record without them.
+    """
+    if record.paused is not None or record.end is not None:
+        return None
+    return record
+
+
+_UPGRADE_STEPS: Final = ((3, _upgrade_v3), (4, _upgrade_v4))
+"""Each step reads a record of its version as the next version's, oldest first."""
+_UPGRADED_RECORD_VERSIONS: Final = frozenset(since for since, _ in _UPGRADE_STEPS)
+"""The earlier record versions this reader still reads, through ``_upgrade``."""
+
+
+def _upgrade(record: LiveInstanceRecord, version: int) -> LiveInstanceRecord | None:
+    """``record``, parsed from a document of ``version``, upgraded step by step to this version."""
+    upgraded: LiveInstanceRecord | None = record
+    for since, step in _UPGRADE_STEPS:
+        if upgraded is not None and version <= since:
+            upgraded = step(upgraded)
+    return upgraded
+
+
 def parse_record(instance_id: str, raw: str | bytes) -> LiveInstanceRecord | UnreadableRecord:
     """Parse one stored record, strictly, if it is of a version this reader knows.
 
     Total: any content, invalid UTF-8 included when given as bytes, is a record
     or an ``UnreadableRecord``.
 
-    A version 3 record is upgraded (``_upgrade_v3``). Records of earlier
+    A version 3 or 4 record is upgraded (``_upgrade``). Records of earlier
     versions predate phases and tombstones and are not upgraded: their servers
     report no phase this reader could stand behind.
     """
@@ -344,28 +539,28 @@ def parse_record(instance_id: str, raw: str | bytes) -> LiveInstanceRecord | Unr
     if not isinstance(version, int) or isinstance(version, bool):
         return UnreadableRecord(id=instance_id, version=None)
     record: LiveInstanceRecord | None = None
-    if version in {_UPGRADED_RECORD_VERSION, RECORD_VERSION}:
+    if version in _UPGRADED_RECORD_VERSIONS | {RECORD_VERSION}:
         try:
             record = LiveInstanceRecord.model_validate({**document, "version": RECORD_VERSION})
         except ValidationError:
             record = None
-    if record is not None and version == _UPGRADED_RECORD_VERSION:
-        record = _upgrade_v3(record)
+    if record is not None and version in _UPGRADED_RECORD_VERSIONS:
+        record = _upgrade(record, version)
     if record is None or record.id != instance_id:
         return UnreadableRecord(id=instance_id, version=version)
     return record
 
 
 class InstanceList(BaseModel):
-    """``vibesys instances list --json``: the detached servers on this node (version 4)."""
+    """``vibesys instances list --json``: the detached servers on this node (version 5)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    version: Literal[4] = 4
+    version: Literal[5] = 5
     instances: tuple[LiveInstanceRecord, ...]
     """Servers alive now."""
     ended: tuple[LiveInstanceRecord, ...] = ()
-    """Servers that exited in the last day, with the phase they ended in."""
+    """Servers that exited in the last day, with the phase they ended in and their ``end``."""
     unreadable: tuple[UnreadableRecord, ...] = ()
     """Live servers whose record this reader cannot interpret (another version, or corrupt)."""
     unverified: tuple[InstanceId, ...] = ()
@@ -563,26 +758,6 @@ class DetachedLaunchFailure(BaseModel):
     """The server already driving the run, for ``run_already_live``: attach to it."""
 
 
-class TaskSummary(BaseModel):
-    """One task of a project."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    name: str
-    """The task's directory name, the value ``--task`` accepts."""
-
-
-class TaskList(BaseModel):
-    """``vibesys tasks --json``: the tasks of one project."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    version: Literal[1] = 1
-    project_root: str
-    """The resolved absolute project directory the tasks were read from."""
-    tasks: tuple[TaskSummary, ...]
-
-
 # --- the host helper ---------------------------------------------------------
 
 HELPER_PROTOCOL_VERSIONS = (1, 1)
@@ -593,46 +768,37 @@ reports per run.
 """
 
 
-class HelperFeature(StrEnum):
-    """Optional capabilities negotiated by ``hello``; a closed set per protocol version.
-
-    A client calls a gated method only after ``hello`` returned its feature, so
-    a strict peer never sees a method it does not know.
-    """
-
-    INSTANCES_WATCH = "instances_watch"
-    """``instances.watch`` and ``instances.unwatch``: registry changes pushed as they happen."""
-    PATHS_COMPLETE = "paths_complete"
-    """``paths.complete``: directory completion for a typed path on the host."""
-    INSTANCES_INSPECT = "instances_inspect"
-    """``instances.inspect``: retained metadata and an optional bounded log tail."""
-    HARNESSES = "harnesses"
-    """``harnesses.list`` and ``run.start``'s ``harness``: start a run on a vetted provider and model."""
-
-
 CLI_PROVIDER_FLAG: Final = "--cli-provider"
 """The run option that names the agent CLI provider; ``run.start`` emits it for ``harness``."""
 MODEL_FLAG: Final = "--model"
 """The run option that names the agent model; ``run.start`` emits it for ``harness``."""
 UNVETTED_MODEL_FLAG: Final = "--allow-unvetted-model"
 """The terminal's opt-out from the vetted harness list; ``run.start`` refuses it in ``args``."""
+MAX_ROUNDS_FLAG: Final = "--max-rounds"
+"""The run option that bounds its rounds; ``run.start`` emits it for ``options.rounds``."""
+MAX_RUN_SECONDS_FLAG: Final = "--max-run-seconds"
+"""Overrides ``[run].max_run_seconds``; ``run.start`` emits it for ``options.time_limit_s``."""
+ROLE_PROVIDER_FLAG: Final = "--role-provider"
+"""``ROLE=PROVIDER``, overriding ``agent.roles.ROLE.provider``; emitted per ``agents`` entry."""
+ROLE_MODEL_FLAG: Final = "--role-model"
+"""``ROLE=MODEL``, overriding ``agent.roles.ROLE.model``; emitted per ``options.roles`` model."""
+ROLE_REASONING_EFFORT_FLAG: Final = "--role-reasoning-effort"
+"""``ROLE=EFFORT``, overriding ``agent.roles.ROLE.reasoning_effort``; emitted per role effort."""
+PUBLISH_FLAG: Final = "--publish"
+"""Publishes the project to GitHub under the generated name; emitted for ``publish_github``."""
+REPO_FLAG: Final = "--repo"
+"""Publishes the project to a named GitHub repository; a typed ``results`` refuses it in ``args``."""
+RUN_ENVIRONMENT_FLAG: Final = "--run-environment"
+"""Selects where evaluation runs; ``run.start`` emits it for ``measure_on``'s Slurm and Modal."""
+SLURM_CONFIG_FLAG: Final = "--slurm-config"
+"""The operator file of a Slurm run; ``run.start`` emits it for ``measure_on``'s Slurm cluster."""
+ENVIRONMENT_FLAGS: Final = (RUN_ENVIRONMENT_FLAG, SLURM_CONFIG_FLAG, "--modal", "--skypilot")
+"""The flags that choose where a run measures; ``measure_on`` is their only source in ``args``."""
+LOCAL_FLAG: Final = "--local"
+"""Keeps the run local; ``run.start`` emits it for ``results: keep``."""
 
 
-RequestId = Annotated[str, StringConstraints(min_length=1, max_length=128)]
-"""Chosen by the client, unique while the channel owns its request or watch worker."""
-
-MAX_DEADLINE_MS = 3_600_000
-
-
-class _HelperRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    request_id: RequestId
-    deadline_ms: Annotated[int, Field(gt=0, le=MAX_DEADLINE_MS)]
-    """How long the client waits for the reply; the helper answers ``deadline_exceeded`` after it."""
-
-
-class HelloRequest(_HelperRequest):
+class HelloRequest(HelperRequestBase):
     """The first message on every channel: which versions and features the client speaks.
 
     Its shape never changes across protocol versions, so any helper can parse
@@ -647,46 +813,54 @@ class HelloRequest(_HelperRequest):
     app_version: str
 
 
-class InstancesListRequest(_HelperRequest):
+class InstancesListRequest(HelperRequestBase):
     """The live and recently ended detached servers on this host."""
 
     type: Literal["instances.list"] = "instances.list"
 
 
-class InstancesInspectRequest(_HelperRequest):
-    """Inspect one detached server without starting another host process."""
+class InstancesInspectRequest(HelperRequestBase):
+    """Inspect one detached server without starting another host process.
+
+    ``include_log`` is deprecated: it asks for a tail of ``server.log``, the detached
+    server's raw output, which is for a person at a terminal. No client UI may depend on
+    it; a run's logs come from its log store through ``logs.list`` and ``logs.read``. The
+    helper keeps answering it so older clients keep working, and removes it at the next
+    helper protocol version (2).
+    """
 
     type: Literal["instances.inspect"] = "instances.inspect"
     instance_id: InstanceId
     include_log: bool = False
 
 
-class InstancesWatchRequest(_HelperRequest):
+class InstancesWatchRequest(HelperRequestBase):
     """Push the listing now and again whenever it changes, until ``instances.unwatch``."""
 
     type: Literal["instances.watch"] = "instances.watch"
 
 
-class InstancesUnwatchRequest(_HelperRequest):
+class InstancesUnwatchRequest(HelperRequestBase):
     """Stop the watch that ``watch_id`` (its request's id) started."""
 
     type: Literal["instances.unwatch"] = "instances.unwatch"
     watch_id: RequestId
 
 
-class TasksListRequest(_HelperRequest):
-    """The tasks a project defines under ``.vibesys/tasks/``."""
-
-    type: Literal["tasks.list"] = "tasks.list"
-    project: str
-    """The project directory on the host; ``~`` expands to the helper's home."""
+RUN_DIGEST_MAX_RUNS: Final = 100
+"""The most runs one ``runs.list`` may ask a digest of."""
 
 
-class RunsListRequest(_HelperRequest):
+class RunsListRequest(HelperRequestBase):
     """A project's runs, with the phase of any server on this host that drives one."""
 
     type: Literal["runs.list"] = "runs.list"
     project: str
+    digest_runs: Annotated[tuple[RunId, ...], Field(max_length=RUN_DIGEST_MAX_RUNS)] | None = None
+    """The runs to read a ``digest`` of (a pass over each journal), so a client names only the runs
+    it shows. Sent only after ``hello`` returned ``run_digest``."""
+    with_dashboard: bool | None = None
+    """Also each digest's ``dashboard`` and run's ``attention``; needs ``run_dashboard``."""
 
 
 class ResumeRun(BaseModel):
@@ -705,33 +879,40 @@ class ResumeLatest(BaseModel):
     latest: Literal[True]
 
 
-class HarnessChoice(BaseModel):
-    """One agent CLI provider and one model it runs."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    provider: str
-    model: str
+_ROLE_NAME: Final = TypeAdapter(RoleName)
 
 
-class HarnessOption(BaseModel):
-    """A vetted provider and model pair a run may start with."""
+def _role_ids(agents: dict[str, HarnessChoice]) -> dict[str, HarnessChoice]:
+    """Refuse a key that is not a role id, naming it.
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    The keys are checked here and not typed as ``RoleName`` because the helper's generated schema
+    says a key's shape with ``patternProperties``, which the desktop's schema walker does not walk.
+    """
+    for role in agents:
+        try:
+            _ROLE_NAME.validate_python(role)
+        except ValidationError as error:
+            message = f"agents.{role}: not a role id ({error.errors()[0]['msg']})"
+            raise ValueError(message) from error
+    return agents
 
-    provider: str
-    model: str
-    default: bool
-    """The model a run on ``provider`` uses when nothing names one."""
+
+RoleAgents = Annotated[dict[str, HarnessChoice], AfterValidator(_role_ids)]
+"""An agent per role: each key a role id ``run.preflight`` returns with ``with_roles``, each value a
+pair ``harnesses.list`` offers. ``run.start`` and ``run.preflight`` refuse an id the run does not
+declare and a pair not offered, naming the key."""
 
 
-class HarnessesListRequest(_HelperRequest):
+class HarnessesListRequest(HelperRequestBase):
     """The vetted provider and model pairs ``run.start``'s ``harness`` accepts."""
 
     type: Literal["harnesses.list"] = "harnesses.list"
+    with_generations: bool | None = None
+    """Ask for each pair's ``display.maker`` and ``display.generation``. Sent only after ``hello``
+    returned ``harness_generations``."""
 
 
-class RunStartRequest(_HelperRequest):
+class RunStartRequest(HelperRequestBase):
     """Start a detached run (``vibesys --detach``) in ``project``.
 
     ``args`` never carry ``UNVETTED_MODEL_FLAG`` (or an abbreviation of it): a run
@@ -748,9 +929,42 @@ class RunStartRequest(_HelperRequest):
     harness: HarnessChoice | None = None
     """A pair ``harnesses.list`` offered; ``None`` keeps the project's configuration.
     Sent only after ``hello`` returned ``harnesses``."""
+    options: RunOptions | None = None
+    """Typed run options; ``args`` may then not repeat any option set here.
+    Sent only after ``hello`` returned ``run_options``."""
+    agents: RoleAgents | None = None
+    """The agent each named role runs; a role without an entry runs ``harness``. Sent only after
+    ``hello`` returned ``run_role_agents``."""
+    measure_on: MeasurementTarget | None = None
+    """Where results are measured; ``args`` then carry no run-environment flag. Sent only after
+    ``hello`` returned ``measurement_target``."""
 
 
-class RunStopRequest(_HelperRequest):
+class RunPreflightRequest(HelperRequestBase):
+    """Whether the run ``run.start`` would launch with these inputs can start, check by check."""
+
+    type: Literal["run.preflight"] = "run.preflight"
+    project: str
+    task: str | None = None
+    args: tuple[str, ...] = ()
+    harness: HarnessChoice | None = None
+    options: RunOptions | None = None
+    agents: RoleAgents | None = None
+    measure_on: MeasurementTarget | None = None
+    """As ``run.start``'s; the reply then ends with the ``measurement_target`` check."""
+    with_roles: bool | None = None
+    """Ask for ``roles`` in the reply. Sent only after ``hello`` returned ``run_roles``."""
+    with_project_clean: bool | None = None
+    """Ask for the ``project_clean`` check. Sent only after ``hello`` returned ``project_clean``."""
+    with_backend: bool | None = None
+    """Ask for ``backend`` in the reply and a ``cause`` on the checks that have one. Sent only
+    after ``hello`` returned ``run_backend``."""
+    with_causes: bool | None = None
+    """Ask for the typed ``cause`` of every other way ``settings_valid`` can fail, and a ``detail``
+    that names no flag. Sent only after ``hello`` returned ``run_causes``."""
+
+
+class RunStopRequest(HelperRequestBase):
     """Stop a live detached server (``vibesys instances stop``)."""
 
     type: Literal["run.stop"] = "run.stop"
@@ -766,7 +980,7 @@ class RunRole(StrEnum):
     CHAT = "chat"
 
 
-class RunConnectRequest(_HelperRequest):
+class RunConnectRequest(HelperRequestBase):
     """Make this channel a byte relay to a live run's control socket."""
 
     type: Literal["run.connect"] = "run.connect"
@@ -774,13 +988,13 @@ class RunConnectRequest(_HelperRequest):
     role: RunRole
 
 
-class PingRequest(_HelperRequest):
+class PingRequest(HelperRequestBase):
     """Liveness of the channel."""
 
     type: Literal["ping"] = "ping"
 
 
-class PathsCompleteRequest(_HelperRequest):
+class PathsCompleteRequest(HelperRequestBase):
     """The directories that complete a typed path on the host."""
 
     type: Literal["paths.complete"] = "paths.complete"
@@ -789,22 +1003,219 @@ class PathsCompleteRequest(_HelperRequest):
     directory, and a trailing ``/`` lists the directory itself."""
 
 
-HELPER_REQUEST_FEATURES: Final[Mapping[type[_HelperRequest], HelperFeature]] = {
+LOGS_READ_MAX_BYTES: Final = 64 * 1024
+"""The most bytes one ``logs.read`` returns, so a reply stays a small helper line."""
+LOGS_READ_MIN_BYTES: Final = 4
+"""The fewest bytes one ``logs.read`` may ask for: one whole UTF-8 character, so every read of
+available bytes makes progress."""
+LOGS_WAIT_MAX_MS: Final = 30_000
+"""The longest a ``logs.read`` waits at the end of an open stream for more bytes."""
+
+LogStreamId = Annotated[str, StringConstraints(pattern=r"^[0-9]{6,12}$")]
+"""A recorded stream's id in its run's log store (``vs_logs``): digits, unique within the run."""
+
+LogOwner = dict[str, JsonValue]
+"""What a stream is for (a startup step, a gate stage, an agent invocation, ...).
+
+The writer validated it against vibesys's ``LogOwner`` union, whose generated TypeScript
+is ``LogOwner`` in the run protocol's bindings; the helper passes it through as JSON so it
+never imports vibesys, and a client narrows it with that union.
+"""
+
+
+class LogPipe(StrEnum):
+    """Which of a command's output pipes wrote some bytes."""
+
+    STDOUT = "stdout"
+    STDERR = "stderr"
+
+
+class LogStreamOutcome(StrEnum):
+    """How a stream was closed."""
+
+    ENDED = "ended"
+    """Its writer closed it normally."""
+    FAILED = "failed"
+    """Its writer closed it because the work it records failed."""
+    ABANDONED = "abandoned"
+    """Its writer stopped without closing it; a later store found it open."""
+
+
+class LogOffset(BaseModel):
+    """Read from this byte offset of the stream."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    offset: NonNegativeInt
+
+
+class LogTail(BaseModel):
+    """Read the last ``tail_bytes`` bytes the stream holds, from the first line start in them."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    tail_bytes: Annotated[int, Field(ge=1, le=LOGS_READ_MAX_BYTES)]
+
+
+class LogsListRequest(HelperRequestBase):
+    """The log streams recorded for one instance, live or ended."""
+
+    type: Literal["logs.list"] = "logs.list"
+    instance_id: InstanceId
+    span_id: SpanId | None = None
+    """Only the streams whose owner names this run-trace span (feature ``logs_by_span``)."""
+
+
+class LogsReadRequest(HelperRequestBase):
+    """One bounded chunk of a stream; at the end of an open stream, wait up to ``wait_ms`` for more.
+
+    A wait ends as soon as bytes arrive or the stream closes, and always before
+    the request's deadline, so a follower keeps exactly one read in flight.
+    """
+
+    type: Literal["logs.read"] = "logs.read"
+    instance_id: InstanceId
+    stream_id: LogStreamId
+    start: LogOffset | LogTail
+    max_bytes: Annotated[int, Field(ge=LOGS_READ_MIN_BYTES, le=LOGS_READ_MAX_BYTES)]
+    wait_ms: Annotated[int, Field(ge=0, le=LOGS_WAIT_MAX_MS)] = 0
+
+
+class LogsCancelRequest(HelperRequestBase):
+    """Withdraw the ``logs.read`` whose request id is ``read_id``: a wait it is in ends now.
+
+    The read still answers, with what it holds (an empty chunk at the end of the
+    stream), and its worker returns, so the channel can admit another request.
+    Naming a read that already answered, or no read, is not an error: withdrawal
+    races the reply by nature. Admitted even when the channel's workers are full.
+    """
+
+    type: Literal["logs.cancel"] = "logs.cancel"
+    read_id: RequestId
+
+
+RUN_EVENTS_READ_MAX_BYTES: Final = 2 * 1024 * 1024
+"""The most journal bytes one ``runs.read_events`` reply carries, so it stays a helper line.
+
+A page stops before the event that would pass it; an event longer than this alone is
+returned alone, so every read makes progress."""
+
+RUN_EVENTS_FILE: Final = "run-events.jsonl"
+"""The run's event journal, one ``RunEvent`` per line, in the run's log directory."""
+
+
+class MachineDescribeRequest(HelperRequestBase):
+    """What this host offers runs: its checkout, hardware, Docker, harness CLIs and runs."""
+
+    type: Literal["machine.describe"] = "machine.describe"
+
+
+class CheckoutInspectRequest(HelperRequestBase):
+    """Whether ``path`` holds a VibeSys checkout, and whether this app can use it."""
+
+    type: Literal["checkout.inspect"] = "checkout.inspect"
+    path: Annotated[str, StringConstraints(min_length=1, max_length=_MAX_PATH_CHARACTERS)]
+    """A path as typed: ``~`` expands on the host, a relative path is under the home directory."""
+
+
+class ExamplesListRequest(HelperRequestBase):
+    """The examples of the checkout this helper runs from, with their tasks."""
+
+    type: Literal["examples.list"] = "examples.list"
+    with_catalogue: bool | None = None
+    """Ask for each example's ``task_details``. Sent only after ``hello`` returned
+    ``example_catalogue``."""
+
+
+class ProjectCreateFromExampleRequest(HelperRequestBase):
+    """Copy ``example`` into its own new Git repository at ``destination`` (absent or empty)."""
+
+    type: Literal["project.create_from_example"] = "project.create_from_example"
+    example: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    """A name ``examples.list`` listed."""
+    destination: Annotated[str, StringConstraints(min_length=1, max_length=_MAX_PATH_CHARACTERS)]
+    """A path as typed, as for ``paths.complete``."""
+
+
+class ProjectCopyOutRequest(HelperRequestBase):
+    """Copy ``source``, a folder inside another Git repository, into its own new one at ``destination``."""
+
+    type: Literal["project.copy_out"] = "project.copy_out"
+    source: Annotated[str, StringConstraints(min_length=1, max_length=_MAX_PATH_CHARACTERS)]
+    destination: Annotated[str, StringConstraints(min_length=1, max_length=_MAX_PATH_CHARACTERS)]
+    """Must not exist."""
+
+
+HELPER_REQUEST_FEATURES: Final[Mapping[type[HelperRequestBase], HelperFeature]] = {
     InstancesInspectRequest: HelperFeature.INSTANCES_INSPECT,
     InstancesWatchRequest: HelperFeature.INSTANCES_WATCH,
     InstancesUnwatchRequest: HelperFeature.INSTANCES_WATCH,
     PathsCompleteRequest: HelperFeature.PATHS_COMPLETE,
+    LogsListRequest: HelperFeature.LOGS,
+    LogsReadRequest: HelperFeature.LOGS,
+    LogsCancelRequest: HelperFeature.LOGS_CANCEL,
     HarnessesListRequest: HelperFeature.HARNESSES,
+    RunsReadEventsRequest: HelperFeature.RUN_HISTORY,
+    RunsEventsForSpanRequest: HelperFeature.RUN_SPAN_EVENTS,
+    RunsReadTailRequest: HelperFeature.RUN_TAIL,
+    RunsSummaryRequest: HelperFeature.RUN_TRACE,
+    MachineDescribeRequest: HelperFeature.MACHINE_DESCRIBE,
+    CheckoutInspectRequest: HelperFeature.CHECKOUT_INSPECT,
+    RunPreflightRequest: HelperFeature.PREFLIGHT,
+    ProjectTaskGoalRequest: HelperFeature.PROJECT_GOAL,
+    ExamplesDestinationRequest: HelperFeature.EXAMPLE_DESTINATION,
+    ExamplesListRequest: HelperFeature.EXAMPLES,
+    ProjectCreateFromExampleRequest: HelperFeature.EXAMPLES,
+    ProjectCopyOutRequest: HelperFeature.EXAMPLES,
+    ComputeListRequest: HelperFeature.MACHINE_COMPUTE,
+    ComputeTestClusterRequest: HelperFeature.MACHINE_COMPUTE,
+    ComputeAddClusterRequest: HelperFeature.MACHINE_COMPUTE,
+    ComputeRemoveClusterRequest: HelperFeature.MACHINE_COMPUTE,
+    AgentLoginsListRequest: HelperFeature.AGENT_LOGINS,
+    AgentLoginsStartRequest: HelperFeature.AGENT_LOGINS,
+    UsageWindowRequest: HelperFeature.USAGE_WINDOW,
+    RunReaderRequest: HelperFeature.CHAT_ENDED_RUNS,
 }
 """The feature each gated request needs, exported with the generated wire contract."""
 
-HELPER_FIELD_FEATURES: Final[Mapping[type[_HelperRequest], Mapping[str, HelperFeature]]] = {
-    RunStartRequest: {"harness": HelperFeature.HARNESSES},
+HELPER_FIELD_FEATURES: Final[Mapping[type[HelperRequestBase], Mapping[str, HelperFeature]]] = {
+    RunStartRequest: {
+        "harness": HelperFeature.HARNESSES,
+        "options": HelperFeature.RUN_OPTIONS,
+        "agents": HelperFeature.RUN_ROLE_AGENTS,
+        "measure_on": HelperFeature.MEASUREMENT_TARGET,
+    },
+    RunPreflightRequest: {
+        "harness": HelperFeature.HARNESSES,
+        "options": HelperFeature.RUN_OPTIONS,
+        "agents": HelperFeature.RUN_ROLE_AGENTS,
+        "measure_on": HelperFeature.MEASUREMENT_TARGET,
+        "with_roles": HelperFeature.RUN_ROLES,
+        "with_backend": HelperFeature.RUN_BACKEND,
+        "with_causes": HelperFeature.RUN_CAUSES,
+        "with_project_clean": HelperFeature.PROJECT_CLEAN,
+    },
+    HarnessesListRequest: {"with_generations": HelperFeature.HARNESS_GENERATIONS},
+    LogsListRequest: {"span_id": HelperFeature.LOGS_BY_SPAN},
+    RunsReadEventsRequest: {
+        "with_totals": HelperFeature.RUN_HISTORY_PAGES,
+        "kinds": HelperFeature.RUN_TRACE_EVENTS,
+    },
+    RunsSummaryRequest: {
+        "offset": HelperFeature.RUN_SUMMARY,
+        "with_ending": HelperFeature.RUN_ENDING,
+    },
+    RunsListRequest: {
+        "digest_runs": HelperFeature.RUN_DIGEST,
+        "with_dashboard": HelperFeature.RUN_DASHBOARD,
+    },
+    ExamplesListRequest: {"with_catalogue": HelperFeature.EXAMPLE_CATALOGUE},
+    RunReaderRequest: {"with_chat": HelperFeature.CHAT_ENDED_RUN_QUESTIONS},
 }
 """The feature each gated optional field needs when it is set (not ``None``), exported too."""
 
 
-def request_features(request: _HelperRequest) -> tuple[HelperFeature, ...]:
+def request_features(request: HelperRequestBase) -> tuple[HelperFeature, ...]:
     """The features ``hello`` must have returned for ``request``: its method's and its set fields'."""
     method = HELPER_REQUEST_FEATURES.get(type(request))
     features = [] if method is None else [method]
@@ -827,7 +1238,30 @@ HelperRequest = Annotated[
     | RunConnectRequest
     | PingRequest
     | PathsCompleteRequest
-    | HarnessesListRequest,
+    | LogsListRequest
+    | LogsReadRequest
+    | LogsCancelRequest
+    | HarnessesListRequest
+    | RunsReadEventsRequest
+    | RunsEventsForSpanRequest
+    | RunsReadTailRequest
+    | RunsSummaryRequest
+    | MachineDescribeRequest
+    | CheckoutInspectRequest
+    | RunPreflightRequest
+    | ExamplesListRequest
+    | ProjectCreateFromExampleRequest
+    | ProjectCopyOutRequest
+    | ComputeListRequest
+    | ComputeTestClusterRequest
+    | ComputeAddClusterRequest
+    | ComputeRemoveClusterRequest
+    | AgentLoginsListRequest
+    | AgentLoginsStartRequest
+    | ProjectTaskGoalRequest
+    | ExamplesDestinationRequest
+    | UsageWindowRequest
+    | RunReaderRequest,
     Field(discriminator="type"),
 ]
 """Every message a client sends on a helper channel."""
@@ -856,13 +1290,7 @@ class Checkout(BaseModel):
     """Whether tracked files differ from ``HEAD``; ``None`` when git could not say."""
 
 
-class _HelperReply(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    request_id: RequestId
-
-
-class HelloReply(_HelperReply):
+class HelloReply(HelperReplyBase):
     """The negotiated version and features, and what will start runs on this host."""
 
     type: Literal["hello"] = "hello"
@@ -873,28 +1301,28 @@ class HelloReply(_HelperReply):
     """``None`` when the helper runs from an installed distribution."""
 
 
-class InstancesListReply(_HelperReply):
+class InstancesListReply(HelperReplyBase):
     """The registry's listing."""
 
     type: Literal["instances.list"] = "instances.list"
     listing: InstanceList
 
 
-class InstancesInspectReply(_HelperReply):
+class InstancesInspectReply(HelperReplyBase):
     """One coherent inspection of a detached server and its retained artifacts."""
 
     type: Literal["instances.inspect"] = "instances.inspect"
     inspection: InstanceInspection
 
 
-class InstancesWatchReply(_HelperReply):
+class InstancesWatchReply(HelperReplyBase):
     """The watch started; ``instances.changed`` for ``watch_id`` follows at once and on change."""
 
     type: Literal["instances.watch"] = "instances.watch"
     watch_id: RequestId
 
 
-class InstancesUnwatchReply(_HelperReply):
+class InstancesUnwatchReply(HelperReplyBase):
     """The watch ended; no ``instances.changed`` for ``watch_id`` follows."""
 
     type: Literal["instances.unwatch"] = "instances.unwatch"
@@ -911,11 +1339,43 @@ class InstancesChanged(BaseModel):
     listing: InstanceList
 
 
-class TasksListReply(_HelperReply):
-    """The project's tasks."""
+class RunDigest(BaseModel):
+    """What a run's journal says at a glance, for a list row; never a replay of the run.
 
-    type: Literal["tasks.list"] = "tasks.list"
-    tasks: TaskList
+    ``ideas`` counts the ideas the run page counts (one per hypothesis, probes excluded) and
+    ``adopted_ratio`` is the result the run's adoption span names, as the run page headlines it:
+    an improvement over the input (for a ``min`` objective, the input's value over the result's);
+    ``None`` when the run adopted nothing. The best raw reading of a gate is not it: that may be
+    an idea that later failed. ``best_so_far_ratio`` is what the page headlines before the run has
+    opened an adoption (while it works): the best idea that passed and beat the input, worded as an
+    improvement the same way; ``None`` before one does and once an adoption exists. ``ideas`` is
+    ``None`` for a journal that predates the run trace (``TraceFormat.PREDATES_TRACE``): it
+    records rounds, not ideas, so no count is true. ``duration_s`` runs from the journal's first
+    event to the last step it recorded; ``None`` for a run with no events. ``ending`` is the run's
+    ending record and ``closing`` its terminal event: both ``None`` for a run still going or one
+    whose server died without a word; they are how an ending is known once its tombstone expired.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["digest"] = "digest"
+    ideas: NonNegativeInt | None
+    adopted_ratio: float | None
+    best_so_far_ratio: float | None
+    duration_s: NonNegativeFloat | None
+    ending: RunEndingFact | None
+    closing: RunClosing | None
+    dashboard: Annotated[RunDashboard | None, Field(exclude_if=lambda each: each is None)] = None
+    """The tile's data when ``runs.list`` asked ``with_dashboard``; absent otherwise."""
+
+
+class RunDigestUnreadable(BaseModel):
+    """A run whose journal exists and could not be read; ``message`` says why, in one line."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["unreadable"] = "unreadable"
+    message: OneLine
 
 
 class RunSummary(BaseModel):
@@ -931,6 +1391,14 @@ class RunSummary(BaseModel):
     """The phase of the server on this host that drives or last drove the run, if one is listed."""
     instance_id: InstanceId | None
     """That server, while it is live: attach to it rather than resume."""
+    digest: Annotated[
+        Annotated[RunDigest | RunDigestUnreadable, Field(discriminator="kind")] | None,
+        Field(exclude_if=lambda digest: digest is None),
+    ] = None
+    """What the journal says of each run named in ``digest_runs`` (feature ``run_digest``); absent for
+    the others, so a strict client that did not ask never sees it."""
+    attention: Annotated[RunAttention | None, Field(exclude_if=lambda each: each is None)] = None
+    """Why the run needs its user when ``runs.list`` asked ``with_dashboard``; absent otherwise."""
 
 
 class RunList(BaseModel):
@@ -942,28 +1410,28 @@ class RunList(BaseModel):
     runs: tuple[RunSummary, ...]
 
 
-class RunsListReply(_HelperReply):
+class RunsListReply(HelperReplyBase):
     """The project's runs."""
 
     type: Literal["runs.list"] = "runs.list"
     runs: RunList
 
 
-class RunStartReply(_HelperReply):
+class RunStartReply(HelperReplyBase):
     """The started server's record, or why nothing started."""
 
     type: Literal["run.start"] = "run.start"
     launch: LiveInstanceRecord | DetachedLaunchFailure
 
 
-class RunStopReply(_HelperReply):
+class RunStopReply(HelperReplyBase):
     """What the stop observed."""
 
     type: Literal["run.stop"] = "run.stop"
     result: InstanceStopResult
 
 
-class RunConnectReply(_HelperReply):
+class RunConnectReply(HelperReplyBase):
     """The channel is now a byte relay carrying the run protocol to this run."""
 
     type: Literal["run.connect"] = "run.connect"
@@ -972,7 +1440,7 @@ class RunConnectReply(_HelperReply):
     """The run protocol version the server speaks."""
 
 
-class PingReply(_HelperReply):
+class PingReply(HelperReplyBase):
     """The channel is alive."""
 
     type: Literal["ping"] = "ping"
@@ -998,7 +1466,7 @@ PATHS_COMPLETE_CAP = 200
 """The most entries one ``paths.complete`` reply carries."""
 
 
-class PathsCompleteReply(_HelperReply):
+class PathsCompleteReply(HelperReplyBase):
     """Matching directories of ``directory``, sorted by name, at most ``PATHS_COMPLETE_CAP``."""
 
     type: Literal["paths.complete"] = "paths.complete"
@@ -1009,54 +1477,212 @@ class PathsCompleteReply(_HelperReply):
     """More directories match than were returned, or the directory was too large to read whole."""
 
 
-class HarnessesListReply(_HelperReply):
+class LogStream(BaseModel):
+    """One recorded log stream of an instance, as its store indexes it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: LogStreamId
+    owner: LogOwner
+    command: str
+    """What wrote the stream, for display: a command line, or the narration's name."""
+    retained_start: NonNegativeInt
+    """The oldest offset the store still holds; bytes before it were evicted."""
+    size: NonNegativeInt
+    """How many bytes were ever written: the offset the next byte will have."""
+    outcome: LogStreamOutcome | None
+    """How the stream was closed; ``None`` while it is open."""
+
+    @model_validator(mode="after")
+    def _retained(self) -> LogStream:
+        if self.retained_start > self.size:
+            message = "retained_start must not pass size"
+            raise ValueError(message)
+        return self
+
+
+class LogPipeSpan(BaseModel):
+    """Bytes ``[offset, offset + length)`` of a stream were written by ``pipe``."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    offset: NonNegativeInt
+    """A stream offset, like ``LogChunk.offset``."""
+    length: PositiveInt
+    pipe: LogPipe
+
+
+class LogsListReply(HelperReplyBase):
+    """The instance's streams, oldest first."""
+
+    type: Literal["logs.list"] = "logs.list"
+    streams: tuple[LogStream, ...]
+
+
+class LogChunk(BaseModel):
+    """Bytes ``[offset, next_offset)`` of a stream, decoded as UTF-8 text.
+
+    The helper cuts a chunk that more bytes follow after the last line end in
+    its window, or, with no line end there, before a character the window
+    splits; so ``data`` decodes without loss except for bytes that are not
+    UTF-8, which become U+FFFD. ``next_offset - offset`` counts bytes.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    offset: NonNegativeInt
+    """Where ``data`` starts: later than asked when the asked-for bytes were evicted
+    (``truncated_before``), or when a tail read skipped to the next line start."""
+    data: str = Field(json_schema_extra={"x-vibesys-max-utf8-bytes": 3 * LOGS_READ_MAX_BYTES})
+    next_offset: NonNegativeInt
+    """Where the next read continues."""
+    eof: bool
+    """``next_offset`` is the end of what the stream holds now (an unfinished last
+    character of an open stream is held back until it is complete)."""
+    closed: bool
+    """The stream is closed: once ``eof``, no more bytes will come."""
+    truncated_before: bool
+    """Bytes the read asked for, before ``offset``, were evicted and are gone."""
+    pipes: tuple[LogPipeSpan, ...]
+    """Which pipe wrote each byte of ``[offset, next_offset)``: adjacent spans, in order,
+    in stream offsets (the coordinates of ``offset``), covering the chunk exactly."""
+
+    @model_validator(mode="after")
+    def _ordered(self) -> LogChunk:
+        span = self.next_offset - self.offset
+        if span < 0 or span > LOGS_READ_MAX_BYTES:
+            message = "next_offset must follow offset by at most LOGS_READ_MAX_BYTES"
+            raise ValueError(message)
+        cursor = self.offset
+        for pipe in self.pipes:
+            if pipe.offset != cursor:
+                message = "pipe spans must be adjacent and start at offset"
+                raise ValueError(message)
+            cursor += pipe.length
+        if cursor != self.next_offset:
+            message = "pipe spans must cover offset to next_offset exactly"
+            raise ValueError(message)
+        return self
+
+
+class LogsReadReply(HelperReplyBase):
+    """One chunk of the stream."""
+
+    type: Literal["logs.read"] = "logs.read"
+    chunk: LogChunk
+
+
+class LogsCancelReply(HelperReplyBase):
+    """The withdrawal was taken: a read ``read_id`` named that was still waiting stops waiting."""
+
+    type: Literal["logs.cancel"] = "logs.cancel"
+    read_id: RequestId
+
+
+class HarnessesListReply(HelperReplyBase):
     """The vetted pairs, grouped by provider with each provider's default first."""
 
     type: Literal["harnesses.list"] = "harnesses.list"
     harnesses: tuple[HarnessOption, ...]
 
+    @model_validator(mode="after")
+    def _generations_group_without_contradiction(self) -> HarnessesListReply:
+        conflict = generation_conflict(self.harnesses)
+        if conflict is not None:
+            raise ValueError(conflict)
+        return self
 
-class HelperErrorCode(StrEnum):
-    """Why a request failed; a closed set."""
 
-    HANDSHAKE_REQUIRED = "handshake_required"
-    """A request other than ``hello`` came before a successful ``hello``."""
-    INCOMPATIBLE = "incompatible"
-    """No protocol version both sides speak, or ``hello`` was sent twice."""
-    INVALID_REQUEST = "invalid_request"
-    """The line is not a request of the negotiated version."""
-    DUPLICATE_REQUEST_ID = "duplicate_request_id"
-    """Another request or watch with this id is open on the channel."""
-    FEATURE_NOT_NEGOTIATED = "feature_not_negotiated"
-    """The method needs a feature ``hello`` did not return."""
-    DEADLINE_EXCEEDED = "deadline_exceeded"
-    """The reply was not ready within the request's ``deadline_ms``."""
-    CHANNEL_BUSY = "channel_busy"
-    """The channel's worker limit is full, or ``run.connect`` needs an idle channel."""
-    UNKNOWN_WATCH = "unknown_watch"
-    """``instances.unwatch`` named no open watch."""
-    PROJECT_MISSING = "project_missing"
-    """The project directory does not exist or is not a directory."""
-    PROJECT_UNINITIALIZED = "project_uninitialized"
-    """The directory has no ``.vibesys/tasks``."""
-    TASK_INVALID = "task_invalid"
-    """The project's tasks or runs could not be read."""
-    PATH_MISSING = "path_missing"
-    """The directory to complete in does not exist."""
-    PATH_NOT_DIRECTORY = "path_not_directory"
-    """The path to complete in is not a directory."""
-    PERMISSION_DENIED = "permission_denied"
-    """This user may not list the directory."""
-    RUN_GONE = "run_gone"
-    """No live server has the id, or nothing listens at its socket."""
-    CONNECT_DENIED = "connect_denied"
-    """The run's socket exists but this user may not connect to it."""
-    CONNECT_FAILED = "connect_failed"
-    """Connecting to the run's socket failed another way."""
-    UNVETTED_HARNESS = "unvetted_harness"
-    """``run.start``'s ``harness`` is not one ``harnesses.list`` offers; only sent with ``harnesses``."""
-    INTERNAL = "internal"
-    """The helper failed; ``message`` says how."""
+class MachineDescribeReply(HelperReplyBase):
+    """The machine's description."""
+
+    type: Literal["machine.describe"] = "machine.describe"
+    machine: MachineDescription
+
+
+class CheckoutFound(BaseModel):
+    """A VibeSys checkout at least ``MIN_CHECKOUT_VERSION``.
+
+    ``compatible`` says whether it ships the host helper this app starts from a checkout.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    state: Literal["found"] = "found"
+    root: str
+    version: str
+    commit: str | None
+    dirty: bool | None
+    compatible: bool
+
+
+class CheckoutNotFound(BaseModel):
+    """The path holds no VibeSys checkout (or does not exist)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    state: Literal["not_found"] = "not_found"
+
+
+class CheckoutTooOld(BaseModel):
+    """A VibeSys checkout older than this app supports: ``version`` is below ``min``."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    state: Literal["too_old"] = "too_old"
+    version: str
+    """The version it declares; empty when it declares none."""
+    min: str
+
+
+CheckoutInspection = Annotated[
+    CheckoutFound | CheckoutNotFound | CheckoutTooOld, Field(discriminator="state")
+]
+
+
+class ExamplesListReply(HelperReplyBase):
+    """The checkout's example catalog."""
+
+    type: Literal["examples.list"] = "examples.list"
+    listing: ExampleList
+
+
+class ProjectCreateFromExampleReply(HelperReplyBase):
+    """The project made from the example."""
+
+    type: Literal["project.create_from_example"] = "project.create_from_example"
+    created: CreatedProject
+
+
+class ProjectCopyOutReply(HelperReplyBase):
+    """The project copied out into its own repository."""
+
+    type: Literal["project.copy_out"] = "project.copy_out"
+    created: CreatedProject
+
+
+class RunPreflightReply(HelperReplyBase):
+    """Every check, in ``CheckId`` order; Start is enabled exactly when none is ``fail``."""
+
+    type: Literal["run.preflight"] = "run.preflight"
+    checks: tuple[Check, ...]
+    roles: Annotated[tuple[RoleName, ...] | None, Field(exclude_if=lambda roles: roles is None)] = (
+        None
+    )
+    """The role ids the run's orchestration declares, in declaration order: what a
+    ``RoleOption.role`` may name. Present only when the request set ``with_roles`` (feature
+    ``run_roles``), so a strict client that did not ask never sees the field."""
+    backend: Annotated[Backend | None, Field(exclude_if=lambda backend: backend is None)] = None
+    """The compute backend the run resolved to, which its task declares; ``None`` when the
+    settings resolved none. Present only when the request set ``with_backend`` (feature
+    ``run_backend``), as are the checks' ``cause`` fields."""
+
+
+class CheckoutInspectReply(HelperReplyBase):
+    """What the path holds."""
+
+    type: Literal["checkout.inspect"] = "checkout.inspect"
+    inspection: CheckoutInspection
 
 
 class HelperError(BaseModel):
@@ -1089,7 +1715,30 @@ HelperReply = (
     | RunConnectReply
     | PingReply
     | PathsCompleteReply
+    | LogsListReply
+    | LogsReadReply
+    | LogsCancelReply
     | HarnessesListReply
+    | RunsReadEventsReply
+    | RunsEventsForSpanReply
+    | RunsReadTailReply
+    | RunsSummaryReply
+    | MachineDescribeReply
+    | CheckoutInspectReply
+    | RunPreflightReply
+    | ExamplesListReply
+    | ProjectCreateFromExampleReply
+    | ProjectCopyOutReply
+    | ComputeListReply
+    | ComputeTestClusterReply
+    | ComputeAddClusterReply
+    | ComputeRemoveClusterReply
+    | AgentLoginsListReply
+    | AgentLoginsStartReply
+    | ProjectTaskGoalReply
+    | ExamplesDestinationReply
+    | UsageWindowReply
+    | RunReaderReply
 )
 """A request's result; its ``type`` is the request's."""
 
@@ -1102,6 +1751,126 @@ _MESSAGE: TypeAdapter[HelperMessage] = TypeAdapter(HelperMessage)
 def parse_helper_message(line: bytes) -> HelperMessage | Unreadable:
     """Parse one helper message line strictly, as a client does, or say what is wrong."""
     return decode_json(line, _MESSAGE, source="message", max_bytes=HELPER_LINE_MAX_BYTES)
+
+
+COMPENSATION_FAILURE_EXIT_STATUS: Final = 12
+"""The helper could not prove cleanup of a successful start the client never received."""
+COMPENSATION_FAILURE_TYPE: Final = "run.start_compensation_failed"
+"""The discriminant of a failed compensating-stop diagnostic."""
+COMPENSATION_FAILURE_DETAIL_CHARACTERS: Final = 2000
+"""The most diagnostic characters retained from a failed compensating stop."""
+
+
+class CompensationFailureKind(StrEnum):
+    """Why cleanup of an undisclosed successful start could not be proved complete."""
+
+    WORKER_START_REFUSED = "worker_start_refused"
+    """The helper could not start the worker that owns the compensating stop."""
+    STOP_FAILED = "stop_failed"
+    """The registry stop operation raised before returning a typed result."""
+    STOP_UNCONFIRMED = "stop_unconfirmed"
+    """The registry returned a typed result that does not prove terminal cleanup."""
+
+
+class _RunStartCompensationFailureFields(BaseModel):
+    """Fields shared by every failed compensating-stop diagnostic."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    type: Literal["run.start_compensation_failed"]
+    exit_status: Literal[12]
+    request_id: RequestId
+    detail: Annotated[
+        str, StringConstraints(min_length=1, max_length=COMPENSATION_FAILURE_DETAIL_CHARACTERS)
+    ]
+
+
+class WorkerStartRefusedCompensationFailure(_RunStartCompensationFailureFields):
+    """The helper could not start the worker that owns the compensating stop."""
+
+    kind: Literal[CompensationFailureKind.WORKER_START_REFUSED]
+    instance_id: InstanceId
+
+
+class StopFailedCompensationFailure(_RunStartCompensationFailureFields):
+    """The registry stop raised before returning typed evidence."""
+
+    kind: Literal[CompensationFailureKind.STOP_FAILED]
+    instance_id: InstanceId
+
+
+class UnconfirmedInstanceStopResult(InstanceStopResult):
+    """A complete stop result whose outcome does not prove terminal cleanup."""
+
+    outcome: Literal[
+        StopOutcome.STOPPING,
+        StopOutcome.STILL_RUNNING,
+        StopOutcome.UNSUPPORTED,
+    ]
+
+
+class StopUnconfirmedCompensationFailure(_RunStartCompensationFailureFields):
+    """The registry returned a typed result that does not prove terminal cleanup.
+
+    The stop result is the one source of the instance identity in this variant,
+    so a serialized report cannot carry two identities that disagree.
+    """
+
+    kind: Literal[CompensationFailureKind.STOP_UNCONFIRMED]
+    stop_result: UnconfirmedInstanceStopResult
+
+
+type RunStartCompensationEvidence = Annotated[
+    WorkerStartRefusedCompensationFailure
+    | StopFailedCompensationFailure
+    | StopUnconfirmedCompensationFailure,
+    Field(discriminator="kind"),
+]
+
+
+class RunStartCompensationFailure(RootModel[RunStartCompensationEvidence]):
+    """One strict stderr line preserving an undisclosed instance cleanup failure.
+
+    A successful ``run.start`` reply could not reach the client, so only this
+    diagnostic can tell an operator which live instance may need recovery. The
+    discriminated variants make result presence and nonterminal outcomes part of
+    the generated schema rather than Python-only validation.
+    """
+
+    root: RunStartCompensationEvidence
+
+    @property
+    def request_id(self) -> str:
+        """The start request whose successful reply was undisclosed."""
+        return self.root.request_id
+
+    @property
+    def instance_id(self) -> str:
+        """The undisclosed instance an operator may need to recover."""
+        if isinstance(self.root, StopUnconfirmedCompensationFailure):
+            return self.root.stop_result.id
+        return self.root.instance_id
+
+    @property
+    def kind(self) -> CompensationFailureKind:
+        """Why terminal cleanup could not be proved."""
+        return self.root.kind
+
+    @property
+    def stop_result(self) -> UnconfirmedInstanceStopResult | None:
+        """The complete nonterminal stop result, when the stop returned one."""
+        if isinstance(self.root, StopUnconfirmedCompensationFailure):
+            return self.root.stop_result
+        return None
+
+    @property
+    def exit_status(self) -> Literal[12]:
+        """The process status paired with this diagnostic."""
+        return self.root.exit_status
+
+    def line(self) -> str:
+        """The report as one newline-terminated JSON line."""
+        return self.model_dump_json() + "\n"
 
 
 class ChannelEndOutcome(StrEnum):

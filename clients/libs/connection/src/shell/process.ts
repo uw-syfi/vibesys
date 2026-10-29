@@ -20,17 +20,26 @@ export interface SpawnedProcess {
    * it ended by signal or never started.
    */
   readonly exit: Promise<number | null>;
+  /**
+   * Settles once the process itself is dead, without waiting for its output to end. `exit` can
+   * stay pending after that: a descendant the process started (ssh's ProxyCommand) may keep an
+   * inherited pipe open, and the pipe ends only when that descendant does. Retirement confirms
+   * on this, because it asks whether the process is gone, not whether every pipe is.
+   */
+  readonly terminated: Promise<void>;
   kill(signal: 'SIGTERM' | 'SIGKILL'): void;
 }
 
 /** What bounded retirement proved about the exact child process. */
 type ProcessRetirementOutcome =
-  | {readonly kind: 'confirmed'; readonly code: number | null}
+  | {readonly kind: 'confirmed'; readonly code: number | null; readonly pipesHeld: boolean}
   | {readonly kind: 'unconfirmed'};
 
 /**
  * One idempotent retirement of a child. `outcome` settles within two grace periods; `exit` remains
- * the exact termination proof when that bound expires first.
+ * the exact termination proof when that bound expires first. A process that `terminated` but whose
+ * `exit` stays pending (a descendant holds its pipes) is confirmed, with a null code and
+ * `pipesHeld`, one grace after it terminated.
  */
 export interface ProcessRetirement {
   readonly outcome: Promise<ProcessRetirementOutcome>;
@@ -69,6 +78,7 @@ export function prepareProcessRetirement(
 
   let cancelKill = (): void => {};
   let cancelConfirmation = (): void => {};
+  let cancelDrain = (): void => {};
   let settle = (_outcome: ProcessRetirementOutcome): void => {};
   let settled = false;
   const outcome = new Promise<ProcessRetirementOutcome>(resolve => {
@@ -77,6 +87,7 @@ export function prepareProcessRetirement(
       settled = true;
       cancelKill();
       cancelConfirmation();
+      cancelDrain();
       resolve(result);
     };
   });
@@ -93,10 +104,18 @@ export function prepareProcessRetirement(
   const retirement: OwnedProcessRetirement = {process, outcome, exit: process.exit, start};
   retirements.set(process, retirement);
   ownedRetirements.add(retirement);
+  void process.terminated.then(() => {
+    // The process is dead; give its output one grace to end and report the exit code, then stop
+    // waiting for pipes that a descendant may hold open.
+    cancelDrain = scheduleTimeout(() => {
+      ownedRetirements.delete(retirement);
+      settle({kind: 'confirmed', code: null, pipesHeld: true});
+    }, graceMs);
+  });
   void process.exit.then(
     code => {
       ownedRetirements.delete(retirement);
-      settle({kind: 'confirmed', code});
+      settle({kind: 'confirmed', code, pipesHeld: false});
     },
     () => {
       process.kill('SIGKILL');
@@ -121,6 +140,12 @@ export function retireProcess(
 export function fromChild(child: ChildProcess): SpawnedProcess {
   const alreadyExited = child.exitCode !== null || child.signalCode !== null;
   let running = !alreadyExited;
+  let markTerminated = (): void => {};
+  const terminated = alreadyExited
+    ? Promise.resolve()
+    : new Promise<void>(resolve => {
+        markTerminated = resolve;
+      });
   const exit = alreadyExited
     ? Promise.resolve(child.exitCode)
     : new Promise<number | null>(resolve => {
@@ -138,13 +163,16 @@ export function fromChild(child: ChildProcess): SpawnedProcess {
         child.on('error', () => {
           if (spawned || child.pid !== undefined) return;
           running = false;
+          markTerminated();
           resolve(null);
         });
         child.once('exit', () => {
           running = false;
+          markTerminated();
         });
         child.once('close', code => {
           running = false;
+          markTerminated();
           resolve(code);
         });
       });
@@ -161,6 +189,7 @@ export function fromChild(child: ChildProcess): SpawnedProcess {
       return running;
     },
     exit,
+    terminated,
     kill: signal => {
       if (child.exitCode === null && child.signalCode === null) child.kill(signal);
     },

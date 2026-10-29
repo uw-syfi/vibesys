@@ -4,7 +4,9 @@
  *
  * `HelperChannel.open` sends `hello` and resolves once the helper answered it; every later request
  * carries an id and a deadline and resolves with its own reply, so requests on one channel run
- * concurrently. Every line is parsed strictly against the generated contract
+ * concurrently. A request may carry an abort signal: aborting it drops the request, and when its
+ * type has a declared withdrawal (`WITHDRAWALS`) the helper offers, tells the helper to stop it.
+ * Every line is parsed strictly against the generated contract
  * (`parseHelperMessage`); a line that is not one ends the channel. A run channel is a channel whose
  * one `run.connect` succeeded: from then on it is a byte stream (`RunStream`) carrying the run
  * protocol, ending with the helper's exit status and its `ChannelEnd` line.
@@ -22,25 +24,44 @@ import {
   type HelperError,
   type HelperFeature,
   type HelperMessage,
+  type HelperRequest,
   helperFeatureForRequest,
   helperFeaturesForRequest,
   type InstancesChanged,
   parseChannelEnd,
   parseHelperMessage,
 } from '@vibesys/contracts/host-helper';
-import type {ScheduleTimeout} from '@vibesys/transport';
-import type {Cause} from '../state/host-connection.js';
+import {
+  type AbortRegistration,
+  type AbortSignalLike,
+  abortReason,
+  registerAbort,
+  type ScheduleTimeout,
+} from '@vibesys/transport';
+import type {Cause, CheckoutProblem} from '../state/host-connection.js';
 import {bootstrapProblem} from './bootstrap.js';
 import {type ProcessRetirement, retireProcess, type SpawnedProcess} from './process.js';
 
 /** A failure of a channel or of an operation on one, with the cause the machine decides on. */
 export class ConnectionError extends Error {
   readonly reason: Cause;
+  /** For an `incompatible` bootstrap report: which checkout problem it is, or null. */
+  readonly checkout: CheckoutProblem | null;
 
-  constructor(reason: Cause, message: string, options?: ErrorOptions) {
+  constructor(
+    reason: Cause,
+    message: string,
+    options?: ErrorOptions & {readonly checkout?: CheckoutProblem | null},
+  ) {
     super(message, options);
     this.name = 'ConnectionError';
     this.reason = reason;
+    this.checkout = options?.checkout ?? null;
+  }
+
+  /** The same failure (cause and checkout problem) in other words. */
+  reworded(message: string): ConnectionError {
+    return new ConnectionError(this.reason, message, {cause: this, checkout: this.checkout});
   }
 }
 
@@ -160,6 +181,14 @@ const FEATURES: readonly HelperFeature[] = [
     ...Object.values(HELPER_FEATURE_BY_FIELD).flatMap(fields => Object.values(fields ?? {})),
   ]),
 ];
+/**
+ * The request types an abort withdraws on the helper's side, each with the request that withdraws
+ * it, named by the aborted request's id. Sent only when `hello` negotiated that request's feature;
+ * otherwise the aborted request is only dropped here and the helper finishes it on its own.
+ */
+const WITHDRAWALS: Readonly<Partial<Record<HelperRequest['type'], (requestId: string) => Body>>> = {
+  'logs.read': requestId => ({type: 'logs.cancel', read_id: requestId}),
+};
 /** How long past its own deadline a request may take before this side gives up on it. */
 const DEADLINE_SLACK_MS = 2_000;
 const STDERR_TAIL = 8192;
@@ -259,9 +288,16 @@ export class HelperChannel implements AsyncDisposable {
     }
   }
 
-  /** Send `body` and resolve with its reply; rejects with `HelperRequestError` or `ConnectionError`. */
-  request<T extends string>(body: Body & {readonly type: T}): Promise<ReplyOf<T>> {
-    return this.#request(body, reply => reply);
+  /**
+   * Send `body` and resolve with its reply; rejects with `HelperRequestError` or `ConnectionError`.
+   * Aborting `signal` rejects with the abort reason, drops the reply, and withdraws the request
+   * when its type has a withdrawal the helper offers (`WITHDRAWALS`).
+   */
+  request<T extends string>(
+    body: Body & {readonly type: T},
+    signal?: AbortSignalLike,
+  ): Promise<ReplyOf<T>> {
+    return this.#request(body, reply => reply, signal);
   }
 
   /**
@@ -271,6 +307,7 @@ export class HelperChannel implements AsyncDisposable {
   #request<T extends string, Result>(
     body: Body & {readonly type: T},
     accept: (reply: ReplyOf<T>) => Result,
+    signal?: AbortSignalLike,
   ): Promise<Result> {
     const terminal = this.#failure ?? this.#inputFailure;
     if (terminal !== null) return Promise.reject(terminal);
@@ -289,13 +326,20 @@ export class HelperChannel implements AsyncDisposable {
         }),
       );
     }
+    if (signal?.aborted === true) return Promise.reject(abortReason(signal));
     const requestId = `r${this.#nextId++}`;
     const {deadlineMs, scheduleTimeout} = this.#options;
     return new Promise<Result>((resolve, reject) => {
-      const cancel = scheduleTimeout(() => {
+      let registration: AbortRegistration | null = null;
+      const stopTimer = scheduleTimeout(() => {
         this.#pending.delete(requestId);
+        registration?.detach();
         reject(new ConnectionError('link', `the helper did not answer ${body.type} in time`));
       }, deadlineMs + DEADLINE_SLACK_MS);
+      const cancel = (): void => {
+        stopTimer();
+        registration?.detach();
+      };
       this.#pending.set(requestId, {
         responseType: body.type,
         resolve: message => {
@@ -308,7 +352,41 @@ export class HelperChannel implements AsyncDisposable {
         reject,
         cancel,
       });
+      if (signal !== undefined) {
+        registration = registerAbort(signal, () =>
+          this.#withdraw(requestId, body.type, abortReason(signal)),
+        );
+        if (registration.aborted) {
+          this.#pending.delete(requestId);
+          stopTimer();
+          reject(abortReason(signal));
+          return;
+        }
+      }
       this.#write({...body, request_id: requestId, deadline_ms: deadlineMs});
+    });
+  }
+
+  /**
+   * Drop the aborted request `requestId` (rejecting it with `reason`), then, when its type has a
+   * withdrawal the helper offers and the channel still serves, send that withdrawal. The
+   * withdrawal's own reply or failure is consumed here: the caller already stopped waiting.
+   */
+  #withdraw(requestId: string, type: string, reason: Error): void {
+    const pending = this.#pending.get(requestId);
+    if (pending === undefined) return;
+    this.#pending.delete(requestId);
+    pending.cancel();
+    pending.reject(reason);
+    const withdrawal = Object.hasOwn(WITHDRAWALS, type)
+      ? WITHDRAWALS[type as HelperRequest['type']]
+      : undefined;
+    if (withdrawal === undefined || !this.active || this.#inputFailure !== null) return;
+    const body = withdrawal(requestId);
+    if (!this.supportsRequest(body.type)) return;
+    this.#request(body, () => undefined).catch(() => {
+      // The withdrawal is best effort: the aborted request's caller is gone, and a failed channel
+      // reports itself to whoever still waits on it.
     });
   }
 
@@ -359,7 +437,8 @@ export class HelperChannel implements AsyncDisposable {
     this.#close();
     const outcome = await this.#retire().outcome;
     if (outcome.kind === 'unconfirmed') throw this.#unconfirmedTerminationError();
-    await this.ended;
+    // A dead helper whose pipes a descendant holds ends its output later; the process is gone.
+    if (!outcome.pipesHeld) await this.ended;
   }
 
   #close(): void {
@@ -499,7 +578,9 @@ export class HelperChannel implements AsyncDisposable {
     if (code === 0 && this.#relay === null) return null;
     const problem =
       this.hello === null ? bootstrapProblem(code, this.#bootstrap, this.#options.where) : null;
-    if (problem !== null) return new ConnectionError('incompatible', problem);
+    if (problem !== null) {
+      return new ConnectionError('incompatible', problem.message, {checkout: problem.checkout});
+    }
     return this.#options.explain(code, this.#stderr);
   }
 

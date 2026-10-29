@@ -15,11 +15,11 @@ from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule
 from pydantic import ValidationError
-from tests.server.support import REQUEST_TIME
+from tests.server.support import CONTROL_KEY, REQUEST_TIME, operator_dialer
 
 import server.registry as instance_module
-from server.api.protocol import Response
-from server.control_envelope import CommandAck, StopCommand
+from server.api.protocol import CommandAck, Response
+from server.control_envelope import StopCommand
 from server.host_api import (
     ECMASCRIPT_DATE_MAX_SECONDS,
     INSPECTION_LOG_TAIL_BYTES,
@@ -33,6 +33,7 @@ from server.host_api import (
     InstanceStatus,
     LiveInstanceRecord,
     MissingLogTail,
+    PauseCause,
     RunPhase,
     RunStatus,
     StopOutcome,
@@ -50,6 +51,7 @@ from server.registry import (
     FakeInstanceLogs,
     FakeInstanceMetadataStore,
     FakeInstanceStore,
+    FakeStopIntents,
     FileInstanceHold,
     FileInstanceLogs,
     FileInstanceMetadataStore,
@@ -71,6 +73,7 @@ from server.registry import (
     parse_instance_id,
 )
 from server.transport.unix_jsonl import MAX_SOCKET_PATH_BYTES
+from vibesys.api import ControlAction
 from vs_sim.api.testing import HANG_GUARD_S, ManualClock, SimNetwork, SimThreads
 
 if TYPE_CHECKING:
@@ -296,6 +299,8 @@ def test_live_instance_record_does_not_absorb_inspection_metadata() -> None:
         "pid",
         "started_at",
         "ended_at",
+        "paused",
+        "end",
         "hostname",
         "protocol_version",
         "vibesys_version",
@@ -638,6 +643,12 @@ _RECORD_DOCUMENTS = {
             "progress": {"done": 1, "total": 3, "label": "RUN npm install"},
         },
     },
+    "v4": lambda instance_id: {**_record(instance_id).model_dump(mode="json"), "version": 4},
+    "v4 with paused": lambda instance_id: {
+        **_paused_record(instance_id).model_dump(mode="json"),
+        "version": 4,
+    },
+    "current paused": lambda instance_id: _paused_record(instance_id).model_dump(mode="json"),
     "future": lambda instance_id: {"version": 9, "id": instance_id, "phase": "anything"},
     "no version": lambda instance_id: {"id": instance_id},
     "not an object": lambda _instance_id: [1, 2],
@@ -668,7 +679,7 @@ def test_a_listing_over_mixed_record_versions_reports_every_live_id_exactly_once
     unreadable = [record.id for record in listing.unreadable]
     assert sorted(live + unreadable) == IDS[: len(kinds)]
     for instance_id, kind in zip(IDS, kinds, strict=False):
-        assert (instance_id in live) == (kind in {"current", "v3"})
+        assert (instance_id in live) == (kind in {"current", "current paused", "v3", "v4"})
 
 
 @pytest.mark.parametrize(
@@ -676,6 +687,7 @@ def test_a_listing_over_mixed_record_versions_reports_every_live_id_exactly_once
     [
         ("v2", 2),
         ("v3 with progress", 3),
+        ("v4 with paused", 4),
         ("future", 9),
         ("no version", None),
         ("not an object", None),
@@ -687,8 +699,15 @@ def test_an_unreadable_record_names_the_version_it_claims(kind: str, version: in
     assert parse_record(IDS[0], _raw(kind, IDS[0])) == UnreadableRecord(id=IDS[0], version=version)
 
 
-def test_a_version_3_record_reads_as_the_same_record_at_the_current_version() -> None:
-    assert parse_record(IDS[0], _raw("v3", IDS[0])) == _record(IDS[0])
+@pytest.mark.parametrize("kind", ["v3", "v4"])
+def test_an_older_record_reads_as_the_same_record_at_the_current_version(kind: str) -> None:
+    assert parse_record(IDS[0], _raw(kind, IDS[0])) == _record(IDS[0])
+
+
+def _paused_record(instance_id: str) -> LiveInstanceRecord:
+    return _record(instance_id).model_copy(
+        update={"phase": RunPhase(status=RunStatus.PAUSED), "paused": PauseCause.QUOTA}
+    )
 
 
 def test_a_newer_checkouts_tombstone_is_left_to_its_own_lister() -> None:
@@ -969,7 +988,7 @@ def test_an_unreadable_lock_is_reported_but_neither_trusted_nor_removed() -> Non
 # exercises the signal fallback.
 _UNANSWERED_THREADS = SimThreads()
 _UNANSWERED = ControlSocketStopRequester(
-    SimNetwork(_UNANSWERED_THREADS),
+    operator_dialer(SimNetwork(_UNANSWERED_THREADS)),
     clock=_UNANSWERED_THREADS,
     deadline_clock=_UNANSWERED_THREADS,
 )
@@ -1014,12 +1033,49 @@ def test_stop_signals_a_live_server_and_waits_for_its_lock(
     clock = ManualClock()
 
     result = LiveRegistry(store, CLOCK).stop(
-        IDS[0], StopEffects(_UNANSWERED, signaller, clock, clock.advance)
+        IDS[0], StopEffects(_UNANSWERED, signaller, clock, clock.advance, FakeStopIntents())
     )
 
     assert result.outcome is StopOutcome.STOPPED
     assert signaller.signalled == [4242]
     assert LiveRegistry(store, CLOCK).list().instances == ()
+
+
+def test_a_signalled_stop_is_recorded_durably_before_the_signal(
+    serving: tuple[FakeInstanceStore, FakeInstanceHold],
+) -> None:
+    """A force stop keeps the stop request first: the killed server cannot commit it."""
+    store, hold = serving
+    intents = FakeStopIntents()
+    seen_at_signal: list[list[str]] = []
+
+    def terminated() -> None:
+        seen_at_signal.append(list(intents.recorded))
+        hold.release()
+
+    clock = ManualClock()
+    result = LiveRegistry(store, CLOCK).stop(
+        IDS[0],
+        StopEffects(_UNANSWERED, _ExitingSignaller(terminated), clock, clock.advance, intents),
+        force=True,
+    )
+
+    assert result.outcome is StopOutcome.STOPPED
+    assert seen_at_signal == [["run-1"]]
+
+
+def test_a_stop_that_signals_nothing_records_nothing() -> None:
+    store = FakeInstanceStore()
+    intents = FakeStopIntents()
+    clock = ManualClock()
+
+    result = LiveRegistry(store, CLOCK).stop(
+        IDS[0],
+        StopEffects(_UNANSWERED, _ExitingSignaller(lambda: None), clock, clock.advance, intents),
+    )
+
+    assert result.outcome is StopOutcome.NOT_RUNNING
+    assert intents.recorded == []
 
 
 def test_stop_reports_a_server_that_outlives_the_wait(
@@ -1029,7 +1085,10 @@ def test_stop_reports_a_server_that_outlives_the_wait(
     clock = ManualClock()
 
     result = LiveRegistry(store, CLOCK).stop(
-        IDS[0], StopEffects(_UNANSWERED, _ExitingSignaller(lambda: None), clock, clock.advance)
+        IDS[0],
+        StopEffects(
+            _UNANSWERED, _ExitingSignaller(lambda: None), clock, clock.advance, FakeStopIntents()
+        ),
     )
 
     assert result.outcome is StopOutcome.STILL_RUNNING
@@ -1046,7 +1105,8 @@ def test_stop_never_signals_a_dead_or_unknown_server(
 
     for instance_id in (IDS[0], IDS[1]):
         result = LiveRegistry(store, CLOCK).stop(
-            instance_id, StopEffects(_UNANSWERED, signaller, clock, clock.advance)
+            instance_id,
+            StopEffects(_UNANSWERED, signaller, clock, clock.advance, FakeStopIntents()),
         )
         assert result.outcome is StopOutcome.NOT_RUNNING
     assert signaller.signalled == []
@@ -1062,7 +1122,11 @@ def test_stop_reports_a_host_that_cannot_signal_safely(
     result = LiveRegistry(store, CLOCK).stop(
         IDS[0],
         StopEffects(
-            _UNANSWERED, _ExitingSignaller(lambda: None, supported=False), clock, clock.advance
+            _UNANSWERED,
+            _ExitingSignaller(lambda: None, supported=False),
+            clock,
+            clock.advance,
+            FakeStopIntents(),
         ),
     )
 
@@ -1118,7 +1182,7 @@ def _reply_bytes(reply: _Reply, request_id: str) -> bytes:
             response = Response(
                 timestamp=REQUEST_TIME,
                 request_id=request_id,
-                ack=CommandAck(action="stop", status="pending"),
+                ack=CommandAck(action=ControlAction.PAUSE_NOW, status="pending"),
             )
         case _Reply.ERROR:
             response = Response(
@@ -1185,6 +1249,10 @@ def _stop_against(
         connection = listener.accept(HANG_GUARD_S)
         if reply is _Reply.TRICKLE:
             threads.sleep(delays.request_read)
+        hello = b""
+        while not hello.endswith(b"\n"):
+            hello += connection.recv(1, HANG_GUARD_S)
+        assert CONTROL_KEY.admits(hello), hello
         line = b""
         while not line.endswith(b"\n"):
             line += connection.recv(1, HANG_GUARD_S)
@@ -1203,10 +1271,13 @@ def _stop_against(
         return LiveRegistry(store, CLOCK).stop(
             IDS[0],
             StopEffects(
-                ControlSocketStopRequester(network, clock=threads, deadline_clock=threads),
+                ControlSocketStopRequester(
+                    operator_dialer(network), clock=threads, deadline_clock=threads
+                ),
                 signaller,
                 threads,
                 threads.sleep,
+                FakeStopIntents(),
             ),
             force=force,
         )
@@ -1400,7 +1471,9 @@ def test_stop_signals_a_server_wedged_after_its_tombstone(
     registry = LiveRegistry(store, ManualClock(tombstone_age))
 
     result = registry.stop(
-        IDS[0], StopEffects(_UNANSWERED, signaller, clock, clock.advance), force=force
+        IDS[0],
+        StopEffects(_UNANSWERED, signaller, clock, clock.advance, FakeStopIntents()),
+        force=force,
     )
 
     assert result.outcome is StopOutcome.STOPPED
@@ -1426,7 +1499,7 @@ def test_stop_lets_an_exiting_server_finish_without_a_signal() -> None:
         hold.release()
 
     result = LiveRegistry(store, CLOCK).stop(
-        IDS[0], StopEffects(_UNANSWERED, signaller, clock, pause)
+        IDS[0], StopEffects(_UNANSWERED, signaller, clock, pause, FakeStopIntents())
     )
 
     assert result.outcome is StopOutcome.STOPPED
@@ -1484,7 +1557,9 @@ def test_every_reader_agrees_whether_a_holder_with_its_tombstone_is_running(age:
     signaller = _ExitingSignaller(hold.release)
     waits = ManualClock()
     result = registry.stop(
-        IDS[0], StopEffects(_UNANSWERED, signaller, waits, waits.advance), force=False
+        IDS[0],
+        StopEffects(_UNANSWERED, signaller, waits, waits.advance, FakeStopIntents()),
+        force=False,
     )
     assert result.outcome is StopOutcome.STOPPED
     assert (waits.now() >= STOP_TIMEOUT_SECONDS) is not running

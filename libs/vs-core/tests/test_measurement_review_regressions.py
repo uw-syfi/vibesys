@@ -29,6 +29,7 @@ def observe_job(
     *,
     facts: core.EvaluationTerminalFacts | None = None,
     evidence: tuple[core.EvidenceRef, ...] = (),
+    operator_diagnostic: str = "",
 ) -> core.Transition:
     return transition(
         committed(state, observed, facts),
@@ -37,6 +38,7 @@ def observe_job(
             observation=observed,
             evidence=evidence,
             evaluation_result=facts,
+            operator_diagnostic=operator_diagnostic,
         ),
     )
 
@@ -461,3 +463,25 @@ def test_the_result_of_a_failed_job_carries_the_tail_of_its_diagnostic(text: str
     failed = observation(request, 2, diagnostic=text, **fields)
     (event,) = results(observe_job(state, failed))
     assert event.diagnostic == text[-core.MEASUREMENT_DIAGNOSTIC_LIMIT :]
+
+
+@pytest.mark.parametrize("split_at", range(1, len("API_TOKEN")))
+def test_measurement_keeps_raw_and_operator_diagnostics_separate(split_at: int) -> None:
+    limit = core.MEASUREMENT_DIAGNOSTIC_LIMIT
+    credential = "API_TOKEN=measurement-secret"
+    suffix = "z" * (limit + split_at - len(credential) - 1)
+    state, request = submitted()
+    fields = {"terminal": True, "released": True, "children_complete": True, "status": S.FAILED}
+    raw = "prefix:" + credential + " " + suffix
+    failed = observation(
+        request,
+        2,
+        diagnostic=raw,
+        **fields,
+    )
+
+    (event,) = results(observe_job(state, failed, operator_diagnostic="safe diagnostic"))
+
+    assert len(event.diagnostic) == limit
+    assert "measurement-secret" in event.diagnostic
+    assert event.operator_diagnostic == "safe diagnostic"

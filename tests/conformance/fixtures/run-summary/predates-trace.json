@@ -1,0 +1,198 @@
+{
+  "description": "A journal a VibeSys from before the run trace recorded (no span events, no run_ending, no protocol_version): its rounds ended, but it holds no ideas or measurements. The helper must say the trace is absent and count the rounds, not fold an empty trace.",
+  "legacy": true,
+  "events": [
+    {
+      "sequence": 1,
+      "run_id": "20261004-000000-0a0a0a0a-dynorch-legacy",
+      "timestamp": "2026-10-04T00:00:00.000000Z",
+      "type": "run_started",
+      "text": "",
+      "status": "active",
+      "round_label": null,
+      "agent_kind": null,
+      "execution_id": null,
+      "data": {
+        "kind": "run_started",
+        "outer_loop": "dynamic",
+        "input": "examples/queue",
+        "max_rounds": 12,
+        "expected_roles": [
+          "dynamic-orchestrator",
+          "dynamic-implementer",
+          "dynamic-judge",
+          "dynamic-profiler"
+        ]
+      }
+    },
+    {
+      "sequence": 2,
+      "run_id": "20261004-000000-0a0a0a0a-dynorch-legacy",
+      "timestamp": "2026-10-04T00:00:00.100000Z",
+      "type": "agent_output_chunk",
+      "text": "",
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "execution_id": null,
+      "data": {
+        "kind": "agent_output_chunk",
+        "channel": "diagnostic",
+        "content": "boot span run_preamble: 252ms\n",
+        "status": null
+      }
+    },
+    {
+      "sequence": 3,
+      "run_id": "20261004-000000-0a0a0a0a-dynorch-legacy",
+      "timestamp": "2026-10-04T00:00:01.000000Z",
+      "type": "experiments_changed",
+      "text": "",
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "execution_id": null,
+      "data": {
+        "kind": "experiments_changed",
+        "reason": "project_attached",
+        "revision": null
+      }
+    },
+    {
+      "sequence": 4,
+      "run_id": "20261004-000000-0a0a0a0a-dynorch-legacy",
+      "timestamp": "2026-10-04T00:00:02.000000Z",
+      "type": "agent_execution_started",
+      "text": "",
+      "status": "active",
+      "round_label": "round-1",
+      "agent_kind": "dynamic-implementer",
+      "execution_id": "e1",
+      "data": {
+        "kind": "agent_execution_started",
+        "stage": "dynamic-implementer",
+        "attempt": null,
+        "system_prompt": "Own one optimization hypothesis.",
+        "user_prompt": "Own hypothesis `fast_path` in this candidate workspace."
+      }
+    },
+    {
+      "sequence": 5,
+      "run_id": "20261004-000000-0a0a0a0a-dynorch-legacy",
+      "timestamp": "2026-10-04T00:00:30.000000Z",
+      "type": "workspace_snapshot",
+      "text": "",
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "execution_id": null,
+      "data": {
+        "kind": "workspace_snapshot",
+        "label": "dynamic: record hypothesis fast_path",
+        "commit": "3b45d709e1697b0a582f753a25e4a4a0b6bab148",
+        "baseline": null,
+        "excluded_paths": [],
+        "source": "git_tracking"
+      }
+    },
+    {
+      "sequence": 6,
+      "run_id": "20261004-000000-0a0a0a0a-dynorch-legacy",
+      "timestamp": "2026-10-04T00:00:30.100000Z",
+      "type": "round_finished",
+      "text": "",
+      "status": "completed",
+      "round_label": "round-1",
+      "agent_kind": null,
+      "execution_id": null,
+      "data": {
+        "kind": "round_finished",
+        "attempts": 1,
+        "judge_verdict": "skipped",
+        "perf_metric": null,
+        "perf_unit": null,
+        "profile_skipped": false
+      }
+    },
+    {
+      "sequence": 7,
+      "run_id": "20261004-000000-0a0a0a0a-dynorch-legacy",
+      "timestamp": "2026-10-04T00:00:30.200000Z",
+      "type": "experiments_changed",
+      "text": "",
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "execution_id": null,
+      "data": {
+        "kind": "experiments_changed",
+        "reason": "round_persisted",
+        "revision": 3
+      }
+    },
+    {
+      "sequence": 8,
+      "run_id": "20261004-000000-0a0a0a0a-dynorch-legacy",
+      "timestamp": "2026-10-04T00:01:00.000000Z",
+      "type": "round_finished",
+      "text": "",
+      "status": "failed",
+      "round_label": "round-2",
+      "agent_kind": null,
+      "execution_id": null,
+      "data": {
+        "kind": "round_finished",
+        "attempts": 3,
+        "judge_verdict": "fail",
+        "perf_metric": null,
+        "perf_unit": null,
+        "profile_skipped": false
+      }
+    },
+    {
+      "sequence": 9,
+      "run_id": "20261004-000000-0a0a0a0a-dynorch-legacy",
+      "timestamp": "2026-10-04T00:01:00.100000Z",
+      "type": "experiments_changed",
+      "text": "",
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "execution_id": null,
+      "data": {
+        "kind": "experiments_changed",
+        "reason": "round_persisted",
+        "revision": 4
+      }
+    },
+    {
+      "sequence": 10,
+      "run_id": "20261004-000000-0a0a0a0a-dynorch-legacy",
+      "timestamp": "2026-10-04T00:01:30.000000Z",
+      "type": "run_finished",
+      "text": "",
+      "status": "completed",
+      "round_label": null,
+      "agent_kind": null,
+      "execution_id": null,
+      "data": null
+    }
+  ],
+  "summary": {
+    "through_sequence": 10,
+    "event_count": 10,
+    "trace": "predates_trace",
+    "rounds_finished": 2,
+    "spans": [],
+    "overview": null,
+    "replies": [],
+    "tokens": {
+      "input": null,
+      "cache_read": null,
+      "cache_write": null,
+      "output": null,
+      "reasoning": null
+    },
+    "usage": []
+  }
+}

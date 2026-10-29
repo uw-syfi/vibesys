@@ -30,6 +30,7 @@ class Look(core.Value):
 
 WRITER = core.Role(
     name="writer",
+    title="Writer",
     prompt="fake/writer.j2",
     reply=Edit,
     workspace=core.WorkspaceMode.ISOLATED_CHILD,
@@ -42,6 +43,7 @@ WRITER = core.Role(
 )
 READER = core.Role(
     name="reader",
+    title="Reader",
     prompt="fake/reader.j2",
     reply=Look,
     workspace=core.WorkspaceMode.READ_ONLY_REVISION,

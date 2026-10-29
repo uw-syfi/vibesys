@@ -10,6 +10,7 @@ import {
   sshGlobSegmentMatches,
   sshHostPatternsMatch,
   withHostSettings,
+  withoutHost,
 } from './host-settings.js';
 
 function generatedStrings(alphabet: readonly string[], maximumLength: number): string[] {
@@ -229,6 +230,29 @@ describe('host settings', () => {
       local: {checkout: '/Users/me/src/vibesys'},
     });
     expect(parseSettings(JSON.parse(JSON.stringify(file)))).toEqual(file);
+  });
+
+  test('removing a host keeps every other host and round-trips through JSON', () => {
+    const ids = [
+      {kind: 'local'},
+      {kind: 'ssh', alias: 'gpu-box'},
+      {kind: 'ssh', alias: 'host-b'},
+    ] as const;
+    for (const removed of ids) {
+      for (let mask = 0; mask < 1 << ids.length; mask++) {
+        const kept = ids.filter((_, index) => (mask & (1 << index)) !== 0);
+        const file = kept.reduce(
+          (each, id) => withHostSettings(each, id, {checkout: `~/vibesys-${hostKey(id)}`}),
+          EMPTY_SETTINGS,
+        );
+        const after = withoutHost(file, removed);
+        expect(settingsFor(after, removed)).toBeNull();
+        for (const id of kept.filter(each => hostKey(each) !== hostKey(removed))) {
+          expect(settingsFor(after, id)).toEqual(settingsFor(file, id));
+        }
+        expect(parseSettings(JSON.parse(JSON.stringify(after)))).toEqual(after);
+      }
+    }
   });
 
   test('an empty version 1 file migrates; one with commands is rejected with what to do', () => {

@@ -1,9 +1,13 @@
 /**
- * Real-Electron composition for the welcome-recovery journey. Production owns both views,
- * preloads, IPC binders, renderer confinement, and lifecycle wiring. In-memory implementations
- * replace only host/run/settings I/O so the journey needs no subprocess, socket, or user files.
+ * Real-Electron composition for the shell-recovery journey. Production owns the app shell page,
+ * its preload, the IPC binders, renderer confinement, and lifecycle wiring. In-memory
+ * implementations replace only host/run/settings I/O so the journey needs no subprocess, socket,
+ * or user files.
  */
+// First, before any page loads: see the module for the Playwright race it closes.
+import './pin-performance-global.mjs';
 import {app, BaseWindow, ipcMain, webContents} from 'electron';
+import {firstLoad} from './first-load.mjs';
 
 // Resolve after `test:e2e` builds the package. Keeping this entry outside the production graph
 // gives Playwright control without adding a test-only API to the shipped application.
@@ -13,163 +17,44 @@ const [
   {WelcomeFeed},
   {rendererGeneration},
   {AppWindow},
+  {chromeInset},
 ] = await Promise.all([
   import(new URL('../dist/main/app-security.js', import.meta.url)),
   import(new URL('../dist/main/desktop.js', import.meta.url)),
   import(new URL('../dist/main/welcome-feed.js', import.meta.url)),
   import(new URL('../dist/main/welcome-ipc.js', import.meta.url)),
   import(new URL('../dist/main/window.js', import.meta.url)),
+  import(new URL('../dist/main/window-chrome.js', import.meta.url)),
 ]);
 
-const WELCOME_URL = 'app://vibesys/welcome.html';
-const RUN_URL = 'app://vibesys/desktop.html';
-const CREDIT_BYTES = 16 * 1024 * 1024;
-const INSTANCE_ID = '0123456789ab';
+const SHELL_URL = 'app://vibesys/shell.html';
+// The welcome preload asks for what the first paint needs before the page's scripts run.
+ipcMain.on('vibesys:welcome:first-paint', event => {
+  event.returnValue = {theme: 'paper', chromeInset: chromeInset(process.platform)};
+});
 const logs = [];
 const fatals = [];
 let appWindow = null;
 let unauthorizedWindow = null;
 let unauthorizedView = null;
 
-const attached = {
-  host: 'local',
-  hostLabel: 'This Mac',
-  instanceId: INSTANCE_ID,
-  runId: 'run-e2e',
-  project: '/projects/e2e',
-  connection: {kind: 'connected'},
-};
-
 function log(message) {
   logs.push(message);
 }
 
-function frameBytes(data) {
-  return Buffer.byteLength(data, 'utf8') + 1;
-}
-
-/** Deterministic protocol peer for the production run preload's real MessagePort. */
-class ProtocolPeer {
-  #port;
-  #receiveCredit = 0;
-  #closed = false;
-
-  constructor(port) {
-    this.#port = port;
-    port.onMessage(value => this.#receive(value));
-    port.onClose(() => {
-      this.#closed = true;
-    });
-    port.post({type: 'open', creditBytes: CREDIT_BYTES});
-  }
-
-  #receive(value) {
-    if (this.#closed || typeof value !== 'object' || value === null) return;
-    if (value.type === 'close') {
-      this.#closed = true;
-      this.#port.close();
-      return;
-    }
-    if (value.type === 'credit') {
-      this.#receiveCredit += value.bytes;
-      return;
-    }
-    if (value.type !== 'send' || typeof value.data !== 'string') return;
-    this.#port.post({type: 'credit', bytes: frameBytes(value.data)});
-    this.#answer(JSON.parse(value.data));
-  }
-
-  #post(message) {
-    const data = JSON.stringify(message);
-    const bytes = frameBytes(data);
-    if (this.#closed || bytes > this.#receiveCredit) {
-      throw new Error('the run page did not grant enough protocol credit');
-    }
-    this.#receiveCredit -= bytes;
-    this.#port.post({type: 'message', data, bytes});
-  }
-
-  #answer(request) {
-    if (request.type === 'query.snapshot') {
-      this.#post({
-        protocol_version: 1,
-        request_id: request.request_id,
-        timestamp: '2026-01-01T00:00:00Z',
-        ok: true,
-        snapshot: {run_id: 'run-e2e', sequence: 0, status: 'running'},
-      });
-      return;
-    }
-    if (request.type === 'query.iterations') {
-      this.#post({
-        protocol_version: 1,
-        request_id: request.request_id,
-        timestamp: '2026-01-01T00:00:00Z',
-        ok: true,
-        iterations_ready: false,
-      });
-      return;
-    }
-    if (request.type === 'subscribe') {
-      this.#post({
-        type: 'subscribed',
-        request_id: request.request_id,
-        run_id: 'run-e2e',
-        latest_sequence: 0,
-      });
-      this.#post({
-        type: 'event_batch',
-        events: [],
-        store_id: 'store-e2e',
-        through_sequence: 0,
-        history_after_sequence: 0,
-      });
-    }
-  }
-}
-
 class FakeRuns {
-  attached() {
-    return attached;
-  }
-
-  stops() {
-    return {};
-  }
-
   connect(port, _runId) {
-    new ProtocolPeer(port);
+    port.close();
   }
 
-  retry() {}
-  retireStartOwner() {}
   detach(_runId) {}
 }
 
 class FakeHosts {
-  settingsProblem() {
-    return Promise.resolve(null);
-  }
-
-  aliases() {
-    return Promise.resolve([]);
-  }
-
-  host(id) {
-    return Promise.resolve({
-      key: id.kind === 'local' ? 'local' : `ssh:${id.alias}`,
-      label: id.kind === 'local' ? 'This Mac' : id.alias,
-      checkout: '/src/vibesys',
-    });
-  }
-
   recent() {
     return Promise.resolve();
   }
 
-  retireInspectionOwner() {}
-  cancelInspectionOwner() {}
-  cancelInspection() {}
   cancelCheckoutOwner() {
     return Promise.resolve();
   }
@@ -179,14 +64,11 @@ class FakeHosts {
 }
 
 class FakeSettings {
+  onHostsChanged() {}
   onRecentChanged() {}
-  recent() {
-    return Promise.resolve({version: 3, runs: []});
+  recentSnapshot() {
+    return Promise.resolve({recent: {version: 4, runs: []}, skipped: []});
   }
-}
-
-function contentsAt(url) {
-  return webContents.getAllWebContents().find(contents => contents.getURL() === url) ?? null;
 }
 
 function ownedWelcomeId() {
@@ -209,20 +91,29 @@ function requiredContents(contents, label) {
   return contents;
 }
 
+/** What the shell page exposes, read from inside it: the confinement the sandbox enforces. */
 function inspectWelcomeContents(contents) {
-  return requiredContents(contents, 'welcome').executeJavaScript(
+  return requiredContents(contents, 'shell').executeJavaScript(
     `(() => {
+      const style = getComputedStyle(document.documentElement);
+      const width = Number.parseFloat(style.getPropertyValue('--chrome-inset-width')) || 0;
+      const height = Number.parseFloat(style.getPropertyValue('--chrome-inset-height')) || 0;
       const visible = element => {
-        if (element === null) return false;
-        const style = getComputedStyle(element);
-        const bounds = element.getBoundingClientRect();
-        return style.display !== 'none' && style.visibility !== 'hidden' && bounds.width > 0 && bounds.height > 0;
+        const box = element.getBoundingClientRect();
+        const computed = getComputedStyle(element);
+        return computed.display !== 'none' && computed.visibility !== 'hidden' && box.width > 0 && box.height > 0;
       };
-      const text = selector => Array.from(document.querySelectorAll(selector), element => element.textContent?.trim() ?? '');
+      // Controls and text drawn under the window's own controls (the inset the preload set).
+      const drawn = Array.from(document.querySelectorAll('body *')).filter(element =>
+        element.matches('a, button, input, select, textarea, [tabindex]:not([tabindex="-1"])') ||
+        Array.from(element.childNodes).some(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== ''));
       return {
-        titleStripVisible: visible(document.querySelector('#title-strip')),
-        headings: text('h1, h2, h3'),
-        buttons: text('button'),
+        underChrome: drawn.flatMap(element => {
+          const box = element.getBoundingClientRect();
+          return visible(element) && box.left < width && box.top < height
+            ? [element.tagName + ' ' + (element.textContent ?? '').trim().slice(0, 20)]
+            : [];
+        }),
         bodyText: document.body.textContent ?? '',
         confinement: {
           bridge: typeof window.vibesysWelcome,
@@ -235,29 +126,19 @@ function inspectWelcomeContents(contents) {
   );
 }
 
-function welcomeHosts(contents) {
-  return requiredContents(contents, 'welcome').executeJavaScript(
-    'window.vibesysWelcome.hosts()',
-    true,
-  );
-}
-
-function clickWelcomeButton(label) {
-  return requiredContents(ownedWelcomeContents(), 'welcome').executeJavaScript(
-    `(() => {
-      const label = ${JSON.stringify(label)};
-      const button = Array.from(document.querySelectorAll('button')).find(
-        element => element.textContent?.trim() === label,
-      );
-      if (button === undefined) throw new Error('welcome button is unavailable: ' + label);
-      button.click();
-    })()`,
-    true,
-  );
-}
-
 registerAppScheme();
-app.on('web-contents-created', (_event, contents) => confineContents(contents, log));
+/** First loads of the pages created while the app starts (the app shell). */
+const startupLoads = [];
+let collectingStartupLoads = true;
+/** Resolves, once the app has created every startup page, with all of their first loads. */
+let startupCreated;
+const startupPagesCreated = new Promise(resolve => {
+  startupCreated = resolve;
+});
+app.on('web-contents-created', (_event, contents) => {
+  confineContents(contents, log);
+  if (collectingStartupLoads) startupLoads.push(firstLoad(contents));
+});
 app.on('window-all-closed', () => app.quit());
 
 // Playwright's Electron loader releases its substituted `app.whenReady()` only after attaching
@@ -272,6 +153,7 @@ void app.whenReady().then(() => {
   const welcome = new WelcomeFeed();
   appWindow = new AppWindow({
     log,
+    surfaceUrl: SHELL_URL,
     connect: (port, runId) => runs.connect(port, runId),
     closed: runId => runs.detach(runId),
     fatal: error => fatals.push(error.message),
@@ -280,8 +162,19 @@ void app.whenReady().then(() => {
     window: appWindow,
     welcome,
     hosts: new FakeHosts(),
+    machines: {},
     runs,
     settings: new FakeSettings(),
+    preferences: {
+      answer: async () => ({
+        appearance: {mode: 'system', light: 'paper', dark: 'ink'},
+        notifications: {enabled: true},
+        archived: [],
+      }),
+    },
+    newRun: {},
+    runWindows: {open: () => ({}), sendWelcome: () => undefined},
+    shellUrl: SHELL_URL,
     welcomeIpc: {
       handle: (channel, listener) =>
         ipcMain.handle(channel, (event, ...args) =>
@@ -297,11 +190,18 @@ void app.whenReady().then(() => {
     },
     log,
   });
-  appWindow.openRunPage(attached.runId, {hostLabel: attached.hostLabel, task: null});
-  desktop.chromeChanged();
+  collectingStartupLoads = false;
+  const loads = Promise.all(startupLoads);
+  loads.catch(() => {});
+  startupCreated({loads});
+  void desktop;
 });
 
 globalThis.vibesysWelcomeRecoveryE2E = {
+  /** Resolves once the app shell has finished its first load. */
+  async startupPagesLoaded() {
+    await (await startupPagesCreated).loads;
+  },
   state() {
     // The control surface is installed before `app.whenReady()` finishes so Playwright can begin
     // polling immediately. Initialization may still be constructing AppWindow at that instant;
@@ -311,21 +211,14 @@ globalThis.vibesysWelcomeRecoveryE2E = {
       return {
         currentWelcomeId: null,
         currentWelcomeUrl: null,
-        runId: null,
-        runUrl: null,
-        mode: null,
         logs: [...logs],
         fatals: [...fatals],
       };
     }
     const currentWelcomeId = ownedWelcomeId();
-    const run = contentsAt(RUN_URL);
     return {
       currentWelcomeId,
       currentWelcomeUrl: ownedWelcomeContents()?.getURL() ?? null,
-      runId: run?.id ?? null,
-      runUrl: run?.getURL() ?? null,
-      mode: appWindow.mode,
       logs: [...logs],
       fatals: [...fatals],
     };
@@ -343,11 +236,15 @@ globalThis.vibesysWelcomeRecoveryE2E = {
   inspectWelcome() {
     return inspectWelcomeContents(ownedWelcomeContents());
   },
-  welcomeHosts() {
-    return welcomeHosts(ownedWelcomeContents());
+  /** The overview a document asks for through its bridge: the answer, or why it was refused. */
+  overviewOf(contents) {
+    return requiredContents(contents, 'shell').executeJavaScript(
+      'window.vibesysWelcome.overview()',
+      true,
+    );
   },
-  clickWelcomeButton(label) {
-    return clickWelcomeButton(label);
+  welcomeOverview() {
+    return this.overviewOf(ownedWelcomeContents());
   },
   async openUnauthorizedWelcome() {
     unauthorizedWindow?.close();
@@ -357,12 +254,11 @@ globalThis.vibesysWelcomeRecoveryE2E = {
     view.setBounds({x: 0, y: 0, width: 960, height: 600});
     unauthorizedWindow = holder;
     unauthorizedView = view;
-    await view.webContents.loadURL(WELCOME_URL);
+    await view.webContents.loadURL(SHELL_URL);
     return {unauthorizedId: view.webContents.id, currentId: ownedWelcomeId()};
   },
-  inspectUnauthorizedWelcome() {
-    const contents = unauthorizedView?.webContents ?? null;
-    return inspectWelcomeContents(contents);
+  unauthorizedOverview() {
+    return this.overviewOf(unauthorizedView?.webContents ?? null);
   },
   closeUnauthorizedWelcome() {
     unauthorizedWindow?.close();

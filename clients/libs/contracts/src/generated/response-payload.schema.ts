@@ -134,6 +134,35 @@ const responsePayloadSchema: Record<string, unknown> = {
       "title": "AgentExecutionActivityData",
       "type": "object"
     },
+    "AttemptOutcome": {
+      "description": "How one try of ``ctx.retry`` ended. Closed.",
+      "enum": [
+        "done",
+        "again",
+        "gave_up"
+      ],
+      "title": "AttemptOutcome",
+      "type": "string"
+    },
+    "BenchmarkVersions": {
+      "additionalProperties": false,
+      "description": "What measured the run.\n\n``evaluator`` is the evaluator package when the task pins one; a source-tree evaluator has\nno version, so it is None.",
+      "properties": {
+        "evaluator": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvaluatorIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "BenchmarkVersions",
+      "type": "object"
+    },
     "CandidateDisposition": {
       "description": "How a measured candidate should be retained independently of its hypothesis.\n\nHypothesis truth and checkpoint utility are different questions. A causal\nforecast can be disproven while its implementation still establishes a\nuseful throughput/latency tradeoff. These values keep that distinction\nexplicit without promoting provisional evidence to an official result.",
       "enum": [
@@ -144,73 +173,6 @@ const responsePayloadSchema: Record<string, unknown> = {
       ],
       "title": "CandidateDisposition",
       "type": "string"
-    },
-    "ChatModelOption": {
-      "additionalProperties": false,
-      "description": "One offered chat model and the source of its suggestion.",
-      "properties": {
-        "model": {
-          "title": "Model",
-          "type": "string"
-        },
-        "source": {
-          "enum": [
-            "run",
-            "role",
-            "suggested"
-          ],
-          "title": "Source",
-          "type": "string"
-        },
-        "default": {
-          "type": "boolean",
-          "default": false,
-          "title": "Default"
-        }
-      },
-      "required": [
-        "model",
-        "source"
-      ],
-      "title": "ChatModelOption",
-      "type": "object"
-    },
-    "ChatOptions": {
-      "additionalProperties": false,
-      "description": "All offered chat selections grouped by provider.",
-      "properties": {
-        "providers": {
-          "items": {
-            "$ref": "#/$defs/ChatProviderOptions"
-          },
-          "title": "Providers",
-          "type": "array"
-        }
-      },
-      "title": "ChatOptions",
-      "type": "object"
-    },
-    "ChatProviderOptions": {
-      "additionalProperties": false,
-      "description": "One supported chat provider and its suggested models.",
-      "properties": {
-        "provider": {
-          "title": "Provider",
-          "type": "string"
-        },
-        "models": {
-          "items": {
-            "$ref": "#/$defs/ChatModelOption"
-          },
-          "title": "Models",
-          "type": "array"
-        }
-      },
-      "required": [
-        "provider"
-      ],
-      "title": "ChatProviderOptions",
-      "type": "object"
     },
     "ChatResult": {
       "additionalProperties": false,
@@ -286,17 +248,10 @@ const responsePayloadSchema: Record<string, unknown> = {
     },
     "CommandAck": {
       "additionalProperties": false,
-      "description": "Acknowledgment of a requested run command.",
+      "description": "Acknowledgment of a requested run command; ``action`` is the control's tag.",
       "properties": {
         "action": {
-          "enum": [
-            "pause",
-            "resume",
-            "steer",
-            "stop"
-          ],
-          "title": "Action",
-          "type": "string"
+          "$ref": "#/$defs/ControlAction"
         },
         "status": {
           "enum": [
@@ -313,6 +268,21 @@ const responsePayloadSchema: Record<string, unknown> = {
       ],
       "title": "CommandAck",
       "type": "object"
+    },
+    "ControlAction": {
+      "description": "What a control request asks for; the tag of the ``ControlRequest`` union.",
+      "enum": [
+        "steer",
+        "pause",
+        "pause_now",
+        "resume",
+        "withdraw",
+        "cancel_attempt",
+        "cancel_item",
+        "set_max_parallel"
+      ],
+      "title": "ControlAction",
+      "type": "string"
     },
     "DesignFileChange": {
       "additionalProperties": false,
@@ -460,6 +430,28 @@ const responsePayloadSchema: Record<string, unknown> = {
       "title": "DesignRound",
       "type": "object"
     },
+    "EvaluatorIdentity": {
+      "additionalProperties": false,
+      "description": "The evaluator package a run measures with, as the task's manifest pins it.",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "title": "EvaluatorIdentity",
+      "type": "object"
+    },
     "ExperimentUpdate": {
       "additionalProperties": false,
       "description": "How to apply ``Response.experiments`` to a client's prior snapshot.\n\nA reset replaces the entire list. A delta replaces entries by stable\nhypothesis ID and then removes the named IDs. ``from_revision`` is None for\na reset because no prior client state is trusted.",
@@ -510,6 +502,15 @@ const responsePayloadSchema: Record<string, unknown> = {
       ],
       "title": "ExperimentUpdate",
       "type": "object"
+    },
+    "FailureKind": {
+      "description": "flows.md's failure kinds a span can end with. Closed.\n\nA defect crashes the step that raised it, which is never persisted, so no trace holds one.",
+      "enum": [
+        "outcome",
+        "interruption"
+      ],
+      "title": "FailureKind",
+      "type": "string"
     },
     "HypothesisEntry": {
       "additionalProperties": false,
@@ -714,7 +715,7 @@ const responsePayloadSchema: Record<string, unknown> = {
           ],
           "default": null
         },
-        "kept": {
+        "best": {
           "anyOf": [
             {
               "type": "boolean"
@@ -724,7 +725,7 @@ const responsePayloadSchema: Record<string, unknown> = {
             }
           ],
           "default": null,
-          "title": "Kept"
+          "title": "Best"
         },
         "strategy_disposition": {
           "anyOf": [
@@ -916,56 +917,6 @@ const responsePayloadSchema: Record<string, unknown> = {
         "reviewed"
       ],
       "title": "HypothesisRound",
-      "type": "object"
-    },
-    "InteractiveSetupDefaults": {
-      "additionalProperties": false,
-      "description": "JSON contract passed to the interactive launch form.",
-      "properties": {
-        "runs_dir": {
-          "title": "Runs Dir",
-          "type": "string"
-        },
-        "input_path": {
-          "title": "Input Path",
-          "type": "string"
-        },
-        "experiment_name": {
-          "title": "Experiment Name",
-          "type": "string"
-        },
-        "repository_owner": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Repository Owner"
-        },
-        "repository_name": {
-          "title": "Repository Name",
-          "type": "string"
-        },
-        "visibility": {
-          "$ref": "#/$defs/RepositoryVisibility"
-        },
-        "theme": {
-          "$ref": "#/$defs/TuiTheme"
-        }
-      },
-      "required": [
-        "runs_dir",
-        "input_path",
-        "experiment_name",
-        "repository_owner",
-        "repository_name",
-        "visibility",
-        "theme"
-      ],
-      "title": "InteractiveSetupDefaults",
       "type": "object"
     },
     "IterationKind": {
@@ -1203,6 +1154,18 @@ const responsePayloadSchema: Record<string, unknown> = {
         },
         "reason": {
           "$ref": "#/$defs/IterationUnavailableReason"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
         }
       },
       "required": [
@@ -1216,10 +1179,82 @@ const responsePayloadSchema: Record<string, unknown> = {
       "enum": [
         "external_state_unavailable",
         "policy_not_mapped",
+        "projection_invalid",
         "state_unavailable"
       ],
       "title": "IterationUnavailableReason",
       "type": "string"
+    },
+    "ObjectiveOverview": {
+      "additionalProperties": false,
+      "description": "What the run optimizes: the task's objective and the metric it is judged on.\n\n``unit`` and ``direction`` come from the run's own measurements and objectives once it has\nthem; ``correctness_check`` is the argv of the check a candidate must pass (empty when the\ntask gates on none).",
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "metric": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metric"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "direction": {
+          "anyOf": [
+            {
+              "enum": [
+                "max",
+                "min"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direction"
+        },
+        "objectives": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TaskObjective"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "correctness_check": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Correctness Check",
+          "type": "array"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "ObjectiveOverview",
+      "type": "object"
     },
     "PerfDeltaReason": {
       "description": "Why a headline measurement carries no causal delta.\n\nAlways re-derived from round evidence (``perf_provenance`` and the\nbaseline fields), never stored on the round record, so it cannot drift\nfrom them. Absent entirely for records that predate provenance tracking:\na legacy absolute number keeps reading as a deliberate absolute rather\nthan being relabelled as unresolved.",
@@ -1362,15 +1397,31 @@ const responsePayloadSchema: Record<string, unknown> = {
       "title": "PerformanceRound",
       "type": "object"
     },
-    "RepositoryVisibility": {
-      "description": "Supported GitHub repository visibility values.",
-      "enum": [
-        "private",
-        "public",
-        "internal"
+    "RunOverview": {
+      "additionalProperties": false,
+      "description": "The run's objective and what measures it: the Overview's header facts.\n\nOne definition for the core event and the wire: the run's ``run_started`` event carries it,\nand the server's snapshot carries it with the unit and direction its measurements add.",
+      "properties": {
+        "overview_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Overview Version",
+          "type": "integer"
+        },
+        "objective": {
+          "$ref": "#/$defs/ObjectiveOverview"
+        },
+        "benchmarks": {
+          "$ref": "#/$defs/BenchmarkVersions",
+          "default": {
+            "evaluator": null
+          }
+        }
+      },
+      "required": [
+        "objective"
       ],
-      "title": "RepositoryVisibility",
-      "type": "string"
+      "title": "RunOverview",
+      "type": "object"
     },
     "RunSnapshot": {
       "additionalProperties": false,
@@ -1439,6 +1490,35 @@ const responsePayloadSchema: Record<string, unknown> = {
           },
           "title": "Chat Threads",
           "type": "array"
+        },
+        "last_chat_thread_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChatThreadId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "spans": {
+          "items": {
+            "$ref": "#/$defs/WireSpan"
+          },
+          "title": "Spans",
+          "type": "array"
+        },
+        "overview": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunOverview"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -1464,20 +1544,397 @@ const responsePayloadSchema: Record<string, unknown> = {
       "title": "RunStatus",
       "type": "string"
     },
-    "TuiTheme": {
-      "description": "Selectable terminal UI themes.",
-      "enum": [
-        "dark",
-        "light",
-        "solarized-dark",
-        "solarized-light",
-        "catppuccin-mocha",
-        "catppuccin-latte",
-        "high-contrast-dark",
-        "high-contrast-light"
+    "Seconds": {
+      "minimum": 0,
+      "type": "number"
+    },
+    "Span": {
+      "additionalProperties": false,
+      "description": "One flow task or awaited operation of the run, on the run clock.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/SpanId"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpanId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "$ref": "#/$defs/SpanType"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/SpanStatus"
+        },
+        "waiting_on": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/WaitingOn"
+          },
+          "title": "Waiting On",
+          "type": "array"
+        },
+        "attempts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SpanAttempt"
+          },
+          "title": "Attempts",
+          "type": "array"
+        },
+        "started_at": {
+          "$ref": "#/$defs/Seconds"
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Seconds"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpanFailure"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stop": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpanStop"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "invocation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Invocation"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpanLabel"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "parent",
+        "type",
+        "name",
+        "status",
+        "started_at"
       ],
-      "title": "TuiTheme",
+      "title": "Span",
+      "type": "object"
+    },
+    "SpanAttempt": {
+      "additionalProperties": false,
+      "description": "One try of ``ctx.retry`` in the flow: try ``n`` of ``of``.\n\n``outcome`` is None while the try runs, and stays None when the flow ended inside it.",
+      "properties": {
+        "n": {
+          "title": "N",
+          "type": "integer"
+        },
+        "of": {
+          "title": "Of",
+          "type": "integer"
+        },
+        "started_at": {
+          "$ref": "#/$defs/Seconds"
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Seconds"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttemptOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "n",
+        "of",
+        "started_at"
+      ],
+      "title": "SpanAttempt",
+      "type": "object"
+    },
+    "SpanFailure": {
+      "additionalProperties": false,
+      "description": "Why a span ended failed or stopped.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/FailureKind"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "title": "SpanFailure",
+      "type": "object"
+    },
+    "SpanId": {
+      "pattern": "^(flow|op):\\S*$",
       "type": "string"
+    },
+    "SpanLabel": {
+      "additionalProperties": false,
+      "description": "What the search says a span is: one of its declared kinds, with that kind's fields.\n\n``attrs_json`` holds the kind's attribute model as JSON (the search's own model, which a\nstate schema cannot name); ``verdict`` is one of the kind's verdicts, apart from ``status``.",
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "links": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SpanLink"
+          },
+          "title": "Links",
+          "type": "array"
+        },
+        "attrs_json": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attrs Json"
+        },
+        "verdict": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verdict"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "SpanLabel",
+      "type": "object"
+    },
+    "SpanLink": {
+      "additionalProperties": false,
+      "description": "A labelled span's relation ``rel`` (one its kind declares) to the span ``to``.",
+      "properties": {
+        "rel": {
+          "title": "Rel",
+          "type": "string"
+        },
+        "to": {
+          "$ref": "#/$defs/SpanId"
+        }
+      },
+      "required": [
+        "rel",
+        "to"
+      ],
+      "title": "SpanLink",
+      "type": "object"
+    },
+    "SpanStatus": {
+      "description": "Where a span is in its lifecycle. Closed.",
+      "enum": [
+        "pending",
+        "running",
+        "waiting",
+        "done",
+        "failed",
+        "stopped"
+      ],
+      "title": "SpanStatus",
+      "type": "string"
+    },
+    "SpanStop": {
+      "additionalProperties": false,
+      "description": "The operator's stop as this flow saw it: when it arrived, and whether it interrupted it.",
+      "properties": {
+        "requested_at": {
+          "$ref": "#/$defs/Seconds"
+        },
+        "landed": {
+          "default": false,
+          "title": "Landed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "requested_at"
+      ],
+      "title": "SpanStop",
+      "type": "object"
+    },
+    "SpanType": {
+      "description": "What a span stands for. Closed.",
+      "enum": [
+        "flow",
+        "operation"
+      ],
+      "title": "SpanType",
+      "type": "string"
+    },
+    "SpanWaitKind": {
+      "description": "What a flow waits on. Closed.",
+      "enum": [
+        "operation",
+        "slot",
+        "time",
+        "stop"
+      ],
+      "title": "SpanWaitKind",
+      "type": "string"
+    },
+    "TaskObjective": {
+      "additionalProperties": false,
+      "description": "One axis the task compares candidates on, and which way is better.",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "max",
+            "min"
+          ],
+          "title": "Direction",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "direction"
+      ],
+      "title": "TaskObjective",
+      "type": "object"
+    },
+    "WaitingOn": {
+      "additionalProperties": false,
+      "description": "One source a suspended flow waits on, since the run-clock time it began waiting on it.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/SpanWaitKind"
+        },
+        "ref": {
+          "title": "Ref",
+          "type": "string"
+        },
+        "since": {
+          "$ref": "#/$defs/Seconds"
+        }
+      },
+      "required": [
+        "kind",
+        "ref",
+        "since"
+      ],
+      "title": "WaitingOn",
+      "type": "object"
+    },
+    "WireSpan": {
+      "$ref": "#/$defs/Span"
     }
   },
   "type": "object",
@@ -1508,28 +1965,6 @@ const responsePayloadSchema: Record<string, unknown> = {
       "anyOf": [
         {
           "$ref": "#/$defs/ChatThreadInfo"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
-    },
-    "chat_options": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/ChatOptions"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
-    },
-    "tui_defaults": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/InteractiveSetupDefaults"
         },
         {
           "type": "null"

@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import posixpath
 from contextlib import suppress
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -24,11 +25,19 @@ from tests.support.workspace_world import open_workspace_env
 from vibesys.run.environment import open_run_environment
 from vs_project.api.testing import GitKind
 from vs_runtime.api.infrastructure import DockerEnvironment, SlurmEnvironment
-from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
+from vs_runtime.api.testing import (
+    DaemonBackend,
+    daemon_docker_config,
+    daemon_engine,
+    idle_environment_system,
+)
 from vs_sandbox.api.slurm import load_slurm_operator_settings
 from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads
+from vs_slurm.api import FakeConnector
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
+
     from vs_runtime.api.infrastructure import (
         RunEnvironment,
         RunEnvironmentRequest,
@@ -39,11 +48,12 @@ if TYPE_CHECKING:
 
 _SLURM_CONFIG = """[slurm]
 name = "test-cluster"
-remote_workspace_root = "/shared/vibesys"
+remote_workspace_root = "{remote_workspace_root}"
 
 [slurm.transport]
 kind = "local"
-shell_command = ["/bin/sh", "-c"]
+shell_command = ["fake-connector", "shell"]
+rsync_command = ["fake-connector", "rsync"]
 """
 
 # What Git reads from the shared repository directory for ``status``, ``diff`` and ``log``.
@@ -60,8 +70,10 @@ def _docker(_tmp_path: Path, engine: FakeDockerEngine) -> RunEnvironment:
 
 
 def _slurm(tmp_path: Path, engine: FakeDockerEngine) -> RunEnvironment:
+    remote = tmp_path / "remote"
+    remote.mkdir()
     config = tmp_path / "slurm.toml"
-    config.write_text(_SLURM_CONFIG, encoding="utf-8")
+    config.write_text(_SLURM_CONFIG.format(remote_workspace_root=remote), encoding="utf-8")
     return SlurmEnvironment(
         load_slurm_operator_settings(config), docker=daemon_docker_config(engine)
     )
@@ -145,6 +157,7 @@ def _problems_of_every_candidate(
 ) -> list[str]:
     engine = daemon_engine(tmp_path, launcher=FakePipedProcessLauncher())
     backend = DaemonBackend(engine, threads=SimThreads())
+    connector = FakeConnector(tmp_path / "cluster")
     environment = make_environment(tmp_path, engine)  # ty: ignore[call-non-callable]
     found: list[str] = []
 
@@ -171,20 +184,44 @@ def _problems_of_every_candidate(
 
     world = tmp_path / "world"
     world.mkdir()
-    with open_workspace_env(
-        world,
-        git=GitKind.REAL,
-        backend=backend,
-        open_session=open_session,
-        owns_candidate_worktrees=True,
-    ) as env:
-        try:
-            asyncio.run(exercise(env.hosts[0]))
-        finally:
-            for host in reversed(env.hosts):
-                with suppress(Exception):
-                    asyncio.run(host.close())
+    _on_the_hosts_threads(world, backend, open_session, connector, exercise)
     return found
+
+
+def _on_the_hosts_threads(
+    world: Path,
+    backend: DaemonBackend,
+    open_session: Callable[[RunEnvironmentRequest], RunEnvironmentSession],
+    connector: FakeConnector,
+    exercise: Callable[[RuntimeWorkspaces], Coroutine[object, object, None]],
+) -> None:
+    """Run ``exercise`` on the first host, as a simulated thread of the hosts' own threads.
+
+    A local Slurm root starts its workspace-root probe on a thread of the host, so the
+    hosts' threads must run: the probe proves the Fake cluster's root and ends.
+    """
+    threads = SimThreads()
+
+    def run() -> None:
+        with open_workspace_env(
+            world,
+            git=GitKind.REAL,
+            backend=backend,
+            open_session=open_session,
+            owns_candidate_worktrees=True,
+            system=replace(idle_environment_system(slurm_processes=connector), threads=threads),
+        ) as env:
+            try:
+                asyncio.run(exercise(env.hosts[0]))
+            finally:
+                for host in reversed(env.hosts):
+                    with suppress(Exception):
+                        asyncio.run(host.close())
+
+    try:
+        threads.run(run)
+    finally:
+        threads.close()
 
 
 def _owner_of(containers: tuple[FakeContainer, ...], workspace: Path) -> _ContainerView:
@@ -222,6 +259,7 @@ def test_a_candidate_container_cannot_read_the_shared_repository_s_credential(
     """
     engine = daemon_engine(tmp_path, launcher=FakePipedProcessLauncher())
     backend = DaemonBackend(engine, threads=SimThreads())
+    connector = FakeConnector(tmp_path / "cluster")
     environment = make_environment(tmp_path, engine)  # ty: ignore[call-non-callable]
     views: list[_ContainerView] = []
 
@@ -246,19 +284,7 @@ def test_a_candidate_container_cannot_read_the_shared_repository_s_credential(
 
     world = tmp_path / "world"
     world.mkdir()
-    with open_workspace_env(
-        world,
-        git=GitKind.REAL,
-        backend=backend,
-        open_session=open_session,
-        owns_candidate_worktrees=True,
-    ) as env:
-        try:
-            asyncio.run(exercise(env.hosts[0]))
-        finally:
-            for host in reversed(env.hosts):
-                with suppress(Exception):
-                    asyncio.run(host.close())
+    _on_the_hosts_threads(world, backend, open_session, connector, exercise)
 
     (view,) = views
     leaked = [

@@ -34,6 +34,7 @@ from vs_sandbox.docker_sandbox import (
 )
 from vs_sandbox.host_resources import HostResource, HostResourceAccess
 from vs_sim.api import (
+    DISCARD,
     Capture,
     NotReleasedError,
     OsThreads,
@@ -96,7 +97,7 @@ def _start_test_container(
 ) -> None:
     """Start *sandbox* with a fake Docker id, then forget the script and setup calls."""
     docker.always(docker_result(stdout=f"{container_id}\n"))
-    sandbox.start()
+    sandbox.start(output=DISCARD)
     docker.clear_script()
     docker.calls.clear()
 
@@ -114,7 +115,7 @@ def _assert_container_stopped(sandbox: DockerSandbox) -> None:
 
 
 def _read_sandbox_metadata(workspace: Path) -> dict[str, object]:
-    metadata_path = workspace / ".docker_metadata.json"
+    metadata_path = workspace.parent / "docker.metadata.json"
     return json.loads(metadata_path.read_text())
 
 
@@ -152,7 +153,7 @@ class TestStart:
 
         docker.always(docker_result(stdout="abc123container\n"))
 
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         # First call: docker run
         docker_run_call = docker.calls[0]
@@ -180,7 +181,7 @@ class TestStart:
         docker.always(docker_timed_out(["docker", "run"], 120))
 
         with pytest.raises(RuntimeError, match="Timed out starting Docker container"):
-            sandbox.start()
+            sandbox.start(output=DISCARD)
 
     def test_start_failure_removes_created_container(
         self, sandbox: DockerSandbox, docker: ScriptedDockerCli
@@ -193,7 +194,7 @@ class TestStart:
         )
 
         with pytest.raises(RuntimeError, match="Failed to start Docker container"):
-            sandbox.start()
+            sandbox.start(output=DISCARD)
 
         stop_call, rm_call = docker.calls[1:]
         assert stop_call.argv == ("docker", "stop", "abc123container")
@@ -215,7 +216,7 @@ class TestStart:
 
         try:
             with pytest.raises(RuntimeError, match="Failed to start Docker container"):
-                sandbox.start()
+                sandbox.start(output=DISCARD)
 
             assert sandbox.container_id == "abc123container"
             assert "abc123container" in _live_containers
@@ -228,7 +229,7 @@ class TestStart:
         monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "3,5,7")
         docker.always(docker_result(stdout="abc123container\n"))
 
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         cmd = docker.argvs[0]
         idx = cmd.index("--gpus")
@@ -241,7 +242,7 @@ class TestStart:
     ) -> None:
         docker.always(docker_result(stdout="abc123\n"))
 
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         cmd = docker.argvs[0]
         # Should have -v for workspace mount
@@ -253,7 +254,7 @@ class TestStart:
     ) -> None:
         docker.always(docker_result(stdout="abc123\n"))
 
-        sandbox_with_mounts.start()
+        sandbox_with_mounts.start(output=DISCARD)
 
         cmd = docker.argvs[0]
         cmd_str = " ".join(cmd)
@@ -267,7 +268,7 @@ class TestStart:
         """The agent image ships every tool baked in; start() installs nothing."""
         docker.always(docker_result(stdout="abc123\n"))
 
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         cmd_strs = [" ".join(argv) for argv in docker.argvs]
         assert not any("pip install" in cmd for cmd in cmd_strs)
@@ -298,7 +299,7 @@ class TestStart:
 
         try:
             with pytest.raises(RuntimeError, match="agent user id remap failed"):
-                sandbox.start()
+                sandbox.start(output=DISCARD)
 
             _assert_container_stopped(sandbox)
             assert "abc123" not in _live_containers
@@ -328,7 +329,7 @@ class TestAgentUserRemap:
             docker_result(),
         )
 
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         cmd = docker.argvs[2]
         assert cmd[:4] == ("docker", "exec", "-u", "root")
@@ -353,7 +354,7 @@ class TestAgentUserRemap:
             docker_result(stdout="1000\n1000\n"),
         )
 
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         # Only the id query follows `docker run`; no usermod/groupmod exec.
         assert len(docker.calls) == 2
@@ -373,9 +374,9 @@ class TestAgentUserRemap:
             docker=engine,
             threads=OsThreads(),
         )
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         try:
-            sandbox.execute("echo hi")
+            sandbox.execute("echo hi", output=DISCARD)
 
             execs = [call for call in engine.calls if call[1] == "exec"]
             assert any(call[2:4] == ("-u", "root") and "usermod" in call[-1] for call in execs)
@@ -403,7 +404,7 @@ class TestAuthFileCopy:
             docker_result(),
         )
 
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         cmd = docker.argvs[2]
         assert cmd[:4] == ("docker", "exec", "-u", "root")
@@ -416,7 +417,7 @@ class TestAuthFileCopy:
     ) -> None:
         docker.always(docker_result(stdout="abc123\n"))
 
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         assert not any("cp -a" in " ".join(argv) for argv in docker.argvs)
 
@@ -442,13 +443,13 @@ class TestExecute:
             docker=engine,
             threads=OsThreads(),
         )
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         return sandbox, engine
 
     def test_execute_runs_bash_in_the_workspace_through_docker_exec(self, tmp_path: Path) -> None:
         sandbox, engine = self._started(tmp_path)
         try:
-            result = sandbox.execute("pwd -P && echo hello > made-by-exec")
+            result = sandbox.execute("pwd -P && echo hello > made-by-exec", output=DISCARD)
             exec_calls = [call for call in engine.calls if call[1] == "exec"][-1]
 
             assert result.exit_code == 0
@@ -465,7 +466,7 @@ class TestExecute:
         sandbox, engine = self._started(tmp_path)
         try:
             before = len(engine.calls)
-            result = sandbox.execute_as_root("apt-get install -y libssl-dev")
+            result = sandbox.execute_as_root("apt-get install -y libssl-dev", output=DISCARD)
             exec_call = [call for call in engine.calls[before:] if call[1] == "exec"][-1]
 
             assert result.exit_code == 0
@@ -477,7 +478,7 @@ class TestExecute:
     def test_execute_does_not_run_as_root(self, tmp_path: Path) -> None:
         sandbox, engine = self._started(tmp_path)
         try:
-            sandbox.execute("true")
+            sandbox.execute("true", output=DISCARD)
 
             assert "-u" not in [call for call in engine.calls if call[1] == "exec"][-1]
         finally:
@@ -485,9 +486,9 @@ class TestExecute:
 
     def test_a_container_removed_underneath_reports_the_daemon_error(self, tmp_path: Path) -> None:
         sandbox, engine = self._started(tmp_path)
-        engine.run(("docker", "rm", "-f", sandbox.container_id), timeout_seconds=1)
+        engine.run(("docker", "rm", "-f", sandbox.container_id), timeout_seconds=1, output=DISCARD)
 
-        result = sandbox.execute("echo hello")
+        result = sandbox.execute("echo hello", output=DISCARD)
 
         assert result.exit_code == 1
         assert result.stdout == ""
@@ -495,7 +496,7 @@ class TestExecute:
 
     def test_execute_without_start_raises(self, sandbox: DockerSandbox) -> None:
         with pytest.raises(RuntimeError, match="not started"):
-            sandbox.execute("echo hello")
+            sandbox.execute("echo hello", output=DISCARD)
 
 
 class TestLifecycleHooks:
@@ -510,7 +511,7 @@ class TestLifecycleHooks:
             lifecycle_hooks=[_RecordingHooks(invocations)],
             threads=SimThreads(),
         )
-        s.start()
+        s.start(output=DISCARD)
         assert invocations == [s]
 
     def test_hooks_re_run_on_restart(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
@@ -525,8 +526,8 @@ class TestLifecycleHooks:
             lifecycle_hooks=[_RecordingHooks(invocations)],
             threads=SimThreads(),
         )
-        s.start()
-        s.start()
+        s.start(output=DISCARD)
+        s.start(output=DISCARD)
         assert invocations == [s, s]
 
     def test_setup_failure_preserves_error_when_stop_fails(
@@ -546,7 +547,7 @@ class TestLifecycleHooks:
 
         try:
             with pytest.raises(SandboxLifecycleError, match="_FailingHooks failed") as error:
-                sandbox.start()
+                sandbox.start(output=DISCARD)
 
             assert isinstance(error.value.__cause__, ValueError)
             _assert_container_stopped(sandbox)
@@ -575,7 +576,7 @@ class TestLifecycleHooks:
 
         try:
             with pytest.raises(SandboxLifecycleError, match="_FailingHooks failed"):
-                sandbox.start()
+                sandbox.start(output=DISCARD)
 
             assert sandbox.container_id == "abc123"
             assert "abc123" in _live_containers
@@ -588,7 +589,7 @@ class TestStop:
         self, sandbox: DockerSandbox, docker: ScriptedDockerCli
     ) -> None:
         docker.always(docker_result(stdout="abc123container\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         docker.calls.clear()
 
         docker.always(docker_result())
@@ -605,7 +606,7 @@ class TestStop:
 
     def test_stop_idempotent(self, sandbox: DockerSandbox, docker: ScriptedDockerCli) -> None:
         docker.always(docker_result(stdout="abc123\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         docker.calls.clear()
 
         docker.always(docker_result())
@@ -714,7 +715,7 @@ class TestStop:
 class TestIdProperty:
     def test_id_property(self, sandbox: DockerSandbox, docker: ScriptedDockerCli) -> None:
         docker.always(docker_result(stdout="abc123def456ghi789\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         assert sandbox.id.startswith("vibesys-")
         assert len(sandbox.id) > len("vibesys-")
@@ -725,7 +726,7 @@ class TestContainerIdProperty:
         self, sandbox: DockerSandbox, docker: ScriptedDockerCli
     ) -> None:
         docker.always(docker_result(stdout="abc123def456ghi789\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         assert sandbox.container_id == "abc123def456ghi789"
 
@@ -737,7 +738,7 @@ class TestContainerIdProperty:
         self, sandbox: DockerSandbox, docker: ScriptedDockerCli
     ) -> None:
         docker.always(docker_result(stdout="abc123def456ghi789\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         sandbox.stop()
 
         with pytest.raises(RuntimeError, match="no running container"):
@@ -769,7 +770,7 @@ class TestCleanupOnExit:
     ) -> None:
 
         docker.always(docker_result(stdout="abc123\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         assert sandbox.container_id in _live_containers
 
@@ -781,7 +782,7 @@ class TestCleanupOnExit:
     ) -> None:
 
         docker.always(docker_result(stdout="container_xyz\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         assert "container_xyz" in _live_containers
 
         docker.calls.clear()
@@ -865,7 +866,7 @@ class TestCleanupOnExit:
                 image="test-image",
                 threads=SimThreads(),
             )
-            sandbox.start()
+            sandbox.start(output=DISCARD)
             try:
                 if act == "stop":
                     try:
@@ -895,7 +896,7 @@ class TestEnvVars:
 
         docker.always(docker_result(stdout="abc123\n"))
 
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         cmd = docker.argvs[0]
         cmd_str = " ".join(cmd)
@@ -924,7 +925,7 @@ class TestEnvVars:
 
         docker.always(docker_result(stdout="abc123\n"))
 
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         cmd_str = " ".join(docker.argvs[0])
         assert "ANTHROPIC_AUTH_TOKEN=sk-secret-token" in cmd_str
@@ -944,6 +945,7 @@ class TestEnvVars:
         sandbox = DockerSandbox(
             docker=docker,
             host_workspace=str(workspace),
+            log_path=workspace.parent / "docker.log",
             image="pytorch:latest",
             env={"ANTHROPIC_API_KEY": "sk-secret-key", "PYTHONPATH": "/opt/vibesys"},
             threads=SimThreads(),
@@ -951,9 +953,9 @@ class TestEnvVars:
 
         docker.always(docker_result(stdout="abc123\n"))
 
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
-        metadata_text = (workspace / ".docker_metadata.json").read_text()
+        metadata_text = (workspace.parent / "docker.metadata.json").read_text()
         assert "sk-secret-key" not in metadata_text
         assert json.loads(metadata_text)["env"] == {"PYTHONPATH": "/opt/vibesys"}
 
@@ -971,7 +973,7 @@ class TestEnvVars:
         docker.always(docker_result(returncode=125, stderr="boom"))
 
         with pytest.raises(RuntimeError) as excinfo:
-            sandbox.start()
+            sandbox.start(output=DISCARD)
 
         assert "sk-secret-token" not in str(excinfo.value)
         assert "ANTHROPIC_AUTH_TOKEN=<redacted>" in str(excinfo.value)
@@ -986,6 +988,7 @@ class TestDevicePassthrough:
         sandbox = DockerSandbox(
             docker=docker,
             host_workspace=str(workspace),
+            log_path=workspace.parent / "docker.log",
             image="public.ecr.aws/neuron/pytorch-inference-neuronx:latest",
             gpus=None,  # Neuron uses --device, not --gpus
             devices=["/dev/neuron0", "/dev/neuron1"],
@@ -993,7 +996,7 @@ class TestDevicePassthrough:
         )
         docker.always(docker_result(stdout="abc123\n"))
 
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         cmd = docker.argvs[0]
         assert "--gpus" not in cmd
@@ -1014,6 +1017,7 @@ class TestDevicePassthrough:
         sandbox = DockerSandbox(
             docker=docker,
             host_workspace=str(workspace),
+            log_path=workspace.parent / "docker.log",
             image="rocm/pytorch:latest",
             gpus=None,
             devices=["/dev/kfd", "/dev/dri/renderD128"],
@@ -1022,7 +1026,7 @@ class TestDevicePassthrough:
         )
         docker.always(docker_result(stdout="abc123\n"))
 
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         cmd = docker.argvs[0]
         assert cmd.count("--group-add") == 2
@@ -1042,7 +1046,7 @@ class TestDevicePassthrough:
             threads=SimThreads(),
         )
         docker.always(docker_result(stdout="abc123\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         cmd = docker.argvs[0]
         assert "--group-add" not in cmd
 
@@ -1054,7 +1058,7 @@ class TestDevicePassthrough:
             threads=SimThreads(),
         )
         docker.always(docker_result(stdout="abc123\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         cmd = docker.argvs[0]
         assert "--device" not in cmd
 
@@ -1069,13 +1073,14 @@ class TestEntrypointOverride:
         sandbox = DockerSandbox(
             docker=docker,
             host_workspace=str(workspace),
+            log_path=workspace.parent / "docker.log",
             image=image,
             gpus=None,
             entrypoint="",  # clear the DLC's baked-in model-server entrypoint,
             threads=SimThreads(),
         )
         docker.always(docker_result(stdout="abc123\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         cmd = docker.argvs[0]
         assert "--entrypoint" in cmd
         ep_idx = cmd.index("--entrypoint")
@@ -1094,7 +1099,7 @@ class TestEntrypointOverride:
             threads=SimThreads(),
         )
         docker.always(docker_result(stdout="abc123\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         cmd = docker.argvs[0]
         assert "--entrypoint" not in cmd
 
@@ -1106,12 +1111,13 @@ class TestShmSize:
         sandbox = DockerSandbox(
             docker=docker,
             host_workspace=str(workspace),
+            log_path=workspace.parent / "docker.log",
             image="img",
             shm_size="16g",
             threads=SimThreads(),
         )
         docker.always(docker_result(stdout="abc123\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         cmd = docker.argvs[0]
         assert "--shm-size" in cmd
         assert cmd[cmd.index("--shm-size") + 1] == "16g"
@@ -1125,7 +1131,7 @@ class TestShmSize:
             threads=SimThreads(),
         )
         docker.always(docker_result(stdout="abc\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         assert "--shm-size" not in docker.argvs[0]
 
 
@@ -1139,7 +1145,7 @@ class TestAutoRemove:
             threads=SimThreads(),
         )
         docker.always(docker_result(stdout="abc\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         assert "--rm" in docker.argvs[0]
 
     def test_no_rm_by_default(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:
@@ -1150,7 +1156,7 @@ class TestAutoRemove:
             threads=SimThreads(),
         )
         docker.always(docker_result(stdout="abc\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         assert "--rm" not in docker.argvs[0]
 
 
@@ -1185,7 +1191,7 @@ class TestWritableCredentialMounts:
             auth_files=auth_files,
             threads=SimThreads(),
         )
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         sandbox.stop()
         return engine
 
@@ -1249,7 +1255,7 @@ class TestResources:
             threads=SimThreads(),
         )
         docker.always(docker_result(stdout="abc\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         cmd_str = " ".join(docker.argvs[0])
         assert f"{tmp_path / 'toolchain'}:{tmp_path / 'toolchain'}:ro" in cmd_str
 
@@ -1264,7 +1270,7 @@ class TestResources:
             threads=SimThreads(),
         )
         docker.always(docker_result(stdout="abc\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         cmd = docker.argvs[0]
         cmd_str = " ".join(cmd)
         mount = f"{tmp_path / 'state'}:{tmp_path / 'state'}"
@@ -1290,7 +1296,7 @@ class TestResources:
             threads=SimThreads(),
         )
         docker.always(docker_result(stdout="abc\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         cmd_str = " ".join(docker.argvs[0])
         assert f"{resource_path}:/opt/vibesys-toolchain:ro" in cmd_str
 
@@ -1305,7 +1311,7 @@ class TestResources:
             threads=SimThreads(),
         )
         docker.always(docker_result(stdout="abc\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         cmd_str = " ".join(docker.argvs[0])
         assert str(tmp_path / "unlisted") not in cmd_str
 
@@ -1324,7 +1330,7 @@ class TestResources:
             threads=SimThreads(),
         )
         docker.always(docker_result(stdout="abc\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         cmd_str = " ".join(docker.argvs[0])
         assert f"{tmp_path / 'explicit'}:/explicit:ro" in cmd_str
         assert f"{tmp_path / 'declared'}:{tmp_path / 'declared'}:ro" in cmd_str
@@ -1337,7 +1343,7 @@ class TestResources:
             threads=SimThreads(),
         )
         docker.always(docker_result(stdout="abc123\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         command = docker.argvs[0]
         mount_arguments = [
             command[index + 1] for index, argument in enumerate(command[:-1]) if argument == "-v"
@@ -1460,7 +1466,7 @@ class TestWrap:
             docker=docker, host_workspace=str(workspace), image="img", threads=SimThreads()
         )
         docker.always(docker_result(stdout="abc123\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         argv = sandbox.wrap(["echo", "hi"], workspace)
 
@@ -1475,7 +1481,7 @@ class TestWrap:
             docker=docker, host_workspace=str(workspace), image="img", threads=SimThreads()
         )
         docker.always(docker_result(stdout="abc123\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         argv = sandbox.wrap(["echo", "hi"])
 
@@ -1487,7 +1493,7 @@ class TestWrap:
             docker=docker, host_workspace=str(workspace), image="img", threads=SimThreads()
         )
         docker.always(docker_result(stdout="abc123\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         argv = sandbox.wrap(["ls"], workspace / "sub")
 
@@ -1505,7 +1511,7 @@ class TestWrap:
             threads=SimThreads(),
         )
         docker.always(docker_result(stdout="abc123\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         argv = sandbox.wrap(["echo", "hi"], workspace)
 
@@ -1522,7 +1528,7 @@ class TestWrap:
             docker=docker, host_workspace=str(workspace), image="img", threads=SimThreads()
         )
         docker.always(docker_result(stdout="abc123\n"))
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         argv = sandbox.wrap(["echo", "hi"], workspace)
 
@@ -1560,7 +1566,7 @@ class TestEnv:
             docker_result(stdout="1000\n1000\n"),
             docker_result(stdout="/usr/local/bin:/usr/bin:/bin\n"),
         )
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         env = sandbox.env
 
@@ -1583,7 +1589,7 @@ class TestEnv:
             docker_result(stdout="1000\n1000\n"),
             docker_result(stdout="/usr/bin:/bin\n"),
         )
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         first = sandbox.env
         second = sandbox.env
@@ -1610,7 +1616,7 @@ class TestEnv:
             docker_result(stdout="1000\n1000\n"),
             docker_result(stdout="/usr/bin\n"),
         )
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         env = sandbox.env
 
@@ -1634,7 +1640,7 @@ class TestEnv:
             docker_result(stdout="1000\n1000\n"),
             docker_result(returncode=1, stderr="no such container"),
         )
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
         with pytest.raises(RuntimeError, match="could not read PATH"):
             _ = sandbox.env
@@ -1678,7 +1684,7 @@ def _released_after_removals(
         sandbox = DockerSandbox(
             docker=docker, host_workspace=str(workspace), image="test-image", threads=threads
         )
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         try:
             if act == "stop":
                 with suppress(RuntimeError, OSError, ProcessTimeoutError):

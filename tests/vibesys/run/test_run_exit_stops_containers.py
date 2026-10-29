@@ -51,6 +51,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_sandbox.api import CommandRunner, HostResource, SandboxKind
+from vs_sim.api import DISCARD
 
 _PLUGIN_ID = "container-exit"
 
@@ -261,11 +262,11 @@ def _execute(
 
 # Each exit path ends the run its own typed way: a stop and a failure return normally, a
 # terminating signal exits 128 + n. (Which signal maps to which code is `supervise`'s own rule,
-# tested where it lives; the stop in the resume test shows a signalled exit removes containers.)
+# tested where it lives; the operator's stop here shows a signalled exit removes containers.)
 # Budget: each case is a whole run over a fake Docker daemon, the point of the regression (#1521).
 @pytest.mark.parametrize(
     ("exit_path", "ends_with"),
-    [("failure", None), ("start-lost", RuntimeError)],
+    [("failure", None), ("start-lost", RuntimeError), ("SIGINT", None)],
 )
 def test_an_exiting_run_leaves_no_container_and_every_container_carries_the_runs_id(
     tmp_path: Path,
@@ -289,23 +290,27 @@ def test_an_exiting_run_leaves_no_container_and_every_container_carries_the_runs
 def test_resuming_a_run_ends_only_the_containers_its_dead_host_left_behind(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A stop ends its containers; a resume refused for a live host recovers nothing; a resume
-    that is accepted removes the run's own orphans and leaves other runs' containers."""
-    engine, first = _execute(tmp_path, monkeypatch, exit_path="SIGINT")
+    """A run whose host died ends its containers; a resume refused for a live host recovers
+    nothing; a resume that is accepted removes the run's own orphans and leaves other runs'.
+
+    The first run must not end (a lost container start raises out of it before core records
+    an end): a run that ended is refused before anything boots, so it recovers nothing.
+    """
+    engine, _ = _execute(tmp_path, monkeypatch, exit_path="start-lost", ends_with=RuntimeError)
     assert engine.containers() == ()
     host_docker = FakeDockerEngine(launcher=FakePipedProcessLauncher())
-    own = _plant_container(host_docker, first.run_id)
+    own = _plant_container(host_docker, _RUN_ID)
     other = _plant_container(host_docker, "some-other-run")
     calls_before_resume = tuple(host_docker.calls)
     project = Project.open(tmp_path / "project")
 
-    with project.state.exclusive_run_host(first.run_id):
+    with project.state.exclusive_run_host(_RUN_ID):
         _execute(
             tmp_path,
             monkeypatch,
             exit_path="SIGINT",
             ends_with=ProjectStateError,
-            resumed=_Resumed(first.run_id, host_docker),
+            resumed=_Resumed(_RUN_ID, host_docker),
         )
     assert {c.container_id for c in host_docker.containers()} == {own, other}
     assert tuple(host_docker.calls) == calls_before_resume
@@ -314,7 +319,7 @@ def test_resuming_a_run_ends_only_the_containers_its_dead_host_left_behind(
         tmp_path,
         monkeypatch,
         exit_path="SIGINT",
-        resumed=_Resumed(first.run_id, host_docker),
+        resumed=_Resumed(_RUN_ID, host_docker),
     )
 
     assert [c.container_id for c in host_docker.containers()] == [other]
@@ -323,5 +328,7 @@ def test_resuming_a_run_ends_only_the_containers_its_dead_host_left_behind(
 
 def _plant_container(engine: FakeDockerEngine, run_id: str) -> str:
     label = f"{RUN_ID_LABEL}={run_id}"
-    result = engine.run(["docker", "run", "-d", "--label", label, "agent-image"], timeout_seconds=1)
+    result = engine.run(
+        ["docker", "run", "-d", "--label", label, "agent-image"], timeout_seconds=1, output=DISCARD
+    )
     return result.stdout.strip()

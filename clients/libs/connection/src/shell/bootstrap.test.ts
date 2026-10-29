@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {localBootstrap, remoteBootstrap} from './bootstrap.js';
+import {localBootstrap, remoteBootstrap, remoteCommand} from './bootstrap.js';
 
 /** `localBootstrap`'s script argument (index 1): the one piece every login shell re-parses unchanged. */
 function scriptOf(checkout: string, uv: string | null): string {
@@ -57,4 +57,17 @@ describe('the bootstrap script a login shell re-parses before sh -c sees it', ()
       expectShellSafe(script);
     }
   });
+});
+
+test('gateway commands use the same login-shell-safe codec for arbitrary command text', () => {
+  const random = generator(19);
+  for (let round = 0; round < 200; round += 1) {
+    const script = `${stressPath(random)}\n${stressPath(random)}`;
+    const command = remoteCommand(script);
+    const match = /^sh -c '([^']+)' vibesys-command x([a-f0-9]*)$/.exec(command);
+    expect(match).not.toBeNull();
+    expectShellSafe(match?.[1] ?? '');
+    expect(Buffer.from(match?.[2] ?? '', 'hex').toString('utf8')).toBe(script);
+  }
+  expect(() => remoteCommand('x\0y')).toThrow('NUL');
 });

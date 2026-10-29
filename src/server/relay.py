@@ -26,9 +26,12 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Final, Protocol
 
 from server.host_api import ChannelEnd, ChannelEndOutcome
+from vs_sim.api import WorkerStartRefusedError
 
 if TYPE_CHECKING:
-    from vs_sim.api import Connection, Threads
+    from collections.abc import Callable
+
+    from vs_sim.api import Condition, Connection, ReservableThreads, WorkerReservation
 
 CHUNK_BYTES: Final = 64 * 1024
 """The most bytes one read takes from either side."""
@@ -381,7 +384,7 @@ class BridgeResult:
 class _Relay:
     """The supervised state shared by the two copy loops."""
 
-    def __init__(self, threads: Threads, limits: BridgeLimits) -> None:
+    def __init__(self, threads: ReservableThreads, limits: BridgeLimits) -> None:
         self._threads = threads
         self._limits = limits
         self._cond = threads.condition()
@@ -415,15 +418,72 @@ class _Relay:
                 return
             self.report(WriteFinished(sink_peer))
 
-    def supervise(self) -> ChannelEndOutcome:
-        """Wait until the fold decides an outcome, ticking at each write or read deadline."""
+    def startup_gate(self) -> _StartupGate:
+        """A startup gate observed under the supervisor's condition."""
+        return _StartupGate(self._cond)
+
+    def supervise(self, startup: _StartupGate) -> ChannelEndOutcome:
+        """Commit startup and supervise without an interruptible ownership handoff."""
         with self._cond:
-            while self._state.outcome is None:
-                deadline = next_deadline(self._state, self._limits)
-                timeout = None if deadline is None else max(deadline - self._threads.now(), 0.0)
-                self._cond.wait(timeout)
-                self._state = advance(self._state, Tick(self._threads.now()), self._limits)
-            return self._state.outcome
+            try:
+                startup.decide_held(commit=True)
+                while self._state.outcome is None:
+                    deadline = next_deadline(self._state, self._limits)
+                    timeout = None if deadline is None else max(deadline - self._threads.now(), 0.0)
+                    self._cond.wait(timeout)
+                    self._state = advance(self._state, Tick(self._threads.now()), self._limits)
+            except BaseException:
+                # Until a worker reacquires this same condition and observes the
+                # decision, commit is private to this owner. An interruption before
+                # the first supervision wait releases the lock can still become an
+                # abort, so no blocked copy worker escapes the transition.
+                startup.abort_if_unobserved_held()
+                raise
+            else:
+                return self._state.outcome
+
+
+class _StartupGate:
+    """Commit both copy workers together, or let either one settle without touching I/O."""
+
+    def __init__(self, condition: Condition) -> None:
+        self._condition = condition
+        self._committed: bool | None = None
+        self._published = False
+        self._observed = False
+
+    def wait(self) -> bool:
+        """Wait for the owner to commit or abort; whether copying may start."""
+        with self._condition:
+            self._condition.wait_for(lambda: self._published)
+            self._observed = True
+            return self._committed is True
+
+    def decide(self, *, commit: bool) -> bool:
+        """Publish the first startup decision and idempotently notify every waiter."""
+        with self._condition:
+            return self.decide_held(commit=commit)
+
+    def decide_held(self, *, commit: bool) -> bool:
+        """Publish while the caller holds the gate condition."""
+        if not self._published:
+            self._committed = commit
+            # Wakeups are prepared before publication. Waiters cannot reacquire the
+            # held condition until ``_published`` is true; if notification raises,
+            # cleanup may instead publish abort and notify again.
+            self._condition.notify_all()
+            self._published = True
+        else:
+            # Notification remains retryable after publication so an interruption
+            # after the fact became visible cannot strand an already waiting worker.
+            self._condition.notify_all()
+        return self._committed is True
+
+    def abort_if_unobserved_held(self) -> None:
+        """Replace an unobserved commit with abort while its condition is still held."""
+        if not self._observed:
+            self._committed = False
+            self._published = False
 
 
 _DETAIL: Final = {
@@ -435,6 +495,110 @@ _DETAIL: Final = {
     ChannelEndOutcome.CLIENT_FAILED: "stdin or stdout failed",
     ChannelEndOutcome.SERVER_UNRESPONSIVE: "the control socket sent nothing for {deadline:g}s",
 }
+
+_START_REFUSED_DETAIL: Final = "relay copy worker start was refused"
+
+
+@dataclass(frozen=True)
+class _Copy:
+    """One direction whose I/O starts only after the shared startup decision."""
+
+    source: ByteSource
+    source_peer: Peer
+    sink: ByteSink
+    sink_peer: Peer
+
+
+def _copy_after_start(
+    gate: _StartupGate,
+    state: _Relay,
+    copy: _Copy,
+) -> None:
+    """Copy only after the owner has acquired both workers."""
+    if gate.wait():
+        state.copy(copy.source, copy.source_peer, copy.sink, copy.sink_peer)
+
+
+def _finish_despite_interruptions[T](
+    effect: Callable[[], T], interruptions: list[BaseException]
+) -> T:
+    """Retry ownership cleanup until it proves completion, retaining interruptions as notes."""
+    while True:
+        try:
+            return effect()
+        except BaseException as interruption:  # noqa: BLE001  # lint-waiver: LW-010255 [BLE001]; this ownership boundary must finish after every cancellation or signal before propagating the original startup failure; narrowing would let an unknown asynchronous exit strand a worker.
+            interruptions.append(interruption)
+
+
+def _run_copy_workers(
+    *,
+    connection: Connection,
+    client: ClientStreams,
+    threads: ReservableThreads,
+    state: _Relay,
+) -> ChannelEndOutcome | BridgeResult:
+    """Acquire, commit, and supervise copy workers under one owner.
+
+    A returned failure means every worker acquired before the refusal has observed the
+    abort and settled without reading or writing either peer.
+    """
+    gate = state.startup_gate()
+    upstream = _Copy(
+        client.incoming,
+        Peer.CLIENT,
+        _ConnectionSink(connection),
+        Peer.SERVER,
+    )
+    downstream = _Copy(
+        _ConnectionSource(connection),
+        Peer.SERVER,
+        client.outgoing,
+        Peer.CLIENT,
+    )
+    workers: list[WorkerReservation] = []
+    try:
+        # Acquire and positively start each reservation before asking for the next.
+        # The gate keeps an eager target away from I/O, while this ordering makes a
+        # closed refusal terminal: a failed process-dispatcher bootstrap cannot be
+        # retried by the second reservation inside an already-doomed transaction.
+        for copy, name in (
+            (upstream, "relay-upstream"),
+            (downstream, "relay-downstream"),
+        ):
+            worker = threads.reserve(
+                lambda copy=copy: _copy_after_start(gate, state, copy),
+                name=name,
+            )
+            workers.append(worker)
+            worker.start()
+        return state.supervise(gate)
+    except BaseException as error:
+        # An interrupt can land while acquiring a reservation, after a native
+        # start takes effect but before it returns its handle, or during the
+        # commit-to-supervision transition. Every acquired reservation is already
+        # in ``workers``; an unobserved commit is converted to abort under the
+        # supervisor's condition, so each possibly-started target is safe to settle.
+        # A decision is committed here only after a worker has observed it, which
+        # means ordinary relay supervision—not its startup transition—had begun.
+        cleanup_interruptions: list[BaseException] = []
+        committed = _finish_despite_interruptions(
+            lambda: gate.decide(commit=False), cleanup_interruptions
+        )
+        if committed:
+            raise
+        for worker in workers:
+            _finish_despite_interruptions(worker.settle, cleanup_interruptions)
+        if cleanup_interruptions:
+            error.add_note(
+                "relay startup cleanup was interrupted "
+                f"{len(cleanup_interruptions)} time(s) before it settled"
+            )
+        if isinstance(error, WorkerStartRefusedError):
+            return BridgeResult(
+                ChannelEndOutcome.CONNECT_FAILED,
+                _START_REFUSED_DETAIL,
+            )
+        raise
 
 
 def _deadline_seconds(outcome: ChannelEndOutcome, limits: BridgeLimits) -> float | None:
@@ -474,7 +638,7 @@ def relay(
     connection: Connection,
     *,
     client: ClientStreams,
-    threads: Threads,
+    threads: ReservableThreads,
     limits: BridgeLimits | None = None,
 ) -> BridgeResult:
     """Relay between ``client`` and an open ``connection``.
@@ -486,20 +650,18 @@ def relay(
     """
     limits = limits or BridgeLimits()
     state = _Relay(threads, limits)
-    threads.spawn(
-        lambda: state.copy(client.incoming, Peer.CLIENT, _ConnectionSink(connection), Peer.SERVER),
-        name="relay-upstream",
-    )
-    threads.spawn(
-        lambda: state.copy(
-            _ConnectionSource(connection), Peer.SERVER, client.outgoing, Peer.CLIENT
-        ),
-        name="relay-downstream",
-    )
     try:
-        outcome = state.supervise()
+        result = _run_copy_workers(
+            connection=connection,
+            client=client,
+            threads=threads,
+            state=state,
+        )
     finally:
         connection.close()
+    if isinstance(result, BridgeResult):
+        return result
+    outcome = result
     detail = _DETAIL[outcome].format(deadline=_deadline_seconds(outcome, limits))
     return BridgeResult(outcome, detail)
 
@@ -509,7 +671,7 @@ def run_bridge(
     network: Dialer,
     address: str,
     client: ClientStreams,
-    threads: Threads,
+    threads: ReservableThreads,
     limits: BridgeLimits | None = None,
 ) -> BridgeResult:
     """Connect to ``address`` and relay (``relay``) until one side ends, stalls, or goes silent."""

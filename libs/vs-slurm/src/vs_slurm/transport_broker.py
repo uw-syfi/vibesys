@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vs_sim.api import Processes, ProcessRun, ProcessSpec
+from vs_sim.api import DISCARD
 
 _SSH_SUFFIX_LENGTH = 3
 _RSYNC_OPERAND_COUNT = 2
@@ -116,7 +117,7 @@ class _SshBrokerPolicy:
     timeout_seconds: float
 
     def run(self, spec: ProcessSpec, *, processes: Processes, timeout: float) -> ProcessRun:
-        ssh = self.transport.ssh_command
+        ssh = self.transport.ssh_argv
         rsync = self.transport.rsync_command
         if spec.argv[: len(ssh)] == ssh:
             suffix = spec.argv[len(ssh) :]
@@ -153,7 +154,7 @@ class _SshBrokerPolicy:
             raise SlurmTransportRequestError.malformed_rsync() from error
         options = argv[:separator]
         operands = argv[separator + 1 :]
-        expected_shell = shlex.join(self.transport.ssh_command)
+        expected_shell = shlex.join(self.transport.ssh_argv)
         if len(operands) != _RSYNC_OPERAND_COUNT or not options or options[0] != "-a":
             raise SlurmTransportRequestError.malformed_rsync()
         index = 1
@@ -242,7 +243,7 @@ def _run_bounded(spec: ProcessSpec, *, processes: Processes, timeout: float) -> 
         spec,
         max_output_bytes=min(spec.max_output_bytes, MAX_TRANSPORT_STREAM_BYTES),
     )
-    return processes.run(bounded, timeout=timeout)
+    return processes.run(bounded, timeout=timeout, output=DISCARD)
 
 
 def _connector_with_local_path(request: SlurmConnectorRequest, local: str) -> SlurmConnectorRequest:

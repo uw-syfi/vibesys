@@ -12,12 +12,11 @@ import nki
 import nki.isa as nisa
 import nki.language as nl
 
-# === Self-contained utilities ===
 
+# === Self-contained utilities ===
 
 def kernel_assert(condition: bool, error_text: str):
     assert condition, f"[INTERNAL_ERROR] [NCC_INKI016] Kernel validation exception: {error_text}"
-
 
 def div_ceil(n: int, d: int) -> int:
     return (n + d - 1) // d
@@ -31,9 +30,9 @@ def div_ceil(n: int, d: int) -> int:
 #
 # For lhsT[K,M] @ rhs[K,N] = output[M,N]:
 #   The caller must transpose the left operand before passing it in.
-P_MAX = 128  # Partition dimension max (K for matmul)
-F_STAT_MAX = 128  # Stationary free dimension max (M for matmul)
-F_MOV_MAX = 512  # Moving free dimension max (N for matmul)
+P_MAX = 128        # Partition dimension max (K for matmul)
+F_STAT_MAX = 128   # Stationary free dimension max (M for matmul)
+F_MOV_MAX = 512    # Moving free dimension max (N for matmul)
 
 
 @nki.jit
@@ -77,10 +76,9 @@ def simple_matmul(
 
     Performance:
         This kernel uses the proper PSUM accumulation pattern for efficient matrix
-        multiplication. The K-dimension loop uses nl.affine_range (NOT nl.sequential_range)
-        to allow the compiler to detect multiple writes to the same PSUM buffer and trigger
-        hardware PSUM accumulation. Using nl.sequential_range would serialize execution and
-        prevent efficient PSUM accumulation, causing severe performance degradation.
+        multiplication. The K-dimension loop is a plain range() and passes
+        accumulate=(k_idx > 0) so the first K tile overwrites (initializes) the PSUM tile
+        and later tiles accumulate onto it. No nisa.memset of the PSUM tile is required.
 
     Example:
         # To compute C = A @ B where A is [M, K] and B is [K, N]:
@@ -90,12 +88,13 @@ def simple_matmul(
         output = zeros(M, N)
         for m_tile in tiles(M, F_STAT_MAX):
             for n_tile in tiles(N, F_MOV_MAX):
-                accum = zeros(m_tile.size, n_tile.size)  # in PSUM
-                for k_tile in sequential_tiles(K, P_MAX):
+                accum = psum(m_tile.size, n_tile.size)  # PSUM, no memset needed
+                for k_tile in tiles(K, P_MAX):
                     lhs_T_tile = load(lhs_T[k_tile, m_tile])  # [K, M]
                     rhs_tile = load(rhs[k_tile, n_tile])      # [K, N]
-                    # nc_matmul: accum += lhs_T_tile.T @ rhs_tile
-                    accum += matmul(stationary=lhs_T_tile, moving=rhs_tile)
+                    # accumulate=(k_tile > 0): overwrite on first tile, accumulate after
+                    matmul(dst=accum, stationary=lhs_T_tile, moving=rhs_tile,
+                           accumulate=(k_tile > 0))
                 store(output[m_tile, n_tile], accum)
         return output
     """
@@ -106,7 +105,10 @@ def simple_matmul(
     K, M = lhs_T.shape
     K_rhs, N = rhs.shape
 
-    kernel_assert(K == K_rhs, f"Contraction dimension mismatch: lhs_T has K={K}, rhs has K={K_rhs}")
+    kernel_assert(
+        K == K_rhs,
+        f"Contraction dimension mismatch: lhs_T has K={K}, rhs has K={K_rhs}"
+    )
 
     # === Allocate Output ===
     output = nl.ndarray((M, N), dtype=lhs_T.dtype, buffer=nl.shared_hbm)
@@ -121,27 +123,26 @@ def simple_matmul(
 
     # === Main Processing Loop ===
     # Tile M by stationary free dimension limit
-    for m_idx in nl.affine_range(num_m_tiles):
+    for m_idx in range(num_m_tiles):
         m_start = m_idx * F_STAT_MAX
         m_end = min(m_start + F_STAT_MAX, M)
         m_size = m_end - m_start
 
         # Tile N by moving free dimension limit
-        for n_idx in nl.affine_range(num_n_tiles):
+        for n_idx in range(num_n_tiles):
             n_start = n_idx * F_MOV_MAX
             n_end = min(n_start + F_MOV_MAX, N)
             n_size = n_end - n_start
 
             # Initialize accumulator in PSUM
-            # PSUM shape: [M_tile, N_tile]
+            # PSUM shape: [M_tile, N_tile]. No memset needed — the first nc_matmul
+            # (accumulate=False on the k_idx==0 tile) overwrites and initializes it.
             accum_psum = nl.ndarray((F_STAT_MAX, F_MOV_MAX), dtype=nl.float32, buffer=nl.psum)
 
-            # Loop over K tiles for PSUM accumulation.
-            # CRITICAL: Use affine_range (not sequential_range) to allow the
-            # compiler to detect multiple writes to the same PSUM buffer and
-            # trigger efficient hardware PSUM accumulation. Using sequential_range
-            # would serialize execution and prevent proper PSUM accumulation.
-            for k_idx in nl.affine_range(num_k_tiles):
+            # Loop over K tiles for PSUM accumulation. Pass accumulate=(k_idx > 0) so
+            # the first K tile overwrites (initializes) PSUM and later tiles accumulate
+            # onto it -- that data dependency is what orders the group.
+            for k_idx in range(num_k_tiles):
                 k_start = k_idx * P_MAX
                 k_end = min(k_start + P_MAX, K)
                 k_size = k_end - k_start
@@ -166,10 +167,13 @@ def simple_matmul(
                 # nc_matmul: dst = stationary.T @ moving
                 # stationary = lhs_T[K, M], moving = rhs[K, N]
                 # dst = lhs_T.T @ rhs = lhs @ rhs = [M, N]
+                # accumulate=(k_idx > 0): overwrite (initialize) PSUM on the first
+                # K tile, accumulate on subsequent tiles. No memset of PSUM needed.
                 nisa.nc_matmul(
                     dst=accum_psum[0:m_size, 0:n_size],
                     stationary=lhs_T_sb[0:k_size, 0:m_size],
                     moving=rhs_sb[0:k_size, 0:n_size],
+                    accumulate=(k_idx > 0),
                 )
 
             # --- Copy from PSUM to SBUF, convert to output dtype ---
@@ -195,13 +199,12 @@ if __name__ == "__main__":
     This test validates correctness against PyTorch reference implementation.
     """
     import os
-
     import torch
     from torch_xla.core import xla_model as xm
 
     # Set environment variables for profiling/debugging
-    os.environ["NEURON_RT_INSPECT_ENABLE"] = "1"
-    os.environ["NEURON_RT_INSPECT_DEVICE_PROFILE"] = "1"
+    os.environ['NEURON_RT_INSPECT_ENABLE'] = '1'
+    os.environ['NEURON_RT_INSPECT_DEVICE_PROFILE'] = '1'
     os.environ["NEURON_RT_INSPECT_OUTPUT_DIR"] = "./output_simple_matmul"
     os.environ["NEURON_CC_FLAGS"] = "--target trn2"
     os.environ["NEURON_PLATFORM_TARGET_OVERRIDE"] = "trn2"

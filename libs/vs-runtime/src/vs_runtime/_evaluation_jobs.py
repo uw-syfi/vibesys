@@ -8,6 +8,7 @@ consumes: status, release, progress, scientific stage results and evidence.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
@@ -33,6 +34,7 @@ from vs_core.api import (
     Observation,
     ObservationStatus,
     PreparedSubmissionReceipt,
+    Reading,
     RequestId,
     ResourceId,
     RevisionRef,
@@ -55,10 +57,12 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api import EvidenceKind as StageKind
 from vs_evaluator_protocol.api import ProfileField
-from vs_runtime._failure_classification import job_failure
+from vs_runtime._evaluation_failure_text import render_stage_output_with_service_log
+from vs_runtime._failure_classification import observed_failure
 from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
 
 STAGE_KINDS: dict[str, StageKind] = {
+    "build": StageKind.BUILD,
     "accuracy": StageKind.ACCURACY,
     "benchmark": StageKind.BENCHMARK,
     "profile": StageKind.PROFILE,
@@ -183,6 +187,7 @@ def measurement_request(
             fingerprints=fingerprints,
             submitted_at_s=plan.submitted_at,
             deadline_at_s=deadline_at,
+            purpose=plan.purpose,
         )
         steps.append(EvaluationStep(name=stage_id, payload=stage.model_dump(mode="json")))
     return EvaluationRequest(
@@ -215,6 +220,12 @@ class JobView:
     evidence: tuple[EvidenceRef, ...]
     facts: EvaluationTerminalFacts | None
     failure: MeasurementFailure | None
+    operator_diagnostic: str = ""
+
+    def reused_from(self, source: RequestId) -> JobView:
+        """This view with each record marked as re-read from the run of submission ``source``."""
+        marked = tuple(item.model_copy(update={"reused_from": source}) for item in self.evidence)
+        return dataclasses.replace(self, evidence=marked)
 
 
 def job_view(  # noqa: PLR0913  # lint-waiver: LW-940004 [PLR0913]; the plan, identity, job and observer are independent facts of one view.
@@ -305,15 +316,29 @@ def _terminal_view(
     # A stage's own failure text says more than the job's summary (a benchmark's last
     # output, say), and is all that explains a failure that left no evidence.
     diagnostic = next(
-        (s.failure for s in terminal.stage_results if s.failure), terminal.failure or ""
+        (
+            render_stage_output_with_service_log(s.failure, s.service_log_tail)
+            for s in terminal.stage_results
+            if s.failure
+        ),
+        terminal.failure or "",
+    )
+    operator_diagnostic = next(
+        (s.operator_failure for s in terminal.stage_results if s.operator_failure is not None),
+        terminal.operator_failure
+        if terminal.operator_failure is not None
+        else ("evaluation failed" if diagnostic else ""),
     )
     observation = make(status, accepted=True, terminal=True, diagnostic=diagnostic)
     evidence, outcomes = _evidence(terminal, plan, subject, observation.sequence)
     failure = (
-        job_failure(
-            item.failure_kind
-            for item in outcomes.values()
-            if item.outcome is EvidenceOutcome.FAILED
+        observed_failure(
+            (
+                item.failure_kind
+                for item in outcomes.values()
+                if item.outcome is EvidenceOutcome.FAILED
+            ),
+            run_environment_unavailable=terminal.run_environment_unavailable,
         )
         if status is ObservationStatus.FAILED
         else None
@@ -323,16 +348,42 @@ def _terminal_view(
         # candidate yet, so no scientific facts reach the core and it may retry. Its
         # evidence still does: the failure text is all an agent learns if the last try
         # fails too.
-        return JobView(observation, None, evidence, None, failure)
-    return JobView(observation, None, evidence, _facts(terminal, plan, outcomes), failure)
+        return JobView(
+            observation,
+            None,
+            evidence,
+            None,
+            failure,
+            operator_diagnostic=operator_diagnostic,
+        )
+    return JobView(
+        observation,
+        None,
+        evidence,
+        _facts(terminal, plan, outcomes),
+        failure,
+        operator_diagnostic=operator_diagnostic,
+    )
 
 
-def _core_kind(kind: StageKind, purpose: str) -> EvidenceKind:
+def _core_kind(kind: StageKind) -> EvidenceKind:
+    """The evidence kind of a stage: a framework run is trusted whoever asked for it."""
     if kind is StageKind.PROFILE:
         return EvidenceKind.PROFILING
-    if purpose == "local-validation":
-        return EvidenceKind.LOCAL_VALIDATION
     return EvidenceKind.CORRECTNESS if kind is StageKind.ACCURACY else EvidenceKind.BENCHMARK
+
+
+def _reading(item: TrustedEvidence) -> Reading | None:
+    """The headline reading of a benchmark record: its first metric, as the record states it."""
+    if item.kind is not StageKind.BENCHMARK or not item.metrics:
+        return None
+    headline = item.metrics[0]
+    return Reading(
+        metric=headline.name,
+        value=headline.value,
+        direction=headline.direction,
+        unit=headline.unit,
+    )
 
 
 def _evidence(
@@ -351,10 +402,14 @@ def _evidence(
             continue
         item = TrustedEvidence.model_validate(step.result)
         by_stage[step.name] = item
+        if item.kind is StageKind.BUILD:
+            # A build proves nothing about the candidate's behaviour: it decides only whether
+            # the later stages ran, and its failure text is the job's diagnostic.
+            continue
         refs.append(
             EvidenceRef(
                 evidence_id=EvidenceId(root=item.evidence_id),
-                kind=_core_kind(item.kind, plan.purpose),
+                kind=_core_kind(item.kind),
                 purpose=plan.purpose,
                 scope=subject.scope,
                 source_request=subject.request_id,
@@ -373,6 +428,8 @@ def _evidence(
                     ArtifactRef(artifact_id=ArtifactId(root=a.path), digest=a.digest.value)
                     for a in item.artifacts
                 ),
+                reading=_reading(item),
+                unmet_requirement=item.unmet_requirement,
             )
         )
     return tuple(refs), by_stage
@@ -403,8 +460,12 @@ def _facts(
         if benchmark is not None and benchmark.outcome is EvidenceOutcome.FAILED
         else None
     )
-    failure_text = next(
-        (s.failure for s in terminal.stage_results if s.failure is not None), terminal.failure
+    failed_stage = next((s for s in terminal.stage_results if s.failure is not None), None)
+    # The service's log follows the stage's output: its last traceback holds the cause.
+    failure_text = (
+        terminal.failure
+        if failed_stage is None
+        else "\n".join(filter(None, (failed_stage.failure, failed_stage.service_log_tail)))
     )
     return EvaluationTerminalFacts(
         stages=tuple(stages),

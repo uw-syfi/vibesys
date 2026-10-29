@@ -3,15 +3,14 @@
 The cluster has accepted the job (it exists and is queued) but the executor has
 not yet seen the reply, so it holds no job id. Whichever of the stop and the
 reply the executor handles first, the evaluation must end CANCELED with exactly
-one scancel of the submitted job. The reply is held until the stop is issued, so
-the test never depends on how long the submission takes.
+one scancel of the submitted job. A Fake blocking runner holds the completed reply
+until the stop is issued, so the test never depends on time or a real worker thread.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-import threading
 from typing import TYPE_CHECKING
 
 import pytest
@@ -26,37 +25,47 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
-from vs_sim.api import DISCARD, OutputSink, ProcessOutcome, ProcessRun, ProcessSpec
-from vs_sim.api.testing import ManualClock
+from vs_sim.api import OutputSink, ProcessOutcome, ProcessRun, ProcessSpec
+from vs_sim.api.testing import NO_PROCESSES, ManualClock
 from vs_slurm.api import SlurmCluster, SlurmConfig, SlurmConnectorTransport, SlurmJobRunner
 from vs_slurm.fake_connector import HOLD_FILE, executing_cluster, handle, recorded_commands
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 
 class _HeldReplyConnector:
-    """The executing fake connector, in process, that withholds sbatch's reply on request."""
+    """The executing fake connector, in process."""
 
     def __init__(self, state: Path) -> None:
         self._state = state
-        self.submitted = threading.Event()
-        self.release_reply = threading.Event()
 
-    def run(
-        self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
-    ) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
         del output
         stdin = spec.input.decode() or None
         del timeout
         request = json.loads(stdin or "{}")
         response = handle(self._state, request)
-        command = str(request.get("command", ""))
-        if "sbatch" in command:
-            # The job now exists on the cluster; the executor has not heard of it.
-            self.submitted.set()
-            self.release_reply.wait()
         return ProcessOutcome(0, json.dumps(response).encode(), b"")
+
+
+class _HeldReplyRunner:
+    """Run the first cluster call, but withhold its result from the executor."""
+
+    def __init__(self) -> None:
+        self.reply_ready = asyncio.Event()
+        self.release_reply = asyncio.Event()
+        self._held = True
+
+    async def run[**P, T](self, function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+        """Finish the first call, then park its reply until the test releases it."""
+        result = function(*args, **kwargs)
+        if self._held:
+            self._held = False
+            self.reply_ready.set()
+            await self.release_reply.wait()
+        return result
 
 
 def _request() -> EvaluationRequest:
@@ -84,6 +93,7 @@ async def test_a_stop_during_sbatch_reply_cancels_the_submitted_job_once(tmp_pat
     )
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    blocking = _HeldReplyRunner()
     executor = SlurmEvaluationExecutor(
         config,
         workspace=workspace,
@@ -97,6 +107,8 @@ async def test_a_stop_during_sbatch_reply_cancels_the_submitted_job_once(tmp_pat
         ),
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=blocking,
+        processes=NO_PROCESSES,
     )
     coordinator = EvaluationCoordinator(
         executor,
@@ -106,12 +118,12 @@ async def test_a_stop_during_sbatch_reply_cancels_the_submitted_job_once(tmp_pat
     )
     try:
         evaluation = await coordinator.submit(_request())
-        await wait_until_executor_started(connector.submitted, executor, evaluation.id)
+        await wait_until_executor_started(blocking.reply_ready, executor, evaluation.id)
         stopping = asyncio.create_task(evaluation.cancel())
-        connector.release_reply.set()
+        blocking.release_reply.set()
         record = await stopping
     finally:
-        connector.release_reply.set()
+        blocking.release_reply.set()
         await executor.close()
 
     assert record.state is EvaluationState.CANCELED

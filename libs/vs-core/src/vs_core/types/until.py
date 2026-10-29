@@ -18,6 +18,12 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
+from vs_core._generated.vibesys.core.v1.failures_cv import (
+    REPLY_ERROR_MESSAGE_LIMIT,
+    ReplyError,
+)
+from vs_core._generated.vibesys.core.v1.vocabulary_cv import ReplyErrorCode
+
 from .common import (
     AttemptRef,
     DecisionId,
@@ -81,6 +87,10 @@ class WaitRefusal(StrEnum):
 
     NOT_PUBLISHED = "not-published"
     """Core recorded the wait but could not publish it."""
+
+    NOT_RESUMABLE = "not-resumable"
+    """Core recorded the wait, but its evaluations ended in a history that can never back a
+    resume (``ResumeRefused``), so no resume will come."""
 
 
 class WhileOpen(Value):
@@ -151,30 +161,7 @@ class Until(Value):
     watches: tuple[Watch, ...] = ()
 
 
-class ReplyErrorCode(StrEnum):
-    """Why a reply did not validate against the agent's reply model. Closed."""
-
-    MISSING = "missing"
-    UNEXPECTED = "unexpected"
-    WRONG_TYPE = "wrong-type"
-    INVALID_VALUE = "invalid-value"
-    NOT_JSON = "not-json"
-
-
-REPLY_ERROR_MESSAGE_LIMIT = 500
 """Characters kept of one validator message, so an unbounded reply cannot grow the state."""
-
-
-class ReplyError(Value):
-    """One typed problem in a reply: where it is and what is wrong.
-
-    ``message`` is the validator's own wording when it reported one (a provider's schema
-    check does); the reply model's check leaves it empty and ``code`` says what is wrong.
-    """
-
-    path: tuple[str | int, ...]
-    code: ReplyErrorCode
-    message: str = Field(default="", max_length=REPLY_ERROR_MESSAGE_LIMIT)
 
 
 _TURN_REASONS = frozenset(
@@ -242,3 +229,21 @@ class Failed(Value):
                 message = f"reason {self.reason.value} needs {name}"
                 raise ValueError(message)
         return self
+
+
+__all__ = [
+    "REPLY_ERROR_MESSAGE_LIMIT",
+    "Failed",
+    "FailureReason",
+    "FromDispatch",
+    "Inherited",
+    "Limit",
+    "ReplyError",
+    "ReplyErrorCode",
+    "Until",
+    "WaitRefusal",
+    "Watch",
+    "WhileAlive",
+    "WhileOpen",
+    "Within",
+]

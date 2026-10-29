@@ -59,6 +59,99 @@ def test_pure_value_libraries_and_ordinary_strategy_text_are_allowed() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "name", ["IterationRequest", "IterationGranted", "IterationCompletion", "IterationCompleted"]
+)
+def test_replay_proto_values_allow_memory_codecs_but_no_unreviewed_methods(name: str) -> None:
+    prefix = "from vs_proto.api import core_iterations as units\n"
+    path = f"{PURE_SCOPE}/flows/example.py"
+    assert (
+        scan_source(
+            path, prefix + f"value = units.{name}.from_binary(data)\nschema = units.{name}.desc()\n"
+        )
+        == ()
+    )
+    forbidden = scan_source(path, prefix + f"units.{name}.read_file('input.pb')\n")
+    assert {site.rule for site in forbidden} == {"effect-path"}
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "ReplayPhysical",
+        "WriterBacking",
+        "WriterIdentity",
+        "WriterManifest",
+        "WriterTerminationProof",
+        "WriterReconciliation",
+        "ReplayToolSubmission",
+        "ReplayToolAcknowledgement",
+        "ReplayTurnWait",
+    ],
+)
+def test_writer_proto_codecs_are_pure_but_file_methods_stay_forbidden(name: str) -> None:
+    path = f"{PURE_SCOPE}/flows/example.py"
+    prefix = "from vs_proto.api import replay as pb\n"
+    assert (
+        scan_source(
+            path, prefix + f"value = pb.{name}.from_binary(data)\nschema = pb.{name}.desc()\n"
+        )
+        == ()
+    )
+    assert {
+        site.rule for site in scan_source(path, prefix + f"pb.{name}.read_file('input.pb')\n")
+    } == {"effect-path"}
+
+
+@pytest.mark.parametrize(
+    ("family", "name"),
+    [
+        ("replay_agent", "ReplayAgentRequest"),
+        ("replay_evaluation", "ReplayEvaluationRequest"),
+    ],
+)
+def test_turn_request_codecs_are_pure_but_unreviewed_methods_are_rejected(
+    family: str, name: str
+) -> None:
+    path = f"{PURE_SCOPE}/flows/example.py"
+    prefix = f"from vs_proto.api import {family} as pb\n"
+    assert (
+        scan_source(
+            path, prefix + f"value = pb.{name}.from_binary(data)\nschema = pb.{name}.desc()\n"
+        )
+        == ()
+    )
+    assert {
+        site.rule for site in scan_source(path, prefix + f"pb.{name}.read_file('input.pb')\n")
+    } == {"effect-path"}
+    assert scan_source(path, prefix + "pb.ExecutionService()\n")
+
+
+def test_native_replay_record_validation_is_pure_but_unreviewed_exports_are_rejected() -> None:
+    path = f"{PURE_SCOPE}/flows/example.py"
+    source = (
+        "from vs_proto.api import ReplayStore, validate\nvalidate(ReplayStore.from_binary(data))\n"
+    )
+    assert scan_source(path, source) == ()
+    assert scan_source(path, "from vs_proto.api import FileStore\n")
+
+
+def test_only_pure_epoch_exports_are_allowed_in_core() -> None:
+    path = f"{PURE_SCOPE}/flows/example.py"
+    source = (
+        "from vs_runlog.api import CurrentEpoch, epoch_has_ended\n"
+        "closed = epoch_has_ended(CurrentEpoch(1, lifecycle))\n"
+    )
+    assert scan_source(path, source) == ()
+    assert scan_source(path, "from vs_runlog.api import RunLogReader\n")
+
+
+@pytest.mark.parametrize("operation", ["is_pydantic_dataclass", "rebuild_dataclass"])
+def test_generated_dataclass_schema_operations_are_pure(operation: str) -> None:
+    source = f"from pydantic.dataclasses import {operation}\n{operation}(Record)"
+    assert scan_source("values.py", source) == ()
+
+
 def test_syntax_errors_fail_closed() -> None:
     with pytest.raises(SyntaxError):
         scan_source("strategy.py", "def invalid(:")

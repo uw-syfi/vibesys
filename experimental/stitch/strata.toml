@@ -1,0 +1,80 @@
+# Every Stitch crate must have a declared architectural layer. Normal and
+# development dependency edges are also constrained by each crate's allowlist.
+require_layer = true
+check_dev = true
+
+[[crate]]
+name = "stitch-*"
+unsafe = "forbid"
+
+[[layer]]
+name = "core"
+crates = ["stitch-core"]
+may_depend_on = []
+dir = "crates/stitch-core"
+
+[[layer]]
+name = "contracts"
+crates = ["stitch-importer-api", "stitch-source-api"]
+may_depend_on = ["core"]
+dir = "crates"
+
+[[layer]]
+name = "session"
+crates = ["stitch-session"]
+may_depend_on = ["core", "contracts"]
+dir = "crates/stitch-session"
+
+[[layer]]
+name = "plugins"
+crates = ["stitch-profiler-*", "stitch-source-workspace"]
+may_depend_on = ["core", "contracts", "session"]
+dir = "plugins"
+
+[[layer]]
+name = "cli"
+crates = ["stitch-cli"]
+may_depend_on = ["core", "contracts", "session", "plugins"]
+dir = "crates/stitch-cli"
+
+[[crate]]
+name = "stitch-core"
+allow = []
+
+[[crate]]
+name = "stitch-importer-api"
+allow = ["stitch-core"]
+
+[[crate]]
+name = "stitch-source-api"
+allow = ["stitch-core"]
+
+[[crate]]
+name = "stitch-session"
+allow = ["stitch-core", "stitch-importer-api", "stitch-source-api"]
+allow_dev = ["stitch-profiler-dial9", "stitch-source-workspace"]
+
+[[crate]]
+name = "stitch-profiler-dial9"
+allow = ["stitch-core", "stitch-importer-api"]
+
+[[crate]]
+name = "stitch-profiler-gpu-bridge"
+allow = ["stitch-core", "stitch-importer-api"]
+
+[[crate]]
+name = "stitch-profiler-otel"
+allow = ["stitch-core", "stitch-importer-api"]
+
+[[crate]]
+name = "stitch-profiler-perf"
+allow = ["stitch-core", "stitch-importer-api", "stitch-session"]
+allow_dev = ["stitch-source-api"]
+
+[[crate]]
+name = "stitch-source-workspace"
+allow = ["stitch-core", "stitch-source-api"]
+
+[[crate]]
+name = "stitch-cli"
+allow = ["stitch-core", "stitch-importer-api", "stitch-profiler-dial9", "stitch-profiler-gpu-bridge", "stitch-profiler-otel", "stitch-profiler-perf", "stitch-session", "stitch-source-api", "stitch-source-workspace"]

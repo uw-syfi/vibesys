@@ -1,7 +1,0 @@
-/* The title strip: the window's drag region, the brand, the connection, and the run controls. */
-header { position: fixed; inset: 0 0 auto 0; height: var(--titlebar); display: flex; align-items: center; gap: 8px; padding: 0 12px 0 84px; background: var(--page); border-bottom: 1px solid var(--line); -webkit-app-region: drag; z-index: 5; }
-html[data-platform="win32"] header, html[data-platform="linux"] header { padding-left: 12px; padding-right: 148px; }
-header .brand { font-weight: 600; color: var(--muted); }
-header .grow { flex: 1; }
-header > * { flex-shrink: 0; white-space: nowrap; }
-header #conn, header #strip-stop-state, header #strip-resume-state { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

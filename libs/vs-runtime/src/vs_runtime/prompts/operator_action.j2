@@ -1,0 +1,12 @@
+{# Context: `action` (str: cancel_attempt, cancel_item or set_max_parallel) and `subject` (str: the attempt id, the item id, or the new limit) of an operator action the run took. For cancel_item, the ids of the item's attempts that have not ended, as the run took the action: `stopped` (tuple[str]: withdrawn now), `unqueued` (tuple[str]: parked, their queued reopen cancelled), `parked` (tuple[str]: parked or blocked, never reopened) and `settling` (tuple[str]: already finishing; their results stand). No trailing newline. #}
+{% if action == "cancel_attempt" -%}
+The operator cancelled attempt {{ subject }}. It has stopped and will not be evaluated; do not continue its work.
+{%- elif action == "cancel_item" -%}
+The operator cancelled work item {{ subject }}. No new attempt at it will start; do not start or continue work on it.
+{%- for attempt in stopped %} Attempt {{ attempt }} has stopped and will not be evaluated.{% endfor %}
+{%- for attempt in unqueued %} Attempt {{ attempt }} was waiting to reopen; its queued reopen is cancelled and it will not run again.{% endfor %}
+{%- for attempt in parked %} Attempt {{ attempt }} stays parked and will not be reopened.{% endfor %}
+{%- for attempt in settling %} Attempt {{ attempt }} was already finishing; it finishes and its result stands.{% endfor %}
+{%- else -%}
+The operator set the number of attempts that run at once to {{ subject }}.
+{%- endif %}

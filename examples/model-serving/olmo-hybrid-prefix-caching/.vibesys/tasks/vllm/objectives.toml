@@ -1,0 +1,3 @@
+[[objective]]
+name = "aggregate_throughput_tok_per_sec"
+direction = "max"

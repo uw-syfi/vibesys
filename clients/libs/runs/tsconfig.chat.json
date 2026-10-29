@@ -1,0 +1,26 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2022"
+    ],
+    "types": [],
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.chat.tsbuildinfo"
+  },
+  "include": [
+    "src/chat/**/*.ts"
+  ],
+  "exclude": [
+    "src/chat/**/*.test.ts"
+  ],
+  "references": [
+    {
+      "path": "../proto/tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.intents.json"
+    }
+  ]
+}

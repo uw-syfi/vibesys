@@ -43,12 +43,13 @@ from vibesys.run.resources import (
     _PreparedRun,
     open_run_resources,
 )
-from vs_agent.api import cli_mcp_config_files, cli_skill_dirs
+from vs_agent.api import cli_mcp_config_files, cli_skill_dirs, task_agent_host_resources
 from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Project
 from vs_runtime.api import AgentRole, boot_trace
 from vs_runtime.api.infrastructure import (
     EvaluatorPackageRequirement,
     RunEnvironmentSpec,
+    prepare_trusted_evaluator,
     resolve_evaluator_package,
 )
 from vs_runtime.api.testing import idle_environment_system
@@ -169,7 +170,6 @@ def _options(max_rounds: int = 1) -> AgentOrchestrationOptions:
         max_rounds=max_rounds,
         max_retries_per_round=1,
         judge_every=1,
-        official_eval_every=1,
     )
 
 
@@ -217,17 +217,20 @@ def _create_context(
     plugin = registration.plugin
     agent_roles = options.get("agent_roles", plugin.agents)
     ownership = ReleaseStack()
+    integration = options.get("integration")
+    if integration is None:
+        integration = LocalRunIntegration(
+            clock=ManualClock(),
+            git=REAL_GIT,
+            github=NO_GITHUB,
+            threads=SimThreads(),
+            system=idle_environment_system(),
+        )
+    ownership.callback(integration.close)
     try:
         prepared = open_run_resources(
             request,
-            options.get("integration")
-            or LocalRunIntegration(
-                clock=ManualClock(),
-                git=REAL_GIT,
-                github=NO_GITHUB,
-                threads=SimThreads(),
-                system=idle_environment_system(),
-            ),
+            integration,
             ownership=ownership,
             agent_specs=resolve_agent_specs(
                 request.config,
@@ -305,7 +308,7 @@ def test_direct_run_uses_one_project_root_and_canonical_state(tmp_path: Path) ->
         policy = environment.request.project_path_policy
         state_paths = project_resources.project.state.sandbox_paths()
         assert state_paths.read_only_path in policy.read_only_paths
-        assert state_paths.hidden_path in policy.hidden_paths
+        assert set(state_paths.hidden_paths) <= set(policy.hidden_paths)
         assert project_resources.project.state.candidate_worktrees_directory(run_id).is_dir()
 
     manifest = Project.open(project).state.load_run(run_id)
@@ -457,6 +460,47 @@ def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_on
         assert all(resources[root] is HostResourceAccess.READ_ONLY for root in expected_tool_roots)
 
 
+def test_prepared_go_module_cache_is_readable_but_not_writable_through_host_confinement(
+    tmp_path: Path,
+) -> None:
+    package_root = tmp_path / "evaluator"
+    package_root.mkdir()
+    (package_root / "go.mod").write_text(
+        "module example.com/evaluator\n\ngo 1.23\n", encoding="utf-8"
+    )
+    (package_root / "go.sum").write_text("", encoding="utf-8")
+    (package_root / "vibesys.evaluator.toml").write_text(
+        """schema_version = 1
+name = "vibesys-evaluator-test"
+version = "1.0.0"
+protocol_version = 1
+toolchains = ["go"]
+go_module = "."
+[entrypoints]
+check = ["go", "-C", "${PACKAGE_ROOT}", "run", "."]
+""",
+        encoding="utf-8",
+    )
+    prepared = prepare_trusted_evaluator(package_root, tmp_path / "operator-cache")
+    module = prepared.requirements.go_module
+    assert module is not None
+    module.cache_root.mkdir(parents=True)
+    sentinel = module.cache_root / "cached-module.txt"
+    sentinel.write_text("prepared", encoding="utf-8")
+
+    declarations = task_agent_host_resources(
+        cli_sandboxed=False,
+        evaluator_package_root=package_root,
+        evaluator_tool_roots=prepared.tool_roots,
+    )
+    cache_resource = next(
+        resource for resource in declarations if resource.path == module.cache_root
+    )
+
+    assert (cache_resource.path / sentinel.name).read_text(encoding="utf-8") == "prepared"
+    assert cache_resource.access is HostResourceAccess.READ_ONLY
+
+
 def test_evaluator_tools_built_for_one_project_are_reused_by_another(tmp_path: Path) -> None:
     packages_root = BUNDLED_RESOURCES.directory("evaluators")
     assert packages_root is not None
@@ -519,7 +563,7 @@ def test_context_assembly_logs_stage_timings(tmp_path: Path) -> None:
     """Every assembly span up to and past the experiments gate reaches the run log.
 
     This is a regression guard for the diagnostic used to find where
-    ``open_run_resources`` spends time before the TUI's hypothesis screen
+    ``open_run_resources`` spends time before the client's hypothesis screen
     can leave "loading experiments..." (the gate flips when the second
     ``LocalRunIntegration.attach`` records ``EXPERIMENTS_CHANGED``).
     """
@@ -552,7 +596,7 @@ def test_dispatch_preamble_spans_reach_run_log(tmp_path: Path) -> None:
 
     ``_dispatch`` and ``_run_agent`` (main.py) do substantial work before a
     ``RunLogger`` exists and record ``boot_trace`` spans as they go.
-    ``_assemble_run_resources`` must drain that buffer at entry, so the
+    ``open_run_resources`` must drain that buffer at entry, so the
     preamble's spans reach the persistent run log ahead of assembly's own.
     """
     project = tmp_path / "queue"

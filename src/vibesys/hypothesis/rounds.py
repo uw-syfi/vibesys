@@ -7,7 +7,7 @@ transition and return the encoded result. Every function is a pure function of i
 so a replay after a crash repeats it.
 
 What it owns: choosing the next round (finished, continue, new hypothesis), starting a
-hypothesis with its parent and rollback base, the cadence of the official gates, the Pareto
+hypothesis on its base, when the trusted gates measure, the Pareto
 guard on a verdict, noting a failed attempt on the active hypothesis, and closing a round into a
 `RoundRecord`. What it does not own: turns, measurements or any workspace operation; the caller
 supplies plain facts (`ClosingFacts`).
@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
 
+from vibesys.hypothesis import cadence
 from vibesys.hypothesis.attempts import (
     AttemptState,
     CandidateReply,
@@ -99,23 +100,30 @@ def next_round(config: HypothesisConfig, ledger: Ledger, round_number: int) -> N
     )
 
 
-def start(  # noqa: PLR0913  # LW-641101 [PLR0913]; every argument is an independent plain fact of the round.
+@dataclass(frozen=True)
+class Parent:
+    """The base a hypothesis starts from, as the ledger records it."""
+
+    round_number: int | None
+    """The round of the idea that made the base; None when the base is the input."""
+    commit: str | None
+
+
+def start(
     config: HypothesisConfig,
     ledger: Ledger,
     plan: OrchestratorPlan,
     *,
     round_number: int,
-    current_commit: str | None,
-    input_baseline: str | None,
+    parent: Parent,
 ) -> tuple[Ledger, StartedHypothesis]:
-    """Start the designer's hypothesis with its parent commit and rollback base."""
+    """Start the designer's hypothesis on the base the caller resolved."""
     started = HypothesisSearch(config).start(
         ledger.search,
         plan,
         round_number=round_number,
-        current_commit=current_commit,
-        records=ledger.records,
-        input_baseline=input_baseline,
+        parent_round=parent.round_number,
+        parent_commit=parent.commit,
     )
     return Ledger(started.state, ledger.carry), started
 
@@ -125,21 +133,14 @@ def validate_plan(config: HypothesisConfig, ledger: Ledger, updates: list) -> No
     HypothesisSearch(config).validate_updates(ledger.search, updates)
 
 
-def official_reason(
-    config: HypothesisConfig,
-    ledger: Ledger,
-    *,
-    round_number: int,
-    requested: bool,
-    candidate_ready: bool = True,
-) -> str | None:
-    """Why the official gates are due after this round's candidate, or None."""
-    return HypothesisSearch(config).official_due(
-        records=ledger.records,
-        round_number=round_number,
-        requested=requested,
-        candidate_ready=candidate_ready,
-    )
+def official_reason(*, candidate_ready: bool = True) -> str | None:
+    """Why the trusted gates measure the reviewed candidate, or None when it is not ready."""
+    return cadence.official_due(candidate_ready=candidate_ready)
+
+
+def evaluated_reason() -> str:
+    """Why the trusted gates measure a candidate its implementer left unsettled."""
+    return cadence.MEASURED_AFTER_EVALUATION
 
 
 def pareto_conflict(
@@ -291,7 +292,7 @@ def archive_view(config: HypothesisConfig, ledger: Ledger) -> ParetoArchiveView:
 
 
 def planning(config: HypothesisConfig, ledger: Ledger, round_number: int) -> PlanningContext:
-    """The evidence a designer turn needs for ``round_number``: plateau, provisional count, carry."""
+    """The evidence a designer turn needs for ``round_number``: plateau, evaluations spent, carry."""
     decision = next_round(config, ledger, round_number)
     if isinstance(decision, Finished):
         message = "no round to plan past the round budget"

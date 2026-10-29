@@ -13,12 +13,12 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from vs_runtime._container_mount_plan import materialize_effective_objective
 from vs_runtime._run_environment import (
     AgentPaths,
     EditorExtras,
     RunEnvironmentRequest,
     _AgentPathSandbox,
-    _materialize_effective_objective,
 )
 from vs_sandbox.api import HostResource, HostResourceAccess
 from vs_sandbox.api.slurm import (
@@ -105,7 +105,7 @@ def agent_paths(
     The agents request trusted evaluation through the evaluation tool, so no accuracy
     or benchmark command is named: it would only run unscored on the container's side.
     """
-    objective = _materialize_effective_objective(request)
+    objective = materialize_effective_objective(request)
     return AgentPaths(
         objective=(
             cast("_AgentPathSandbox", sandbox).agent_path(objective)

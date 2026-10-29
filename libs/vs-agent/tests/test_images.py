@@ -72,6 +72,7 @@ class _FakeRunner:
         self.build_returncode = build_returncode
         self.calls: list[tuple[tuple[str, ...], Path, float]] = []
         self.workspaces: list[_Workspace] = []
+        self.images: set[str] = set()
 
     def run(
         self,
@@ -79,18 +80,23 @@ class _FakeRunner:
         *,
         cwd: Path,
         timeout: float,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> DockerBuildResult:
         del output
         normalized = tuple(argv)
         self.calls.append((normalized, cwd, timeout))
-        if normalized[1] == "build" and any(a.startswith("vibesys-agent-build:") for a in argv):
-            self._read_workspace(normalized)
-            return docker_build_result(("docker",), self.build_returncode, "", "build failed")
+        if normalized[1] == "build":
+            if self.build_returncode == 0:
+                self.images.add(normalized[normalized.index("--tag") + 1])
+            if any(a.startswith("vibesys-agent-build:") for a in argv):
+                self._read_workspace(normalized)
+                return docker_build_result(("docker",), self.build_returncode, "", "build failed")
         if normalized[1] in {"build", "image"} and normalized[2] != "inspect":
             return docker_build_result(("docker",), 0, "", "")
         if normalized[1] == "image":
             tag = normalized[-1]
+            if tag not in self.images:
+                return docker_build_result(("docker",), 1, "", f"No such image: {tag}")
             image_id = (
                 self.task_image_id if tag.startswith("vibesys-task-build:") else self.agent_image_id
             )
@@ -134,11 +140,20 @@ def test_agent_image_is_one_docker_build_of_the_generated_dockerfile() -> None:
     runner = _FakeRunner()
 
     image_id = agent_image(
-        "python:3.12-bookworm", command_runner=runner, timeout=42, clock=ManualClock()
+        "python:3.12-bookworm",
+        command_runner=runner,
+        timeout=42,
+        clock=ManualClock(),
+        output=DISCARD,
     )
 
     assert image_id == _AGENT_IMAGE_ID
-    assert runner.verbs() == [("image", "inspect"), ("build",), ("image", "inspect")]
+    assert runner.verbs() == [
+        ("image", "inspect"),
+        ("image", "inspect"),
+        ("build",),
+        ("image", "inspect"),
+    ]
     assert {timeout for _argv, _cwd, timeout in runner.calls} == {42}
     (workspace,) = runner.workspaces
     assert workspace.base_image == "python:3.12-bookworm"
@@ -146,11 +161,43 @@ def test_agent_image_is_one_docker_build_of_the_generated_dockerfile() -> None:
     assert not workspace.root.exists()  # the build context does not outlive the build
 
 
+def test_a_second_launch_of_an_unchanged_selection_builds_and_exports_nothing(
+    tmp_path: Path,
+) -> None:
+    """Regression: every launch ran ``docker build``, and a build re-exports the whole image.
+
+    A build whose layers are all cached still writes the image out, and on a host
+    whose daemon lacks the base that export took minutes; the image tag names every
+    input, so a daemon that has the tag has the image.
+    """
+    task_root = tmp_path / "task"
+    task_root.mkdir()
+    (task_root / "Dockerfile").write_text("ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n", encoding="utf-8")
+    runner = _FakeRunner()
+
+    def launch() -> str:
+        return agent_image(
+            "python:3.12-bookworm",
+            task_dockerfile=task_root / "Dockerfile",
+            command_runner=runner,
+            clock=ManualClock(),
+            output=DISCARD,
+        )
+
+    first = launch()
+    builds_after_first = sum(call[0][1] == "build" for call in runner.calls)
+    second = launch()
+
+    assert first == second == _AGENT_IMAGE_ID
+    assert builds_after_first == 2  # the task image, then the agent layer
+    assert sum(call[0][1] == "build" for call in runner.calls) == builds_after_first
+
+
 def test_the_image_runs_as_agent_in_workspace_and_never_mounts_the_docker_socket() -> None:
     """The Dockerfile ends with WORKDIR and USER, and no command runs a container or mounts a path."""
     runner = _FakeRunner()
 
-    agent_image("python:3.12-bookworm", command_runner=runner, clock=ManualClock())
+    agent_image("python:3.12-bookworm", command_runner=runner, clock=ManualClock(), output=DISCARD)
 
     assert runner.workspaces[0].dockerfile.splitlines()[-2:] == [
         "WORKDIR /workspace",
@@ -177,10 +224,11 @@ def test_agent_image_chains_task_image_as_base(tmp_path: Path) -> None:
         task_dockerfile=task_dockerfile,
         command_runner=runner,
         clock=ManualClock(),
+        output=DISCARD,
     )
 
     assert image_id == _AGENT_IMAGE_ID
-    task_build_argv, task_cwd, _ = runner.calls[0]
+    task_build_argv, task_cwd, _ = runner.calls[1]
     task_tag = task_build_argv[4]
     assert task_tag.startswith("vibesys-task-build:")
     assert task_build_argv == (
@@ -196,7 +244,7 @@ def test_agent_image_chains_task_image_as_base(tmp_path: Path) -> None:
         str(task_root),
     )
     assert task_cwd == task_root
-    assert runner.calls[1][0] == (
+    assert runner.calls[2][0] == (
         "docker",
         "image",
         "inspect",
@@ -217,7 +265,13 @@ def test_extra_features_follow_the_agent_feature_in_order(tmp_path: Path) -> Non
         extras.append(LocalFeature(directory))
     runner = _FakeRunner()
 
-    agent_image("python:3.12-bookworm", features=extras, command_runner=runner, clock=ManualClock())
+    agent_image(
+        "python:3.12-bookworm",
+        features=extras,
+        command_runner=runner,
+        clock=ManualClock(),
+        output=DISCARD,
+    )
 
     assert runner.workspaces[0].feature_ids == ("vibesys-agent", "zeta", "alpha")
 
@@ -225,7 +279,11 @@ def test_extra_features_follow_the_agent_feature_in_order(tmp_path: Path) -> Non
 def test_agent_image_rejects_nonpositive_timeout() -> None:
     with pytest.raises(ValueError, match="timeout must be positive"):
         agent_image(
-            "python:3.12-bookworm", command_runner=_FakeRunner(), timeout=0, clock=ManualClock()
+            "python:3.12-bookworm",
+            command_runner=_FakeRunner(),
+            timeout=0,
+            clock=ManualClock(),
+            output=DISCARD,
         )
 
 
@@ -233,9 +291,11 @@ def test_a_failed_feature_image_build_is_a_task_image_build_error_and_cleans_up(
     runner = _FakeRunner(build_returncode=1)
 
     with pytest.raises(TaskImageBuildError, match=r"feature image build failed.*build failed"):
-        agent_image("python:3.12-bookworm", command_runner=runner, clock=ManualClock())
+        agent_image(
+            "python:3.12-bookworm", command_runner=runner, clock=ManualClock(), output=DISCARD
+        )
 
-    assert runner.verbs() == [("image", "inspect"), ("build",)]
+    assert runner.verbs() == [("image", "inspect"), ("image", "inspect"), ("build",)]
     assert not runner.workspaces[0].root.exists()
 
 
@@ -243,7 +303,9 @@ def test_agent_image_rejects_a_truncated_inspect_id() -> None:
     runner = _FakeRunner(agent_inspect_omitted_characters=2048)
 
     with pytest.raises(TaskImageBuildError, match="characters truncated"):
-        agent_image("python:3.12-bookworm", command_runner=runner, clock=ManualClock())
+        agent_image(
+            "python:3.12-bookworm", command_runner=runner, clock=ManualClock(), output=DISCARD
+        )
 
 
 def test_agent_feature_ships_as_package_data() -> None:
@@ -279,7 +341,11 @@ def test_agent_base_image_is_never_a_bare_image_id(base_image: str, flow: str) -
         runner = _FakeRunner()
 
         agent_image(
-            base_image, task_dockerfile=task_dockerfile, command_runner=runner, clock=ManualClock()
+            base_image,
+            task_dockerfile=task_dockerfile,
+            command_runner=runner,
+            clock=ManualClock(),
+            output=DISCARD,
         )
 
         agent_base = _devcontainer_base(runner)
@@ -297,8 +363,35 @@ def test_agent_image_tags_a_bare_base_image_id_before_building() -> None:
     """The entrypoint records the task image by ID; the agent layer tags it."""
     runner = _FakeRunner()
 
-    agent_image(_TASK_IMAGE_ID, command_runner=runner, clock=ManualClock())
+    agent_image(_TASK_IMAGE_ID, command_runner=runner, clock=ManualClock(), output=DISCARD)
 
     tag = "vibesys-base:" + "a" * 64
     assert runner.calls[0][0] == ("docker", "tag", _TASK_IMAGE_ID, tag)
     assert _devcontainer_base(runner) == tag
+
+
+def test_agent_builder_accepts_explicit_cache_sources() -> None:
+    runner = _FakeRunner()
+    sources = ("cache:first", "cache:second")
+    agent_image(
+        "python:3.12-bookworm",
+        cache_from=sources,
+        command_runner=runner,
+        clock=ManualClock(),
+        output=DISCARD,
+    )
+    (build,) = [argv for argv, _, _ in runner.calls if argv[1] == "build"]
+    assert tuple(build[i + 1] for i, arg in enumerate(build) if arg == "--cache-from") == sources
+
+
+def test_invalid_cache_sources_fail_before_tagging_a_base_image() -> None:
+    runner = _FakeRunner()
+    with pytest.raises(ValueError, match="cache_from"):
+        agent_image(
+            _TASK_IMAGE_ID,
+            cache_from=("",),
+            command_runner=runner,
+            clock=ManualClock(),
+            output=DISCARD,
+        )
+    assert runner.calls == []

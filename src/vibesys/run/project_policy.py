@@ -40,11 +40,11 @@ def build_project_path_policy(
     hidden = {
         path
         for path in (
-            state_paths.hidden_path,
+            *state_paths.hidden_paths,
             Path("agent.toml"),
             *(path.relative_to(root) for path in root.glob(".env*")),
         )
-        if path is not None and (root / path).exists()
+        if (root / path).exists()
     }
     return ProjectPathPolicy(
         hidden_paths=_minimal_paths(hidden),

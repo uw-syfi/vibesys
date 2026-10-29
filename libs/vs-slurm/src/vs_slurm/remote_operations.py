@@ -79,18 +79,29 @@ class RemoteOperations:
         self._scratch_root = scratch_root
 
     def claim(self, operation_id: str, intent: str) -> RemoteOperationClaim:
-        """Claim an operation atomically; an interrupted claim stays Unknown."""
+        """Claim an operation by atomically publishing its immutable intent."""
         base = self._root / operation_id
         directory = base / ".cluster-operation"
-        response = self._transport.exec(
-            f"mkdir -p {shlex.quote(base.as_posix())} && "
-            f"if mkdir {shlex.quote(directory.as_posix())} 2>/dev/null; then printf CREATED; else printf EXISTS; fi"
-        ).stdout.strip()
-        if response == "CREATED":
-            self._write(directory / "intent.json", intent)
-            self._sync_directory_chain(base)
-        elif response != "EXISTS":
-            raise RemoteOperationError.invalid_evidence()
+        self._transport.exec(f"mkdir -p {shlex.quote(directory.as_posix())}")
+        with tempfile.TemporaryDirectory(
+            prefix="vs-slurm-claim-", dir=self._scratch_root
+        ) as temporary:
+            local = Path(temporary) / "intent"
+            local.write_text(intent, encoding="utf-8")
+            pending = directory / ("intent.pending." + Path(temporary).name)
+            self._transport.put(local, pending)
+            published = directory / "intent.json"
+            pending_quoted = shlex.quote(pending.as_posix())
+            published_quoted = shlex.quote(published.as_posix())
+            sync_paths = (published, directory, base, *base.parents)
+            response = self._transport.exec(
+                f"if ln {pending_quoted} {published_quoted} 2>/dev/null; then "
+                f"rm {pending_quoted} && sync "
+                f"{shlex.join(path.as_posix() for path in sync_paths)} && printf CREATED; "
+                f"else rm -f {pending_quoted}; printf EXISTS; fi"
+            ).stdout.strip()
+            if response not in {"CREATED", "EXISTS"}:
+                raise RemoteOperationError.invalid_evidence()
         evidence = self.inspect(operation_id)
         kind = "created" if response == "CREATED" else "existing"
         if evidence.intent is None:

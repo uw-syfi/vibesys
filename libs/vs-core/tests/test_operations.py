@@ -14,7 +14,6 @@ from vs_core.api import (
     ContractError,
     DecisionId,
     DecisionSubmitted,
-    EnvelopeMigration,
     EventCursor,
     HostFence,
     HostId,
@@ -322,12 +321,6 @@ def normalize_old_artifact(source: str) -> str:
     return json.dumps(payload)
 
 
-def normalize_old_envelope(source: str) -> str:
-    payload = json.loads(source)
-    payload["schema_version"] = ENVELOPE_SCHEMA_VERSION
-    return json.dumps(payload)
-
-
 def test_operation_migration_is_explicit_and_validates_original_subtype() -> None:
     codec = registry()
     current = reference(codec.descriptors[0])
@@ -354,27 +347,4 @@ def test_operation_migration_is_explicit_and_validates_original_subtype() -> Non
         codec.migrate_operation(
             converted,
             OperationMigration(source=old, target=current, rewrite=normalize_old_artifact),
-        )
-
-
-def test_envelope_migration_requires_selected_source_and_registered_target() -> None:
-    codec, envelope = operation_state()
-    legacy = json.loads(envelope.model_dump_json())
-    legacy["schema_version"] = 0
-    source = json.dumps(legacy)
-    migration = EnvelopeMigration(
-        source_version=0, target_version=ENVELOPE_SCHEMA_VERSION, rewrite=normalize_old_envelope
-    )
-    assert codec.migrate_envelope(RunEnvelope[StrategyState], source, migration) == envelope
-    with pytest.raises(ContractError, match="source"):
-        codec.migrate_envelope(RunEnvelope[StrategyState], envelope.model_dump_json(), migration)
-    with pytest.raises(ContractError, match="target"):
-        codec.migrate_envelope(
-            RunEnvelope[StrategyState],
-            source,
-            EnvelopeMigration(
-                source_version=0,
-                target_version=ENVELOPE_SCHEMA_VERSION + 1,
-                rewrite=normalize_old_envelope,
-            ),
         )

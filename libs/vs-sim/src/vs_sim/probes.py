@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vs_sim.processes import Processes
+from vs_sim.output import DISCARD
 
 
 @dataclass(frozen=True)
@@ -71,7 +72,9 @@ class ProcessesProbe:
     def run(self, argv: Sequence[str], *, timeout_seconds: float) -> ProbeResult | None:
         """Run ``argv`` and decode its output; undecodable bytes are replaced."""
         try:
-            run = self._processes.run(ProcessSpec(tuple(argv)), timeout=timeout_seconds)
+            run = self._processes.run(
+                ProcessSpec(tuple(argv)), timeout=timeout_seconds, output=DISCARD
+            )
         except OSError:
             return None
         if not isinstance(run, ProcessOutcome):

@@ -17,7 +17,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT, ComputeBackend
 from vibesys.repository import REPOSITORY_COMPONENT, RepositoryVisibility
@@ -51,8 +58,9 @@ class ModelCfg(_Strict):
         min_length=1,
         max_length=256,
         description=(
-            "Model identifier, e.g. 'claude-opus-5'. The --model flag overrides. Must be a "
-            "vetted model of the selected CLI provider; None uses that provider's default."
+            "Model identifier, as the selected CLI provider's --model flag takes it. The "
+            "--model flag overrides. Must be a vetted model of that provider (agentshim's "
+            "known models for it); None uses that provider's default."
         ),
     )
 
@@ -97,13 +105,25 @@ class BackendCfg(_Strict):
 
 
 class AgentRoleCfg(_Strict):
-    """Optional model controls for one conceptual agent-loop role."""
+    """Optional provider and model controls for one conceptual agent-loop role."""
 
+    provider: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=256,
+        description=(
+            "CLI provider for this role. None uses [agent].cli_provider. A role that names "
+            "a provider other than the run's and no model runs that provider's default model."
+        ),
+    )
     model: str | None = Field(
         default=None,
         min_length=1,
         max_length=256,
-        description="CLI model override for this role. None uses [model].name.",
+        description=(
+            "CLI model override for this role. None uses [model].name, or the role's provider's "
+            "default model when the role names another provider."
+        ),
     )
     reasoning_effort: str | None = Field(
         default=None,
@@ -219,8 +239,17 @@ class AgentCfg(_Strict):
     backend: str | None = Field(
         default=None,
         description=(
-            "Agent runner backend: 'cli' (drive an external coding-agent CLI). "
+            "Agent runner backend: 'cli' (drive an external coding-agent CLI) or 'scripted' "
+            "(agent-less: the real backend with scripted agents and no model). "
             "The --agent-backend flag overrides; defaults to 'cli'."
+        ),
+    )
+    scripted_seed: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Seed of the 'scripted' backend's choices: with the same seed and the same project, "
+            "the scripted agents plan, edit and judge the same way. Read only with that backend."
         ),
     )
     cli_provider: str | None = Field(
@@ -492,6 +521,75 @@ def _load_dotenv_file(path: Path = PROJECT_ROOT / ".env") -> None:
     values for free.
     """
     load_dotenv(path, override=False)
+
+
+class _HostSettings(_Strict):
+    """The host file that names which models live runs on this machine may use.
+
+    ``allowed_models`` is the only key. Missing, or an empty list, means no
+    restriction. Unknown keys are rejected and the key is named.
+    """
+
+    allowed_models: tuple[str, ...] = Field(default=(), description="Model ids live runs may use.")
+
+    @field_validator("allowed_models")
+    @classmethod
+    def _named_models(cls, models: tuple[str, ...]) -> tuple[str, ...]:
+        blank = [index for index, model in enumerate(models) if not model.strip()]
+        if blank:
+            message = "allowed_models entries must be non-empty model ids"
+            raise ValueError(message)
+        return models
+
+
+def host_settings_path() -> Path:
+    """``~/.config/vibesys/host.toml``, the machine-wide file of allowed models.
+
+    The directory is the user's VibeSys configuration directory, the same one
+    that holds the machine's other settings. A missing file means no restriction.
+    """
+    return Path.home() / ".config" / "vibesys" / "host.toml"
+
+
+def load_host_allowed_models(path: Path | None = None) -> frozenset[str]:
+    """The models ``path`` allows, or none when the file is missing.
+
+    ``path`` defaults to :func:`host_settings_path`. An empty list is no
+    restriction. A file that cannot be parsed, or that names an unknown key,
+    raises ``ValueError`` naming that key or the file.
+    """
+    location = host_settings_path() if path is None else path
+    if not location.exists():
+        return frozenset()
+    if not location.is_file():
+        message = f"{location.name}: expected a file"
+        raise ValueError(message)
+    try:
+        document = tomllib.loads(location.read_text(encoding="utf-8"))
+    except OSError as error:
+        message = f"{location.name}: {error.strerror or error}"
+        raise ValueError(message) from error
+    except tomllib.TOMLDecodeError as error:
+        message = f"{location.name}: {error}"
+        raise ValueError(message) from error
+    try:
+        settings = _HostSettings.model_validate(document)
+    except ValidationError as error:
+        keys = _host_setting_keys(error)
+        message = f"{location.name}: {keys}"
+        raise ValueError(message) from error
+    return frozenset(settings.allowed_models)
+
+
+def _host_setting_keys(error: ValidationError) -> str:
+    """The keys ``error`` names, in the order reported, each once."""
+    named: list[str] = []
+    for item in error.errors():
+        loc = item.get("loc") or ()
+        key = "allowed_models" if not loc else str(loc[0])
+        if key not in named:
+            named.append(key)
+    return ", ".join(named)
 
 
 def load_config(path: Path, *, ignored_sections: frozenset[str] = frozenset()) -> Config:

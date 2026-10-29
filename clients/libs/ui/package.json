@@ -7,7 +7,11 @@
     "layer": "foundation",
     "entries": {
       ".": "dom",
-      "./tokens.css": "dom"
+      "./legacy": "dom",
+      "./tokens": "neutral",
+      "./tokens.css": "dom",
+      "./fonts.css": "dom",
+      "./components.css": "dom"
     }
   },
   "exports": {
@@ -16,28 +20,74 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./legacy": {
+      "@vibesys/source": "./src/legacy/index.ts",
+      "types": "./dist/legacy/index.d.ts",
+      "default": "./dist/legacy/index.js"
+    },
+    "./tokens": {
+      "@vibesys/source": "./src/tokens/index.ts",
+      "types": "./dist/tokens/index.d.ts",
+      "default": "./dist/tokens/index.js"
+    },
     "./tokens.css": {
       "@vibesys/source": "./src/tokens.css",
       "default": "./src/tokens.css"
+    },
+    "./fonts.css": {
+      "@vibesys/source": "./src/fonts.css",
+      "default": "./src/fonts.css"
+    },
+    "./components.css": {
+      "@vibesys/source": "./src/components.css",
+      "default": "./src/components.css"
     }
   },
   "files": [
     "dist",
     "!dist/.*.tsbuildinfo",
-    "src/tokens.css"
+    "src/tokens.css",
+    "src/fonts.css",
+    "src/components.css",
+    "src/frame.css",
+    "src/controls.css",
+    "src/navigation.css",
+    "src/rail.css",
+    "src/overview-tiles.css",
+    "src/chat.css",
+    "src/base.css",
+    "src/inputs.css",
+    "src/surfaces.css",
+    "src/documents.css",
+    "src/threads.css",
+    "src/fonts"
   ],
   "scripts": {
-    "build": "tsc -b tsconfig.lib.json",
+    "build": "tsc -b tsconfig.lib.json tsconfig.legacy.json tsconfig.tokens.json",
     "check": "tsc -b",
+    "generate:tokens": "bun scripts/tokens-css.ts generate",
+    "check:tokens": "bun scripts/tokens-css.ts check",
     "test": "node ../../tools/scripts/run_bun_tests.mjs ./src"
   },
   "dependencies": {
-    "react": "19.1.1"
+    "react": "19.1.1",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
+    "simple-icons": "16.35.0"
+  },
+  "peerDependencies": {
+    "@types/react": "19.1.13"
+  },
+  "peerDependenciesMeta": {
+    "@types/react": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
     "@types/react": "19.1.13",
     "@types/react-dom": "19.1.9",
+    "happy-dom": "20.14.5",
     "react-dom": "19.1.1",
     "typescript": "^5.8.3"
   }

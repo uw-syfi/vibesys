@@ -72,7 +72,6 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import MemoryValidationPasses, idle_environment_system
 from vs_sandbox.api import CommandResult, CommandRunner, ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api import DISCARD
 from vs_sim.api.testing import InlineBlockingRunner, ManualClock, SimThreads
 
 if TYPE_CHECKING:
@@ -115,7 +114,7 @@ class _LosesStageCommands(FakeCommandRunner):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> CommandResult:
         del cancel  # no stage of this test is cancelled
         result = super().execute(command, timeout=timeout, output=output)
@@ -132,10 +131,15 @@ class _Session:
     view: RunEnvironmentView = field(
         default_factory=lambda: RunEnvironmentView(
             paths=AgentPaths(accuracy_command=_ACCURACY, benchmark_command=_BENCHMARK),
+            workspace_git_writable=True,
             cli_sandboxed=True,
             env_kind="modal",
         )
     )
+
+    @property
+    def capture_commands(self) -> CommandRunner:
+        return self.sandbox
 
     def __enter__(self) -> _Session:
         return self
@@ -296,7 +300,7 @@ def _measure_with_lost_command(
             )
             runtime = create_workspace_runtime(
                 workspace_resources=factory,
-                blocking=BlockingOperations(runner=InlineBlockingRunner()),
+                blocking=BlockingOperations(runner=InlineBlockingRunner(), threads=SimThreads()),
                 validation_passes=MemoryValidationPasses(),
             )
             evaluation = create_evaluation(

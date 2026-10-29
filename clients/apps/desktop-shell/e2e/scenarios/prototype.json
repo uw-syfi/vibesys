@@ -1,0 +1,586 @@
+{
+  "format": 1,
+  "name": "prototype",
+  "description": "Native journey scenario: prototype.",
+  "runId": "20261015-163047",
+  "state": "live",
+  "objective": {
+    "text": "Maximize trusted end-to-end throughput of the MPMC queue.",
+    "metric": "total_ops_per_sec",
+    "unit": "ops/s",
+    "direction": "max"
+  },
+  "events": [
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "run_started",
+      "data": {
+        "kind": "run_started",
+        "overview": {
+          "objective": {
+            "text": "Maximize trusted end-to-end throughput of the MPMC queue.",
+            "metric": "total_ops_per_sec",
+            "unit": "ops/s",
+            "direction": "max",
+            "correctness_check": []
+          }
+        },
+        "outer_loop": "dynamic",
+        "input": "objective.md",
+        "expected_roles": [
+          "orchestrator",
+          "implementer",
+          "judge"
+        ]
+      },
+      "sequence": 1
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "server_ready",
+      "sequence": 2
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 3,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:run",
+          "parent": null,
+          "type": "flow",
+          "name": "dynamic",
+          "status": "running",
+          "started_at": 0
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 4,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:base",
+          "parent": "flow:run",
+          "type": "flow",
+          "name": "gate",
+          "status": "done",
+          "started_at": 330,
+          "ended_at": 380,
+          "label": {
+            "kind": "gate",
+            "title": "Baseline",
+            "attrs_json": "{\"stage\":\"benchmark\",\"metric_value\":10000000,\"vs_baseline\":1,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":10000000,\"unit\":\"ops/s\",\"direction\":\"max\"}],\"input_metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":10000000.0,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 5,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:p1",
+          "parent": "flow:run",
+          "type": "operation",
+          "name": "planning call",
+          "status": "done",
+          "started_at": 385,
+          "ended_at": 425,
+          "label": {
+            "kind": "planning_call",
+            "title": "Planning call 1",
+            "attrs_json": "{\"call\":1}"
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 6,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:p2",
+          "parent": "flow:run",
+          "type": "operation",
+          "name": "planning call",
+          "status": "done",
+          "started_at": 1220,
+          "ended_at": 1260,
+          "label": {
+            "kind": "planning_call",
+            "title": "Planning call 2",
+            "attrs_json": "{\"call\":2}"
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 7,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:adopt",
+          "parent": "flow:run",
+          "type": "operation",
+          "name": "adopt",
+          "status": "running",
+          "started_at": 1100,
+          "label": {
+            "kind": "adoption",
+            "title": "r1",
+            "attrs_json": "{\"candidate\":\"r1\"}"
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 8,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:w1",
+          "parent": "op:p1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "done",
+          "started_at": 420,
+          "ended_at": 1020,
+          "label": {
+            "kind": "workstream",
+            "title": "Lock-free ring with per-slot sequence numbers",
+            "attrs_json": "{\"hypothesis_id\":\"W1\",\"parent_revision\":\"r0\",\"base_round\":null,\"revision\":\"r1\"}",
+            "verdict": "passed",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 9,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w1-impl",
+          "parent": "flow:w1",
+          "type": "operation",
+          "name": "agent turn",
+          "status": "done",
+          "started_at": 421,
+          "ended_at": 800,
+          "label": {
+            "kind": "agent_turn",
+            "title": "Implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"op:w1-impl\"}"
+          },
+          "invocation": "op:w1-impl"
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 10,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:w1-gate",
+          "parent": "flow:w1",
+          "type": "flow",
+          "name": "gate",
+          "status": "done",
+          "started_at": 810,
+          "ended_at": 1010,
+          "label": {
+            "kind": "gate",
+            "title": "Correctness, then benchmark",
+            "attrs_json": "{\"stage\":\"benchmark\",\"metric_value\":19000000,\"vs_baseline\":1.9,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":19000000,\"unit\":\"ops/s\",\"direction\":\"max\"}],\"input_metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":10000000.0,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 11,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:w2",
+          "parent": "op:p1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "done",
+          "started_at": 420,
+          "ended_at": 1020,
+          "label": {
+            "kind": "workstream",
+            "title": "Cache-line padding and batched enqueue",
+            "attrs_json": "{\"hypothesis_id\":\"W2\",\"parent_revision\":\"r0\",\"base_round\":null,\"revision\":\"r2\"}",
+            "verdict": "passed",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 12,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w2-impl",
+          "parent": "flow:w2",
+          "type": "operation",
+          "name": "agent turn",
+          "status": "done",
+          "started_at": 421,
+          "ended_at": 800,
+          "label": {
+            "kind": "agent_turn",
+            "title": "Implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"op:w2-impl\"}"
+          },
+          "invocation": "op:w2-impl"
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 13,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:w2-gate",
+          "parent": "flow:w2",
+          "type": "flow",
+          "name": "gate",
+          "status": "done",
+          "started_at": 810,
+          "ended_at": 1010,
+          "label": {
+            "kind": "gate",
+            "title": "Correctness, then benchmark",
+            "attrs_json": "{\"stage\":\"benchmark\",\"metric_value\":15500000,\"vs_baseline\":1.55,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":15500000,\"unit\":\"ops/s\",\"direction\":\"max\"}],\"input_metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":10000000.0,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 14,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:w3",
+          "parent": "op:p1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "done",
+          "started_at": 900,
+          "ended_at": 1500,
+          "label": {
+            "kind": "workstream",
+            "title": "Spin then park idle consumers",
+            "attrs_json": "{\"hypothesis_id\":\"W3\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "verdict": "failed",
+            "reason": "turned_down",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 15,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w3-impl",
+          "parent": "flow:w3",
+          "type": "operation",
+          "name": "agent turn",
+          "status": "done",
+          "started_at": 901,
+          "ended_at": 1280,
+          "label": {
+            "kind": "agent_turn",
+            "title": "Implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"op:w3-impl\"}"
+          },
+          "invocation": "op:w3-impl"
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 16,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:w3-gate",
+          "parent": "flow:w3",
+          "type": "flow",
+          "name": "gate",
+          "status": "done",
+          "started_at": 1290,
+          "ended_at": 1490,
+          "label": {
+            "kind": "gate",
+            "title": "Correctness, then benchmark",
+            "attrs_json": "{\"stage\":\"benchmark\",\"metric_value\":8500000,\"vs_baseline\":0.85,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":8500000,\"unit\":\"ops/s\",\"direction\":\"max\"}],\"input_metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":10000000.0,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "slower"
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 17,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:w4",
+          "parent": "op:p1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "done",
+          "started_at": 960,
+          "ended_at": 1560,
+          "label": {
+            "kind": "workstream",
+            "title": "Larger batch size",
+            "attrs_json": "{\"hypothesis_id\":\"W4\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "verdict": "failed",
+            "reason": "turned_down",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 18,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w4-impl",
+          "parent": "flow:w4",
+          "type": "operation",
+          "name": "agent turn",
+          "status": "done",
+          "started_at": 961,
+          "ended_at": 1340,
+          "label": {
+            "kind": "agent_turn",
+            "title": "Implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"op:w4-impl\"}"
+          },
+          "invocation": "op:w4-impl"
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 19,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:w4-gate",
+          "parent": "flow:w4",
+          "type": "flow",
+          "name": "gate",
+          "status": "done",
+          "started_at": 1350,
+          "ended_at": 1550,
+          "label": {
+            "kind": "gate",
+            "title": "Correctness, then benchmark",
+            "attrs_json": "{\"stage\":\"benchmark\",\"metric_value\":0,\"vs_baseline\":0,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":0,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "failed_check"
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 20,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:w5",
+          "parent": "op:p2",
+          "type": "flow",
+          "name": "workstream",
+          "status": "running",
+          "started_at": 1260,
+          "label": {
+            "kind": "workstream",
+            "title": "Combine W1 ring with W2 padding",
+            "attrs_json": "{\"hypothesis_id\":\"W5\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "links": [
+              {
+                "rel": "builds_on",
+                "to": "flow:w1"
+              },
+              {
+                "rel": "builds_on",
+                "to": "flow:w2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 21,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w5-impl",
+          "parent": "flow:w5",
+          "type": "operation",
+          "name": "agent turn",
+          "status": "done",
+          "started_at": 1261,
+          "ended_at": 1640,
+          "label": {
+            "kind": "agent_turn",
+            "title": "Implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"op:w5-impl\"}"
+          },
+          "invocation": "op:w5-impl"
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 22,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:w5-gate",
+          "parent": "flow:w5",
+          "type": "flow",
+          "name": "gate",
+          "status": "running",
+          "started_at": 1650,
+          "label": {
+            "kind": "gate",
+            "title": "Correctness, then benchmark",
+            "attrs_json": "{\"stage\":\"benchmark\",\"metric_value\":24000000,\"vs_baseline\":2.4,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":24000000,\"unit\":\"ops/s\",\"direction\":\"max\"}],\"input_metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":10000000.0,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 23,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:w6",
+          "parent": "op:p2",
+          "type": "flow",
+          "name": "workstream",
+          "status": "running",
+          "started_at": 1260,
+          "label": {
+            "kind": "workstream",
+            "title": "Wait-free consumer path",
+            "attrs_json": "{\"hypothesis_id\":\"W6\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "links": [
+              {
+                "rel": "builds_on",
+                "to": "flow:w1"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 24,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w6-impl",
+          "parent": "flow:w6",
+          "type": "operation",
+          "name": "agent turn",
+          "status": "running",
+          "started_at": 1261,
+          "label": {
+            "kind": "agent_turn",
+            "title": "Implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"op:w6-impl\"}"
+          },
+          "invocation": "op:w6-impl"
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "span_started",
+      "sequence": 25,
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:w7",
+          "parent": "op:p2",
+          "type": "flow",
+          "name": "workstream",
+          "status": "waiting",
+          "started_at": 1500,
+          "label": {
+            "kind": "workstream",
+            "title": "Per-core queues with stealing",
+            "attrs_json": "{\"hypothesis_id\":\"W7\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "links": [
+              {
+                "rel": "builds_on",
+                "to": "flow:w5"
+              },
+              {
+                "rel": "builds_on",
+                "to": "flow:w1"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

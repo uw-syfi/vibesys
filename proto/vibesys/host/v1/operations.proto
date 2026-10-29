@@ -1,0 +1,2005 @@
+syntax = "proto3";
+package vibesys.host.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/host/v1/operation_options.proto";
+import "vibesys/store/v1/skeleton.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1";
+option (vibesys.host.v1.minimum_checkout_version) = "0.1.1";
+
+message TaskList {
+  int64 version = 1 [(buf.validate.field).int64.const = 1];
+  string project_root = 2 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  repeated TaskSummary tasks = 3;
+}
+
+message TaskSummary {
+  string name = 1 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+}
+
+message HarnessDisplay {
+  string provider_name = 1 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  optional string model_name = 2 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  optional string family = 3 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  optional int64 tier = 4 [(buf.validate.field) = {
+    int64: {gte: 1}
+  }];
+  optional string tier_name = 5 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  optional Maker maker = 6 [(buf.validate.field) = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
+  ModelGeneration generation = 7;
+}
+
+message HarnessOption {
+  string provider = 1 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  string model = 2 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  bool default = 3;
+  HarnessDisplay display = 4;
+}
+
+enum Maker {
+  MAKER_UNSPECIFIED = 0;
+  MAKER_ANTHROPIC = 1 [(vibesys.host.v1.adapter_spelling) = "anthropic"];
+  MAKER_OPENAI = 2 [(vibesys.host.v1.adapter_spelling) = "openai"];
+  MAKER_GOOGLE = 3 [(vibesys.host.v1.adapter_spelling) = "google"];
+}
+
+message ModelGeneration {
+  string id = 1 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 64
+    }
+  }];
+  string name = 2 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 64
+    }
+  }];
+  int64 order = 3 [(buf.validate.field) = {
+    int64: {gte: 1}
+  }];
+}
+
+enum AcceleratorVendor {
+  ACCELERATOR_VENDOR_UNSPECIFIED = 0;
+  ACCELERATOR_VENDOR_NVIDIA = 1 [(vibesys.host.v1.adapter_spelling) = "nvidia"];
+  ACCELERATOR_VENDOR_AMD = 2 [(vibesys.host.v1.adapter_spelling) = "amd"];
+  ACCELERATOR_VENDOR_AWS = 3 [(vibesys.host.v1.adapter_spelling) = "aws"];
+  ACCELERATOR_VENDOR_APPLE = 4 [(vibesys.host.v1.adapter_spelling) = "apple"];
+  ACCELERATOR_VENDOR_CPU = 5 [(vibesys.host.v1.adapter_spelling) = "cpu"];
+}
+
+enum Backend {
+  BACKEND_UNSPECIFIED = 0;
+  BACKEND_CPU = 1 [(vibesys.host.v1.adapter_spelling) = "cpu"];
+  BACKEND_CUDA = 2 [(vibesys.host.v1.adapter_spelling) = "cuda"];
+  BACKEND_ROCM = 3 [(vibesys.host.v1.adapter_spelling) = "rocm"];
+  BACKEND_METAL = 4 [(vibesys.host.v1.adapter_spelling) = "metal"];
+  BACKEND_TRAINIUM = 5 [(vibesys.host.v1.adapter_spelling) = "trainium"];
+}
+
+enum ExampleDomain {
+  EXAMPLE_DOMAIN_UNSPECIFIED = 0;
+  EXAMPLE_DOMAIN_LLM_SERVING = 1 [(vibesys.host.v1.adapter_spelling) = "llm-serving"];
+  EXAMPLE_DOMAIN_DATA_STRUCTURES = 2 [(vibesys.host.v1.adapter_spelling) = "data-structures"];
+  EXAMPLE_DOMAIN_DATABASES = 3 [(vibesys.host.v1.adapter_spelling) = "databases"];
+  EXAMPLE_DOMAIN_MICROSERVICES = 4 [(vibesys.host.v1.adapter_spelling) = "microservices"];
+}
+
+message ExampleHardware {
+  string accelerator = 1 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  int64 count = 2;
+  AcceleratorVendor vendor = 3 [(buf.validate.field) = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
+  optional Backend backend = 4 [(buf.validate.field) = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
+}
+
+message ExampleList {
+  int64 version = 1 [(buf.validate.field).int64.const = 1];
+  string checkout = 2 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  repeated ExampleSummary examples = 3;
+}
+
+message ExampleModel {
+  string name = 1 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  ModelMaker maker = 2 [(buf.validate.field) = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
+}
+
+message ExampleObjective {
+  string metric = 1 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  string direction = 2 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+}
+
+message ExampleSummary {
+  string name = 1 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  string category = 2 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  repeated string tasks = 3 [(buf.validate.field).repeated = {
+    max_items: 10000
+    items: {
+      string: {max_bytes: 131072}
+    }
+  }];
+  bool external_repo = 4;
+  ExampleSummaryTaskDetails task_details = 5;
+}
+
+message ExampleTask {
+  string task = 1 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  repeated ExampleObjective objectives = 2;
+  string goal = 3 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      max_len: 32000
+    }
+  }];
+  bool goal_truncated = 4;
+  ExampleDomain domain = 5 [(buf.validate.field) = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
+  ExampleHardware hardware = 6 [(buf.validate.field) = {required: true}];
+  ExampleModel model = 7;
+  ExampleWorkload workload = 8;
+}
+
+message ExampleWorkload {
+  string name = 1 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  string description = 2 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+}
+
+enum ModelMaker {
+  MODEL_MAKER_UNSPECIFIED = 0;
+  MODEL_MAKER_META = 1 [(vibesys.host.v1.adapter_spelling) = "meta"];
+  MODEL_MAKER_QWEN = 2 [(vibesys.host.v1.adapter_spelling) = "qwen"];
+  MODEL_MAKER_DEEPSEEK = 3 [(vibesys.host.v1.adapter_spelling) = "deepseek"];
+  MODEL_MAKER_ZHIPU = 4 [(vibesys.host.v1.adapter_spelling) = "zhipu"];
+  MODEL_MAKER_MOONSHOT = 5 [(vibesys.host.v1.adapter_spelling) = "moonshot"];
+  MODEL_MAKER_AI2 = 6 [(vibesys.host.v1.adapter_spelling) = "ai2"];
+  MODEL_MAKER_OPENAI = 7 [(vibesys.host.v1.adapter_spelling) = "openai"];
+  MODEL_MAKER_OTHER = 8 [(vibesys.host.v1.adapter_spelling) = "other"];
+}
+
+message TaskGoal {
+  string task = 1 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  repeated ExampleObjective objectives = 2;
+  string goal = 3 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      max_len: 32000
+    }
+  }];
+  bool goal_truncated = 4;
+}
+
+enum Accelerator {
+  ACCELERATOR_UNSPECIFIED = 0;
+  ACCELERATOR_CPU = 1 [(vibesys.host.v1.adapter_spelling) = "cpu"];
+  ACCELERATOR_CUDA = 2 [(vibesys.host.v1.adapter_spelling) = "cuda"];
+  ACCELERATOR_ROCM = 3 [(vibesys.host.v1.adapter_spelling) = "rocm"];
+  ACCELERATOR_METAL = 4 [(vibesys.host.v1.adapter_spelling) = "metal"];
+}
+
+message DockerReachable {
+  bool reachable = 1 [(buf.validate.field).bool.const = true];
+  string version = 2 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+}
+
+message DockerUnreachable {
+  bool reachable = 1 [(buf.validate.field).bool.const = false];
+  string reason = 2 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+}
+
+message Gpu {
+  string vendor = 1 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  string model = 2 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+}
+
+message Hardware {
+  int64 cpu_cores = 1 [(buf.validate.field) = {
+    int64: {gt: 0}
+  }];
+  repeated Gpu gpus = 2;
+  Accelerator accelerator = 3 [(buf.validate.field) = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
+}
+
+message MachineCheckout {
+  string root = 1 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  string version = 2 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  optional string commit = 3 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  optional bool dirty = 4;
+}
+
+message MachineDescription {
+  MachineCheckout checkout = 1;
+  Hardware hardware = 2 [(buf.validate.field) = {required: true}];
+  MachineDescriptionDocker docker = 3 [(buf.validate.field) = {required: true}];
+  repeated string harness_clis = 4 [(buf.validate.field).repeated = {
+    max_items: 10000
+    items: {
+      string: {max_bytes: 131072}
+    }
+  }];
+  map<string, string> harness_cli_names = 5;
+  RunCounts runs = 6 [(buf.validate.field) = {required: true}];
+}
+
+message RunCounts {
+  int64 live = 1 [(buf.validate.field) = {
+    int64: {gte: 0}
+  }];
+  int64 ended_today = 2 [(buf.validate.field) = {
+    int64: {gte: 0}
+  }];
+}
+
+message ClusterHardware {
+  optional Accelerator accelerator = 1 [(buf.validate.field) = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
+  repeated string gpu_models = 2 [(buf.validate.field).repeated = {
+    max_items: 10000
+    items: {
+      string: {
+        max_bytes: 131072
+        min_len: 1
+        max_len: 256
+        pattern: "^[^\\n\\r]*$"
+      }
+    }
+  }];
+  int64 gpus_per_node = 3 [(buf.validate.field) = {
+    int64: {gte: 0}
+  }];
+}
+
+enum ClusterSource {
+  CLUSTER_SOURCE_UNSPECIFIED = 0;
+  CLUSTER_SOURCE_VIBESYS = 1 [(vibesys.host.v1.adapter_spelling) = "vibesys"];
+  CLUSTER_SOURCE_SLURM_TOML = 2 [(vibesys.host.v1.adapter_spelling) = "slurm_toml"];
+}
+
+message ComputeSettings {
+  string config_path = 1 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  repeated ListedCluster clusters = 2;
+  ModalStatus modal = 3 [(buf.validate.field) = {required: true}];
+}
+
+message ListedCluster {
+  SlurmClusterSettings cluster = 1 [(buf.validate.field) = {required: true}];
+  ClusterSource source = 2 [(buf.validate.field) = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
+}
+
+message LoginNodeReach {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "login_node"}
+  }];
+}
+
+message ModalStatus {
+  bool token_present = 1;
+  optional ModalTokenSource source = 2 [(buf.validate.field) = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
+}
+
+enum ModalTokenSource {
+  MODAL_TOKEN_SOURCE_UNSPECIFIED = 0;
+  MODAL_TOKEN_SOURCE_ENVIRONMENT = 1 [(vibesys.host.v1.adapter_spelling) = "environment"];
+  MODAL_TOKEN_SOURCE_PROFILE = 2 [(vibesys.host.v1.adapter_spelling) = "profile"];
+}
+
+message SlurmClusterSettings {
+  string name = 1 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      pattern: "^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$"
+    }
+  }];
+  SlurmClusterSettingsReach reach = 2 [(buf.validate.field) = {required: true}];
+  string workspace = 3 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 4096
+    }
+  }];
+  optional string partition = 4 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 256
+      pattern: "^[^\\n\\r]*$"
+    }
+  }];
+  optional int64 nodes = 5 [(buf.validate.field) = {
+    int64: {gt: 0}
+  }];
+  optional string time_limit = 6 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      pattern: "^[0-9][0-9:-]{0,31}$"
+    }
+  }];
+  repeated string sbatch_options = 7 [(buf.validate.field).repeated = {
+    max_items: 10000
+    items: {
+      string: {
+        max_bytes: 131072
+        min_len: 1
+        max_len: 256
+        pattern: "^[^\\n\\r]*$"
+      }
+    }
+  }];
+  ClusterHardware hardware = 8;
+}
+
+message SshReach {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "ssh"}
+  }];
+  string host = 2 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      max_len: 255
+      pattern: "^[A-Za-z0-9][A-Za-z0-9_.@-]*$"
+    }
+  }];
+}
+
+message HarnessChoice {
+  string provider = 1 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  string model = 2 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+}
+
+message ModalTarget {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "modal"}
+  }];
+}
+
+enum ReasoningEffort {
+  REASONING_EFFORT_UNSPECIFIED = 0;
+  REASONING_EFFORT_DEFAULT = 1 [(vibesys.host.v1.adapter_spelling) = "default"];
+  REASONING_EFFORT_LOW = 2 [(vibesys.host.v1.adapter_spelling) = "low"];
+  REASONING_EFFORT_MEDIUM = 3 [(vibesys.host.v1.adapter_spelling) = "medium"];
+  REASONING_EFFORT_HIGH = 4 [(vibesys.host.v1.adapter_spelling) = "high"];
+}
+
+message RoleOption {
+  string role = 1 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      max_len: 64
+      pattern: "^[a-z0-9][a-z0-9._-]*$"
+    }
+  }];
+  optional string model = 2 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 256
+    }
+  }];
+  ReasoningEffort reasoning_effort = 3 [(buf.validate.field) = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
+}
+
+message RunOptions {
+  optional int64 rounds = 1 [(buf.validate.field) = {
+    int64: {gt: 0}
+  }];
+  optional int64 time_limit_s = 2 [(buf.validate.field) = {
+    int64: {gt: 0}
+  }];
+  optional RunResults results = 3 [(buf.validate.field) = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
+  repeated RoleOption roles = 4;
+}
+
+enum RunResults {
+  RUN_RESULTS_UNSPECIFIED = 0;
+  RUN_RESULTS_KEEP = 1 [(vibesys.host.v1.adapter_spelling) = "keep"];
+  RUN_RESULTS_PUBLISH_GITHUB = 2 [(vibesys.host.v1.adapter_spelling) = "publish_github"];
+}
+
+message SameMachine {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "same_machine"}
+  }];
+}
+
+message SlurmTarget {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "slurm"}
+  }];
+  string cluster = 2 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      pattern: "^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$"
+    }
+  }];
+}
+
+message ArgumentsRejected {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "arguments_rejected"}
+  }];
+  string problem = 2 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 4096
+    }
+  }];
+}
+
+message ArgumentsUnrecognized {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "arguments_unrecognized"}
+  }];
+  repeated string arguments = 2 [(buf.validate.field).repeated = {
+    max_items: 10000
+    items: {
+      string: {
+        max_bytes: 131072
+        min_len: 1
+        max_len: 4096
+      }
+    }
+  }];
+}
+
+message BackendUnavailable {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "backend_unavailable"}
+  }];
+  string task = 2 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 256
+    }
+  }];
+  Backend backend = 3 [(buf.validate.field) = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
+  repeated Backend declared = 4 [(buf.validate.field).repeated = {
+    max_items: 10000
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
+}
+
+message Check {
+  CheckId id = 1 [(buf.validate.field) = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
+  CheckState state = 2 [(buf.validate.field) = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
+  string detail = 3 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 300
+      pattern: "^[^\\n\\r]*$"
+    }
+  }];
+  CheckFix fix = 4;
+  CheckCause cause = 5;
+}
+
+enum CheckId {
+  CHECK_ID_UNSPECIFIED = 0;
+  CHECK_ID_CHECKOUT_FOUND = 1 [(vibesys.host.v1.adapter_spelling) = "checkout_found"];
+  CHECK_ID_PROJECT_OWN_REPOSITORY = 2 [(vibesys.host.v1.adapter_spelling) = "project_own_repository"];
+  CHECK_ID_PROJECT_CLEAN = 3 [(vibesys.host.v1.adapter_spelling) = "project_clean"];
+  CHECK_ID_SETTINGS_VALID = 4 [(vibesys.host.v1.adapter_spelling) = "settings_valid"];
+  CHECK_ID_DOCKER_REACHABLE = 5 [(vibesys.host.v1.adapter_spelling) = "docker_reachable"];
+  CHECK_ID_AGENT_IMAGE = 6 [(vibesys.host.v1.adapter_spelling) = "agent_image"];
+  CHECK_ID_EVALUATOR_AVAILABLE = 7 [(vibesys.host.v1.adapter_spelling) = "evaluator_available"];
+  CHECK_ID_MEASUREMENT_TARGET = 8 [(vibesys.host.v1.adapter_spelling) = "measurement_target"];
+}
+
+enum CheckState {
+  CHECK_STATE_UNSPECIFIED = 0;
+  CHECK_STATE_OK = 1 [(vibesys.host.v1.adapter_spelling) = "ok"];
+  CHECK_STATE_WARN = 2 [(vibesys.host.v1.adapter_spelling) = "warn"];
+  CHECK_STATE_FAIL = 3 [(vibesys.host.v1.adapter_spelling) = "fail"];
+}
+
+message ChooseCheckout {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "choose_checkout"}
+  }];
+}
+
+message ConfigInvalid {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "config_invalid"}
+  }];
+  string problem = 2 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 4096
+    }
+  }];
+}
+
+message ConfigureCompute {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "configure_compute"}
+  }];
+  ConfigureComputeTarget target = 2 [(buf.validate.field) = {required: true}];
+}
+
+message CopyOut {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "copy_out"}
+  }];
+  string suggested_path = 2 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+}
+
+message DeclareBuild {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "declare_build"}
+  }];
+  string manifest = 2 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  repeated string outputs = 3 [(buf.validate.field).repeated = {
+    max_items: 10000
+    items: {
+      string: {max_bytes: 131072}
+    }
+  }];
+}
+
+message EditSetting {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "edit_setting"}
+  }];
+  string key = 2 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+}
+
+message GitHubUnavailable {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "github_unavailable"}
+  }];
+  string problem = 2 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 4096
+    }
+  }];
+}
+
+message MeasurementTargetMisfit {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "measurement_target_misfit"}
+  }];
+  MeasurementTargetMisfitTarget target = 2 [(buf.validate.field) = {required: true}];
+  Backend backend = 3 [(buf.validate.field) = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
+  Accelerator offered = 4 [(buf.validate.field) = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
+}
+
+message MeasurementTargetNotConfigured {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "measurement_target_not_configured"}
+  }];
+  MeasurementTargetNotConfiguredTarget target = 2 [(buf.validate.field) = {required: true}];
+}
+
+message ModelNotVetted {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "model_not_vetted"}
+  }];
+  string provider = 2 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 4096
+    }
+  }];
+  optional string model = 3 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 4096
+    }
+  }];
+  repeated string vetted = 4 [(buf.validate.field).repeated = {
+    max_items: 10000
+    items: {
+      string: {
+        max_bytes: 131072
+        min_len: 1
+        max_len: 4096
+      }
+    }
+  }];
+  optional string role = 5 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 4096
+    }
+  }];
+  bool fallback = 6;
+}
+
+message OptionNotAccepted {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "option_not_accepted"}
+  }];
+  RunOption option = 2 [(buf.validate.field) = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
+}
+
+message ProjectDirty {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "project_dirty"}
+  }];
+  string project = 2 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 4096
+    }
+  }];
+  repeated string paths = 3 [(buf.validate.field).repeated = {
+    max_items: 10000
+    items: {
+      string: {
+        max_bytes: 131072
+        min_len: 1
+        max_len: 4096
+      }
+    }
+  }];
+}
+
+message RolesNotDeclared {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "roles_not_declared"}
+  }];
+  repeated string roles = 2 [(buf.validate.field).repeated = {
+    max_items: 10000
+    items: {
+      string: {
+        max_bytes: 131072
+        min_len: 1
+        max_len: 4096
+      }
+    }
+  }];
+}
+
+enum RunOption {
+  RUN_OPTION_UNSPECIFIED = 0;
+  RUN_OPTION_ROUNDS = 1 [(vibesys.host.v1.adapter_spelling) = "rounds"];
+  RUN_OPTION_TIME_LIMIT = 2 [(vibesys.host.v1.adapter_spelling) = "time_limit"];
+  RUN_OPTION_RESULTS = 3 [(vibesys.host.v1.adapter_spelling) = "results"];
+  RUN_OPTION_ROLE_MODEL = 4 [(vibesys.host.v1.adapter_spelling) = "role_model"];
+  RUN_OPTION_ROLE_REASONING_EFFORT = 5 [(vibesys.host.v1.adapter_spelling) = "role_reasoning_effort"];
+  RUN_OPTION_ROLE_AGENT = 6 [(vibesys.host.v1.adapter_spelling) = "role_agent"];
+}
+
+message StartDocker {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "start_docker"}
+  }];
+}
+
+message SysboxMissing {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "sysbox_missing"}
+  }];
+  string task = 2 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 4096
+    }
+  }];
+  string problem = 3 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 4096
+    }
+  }];
+}
+
+message TaskImageUnsupported {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "task_image_unsupported"}
+  }];
+  optional string task = 2 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 4096
+    }
+  }];
+  string problem = 3 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 4096
+    }
+  }];
+}
+
+message TaskNeedsProvisioning {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "task_needs_provisioning"}
+  }];
+  string task = 2 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 4096
+    }
+  }];
+}
+
+message TaskNotFound {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "task_not_found"}
+  }];
+  string task = 2 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 4096
+    }
+  }];
+  repeated string available = 3 [(buf.validate.field).repeated = {
+    max_items: 10000
+    items: {
+      string: {
+        max_bytes: 131072
+        min_len: 1
+        max_len: 4096
+      }
+    }
+  }];
+}
+
+message TaskUnusable {
+  string kind = 1 [(buf.validate.field) = {
+    string: {const: "task_unusable"}
+  }];
+  optional string task = 2 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 4096
+    }
+  }];
+  string problem = 3 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 4096
+    }
+  }];
+}
+
+message ListTasksRequest {
+  string request_id = 1 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 128
+    }
+  }];
+  string project = 2 [(buf.validate.field) = {
+    string: {
+      min_len: 1
+      max_bytes: 4096
+    }
+  }];
+}
+
+message ListTasksResponse {
+  string request_id = 1 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 128
+    }
+  }];
+  TaskList tasks = 2 [(buf.validate.field) = {required: true}];
+}
+
+message ListHarnessesRequest {
+  string request_id = 1 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 128
+    }
+  }];
+  optional bool with_generations = 2;
+}
+
+message ListHarnessesResponse {
+  string request_id = 1 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 128
+    }
+  }];
+  repeated HarnessOption harnesses = 2;
+}
+
+message ListExamplesRequest {
+  string request_id = 1 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 128
+    }
+  }];
+  optional bool with_catalogue = 2;
+}
+
+message ListExamplesResponse {
+  string request_id = 1 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 128
+    }
+  }];
+  ExampleList listing = 2 [(buf.validate.field) = {required: true}];
+}
+
+message GetTaskGoalRequest {
+  string request_id = 1 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 128
+    }
+  }];
+  string project = 2 [(buf.validate.field) = {
+    string: {
+      min_len: 1
+      max_bytes: 4096
+    }
+  }];
+  string task = 3 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 256
+    }
+  }];
+}
+
+message GetTaskGoalResponse {
+  string request_id = 1 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 128
+    }
+  }];
+  TaskGoal goal = 2 [(buf.validate.field) = {required: true}];
+}
+
+message DescribeMachineRequest {
+  string request_id = 1 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 128
+    }
+  }];
+}
+
+message DescribeMachineResponse {
+  string request_id = 1 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 128
+    }
+  }];
+  MachineDescription machine = 2 [(buf.validate.field) = {required: true}];
+}
+
+message ListComputeRequest {
+  string request_id = 1 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 128
+    }
+  }];
+}
+
+message ListComputeResponse {
+  string request_id = 1 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 128
+    }
+  }];
+  ComputeSettings settings = 2 [(buf.validate.field) = {required: true}];
+}
+
+message PreflightRunRequest {
+  string request_id = 1 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 128
+    }
+  }];
+  string project = 2 [(buf.validate.field) = {
+    string: {
+      min_len: 1
+      max_bytes: 4096
+    }
+  }];
+  optional string task = 3 [(buf.validate.field) = {
+    string: {max_bytes: 131072}
+  }];
+  repeated string args = 4 [(buf.validate.field).repeated = {
+    max_items: 10000
+    items: {
+      string: {max_bytes: 131072}
+    }
+  }];
+  HarnessChoice harness = 5;
+  RunOptions options = 6;
+  PreflightRunRequestAgents agents = 7;
+  PreflightRunRequestMeasureOn measure_on = 8;
+  optional bool with_roles = 9;
+  optional bool with_project_clean = 10;
+  optional bool with_backend = 11;
+  optional bool with_causes = 12;
+}
+
+message PreflightRunResponse {
+  string request_id = 1 [(buf.validate.field) = {
+    string: {
+      max_bytes: 131072
+      min_len: 1
+      max_len: 128
+    }
+  }];
+  repeated Check checks = 2;
+  PreflightRunResponseRoles roles = 3;
+  optional Backend backend = 4 [(buf.validate.field) = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
+}
+
+message ExampleSummaryTaskDetails {
+  repeated ExampleTask items = 1;
+}
+
+message MachineDescriptionDocker {
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    DockerReachable docker_reachable = 1;
+    DockerUnreachable docker_unreachable = 2;
+  }
+}
+
+message SlurmClusterSettingsReach {
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    SshReach ssh_reach = 1;
+    LoginNodeReach login_node_reach = 2;
+  }
+}
+
+message CheckFix {
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    ChooseCheckout choose_checkout = 1;
+    CopyOut copy_out = 2;
+    EditSetting edit_setting = 3;
+    StartDocker start_docker = 4;
+    DeclareBuild declare_build = 5;
+    ConfigureCompute configure_compute = 6;
+  }
+}
+
+message CheckCause {
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    BackendUnavailable backend_unavailable = 1;
+    ProjectDirty project_dirty = 2;
+    TaskNotFound task_not_found = 3;
+    TaskUnusable task_unusable = 4;
+    TaskNeedsProvisioning task_needs_provisioning = 5;
+    TaskImageUnsupported task_image_unsupported = 6;
+    SysboxMissing sysbox_missing = 7;
+    ConfigInvalid config_invalid = 8;
+    RolesNotDeclared roles_not_declared = 9;
+    ModelNotVetted model_not_vetted = 10;
+    ArgumentsRejected arguments_rejected = 11;
+    ArgumentsUnrecognized arguments_unrecognized = 12;
+    OptionNotAccepted option_not_accepted = 13;
+    GitHubUnavailable git_hub_unavailable = 14;
+    MeasurementTargetNotConfigured measurement_target_not_configured = 15;
+    MeasurementTargetMisfit measurement_target_misfit = 16;
+  }
+}
+
+message ConfigureComputeTarget {
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    SlurmTarget slurm_target = 1;
+    ModalTarget modal_target = 2;
+  }
+}
+
+message MeasurementTargetMisfitTarget {
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    SameMachine same_machine = 1;
+    SlurmTarget slurm_target = 2;
+    ModalTarget modal_target = 3;
+  }
+}
+
+message MeasurementTargetNotConfiguredTarget {
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    SlurmTarget slurm_target = 1;
+    ModalTarget modal_target = 2;
+  }
+}
+
+message PreflightRunRequestAgents {
+  map<string, HarnessChoice> items = 1;
+}
+
+message PreflightRunRequestMeasureOn {
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    SameMachine same_machine = 1;
+    SlurmTarget slurm_target = 2;
+    ModalTarget modal_target = 3;
+  }
+}
+
+message PreflightRunResponseRoles {
+  repeated string items = 1 [(buf.validate.field).repeated = {
+    max_items: 10000
+    items: {
+      string: {
+        max_bytes: 131072
+        max_len: 64
+        pattern: "^[a-z0-9][a-z0-9._-]*$"
+      }
+    }
+  }];
+}
+
+// A candidate checkout inspection. The executable and argv are fixed by the
+// gateway; this payload only names the path and the caller's selection revision.
+enum CandidateState {
+  CANDIDATE_STATE_UNSPECIFIED = 0;
+  CANDIDATE_STATE_FOUND = 1;
+  CANDIDATE_STATE_NOT_FOUND = 2;
+  CANDIDATE_STATE_TOO_OLD = 3;
+}
+
+message CandidateIdentity {
+  string root = 1 [(buf.validate.field).string = {max_bytes: 4096}];
+  string version = 2 [(buf.validate.field).string = {max_bytes: 128}];
+  optional string commit = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+  optional bool dirty = 4;
+  bool compatible = 5;
+  bool vibesys_project = 6;
+  bool git_repository = 7;
+}
+
+message InspectCandidateRequest {
+  string request_id = 1 [(buf.validate.field).string = {
+    max_bytes: 131072
+    min_len: 1
+    max_len: 128
+  }];
+  string path = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
+  uint64 selection_revision = 3 [(buf.validate.field).uint64.gt = 0];
+}
+
+message InspectCandidateResponse {
+  option (buf.validate.message).cel = {
+    id: "inspect.identity"
+    message: "found and too-old candidates include a versioned identity"
+    expression: "(this.state != 1 && this.state != 3) || (has(this.identity) && (this.state != 1 || (this.identity.root != '' && this.identity.version != '')))"
+  };
+  string request_id = 1 [(buf.validate.field).string = {
+    max_bytes: 131072
+    min_len: 1
+    max_len: 128
+  }];
+  uint64 selection_revision = 2 [(buf.validate.field).uint64.gt = 0];
+  string schema_hash = 3 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  CandidateState state = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  CandidateIdentity identity = 5;
+  string minimum_version = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+  bool vibesys_checkout = 7;
+  bool vibesys_project = 8;
+  bool git_repository = 9;
+}
+
+message CompletedPath {
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 255
+  }];
+  string path = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
+  bool vibesys_checkout = 3;
+  bool vibesys_project = 4;
+  bool git_repository = 5;
+}
+
+message CompletePathsRequest {
+  string request_id = 1 [(buf.validate.field).string = {
+    max_bytes: 131072
+    min_len: 1
+    max_len: 128
+  }];
+  string prefix = 2 [(buf.validate.field).string.max_bytes = 4096];
+}
+
+message CompletePathsResponse {
+  string request_id = 1 [(buf.validate.field).string = {
+    max_bytes: 131072
+    min_len: 1
+    max_len: 128
+  }];
+  string directory = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
+  repeated CompletedPath entries = 3 [(buf.validate.field).repeated.max_items = 200];
+  bool truncated = 4;
+}
+
+message LoginRequest {
+  string request_id = 1 [(buf.validate.field).string = {
+    max_bytes: 131072
+    min_len: 1
+    max_len: 128
+  }];
+  string provider = 2 [(buf.validate.field).string = {
+    max_bytes: 131072
+    min_len: 1
+    max_len: 128
+  }];
+}
+
+enum LoginUnavailableReason {
+  LOGIN_UNAVAILABLE_REASON_UNSPECIFIED = 0;
+  LOGIN_UNAVAILABLE_REASON_NOT_INSTALLED = 1 [(vibesys.host.v1.adapter_spelling) = "not_installed"];
+  LOGIN_UNAVAILABLE_REASON_NO_LOGIN_COMMAND = 2 [(vibesys.host.v1.adapter_spelling) = "no_login_command"];
+  LOGIN_UNAVAILABLE_REASON_NEEDS_TERMINAL = 3 [(vibesys.host.v1.adapter_spelling) = "needs_terminal"];
+  LOGIN_UNAVAILABLE_REASON_START_FAILED = 4 [(vibesys.host.v1.adapter_spelling) = "start_failed"];
+}
+
+message LoginStartedBody {
+  optional string instruction = 1 [(buf.validate.field).string = {
+    max_bytes: 131072
+    max_len: 300
+    pattern: "^[^\\n\\r]*$"
+  }];
+}
+
+message LoginUnavailableBody {
+  LoginUnavailableReason reason = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string command = 2 [(buf.validate.field).string = {
+    max_bytes: 131072
+    max_len: 300
+    pattern: "^[^\\n\\r]*$"
+  }];
+  string detail = 3 [(buf.validate.field).string = {
+    max_bytes: 131072
+    max_len: 300
+    pattern: "^[^\\n\\r]*$"
+  }];
+}
+
+// One sequenced login fact. The host process stays up until cancel or completion.
+message StartRunHarness {
+  string provider = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+  string model = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+}
+
+enum StartRunResults {
+  START_RUN_RESULTS_UNSPECIFIED = 0;
+  START_RUN_RESULTS_KEEP = 1;
+  START_RUN_RESULTS_PUBLISH_GITHUB = 2;
+}
+
+enum StartRunReasoning {
+  START_RUN_REASONING_UNSPECIFIED = 0;
+  START_RUN_REASONING_DEFAULT = 1;
+  START_RUN_REASONING_LOW = 2;
+  START_RUN_REASONING_MEDIUM = 3;
+  START_RUN_REASONING_HIGH = 4;
+}
+
+message StartRunRole {
+  string role = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+  string model = 2 [(buf.validate.field).string.max_bytes = 256];
+  StartRunReasoning reasoning = 3 [(buf.validate.field).enum.defined_only = true];
+}
+
+message StartRunOptions {
+  optional int32 rounds = 1 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 1000000
+  }];
+  optional int32 time_limit_s = 2 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 8640000
+  }];
+  StartRunResults results = 3 [(buf.validate.field).enum.defined_only = true];
+  repeated StartRunRole roles = 4 [(buf.validate.field).repeated.max_items = 32];
+}
+
+message StartRunAgent {
+  string role = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+  StartRunHarness harness = 2 [(buf.validate.field).required = true];
+}
+
+message StartRunSameMachine {}
+
+message StartRunModal {}
+
+message StartRunMeasure {
+  oneof target {
+    option (buf.validate.oneof).required = true;
+    StartRunSameMachine same_machine = 1;
+    string slurm_cluster = 2 [(buf.validate.field).string = {
+      min_len: 1
+      max_bytes: 256
+    }];
+    StartRunModal modal = 3;
+  }
+}
+
+enum ClusterTestStage {
+  CLUSTER_TEST_STAGE_UNSPECIFIED = 0;
+  CLUSTER_TEST_STAGE_REACH = 1 [(vibesys.host.v1.adapter_spelling) = "reach"];
+  CLUSTER_TEST_STAGE_SCHEDULER = 2 [(vibesys.host.v1.adapter_spelling) = "scheduler"];
+  CLUSTER_TEST_STAGE_WORKSPACE = 3 [(vibesys.host.v1.adapter_spelling) = "workspace"];
+}
+
+message ClusterTestPassed {
+  ClusterHardware hardware = 1 [(buf.validate.field).required = true];
+  repeated string partitions = 2 [(buf.validate.field).repeated.max_items = 256];
+}
+
+message ClusterTestFailed {
+  ClusterTestStage stage = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string detail = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 300
+    pattern: "^[^\\n\\r]*$"
+  }];
+}
+
+enum DestinationState {
+  DESTINATION_STATE_UNSPECIFIED = 0;
+  DESTINATION_STATE_ABSENT = 1 [(vibesys.host.v1.adapter_spelling) = "absent"];
+  DESTINATION_STATE_EMPTY = 2 [(vibesys.host.v1.adapter_spelling) = "empty"];
+  DESTINATION_STATE_EXAMPLE_PROJECT = 3 [(vibesys.host.v1.adapter_spelling) = "example_project"];
+  DESTINATION_STATE_OCCUPIED = 4 [(vibesys.host.v1.adapter_spelling) = "occupied"];
+}
+
+message InspectDestinationRequest {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  string example = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+  string destination = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+  }];
+}
+
+message InspectDestinationResponse {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  DestinationState state = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string project = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+  }];
+}
+
+message CreatedProject {
+  string project = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+  }];
+  repeated string tasks = 2 [(buf.validate.field).repeated.max_items = 256];
+}
+
+message DestinationTaken {}
+
+message CreateExampleRequest {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  string example = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+  string destination = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+  }];
+}
+
+message CreateExampleResponse {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  oneof result {
+    option (buf.validate.oneof).required = true;
+    CreatedProject created = 2;
+    DestinationTaken taken = 3;
+  }
+}
+
+message CopyProjectRequest {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  string source = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+  }];
+  string destination = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+  }];
+}
+
+message CopyProjectResponse {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  CreatedProject created = 2 [(buf.validate.field).required = true];
+}
+
+message PutClusterRequest {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  SlurmClusterSettings cluster = 2 [(buf.validate.field).required = true];
+}
+
+message PutClusterResponse {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  ComputeSettings settings = 2 [(buf.validate.field).required = true];
+}
+
+message RemoveClusterRequest {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  string name = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$"];
+}
+
+message RemoveClusterResponse {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  ComputeSettings settings = 2 [(buf.validate.field).required = true];
+}
+
+message TestClusterRequest {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  SlurmClusterSettings cluster = 2 [(buf.validate.field).required = true];
+}
+
+message TestClusterResponse {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  oneof result {
+    option (buf.validate.oneof).required = true;
+    ClusterTestPassed passed = 2;
+    ClusterTestFailed failed = 3;
+  }
+}
+
+message StartRunRequest {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  string project = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
+  string task = 3 [(buf.validate.field).string.max_bytes = 256];
+  repeated string args = 4 [(buf.validate.field).repeated.max_items = 256];
+  StartRunHarness harness = 5;
+  StartRunOptions options = 6;
+  repeated StartRunAgent agents = 7 [(buf.validate.field).repeated.max_items = 32];
+  StartRunMeasure measure_on = 8;
+}
+
+message StartRunResponse {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  string run_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+  string instance_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+}
+
+message LoginResponse {
+  string request_id = 1 [(buf.validate.field).string = {
+    max_bytes: 131072
+    min_len: 1
+    max_len: 128
+  }];
+  uint64 sequence = 2 [(buf.validate.field).uint64.gt = 0];
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    LoginStartedBody started = 3;
+    LoginUnavailableBody unavailable = 4;
+  }
+}
+
+// Discovery metadata only. Run facts are read through Skeleton/Tail after import.
+message SavedRun {
+  string run_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  optional string task = 2 [(buf.validate.field).string.max_bytes = 65536];
+  string display_name = 3 [(buf.validate.field).string.max_bytes = 65536];
+  google.protobuf.Timestamp created_at = 4 [(buf.validate.field).required = true];
+  SavedRunImport imported = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string detail = 6 [(buf.validate.field).string.max_bytes = 65536];
+}
+enum SavedRunImport {
+  SAVED_RUN_IMPORT_UNSPECIFIED = 0;
+  SAVED_RUN_IMPORT_AVAILABLE = 1;
+  SAVED_RUN_IMPORT_UNAVAILABLE = 2;
+}
+message ListSavedRunsRequest {
+  option (buf.validate.message).cel = {
+    id: "saved_runs.revision"
+    message: "revision is required after the first page"
+    expression: "this.offset == 0u || this.revision != ''"
+  };
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  string project = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
+  uint32 offset = 3;
+  string revision = 4 [(buf.validate.field).string = {max_bytes: 64}];
+}
+message ListSavedRunsResponse {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  string project_root = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
+  repeated SavedRun runs = 3 [(buf.validate.field).repeated.max_items = 200];
+  string revision = 4 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  optional uint32 next_offset = 5;
+}
+
+// Internal Pause-now escalation, never another operator control.
+message TerminateRunRequest {
+  option (buf.validate.message).cel = {
+    id: "terminate_run.identity"
+    message: "expected_process requires a pid, epoch and start identity"
+    expression: "has(this.expected_process) && this.expected_process.pid > 0u && this.expected_process.epoch > 0u && has(this.expected_process.started_at)"
+  };
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+    pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+  }];
+  string project_root = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
+  string run_id = 3 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  vibesys.store.v1.RunProcess expected_process = 4 [(buf.validate.field).required = true];
+  // Set by the gateway from its execution context, including helper startup time.
+  google.protobuf.Timestamp deadline = 5;
+}
+// No outcome asserts a run lifecycle. Only the writer/recovery records that.
+message TerminateRunResponse {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  TerminateRunOutcome outcome = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string detail = 3 [(buf.validate.field).string.max_bytes = 65536];
+}
+enum TerminateRunOutcome {
+  TERMINATE_RUN_OUTCOME_UNSPECIFIED = 0;
+  TERMINATE_RUN_OUTCOME_WRITER_RELEASED = 1;
+  TERMINATE_RUN_OUTCOME_IDENTITY_CHANGED = 2;
+  TERMINATE_RUN_OUTCOME_UNSUPPORTED = 3;
+  TERMINATE_RUN_OUTCOME_REQUESTED_UNCONFIRMED = 4;
+  TERMINATE_RUN_OUTCOME_OBSERVATION_UNKNOWN = 5;
+  TERMINATE_RUN_OUTCOME_PROCESS_ABSENT = 6;
+}
+
+// Login status facts are read independently of the long-lived login watch.
+enum AgentLoginState {
+  AGENT_LOGIN_STATE_UNSPECIFIED = 0;
+  AGENT_LOGIN_STATE_SIGNED_IN = 1 [(vibesys.host.v1.adapter_spelling) = "signed_in"];
+  AGENT_LOGIN_STATE_SIGNED_OUT = 2 [(vibesys.host.v1.adapter_spelling) = "signed_out"];
+  AGENT_LOGIN_STATE_UNKNOWN = 3 [(vibesys.host.v1.adapter_spelling) = "unknown"];
+}
+message LoginAccount {
+  string kind = 1 [(buf.validate.field).string.const = "account"];
+}
+message LoginApiKey {
+  option (buf.validate.message).cel = {
+    id: "login.one_key_source"
+    message: "an API key names a variable or a file, not both"
+    expression: "!has(this.variable) || !has(this.file)"
+  };
+  string kind = 1 [(buf.validate.field).string.const = "api_key"];
+  optional string variable = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  optional string file = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+}
+message AgentLoginHow {
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    LoginAccount account = 1;
+    LoginApiKey api_key = 2;
+  }
+}
+message AgentLogin {
+  option (buf.validate.message).cel = {
+    id: "login.installed_state"
+    message: "a missing harness has unknown login state"
+    expression: "this.installed || this.state == 3"
+  };
+  option (buf.validate.message).cel = {
+    id: "login.how_state"
+    message: "how is named only for a signed-in harness"
+    expression: "!has(this.how) || this.state == 1"
+  };
+  string provider = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  string provider_name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  bool installed = 3;
+  AgentLoginState state = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  AgentLoginHow how = 5;
+  repeated string api_key_variables = 6 [(buf.validate.field).repeated = {
+    max_items: 10000
+    items: {
+      string: {
+        min_len: 1
+        max_len: 128
+      }
+    }
+  }];
+  string detail = 7 [(buf.validate.field).string = {
+    max_len: 300
+    pattern: "^[^\\n\\r]*$"
+  }];
+  bool can_start_login = 8;
+}
+message ListAgentLoginsRequest {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+}
+message ListAgentLoginsResponse {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  repeated AgentLogin logins = 2 [(buf.validate.field).repeated.max_items = 10000];
+}
+
+// What a run's journal says at a glance: the sidebar row and the dashboard tile.
+enum RunEndOutcome {
+  RUN_END_OUTCOME_UNSPECIFIED = 0;
+  RUN_END_OUTCOME_ADOPTED = 1;
+  RUN_END_OUTCOME_KEPT_INPUT = 2;
+  RUN_END_OUTCOME_NO_WINNER = 3;
+  RUN_END_OUTCOME_ADOPTION_FAILED = 4;
+  RUN_END_OUTCOME_STOPPED = 5;
+  RUN_END_OUTCOME_DEADLINE = 6;
+  RUN_END_OUTCOME_FINISH_REFUSED = 7;
+  RUN_END_OUTCOME_FAILED = 8;
+  RUN_END_OUTCOME_FORCE_STOPPED = 9;
+}
+enum RunClosing {
+  RUN_CLOSING_UNSPECIFIED = 0;
+  RUN_CLOSING_FINISHED = 1;
+  RUN_CLOSING_FAILED = 2;
+  RUN_CLOSING_INTERRUPTED = 3;
+}
+enum IdeaVerdict {
+  IDEA_VERDICT_UNSPECIFIED = 0;
+  IDEA_VERDICT_KEPT = 1;
+  IDEA_VERDICT_NOT_BETTER = 2;
+  IDEA_VERDICT_FAILED = 3;
+  IDEA_VERDICT_RUNNING = 4;
+}
+enum RunAttention {
+  RUN_ATTENTION_UNSPECIFIED = 0;
+  RUN_ATTENTION_NONE = 1;
+  RUN_ATTENTION_FAILED = 2;
+  RUN_ATTENTION_REPEATED_FAILURE = 3;
+  RUN_ATTENTION_STALLED = 4;
+}
+message RunEnding {
+  // Unspecified when the run ended without recording a result.
+  RunEndOutcome outcome = 1 [(buf.validate.field).enum.defined_only = true];
+  string summary = 2 [(buf.validate.field).string.max_bytes = 65536];
+  bool uncompared = 3;
+}
+message IdeaPoint {
+  optional double ratio = 1 [(buf.validate.field).double.finite = true];
+  IdeaVerdict verdict = 2 [(buf.validate.field) = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
+  optional google.protobuf.Timestamp at = 3;
+}
+message BestReading {
+  double value = 1 [(buf.validate.field).double.finite = true];
+  optional string metric = 2 [(buf.validate.field).string.max_bytes = 4096];
+  optional string unit = 3 [(buf.validate.field).string.max_bytes = 4096];
+}
+message RunDashboard {
+  repeated IdeaPoint points = 1 [(buf.validate.field).repeated.max_items = 64];
+  uint32 points_omitted = 2;
+  uint32 failed_streak = 3;
+  optional google.protobuf.Timestamp last_event_at = 4;
+  optional BestReading best = 5;
+  RunAttention attention = 6 [(buf.validate.field).enum.defined_only = true];
+}
+message RunDigest {
+  optional uint32 ideas = 1;
+  optional double adopted_ratio = 2 [(buf.validate.field).double.finite = true];
+  optional double best_so_far_ratio = 3 [(buf.validate.field).double.finite = true];
+  optional double duration_s = 4 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  optional RunEnding ending = 5;
+  RunClosing closing = 6 [(buf.validate.field).enum.defined_only = true];
+  // Present exactly when the request asked for it.
+  optional RunDashboard dashboard = 7;
+}
+message RunDigestEntry {
+  string run_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  google.protobuf.Timestamp created_at = 2 [(buf.validate.field).required = true];
+  oneof result {
+    option (buf.validate.oneof).required = true;
+    RunDigest digest = 3;
+    // Why the journal could not be read, in one line.
+    string unreadable = 4 [(buf.validate.field).string = {
+      max_len: 300
+      pattern: "^[^\\n\\r]*$"
+    }];
+  }
+}
+message ListRunDigestsRequest {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  string project = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
+  repeated string run_ids = 3 [(buf.validate.field).repeated = {
+    max_items: 100
+    unique: true
+    items: {
+      string: {pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"}
+    }
+  }];
+  bool with_dashboard = 4;
+}
+// One entry for each requested run the project has, in the order asked.
+message ListRunDigestsResponse {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  repeated RunDigestEntry digests = 2 [(buf.validate.field).repeated.max_items = 100];
+}
+
+// What runs spent in a window of time. A count a provider did not report is absent, not zero.
+message TokenTally {
+  optional uint64 input = 1;
+  optional uint64 cache_read = 2;
+  optional uint64 cache_write = 3;
+  optional uint64 output = 4;
+  optional uint64 reasoning = 5;
+}
+message RunSpend {
+  string run_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  optional string task = 2 [(buf.validate.field).string.max_bytes = 65536];
+  double cost_usd = 3 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  uint32 unpriced_turns = 4;
+}
+message AgentSpend {
+  optional string role = 1 [(buf.validate.field).string.max_bytes = 4096];
+  optional string harness = 2 [(buf.validate.field).string.max_bytes = 4096];
+  optional string model = 3 [(buf.validate.field).string.max_bytes = 4096];
+  double cost_usd = 4 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  uint32 turns = 5;
+  uint32 unpriced_turns = 6;
+}
+message UsageWindowRequest {
+  option (buf.validate.message).cel = {
+    id: "usage_window.bounds"
+    message: "since must be before until, and the window at most 336 hours"
+    expression: "this.since < this.until && this.until - this.since <= duration('1209600s')"
+  };
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  string project = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
+  repeated string run_ids = 3 [(buf.validate.field).repeated = {
+    max_items: 100
+    unique: true
+    items: {
+      string: {pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"}
+    }
+  }];
+  google.protobuf.Timestamp since = 4 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp until = 5 [(buf.validate.field).required = true];
+}
+message UsageWindowResponse {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  google.protobuf.Timestamp since = 2 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp until = 3 [(buf.validate.field).required = true];
+  double spent_usd = 4 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  double spend_per_hour_usd = 5 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  TokenTally tokens = 6 [(buf.validate.field).required = true];
+  uint32 turns = 7;
+  uint32 unpriced_turns = 8;
+  uint32 untimed_turns = 9;
+  uint32 new_bests = 10;
+  optional double cost_per_new_best_usd = 11 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  // The costliest run first.
+  repeated RunSpend by_run = 12 [(buf.validate.field).repeated.max_items = 100];
+  // The costliest agent first.
+  repeated AgentSpend by_agent = 13 [(buf.validate.field).repeated.max_items = 64];
+  uint32 agents_omitted = 14;
+  repeated string missing_runs = 15 [(buf.validate.field).repeated.max_items = 100];
+}

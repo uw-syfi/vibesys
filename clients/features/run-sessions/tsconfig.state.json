@@ -1,0 +1,31 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2022"
+    ],
+    "types": [],
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.state.tsbuildinfo"
+  },
+  "include": [
+    "src/state/**/*.ts",
+    "src/state/**/*.tsx"
+  ],
+  "exclude": [
+    "src/state/**/*.test.ts",
+    "src/state/**/*.test.tsx"
+  ],
+  "references": [
+    {
+      "path": "../../libs/machine/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/runs/tsconfig.chat.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.lib.json"
+    }
+  ]
+}

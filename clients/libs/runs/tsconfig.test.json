@@ -22,6 +22,12 @@
     },
     {
       "path": "../store/tsconfig.testing.json"
+    },
+    {
+      "path": "./tsconfig.intents.json"
+    },
+    {
+      "path": "./tsconfig.chat.json"
     }
   ]
 }

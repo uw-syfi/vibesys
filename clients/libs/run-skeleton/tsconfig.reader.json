@@ -1,0 +1,28 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [],
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.reader.tsbuildinfo"
+  },
+  "include": [
+    "src/reader.ts"
+  ],
+  "references": [
+    {
+      "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "../proto/tsconfig.lib.json"
+    },
+    {
+      "path": "../transport/tsconfig.lib.json"
+    }
+  ]
+}

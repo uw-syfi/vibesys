@@ -11,8 +11,22 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from . import _wait_clock
+from ._base_runs import after_run, base_of, record_samples, with_base
+from ._comparison import (
+    as_answer,
+    moment_of,
+    run_reading,
+)
 from ._deadlines import resolve_until
 from ._evaluation_history import produce_history
+from ._measurement_reuse import (
+    checkpoint_input,
+    held_answer,
+    held_input_run,
+    reused_evidence_complete,
+    reused_record,
+    reused_run,
+)
 from ._proofs import (
     Mismatch,
     Missing,
@@ -22,20 +36,37 @@ from ._proofs import (
     Verdict,
     accepted_receipt_for,
     committed_stop,
-    current_admission,
+    continues_admitted_work,
     current_closure,
     fresh_observation,
     observation_for,
     operation_for,
     released_owner,
     request_matches,
+    stop_mode,
     submission_budget_for,
 )
 from ._registry import ContractError
-from ._values import digest
+from ._runaway import runaway_noted
+from ._submission_receipts import (
+    canonical_failure,
+    conclusive,
+    ended_unobserved,
+    job_budget,
+    submission_receipt,
+)
+from ._submissions import (
+    Origin,
+    allocate,
+    capped,
+    current,
+    identity_of,
+    rejected,
+    submission_released,
+)
+from ._turn_permit import _executing_turn, _Facts, _permit_for_turn
 from .types.attempts import (
     AttemptEvaluationHistoryUpdated,
-    AttemptPhase,
     CloseAttemptScope,
     SnapshotAndRetain,
 )
@@ -43,6 +74,7 @@ from .types.common import (
     MAX_SUBMISSIONS_PER_MEASUREMENT,
     AttemptId,
     AttemptRef,
+    CompletionStatus,
     EvidenceKind,
     ExecuteRegisteredOperation,
     LifecycleClass,
@@ -51,6 +83,7 @@ from .types.common import (
     RevisionRef,
     RunStatus,
     Scope,
+    StopMode,
 )
 from .types.evaluation import (
     MEASUREMENT_DIAGNOSTIC_LIMIT,
@@ -71,6 +104,7 @@ from .types.evaluation import (
     MeasurementIdentity,
     MeasurementRequested,
     MeasurementResult,
+    MeasurementSubmissionEnded,
     MeasurementSubmissionObserved,
     ObservationsDue,
     ObservedJobFacts,
@@ -89,39 +123,26 @@ from .types.evaluation import (
 )
 from .types.evaluation_history import EvaluationStageOutcome
 from .types.job_observations import MeasurementFailure
-from .types.kernel import AreaChange
-from .types.records import Outbound, RequestObserved, RequestPhase, inherit, within
+from .types.kernel import AreaChange, DecisionCompleted
+from .types.records import (
+    Attribution,
+    Outbound,
+    RequestObserved,
+    RequestPhase,
+    inherit,
+    within,
+)
 from .types.strategy import Measure
 from .types.until import Until, Within
 from .types.waits import WaitOn
 
 if TYPE_CHECKING:
-    from .types.common import DecisionId, Observation, ResourceId, Seconds
+    from .types.common import Observation, ResourceId, Seconds
     from .types.evaluation import EvaluationEvent, EvaluationState, EvidenceRef, MeasurementPlan
     from .types.kernel import EvaluationContext, RunState, Signal
     from .types.records import RecordsState, Request, RequestRecord
 
-__all__ = ["advance", "cancel_settled"]
-
-
-def _current(context: EvaluationContext, scope: Scope) -> Verdict[DecisionId | None]:
-    if context.run.status != RunStatus.RUNNING:
-        return Missing(ProofReason.UNRESOLVED)
-    if scope.owner == context.run.run_id:
-        return (
-            Proven(None)
-            if scope.generation == context.run.generation
-            else Mismatch(ProofField.GENERATION)
-        )
-    owner = next((row for row in context.attempts.attempts if row.attempt_id == scope.owner), None)
-    proof = current_admission(owner, scope, owner.admission_id if owner is not None else None)
-    if not isinstance(proof, Proven):
-        return proof
-    if owner is None or owner.phase != AttemptPhase.ACTIVE or owner.closure is not None:
-        return Missing(ProofReason.UNRESOLVED)
-    if owner.terminal_reason is not None:
-        return Missing(ProofReason.UNRESOLVED)
-    return proof
+__all__ = ["advance", "cancel_settled", "submission_ended"]
 
 
 def _origin(context: EvaluationContext, event: MeasurementRequested) -> Verdict[Measure]:
@@ -129,13 +150,12 @@ def _origin(context: EvaluationContext, event: MeasurementRequested) -> Verdict[
         receipt
         for receipt in context.run.receipts
         if isinstance(receipt.decision, Measure)
+        and receipt.decision_id == event.decision_id
         and receipt.decision.scope == event.scope
         and receipt.decision.plan == event.plan
     )
     if not rows:
         return Missing(ProofReason.ABSENT_RECEIPT)
-    # Identical measurements can be proposed again after conclusive failure.
-    # The latest accepted command supplies correlation, never a new budget key.
     receipt = rows[-1]
     proof = accepted_receipt_for(context.run.receipts, receipt.decision_id, receipt.decision)
     if not isinstance(proof, Proven):
@@ -195,15 +215,6 @@ def _snapshot_revision(
     )
 
 
-def _identity(plan: MeasurementPlan) -> Verdict[MeasurementIdentity]:
-    if not isinstance(plan.candidate, RevisionRef):
-        return Missing(ProofReason.ABSENT_CHECKPOINT)
-    try:
-        return Proven(MeasurementIdentity.from_plan(plan, plan.candidate))
-    except ValueError:
-        return Mismatch(ProofField.PAYLOAD)
-
-
 def _budget_ready(
     state: EvaluationState, context: EvaluationContext, budget: SubmissionBudget | None
 ) -> Verdict[SubmissionBudget | None]:
@@ -223,66 +234,13 @@ def _budget_ready(
         or not latest.failure.retryable
         or (
             observation.accepted
-            and not isinstance(_submission_released(state, context, latest), Proven)
+            and not isinstance(submission_released(state, context, latest), Proven)
         )
     ):
         return Missing(ProofReason.UNRESOLVED)
     if len(budget.receipts) >= min(budget.limit, MAX_SUBMISSIONS_PER_MEASUREMENT):
         return Missing(ProofReason.ABSENT_CHARGE)
     return Proven(budget)
-
-
-def _submission_released(
-    state: EvaluationState, context: EvaluationContext, receipt: PreparedSubmissionReceipt
-) -> Verdict[Observation]:
-    rows = tuple(
-        j
-        for j in (*state.jobs, *state.registered_jobs)
-        if (j.submission_id if isinstance(j, OwnedJob) else j.request_id) == receipt.request_id
-    )
-    if len(rows) != 1:
-        return Missing(ProofReason.ABSENT_RESOURCE)
-    job = rows[0]
-    proof = released_owner(job, context.records.records)
-    if not isinstance(proof, Proven):
-        return proof
-    return (
-        proof
-        if isinstance(_descendants_released(context, job), Proven)
-        else Missing(ProofReason.INCOMPLETE_MANIFEST)
-    )
-
-
-def _descendants_released(
-    context: EvaluationContext, job: OwnedJob | RegisteredOwnedJob
-) -> Verdict[OwnedJob | RegisteredOwnedJob]:
-    pending = list(
-        dict.fromkeys(
-            (*job.children, *(job.observation.descendants if job.observation is not None else ()))
-        )
-    )
-    seen = set()
-    while pending:
-        resource = pending.pop()
-        if resource in seen:
-            continue
-        seen.add(resource)
-        rows = tuple(
-            child
-            for child in context.records.children
-            if child.resource_id == resource and child.scope == job.scope
-        )
-        if len(rows) != 1:
-            return Missing(ProofReason.INCOMPLETE_MANIFEST)
-        child = rows[0]
-        if not isinstance(released_owner(child, context.records.records), Proven):
-            return Missing(ProofReason.UNRESOLVED)
-        pending.extend(
-            resource
-            for mark in child.observation_watermarks
-            for resource in mark.observation.descendants
-        )
-    return Proven(job)
 
 
 def _reused(
@@ -304,7 +262,7 @@ def _reusable_capture(
     plan: MeasurementPlan,
     evidence: EvidenceRef,
 ) -> Verdict[EvidenceRef]:
-    identity = _identity(plan)
+    identity = identity_of(plan)
     if not isinstance(identity, Proven):
         return identity
     jobs = tuple(
@@ -351,7 +309,65 @@ def _reusable_capture(
 def _requested(
     state: EvaluationState, context: EvaluationContext, event: MeasurementRequested
 ) -> AreaChange[EvaluationState]:
-    authority = _current(context, event.scope)
+    """Admit a ``Measure`` decision; an answer core gives at once is addressed to the decision.
+
+    A decision with no request of its own to wait on is answered here (refused, answered from
+    evidence core holds, or from the run that already measured its input), and it completes
+    with that answer, so the receipt says it was answered (`unanswered_measures`).
+    """
+    change = _admitted(state, context, event)
+    results = tuple(
+        item.model_copy(update={"decision_id": event.decision_id})
+        if isinstance(item, MeasurementResult)
+        and item.source_request is None
+        and item.decision_id is None
+        else item
+        for item in change.events
+    )
+    answers = tuple(
+        item
+        for item in results
+        if isinstance(item, MeasurementResult) and item.decision_id == event.decision_id
+    )
+    if not answers:
+        return change
+    status = (
+        CompletionStatus.SUCCEEDED
+        if answers[-1].status == ObservationStatus.SUCCEEDED
+        else CompletionStatus.FAILED
+    )
+    done = DecisionCompleted(decision_id=event.decision_id, status=status)
+    return change.model_copy(update={"events": results, "signals": (*change.signals, done)})
+
+
+def _answered_from_held(
+    state: EvaluationState,
+    context: EvaluationContext,
+    event: MeasurementRequested,
+    plan: MeasurementPlan,
+    identity: MeasurementIdentity,
+) -> AreaChange[EvaluationState] | None:
+    """The answer to ``event`` from what core already holds, or None when it must be measured.
+
+    The input's own run answers a repeat of its baseline; evidence of a profile capture that
+    is still valid answers the capture asked for again.
+    """
+    run = held_input_run(state, event.scope, identity)
+    if run is not None:
+        return AreaChange(state=state, events=(held_answer(state, run, event.decision_id),))
+    reuse = _reused(state, context, event.scope, plan)
+    if not reuse:
+        return None
+    result = MeasurementResult(
+        scope=event.scope, evidence=reuse, status=ObservationStatus.SUCCEEDED
+    )
+    return AreaChange(state=state, events=(result,))
+
+
+def _admitted(
+    state: EvaluationState, context: EvaluationContext, event: MeasurementRequested
+) -> AreaChange[EvaluationState]:
+    authority = current(context, event.scope)
     origin = _origin(context, event)
     resolved = _resolved_plan(context, event.scope, event.plan)
     if (
@@ -359,21 +375,14 @@ def _requested(
         or not isinstance(origin, Proven)
         or not isinstance(resolved, Proven)
     ):
-        return _rejected(state, event.scope)
-    plan = resolved.value
-    identity = _identity(plan)
+        return rejected(state, event.scope)
+    plan = checkpoint_input(context, event.scope, resolved.value)
+    identity = identity_of(plan)
     if not isinstance(identity, Proven):
-        return _rejected(state, event.scope)
-    reuse = _reused(state, context, event.scope, plan)
-    if reuse:
-        return AreaChange(
-            state=state,
-            events=(
-                MeasurementResult(
-                    scope=event.scope, evidence=reuse, status=ObservationStatus.SUCCEEDED
-                ),
-            ),
-        )
+        return rejected(state, event.scope)
+    held = _answered_from_held(state, context, event, plan, identity.value)
+    if held is not None:
+        return held
     # Replayed commands never allocate another ordinal, including changed timing.
     if any(
         isinstance(row.request, SubmitMeasurement)
@@ -381,25 +390,21 @@ def _requested(
         for row in context.records.records
     ):
         return AreaChange(state=state)
-    return _admit(
-        state, context, _Origin(event.scope, origin.value.decision_id), plan, identity.value
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class _Origin:
-    """Who a submission is charged to: the scope and the Measure decision, if any."""
-
-    scope: Scope
-    decision_id: DecisionId | None
-    within: Within | None = None
-    """The agent's limit; None for a Measure decision, whose limit is its wait's."""
+    run = reused_run(state, event.scope, plan, identity.value, moment_of(context.run))
+    reuses = None if run is None else run.submission_id
+    base = base_of(context, event.scope, plan) if event.compared else None
+    origin_of = Origin(event.scope, origin.value.decision_id, reuses=reuses, base=base)
+    change = _admit(state, context, origin_of, plan, identity.value)
+    outbound = next((r for r in change.requests if isinstance(r.request, SubmitMeasurement)), None)
+    if outbound is None or outbound.request.request_id is None:
+        return change
+    return with_base(change, context, origin_of, plan, outbound.request.request_id)
 
 
 def _admit(
     state: EvaluationState,
     context: EvaluationContext,
-    origin: _Origin,
+    origin: Origin,
     plan: MeasurementPlan,
     identity: MeasurementIdentity,
 ) -> AreaChange[EvaluationState]:
@@ -423,8 +428,8 @@ def _admit(
             if budget is not None
             else None
         )
-        return _rejected(state, scope, failure)
-    return _allocate(state, context, origin, plan, budget)
+        return rejected(state, scope, failure)
+    return allocate(state, context, origin, plan, budget)
 
 
 def _agent_requested(
@@ -444,11 +449,16 @@ def _agent_requested(
     """
     if any(call.call_id == event.call_id for call in state.agent_calls):
         return AreaChange(state=state)
-    identity = _identity(event.plan)
+    identity = identity_of(event.plan)
+    facts = _Facts(context.run, context.sessions, context.records, state)
+    requester = _executing_turn(context.sessions, event.scope)
+    permit = _permit_for_turn(facts, requester, live=True)
     rejection: AgentRejection | None = None
-    if context.run.status != RunStatus.RUNNING:
+    if not continues_admitted_work(context.run) and not (
+        context.run.status == RunStatus.DRAINING and permit is not None
+    ):
         rejection = AgentRejection.RUN_STOPPING
-    elif not isinstance(_current(context, event.scope), Proven):
+    elif not isinstance(current(context, event.scope), Proven):
         rejection = AgentRejection.NOT_ADMITTED
     elif not isinstance(identity, Proven):
         rejection = AgentRejection.INVALID_PLAN
@@ -459,9 +469,18 @@ def _agent_requested(
         request_id, deadline_at = repeated
         call = AgentCall.answered(event, request_id, deadline_at, repeat=True)
         return _recorded(AreaChange(state=state), call)
-    change = _admit(
-        state, context, _Origin(event.scope, None, _capped(event)), event.plan, identity.value
+    origin = Origin(
+        event.scope,
+        None,
+        capped(
+            event,
+            deadline_at=None if permit is None else permit.deadline_at,
+            now_at=context.run.now_at,
+        ),
+        base=base_of(context, event.scope, event.plan),
+        requested_by=requester,
     )
+    change = _admit(state, context, origin, event.plan, identity.value)
     outbound = next((r for r in change.requests if isinstance(r.request, SubmitMeasurement)), None)
     if outbound is None or outbound.request.request_id is None:
         refused = AgentCall.refused(event, AgentRejection.NOT_ALLOWED)
@@ -469,13 +488,11 @@ def _agent_requested(
     call = AgentCall.answered(
         event, outbound.request.request_id, _deadline_at(context, outbound), repeat=False
     )
-    return _recorded(change, call)
-
-
-def _capped(event: AgentMeasurementRequested) -> Within:
-    """The agent's limit, no longer than the plan's declared stages and queue allowance."""
-    within = event.within
-    return within.model_copy(update={"limit": min(within.limit, event.plan.time_bound)})
+    based = with_base(change, context, origin, event.plan, outbound.request.request_id)
+    recorded = _recorded(based, call)
+    return recorded.model_copy(
+        update={"state": runaway_noted(recorded.state, context, event.scope)}
+    )
 
 
 def _deadline_at(context: EvaluationContext, outbound: Outbound) -> Seconds:
@@ -542,77 +559,6 @@ def _deadline_of(
     if row is not None and isinstance(row.request, SubmitMeasurement):
         return row.until.at
     return None
-
-
-def _allocate(
-    state: EvaluationState,
-    context: EvaluationContext,
-    origin: _Origin,
-    plan: MeasurementPlan,
-    budget: SubmissionBudget | None,
-) -> AreaChange[EvaluationState]:
-    scope, decision_id = origin.scope, origin.decision_id
-    identity = _identity(plan)
-    authority = _current(context, scope)
-    if not isinstance(identity, Proven) or not isinstance(authority, Proven):
-        return _rejected(state, scope)
-    if budget is None:
-        budget = SubmissionBudget(
-            scope=scope, identity=identity.value, limit=MAX_SUBMISSIONS_PER_MEASUREMENT
-        )
-    # New work is refused once the run's time is over, and a submission needs a positive limit.
-    if not context.run.deadline_at > context.run.now_at or (
-        origin.within is not None and origin.within.limit <= 0
-    ):
-        return _rejected(state, scope)
-    ordinal = len(budget.receipts) + 1
-    key = digest(budget.identity)[:24]
-    identity_id = RequestId(
-        root=f"measurement:{scope.owner.root}:{scope.generation}:{key}:{ordinal}"
-    )
-    request = SubmitMeasurement(
-        request_id=identity_id,
-        scope=scope,
-        admission_id=authority.value,
-        decision_id=decision_id,
-        plan=plan,
-    )
-    updated = budget.model_copy(
-        update={
-            "receipts": (
-                *budget.receipts,
-                PreparedSubmissionReceipt(request_id=identity_id, ordinal=ordinal),
-            )
-        }
-    )
-    budgets = (
-        tuple(updated if b == budget else b for b in state.submission_budgets)
-        if budget in state.submission_budgets
-        else (*state.submission_budgets, updated)
-    )
-    # A measurement decision waits as long as its wait says; an agent's own submission, as
-    # long as the limit parsed from its call says. Neither is a field of the plan.
-    outbound = (
-        inherit(request)
-        if decision_id is not None or origin.within is None
-        else Outbound(request=request, until=origin.within)
-    )
-    return AreaChange(
-        state=state.model_copy(update={"submission_budgets": budgets}), requests=(outbound,)
-    )
-
-
-def _rejected(
-    state: EvaluationState, scope: Scope, failure: MeasurementFailure | None = None
-) -> AreaChange[EvaluationState]:
-    return AreaChange(
-        state=state,
-        events=(
-            MeasurementResult(
-                scope=scope, evidence=(), status=ObservationStatus.REJECTED, failure=failure
-            ),
-        ),
-    )
 
 
 def _reported_to_strategy(context: EvaluationContext, job: OwnedJob | RegisteredOwnedJob) -> bool:
@@ -687,16 +633,44 @@ def _submission_observed(
     change = _submission_receipted(state, context, event)
     proof = _source(context, event.observation)
     if (
-        not _conclusive(event.observation)
+        not conclusive(event.observation)
         or not isinstance(proof, Proven)
         or not isinstance(proof.value.request, SubmitMeasurement)
     ):
         return change
+    # A submission can end without a job to observe (refused at submission), and its end is
+    # what frees a run its comparisons wait on, so they are re-checked here too.
+    change = after_run(change, context, proof.value.request_id)
     scope = proof.value.request.scope
     wake = _deferred_wake(change.state, event, proof.value)
     # A waiting continuation derives and publishes the history itself when it authorizes.
     history = () if wake else _history_signals(change.state, context, scope)
     return change.model_copy(update={"signals": (*change.signals, *history, *wake)})
+
+
+def submission_ended(
+    state: EvaluationState, context: EvaluationContext, event: EvaluationEvent
+) -> AreaChange[EvaluationState]:
+    """Close the budget entry of a submission core ended before it named a job, and re-check.
+
+    No observation will reach the entry (its submission hung, or a restarted host could not
+    find it), so left open it would count its run under way for good: every comparison of its
+    input would stay settling and take no further run. A submission whose job is known ends
+    with that job. The comparisons waiting on its input take the runs they still need
+    (`after_run`).
+    """
+    if not isinstance(event, MeasurementSubmissionEnded):
+        raise ContractError(("event", event.kind), "not a submission's end")
+    if any(job.submission_id == event.request_id for job in state.jobs):
+        return AreaChange(state=state)
+    budgets = tuple(
+        ended_unobserved(budget, event.request_id, event.reason)
+        for budget in state.submission_budgets
+    )
+    if budgets == state.submission_budgets:
+        return AreaChange(state=state)
+    change = AreaChange(state=state.model_copy(update={"submission_budgets": budgets}))
+    return after_run(change, context, event.request_id)
 
 
 def _deferred_wake(
@@ -709,7 +683,7 @@ def _deferred_wake(
     a moment it can proceed. Each wake names one of the continuation's own jobs at its
     current observation, which the continuation handler accepts as its own job event.
     """
-    if not _conclusive(event.observation):
+    if not conclusive(event.observation):
         return ()
     wakes: list[ContinuationJobsChanged] = []
     for continuation in state.continuations:
@@ -759,7 +733,7 @@ def _submission_receipted(
     budget = submission_budget_for(request, state.submission_budgets, context.run.receipts)
     if not isinstance(budget, Proven):
         return AreaChange(state=state)
-    updated = _submission_receipt(budget.value, event, source)
+    updated = submission_receipt(budget.value, event, source)
     if not isinstance(updated, Proven):
         return AreaChange(state=state)
     state = state.model_copy(
@@ -788,65 +762,6 @@ def _resource_taken(state: EvaluationState, observation: Observation, owner: Req
     )
 
 
-def _canonical_failure(
-    observation: Observation, claim: MeasurementFailure | None, *, has_facts: bool
-) -> MeasurementFailure | None:
-    """Restrict the caller's failure claim to what the committed facts allow.
-
-    A classification can only narrow what the canonical observation proves. It never
-    grants retry authority after execution succeeded, never contradicts committed
-    scientific facts, and never exists before a conclusive terminal observation.
-    """
-    if claim is None or not _conclusive(observation):
-        return None
-    if observation.accepted:
-        if observation.status == ObservationStatus.SUCCEEDED:
-            return None
-        if claim is not None and claim.retryable and has_facts:
-            return MeasurementFailure.UNKNOWN
-    return claim
-
-
-def _conclusive(observation: Observation | None) -> bool:
-    return (
-        observation is not None
-        and observation.terminal
-        and observation.status not in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
-    )
-
-
-def _submission_receipt(
-    budget: SubmissionBudget, event: MeasurementSubmissionObserved, source: RequestRecord
-) -> Verdict[SubmissionBudget]:
-    matches = tuple(
-        r
-        for r in budget.receipts
-        if isinstance(r, PreparedSubmissionReceipt) and r.request_id == event.observation.request_id
-    )
-    if len(matches) != 1:
-        return Missing(ProofReason.ABSENT_RECEIPT)
-    receipt = matches[0]
-    history = (receipt.observation,) if receipt.observation is not None else ()
-    proof = fresh_observation(history, event.observation, complete=True)
-    if not isinstance(proof, Proven):
-        return proof
-    if receipt.observation == event.observation or receipt.failure == MeasurementFailure.WORKLOAD:
-        return Missing(ProofReason.UNRESOLVED)
-    updated = receipt.model_copy(
-        update={
-            "observation": event.observation,
-            "failure": _canonical_failure(
-                event.observation, event.failure, has_facts=source.evaluation_result is not None
-            ),
-        }
-    )
-    return Proven(
-        budget.model_copy(
-            update={"receipts": tuple(updated if r == receipt else r for r in budget.receipts)}
-        )
-    )
-
-
 def _submission_job(
     state: EvaluationState,
     context: EvaluationContext,
@@ -862,6 +777,8 @@ def _submission_job(
             submission_id=source.request_id,
             scope=request.scope,
             plan=request.plan,
+            reuses=request.reuses,
+            base=request.base,
             status=ObservationStatus.PENDING,
             # A job nobody has polled is due now. Normally the first JobObserved replaces
             # this; after a restart that lost it (the submit ran, its job observation was
@@ -891,17 +808,17 @@ def _registered_requested(
 ) -> AreaChange[EvaluationState]:
     request = event.request
     proof = operation_for(context.run.receipts, request)
-    current = _current(context, request.scope)
-    if not isinstance(proof, Proven) or not isinstance(current, Proven):
-        return _rejected(state, request.scope)
+    authority = current(context, request.scope)
+    if not isinstance(proof, Proven) or not isinstance(authority, Proven):
+        return rejected(state, request.scope)
     if (
         request.operation.schema_ref.lifecycle != LifecycleClass.OWNED_JOB
         or request.request_id is None
     ):
-        return _rejected(state, request.scope)
+        return rejected(state, request.scope)
     identity = proof.value.registered_measurement
     if event.expected_measurement != identity:
-        return _rejected(state, request.scope)
+        return rejected(state, request.scope)
     existing = tuple(
         j
         for j in state.registered_jobs
@@ -913,13 +830,13 @@ def _registered_requested(
             if len(existing) == 1
             and existing[0].scope == request.scope
             and existing[0].expected_measurement == identity
-            else _rejected(state, request.scope)
+            else rejected(state, request.scope)
         )
     budgets = state.submission_budgets
     if identity is not None:
         matches = tuple(b for b in budgets if b.scope == request.scope and b.identity == identity)
         if matches:
-            return _rejected(state, request.scope)
+            return rejected(state, request.scope)
         budgets = (
             *budgets,
             SubmissionBudget(
@@ -948,7 +865,7 @@ def _registered_requested(
 
 def _job_identity(job: OwnedJob | RegisteredOwnedJob) -> Verdict[MeasurementIdentity]:
     if isinstance(job, OwnedJob):
-        return _identity(job.plan)
+        return identity_of(job.plan)
     return (
         Proven(job.expected_measurement)
         if job.expected_measurement is not None
@@ -1100,10 +1017,7 @@ def _measure_origin(
     request it allocated, so the same scope and request id prove the origin.
     """
     if request.decision_id is None:
-        admitted = any(
-            call.request_id == source.request_id and call.scope == request.scope
-            for call in state.agent_calls
-        )
+        admitted = state.asked_without_decision(source.request_id, request.scope)
         return Proven(None) if admitted else Missing(ProofReason.ABSENT_RECEIPT)
     receipt = accepted_receipt_for(context.run.receipts, request.decision_id, None)
     if not isinstance(receipt, Proven):
@@ -1118,7 +1032,11 @@ def _measure_origin(
     resolved = _resolved_plan(context, request.scope, decision.plan)
     if not isinstance(resolved, Proven):
         return resolved
-    if resolved.value != request.plan:
+    # Core set the measured input at admission from the scope's first checkpoint, if any then.
+    if request.plan not in (
+        resolved.value,
+        checkpoint_input(context, request.scope, resolved.value),
+    ):
         return Mismatch(ProofField.PAYLOAD)
     return Proven(None)
 
@@ -1190,34 +1108,73 @@ def _side_facts(
     return Proven(job)
 
 
+@dataclass(frozen=True, slots=True)
+class _Stored:
+    """What a job's observation added to the ledger."""
+
+    accepted: tuple[EvidenceRef, ...]
+    """The job's records, as the ledger holds them."""
+    ledger: tuple[EvidenceRef, ...]
+    refused: bool
+    """A repeat of a key came with different content."""
+    measured: tuple[EvidenceRef, ...]
+    """The records new to the ledger as the run reported them, so its samples read the run's
+    own readings and not the answer an official record states (`as_answer`)."""
+
+
 def _store_evidence(
     state: EvaluationState,
     job: OwnedJob | RegisteredOwnedJob,
     event: JobObserved | RegisteredJobObserved,
-) -> tuple[tuple[EvidenceRef, ...], tuple[EvidenceRef, ...], bool]:
+    now_at: Seconds,
+) -> _Stored:
     """Accept evidence keyed by (source request, evidence id).
 
     The same EvidenceId from two jobs is two records. A repeat of one key with
     different content is refused, and the caller reports that refusal instead of
-    dropping it silently.
+    dropping it silently. An official job's benchmark record enters the ledger as the
+    measurement's answer (`as_answer`), and a repeat is compared in that form.
     """
     accepted = list(job.evidence)
     ledger = list(state.evidence)
+    measured: list[EvidenceRef] = []
     refused = False
     for evidence in event.evidence:
         verdict = _evidence(job, event, evidence)
-        if not isinstance(verdict, Proven):
+        if not isinstance(verdict, Proven) or not reused_record(state, job, evidence):
             continue
-        incoming = verdict.value
+        reported = verdict.value
+        incoming = (
+            as_answer(state, job, reported, now_at) if isinstance(job, OwnedJob) else reported
+        )
         previous = next((e for e in ledger if e.key == incoming.key), None)
         if previous is None:
             ledger.append(incoming)
             accepted.append(incoming)
-        elif previous != incoming:
+            measured.append(reported)
+        elif previous != incoming and not _same_report(state, job, previous, reported):
             refused = True
         elif incoming not in accepted:
             accepted.append(incoming)
-    return tuple(accepted), tuple(ledger), refused
+            measured.append(reported)
+    return _Stored(tuple(accepted), tuple(ledger), refused, tuple(measured))
+
+
+def _same_report(
+    state: EvaluationState,
+    job: OwnedJob | RegisteredOwnedJob,
+    previous: EvidenceRef,
+    reported: EvidenceRef,
+) -> bool:
+    """Whether ``reported`` repeats the record the ledger holds as ``previous``, as its run read it.
+
+    An official answer whose restating closed (``OwnedJob.answer_until``) keeps the mean it
+    stated then, while `as_answer` would state the mean of every sample now; the run's own
+    reading (`run_reading`) is what a repeat of its report must match.
+    """
+    return isinstance(job, OwnedJob) and (
+        previous.model_copy(update={"reading": run_reading(state, job, previous)}) == reported
+    )
 
 
 def _job_observed(
@@ -1234,7 +1191,16 @@ def _job_observed(
     observation = event.observation
     if observation.resource_id is None:
         return AreaChange(state=state)
-    accepted, ledger, refused = _store_evidence(state, job, event)
+    stored = _store_evidence(state, job, event, context.run.now_at)
+    accepted, ledger, refused, measured = (
+        stored.accepted,
+        stored.ledger,
+        stored.refused,
+        stored.measured,
+    )
+    incomplete = not reused_evidence_complete(
+        state, job, accepted, terminal=event.observation.terminal
+    )
     previous = (
         ObservedJobFacts(
             resource_id=observation.resource_id,
@@ -1261,6 +1227,9 @@ def _job_observed(
             **_next_poll(job, observation, context),
         }
     )
+    collect = _collection(updated, context)
+    if isinstance(updated, OwnedJob):
+        updated = updated.model_copy(update={"collecting": _collecting(updated, context, collect)})
     state = state.model_copy(
         update={
             "jobs": tuple(updated if j == job else j for j in state.jobs)
@@ -1272,24 +1241,33 @@ def _job_observed(
             "evidence": tuple(ledger),
         }
     )
-    claim = _canonical_failure(
+    claim = canonical_failure(
         observation,
         event.failure if isinstance(event, JobObserved) else None,
         has_facts=event.evaluation_result is not None,
     )
-    state = _job_budget(state, context, updated, claim)
+    state = job_budget(state, context, updated, claim, reuse_incomplete=incomplete)
+    ran = record_samples(state, context, updated, measured, observation.observed_at)
+    state, requests = ran.state, ran.requests
     wake = ContinuationJobsChanged(
         resource_id=observation.resource_id, observation=observation, previous=previous
     )
-    requests: tuple[Outbound, ...] = ()
     events: tuple[MeasurementResult | JobQueued, ...] = _queued_notice(updated, job, context)
     source_id = updated.submission_id if isinstance(updated, OwnedJob) else updated.request_id
     reported = _reported_to_strategy(context, job)
-    if _conclusive(observation):
+    if conclusive(observation):
         newly = tuple(e for e in accepted if e not in job.evidence)
         # A refused evidence id is reported as an unclassified failure, never hidden.
-        failure = MeasurementFailure.UNKNOWN if refused else claim
-        if reported and not _conclusive(job.observation):
+        # A reused result short of its source's records says nothing of the candidate, so it
+        # is the machinery's failure and the budget admits one fresh measurement.
+        failure = (
+            MeasurementFailure.UNKNOWN
+            if refused
+            else MeasurementFailure.INFRASTRUCTURE
+            if incomplete
+            else claim
+        )
+        if reported and not conclusive(job.observation):
             events = (
                 *events,
                 MeasurementResult(
@@ -1299,9 +1277,10 @@ def _job_observed(
                     status=observation.status,
                     failure=failure,
                     diagnostic=observation.diagnostic[-MEASUREMENT_DIAGNOSTIC_LIMIT:],
+                    operator_diagnostic=event.operator_diagnostic[-MEASUREMENT_DIAGNOSTIC_LIMIT:],
                 ),
             )
-        elif reported and (newly or refused):
+        elif reported and (newly or refused or incomplete):
             # Late evidence is published once, as the delta, never replayed or dropped.
             events = (
                 *events,
@@ -1312,22 +1291,11 @@ def _job_observed(
                     status=observation.status,
                     failure=failure,
                     diagnostic=observation.diagnostic[-MEASUREMENT_DIAGNOSTIC_LIMIT:],
+                    operator_diagnostic=event.operator_diagnostic[-MEASUREMENT_DIAGNOSTIC_LIMIT:],
                 ),
             )
-        # A cancel stop discards its run's jobs, so it collects nothing from them: a job the
-        # executor holds no record of cannot be collected from, and asking would hold the
-        # run closing for good.
-        if (
-            observation.accepted
-            and not updated.evidence
-            and _cancelling_scope(context) != job.scope
-        ):
-            collect = _job_request(CollectEvidence, updated, context, "evidence")
-            # One collection per job. A collection that yields nothing (a job that failed
-            # before producing evidence) is itself observed as a job event, and asking
-            # again on that event would never end.
-            if not context.records.positions(collect.request_id):
-                requests = (_job_outbound(CollectEvidence, updated, context, "evidence"),)
+        if collect is not None:
+            requests = (*requests, collect)
     closing = _ended(context, job, event)
     return AreaChange(
         state=state,
@@ -1336,8 +1304,55 @@ def _job_observed(
         # history in which this submission is not closed.
         signals=closing or (*_history_unless_awaited(state, context, job, event), wake),
         requests=requests if context.run.status != RunStatus.TERMINAL else (),
-        events=events,
+        # A comparison the run's end settled is told after the run's own result.
+        events=(*events, *ran.events),
     )
+
+
+def _collection(job: OwnedJob | RegisteredOwnedJob, context: EvaluationContext) -> Outbound | None:
+    """The collection of an ended job's evidence to ask for now, if the job needs one.
+
+    A cancel stop discards its run's jobs, so it collects nothing from them: a job the executor
+    holds no record of cannot be collected from, and asking would hold the run closing for
+    good. One collection per job: a collection that yields nothing (a job that failed before
+    producing evidence) is itself observed as a job event, and asking again on that event
+    would never end.
+    """
+    observation = job.observation
+    if (
+        not conclusive(observation)
+        or observation is None
+        or not observation.accepted
+        or job.evidence
+        or _cancelling_scope(context) == job.scope
+    ):
+        return None
+    collect = _job_request(CollectEvidence, job, context, "evidence")
+    if context.records.positions(collect.request_id):
+        return None
+    return _job_outbound(CollectEvidence, job, context, "evidence")
+
+
+def _collecting(
+    job: OwnedJob, context: EvaluationContext, collect: Outbound | None
+) -> RequestId | None:
+    """The collection of ``job``'s evidence still under way, while it may still bring a sample.
+
+    The one asked for now, else the one asked for before while it is open and no evidence came.
+    Only a framework run that succeeded can give a sample (`sample_of`): the evidence of any
+    other changes nothing a comparison waits on, so its end is decided at once.
+    """
+    if (
+        job.evidence
+        or not job.terminal
+        or job.status != ObservationStatus.SUCCEEDED
+        or job.reuses is not None
+    ):
+        return None
+    if collect is not None:
+        return collect.request.request_id
+    held = None if job.collecting is None else context.records.record(job.collecting)
+    return job.collecting if held is not None and _open(held) else None
 
 
 def _queued_notice(
@@ -1383,8 +1398,8 @@ def _ended(
     """
     if (
         not isinstance(job, OwnedJob)
-        or not _conclusive(event.observation)
-        or _conclusive(job.observation)
+        or not conclusive(event.observation)
+        or conclusive(job.observation)
     ):
         return ()
     record = context.records.record(job.submission_id)
@@ -1448,12 +1463,40 @@ def _poll(job: OwnedJob | RegisteredOwnedJob, context: EvaluationContext) -> Out
     if base is None or not context.records.positions(base):
         return outbound
     lapsed = 1
-    while context.records.positions(RequestId(root=f"{base.root}:b{lapsed}")):
+    while context.records.positions(RequestId(root=f"{base.root}{_LAPSED}{lapsed}")):
         lapsed += 1
-    identity = RequestId(root=f"{base.root}:b{lapsed}")
+    identity = RequestId(root=f"{base.root}{_LAPSED}{lapsed}")
     return outbound.model_copy(
         update={"request": outbound.request.model_copy(update={"request_id": identity})}
     )
+
+
+_LAPSED = ":b"
+"""What a poll's name adds to its base, with a count, when an earlier poll took the base."""
+
+
+def poll_family(request_id: RequestId) -> tuple[str, int] | None:
+    """The job prefix and observation sequence a poll of an owned job is named by, else None.
+
+    `_poll` names a poll ``{prefix}:{sequence}``, ``prefix`` naming the job and ``sequence``
+    the observation the poll follows, with ``:b{count}`` added when earlier polls took that
+    name. A job's observation sequence only grows, so a poll of a lower sequence than the
+    job's newest poll is never named again. Any other request id (a continuation's poll,
+    whose id core allocates from its revision) gives None.
+    """
+    root = request_id.root
+    base, lapsed, count = root.rpartition(_LAPSED)
+    if lapsed and count.isdecimal() and count.isascii():
+        root = base
+    prefix, _, sequence = root.rpartition(":")
+    if not (
+        prefix.startswith("measurement:")
+        and prefix.endswith(":observe")
+        and sequence.isdecimal()
+        and sequence.isascii()
+    ):
+        return None
+    return prefix, int(sequence)
 
 
 def _poll_due(
@@ -1501,10 +1544,14 @@ def _wait_lapsed(
     The poll blocked at its bound (the executor never answered in time, or the host was
     down past it) or the job refused its answer. A registered job whose operation ended
     without ever naming a job has nothing to poll: it ends with what that request reported,
-    and its release is proved from that record like any other.
+    and its release is proved from that record like any other. An ended job whose evidence
+    collection ended without reaching it stops collecting, and its run's end is decided then
+    (`after_run`).
     """
 
     def woken[J: OwnedJob | RegisteredOwnedJob](job: J) -> J:
+        if isinstance(job, OwnedJob) and job.collecting == event.request_id:
+            return job.model_copy(update={"collecting": None})
         if _owner_request(job) != event.job or job.wait is None:
             return job
         ended = context.records.record(event.request_id)
@@ -1522,7 +1569,7 @@ def _wait_lapsed(
             }
         )
 
-    return AreaChange(
+    change = AreaChange(
         state=state.model_copy(
             update={
                 "jobs": tuple(woken(job) for job in state.jobs),
@@ -1530,6 +1577,12 @@ def _wait_lapsed(
             }
         )
     )
+    collected = any(
+        job.submission_id == event.job and job.collecting == event.request_id for job in state.jobs
+    )
+    # The collection of an ended job's evidence ended without reaching it: its run gave no
+    # sample, and the comparisons it serves take the runs they still need.
+    return after_run(change, context, event.job) if collected else change
 
 
 def _open(record: RequestRecord) -> bool:
@@ -1537,52 +1590,6 @@ def _open(record: RequestRecord) -> bool:
         RequestPhase.PREPARED,
         RequestPhase.DISPATCHED,
         RequestPhase.RECONCILING,
-    )
-
-
-def _job_budget(
-    state: EvaluationState,
-    context: EvaluationContext,
-    job: OwnedJob | RegisteredOwnedJob,
-    claim: MeasurementFailure | None = None,
-) -> EvaluationState:
-    if job.observation is None:
-        return state
-    source_id = job.submission_id if isinstance(job, OwnedJob) else job.request_id
-    source = context.records.record(source_id)
-    if source is None or not isinstance(
-        source.request, SubmitMeasurement | ExecuteRegisteredOperation
-    ):
-        return state
-    proof = submission_budget_for(source.request, state.submission_budgets, context.run.receipts)
-    if not isinstance(proof, Proven):
-        return state
-    receipt = next(
-        (
-            r
-            for r in proof.value.receipts
-            if isinstance(r, PreparedSubmissionReceipt) and r.request_id == source_id
-        ),
-        None,
-    )
-    updated = _submission_receipt(
-        proof.value,
-        MeasurementSubmissionObserved(
-            observation=job.observation,
-            failure=(receipt.failure if receipt is not None else None) or claim,
-        ),
-        source,
-    )
-    return (
-        state.model_copy(
-            update={
-                "submission_budgets": tuple(
-                    updated.value if b == proof.value else b for b in state.submission_budgets
-                )
-            }
-        )
-        if isinstance(updated, Proven)
-        else state
     )
 
 
@@ -1595,7 +1602,7 @@ def _history_unless_awaited(
     """The history signal, unless the continuation this job's end wakes publishes it itself."""
     if (
         job.resource_id is not None
-        and _conclusive(event.observation)
+        and conclusive(event.observation)
         and _awaited(state, job.resource_id)
     ):
         return ()
@@ -1663,14 +1670,11 @@ def _job_request(
     # stop, a drain and a late observation all name the submission's decision. Left to the
     # asker, two events asking for one step at one instant stamp it differently and the one
     # request id would carry two payloads.
-    inherited = (
-        canonical.request if canonical is not None and model is not CollectEvidence else None
-    )
     return model(
         request_id=RequestId(root=f"{_step_prefix(job, action)}{suffix}"),
         scope=job.scope,
         admission_id=canonical.request.admission_id if canonical is not None else None,
-        decision_id=inherited.decision_id if inherited is not None else None,
+        decision_id=canonical.request.decision_id if canonical is not None else None,
         resource_id=job.resource_id,
     )
 
@@ -1700,10 +1704,15 @@ def _job_outbound(
     context: EvaluationContext,
     action: str,
 ) -> Outbound:
-    """A job request with the bound its kind gets: cancellation or reconciliation."""
+    """A job request with the bound its kind gets: cancellation or reconciliation.
+
+    A step that names the submission's decision keeps it, an agent's ``None`` included: any
+    signal of a step may ask for it, and the asker's decision is not the job's.
+    """
     limits = context.run.limits
     bound = limits.cancellation_bound if model is CancelOwnedJob else limits.reconciliation_bound
-    return within(_job_request(model, job, context, action), bound)
+    outbound = within(_job_request(model, job, context, action), bound)
+    return outbound.model_copy(update={"attribution": Attribution.OWN})
 
 
 def _terminate(
@@ -1807,7 +1816,8 @@ def _cancelling_scope(context: EvaluationContext) -> Scope | None:
     """
     match committed_stop(context.run):
         case Proven(value=stop) if context.run.status == RunStatus.CLOSING and (
-            stop.mode == "cancel" or context.run.now_at >= context.run.deadline_at
+            stop_mode(context.run) is StopMode.CANCEL
+            or context.run.now_at >= context.run.deadline_at
         ):
             return stop.scope
         case _:
@@ -1831,7 +1841,9 @@ def cancel_settled(records: RecordsState, run: RunState, resource: ResourceId) -
     end, as it did before any retry.
     """
     cancels = tuple(
-        row for row in records.about_resource(resource) if isinstance(row.request, CancelOwnedJob)
+        row
+        for row in records.about_resource(resource)
+        if isinstance(row.request, CancelOwnedJob) and not row.request.for_park
     )
     blocked = sum(
         1 for row in cancels if row.phase == RequestPhase.BLOCKED or row.failure is not None

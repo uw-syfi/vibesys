@@ -1,27 +1,29 @@
-"""The saved runtime record's shape is pinned to the versions a load checks.
+"""The saved runtime record's shape is pinned by a readable snapshot, with the versions a load checks.
 
 Production saves a ``RuntimeRecord[FlowState]``: the envelope plus the runtime's own fields
 (publications, cursors, owner events, decisions, wakes). A load refuses a record whose
-``RUNTIME_SCHEMA_VERSION`` or whose envelope's ``ENVELOPE_SCHEMA_VERSION`` differs, so the
-whole record's shape is pinned to the pair: a change anywhere in it, the core events it
-queues included, without a new version of either fails here.
+``RUNTIME_SCHEMA_VERSION`` differs and migrates an older envelope, so the snapshot's version is
+the pair. A shape change fails here until the snapshot is regenerated, and
+``scripts/check_persisted_schema_compat.py`` then holds it against the base branch's snapshot:
+under the same pair, every record saved before it must still decode.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from vs_core.api import ENVELOPE_SCHEMA_VERSION, FlowState
-from vs_core.api.testing import assert_schema_pinned
+from vs_core.api.testing import assert_schema_snapshot, schema_snapshot
 from vs_runtime.api.core import RUNTIME_SCHEMA_VERSION, RuntimeRecord
 
-_VERSIONS = Path(__file__).parent / "runtime_record_schema_versions.txt"
+_GOLDEN = Path(__file__).parent / "runtime_record.persisted-schema.txt"
 
 
-def test_the_saved_record_shape_is_the_one_pinned_for_its_versions() -> None:
+def test_the_saved_record_shape_is_the_one_its_snapshot_pins() -> None:
     schema = RuntimeRecord[FlowState].model_json_schema()
-    assert_schema_pinned(
-        _VERSIONS.read_text(encoding="utf-8"),
-        (ENVELOPE_SCHEMA_VERSION, RUNTIME_SCHEMA_VERSION),
-        schema,
-    )
+    version = (ENVELOPE_SCHEMA_VERSION, RUNTIME_SCHEMA_VERSION)
+    expected = schema_snapshot("RuntimeRecord[FlowState]", version, schema)
+    if os.environ.get("UPDATE_GOLDEN") == "1":
+        _GOLDEN.write_text(expected, encoding="utf-8")
+    assert_schema_snapshot(_GOLDEN.read_text(encoding="utf-8"), expected)

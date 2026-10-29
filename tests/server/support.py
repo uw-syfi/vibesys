@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tests.support.real_git import REAL_GIT
@@ -23,11 +24,11 @@ from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
 )
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
-from vs_core.api import StopMode
-from vs_project.api import OrchestrationDescriptor
+from vibesys.run.integration import CoreRunControlEvents
+from vs_project.api import OperatorDialer, OperatorKey, OrchestrationDescriptor
 from vs_runtime.api.infrastructure import (
+    ChannelRunControl,
     RunControlChannel,
-    RunControlTransition,
     create_run_control_channel,
 )
 from vs_sim.api import OsThreads, Platform
@@ -42,11 +43,16 @@ from vs_sim.api.testing import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from server.chat.factory import ChatAgentBuilder
+    from server.host_api import (
+        FailureReason,
+        PauseCause,
+        RunEndingFact,
+        RunStatus,
+        StartupFact,
+    )
     from server.run_attachment import AgentSelection
-    from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunRecord, RunView
     from vs_project.api import Project
     from vs_sim.api import Condition, Network, ProcessSpec, Threads, Worker
@@ -54,47 +60,57 @@ if TYPE_CHECKING:
 
 REQUEST_TIME = datetime(2026, 1, 1, tzinfo=UTC)
 """The stamp a test gives a request or response it builds."""
+CONTROL_KEY = OperatorKey("5" * 64)
+"""The operator key every test server demands and every test client presents."""
+ANY_SOCKET_ROOT = Path("/")
+"""A dialer root that contains every socket, for tests not about where the socket lives.
+
+``libs/vs-project/tests/test_operator_key.py`` pins that a dialer refuses a socket outside
+its root; the transport and lifecycle tests here bind theirs in temporary directories.
+"""
 
 
-class _ControlBridge:
-    """Adapt a `RunControlChannel` to the `vibesys.api.RunControl` shape.
-
-    Mirrors what `vibesys.api._session._LocalRunSession`'s `steer`/`pause`/
-    `resume`/`stop` methods do in production: translate the `RunControl`
-    protocol's names onto the channel's writer-side methods. The control slot
-    installs this so `RunApi` can route exactly as it would to a live session.
-    """
-
-    def __init__(self, channel: RunControlChannel) -> None:
-        self._channel = channel
-
-    def steer(self, text: str) -> None:
-        self._channel.queue_steer(text)
-
-    def pause(self) -> None:
-        self._channel.request_pause()
-
-    def resume(self) -> None:
-        self._channel.resume()
-
-    def resume_with_fallback(self) -> None:
-        self._channel.resume_with_fallback()
-
-    def stop(self) -> None:
-        self._channel.request_stop(StopMode.DRAIN)
+def operator_dialer(network: Network) -> OperatorDialer:
+    """The operator's dialer over ``network``: it presents :data:`CONTROL_KEY` anywhere."""
+    return OperatorDialer(network, CONTROL_KEY, root=ANY_SOCKET_ROOT)
 
 
-def _record_control_transition(
-    events: CoreEventJournal, transition: RunControlTransition
-) -> object:
-    """Adapt runtime transitions to the core journal in test composition."""
-    return events.emit(
-        CoreEventType(transition.kind.value),
-        transition.text,
-        agent_kind=transition.agent_kind,
-        round_label=transition.round_label,
-        execution_id=transition.execution_id,
-    )
+class RecordingObserver:
+    """A ``ServerLifecycleObserver`` that notes each fact it is told, in order, in ``facts``."""
+
+    def __init__(self) -> None:
+        """Start with no facts."""
+        self.facts: list[object] = []
+
+    def resolved(self, *, project_root: Path, task: str) -> None:
+        """The invocation resolved; not noted."""
+        del project_root, task
+
+    def listening(self) -> None:
+        """Note ``"listening"``."""
+        self.facts.append("listening")
+
+    def observe(
+        self,
+        *,
+        status: RunStatus | None = None,
+        failure: FailureReason | None = None,
+        startup: StartupFact | None = None,
+    ) -> None:
+        """Note the one fact given."""
+        self.facts.append(status or failure or startup)
+
+    def pausing_for(self, cause: PauseCause) -> None:
+        """Note the pause's cause."""
+        self.facts.append(cause)
+
+    def ending(self, fact: RunEndingFact) -> None:
+        """Note the run's ending."""
+        self.facts.append(fact)
+
+    def terminated(self) -> None:
+        """Note ``"terminated"``."""
+        self.facts.append("terminated")
 
 
 def agent_descriptor(
@@ -107,7 +123,6 @@ def agent_descriptor(
         max_rounds=3,
         max_retries_per_round=1,
         judge_every=1,
-        official_eval_every=1,
         metric_space=metric_space or MetricSpace(),
     )
     return OrchestrationDescriptor(
@@ -140,6 +155,7 @@ class ServerParts:
     api: RunApi
     core_events: CoreEventJournal
     control: RunControlChannel
+    operator_control: ChannelRunControl
     clock: ManualClock
 
     def start_execution(
@@ -208,7 +224,6 @@ def build_server_parts(
     log_dir: Path | None = None,
     *,
     record: RunRecord | None = None,
-    tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
     chat_agent_builder: ChatAgentBuilder | None = None,
     threads: Threads | None = None,
 ) -> ServerParts:
@@ -247,10 +262,8 @@ def build_server_parts(
     chat.set_fallback_answer(RunInspector(integration).answer)
     core_events = CoreEventJournal(clock=clock, threads=OsThreads())
     core_events.subscribe(integration.project_event)
-    control = create_run_control_channel(
-        lambda transition: _record_control_transition(core_events, transition), threads=OsThreads()
-    )
-    control_bridge = _ControlBridge(control)
+    control = create_run_control_channel(CoreRunControlEvents(core_events), threads=OsThreads())
+    control_bridge = ChannelRunControl(control, threads)
     controls = RunControlSlot(condition)
     controls.install(control_bridge)
     api = RunApi(
@@ -262,7 +275,6 @@ def build_server_parts(
         integration,
         controls=controls,
         clock=clock,
-        tui_defaults=tui_defaults,
         threads=threads,
     )
     parts = ServerParts(
@@ -275,6 +287,7 @@ def build_server_parts(
         api=api,
         core_events=core_events,
         control=control,
+        operator_control=control_bridge,
         clock=clock,
     )
     if log_dir is not None:

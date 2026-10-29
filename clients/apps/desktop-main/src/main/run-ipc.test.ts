@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import type {RelayPort} from '@vibesys/feature-run-control/main';
-import {APP_ENTRY_URL} from './app-assets.js';
+import {SHELL_URL} from './app-assets.js';
 import {
   type PendingRunPort,
   type RunConnectEvent,
@@ -129,24 +129,24 @@ function expectAdmission(
 }
 
 describe('RunIpcRegistry', () => {
-  test('admits only the current sender at the exact run resource', () => {
+  test('admits only the current sender at the shell page', () => {
     const ipc = new FakeRunIpc();
     const refused: string[] = [];
-    const registry = new RunIpcRegistry(ipc, APP_ENTRY_URL, message => refused.push(message));
+    const registry = new RunIpcRegistry(ipc, SHELL_URL, message => refused.push(message));
     const page = new FakePage(41);
     registry.register(page);
 
     const pages = [
-      {url: APP_ENTRY_URL, allowed: true},
-      {url: `${APP_ENTRY_URL}?source=launch`, allowed: true},
-      {url: `${APP_ENTRY_URL}#run`, allowed: true},
+      {url: SHELL_URL, allowed: true},
+      {url: `${SHELL_URL}?source=launch`, allowed: true},
+      {url: `${SHELL_URL}#run`, allowed: true},
       {url: 'app://vibesys/welcome.html', allowed: false},
-      {url: 'app://vibesys/desktop.html-preview.html', allowed: false},
-      {url: 'app://vibesys/desktop.html/child', allowed: false},
-      {url: 'app://other/desktop.html', allowed: false},
-      {url: 'app://user@vibesys/desktop.html', allowed: false},
-      {url: 'app://vibesys:443/desktop.html', allowed: false},
-      {url: 'https://vibesys/desktop.html', allowed: false},
+      {url: 'app://vibesys/shell.html-preview.html', allowed: false},
+      {url: 'app://vibesys/shell.html/child', allowed: false},
+      {url: 'app://other/shell.html', allowed: false},
+      {url: 'app://user@vibesys/shell.html', allowed: false},
+      {url: 'app://vibesys:443/shell.html', allowed: false},
+      {url: 'https://vibesys/shell.html', allowed: false},
       {url: 'not a url', allowed: false},
       {url: null, allowed: false},
     ] as const;
@@ -166,7 +166,7 @@ describe('RunIpcRegistry', () => {
     page.currentId = null;
     const detachedPort = new FakePendingRunPort();
     const connectionsBefore = page.connected.length;
-    ipc.request({port: detachedPort, senderId: 41, senderUrl: APP_ENTRY_URL});
+    ipc.request({port: detachedPort, senderId: 41, senderUrl: SHELL_URL});
     expect(detachedPort.starts).toBe(0);
     expect(detachedPort.closes).toBe(1);
     expect(page.connected).toHaveLength(connectionsBefore);
@@ -178,11 +178,11 @@ describe('RunIpcRegistry', () => {
   test('ignores a connection event with no transferred port', () => {
     const ipc = new FakeRunIpc();
     const refused: string[] = [];
-    const registry = new RunIpcRegistry(ipc, APP_ENTRY_URL, message => refused.push(message));
+    const registry = new RunIpcRegistry(ipc, SHELL_URL, message => refused.push(message));
     const page = new FakePage(41);
     registry.register(page);
 
-    ipc.request({port: null, senderId: 41, senderUrl: APP_ENTRY_URL});
+    ipc.request({port: null, senderId: 41, senderUrl: SHELL_URL});
 
     expect(page.connected).toEqual([]);
     expect(refused).toEqual([]);
@@ -191,14 +191,14 @@ describe('RunIpcRegistry', () => {
   test('regression: a second window never steals or closes a port the first window owns', () => {
     const ipc = new FakeRunIpc();
     const refused: string[] = [];
-    const registry = new RunIpcRegistry(ipc, APP_ENTRY_URL, message => refused.push(message));
+    const registry = new RunIpcRegistry(ipc, SHELL_URL, message => refused.push(message));
     const first = new FakePage(41);
     const second = new FakePage(42);
     registry.register(first);
     registry.register(second);
 
     const portForFirst = new FakePendingRunPort();
-    ipc.request({port: portForFirst, senderId: 41, senderUrl: APP_ENTRY_URL});
+    ipc.request({port: portForFirst, senderId: 41, senderUrl: SHELL_URL});
     expect(portForFirst.starts).toBe(1);
     expect(portForFirst.closes).toBe(0);
     expect(first.connected).toHaveLength(1);
@@ -209,7 +209,7 @@ describe('RunIpcRegistry', () => {
     if (firstRelay === undefined) throw new Error('the first page did not receive a relay');
 
     const portForSecond = new FakePendingRunPort();
-    ipc.request({port: portForSecond, senderId: 42, senderUrl: APP_ENTRY_URL});
+    ipc.request({port: portForSecond, senderId: 42, senderUrl: SHELL_URL});
     expect(portForSecond.starts).toBe(1);
     expect(portForSecond.closes).toBe(0);
     expect(second.connected).toHaveLength(1);
@@ -221,12 +221,12 @@ describe('RunIpcRegistry', () => {
   test('a port neither registered window claims is refused and closed exactly once', () => {
     const ipc = new FakeRunIpc();
     const refused: string[] = [];
-    const registry = new RunIpcRegistry(ipc, APP_ENTRY_URL, message => refused.push(message));
+    const registry = new RunIpcRegistry(ipc, SHELL_URL, message => refused.push(message));
     registry.register(new FakePage(41));
     registry.register(new FakePage(42));
 
     const port = new FakePendingRunPort();
-    ipc.request({port, senderId: 99, senderUrl: APP_ENTRY_URL});
+    ipc.request({port, senderId: 99, senderUrl: SHELL_URL});
 
     expect(port.starts).toBe(0);
     expect(port.closes).toBe(1);
@@ -235,13 +235,13 @@ describe('RunIpcRegistry', () => {
 
   test('withdrawing a registration stops it from competing for later connects', () => {
     const ipc = new FakeRunIpc();
-    const registry = new RunIpcRegistry(ipc, APP_ENTRY_URL, () => {});
+    const registry = new RunIpcRegistry(ipc, SHELL_URL, () => {});
     const page = new FakePage(41);
     const unregister = registry.register(page);
     unregister();
 
     const port = new FakePendingRunPort();
-    ipc.request({port, senderId: 41, senderUrl: APP_ENTRY_URL});
+    ipc.request({port, senderId: 41, senderUrl: SHELL_URL});
 
     expect(port.starts).toBe(0);
     expect(port.closes).toBe(1);
@@ -252,7 +252,7 @@ describe('RunIpcRegistry', () => {
     const ipc = new FakeRunIpc();
     const messages: unknown[] = [];
     let closes = 0;
-    const registry = new RunIpcRegistry(ipc, APP_ENTRY_URL, () => {});
+    const registry = new RunIpcRegistry(ipc, SHELL_URL, () => {});
     registry.register({
       currentSenderId: () => 41,
       connect: port => {
@@ -265,7 +265,7 @@ describe('RunIpcRegistry', () => {
     });
     const port = new FakePendingRunPort([{type: 'queued'}, CLOSED]);
 
-    ipc.request({port, senderId: 41, senderUrl: APP_ENTRY_URL});
+    ipc.request({port, senderId: 41, senderUrl: SHELL_URL});
 
     expect(messages).toEqual([{type: 'queued'}]);
     expect(closes).toBe(1);
@@ -300,11 +300,14 @@ describe('RunIpcRegistry', () => {
     const ipc = new FakeRunIpc();
     const failures: string[] = [];
     const owner = new AbortController();
-    const registry = new RunIpcRegistry(ipc, APP_ENTRY_URL, failure => failures.push(failure));
-    registry.register({currentSenderId: () => 41, connect: port => connect(port, owner)});
+    const registry = new RunIpcRegistry(ipc, SHELL_URL, failure => failures.push(failure));
+    registry.register({
+      currentSenderId: () => 41,
+      connect: port => connect(port, owner),
+    });
     const port = makePort();
 
-    expect(() => ipc.request({port, senderId: 41, senderUrl: APP_ENTRY_URL})).not.toThrow();
+    expect(() => ipc.request({port, senderId: 41, senderUrl: SHELL_URL})).not.toThrow();
 
     expect(port.starts).toBe(expectedStarts);
     expect(port.closes).toBe(1);
@@ -315,11 +318,11 @@ describe('RunIpcRegistry', () => {
 
   test('does not start a port its connection owner rejected', () => {
     const ipc = new FakeRunIpc();
-    const registry = new RunIpcRegistry(ipc, APP_ENTRY_URL, () => {});
+    const registry = new RunIpcRegistry(ipc, SHELL_URL, () => {});
     registry.register({currentSenderId: () => 41, connect: port => port.close()});
     const port = new FakePendingRunPort();
 
-    ipc.request({port, senderId: 41, senderUrl: APP_ENTRY_URL});
+    ipc.request({port, senderId: 41, senderUrl: SHELL_URL});
 
     expect(port.starts).toBe(0);
     expect(port.closes).toBe(1);
@@ -333,7 +336,7 @@ describe('RunIpcRegistry', () => {
   }) => {
     const ipc = new FakeRunIpc();
     let ownerCloses = 0;
-    const registry = new RunIpcRegistry(ipc, APP_ENTRY_URL, () => {});
+    const registry = new RunIpcRegistry(ipc, SHELL_URL, () => {});
     registry.register({
       currentSenderId: () => 41,
       connect: port => {
@@ -346,7 +349,7 @@ describe('RunIpcRegistry', () => {
     });
     const port = new FakePendingRunPort([], null, notification);
 
-    ipc.request({port, senderId: 41, senderUrl: APP_ENTRY_URL});
+    ipc.request({port, senderId: 41, senderUrl: SHELL_URL});
     port.flushDeferredClose();
 
     expect(ownerCloses).toBe(0);

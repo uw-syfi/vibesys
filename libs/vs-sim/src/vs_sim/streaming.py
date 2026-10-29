@@ -12,7 +12,7 @@ import subprocess
 import threading
 from typing import IO, TYPE_CHECKING, Protocol
 
-from vs_sim.output import DISCARD, OutputStream
+from vs_sim.output import OutputStream
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -32,7 +32,7 @@ class StreamingCommand(Protocol):
         *,
         cwd: Path,
         timeout_seconds: float,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> subprocess.CompletedProcess[str]:
         """Run ``argv`` with no input and no shell, and return what it printed.
 
@@ -61,7 +61,7 @@ class SubprocessStreamingCommand:
         *,
         cwd: Path,
         timeout_seconds: float,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> subprocess.CompletedProcess[str]:
         """Run ``argv``; undecodable bytes are replaced."""
         command = tuple(argv)

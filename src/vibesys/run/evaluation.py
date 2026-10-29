@@ -17,12 +17,14 @@ from vibesys.events import (
     SubprocessOutputData,
 )
 from vs_core.api import EvidenceKind
+from vs_redaction.api import redact_diagnostic_tail
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
     BenchmarkEvaluation,
     BenchmarkFailureKind,
     BenchmarkObjective,
+    BuildEvaluation,
     Evaluation,
     LocalValidationEvaluation,
     MetricDirection,
@@ -38,10 +40,10 @@ from vs_runtime.api.infrastructure import (
     TrustedAccuracyResult,
     TrustedBenchmarkContract,
     TrustedBenchmarkResult,
+    TrustedBuild,
     TrustedEvaluationPlan,
     ValidationRecipe,
 )
-from vs_sim.api import DISCARD
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -50,7 +52,6 @@ if TYPE_CHECKING:
     from vibesys.run.contracts import RunRequest
     from vs_runtime.api import Workspace
     from vs_runtime.api.infrastructure import (
-        RunEnvironmentSession,
         WorkspaceRuntime,
     )
     from vs_sim.api import OutputSink
@@ -62,13 +63,16 @@ GATE_FEEDBACK_TAIL_CHARS = 4000
 
 def trusted_evaluation_plan(
     bundle: InputBundle,
-    session: RunEnvironmentSession,
     *,
+    accuracy_command: str | None,
+    benchmark_command: str | None,
+    framework_setup_timeout_seconds: int,
     candidate_startup_causes: tuple[str, ...],
 ) -> TrustedEvaluationPlan:
     """Lower task and environment configuration into runtime execution facts.
 
-    ``candidate_startup_causes`` are the run's domain's log patterns for a candidate that
+    The commands and the setup bound are the run environment's (``session.view``) or, for work
+    outside a run, the ones its own layout gives. ``candidate_startup_causes`` are the run's domain's log patterns for a candidate that
     broke its own server; the wiring passes them in, so this module names no domain.
     """
     scalar = bundle.benchmark_result
@@ -80,12 +84,22 @@ def trusted_evaluation_plan(
         if scalar is not None
         else (ProtocolBenchmarkContract() if bundle.benchmark_result_protocol is not None else None)
     )
+    build = bundle.manifest.build
     return TrustedEvaluationPlan(
-        accuracy_command=session.view.paths.accuracy_command,
+        build=(
+            None
+            if build is None
+            else TrustedBuild(
+                command=shlex.join(build.command),
+                timeout_seconds=build.timeout_seconds,
+                outputs=bundle.candidate_outputs,
+            )
+        ),
+        accuracy_command=accuracy_command,
         accuracy_timeout_seconds=bundle.manifest.accuracy.timeout_seconds,
-        benchmark_command=session.view.paths.benchmark_command,
+        benchmark_command=benchmark_command,
         benchmark_timeout_seconds=bundle.manifest.benchmark.timeout_seconds,
-        framework_setup_timeout_seconds=session.view.framework_setup_timeout_seconds,
+        framework_setup_timeout_seconds=framework_setup_timeout_seconds,
         profile_command=(
             shlex.join(bundle.profile_command) if bundle.profile_command is not None else None
         ),
@@ -94,6 +108,7 @@ def trusted_evaluation_plan(
         ),
         benchmark_contract=contract,
         candidate_startup_causes=candidate_startup_causes,
+        unread_paths=() if bundle.manifest.workspace is None else bundle.manifest.workspace.unread,
         accuracy_gated=(
             (EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK)
             if bundle.manifest.benchmark.requires_accuracy
@@ -163,14 +178,26 @@ class CoreLocalValidationEvents:
 
     def finished(self, result: FrameworkValidationResult) -> None:
         """Publish one ``GATE_FINISHED`` for a validation recipe's settled result."""
-        failure = None if result.passed else (result.error or result.output or "unknown failure")
+        failure = (
+            None
+            if result.passed
+            else result.operator_error
+            if result.operator_error is not None
+            else result.operator_output
+            if result.operator_output is not None
+            else result.error or result.output or "unknown failure"
+        )
         emit_gate_finished(
             self._events,
             GateFinishedData(
                 gate=GateKind.VALIDATION,
                 recipe=result.recipe.name,
                 reused=result.reused,
-                output_tail=None if failure is None else failure[-GATE_LOG_TAIL_CHARS:],
+                output_tail=(
+                    None
+                    if failure is None
+                    else redact_diagnostic_tail(failure, max_chars=GATE_LOG_TAIL_CHARS)
+                ),
                 round_label=self._round_label,
             ),
             passed=result.passed,
@@ -248,12 +275,46 @@ class _EvaluationAdapter:
         self._runtime_evaluation.spec(workspace)
         return workspace
 
+    async def build(self, workspace: Workspace, *, output: OutputSink) -> BuildEvaluation:
+        """Build the candidate's commit confined, or reuse its verified build.
+
+        Its gate events come from the measurement's stage events, as every stage's do.
+        """
+        live = self._live_workspace(workspace)
+        if self._request.agent_backend == "stub":
+            return BuildEvaluation(executed=False)
+        run = await self._runtime_evaluation.build(live, output=output)
+        result = run.result
+        if run.passed:
+            return BuildEvaluation(
+                executed=result is not None and result.executed, reused=run.reused
+            )
+        if run.missing_output is not None:
+            feedback = f"Candidate build failed: {run.missing_output}."
+            return BuildEvaluation(
+                executed=True,
+                feedback=feedback,
+                operator_feedback=redact_diagnostic_tail(
+                    feedback, max_chars=GATE_FEEDBACK_TAIL_CHARS
+                ),
+                failure_kind=BenchmarkFailureKind.WORKLOAD,
+            )
+        if result is None or result.failure_kind is None:
+            message = "runtime build reported a failure without a build result"
+            raise RuntimeContractError(message)
+        return BuildEvaluation(
+            executed=result.executed,
+            feedback=(result.failure or "")[-GATE_FEEDBACK_TAIL_CHARS:],
+            operator_feedback=(result.operator_failure or "")[-GATE_FEEDBACK_TAIL_CHARS:],
+            failure_kind=result.failure_kind,
+        )
+
     async def accuracy(
         self,
         workspace: Workspace,
         *,
         reuse: AccuracyReceipt | None = None,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> AccuracyEvaluation:
         """Run or explicitly reuse trusted accuracy for one candidate."""
         live = self._live_workspace(workspace)
@@ -265,6 +326,7 @@ class _EvaluationAdapter:
                     self._run_id,
                     live,
                     reuse=reuse,
+                    output=output,
                 )
             except asyncio.CancelledError:
                 self._finish_gate_error(GateKind.ACCURACY, "evaluation cancelled")
@@ -294,16 +356,17 @@ class _EvaluationAdapter:
                 output=output,
             )
             result = self._require_accuracy_result(run.result)
-            self._log_provisioning(result.provisioned_volumes, result.failure)
+            self._log_provisioning(result.provisioned_volumes, result.operator_failure)
             self._publish_streams(
-                result.stdout,
-                result.stderr,
+                result.operator_stdout,
+                result.operator_stderr,
                 f"evaluation-accuracy-{next(self._identifiers)}",
                 "accuracy_checker",
             )
             evaluation = AccuracyEvaluation(
                 executed=result.executed,
                 feedback=self._accuracy_feedback(result),
+                operator_feedback=self._operator_accuracy_feedback(result),
                 failure_kind=result.failure_kind,
                 receipt=run.receipt if result.passed else None,
             )
@@ -321,7 +384,7 @@ class _EvaluationAdapter:
         workspace: Workspace,
         *,
         objectives: tuple[BenchmarkObjective, ...] = (),
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> BenchmarkEvaluation:
         """Run the benchmark and apply policy-selected headline semantics."""
         self._validate_objectives(objectives)
@@ -337,15 +400,15 @@ class _EvaluationAdapter:
                 output=output,
             )
             result = run.result
-            self._log_provisioning(result.provisioned_volumes, result.failure)
+            self._log_provisioning(result.provisioned_volumes, result.operator_failure)
             evaluation = self._interpret_benchmark(
                 result,
                 objectives,
                 run.contract,
             )
             self._publish_streams(
-                result.stdout,
-                result.stderr,
+                result.operator_stdout,
+                result.operator_stderr,
                 f"evaluation-benchmark-{next(self._identifiers)}",
                 "benchmark",
             )
@@ -382,7 +445,9 @@ class _EvaluationAdapter:
             self._events,
             GateFinishedData(
                 gate=GateKind.ACCURACY,
-                output_tail=(result.output[-GATE_LOG_TAIL_CHARS:] if not result.passed else None),
+                output_tail=(
+                    result.operator_output[-GATE_LOG_TAIL_CHARS:] if not result.passed else None
+                ),
             ),
             passed=result.passed,
         )
@@ -410,7 +475,9 @@ class _EvaluationAdapter:
                 unit=(evaluation.metric_unit or evaluation.metric_name)
                 if result.passed and evaluation.metric_name is not None
                 else None,
-                output_tail=(result.output[-GATE_LOG_TAIL_CHARS:] if not result.passed else None),
+                output_tail=(
+                    result.operator_output[-GATE_LOG_TAIL_CHARS:] if not result.passed else None
+                ),
             ),
             passed=result.passed,
         )
@@ -418,7 +485,10 @@ class _EvaluationAdapter:
     def _finish_gate_error(self, gate: GateKind, output: str) -> None:
         emit_gate_finished(
             self._events,
-            GateFinishedData(gate=gate, output_tail=output[-GATE_LOG_TAIL_CHARS:]),
+            GateFinishedData(
+                gate=gate,
+                output_tail=redact_diagnostic_tail(output, max_chars=GATE_LOG_TAIL_CHARS),
+            ),
             passed=False,
         )
 
@@ -455,6 +525,19 @@ class _EvaluationAdapter:
         return f"Framework accuracy gate failed.\n{result.output[-GATE_FEEDBACK_TAIL_CHARS:]}"
 
     @staticmethod
+    def _operator_accuracy_feedback(result: TrustedAccuracyResult) -> str | None:
+        """Return the independently safe operator projection of accuracy feedback."""
+        if result.passed:
+            return None
+        if result.operator_failure is not None and result.operator_failure.startswith(
+            "Model-weight request"
+        ):
+            return result.operator_failure[-GATE_FEEDBACK_TAIL_CHARS:]
+        return (
+            f"Framework accuracy gate failed.\n{result.operator_output[-GATE_FEEDBACK_TAIL_CHARS:]}"
+        )
+
+    @staticmethod
     def _interpret_benchmark(
         result: TrustedBenchmarkResult,
         objectives: tuple[BenchmarkObjective, ...],
@@ -470,11 +553,28 @@ class _EvaluationAdapter:
                 else result.failure_reason
                 or (f"Framework benchmark failed.\n{result.output[-GATE_FEEDBACK_TAIL_CHARS:]}")
             )
+            if not result.executed or provisioning_failure:
+                operator_feedback = (
+                    result.operator_failure_reason
+                    if result.operator_failure_reason is not None
+                    else result.operator_failure
+                )
+            else:
+                operator_feedback = (
+                    result.operator_failure_reason
+                    if result.operator_failure_reason is not None
+                    else (
+                        "Framework benchmark failed.\n"
+                        f"{result.operator_output[-GATE_FEEDBACK_TAIL_CHARS:]}"
+                    )
+                )
             return BenchmarkEvaluation(
                 executed=result.executed,
                 feedback=feedback,
+                operator_feedback=operator_feedback,
                 failure_kind=result.failure_kind,
                 partial_measurement=result.partial_measurement,
+                unmet_requirement=result.unmet_requirement,
             )
         if result.row is None:
             return BenchmarkEvaluation(executed=result.executed)
@@ -492,6 +592,10 @@ class _EvaluationAdapter:
             return BenchmarkEvaluation(
                 executed=result.executed,
                 feedback=feedback,
+                operator_feedback=redact_diagnostic_tail(
+                    feedback,
+                    max_chars=GATE_FEEDBACK_TAIL_CHARS,
+                ),
                 failure_kind=BenchmarkFailureKind.WORKLOAD,
                 row=result.row,
             )
@@ -533,7 +637,11 @@ class _EvaluationAdapter:
     ) -> None:
         prefix = "Model-weight request could not be satisfied: "
         if failure is not None and failure.startswith(prefix):
-            self._log(f"[model-request] rejected: {failure.removeprefix(prefix)}")
+            detail = redact_diagnostic_tail(
+                failure.removeprefix(prefix),
+                max_chars=GATE_FEEDBACK_TAIL_CHARS,
+            )
+            self._log(f"[model-request] rejected: {detail}")
         if volumes:
             self._log(
                 f"[model-request] staged {len(volumes)} model volume(s): " + ", ".join(volumes)

@@ -8,6 +8,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from vs_project.api import GitError
+from vs_runtime._build_outputs import (
+    OUTPUTS_ENVIRONMENT_VARIABLE,
+    MemoryBuildStore,
+    MissingOutputError,
+    build_key,
+    verify_outputs,
+)
 from vs_runtime._local_validation import (
     LocalValidationEvents,
     LocalValidator,
@@ -16,6 +23,7 @@ from vs_runtime._local_validation import (
 from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces, WorkspaceResource, run_sync
 from vs_runtime.contracts import (
     AccuracyReceipt,
+    CaptureStopUnconfirmedError,
     CommandResult,
     RuntimeContractError,
     Workspace,
@@ -24,17 +32,19 @@ from vs_runtime.contracts import (
     validate_trusted_shell_command,
     validate_workspace_writable_paths,
 )
-from vs_sim.api import DISCARD
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from vs_runtime._build_outputs import BuildRecord, BuildStore
     from vs_runtime._local_validation import FrameworkValidationResult
     from vs_runtime._run_host import BlockingOperations
     from vs_runtime._trusted_evaluation import (
         TrustedAccuracyResult,
         TrustedBenchmarkContract,
         TrustedBenchmarkResult,
+        TrustedBuild,
+        TrustedBuildResult,
     )
     from vs_runtime._validation_passes import ValidationPasses
     from vs_sim.api import OutputSink
@@ -47,12 +57,15 @@ class CommandExecutionResult(Protocol):
     exit_code: int | None
     truncated: bool
     stdout: str
+    diagnostic_output: str
+    diagnostic_stdout: str
 
 
 @dataclass(frozen=True, slots=True)
 class WorkspaceEvaluationSpec:
     """Immutable execution facts needed by product evaluation policy."""
 
+    build: TrustedBuild | None
     accuracy_command: str | None
     benchmark_command: str | None
     benchmark_contract: TrustedBenchmarkContract | None
@@ -70,6 +83,22 @@ class RuntimeAccuracyRun:
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeBuildRun:
+    """Policy-neutral result of one build lifecycle: built, reused, or failed."""
+
+    result: TrustedBuildResult | None
+    """The build command's result; None when a recorded build was reused or none is declared."""
+    reused: bool
+    missing_output: str | None = None
+    """The first required output the build did not produce, which fails the build."""
+
+    @property
+    def passed(self) -> bool:
+        """Whether the commit has a verified build its later stages can load."""
+        return self.missing_output is None and (self.result is None or self.result.passed)
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeBenchmarkRun:
     """Policy-neutral result and contract from one benchmark lifecycle."""
 
@@ -83,6 +112,7 @@ class WorkspaceRuntime:
 
     workspaces: RuntimeWorkspaces
     commands: RuntimeCommands
+    capture_commands: RuntimeCaptureCommands
     evaluation: RuntimeWorkspaceEvaluation
 
 
@@ -102,49 +132,6 @@ class RuntimeCommands:
     ) -> CommandResult:
         validate_command(argv, timeout_seconds)
         return await self._execute(workspace, shlex.join(argv), timeout_seconds)
-
-    async def capture_output(
-        self,
-        argv: tuple[str, ...],
-        *,
-        workspace: Workspace,
-        output_argument: str,
-        timeout_seconds: int | None = None,
-    ) -> CommandResult:
-        validate_command(argv, timeout_seconds)
-        validate_command((output_argument,), None)
-        managed = self._workspaces.workspace_for(workspace)
-        async with self._workspaces._mutation(managed):  # noqa: SLF001  # lint-waiver: LW-228423 [SLF001]; the sibling runtime capability serializes effects through the workspace owner.
-            resource = self._workspaces.resource_for(managed)
-            temporary = await self._blocking.run(resource.execute, "mktemp", None)
-            if temporary.exit_code != 0 or not temporary.stdout.strip():
-                message = "runtime could not allocate a captured command output file"
-                raise RuntimeContractError(message)
-            output_path = temporary.stdout.strip()
-            primary_error: BaseException | None = None
-            try:
-                result = await self._blocking.run(
-                    resource.execute,
-                    shlex.join((*argv, output_argument, output_path)),
-                    timeout_seconds,
-                )
-                if result.exit_code != 0:
-                    return _command_result(result)
-                captured = await self._blocking.run(
-                    resource.execute,
-                    shlex.join(("cat", output_path)),
-                    None,
-                )
-                return _captured_result(result, captured)
-            except BaseException as error:
-                primary_error = error
-                raise
-            finally:
-                cleanup_error = await self._remove_captured_output(resource, output_path)
-                if cleanup_error is not None:
-                    if primary_error is None:
-                        raise cleanup_error
-                    primary_error.add_note(str(cleanup_error))
 
     async def run_trusted_shell(
         self,
@@ -167,6 +154,74 @@ class RuntimeCommands:
             resource = self._workspaces.resource_for(managed)
             result = await self._blocking.run(resource.execute, command, timeout_seconds)
         return _command_result(result)
+
+
+class RuntimeCaptureCommands:
+    """Capture output through each environment's explicit capture-command runner."""
+
+    def __init__(self, workspaces: RuntimeWorkspaces, blocking: BlockingOperations) -> None:
+        self._workspaces = workspaces
+        self._blocking = blocking
+
+    async def capture_output(
+        self,
+        argv: tuple[str, ...],
+        *,
+        workspace: Workspace,
+        output_argument: str,
+        timeout_seconds: int | None = None,
+    ) -> CommandResult:
+        """Run argv with a shared-workspace temporary artifact owned by this runtime."""
+        validate_command(argv, timeout_seconds)
+        validate_command((output_argument,), None)
+        managed = self._workspaces.workspace_for(workspace)
+        async with self._workspaces._mutation(managed):  # noqa: SLF001  # lint-waiver: LW-228423 [SLF001]; the sibling runtime capability serializes capture and cleanup through the workspace owner.
+            resource = self._workspaces.resource_for(managed)
+            # A relative path is visible at the same workspace root in an editor
+            # container and in a Slurm job. mktemp creates it mode 0600 before
+            # the command starts, so the command never chooses the artifact.
+            temporary = await self._blocking.run(
+                resource.execute, "mktemp .vibesys-capture.XXXXXXXXXX", None
+            )
+            if temporary.exit_code != 0 or not temporary.stdout.strip():
+                message = "runtime could not allocate a captured command output file"
+                raise RuntimeContractError(message)
+            output_path = temporary.stdout.strip()
+            await self._workspaces.begin_capture(managed, resource.capture_execution)
+            primary_error: BaseException | None = None
+            stop_unconfirmed = False
+            try:
+                command = shlex.join((*argv, output_argument, output_path))
+                result = await self._blocking.run_cancellable(
+                    lambda cancel: resource.execute_capture(command, timeout_seconds, cancel)
+                )
+                if result.exit_code != 0:
+                    return _command_result(result)
+                captured = await self._blocking.run(
+                    resource.execute,
+                    shlex.join(("cat", output_path)),
+                    None,
+                )
+                return _captured_result(result, captured)
+            except CaptureStopUnconfirmedError as error:
+                primary_error = error
+                stop_unconfirmed = True
+                raise
+            except BaseException as error:
+                primary_error = error
+                raise
+            finally:
+                if not stop_unconfirmed:
+                    try:
+                        await self._workspaces.finish_capture(managed)
+                    except CaptureStopUnconfirmedError:
+                        stop_unconfirmed = True
+                        raise
+                    cleanup_error = await self._remove_captured_output(resource, output_path)
+                    if cleanup_error is not None:
+                        if primary_error is None:
+                            raise cleanup_error
+                        primary_error.add_note(str(cleanup_error))
 
     async def _remove_captured_output(
         self,
@@ -196,15 +251,71 @@ class RuntimeWorkspaceEvaluation:
         workspaces: RuntimeWorkspaces,
         commands: RuntimeCommands,
         validation_passes: ValidationPasses,
+        builds: BuildStore | None = None,
     ) -> None:
+        """``builds`` keeps verified candidate builds outside every workspace (default: memory)."""
         self._workspaces = workspaces
         self._commands = commands
         self._validator = LocalValidator(commands, validation_passes)
+        self._builds = builds or MemoryBuildStore()
 
     def spec(self, workspace: Workspace) -> WorkspaceEvaluationSpec:
         return self._workspaces.resource_for(
             self._workspaces.workspace_for(workspace)
         ).evaluation_spec
+
+    async def build(self, workspace: Workspace, *, output: OutputSink) -> RuntimeBuildRun:
+        """Build the workspace's commit confined in a fresh checkout, or reuse its verified build.
+
+        The build command's output is written to *output* as it runs. After it passes, every
+        output the evaluator requires is verified and recorded outside the workspace, so the
+        check and measure stages of this commit load exactly what this build produced.
+        """
+        managed = self._workspaces.workspace_for(workspace)
+        build = self.spec(managed).build
+        if build is None:
+            return RuntimeBuildRun(result=None, reused=False)
+        revision = await managed.snapshot("framework-build-input")
+        key = build_key(revision, build.command, build.outputs)
+        if self._builds.find(key) is not None:
+            return RuntimeBuildRun(result=None, reused=True)
+        async with self._evaluation_target(managed, revision) as target:
+            result = await self._workspaces._evaluate(  # noqa: SLF001  # lint-waiver: LW-959101 [SLF001]; the candidate build must not overlap workspace mutation, like every trusted stage.
+                # > A public mutation-scoped evaluate on RuntimeWorkspaces would be a second
+                # > entry used only by its sibling capability; the gates use this one.
+                target,
+                lambda resource: resource.candidate_build(output),
+            )
+            if not result.passed:
+                return RuntimeBuildRun(result=result, reused=False)
+            try:
+                verified = verify_outputs(target.path, build.outputs)
+            except MissingOutputError as missing:
+                return RuntimeBuildRun(result=result, reused=False, missing_output=str(missing))
+        self._builds.record(key, revision, verified)
+        return RuntimeBuildRun(result=result, reused=False)
+
+    def _place_build_outputs(self, target: RuntimeWorkspace, revision: str) -> str | None:
+        """Put the commit's verified build outputs in ``target``; their env assignment, or None.
+
+        A task without a build has nothing to place. A task with one whose commit has no
+        recorded build stops the stage: its build stage did not run or did not pass.
+        """
+        build = self.spec(target).build
+        if build is None:
+            return None
+        record: BuildRecord | None = self._builds.find(
+            build_key(revision, build.command, build.outputs)
+        )
+        if record is None:
+            message = (
+                f"no verified build of revision {revision} is recorded: the measurement's "
+                "build stage did not run or did not pass"
+            )
+            raise RuntimeContractError(message)
+        self._builds.materialize(record, target.path)
+        paths = ":".join(output.path for output in record.outputs)
+        return f"{OUTPUTS_ENVIRONMENT_VARIABLE}={shlex.quote(paths)}"
 
     async def accuracy(
         self,
@@ -213,7 +324,7 @@ class RuntimeWorkspaceEvaluation:
         *,
         reuse: AccuracyReceipt | None = None,
         release: bool = False,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> RuntimeAccuracyRun:
         """Run accuracy or validate explicit reuse for the current candidate.
 
@@ -239,6 +350,7 @@ class RuntimeWorkspaceEvaluation:
                 spec.accuracy_command,
                 candidate_revision,
                 spec.deployment_release_env_var if release else None,
+                outputs=self._place_build_outputs(target, candidate_revision),
             )
             result = await self._workspaces._evaluate(  # noqa: SLF001  # lint-waiver: LW-228425 [SLF001]; trusted execution must not overlap workspace mutation.
                 target, lambda resource: resource.trusted_accuracy(command_override, output)
@@ -261,7 +373,7 @@ class RuntimeWorkspaceEvaluation:
         workspace: Workspace,
         *,
         required_metrics: frozenset[str],
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> RuntimeBenchmarkRun:
         """Snapshot and benchmark the exact submitted candidate revision.
 
@@ -275,6 +387,7 @@ class RuntimeWorkspaceEvaluation:
                 spec.benchmark_command,
                 candidate_revision,
                 spec.deployment_release_env_var,
+                outputs=self._place_build_outputs(target, candidate_revision),
             )
             result = await self._workspaces._evaluate(  # noqa: SLF001  # lint-waiver: LW-228426 [SLF001]; trusted execution must not overlap workspace mutation.
                 target,
@@ -380,12 +493,16 @@ def _evaluation_command(
     command: str | None,
     revision: str | None,
     release_env: str | None,
+    *,
+    outputs: str | None = None,
 ) -> str | None:
     if command is None:
         return None
     variables = []
     if revision:
         variables.append(f"VIBESYS_CANDIDATE_REVISION={shlex.quote(revision)}")
+    if outputs:
+        variables.append(outputs)
     if release_env:
         variables.append(f"{release_env}=1")
     return f"env {' '.join(variables)} {command}" if variables else command
@@ -396,6 +513,7 @@ def _command_result(result: CommandExecutionResult) -> CommandResult:
         output=result.output,
         exit_code=result.exit_code,
         truncated=result.truncated,
+        diagnostic_output=result.diagnostic_output,
     )
 
 
@@ -410,4 +528,5 @@ def _captured_result(
         output=captured.stdout,
         exit_code=command.exit_code,
         truncated=captured.truncated,
+        diagnostic_output=captured.diagnostic_stdout,
     )

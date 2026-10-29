@@ -26,11 +26,12 @@ if TYPE_CHECKING:
     from typing import Any
 
     from vs_sandbox.process_execution import StoppableProcess
+from vs_sim.api import DISCARD
 
 
 def _start(script: str) -> StoppableProcess:
     process = SubprocessPipedProcessLauncher().start(("/bin/sh", "-c", script))
-    return PipedStoppableProcess(process, threads=OsThreads())
+    return PipedStoppableProcess(process, threads=OsThreads(), output=DISCARD)
 
 
 class TestPipedStoppableProcess(StoppableProcessContract):

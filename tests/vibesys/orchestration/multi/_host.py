@@ -39,14 +39,14 @@ def config(**overrides: object) -> MultiConfig:
     return MultiConfig.model_validate({"max_rounds": 1, **overrides})
 
 
-def implemented(outcome: str = "nominated", **extra: object) -> ImplementerResponse:
+def implemented(outcome: str = "implemented", **extra: object) -> ImplementerResponse:
     """An implementer reply."""
     return ImplementerResponse.model_validate_json(
         json.dumps(
             {
                 "summary": "did it",
                 "expected_behavior": "faster",
-                "hypothesis_outcome": outcome,
+                "status": outcome,
                 **extra,
             }
         )
@@ -151,7 +151,7 @@ class MultiHost(SerialHost):
     def _implementer(self, asked: Asked, variant: int) -> None:
         match variant % 7:
             case 0 | 1:
-                outcome = "nominated" if variant % 7 == 0 else "continue"
+                outcome = "implemented" if variant % 7 == 0 else "continue"
                 reply = implemented(outcome, next_step="more" if outcome == "continue" else "")
                 self.run.reply(asked, reply, checkpoint=Retained(revision=self.retained()))
             case 2:

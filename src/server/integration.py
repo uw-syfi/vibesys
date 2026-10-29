@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from server.chat.factory import (
     ChatAgentBuilder,
@@ -19,14 +20,24 @@ from server.events import (
     EventType,
     FrameworkSource,
     FrameworkWarningData,
+    InputMeasurementFailedData,
     InvocationFinishedData,
     PhaseData,
     RunEvent,
+    SteerProposedData,
+    ToolResultData,
+    TurnUsageData,
 )
 from server.read_model import RunInspector
 from server.run_attachment import AgentSelection, RunAttachment
 from server.run_lifecycle import RunTrigger
-from vibesys.api import CoreEventType
+from vibesys.api import (
+    STEER_PROPOSAL_KIND,
+    CoreEventType,
+    JsonResultPayload,
+    SteerDeliveryData,
+    SteerProposalReceipt,
+)
 from vs_sim.api import CloseOnce, ReleaseStack
 
 if TYPE_CHECKING:
@@ -37,7 +48,7 @@ if TYPE_CHECKING:
     from server.controller import RunController
     from server.execution import ExecutionTracker
     from server.journal import WireJournal
-    from vibesys.api import AuxiliaryAgents, CoreEvent, RunReady, RunRecord, RunSession
+    from vibesys.api import AuxiliaryAgents, CoreEvent, RunReader, RunReady, RunRecord, RunSession
     from vs_sim.api import Clock, Threads
 
 _EVENT_DATA_ADAPTER = TypeAdapter(EventData)
@@ -62,6 +73,8 @@ _PRESENTATION_EVENTS = frozenset(
         EventType.QUOTA_PAUSED,
         EventType.QUOTA_RESUMED,
         EventType.QUOTA_ABANDONED,
+        EventType.QUOTA_WAITING,
+        EventType.QUOTA_WAIT_CANCELLED,
         EventType.PROVIDER_SWITCHED,
     }
 )
@@ -96,12 +109,24 @@ fatal, per-invocation and per-phase failures are errors.
 _CONTROL_EVENT_TYPES = frozenset(
     {
         CoreEventType.STEER_QUEUED,
+        CoreEventType.GUIDANCE_QUEUED,
+        CoreEventType.WITHDRAW_QUEUED,
+        CoreEventType.GUIDANCE_ENDED,
+        CoreEventType.GUIDANCE_REACHED,
         CoreEventType.PAUSE_REQUESTED,
         CoreEventType.RESUMED,
         CoreEventType.STOP_REQUESTED,
+        CoreEventType.PARK_REQUESTED,
+        CoreEventType.PARKED,
         CoreEventType.STEER_CONSUMED,
+        CoreEventType.STEER_DELIVERED_MID_TURN,
+        CoreEventType.STEER_DROPPED,
+        CoreEventType.CONTROL_REFUSED,
+        CoreEventType.REQUEST_REJECTED,
         CoreEventType.PAUSED,
         CoreEventType.STOPPED,
+        CoreEventType.ACTION_QUEUED,
+        CoreEventType.ACTION_APPLIED,
     }
 )
 """Run-control events from `RunControlChannel`, projected onto the controller.
@@ -144,6 +169,31 @@ def _framework_warning_diagnostic(data: FrameworkWarningData) -> Diagnostic:
     )
 
 
+def _input_measurement_diagnostic(data: InputMeasurementFailedData) -> Diagnostic:
+    """Lift a failed input measurement into the run-scoped diagnostic surface (S173).
+
+    The run goes on, so this is an error, not a fatal one. The summary states the facts the
+    event carries: how it failed, where, how often it was measured, and what candidates are
+    judged against now; the detail is the redacted tail of what the failed stage printed.
+    """
+    where = f", stage {data.stage}" if data.stage else ""
+    twice = "; measured twice" if data.attempts > 1 else ""
+    judged = (
+        "candidates must still beat its benchmark"
+        if data.compared
+        else "a candidate adopted now is adopted without an input comparison"
+    )
+    return Diagnostic(
+        code="input_measurement_failed",
+        summary=f"The input's trusted measurement failed ({data.failure.value}{where}{twice}); "
+        f"{judged}",
+        detail=data.summary or None,
+        scope=DiagnosticScope.RUN,
+        severity=DiagnosticSeverity.ERROR,
+        source=FrameworkSource.LOOP.value,
+    )
+
+
 def _core_failure_diagnostic(
     event_type: EventType, text: str, data: EventData | None
 ) -> Diagnostic:
@@ -181,9 +231,36 @@ def _core_event_diagnostic(
     """Return the diagnostic a projected core event must carry, if any."""
     if isinstance(data, FrameworkWarningData):
         return _framework_warning_diagnostic(data)
+    if isinstance(data, InputMeasurementFailedData):
+        return _input_measurement_diagnostic(data)
     if event_type in _CORE_FAILURE_CONTEXTS and status is EventStatus.FAILED:
         return _core_failure_diagnostic(event_type, text, data)
     return None
+
+
+def _steer_proposal(data: ToolResultData, execution_id: str | None) -> SteerProposedData | None:
+    """The proposal a chat turn's tool result carries, or None when it carries none.
+
+    ``propose_steer`` returns a ``SteerProposalReceipt`` as JSON. The receipt is recognized by its
+    ``kind`` and parsed strictly, so a result that merely mentions a steer, or an error, proposes
+    nothing. The proposal is named by the turn and the tool call when the provider gives the call
+    an id (stable across replays), and by a fresh id otherwise.
+    """
+    payload = data.payload
+    if data.is_error or not isinstance(payload, JsonResultPayload):
+        return None
+    value = payload.value
+    if not isinstance(value, dict) or value.get("kind") != STEER_PROPOSAL_KIND:
+        return None
+    try:
+        receipt = SteerProposalReceipt.model_validate(value)
+    except ValidationError:
+        return None
+    stable = execution_id is not None and data.call_id is not None
+    return SteerProposedData(
+        proposal_id=f"{execution_id}.{data.call_id}" if stable else uuid.uuid4().hex,
+        proposal=receipt.proposal,
+    )
 
 
 class RunIntegrationAdapter:
@@ -220,6 +297,8 @@ class RunIntegrationAdapter:
         self._detach_run: Callable[[], None] | None = None
         self._close = CloseOnce()
         self._failure_diagnostics: dict[str, Diagnostic] = {}
+        self.trace = journal.trace
+        """The run's spans, folded from its span events (live and replayed)."""
 
     @property
     def attached_run(self) -> RunRecord | None:
@@ -260,6 +339,18 @@ class RunIntegrationAdapter:
         """
         self.attach(ready.log_directory, run_id=ready.record.run_id, record=ready.record)
         self.controller.ready()
+        self._open_chat(ready, session.open_auxiliary_agents())
+
+    def attach_reader(self, reader: RunReader) -> None:
+        """Attach experiment chat over a finished run's reader: the run's journal is already open.
+
+        Only chat is attached. The run is not announced ready and nothing of it executes.
+        """
+        self._owned.callback(reader.close)
+        self._open_chat(reader.ready(), reader.open_auxiliary_agents())
+
+    def _open_chat(self, ready: RunReady, auxiliary_agents: AuxiliaryAgents) -> None:
+        """Own ``auxiliary_agents`` and start experiment chat over them."""
         attachment = RunAttachment(
             chat_state_dir=ready.frontend_state_directory / "chat",
             agent_defaults=AgentSelection(
@@ -269,7 +360,6 @@ class RunIntegrationAdapter:
             ),
             agent_providers=ready.agent_providers,
         )
-        auxiliary_agents = session.open_auxiliary_agents()
         self._owned.callback(auxiliary_agents.close)
         self._attach_run(attachment, auxiliary_agents)
 
@@ -371,6 +461,10 @@ class RunIntegrationAdapter:
 
     def project_event(self, event: CoreEvent) -> None:
         """Project one core event onto server tracking state and the wire journal."""
+        if event.type is CoreEventType.INTENT_STATE:
+            # The additive run.log owns outcomes; legacy control events still
+            # update the existing frontend through _CONTROL_EVENT_TYPES.
+            return
         if event.type in _CONTROL_EVENT_TYPES:
             self._project_control_event(event)
             return
@@ -380,6 +474,8 @@ class RunIntegrationAdapter:
             if event.data is None
             else _EVENT_DATA_ADAPTER.validate_python(event.data.model_dump(mode="python"))
         )
+        if isinstance(data, TurnUsageData) and data.span_id is None:
+            data = data.model_copy(update={"span_id": self.trace.turn_span(event.execution_id)})
         if event_type is EventType.AGENT_EXECUTION_STARTED:
             self.executions.track_started(event)
         elif event_type is EventType.AGENT_EXECUTION_FINISHED:
@@ -419,24 +515,50 @@ class RunIntegrationAdapter:
         representation of that state, so this only calls its existing
         bookkeeping methods -- it does not append a second wire event.
         """
-        if event.type is CoreEventType.STEER_QUEUED:
-            self.controller.steer(event.text)
-        elif event.type is CoreEventType.PAUSE_REQUESTED:
-            self.controller.pause_after_call()
-        elif event.type is CoreEventType.RESUMED:
-            self.controller.resume()
-        elif event.type is CoreEventType.STOP_REQUESTED:
-            self.controller.stop_after_call()
-        elif event.type is CoreEventType.STEER_CONSUMED:
-            self.controller.record_steer_consumed(
+        handle = {
+            CoreEventType.STEER_QUEUED: lambda: self.controller.steer(event.text),
+            CoreEventType.GUIDANCE_QUEUED: lambda: self.controller.standing_guidance(event.text),
+            CoreEventType.WITHDRAW_QUEUED: lambda: self.controller.withdraw(event.text),
+            CoreEventType.GUIDANCE_ENDED: lambda: self.controller.record_guidance_ended(event.text),
+            CoreEventType.PAUSE_REQUESTED: self.controller.pause_after_call,
+            CoreEventType.RESUMED: self.controller.resume,
+            CoreEventType.STOP_REQUESTED: self.controller.stop_after_call,
+            CoreEventType.PARK_REQUESTED: self.controller.stop_after_call,
+            CoreEventType.PARKED: self.controller.land_stop_at_boundary,
+            CoreEventType.STEER_CONSUMED: lambda: self.controller.record_steer_consumed(
+                agent_kind=event.agent_kind,
+                round_label=event.round_label,
+                execution_id=event.execution_id,
+                note=event.text,
+            ),
+            CoreEventType.STEER_DELIVERED_MID_TURN: lambda: self.controller.record_steer_consumed(
+                agent_kind=event.agent_kind,
+                round_label=event.round_label,
+                execution_id=event.execution_id,
+                mid_turn=True,
+            ),
+            CoreEventType.STEER_DROPPED: lambda: self.controller.record_steer_dropped(event.text),
+            CoreEventType.CONTROL_REFUSED: lambda: self.controller.record_control_refused(
+                event.text
+            ),
+            CoreEventType.REQUEST_REJECTED: lambda: self.controller.record_request_rejected(
+                event.text
+            ),
+            CoreEventType.ACTION_QUEUED: lambda: self.controller.action(event.text),
+            CoreEventType.ACTION_APPLIED: lambda: self.controller.record_action_applied(event.text),
+            CoreEventType.PAUSED: self.controller.land_pause_at_boundary,
+            CoreEventType.STOPPED: self.controller.land_stop_at_boundary,
+        }.get(event.type)
+        if handle is not None:
+            handle()
+        if isinstance(event.data, SteerDeliveryData):
+            self.journal.record(
+                EventType.STEER_DELIVERY,
+                data=event.data,
                 agent_kind=event.agent_kind,
                 round_label=event.round_label,
                 execution_id=event.execution_id,
             )
-        elif event.type is CoreEventType.PAUSED:
-            self.controller.land_pause_at_boundary()
-        elif event.type is CoreEventType.STOPPED:
-            self.controller.land_stop_at_boundary()
 
     def _route_output_event(self, event: CoreEvent) -> None:
         """Publish one explicitly delivered presentation event."""
@@ -453,3 +575,13 @@ class RunIntegrationAdapter:
             round_label=event.round_label,
             invocation_id=event.execution_id,
         )
+        if event.agent_kind == "chat" and isinstance(data, ToolResultData):
+            proposed = _steer_proposal(data, event.execution_id)
+            if proposed is not None:
+                self.executions.publish_presentation(
+                    EventType.STEER_PROPOSED,
+                    proposed,
+                    agent_kind=event.agent_kind,
+                    round_label=event.round_label,
+                    invocation_id=event.execution_id,
+                )

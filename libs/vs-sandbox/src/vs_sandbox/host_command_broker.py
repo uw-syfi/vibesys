@@ -25,7 +25,7 @@ import logging
 import secrets
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -33,6 +33,8 @@ from vs_decode.api import Unreadable, decode_json
 from vs_sandbox.agent_gpu import (
     AgentGpuConfig,
     GpuCommand,
+    GpuJobOutcome,
+    GpuJobRequest,
     GpuLauncher,
 )
 from vs_sandbox.host_command_client import SOCKET_ENV, TOKEN_ENV
@@ -161,18 +163,83 @@ class RunRoots:
 
 
 @dataclass(frozen=True, slots=True)
+class AuthorizedGpuJob:
+    """One fully validated GPU job, ready for synchronous execution."""
+
+    request: GpuJobRequest
+    command: GpuCommand
+    launcher: GpuLauncher
+
+    def run(self, write: Callable[[bytes], None], cancel: Event) -> GpuJobOutcome:
+        """Run through the launcher fixed when authorization succeeded."""
+        return self.launcher.run(self.request, self.command, write=write, cancel=cancel)
+
+
+@dataclass(frozen=True, slots=True)
+class GpuCommandSpec:
+    """One caller's GPU command before operator authorization."""
+
+    workspace: Path
+    cwd: Path
+    argv: tuple[str, ...]
+    env: Mapping[str, str]
+    gpus: int | None = None
+    time_minutes: int | None = None
+    job_name: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class GpuCommands:
-    """What the broker needs to offer the ``gpu`` operation.
+    """Authorize and run GPU commands under one operator policy.
 
     *host_env* is the submit host's environment a job may inherit; only its
     baseline subset reaches the job. *confinement* is the job's explicit
-    confinement policy. *launcher* starts the job's ``srun``.
+    confinement policy. *launcher* starts the job's ``srun``. Both the host
+    broker and trusted runtime callers use :meth:`prepare`, so confinement,
+    environment filtering, request limits and the run-scoped launcher cannot
+    drift between the two paths.
     """
 
     config: AgentGpuConfig
     confinement: JobConfinement
     host_env: Mapping[str, str]
     launcher: GpuLauncher
+
+    def prepare(self, spec: GpuCommandSpec) -> AuthorizedGpuJob:
+        """Authorize one command and return the fixed job it describes.
+
+        ``workspace`` is the confinement root; ``cwd`` must be contained by
+        it. The caller supplies untrusted or trusted argv and environment, but
+        this owner applies the same closed policy in either case.
+        """
+        root = spec.workspace.resolve()
+        working = spec.cwd.resolve()
+        if working != root and root not in working.parents:
+            raise HostCommandBrokerError.outside_workspace()
+        request = self.config.request(spec.gpus, spec.time_minutes)
+        wrapped = self.confinement.wrap(
+            root, ["/bin/sh", "-c", _CHDIR_SCRIPT, "vibesys-gpu", str(working), *spec.argv]
+        )
+        command = GpuCommand(
+            argv=tuple(wrapped),
+            cwd=root,
+            env=job_environment(self.host_env, spec.env),
+            job_name=spec.job_name,
+        )
+        return AuthorizedGpuJob(request, command, self.launcher)
+
+    def reconcile(self, job_name: str) -> bool:
+        """Stop one previously authorized job and confirm it is no longer queued."""
+        if not isinstance(self.launcher, _GpuJobReconciler):
+            return False
+        return self.launcher.reconcile(job_name)
+
+
+@runtime_checkable
+class _GpuJobReconciler(Protocol):
+    """Optional launcher capability for a prior durable job identity."""
+
+    def reconcile(self, job_name: str) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,7 +254,7 @@ class BrokerTransport:
 class _Job:
     """One authorized request, ready to run."""
 
-    run: Callable[[Callable[[bytes], None], Event], int]
+    run: Callable[[Callable[[bytes], None], Event], GpuJobOutcome]
 
 
 def _read_frame(connection: Connection) -> bytes:
@@ -280,7 +347,6 @@ class HostCommandBroker:
         self._threads = transport.threads
         self._workspaces = tuple(path.resolve() for path in roots.workspaces)
         self._gpu = gpu
-        self._launcher: GpuLauncher | None = None if gpu is None else gpu.launcher
         self._listener: Listener | None = None
         self._acceptor: Worker | None = None
         self._in_flight: set[Event] = set()
@@ -398,9 +464,23 @@ class HostCommandBroker:
             except OSError:
                 cancel.set()
 
-        status = job.run(write, cancel)
+        outcome = job.run(write, cancel)
+        if not outcome.termination_confirmed:
+            message = "GPU job termination could not be confirmed; no exit status is safe"
+            _LOG.error(message)
+            if not cancel.is_set():
+                with contextlib.suppress(OSError):
+                    _send(connection, {"error": message})
+            return
         if cancel.is_set():
             return
+        status = outcome.exit_code
+        if outcome.failure is not None:
+            write(
+                f"[vibesys-gpu] command relay failed "
+                f"({type(outcome.failure).__name__}): {outcome.failure}\n".encode()
+            )
+            status = 1
         try:
             _send(connection, {"exit": status})
         except OSError:
@@ -416,19 +496,19 @@ class HostCommandBroker:
 
     def _prepare_gpu(self, call: GpuCall, cwd: Path, workspace: Path) -> _Job:
         gpu = self._gpu
-        launcher = self._launcher
-        if gpu is None or launcher is None:
+        if gpu is None:
             raise HostCommandBrokerError.unsupported("gpu")
-        request = gpu.config.request(call.gpus, call.time_minutes)
-        argv = gpu.confinement.wrap(
-            workspace, ["/bin/sh", "-c", _CHDIR_SCRIPT, "vibesys-gpu", str(cwd), *call.argv]
+        job = gpu.prepare(
+            GpuCommandSpec(
+                workspace=workspace,
+                cwd=cwd,
+                argv=call.argv,
+                env=call.env,
+                gpus=call.gpus,
+                time_minutes=call.time_minutes,
+            )
         )
-        command = GpuCommand(
-            argv=tuple(argv), cwd=workspace, env=job_environment(gpu.host_env, call.env)
-        )
-        return _Job(
-            run=lambda write, cancel: launcher.run(request, command, write=write, cancel=cancel)
-        )
+        return _Job(run=job.run)
 
     def _workspace_for(self, cwd: Path) -> Path:
         for workspace in self._workspaces:

@@ -17,9 +17,10 @@ from typing import TYPE_CHECKING, NoReturn, Protocol
 
 from entrypoints import cli
 from entrypoints.main_thread_interrupt import MainThreadInterrupt
-from entrypoints.production import production_runs, production_web_discovery
+from entrypoints.production import production_run_readers, production_runs, production_web_discovery
 from entrypoints.web_assets import WebAssetBundle
 from server.host_api import (
+    RUN_EVENTS_FILE,
     DetachedLaunchErrorCode,
     DetachedLaunchFailure,
     FailureReason,
@@ -27,6 +28,8 @@ from server.host_api import (
     LiveInstanceRecord,
 )
 from server.registry import (
+    INSTANCES_DIRECTORY,
+    READERS_DIRECTORY,
     FileInstanceStore,
     LiveRegistry,
     driving,
@@ -37,6 +40,7 @@ from server.registry import (
     new_instance_id,
 )
 from server.runtime import (
+    READER_IDLE_SECONDS,
     WEBSOCKET_CLOSE_TIMEOUT_SECONDS,
     WebDiscovery,
     WebGatewayListener,
@@ -49,24 +53,34 @@ from server.runtime import (
     WebSocketBindError,
     browser_origin,
 )
-from server.settings import InteractiveSetupDefaults, TuiTheme, load_tui_theme
-from vibesys.api import ConfigurationError
-from vibesys.api.request import generate_experiment_name, repository_name_from_experiment
-from vs_github.api import GitHubCLI, GitHubCLIError
-from vs_project.api import Project
+from vibesys.api import ConfigurationError, RunRequest, RunStatus
+from vs_project.api import (
+    Project,
+    ProjectRootNotFoundError,
+    ProjectStateError,
+    create_operator_key,
+    user_runtime_root,
+    validate_run_id,
+)
 from vs_sim.api import (
-    OsProcesses,
     OsThreads,
     Platform,
     SignalMainThreadWake,
     Signals,
     SystemClock,
     WakeupFdSignalRelay,
-    utc_datetime,
 )
 
 _WEB_PORT_MAX = 65_535
-_DETACHED_START_TIMEOUT_SECONDS = 10.0
+_DETACHED_START_HANG_GUARD_SECONDS = 600.0
+"""How long a detached server that is still running may take to publish its record.
+
+Readiness is the child's to announce, and a child that exits is seen at once, so
+this bound never decides how long a start takes: it only ends a child that is alive
+and will not publish. It is generous because the first start after an install
+compiles bytecode and loads every module (tens of seconds on a slow disk), and
+a guess near that time fails a healthy start.
+"""
 _DETACHED_STOP_TIMEOUT_SECONDS = 2.0
 _GATEWAY_STOP_GRACE_SECONDS = 2.0
 GATEWAY_STOP_TIMEOUT_SECONDS = WEBSOCKET_CLOSE_TIMEOUT_SECONDS + _GATEWAY_STOP_GRACE_SECONDS
@@ -75,12 +89,11 @@ _DETACHED_POLL_SECONDS = 0.05
 _DETACHED_LOG_TAIL_BYTES = 4_096
 
 if TYPE_CHECKING:
-    import argparse
     from collections.abc import Callable, Iterator
     from typing import BinaryIO
 
     from server.runtime import ServerLifecycleObserver, ServerRuntime
-    from vibesys.api import Config, Runs
+    from vibesys.api import RunReader, RunReaders, Runs
     from vs_sim.api import MainThreadWake, SignalRelay, Threads
 
 
@@ -95,13 +108,20 @@ def _report_stuck_main_thread(waited: float) -> None:
 def _termination_signal(
     runtime: ServerRuntime, relay: SignalRelay, wake: MainThreadWake, threads: Threads
 ) -> Iterator[None]:
-    """Forward launcher termination into the server's cleanup boundary.
+    """Forward the launcher's signals into the server's run and cleanup boundary.
 
-    The kernel may hand a process-directed SIGTERM to a transport thread, while
+    A Ctrl-C (SIGINT) stops the run through its control, cancelling its work in flight,
+    as headless does; with no run to stop, it ends the server like SIGTERM. SIGTERM and
+    SIGHUP end the server now, through its cleanup boundary. The relay owns SIGINT too,
+    so ``asyncio.run`` installs no handler that would cancel the run's driver on the
+    first SIGINT and raise inside its teardown on the next.
+
+    The kernel may hand a process-directed signal to a transport thread, while
     CPython runs Python handlers on the main thread only, so a handler installed
     for SIGTERM is not run while the main thread is blocked in the run. *relay*
-    observes SIGTERM on whichever thread took it, then *wake* interrupts the main
-    thread, resent until the main thread has taken it (see ``MainThreadInterrupt``).
+    observes the signal on whichever thread took it, then *wake* interrupts the main
+    thread, resent until the scope ends so discarded interruptions can be recovered
+    (see ``MainThreadInterrupt``).
     """
 
     def on_wake() -> None:
@@ -111,20 +131,51 @@ def _termination_signal(
     with ExitStack() as scope:
         send = scope.enter_context(wake.armed(on_wake))
         interrupt = MainThreadInterrupt(send, threads, _report_stuck_main_thread)
+        scope.enter_context(interrupt.recovering())
 
-        def terminate(signum: int) -> None:
-            del signum
-            runtime.shutdown()
+        def on_signal(signum: int) -> None:
+            number = Signals(signum)
+            if number is Signals.SIGINT and runtime.interrupt():
+                return
+            runtime.shutdown(number)
             interrupt.request()
 
-        scope.enter_context(relay.relay([Signals.SIGTERM], terminate))
-        yield
+        scope.enter_context(
+            relay.relay([Signals.SIGINT, Signals.SIGTERM, Signals.SIGHUP], on_signal)
+        )
+        # Keep the callback as a backstop if the first interruption lands in the
+        # finally suite itself. Both disarm requests before the relay joins them.
+        scope.callback(interrupt.finish)
+        try:
+            yield
+        finally:
+            interrupt.finish()
 
 
 def _control_socket_from_argv(argv: list[str]) -> Path | None:
     """Read the transport bootstrap flag without parsing run configuration."""
     value = cli.option_from_argv(argv, "--control-socket")
     return Path(value) if value else None
+
+
+def _refuse_control_socket_outside_runtime_root(path: Path) -> None:
+    """Exit with a configuration error unless ``path``'s directory is in the runtime root.
+
+    Every operator client presents the key only to a socket there (``OperatorDialer``),
+    and a confined agent can write elsewhere, so a socket outside it is one the operator
+    could not reach and an agent could take over.
+    """
+    root = user_runtime_root(os.environ, os.getuid())
+    directory = path.absolute().parent.resolve()
+    resolved_root = root.resolve()
+    if directory != resolved_root and resolved_root not in directory.parents:
+        cli.configuration_error(
+            f"--control-socket {path} is not inside the operator's runtime root {root}: "
+            "operator clients present the control key only to a socket there, where no "
+            "confined agent can write. Choose a path inside it, or set XDG_RUNTIME_DIR",
+            code="invalid_arguments",
+            stage="argument_parsing",
+        )
 
 
 def _web_requested(argv: list[str]) -> bool:
@@ -152,13 +203,7 @@ def _web_assets_from_argv(argv: list[str]) -> WebAssetBundle | None:
     value = cli._option_from_argv(argv, "--web-assets")  # noqa: SLF001  # lint-waiver: LW-101004 [SLF001]; reuse the CLI's private option scanner before full argument parsing
     if value is not None:
         return WebAssetBundle.from_directory(Path(value), require_manifest=False)
-    source_root = Path(__file__).resolve().parents[2]
-    candidate = source_root / "clients" / "apps" / "web" / "dist"
-    return (
-        WebAssetBundle.from_directory(candidate, require_manifest=True)
-        if candidate.is_dir()
-        else None
-    )
+    return None
 
 
 def _web_origins_from_argv(argv: list[str]) -> tuple[str, ...]:
@@ -199,12 +244,42 @@ def _web_instance_from_argv(argv: list[str]) -> Path:
     )
 
 
+def _first_option(argv: list[str], options: tuple[str, ...]) -> str | None:
+    """The value of the first of ``options`` that ``argv`` sets."""
+    for option in options:
+        value = cli._option_from_argv(argv, option)  # noqa: SLF001  # lint-waiver: LW-101043 [SLF001]; reuse the CLI's private option scanner for the launcher-only flag
+        if value is not None:
+            return value
+    return None
+
+
 def _read_only_log_from_argv(argv: list[str]) -> Path | None:
-    value = cli._option_from_argv(argv, "--web-reopen")  # noqa: SLF001  # lint-waiver: LW-101043 [SLF001]; reuse the CLI's private option scanner for the launcher-only flag
+    """The journal a read-only server serves: ``--web-reopen`` with the web UI, ``--reopen`` without."""
+    value = _first_option(argv, ("--web-reopen", "--reopen"))
     if value is None:
         return None
     path = Path(value).expanduser().resolve()
-    return path.parent if path.name == "run-events.jsonl" else path
+    return path.parent if path.name == RUN_EVENTS_FILE else path
+
+
+def _chat_reader_opener(
+    arguments: list[str], run_readers: RunReaders
+) -> Callable[[], RunReader] | None:
+    """How the read-only server opens the run it serves for conversation.
+
+    The request is the one resuming the run builds: its record restores the run's settings, so
+    nothing is passed but the run's id. The server runs in the run's project directory. A server
+    reopened without the run's id (a journal read for its events) has no chat agent.
+    """
+    run_id = _first_option(arguments, ("--run-id",))
+    if run_id is None:
+        return None
+
+    def open_reader() -> RunReader:
+        request = cli.build_reader_request(Path.cwd(), run_id)
+        return run_readers(request)
+
+    return open_reader
 
 
 def _headless_argv(argv: list[str]) -> list[str]:
@@ -217,12 +292,12 @@ def _headless_argv(argv: list[str]) -> list[str]:
             continue
         if argument in {
             "--control-socket",
-            "--theme",
             "--web-port",
             "--web-assets",
             "--web-origin",
             "--web-instance",
             "--web-reopen",
+            "--reopen",
             "--instance-id",
         }:
             skip_next = True
@@ -232,109 +307,18 @@ def _headless_argv(argv: list[str]) -> list[str]:
         if argument.startswith(
             (
                 "--control-socket=",
-                "--theme=",
                 "--web-port=",
                 "--web-assets=",
                 "--web-origin=",
                 "--web-instance=",
                 "--web-reopen=",
+                "--reopen=",
                 "--instance-id=",
             )
         ):
             continue
         arguments.append(argument)
     return arguments
-
-
-def _suggest_repository_owner(config: Config) -> str | None:
-    """Return a setup-form owner suggestion without requiring GitHub access."""
-    repository = config.repository
-    if repository.owner is not None:
-        return str(repository.owner)
-    try:
-        return GitHubCLI(OsProcesses()).current_user()
-    except GitHubCLIError:
-        return None
-
-
-def _resolve_tui_defaults(  # noqa: PLR0913  # lint-waiver: LW-011105 [PLR0913]; This private resolver maps the parser's six independent setup flags to derived defaults; a Namespace loses field types and a new input DTO would duplicate the parser.
-    *,
-    config_path: Path | None = None,
-    input_path: Path | None = None,
-    runs_dir: Path | None = None,
-    experiment_name: str | None = None,
-    theme: TuiTheme | None = None,
-    directory_only: bool = False,
-) -> InteractiveSetupDefaults:
-    """Resolve launcher-facing defaults from local configuration."""
-    config = cli.load_config_or_default(config_path)
-    launch_config_path = config_path
-    if launch_config_path is None:
-        directory_config = Path.cwd() / "agent.toml"
-        launch_config_path = directory_config if directory_config.is_file() else None
-    resolved_input = input_path.expanduser().resolve() if input_path is not None else None
-    resolved_runs_dir = (runs_dir or Path.cwd() / "exp_env").expanduser().resolve()
-    resolved_name = experiment_name or generate_experiment_name(
-        resolved_input, now=utc_datetime(SystemClock())
-    )
-    return InteractiveSetupDefaults(
-        runs_dir=str(resolved_runs_dir),
-        input_path=str(resolved_input) if resolved_input is not None else "",
-        experiment_name=resolved_name,
-        repository_owner=None if directory_only else _suggest_repository_owner(config),
-        repository_name=repository_name_from_experiment(resolved_name),
-        visibility=config.repository.visibility,
-        theme=theme or load_tui_theme(launch_config_path),
-    )
-
-
-def _tui_defaults_from_argv(argv: list[str]) -> Callable[[], InteractiveSetupDefaults]:
-    """Build the lazy defaults provider exposed over the control socket."""
-    config = cli.option_from_argv(argv, "--config")
-    theme = cli.option_from_argv(argv, "--theme")
-
-    def provide() -> InteractiveSetupDefaults:
-        return _resolve_tui_defaults(
-            config_path=Path(config) if config is not None else None,
-            theme=TuiTheme(theme) if theme is not None else None,
-            directory_only=True,
-        )
-
-    return provide
-
-
-def _build_tui_defaults_parser() -> argparse.ArgumentParser:
-    parser = cli.RunArgumentParser(
-        prog="vibesys tui-defaults",
-        description="Resolve configuration defaults for a TUI launcher.",
-    )
-    parser.add_argument("--config", type=Path, default=None)
-    parser.add_argument("--input", type=Path, default=None)
-    parser.add_argument("--runs-dir", type=cli.parse_runs_dir, default=None)
-    parser.add_argument("--exp-name", default=None)
-    parser.add_argument("--theme", type=TuiTheme, choices=list(TuiTheme), default=None)
-    parser.add_argument("--directory-only", action="store_true")
-    return parser
-
-
-def _run_tui_defaults(argv: list[str]) -> None:
-    args = _build_tui_defaults_parser().parse_args(argv)
-    try:
-        defaults = _resolve_tui_defaults(
-            config_path=args.config,
-            input_path=args.input,
-            runs_dir=args.runs_dir,
-            experiment_name=args.exp_name,
-            theme=args.theme,
-            directory_only=args.directory_only,
-        )
-    except (ValueError, FileNotFoundError) as exc:
-        cli.configuration_error(
-            str(exc),
-            code="config_load_failed",
-            stage="config_loading",
-        )
-    sys.stdout.write(defaults.model_dump_json() + "\n")
 
 
 def _missing_control_socket() -> NoReturn:
@@ -384,6 +368,12 @@ class _DetachedGatewayEffects:
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
+
+    def spawn_python(
+        self, module: str, arguments: list[str], environment: dict[str, str], output: BinaryIO
+    ) -> _DetachedProcess:
+        """Launch a framework child with the same installed interpreter as this host."""
+        return self.spawn([sys.executable, "-m", module, *arguments], environment, output)
 
     def discover(self, instance_path: Path) -> WebInstanceRecord | None:
         return self._discovery.discover(instance_path, cleanup_stale=False)
@@ -447,8 +437,11 @@ def _spawn_detached(
             ),
             effects,
         )
-        print(f"VibeSys web UI: {record.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101036 [T201]; expose the detached capability URL to the launcher user
-        webbrowser.open(record.url, new=2)
+        if _web_assets_from_argv(arguments) is not None:
+            print(f"VibeSys web UI: {record.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101036 [T201]; expose the detached capability URL to the launcher user
+            webbrowser.open(record.url, new=2)
+        else:
+            print(f"VibeSys gateway: {record.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101200 [T201]; expose the detached capability URL to the launcher user
 
 
 @dataclass(frozen=True)
@@ -468,8 +461,11 @@ class _DetachedLaunch[T]:
         return self._failure(f"{self.name} exited with status {status}")
 
     def not_ready(self) -> _DetachedStartError:
+        """The server was still running, so it hung or was still loading, but it did not crash."""
         return self._failure(
-            f"{self.name} did not become ready within {_DETACHED_START_TIMEOUT_SECONDS:g} seconds"
+            f"{self.name} did not become ready within {_DETACHED_START_HANG_GUARD_SECONDS:g} "
+            "seconds and was stopped. It was still running, not crashed: it hung, or it "
+            "was still loading"
         )
 
     def _failure(self, summary: str) -> _DetachedStartError:
@@ -486,12 +482,8 @@ def _start_detached_child[T](launch: _DetachedLaunch[T], effects: _DetachedGatew
     launch's output as stdout and stderr.
     """
     environment = {**os.environ, "VIBESYS_DETACHED_CHILD": "1"}
-    process = effects.spawn(
-        [sys.executable, "-m", launch.module, *launch.arguments],
-        environment,
-        launch.output,
-    )
-    deadline = effects.monotonic() + _DETACHED_START_TIMEOUT_SECONDS
+    process = effects.spawn_python(launch.module, launch.arguments, environment, launch.output)
+    deadline = effects.monotonic() + _DETACHED_START_HANG_GUARD_SECONDS
     while effects.monotonic() < deadline:
         value = launch.ready()
         if value is not None:
@@ -500,6 +492,14 @@ def _start_detached_child[T](launch: _DetachedLaunch[T], effects: _DetachedGatew
         if status is not None:
             raise launch.exited(status)
         effects.sleep(_DETACHED_POLL_SECONDS)
+    # Say in the log itself what ended the start, so a log the server never wrote to
+    # is not left blank. The child shares this file's offset, so append at its end.
+    launch.output.seek(0, os.SEEK_END)
+    launch.output.write(
+        f"vibesys: launcher stopped this server: it published no record within "
+        f"{_DETACHED_START_HANG_GUARD_SECONDS:g} s of starting\n".encode()
+    )
+    launch.output.flush()
     _stop_detached(process)
     raise launch.not_ready()
 
@@ -516,13 +516,16 @@ def _spawn_detached_instance(
     arguments: list[str],
     root: Path,
     effects: _DetachedGatewayEffects,
+    *,
+    registry_directory: str = INSTANCES_DIRECTORY,
 ) -> LiveInstanceRecord:
     """Start a headless detached server under ``root`` and return its serving record.
 
     ``arguments`` name the run (``--run-id``); the server publishes it in its
-    first record, before it loads the engine (``entrypoints.detached_run``).
+    first record, before it loads the engine (``entrypoints.detached_run``), in the
+    registry ``registry_directory`` names.
     """
-    registry = LiveRegistry(FileInstanceStore(root), SystemClock())
+    registry = LiveRegistry(FileInstanceStore(root, directory=registry_directory), SystemClock())
     instance_id = new_instance_id()
     run_directory = instance_run_directory(root, instance_id)
     run_directory.parent.mkdir(mode=0o700, exist_ok=True)
@@ -579,7 +582,7 @@ def _instance_in_use(instance_path: Path, hold: WebInstanceHold) -> str:
     """Explain a refused launch, naming the processes in the way, if it can.
 
     The blocker is whatever holds the startup log, which need not be a VibeSys
-    gateway and need not be stoppable with `vibesys web stop`: a descendant
+    gateway: a descendant
     that inherited the log keeps it after the gateway is gone, and nothing
     publishes a record for such a process. So this names the measured holders
     and offers both escapes rather than routing every case through `stop`.
@@ -593,8 +596,7 @@ def _instance_in_use(instance_path: Path, hold: WebInstanceHold) -> str:
     )
     return (
         f"Another process holds {log_path}, so this launch would overwrite a running "
-        f"gateway's output.{users} Stop the gateway with `vibesys web stop --instance "
-        f"{instance_path}`, or end those processes yourself if no gateway owns them."
+        f"gateway's output.{users} End those processes before starting another gateway."
     )
 
 
@@ -829,6 +831,8 @@ def _detached_failure(summary: str, log_path: Path, output: BinaryIO) -> str:
     output.seek(max(0, length - _DETACHED_LOG_TAIL_BYTES))
     tail = output.read().decode("utf-8", errors="replace").strip()
     message = f"{summary}. Startup log: {log_path}"
+    if not tail:
+        message += " (the server wrote nothing to it before it ended)"
     return f"{tail}\n{message}" if tail else message
 
 
@@ -935,14 +939,39 @@ def _start_detached_instance(
             code="invalid_arguments",
             stage="argument_parsing",
         )
+    root = instance_root(os.environ, os.getuid())
+    if _read_only_log_from_argv(arguments) is not None:
+        return _start_detached_reader(arguments, root, effects)
     # Reject a malformed run before anything is spawned, so the operator sees
     # the diagnostic here rather than in a detached server's log.
     run_id: str = cli.parse_cli_invocation(_headless_argv(arguments)).args.run_id
-    root = instance_root(os.environ, os.getuid())
     live = driving(LiveRegistry(FileInstanceStore(root), SystemClock()).list(), run_id)
     if live is not None:
         raise _DetachedLiveRunError(live)
     return _spawn_detached_instance([*arguments, "--run-id", run_id], root, effects)
+
+
+def _start_detached_reader(
+    arguments: list[str], root: Path, effects: _DetachedGatewayEffects
+) -> LiveInstanceRecord:
+    """Spawn the read-only server of the journal ``--reopen`` names, registered as a reader.
+
+    The run is not started, so there is no run request to parse: ``--run-id`` names the run
+    whose recorded journal is served. A reader drives nothing, so a live server of the same run
+    does not stop one from starting (it registers apart from the runs).
+    """
+    value = _first_option(arguments, ("--run-id",))
+    if value is None:
+        cli.configuration_error(
+            "--reopen needs --run-id, the run the journal records",
+            code="invalid_arguments",
+            stage="argument_parsing",
+        )
+    try:
+        validate_run_id(value)
+    except ProjectStateError as exc:
+        cli.configuration_error(str(exc), code="invalid_arguments", stage="argument_parsing")
+    return _spawn_detached_instance(arguments, root, effects, registry_directory=READERS_DIRECTORY)
 
 
 def main(
@@ -950,12 +979,14 @@ def main(
     *,
     observer: ServerLifecycleObserver | None = None,
     runs: Runs | None = None,
+    run_readers: RunReaders | None = None,
 ) -> None:
     """Run the frontend server and headless engine in one process.
 
     ``observer`` is a detached server's registry record
     (``entrypoints.detached_run``), told when the server reaches a milestone.
-    ``runs`` replaces the application-wired run service in tests.
+    ``runs`` and ``run_readers`` replace the application-wired run service and finished-run
+    opener in tests.
 
     Every configuration diagnostic raised below this frame is rendered to
     stderr and exits with the diagnostic's code, the way
@@ -963,11 +994,11 @@ def main(
     raising site is what makes that total: argument parsing and `RunRequest`
     building both run before any transport binds, so a diagnostic they raise
     has no structured channel to reach a frontend on, and stderr is inherited
-    by the TUI launcher and redirected onto the detached startup log.
+    by the launcher and redirected onto the detached startup log.
     """
-    cli.start_boot_trace()
+    cli.start_process()
     try:
-        _serve(sys.argv[1:] if argv is None else argv, observer, runs)
+        _serve(sys.argv[1:] if argv is None else argv, observer, runs, run_readers)
     except ConfigurationError as exc:
         if observer is not None:
             diagnostic = exc.diagnostic
@@ -979,24 +1010,34 @@ def main(
         cli.render_configuration_error(exc)
     except WebSocketBindError as exc:
         sys.stderr.write(f"{exc}\n")
-        sys.stderr.write(
-            "Inspect or stop that listener with "
-            f"`vibesys web status --port {exc.port}` or "
-            f"`vibesys web stop --port {exc.port}`.\n"
-        )
+        sys.stderr.write(f"Inspect or stop the listener on port {exc.port} before retrying.\n")
         raise SystemExit(1) from None
+
+
+def _opened_project_root(request: RunRequest) -> Path | None:
+    """The opened project's root when its directory exists.
+
+    A fresh collection destination does not exist until the run provisions it.
+    The server publishes that root from the run-ready fact, which is
+    ``Project.root`` after ``Project.open``. ``resolved_project_root`` is the
+    request's root, including None when a caller has not named one.
+    """
+    root = request.resolved_project_root
+    if root is None:
+        return None
+    try:
+        return Project.open(root).root
+    except ProjectRootNotFoundError:
+        return None
 
 
 def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR0912, PLR0915]; the entrypoint owns ordered setup, parsing, execution, and cleanup branches
     arguments: list[str],
     observer: ServerLifecycleObserver | None,
     runs: Runs | None,
+    run_readers: RunReaders | None,
 ) -> None:
     """Serve one invocation, leaving configuration diagnostics to `main`."""
-    if arguments and arguments[0] == "tui-defaults":
-        _run_tui_defaults(arguments[1:])
-        return
-
     web = _web_requested(arguments)
     detach = _detach_requested(arguments)
     detached_child = os.environ.get("VIBESYS_DETACHED_CHILD") == "1"
@@ -1028,8 +1069,11 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
                     code="invalid_arguments",
                     stage="argument_parsing",
                 )
-            print(f"VibeSys web UI: {existing.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101039 [T201]; expose the reused capability URL to the launcher user
-            webbrowser.open(existing.url, new=2)
+            if web_bundle is not None:
+                print(f"VibeSys web UI: {existing.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101039 [T201]; expose the reused capability URL to the launcher user
+                webbrowser.open(existing.url, new=2)
+            else:
+                print(f"VibeSys gateway: {existing.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101201 [T201]; expose the reused capability URL to the launcher user
             return
         if detach:
             try:
@@ -1056,9 +1100,16 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
             code="invalid_arguments",
             stage="argument_parsing",
         )
+    if control_socket is not None:
+        _refuse_control_socket_outside_runtime_root(control_socket)
     temp_socket_dir: tempfile.TemporaryDirectory[str] | None = None
     if control_socket is None:
-        temp_socket_dir = tempfile.TemporaryDirectory(prefix="vibesys-web-")
+        # In the operator's runtime root, where no confined agent can write: in a shared
+        # /tmp an agent could move the socket aside and bind its own to read the operator
+        # key a client presents. Clients refuse a socket anywhere else (OperatorDialer).
+        temp_socket_dir = tempfile.TemporaryDirectory(
+            prefix="vibesys-web-", dir=instance_root(os.environ, os.getuid())
+        )
         control_socket = Path(temp_socket_dir.name) / "control.sock"
     try:
         request = (
@@ -1066,22 +1117,34 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
             if read_only_log is not None
             else cli.build_run_request(cli.parse_cli_invocation(_headless_argv(arguments)))
         )
-        if observer is not None and request is not None:
-            observer.resolved(
-                project_root=request.project_root,
-                task=request.input_bundle.task_name,
-            )
+        opened_root = None if request is None else _opened_project_root(request)
+        if observer is not None and request is not None and opened_root is not None:
+            observer.resolved(project_root=opened_root, task=request.input_bundle.task_name)
         run_id = None if request is None else request.resolved_run_id
-        project_root = None if request is None else request.resolved_project_root
+        project_root = (
+            None
+            if request is None
+            else opened_root
+            if opened_root is not None
+            else request.resolved_project_root
+        )
         server_runtime = import_module("server.runtime").ServerRuntime
+        open_reader = (
+            None
+            if read_only_log is None
+            else _chat_reader_opener(
+                arguments, production_run_readers() if run_readers is None else run_readers
+            )
+        )
         platform = Platform.real()
+        control_key = create_operator_key(os.environ, os.getuid())
         if web:
             runtime = server_runtime(
                 socket_path=control_socket,
+                control_key=control_key,
                 runs=production_runs() if runs is None else runs,
                 run_id=run_id,
                 project_root=project_root,
-                tui_defaults=_tui_defaults_from_argv(arguments),
                 web=True,
                 web_port=web_port,
                 web_assets=web_bundle.directory if web_bundle is not None else None,
@@ -1090,16 +1153,21 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
                 instance_path=instance_path,
                 detach=detach,
                 read_only_log=read_only_log,
+                observer=observer,
+                open_reader=open_reader,
                 platform=platform,
             )
         else:
             runtime = server_runtime(
                 socket_path=control_socket,
+                control_key=control_key,
                 runs=production_runs() if runs is None else runs,
                 run_id=run_id,
                 project_root=project_root,
-                tui_defaults=_tui_defaults_from_argv(arguments),
                 detach=detach,
+                read_only_log=read_only_log,
+                open_reader=open_reader,
+                reader_idle_seconds=READER_IDLE_SECONDS if read_only_log is not None else None,
                 observer=observer,
                 platform=platform,
             )
@@ -1114,7 +1182,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
     # `result` is `None` when `ServerRuntime.run` absorbed an operator stop
     # (`RunStopped`) as a clean backend exit; only a completed run's
     # `RunResult.succeeded` decides the process exit code.
-    if result is not None and not result.succeeded:
+    if result is not None and not result.succeeded and result.status is not RunStatus.PARKED:
         raise SystemExit(1)
 
 

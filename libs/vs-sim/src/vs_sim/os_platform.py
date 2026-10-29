@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from vs_sim.concurrency import Threads
     from vs_sim.network import Network
     from vs_sim.processes import Processes
-    from vs_sim.signals import ProcessSignaller
+    from vs_sim.signals import ProcessSignaller, WriterProcessSignaller
 
 
 @dataclass(frozen=True)
@@ -35,15 +35,18 @@ class Platform:
     processes: Processes
     network: Network
     signaller: ProcessSignaller
+    writer_signaller: WriterProcessSignaller | None = None
 
     @classmethod
     def real(cls) -> Platform:
         """The host's own: the wall clock, OS threads and processes, Unix sockets, pidfds."""
+        signaller = PidfdProcessSignaller()
         return cls(
             clock=SystemClock(),
             threads=OsThreads(),
             blocking=ThreadBlockingRunner(),
             processes=OsProcesses(),
             network=UnixNetwork(),
-            signaller=PidfdProcessSignaller(),
+            signaller=signaller,
+            writer_signaller=signaller,
         )

@@ -33,7 +33,7 @@ Malformed, stale, cross-parent, and out-of-range cursors fail explicitly.
 Clients replace a sibling set on a null cursor and append only an exact cursor
 continuation. Replaying the same page is idempotent; reusing an applied cursor
 with different content, skipping a cursor, or continuing a stale revision is
-rejected. Web and TUI sessions fetch the root pages at bootstrap and after an
+rejected. Clients fetch the root pages at bootstrap and after an
 `iterations_changed` invalidation, fold them into shared core navigation state,
 and fall back to event-derived rounds when the server predates the query or the
 policy returns typed unavailability. This preserves deterministic navigation

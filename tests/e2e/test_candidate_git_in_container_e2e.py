@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from vs_runtime.api.infrastructure import RunEnvironmentSession
+from vs_sim.api import DISCARD
 
 pytestmark = pytest.mark.e2e
 
@@ -113,9 +114,9 @@ def test_git_works_in_the_candidate_worktree(
 ) -> None:
     session, _workspace, _sibling = candidate
 
-    inside = session.sandbox.execute("git rev-parse --is-inside-work-tree")
-    status = session.sandbox.execute("git status --porcelain")
-    diff = session.sandbox.execute("git diff --name-only")
+    inside = session.sandbox.execute("git rev-parse --is-inside-work-tree", output=DISCARD)
+    status = session.sandbox.execute("git status --porcelain", output=DISCARD)
+    diff = session.sandbox.execute("git diff --name-only", output=DISCARD)
 
     assert inside.exit_code == 0, inside.output
     assert inside.output.strip() == "true"
@@ -139,7 +140,7 @@ def test_git_in_the_container_cannot_alter_refs_or_other_worktrees(
         f"git -C {sibling} checkout -q --detach HEAD~0",
         f"printf x > {sibling}/intruder",
     ]
-    results = [session.sandbox.execute(command) for command in attempts]
+    results = [session.sandbox.execute(command, output=DISCARD) for command in attempts]
 
     assert all(result.exit_code != 0 for result in results), [r.output for r in results]
     assert _git("for-each-ref", cwd=project) == refs_before

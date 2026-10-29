@@ -13,21 +13,37 @@
  * channel at once (`drop`, a broken link).
  */
 import {
+  type AgentLogin,
+  type Backend,
   type ChannelEndOutcome,
+  type Check,
+  type CheckoutInspectReply,
+  type ClusterTestFailed,
+  type ClusterTestPassed,
+  type ComputeSettings,
+  type ExampleList,
   type HarnessOption,
   type HelperFeature,
   type HelperRequest,
   helperFeaturesForRequest,
   type InstanceList,
   type LiveInstanceRecord,
+  type LoginStarted,
+  type LoginUnavailable,
+  type MachineDescription,
   type PathEntry,
   parseHelperRequest,
+  RUN_EVENT_TYPES_BY_KINDS,
+  type RunSummary,
+  type TaskGoal,
   type UnreadableRecord,
+  type UsageWindowReply,
 } from '@vibesys/contracts/host-helper';
 import {ConnectionError} from '../shell/helper-channel.js';
 import type {Link} from '../shell/link.js';
 import type {SpawnedProcess} from '../shell/process.js';
 import type {Cause} from '../state/host-connection.js';
+import {FakeLogStore, UnknownLogStream} from './fake-log-store.js';
 import {type FakeProcess, fakeProcess} from './fake-process.js';
 
 type Reply = Record<string, unknown>;
@@ -93,17 +109,144 @@ export interface FakeHost {
   readonly unverified: string[];
   /** Project directories and their tasks. */
   readonly projects: Map<string, readonly string[]>;
+  /** What `project.task_goal` answers per `PROJECT TASK` (a space between); a task not named is `task_invalid`. */
+  readonly goals: Map<string, TaskGoal>;
+  /**
+   * The pages `runs.summary` answers per `PROJECT RUN_ID` (a space between), each served for its
+   * `offset`; a page not named here, or a run not named, is an unknown run.
+   */
+  readonly summaries: Map<string, readonly {readonly offset: number; readonly page: Reply}[]>;
   /** Directories and the directories in them. */
   readonly directories: Map<string, readonly string[]>;
+  /** The runs each project records (`runs.list`), with the digests it can read. */
+  readonly runHistory: Map<string, readonly RunSummary[]>;
+  /**
+   * The journals `runs.read_events` serves per `PROJECT RUN_ID` (a space between): each event a
+   * JSON document with its `sequence` (increasing) and `type`. A run not named here, or a request
+   * for another page kind, is an unknown run.
+   */
+  readonly journals: Map<string, readonly Readonly<Record<string, unknown>>[]>;
+  /** The most bytes of events (their JSON) one `runs.read_events` page holds, one event at least. */
+  journalPageBytes: number;
   /** How each live run answers its run channel. */
   readonly runs: Map<string, RunServer>;
+  /** How a read-only server (`run.reader`) answers its run channel. */
+  readerServer: RunServer;
+  /**
+   * The read-only servers `run.reader` started, by the run each serves: a run with a live server
+   * is read through it, and a run that already has a reader shares it.
+   */
+  readonly readers: Map<string, string>;
+  /** The run of every read-only server `run.reader` started, in order. */
+  readonly readerStarts: string[];
   /** Live runs this user may not connect to (`connect_denied`). */
   readonly denied: Set<string>;
   /** Retained bounded diagnostic tails, by instance id. */
   readonly logs: Map<string, {readonly text: string; readonly truncated: boolean}>;
   /** The vetted provider and model pairs (`harnesses.list`), each provider's default first. */
   readonly harnesses: HarnessOption[];
+  /** What `machine.describe` answers; replace it to describe another machine. */
+  machine: MachineDescription;
+  /** What `checkout.inspect` answers per path; any other path holds no checkout. */
+  readonly checkouts: Map<string, CheckoutInspectReply['inspection']>;
+  /** What `run.preflight` answers for a known project; replace it to fail a check. */
+  preflight: Check[];
+  /** The role ids `run.preflight` reports the run's orchestration declares (`with_roles`). */
+  roles: string[];
+  /** The compute backend `run.preflight` reports the run resolved to (`with_backend`). */
+  backend: Backend | null;
+  /**
+   * What `examples.list` answers (its `task_details` only when the request set `with_catalogue`),
+   * or `null` for a helper with no catalog (`examples_unavailable`, as from an installed
+   * distribution). `project.create_from_example` and `project.copy_out` add
+   * the project they make to `projects` and `directories`.
+   */
+  examples: ExampleList | null;
+  /** What `compute.list` answers; adds and removals change it, as they change the helper's file. */
+  compute: ComputeSettings;
+  /**
+   * What `compute.test_cluster` finds, by the cluster's ssh host alias (a login-node cluster is
+   * under `''`); a cluster not named here cannot be reached.
+   */
+  readonly clusterTests: Map<string, ClusterTestPassed | ClusterTestFailed>;
+  /** What `agent_logins.list` answers. */
+  logins: AgentLogin[];
+  /** What `agent_logins.start` answers per provider; a provider not named has no login command. */
+  readonly loginStarts: Map<string, LoginStarted | LoginUnavailable>;
+  /**
+   * What `usage.window` answers per project: the figures it holds, whatever the window. The reply
+   * echoes the window asked for and names as `missing_runs` the requested runs the project's
+   * `runHistory` does not list; a project not named here has spent nothing.
+   */
+  readonly usage: Map<string, UsageFigures>;
 }
+
+/** The figures of a `usage.window` reply that do not depend on which window was asked. */
+type UsageFigures = Omit<
+  UsageWindowReply,
+  'type' | 'request_id' | 'since' | 'until' | 'missing_runs'
+>;
+
+/** A project that spent nothing: the figures `usage.window` answers for a project with no entry. */
+const NO_USAGE: UsageFigures = {
+  spent_usd: 0,
+  spend_per_hour_usd: 0,
+  tokens: {input: null, cache_read: null, cache_write: null, output: null, reasoning: null},
+  turns: 0,
+  unpriced_turns: 0,
+  untimed_turns: 0,
+  new_bests: 0,
+  cost_per_new_best_usd: null,
+  by_run: [],
+  by_agent: [],
+  agents_omitted: 0,
+};
+
+/** `listing` as a helper answers a client that does not set `with_catalogue`. */
+function withoutTaskDetails(listing: ExampleList): ExampleList {
+  return {
+    ...listing,
+    examples: listing.examples.map(({task_details: _details, ...example}) => example),
+  };
+}
+
+/** `check` as a helper answers a client that sets (or not) `with_backend` and `with_causes`. */
+function answeredTo(check: Check, request: Extract<HelperRequest, {type: 'run.preflight'}>): Check {
+  const {cause} = check;
+  if (cause === undefined || cause === null || cause.kind === 'project_dirty') return check;
+  const asked = cause.kind === 'backend_unavailable' ? request.with_backend : request.with_causes;
+  if (asked === true) return check;
+  const {cause: _withheld, ...plain} = check;
+  return plain;
+}
+
+/** The roles a new `FakeHelper` reports: those the multi orchestration declares. */
+const FAKE_ROLES: readonly string[] = [
+  'multi-orchestrator',
+  'multi-profiler',
+  'multi-implementer',
+  'multi-judge',
+];
+
+/** The checks a new `FakeHelper` answers: every one passes. */
+const PASSING_CHECKS: readonly Check[] = [
+  {id: 'checkout_found', state: 'ok', detail: 'VibeSys 0.1.1 at /src/vibesys'},
+  {id: 'project_own_repository', state: 'ok', detail: 'the project is its own Git repository'},
+  {id: 'project_clean', state: 'ok', detail: 'the project has no uncommitted changes'},
+  {id: 'settings_valid', state: 'ok', detail: "the run's configuration is valid"},
+  {id: 'docker_reachable', state: 'ok', detail: 'Docker 27.3.1'},
+  {id: 'agent_image', state: 'ok', detail: 'an agent image is cached here'},
+  {id: 'evaluator_available', state: 'ok', detail: 'benchmark command'},
+];
+
+/** The machine a new `FakeHelper` describes: a CPU-only host with Docker and one harness CLI. */
+const FAKE_MACHINE: MachineDescription = {
+  checkout: {root: '/src/vibesys', version: '0.1.1', commit: 'abc123', dirty: false},
+  hardware: {cpu_cores: 8, gpus: [], accelerator: 'cpu'},
+  docker: {reachable: true, version: '27.3.1'},
+  harness_clis: ['codex'],
+  runs: {live: 0, ended_today: 0},
+};
 
 /** The pairs a new `FakeHelper` offers: two providers, each default first. */
 export const FAKE_HARNESSES: readonly HarnessOption[] = [
@@ -113,11 +256,104 @@ export const FAKE_HARNESSES: readonly HarnessOption[] = [
 ];
 
 /**
+ * The pairs of a helper whose agent library names each model's maker and generation: two makers,
+ * the newer generation of one with two tiers, an older generation still vetted, and a model
+ * agentshim places in no generation. A strict client sees the maker and generation only when it
+ * asks (`with_generations`), so use `FakeHelper.host.harnesses` to seed it.
+ */
+export const FAKE_MODEL_CATALOGUE: readonly HarnessOption[] = [
+  {
+    provider: 'codex',
+    model: 'gpt-6-sol',
+    default: true,
+    display: {
+      provider_name: 'Codex',
+      model_name: 'GPT-6 Sol',
+      family: 'GPT',
+      tier: 3,
+      tier_name: 'Sol',
+      maker: 'openai',
+      generation: {id: 'gpt-6', name: 'GPT-6', order: 1},
+    },
+  },
+  {
+    provider: 'codex',
+    model: 'gpt-6-luna',
+    default: false,
+    display: {
+      provider_name: 'Codex',
+      model_name: 'GPT-6 Luna',
+      family: 'GPT',
+      tier: 1,
+      tier_name: 'Luna',
+      maker: 'openai',
+      generation: {id: 'gpt-6', name: 'GPT-6', order: 1},
+    },
+  },
+  {
+    provider: 'codex',
+    model: 'gpt-5.6-sol',
+    default: false,
+    display: {
+      provider_name: 'Codex',
+      model_name: 'GPT-5.6 Sol',
+      family: 'GPT',
+      tier: 3,
+      tier_name: 'Sol',
+      maker: 'openai',
+      generation: {id: 'gpt-5.6', name: 'GPT-5.6', order: 2},
+    },
+  },
+  {
+    provider: 'codex',
+    model: 'gpt-5.5',
+    default: false,
+    display: {provider_name: 'Codex', model_name: 'GPT-5.5', family: 'GPT', maker: 'openai'},
+  },
+  {
+    provider: 'claude',
+    model: 'claude-opus-5-5',
+    default: true,
+    display: {
+      provider_name: 'Claude Code',
+      model_name: 'Opus 5.5',
+      family: 'Claude',
+      tier: 3,
+      tier_name: 'Opus',
+      maker: 'anthropic',
+      generation: {id: 'claude-5.5', name: 'Claude 5.5', order: 1},
+    },
+  },
+  {
+    provider: 'claude',
+    model: 'claude-sonnet-5',
+    default: false,
+    display: {
+      provider_name: 'Claude Code',
+      model_name: 'Sonnet 5',
+      family: 'Claude',
+      tier: 2,
+      tier_name: 'Sonnet',
+      maker: 'anthropic',
+      generation: {id: 'claude-5', name: 'Claude 5', order: 2},
+    },
+  },
+];
+
+/** The same pairs as a client that did not ask for generations reads them. */
+function withoutGenerations(option: HarnessOption): HarnessOption {
+  if (option.display == null) return option;
+  const {maker: _maker, generation: _generation, ...display} = option.display;
+  return {...option, display};
+}
+
+/**
  * The run options `server.host_api` names (`UNVETTED_MODEL_FLAG`, `CLI_PROVIDER_FLAG`,
  * `MODEL_FLAG`): the wire contract carries no constants, so this Fake repeats them.
  */
 const UNVETTED_MODEL_FLAG = '--allow-unvetted-model';
 const HARNESS_FLAGS = ['--cli-provider', '--model'] as const;
+const ROLE_AGENT_FLAGS = ['--role-provider', '--role-model'] as const;
 
 /** Whether argparse reads `token` (`--name` or `--name=value`) as `flag`, as the helper decides. */
 function abbreviates(token: string, flag: string): boolean {
@@ -126,9 +362,14 @@ function abbreviates(token: string, flag: string): boolean {
 }
 
 /** Why the helper refuses `start`'s arguments, or null when it accepts them. */
-function refusedArgument(start: Extract<HelperRequest, {type: 'run.start'}>): string | null {
-  const refused =
-    start.harness == null ? [UNVETTED_MODEL_FLAG] : [UNVETTED_MODEL_FLAG, ...HARNESS_FLAGS];
+function refusedArgument(
+  start: Extract<HelperRequest, {type: 'run.start' | 'run.preflight'}>,
+): string | null {
+  const refused = [
+    UNVETTED_MODEL_FLAG,
+    ...(start.harness == null ? [] : HARNESS_FLAGS),
+    ...(start.agents == null || Object.keys(start.agents).length === 0 ? [] : ROLE_AGENT_FLAGS),
+  ];
   for (const token of start.args ?? []) {
     const flag = refused.find(candidate => abbreviates(token, candidate));
     if (flag !== undefined) return `${token} selects ${flag}`;
@@ -138,7 +379,7 @@ function refusedArgument(start: Extract<HelperRequest, {type: 'run.start'}>): st
 
 export function record(id: string, runId: string, project = '/p'): LiveInstanceRecord {
   return {
-    version: 4,
+    version: 5,
     id,
     status: 'serving',
     phase: {status: 'running', stage: null, reason: null},
@@ -163,11 +404,34 @@ export class FakeHelper {
     unreadable: [],
     unverified: [],
     projects: new Map(),
+    goals: new Map(),
+    summaries: new Map(),
     directories: new Map(),
+    runHistory: new Map(),
+    journals: new Map(),
+    journalPageBytes: Number.POSITIVE_INFINITY,
     runs: new Map(),
+    readerServer: ECHO_SERVER,
+    readers: new Map(),
+    readerStarts: [],
     denied: new Set(),
     logs: new Map(),
     harnesses: [...FAKE_HARNESSES],
+    machine: FAKE_MACHINE,
+    checkouts: new Map(),
+    preflight: [...PASSING_CHECKS],
+    roles: [...FAKE_ROLES],
+    backend: 'cpu',
+    examples: null,
+    compute: {
+      config_path: '/home/me/.config/vibesys/compute.toml',
+      clusters: [],
+      modal: {token_present: false},
+    },
+    clusterTests: new Map(),
+    logins: [],
+    loginStarts: new Map(),
+    usage: new Map(),
   };
   /** Exit every new channel at once with this status and stdout, as a failing bootstrap does. */
   bootstrapExit: {readonly code: number; readonly stdout: string} | null = null;
@@ -199,7 +463,41 @@ export class FakeHelper {
     'paths_complete',
     'instances_inspect',
     'harnesses',
+    'logs',
+    'logs_cancel',
+    'run_history',
+    'run_span_events',
+    'run_tail',
+    'run_trace_events',
+    'run_summary',
+    'run_trace',
+    'run_ending',
+    'run_history_pages',
+    'machine_describe',
+    'checkout_inspect',
+    'preflight',
+    'run_options',
+    'examples',
+    'run_roles',
+    'run_backend',
+    'run_causes',
+    'project_clean',
+    'run_digest',
+    'run_dashboard',
+    'example_catalogue',
+    'harness_generations',
+    'run_role_agents',
+    'measurement_target',
+    'machine_compute',
+    'agent_logins',
+    'project_goal',
+    'example_destination',
+    'usage_window',
+    'chat_ended_runs',
+    'chat_ended_run_questions',
   ]);
+  /** The run log streams `logs.list` and `logs.read` serve; replace it to seed a store. */
+  logStore = new FakeLogStore();
   readonly #pendingAnswers = new Map<HelperRequest['type'], PendingAnswer[]>();
   /** How many of them have exited. */
   exited = 0;
@@ -339,7 +637,7 @@ export class FakeHelper {
 
   listing(): InstanceList {
     return {
-      version: 4,
+      version: 5,
       instances: [...this.host.instances],
       ended: [...this.host.ended],
       unreadable: [...this.host.unreadable],
@@ -358,6 +656,11 @@ export class FakeHelper {
 
   newInstanceId(): string {
     return (this.#nextInstance++).toString(16).padStart(12, '0');
+  }
+
+  /** A read-only server ended by itself, as it does once no client holds it: the next `run.reader` starts another. */
+  endReader(runId: string): void {
+    this.host.readers.delete(runId);
   }
 }
 
@@ -494,27 +797,307 @@ class HelperSession {
         return;
       case 'tasks.list':
       case 'runs.list':
+      case 'project.task_goal':
         this.#project(request);
         return;
       case 'run.start':
         this.#start(request);
         return;
+      case 'runs.read_events':
+      case 'runs.events_for_span':
+      case 'runs.read_tail':
+      case 'runs.summary':
+      case 'usage.window':
+        this.#readRunHistory(request);
+        return;
+      case 'machine.describe':
+        this.#send({type: 'machine.describe', request_id: id, machine: this.#helper.host.machine});
+        return;
+      case 'run.preflight':
+        this.#preflight(request);
+        return;
+      case 'examples.list':
+      case 'examples.destination':
+        this.#examples(request);
+        return;
+      case 'project.create_from_example':
+      case 'project.copy_out':
+        this.#createProject(request);
+        return;
+      case 'checkout.inspect':
+        this.#inspectCheckout(request);
+        return;
       case 'harnesses.list':
-        this.#send({
-          type: 'harnesses.list',
-          request_id: id,
-          harnesses: [...this.#helper.host.harnesses],
-        });
+        this.#harnesses(request);
+        return;
+      case 'compute.list':
+      case 'compute.test_cluster':
+      case 'compute.add_cluster':
+      case 'compute.remove_cluster':
+      case 'agent_logins.list':
+      case 'agent_logins.start':
+        this.#machineSettings(request);
         return;
       case 'run.stop':
-        this.#stop(request);
-        return;
+      case 'run.reader':
       case 'run.connect':
-        this.#connect(id, request.instance_id);
+        this.#runRequest(request);
         return;
       case 'paths.complete':
         this.#complete(id, request.prefix);
         return;
+      case 'logs.list':
+      case 'logs.read':
+        this.#logs(request);
+        return;
+      case 'logs.cancel':
+        // This helper answers every read at once, so the named read has always answered already
+        // (or never existed): the cancel's reply follows it, as the real helper's does.
+        this.#send({type: 'logs.cancel', request_id: id, read_id: request.read_id});
+        return;
+    }
+  }
+
+  /** The inspection of a checkout the host holds, or `not_found` when it holds none there. */
+  #inspectCheckout(request: Extract<HelperRequest, {type: 'checkout.inspect'}>): void {
+    this.#send({
+      type: 'checkout.inspect',
+      request_id: request.request_id,
+      inspection: this.#helper.host.checkouts.get(request.path) ?? {state: 'not_found'},
+    });
+  }
+
+  /** The compute settings and agent login requests, which read or change what the host holds. */
+  #machineSettings(
+    request: Extract<
+      HelperRequest,
+      {
+        type:
+          | 'compute.list'
+          | 'compute.test_cluster'
+          | 'compute.add_cluster'
+          | 'compute.remove_cluster'
+          | 'agent_logins.list'
+          | 'agent_logins.start';
+      }
+    >,
+  ): void {
+    const id = request.request_id;
+    const host = this.#helper.host;
+    switch (request.type) {
+      case 'compute.list':
+        this.#send({type: 'compute.list', request_id: id, settings: host.compute});
+        return;
+      case 'compute.test_cluster':
+        this.#send({
+          type: 'compute.test_cluster',
+          request_id: id,
+          result: this.#testCluster(request.cluster),
+        });
+        return;
+      case 'compute.add_cluster':
+        this.#addCluster(request);
+        return;
+      case 'compute.remove_cluster':
+        this.#removeCluster(request);
+        return;
+      case 'agent_logins.list':
+        this.#send({type: 'agent_logins.list', request_id: id, logins: host.logins});
+        return;
+      case 'agent_logins.start':
+        this.#send({
+          type: 'agent_logins.start',
+          request_id: id,
+          result: host.loginStarts.get(request.provider) ?? {
+            outcome: 'unavailable',
+            reason: 'no_login_command',
+          },
+        });
+        return;
+    }
+  }
+
+  /** The figures the host holds for the (known) project, in the window asked for. */
+  #usage(request: Extract<HelperRequest, {type: 'usage.window'}>): void {
+    const id = request.request_id;
+    const host = this.#helper.host;
+    const known = new Set((host.runHistory.get(request.project) ?? []).map(run => run.run_id));
+    this.#send({
+      ...(host.usage.get(request.project) ?? NO_USAGE),
+      type: 'usage.window',
+      request_id: id,
+      since: request.since,
+      until: request.until,
+      missing_runs: [...new Set(request.run_ids)].filter(run => !known.has(run)),
+    });
+  }
+
+  #harnesses(request: Extract<HelperRequest, {type: 'harnesses.list'}>): void {
+    const {harnesses} = this.#helper.host;
+    this.#send({
+      type: 'harnesses.list',
+      request_id: request.request_id,
+      harnesses:
+        request.with_generations === true ? [...harnesses] : harnesses.map(withoutGenerations),
+    });
+  }
+
+  #testCluster(
+    cluster: Extract<HelperRequest, {type: 'compute.test_cluster'}>['cluster'],
+  ): ClusterTestPassed | ClusterTestFailed {
+    const alias = cluster.reach.kind === 'ssh' ? cluster.reach.host : '';
+    return (
+      this.#helper.host.clusterTests.get(alias) ?? {
+        outcome: 'failed',
+        stage: 'reach',
+        detail: `cannot reach ${alias || 'the scheduler'}`,
+      }
+    );
+  }
+
+  #addCluster(request: Extract<HelperRequest, {type: 'compute.add_cluster'}>): void {
+    const id = request.request_id;
+    const host = this.#helper.host;
+    if (host.compute.clusters.some(listed => listed.cluster.name === request.cluster.name)) {
+      this.#send(
+        this.#error(
+          id,
+          'cluster_exists',
+          `a cluster named '${request.cluster.name}' is already set up`,
+        ),
+      );
+      return;
+    }
+    const result = this.#testCluster(request.cluster);
+    if (result.outcome === 'failed') {
+      this.#send(this.#error(id, 'cluster_test_failed', `${result.stage}: ${result.detail}`));
+      return;
+    }
+    host.compute = {
+      ...host.compute,
+      clusters: [...host.compute.clusters, {cluster: request.cluster, source: 'vibesys'}],
+    };
+    this.#send({type: 'compute.add_cluster', request_id: id, settings: host.compute});
+  }
+
+  #removeCluster(request: Extract<HelperRequest, {type: 'compute.remove_cluster'}>): void {
+    const id = request.request_id;
+    const host = this.#helper.host;
+    const listed = host.compute.clusters.find(each => each.cluster.name === request.name);
+    if (listed === undefined) {
+      this.#send(
+        this.#error(id, 'unknown_cluster', `no cluster named '${request.name}' is set up`),
+      );
+      return;
+    }
+    if (listed.source === 'slurm_toml') {
+      this.#send(
+        this.#error(
+          id,
+          'cluster_read_only',
+          `cluster '${request.name}' comes from the operator file`,
+        ),
+      );
+      return;
+    }
+    host.compute = {
+      ...host.compute,
+      clusters: host.compute.clusters.filter(each => each !== listed),
+    };
+    this.#send({type: 'compute.remove_cluster', request_id: id, settings: host.compute});
+  }
+
+  #examples(
+    request: Extract<HelperRequest, {type: 'examples.list' | 'examples.destination'}>,
+  ): void {
+    if (request.type === 'examples.destination') {
+      this.#exampleDestination(request);
+      return;
+    }
+    const listing = this.#helper.host.examples;
+    if (listing === null) {
+      this.#send({
+        ...this.#error(request.request_id, 'examples_unavailable', 'no catalog'),
+        path: '',
+      });
+      return;
+    }
+    this.#send({
+      type: 'examples.list',
+      request_id: request.request_id,
+      listing: request.with_catalogue === true ? listing : withoutTaskDetails(listing),
+    });
+  }
+
+  /**
+   * What `project.create_from_example` would find at the destination: nothing, an empty
+   * directory, a project with the example's tasks, or anything else.
+   */
+  #exampleDestination(request: Extract<HelperRequest, {type: 'examples.destination'}>): void {
+    const id = request.request_id;
+    const {host} = this.#helper;
+    const example = host.examples?.examples.find(entry => entry.name === request.example);
+    if (host.examples === null || example === undefined) {
+      const [code, path] =
+        host.examples === null
+          ? (['examples_unavailable', ''] as const)
+          : (['unknown_example', host.examples.checkout] as const);
+      this.#send({...this.#error(id, code, 'no such example'), path});
+      return;
+    }
+    const {destination} = request;
+    const tasks = host.projects.get(destination);
+    const entries = host.directories.get(destination);
+    const same =
+      tasks !== undefined &&
+      example.tasks.length > 0 &&
+      [...tasks].sort().join('\n') === [...example.tasks].sort().join('\n');
+    const state =
+      tasks !== undefined
+        ? same
+          ? 'example_project'
+          : 'occupied'
+        : entries === undefined
+          ? 'absent'
+          : entries.length === 0
+            ? 'empty'
+            : 'occupied';
+    this.#send({
+      type: 'examples.destination',
+      request_id: id,
+      state,
+      project: state === 'example_project' ? destination : null,
+    });
+  }
+
+  #logs(request: Extract<HelperRequest, {type: 'logs.list' | 'logs.read'}>): void {
+    const helper = this.#helper;
+    const id = request.request_id;
+    const known =
+      helper.logStore.has(request.instance_id) ||
+      [...helper.host.instances, ...helper.host.ended].some(
+        entry => entry.id === request.instance_id,
+      );
+    if (!known) {
+      this.#send(this.#error(id, 'unknown_instance', `no logs for ${request.instance_id}`));
+      return;
+    }
+    if (request.type === 'logs.list') {
+      const streams = helper.logStore.streams(request.instance_id);
+      this.#send({type: 'logs.list', request_id: id, streams});
+      return;
+    }
+    try {
+      const chunk = helper.logStore.read(
+        request.instance_id,
+        request.stream_id,
+        request.start,
+        request.max_bytes,
+      );
+      this.#send({type: 'logs.read', request_id: id, chunk});
+    } catch (error) {
+      if (!(error instanceof UnknownLogStream)) throw error;
+      this.#send(this.#error(id, 'unknown_log_stream', `no log stream ${request.stream_id}`));
     }
   }
 
@@ -618,27 +1201,273 @@ class HelperSession {
       this.#send(this.#error(id, 'invalid_request', refused));
       return;
     }
-    const harness = request.harness;
-    if (harness != null) {
-      const offered = this.#helper.host.harnesses;
-      const vetted = offered.some(
-        option => option.provider === harness.provider && option.model === harness.model,
-      );
-      if (!vetted) {
-        const allowed = offered
-          .filter(option => option.provider === harness.provider)
-          .map(option => option.model);
-        const models = allowed.length === 0 ? 'none' : allowed.join(', ');
-        this.#send(this.#error(id, 'unvetted_harness', `vetted models: ${models}`));
-        return;
-      }
+    const refusal = this.#refusedHarness(request);
+    if (refusal !== null) {
+      this.#send(refusal);
+      return;
+    }
+    if (!this.#helper.host.projects.has(request.project)) {
+      this.#project(request);
+      return;
+    }
+    const undeclared = this.#undeclaredAgent(request);
+    if (undeclared !== null) {
+      this.#send(this.#error(id, 'invalid_request', undeclared));
+      return;
     }
     this.#project(request);
   }
 
-  #project(
-    request: Extract<HelperRequest, {type: 'tasks.list' | 'runs.list' | 'run.start'}>,
+  /**
+   * Why the helper refuses the request's harness, its roles' agents or their models, or null:
+   * a role's typed model and its agent both choose its model, and every pair must be offered.
+   */
+  #refusedHarness(
+    request: Extract<HelperRequest, {type: 'run.start' | 'run.preflight'}>,
+  ): Reply | null {
+    const id = request.request_id;
+    const offered = this.#helper.host.harnesses;
+    const agents = Object.entries(request.agents ?? {});
+    const modelled = request.options?.roles?.find(
+      role => role.model != null && request.agents?.[role.role] !== undefined,
+    );
+    if (modelled !== undefined) {
+      const message = `agents.${modelled.role} sets the model of role '${modelled.role}', which options.roles also sets; set it in one place`;
+      return this.#error(id, 'invalid_request', message);
+    }
+    const choices = [
+      ...(request.harness == null ? [] : [['harness', request.harness] as const]),
+      ...agents.map(([role, choice]) => [`agents.${role}`, choice] as const),
+    ];
+    for (const [key, choice] of choices) {
+      const vetted = offered.some(
+        option => option.provider === choice.provider && option.model === choice.model,
+      );
+      if (vetted) continue;
+      const allowed = offered
+        .filter(option => option.provider === choice.provider)
+        .map(option => option.model);
+      const models = allowed.length === 0 ? 'none' : allowed.join(', ');
+      return this.#error(
+        id,
+        'unvetted_harness',
+        `${key}: model '${choice.model}' is not vetted for provider '${choice.provider}'; vetted models: ${models}`,
+      );
+    }
+    return null;
+  }
+
+  /** The first `agents` key naming a role the run's orchestration does not declare, worded. */
+  #undeclaredAgent(
+    request: Extract<HelperRequest, {type: 'run.start' | 'run.preflight'}>,
+  ): string | null {
+    const declared = this.#helper.host.roles;
+    const unknown = Object.keys(request.agents ?? {}).filter(role => !declared.includes(role));
+    if (unknown.length === 0) return null;
+    return `${unknown.map(role => `agents.${role}`).join(', ')}: the run's orchestration declares no such role`;
+  }
+
+  /**
+   * Make a project as the helper would: an example the catalog lists, or a folder that exists,
+   * into a destination nothing occupies yet. The new project defines the example's tasks.
+   */
+  #createProject(
+    request: Extract<HelperRequest, {type: 'project.create_from_example' | 'project.copy_out'}>,
   ): void {
+    const id = request.request_id;
+    const host = this.#helper.host;
+    const catalog = host.examples;
+    if (request.type === 'project.create_from_example' && catalog === null) {
+      this.#send({...this.#error(id, 'examples_unavailable', 'no catalog'), path: ''});
+      return;
+    }
+    const example = catalog?.examples.find(
+      entry => request.type === 'project.create_from_example' && entry.name === request.example,
+    );
+    const known =
+      request.type === 'project.copy_out'
+        ? host.directories.has(request.source)
+        : example !== undefined;
+    if (!known) {
+      const [code, path] =
+        request.type === 'project.copy_out'
+          ? (['path_missing', request.source] as const)
+          : (['unknown_example', catalog?.checkout ?? ''] as const);
+      this.#send({...this.#error(id, code, 'no such source'), path});
+      return;
+    }
+    // An empty directory is made into the project; a project, or a directory with entries, is not.
+    const occupied = (host.directories.get(request.destination)?.length ?? 0) > 0;
+    if (occupied || host.projects.has(request.destination)) {
+      this.#send({
+        ...this.#error(id, 'destination_exists', `${request.destination} exists`),
+        path: request.destination,
+      });
+      return;
+    }
+    const tasks =
+      request.type === 'project.copy_out'
+        ? [...(host.projects.get(request.source) ?? [])]
+        : [...(example?.tasks ?? [])];
+    host.projects.set(request.destination, tasks);
+    host.directories.set(request.destination, []);
+    this.#send({
+      type: request.type,
+      request_id: id,
+      created: {project: request.destination, tasks},
+    });
+  }
+
+  #preflight(request: Extract<HelperRequest, {type: 'run.preflight'}>): void {
+    const id = request.request_id;
+    const argument = refusedArgument(request);
+    const refusal = argument === null ? this.#refusedHarness(request) : null;
+    if (argument !== null || refusal !== null) {
+      this.#send(refusal ?? this.#error(id, 'invalid_request', argument ?? ''));
+      return;
+    }
+    if (!this.#helper.host.projects.has(request.project)) {
+      this.#send({...this.#error(id, 'project_missing', 'no such project'), path: request.project});
+      return;
+    }
+    const undeclared = this.#undeclaredAgent(request);
+    if (undeclared !== null) {
+      this.#send(this.#error(id, 'invalid_request', undeclared));
+      return;
+    }
+    const {host} = this.#helper;
+    this.#send({
+      type: 'run.preflight',
+      request_id: id,
+      // A helper answers the project_clean check only to a client that asked for it, and a typed
+      // cause only to one that asked for its kind (the backend's, or any other failed setting's).
+      checks: host.preflight
+        .filter(check => request.with_project_clean === true || check.id !== 'project_clean')
+        .map(check => answeredTo(check, request)),
+      ...(request.with_roles === true ? {roles: [...host.roles]} : {}),
+      ...(request.with_backend === true && host.backend !== null ? {backend: host.backend} : {}),
+    });
+  }
+
+  /** The fake host records no runs, so every run of a known project is unknown; usage is what it holds. */
+  #readRunHistory(
+    request: Extract<
+      HelperRequest,
+      {
+        type:
+          | 'runs.read_events'
+          | 'runs.events_for_span'
+          | 'runs.read_tail'
+          | 'runs.summary'
+          | 'usage.window';
+      }
+    >,
+  ): void {
+    const id = request.request_id;
+    if (!this.#helper.host.projects.has(request.project)) {
+      this.#send({...this.#error(id, 'project_missing', 'no such project'), path: request.project});
+      return;
+    }
+    if (request.type === 'usage.window') {
+      this.#usage(request);
+      return;
+    }
+    if (request.type === 'runs.read_events') {
+      const journal = this.#helper.host.journals.get(`${request.project} ${request.run_id}`);
+      if (journal !== undefined) {
+        this.#send(this.#eventsPage(request, journal));
+        return;
+      }
+    }
+    if (request.type === 'runs.summary') {
+      const served = this.#helper.host.summaries
+        .get(`${request.project} ${request.run_id}`)
+        ?.find(entry => entry.offset === request.offset);
+      if (served !== undefined) {
+        this.#send({...served.page, type: 'runs.summary', request_id: id});
+        return;
+      }
+    }
+    this.#send({
+      ...this.#error(id, 'unknown_run', `${request.project} has no run '${request.run_id}'`),
+      path: request.project,
+    });
+  }
+
+  /**
+   * A page of `journal` as the real helper cuts one: the events from `from_sequence` (of the
+   * request's `kinds` only), at most `max` and `journalPageBytes`, one at least; an incomplete
+   * page's `next_sequence` follows its last event and a complete one's the journal's last.
+   */
+  #eventsPage(
+    request: Extract<HelperRequest, {type: 'runs.read_events'}>,
+    journal: readonly Readonly<Record<string, unknown>>[],
+  ): Reply {
+    const types = request.kinds == null ? null : new Set(RUN_EVENT_TYPES_BY_KINDS[request.kinds]);
+    const selected = journal.filter(
+      event => types === null || (typeof event['type'] === 'string' && types.has(event['type'])),
+    );
+    const sequenceOf = (event: Readonly<Record<string, unknown>>): number =>
+      Number(event['sequence']);
+    const rest = selected.filter(event => sequenceOf(event) >= request.from_sequence);
+    const page: Readonly<Record<string, unknown>>[] = [];
+    let bytes = 0;
+    for (const event of rest) {
+      const size = JSON.stringify(event).length;
+      if (page.length >= request.max) break;
+      if (page.length > 0 && bytes + size > this.#helper.host.journalPageBytes) break;
+      page.push(event);
+      bytes += size;
+    }
+    const complete = page.length === rest.length;
+    const last = journal.reduce((newest, event) => Math.max(newest, sequenceOf(event)), 0);
+    const totals =
+      request.with_totals === true
+        ? {
+            total_events: selected.length,
+            total_bytes: selected.reduce((sum, event) => sum + JSON.stringify(event).length + 1, 0),
+          }
+        : {};
+    return {
+      type: 'runs.read_events',
+      request_id: request.request_id,
+      events: page,
+      next_sequence: complete
+        ? Math.max(request.from_sequence, last + 1)
+        : sequenceOf(page[page.length - 1] ?? {}) + 1,
+      complete,
+      ...totals,
+    };
+  }
+
+  #taskGoal(request: Extract<HelperRequest, {type: 'project.task_goal'}>): void {
+    const id = request.request_id;
+    const {host} = this.#helper;
+    if (!host.projects.has(request.project)) {
+      this.#send({...this.#error(id, 'project_missing', 'no such project'), path: request.project});
+      return;
+    }
+    const goal = host.goals.get(`${request.project} ${request.task}`);
+    if (goal === undefined) {
+      this.#send({
+        ...this.#error(id, 'task_invalid', `no task ${request.task} with a goal`),
+        path: request.project,
+      });
+      return;
+    }
+    this.#send({type: 'project.task_goal', request_id: id, goal});
+  }
+
+  #project(
+    request: Extract<
+      HelperRequest,
+      {type: 'tasks.list' | 'runs.list' | 'run.start' | 'project.task_goal'}
+    >,
+  ): void {
+    if (request.type === 'project.task_goal') {
+      this.#taskGoal(request);
+      return;
+    }
     const id = request.request_id;
     const helper = this.#helper;
     const tasks = helper.host.projects.get(request.project);
@@ -658,7 +1487,19 @@ class HelperSession {
       this.#send({
         type: 'runs.list',
         request_id: id,
-        runs: {project_root: request.project, runs: []},
+        runs: {
+          project_root: request.project,
+          runs: (helper.host.runHistory.get(request.project) ?? []).map(run => {
+            const {digest: _digest, attention: _attention, ...plain} = run;
+            if (request.digest_runs?.includes(run.run_id) !== true) return plain;
+            if (request.with_dashboard === true) return run;
+            // A client that did not ask for the dashboard never sees it.
+            const {attention: _unasked, ...asked} = run;
+            if (asked.digest?.kind !== 'digest') return asked;
+            const {dashboard: _dashboard, ...digest} = asked.digest;
+            return {...asked, digest};
+          }),
+        },
       });
       return;
     }
@@ -693,10 +1534,46 @@ class HelperSession {
     this.#send({type: 'run.start', request_id: id, launch: live});
   }
 
+  #runRequest(
+    request: Extract<HelperRequest, {type: 'run.stop' | 'run.reader' | 'run.connect'}>,
+  ): void {
+    if (request.type === 'run.stop') this.#stop(request);
+    else if (request.type === 'run.reader') this.#reader(request);
+    else this.#connect(request.request_id, request.instance_id);
+  }
+
+  /** `run.reader`: a live run's own server, else the read-only one a run that ended shares. */
+  #reader(request: Extract<HelperRequest, {type: 'run.reader'}>): void {
+    const helper = this.#helper;
+    const id = request.request_id;
+    const live = helper.host.instances.find(entry => entry.run_id === request.run_id);
+    if (live !== undefined) {
+      this.#send({type: 'run.reader', request_id: id, instance_id: live.id, read_only: false});
+      return;
+    }
+    const known = helper.host.runHistory.get(request.project) ?? [];
+    if (!known.some(run => run.run_id === request.run_id)) {
+      this.#send(this.#error(id, 'unknown_run', `${request.project} has no run ${request.run_id}`));
+      return;
+    }
+    let reader = helper.host.readers.get(request.run_id);
+    if (reader === undefined) {
+      reader = helper.newInstanceId();
+      helper.host.readers.set(request.run_id, reader);
+      helper.host.readerStarts.push(request.run_id);
+    }
+    this.#send({type: 'run.reader', request_id: id, instance_id: reader, read_only: true});
+  }
+
   #connect(id: string, instanceId: string): void {
     const helper = this.#helper;
-    const live = helper.host.instances.find(entry => entry.id === instanceId);
-    const server = helper.host.runs.get(instanceId);
+    const reader = [...helper.host.readers].find(([, instance]) => instance === instanceId);
+    const live =
+      helper.host.instances.find(entry => entry.id === instanceId) ??
+      (reader === undefined ? undefined : record(instanceId, reader[0]));
+    const server =
+      helper.host.runs.get(instanceId) ??
+      (reader === undefined ? undefined : helper.host.readerServer);
     if (this.#watches.size > 0) {
       this.#send(this.#error(id, 'channel_busy', 'busy'));
       return;

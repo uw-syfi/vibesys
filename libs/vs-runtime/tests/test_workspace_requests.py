@@ -67,6 +67,7 @@ from vs_runtime.api.core import (
     ExecutionContext,
     ExecutionResult,
     ExecutorRole,
+    ReceiptEvidenceLedger,
     ReceiptStore,
     RequestExecutors,
     RuntimeWorkspaceRequests,
@@ -91,13 +92,12 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.observation_contracts import assert_core_accepts
 from vs_runtime.api.testing import MemoryValidationPasses, idle_environment_system
-from vs_sandbox.api import ProjectPathPolicy
+from vs_sandbox.api import CaptureExecutionIdentity, CaptureExecutionKind, ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 from vs_sim.api.testing import (
     InlineBlockingRunner,
     ManualClock,
     Sim,
-    SimBlockingRunner,
     SimThreads,
     examples,
     swept,
@@ -118,6 +118,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import AgentExecutionConfiguration, WorkspaceResourceProvider
     from vs_sandbox.api import CommandRunner
     from vs_sim.api import BlockingRunner, Event
+    from vs_sim.api.testing import Gate
 
 # Each example builds real workspaces. A pull request draws a sample; the nightly depth
 # (`--depth=nightly`) searches deeper.
@@ -127,8 +128,15 @@ if TYPE_CHECKING:
 class _Session:
     sandbox: CommandRunner = field(default_factory=FakeCommandRunner)
     view: RunEnvironmentView = field(
-        default_factory=lambda: RunEnvironmentView(paths=AgentPaths(), cli_sandboxed=True)
+        default_factory=lambda: RunEnvironmentView(
+            paths=AgentPaths(), workspace_git_writable=True, cli_sandboxed=True
+        )
     )
+    capture_execution: CaptureExecutionIdentity | None = None
+
+    @property
+    def capture_commands(self) -> CommandRunner:
+        return self.sandbox
 
     def __enter__(self) -> _Session:
         return self
@@ -164,13 +172,14 @@ class _Env:
     run_id: str
     factory: WorkspaceResourceProvider
     blocking: BlockingRunner
+    threads: SimThreads
     hosts: list[RuntimeWorkspaces] = field(default_factory=list)
 
     def start_host(self) -> RuntimeWorkspaces:
         """Start another host over the same disk state, as after a process restart."""
         runtime = create_workspace_runtime(
             workspace_resources=self.factory,
-            blocking=BlockingOperations(runner=self.blocking),
+            blocking=BlockingOperations(runner=self.blocking, threads=self.threads),
             validation_passes=MemoryValidationPasses(),
         )
         self.hosts.append(runtime.workspaces)
@@ -200,6 +209,8 @@ def _env(
     tmp_path: Path,
     wrap: Callable[[WorkspaceResourceFactory], WorkspaceResourceProvider] = lambda f: f,
     blocking: BlockingRunner | None = None,
+    *,
+    recoverable_capture: bool = False,
 ) -> Iterator[_Env]:
     root = tmp_path / "project"
     root.mkdir()
@@ -244,14 +255,28 @@ def _env(
                 clock=ManualClock(),
                 system=idle_environment_system(),
             ),
-            lambda _request: _Session(),
+            lambda session_request: _Session(
+                capture_execution=(
+                    CaptureExecutionIdentity(
+                        kind=CaptureExecutionKind.SLURM_GPU,
+                        execution_id=(
+                            "vibesys-test-capture-"
+                            + hashlib.sha256(
+                                str(session_request.workspace.resolve()).encode()
+                            ).hexdigest()[:8]
+                        ),
+                    )
+                    if recoverable_capture
+                    else None
+                )
+            ),
             clock=ManualClock(),
         )
         with closing(environment):
             factory = WorkspaceResourceFactory(
                 project,
                 environment,
-                evaluation_plan=TrustedEvaluationPlan(),
+                evaluation_plan=TrustedEvaluationPlan(unread_paths=("NOTES.md",)),
                 memory_paths=(),
                 skill_source_dirs=(),
                 skill_selection=NULL_SKILL_SELECTION,
@@ -265,6 +290,7 @@ def _env(
                 "workspace-requests",
                 wrap(factory),
                 blocking=blocking or InlineBlockingRunner(),
+                threads=SimThreads(),
             )
             env.start_host()
             try:
@@ -324,9 +350,14 @@ def _executor(
 ) -> tuple[RuntimeWorkspaceRequests, ReceiptStore]:
     """A host's executor over the run's durable receipts (a new one models a restart)."""
     chosen = store or _ENVS[workspaces].store()
-    return RuntimeWorkspaceRequests(
-        workspaces, chosen, SettledRunInvocations(), blocking=InlineBlockingRunner()
-    ), chosen
+    executor = RuntimeWorkspaceRequests(
+        workspaces,
+        chosen,
+        SettledRunInvocations(),
+        blocking=InlineBlockingRunner(),
+        evidence=ReceiptEvidenceLedger(chosen),
+    )
+    return executor, chosen
 
 
 async def _run(
@@ -736,7 +767,11 @@ def test_run_snapshot_waits_for_proof_that_the_writer_ended(tmp_path: Path) -> N
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         store = _ENVS[workspaces].store()
         running = RuntimeWorkspaceRequests(
-            workspaces, store, RunningRunInvocations(), blocking=InlineBlockingRunner()
+            workspaces,
+            store,
+            RunningRunInvocations(),
+            blocking=InlineBlockingRunner(),
+            evidence=ReceiptEvidenceLedger(store),
         )
         request = SnapshotAndRetainRun(
             request_id=_rid("run-snap-wait"),
@@ -757,7 +792,11 @@ def test_run_snapshot_waits_for_proof_that_the_writer_ended(tmp_path: Path) -> N
         assert waiting.observation.revision is None
         assert _commits(workspaces) == commits
         settled = RuntimeWorkspaceRequests(
-            workspaces, store, SettledRunInvocations(), blocking=InlineBlockingRunner()
+            workspaces,
+            store,
+            SettledRunInvocations(),
+            blocking=InlineBlockingRunner(),
+            evidence=ReceiptEvidenceLedger(store),
         )
         done = await _run(settled, request)
         assert done.observation.observation.status is ObservationStatus.SUCCEEDED
@@ -846,7 +885,7 @@ def test_identity_conflicts_stale_hosts_and_unowned_requests(tmp_path: Path) -> 
         asyncio.run(exercise(workspaces))
 
 
-def test_adoption_applies_inspects_and_verifies_the_selected_revision(tmp_path: Path) -> None:
+def test_adoption_publishes_and_legacy_verification_reads_publication(tmp_path: Path) -> None:
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         executor, _ = _executor(workspaces)
         attempt = _attempt()
@@ -870,9 +909,10 @@ def test_adoption_applies_inspects_and_verifies_the_selected_revision(tmp_path: 
             return VerifyAdoption(request_id=_rid(name), scope=run_scope, selection=selection)
 
         before = await _run(executor, verify("verify-0"))
-        assert before.observation.observation.status is ObservationStatus.FAILED
+        assert before.observation.observation.status is ObservationStatus.SUCCEEDED
         assert before.observation.observation.terminal
-        assert before.observation.revision is None
+        assert before.observation.revision == winner
+        assert (workspaces.root.path / "candidate.py").read_text() == "VALUE = 1\n"
         adopt = AdoptRevision(request_id=_rid("adopt-1"), scope=run_scope, selection=selection)
         applied = await _run(executor, adopt)
         assert applied.observation.observation.status is ObservationStatus.SUCCEEDED
@@ -881,11 +921,16 @@ def test_adoption_applies_inspects_and_verifies_the_selected_revision(tmp_path: 
         root_file = workspaces.root.path / "candidate.py"
         assert root_file.read_text(encoding="utf-8") == "VALUE = 2\n"
         assert await _run(executor, adopt, epoch=2) == applied
+        before_head = workspaces.root.revision
+        same = AdoptRevision(request_id=_rid("adopt-same"), scope=run_scope, selection=selection)
+        checked = await _run(executor, same, epoch=2)
+        assert checked.observation.observation.status is ObservationStatus.SUCCEEDED
+        assert workspaces.root.revision == before_head
         proof = await _run(executor, verify("verify-1"), epoch=2)
         assert proof.observation.observation.status is ObservationStatus.SUCCEEDED
         assert proof.observation.revision == winner
-        # Interrupted before the result was recorded: the root already proves the
-        # content, so the retry reports success instead of applying again.
+        # Interrupted after publication: the source receipt proves the same commit,
+        # so the retry never restores the root or creates a second publication.
         again = AdoptRevision(request_id=_rid("adopt-2"), scope=run_scope, selection=selection)
         crashing = _failing(_ENVS[workspaces])
         flaky, _ = _executor(workspaces, crashing)
@@ -894,11 +939,12 @@ def test_adoption_applies_inspects_and_verifies_the_selected_revision(tmp_path: 
             await _run(flaky, again, epoch=3)
         resumed = await _run(executor, again, epoch=3)
         assert resumed.observation.observation.status is ObservationStatus.SUCCEEDED
-        # Drift after adoption is never reported as verified.
+        # Checkout drift does not invalidate a durable publication.
         root_file.write_text("VALUE = 3\n", encoding="utf-8")
         drifted = await _run(executor, verify("verify-2"), epoch=3)
-        assert drifted.observation.observation.status is ObservationStatus.FAILED
+        assert drifted.observation.observation.status is ObservationStatus.SUCCEEDED
         assert drifted.observation.observation.terminal
+        assert root_file.read_text() == "VALUE = 3\n"
 
     with _workspaces(tmp_path) as workspaces:
         asyncio.run(exercise(workspaces))
@@ -1188,8 +1234,8 @@ def test_root_adopt_and_restore_never_delete_ignored_user_files(tmp_path: Path) 
 
         adopted = await _run(executor, _adopt("ad", revision, AdoptRevision))
         assert _status(adopted) is ObservationStatus.SUCCEEDED
-        assert (root.path / "candidate.py").read_text(encoding="utf-8") == "VALUE = 2\n"
-        assert not (root.path / "untracked.txt").exists()
+        assert (root.path / "candidate.py").read_text(encoding="utf-8") == "VALUE = 1\n"
+        assert (root.path / "untracked.txt").read_text() == "leftover"
         assert _ignored_snapshot(root.path) == user_files
 
         (root.path / "candidate.py").write_text("VALUE = 3\n", encoding="utf-8")
@@ -1203,7 +1249,7 @@ def test_root_adopt_and_restore_never_delete_ignored_user_files(tmp_path: Path) 
         asyncio.run(exercise(workspaces))
 
 
-def test_root_verification_compares_tracked_content_not_ignored_files(tmp_path: Path) -> None:
+def test_legacy_verification_preserves_all_checkout_content(tmp_path: Path) -> None:
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         executor, _ = _executor(workspaces)
         root = workspaces.root.path
@@ -1221,8 +1267,9 @@ def test_root_verification_compares_tracked_content_not_ignored_files(tmp_path: 
             assert _status(verified) is ObservationStatus.SUCCEEDED
         (root / "candidate.py").write_text("VALUE = 9\n", encoding="utf-8")
         drifted = await _run(executor, _adopt("vd", revision, VerifyAdoption))
-        assert _status(drifted) is ObservationStatus.FAILED
+        assert _status(drifted) is ObservationStatus.SUCCEEDED
         assert drifted.observation.observation.terminal
+        assert (root / "candidate.py").read_text() == "VALUE = 9\n"
 
     with _workspaces(tmp_path) as workspaces:
         asyncio.run(exercise(workspaces))
@@ -1457,6 +1504,32 @@ def test_a_host_stop_keeps_exactly_the_attempt_workspaces_core_still_holds(
         asyncio.run(exercise())
 
 
+def test_an_unsettled_command_candidate_survives_followed_close_and_restart(
+    tmp_path: Path,
+) -> None:
+    """An unconfirmed Slurm command is durable cleanup intent, not a core attempt hold."""
+    with _env(tmp_path, recoverable_capture=True) as env:
+
+        async def exercise() -> None:
+            member_id = "capture-unconfirmed-operation"
+            first = env.hosts[0]
+            candidate = await first.create_candidate(member_id=member_id)
+            path = candidate.path
+            await first.retain_unsettled(candidate)
+            first.follow(lambda: WorkspaceHolds(final=True, attempts=frozenset()))
+            await first.close()
+
+            assert path in _candidates_on_disk(env)
+            second = env.start_host()
+            second.follow(lambda: WorkspaceHolds(final=True, attempts=frozenset()))
+            await second.release_unheld()
+            assert path in _candidates_on_disk(env)
+            with pytest.raises(RuntimeContractError, match="retained by the previous host"):
+                await second.create_candidate(member_id=member_id)
+
+        asyncio.run(exercise())
+
+
 def test_f4_exclusive_root_is_held_by_one_attempt_generation(tmp_path: Path) -> None:
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         executor, _ = _executor(workspaces)
@@ -1625,6 +1698,20 @@ class _FaultyResources:
     def leftover_candidates(self) -> tuple[str, ...]:
         return self._inner.leftover_candidates()
 
+    def unsettled_candidates(self) -> frozenset[str]:
+        return self._inner.unsettled_candidates()
+
+    def record_capture_intent(
+        self, workspace_id: str, execution: CaptureExecutionIdentity, /
+    ) -> None:
+        self._inner.record_capture_intent(workspace_id, execution)
+
+    def clear_capture_intent(self, workspace_id: str, /) -> None:
+        self._inner.clear_capture_intent(workspace_id)
+
+    def reconcile_capture_intents(self) -> frozenset[str]:
+        return self._inner.reconcile_capture_intents()
+
     def remove_leftover(self, workspace_id: str, /) -> None:
         self._inner.remove_leftover(workspace_id)
 
@@ -1656,6 +1743,29 @@ def _faulty(factory: WorkspaceResourceProvider) -> _FaultyResources:
 def _faults(env: _Env) -> _FaultyResources:
     assert isinstance(env.factory, _FaultyResources)
     return env.factory
+
+
+class _HoldingCloseRunner:
+    """Cooperatively hold resource close while unrelated blocking calls can run."""
+
+    def __init__(self, entered: Gate, release: Gate) -> None:
+        self._entered = entered
+        self._release = release
+        self._enabled = False
+
+    def enable(self) -> None:
+        self._enabled = True
+
+    async def run[**P, Result](
+        self,
+        function: Callable[P, Result],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> Result:
+        if self._enabled and getattr(function, "__name__", None) == "close":
+            self._entered.open()
+            await self._release.wait()
+        return function(*args, **kwargs)
 
 
 def test_f7_a_failed_discard_is_not_stored_and_a_retry_completes_it(tmp_path: Path) -> None:
@@ -1831,8 +1941,9 @@ def test_f13_a_transient_create_failure_is_retried_not_stored(tmp_path: Path) ->
 
 
 def test_f12_a_slow_discard_does_not_block_another_attempt(tmp_path: Path, sim: Sim) -> None:
-    threads = sim.threads()
-    with _env(tmp_path, _faulty, blocking=SimBlockingRunner(threads)) as env:
+    entered, release = sim.gate(), sim.gate()
+    runner = _HoldingCloseRunner(entered, release)
+    with _env(tmp_path, _faulty, blocking=runner) as env:
 
         async def exercise() -> None:
             workspaces = env.hosts[0]
@@ -1840,25 +1951,27 @@ def test_f12_a_slow_discard_does_not_block_another_attempt(tmp_path: Path, sim: 
             a, b = _attempt("a"), _attempt("b")
             await _ensure_at(executor, workspaces, a, "ea")
             await _ensure_at(executor, workspaces, b, "eb")
-            faults = _faults(env)
-            entered, release = threads.event(), threads.event()
-            faults.hold_close = (entered, release)
+            runner.enable()
             slow = asyncio.create_task(
                 _run(executor, DiscardWorkspace(**_common(a, "da"), attempt=a))
             )
-            await SimBlockingRunner(threads).run(entered.wait)
+            await entered.wait(slow)
             base = revision_ref(workspaces.root.revision or "")
             other = await _run(
                 executor, RestoreRevision(**_common(b, "rb"), attempt=b, revision=base)
             )
             assert _status(other) is ObservationStatus.SUCCEEDED
-            release.set()
+            release.open()
             assert _status(await slow) is ObservationStatus.SUCCEEDED
             # The hosts' blocking work runs on the simulated threads, so they close here.
             await workspaces.close()
-            env.hosts.clear()
 
-        sim.run(exercise(), threads=threads)
+        try:
+            sim.run(exercise())
+        finally:
+            # A failed simulation has already closed its thread driver; the ordinary
+            # context cleanup cannot drive this host's injected blocking runner again.
+            env.hosts.clear()
 
 
 def test_corrupt_receipts_yield_unknown_not_an_exception(tmp_path: Path) -> None:

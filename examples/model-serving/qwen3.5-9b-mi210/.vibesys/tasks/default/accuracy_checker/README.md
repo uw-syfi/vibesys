@@ -105,7 +105,7 @@ the same verdicts):
 | Server | Cache-hit rounds | cached / resumable tokens | Non-tie div. | Mean round prefix frac. | Gate time | Result |
 |:--|--:|--:|--:|--:|--:|:--|
 | Reference engine (no prefix cache) | 0/48 | 0 / 18472 | 0 | 0.961 | 102 s | PASS |
-| Tuned vLLM (`benchmark/vllm_baseline.sh`) | 6/48 | 15840 / 18473 | 0 | 0.961 | 31 s | PASS |
+| vLLM (comparison baseline) | 6/48 | 15840 / 18473 | 0 | 0.961 | 31 s | PASS |
 | Campaign engine (prefix cache + MTP) | 34/48 | 18285 / 18452 | 0 | 0.939 | 17 s | PASS |
 
 Gate time is the whole checker run (base, resume, and stream checks).

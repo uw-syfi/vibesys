@@ -8,7 +8,9 @@ reach a terminal state, render a failed stage's text, and cancel the same way.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import asyncio
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -16,6 +18,7 @@ from typing import TYPE_CHECKING, Protocol
 import pytest
 
 from vs_evaluation.api import (
+    MAX_EVIDENCE_SUMMARY_CHARS,
     ContentDigest,
     EvaluationRequest,
     EvaluationState,
@@ -31,7 +34,7 @@ from vs_evaluation.api import (
     TrustedEvidence,
 )
 from vs_evaluation.api import (
-    PollingEvaluationExecutor as PollingExecutorPort,
+    RecoverableEvaluationExecutor as PollingExecutorPort,
 )
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_runtime.api import (
@@ -40,13 +43,16 @@ from vs_runtime.api import (
     PollingEvaluationExecutor,
     render_stage_failure,
 )
-from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster, build_stack
+from vs_runtime.api.core import StageOutputOpener, StageRun
+from vs_runtime.api.slurm_evaluation_stack import BENCHMARK_OUTPUT, ScenarioCluster, build_stack
 from vs_runtime.api.testing import FakeEvaluation, FakeWorkspace, FakeWorkspaces
+from vs_sandbox.api.slurm import SlurmExecutionPolicy
+from vs_sim.api import Capture, OutputStream
 from vs_sim.api.testing import ManualClock, yield_until
 from vs_slurm.api import SlurmJobStatus
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Iterator
 
 pytestmark = pytest.mark.asyncio
 
@@ -68,6 +74,9 @@ class _World:
     snapshot: str
     stage_running: Callable[[], Awaitable[None]]
     submission_visible: Callable[[str], Awaitable[None]]
+    workspaces: FakeWorkspaces
+    printed: dict[str, bytes] = field(default_factory=dict)
+    """What each stage's command printed to stdout, as the executor's Fake scripts it."""
 
 
 class _Script(StrEnum):
@@ -76,17 +85,21 @@ class _Script(StrEnum):
     HOLD_FIRST_STAGE = "hold-first-stage"
 
 
-type _Build = Callable[[Path, _Script], Awaitable[_World]]
+type _Build = Callable[[Path, _Script, StageOutputOpener | None], Awaitable[_World]]
+_LOCAL_PRINTED = {"accuracy": b"checking 1/3\nchecking 2/3\n", "benchmark": b"warmup\nrps=41\n"}
 
 
-async def _local(root: Path, script: _Script) -> _World:
+async def _local(root: Path, script: _Script, stage_output: StageOutputOpener | None) -> _World:
     del root
     evaluation = FakeEvaluation()
+    evaluation.printed.update({"accuracy": (_LOCAL_PRINTED["accuracy"], b"")})
+    evaluation.printed.update({"benchmark": (_LOCAL_PRINTED["benchmark"], b"")})
     if script is _Script.FAIL_ACCURACY:
         evaluation.accuracy_results.append(
             AccuracyEvaluation(
                 executed=True,
                 feedback="accuracy mismatch",
+                operator_feedback="accuracy mismatch",
                 failure_kind=BenchmarkFailureKind.WORKLOAD,
             )
         )
@@ -106,19 +119,23 @@ async def _local(root: Path, script: _Script) -> _World:
         return None
 
     return _World(
-        PollingEvaluationExecutor(evaluation, workspaces, clock=ManualClock()),
+        PollingEvaluationExecutor(
+            evaluation, workspaces, clock=ManualClock(), stage_output=stage_output
+        ),
         snapshot,
         running,
         visible,
+        workspaces,
+        dict(_LOCAL_PRINTED),
     )
 
 
-async def _slurm(root: Path, script: _Script) -> _World:
+async def _slurm(root: Path, script: _Script, stage_output: StageOutputOpener | None) -> _World:
     cluster = ScenarioCluster()
     cluster.accuracy_exit = 1 if script is _Script.FAIL_ACCURACY else 0
     if script is _Script.HOLD_FIRST_STAGE:
         cluster.states = (SlurmJobStatus.PENDING,)
-    stack = await build_stack(root, cluster)
+    stack = await build_stack(root, cluster, stage_output=stage_output)
 
     async def running() -> None:
         return None
@@ -128,7 +145,8 @@ async def _slurm(root: Path, script: _Script) -> _World:
         # in a background task, and until it lands a poll honestly reports Unknown.
         await wait_until_executor_started(cluster.accepted, stack.executor, handle_id)
 
-    return _World(stack.executor, stack.snapshot, running, visible)
+    printed = {"accuracy": b"ok", "benchmark": BENCHMARK_OUTPUT.encode()}
+    return _World(stack.executor, stack.snapshot, running, visible, stack.workspaces, printed)
 
 
 BUILDERS = [pytest.param(_local, id="polling"), pytest.param(_slurm, id="semantic-slurm")]
@@ -167,7 +185,7 @@ async def _terminal(executor: _Executor) -> ExecutorObservation:
 async def test_a_submitted_request_is_observable_and_succeeds_with_evidence_per_stage(
     build: _Build, tmp_path: Path
 ) -> None:
-    world = await build(tmp_path, _Script.SUCCEED)
+    world = await build(tmp_path, _Script.SUCCEED, None)
     assert await world.executor.inspect(_HANDLE) is None
 
     await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
@@ -186,7 +204,7 @@ async def test_a_submitted_request_is_observable_and_succeeds_with_evidence_per_
 
 @pytest.mark.parametrize("build", BUILDERS)
 async def test_resubmitting_the_same_handle_is_idempotent(build: _Build, tmp_path: Path) -> None:
-    world = await build(tmp_path, _Script.SUCCEED)
+    world = await build(tmp_path, _Script.SUCCEED, None)
     request = _request(world.snapshot)
 
     await world.executor.submit(request, handle_id=_HANDLE)
@@ -201,7 +219,7 @@ async def test_resubmitting_the_same_handle_is_idempotent(build: _Build, tmp_pat
 async def test_a_failed_accuracy_stage_fails_the_evaluation_with_its_rendered_text(
     build: _Build, tmp_path: Path
 ) -> None:
-    world = await build(tmp_path, _Script.FAIL_ACCURACY)
+    world = await build(tmp_path, _Script.FAIL_ACCURACY, None)
 
     await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
     observed = await _terminal(world.executor)
@@ -218,11 +236,68 @@ async def test_a_failed_accuracy_stage_fails_the_evaluation_with_its_rendered_te
     await world.executor.close()
 
 
+async def test_semantic_slurm_failure_keeps_raw_evidence_and_safe_operator_summary(
+    tmp_path: Path,
+) -> None:
+    cluster = ScenarioCluster()
+    cluster.benchmark_exit = 1
+    cluster.benchmark_output = "API_TOKEN=" + "slurm-secret-" * 2_000
+    stack = await build_stack(tmp_path, cluster)
+
+    await stack.executor.submit(_request(stack.snapshot), handle_id=_HANDLE)
+    observed = await _terminal(stack.executor)
+    benchmark = observed.stage_results[1]
+    evidence = TrustedEvidence.model_validate(benchmark.result)
+
+    assert evidence.semantic_summary is not None
+    assert "slurm-secret" in evidence.semantic_summary
+    assert len(evidence.semantic_summary) <= MAX_EVIDENCE_SUMMARY_CHARS
+    assert benchmark.operator_summary is not None
+    assert "slurm-secret" not in benchmark.operator_summary
+    await stack.executor.close()
+
+
+_PRIVATE_PYTHON = "/cluster/work/u/venv/bin/python"
+_PRIVATE_SETUP = "/cluster/work/u/campaign/setup.sh"
+_PRIVATE_ERROR = (
+    f"{_PRIVATE_PYTHON}: Error while finding module specification for 'engine.server' "
+    "(ModuleNotFoundError: No module named 'engine')\n"
+    '  File "/cluster/work/u/venv/lib/python3.10/site-packages/x.py", line 1, in main\n'
+    f"sourced {_PRIVATE_SETUP}\n"
+)
+
+
+@pytest.mark.parametrize("never_ready", [False, True])
+async def test_a_failed_slurm_evaluation_names_none_of_the_operators_paths(
+    *, never_ready: bool, tmp_path: Path
+) -> None:
+    cluster = ScenarioCluster()
+    if never_ready:
+        cluster.job_exit_code = 70
+        cluster.benchmark_output = _PRIVATE_ERROR
+    else:
+        cluster.accuracy_exit = 1
+        cluster.accuracy_output = _PRIVATE_ERROR
+        cluster.service_log_tail = _PRIVATE_ERROR
+    policy = SlurmExecutionPolicy(remote_python=_PRIVATE_PYTHON, setup_script=_PRIVATE_SETUP)
+    stack = await build_stack(tmp_path, cluster, policy=policy)
+
+    await stack.executor.submit(_request(stack.snapshot), handle_id=_HANDLE)
+    observed = await _terminal(stack.executor)
+
+    reported = observed.model_dump_json()
+    assert observed.state is EvaluationState.FAILED
+    assert "No module named" in reported
+    for private in (_PRIVATE_PYTHON, _PRIVATE_SETUP, "/cluster/work/u"):
+        assert private not in reported
+    await stack.executor.close()
+
+
 @pytest.mark.parametrize("build", BUILDERS)
 async def test_cancel_stops_an_in_flight_evaluation_and_reports_canceled(
     build: _Build, tmp_path: Path
 ) -> None:
-    world = await build(tmp_path, _Script.HOLD_FIRST_STAGE)
+    world = await build(tmp_path, _Script.HOLD_FIRST_STAGE, None)
     await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
     await world.stage_running()
 
@@ -237,7 +312,7 @@ async def test_cancel_stops_an_in_flight_evaluation_and_reports_canceled(
 async def test_poll_reports_each_phase_without_submitting_or_cancelling(
     build: _Build, tmp_path: Path
 ) -> None:
-    world = await build(tmp_path, _Script.SUCCEED)
+    world = await build(tmp_path, _Script.SUCCEED, None)
     assert (await world.executor.poll(_HANDLE)).phase is PollPhase.UNSUBMITTED
     assert await world.executor.inspect(_HANDLE) is None  # polling submitted nothing
 
@@ -255,6 +330,24 @@ async def test_poll_reports_each_phase_without_submitting_or_cancelling(
     await world.executor.close()
 
 
+def test_scenario_cluster_announces_acceptance_on_the_event_loop_itself() -> None:
+    """``ScenarioCluster.accepted`` is an ``asyncio.Event``, never a real thread's wait.
+
+    ``build_stack`` always runs cluster calls through ``InlineBlockingRunner``, so
+    ``submit`` always sets ``accepted`` on the event loop's own thread. A real
+    ``threading.Event`` observed through ``asyncio.to_thread`` races that
+    submission against the operation ``wait_until_executor_started`` watches for:
+    a scripted job with no held phase (``_Script.SUCCEED``) can submit, finish,
+    and publish its terminal state before a background thread notices the flag,
+    so the wait reports the operation ended before it ever caught a "started"
+    signal (``test_poll_reports_each_phase_without_submitting_or_cancelling``
+    failed this way under CI's parallel load). An ``asyncio.Event`` is set and
+    read on the same loop, in the same deterministic order every time.
+    """
+    cluster = ScenarioCluster()
+    assert isinstance(cluster.accepted, asyncio.Event)
+
+
 @pytest.mark.parametrize("build", BUILDERS)
 async def test_cancelling_a_finished_evaluation_keeps_its_terminal_result(
     build: _Build, tmp_path: Path
@@ -265,7 +358,7 @@ async def test_cancelling_a_finished_evaluation_keeps_its_terminal_result(
     then polls each to prove release. A cancel that rewrites a SUCCEEDED
     evaluation as CANCELED discards evidence the run already paid for.
     """
-    world = await build(tmp_path, _Script.SUCCEED)
+    world = await build(tmp_path, _Script.SUCCEED, None)
     await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
     finished = await _terminal(world.executor)
     assert finished.state is EvaluationState.SUCCEEDED
@@ -288,7 +381,7 @@ async def test_close_ends_every_submitted_evaluation_in_a_terminal_state(
     build: _Build, tmp_path: Path
 ) -> None:
     """Closing the executor right after a submit leaves no evaluation non-terminal."""
-    world = await build(tmp_path, _Script.HOLD_FIRST_STAGE)
+    world = await build(tmp_path, _Script.HOLD_FIRST_STAGE, None)
     await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
 
     await world.executor.close()
@@ -296,3 +389,88 @@ async def test_close_ends_every_submitted_evaluation_in_a_terminal_state(
     observed = await world.executor.inspect_only(_HANDLE)
     assert observed is not None
     assert observed.state in _TERMINAL, observed
+
+
+@dataclass
+class _Streams:
+    """An opener that keeps each stage's stdout and records open and close, in order."""
+
+    opened: list[StageRun] = field(default_factory=list)
+    closed: list[StageRun] = field(default_factory=list)
+    output: dict[StageRun, Capture] = field(default_factory=dict)
+
+    @contextmanager
+    def open(self, run: StageRun) -> Iterator[Capture]:
+        self.opened.append(run)
+        sink = self.output[run] = Capture(1 << 16)
+        try:
+            yield sink
+        finally:
+            self.closed.append(run)
+
+
+@pytest.mark.parametrize("build", BUILDERS)
+async def test_each_stage_output_reaches_one_stream_named_by_its_run(
+    build: _Build, tmp_path: Path
+) -> None:
+    """Local or on the cluster, a stage's whole stdout lands in one stream, closed at its end."""
+    streams = _Streams()
+    world = await build(tmp_path, _Script.SUCCEED, streams.open)
+
+    await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
+    observed = await _terminal(world.executor)
+    await world.executor.close()
+
+    runs = [StageRun(_HANDLE, "accuracy"), StageRun(_HANDLE, "benchmark")]
+    assert observed.state is EvaluationState.SUCCEEDED
+    assert streams.opened == runs
+    assert sorted(streams.closed, key=runs.index) == runs
+    assert {
+        run.stage_id: streams.output[run].kept(OutputStream.STDOUT) for run in runs
+    } == world.printed
+
+
+@pytest.mark.parametrize("build", BUILDERS)
+async def test_every_candidate_an_executor_evaluates_is_opened_as_its_measured_input(
+    build: _Build, tmp_path: Path
+) -> None:
+    """The evaluated tree is the measured input's: the task's unread paths are withheld.
+
+    So an official measurement that reuses an earlier run of the same measured input reads
+    the very tree that run read (``Workspaces.create_measured_candidate``).
+    """
+    world = await build(tmp_path, _Script.SUCCEED, None)
+
+    await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
+    await _terminal(world.executor)
+
+    assert world.workspaces.candidates
+    assert world.workspaces.measured_candidates == world.workspaces.candidates
+    await world.executor.close()
+
+
+@pytest.mark.parametrize("build", BUILDERS)
+async def test_recovery_inspection_reads_owner_knowledge_without_new_work(
+    build: _Build, tmp_path: Path
+) -> None:
+    world = await build(tmp_path, _Script.SUCCEED, None)
+    try:
+        # Main callers poll. An unseen job is unsubmitted. recover is a separate
+        # question: a fresh local process cannot prove the delivery never began,
+        # while the durable Slurm owner answers with the same poll.
+        assert (await world.executor.poll(_HANDLE)).phase is PollPhase.UNSUBMITTED
+        unseen = await world.executor.recover(_HANDLE)
+        if isinstance(world.executor, PollingEvaluationExecutor):
+            assert unseen.phase is PollPhase.UNKNOWN
+        else:
+            assert unseen.phase is PollPhase.UNSUBMITTED
+        assert not world.workspaces.candidates
+        await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
+        terminal = await _terminal(world.executor)
+        candidates = world.workspaces.candidates
+        observed = await world.executor.recover(_HANDLE)
+        assert observed.phase is PollPhase.ENDED
+        assert observed.terminal == terminal
+        assert world.workspaces.candidates == candidates
+    finally:
+        await world.executor.close()

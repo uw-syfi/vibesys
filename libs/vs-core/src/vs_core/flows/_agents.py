@@ -7,6 +7,7 @@ gets one ``TurnFinished`` or one ``Failed``. Between the two, core runs the turn
     render the prompt -> run the turn -> validate the reply against the role's model
     -> ask for a correction of an invalid reply -> ask again after a lost turn (after a backoff)
     -> suspend a turn that waits for evaluations and resume it when core authorizes
+       (and, with a ``Parking``, once the search lends the turn an agent slot again)
     -> hold a write turn's reply until core recorded its checkpoint -> deliver ONE result.
 
 This is ordinary flow code over the runtime's own handle (a ``Kit``), so it is journaled and
@@ -20,8 +21,9 @@ its continuation, which core authorizes once.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from hashlib import sha256
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -55,6 +57,7 @@ from vs_core.types.job_observations import WaitEnd
 from vs_core.types.search import (
     CheckpointKnown,
     OperationFinished,
+    ResumeFailed,
     ResumeReady,
     TurnEnded,
     TurnFinished,
@@ -75,11 +78,14 @@ from ._roles import reply_errors
 from ._sources import First
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from pydantic import BaseModel
 
     from vs_core.types.search import Event
 
     from ._kit import Kit
+    from ._labels import Label
     from ._roles import Role
     from ._sources import Signal
     from ._workspaces import Workspace
@@ -97,6 +103,28 @@ class _Again:
 
 
 _AGAIN = _Again()
+_BACKOFF_STEPS = 16
+"""Outage losses past this many wait the backoff's cap; the doubling stops before it overflows."""
+
+
+class Parking(Protocol):
+    """What a search does with the agent slot of a turn core suspended on its evaluations.
+
+    A suspended turn runs no agent until it resumes, however long its evaluations queue. Core
+    calls ``parked`` once it recorded the wait, so the search may lend the turn's slot to other
+    work. Once core authorizes the resume, the ask awaits ``resumed`` before it asks the agent
+    to go on: the search returns when the turn holds an agent slot again (the resume is bound
+    to a slot late, when one is free). A wait that ends without a resume (core refused it, or
+    the run's deadline came) ends the ask with its failure and never calls ``resumed``.
+    """
+
+    def parked(self) -> None:
+        """Core recorded the turn's wait: its agent slot is free until it resumes."""
+        ...
+
+    async def resumed(self) -> None:
+        """Core authorized the resume: return once the turn holds an agent slot again."""
+        ...
 
 
 class Agents:
@@ -112,11 +140,14 @@ class Agents:
         *,
         workspace: Workspace | None = None,
         revision: RevisionRef | None = None,
+        started_by: Sequence[str] = (),
     ) -> Session:
         """A new conversation with ``role``, in ``workspace`` (the run when omitted).
 
         ``revision`` is the revision of the role's workspace for its turns, unless a turn names
-        another; it is needed for a role that works on a revision. The role must be one the
+        another; it is needed for a role that works on a revision. ``started_by`` names the
+        agents (each a session's ``agent``) whose work started this one; none when the search
+        itself did. The role must be one the
         search declares (``@search(roles=...)``); the declared role, with the model the operator
         chose for this run, is the one asked.
         """
@@ -132,7 +163,16 @@ class Agents:
         subject = self._kit.path.rstrip("/") or "run"
         if number > 1:
             subject = f"{subject}#{number}"
-        return Session(self._kit, role, subject, workspace, revision)
+        return Session(self._kit, role, subject, _Opened(workspace, revision, tuple(started_by)))
+
+
+@dataclass(frozen=True)
+class _Opened:
+    """What a session is opened with: its workspace, its revision, and the agents that started it."""
+
+    workspace: Workspace | None
+    revision: RevisionRef | None
+    started_by: tuple[str, ...]
 
 
 class Session:
@@ -143,15 +183,29 @@ class Session:
         kit: Kit,
         role: Role,
         subject: str,
-        workspace: Workspace | None,
-        revision: RevisionRef | None,
+        opened: _Opened,
     ) -> None:
         """Make the session; ``ctx.agents.session`` is the way in."""
         self._kit = kit
         self.role = role
         self.subject = subject
-        self.workspace = workspace
-        self.revision = revision
+        self.workspace = opened.workspace
+        self.revision = opened.revision
+        self.started_by = opened.started_by
+        """The agents whose work started this one; empty when the search itself did."""
+
+    @property
+    def agent(self) -> str:
+        """The agent's stable identity in the run: the id of the conversation its turns continue.
+
+        The same across replay and restart: the id scheme derives it from the role and the
+        subject (the flow's path and the session's number among the role's sessions there).
+        """
+        ids = self._kit.run.wiring.ids
+        if ids is None:
+            message = "this search was registered without an id scheme: it cannot ask agents"
+            raise ContractError(("agents", "session"), message)
+        return ids.session_id(self.role.name, self.subject).root
 
     async def turn(
         self,
@@ -159,13 +213,17 @@ class Session:
         *,
         within: Seconds | Within | None = None,
         revision: RevisionRef | None = None,
+        label: Label | None = None,
+        parking: Parking | None = None,
     ) -> TurnFinished | Failed:
         """Ask the agent once: its validated reply, or the typed failure that ended the turn.
 
         ``prompt`` is the context the role's template renders; a ``Correction`` names the
         earlier turn it corrects. Each provider turn of the ask may take the role's
         ``turn_time``; ``within`` narrows that for this ask (the smaller limit applies) and
-        adds the watches that may end it earlier.
+        adds the watches that may end it earlier. ``label`` labels the span of each provider
+        turn the ask makes. ``parking`` lends the agent slot of a turn that waits for its
+        evaluations out until its resume (`Parking`); without it the wait keeps the slot.
         """
         asked = (
             None
@@ -175,20 +233,31 @@ class Session:
         role = self.role
         limit = role.turn_time if asked is None else min(asked.limit, role.turn_time)
         until = Within(limit=limit, watches=() if asked is None else asked.watches)
-        ask = _Ask(self._kit, self, prompt, until, revision or self.revision)
+        terms = _Terms(until, revision or self.revision, label, parking)
+        ask = _Ask(self._kit, self, prompt, terms)
         while True:
             step = await ask.attempt()
             if not isinstance(step, _Again):
                 return step
 
 
+@dataclass(frozen=True)
+class _Terms:
+    """What one ask was asked under: its bound, revision, spans' label and slot while it waits."""
+
+    until: Within
+    revision: RevisionRef | None
+    label: Label | None
+    parking: Parking | None = None
+
+
 class _Ask:
     """One ask: what stays the same across its corrections, re-asks and resumes, and what changes."""
 
-    def __init__(
-        self, kit: Kit, session: Session, prompt: Value, until: Within, revision: RevisionRef | None
-    ) -> None:
+    def __init__(self, kit: Kit, session: Session, prompt: Value, terms: _Terms) -> None:
         self.kit = kit
+        until, revision, self.label = terms.until, terms.revision, terms.label
+        self.parking = terms.parking
         self.session = session
         self.role = session.role
         self.until = until
@@ -203,8 +272,11 @@ class _Ask:
         self.continuation = None
         self.corrections = 0
         self.drops = 0
+        self.outages = 0
+        """Turns of this ask core ended while the capacity gate held them; never a limit."""
         self.resuming = False
-        """Whether the ask in flight continues a wait: a loss of it is never asked again."""
+        """Whether the ask in flight continues a wait: a loss of it is never asked again, unless
+        its provider lost it (``_unavailable``)."""
         self.invocation: InvocationRef | None = None
         self.decision = DecisionId(root=self.role.name)
 
@@ -226,7 +298,8 @@ class _Ask:
             ),
         )
         try:
-            pending = kit.start(request, Within(limit=self.until.limit, watches=self.until.watches))
+            bound = Within(limit=self.until.limit, watches=self.until.watches)
+            pending = kit.start(request, bound, self.label)
             self.decision = pending.decision
             event = await kit.settle(pending)
             if isinstance(event, Failed):
@@ -249,6 +322,7 @@ class _Ask:
             subject=f"{self.session.subject}.{self.role.name}",
             ordinal=serial,
             context=self.input,
+            continuation_of=self.predecessor or self.invocation,
         )
         scope: Scope = THIS_RUN if self.session.workspace is None else self.session.workspace.scope
         operation = Operation(
@@ -403,8 +477,13 @@ class _Ask:
 
     async def _unsuccessful(self, result: TurnResult) -> Failed | _Again:
         role, turn = self.role, result.invocation
+        if result.failure is TurnFailureKind.EPOCH_INTERRUPTED:
+            self.charge = "correction"
+            return self._unfinished(turn)
         if result.failure is TurnFailureKind.TRANSPORT_LOST:
             return await self._lost(turn)
+        if result.failure is TurnFailureKind.PROVIDER_UNAVAILABLE:
+            return await self._unavailable(turn)
         if result.reply_errors:
             # The executor's own schema check rejected the reply: the same typed failure as
             # a reply that breaks the model here, with the errors it reported by field.
@@ -461,11 +540,15 @@ class _Ask:
     async def _lost(self, lost: InvocationRef) -> Failed | _Again:
         """The transport lost the turn: ask the same question again after a backoff, or report it.
 
-        A turn that continued a wait is never asked again, whatever the role's ``lost_turns``:
-        core authorizes each continuation's resume once, so the caller decides what follows.
+        A turn that continued a wait is asked again at most once, and only if the role asks
+        lost turns again at all: core authorizes each continuation's resume once, so the new
+        turn follows the lost one in its conversation as a correction, with the same prompt,
+        as ``_unavailable`` does. Without it, a resumed turn the transport lost (an outage that
+        began too late in its own time for the capacity gate to hold it, S179) lost its whole
+        workstream.
         """
         role = self.role
-        allowed = 0 if self.resuming else role.lost_turns
+        allowed = min(1, role.lost_turns) if self.resuming else role.lost_turns
         if self.drops >= allowed:
             return Failed(reason=FailureReason.LOST, decision=self.decision, turn=lost)
         await self.kit.timer(self.kit.now() + role.lost_turn_backoff.delay(self.drops))
@@ -475,6 +558,34 @@ class _Ask:
         self.continuation = None
         self.invocation = None
         self.drops += 1
+        return _AGAIN
+
+    async def _unavailable(self, lost: InvocationRef) -> _Again:
+        """The provider lost the turn while the run's capacity gate held it: ask again.
+
+        The turn's own work never failed; its provider was unavailable (an outage, a spent
+        quota) past the time core gave it. That is not the role's to spend, so it never counts
+        against ``lost_turns`` nor against core's ``MAX_REASK_CHAIN`` (admission skips such a
+        link), and a turn that continued a wait is asked again too: the new
+        turn follows the lost one in its conversation, with the same prompt, as a correction
+        (its continuation was used). The gate's own budget, and the pause it puts the run in
+        once that is spent, bound how long the provider is waited for.
+        """
+        role = self.role
+        await self.kit.timer(
+            self.kit.now() + role.lost_turn_backoff.delay(min(self.outages, _BACKOFF_STEPS))
+        )
+        self.charge = "correction"
+        self.outages += 1
+        return self._unfinished(lost)
+
+    def _unfinished(self, invocation: InvocationRef) -> _Again:
+        """Retry an unfinished invocation without spending corrections or lost-turn allowances."""
+        self.predecessor = invocation
+        self.resume = None
+        self.continuation = None
+        self.invocation = None
+        self.resuming = False
         return _AGAIN
 
     # -- waiting for what core decides ---------------------------------------------------------
@@ -507,10 +618,13 @@ class _Ask:
             message = f"a suspension was recorded as {recorded.kind}"
             raise ContractError(("agents", "turn"), message)
         wanted = recorded.continuation.continuation_id
+        if self.parking is not None:
+            self.parking.parked()
         ready = self.kit.signal(
             f"resume of {wanted.root}",
             lambda event: (
-                isinstance(event, ResumeReady) and event.authorization.continuation_id == wanted
+                (isinstance(event, ResumeReady) and event.authorization.continuation_id == wanted)
+                or (isinstance(event, ResumeFailed) and event.refusal.continuation_id == wanted)
             ),
         )
         try:
@@ -519,9 +633,18 @@ class _Ask:
             self.kit.run.release(ready)
         if isinstance(authorized, Failed):
             return authorized
+        if isinstance(authorized, ResumeFailed):
+            return Failed(
+                reason=FailureReason.WAIT_REFUSED,
+                decision=self.decision,
+                turn=turn,
+                refusal=WaitRefusal.NOT_RESUMABLE,
+            )
         if not isinstance(authorized, ResumeReady):
             message = f"a resume was authorized as {authorized.kind}"
             raise ContractError(("agents", "turn"), message)
+        if self.parking is not None:
+            await self.parking.resumed()  # held until the search lends the turn a slot again
         return self._resumed(turn, authorized)
 
     def _resumed(self, turn: InvocationRef, ready: ResumeReady) -> _Again:
@@ -537,6 +660,8 @@ class _Ask:
             and any(job.by is WaitEnd.QUEUE_BUDGET for job in timeout.unfinished),
             evidence=authorization.evidence,
             repeated_failure=authorization.repeated_failure,
+            comparisons=authorization.comparisons,
+            settling=authorization.settling,
         )
         template = self.role.exchanges.resume
         if template is None:
@@ -570,4 +695,4 @@ class _Ask:
         return got.checkpoint
 
 
-__all__ = ["Agents", "Session", "reply_errors"]
+__all__ = ["Agents", "Parking", "Session", "reply_errors"]

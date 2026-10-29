@@ -7,8 +7,6 @@
   "round_label": "round 1",
   "data": {
     "kind": "workstream_finished",
-    "setup_failure": false,
-    "refunded": false,
     "repeated_error": true,
     "last_error": {
       "kind": "turn-limit",

@@ -5,29 +5,44 @@ from __future__ import annotations
 import os
 import socket
 from contextlib import redirect_stderr
+from datetime import UTC, datetime
 from io import StringIO
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from tests.server.support import build_server_parts
 
 from entrypoints.server import main
+from server.events import EventType, RunEvent, RunStartedData
 from server.runtime import WebPortInspector, WebPortState
 from server.transport.websocket import WebSocketBindError, WebSocketGateway
 from vs_sim.api import MonotonicClock, OsThreads, PidfdProcessSignaller, ThreadBlockingRunner
 from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from vs_sim.api import Event
 
 
 def test_server_main_prints_the_bind_authority_and_reason_on_its_first_line(
     tmp_path: Path,
 ) -> None:
-    source = Path("clients/tui/dev/fixtures/framework-events.jsonl")
     replay = tmp_path / "run-events.jsonl"
-    replay.write_bytes(source.read_bytes())
+    started = RunEvent(
+        sequence=1,
+        run_id="collision-test",
+        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+        type=EventType.RUN_STARTED,
+        data=RunStartedData(outer_loop="single-agent", input="objective"),
+    )
+    finished = RunEvent(
+        sequence=2,
+        run_id="collision-test",
+        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+        type=EventType.RUN_FINISHED,
+    )
+    replay.write_text(started.model_dump_json() + "\n" + finished.model_dump_json() + "\n")
     instance = tmp_path / "web-gateway.json"
 
     with socket.create_server(("127.0.0.1", 0)) as held:
@@ -50,7 +65,7 @@ def test_server_main_prints_the_bind_authority_and_reason_on_its_first_line(
     first_line = stderr.getvalue().splitlines()[0]
     assert first_line.startswith(f"WebSocket gateway could not bind 127.0.0.1:{port}:")
     assert "address already in use" in first_line.lower()
-    assert f"vibesys web stop --port {port}" in stderr.getvalue()
+    assert f"Inspect or stop the listener on port {port}" in stderr.getvalue()
 
 
 def test_inspector_maps_a_real_same_user_non_gateway_listener() -> None:

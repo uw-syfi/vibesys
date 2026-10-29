@@ -11,6 +11,7 @@ from hypothesis import strategies as st
 
 from vs_runtime.api import BenchmarkEvaluation
 from vs_runtime.api.testing import FakeEvaluation, FakeWorkspace, FakeWorkspaces
+from vs_sim.api import DISCARD
 
 
 class _ScriptedFailureError(RuntimeError):
@@ -37,7 +38,9 @@ def test_scripted_benchmarks_return_or_raise_in_call_order(script: list[float | 
             try:
                 observed.append(
                     (
-                        await evaluation.benchmark(FakeWorkspace(path=Path("/workspace")))
+                        await evaluation.benchmark(
+                            FakeWorkspace(path=Path("/workspace")), output=DISCARD
+                        )
                     ).metric_value
                 )
             except _ScriptedFailureError:
@@ -46,7 +49,7 @@ def test_scripted_benchmarks_return_or_raise_in_call_order(script: list[float | 
 
     assert asyncio.run(drain()) == script
     assert (
-        asyncio.run(evaluation.benchmark(FakeWorkspace(path=Path("/workspace"))))
+        asyncio.run(evaluation.benchmark(FakeWorkspace(path=Path("/workspace")), output=DISCARD))
         == evaluation.default_benchmark
     )
 
@@ -58,8 +61,8 @@ def test_root_benchmarks_use_their_own_script_whatever_the_interleaving() -> Non
     candidate = FakeWorkspace(path=Path("/workspace"), workspace_id="candidate")
 
     async def scenario() -> tuple[float | None, float | None]:
-        first = await evaluation.benchmark(candidate)
-        root = await evaluation.benchmark(FakeWorkspace(path=Path("/workspace")))
+        first = await evaluation.benchmark(candidate, output=DISCARD)
+        root = await evaluation.benchmark(FakeWorkspace(path=Path("/workspace")), output=DISCARD)
         return first.metric_value, root.metric_value
 
     assert asyncio.run(scenario()) == (2.0, 1.0)
@@ -75,7 +78,11 @@ def test_gate_holds_one_call_until_released() -> None:
 
         async def call() -> None:
             finished.append(
-                (await evaluation.benchmark(FakeWorkspace(path=Path("/workspace")))).metric_value
+                (
+                    await evaluation.benchmark(
+                        FakeWorkspace(path=Path("/workspace")), output=DISCARD
+                    )
+                ).metric_value
             )
 
         first = asyncio.ensure_future(call())
@@ -103,7 +110,7 @@ def test_gate_notes_whether_a_cancellation_found_the_workspace_live(*, discard_f
 
     async def scenario() -> None:
         candidate = await workspaces.create_candidate()
-        held = asyncio.ensure_future(evaluation.accuracy(candidate))
+        held = asyncio.ensure_future(evaluation.accuracy(candidate, output=DISCARD))
         await gate.entered.wait()
         if discard_first:
             await candidate.discard()

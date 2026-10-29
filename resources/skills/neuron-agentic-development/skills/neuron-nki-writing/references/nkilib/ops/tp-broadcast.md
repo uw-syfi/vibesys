@@ -52,7 +52,7 @@ Transposes then broadcasts `src[0:1, :]` onto all partitions of `dst`. Each part
 - The transposed dimension of `dst` (`dst.shape[1]`) must equal `src.shape[0]` (the partition dimension).
 - Uses PSUM as intermediate storage -- the transpose result is first written to a `float32` PSUM buffer of shape `[B, P]`, then copied to `dst` in SBUF.
 - **Warning:** This function always broadcasts `src[0:1]`. Passing a pre-sliced tensor will raise an error.
-- PSUM free dimension limit applies: `B` must be within PSUM limits (512 for gen2/gen3, 4096 for gen4).
+- PSUM free dimension limit applies: `B` must be within the PSUM limit — 512 (gen2/3); gen4: 4096 for fp32, 8192 for bf16.
 
 **Example:**
 ```python

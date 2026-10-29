@@ -34,8 +34,9 @@ from ._proofs import (
 )
 from ._registry import ClosedRecordContradictionError, ContractError
 from ._request_forward import declaration, owner_signals, records_own
-from ._request_recovery import command_open
+from ._request_recovery import resent
 from ._session_scope import lost_turn_cancellation
+from ._turn_permit import cap_dispatch_until, facts_for
 from ._values import digest
 from .types.attempts import RevisionOperationRequested
 from .types.common import (
@@ -248,11 +249,20 @@ def _dispatched(
         update={"phase": RequestPhase.DISPATCHED, "dispatched_in": state.recovery.epoch}
     )
     if record.limit_from_dispatch is not None and record.dispatched_at is None:
+        until = started_until(context.run, record.limit_from_dispatch, record.until.watches)
+        at = cap_dispatch_until(
+            facts_for(
+                run=context.run,
+                sessions=context.sessions,
+                records=state,
+                evaluation=context.evaluation,
+            ),
+            record.request,
+            until.at,
+        )
         updated = updated.model_copy(
             update={
-                "until": started_until(
-                    context.run, record.limit_from_dispatch, record.until.watches
-                ),
+                "until": until.model_copy(update={"at": at}),
                 "dispatched_at": context.run.now_at,
             }
         )
@@ -437,27 +447,9 @@ def _reissue(
 
     Never begun: no effect started, so the request is simply sent again. Begun without a
     result: the effect may have run, so the request is sent again to resume, and its
-    executor inspects the external effect before repeating it. Either way the request is
-    neither observed nor reported to its owner: the owner never learns it was interrupted,
-    and the replay equals the straight run.
-
-    A command (an inspection, cancel or block) is core's own and has no owner's limit: sent
-    again, it gets a fresh reconciliation bound from now, or a re-send that waited out its
-    first bound would lapse before it is answered.
+    executor inspects the external effect before repeating it (`resent`).
     """
-    until = record.until
-    if command_open(record):
-        fresh = context.run.now_at + context.run.limits.reconciliation_bound
-        until = until.model_copy(update={"at": max(until.at, fresh)})
-    reissued = record.model_copy(
-        update={
-            "phase": RequestPhase.PREPARED,
-            "observation": None,
-            "sequence": None,
-            "retry_at": None,
-            "until": until,
-        }
-    )
+    reissued = resent(record, context.run.now_at, context.run.limits.reconciliation_bound)
     return AreaChange(state=_replace(state, reissued))
 
 
@@ -478,6 +470,8 @@ def _apply(
             ("observation", "request_id"), "observation requires committed dispatch authorization"
         )
     previous = record.observation
+    if previous is not None and _ended_at_close(previous) and observation != previous:
+        return _answered_after_close(state, context, record, facts)
     fresh = fresh_observation(() if previous is None else (previous,), observation, complete=True)
     if isinstance(fresh, Mismatch) and fresh.field == ProofField.SEQUENCE:
         if previous is not None and observation.sequence < previous.sequence:
@@ -503,14 +497,7 @@ def _refine(
     contradicts the disposition is a typed `ClosedRecordContradictionError`.
     """
     previous = record.observation
-    if (
-        previous is not None
-        and observation.status == ObservationStatus.UNKNOWN
-        and observation.accepted != previous.accepted
-    ):
-        # An executor that cannot say reports itself unaccepted, even of a job it once took
-        # (it lost its record of a submission that never reached the cluster). Such an answer
-        # claims nothing, so it neither contradicts the disposition nor proves a release.
+    if previous is not None and _claims_nothing(previous, observation):
         return AreaChange(state=state)
     if previous is None or not _agrees(previous, observation):
         raise ClosedRecordContradictionError(record.request_id, previous, observation)
@@ -575,6 +562,16 @@ def _recorded(state: RecordsState, observation: Observation) -> Observation | No
 _DID_NOT_SUCCEED = frozenset(
     {ObservationStatus.FAILED, ObservationStatus.REJECTED, ObservationStatus.CANCELLED}
 )
+
+
+def _claims_nothing(closed: Observation, later: Observation) -> bool:
+    """Whether a later answer is an executor that cannot say, about a closed record.
+
+    An executor that cannot say reports itself unaccepted, even of a job it once took (it lost
+    its record of a submission that never reached the cluster). Such an answer claims nothing,
+    so it neither contradicts the disposition nor proves a release.
+    """
+    return later.status == ObservationStatus.UNKNOWN and later.accepted != closed.accepted
 
 
 def _agrees(closed: Observation, later: Observation) -> bool:
@@ -729,15 +726,52 @@ def _undispatchable(
     return _cancel_prepared(state, context, (record,))
 
 
+def _ended_at_close(observation: Observation) -> bool:
+    """Whether *observation* is core's own end of a blocked record a closing run waited on."""
+    return observation.event_id.root.startswith(_CLOSE_END)
+
+
+def _answered_after_close(
+    state: RecordsState, context: RecordsContext, record: RequestRecord, facts: Facts
+) -> AreaChange[RecordsState]:
+    """An executor's answer to a record core ended because a closing run waited on it.
+
+    Core ended the record on the premise that no answer would come (`_end_stalled_block`),
+    numbering its end right after the executor's last answer. The executor's next answer
+    carries that same number, so it is judged on what it says, never refused as a sequence
+    conflict; one numbered before the end is an answer the end already saw.
+
+    An answer that agrees with the end, or claims nothing, adds what it proves (`_refine`).
+    One that disagrees proves the premise wrong: while the run is still closing it is taken
+    as the blocked record the end replaced would take it, so what it names (a job a slow
+    submission started) is known to its owner, which ends it, and the passed bound ends the
+    record again. Once the run is terminal nothing can act on it: a disagreement is the typed
+    contradiction.
+    """
+    ended = record.observation
+    answer = facts.observation
+    if ended is None or answer.sequence < ended.sequence:
+        return AreaChange(state=state)
+    if (
+        context.run.status != RunStatus.CLOSING
+        or _claims_nothing(ended, answer)
+        or _agrees(ended, answer)
+    ):
+        return _refine(state, record, answer)
+    blocked = record.model_copy(update={"phase": RequestPhase.BLOCKED})
+    return _advance_phase(state, context, blocked, facts)
+
+
 def _end_stalled_block(
     state: RecordsState, context: RecordsContext, event: BlockedRecordStalled
 ) -> AreaChange[RecordsState]:
     """End the blocked record a closing run waits on, as a conclusive failure.
 
-    The record's bound passed and nothing addresses it, so no executor answer will come. The
+    The record's bound passed and nothing addresses it, so no executor answer is expected. The
     failure keeps what the executor reported (acceptance, resource, children, release), so
     the end never claims a release nobody proved: an owner whose release is unproven keeps
-    holding closure until its own cancellation proves it.
+    holding closure until its own cancellation proves it. An answer that comes anyway (one
+    already on its way when the bound passed) is judged by `_answered_after_close`.
     """
     record = _unique(state, event.request_id)
     if (
@@ -750,7 +784,7 @@ def _end_stalled_block(
     request = record.request
     ended = (
         Observation(
-            event_id=EventId(root=f"blocked-at-close:{record.request_id.root}"),
+            event_id=EventId(root=f"{_CLOSE_END}{record.request_id.root}"),
             request_id=record.request_id,
             scope=request.scope,
             sequence=0,
@@ -762,7 +796,7 @@ def _end_stalled_block(
         if previous is None
         else previous.model_copy(
             update={
-                "event_id": EventId(root=f"blocked-at-close:{record.request_id.root}"),
+                "event_id": EventId(root=f"{_CLOSE_END}{record.request_id.root}"),
                 "sequence": previous.sequence + 1,
                 "observed_at": context.run.now_at,
                 "status": ObservationStatus.FAILED,
@@ -774,6 +808,7 @@ def _end_stalled_block(
 
 
 _BLOCKED_AT_CLOSE = "the run closed while this request was blocked at its reconciliation bound"
+_CLOSE_END = "blocked-at-close:"
 
 
 def _record(

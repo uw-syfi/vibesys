@@ -18,6 +18,7 @@ EXCHANGES = Exchanges(
 
 IMPLEMENTER = Role(
     name="implementer",
+    title="Implementer",
     prompt="round.j2",
     reply=SingleAgentRoundResponse,
     workspace=WorkspaceMode.ISOLATED_CHILD,

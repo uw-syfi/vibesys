@@ -76,3 +76,24 @@ describe('ConnectionManager', () => {
     releaseAttachedRun();
   });
 });
+
+test('additional transport owners retire before their shared host link, exactly once', async () => {
+  const link = new FakeLink();
+  const clock = new FakeClock();
+  const manager = new ConnectionManager({
+    linkFor: () => link,
+    appVersion: 'test',
+    scheduleTimeout: clock.schedule,
+    log: () => {},
+  });
+  const lease = await manager.leaseLink({kind: 'local'});
+  let retired = 0;
+  manager.onDisposing(() => {
+    expect(link.released).toBe(0);
+    retired += 1;
+  });
+  await manager[Symbol.asyncDispose]();
+  await manager[Symbol.asyncDispose]();
+  expect(retired).toBe(1);
+  await lease.release();
+});

@@ -1,0 +1,25 @@
+[package]
+name = "stitch-cli"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "stitch"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde_json.workspace = true
+stitch-core = { path = "../stitch-core" }
+stitch-source-api = { path = "../stitch-source-api" }
+stitch-importer-api = { path = "../stitch-importer-api" }
+stitch-profiler-otel = { path = "../../plugins/profilers/otel" }
+stitch-profiler-perf = { path = "../../plugins/profilers/perf" }
+stitch-profiler-dial9 = { path = "../../plugins/profilers/dial9" }
+stitch-profiler-gpu-bridge = { path = "../../plugins/profilers/gpu-bridge" }
+stitch-source-workspace = { path = "../../plugins/source/declared-workspace" }
+stitch-session = { path = "../stitch-session" }
+
+[dev-dependencies]
+tempfile.workspace = true

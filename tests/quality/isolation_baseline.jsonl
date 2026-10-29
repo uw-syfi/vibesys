@@ -1,8 +1,3 @@
-{"path": "clients/tui/dev/harness.test.ts", "rule": "wall_clock_sync", "count": 1}
-{"path": "clients/tui/src/session-controller.test.ts", "rule": "wall_clock_sync", "count": 25}
-{"path": "clients/tui/src/ui/agent-map-spinner.test.ts", "rule": "wall_clock_sync", "count": 2}
-{"path": "clients/tui/src/ui/app.test.ts", "rule": "wall_clock_sync", "count": 5}
-{"path": "clients/tui/src/ui/round-rail.test.ts", "rule": "wall_clock_sync", "count": 4}
 {"path": "libs/vs-agent/tests/test_cli_docker.py", "rule": "patch", "count": 2}
 {"path": "libs/vs-agent/tests/test_fake_client.py", "rule": "private_import", "count": 5}
 {"path": "libs/vs-agent/tests/test_host_resource_declarations.py", "rule": "patch", "count": 2}
@@ -41,13 +36,12 @@
 {"path": "sdk/vs-bench/tests/test_transport.py", "rule": "private_import", "count": 1}
 {"path": "tests/architecture/test_delegated_merge.py", "rule": "patch", "count": 12}
 {"path": "tests/e2e/test_torch_inject_processes_e2e.py", "rule": "timeout_verdict", "count": 2}
-{"path": "tests/entrypoints/test_headless.py", "rule": "mock", "count": 19}
+{"path": "tests/entrypoints/test_headless.py", "rule": "mock", "count": 16}
 {"path": "tests/entrypoints/test_headless.py", "rule": "patch", "count": 8}
-{"path": "tests/entrypoints/test_launcher.py", "rule": "mock", "count": 4}
-{"path": "tests/entrypoints/test_launcher.py", "rule": "patch", "count": 92}
+{"path": "tests/entrypoints/test_launcher.py", "rule": "patch", "count": 1}
 {"path": "tests/examples/test_differential_dataflow_example.py", "rule": "patch", "count": 11}
 {"path": "tests/examples/test_qwen35_mi210_bundle.py", "rule": "patch", "count": 5}
-{"path": "tests/packaging/test_installed_release_verifier.py", "rule": "patch", "count": 14}
+{"path": "tests/packaging/test_installed_release_verifier.py", "rule": "patch", "count": 3}
 {"path": "tests/server/test_api_transport.py", "rule": "patch", "count": 1}
 {"path": "tests/server/test_event_store.py", "rule": "patch", "count": 2}
 {"path": "tests/server/test_event_store_index.py", "rule": "patch", "count": 13}

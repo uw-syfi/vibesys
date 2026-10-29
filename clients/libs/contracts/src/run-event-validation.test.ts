@@ -1,5 +1,5 @@
 import {it} from 'node:test';
-import {validateRunEvent} from './index.js';
+import {validateAgentReply, validateRunEvent} from './index.js';
 import {expect} from './test-support/expect.js';
 
 function event(data: unknown): Record<string, unknown> {
@@ -100,4 +100,17 @@ it('rejects nonportable chat thread identities from the generated schema', () =>
 
   const value = {...event(null), chat_thread_id: 'thread-1.name'};
   expect(validateRunEvent(value)).toBe(value);
+});
+
+it('retained typed replies reject malformed fields and unknown routing keys', () => {
+  const reply = {kind: 'Result', json_schema: {type: 'object'}, value: {answer: 'yes'}};
+  expect(validateAgentReply(reply)).toEqual(reply);
+  for (const invalid of [
+    {...reply, kind: ''},
+    {...reply, json_schema: []},
+    {...reply, value: null},
+    {...reply, unknown: true},
+  ]) {
+    expect(() => validateAgentReply(invalid)).toThrow();
+  }
 });

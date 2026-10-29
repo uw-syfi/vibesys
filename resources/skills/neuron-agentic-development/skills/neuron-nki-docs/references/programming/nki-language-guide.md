@@ -417,6 +417,13 @@ while x < 10:
 
 ## Dynamic Control Flow
 
+> **NKI 0.6.0+ note:** The NKI frontend is moving from Parsing to Tracing (Tracing available in
+> 0.6.0, default in 0.7.0, parser removed in 0.8.0). The `for i in dynamic_range(...)` and bare
+> `while reg:` forms shown below are **parser-only and removed under tracing** — a runtime register
+> has no value at trace time. Replace them with the structured constructs `nl.fori_loop(lower, upper,
+> body_fun, step=1)` (counted loop with a runtime bound) and `nl.while_loop(init, body_fun)`
+> (data-dependent loop); both compile on the parser and the tracer.
+
 In the previous section we looked at control-flow constructs that are ultimately expanded at compile-time. NKI also supports dynamic control-flow, or control-flow that runs on the device. Dynamic control-flow is not expanded by the compiler, but lowered to equivalent Trainium control-flow instructions.
 
 The most basic dynamic loop is a for-loop with static bounds. A dynamic loop with static bounds can be written using the standard for-loop with a dynamic_range hint.

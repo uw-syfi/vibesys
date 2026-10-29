@@ -3,7 +3,8 @@
  * (`HostListing`) and those runs: each recent run's status, and the project directories to offer.
  * Pure functions of pushed data; the host is never asked again for them.
  */
-import {type HostKey, type HostListing, type HostRun, instanceObservation} from '@vibesys/hosts';
+import {type HostKey, type HostListing, instanceObservation, newestServerOf} from '@vibesys/hosts';
+import type {RunStart} from './run-start.js';
 
 /** A run the user attached to, as the views list it. */
 export interface RecentRun {
@@ -15,6 +16,16 @@ export interface RecentRun {
   /** Last known server instance, retained for diagnostics after registry tombstones expire. */
   readonly instanceId: string | null;
   readonly attachedAt: number;
+  /** What the app started it with, when the app started it; absent or null otherwise. */
+  readonly start?: RunStart | null;
+}
+
+/** An entry of the saved recent runs that could not be read, so the list leaves it out. */
+export interface SkippedRecent {
+  /** Its place in the saved list. */
+  readonly index: number;
+  /** Why, naming the key that is wrong (`recent.json: runs[16].task must be a task name`). */
+  readonly reason: string;
 }
 
 /**
@@ -44,9 +55,7 @@ export type RecentStatus =
 /** `run`'s status in its host's `listing` (undefined: no listing yet). */
 export function recentStatus(run: RecentRun, listing: HostListing | undefined): RecentStatus {
   if (listing?.kind !== 'listed') return {kind: 'unknown'};
-  const live = listing.live.find(
-    entry => entry.runId === run.runId && entry.projectRoot === run.project,
-  );
+  const live = newestServerOf(listing.live, run.runId, run.project);
   if (live !== undefined) return {kind: 'live', instanceId: live.id, status: live.status};
   if (run.instanceId !== null) {
     const observed = instanceObservation(listing, run.instanceId);
@@ -59,13 +68,7 @@ export function recentStatus(run: RecentRun, listing: HostListing | undefined): 
     return {kind: 'unknown'};
   }
   // A run resumed and ended again has several tombstones: its latest server says how it ended.
-  const ended = listing.ended
-    .filter(entry => entry.runId === run.runId && entry.projectRoot === run.project)
-    .reduce<HostRun | undefined>(
-      (latest, entry) =>
-        latest === undefined || entry.startedAt > latest.startedAt ? entry : latest,
-      undefined,
-    );
+  const ended = newestServerOf(listing.ended, run.runId, run.project);
   return {
     kind: 'ended',
     instanceId: ended?.id ?? run.instanceId,
@@ -90,4 +93,23 @@ export function suggestProjects(
   if (listing?.kind === 'listed') for (const run of listing.live) add(run.projectRoot);
   for (const run of recent) if (run.host === host) add(run.project);
   return projects;
+}
+
+/**
+ * Every project directory the app has met on `host`, each once: those of its live servers, its
+ * ended ones the registry still keeps, then its recent runs. A machine lists runs project by
+ * project, so these are the projects a question across runs asks of it.
+ */
+export function knownProjects(
+  listing: HostListing | undefined,
+  recent: readonly RecentRun[],
+  host: HostKey,
+): string[] {
+  const projects = new Set<string>();
+  if (listing?.kind === 'listed') {
+    for (const run of [...listing.live, ...listing.ended]) projects.add(run.projectRoot);
+  }
+  for (const run of recent) if (run.host === host) projects.add(run.project);
+  projects.delete('');
+  return [...projects];
 }

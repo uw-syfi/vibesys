@@ -3,9 +3,11 @@ import responsePayloadSchema from './generated/response-payload.schema.js';
 import runEventSchema from './generated/run-event.schema.js';
 import type {
   ActiveExecutions,
+  AgentReply,
   Diagnostic,
   ProtocolResponse,
   RunEvent,
+  RunSnapshot,
   ServerMessage,
 } from './protocol.js';
 import {
@@ -56,6 +58,21 @@ export function parseProtocolResponse(line: string): ProtocolResponse {
 /** Validate an event from a non-transport boundary and return its typed value. */
 export function validateRunEvent(value: unknown): RunEvent {
   return validateRunEventAt(value, 'run event');
+}
+
+/** Validate a retained typed reply without reconstructing an event around it. */
+export function validateAgentReply(value: unknown): AgentReply {
+  validateSchema(value, {$ref: '#/$defs/AgentReply'}, 'agent reply', {...OPEN_WALK, strict: true});
+  return value as AgentReply;
+}
+
+/**
+ * Validate a run snapshot from a non-transport boundary (the run page seeds its trace from one
+ * made of a host's run summary) and return its typed value.
+ */
+export function validateRunSnapshot(value: unknown): RunSnapshot {
+  validateSchema(value, {$ref: '#/$defs/RunSnapshot'}, 'run snapshot', OPEN_WALK);
+  return value as RunSnapshot;
 }
 
 /**
@@ -176,7 +193,7 @@ function validateEventBatch(record: Record<string, unknown>): void {
   // Kind only, deliberately. That `history_after_sequence` is a non-negative
   // safe integer is `StreamReconciler.declaredFloorOf`'s check and stays
   // there: its comment records why the boundary must not refuse a value the
-  // web client currently folds through `?? 0` and never reads back.
+  // desktop client currently folds through `?? 0` and never reads back.
   optionalNumber(record, 'history_after_sequence', STREAM);
   optionalBoolean(record, 'rebootstrap', STREAM);
   validateActiveExecutions(record, STREAM);

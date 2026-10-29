@@ -106,8 +106,9 @@ conformance corpus.
   dependency shows up only in some shard layouts.
 - A property passes on PR depth and fails nightly because the PR profile is
   derandomized and draws few examples: pin each nightly failure with
-  `@example(...)` so PR runs replay it. Unenforced: the nightly result
-  arrives after merge.
+  `@example(...)` so PR runs replay it. Enforced for regression tests by
+  `test_every_property_regression_test_pins_its_input`. Unenforced for other
+  nightly finds: the result arrives after merge.
 - An `async def` test marked `asyncio` silently leaves the virtual clock and
   then waits in real time; drop the marker unless the test needs
   pytest-asyncio.

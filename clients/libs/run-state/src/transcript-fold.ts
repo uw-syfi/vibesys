@@ -6,8 +6,10 @@
 import type {RunEvent} from '@vibesys/contracts';
 import {ownProjectionInput, type ReadonlyProjection} from './publication.js';
 import {type RoundKey, roundKeyFor, roundNumberFor} from './round-key.js';
+import {beforeStructuredReply} from './transcript-reply-suffix.js';
 
 type RunEventData = NonNullable<RunEvent['data']>;
+type TypedReply = NonNullable<Extract<RunEventData, {kind: 'agent_execution_finished'}>['reply']>;
 type TypedToolResult = ReadonlyProjection<Extract<RunEventData, {kind: 'tool_result'}>>;
 /** Typed structure a producer preserved alongside the raw tool-result text. */
 export type ToolResultPayload = NonNullable<TypedToolResult['payload']>;
@@ -23,7 +25,8 @@ export interface TranscriptEntry {
     | 'diagnostic'
     | 'subprocess'
     | 'status'
-    | 'result';
+    | 'result'
+    | 'reply';
   readonly content: string;
   readonly label?: string;
   readonly tone?: 'normal' | 'success' | 'failure';
@@ -32,6 +35,12 @@ export interface TranscriptEntry {
   readonly roundNumber?: number;
   readonly roundKey?: RoundKey;
   readonly turnId?: string;
+  /**
+   * The agent-turn span of the run trace this entry belongs to, as the server stamped it on the
+   * event (`RunEvent.span_id`). Entries join the trace by this id and by nothing else; an entry
+   * the server did not tie to a span has none.
+   */
+  readonly spanId?: string;
   readonly invocationId?: string;
   readonly startsTurn?: boolean;
   readonly toolCall?: string;
@@ -46,11 +55,24 @@ export interface TranscriptEntry {
   readonly toolCallId?: string;
   readonly toolArguments?: ReadonlyProjection<Record<string, unknown>>;
   readonly toolResult?: TypedToolResult;
+  /**
+   * For a `reply` entry, the typed reply a structured turn ended with (`agent_execution_finished`'s
+   * `data.reply`): its model's name, JSON Schema and validated value. `content` is the raw text it
+   * came from, which this entry replaces among the turn's streamed assistant text.
+   */
+  readonly reply?: ReadonlyProjection<TypedReply>;
   /** The server cut this event's payload at its recorded-size bound. */
   readonly truncated?: true;
 }
 
 export function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
+  const entry = projectedEntry(event);
+  const spanId = event.span_id;
+  if (entry === null || spanId === undefined || spanId === null) return entry;
+  return {...entry, spanId};
+}
+
+function projectedEntry(event: RunEvent): TranscriptEntry | null {
   const fields = transcriptFields(event);
   const dataEntry = eventDataToTranscriptEntry(event, fields);
   const entry = dataEntry === undefined ? eventTypeToTranscriptEntry(event, fields) : dataEntry;
@@ -229,6 +251,9 @@ function eventDataToTranscriptEntry(
   if (data?.kind === 'tool_call' || data?.kind === 'tool_result') {
     return toolTranscriptEntry(event, data, fields);
   }
+  if (data?.kind === 'agent_execution_finished') {
+    return data.reply == null ? undefined : replyTranscriptEntry(event, data, data.reply, fields);
+  }
   if (data?.kind === 'subprocess_output') {
     return {
       id: fields.id,
@@ -242,6 +267,9 @@ function eventDataToTranscriptEntry(
   // The warning rides the envelope's `diagnostic`, which `applyDiagnosticEvent`
   // has already folded into `diagnostics`; it is not transcript prose.
   if (data?.kind === 'framework_warning') return null;
+  // Likewise the failed input measurement: the server attaches its diagnostic, and the run's state
+  // keeps it as `inputFailure`.
+  if (data?.kind === 'input_measurement_failed') return null;
   if (
     data?.kind === 'judge_result' ||
     data?.kind === 'benchmark_result' ||
@@ -333,6 +361,27 @@ function outputTranscriptEntry(
       ? {startsTurn: true, toolCall: data.content}
       : {}),
     ...(gate?.command === undefined ? {} : {command: gate.command}),
+  };
+}
+
+/** The typed reply of a finished structured turn; `content` keeps the raw text it came from. */
+function replyTranscriptEntry(
+  event: RunEvent,
+  data: Extract<RunEventData, {kind: 'agent_execution_finished'}>,
+  reply: TypedReply,
+  fields: TranscriptFields,
+): TranscriptEntry {
+  const invocationId = event.invocation_id ?? event.execution_id ?? undefined;
+  return {
+    id: fields.id,
+    kind: 'reply',
+    content: typeof data.result === 'string' ? data.result : JSON.stringify(reply.value),
+    label: labelFor(event, 'reply'),
+    ...fields.agentFields,
+    ...fields.roundFields,
+    turnId: invocationId ?? fields.turnId,
+    ...(invocationId === undefined ? {} : {invocationId}),
+    reply: ownProjectionInput(reply),
   };
 }
 
@@ -473,12 +522,10 @@ export function configurationFailureContent(data: {
 /**
  * Legacy/recorded-prose adapter: a live backend on `main` now emits a typed
  * `gate_started` event whose `command` field `eventToTranscriptEntry` reads
- * directly (see above), but a run recorded before #697 (e.g. the dev harness
- * fixture `clients/tui/dev/fixtures/bad-cpp-round1.jsonl`, replayed byte for
- * byte as `agent_output_chunk`/diagnostic) still carries the gate command as
- * free text: loop.py's old `ctx.lprint(f"[framework-validation] running
+ * directly (see above), but a run recorded before #697 (replayed as `agent_output_chunk`/diagnostic)
+ * still carries the gate command as free text: loop.py's old `ctx.lprint(f"[framework-validation] running
  * {recipe.name}: {recipe.command}")`. This is the one place that text is
- * folded into an entry, so it is split here rather than let the TUI
+ * folded into an entry, so it is split here rather than let a renderer
  * word-wrap a shell command as prose.
  *
  * Deliberately narrow: only the exact "[framework-validation] running
@@ -657,6 +704,10 @@ export function foldTranscriptEntry(
   incoming: TranscriptEntry,
   index: TranscriptIndex | null,
 ): void {
+  if (incoming.kind === 'reply') {
+    foldReply(entries, incoming, index);
+    return;
+  }
   if (incoming.kind === 'tool' && !incoming.startsTurn && incoming.toolName !== undefined) {
     const target =
       index === null ? findToolCall(entries, incoming) : index.match(entries, incoming);
@@ -919,6 +970,49 @@ export class TranscriptBuffer {
 
 /** Key for the run transcript, kept out of the chat thread id space. */
 export const RUN_TRANSCRIPT = `${TOOL_KEY_SEPARATOR}run`;
+
+/** How far back a reply looks for the turn's streamed text; turns that run together interleave. */
+const REPLY_SCAN = 500;
+
+function replyPrefix(text: string, reply: TranscriptEntry, raw: string): string | undefined {
+  if (text.endsWith(raw)) return text.slice(0, text.length - raw.length).trimEnd();
+  return reply.reply ? beforeStructuredReply(text, reply.reply.value) : undefined;
+}
+
+/**
+ * Folds a turn's typed reply over its own streamed text: a structured turn's final assistant text
+ * is the reply's raw JSON, so the typed entry takes that text's place (or what is left of the
+ * entry once the JSON is cut off its end), and the reply never shows twice, once as braces.
+ */
+function foldReply(
+  entries: TranscriptEntry[],
+  reply: TranscriptEntry,
+  index: TranscriptIndex | null,
+): void {
+  const raw = reply.content.trim();
+  const turn = reply.invocationId;
+  if (raw !== '' && turn !== undefined) {
+    const floor = Math.max(0, entries.length - REPLY_SCAN);
+    for (let at = entries.length - 1; at >= floor; at -= 1) {
+      const entry = entries[at];
+      if (entry === undefined || entry.kind !== 'assistant' || entry.invocationId !== turn)
+        continue;
+      const text = entry.content.trimEnd();
+      const rest = replyPrefix(text, reply, raw);
+      if (rest === undefined) break;
+      if (rest === '') {
+        entries[at] = reply;
+        index?.record(reply, at);
+        return;
+      }
+      entries[at] = {...entry, content: rest};
+      break;
+    }
+  }
+  const appended = uniqueTranscriptEntry(entries, reply, index);
+  entries.push(appended);
+  index?.record(appended, entries.length - 1);
+}
 
 function mergeToolResult(call: TranscriptEntry, result: TranscriptEntry): TranscriptEntry {
   if (call.toolArguments !== undefined && result.toolResult !== undefined) {

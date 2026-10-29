@@ -94,12 +94,17 @@ class MeasurementFailure(StrEnum):
     ``AMBIGUOUS`` is a failure the evidence cannot assign to the candidate or to the
     machinery. The backend decides how often it measures such a failure again, within its
     declared bound and core's hard cap; what reaches core is final.
+
+    ``RUN_ENVIRONMENT_UNAVAILABLE`` is a measurement the run environment refused because
+    it can run no such work at all (a local Slurm root its probe could not prove shared).
+    It is nobody's candidate's fault, and no retry can succeed, so it is never retried.
     """
 
     WORKLOAD = "workload"
     INFRASTRUCTURE = "infrastructure"
     AMBIGUOUS = "ambiguous"
     UNKNOWN = "unknown"
+    RUN_ENVIRONMENT_UNAVAILABLE = "run_environment_unavailable"
 
     @property
     def retryable(self) -> bool:

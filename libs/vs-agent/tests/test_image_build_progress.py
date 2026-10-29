@@ -36,6 +36,7 @@ def _build(stderr: str, *, returncode: int = 0) -> list[ImageBuildProgress]:
         command_runner=runner,
         on_progress=observed.append,
         clock=ManualClock(),
+        output=DISCARD,
     )
     return observed
 
@@ -57,7 +58,30 @@ def test_each_step_docker_starts_is_one_observation() -> None:
         ImageBuildProgress(done=0, total=3, label="FROM docker.io/library/python:3.12-bookworm"),
         ImageBuildProgress(done=1, total=3, label="RUN npm install -g --include=optional"),
         ImageBuildProgress(done=2, total=3, label="RUN pip install --no-cache-dir uv"),
+        ImageBuildProgress(done=3, total=3, label="exporting to image"),
     ]
+
+
+def test_the_export_after_the_last_step_is_one_observation_not_a_step() -> None:
+    """Regression: a large base image spent twelve minutes exporting with no observation."""
+    stderr = "\n".join(
+        [
+            _step_line(5, 3, 3, "RUN pip install --no-cache-dir uv"),
+            "#8 exporting to image",
+            "#8 exporting layers 603.8s done",
+            "#8 exporting to image 604.0s done",
+            "#9 exporting to image",
+        ]
+    )
+
+    assert _build(stderr) == [
+        ImageBuildProgress(done=2, total=3, label="RUN pip install --no-cache-dir uv"),
+        ImageBuildProgress(done=3, total=3, label="exporting to image"),
+    ]
+
+
+def test_an_export_without_a_step_before_it_reports_nothing() -> None:
+    assert _build("#8 exporting to image") == []
 
 
 _LINES = st.one_of(
@@ -69,6 +93,7 @@ _LINES = st.one_of(
         st.text(st.characters(min_codepoint=33, max_codepoint=126), min_size=1, max_size=400),
     ),
     st.integers(0, 99).map(lambda sequence: f"#{sequence} CACHED"),
+    st.integers(0, 99).map(lambda sequence: f"#{sequence} exporting to image"),
     st.text(st.characters(min_codepoint=32, max_codepoint=126)),
 )
 
@@ -80,7 +105,9 @@ def test_observations_only_move_forward_within_the_build(lines: list[str]) -> No
     done = [progress.done for progress in observed]
     assert done == sorted(set(done))
     for progress in observed:
-        assert 0 <= progress.done < progress.total
+        exporting = progress.label == "exporting to image"
+        assert 0 <= progress.done <= progress.total
+        assert (progress.done == progress.total) == exporting
         assert 0 < len(progress.label) <= 200
 
 
@@ -99,6 +126,7 @@ def test_a_failed_build_still_reports_the_steps_it_reached() -> None:
             command_runner=runner,
             on_progress=observed.append,
             clock=ManualClock(),
+            output=DISCARD,
         )
 
     assert observed == [ImageBuildProgress(done=1, total=3, label="RUN npm install")]
@@ -110,17 +138,27 @@ def test_a_build_with_no_sink_streams_nothing() -> None:
     )
 
     assert agent_image(
-        "python:3.12-bookworm", command_runner=runner, clock=ManualClock()
+        "python:3.12-bookworm",
+        command_runner=runner,
+        clock=ManualClock(),
+        output=DISCARD,
     ).startswith("sha256:")
 
 
 _STEP = re.compile(r"^#\d+ \[(?:\S+ )?\s*(\d+)/(\d+)\] (.+)$")
+_EXPORT = re.compile(r"^#\d+ exporting to image")
 
 
 def _expected_steps(lines: Sequence[str]) -> list[ImageBuildProgress]:
     """The observations a build reports for its stderr lines: the rules this suite pins."""
     expected: list[ImageBuildProgress] = []
+    exported = False
     for line in lines:
+        if expected and not exported and _EXPORT.match(line):
+            exported = True
+            total = expected[-1].total
+            expected.append(ImageBuildProgress(done=total, total=total, label="exporting to image"))
+            continue
         match = _STEP.match(line)
         if match is None:
             continue
@@ -144,7 +182,7 @@ class _ChunkingRunner:
         self.written = {stream: bytearray() for stream in OutputStream}
 
     def run(
-        self, argv: Sequence[str], *, cwd: Path, timeout: float, output: OutputSink = DISCARD
+        self, argv: Sequence[str], *, cwd: Path, timeout: float, output: OutputSink
     ) -> DockerBuildResult:
         scripted = Capture(limit=1 << 20)
         result = self._inner.run(argv, cwd=cwd, timeout=timeout, output=scripted)

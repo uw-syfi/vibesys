@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {LaunchError, parseLaunch} from './launch-args.js';
+import {LaunchError, parseLaunch, USER_DATA_ENV, userDataOverride} from './launch-args.js';
 
 const CWD = '/home/me';
 
@@ -25,13 +25,9 @@ describe('parseLaunch', () => {
     });
   });
 
-  test('opens the welcome view, on a host when one is named', () => {
-    expect(parseLaunch([], CWD)).toEqual({kind: 'welcome', host: null});
-    expect(parseLaunch(['--'], CWD)).toEqual({kind: 'welcome', host: null});
-    expect(parseLaunch(['--host', 'gpu-box'], CWD)).toEqual({
-      kind: 'welcome',
-      host: {kind: 'ssh', alias: 'gpu-box'},
-    });
+  test('opens the main window when nothing is asked for', () => {
+    expect(parseLaunch([], CWD)).toEqual({kind: 'main-window'});
+    expect(parseLaunch(['--'], CWD)).toEqual({kind: 'main-window'});
   });
 
   test('attaches to a detached run on a host, or on this machine', () => {
@@ -53,6 +49,7 @@ describe('parseLaunch', () => {
       [['--host', 'h', '--', 'x'], 'only --project takes run arguments'],
       [['--host', '-oProxyCommand=x'], 'not a usable ssh host name'],
       [['--host'], '--host needs a value'],
+      [['--host', 'gpu-box'], '--host needs --instance'],
       [['--instance', 'ZZ'], '--instance needs a run id'],
       [['--host', 'h', '--project', 'p'], 'pass only one of'],
       [['--project'], '--project needs a path'],
@@ -67,5 +64,18 @@ describe('parseLaunch', () => {
       expect(() => parseLaunch(argv, CWD)).toThrow(message);
       expect(() => parseLaunch(argv, CWD)).toThrow(LaunchError);
     }
+  });
+});
+
+describe('userDataOverride', () => {
+  test('is the default directory unless the variable names one', () => {
+    expect(userDataOverride({})).toBeNull();
+    expect(userDataOverride({[USER_DATA_ENV]: ''})).toBeNull();
+    expect(userDataOverride({[USER_DATA_ENV]: '/work/profile'})).toBe('/work/profile');
+  });
+
+  test('refuses a relative directory, naming the variable', () => {
+    expect(() => userDataOverride({[USER_DATA_ENV]: 'profile'})).toThrow(LaunchError);
+    expect(() => userDataOverride({[USER_DATA_ENV]: 'profile'})).toThrow(USER_DATA_ENV);
   });
 });

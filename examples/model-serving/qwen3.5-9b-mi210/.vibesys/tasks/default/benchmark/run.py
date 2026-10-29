@@ -88,6 +88,12 @@ Mode = Literal["smoke", "quick", "full", "holdout"]
 
 DEFAULT_MODEL = "Qwen/Qwen3.5-9B"
 DEFAULT_BASE_URL = "http://127.0.0.1:8000/v1"
+# The wire protocol session_runner speaks to the server (its `--backend`). `openai` is the
+# contract every candidate meets; a comparison baseline's engine may need its native
+# token-in/token-out endpoint (SGLang: `sglang-tokens`, which needs the server's
+# --skip-tokenizer-init and --stream-output).
+BACKENDS = ("openai", "vllm-tokens", "sglang-tokens")
+DEFAULT_BACKEND = "openai"
 
 # Session-count knobs for each mode. Calibrated against the tuned vLLM
 # baseline on 1x MI210 (see ../README.md "Modes"): quick lands at ~2-3
@@ -147,17 +153,44 @@ WARMUP_TRACE_SHA256 = "d179a756f8343eb6b27e492b3c88b81e87b8a5870872370e6e46e0e7b
 WARMUP_TRACE_ROWS = 72
 
 
+# The requirement a server lacks when session_runner's preflight refuses it: the evaluator
+# result protocol's `requirement_not_met` error names it, so VibeSys does not measure the same
+# revision again (the refusal is deterministic: the server never reports a cache hit).
+PREFIX_CACHE_REQUIREMENT = "prefix_cache"
+
+
+def is_preflight_failure(stderr_tail: str) -> bool:
+    """Whether a session_runner run failed at its prefix-cache preflight.
+
+    The preflight runs before any replay traffic and is the only session_runner check that
+    names itself, so a stderr tail that mentions it is the preflight refusing the server, not
+    a request that failed. This reads request-factory's wording: should it change, a
+    preflight refusal reads as an ordinary failure again (the error kind's default), which
+    costs a repeated measurement, never a wrong verdict.
+    """
+    return "preflight" in stderr_tail.lower()
+
+
 class HarnessError(RuntimeError):
     """A domain-level failure: bad config, a missing tool, or a failed run.
 
     `partial` is what a sub-run measured before it was stopped, as an evaluator
     result protocol `partial` object (see `partial_measurement`), or None when
-    it measured nothing.
+    it measured nothing. `requirement` names a capability the measured server
+    lacks (see `PREFIX_CACHE_REQUIREMENT`) when the failure is deterministic:
+    the protocol's `requirement_not_met` error kind, which VibeSys never
+    measures again. None means a failure that measuring again might change.
     """
 
-    def __init__(self, message: str, partial: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        partial: dict[str, Any] | None = None,
+        requirement: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.partial = partial
+        self.requirement = requirement
 
 
 # The evaluator result protocol VibeSys reads from `--vs-output` (protocol 2;
@@ -190,10 +223,18 @@ class ProtocolReport:
     def emit(self, value: float) -> None:
         self._write({"kind": "result", "label": "", "values": {HEADLINE_METRIC: value}})
 
-    def fail(self, message: str, partial: dict[str, Any] | None) -> None:
+    def fail(
+        self,
+        message: str,
+        partial: dict[str, Any] | None,
+        requirement: str | None = None,
+    ) -> None:
         record: dict[str, Any] = {"kind": "error", "message": message or "benchmark failed"}
         if partial is not None:
             record["partial"] = partial
+        if requirement is not None:
+            record["error_kind"] = "requirement_not_met"
+            record["requirement"] = requirement
         self._write(record)
 
     def _write(self, record: dict[str, Any], mode: str = "a") -> None:
@@ -499,6 +540,7 @@ def _base_replay_argv(
     log_path: Path,
     summary_path: Path,
     timeline_path: Path,
+    backend: str = DEFAULT_BACKEND,
 ) -> list[str]:
     return [
         "--trace",
@@ -516,7 +558,7 @@ def _base_replay_argv(
         "--model",
         model,
         "--backend",
-        "openai",
+        backend,
         "--temperature",
         "0",
         "--arrival-mode",
@@ -674,6 +716,20 @@ def measured_metrics(summary: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def warmup_failure(mode: str, stderr_tail: str) -> HarnessError:
+    """The failure of a warmup sub-run that exited nonzero, typed by where it failed.
+
+    A refusal at session_runner's prefix-cache preflight is deterministic for the server, so
+    it names the unmet requirement; any other failure may pass on another try.
+    """
+    return HarnessError(
+        f"{mode}: warmup sub-run failed (this is where a prefix-cache-preflight "
+        f'failure surfaces -- see ../README.md "Prefix-cache preflight"):\n'
+        f"{stderr_tail}",
+        requirement=PREFIX_CACHE_REQUIREMENT if is_preflight_failure(stderr_tail) else None,
+    )
+
+
 def run_replay(args: argparse.Namespace, paths: _ResolvedPaths, mode: Mode) -> dict[str, Any]:
     verify_model_identity(args.base_url, args.model)
 
@@ -692,6 +748,7 @@ def run_replay(args: argparse.Namespace, paths: _ResolvedPaths, mode: Mode) -> d
         log_path=work_dir / f"{mode}_warmup_requests.jsonl",
         summary_path=work_dir / f"{mode}_warmup_summary.json",
         timeline_path=work_dir / f"{mode}_warmup_timeline.parquet",
+        backend=args.backend,
     )
     warmup = run_session_runner(
         args.request_factory_engine,
@@ -703,11 +760,7 @@ def run_replay(args: argparse.Namespace, paths: _ResolvedPaths, mode: Mode) -> d
         ).feed,
     )
     if warmup.returncode != 0:
-        raise HarnessError(
-            f"{mode}: warmup sub-run failed (this is where a prefix-cache-preflight "
-            f'failure surfaces -- see ../README.md "Prefix-cache preflight"):\n'
-            f"{warmup.stderr_tail}"
-        )
+        raise warmup_failure(mode, warmup.stderr_tail)
 
     session_count = MODE_SESSIONS[mode]
     measured_summary_path = work_dir / f"{mode}_summary.json"
@@ -723,6 +776,7 @@ def run_replay(args: argparse.Namespace, paths: _ResolvedPaths, mode: Mode) -> d
         log_path=work_dir / f"{mode}_requests.jsonl",
         summary_path=measured_summary_path,
         timeline_path=work_dir / f"{mode}_timeline.parquet",
+        backend=args.backend,
     )
     start = time.monotonic()
     measured = run_session_runner(
@@ -870,6 +924,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--mode", choices=["smoke", "quick", "full", "holdout"], required=True)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument(
+        "--backend",
+        choices=BACKENDS,
+        default=DEFAULT_BACKEND,
+        help="Wire protocol session_runner speaks to the server (default: %(default)s).",
+    )
     parser.add_argument("--output-json", type=Path, default=None)
     parser.add_argument(
         "--vs-output",
@@ -915,7 +975,7 @@ def main(argv: list[str] | None = None) -> int:
             result = run_replay(args, paths, args.mode)
     except HarnessError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        report.fail(str(exc), exc.partial)
+        report.fail(str(exc), exc.partial, exc.requirement)
         return 1
     if args.mode == "smoke":
         report.fail("smoke mode validates plumbing only and measures no throughput", None)

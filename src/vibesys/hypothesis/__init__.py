@@ -24,10 +24,12 @@ from vibesys.hypothesis.attempts import (
     recorded_judge_verdict,
 )
 from vibesys.hypothesis.config import HypothesisConfig
+from vibesys.hypothesis.decision_inputs import DecidedFrom, declared_inputs
 from vibesys.hypothesis.ending import RunEnding, derive_ending, ending_of, has_trusted_reading
 from vibesys.hypothesis.history import (
     CandidateDisposition,
     HypothesisOutcome,
+    ImplementerStatus,
     JudgeVerdict,
     PerfDeltaReason,
     PerfProvenance,
@@ -80,7 +82,6 @@ from vibesys.hypothesis.results import (
     NewHypothesis,
     NextRoundDecision,
     PlanningContext,
-    RollbackTarget,
     StartedHypothesis,
 )
 from vibesys.hypothesis.search import HypothesisSearch
@@ -113,6 +114,7 @@ __all__ = [
     "CarryOver",
     "ClosedRound",
     "Continue",
+    "DecidedFrom",
     "ExhaustionNotice",
     "Finished",
     "Hypothesis",
@@ -126,6 +128,7 @@ __all__ = [
     "HypothesisStrategy",
     "HypothesisStrategyUpdate",
     "ImplementerReply",
+    "ImplementerStatus",
     "InvalidPlanError",
     "JudgeOutcome",
     "JudgeReviewed",
@@ -146,7 +149,6 @@ __all__ = [
     "RecordInput",
     "RegressionNotice",
     "RetainedTerminalCheckpoint",
-    "RollbackTarget",
     "RoundHistory",
     "RoundRecord",
     "RunEnding",
@@ -157,6 +159,7 @@ __all__ = [
     "WorkspaceCheckpoint",
     "attempt_was_reviewed",
     "build_round_record",
+    "declared_inputs",
     "derive_ending",
     "derive_hypothesis_title",
     "ending_of",

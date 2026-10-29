@@ -9,7 +9,6 @@ from vs_sandbox.fake_docker_command import ScriptedDockerCli
 from vs_sandbox.lifecycle import SandboxLifecycle
 from vs_sandbox.local_compute_backend import LocalBackend
 from vs_sandbox.local_shell import LocalShellRunner
-from vs_sim.api import DISCARD
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -29,7 +28,7 @@ class HostExecutedContainer(LocalShellRunner):
     run's commands but no Docker daemon.
     """
 
-    def start(self, *, output: OutputSink = DISCARD) -> None:
+    def start(self, *, output: OutputSink) -> None:
         """Start nothing: the host is already running, so nothing is written to *output*."""
         del output
 

@@ -3,9 +3,11 @@ import {mkdtempSync, readdirSync} from 'node:fs';
 import {lstat, mkdtemp, readFile, rm, symlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {Seeded} from '@vibesys/store/testing';
+import {isDeepStrictEqual} from 'node:util';
+import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {EMPTY_SETTINGS, withHostSettings} from './host-settings.js';
-import {EMPTY_RECENT, type RecentFile, remember} from './recent.js';
+import {decodePreferences, decodeRecent, decodeSettings, settingsBinaryPath} from './index.js';
+import {EMPTY_RECENT, type RecentFile, recentDocument, remember} from './recent.js';
 import {SettingsStore} from './settings-store.js';
 import {FakeSettingsFilesystem, fileError} from './testing/fake-settings-filesystem.js';
 
@@ -17,6 +19,7 @@ function store(
   const settings = new SettingsStore({
     settingsPath: join(directory, 'hosts.json'),
     recentPath: join(directory, 'recent.json'),
+    preferencesPath: join(directory, 'preferences.json'),
     log: message => logged.push(message),
     ...(filesystem === undefined ? {} : {filesystem}),
   });
@@ -72,7 +75,13 @@ describe('SettingsStore', () => {
       await expect(changing).rejects.toThrow(path);
       expect(updates).toBe(0);
       expect(filesystem.text(path)).toBe(invalid);
-      expect(filesystem.operations.map(operation => operation.kind)).toEqual(['read', 'read']);
+      expect(filesystem.operations.map(operation => operation.kind)).toEqual([
+        'read',
+        'read',
+        'read',
+        'read',
+        'read',
+      ]);
       expect(logged).toHaveLength(2);
 
       filesystem.setText(
@@ -85,7 +94,7 @@ describe('SettingsStore', () => {
       await settings.updateHosts(current =>
         withHostSettings(current, {kind: 'ssh', alias: 'new'}, {checkout: '/new'}),
       );
-      expect(JSON.parse(filesystem.text(path))).toEqual({
+      expect(readWritten(filesystem, path)).toEqual({
         version: 2,
         hosts: {
           'ssh:existing': {checkout: '/existing'},
@@ -99,10 +108,7 @@ describe('SettingsStore', () => {
   test('regression: invalid recent runs stay intact and emit nothing until corrected', async () => {
     const directory = '/settings';
     const path = join(directory, 'recent.json');
-    const invalidFiles = [
-      '{"version":2,"runs":[{"host":"local","project":"/old"}]',
-      JSON.stringify({version: 2, runs: [{...version2Run(1), runId: null}]}),
-    ];
+    const invalidFiles = ['{"version":2,"runs":[{"host":"local","project":"/old"}]'];
 
     for (const invalid of invalidFiles) {
       const filesystem = new FakeSettingsFilesystem({[path]: invalid});
@@ -120,14 +126,85 @@ describe('SettingsStore', () => {
       expect(updates).toBe(0);
       expect(heard).toEqual([]);
       expect(filesystem.text(path)).toBe(invalid);
-      expect(filesystem.operations.map(operation => operation.kind)).toEqual(['read', 'read']);
+      expect(filesystem.operations.map(operation => operation.kind)).toEqual([
+        'read',
+        'read',
+        'read',
+        'read',
+        'read',
+      ]);
       expect(logged).toHaveLength(2);
 
       filesystem.setText(path, `${JSON.stringify({version: 2, runs: [version2Run(1)]})}\n`);
       await settings.updateRecent(current => remember(current, run(2)));
-      const expected = {version: 3 as const, runs: [run(2), migratedVersion2Run(1)]};
-      expect(JSON.parse(filesystem.text(path))).toEqual(expected);
+      const expected = {version: 4 as const, runs: [run(2), migratedVersion2Run(1)]};
+      expect(readWritten(filesystem, path)).toEqual(expected);
       expect(heard).toEqual([expected]);
+    }
+  });
+
+  test('a recent file with invalid entries lists the valid ones and reports the rest', async () => {
+    const directory = '/settings';
+    const path = join(directory, 'recent.json');
+    const text = `${JSON.stringify({
+      version: 4,
+      runs: [run(3), {...run(2), task: ''}, run(1), {...run(0), instanceId: 'bad'}],
+    })}\n`;
+    const filesystem = new FakeSettingsFilesystem({[path]: text});
+    const {settings, logged} = store(filesystem, directory);
+
+    const snapshot = await settings.recentSnapshot();
+
+    expect(snapshot.recent).toEqual({version: 4, runs: [run(3), run(1)]});
+    expect(snapshot.skipped.map(each => each.index)).toEqual([1, 3]);
+    expect(snapshot.skipped[0]?.reason).toBe('recent.json: runs[1].task must be a task name');
+    expect(logged.join('\n')).toContain('runs[3].instanceId');
+    expect(filesystem.text(path)).toBe(text);
+  });
+
+  test('regression: recording a run keeps every invalid entry as written and every valid one', async () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const directory = '/settings';
+      const path = join(directory, 'recent.json');
+      const entries: unknown[] = [];
+      const invalid: unknown[] = [];
+      for (let index = 0; index < random.int(8); index++) {
+        if (random.int(2) === 0) {
+          const bad = random.pick([
+            {...run(index), task: ''},
+            {...run(index), instanceId: 'bad'},
+            {...run(index), extra: [index, {nested: null}]},
+            [index, 'not an object'],
+            null,
+          ]);
+          invalid.push(bad);
+          entries.push(bad);
+        } else {
+          entries.push(run(index));
+        }
+      }
+      const filesystem = new FakeSettingsFilesystem({
+        [path]: JSON.stringify({version: 4, runs: entries}),
+      });
+      const {settings} = store(filesystem, directory);
+      const before = await settings.recentSnapshot();
+
+      await settings.updateRecent(current => remember(current, run(100)));
+
+      const written = readWritten(filesystem, path) as {runs: unknown[]};
+      const validWritten = written.runs.filter(
+        entry => !invalid.some(bad => isDeepStrictEqual(bad, entry)),
+      );
+      expect(
+        written.runs.filter(entry => invalid.some(bad => isDeepStrictEqual(bad, entry))),
+      ).toEqual(invalid);
+      expect<unknown[]>(validWritten).toEqual([run(100), ...before.recent.runs].slice(0, 20));
+      const after = await settings.recentSnapshot();
+      expect([...after.recent.runs] as unknown[]).toEqual(validWritten);
+      expect(after.skipped.map(each => each.reason.replace(/runs\[\d+\]/, 'runs[]'))).toEqual(
+        before.skipped.map(each => each.reason.replace(/runs\[\d+\]/, 'runs[]')),
+      );
     }
   });
 
@@ -149,13 +226,194 @@ describe('SettingsStore', () => {
       version: 2,
       hosts: {'ssh:one': {checkout: '/one'}, 'ssh:two': {checkout: '/two'}},
     });
-    expect(await settings.recent()).toEqual({version: 3, runs: [run(2), run(1)]});
+    expect(await settings.recent()).toEqual({version: 4, runs: [run(2), run(1)]});
+  });
+
+  test('directory-synced host and recent updates survive a crash and a fresh store', async () => {
+    const directory = '/settings';
+    const hostsPath = join(directory, 'hosts.json');
+    const recentPath = join(directory, 'recent.json');
+    const filesystem = new FakeSettingsFilesystem();
+    const {settings} = store(filesystem, directory);
+    const heard: RecentFile[] = [];
+    settings.onRecentChanged(recent => heard.push(recent));
+
+    await expect(
+      settings.updateHosts(current =>
+        withHostSettings(current, {kind: 'local'}, {checkout: '/project'}),
+      ),
+    ).resolves.toBe('committed');
+    await settings.updateRecent(current => remember(current, run(1)));
+    expect(heard).toHaveLength(1);
+
+    filesystem.crash();
+    const recovered = store(filesystem, directory).settings;
+    expect((await recovered.hosts()).settings.hosts['local']).toEqual({checkout: '/project'});
+    expect(await recovered.recent()).toEqual({version: 4, runs: [run(1)]});
+    expect(filesystem.operations).toContainEqual({
+      kind: 'sync-file',
+      path: `${settingsBinaryPath(hostsPath)}.0.tmp`,
+    });
+    expect(filesystem.operations).toContainEqual({kind: 'sync-directory', path: directory});
+    expect(filesystem.operations).toContainEqual({
+      kind: 'sync-file',
+      path: `${settingsBinaryPath(recentPath)}.1.tmp`,
+    });
+  });
+
+  test('an unavailable directory sync acknowledges visibility without claiming crash durability', async () => {
+    const directory = '/settings';
+    const filesystem = new FakeSettingsFilesystem({}, {directorySync: 'unavailable'});
+    const {settings} = store(filesystem, directory);
+    const heard: RecentFile[] = [];
+    settings.onRecentChanged(recent => heard.push(recent));
+    expect(() => filesystem.failNextDirectorySync('/settings/recent.json', new Error())).toThrow(
+      'capability is unavailable',
+    );
+
+    await settings.updateRecent(current => remember(current, run(1)));
+    expect(await settings.recent()).toEqual({version: 4, runs: [run(1)]});
+    expect(heard).toEqual([{version: 4, runs: [run(1)]}]);
+    expect(filesystem.operations).toContainEqual({
+      kind: 'directory-sync-unavailable',
+      path: directory,
+    });
+    expect(
+      filesystem.operations.some(operation => operation.kind === 'sync-directory'),
+    ).toBeFalse();
+
+    filesystem.crash();
+    expect(await store(filesystem, directory).settings.recent()).toEqual(EMPTY_RECENT);
+  });
+
+  test('every directory-synced update in a generated sequence survives immediate recovery', async () => {
+    const directory = '/settings';
+    const filesystem = new FakeSettingsFilesystem();
+    const expectedHosts: string[] = [];
+    const expectedRuns: number[] = [];
+    const random = new Seeded(2820);
+    let settings = store(filesystem, directory).settings;
+
+    for (let index = 1; index <= 20; index += 1) {
+      if (random.bool()) {
+        const alias = `host-${index}`;
+        expectedHosts.push(`ssh:${alias}`);
+        await expect(
+          settings.updateHosts(current =>
+            withHostSettings(current, {kind: 'ssh', alias}, {checkout: `/checkout/${index}`}),
+          ),
+        ).resolves.toBe('committed');
+      } else {
+        expectedRuns.push(index);
+        await settings.updateRecent(current => remember(current, run(index)));
+      }
+
+      filesystem.crash();
+      settings = store(filesystem, directory).settings;
+      expect(Object.keys((await settings.hosts()).settings.hosts).sort()).toEqual(
+        [...expectedHosts].sort(),
+      );
+      expect((await settings.recent()).runs.map(entry => entry.attachedAt).sort()).toEqual(
+        [...expectedRuns].sort(),
+      );
+    }
+  });
+
+  test('a staged-file sync failure reports no host commit and recovers the old file', async () => {
+    const directory = '/settings';
+    const path = join(directory, 'hosts.json');
+    const existing = {version: 2 as const, hosts: {local: {checkout: '/old'}}};
+    const filesystem = new FakeSettingsFilesystem({[path]: `${JSON.stringify(existing)}\n`});
+    const {settings} = store(filesystem, directory);
+    await settings.hosts();
+    filesystem.operations.length = 0;
+    filesystem.failNextFileSync(settingsBinaryPath(path), fileError('EIO', path));
+
+    const changing = settings.updateHosts(current =>
+      withHostSettings(current, {kind: 'local'}, {checkout: '/new'}),
+    );
+    await expect(changing).rejects.toThrow('EIO');
+    expect(readWritten(filesystem, path)).toEqual(existing);
+
+    filesystem.crash();
+    expect((await store(filesystem, directory).settings.hosts()).settings).toEqual(existing);
+    expect(filesystem.operations.map(operation => operation.kind)).toEqual([
+      'read',
+      'write',
+      'sync-file',
+      'crash',
+      'read',
+    ]);
+  });
+
+  test('a staged-file sync failure rejects a recent update without announcing it', async () => {
+    const directory = '/settings';
+    const path = join(directory, 'recent.json');
+    const existing = {version: 4 as const, runs: [run(1)]};
+    const filesystem = new FakeSettingsFilesystem({[path]: `${JSON.stringify(existing)}\n`});
+    const {settings} = store(filesystem, directory);
+    const heard: RecentFile[] = [];
+    settings.onRecentChanged(recent => heard.push(recent));
+    await settings.recent();
+    filesystem.operations.length = 0;
+    filesystem.failNextFileSync(settingsBinaryPath(path), fileError('EIO', path));
+
+    await expect(settings.updateRecent(current => remember(current, run(2)))).rejects.toThrow(
+      'EIO',
+    );
+    expect(heard).toEqual([]);
+    filesystem.crash();
+    expect(await store(filesystem, directory).settings.recent()).toEqual(existing);
+  });
+
+  test('a directory sync failure preserves the ambiguous post-rename host state', async () => {
+    const directory = '/settings';
+    const path = join(directory, 'hosts.json');
+    const existing = {version: 2 as const, hosts: {local: {checkout: '/old'}}};
+    const filesystem = new FakeSettingsFilesystem({[path]: `${JSON.stringify(existing)}\n`});
+    const {settings} = store(filesystem, directory);
+    await settings.hosts();
+    filesystem.operations.length = 0;
+    filesystem.failNextDirectorySync(settingsBinaryPath(path), fileError('EIO', directory));
+
+    const changing = settings.updateHosts(current =>
+      withHostSettings(current, {kind: 'local'}, {checkout: '/new'}),
+    );
+    await expect(changing).rejects.toThrow('EIO');
+
+    // Rename succeeded before the failed directory sync. Reporting failure does not promise that
+    // the replacement was rolled back: it is visible now, but its crash outcome is unknown.
+    expect((await settings.hosts()).settings.hosts['local']).toEqual({checkout: '/new'});
+    filesystem.crash();
+    expect((await store(filesystem, directory).settings.hosts()).settings).toEqual(existing);
+  });
+
+  test('a directory sync failure does not announce an ambiguously replaced recent file', async () => {
+    const directory = '/settings';
+    const path = join(directory, 'recent.json');
+    const existing = {version: 4 as const, runs: [run(1)]};
+    const filesystem = new FakeSettingsFilesystem({[path]: `${JSON.stringify(existing)}\n`});
+    const {settings} = store(filesystem, directory);
+    const heard: RecentFile[] = [];
+    settings.onRecentChanged(recent => heard.push(recent));
+    await settings.recent();
+    filesystem.operations.length = 0;
+    filesystem.failNextDirectorySync(settingsBinaryPath(path), fileError('EIO', directory));
+
+    await expect(settings.updateRecent(current => remember(current, run(2)))).rejects.toThrow(
+      'EIO',
+    );
+    expect(heard).toEqual([]);
+    expect((await settings.recent()).runs).toEqual([run(2), run(1)]);
+
+    filesystem.crash();
+    expect(await store(filesystem, directory).settings.recent()).toEqual(existing);
   });
 
   test('staging chooses a fresh sibling without overwriting an existing entry', async () => {
     const directory = '/settings';
     const path = join(directory, 'hosts.json');
-    const occupied = `${path}.0.tmp`;
+    const occupied = `${settingsBinaryPath(path)}.0.tmp`;
     const filesystem = new FakeSettingsFilesystem({[occupied]: 'owned elsewhere'});
     const {settings} = store(filesystem, directory);
 
@@ -164,7 +422,10 @@ describe('SettingsStore', () => {
     );
 
     expect(filesystem.text(occupied)).toBe('owned elsewhere');
-    expect(filesystem.operations).toContainEqual({kind: 'write', path: `${path}.1.tmp`});
+    expect(filesystem.operations).toContainEqual({
+      kind: 'write',
+      path: `${settingsBinaryPath(path)}.1.tmp`,
+    });
     expect((await settings.hosts()).settings.hosts['local']).toEqual({checkout: '/project'});
   });
 
@@ -173,7 +434,7 @@ describe('SettingsStore', () => {
       const directory = await mkdtemp(join(tmpdir(), 'vsd-settings-link-'));
       const path = join(directory, targetName);
       const unrelated = join(directory, 'unrelated');
-      const planted = `${path}.${process.pid}.tmp`;
+      const planted = `${settingsBinaryPath(path)}.${process.pid}.tmp`;
       try {
         await writeFile(unrelated, 'keep me\n', {mode: 0o644});
         const unrelatedMode = (await lstat(unrelated)).mode & 0o777;
@@ -188,12 +449,14 @@ describe('SettingsStore', () => {
           await settings.updateRecent(current => remember(current, run(1)));
         }
 
-        const installed = await lstat(path);
+        const installed = await lstat(settingsBinaryPath(path));
         expect(installed.isFile()).toBeTrue();
         expect(installed.isSymbolicLink()).toBeFalse();
         expect(installed.mode & 0o777).toBe(0o600);
-        const written = JSON.parse(await readFile(path, 'utf8')) as {version?: unknown};
-        expect(written.version).toBe(targetName === 'hosts.json' ? 2 : 3);
+        const bytes = await readFile(settingsBinaryPath(path));
+        const written =
+          targetName === 'hosts.json' ? decodeSettings(bytes) : decodeRecent(bytes).file;
+        expect(written.version).toBe(targetName === 'hosts.json' ? 2 : 4);
         expect((await lstat(planted)).isSymbolicLink()).toBeTrue();
         expect(await readFile(unrelated, 'utf8')).toBe('keep me\n');
         expect((await lstat(unrelated)).mode & 0o777).toBe(unrelatedMode);
@@ -203,7 +466,7 @@ describe('SettingsStore', () => {
     }
   });
 
-  test('a regular settings file is atomically replaced with exact private permissions', async () => {
+  test('a regular settings file is durably replaced with exact private permissions', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'vsd-settings-file-'));
     const path = join(directory, 'hosts.json');
     try {
@@ -214,7 +477,7 @@ describe('SettingsStore', () => {
         withHostSettings(current, {kind: 'local'}, {checkout: '/project'}),
       );
 
-      const installed = await lstat(path);
+      const installed = await lstat(settingsBinaryPath(path));
       expect(installed.isFile()).toBeTrue();
       expect(installed.mode & 0o777).toBe(0o600);
       expect((await settings.hosts()).settings.hosts['local']).toEqual({checkout: '/project'});
@@ -245,7 +508,10 @@ describe('SettingsStore', () => {
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toContain(`could not read ${path}`);
     expect(logged).toContainEqual(expect.stringContaining(`could not read ${path}`));
-    expect(filesystem.operations).toEqual([{kind: 'read', path}]);
+    expect(filesystem.operations).toEqual([
+      {kind: 'read', path: settingsBinaryPath(path)},
+      {kind: 'read', path},
+    ]);
     expect(JSON.parse(filesystem.text(path))).toEqual({
       version: 2,
       hosts: {'ssh:existing': {checkout: '/existing'}},
@@ -254,7 +520,7 @@ describe('SettingsStore', () => {
     await settings.updateHosts(current =>
       withHostSettings(current, {kind: 'ssh', alias: 'new'}, {checkout: '/new'}),
     );
-    expect(JSON.parse(filesystem.text(path))).toEqual({
+    expect(readWritten(filesystem, path)).toEqual({
       version: 2,
       hosts: {
         'ssh:existing': {checkout: '/existing'},
@@ -265,8 +531,16 @@ describe('SettingsStore', () => {
     expect(filesystem.operations.map(operation => operation.kind)).toEqual([
       'read',
       'read',
+      'read',
+      'read',
       'write',
+      'sync-file',
       'replace',
+      'sync-directory',
+      'write',
+      'sync-file',
+      'replace',
+      'sync-directory',
       'read',
     ]);
   });
@@ -287,19 +561,30 @@ describe('SettingsStore', () => {
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toContain(`could not read ${path}`);
     expect(logged).toContainEqual(expect.stringContaining(`could not read ${path}`));
-    expect(filesystem.operations).toEqual([{kind: 'read', path}]);
+    expect(filesystem.operations).toEqual([
+      {kind: 'read', path: settingsBinaryPath(path)},
+      {kind: 'read', path},
+    ]);
     expect(JSON.parse(filesystem.text(path))).toEqual(existing);
 
     await settings.updateRecent(current => remember(current, run(2)));
-    expect(JSON.parse(filesystem.text(path))).toEqual({
-      version: 3,
+    expect(readWritten(filesystem, path)).toEqual({
+      version: 4,
       runs: [run(2), migratedVersion2Run(1)],
     });
     expect(filesystem.operations.map(operation => operation.kind)).toEqual([
       'read',
       'read',
+      'read',
+      'read',
       'write',
+      'sync-file',
       'replace',
+      'sync-directory',
+      'write',
+      'sync-file',
+      'replace',
+      'sync-directory',
     ]);
   });
 
@@ -330,14 +615,16 @@ describe('SettingsStore', () => {
     const existing = {version: 2, hosts: {'ssh:existing': {checkout: '/existing'}}};
     const filesystem = new FakeSettingsFilesystem({[path]: `${JSON.stringify(existing)}\n`});
     const {settings} = store(filesystem, directory);
-    filesystem.failNextReplace(path, fileError('ENOSPC', path));
+    await settings.hosts();
+    filesystem.operations.length = 0;
+    filesystem.failNextReplace(settingsBinaryPath(path), fileError('ENOSPC', path));
 
     const changing = settings.updateHosts(current =>
       withHostSettings(current, {kind: 'ssh', alias: 'new'}, {checkout: '/new'}),
     );
     await expect(changing).rejects.toThrow('ENOSPC');
 
-    expect(JSON.parse(filesystem.text(path))).toEqual(existing);
+    expect(readWritten(filesystem, path)).toEqual(existing);
     const staging = filesystem.operations.find(operation => operation.kind === 'write')?.path;
     expect(staging).toBeDefined();
     if (staging === undefined) throw new Error('expected a staged write');
@@ -345,6 +632,7 @@ describe('SettingsStore', () => {
     expect(filesystem.operations.map(operation => operation.kind)).toEqual([
       'read',
       'write',
+      'sync-file',
       'replace',
       'remove',
     ]);
@@ -353,18 +641,20 @@ describe('SettingsStore', () => {
   test('regression: a failed recent-runs replace removes its staged file', async () => {
     const directory = '/settings';
     const path = join(directory, 'recent.json');
-    const existing = {version: 3 as const, runs: [run(1)]};
+    const existing = {version: 4 as const, runs: [run(1)]};
     const filesystem = new FakeSettingsFilesystem({[path]: `${JSON.stringify(existing)}\n`});
     const {settings} = store(filesystem, directory);
     const heard: RecentFile[] = [];
     settings.onRecentChanged(recent => heard.push(recent));
-    filesystem.failNextReplace(path, fileError('EACCES', path));
+    await settings.recent();
+    filesystem.operations.length = 0;
+    filesystem.failNextReplace(settingsBinaryPath(path), fileError('EACCES', path));
 
     const changing = settings.updateRecent(current => remember(current, run(2)));
     await expect(changing).rejects.toThrow('EACCES');
 
     expect(heard).toEqual([]);
-    expect(JSON.parse(filesystem.text(path))).toEqual(existing);
+    expect(readWritten(filesystem, path)).toEqual(existing);
     const staging = filesystem.operations.find(operation => operation.kind === 'write')?.path;
     expect(staging).toBeDefined();
     if (staging === undefined) throw new Error('expected a staged write');
@@ -372,6 +662,7 @@ describe('SettingsStore', () => {
     expect(filesystem.operations.map(operation => operation.kind)).toEqual([
       'read',
       'write',
+      'sync-file',
       'replace',
       'remove',
     ]);
@@ -443,7 +734,9 @@ describe('SettingsStore', () => {
     expect(() => filesystem.text(staging)).toThrow();
     expect(filesystem.operations.map(operation => operation.kind)).toEqual([
       'read',
+      'read',
       'write',
+      'sync-file',
       'remove',
     ]);
   });
@@ -482,3 +775,11 @@ describe('SettingsStore', () => {
     }
   });
 });
+
+function readWritten(filesystem: FakeSettingsFilesystem, path: string): unknown {
+  const bytes = filesystem.bytes(settingsBinaryPath(path));
+  if (path.endsWith('hosts.json')) return decodeSettings(bytes);
+  if (path.endsWith('preferences.json')) return decodePreferences(bytes);
+  const recent = decodeRecent(bytes);
+  return recentDocument(recent.file, recent.invalid);
+}

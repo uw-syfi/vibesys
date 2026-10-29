@@ -14,7 +14,10 @@ from vs_sim.api.testing import (
     HANG_GUARD_S,
     NetworkContract,
     NetworkUnderTest,
+    RefusingReservableThreads,
     RefusingThreads,
+    ReservableThreadsContract,
+    ReservableThreadsUnderTest,
     SimNetwork,
     SimThreads,
     ThreadsContract,
@@ -29,31 +32,54 @@ _REAL_TICK_S = 0.001
 #: A socket-sized buffer, so the simulated network blocks a sender as a real one does.
 
 
-class TestOsThreads(ThreadsContract):
+class TestOsThreads(ThreadsContract, ReservableThreadsContract):
     def threads_under_test(self, seed: int) -> ThreadsUnderTest:
         del seed  # a real implementation has one interleaving
         return ThreadsUnderTest(
             OsThreads(), lambda program: program(), tick=_REAL_TICK_S, exact=False
         )
 
+    def reservable_threads_under_test(self, seed: int) -> ReservableThreadsUnderTest:
+        del seed
+        return ReservableThreadsUnderTest(OsThreads(), lambda program: program())
 
-class TestSimThreadsFifo(ThreadsContract):
+
+class TestSimThreadsFifo(ThreadsContract, ReservableThreadsContract):
     def threads_under_test(self, seed: int) -> ThreadsUnderTest:
         del seed  # first-in first-out has one interleaving
         sim = SimThreads()
         return ThreadsUnderTest(sim, sim.run, tick=1.0, exact=True)
 
+    def reservable_threads_under_test(self, seed: int) -> ReservableThreadsUnderTest:
+        del seed
+        sim = SimThreads()
+        return ReservableThreadsUnderTest(sim, sim.run)
 
-class TestSimThreadsSeeded(ThreadsContract):
+
+class TestSimThreadsSeeded(ThreadsContract, ReservableThreadsContract):
     def threads_under_test(self, seed: int) -> ThreadsUnderTest:
         sim = SimThreads(schedule_seed=seed)
         return ThreadsUnderTest(sim, sim.run, tick=1.0, exact=True)
+
+    def reservable_threads_under_test(self, seed: int) -> ReservableThreadsUnderTest:
+        sim = SimThreads(schedule_seed=seed)
+        return ReservableThreadsUnderTest(sim, sim.run)
 
 
 class TestRefusingThreads(ThreadsContract):
     def threads_under_test(self, seed: int) -> ThreadsUnderTest:
         sim = SimThreads(schedule_seed=seed)
         return ThreadsUnderTest(RefusingThreads(sim, {}), sim.run, tick=1.0, exact=True)
+
+
+class TestRefusingReservableThreads(ThreadsContract, ReservableThreadsContract):
+    def threads_under_test(self, seed: int) -> ThreadsUnderTest:
+        sim = SimThreads(schedule_seed=seed)
+        return ThreadsUnderTest(RefusingReservableThreads(sim, {}), sim.run, tick=1.0, exact=True)
+
+    def reservable_threads_under_test(self, seed: int) -> ReservableThreadsUnderTest:
+        sim = SimThreads(schedule_seed=seed)
+        return ReservableThreadsUnderTest(RefusingReservableThreads(sim, {}), sim.run)
 
 
 def test_refusing_threads_consumes_only_the_scripted_starts() -> None:
@@ -65,6 +91,26 @@ def test_refusing_threads_consumes_only_the_scripted_starts() -> None:
         with pytest.raises(WorkerStartRefusedError, match="client"):
             threads.spawn(lambda: ran.append("refused"), name="client")
         threads.spawn(lambda: ran.append("started"), name="client")
+
+    sim.run(main)
+    assert ran == ["started"]
+
+
+def test_refusing_reservable_threads_refuses_a_start_without_running_its_target() -> None:
+    sim = SimThreads()
+    threads = RefusingReservableThreads(sim, {"client": 1})
+    ran: list[str] = []
+
+    def main() -> None:
+        refused = threads.reserve(lambda: ran.append("refused"), name="client")
+        with pytest.raises(WorkerStartRefusedError, match="client"):
+            refused.start()
+        with pytest.raises(RuntimeError, match="cannot be started"):
+            refused.start()
+        refused.settle()
+        started = threads.reserve(lambda: ran.append("started"), name="client")
+        started.start()
+        started.settle()
 
     sim.run(main)
     assert ran == ["started"]

@@ -9,7 +9,7 @@ import {promisify} from 'node:util';
 import {compiledTestFileNames, missingCompiledTestFileNames} from './run_node_tests.mjs';
 
 const RUNNER = resolve(dirname(fileURLToPath(import.meta.url)), 'run_node_tests.mjs');
-const TRANSPORT_PACKAGES = ['transport', 'transport-node'];
+const TRANSPORT_PACKAGES = ['transport'];
 const run = promisify(execFile);
 
 for (const directory of TRANSPORT_PACKAGES) {

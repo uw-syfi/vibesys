@@ -1,0 +1,1165 @@
+{
+  "format": 1,
+  "name": "long-titles",
+  "description": "Ideas whose titles are very long, one unbroken token, wide characters or markup.",
+  "runId": "20261015-163047",
+  "state": "live",
+  "objective": {
+    "text": "Maximize trusted end-to-end throughput of the MPMC queue. Every candidate must pass the 100-trial correctness check.",
+    "metric": "total_ops_per_sec",
+    "unit": "ops/s",
+    "direction": "max"
+  },
+  "events": [
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 1,
+      "timestamp": "2026-10-15T16:30:51+00:00",
+      "type": "run_started",
+      "data": {
+        "kind": "run_started",
+        "outer_loop": "iterate",
+        "input": "objectives/queue.md",
+        "max_rounds": 6,
+        "expected_roles": [
+          "orchestrator",
+          "implementer",
+          "judge"
+        ],
+        "overview": {
+          "objective": {
+            "text": "Maximize trusted end-to-end throughput of the MPMC queue. Every candidate must pass the 100-trial correctness check.",
+            "metric": "total_ops_per_sec",
+            "unit": "ops/s",
+            "direction": "max",
+            "correctness_check": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 2,
+      "timestamp": "2026-10-15T16:30:52+00:00",
+      "type": "run_configured",
+      "data": {
+        "kind": "run_configured",
+        "run_log_path": "logs/20261015-163047",
+        "project_root": "project",
+        "model": "claude-opus-5",
+        "objective": "Raise queue throughput",
+        "search_policy": "beam",
+        "benchmark_contract": true,
+        "pareto_objectives": null,
+        "source": "loop"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 3,
+      "timestamp": "2026-10-15T16:30:53+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root#1",
+          "parent": null,
+          "type": "flow",
+          "name": "dynamic",
+          "status": "running",
+          "started_at": 0
+        }
+      }
+    },
+    {
+      "type": "span_ended",
+      "timestamp": "2026-10-15T16:30:53+00:00",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:input-measurement",
+          "parent": "flow:root#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "done",
+          "started_at": 3,
+          "ended_at": 4,
+          "label": {
+            "kind": "gate",
+            "title": "input benchmark",
+            "verdict": "passed",
+            "attrs_json": "{\"stage\":\"benchmark\",\"metric_value\":10000000,\"vs_baseline\":1,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":10000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}"
+          }
+        }
+      },
+      "sequence": 4
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 5,
+      "timestamp": "2026-10-15T16:31:01+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/plan#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "plan",
+          "status": "running",
+          "started_at": 10,
+          "ended_at": 50,
+          "label": {
+            "kind": "planning_call",
+            "title": "planning call 1",
+            "attrs_json": "{\"call\":1}"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 6,
+      "timestamp": "2026-10-15T16:31:41+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "flow:root/plan#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "plan",
+          "status": "done",
+          "started_at": 10,
+          "ended_at": 50,
+          "label": {
+            "kind": "planning_call",
+            "title": "planning call 1",
+            "attrs_json": "{\"call\":1}"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 7,
+      "timestamp": "2026-10-15T16:32:51+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/ws-1#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "running",
+          "started_at": 120,
+          "label": {
+            "kind": "workstream",
+            "title": "Replace the per-slot sequence counters with a single padded head and tail pair, batch the producer-side reservation across up to sixteen enqueues, park idle consumers on a futex after a bounded spin, and re-measure every contention level from one to sixty-four threads before keeping anything",
+            "attrs_json": "{\"hypothesis_id\":\"H1\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 8,
+      "timestamp": "2026-10-15T16:32:52+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w1-turn",
+          "parent": "flow:root/ws-1#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 121,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w1-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 9,
+      "timestamp": "2026-10-15T16:36:52+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w1-turn",
+          "parent": "flow:root/ws-1#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "done",
+          "started_at": 121,
+          "ended_at": 361,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w1-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 10,
+      "timestamp": "2026-10-15T16:36:53+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w1-gate",
+          "parent": "flow:root/ws-1#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "running",
+          "started_at": 362,
+          "ended_at": 519,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":13000000,\"vs_baseline\":1.3,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":13000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 11,
+      "timestamp": "2026-10-15T16:39:30+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w1-gate",
+          "parent": "flow:root/ws-1#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "done",
+          "started_at": 362,
+          "ended_at": 519,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":13000000,\"vs_baseline\":1.3,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":13000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 12,
+      "timestamp": "2026-10-15T16:39:31+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "flow:root/ws-1#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "done",
+          "started_at": 120,
+          "ended_at": 520,
+          "label": {
+            "kind": "workstream",
+            "title": "Replace the per-slot sequence counters with a single padded head and tail pair, batch the producer-side reservation across up to sixteen enqueues, park idle consumers on a futex after a bounded spin, and re-measure every contention level from one to sixty-four threads before keeping anything",
+            "attrs_json": "{\"hypothesis_id\":\"H1\",\"parent_revision\":\"r0\",\"base_round\":null,\"revision\":\"r1\"}",
+            "verdict": "passed",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 13,
+      "timestamp": "2026-10-15T16:33:11+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/ws-2#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "running",
+          "started_at": 140,
+          "label": {
+            "kind": "workstream",
+            "title": "RingaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaBuffer",
+            "attrs_json": "{\"hypothesis_id\":\"H2\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 14,
+      "timestamp": "2026-10-15T16:33:12+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w2-turn",
+          "parent": "flow:root/ws-2#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 141,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w2-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 15,
+      "timestamp": "2026-10-15T16:37:12+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w2-turn",
+          "parent": "flow:root/ws-2#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "done",
+          "started_at": 141,
+          "ended_at": 381,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w2-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 16,
+      "timestamp": "2026-10-15T16:37:13+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w2-gate",
+          "parent": "flow:root/ws-2#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "running",
+          "started_at": 382,
+          "ended_at": 539,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":9000000,\"vs_baseline\":0.9,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":9000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "slower"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 17,
+      "timestamp": "2026-10-15T16:39:50+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w2-gate",
+          "parent": "flow:root/ws-2#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "done",
+          "started_at": 382,
+          "ended_at": 539,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":9000000,\"vs_baseline\":0.9,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":9000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "slower"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 18,
+      "timestamp": "2026-10-15T16:39:51+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "flow:root/ws-2#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "done",
+          "started_at": 140,
+          "ended_at": 540,
+          "label": {
+            "kind": "workstream",
+            "title": "RingaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaBuffer",
+            "attrs_json": "{\"hypothesis_id\":\"H2\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "verdict": "failed",
+            "reason": "turned_down",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 19,
+      "timestamp": "2026-10-15T16:33:31+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/ws-3#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "running",
+          "started_at": 160,
+          "label": {
+            "kind": "workstream",
+            "title": "並列キューのためのキャッシュライン整列とバッチ処理 🚀 sequence ring",
+            "attrs_json": "{\"hypothesis_id\":\"H3\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 20,
+      "timestamp": "2026-10-15T16:33:32+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w3-turn",
+          "parent": "flow:root/ws-3#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 161,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-3\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w3-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 21,
+      "timestamp": "2026-10-15T16:33:51+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/ws-4#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "running",
+          "started_at": 180,
+          "label": {
+            "kind": "workstream",
+            "title": "Use `crossbeam::utils::CachePadded` for `head` and `tail`, then `Relaxed` loads where the fence allows",
+            "attrs_json": "{\"hypothesis_id\":\"H4\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 22,
+      "timestamp": "2026-10-15T16:33:52+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w4-turn",
+          "parent": "flow:root/ws-4#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 181,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-4\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w4-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 23,
+      "timestamp": "2026-10-15T16:37:52+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w4-turn",
+          "parent": "flow:root/ws-4#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "done",
+          "started_at": 181,
+          "ended_at": 421,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-4\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w4-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 24,
+      "timestamp": "2026-10-15T16:37:53+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w4-gate",
+          "parent": "flow:root/ws-4#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "running",
+          "started_at": 422,
+          "ended_at": 579,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":16000000,\"vs_baseline\":1.6,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":16000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 25,
+      "timestamp": "2026-10-15T16:40:30+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w4-gate",
+          "parent": "flow:root/ws-4#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "done",
+          "started_at": 422,
+          "ended_at": 579,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":16000000,\"vs_baseline\":1.6,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":16000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 26,
+      "timestamp": "2026-10-15T16:40:31+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "flow:root/ws-4#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "done",
+          "started_at": 180,
+          "ended_at": 580,
+          "label": {
+            "kind": "workstream",
+            "title": "Use `crossbeam::utils::CachePadded` for `head` and `tail`, then `Relaxed` loads where the fence allows",
+            "attrs_json": "{\"hypothesis_id\":\"H4\",\"parent_revision\":\"r0\",\"base_round\":null,\"revision\":\"r4\"}",
+            "verdict": "passed",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 27,
+      "timestamp": "2026-10-15T16:34:11+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/ws-5#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "running",
+          "started_at": 200,
+          "label": {
+            "kind": "workstream",
+            "title": "Short one",
+            "attrs_json": "{\"hypothesis_id\":\"H5\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 28,
+      "timestamp": "2026-10-15T16:34:12+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w5-turn",
+          "parent": "flow:root/ws-5#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 201,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-5\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w5-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 29,
+      "timestamp": "2026-10-15T16:38:12+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w5-turn",
+          "parent": "flow:root/ws-5#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "done",
+          "started_at": 201,
+          "ended_at": 441,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-5\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w5-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 30,
+      "timestamp": "2026-10-15T16:38:13+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w5-gate",
+          "parent": "flow:root/ws-5#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "running",
+          "started_at": 442,
+          "ended_at": 599,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":9000000,\"vs_baseline\":0.9,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":9000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "slower"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 31,
+      "timestamp": "2026-10-15T16:40:50+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w5-gate",
+          "parent": "flow:root/ws-5#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "done",
+          "started_at": 442,
+          "ended_at": 599,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":9000000,\"vs_baseline\":0.9,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":9000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "slower"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 32,
+      "timestamp": "2026-10-15T16:40:51+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "flow:root/ws-5#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "done",
+          "started_at": 200,
+          "ended_at": 600,
+          "label": {
+            "kind": "workstream",
+            "title": "Short one",
+            "attrs_json": "{\"hypothesis_id\":\"H5\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "verdict": "failed",
+            "reason": "turned_down",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 33,
+      "timestamp": "2026-10-15T16:34:31+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/ws-6#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "running",
+          "started_at": 220,
+          "label": {
+            "kind": "workstream",
+            "title": "Lock-free ring with per-slot sequence numbers (v3, after the review asked for a stricter memory ordering on the consumer side of the ring)",
+            "attrs_json": "{\"hypothesis_id\":\"H6\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 34,
+      "timestamp": "2026-10-15T16:34:32+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w6-turn",
+          "parent": "flow:root/ws-6#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 221,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-6\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w6-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 35,
+      "timestamp": "2026-10-15T16:34:51+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/ws-7#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "running",
+          "started_at": 240,
+          "label": {
+            "kind": "workstream",
+            "title": "Tiny",
+            "attrs_json": "{\"hypothesis_id\":\"H7\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 36,
+      "timestamp": "2026-10-15T16:34:52+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w7-turn",
+          "parent": "flow:root/ws-7#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 241,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-7\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w7-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 37,
+      "timestamp": "2026-10-15T16:38:52+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w7-turn",
+          "parent": "flow:root/ws-7#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "done",
+          "started_at": 241,
+          "ended_at": 481,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-7\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w7-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 38,
+      "timestamp": "2026-10-15T16:38:53+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w7-gate",
+          "parent": "flow:root/ws-7#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "running",
+          "started_at": 482,
+          "ended_at": 639,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":19000000,\"vs_baseline\":1.9,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":19000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 39,
+      "timestamp": "2026-10-15T16:41:30+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w7-gate",
+          "parent": "flow:root/ws-7#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "done",
+          "started_at": 482,
+          "ended_at": 639,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":19000000,\"vs_baseline\":1.9,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":19000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 40,
+      "timestamp": "2026-10-15T16:41:31+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "flow:root/ws-7#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "done",
+          "started_at": 240,
+          "ended_at": 640,
+          "label": {
+            "kind": "workstream",
+            "title": "Tiny",
+            "attrs_json": "{\"hypothesis_id\":\"H7\",\"parent_revision\":\"r0\",\"base_round\":null,\"revision\":\"r7\"}",
+            "verdict": "passed",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 41,
+      "timestamp": "2026-10-15T16:35:11+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/ws-8#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "running",
+          "started_at": 260,
+          "label": {
+            "kind": "workstream",
+            "title": "Batch enqueue → combine → steal: a three-stage pipeline with a work-stealing deque per core and a global overflow list that is drained only when every local deque is empty",
+            "attrs_json": "{\"hypothesis_id\":\"H8\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 42,
+      "timestamp": "2026-10-15T16:35:12+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w8-turn",
+          "parent": "flow:root/ws-8#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 261,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-8\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w8-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 43,
+      "timestamp": "2026-10-15T16:39:12+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w8-turn",
+          "parent": "flow:root/ws-8#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "done",
+          "started_at": 261,
+          "ended_at": 501,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-8\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w8-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 44,
+      "timestamp": "2026-10-15T16:39:13+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w8-gate",
+          "parent": "flow:root/ws-8#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "running",
+          "started_at": 502,
+          "ended_at": 659,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":9000000,\"vs_baseline\":0.9,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":9000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "slower"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 45,
+      "timestamp": "2026-10-15T16:41:50+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w8-gate",
+          "parent": "flow:root/ws-8#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "done",
+          "started_at": 502,
+          "ended_at": 659,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":9000000,\"vs_baseline\":0.9,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":9000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "slower"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 46,
+      "timestamp": "2026-10-15T16:41:51+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "flow:root/ws-8#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "done",
+          "started_at": 260,
+          "ended_at": 660,
+          "label": {
+            "kind": "workstream",
+            "title": "Batch enqueue → combine → steal: a three-stage pipeline with a work-stealing deque per core and a global overflow list that is drained only when every local deque is empty",
+            "attrs_json": "{\"hypothesis_id\":\"H8\",\"parent_revision\":\"r0\",\"base_round\":null}",
+            "verdict": "failed",
+            "reason": "turned_down",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
+      "sequence": 47,
+      "timestamp": "2026-10-15T16:45:51+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:adopt",
+          "parent": "flow:root#1",
+          "type": "operation",
+          "name": "adopt",
+          "status": "running",
+          "started_at": 900,
+          "label": {
+            "kind": "adoption",
+            "title": "r1",
+            "attrs_json": "{\"candidate\":\"r1\",\"metric_value\":13000000,\"vs_baseline\":1.3}"
+          }
+        }
+      }
+    }
+  ]
+}

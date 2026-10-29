@@ -9,8 +9,12 @@ from typing import TYPE_CHECKING, TypeAlias, TypedDict, Unpack
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from .cluster import job_handle, payload_digest
+from vs_sim.api.testing import FakeByteSource
+
+from .cluster import collection_locator, job_handle, payload_digest
 from .cluster_types import (
+    ANOTHER_JOB,
+    ClusterCall,
     ClusterCancelOutcome,
     ClusterCancelRequested,
     ClusterCollected,
@@ -26,22 +30,23 @@ from .cluster_types import (
     ClusterTarget,
     ClusterUnknown,
     collection_problem,
+    live_observation,
+    observation_names,
     validate_operation_id,
 )
+from .errors import SlurmError, SlurmSubmissionRejectedError
 from .runner import (
     SlurmArtifactTarget,
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchResult,
-    SlurmBatchStageHandle,
     SlurmBatchStageResult,
-    SlurmError,
     SlurmJobHandle,
     SlurmJobRequest,
     SlurmJobResult,
     SlurmJobStatus,
-    SlurmSubmissionRejectedError,
     _safe_relative_path,
+    batch_stage_handles,
 )
 from .scheduler_states import (
     Completing,
@@ -58,12 +63,16 @@ from .staging import _ContentStageError
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_sim.api import Clock
+    from vs_sim.api import ByteSource, Clock, OutputStream
 
 Request: TypeAlias = SlurmJobRequest | SlurmBatchRequest
 
 
 _MULTI_STAGE = 2
+
+
+def _no_call(_call: ClusterCall) -> None:
+    """Hear nothing of the transport calls."""
 
 
 class SecondsRange(BaseModel):
@@ -222,6 +231,7 @@ class FakeCluster:
         clock: Clock,
         timing: SlurmTimingProfile | None = None,
         seed: int = 0,
+        on_call: Callable[[ClusterCall], None] | None = None,
     ) -> None:
         """Create the implementation with its owned operation storage.
 
@@ -229,8 +239,20 @@ class FakeCluster:
         advances it. ``timing`` bounds queue wait, run time and COMPLETING time;
         each job's values are drawn deterministically from ``seed`` and its
         operation identity.
+
+        ``on_call`` hears each transport call an ``inspect`` or a ``cancel``
+        makes, as the call goes out: a call's effect (the scancel's, or a
+        read's) lands when ``on_call`` returns, so a test that advances the
+        clock there makes each call that slow, and one that raises
+        ``SlurmError`` there fails it. An inspection is one scheduler read. A
+        cancel given a live reading sends its scancel first, as
+        ``SlurmCluster``'s does (``OBSERVED_CANCEL_CALLS``); one without reads
+        the scheduler, then sends a scancel if the job is live. No call is made
+        holding this cluster's lock, so a slow call of one thread never delays
+        another's.
         """
         self.clock = clock
+        self._on_call = on_call if on_call is not None else _no_call
         self._timing = timing if timing is not None else SlurmTimingProfile()
         self._seed = seed
         self._lock = RLock()
@@ -240,10 +262,14 @@ class FakeCluster:
         self._pending: dict[str, str] = {}
         self._rejections: dict[str, tuple[str, str]] = {}
         self._expired_names: set[str] = set()
+        self._collisions: set[str] = set()
+        self._outputs: dict[tuple[str, int, OutputStream], FakeByteSource] = {}
 
     def reopen(self) -> FakeCluster:
         """Reconstruct an implementation over the same external scheduler state."""
-        reopened = FakeCluster(clock=self.clock, timing=self._timing, seed=self._seed)
+        reopened = FakeCluster(
+            clock=self.clock, timing=self._timing, seed=self._seed, on_call=self._on_call
+        )
         reopened._lock = self._lock
         reopened._scripts = self._scripts
         reopened._jobs = self._jobs
@@ -251,12 +277,33 @@ class FakeCluster:
         reopened._pending = self._pending
         reopened._rejections = self._rejections
         reopened._expired_names = self._expired_names
+        reopened._collisions = self._collisions
+        reopened._outputs = self._outputs
         return reopened
 
     def forget_name_history(self, operation_id: str) -> None:
-        """Expire scheduler name lookup while retained acceptance stays recoverable."""
+        """Expire the name lookup of the operation's job once it has ended.
+
+        Retained acceptance stays recoverable. A queued or running job is still
+        found by its name, as ``squeue -n`` lists it in Slurm.
+        """
         validate_operation_id(operation_id)
         self._expired_names.add(operation_id)
+
+    def collide_name(self, operation_id: str) -> None:
+        """Give another scheduler job this operation's name, as a foreign submitter's would.
+
+        A lookup by name then finds two jobs, so it proves neither which job is the
+        operation's nor that none is: an inspect that needs it stays unknown.
+        """
+        validate_operation_id(operation_id)
+        self._collisions.add(operation_id)
+
+    def has_live_job(self, operation_id: str) -> bool:
+        """Whether the scheduler holds this operation's job queued or running, read without advancing it."""
+        with self._lock:
+            job = self._jobs.get(operation_id)
+            return job is not None and isinstance(self._peek(job), Queued | Running)
 
     def on_accept(self, operation_id: str, callback: Callable[[], None]) -> None:
         """Run a deterministic test barrier after external acceptance."""
@@ -452,6 +499,7 @@ class FakeCluster:
     def inspect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterInspectOutcome:
         """Observe scheduler evidence without submitting work."""
         try:
+            self._on_call(ClusterCall.SCHEDULER_READ)
             with self._lock:
                 return self._inspect(target, by_job_id=by_job_id)
         except SlurmError as error:
@@ -466,10 +514,18 @@ class FakeCluster:
             return ClusterUnknown(
                 operation_id=target if isinstance(target, str) and not by_job_id else None,
                 reason="operation not found",
+                job_absent=self._absent_by_name(target, by_job_id=by_job_id),
             )
-        if job.operation_id in self._expired_names and not job.accepted_published and not by_job_id:
+        if self._ambiguous(job, by_job_id=by_job_id):
             return ClusterUnknown(
-                operation_id=job.operation_id, reason="submission acceptance unresolved"
+                operation_id=job.operation_id, reason="scheduler operation identity is ambiguous"
+            )
+        if self._forgotten(job, by_job_id=by_job_id):
+            # The name lookup forgot the ended job, and nothing else names it.
+            return ClusterUnknown(
+                operation_id=job.operation_id,
+                reason="submission acceptance unresolved",
+                job_absent=True,
             )
         job.acceptance_observed = True
         job.accepted_published = True
@@ -525,16 +581,37 @@ class FakeCluster:
                 job.cancelled = True
         return life_for_status(status)
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
         """Record cancellation intent, leaving confirmation to inspect."""
+        operation_id = target if isinstance(target, str) and not by_job_id else None
+        if observed is not None and not observation_names(target, observed, by_job_id=by_job_id):
+            return ClusterUnknown(operation_id=operation_id, reason=ANOTHER_JOB)
         try:
+            if live_observation(observed) is not None:
+                self._on_call(ClusterCall.SCANCEL)  # first, holding nothing
+                with self._lock:
+                    self._stop(self._find(target, by_job_id=by_job_id))
+            else:
+                self._on_call(ClusterCall.SCHEDULER_READ)
+                with self._lock:
+                    job = self._find(target, by_job_id=by_job_id)
+                    live = (
+                        job is not None
+                        and not self._unresolved(job, by_job_id=by_job_id)
+                        and isinstance(self._peek(job), Queued | Running)
+                    )
+                if live:
+                    self._on_call(ClusterCall.SCANCEL)
             with self._lock:
                 return self._cancel(target, by_job_id=by_job_id)
         except SlurmError as error:
-            return ClusterUnknown(
-                operation_id=target if isinstance(target, str) and not by_job_id else None,
-                reason=str(error),
-            )
+            return ClusterUnknown(operation_id=operation_id, reason=str(error))
 
     def _cancel(self, target: ClusterTarget, *, by_job_id: bool) -> ClusterCancelOutcome:
         job = self._find(target, by_job_id=by_job_id)
@@ -545,18 +622,67 @@ class FakeCluster:
                 return ClusterCancelRequested(operation_id=target)
             return ClusterUnknown(operation_id=None, reason="operation not found")
         self._cancelled.add(job.operation_id)
+        if self._ambiguous(job, by_job_id=by_job_id):
+            return ClusterUnknown(
+                operation_id=job.operation_id, reason="scheduler operation identity is ambiguous"
+            )
+        if self._forgotten(job, by_job_id=by_job_id):
+            # No job is found by the name: the cancel leaves only its tombstone, as production's.
+            return ClusterCancelRequested(operation_id=job.operation_id)
         if job.cancelled_at is None:
             job.cancelled_at = self.clock.now()
-        if job.operation_id in self._expired_names and not job.accepted_published and not by_job_id:
-            return ClusterUnknown(
-                operation_id=job.operation_id, reason="submission acceptance unresolved"
-            )
         observed = self._inspect(target, by_job_id=by_job_id)
         if isinstance(observed, ClusterUnknown):
             return observed
         return ClusterCancelRequested(
             operation_id=job.operation_id, job_id=job_handle(job.handle).job_id
         )
+
+    def _unresolved(self, job: _Job, *, by_job_id: bool) -> bool:
+        """Whether a lookup by name cannot find the job, which only that lookup can find."""
+        return self._ambiguous(job, by_job_id=by_job_id) or self._forgotten(
+            job, by_job_id=by_job_id
+        )
+
+    @staticmethod
+    def _by_name_only(job: _Job, *, by_job_id: bool) -> bool:
+        """Whether only the name finds the job: its acceptance was never published."""
+        return not job.accepted_published and not by_job_id
+
+    def _ambiguous(self, job: _Job, *, by_job_id: bool) -> bool:
+        """Whether the job is found only by a name another job also has (``collide_name``)."""
+        return job.operation_id in self._collisions and self._by_name_only(job, by_job_id=by_job_id)
+
+    def _forgotten(self, job: _Job, *, by_job_id: bool) -> bool:
+        """Whether the name lookup forgot the job: its history expired once it ended.
+
+        A queued or running job is still listed by name (``squeue -n``), as in Slurm.
+        """
+        return (
+            job.operation_id in self._expired_names
+            and self._by_name_only(job, by_job_id=by_job_id)
+            and not isinstance(self._peek(job), Queued | Running)
+        )
+
+    def _stop(self, job: _Job | None) -> None:
+        """The scancel's effect: a job still queued or running is cancelled."""
+        if job is None or not isinstance(self._peek(job), Queued | Running):
+            return
+        if job.timeline is not None:
+            if job.cancelled_at is None:
+                job.cancelled_at = self.clock.now()
+        else:
+            job.cancelled = True
+
+    def _peek(self, job: _Job) -> JobLife:
+        """The job's state now, as a scheduler read would see it, without consuming a scripted one."""
+        if job.timeline is not None:
+            return job.timeline.state(self.clock.now(), job.cancelled_at)
+        if job.cancelled:
+            return life_for_status(SlurmJobStatus.CANCELLED)
+        script = self._scripts[job.operation_id]
+        states = script.states if script.states is not None else (SlurmJobStatus.PENDING,)
+        return life_for_status(states[min(script.index, len(states) - 1)])
 
     def collect(
         self,
@@ -582,7 +708,9 @@ class FakeCluster:
                 job_id=observation.job_id,
                 reason="job is not terminal",
             )
-        self._collect_artifacts(job, status=observation.status)
+        self._collect_artifacts(
+            job, collection_locator(target, job.handle), status=observation.status
+        )
         result = job.result
         code = result.job_exit_code if isinstance(result, SlurmBatchResult) else result.exit_code
         if code == 0 and observation.status in {SlurmJobStatus.FAILED, SlurmJobStatus.CANCELLED}:
@@ -611,12 +739,36 @@ class FakeCluster:
             )
         return ClusterCollected(operation_id=job.operation_id, result=result)
 
-    def _collect_artifacts(self, job: _Job, *, status: SlurmJobStatus) -> None:
+    def stage_output_file(
+        self, operation_id: str, index: int, stream: OutputStream
+    ) -> FakeByteSource:
+        """The output file stage ``index`` of a batch writes ``stream`` to, for a test to grow.
+
+        It exists from this call on; until then :meth:`stage_output` reads no such file. What
+        the test writes here is what a reader sees live; the collected stage result is
+        what the job's script says, so a test keeps the two the same.
+        """
+        validate_operation_id(operation_id)
+        with self._lock:
+            return self._outputs.setdefault(
+                (operation_id, index, stream),
+                FakeByteSource(where=f"{operation_id} stage {index} {stream.value}"),
+            )
+
+    def stage_output(
+        self, handle: SlurmBatchHandle, index: int, stream: OutputStream
+    ) -> ByteSource:
+        """What the test wrote to stage ``index``'s output file, read through a live source."""
+        return _StageOutput(self._outputs, (handle.job.invocation_id, index, stream))
+
+    def _collect_artifacts(
+        self, job: _Job, locator: ClusterHandle | None, *, status: SlurmJobStatus
+    ) -> None:
         contents = self._scripts[job.operation_id].artifact_contents or {}
         result = job.result
-        if isinstance(result, SlurmBatchResult) and isinstance(job.handle, SlurmBatchHandle):
+        if isinstance(result, SlurmBatchResult) and isinstance(locator, SlurmBatchHandle):
             stages = []
-            handles = {stage.name: stage for stage in job.handle.stages}
+            handles = {stage.name: stage for stage in locator.stages}
             for stage in result.stages:
                 declared = handles.get(stage.name)
                 if type(stage.exit_code) is not int or stage.exit_code != 0 or declared is None:
@@ -679,6 +831,18 @@ class FakeCluster:
                 failures.append(f"{target.remote_path}: {error}")
         return tuple(recovered), "; ".join(failures) or None
 
+    def _absent_by_name(self, target: ClusterTarget, *, by_job_id: bool) -> bool:
+        """Whether a name lookup proves that no job of this name exists, as in production.
+
+        No job was accepted under the name: its sbatch was rejected, it was
+        cancelled before it started, a cancel left only its tombstone, or it was
+        never submitted. Production reads no intent (or one that started no job)
+        and asks the scheduler by name, which finds nothing, so both call it
+        absent; a submission still on its way to sbatch may yet start a job. Only
+        a name another job also has (``collide_name``) proves nothing.
+        """
+        return isinstance(target, str) and not by_job_id and target not in self._collisions
+
     def _find(self, target: ClusterTarget, *, by_job_id: bool) -> _Job | None:
         if not isinstance(target, str):
             incoming = job_handle(target)
@@ -740,24 +904,7 @@ class FakeCluster:
             job=job,
             submission_seconds=0.0,
             stop_on_failure=request.stop_on_failure,
-            stages=tuple(
-                SlurmBatchStageHandle(
-                    name=stage.name,
-                    file_artifacts=tuple(
-                        SlurmArtifactTarget(
-                            remote_path=a.remote_path, local_path=a.local_path, kind="file"
-                        )
-                        for a in stage.file_artifacts
-                    ),
-                    tree_artifacts=tuple(
-                        SlurmArtifactTarget(
-                            remote_path=a.remote_path, local_path=a.local_path, kind="tree"
-                        )
-                        for a in stage.tree_artifacts
-                    ),
-                )
-                for stage in request.stages
-            ),
+            stages=batch_stage_handles(request),
         )
 
     @staticmethod
@@ -789,3 +936,28 @@ class FakeCluster:
             content_cache_hits=0,
             collection_failure="missing exit status",
         )
+
+
+class _StageOutput:
+    """A stage's output file that is missing until the test creates it, as on a cluster."""
+
+    def __init__(
+        self,
+        outputs: dict[tuple[str, int, OutputStream], FakeByteSource],
+        key: tuple[str, int, OutputStream],
+    ) -> None:
+        self._outputs = outputs
+        self._key = key
+        self._where = f"{key[0]} stage {key[1]} {key[2].value}"
+
+    def _file(self) -> FakeByteSource:
+        file = self._outputs.get(self._key)
+        if file is None:
+            raise FileNotFoundError(self._where)
+        return file
+
+    def size(self) -> int:
+        return self._file().size()
+
+    def read(self, offset: int, max_bytes: int) -> bytes:
+        return self._file().read(offset, max_bytes)

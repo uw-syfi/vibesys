@@ -17,10 +17,14 @@ from vibesys.candidates.api import InputReading, Measured
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.metrics import AcceptedReading, MetricRow, PartialRow
 from vibesys.orchestration.dynamic.models import (
+    CombinePlan,
+    MergePlan,
+    PlannerHandoff,
     PlannerHypothesisUpdate,
     PortfolioPlan,
     ProfileDecision,
     StrategyReason,
+    WorkstreamExpectation,
     WorkstreamPlan,
 )
 from vibesys.orchestration.dynamic.search.api import (
@@ -222,6 +226,35 @@ def profile_entry(identifier: str, **changes: object) -> ProfileDecision:
     return ProfileDecision.model_validate(fields)
 
 
+def merge_entry(identifier: str, *candidates: str, **changes: object) -> MergePlan:
+    """A planner entry that merges the latest verified candidates of ``candidates`` into main."""
+    fields: dict[str, object] = {
+        "kind": "merge",
+        "merge_id": identifier,
+        "candidates": list(candidates),
+        "instructions": "Apply them in order.",
+        "watch_for": "Both touch the scheduler.",
+        **changes,
+    }
+    return MergePlan.model_validate(fields)
+
+
+def combine_entry(identifier: str, *parts: tuple[str, str], **changes: object) -> CombinePlan:
+    """A planner entry that combines the exact (hypothesis, revision) ``parts`` into one candidate."""
+    fields: dict[str, object] = {
+        "kind": "combine",
+        "hypothesis_id": identifier,
+        "title": f"title {identifier}",
+        "hypothesis": "the parts work together",
+        "parents": [{"hypothesis_id": item, "revision": revision} for item, revision in parts],
+        "instructions": "Apply them in order.",
+        "watch_for": "Both touch the scheduler.",
+        "pass_criteria": "faster than the best part",
+        **changes,
+    }
+    return CombinePlan.model_validate(fields)
+
+
 def update_entry(
     identifier: str, disposition: Literal["parked", "abandoned"] = "parked"
 ) -> PlannerHypothesisUpdate:
@@ -235,18 +268,39 @@ def update_entry(
 
 
 def portfolio(
-    *entries: WorkstreamPlan | ProfileDecision, updates: tuple[PlannerHypothesisUpdate, ...] = ()
+    *entries: WorkstreamPlan | ProfileDecision | MergePlan | CombinePlan,
+    updates: tuple[PlannerHypothesisUpdate, ...] = (),
+    expected: tuple[str, ...] = (),
+    order: tuple[str, ...] = (),
 ) -> PortfolioPlan:
-    """A planner reply of ``entries`` and ``updates``."""
-    return PortfolioPlan(reasoning="portfolio", workstreams=entries, hypothesis_updates=updates)
+    """A planner reply of ``entries`` and ``updates``, expecting something of ``expected``
+    and ranking evaluations in ``order``."""
+    return PortfolioPlan(
+        reasoning="portfolio",
+        workstreams=entries,
+        hypothesis_updates=updates,
+        handoff=PlannerHandoff(
+            expectations=tuple(
+                WorkstreamExpectation(
+                    work_id=item, expected="e", if_it_succeeds="s", if_it_fails="f"
+                )
+                for item in expected
+            ),
+            doubts=(),
+        ),
+        evaluation_order=order,
+    )
 
 
 @st.composite
-def planner_entries(draw: st.DrawFn) -> WorkstreamPlan | ProfileDecision:
-    """An implement or profile entry over a small ID space, with parents drawn from it too."""
+def planner_entries(draw: st.DrawFn) -> WorkstreamPlan | ProfileDecision | MergePlan:
+    """An implement, profile or merge entry over a small ID space, with parents drawn from it too."""
     identifier = draw(IDS)
-    if draw(st.booleans()):
+    kind = draw(st.sampled_from(["implement", "profile", "merge"]))
+    if kind == "profile":
         return profile_entry(identifier, target_hypothesis_id=draw(st.none() | IDS))
+    if kind == "merge":
+        return merge_entry(identifier, *draw(st.lists(IDS, min_size=1, max_size=3)))
     return implement_entry(
         identifier,
         continue_hypothesis=draw(st.booleans()),
@@ -268,7 +322,8 @@ portfolios = st.builds(
 
 def config(**changes: object) -> DynamicConfig:
     """A search config of a few rounds, overridden by the test."""
-    return DynamicConfig.model_validate({"max_rounds": 3, "max_in_flight": 2, **changes})
+    fields = {"max_rounds": 3, "max_in_flight": 2}
+    return DynamicConfig.model_validate({**fields, **changes})
 
 
 def round_record(
@@ -311,6 +366,15 @@ def finished_profile(identifier: str, sequence: int) -> FinishedWork:
     return FinishedWork(
         sequence=sequence,
         plan=WorkPlan(kind=WorkKind.PROFILE, work_id=identifier, question="q"),
+        parent=BASE,
+    )
+
+
+def finished_merge(identifier: str, sequence: int) -> FinishedWork:
+    """A merge workstream that ended."""
+    return FinishedWork(
+        sequence=sequence,
+        plan=WorkPlan(kind=WorkKind.MERGE, work_id=identifier, candidates=("a",)),
         parent=BASE,
     )
 

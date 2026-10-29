@@ -1,9 +1,10 @@
 /**
  * Experiment-chat threads in the run fold: registration, titles, and each thread's transcript.
  */
-import type {RunEvent} from '@vibesys/contracts';
+import type {RunEvent, RunSnapshot} from '@vibesys/contracts';
 import {acceptsRunMetadata, retainedReplayEvents} from './replay.js';
 import {
+  type ChatProposal,
   type ChatThread,
   type CoreState,
   cloneCoreStateWith,
@@ -15,6 +16,24 @@ import {
   type TranscriptEntry,
 } from './transcript-fold.js';
 import type {TranscriptFolder} from './transcript-folder.js';
+
+/** The snapshot's thread registry and last thread, applied to `state`. */
+export function registerSnapshotChat(state: CoreState, snapshot: RunSnapshot): CoreState {
+  const registered = (snapshot.chat_threads ?? []).reduce(
+    (current, thread) =>
+      upsertChatThread(current, {
+        id: thread.thread_id,
+        title: thread.title ?? '',
+        provider: thread.provider,
+        model: thread.model,
+      }),
+    state,
+  );
+  const lastChatThreadId = snapshot.last_chat_thread_id ?? registered.lastChatThreadId;
+  return lastChatThreadId === registered.lastChatThreadId
+    ? registered
+    : cloneCoreStateWith(registered, {lastChatThreadId});
+}
 
 /** Adds snapshot-only thread registry facts without merging an event projection. */
 export function retainRegisteredChatThreads(
@@ -78,13 +97,52 @@ export function applyChatEvent(
   if (data?.kind === 'chat' && data.thread_title) {
     next = setChatThreadTitle(next, threadId, data.thread_title);
   }
+  if (data?.kind === 'chat') next = recordChatQuestion(next, threadId, event);
   const entry = eventToTranscriptEntry(event);
   if (entry === null || (entry.kind !== 'assistant' && entry.kind !== 'result')) return next;
   return appendChatTranscript(next, threadId, entry, folder, data?.kind === 'chat');
 }
 
+/** Keeps the question the terminal `chat` event carries, once per event. */
+function recordChatQuestion(state: CoreState, threadId: string, event: RunEvent): CoreState {
+  const text = event.text ?? '';
+  const sequence = event.sequence ?? 0;
+  if (text === '' || sequence <= 0) return state;
+  const id = String(sequence);
+  const known = state.chatQuestions[threadId] ?? [];
+  if (known.some(question => question.id === id)) return state;
+  return cloneCoreStateWith(state, {
+    chatQuestions: {...state.chatQuestions, [threadId]: [...known, {id, text}]},
+  });
+}
+
+/**
+ * Keeps a steer the thread's agent proposed, once per `proposal_id`. A proposal records nothing
+ * about delivery: the operator's `command.control` is the only thing that reaches the run.
+ */
+export function applyChatProposal(state: CoreState, event: RunEvent, sequence: number): CoreState {
+  const data = event.data;
+  if (data?.kind !== 'steer_proposed') return state;
+  const threadId = event.chat_thread_id ?? DEFAULT_CHAT_THREAD_ID;
+  const known = state.chatProposals[threadId] ?? [];
+  if (known.some(proposal => proposal.id === data.proposal_id)) return state;
+  const proposal: ChatProposal = {
+    id: data.proposal_id,
+    sequence,
+    text: data.proposal.text,
+    target: {
+      kind: data.proposal.target?.kind ?? 'run',
+      id: data.proposal.target?.id ?? null,
+    },
+    mode: data.proposal.mode ?? 'next_turn',
+  };
+  return cloneCoreStateWith(state, {
+    chatProposals: {...state.chatProposals, [threadId]: [...known, proposal]},
+  });
+}
+
 /** Registers a replayed thread, or refreshes the record it already has. */
-export function upsertChatThread(
+function upsertChatThread(
   state: CoreState,
   thread: ChatThread,
   creationSequence?: number,

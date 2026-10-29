@@ -1,0 +1,13 @@
+{
+  // The bundle's Vite configuration and the Playwright suite, which run under Node.
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "tsBuildInfoFile": ".tsbuild/node.tsbuildinfo"
+  },
+  "include": ["vite.config.ts", "playwright.config.ts", "../../tools/e2e/free-port.mts", "../../tools/e2e/shard.mts", "e2e/**/*.ts"]
+}

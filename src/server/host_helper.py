@@ -38,24 +38,39 @@ from typing import TYPE_CHECKING, Final, assert_never
 from pydantic import JsonValue, TypeAdapter
 
 from server.host_api import (
+    COMPENSATION_FAILURE_DETAIL_CHARACTERS,
+    COMPENSATION_FAILURE_EXIT_STATUS,
+    COMPENSATION_FAILURE_TYPE,
     HELPER_LINE_MAX_BYTES,
+    CompensationFailureKind,
     HelloRequest,
     HelperError,
     HelperErrorCode,
+    HelperFeature,
     HelperMessage,
     HelperReply,
     HelperRequest,
     InstanceList,
     InstancesChanged,
+    InstanceStopResult,
     InstancesUnwatchReply,
     InstancesUnwatchRequest,
     InstancesWatchReply,
     InstancesWatchRequest,
     LiveInstanceRecord,
+    LogsCancelReply,
+    LogsCancelRequest,
+    LogsReadRequest,
     RunConnectReply,
     RunConnectRequest,
+    RunStartCompensationFailure,
     RunStartReply,
     RunStartRequest,
+    StopFailedCompensationFailure,
+    StopOutcome,
+    StopUnconfirmedCompensationFailure,
+    UnconfirmedInstanceStopResult,
+    WorkerStartRefusedCompensationFailure,
     parse_helper_request,
     request_features,
 )
@@ -65,6 +80,7 @@ from server.host_helper_requests import (
     answer,
     connect,
     negotiate,
+    without_home,
 )
 from server.relay import (
     ChannelEndOutcome,
@@ -77,7 +93,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from server.relay import ByteSink, ByteSource
-    from vs_sim.api import Connection, Event, Threads
+    from vs_sim.api import Connection, Event, ReservableThreads, Threads
 
 WATCH_INTERVAL_SECONDS: Final = 1.0
 """How often a watch reads the registry; a change is pushed at most this late."""
@@ -100,6 +116,8 @@ _JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 class ChannelState:
     """What one channel knows: the handshake, requests in flight, watches, the hand-over."""
 
+    offered: frozenset[HelperFeature] = frozenset(HelperFeature)
+    """The features this helper serves (``HelperHost.offered_features``); ``hello`` negotiates among them."""
     negotiated: Negotiated | None = None
     pending: Mapping[str, float] = field(default_factory=dict)
     """Replies still owed to the client, by id, with their deadline."""
@@ -111,8 +129,14 @@ class ChannelState:
     """Open watches, by id, with the listing last pushed on each."""
     stopping_watches: frozenset[str] = frozenset()
     """Watch ids owned until their workers confirm that they stopped."""
-    compensating: frozenset[str] = frozenset()
-    """Request ids whose undeliverable started run is still being stopped."""
+    compensating: Mapping[str, str] = field(default_factory=dict)
+    """Undeliverable started runs still owned, from request id to instance id."""
+    compensation_failures: tuple[RunStartCompensationFailure, ...] = ()
+    """Terminal diagnostics for compensating stops that could not be proved complete."""
+    reads: frozenset[str] = frozenset()
+    """``logs.read`` workers that have not returned: the ones ``logs.cancel`` can withdraw."""
+    withdrawing: Mapping[str, str] = field(default_factory=dict)
+    """Each withdrawn read's id, with the ``logs.cancel`` answered once the read returns."""
     connecting: str | None = None
     """The ``run.connect`` in flight; input waits until it is answered."""
     relaying: bool = False
@@ -161,9 +185,20 @@ class StartUndeliverable:
 
 @dataclass(frozen=True)
 class CompensationFinished:
-    """The cleanup owned by ``request_id`` physically returned."""
+    """The cleanup owned by ``request_id`` returned a typed stop result."""
 
     request_id: str
+    result: InstanceStopResult
+
+
+@dataclass(frozen=True)
+class CompensationFailed:
+    """The cleanup worker could not return a typed stop result."""
+
+    request_id: str
+    instance_id: str
+    kind: CompensationFailureKind
+    detail: str
 
 
 @dataclass(frozen=True)
@@ -185,6 +220,7 @@ type ChannelEvent = (
     | WatchStopped
     | StartUndeliverable
     | CompensationFinished
+    | CompensationFailed
     | Tick
     | InputEnded
 )
@@ -228,6 +264,13 @@ class Unwatch:
 
 
 @dataclass(frozen=True)
+class WithdrawRead:
+    """End the wait of the ``logs.read`` ``request_id`` executes, so it answers at once."""
+
+    request_id: str
+
+
+@dataclass(frozen=True)
 class Relay:
     """Hand the channel to the relay over the connection ``request_id`` opened."""
 
@@ -246,7 +289,9 @@ class Close:
     """The channel is done: input ended and nothing is in flight."""
 
 
-type ChannelOutput = Send | Execute | Watch | Unwatch | Relay | Release | StopStartedRun | Close
+type ChannelOutput = (
+    Send | Execute | Watch | Unwatch | WithdrawRead | Relay | Release | StopStartedRun | Close
+)
 
 
 def accepts_input(state: ChannelState) -> bool:
@@ -263,7 +308,7 @@ def step(
     state: ChannelState, event: ChannelEvent, vibesys_version: str
 ) -> tuple[ChannelState, tuple[ChannelOutput, ...]]:
     """Fold one observation into the channel; return the new state and the outputs."""
-    if state.relaying and not isinstance(event, CompensationFinished):
+    if state.relaying and not isinstance(event, (CompensationFinished, CompensationFailed)):
         return state, ()
     match event:
         case Received(line=line, at=at):
@@ -272,7 +317,13 @@ def step(
             return _answered(state, request_id, reply)
         case Observed(watch_id=watch_id, listing=listing):
             return _observed(state, watch_id, listing)
-        case WatchStopped() | StartUndeliverable() | CompensationFinished() | InputEnded():
+        case (
+            WatchStopped()
+            | StartUndeliverable()
+            | CompensationFinished()
+            | CompensationFailed()
+            | InputEnded()
+        ):
             return _settle(state, event)
         case Tick(at=at):
             return _tick(state, at)
@@ -282,9 +333,13 @@ def step(
 
 def _settle(
     state: ChannelState,
-    event: WatchStopped | StartUndeliverable | CompensationFinished | InputEnded,
+    event: WatchStopped
+    | StartUndeliverable
+    | CompensationFinished
+    | CompensationFailed
+    | InputEnded,
 ) -> tuple[ChannelState, tuple[ChannelOutput, ...]]:
-    """Release physical watch or compensation ownership after its worker returns."""
+    """Release physical ownership only after a worker reports semantic completion."""
     match event:
         case WatchStopped(watch_id=watch_id):
             watches = {wid: last for wid, last in state.watches.items() if wid != watch_id}
@@ -297,11 +352,10 @@ def _settle(
         case StartUndeliverable(request_id=request_id, instance_id=instance_id):
             if request_id in state.compensating:
                 return state, ()
-            state = replace(state, compensating=state.compensating | {request_id})
+            state = replace(state, compensating={**state.compensating, request_id: instance_id})
             return state, (StopStartedRun(request_id, instance_id),)
-        case CompensationFinished(request_id=request_id):
-            state = replace(state, compensating=state.compensating - {request_id})
-            return _maybe_close(state, [])
+        case CompensationFinished() | CompensationFailed():
+            return _settle_compensation(state, event)
         case InputEnded():
             outputs: list[ChannelOutput] = [Unwatch(watch_id) for watch_id in state.watches]
             state = replace(
@@ -313,6 +367,72 @@ def _settle(
             return _maybe_close(state, outputs)
         case _:
             assert_never(event)
+
+
+def _settle_compensation(
+    state: ChannelState, event: CompensationFinished | CompensationFailed
+) -> tuple[ChannelState, tuple[ChannelOutput, ...]]:
+    """Turn one returned cleanup worker into terminal release or retained failure evidence."""
+    request_id = event.request_id
+    instance_id = state.compensating.get(request_id)
+    if instance_id is None:
+        return state, ()
+    state = replace(
+        state,
+        compensating={
+            owned_request: owned_instance
+            for owned_request, owned_instance in state.compensating.items()
+            if owned_request != request_id
+        },
+    )
+    if isinstance(event, CompensationFinished):
+        result = event.result
+        if result.id != instance_id:
+            failure = _compensation_report(
+                request_id=request_id,
+                instance_id=instance_id,
+                kind=CompensationFailureKind.STOP_FAILED,
+                detail=f"compensating stop returned the wrong instance id {result.id}",
+            )
+            return _record_compensation_failure(state, failure)
+        if result.outcome in {StopOutcome.STOPPED, StopOutcome.NOT_RUNNING}:
+            return _maybe_close(state, [])
+        failure = _compensation_report(
+            request_id=request_id,
+            instance_id=result.id,
+            kind=CompensationFailureKind.STOP_UNCONFIRMED,
+            detail=f"compensating stop returned {result.outcome.value}",
+            stop_result=result,
+        )
+        return _record_compensation_failure(state, failure)
+    kind = event.kind
+    detail = event.detail
+    if event.instance_id != instance_id:
+        kind = CompensationFailureKind.STOP_FAILED
+        detail = f"compensation failure named the wrong instance id {event.instance_id}"
+    failure = _compensation_report(
+        request_id=request_id,
+        instance_id=instance_id,
+        kind=kind,
+        detail=detail,
+    )
+    return _record_compensation_failure(state, failure)
+
+
+def _record_compensation_failure(
+    state: ChannelState, failure: RunStartCompensationFailure
+) -> tuple[ChannelState, tuple[ChannelOutput, ...]]:
+    """Retain cleanup evidence and end this channel through its ordinary bounded drain."""
+    stopping = frozenset(state.watches)
+    outputs: list[ChannelOutput] = [Unwatch(watch_id) for watch_id in state.watches]
+    state = replace(
+        state,
+        input_ended=True,
+        watches={},
+        stopping_watches=state.stopping_watches | stopping,
+        compensation_failures=(*state.compensation_failures, failure),
+    )
+    return _maybe_close(state, outputs)
 
 
 def _observed(
@@ -393,7 +513,7 @@ def _admission(
     refusal: HelperError | None = None
     if state.negotiated is None:
         if isinstance(request, HelloRequest):
-            negotiated = negotiate(request, vibesys_version)
+            negotiated = negotiate(request, vibesys_version, state.offered)
             if isinstance(negotiated, HelperError):
                 refusal = negotiated
             else:
@@ -426,7 +546,7 @@ def _admission(
         ):
             message = f"this channel already owns {MAX_ACTIVE_WATCHES} watch worker"
             refusal = _error(request_id, HelperErrorCode.CHANNEL_BUSY, message)
-        elif not isinstance(request, InstancesUnwatchRequest) and (
+        elif not isinstance(request, InstancesUnwatchRequest | LogsCancelRequest) and (
             len(state.executing) + len(state.compensating) >= MAX_EXECUTING_REQUESTS
         ):
             message = f"this channel already owns {MAX_EXECUTING_REQUESTS} request workers"
@@ -459,6 +579,10 @@ def _admit(
                 Unwatch(watch_id),
                 Send(InstancesUnwatchReply(request_id=request_id, watch_id=watch_id)),
             )
+        case LogsCancelRequest():
+            return _withdraw(state, request, at)
+        case LogsReadRequest():
+            state = replace(state, reads=state.reads | {request_id})
         case RunConnectRequest():
             if state.executing or state.watches or state.stopping_watches:
                 message = "run.connect needs a channel with no other request or watch open"
@@ -473,16 +597,32 @@ def _admit(
     return replace(state, pending=pending, executing=executing), (Execute(request),)
 
 
+def _withdraw(
+    state: ChannelState, request: LogsCancelRequest, at: float
+) -> tuple[ChannelState, tuple[ChannelOutput, ...]]:
+    """End the wait of the read ``request`` names; its reply follows the read's (``_withdrawn``)."""
+    request_id, read_id = request.request_id, request.read_id
+    if read_id not in state.reads or read_id in state.withdrawing:
+        return state, (Send(LogsCancelReply(request_id=request_id, read_id=read_id)),)
+    pending = {**state.pending, request_id: at + request.deadline_ms / 1000}
+    withdrawing = {**state.withdrawing, read_id: request_id}
+    return replace(state, pending=pending, withdrawing=withdrawing), (WithdrawRead(read_id),)
+
+
 def _answered(
     state: ChannelState, request_id: str, reply: HelperReply | HelperError
 ) -> tuple[ChannelState, tuple[ChannelOutput, ...]]:
     if request_id not in state.executing:
         return state, ()
     was_starting = request_id in state.starting
-    state = replace(
-        state,
-        executing=state.executing - {request_id},
-        starting=state.starting - {request_id},
+    state, withdrawn = _withdrawn(
+        replace(
+            state,
+            executing=state.executing - {request_id},
+            starting=state.starting - {request_id},
+            reads=state.reads - {request_id},
+        ),
+        request_id,
     )
     compensation = _start_compensation(request_id, reply) if was_starting else None
     if request_id not in state.pending:
@@ -491,17 +631,41 @@ def _answered(
         if isinstance(reply, RunConnectReply):
             outputs.append(Release(request_id))
         elif compensation is not None:
-            state = replace(state, compensating=state.compensating | {request_id})
+            state = replace(
+                state,
+                compensating={
+                    **state.compensating,
+                    request_id: compensation.instance_id,
+                },
+            )
             outputs.append(compensation)
-        return _maybe_close(state, outputs)
+        return _maybe_close(state, [*outputs, *withdrawn])
     pending = {rid: d for rid, d in state.pending.items() if rid != request_id}
     state = replace(state, pending=pending)
-    outputs = [Send(reply, if_undelivered=compensation)]
+    outputs = [Send(reply, if_undelivered=compensation), *withdrawn]
     if request_id == state.connecting:
         if isinstance(reply, RunConnectReply):
             return replace(state, connecting=None, relaying=True), (*outputs, Relay(request_id))
         state = replace(state, connecting=None)
     return _maybe_close(state, outputs)
+
+
+def _withdrawn(state: ChannelState, read_id: str) -> tuple[ChannelState, list[ChannelOutput]]:
+    """Answer the ``logs.cancel`` that withdrew ``read_id``, now that the read returned.
+
+    After the read's own reply, so a client that sees the cancel's reply knows the
+    read's worker is free; nothing when its deadline already answered for it.
+    """
+    cancel_id = state.withdrawing.get(read_id)
+    if cancel_id is None:
+        return state, []
+    withdrawing = {rid: cid for rid, cid in state.withdrawing.items() if rid != read_id}
+    state = replace(state, withdrawing=withdrawing)
+    if cancel_id not in state.pending:
+        return state, []
+    pending = {rid: d for rid, d in state.pending.items() if rid != cancel_id}
+    reply = LogsCancelReply(request_id=cancel_id, read_id=read_id)
+    return replace(state, pending=pending), [Send(reply)]
 
 
 def _start_compensation(request_id: str, reply: HelperReply | HelperError) -> StopStartedRun | None:
@@ -569,16 +733,26 @@ class _InboxSource:
             return chunk
 
 
+@dataclass(frozen=True)
+class _ChannelClosed:
+    """A control channel ended, including any retained compensation failures."""
+
+    compensation_failures: tuple[RunStartCompensationFailure, ...]
+
+
 class _Channel:
-    def __init__(self, host: HelperHost, inbox: _Inbox, output: ByteSink, threads: Threads) -> None:
+    def __init__(
+        self, host: HelperHost, inbox: _Inbox, output: ByteSink, threads: ReservableThreads
+    ) -> None:
         self._host = host
         self._inbox = inbox
         self._output = output
         self._threads = threads
-        self._state = ChannelState()
+        self._state = ChannelState(offered=host.offered_features())
         self._events: list[ChannelEvent] = []
         self._held: dict[str, Connection] = {}
         self._watches: dict[str, tuple[Event, Event]] = {}
+        self._withdrawals: dict[str, Event] = {}
         self._handed_over: str | None = None
         self._closed = False
 
@@ -587,8 +761,8 @@ class _Channel:
             self._events.append(event)
             self._inbox.cond.notify_all()
 
-    def supervise(self) -> Connection | None:
-        """Run the channel until it closes (``None``) or is handed to the relay."""
+    def supervise(self) -> Connection | _ChannelClosed:
+        """Run until control closes with evidence, or a connection is handed to the relay."""
         cond = self._inbox.cond
         with cond:
             while True:
@@ -602,9 +776,13 @@ class _Channel:
                     and not self._state.stopping_watches
                     and not self._state.compensating
                 ):
-                    return None
+                    self._close_held()
+                    return _ChannelClosed(self._state.compensation_failures)
                 if self._handed_over is not None:
                     if not self._state.compensating:
+                        if self._state.compensation_failures:
+                            self._close_held()
+                            return _ChannelClosed(self._state.compensation_failures)
                         return self._held.pop(self._handed_over)
                     # The relay owns the channel now. Only compensation can delay
                     # handoff, and its worker notifies this condition when it settles.
@@ -615,6 +793,12 @@ class _Channel:
                     timeout = None if deadline is None else max(deadline - self._threads.now(), 0.0)
                     cond.wait(timeout)
                 self._events.append(Tick(self._threads.now()))
+
+    def _close_held(self) -> None:
+        """Release connections a failed channel can no longer hand to a relay."""
+        for connection in self._held.values():
+            connection.close()
+        self._held.clear()
 
     def _input_ready(self) -> bool:
         inbox = self._inbox
@@ -643,13 +827,17 @@ class _Channel:
                     watch[1].set()
             elif isinstance(event, WatchStopped):
                 self._watches.pop(event.watch_id, None)
+            elif isinstance(event, Answered):
+                self._withdrawals.pop(event.request_id, None)
 
     def _perform(self, output: ChannelOutput) -> None:
         match output:
             case Send():
                 self._send(output)
             case Execute(request=request):
-                self._threads.spawn(lambda: self._execute(request), name=f"helper-{request.type}")
+                self._begin_execute(request)
+            case WithdrawRead(request_id=request_id):
+                self._withdrawals[request_id].set()
             case Watch(watch_id=watch_id):
                 stop = self._threads.event()
                 observed = self._threads.event()
@@ -682,12 +870,34 @@ class _Channel:
                 self._apply(InputEnded())
             self._closed = True
 
-    def _begin_stop_started(self, request_id: str, instance_id: str) -> None:
+    def _begin_execute(self, request: HelperRequest) -> None:
+        """Spawn ``request``'s worker; a ``logs.read`` keeps its withdrawal for ``WithdrawRead``."""
+        withdrawal = self._threads.event()
+        if isinstance(request, LogsReadRequest):
+            self._withdrawals[request.request_id] = withdrawal
         self._threads.spawn(
-            lambda: self._stop_started(request_id, instance_id), name="helper-stop-started"
+            lambda: self._execute(request, withdrawal), name=f"helper-{request.type}"
         )
 
-    def _execute(self, request: HelperRequest) -> None:
+    def _begin_stop_started(self, request_id: str, instance_id: str) -> None:
+        try:
+            self._threads.spawn(
+                lambda: self._stop_started(request_id, instance_id), name="helper-stop-started"
+            )
+        # lint-waiver: LW-276801 [BLE001]; worker creation is the cleanup boundary.
+        # > Catching Exception or only today's WorkerStartRefusedError would miss a
+        # > BaseException exit from another Threads implementation, while a finally block
+        # > has no failure detail. Converting every refusal preserves recorded ownership.
+        except BaseException as error:  # noqa: BLE001
+            failure = _compensation_failed_event(
+                request_id,
+                instance_id,
+                CompensationFailureKind.WORKER_START_REFUSED,
+                error,
+            )
+            self.post(failure)
+
+    def _execute(self, request: HelperRequest, withdrawal: Event) -> None:
         try:
             if isinstance(request, RunConnectRequest):
                 opened = connect(request, self._host)
@@ -698,16 +908,14 @@ class _Channel:
                     with self._inbox.cond:
                         self._held[request.request_id] = connection
             else:
-                reply = answer(request, self._host)
+                reply = answer(request, self._host, withdrawal)
         # lint-waiver: LW-188705 [BLE001]; one request's failure is its own typed reply.
         # > Letting it escape kills the worker silently, and the client waits out its whole
         # > deadline for a `deadline_exceeded` that hides the cause; catching named types
         # > instead would miss exactly the unexpected failures this exists to report.
         except Exception as error:  # noqa: BLE001
-            reply = _error(
-                request.request_id, HelperErrorCode.INTERNAL, f"{type(error).__name__}: {error}"
-            )
-        self.post(Answered(request.request_id, reply))
+            reply = _error(request.request_id, HelperErrorCode.INTERNAL, _exception_detail(error))
+        self.post(Answered(request.request_id, without_home(reply, self._host)))
 
     def _watch(self, watch_id: str, stop: Event, observed: Event) -> None:
         try:
@@ -725,9 +933,103 @@ class _Channel:
 
     def _stop_started(self, request_id: str, instance_id: str) -> None:
         try:
-            self._host.registry.stop(instance_id, self._host.stop_effects)
-        finally:
-            self.post(CompensationFinished(request_id))
+            result = self._host.registry.stop(instance_id, self._host.stop_effects)
+        # lint-waiver: LW-276802 [BLE001]; every cleanup failure must settle ownership.
+        # > Catching Exception or named registry errors misses BaseException exits such as
+        # > SystemExit; a finally block would falsely report success without evidence.
+        # > Converting the boundary failure keeps the supervisor joinable and explicit.
+        except BaseException as error:  # noqa: BLE001
+            failure = _compensation_failed_event(
+                request_id,
+                instance_id,
+                CompensationFailureKind.STOP_FAILED,
+                error,
+            )
+            self.post(failure)
+        else:
+            self.post(CompensationFinished(request_id, result))
+
+
+def _compensation_failed_event(
+    request_id: str,
+    instance_id: str,
+    kind: CompensationFailureKind,
+    error: BaseException,
+) -> CompensationFailed:
+    """Bound one external failure for the channel core to settle."""
+    return CompensationFailed(
+        request_id,
+        instance_id,
+        kind,
+        _exception_detail(error),
+    )
+
+
+def _exception_detail(error: BaseException) -> str:
+    """Format an arbitrary failure without letting its formatter escape the boundary."""
+    error_type = type(error).__name__
+    try:
+        message = str(error)
+    # lint-waiver: LW-276803 [BLE001]; exception text is itself an untrusted boundary.
+    # > Catching Exception misses BaseException raised by an arbitrary __str__, while
+    # > repr(error) invokes another arbitrary formatter. The stable type name is the
+    # > only diagnostic that does not execute code supplied by the caught exception.
+    except BaseException:  # noqa: BLE001
+        return error_type[:COMPENSATION_FAILURE_DETAIL_CHARACTERS]
+    detail = f"{error_type}: {message}" if message else error_type
+    return detail[:COMPENSATION_FAILURE_DETAIL_CHARACTERS]
+
+
+def _compensation_report(
+    *,
+    request_id: str,
+    instance_id: str,
+    kind: CompensationFailureKind,
+    detail: str,
+    stop_result: InstanceStopResult | None = None,
+) -> RunStartCompensationFailure:
+    """Build the one strict external report for every compensation failure path."""
+    bounded_detail = detail[:COMPENSATION_FAILURE_DETAIL_CHARACTERS] or kind.value
+    if kind is CompensationFailureKind.WORKER_START_REFUSED:
+        if stop_result is not None:
+            message = "worker-start refusal cannot carry a stop result"
+            raise ValueError(message)
+        evidence = WorkerStartRefusedCompensationFailure(
+            type=COMPENSATION_FAILURE_TYPE,
+            exit_status=COMPENSATION_FAILURE_EXIT_STATUS,
+            request_id=request_id,
+            kind=kind,
+            instance_id=instance_id,
+            detail=bounded_detail,
+        )
+    elif kind is CompensationFailureKind.STOP_FAILED:
+        if stop_result is not None:
+            message = "failed stop cannot carry a stop result"
+            raise ValueError(message)
+        evidence = StopFailedCompensationFailure(
+            type=COMPENSATION_FAILURE_TYPE,
+            exit_status=COMPENSATION_FAILURE_EXIT_STATUS,
+            request_id=request_id,
+            kind=kind,
+            instance_id=instance_id,
+            detail=bounded_detail,
+        )
+    else:
+        if stop_result is None:
+            message = "unconfirmed stop needs its typed stop result"
+            raise ValueError(message)
+        if stop_result.id != instance_id:
+            message = "unconfirmed stop result names another instance"
+            raise ValueError(message)
+        evidence = StopUnconfirmedCompensationFailure(
+            type=COMPENSATION_FAILURE_TYPE,
+            exit_status=COMPENSATION_FAILURE_EXIT_STATUS,
+            request_id=request_id,
+            kind=kind,
+            detail=bounded_detail,
+            stop_result=UnconfirmedInstanceStopResult.model_validate(stop_result.model_dump()),
+        )
+    return RunStartCompensationFailure(root=evidence)
 
 
 def serve_channel(
@@ -736,12 +1038,15 @@ def serve_channel(
     source: ByteSource,
     output: ByteSink,
     errors: ByteSink,
-    threads: Threads,
+    threads: ReservableThreads,
 ) -> int:
     """Serve one channel until its input ends or it is relayed; the process exit status.
 
-    ``0`` when the client ended a control channel; a relayed channel ends with the
-    relay's status and, when that is not ``0``, one ``ChannelEnd`` line on
+    ``0`` when the client ended a control channel. A control channel whose
+    undeliverable successful start could not be proved stopped returns
+    ``COMPENSATION_FAILURE_EXIT_STATUS`` and writes its typed
+    ``RunStartCompensationFailure`` evidence to ``errors``. A relayed channel ends
+    with the relay's status and, when that is not ``0``, one ``ChannelEnd`` line on
     ``errors``. A ``run.start`` worker and any compensation it owns settle before
     this returns; other workers and the input pump may still be blocked, and the
     caller ends the process.
@@ -749,9 +1054,16 @@ def serve_channel(
     inbox = _Inbox(threads)
     threads.spawn(lambda: inbox.pump(source), name="helper-input")
     channel = _Channel(host, inbox, output, threads)
-    connection = channel.supervise()
-    if connection is None:
-        return 0
+    completion = channel.supervise()
+    if isinstance(completion, _ChannelClosed):
+        for failure in completion.compensation_failures:
+            errors.write(failure.line().encode())
+        return (
+            completion.compensation_failures[0].exit_status
+            if completion.compensation_failures
+            else 0
+        )
+    connection = completion
     result = relay(connection, client=ClientStreams(_InboxSource(inbox), output), threads=threads)
     if result.outcome is not ChannelEndOutcome.CLIENT_CLOSED:
         errors.write(result.channel_end().line().encode())

@@ -20,7 +20,7 @@ from server.chat.factory import (
     ExperimentChatFactory,
 )
 from server.chat.manager import ChatAnswer, ChatThreadHandle
-from server.chat.options import ChatRunSettings
+from server.chat.settings import ChatRunSettings
 from server.events import ChatThreadCreatedData, EventType, make_event
 from server.run_attachment import AgentSelection, RunAttachment
 from vs_sim.api import OsThreads
@@ -28,6 +28,8 @@ from vs_sim.api.testing import ManualClock, SimThreads, wait_or_fail
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from server.host_api import HarnessChoice
 
 _TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -69,8 +71,7 @@ def test_concurrent_restore_is_single_flight(tmp_path: Path) -> None:
 
     def factory(
         thread_id: str,
-        _provider: str | None,
-        _model: str | None,
+        _harness: HarnessChoice | None,
     ) -> ChatThreadHandle:
         calls.append(thread_id)
         construction_started.set()
@@ -116,8 +117,7 @@ def test_concurrent_restore_shares_factory_failure(tmp_path: Path) -> None:
 
     def factory(
         _thread_id: str,
-        _provider: str | None,
-        _model: str | None,
+        _harness: HarnessChoice | None,
     ) -> ChatThreadHandle:
         nonlocal calls
         calls += 1
@@ -156,8 +156,7 @@ def test_restore_cancellation_wakes_every_waiter(tmp_path: Path) -> None:
 
     def factory(
         _thread_id: str,
-        _provider: str | None,
-        _model: str | None,
+        _harness: HarnessChoice | None,
     ) -> ChatThreadHandle:
         nonlocal calls
         calls += 1
@@ -203,14 +202,13 @@ def test_thread_turns_serialize_and_shutdown_drains_queued_borrowers(tmp_path: P
 
     def factory(
         thread_id: str,
-        provider: str | None,
-        model: str | None,
+        harness: HarnessChoice | None,
     ) -> ChatThreadHandle:
         return ChatThreadHandle(
             spec=ChatThreadCreatedData(
                 thread_id=thread_id,
-                provider=provider or "codex",
-                model=model or "gpt-test",
+                provider="codex" if harness is None else harness.provider,
+                model="gpt-test" if harness is None else harness.model,
                 created_at=_TIMESTAMP,
             ),
             handler=handler,
@@ -269,8 +267,7 @@ def test_restoration_finishing_during_shutdown_is_closed_without_invocation(
 
     def factory(
         _thread_id: str,
-        _provider: str | None,
-        _model: str | None,
+        _harness: HarnessChoice | None,
     ) -> ChatThreadHandle:
         construction_started.set()
         wait_or_fail(release_construction, "release construction")
@@ -313,16 +310,15 @@ def test_thread_creation_finishing_during_shutdown_is_closed_without_publish(
 
     def factory(
         thread_id: str,
-        provider: str | None,
-        model: str | None,
+        harness: HarnessChoice | None,
     ) -> ChatThreadHandle:
         construction_started.set()
         wait_or_fail(release_construction, "release construction")
         return ChatThreadHandle(
             spec=ChatThreadCreatedData(
                 thread_id=thread_id,
-                provider=provider or "codex",
-                model=model or "gpt-test",
+                provider="codex" if harness is None else harness.provider,
+                model="gpt-test" if harness is None else harness.model,
                 created_at=_TIMESTAMP,
             ),
             handler=lambda _question: ChatAnswer(text="unused", invocation_id="exec-unused"),

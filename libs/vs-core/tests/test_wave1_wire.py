@@ -10,6 +10,7 @@ from pydantic import BaseModel, ValidationError
 
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
+    OLDEST_SUPPORTED_ENVELOPE_VERSION,
     AttemptId,
     AttemptRef,
     Capabilities,
@@ -18,7 +19,6 @@ from vs_core.api import (
     ContractError,
     DecisionId,
     DecisionSubmitted,
-    EnvelopeMigration,
     EventCursor,
     EventId,
     HostFence,
@@ -51,6 +51,7 @@ from vs_core.api import (
     Within,
     initial_state,
     step,
+    upgrade_envelope,
 )
 
 
@@ -104,15 +105,29 @@ def envelope() -> RunEnvelope[StrategyState]:
     )
 
 
-@given(st.integers().filter(lambda value: value != ENVELOPE_SCHEMA_VERSION))
-def test_envelope_versions_are_rejected_before_decoding_new_contracts(version: int) -> None:
+@given(
+    st.integers().filter(
+        lambda value: not OLDEST_SUPPORTED_ENVELOPE_VERSION <= value <= ENVELOPE_SCHEMA_VERSION
+    )
+)
+def test_envelope_versions_out_of_range_are_rejected_before_decoding_new_contracts(
+    version: int,
+) -> None:
     codec = OperationRegistry()
     # Deliberately absent core proves the version barrier precedes nested decode.
     named = rf"schema_version.*envelope version {version} is not supported"
     with pytest.raises(ContractError, match=named):
         codec.decode_envelope(RunEnvelope[StrategyState], json.dumps({"schema_version": version}))
     with pytest.raises(ContractError, match=named):
-        codec.encode_envelope(envelope().model_copy(update={"schema_version": version}))
+        upgrade_envelope(json.dumps({"schema_version": version}), ("schema_version",))
+
+
+@given(st.integers().filter(lambda value: value != ENVELOPE_SCHEMA_VERSION))
+def test_a_run_writes_only_the_current_envelope_version(version: int) -> None:
+    with pytest.raises(ContractError, match="schema_version"):
+        OperationRegistry().encode_envelope(
+            envelope().model_copy(update={"schema_version": version})
+        )
 
 
 @pytest.mark.parametrize("version", [None, True, "2", 2.0])
@@ -133,28 +148,15 @@ def test_a_hostile_envelope_is_a_contract_error(source: str) -> None:
         OperationRegistry().decode_envelope(RunEnvelope[StrategyState], source)
 
 
-def upgrade_envelope(source: str) -> str:
-    payload = json.loads(source)
-    payload["schema_version"] = ENVELOPE_SCHEMA_VERSION
-    return json.dumps(payload)
-
-
-def test_previous_envelope_requires_selected_migration() -> None:
+def test_an_envelope_older_than_the_oldest_supported_names_both_versions() -> None:
     codec = OperationRegistry()
-    current = envelope()
-    previous = current.model_copy(update={"schema_version": 1}).model_dump_json()
-    with pytest.raises(ContractError, match="envelope version 1 is not supported"):
-        codec.decode_envelope(RunEnvelope[StrategyState], previous)
-    loaded = codec.migrate_envelope(
-        RunEnvelope[StrategyState],
-        previous,
-        EnvelopeMigration(
-            source_version=1,
-            target_version=ENVELOPE_SCHEMA_VERSION,
-            rewrite=upgrade_envelope,
-        ),
-    )
-    assert loaded == current
+    stored = envelope().model_copy(update={"schema_version": OLDEST_SUPPORTED_ENVELOPE_VERSION - 1})
+    with pytest.raises(
+        ContractError,
+        match=rf"envelope version {OLDEST_SUPPORTED_ENVELOPE_VERSION - 1} is not supported; "
+        rf"versions {OLDEST_SUPPORTED_ENVELOPE_VERSION} to {ENVELOPE_SCHEMA_VERSION}",
+    ):
+        codec.decode_envelope(RunEnvelope[StrategyState], stored.model_dump_json())
 
 
 @given(

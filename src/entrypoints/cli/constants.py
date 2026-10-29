@@ -9,7 +9,7 @@ from __future__ import annotations
 _OUTER_LOOPS = ("agent", "profile-guided", "dynamic", "plain", "evolve")
 
 
-_IGNORED_CONFIG_SECTIONS = frozenset({"tui"})
+_IGNORED_CONFIG_SECTIONS = frozenset()
 
 
 _RUN_ENVIRONMENT_OPTION_CLI_FIELDS: dict[str, str] = {

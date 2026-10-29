@@ -135,6 +135,85 @@
         "request_id": "s",
         "code": "feature_not_negotiated"
       }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.list",
+        "request_id": "ll",
+        "deadline_ms": 10000,
+        "instance_id": "0123456789ab"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "ll",
+        "code": "feature_not_negotiated"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "lr",
+        "deadline_ms": 10000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "tail_bytes": 1024
+        },
+        "max_bytes": 65536,
+        "wait_ms": 0
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "lr",
+        "code": "feature_not_negotiated"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "runs.events_for_span",
+        "request_id": "es",
+        "deadline_ms": 10000,
+        "project": "/nonexistent/vibesys-conformance-project",
+        "run_id": "20261010-120000-11111111-run",
+        "span_id": "op:turn",
+        "max": 10
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "es",
+        "code": "feature_not_negotiated"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "runs.read_tail",
+        "request_id": "rt",
+        "deadline_ms": 10000,
+        "project": "/nonexistent/vibesys-conformance-project",
+        "run_id": "20261010-120000-11111111-run",
+        "tail": 10
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "rt",
+        "code": "feature_not_negotiated"
+      }
     }
   ]
 }

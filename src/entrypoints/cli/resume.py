@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
@@ -15,11 +16,10 @@ from entrypoints.cli.remote import _is_remote_project
 from launch import validate_descriptor
 from vibesys.api import ComputeBackend, ProfilerKind
 from vibesys.api.profilers import coerce_profiler_kind
-from vibesys.api.request import migrate_recorded_run_environment
+from vibesys.api.request import ensure_resumable, migrate_recorded_run_environment
 from vs_project.api import (
     Git,
-    GitError,
-    GitTracker,
+    GitRunHistory,
     NullGitTrackerEvents,
     OrchestrationRunManifest,
     Project,
@@ -47,6 +47,8 @@ _POLICY_CLI_SELECTION = {
 }
 _OPTION_TO_CLI = {
     "compute_backend": "backend",
+    "mode": "dynamic_mode",
+    "pick": "evaluation_pick",
     "operator_constraints": "constraint",
 }
 _CONFIG_ONLY_OPTIONS = frozenset(
@@ -56,6 +58,7 @@ _CONFIG_ONLY_OPTIONS = frozenset(
         "default_reasoning_effort",
         "metric_space",
         "profile_guided",
+        "plan",
     }
 )
 
@@ -231,19 +234,23 @@ def _restore_evolve_objectives(
     return []
 
 
+def _recorded_cli_selection(orchestration_id: str) -> tuple[str, str | None]:
+    try:
+        return _POLICY_CLI_SELECTION[orchestration_id]
+    except KeyError:
+        _configuration_error(
+            f"The CLI cannot resume orchestration {orchestration_id!r}",
+            code="project_resume_configuration_invalid",
+            stage="resume_resolution",
+        )
+
+
 def _restore_descriptor_options(
     args: argparse.Namespace, manifest: OrchestrationRunManifest, *, loop_kind: str
 ) -> None:
     """Restore omitted flags from the single active descriptor format."""
     descriptor = manifest.orchestration
-    try:
-        recorded_loop, inner_loop = _POLICY_CLI_SELECTION[descriptor.id]
-    except KeyError:
-        _configuration_error(
-            f"The CLI cannot resume orchestration {descriptor.id!r}",
-            code="project_resume_configuration_invalid",
-            stage="resume_resolution",
-        )
+    recorded_loop, inner_loop = _recorded_cli_selection(descriptor.id)
     if recorded_loop != loop_kind:
         _configuration_error(
             f"Run uses --outer-loop {recorded_loop}, not {loop_kind}",
@@ -281,21 +288,15 @@ def _restore_descriptor_options(
     args.project_run_configuration = SimpleNamespace(**manifest.execution.model_dump())
 
 
-def _switch_project_resume_branch(project_root: Path, run_id: str) -> None:
-    """Select the run branch before callers read committed project files."""
-    if not (project_root / ".git").exists():
-        return
+def _latest_run_id(project: Project) -> str:
+    """The project's latest run, whichever branch is checked out (each run has its own)."""
     events = NullGitTrackerEvents()
-    repository = open_git_repository(project_root, git=Git(OsProcesses()), faults=events)
-    tracker = GitTracker(project_root, events=events, run_id=run_id, repository=repository)
-    try:
-        tracker.init(existing=True)
-    except (GitError, ValueError) as exc:
-        _configuration_error(
-            f"Cannot resume project run {run_id!r}: {exc}",
-            code="resume_not_found",
-            stage="resume_resolution",
-        )
+    repository = open_git_repository(project.root, git=Git(OsProcesses()), faults=events)
+    runs = GitRunHistory(project, repository).recorded().runs
+    if not runs:
+        message = f"No VibeSys runs exist under {project.root}"
+        raise ProjectStateError(message)
+    return runs[-1].run_id
 
 
 def _requested_resume(args: argparse.Namespace, *, direct: bool) -> str | None:
@@ -311,9 +312,17 @@ def _requested_resume(args: argparse.Namespace, *, direct: bool) -> str | None:
     return None if args.run_id is None else str(args.run_id)
 
 
-def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
+@dataclass(frozen=True)
+class _ResumeSelection:
+    project_root: Path
+    run_id: str
+    manifest: OrchestrationRunManifest
+
+
+def _load_resume_selection(args: argparse.Namespace) -> _ResumeSelection | None:
+    """Read saved identity and settings once, before choosing a strategy parser."""
     if args.resume is None:
-        return
+        return None
     if args.repo is not None:
         _configuration_error(
             "--repo creates a remote for a new experiment and cannot be combined with --resume",
@@ -332,12 +341,15 @@ def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
         else _resolve_project_root(args.resume, args.runs_dir)
     )
     try:
-        store = Project.open(project_root).state
+        project = Project.open(project_root)
+        store = project.state
         run_id = _requested_resume(args, direct=direct)
         if run_id is None:
-            run_id = store.current_run_id() or store.resolve_run().run_id
-        _switch_project_resume_branch(project_root, run_id)
-        manifest = store.load_run(run_id)
+            run_id = store.current_run_id() or _latest_run_id(project)
+        events = NullGitTrackerEvents()
+        repository = open_git_repository(project_root, git=Git(OsProcesses()), faults=events)
+        manifest = GitRunHistory(project, repository).manifest(run_id)
+
     except ProjectStateError as exc:
         message = str(exc)
         _configuration_error(
@@ -356,6 +368,22 @@ def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
             stage="resume_resolution",
         )
     validate_descriptor(manifest.orchestration)
+    return _ResumeSelection(project_root, run_id, manifest)
+
+
+def _resolve_resume_args(
+    args: argparse.Namespace,
+    *,
+    loop_kind: str,
+    selection: _ResumeSelection | None = None,
+    read_only: bool = False,
+) -> None:
+    selected = selection or _load_resume_selection(args)
+    if selected is None:
+        return
+    project_root, run_id, manifest = selected.project_root, selected.run_id, selected.manifest
+    if not read_only:
+        ensure_resumable(project_root, run_id)
     args.resume = run_id
     args.run_id = run_id
     args.exp_name = run_id

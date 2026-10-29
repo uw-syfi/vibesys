@@ -43,6 +43,12 @@ class FakeSocket implements WebSocketLike {
     this.onmessage?.({data: JSON.stringify(message)});
   }
 
+  /** Snapshot a message callback the runtime queued before its handler was cleared. */
+  queueResponse(message: unknown): () => void {
+    const pending = this.onmessage;
+    return () => pending?.({data: JSON.stringify(message)});
+  }
+
   receive(data: unknown): void {
     this.onmessage?.({data});
   }
@@ -225,18 +231,6 @@ const okResponse = (requestId: string, body: Record<string, unknown> = {}) => ({
 
 const response = okResponse;
 
-function tuiDefaults(): Record<string, unknown> {
-  return {
-    runs_dir: 'runs',
-    input_path: 'input.py',
-    experiment_name: 'experiment',
-    repository_owner: null,
-    repository_name: 'repository',
-    visibility: 'private',
-    theme: 'dark',
-  };
-}
-
 function responsePayloadFixture(): string {
   return readFileSync('../contracts/src/generated/response-payload.fixture.json', 'utf8');
 }
@@ -254,7 +248,7 @@ describe('WebSocketTransport', () => {
       },
     });
 
-    const pending = transport.request({type: 'query.tui_defaults'});
+    const pending = transport.request({type: 'query.history'});
     await tick();
     const frame = JSON.parse(sockets[0]?.sent[0] ?? '{}') as {
       request_id?: string;
@@ -262,7 +256,7 @@ describe('WebSocketTransport', () => {
     };
     expect(sockets[0]?.sent[0]?.endsWith('\n')).toBe(false);
     expect(frame.client_id).toBe('browser-client');
-    sockets[0]?.respond(response(frame.request_id ?? '', {tui_defaults: tuiDefaults()}));
+    sockets[0]?.respond(response(frame.request_id ?? '', {events: []}));
     await expect(pending).resolves.toMatchObject({ok: true});
     await transport.close();
   });
@@ -399,6 +393,168 @@ describe('WebSocketTransport', () => {
     await transport.close();
   });
 
+  it('contains both subscription observers and joins retirement before terminal failure', async () => {
+    const socket = new DelayedCloseSocket();
+    const clock = new FakeClock();
+    const messageFailure = new Error('message observer failed');
+    const disconnectFailure = new Error('disconnect observer failed');
+    const transport = new WebSocketTransport(URL, {
+      closeGraceMs: 50,
+      scheduleTimeout: clock.schedule,
+      webSocket: () => {
+        queueMicrotask(() => socket.open());
+        return socket;
+      },
+    });
+    let reentrantClose: Promise<void> | undefined;
+    const subscription = transport.subscribe(
+      0,
+      message => {
+        if (message.type === 'event_batch') throw messageFailure;
+      },
+      () => {
+        reentrantClose = transport.close();
+        throw disconnectFailure;
+      },
+    );
+    await tick();
+    socket.respond({
+      type: 'subscribed',
+      request_id: 'subscribe-1',
+      run_id: 'run-1',
+      latest_sequence: 0,
+    });
+    await subscription;
+
+    let escaped: unknown;
+    try {
+      socket.respond({type: 'event_batch', events: [], history_after_sequence: 0});
+    } catch (error) {
+      escaped = error;
+    }
+
+    expect(escaped).toBeUndefined();
+    expect(socket.closeCalls).toBe(1);
+    expect(socket.readyState).toBe(2);
+    expect(clock.pendingDelays()).toEqual([50]);
+    if (reentrantClose === undefined) throw new Error('The disconnect observer did not close');
+    expect(transport.close()).toBe(reentrantClose);
+    let settled = false;
+    void reentrantClose.catch(() => {
+      settled = true;
+    });
+    await tick();
+    expect(settled).toBe(false);
+
+    socket.finishClose();
+    const failure = await reentrantClose.catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([messageFailure, disconnectFailure]);
+    await expect(transport.close()).rejects.toBe(failure);
+    expect(socket.closeCalls).toBe(1);
+    expect(clock.pending).toBe(0);
+  });
+
+  it('suppresses a subscription message callback queued before terminal close', async () => {
+    const socket = new FakeSocket();
+    const transport = transportFor(socket);
+    const delivered: EventBatchMessage[] = [];
+    const subscription = transport.subscribe(
+      0,
+      message => {
+        if (message.type === 'event_batch') delivered.push(message);
+      },
+      () => undefined,
+    );
+    await tick();
+    socket.respond({
+      type: 'subscribed',
+      request_id: 'subscribe-1',
+      run_id: 'run-1',
+      latest_sequence: 0,
+    });
+    await subscription;
+    const deliverQueued = socket.queueResponse({
+      type: 'event_batch',
+      events: [],
+      history_after_sequence: 0,
+    });
+
+    const closing = transport.close();
+    let escaped: unknown;
+    try {
+      deliverQueued();
+    } catch (error) {
+      escaped = error;
+    }
+
+    expect(escaped).toBeUndefined();
+    expect(delivered).toEqual([]);
+    expect(socket.closeCalls).toBe(1);
+    await closing;
+  });
+
+  it('contains a disconnect observer and preserves its failure by identity', async () => {
+    const socket = new FakeSocket();
+    const observerFailure = new Error('disconnect observer failed');
+    const transport = transportFor(socket);
+    const subscription = transport.subscribe(
+      0,
+      () => {},
+      () => {
+        throw observerFailure;
+      },
+    );
+    await tick();
+    socket.respond({
+      type: 'subscribed',
+      request_id: 'subscribe-1',
+      run_id: 'run-1',
+      latest_sequence: 0,
+    });
+    await subscription;
+
+    let escaped: unknown;
+    try {
+      socket.drop();
+    } catch (error) {
+      escaped = error;
+    }
+
+    expect(escaped).toBeUndefined();
+    await expect(transport.close()).rejects.toBe(observerFailure);
+    expect(socket.closeCalls).toBe(0);
+  });
+
+  it('retires on message observer failure without relabeling valid peer data', async () => {
+    const socket = new FakeSocket();
+    const observerFailure = new Error('message observer failed');
+    const disconnects: Error[] = [];
+    const transport = transportFor(socket);
+    const subscription = transport.subscribe(
+      0,
+      message => {
+        if (message.type === 'event_batch') throw observerFailure;
+      },
+      error => disconnects.push(error),
+    );
+    await tick();
+    socket.respond({
+      type: 'subscribed',
+      request_id: 'subscribe-1',
+      run_id: 'run-1',
+      latest_sequence: 0,
+    });
+    await subscription;
+
+    socket.respond({type: 'event_batch', events: [], history_after_sequence: 0});
+
+    expect(disconnects).toEqual([observerFailure]);
+    expect(disconnects[0]).not.toBeInstanceOf(BackendClientError);
+    expect(socket.closeCalls).toBe(1);
+    await expect(transport.close()).rejects.toBe(observerFailure);
+  });
+
   it('closes a corrupted control socket before redialing', async () => {
     const sockets: FakeSocket[] = [];
     const transport = new WebSocketTransport(URL, {
@@ -409,17 +565,17 @@ describe('WebSocketTransport', () => {
         return socket;
       },
     });
-    const first = transport.request({type: 'query.tui_defaults'});
+    const first = transport.request({type: 'query.history'});
     await tick();
 
     sockets[0]?.receive('{');
     await expect(first).rejects.toMatchObject({kind: 'parse'});
     expect(sockets[0]?.closeCalls).toBe(1);
 
-    const second = transport.request({type: 'query.tui_defaults'});
+    const second = transport.request({type: 'query.history'});
     await tick();
     const frame = JSON.parse(sockets[1]?.sent[0] ?? '{}') as {request_id?: string};
-    sockets[1]?.respond(response(frame.request_id ?? '', {tui_defaults: tuiDefaults()}));
+    sockets[1]?.respond(response(frame.request_id ?? '', {events: []}));
     await expect(second).resolves.toMatchObject({ok: true});
     await transport.close();
   });
@@ -429,7 +585,7 @@ describe('WebSocketTransport', () => {
     const transport = new WebSocketTransport(URL, {
       webSocket: () => socket,
     });
-    const pending = transport.request({type: 'query.tui_defaults'});
+    const pending = transport.request({type: 'query.history'});
 
     await transport.close();
 
@@ -983,6 +1139,164 @@ describe('WebSocketTransport', () => {
     expect(scheduler.pending).toBe(0);
   });
 
+  it('settles a dedicated socket before exposing a control observer failure', async () => {
+    const controlSocket = new FakeSocket();
+    const chatSocket = new DelayedCloseSocket();
+    const sockets: FakeSocket[] = [controlSocket, chatSocket];
+    const scheduler = new FakeClock();
+    const observerError = new Error('control observer failed');
+    const transport = new WebSocketTransport(URL, {
+      closeGraceMs: 50,
+      scheduleTimeout: scheduler.schedule,
+      onConnectionState: state => {
+        if (state.status === 'connected') throw observerError;
+      },
+      webSocket: () => {
+        const socket = sockets.shift();
+        if (socket === undefined) throw new Error('The test opened an unexpected socket');
+        queueMicrotask(() => socket.open());
+        return socket;
+      },
+    });
+    const snapshot = transport.request({type: 'query.snapshot'});
+    await tick();
+    controlSocket.answerAll();
+    await expect(snapshot).resolves.toMatchObject({ok: true});
+
+    const chat = rejection(transport.request({type: 'query.chat', text: 'still running'}));
+    await tick();
+    expect(chatSocket.frames()[0]?.['type']).toBe('query.chat');
+
+    const closing = transport.close();
+    const pending = {};
+    let closeOutcome: unknown = pending;
+    void closing.then(
+      () => {
+        closeOutcome = undefined;
+      },
+      error => {
+        closeOutcome = error;
+      },
+    );
+    await tick();
+
+    expect(await chat).toMatchObject({kind: 'disconnected'});
+    expect(closeOutcome).toBe(pending);
+    expect(chatSocket.readyState).toBe(2);
+    expect(scheduler.pendingDelays()).toEqual([50]);
+
+    chatSocket.finishClose();
+    await expect(closing).rejects.toBe(observerError);
+    expect(scheduler.pendingDelays()).toEqual([]);
+    expect(chatSocket.readyState).toBe(3);
+  });
+
+  it('settles every bounded close owner before exposing structural failures', async () => {
+    const controlSocket = new FakeSocket();
+    const chatSocket = new DelayedCloseSocket();
+    const sockets: FakeSocket[] = [controlSocket, chatSocket];
+    const clock = new FakeClock();
+    const observerError = new Error('control observer failed');
+    const schedulerError = new Error('close deadline registration failed');
+    let schedules = 0;
+    const transport = new WebSocketTransport(URL, {
+      closeGraceMs: 50,
+      scheduleTimeout: (callback, delayMs) => {
+        schedules += 1;
+        if (schedules === 4) throw schedulerError;
+        return clock.schedule(callback, delayMs);
+      },
+      onConnectionState: state => {
+        if (state.status === 'connected') throw observerError;
+      },
+      webSocket: () => {
+        const socket = sockets.shift();
+        if (socket === undefined) throw new Error('The test opened an unexpected socket');
+        queueMicrotask(() => socket.open());
+        return socket;
+      },
+    });
+    const snapshot = transport.request({type: 'query.snapshot'});
+    await tick();
+    controlSocket.answerAll();
+    await expect(snapshot).resolves.toMatchObject({ok: true});
+
+    const chat = rejection(transport.request({type: 'query.chat', text: 'still running'}));
+    await tick();
+    const closing = transport.close();
+    const pending = {};
+    let closeOutcome: unknown = pending;
+    void closing.then(
+      () => {
+        closeOutcome = undefined;
+      },
+      error => {
+        closeOutcome = error;
+      },
+    );
+    await tick();
+
+    expect(await chat).toMatchObject({kind: 'disconnected'});
+    expect(closeOutcome).toBe(pending);
+    expect(controlSocket.closeCalls).toBe(1);
+    expect(chatSocket.closeCalls).toBe(1);
+    expect(clock.pendingDelays()).toEqual([50]);
+
+    chatSocket.finishClose();
+    const error = await closing.then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors).toEqual([observerError, schedulerError]);
+    expect(clock.pendingDelays()).toEqual([]);
+  });
+
+  it('retains a completed dedicated retirement failure for terminal close', async () => {
+    const controlSocket = new FakeSocket();
+    const chatSocket = new FakeSocket();
+    const sockets: FakeSocket[] = [controlSocket, chatSocket];
+    const clock = new FakeClock();
+    const observerError = new Error('control observer failed');
+    const schedulerError = new Error('chat close deadline registration failed');
+    let schedules = 0;
+    const transport = new WebSocketTransport(URL, {
+      scheduleTimeout: (callback, delayMs) => {
+        schedules += 1;
+        if (schedules === 4) throw schedulerError;
+        return clock.schedule(callback, delayMs);
+      },
+      onConnectionState: state => {
+        if (state.status === 'connected') throw observerError;
+      },
+      webSocket: () => {
+        const socket = sockets.shift();
+        if (socket === undefined) throw new Error('The test opened an unexpected socket');
+        queueMicrotask(() => socket.open());
+        return socket;
+      },
+    });
+    const snapshot = transport.request({type: 'query.snapshot'});
+    await tick();
+    controlSocket.answerAll();
+    await expect(snapshot).resolves.toMatchObject({ok: true});
+
+    const chat = transport.request({type: 'query.chat', text: 'answer before retiring'});
+    await tick();
+    chatSocket.answerAll({chat: {question: 'q', answer: 'done', effect: 'none'}});
+    await expect(chat).resolves.toMatchObject({ok: true});
+    await tick();
+    expect(chatSocket.closeCalls).toBe(1);
+
+    const error = await transport.close().then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors).toEqual([observerError, schedulerError]);
+    expect(controlSocket.closeCalls).toBe(1);
+  });
+
   it('keeps a dedicated socket owned while its handshake is handed to the request', async () => {
     const socket = new DelayedCloseSocket();
     const scheduler = new FakeClock();
@@ -1328,7 +1642,7 @@ describe('WebSocketTransport', () => {
     const abandoned = rejection(
       transport.request({type: 'query.snapshot'}, {signal: controller.signal}),
     );
-    const kept = transport.request({type: 'query.tui_defaults'});
+    const kept = transport.request({type: 'query.history'});
     gateway.socket(0).drop();
     await tick();
     controller.abort();
@@ -1340,7 +1654,7 @@ describe('WebSocketTransport', () => {
     // queue must not be written to the fresh connection, or the caller gets a
     // command they explicitly abandoned.
     const resent = gateway.socket(1).frames();
-    expect(resent.map(frame => frame['type'])).toEqual(['query.tui_defaults']);
+    expect(resent.map(frame => frame['type'])).toEqual(['query.history']);
     gateway.socket(1).answerAll();
     await expect(kept).resolves.toMatchObject({ok: true});
     await transport.close();
@@ -1563,7 +1877,7 @@ describe('WebSocketTransport', () => {
 
     const first = transport.request({type: 'command.pause'});
     const second = transport.request({type: 'query.snapshot'});
-    const third = transport.request({type: 'query.tui_defaults'});
+    const third = transport.request({type: 'query.history'});
     await tick();
     expect(gateway.socket(0).frames()).toHaveLength(3);
 
@@ -1587,7 +1901,7 @@ describe('WebSocketTransport', () => {
         .frames()
         .map(frame => frame['type'])
         .sort(),
-    ).toEqual(['command.pause', 'query.snapshot', 'query.tui_defaults']);
+    ).toEqual(['command.pause', 'query.history', 'query.snapshot']);
 
     gateway.socket(2).answerAll();
     await expect(Promise.all([first, second, third])).resolves.toHaveLength(3);
@@ -1651,7 +1965,7 @@ describe('WebSocketTransport', () => {
       onConnectionState: state => {
         if (state.status !== 'connected' || reported) return;
         reported = true;
-        void transport.request({type: 'query.tui_defaults'}).catch(() => undefined);
+        void transport.request({type: 'query.history'}).catch(() => undefined);
       },
     });
 
@@ -1665,7 +1979,7 @@ describe('WebSocketTransport', () => {
         .socket(0)
         .frames()
         .map(frame => frame['type']),
-    ).toEqual(['command.pause', 'query.tui_defaults']);
+    ).toEqual(['command.pause', 'query.history']);
     gateway.socket(0).answerAll();
     await expect(held).resolves.toMatchObject({ok: true});
     await transport.close();
@@ -1817,7 +2131,7 @@ describe('wire payload validation', () => {
     await tick();
     const requestId = String(socket.frames()[0]?.['request_id']);
     socket.receive(
-      `{"protocol_version":1,"request_id":"${requestId}","client_id":"","timestamp":"2026-09-30T20:08:01.112867Z","ok":true,"error":null,"diagnostic":null,"ack":null,"chat":null,"chat_thread":null,"chat_options":null,"tui_defaults":null,"snapshot":null,"events":[],"performance":[],"performance_context":null,"experiments":[],"experiment_update":null,"experiments_ready":null,"design":[],"design_ready":null,"design_patch":null}`,
+      `{"protocol_version":1,"request_id":"${requestId}","client_id":"","timestamp":"2026-09-30T20:08:01.112867Z","ok":true,"error":null,"diagnostic":null,"ack":null,"chat":null,"chat_thread":null,"snapshot":null,"events":[],"performance":[],"performance_context":null,"experiments":[],"experiment_update":null,"experiments_ready":null,"design":[],"design_ready":null,"design_patch":null}`,
     );
 
     await expect(pending).resolves.toMatchObject({ok: true, request_id: requestId});
@@ -1843,8 +2157,6 @@ describe('wire payload validation', () => {
       'ack',
       'chat',
       'chat_thread',
-      'chat_options',
-      'tui_defaults',
       'snapshot',
       'performance',
       'performance_context',
@@ -2264,7 +2576,7 @@ function noop(): void {}
 
 const IDEMPOTENT_TYPES = [
   'query.snapshot',
-  'query.tui_defaults',
+  'query.history',
   'command.pause',
   'command.resume',
 ] as const;

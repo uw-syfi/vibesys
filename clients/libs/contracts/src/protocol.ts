@@ -9,14 +9,27 @@ export const PROTOCOL_VERSION = 1;
 export type ProtocolRequest = ProtocolDocument['request'];
 export type ProtocolResponse = ProtocolDocument['response'];
 export type RunEvent = ProtocolDocument['event'];
+/** Structured reply retained by an agent turn, using the producer's declared schema. */
+export type AgentReply = NonNullable<
+  Extract<NonNullable<RunEvent['data']>, {kind: 'agent_execution_finished'}>['reply']
+>;
 /** Structured status carried by streamed agent output and tool calls. */
 export type AgentStatusData = NonNullable<
   Extract<NonNullable<RunEvent['data']>, {channel: unknown}>['status']
 >;
 export type RunSnapshot = ProtocolDocument['snapshot'];
+/** The run's objective and what measures it. Source: `RunOverview` in `vibesys.events`. */
+export type RunOverview = NonNullable<RunSnapshot['overview']>;
+/** One span of the run trace: a flow task or an awaited operation. Source: `Span` in `vs_core.flows`. */
+export type Span = NonNullable<RunSnapshot['spans']>[number];
 /** Run lifecycle statuses the backend reports. Source: `RunStatus` in `src/server/run_lifecycle.py`. */
 export type RunStatus = RunSnapshot['status'];
 export type ServerMessage = ProtocolDocument['server_message'];
+/** What a run's log stream is for. Source: `LogOwner` in `src/vibesys/log_owners.py`. */
+export type LogOwner = ProtocolDocument['log_owner'];
+/** One JSON line of a `run_narration` stream. Source: `NarrationLine` in `vs_logs`. */
+export type NarrationLine = ProtocolDocument['narration_line'];
+export type NarrationLevel = NarrationLine['level'];
 /** The complete authoritative list staged from active-execution checkpoint chunks. */
 export type ActiveExecutions = NonNullable<RunSnapshot['active_executions']>;
 /** The `event_batch` arm of `ServerMessage`: a run of events plus cursor metadata. */
@@ -36,10 +49,6 @@ export type HypothesisRound = NonNullable<HypothesisEntry['rounds']>[number];
 export type DesignRound = NonNullable<ProtocolResponse['design']>[number];
 export type DesignFileChange = NonNullable<DesignRound['files']>[number];
 export type DesignPatch = NonNullable<ProtocolResponse['design_patch']>;
-export type ChatOptions = NonNullable<ProtocolResponse['chat_options']>;
-export type ChatProviderOptions = NonNullable<ChatOptions['providers']>[number];
-export type ChatModelOption = NonNullable<ChatProviderOptions['models']>[number];
-export type TuiDefaults = NonNullable<ProtocolResponse['tui_defaults']>;
 export type IterationResult = NonNullable<ProtocolResponse['iterations']>;
 export type IterationPage = Extract<IterationResult, {kind?: 'page'}>;
 export type IterationUnavailable = Extract<IterationResult, {kind?: 'unavailable'}>;

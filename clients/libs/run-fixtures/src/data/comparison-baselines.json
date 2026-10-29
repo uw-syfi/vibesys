@@ -1,0 +1,509 @@
+{
+  "format": 1,
+  "name": "comparison-baselines",
+  "description": "A live run with no input reading and two comparison baselines: one measured, one not measured.",
+  "runId": "20261019-120000",
+  "state": "live",
+  "objective": {
+    "text": "Maximize trusted end-to-end throughput of the MPMC queue. Every candidate must pass the 100-trial correctness check.",
+    "metric": "total_ops_per_sec",
+    "unit": "ops/s",
+    "direction": "max"
+  },
+  "events": [
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-120000",
+      "sequence": 1,
+      "timestamp": "2026-10-15T16:30:51+00:00",
+      "type": "run_started",
+      "data": {
+        "kind": "run_started",
+        "outer_loop": "iterate",
+        "input": "objectives/queue.md",
+        "max_rounds": 6,
+        "expected_roles": [
+          "orchestrator",
+          "implementer",
+          "judge"
+        ],
+        "overview": {
+          "objective": {
+            "text": "Maximize trusted end-to-end throughput of the MPMC queue. Every candidate must pass the 100-trial correctness check.",
+            "metric": "total_ops_per_sec",
+            "unit": "ops/s",
+            "direction": "max",
+            "correctness_check": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-120000",
+      "sequence": 2,
+      "timestamp": "2026-10-15T16:30:52+00:00",
+      "type": "run_configured",
+      "data": {
+        "kind": "run_configured",
+        "run_log_path": "logs/20261019-120000",
+        "project_root": "project",
+        "model": "claude-opus-5",
+        "objective": "Raise queue throughput",
+        "search_policy": "beam",
+        "benchmark_contract": true,
+        "pareto_objectives": null,
+        "source": "loop"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-120000",
+      "sequence": 3,
+      "timestamp": "2026-10-15T16:30:53+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root#1",
+          "parent": null,
+          "type": "flow",
+          "name": "dynamic",
+          "status": "running",
+          "started_at": 0
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-120000",
+      "sequence": 4,
+      "timestamp": "2026-10-15T16:30:54+00:00",
+      "type": "comparisons_read",
+      "data": {
+        "kind": "comparisons_read",
+        "comparisons": [
+          {
+            "name": "vllm",
+            "label": "vLLM",
+            "status": "measured",
+            "metric": "total_ops_per_sec",
+            "unit": "ops/s",
+            "direction": "max",
+            "value": 66.2,
+            "spread": 0.02,
+            "samples": 3,
+            "hosts": [
+              "host-a"
+            ]
+          },
+          {
+            "name": "sglang",
+            "label": "SGLang",
+            "status": "not_measured"
+          }
+        ]
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-120000",
+      "sequence": 5,
+      "timestamp": "2026-10-15T16:31:01+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/plan#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "plan",
+          "status": "running",
+          "started_at": 10,
+          "ended_at": 50,
+          "label": {
+            "kind": "planning_call",
+            "title": "planning call 1",
+            "attrs_json": "{\"call\":1}"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-120000",
+      "sequence": 6,
+      "timestamp": "2026-10-15T16:31:41+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "flow:root/plan#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "plan",
+          "status": "done",
+          "started_at": 10,
+          "ended_at": 50,
+          "label": {
+            "kind": "planning_call",
+            "title": "planning call 1",
+            "attrs_json": "{\"call\":1}"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-120000",
+      "sequence": 7,
+      "timestamp": "2026-10-15T16:32:31+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/ws-1#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "running",
+          "started_at": 100,
+          "label": {
+            "kind": "workstream",
+            "title": "Preallocate the arena",
+            "attrs_json": "{\"hypothesis_id\":\"H1\",\"parent_revision\":\"r0\",\"base_round\":null,\"round\":1}",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-120000",
+      "sequence": 8,
+      "timestamp": "2026-10-15T16:32:32+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w1-turn",
+          "parent": "flow:root/ws-1#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 101,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w1-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-120000",
+      "sequence": 9,
+      "timestamp": "2026-10-15T16:38:32+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w1-turn",
+          "parent": "flow:root/ws-1#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "done",
+          "started_at": 101,
+          "ended_at": 461,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w1-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-120000",
+      "sequence": 10,
+      "timestamp": "2026-10-15T16:38:33+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w1-gate",
+          "parent": "flow:root/ws-1#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "running",
+          "started_at": 462,
+          "ended_at": 699,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":352.1,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":352.1,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-120000",
+      "sequence": 11,
+      "timestamp": "2026-10-15T16:42:30+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w1-gate",
+          "parent": "flow:root/ws-1#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "done",
+          "started_at": 462,
+          "ended_at": 699,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":352.1,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":352.1,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-120000",
+      "sequence": 12,
+      "timestamp": "2026-10-15T16:42:30+00:00",
+      "type": "measurement_compared",
+      "data": {
+        "kind": "measurement_compared",
+        "metric": "total_ops_per_sec",
+        "unit": "ops/s",
+        "direction": "max",
+        "candidate_commit": "r1",
+        "base_commit": "r0",
+        "candidate_value": 350.39,
+        "base_value": 286.96,
+        "ratio": 1.2210412601059382,
+        "noise": 0.03,
+        "verdict": "better",
+        "candidate_samples": 5,
+        "base_samples": 5
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-120000",
+      "sequence": 13,
+      "timestamp": "2026-10-15T16:42:31+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "flow:root/ws-1#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "done",
+          "started_at": 100,
+          "ended_at": 700,
+          "label": {
+            "kind": "workstream",
+            "title": "Preallocate the arena",
+            "attrs_json": "{\"hypothesis_id\":\"H1\",\"parent_revision\":\"r0\",\"base_round\":null,\"round\":1,\"revision\":\"r1\"}",
+            "verdict": "passed",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-120000",
+      "sequence": 14,
+      "timestamp": "2026-10-15T16:44:11+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/ws-2#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "running",
+          "started_at": 800,
+          "label": {
+            "kind": "workstream",
+            "title": "Pin the consumers to cores",
+            "attrs_json": "{\"hypothesis_id\":\"H2\",\"parent_revision\":\"r1\",\"base_round\":1,\"round\":2}",
+            "links": [
+              {
+                "rel": "builds_on",
+                "to": "flow:root/ws-1#1"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-120000",
+      "sequence": 15,
+      "timestamp": "2026-10-15T16:44:12+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w2-turn",
+          "parent": "flow:root/ws-2#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 801,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w2-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-120000",
+      "sequence": 16,
+      "timestamp": "2026-10-15T16:50:12+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w2-turn",
+          "parent": "flow:root/ws-2#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "done",
+          "started_at": 801,
+          "ended_at": 1161,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
+          },
+          "invocation": "inv-op:w2-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-120000",
+      "sequence": 17,
+      "timestamp": "2026-10-15T16:50:13+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w2-gate",
+          "parent": "flow:root/ws-2#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "running",
+          "started_at": 1162,
+          "ended_at": 1399,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":395.4,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":395.4,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-120000",
+      "sequence": 18,
+      "timestamp": "2026-10-15T16:54:10+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w2-gate",
+          "parent": "flow:root/ws-2#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "done",
+          "started_at": 1162,
+          "ended_at": 1399,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":395.4,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":395.4,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-120000",
+      "sequence": 19,
+      "timestamp": "2026-10-15T16:54:10+00:00",
+      "type": "measurement_compared",
+      "data": {
+        "kind": "measurement_compared",
+        "metric": "total_ops_per_sec",
+        "unit": "ops/s",
+        "direction": "max",
+        "candidate_commit": "r2",
+        "base_commit": "r1",
+        "candidate_value": 385.4,
+        "base_value": 350.4,
+        "ratio": 1.0998858447488584,
+        "noise": 0.03,
+        "verdict": "better",
+        "candidate_samples": 5,
+        "base_samples": 5
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-120000",
+      "sequence": 20,
+      "timestamp": "2026-10-15T16:54:11+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "flow:root/ws-2#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "done",
+          "started_at": 800,
+          "ended_at": 1400,
+          "label": {
+            "kind": "workstream",
+            "title": "Pin the consumers to cores",
+            "attrs_json": "{\"hypothesis_id\":\"H2\",\"parent_revision\":\"r1\",\"base_round\":1,\"round\":2,\"revision\":\"r2\"}",
+            "verdict": "passed",
+            "links": [
+              {
+                "rel": "builds_on",
+                "to": "flow:root/ws-1#1"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

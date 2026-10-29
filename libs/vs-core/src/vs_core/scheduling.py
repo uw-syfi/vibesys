@@ -9,12 +9,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, assert_never
 
 from ._adoption import fences_root_mutation
+from ._operator_actions import parallel_limit
 from ._proofs import (
     Proven,
     accepted_receipt_for,
     admission_remaining,
     committed_stop,
     draining,
+    stop_mode,
 )
 from ._request_ledger import due_retries
 from ._request_recovery import overdue_reconciliations
@@ -28,6 +30,7 @@ from .types.common import (
     RejectionCode,
     RequestId,
     RunStatus,
+    StopMode,
     WorkspaceMode,
 )
 from .types.evaluation import ObservationsDue, RunJobsCancelRequested
@@ -43,6 +46,7 @@ from .types.scheduling import (
     AttemptRequest,
     AttemptRequested,
     ClockAdvanced,
+    ParallelLimitChanged,
     QueueEntryRetired,
     RegisterAttempt,
     RunDrained,
@@ -192,7 +196,7 @@ def _fits(state: SchedulingState, context: SchedulingContext, request: Admission
     """
     if any(slot.attempt.attempt_id == _target(request).attempt_id for slot in state.slots):
         return False
-    if len(state.slots) >= context.run.limits.max_parallel:
+    if len(state.slots) >= parallel_limit(context.run):
         return False
     if any(set(request.pools).intersection(slot.pools) for slot in state.slots):
         return False
@@ -512,8 +516,9 @@ def _cancel(state: SchedulingState, context: SchedulingContext) -> tuple[Signal,
     if context.run.status != RunStatus.CLOSING:
         return None
     decision = _first_stop(context)
-    # Reordered controls cannot change the first committed stop disposition.
-    if decision is None or decision.mode != "cancel":
+    # The first committed Finish keeps its authority; a later cancel control escalates only
+    # its mode (``stop_mode``), and a later drain never weakens a cancel.
+    if decision is None or stop_mode(context.run) is not StopMode.CANCEL:
         return None
     # A parked closure fences its old episode, not a queued reopening. Cancel
     # the carried new admission identity unless that exact episode is closing.
@@ -664,8 +669,8 @@ def schedule(
             )
         case AdmissionControl():
             return _control(state, context, event)
-        case AdoptionFenceLifted():
-            # The fence is part of `_fits`; this only retries admission.
+        case AdoptionFenceLifted() | ParallelLimitChanged():
+            # The fence and the limit are part of `_fits`; this only retries admission.
             change = _fill(state, context)
         case _:
             assert_never(event)

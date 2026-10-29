@@ -1,252 +1,80 @@
-"""The ``vibesys`` console entry point (unified launcher).
+"""Route the ``vibesys`` console command to its Python entrypoint.
 
-``vibesys`` is the single entry point for both installed and in-repo use, and
-replaces the former ``./vs`` script. From a source checkout, run it with
-``uv run vibesys``.
+Light host commands run in this process. Run commands execute in a child so
+the run's own teardown remains authoritative.
 
-It routes to the headless engine, with no JavaScript runtime required, when:
+The child leads its own session, with no controlling terminal, so the terminal's
+signals reach only the launcher, and no command the run starts can open the
+terminal to prompt the operator (``vs_sim.api.InheritedStdioLauncher``). The
+launcher is the one path by which a signal reaches the run: each Ctrl-C reaches
+it exactly once. The launcher forwards every shutdown signal
+it receives: SIGTERM, SIGHUP and SIGQUIT as they are, the first SIGINT as
+SIGINT, and every later SIGINT as SIGTERM, so a repeated Ctrl-C forces the run
+to end. It forwards SIGCONT too, so a child stopped by any means continues with
+its launcher. Ctrl-Z suspends only the launcher; the run goes on, and its output
+still reaches the terminal.
 
-* ``--headless`` is passed,
-* ``--web`` is passed,
-* the first argument is ``validate``, or
-* stdin/stdout is not a TTY (pipes, CI).
-
-Otherwise it starts the interactive OpenTUI client, resolving the TUI in order:
-
-1. a prebuilt payload bundled into the wheel (``entrypoints/_tui``), run under its
-   vendored Bun -- the hermetic end-user path;
-2. a source checkout (``clients/tui``), built on demand with the system JS
-   toolchain (Bun + Node 20+ + pnpm) -- the developer path that subsumes
-   ``./vs``;
-3. otherwise, a notice plus the headless engine.
-
-The headless path runs ``python -m entrypoints.headless`` in a subprocess.
-Interactive paths run the compiled launcher with ``VIBESYS_PYTHON`` set so it
-drives the current interpreter. Every child runs through :func:`call_child`,
-which never kills the child: the child owns its run's teardown.
-
-The light host commands (``example``, ``instances``, ``tasks``) run in this
-process, routed on ``argv`` before anything heavy is imported. This module's own imports stay
-light for that reason (``tests/architecture/test_light_entrypoints.py``); the
-boot trace, which lives behind ``vibesys.api``, is loaded only on the paths that
-start the engine or the TUI.
+If the launcher dies without forwarding anything (SIGKILL, an OOM kill, a
+crash), the child hangs up as a closed terminal used to make it: its lifeline
+from the launcher reaches end-of-file (``vs_sim.api.follow_launcher``, called by
+``entrypoints.cli.start_process``).
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
-import os
-import re
-import shutil
 import sys
 import tomllib
 from dataclasses import dataclass, field
 from functools import partial
-from importlib.resources import files
+from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING
 
-from entrypoints import examples, instances, tasks
-from vs_sim.api import (
-    InheritedStdioLauncher,
-    LoopSignalSource,
-    MonotonicClock,
-    ProcessSpec,
-    Signals,
-    SubprocessLauncher,
-    SystemClock,
-)
+from vs_sim.api import InheritedStdioLauncher, LoopSignalSource, Signals
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vs_sim.api import (
-        Clock,
-        ForegroundChild,
-        ForegroundLauncher,
-        ProcessLauncher,
-        SignalSource,
-    )
-
-_MIN_NODE_MAJOR = 20
-
-#: Files and directories whose changes trigger a source-TUI rebuild, relative to
-#: the repository root. Mirrors the staleness check the old ``./vs`` script used.
-#:
-#: Principle: watch only inputs to the *shipped bundle* (``clients/tui/dist``),
-#: not everything that happens to live nearby. On the Python side that means
-#: the modules that actually shape ``ProtocolDocument`` in
-#: ``server.api.schema`` -- ``events.py``, ``protocol.py``, and
-#: ``diagnostics.py`` -- not all of ``src/server``. None of the other server
-#: modules feed the Pydantic models serialized into the schema, so changes to
-#: them cannot change the generated output and are deliberately excluded here.
-_REBUILD_WATCH_FILES: tuple[str, ...] = (
-    "clients/libs/contracts/package.json",
-    "clients/libs/contracts/tsconfig.json",
-    "clients/libs/contracts/tsconfig.lib.json",
-    "clients/libs/run-state/package.json",
-    "clients/libs/run-state/tsconfig.json",
-    "clients/libs/run-state/tsconfig.lib.json",
-    "clients/libs/run-state/tsconfig.performance.json",
-    "clients/libs/run-state/tsconfig.rounds.json",
-    "clients/libs/run-state/tsconfig.transcript.json",
-    "clients/libs/transport/package.json",
-    "clients/libs/transport/tsconfig.json",
-    "clients/libs/transport/tsconfig.lib.json",
-    "clients/libs/transport-node/package.json",
-    "clients/libs/transport-node/tsconfig.json",
-    "clients/libs/transport-node/tsconfig.lib.json",
-    "clients/tui/package.json",
-    "clients/tui/tsconfig.json",
-    "clients/tui/tsconfig.check.json",
-    "clients/tools/tsconfig.base.json",
-    "clients/turbo.json",
-    "clients/package.json",
-    "clients/pnpm-lock.yaml",
-    "clients/pnpm-workspace.yaml",
-    "clients/biome.json",
-    # Inputs to `generate:protocol` (python -m server.api.schema), which
-    # feeds clients/libs/contracts' generated types and, downstream, the TUI
-    # bundle. See the principle above for why this is the full set, no more.
-    "src/server/api/schema.py",
-    "src/server/events.py",
-    "src/server/api/protocol.py",
-    "src/server/controller.py",
-    "src/server/diagnostics.py",
-    "src/server/settings.py",
-)
-_REBUILD_WATCH_DIRS: tuple[str, ...] = (
-    "clients/libs/contracts/src",
-    "clients/libs/run-state/src",
-    "clients/libs/transport/src",
-    "clients/libs/transport-node/src",
-    "clients/tui/src",
-)
+    from vs_sim.api import ForegroundChild, ForegroundLauncher, SignalSource
 
 
 @dataclass(frozen=True)
 class LauncherHost:
-    """What the launcher runs on: how it starts processes, the terminal child, and time.
+    """Injected child process and signal boundaries."""
 
-    The defaults are the real operating system; a test passes Fakes.
-    """
-
-    processes: ProcessLauncher = field(default_factory=SubprocessLauncher)
-    """Starts the probes and builds whose output the launcher reads."""
     children: ForegroundLauncher = field(default_factory=InheritedStdioLauncher)
-    """Starts the engine or TUI that shares this terminal."""
-    clock: Clock = field(default_factory=MonotonicClock)
-    """Times the dependency install and the TUI rebuild for the messages."""
     signals: SignalSource = field(default_factory=LoopSignalSource)
-    """Where this process's signals arrive."""
 
 
-@dataclass(frozen=True)
-class _Captured:
-    """The status and decoded output of a finished probe or build step."""
-
-    returncode: int
-    stdout: str
-    stderr: str
-
-
-def _run_captured(host: LauncherHost, argv: list[str], cwd: Path | None = None) -> _Captured:
-    """Run *argv* to completion and return its status and output.
-
-    Raises ``OSError`` when the program cannot be started.
-    """
-
-    async def run() -> _Captured:
-        process = await host.processes.start(ProcessSpec(tuple(argv), cwd=cwd))
-        outcome = await process.wait()
-        return _Captured(
-            outcome.returncode,
-            outcome.stdout.decode(errors="replace"),
-            outcome.stderr.decode(errors="replace"),
-        )
-
-    return asyncio.run(run())
-
-
-@dataclass(frozen=True)
-class BundledTui:
-    """Paths needed to launch the wheel's self-contained interactive client."""
-
-    root: Path
-    runtime: Path
-    launcher: Path
-
-
-def bundled_tui() -> BundledTui | None:
-    """Return the staged prebuilt TUI paths, or ``None`` when not bundled."""
+def source_checkout_root() -> Path | None:
+    """Return the checkout owning this module, if it has valid project metadata."""
     try:
-        base = Path(str(files("entrypoints"))) / "_tui"
-    except (ModuleNotFoundError, TypeError):  # pragma: no cover - defensive
+        package_file = Path(__file__).resolve()
+        root = package_file.parents[2]
+        if (root / "src" / "entrypoints" / "launcher.py").resolve() != package_file:
+            return None
+        with (root / "pyproject.toml").open("rb") as project_file:
+            project = tomllib.load(project_file).get("project")
+        if not isinstance(project, dict) or project.get("name") != "vibesys":
+            return None
+    except (IndexError, OSError, tomllib.TOMLDecodeError):
         return None
-    if not base.is_dir():
-        return None
-    return BundledTui(
-        root=base,
-        runtime=base / "bin" / "bun",
-        launcher=base / "app" / "dist" / "launcher.js",
-    )
-
-
-def _headless_requested(args: list[str]) -> bool:
-    """Whether to run the engine directly instead of the interactive TUI.
-
-    ``--help``/``-h`` and ``validate`` never need the TUI, so they always go to
-    the engine (and never trigger a source-checkout build).
-    """
-    if (
-        "--headless" in args
-        or "--web" in args
-        or "--web-reopen" in args
-        or "--detach" in args
-        or "--help" in args
-        or "-h" in args
-    ):
-        return True
-    if args and args[0] in {"tui-defaults", "validate", "web"}:
-        return True
-    return not (sys.stdin.isatty() and sys.stdout.isatty())
+    return root
 
 
 def headless_command(args: Sequence[str]) -> list[str]:
-    """The command line that runs ``vibesys ARGS`` without the TUI, under this interpreter.
-
-    The host helper starts detached runs (``--detach``) through it, so a run the
-    desktop app starts runs exactly what ``vibesys --detach`` at a terminal runs.
-    """
-    args = list(args)
-    subcommands = {"web": "entrypoints.web"}
+    """Return the Python child command for a run or detached server."""
+    arguments = list(args)
     module = (
-        subcommands[args[0]]
-        if args and args[0] in subcommands
-        else "entrypoints.server"
-        if (args and args[0] == "tui-defaults")
-        or "--web" in args
-        or "--web-reopen" in args
-        or "--detach" in args
+        "entrypoints.server"
+        if "--web" in arguments or "--web-reopen" in arguments or "--detach" in arguments
         else "entrypoints.headless"
     )
-    if module in subcommands.values():
-        command_args = args[1:]
-    elif module == "entrypoints.server":
-        command_args = args
-    else:
-        command_args = _without_option(args, "--theme")
-    return [sys.executable, "-m", module, *command_args]
+    return [sys.executable, "-m", module, *arguments]
 
 
-def _run_headless(args: list[str], host: LauncherHost) -> int:
-    return call_child(headless_command(args), children=host.children, signals=host.signals)
-
-
-# Signals a supervisor or a closed terminal sends to this process alone; the
-# child must see them too, or it runs on (SIGTERM) or is never told to stop.
-_FORWARDED_SIGNALS = (Signals.SIGTERM, Signals.SIGHUP)
+_FORWARDED_SIGNALS = (Signals.SIGTERM, Signals.SIGHUP, Signals.SIGQUIT, Signals.SIGCONT)
 
 
 def call_child(
@@ -256,20 +84,7 @@ def call_child(
     children: ForegroundLauncher,
     signals: SignalSource,
 ) -> int:
-    """Run *argv* until it exits and return its exit status.
-
-    The child owns everything a run started, including Slurm jobs that only its
-    teardown cancels, so this process never kills it and never exits first.
-    Ctrl-C reaches the child from the terminal (both share the foreground
-    process group), so SIGINT here only keeps waiting; ``subprocess.call``
-    would instead SIGKILL the child 0.25 seconds later, skipping its teardown.
-    SIGTERM and SIGHUP are forwarded to the child. A child killed by a signal
-    reports ``128 + signal``, as a shell does.
-
-    *children* starts the child (in production, one that shares this terminal) and
-    *signals* is where this process's signals arrive (in production, its own, which
-    only the main thread takes); a test passes Fakes of both and delivers by hand.
-    """
+    """Run a child until it exits, forwarding terminal shutdown signals and SIGCONT."""
     return asyncio.run(run_child(argv, env=env, children=children, signals=signals))
 
 
@@ -280,19 +95,24 @@ async def run_child(
     children: ForegroundLauncher,
     signals: SignalSource,
 ) -> int:
-    """:func:`call_child` on the running event loop, for a caller that drives the loop."""
+    """Run the child on an existing event loop without preempting its teardown."""
     started: list[ForegroundChild] = []
+
+    interrupts: list[Signals] = []
 
     def forward(number: Signals) -> None:
         for child in started:
             child.send_signal(number)
 
-    def wait_for_child() -> None:
-        """The terminal already delivered SIGINT to the child; keep waiting."""
+    def interrupt() -> None:
+        """Forward the first SIGINT as it is, and force the run to end on a later one."""
+        if started:
+            forward(Signals.SIGTERM if interrupts else Signals.SIGINT)
+            interrupts.append(Signals.SIGINT)
 
     installed: list[Signals] = []
     try:
-        signals.add_handler(Signals.SIGINT, wait_for_child)
+        signals.add_handler(Signals.SIGINT, interrupt)
         installed.append(Signals.SIGINT)
         for number in _FORWARDED_SIGNALS:
             signals.add_handler(number, partial(forward, number))
@@ -306,345 +126,24 @@ async def run_child(
     return 128 - returncode if returncode < 0 else returncode
 
 
-def _without_option(args: list[str], option: str) -> list[str]:
-    """Remove one value-bearing launcher option from an argument vector."""
-    remaining: list[str] = []
-    skip_next = False
-    prefix = f"{option}="
-    for argument in args:
-        if skip_next:
-            skip_next = False
-            continue
-        if argument == option:
-            skip_next = True
-            continue
-        if argument.startswith(prefix):
-            continue
-        remaining.append(argument)
-    return remaining
-
-
-# ---------------------------------------------------------------------------
-# Tier 1: prebuilt payload bundled into a platform wheel
-# ---------------------------------------------------------------------------
-
-
-def _bundled_runtime_missing_message() -> str:
-    return (
-        "vibesys: the bundled Bun runtime or TUI launcher is missing or not executable.\n"
-        "Reinstall the platform wheel, or run headless instead:\n"
-        "  vibesys --headless --project /path/to/repository --task TASK ..."
-    )
-
-
-def _run_bundled_tui(
-    bundle: BundledTui, args: list[str], host: LauncherHost, trace_env: dict[str, str]
-) -> int:
-    if not bundle.runtime.is_file() or not os.access(bundle.runtime, os.X_OK):
-        sys.stderr.write(_bundled_runtime_missing_message() + "\n")
-        return 1
-    if not bundle.launcher.is_file():
-        sys.stderr.write(_bundled_runtime_missing_message() + "\n")
-        return 1
-
-    env = {
-        **os.environ,
-        "BUN_CONFIG_SKIP_INSTALL_PACKAGES": "1",
-        "VIBESYS_PYTHON": sys.executable,
-        "VIBESYS_TUI_RUNTIME": str(bundle.runtime),
-        # Launch anchor and stderr-trace request. The launcher (launcher.ts)
-        # forwards its own environment to the frontend it spawns, so these
-        # reach clients/tui/src/boot-trace.ts unchanged.
-        **trace_env,
-    }
-    return call_child(
-        [str(bundle.runtime), str(bundle.launcher), *args],
-        env=env,
-        children=host.children,
-        signals=host.signals,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Tier 2: build and run the TUI from a source checkout (subsumes ./vs)
-# ---------------------------------------------------------------------------
-
-
-def _reject_json_constant(value: str) -> NoReturn:
-    message = "Invalid JSON constant"
-    raise json.JSONDecodeError(message, value, 0)
-
-
-def source_checkout_root() -> Path | None:
-    """Return the VibeSys checkout owning this module, or ``None``."""
-    try:
-        package_file = Path(__file__).resolve()
-        root = package_file.parents[2]
-        if (root / "src" / "entrypoints" / "launcher.py").resolve() != package_file:
-            return None
-
-        with (root / "pyproject.toml").open("rb") as pyproject_file:
-            pyproject = tomllib.load(pyproject_file)
-        project = pyproject.get("project")
-        if not isinstance(project, dict) or project.get("name") != "vibesys":
-            return None
-
-        with (root / "clients" / "tui" / "package.json").open(encoding="utf-8") as package_file:
-            tui_package = json.load(package_file, parse_constant=_reject_json_constant)
-        if not isinstance(tui_package, dict) or tui_package.get("name") != "@vibesys/tui":
-            return None
-    except (IndexError, OSError, UnicodeDecodeError, json.JSONDecodeError, tomllib.TOMLDecodeError):
-        return None
-    return root
-
-
-def _bun_executable() -> Path | None:
-    found = shutil.which("bun")
-    if found is not None:
-        return Path(found)
-    fallback = Path.home() / ".bun" / "bin" / "bun"
-    return fallback if fallback.is_file() and os.access(fallback, os.X_OK) else None
-
-
-def _node_executable() -> Path | None:
-    found = shutil.which("node")
-    return Path(found) if found is not None else None
-
-
-def _node_major(node: Path, host: LauncherHost) -> int | None:
-    try:
-        result = _run_captured(host, [str(node), "--version"])
-    except OSError:
-        return None
-    if result.returncode != 0:
-        return None
-    match = re.match(r"v(\d+)", result.stdout.strip())
-    return int(match.group(1)) if match else None
-
-
-def _pnpm_argv() -> list[str] | None:
-    pnpm = shutil.which("pnpm")
-    if pnpm is not None:
-        return [pnpm]
-    corepack = shutil.which("corepack")
-    if corepack is not None:
-        return [corepack, "pnpm"]
-    return None
-
-
-def _stale_reason(root: Path) -> str | None:
-    """Return why the source TUI bundle needs a rebuild, or ``None`` if fresh.
-
-    The result is a path relative to ``root`` (or a short description for the
-    missing-output case), meant for a user-facing message. It names the first
-    offending input found while scanning ``_REBUILD_WATCH_FILES`` then
-    ``_REBUILD_WATCH_DIRS`` in order, not necessarily the most-recently-changed
-    one.
-    """
-    dist = root / "clients" / "tui" / "dist"
-    entry = dist / "index.js"
-    launcher = dist / "launcher.js"
-    if not entry.is_file() or not launcher.is_file():
-        return "clients/tui/dist/index.js (missing)"
-    reference = entry.stat().st_mtime
-    for rel in _REBUILD_WATCH_FILES:
-        path = root / rel
-        if path.is_file() and path.stat().st_mtime > reference:
-            return rel
-    for rel in _REBUILD_WATCH_DIRS:
-        base = root / rel
-        if not base.is_dir():
-            continue
-        for path in base.rglob("*"):
-            if path.is_file() and path.stat().st_mtime > reference:
-                return str(path.relative_to(root))
-    return None
-
-
-def _needs_rebuild(root: Path) -> bool:
-    return _stale_reason(root) is not None
-
-
-#: The pnpm workspace root, relative to the repository root. Every pnpm
-#: command runs here, and `node_modules` and the lockfile live here.
-_WORKSPACE_REL = "clients"
-
-#: Marker written under the workspace `node_modules` after a successful
-#: `pnpm install`, so later launches can skip reinstalling when nothing changed.
-_INSTALL_STAMP_REL = "node_modules/.vibesys-install-stamp"
-
-
-def _needs_install(root: Path) -> bool:
-    """Whether `pnpm install --frozen-lockfile` must run before codegen/build.
-
-    Skipped when `node_modules` already exists and the lockfile is no newer
-    than the stamp file written after the last successful install.
-    """
-    workspace = root / _WORKSPACE_REL
-    if not (workspace / "node_modules").is_dir():
-        return True
-    stamp = workspace / _INSTALL_STAMP_REL
-    if not stamp.is_file():
-        return True
-    lockfile = workspace / "pnpm-lock.yaml"
-    return lockfile.is_file() and lockfile.stat().st_mtime > stamp.stat().st_mtime
-
-
-def _write_install_stamp(root: Path) -> None:
-    stamp = root / _WORKSPACE_REL / _INSTALL_STAMP_REL
-    stamp.parent.mkdir(parents=True, exist_ok=True)
-    stamp.touch()
-
-
-def _run_pnpm_install(pnpm: list[str], root: Path, host: LauncherHost) -> bool:
-    sys.stderr.write("vibesys: installing JS dependencies (pnpm install --frozen-lockfile)...\n")
-    started = host.clock.now()
-    result = _run_captured(host, [*pnpm, "install", "--frozen-lockfile"], root / _WORKSPACE_REL)
-    if result.returncode != 0:
-        sys.stderr.write("vibesys: failed to install JS dependencies:\n")
-        sys.stderr.write(result.stdout)
-        sys.stderr.write(result.stderr)
-        return False
-    _write_install_stamp(root)
-    elapsed = host.clock.now() - started
-    sys.stderr.write(f"vibesys: dependencies installed ({elapsed:.1f}s)\n")
-    return True
-
-
-def _run_codegen_and_build(pnpm: list[str], root: Path, host: LauncherHost) -> bool:
-    steps = (
-        [*pnpm, "--dir", "contracts", "generate:protocol"],
-        [*pnpm, "build:clients"],
-    )
-    for command in steps:
-        result = _run_captured(host, command, root / _WORKSPACE_REL)
-        if result.returncode != 0:
-            sys.stderr.write("vibesys: failed to build the interactive client:\n")
-            sys.stderr.write(result.stdout)
-            sys.stderr.write(result.stderr)
-            return False
-    return True
-
-
-def _ensure_source_tui_built(root: Path, host: LauncherHost) -> bool:
-    pnpm = _pnpm_argv()
-    if pnpm is None:
-        sys.stderr.write(
-            "vibesys: pnpm is required to build the interactive client. Install pnpm "
-            "or enable Corepack, or run headless with --headless.\n"
-        )
-        return False
-
-    if _needs_install(root) and not _run_pnpm_install(pnpm, root, host):
-        return False
-    if _run_codegen_and_build(pnpm, root, host):
-        return True
-
-    # The build failed even though the install-skip heuristic considered
-    # dependencies fresh (e.g. a partially removed node_modules). Fall back to
-    # a full install and retry once before giving up.
-    sys.stderr.write("vibesys: build failed; retrying after a full dependency install...\n")
-    return _run_pnpm_install(pnpm, root, host) and _run_codegen_and_build(pnpm, root, host)
-
-
-def _run_source_tui(
-    root: Path, args: list[str], host: LauncherHost, trace_env: dict[str, str]
-) -> int:
-    bun = _bun_executable()
-    if bun is None:
-        sys.stderr.write(
-            "vibesys: Bun is required by the OpenTUI client. Install it from "
-            "https://bun.sh, or run headless with --headless.\n"
-        )
-        return 1
-    node = _node_executable()
-    if node is None or (_node_major(node, host) or 0) < _MIN_NODE_MAJOR:
-        sys.stderr.write(
-            f"vibesys: Node.js {_MIN_NODE_MAJOR}+ is required for the interactive client, "
-            "or run headless with --headless.\n"
-        )
-        return 1
-    if _needs_rebuild(root):
-        reason = _stale_reason(root) or "clients/tui/dist/index.js (missing)"
-        sys.stderr.write(
-            f"vibesys: TUI bundle is stale (changed: {reason}); rebuilding (~30-60s)...\n"
-        )
-        started = host.clock.now()
-        if not _ensure_source_tui_built(root, host):
-            return 1
-        elapsed = host.clock.now() - started
-        sys.stderr.write(f"vibesys: TUI bundle rebuilt ({elapsed:.1f}s)\n")
-
-    launcher = root / "clients" / "tui" / "dist" / "launcher.js"
-    env = {
-        **os.environ,
-        "VIBESYS_PYTHON": sys.executable,
-        # Ensure the launcher's Bun frontend is discoverable even when Bun only
-        # lives under ~/.bun/bin.
-        "PATH": os.pathsep.join([str(bun.parent), os.environ.get("PATH", "")]),
-        # Launch anchor and stderr-trace request; see _run_bundled_tui.
-        **trace_env,
-    }
-    return call_child(
-        [str(node), str(launcher), *args], env=env, children=host.children, signals=host.signals
-    )
-
-
-#: Host commands that run in this process. Each module imports only light
-#: contracts, so the command answers in the interpreter's startup time instead
-#: of paying for the engine twice (here and in a child).
-_LIGHT_COMMANDS: dict[str, Callable[[list[str]], int]] = {
-    "example": examples.main,
-    "instances": instances.main,
-    "tasks": tasks.main,
+_LIGHT_COMMANDS: dict[str, str] = {
+    "host": "entrypoints.host",
+    "evals": "entrypoints.evals",
+    "example": "entrypoints.examples",
+    "instances": "entrypoints.instances",
+    "tasks": "entrypoints.tasks",
 }
 
 
-def _launch_trace_env() -> dict[str, str]:
-    """Anchor the boot trace's launch time now; return the env a frontend child needs."""
-    # lint-waiver: LW-182902 [PLC0415]; light host commands are routed before the engine facade loads.
-    # > The boot trace is reached through `vibesys.api`, which imports the engine
-    # > (about 1.7 s). A module-level import charges that to `vibesys instances`
-    # > and `vibesys tasks`; a separate light launcher module would split one
-    # > routing decision across two files without removing this deferred import.
-    from vibesys.api import boot_trace  # noqa: PLC0415
-
-    boot_trace.install(boot_trace.BootTrace(wall=SystemClock(), elapsed=MonotonicClock()))
-    boot_trace.mark_launch()
-    return boot_trace.child_env()
-
-
 def main(argv: list[str] | None = None, host: LauncherHost | None = None) -> int:
-    """Entry point for the ``vibesys`` console script; *host* is the real system by default."""
+    """Entry point for the ``vibesys`` console script."""
     host = LauncherHost() if host is None else host
     args = list(sys.argv[1:] if argv is None else argv)
-
     light = _LIGHT_COMMANDS.get(args[0]) if args else None
     if light is not None:
-        return light(args[1:])
-
-    # Anchored before any doctor check, staleness check, or rebuild, so the
-    # frontend's boot trace reports wall time since the user actually ran the
-    # command, including a source-checkout rebuild.
-    trace_env = _launch_trace_env()
-
-    if _headless_requested(args):
-        return _run_headless(args, host)
-
-    bundle = bundled_tui()
-    if bundle is not None:
-        return _run_bundled_tui(bundle, args, host, trace_env)
-
-    root = source_checkout_root()
-    if root is not None:
-        return _run_source_tui(root, args, host, trace_env)
-
-    sys.stderr.write(
-        "vibesys: interactive TUI is not bundled and no source checkout was found; "
-        "running headless. Install a supported platform wheel to get the TUI, or "
-        "pass --headless to silence this notice.\n"
-    )
-    return _run_headless(args, host)
+        command: Callable[[list[str]], int] = import_module(light).main
+        return command(args[1:])
+    return call_child(headless_command(args), children=host.children, signals=host.signals)
 
 
 if __name__ == "__main__":  # pragma: no cover

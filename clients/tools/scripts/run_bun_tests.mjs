@@ -19,27 +19,31 @@
  * is the record of what it collected, so the gate reads the runner's answer instead of scraping
  * its console summary.
  *
- * `--max-concurrency 1`, the per-test bound and the source condition live here rather than in each
- * package's `test` script, so the packages cannot drift apart on them. The runner deliberately takes test roots and nothing else:
+ * `--max-concurrency 1` and the source condition live here, and the hang guard lives in the shared
+ * runner configuration, rather than in each
+ * package's `test` script, so the packages cannot drift apart. The runner takes test roots only:
  * a bun flag that changed which files run (`-t`, `--bail`, `--only`) would make the gate report
  * the rest of the suite as missing, so ad-hoc runs call `bun test` directly.
  */
 
-import {spawn} from 'node:child_process';
+import {execFileSync, spawn} from 'node:child_process';
 import {mkdtempSync, readdirSync, readFileSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join, resolve} from 'node:path';
+import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {PER_TEST_BOUND_MS} from './test_runner_config.mjs';
 
 const RUNNER = 'bun';
 /**
- * The per-test bound, in milliseconds. It only guards against a hang: no test waits on time (they
- * run on fakes and virtual clocks), so a test that reaches it is stuck, not slow. Bun's 5 s default
- * is too close to legitimate work: a model-based machine test folds 300 seeds of up to 60 steps
- * (about 1 s alone on a developer machine) and took 5.3 and 6.6 s on a CI runner while turbo ran
- * the other packages' suites beside it. 60 s is far above that and still ends a stuck run quickly.
+ * The Bun version is pinned in `packaging/fetch_bun.py`, which CI uses to install it.
+ * A Bun older than the pin resolves imports differently (1.3.9 does not map
+ * `./welcome.cjs` to its `welcome.cts` source), so a test run on it fails on a module it cannot
+ * find, which reads as a missing build and not as the wrong runtime.
  */
-const PER_TEST_BOUND_MS = 60_000;
+const BUN_PIN_FILE = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../../packaging/fetch_bun.py',
+);
 const RUNNER_ARGUMENTS = [
   'test',
   '--conditions=@vibesys/source',
@@ -53,7 +57,7 @@ const REPORT_FILE = 'collected.xml';
 
 /**
  * Bun's test-file discovery rules, transcribed, because the gate has to glob the same set bun
- * does. Verified against bun 1.4.2, the version `packaging/tui_packaging.py` pins: a name is a
+ * does. Verified against bun 1.4.2, the version `packaging/fetch_bun.py` pins: a name is a
  * test file when `test` or `spec` is its last dot- or underscore-separated component before the
  * extension, for each of `js`, `jsx`, `ts`, `tsx`, `mjs`, `cjs`, `mts`, and `cts`; a directory
  * whose name starts with a dot or is `node_modules` is not searched, while a *file* whose name
@@ -133,6 +137,45 @@ export function collectionErrors(expected, collected) {
   return errors;
 }
 
+/**
+ * The Bun version `packaging/fetch_bun.py` pins, read from its `BUN_VERSION = "x.y.z"` line.
+ *
+ * @param {string} source the text of that file
+ * @returns {string}
+ */
+export function pinnedBunVersion(source) {
+  const match = source.match(/^BUN_VERSION = "(\d+\.\d+\.\d+)"$/m);
+  if (match === null) throw new Error(`${BUN_PIN_FILE}: no BUN_VERSION = "x.y.z" line`);
+  return match[1];
+}
+
+/**
+ * The rejection for a Bun other than the pinned one, or `undefined` when they agree.
+ *
+ * @param {string} actual the version `bun --version` printed
+ * @param {string} pinned the version `pinnedBunVersion` read
+ * @returns {string | undefined}
+ */
+export function bunVersionError(actual, pinned) {
+  if (actual === pinned) return undefined;
+  return (
+    `bun ${actual} is on PATH but the clients tests need bun ${pinned} (the pin in ` +
+    'packaging/fetch_bun.py, the version CI installs). Another version resolves imports ' +
+    'differently, so a test can fail on a module it cannot find. Install the pinned version, ' +
+    'for example `python3 packaging/fetch_bun.py --target <linux-x86_64|linux-aarch64|macos-arm64> ' +
+    '--output <dir>/bin/bun`, and put that directory first on PATH.'
+  );
+}
+
+/** The version of the Bun on PATH, or a rejection saying there is none. */
+function installedBunVersion() {
+  try {
+    return execFileSync(RUNNER, ['--version'], {encoding: 'utf8'}).trim();
+  } catch (error) {
+    throw new Error(`cannot run \`${RUNNER} --version\`: ${error.message}`);
+  }
+}
+
 /** The test roots relative to the package, or a rejection naming why an argument is not one. */
 function parseRoots(argv) {
   if (argv.length === 0) {
@@ -206,6 +249,14 @@ function runSuite(roots, reportFile) {
 
 async function main(argv) {
   const roots = parseRoots(argv);
+  const versionError = bunVersionError(
+    installedBunVersion(),
+    pinnedBunVersion(readFileSync(BUN_PIN_FILE, 'utf8')),
+  );
+  if (versionError !== undefined) {
+    console.error(versionError);
+    return 1;
+  }
   const expected = testFileNames(process.cwd(), roots);
   // The report is this process's to create and to remove, on every path, and a per-run directory
   // keeps two packages' suites from naming the same file under `pnpm -r`.

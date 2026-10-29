@@ -9,6 +9,16 @@ type WorkspacePolicy = NonNullable<KnipConfig['workspaces']>[string];
 // name instead of silently falling back to knip's default entry-point heuristics, which is how
 // `web` came to be audited against defaults meant for a library rather than a bundled app.
 const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
+  'libs/connection': {
+    entry: ['src/index.ts', 'src/testing/index.ts', 'src/**/*.test.ts', 'node-tests/**/*.test.ts'],
+    project: ['src/**/*.ts', 'node-tests/**/*.ts'],
+  },
+  'libs/proto': {
+    entry: ['src/index.ts', 'tests/*.mjs'],
+    project: ['src/**/*.ts', '*.mjs', 'tests/*.mjs'],
+    // Tool-owned bindings are guarded by the proto regenerate-and-diff check.
+    ignore: ['src/generated/**'],
+  },
   'libs/contracts': {
     entry: ['src/**/*.test.ts'],
     project: ['src/**/*.ts'],
@@ -28,35 +38,6 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
     ],
     project: ['src/**/*.ts', 'bench/**/*.ts'],
   },
-  tui: {
-    entry: [
-      // The frontend process: the launcher (the `bin`, an entry by default) spawns `dist/index.js`.
-      'src/index.ts',
-      'src/**/*.test.ts',
-      // Replay harness: `mock-ui.sh` starts `mock-server.ts`; `harness.test.ts` runs under `bun test`.
-      'dev/mock-server.ts',
-      'dev/**/*.test.ts',
-      // Hand-run benchmark (`bun benchmarks/experiment-refresh.ts`).
-      'benchmarks/*.ts',
-    ],
-    project: ['src/**/*.ts', 'dev/**/*.ts', 'benchmarks/**/*.ts'],
-  },
-  'apps/web': {
-    entry: [
-      // The desktop shell's run page (`desktop.html`, built by `vite.desktop.config.ts`); knip's
-      // Vite plugin finds the browser page (`index.html` -> `src/app/main.tsx`) itself.
-      'src/app/desktop-main.tsx',
-      // The browser transport bundle's entry (`vite.browser.config.ts`).
-      'src/platform/backend.ts',
-      'src/**/*.test.ts',
-      'src/**/*.test.tsx',
-      // Playwright specs, run by `pnpm --filter @vibesys/app-web test:e2e`.
-      'e2e/**/*.spec.ts',
-      // Loaded by gateway-form-harness.html rather than by a TypeScript import.
-      'e2e/gateway-form-harness.ts',
-    ],
-    project: ['src/**/*.ts', 'src/**/*.tsx', 'e2e/**/*.ts'],
-  },
   'apps/desktop-main': {
     // The Electron main process and the two sandboxed preloads (`.cts`, loaded by path from
     // `src/main/app-security.ts`) are the package's exports, entries by default; the build's copy
@@ -71,16 +52,31 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
       'e2e/**/*.{ts,mjs}',
     ],
   },
-  'apps/desktop-renderer': {
-    // The welcome page's entry (`welcome.html`, built by `vite.config.ts`).
-    entry: ['src/main.tsx', 'src/**/*.test.ts', 'src/**/*.test.tsx', 'e2e/**/*.spec.ts'],
-    project: ['src/**/*.ts', 'src/**/*.tsx', 'e2e/**/*.{ts,js}'],
+  'apps/desktop-shell': {
+    // The app shell's page (`shell.html`, built by `vite.config.ts`) and its Playwright journey.
+    entry: [
+      'src/main.tsx',
+      'src/**/*.test.ts',
+      'src/**/*.test.tsx',
+      'e2e/**/*.spec.ts',
+      // The static server the suite starts (`playwright.config.ts`).
+      'e2e/serve-dist.mjs',
+    ],
+    project: ['src/**/*.ts', 'src/**/*.tsx', 'e2e/**/*.{ts,mjs}'],
+  },
+  'apps/ui-gallery': {
+    // The development-only component gallery (`index.html`, built by `vite.config.ts`), its
+    // Playwright suite, and the static server that suite starts (`playwright.config.ts`).
+    entry: ['src/main.tsx', 'src/**/*.test.ts', 'e2e/**/*.spec.ts', 'e2e/serve-dist.mjs'],
+    project: ['src/**/*.ts', 'src/**/*.tsx', 'e2e/**/*.{ts,mjs}'],
   },
 };
 
 // Repository tooling run by `node tools/scripts/...`; `*.test.mjs` runs under `node --test`. The
 // workspace root is not a package, so it is not part of the derived set.
 const ROOT_POLICY: WorkspacePolicy = {
+  // Invoked by root scripts/generate_proto.sh through buf.gen.yaml.
+  ignoreDependencies: ['@bufbuild/protoc-gen-es'],
   entry: ['tools/scripts/*.mjs'],
   project: ['tools/scripts/**/*.mjs'],
 };
@@ -111,9 +107,9 @@ for (const {name, directory, manifest} of layout.packages) {
 }
 
 const config: KnipConfig = {
-  // External programs run by scripts or tests, not npm packages: `uv` (generate:protocol, dev
-  // machines only) and `pkill` (harness.test.ts cleanup).
-  ignoreBinaries: ['uv', 'pkill'],
+  // The protocol generator calls an external Python tool.
+  // Go is a system build tool, like uv; gateway builds report its absence explicitly.
+  ignoreBinaries: ['uv', 'go'],
   workspaces,
 };
 

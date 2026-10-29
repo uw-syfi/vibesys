@@ -1,0 +1,80 @@
+{
+  "id": "helper-run-events-kinds-gated",
+  "protocol": "host-helper",
+  "title": "runs.read_events kinds needs the trace events feature",
+  "description": "After a hello that negotiated run_history but not run_trace_events, runs.read_events naming kinds is answered feature_not_negotiated and nothing is read; a read naming none is not refused (here, project_missing).",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "run_history"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "run_history"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "runs.read_events",
+        "request_id": "k",
+        "deadline_ms": 10000,
+        "project": "/nonexistent-vibesys-conformance/project",
+        "run_id": "20261010-120000-11111111-run",
+        "from_sequence": 1,
+        "max": 100,
+        "kinds": "trace"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "k",
+        "code": "feature_not_negotiated"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "runs.read_events",
+        "request_id": "p",
+        "deadline_ms": 10000,
+        "project": "/nonexistent-vibesys-conformance/project",
+        "run_id": "20261010-120000-11111111-run",
+        "from_sequence": 1,
+        "max": 100
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "p",
+        "code": "project_missing"
+      }
+    }
+  ]
+}

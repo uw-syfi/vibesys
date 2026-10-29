@@ -21,13 +21,22 @@ from vs_sandbox.api import (
     ContainerRuntimeUnavailableError,
     DockerSandbox,
     NestedDaemonError,
+    require_sysbox_runtime,
+    sysbox_unavailable,
     workspace_container_root,
 )
-from vs_sandbox.api.testing import FakeDockerEngine, ScriptedDockerCli
-from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads, examples
+from vs_sandbox.api.testing import (
+    FakeDockerEngine,
+    ScriptedDockerCli,
+    docker_missing,
+    docker_result,
+)
+from vs_sim.api import ProbeResult
+from vs_sim.api.testing import FakePipedProcessLauncher, ScriptedProbe, SimThreads, examples
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+from vs_sim.api import DISCARD
 
 _IMAGE = "agent-image"
 _SYSBOX_RUNTIMES = ("runc", "sysbox-runc")
@@ -81,7 +90,7 @@ def test_sysbox_sandbox_runs_under_the_sysbox_runtime_with_its_own_daemon(tmp_pa
     engine = _engine(tmp_path, runtimes=_SYSBOX_RUNTIMES)
     sandbox, _ = _sysbox_sandbox(tmp_path, engine)
 
-    sandbox.start()
+    sandbox.start(output=DISCARD)
     try:
         run = _run_call(engine)
         assert _flag_values(run, "--runtime") == ["sysbox-runc"]
@@ -96,7 +105,7 @@ def test_sysbox_sandbox_never_mounts_the_host_socket_or_runs_privileged(tmp_path
     engine = _engine(tmp_path, runtimes=_SYSBOX_RUNTIMES)
     sandbox, _ = _sysbox_sandbox(tmp_path, engine)
 
-    sandbox.start()
+    sandbox.start(output=DISCARD)
     sandbox.stop()
 
     run = _run_call(engine)
@@ -108,7 +117,7 @@ def test_the_daemon_is_started_and_awaited_before_the_sandbox_is_ready(tmp_path:
     engine = _engine(tmp_path, runtimes=_SYSBOX_RUNTIMES)
     sandbox, _ = _sysbox_sandbox(tmp_path, engine)
 
-    sandbox.start()
+    sandbox.start(output=DISCARD)
     sandbox.stop()
 
     root_execs = [call for call in engine.calls if call[1] == "exec" and "root" in call[:5]]
@@ -127,7 +136,7 @@ def test_a_daemon_that_never_becomes_ready_fails_the_start_and_releases_the_cont
     sandbox, _ = _sysbox_sandbox(tmp_path, engine)
 
     with pytest.raises(NestedDaemonError, match="not ready"):
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
     with pytest.raises(RuntimeError, match="no running container"):
         _ = sandbox.container_id
@@ -141,7 +150,7 @@ def test_a_host_without_sysbox_fails_early_and_never_falls_back_to_the_socket(
     sandbox, _ = _sysbox_sandbox(tmp_path, engine)
 
     with pytest.raises(ContainerRuntimeUnavailableError) as raised:
-        sandbox.start()
+        sandbox.start(output=DISCARD)
 
     message = str(raised.value)
     assert "sysbox-runc" in message
@@ -170,7 +179,7 @@ def test_an_ordinary_sandbox_is_unchanged(tmp_path: Path) -> None:
         host_workspace=str(workspace), image=_IMAGE, docker=engine, threads=SimThreads()
     )
 
-    sandbox.start()
+    sandbox.start(output=DISCARD)
     sandbox.stop()
 
     run = _run_call(engine)
@@ -188,10 +197,14 @@ def test_an_ordinary_sandbox_argv_and_metadata_are_exactly_the_historical_ones(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     sandbox = DockerSandbox(
-        host_workspace=str(workspace), image=_IMAGE, docker=engine, threads=SimThreads()
+        host_workspace=str(workspace),
+        image=_IMAGE,
+        docker=engine,
+        threads=SimThreads(),
+        log_path=tmp_path / "docker.log",
     )
 
-    sandbox.start()
+    sandbox.start(output=DISCARD)
     sandbox.stop()
 
     run = _run_call(engine)
@@ -200,7 +213,7 @@ def test_an_ordinary_sandbox_argv_and_metadata_are_exactly_the_historical_ones(
     assert run[5:7] == ("-v", f"{workspace}:/workspace")
     assert run[-5:] == ("--workdir", "/workspace", _IMAGE, "sleep", "infinity")
     assert "--init" in run  # PID 1 must handle SIGTERM so `docker stop` is prompt
-    metadata = json.loads((workspace / ".docker_metadata.json").read_text())
+    metadata = json.loads((tmp_path / "docker.metadata.json").read_text())
     assert set(metadata) == {
         "image", "gpus", "devices", "group_add", "entrypoint", "shm_size",
         "bind_mounts", "env", "symlink_commands",
@@ -210,7 +223,7 @@ def test_an_ordinary_sandbox_argv_and_metadata_are_exactly_the_historical_ones(
 def test_a_gpu_reselection_leaves_a_sysbox_sandbox_and_its_daemon_alone(tmp_path: Path) -> None:
     engine = _engine(tmp_path, runtimes=_SYSBOX_RUNTIMES)
     sandbox, _ = _sysbox_sandbox(tmp_path, engine)
-    sandbox.start()
+    sandbox.start(output=DISCARD)
     container = sandbox.container_id
 
     sandbox.restart_with_gpus("device=1")
@@ -224,7 +237,7 @@ def test_the_workspace_mounts_at_its_host_path(tmp_path: Path) -> None:
     engine = _engine(tmp_path, runtimes=_SYSBOX_RUNTIMES)
     sandbox, workspace = _sysbox_sandbox(tmp_path, engine)
 
-    sandbox.start()
+    sandbox.start(output=DISCARD)
     sandbox.stop()
 
     assert f"{workspace}:{workspace}" in _flag_values(_run_call(engine), "-v")
@@ -269,7 +282,7 @@ def test_exec_runs_in_the_agent_cwd_at_the_host_path(
         docker_in_docker=True,
         threads=SimThreads(),
     )
-    sandbox.start()
+    sandbox.start(output=DISCARD)
     try:
         cwd = workspace.joinpath(*relative)
         argv = sandbox.wrap(["true"], cwd)
@@ -296,7 +309,7 @@ def test_a_same_path_workspace_needs_no_container_runtime(
         same_path_workspace=True,
         threads=SimThreads(),
     )
-    sandbox.start()
+    sandbox.start(output=DISCARD)
     try:
         nested = workspace.joinpath(*relative)
         run = _run_call(engine)
@@ -308,3 +321,55 @@ def test_a_same_path_workspace_needs_no_container_runtime(
         assert "info" not in [call[1] for call in engine.calls]
     finally:
         sandbox.stop()
+
+
+_RUNTIME_LISTINGS = st.one_of(
+    st.lists(
+        st.sampled_from(["runc", "sysbox-runc", "nvidia", "kata"]), unique=True, max_size=4
+    ).map(lambda names: json.dumps({name: {} for name in names})),
+    st.sampled_from(["", "null", "[]", "junk", '{"runc": {}', "42"]),
+)
+_LISTING_REPLIES = st.tuples(
+    st.sampled_from([0, 0, 1, 125]),
+    _RUNTIME_LISTINGS,
+    st.sampled_from(["", "Cannot connect to the Docker daemon"]),
+)
+
+
+@given(reply=_LISTING_REPLIES)
+def test_preflight_asks_the_runs_own_sysbox_question_and_gets_its_answer(
+    reply: tuple[int, str, str],
+) -> None:
+    """Regression: a host with no Sysbox passed preflight, then the run stopped after Start.
+
+    The run raises from ``require_sysbox_runtime`` before its image build; the check made
+    ahead of it (``sysbox_unavailable``) reads the same ``docker info`` listing and gives
+    the run's message, for a reply the run accepts and one it refuses alike.
+    """
+    cli = ScriptedDockerCli()
+    cli.always(docker_result(*reply))
+    probe = ScriptedProbe(lambda _argv: ProbeResult(*reply))
+
+    try:
+        require_sysbox_runtime(cli)
+    except ContainerRuntimeUnavailableError as error:
+        runs_answer: str | None = str(error)
+    else:
+        runs_answer = None
+
+    assert sysbox_unavailable(probe) == runs_answer
+    assert probe.calls[0][0] == cli.argvs[0]
+
+
+def test_a_docker_that_cannot_answer_leaves_the_runtime_listing_unreadable() -> None:
+    cli = ScriptedDockerCli()
+    cli.always(docker_missing())
+    probe = ScriptedProbe(lambda _argv: None)
+
+    with pytest.raises(ContainerRuntimeUnavailableError) as raised:
+        require_sysbox_runtime(cli)
+
+    reason = sysbox_unavailable(probe)
+    assert reason is not None
+    assert "Could not list the Docker runtimes" in reason
+    assert "Could not list the Docker runtimes" in str(raised.value)

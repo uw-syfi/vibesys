@@ -225,6 +225,8 @@ class Invocation(Value):
     output_json: str | None = None
     reserved_inputs: tuple[ArtifactRef, ...] = ()
     input_ids: tuple[InputId, ...] = ()
+    guidance_ids: tuple[InputId, ...] = ()
+    """The standing inputs the turn was dispatched with, in the order it received them."""
     evaluation_prefix: EvaluationHistoryCursor | None = None
     pending_suspension: Continuation | None = None
     until: Until
@@ -674,6 +676,8 @@ class DispatchTurn(RequestBase):
     kind: Literal["dispatch_turn"] = "dispatch_turn"
     turn: TurnSpec
     inputs: tuple[SessionInput, ...] = ()
+    guidance: tuple[SessionInput, ...] = ()
+    """The standing inputs in force for this turn when it was dispatched; none is reserved."""
 
 
 class InspectTurn(RequestBase):
@@ -731,6 +735,8 @@ class ResumeSessionTurn(RequestBase):
     kind: Literal["resume_session_turn"] = "resume_session_turn"
     turn: TurnSpec
     inputs: tuple[SessionInput, ...] = ()
+    guidance: tuple[SessionInput, ...] = ()
+    """The standing inputs in force for this turn when it was dispatched; none is reserved."""
     continuation_id: ContinuationId
     publication: ResumeAuthorizationReceipt | None = None
     """The publication proof core held for this continuation when it issued the resume.
@@ -746,6 +752,65 @@ class SessionInputReceived(Value):
 
     kind: Literal["session_input_received"] = "session_input_received"
     input: SessionInput
+
+
+class InputWithdrawRequested(Value):
+    """End one standing input: the signal an operator's withdraw control raises.
+
+    Only core raises it, from a recorded withdraw control; it is not accepted as ingress.
+    """
+
+    kind: Literal["input_withdraw_requested"] = "input_withdraw_requested"
+    input_id: InputId
+
+
+class InputOfferedMidTurn(Value):
+    """The shell is about to offer an interrupt-mode input to a running turn.
+
+    Committed before the provider is asked, so a crash after the call cannot lose the
+    fact that it may have been made. Core records the offer only for a pending
+    interrupt-mode input and an executing session turn that would take it; any other
+    offer is a no-op the shell sees in the committed state before it calls.
+    """
+
+    kind: Literal["input_offered_mid_turn"] = "input_offered_mid_turn"
+    input_id: InputId
+    invocation: InvocationRef
+    now_at: Seconds
+
+
+class InputTakenMidTurn(Value):
+    """The provider took an offered input into its running turn (it answered ``DELIVERED``).
+
+    Committed after the provider's answer. Only a taken offer joins the turn when the turn's
+    acceptance commits; an offer the turn ends without having taken waits for the next turn.
+    A crash between the answer and this commit leaves the offer untaken, so the input reaches
+    a turn again: delivery is at least once. A take for an offer core no longer holds for that
+    turn changes nothing.
+    """
+
+    kind: Literal["input_taken_mid_turn"] = "input_taken_mid_turn"
+    input_id: InputId
+    invocation: InvocationRef
+    now_at: Seconds
+
+
+class InputMidTurnReleased(Value):
+    """An offered input did not stay in the running turn: it waits for the next turn instead.
+
+    The shell raises it when the provider takes no mid-turn input or has no turn running, or
+    when it finds an offer an earlier host made. The turn's own result raises it, before the
+    turn's acceptance, for a message the provider took and then refused (``refused``): the
+    agent never read that one. An offer that already settled, or that core holds for another
+    turn, changes nothing.
+    """
+
+    kind: Literal["input_mid_turn_released"] = "input_mid_turn_released"
+    input_id: InputId
+    invocation: InvocationRef
+    now_at: Seconds
+    refused: bool = False
+    """The provider took the message and then refused it, so the agent did not read it."""
 
 
 class InputReservationRequested(Value):
@@ -940,6 +1005,10 @@ type SessionsEvent = Annotated[
     | SteerReceived
     | InterruptRequested
     | SessionInputReceived
+    | InputWithdrawRequested
+    | InputOfferedMidTurn
+    | InputTakenMidTurn
+    | InputMidTurnReleased
     | InputReservationRequested
     | TurnInputsReserved
     | InputAcceptanceObserved

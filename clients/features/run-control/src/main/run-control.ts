@@ -4,13 +4,14 @@
  * `run.stop`, `instances.list`); each run page's connections are run channels the same connection
  * opens.
  *
- * A run's identity comes from its record (`run_id`), when the app starts or attaches to it; it is
- * never inferred later. Each attached run keeps its own binding, keyed by that `run_id`: attaching,
- * starting, or resuming a run never disturbs a binding under a different key, so one window's run
- * cannot be silently detached by another window's navigation. Whether a run ended comes from the
- * host's pushed registry, a run channel that ended with `run_gone`, or a check that found the run
- * gone. The page keeps its own resume logic but no retry timer: while its page still owns it, a dial
- * waits for the host connection to be ready, and the page is woken when the connection recovers.
+ * A run's identity is its host and the `run_id` from its record, when the app starts or attaches to
+ * it; it is never inferred later. Each attached run keeps its own binding under that composite
+ * identity: attaching, starting, or resuming a run never disturbs a binding under a different key,
+ * so one window's run cannot be silently detached by another window's navigation. Whether a run
+ * ended comes from the host's pushed registry, a run channel that ended with `run_gone`, or a check
+ * that found the run gone. The page keeps its own resume logic but no retry timer: while its page
+ * still owns it, a dial waits for the host connection to be ready, and the page is woken when the
+ * connection recovers.
  *
  * Navigation toward a target (a host and instance id) is tracked separately from bindings, by the
  * same key: a newer attach, start, or resume toward the *same* target supersedes an older one
@@ -18,6 +19,7 @@
  * one target), but navigation toward a *different* target never touches it.
  */
 
+import type {Duplex} from 'node:stream';
 import {
   type ConnectionLease,
   connectionStatus,
@@ -32,16 +34,31 @@ import type {
 import {
   type ConnectionStatus,
   type HostId,
-  hostFromKey,
+  type HostKey,
   hostKey,
   hostLabel,
   instanceObservation,
 } from '@vibesys/hosts';
-import type {ChromeState, HarnessChoice, StartOutcome} from '@vibesys/ipc';
-import type {ResumeRunId, StopView} from '@vibesys/runs';
+import type {HarnessChoice, ReaderAttached} from '@vibesys/ipc';
+import {type ResumeRunId, type RunRef, runRefKey} from '@vibesys/runs';
 import type {StoredRecentRun} from '@vibesys/settings';
+import {LiveFanout} from './live-fanout.js';
 import {type RelayPort, relay} from './relay.js';
-import {StopController} from './stop-controller.js';
+
+/** How a start ended: attached, or cancelled (and its run stopped). */
+export type StartOutcome = 'started' | 'cancelled';
+
+/** The run most recently bound, and the state of its connection. */
+export interface BoundRun {
+  readonly host: HostKey;
+  readonly hostLabel: string;
+  /** The registry id of the server driving the run. */
+  readonly instanceId: string;
+  /** The run's id, from its record. */
+  readonly runId: string;
+  readonly project: string;
+  readonly connection: ConnectionStatus;
+}
 
 /** The page that shows one attached run, in its own window. */
 interface RunPage {
@@ -53,13 +70,9 @@ interface RunPage {
 export interface RunControlDeps {
   /** Lease the one connection to `id`; the caller releases or transfers every lease. */
   connection(id: HostId): Promise<ConnectionLease>;
-  /** Open (or focus an already-open) window for `runId`, titled from `title`. */
-  openPage(
-    runId: string,
-    title: {readonly hostLabel: string; readonly task: string | null},
-  ): RunPage;
+  /** Open (or focus an already-open) window for `run`, titled from `title`. */
+  openPage(run: RunRef, title: {readonly hostLabel: string; readonly task: string | null}): RunPage;
   /** Ask the user; resolves true on "yes". */
-  confirm(text: string): Promise<boolean>;
   /** Record a run only while `current` says this selection still owns navigation. */
   remember(run: StoredRecentRun, current: () => boolean): Promise<void>;
   /** The window's state changed: send it again. */
@@ -71,7 +84,7 @@ export interface RunControlDeps {
 interface Binding {
   readonly id: HostId;
   readonly instanceId: string;
-  readonly runId: string;
+  readonly run: RunRef;
   readonly project: string;
   readonly task: string | null;
   readonly connection: HostConnection;
@@ -136,9 +149,9 @@ interface Launch {
 }
 
 export class RunControl {
+  readonly #liveFanout = new LiveFanout();
   readonly #deps: RunControlDeps;
-  readonly #stops: StopController;
-  /** Every run bound to a window, by `run_id`. */
+  /** Every run bound to a window, by `(host, run_id)`. */
   readonly #bindings = new Map<string, Binding>();
   /** The claim currently navigating toward (or already bound to) each target, by `targetKey`. */
   readonly #claims = new Map<string, Claim>();
@@ -146,61 +159,28 @@ export class RunControl {
   readonly #starts = new Map<string, Map<number, Claim>>();
   /** Stale launches held until the matching claim binds or is abandoned. */
   readonly #pendingAdoptions = new Map<string, PendingAdoption>();
-  /**
-   * The most recently bound run, for the single legacy "attached run" the welcome window's title
-   * strip still shows (`ChromeState.attached`). A real multi-run summary is the unified run-registry
-   * dashboard's job (#814/#816), out of scope here; until then this is a deliberate, documented
-   * simplification, not a correctness property of the registry itself.
-   */
-  #lastBoundRunId: string | null = null;
+  /** The most recently bound run, which a launch from the command line opens a window for. */
+  #lastBoundRun: RunRef | null = null;
   /** Orders claims by request time; see `Claim.sequence`. */
   #nextSequence = 0;
 
   constructor(deps: RunControlDeps) {
     this.#deps = deps;
-    this.#stops = new StopController({
-      stop: async (host, instanceId, force, current) => {
-        await using lease = await deps.connection(hostFromKey(host));
-        const attempt = await lease.connection.requestIfCurrent(
-          {type: 'run.stop', instance_id: instanceId, force},
-          current,
-        );
-        switch (attempt.kind) {
-          case 'not-written':
-            return attempt;
-          case 'answered':
-            return {kind: 'answered', result: attempt.reply.result};
-          case 'failed':
-            return {
-              kind: 'failed',
-              written: attempt.written,
-              message:
-                attempt.error instanceof Error ? attempt.error.message : String(attempt.error),
-            };
-        }
-      },
-      confirm: text => deps.confirm(text),
-      changed: () => deps.changed(),
-    });
   }
 
-  /** The most recently bound run, for the title strip. */
-  attached(): ChromeState['attached'] {
-    const runId = this.#lastBoundRunId;
-    const run = runId === null ? undefined : this.#bindings.get(runId);
+  /** The most recently bound run, or null when none is bound. */
+  attached(): BoundRun | null {
+    const ref = this.#lastBoundRun;
+    const run = ref === null ? undefined : this.#bindings.get(runRefKey(ref));
     if (run === undefined) return null;
     return {
       host: hostKey(run.id),
       hostLabel: hostLabel(run.id),
       instanceId: run.instanceId,
-      runId: run.runId,
+      runId: run.run.runId,
       project: run.project,
       connection: run.status,
     };
-  }
-
-  stops(): Record<string, StopView> {
-    return this.#stops.views();
   }
 
   /** Attach to registry run `instanceId` on `id`. */
@@ -234,6 +214,45 @@ export class RunControl {
         case 'absent':
           throw new Error(`no live run ${instanceId} on ${hostLabel(id)}`);
       }
+    } catch (error) {
+      this.#forgetClaim(claim);
+      throw error;
+    } finally {
+      await lease?.[Symbol.asyncDispose]();
+    }
+  }
+
+  /**
+   * Attach, for Chat, the server that serves run `runId` of `project` on `id`: the run's live one,
+   * or for a run that ended the read-only one the host starts on demand (`run.reader`, feature
+   * `chat_ended_runs`; a host without it is `unsupported` and nothing is sent). The server is
+   * bound like an attached run, so the window's connections reach it; letting the run go lets the
+   * host's server end, which it does by itself once no connection holds it.
+   */
+  async attachReader(id: HostId, project: string, runId: string): Promise<ReaderAttached> {
+    const claim: Claim = this.#newClaim();
+    let lease: ConnectionLease | null = null;
+    try {
+      lease = await this.#deps.connection(id);
+      const connection = lease.connection;
+      await connection.ready();
+      if (connection.features?.includes('chat_ended_runs') !== true) return {kind: 'unsupported'};
+      if (claim.cancelled) return {kind: 'attached'};
+      const reply = await connection.request({
+        type: 'run.reader',
+        project,
+        run_id: runId,
+        ...(connection.features?.includes('chat_ended_run_questions') === true
+          ? {with_chat: true}
+          : {}),
+      });
+      if (claim.cancelled) return {kind: 'attached'};
+      this.#claimTarget(id, reply.instance_id, claim);
+      const bindingLease = lease;
+      lease = null;
+      const record = {id: reply.instance_id, run_id: runId, project_root: project};
+      await this.#bind(claim, id, bindingLease, record, null);
+      return {kind: 'attached'};
     } catch (error) {
       this.#forgetClaim(claim);
       throw error;
@@ -290,59 +309,54 @@ export class RunControl {
     await this.#launch(id, project, launch, this.#newClaim());
   }
 
-  /** Stop `instanceId` on `id` after asking. */
-  async stop(id: HostId, instanceId: string, force: boolean): Promise<void> {
-    const run = this.#bindingFor(id, instanceId);
-    const label = run?.task ?? run?.runId ?? instanceId;
-    await this.#stops.request(
-      {host: hostKey(id), hostLabel: hostLabel(id), instanceId, label},
-      force,
-    );
-  }
-
-  /** The user asked to retry the most recently bound run's connection (or to sign in again). */
-  retry(): void {
-    const runId = this.#lastBoundRunId;
-    if (runId === null) return;
-    this.#bindings.get(runId)?.connection.dispatch({type: 'user-retry'});
-  }
-
   /**
-   * Relay one connection `runId`'s run page opened, over a run channel. Message and close listener
+   * Relay one connection `run`'s run page opened, over a run channel. Message and close listener
    * ownership is installed synchronously before this returns.
    */
-  connect(port: RelayPort, runId: string): void {
-    const run = this.#bindings.get(runId);
+  connect(port: RelayPort, ref: RunRef): void {
+    const run = this.#bindings.get(runRefKey(ref));
     if (run === undefined) {
       port.close();
       return;
     }
-    void relay(port, async signal => {
-      try {
-        return (await run.connection.openRun(run.instanceId, signal)).stream;
-      } catch (error) {
-        if (error instanceof Error && 'reason' in error) {
-          if (error.reason === 'run-gone') this.#ended(run);
-          else if (error.reason === 'capacity') this.#capacityRefused(run, error.message);
-        }
-        throw error;
+    const streamKey = `${hostKey(run.id)}\u0000${run.instanceId}`;
+    void relay(port, signal =>
+      this.#liveFanout.open(
+        streamKey,
+        upstreamSignal => this.#dialRun(run, upstreamSignal),
+        signal,
+      ),
+    );
+  }
+
+  async #dialRun(run: Binding, signal: AbortSignal): Promise<Duplex> {
+    try {
+      return (await run.connection.openRun(run.instanceId, signal)).stream;
+    } catch (error) {
+      if (error instanceof Error && 'reason' in error) {
+        if (error.reason === 'run-gone') this.#ended(run);
+        else if (error.reason === 'capacity') this.#capacityRefused(run, error.message);
       }
-    });
+      throw error;
+    }
   }
 
-  /** End `runId`'s page; the run itself keeps going on its host. Safe when `runId` is not bound. */
-  detach(runId: string): void {
-    this.#releaseBinding(runId);
+  /** End `run`'s page; the run itself keeps going on its host. Safe when it is not bound. */
+  detach(run: RunRef): void {
+    this.#releaseBinding(run);
   }
 
-  /** Drop `runId`'s binding, without disturbing any other binding or in-flight navigation. */
-  #releaseBinding(runId: string): void {
-    const run = this.#bindings.get(runId);
+  /** Drop `ref`'s binding, without disturbing any other binding or in-flight navigation. */
+  #releaseBinding(ref: RunRef): void {
+    const key = runRefKey(ref);
+    const run = this.#bindings.get(key);
     if (run === undefined) return;
-    this.#bindings.delete(runId);
-    if (this.#lastBoundRunId === runId) this.#lastBoundRunId = null;
-    const key = targetKey(run.id, run.instanceId);
-    if (this.#claims.get(key) !== undefined) this.#claims.delete(key);
+    this.#bindings.delete(key);
+    if (this.#lastBoundRun !== null && runRefKey(this.#lastBoundRun) === key) {
+      this.#lastBoundRun = null;
+    }
+    const target = targetKey(run.id, run.instanceId);
+    if (this.#claims.get(target) !== undefined) this.#claims.delete(target);
     this.#settleAdoption(run.id, run.instanceId, false);
     let retirement: PromiseLike<void>;
     try {
@@ -441,20 +455,33 @@ export class RunControl {
       const current = (): boolean => !this.#isTargeted(id, record.id);
       if (!current()) continue;
       this.#deps.log(`${reason}; stopping run ${record.id}`);
-      const result = await this.#stops.stopConfirmed(
-        {
-          host: hostKey(id),
-          hostLabel: hostLabel(id),
-          instanceId: record.id,
-          label: record.run_id,
-        },
-        current,
-      );
-      if (result.kind === 'withdrawn') continue;
-      if (result.kind === 'failed')
-        this.#deps.log(`could not stop superseded run ${record.id}: ${result.message}`);
+      if (!(await this.#cancelUnattached(id, record.id, current))) continue;
       return;
     }
+  }
+
+  /** Cancel only while no newer claim owns the target; a written failure is still settled. */
+  async #cancelUnattached(
+    id: HostId,
+    instanceId: string,
+    current: () => boolean,
+  ): Promise<boolean> {
+    try {
+      await using lease = await this.#deps.connection(id);
+      const result = await lease.connection.requestIfCurrent(
+        {type: 'run.stop', instance_id: instanceId, force: false},
+        current,
+      );
+      if (result.kind === 'not-written') return false;
+      if (result.kind === 'failed') throw result.error;
+      if (!['stopped', 'stopping', 'not_running'].includes(result.reply.result.outcome)) {
+        throw new Error(result.reply.result.outcome);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.#deps.log(`could not stop superseded run ${instanceId}: ${message}`);
+    }
+    return true;
   }
 
   /** True when a target is bound, or a live claim is still navigating toward it. */
@@ -471,6 +498,11 @@ export class RunControl {
       if (binding.instanceId === instanceId && hostKey(binding.id) === hostKey(id)) return binding;
     }
     return undefined;
+  }
+
+  /** Whether `binding` is still the installed owner of its composite run identity. */
+  #ownsBinding(binding: Binding): boolean {
+    return this.#bindings.get(runRefKey(binding.run)) === binding;
   }
 
   #isIntended(id: HostId, instanceId: string): boolean {
@@ -508,10 +540,10 @@ export class RunControl {
     claim: Claim,
     id: HostId,
     lease: ConnectionLease,
-    record: LiveInstanceRecord,
+    record: Pick<LiveInstanceRecord, 'id' | 'run_id' | 'project_root'>,
     task: string | null,
   ): Promise<boolean> {
-    const runId = record.run_id;
+    const run: RunRef = {host: hostKey(id), runId: record.run_id};
     const connection = lease.connection;
     const subscriptions: (() => void)[] = [];
     const pendingObservations: (() => void)[] = [];
@@ -553,12 +585,12 @@ export class RunControl {
         attachedAt: this.#deps.now(),
       });
       if (claim.cancelled) return false;
-      this.#releaseBinding(runId);
-      page = this.#deps.openPage(runId, {hostLabel: hostLabel(id), task});
+      this.#releaseBinding(run);
+      page = this.#deps.openPage(run, {hostLabel: hostLabel(id), task});
       const provisional: Binding = {
         id,
         instanceId: record.id,
-        runId,
+        run,
         project: record.project_root,
         task,
         connection,
@@ -582,19 +614,19 @@ export class RunControl {
           });
         }),
       );
-      this.#bindings.set(runId, provisional);
-      this.#lastBoundRunId = runId;
+      this.#bindings.set(runRefKey(run), provisional);
+      this.#lastBoundRun = run;
       observationPhase = 'live';
       for (const observation of pendingObservations.splice(0)) observation();
       this.#deps.changed();
-      if (claim.cancelled || this.#bindings.get(runId) !== provisional) return false;
+      if (claim.cancelled || !this.#ownsBinding(provisional)) return false;
       installed = true;
       this.#settleAdoption(id, record.id, true);
       return true;
     } finally {
       if (!installed) {
         observationPhase = 'closed';
-        if (binding !== null && this.#bindings.get(runId) === binding) this.#bindings.delete(runId);
+        if (binding !== null && this.#ownsBinding(binding)) this.#bindings.delete(runRefKey(run));
         try {
           leaseRelease = release();
         } finally {
@@ -674,7 +706,7 @@ export class RunControl {
   }
 
   #phase(binding: Binding, phase: Phase): void {
-    if (this.#bindings.get(binding.runId) !== binding || binding.status.kind === 'run-ended') {
+    if (!this.#ownsBinding(binding) || binding.status.kind === 'run-ended') {
       return;
     }
     const recovered = phase.kind === 'ready' && binding.status.kind !== 'connected';
@@ -685,9 +717,7 @@ export class RunControl {
   }
 
   #listing(binding: Binding, listing: InstanceList): void {
-    const host = hostKey(binding.id);
-    this.#stops.observeListing(host, listing);
-    if (this.#bindings.get(binding.runId) !== binding) return;
+    if (!this.#ownsBinding(binding)) return;
     const observation = instanceObservation(listing, binding.instanceId);
     switch (observation.kind) {
       case 'live':
@@ -706,17 +736,16 @@ export class RunControl {
   }
 
   #ended(binding: Binding): void {
-    if (this.#bindings.get(binding.runId) !== binding || binding.status.kind === 'run-ended') {
+    if (!this.#ownsBinding(binding) || binding.status.kind === 'run-ended') {
       return;
     }
     binding.status = {kind: 'run-ended'};
-    this.#stops.runEnded(hostKey(binding.id), binding.instanceId);
     this.#deps.changed();
   }
 
   /** This window's own dial to its run was refused: the host's channel ceiling is spent. */
   #capacityRefused(binding: Binding, detail: string): void {
-    if (this.#bindings.get(binding.runId) !== binding || binding.status.kind === 'run-ended') {
+    if (!this.#ownsBinding(binding) || binding.status.kind === 'run-ended') {
       return;
     }
     binding.status = {kind: 'capacity', detail};

@@ -18,9 +18,10 @@ from vs_core.api.search import (
     TaskTerms,
 )
 
+BUILD = "build"
 ACCURACY = "accuracy"
 BENCHMARK = "benchmark"
-"""The names of the two gate stages in a task's recipe."""
+"""The names of the stages a task's recipe can measure a candidate with, in order."""
 
 
 def gates_of(terms: TaskTerms) -> Gates:
@@ -37,7 +38,7 @@ def space_of(terms: TaskTerms) -> MetricSpace:
 
 
 PROFILE = "profile"
-STAGE_SECONDS = {ACCURACY: 1800.0, BENCHMARK: 3600.0, PROFILE: 1800.0}
+STAGE_SECONDS = {BUILD: 1800.0, ACCURACY: 1800.0, BENCHMARK: 3600.0, PROFILE: 1800.0}
 """Seconds one stage of a measurement may execute when the evaluation plan declares no limit."""
 OPERATION_SECONDS = 300.0
 """Seconds one read of evidence (decoding it, verifying a parent) may take."""
@@ -52,27 +53,33 @@ class Measuring:
     queue_allowance: float
     """Seconds a measurement may wait in the evaluation queue."""
     profile_fields: tuple[str, ...] = ()
+    """The measurement fields the run's profile capture supplies."""
     benchmark_needs_accuracy: bool = True
     """A benchmark counts only where the accuracy gate passed (the task's ``requires_accuracy``)."""
-    """The measurement fields the run's profile capture supplies."""
+    builds: bool = False
+    """The task declares a candidate build, which runs before every other gate."""
 
 
 def terms_of(
     recipe: ArtifactRef, gates: Gates, space: MetricSpace, measuring: Measuring
 ) -> TaskTerms:
     """The task's terms from what the host resolved about its input bundle and its domain."""
-    measured = tuple(
-        name for name, gated in ((ACCURACY, gates.accuracy), (BENCHMARK, gates.benchmark)) if gated
+    gated = tuple(
+        name for name, on in ((ACCURACY, gates.accuracy), (BENCHMARK, gates.benchmark)) if on
     )
+    # A build is measured first, and only for a task that measures something it builds for.
+    measured = ((BUILD,) if measuring.builds and gated else ()) + gated
     return TaskTerms(
         recipe=recipe,
         stages=tuple(
             TaskStage(stage_id=name, execution_seconds=measuring.stage_seconds.get(name) or default)
             for name, default in STAGE_SECONDS.items()
+            if name != BUILD or measuring.builds
         ),
         measured=measured,
         queue_allowance=measuring.queue_allowance,
         accuracy_stage=ACCURACY if gates.accuracy else None,
+        benchmark_stage=BENCHMARK if gates.benchmark else None,
         accuracy_gated=(
             (EvidenceKind.BENCHMARK,)
             if gates.accuracy and measuring.benchmark_needs_accuracy

@@ -29,6 +29,7 @@ from tests.vibesys.serial_search._host import (
 from tests.vibesys.serial_search._replies import plan_reply
 from tests.vibesys.vibesys_flows import across_restarts
 
+from vibesys.serial_search.api import PlanPrompt
 from vs_core.api import (
     CheckpointDecline,
     Declined,
@@ -180,24 +181,6 @@ def test_a_checkpoint_core_declines_leaves_the_round_without_a_candidate(
 
 
 @MODES
-def test_the_gates_are_skipped_on_rounds_the_cadence_does_not_audit(*, restarting: bool) -> None:
-    host = start(config(max_rounds=2, official_eval_every=2), restarting=restarting)
-    design(host)
-    host.drain_until_turn(IMPLEMENTER)
-    implement(host, candidate="c1")
-    host.drain_until_turn(PLANNER)
-
-    assert host.measured == []  # the first round was not audited, so nothing was measured
-    design(host, "h2")
-    host.drain_until_turn(IMPLEMENTER)
-    implement(host, candidate="c2")
-    host.drain()
-
-    assert host.measured == ["c2"]
-    assert_flow_closed(host)
-
-
-@MODES
 @settings(max_examples=examples(pr=20, nightly=80), deadline=None, database=None)
 @example(throughputs=(30, 40), reviewed=(True, True))
 @example(throughputs=(90, 60), reviewed=(True, True))
@@ -238,3 +221,21 @@ def test_the_best_eligible_candidate_of_the_rounds_is_adopted_not_the_last(
     else:
         assert selection_of(host) == ("trusted_baseline", None)
     assert_flow_closed(host)
+
+
+@MODES
+@settings(max_examples=examples(pr=4, nightly=20), deadline=None, derandomize=True, database=None)
+@given(noise=st.floats(0.001, 0.02, allow_nan=False))
+def test_a_designer_after_a_measured_round_is_shown_that_comparisons_noise(
+    *, restarting: bool, noise: float
+) -> None:
+    host = start(config(max_rounds=2), restarting=restarting, comparisons={"def456": (1.2, noise)})
+    design(host)
+    host.drain_until_turn(IMPLEMENTER)
+    implement(host)
+    host.drain_until_turn(PLANNER)
+    context = host.run.expect_turn(role=PLANNER).context
+
+    assert isinstance(context, PlanPrompt)
+    assert context.measurement_noise is not None
+    assert context.measurement_noise.noise == noise

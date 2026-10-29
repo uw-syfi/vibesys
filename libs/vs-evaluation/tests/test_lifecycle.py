@@ -186,6 +186,7 @@ async def test_submit_deduplicates_by_stable_key_and_reuses_terminal_result() ->
                 name="correctness",
                 state=StageState.SUCCEEDED,
                 result={"passed": True},
+                operator_summary="safe correctness summary",
                 duration_s=2,
             ),
             EvaluationStepResult(
@@ -201,6 +202,7 @@ async def test_submit_deduplicates_by_stable_key_and_reuses_terminal_result() ->
     assert isinstance(result, EvaluationCompleted)
     assert [stage.name for stage in result.stages] == ["correctness", "measurement"]
     assert result.stages[0].result == {"passed": True}
+    assert result.stages[0].operator_summary == "safe correctness summary"
 
 
 @pytest.mark.asyncio

@@ -53,10 +53,9 @@ export function subscribeRequest(
 
 /**
  * The transport surface a session consumes: one control request/response verb,
- * a live event subscription, and a bounded close. `ServerClient` (the Node
- * socket transport) satisfies it structurally, and a browser WebSocket
- * transport will too, so nothing above this line depends on how the bytes
- * travel. Neutral by construction: it names only protocol types, no runtime.
+ * a live event subscription, and a bounded close. The browser WebSocket
+ * transport satisfies it structurally, as any other must, so nothing above
+ * this line depends on how the bytes travel. Neutral by construction: it names only protocol types, no runtime.
  */
 export interface ServerTransport {
   /**
@@ -74,6 +73,15 @@ export interface ServerTransport {
    * latency is bounded by the redial schedule, not by this.
    */
   request(input: RequestInput, options?: RequestOptions): Promise<ProtocolResponse>;
+  /**
+   * Open one event subscription. Consumer callbacks are notification
+   * boundaries, never socket callbacks: an `onMessage` failure retires that
+   * subscription and is delivered to `onDisconnect` without being relabeled a
+   * peer parse fault; either callback's thrown value is contained and retained
+   * until terminal `close()`. `close()` reports those failures only after every
+   * acquired bounded socket owner has settled, preserving one by identity and
+   * several in delivery order.
+   */
   subscribe(
     afterSequence: number,
     onMessage: (message: ServerMessage) => void,
@@ -86,7 +94,7 @@ export interface ServerTransport {
 /**
  * A transport whose control channel can be redialed on demand. Separate from
  * `ServerTransport` rather than folded into it: a frontend that offers a
- * reconnect affordance needs this, and one that does not (the TUI today) should
+ * reconnect affordance needs this, and a client that does not should
  * not have to implement a verb it never calls. Both shipped transports satisfy
  * it, so the affordance is reachable without an optional method, which would
  * make "does my transport actually redial" a per-implementation question.

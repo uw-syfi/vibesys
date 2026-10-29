@@ -1,0 +1,37 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2022"
+    ],
+    "types": [],
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.lib.tsbuildinfo"
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/cache/**",
+    "src/testing.ts",
+    "src/reader.ts"
+  ],
+  "references": [
+    {
+      "path": "../proto/tsconfig.lib.json"
+    },
+    {
+      "path": "../machine/tsconfig.lib.json"
+    },
+    {
+      "path": "../store/tsconfig.lib.json"
+    },
+    {
+      "path": "../transport/tsconfig.lib.json"
+    }
+  ]
+}

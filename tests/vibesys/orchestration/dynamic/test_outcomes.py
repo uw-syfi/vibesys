@@ -189,6 +189,9 @@ def test_the_last_turn_that_gave_nothing_is_what_a_workstream_that_may_not_retry
     }
     if blocker.kind in expected:
         assert found.kind is expected[blocker.kind]
+    elif blocker.kind is BlockerKind.REPLY_REJECTED:
+        # A reply the run refused, as the last turn: the implementer kept replying invalidly.
+        assert (found.kind, found.role) == (FailureKind.INVALID_REPLY, AgentName.IMPLEMENTER)
     else:
         assert found.role is AgentName.IMPLEMENTER
         assert found.kind in {FailureKind.TURN_FAILED, FailureKind.ENDED}
@@ -238,7 +241,8 @@ def test_a_candidate_is_eligible_exactly_when_the_task_the_review_and_the_input_
         evidence=evidence_of(accuracy=accuracy, benchmark=benchmark, throughput=case.throughput),
         cause=case.cause,
     )
-    settle = assertion(workstream_start(), closing, TERMS)
+    start = workstream_start()
+    settle = assertion(start, closing, TERMS, start.baseline)
 
     # TERMS measures accuracy and benchmark, so both gates need a passed reading.
     expected = (
@@ -272,7 +276,7 @@ def test_a_profile_workstream_settles_ineligible_and_discarded_whatever_it_measu
         evidence=Evidence(readings=(reading,), proof=Proof(refs=(ref,))),
         cause=Failure(kind=FailureKind.OUT_OF_BUDGET) if failed_workstream else None,
     )
-    settle = assertion(workstream_start(WorkKind.PROFILE), closing, TERMS)
+    settle = assertion(workstream_start(WorkKind.PROFILE), closing, TERMS, None)
     assert (settle.eligible, settle.retention, settle.candidate) == (False, "discard", None)
     assert settle.outcome == ("failed" if failed_workstream else "succeeded")
 

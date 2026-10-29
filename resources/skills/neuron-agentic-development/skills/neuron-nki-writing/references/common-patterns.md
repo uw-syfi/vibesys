@@ -12,26 +12,33 @@ Element-wise operations use VectorE/ScalarE and work on any buffer type. For bas
 
 ## Matrix Multiply - CRITICAL: PSUM Accumulation Pattern
 
-**PERFORMANCE REQUIREMENT**: Matrix multiplication accumulation over the K (contraction) dimension requires careful loop structure to trigger efficient hardware PSUM accumulation. Using `nl.sequential_range` will serialize execution and prevent PSUM accumulation, causing severe performance degradation.
+**PERFORMANCE REQUIREMENT**: Matrix multiplication accumulation over the K (contraction) dimension must let the hardware accumulate in PSUM rather than round-tripping partial sums. What makes that work is the `accumulate` flag plus keeping PSUM resident — not the choice of loop function. (`nl.affine_range` / `nl.sequential_range` / `nl.static_range` are deprecated aliases for `range()` and behave identically; neither serializes nor parallelizes anything.)
+
+**Use the `accumulate=(k_idx > 0)` flag to control PSUM initialization.** The `accumulate` parameter of `nisa.nc_matmul` makes the overwrite-vs-accumulate behavior explicit:
+- `accumulate=False` — overwrite the `dst` PSUM tile. The **first** matmul targeting a PSUM location must overwrite to initialize it.
+- `accumulate=True` — add the result onto existing PSUM content. Valid only after the location was initialized with `accumulate=False`.
+
+In a K-tile loop, pass `accumulate=(k_idx > 0)`: the first iteration (`k_idx == 0`) overwrites and initializes PSUM, and every later iteration accumulates. **No `nisa.memset` of the PSUM tile is needed** — the `accumulate=False` first write initializes it. Do NOT memset PSUM before the accumulation loop.
 
 **The Correct Pattern (from production kernels):**
 
 ```python
-# 1. Allocate PSUM buffer (uninitialized is correct)
+# 1. Allocate PSUM buffer (no memset needed — the first matmul initializes it)
 result_psum = nl.ndarray((M_tile, N_tile), dtype=nl.float32, buffer=nl.psum)
 
-# 2. Loop over K tiles using affine_range or range (NOT sequential_range)
-for k_idx in nl.affine_range(num_k_tiles):
+# 2. Loop over K tiles with a plain range
+for k_idx in range(num_k_tiles):
     # Load tiles for this K slice
     a_tile = load_stationary_tile(a, k_idx)  # [K_tile, M_tile]
     b_tile = load_moving_tile(b, k_idx)      # [K_tile, N_tile]
 
-    # 3. Multiple nc_matmul writes to SAME psum buffer
-    # Compiler detects multiple writes → triggers hardware accumulation
+    # 3. Explicit accumulate flag: overwrite on first K tile, accumulate after.
+    #    accumulate=(k_idx > 0) → False when k_idx == 0, True otherwise.
     nisa.nc_matmul(
         dst=result_psum,
         stationary=a_tile,
-        moving=b_tile
+        moving=b_tile,
+        accumulate=(k_idx > 0),
     )
 
 # 4. Copy PSUM → SBUF for further operations
@@ -40,12 +47,12 @@ nisa.tensor_copy(dst=result_sbuf, src=result_psum)
 ```
 
 **Key points:**
-- **PSUM allocation**: Uninitialized `nl.ndarray(..., buffer=nl.psum)` is correct (matches production kernels)
-- **Loop type**: Use `nl.affine_range()` or `range()` for K-dimension loops, NEVER `nl.sequential_range`
-- **Accumulation mechanism**: Multiple writes to the same PSUM buffer trigger hardware accumulation automatically
+- **PSUM allocation**: Uninitialized `nl.ndarray(..., buffer=nl.psum)` is correct — **never `nisa.memset` the PSUM tile before the K loop**; the `accumulate=False` first write initializes it
+- **Loop type**: Use plain `range()` for K-dimension loops. The deprecated `nl.*_range` aliases are the same function, so none of them changes scheduling
+- **Accumulation mechanism**: Pass `accumulate=(k_idx > 0)` so the first K tile overwrites (initializes) PSUM and subsequent tiles accumulate. This is the explicit, preferred form; omitting `accumulate` (default `None`) lets the compiler auto-infer the same behavior, but the explicit flag documents intent and avoids ambiguity
 - **Operand dimensions**:
   - Stationary (left): `[K, M]` where K ≤ 128 (partition), M ≤ 128 (stationary free)
-  - Moving (right): `[K, N]` where K ≤ 128 (partition), N ≤ 512 (moving free, gen2/3) or ≤ 4096 (gen4)
+  - Moving (right): `[K, N]` where K ≤ 128 (partition), N ≤ `nl.tile_size.gemm_moving_fmax` (moving free; gen/dtype-dependent)
   - Result: `[M, N]` in PSUM
 
 **Complete tiled matmul example:**
@@ -56,21 +63,21 @@ num_m_tiles = div_ceil(M, 128)
 num_n_tiles = div_ceil(N, 512)
 num_k_tiles = div_ceil(K, 128)
 
-for m_idx in nl.affine_range(num_m_tiles):
-    for n_idx in nl.affine_range(num_n_tiles):
-        # Allocate PSUM for this output tile
+for m_idx in range(num_m_tiles):
+    for n_idx in range(num_n_tiles):
+        # Allocate PSUM for this output tile (no memset — first matmul initializes it)
         psum = nl.ndarray((128, 512), dtype=nl.float32, buffer=nl.psum)
 
         # Accumulate over K dimension
-        for k_idx in nl.affine_range(num_k_tiles):  # CRITICAL: affine_range, not sequential_range
+        for k_idx in range(num_k_tiles):
             # Load input tiles
             a_tile = nl.ndarray((128, 128), dtype=dtype, buffer=nl.sbuf)
             b_tile = nl.ndarray((128, 512), dtype=dtype, buffer=nl.sbuf)
             nisa.dma_copy(dst=a_tile, src=A[k_idx*128:(k_idx+1)*128, m_idx*128:(m_idx+1)*128])
             nisa.dma_copy(dst=b_tile, src=B[k_idx*128:(k_idx+1)*128, n_idx*512:(n_idx+1)*512])
 
-            # Matmul accumulates into same PSUM
-            nisa.nc_matmul(dst=psum, stationary=a_tile, moving=b_tile)
+            # Overwrite PSUM on first K tile, accumulate on the rest
+            nisa.nc_matmul(dst=psum, stationary=a_tile, moving=b_tile, accumulate=(k_idx > 0))
 
         # Copy result and store
         result = nl.ndarray((128, 512), dtype=dtype, buffer=nl.sbuf)
@@ -81,13 +88,15 @@ for m_idx in nl.affine_range(num_m_tiles):
 **Anti-patterns (NEVER DO THIS):**
 
 ```python
-# WRONG: Using nl.sequential_range for K accumulation
-for k_idx in nl.sequential_range(num_k_tiles):  # Serializes execution!
-    nisa.nc_matmul(dst=psum, stationary=a_tile, moving=b_tile)
+# WRONG: memset the PSUM tile to zero before accumulating — unnecessary.
+# accumulate=(k_idx > 0) overwrites on the first K tile, so no zero-init is needed.
+nisa.memset(dst=psum, value=0.0)                       # REMOVE THIS
+for k_idx in range(num_k_tiles):
+    nisa.nc_matmul(dst=psum, stationary=a_tile, moving=b_tile, accumulate=True)
 
 # WRONG: Writing PSUM to HBM between accumulation steps
-for k_idx in nl.affine_range(num_k_tiles):
-    nisa.nc_matmul(dst=psum, stationary=a_tile, moving=b_tile)
+for k_idx in range(num_k_tiles):
+    nisa.nc_matmul(dst=psum, stationary=a_tile, moving=b_tile, accumulate=(k_idx > 0))
     nisa.dma_copy(dst=hbm_temp, src=psum)  # Unnecessary HBM traffic!
 
 # WRONG: Direct PSUM to HBM dma_copy — no longer supported
@@ -99,7 +108,7 @@ nisa.dma_copy(dst=hbm_output, src=sbuf_temp)
 ```
 
 **Why this matters**:
-- `nl.sequential_range` forces serialization, preventing the compiler from detecting the accumulation pattern
+- `accumulate=(k_idx > 0)` makes PSUM initialization explicit: the first matmul overwrites (no separate memset), later matmuls accumulate
 - Hardware PSUM accumulation is performed in FP32 with very low overhead
 - Fallback to VectorEngine accumulation via `tensor_tensor` is significantly slower
 
@@ -172,7 +181,7 @@ nisa.tensor_tensor_scan(
 # Computes: out[i] = deltaA[i] * out[i-1] + deltaBu[i]
 
 # Anti-pattern: Explicit loop (seq_len instructions, very slow)
-for i in nl.sequential_range(seq_len - 1):
+for i in range(seq_len - 1):
     scan_result[0:channels, i+1] = (
         deltaA[0:channels, i+1] * scan_result[0:channels, i]
         + deltaBu[0:channels, i+1]
@@ -189,7 +198,7 @@ for i in nl.sequential_range(seq_len - 1):
 ```python
 scan_init = nl.zeros((channels, 1), dtype=deltaA.dtype, buffer=nl.sbuf)
 
-for i_seq_tile in nl.static_range(n_seq_tiles):
+for i_seq_tile in range(n_seq_tiles):
     seq_start = i_seq_tile * seq_tile_size
 
     # Load current tiles
@@ -221,15 +230,16 @@ are documented in `references/nkilib/`.
 
 ### cumsum — Simple tiling with TiledRange
 
-Uses `TiledRange` for partition tiling, `sequential_range` for the carry-dependent free dimension,
-and `tensor_tensor_scan` for the cumulative sum itself.
+Uses `TiledRange` for partition tiling, a plain `range()` over the free dimension (the carry is a
+real data dependency through `init_sb`, not something the loop function expresses), and
+`tensor_tensor_scan` for the cumulative sum itself.
 
 ```python
 for p_tile in TiledRange(outer_dim, P_MAX):  # See references/nkilib/core/tiled-range.md
     init_sb = nl.ndarray((P_MAX, 1), dtype=nl.float32, buffer=nl.sbuf)
     nisa.memset(dst=init_sb, value=0.0)
 
-    for f_tile_idx in nl.sequential_range(num_f_tiles):  # Carry dependency
+    for f_tile_idx in range(num_f_tiles):  # carry flows through init_sb below
         f_start = f_tile_idx * F_TILE_SIZE
         f_end = min(f_start + F_TILE_SIZE, last_dim)
         f_size = f_end - f_start

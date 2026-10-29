@@ -94,9 +94,10 @@ def _open(record: RequestRecord | None) -> bool:
     )
 
 
-def _executors() -> Executors:
+def _executors(*, plans: int = 1) -> Executors:
+    """The far side's agents: ``plans`` planner replies, each scheduling h1, then nothing usable."""
     return Executors(
-        planner=deque([plan_reply(implement("h1"))]),
+        planner=deque([plan_reply(implement("h1")) for _ in range(plans)]),
         implementer=deque([implemented()]),
         judge=deque([reviewed()]),
         exhausted="not json",
@@ -153,6 +154,8 @@ class _LateJobId:
 
     inner: Executors
     baseline: set[str] = field(default_factory=set)
+    past_deadline: bool = False
+    """Whether the submission also outlasts the run, so the run closes before the answer."""
 
     def __call__(self, request: Request, core: CoreState) -> Answer | tuple[Answer, ...]:
         """What the executors report for ``request``."""
@@ -165,16 +168,18 @@ class _LateJobId:
             self.baseline.add(answer.resource_id.root)
         return answer
 
-    @staticmethod
-    def during(request: Request, core: CoreState) -> tuple[CoreEvent, ...]:
-        """While the input's submission runs, time passes its limit."""
+    def during(self, request: Request, core: CoreState) -> tuple[CoreEvent, ...]:
+        """While the input's submission runs, time passes its limit (and the run's deadline)."""
         if not isinstance(request, SubmitMeasurement) or request.plan.purpose != "baseline":
             return ()
         record = _submission(core)
         assert record is not None
         assert record.dispatched_at is not None
         assert record.limit_from_dispatch is not None
-        return (ClockAdvanced(now_at=record.dispatched_at + record.limit_from_dispatch + 1.0),)
+        passed = record.dispatched_at + record.limit_from_dispatch + 1.0
+        if self.past_deadline:
+            passed = max(passed, core.run.deadline_at + 1.0)
+        return (ClockAdvanced(now_at=passed),)
 
 
 def test_a_job_whose_id_arrives_after_its_submission_ended_is_cancelled() -> None:
@@ -184,7 +189,7 @@ def test_a_job_whose_id_arrives_after_its_submission_ended_is_cancelled() -> Non
     again, and that second end, with the id known, asks for the cancel. A guard: the re-sent
     cancel of a blocked one must leave this path working.
     """
-    script = _LateJobId(inner=_executors())
+    script = _LateJobId(inner=_executors(plans=2))
     trace = _drive(script, during_turn=script.during)
 
     submission = _submission(trace.core)
@@ -192,3 +197,25 @@ def test_a_job_whose_id_arrives_after_its_submission_ended_is_cancelled() -> Non
     assert submission.failure is not None
     assert script.baseline
     assert _cancels(trace, script.baseline)
+
+
+def test_a_job_whose_id_arrives_after_the_run_closed_has_ended_when_the_run_ends() -> None:
+    """The late ``sbatch`` answer may come after the run closed around its blocked submission.
+
+    The run's deadline passes while the input's submission runs, so the run closes and core
+    ends the submission it waits on, numbering that end where the executor's first answer
+    goes. The answer that then names the job is still taken (regression, PR #3235: it was
+    refused as a sequence conflict, halting the host), and the run ends only once the job has.
+    """
+    script = _LateJobId(inner=_executors(), past_deadline=True)
+    trace = _drive(script, during_turn=script.during)
+
+    assert trace.finished
+    assert script.baseline
+    named = [
+        job
+        for job in trace.core.evaluation.jobs
+        if job.resource_id is not None and job.resource_id.root in script.baseline
+    ]
+    assert named
+    assert all(job.terminal for job in named)
