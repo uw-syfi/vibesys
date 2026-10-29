@@ -2768,6 +2768,7 @@ export interface NarrationLine {
   traceback?: Traceback;
 }
 export interface SpanAttributes {
+  "check-input"?: CheckInputSpanAttributes | null;
   dynamic?: DynamicSpanAttributes | null;
   evolve?: EvolveSpanAttributes | null;
   "multi-agent"?: MultiAgentSpanAttributes | null;
@@ -2776,7 +2777,7 @@ export interface SpanAttributes {
   "profile-guided-single-agent"?: ProfileGuidedSingleAgentSpanAttributes | null;
   "single-agent"?: SingleAgentSpanAttributes | null;
 }
-export interface DynamicSpanAttributes {
+export interface CheckInputSpanAttributes {
   adoption?: AdoptionAttrs | null;
   agent_turn?: AgentTurnAttrs | null;
   gate?: GateAttrs | null;
@@ -2885,6 +2886,13 @@ export interface WorkstreamAttrs {
   summary?: Summary5;
   probe?: Probe;
   sequence?: Sequence2;
+}
+export interface DynamicSpanAttributes {
+  adoption?: AdoptionAttrs | null;
+  agent_turn?: AgentTurnAttrs | null;
+  gate?: GateAttrs | null;
+  planning_call?: PlanningAttrs | null;
+  workstream?: WorkstreamAttrs | null;
 }
 export interface EvolveSpanAttributes {
   adoption?: AdoptionAttrs | null;
