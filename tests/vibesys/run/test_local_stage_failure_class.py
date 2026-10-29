@@ -82,7 +82,7 @@ if TYPE_CHECKING:
     from vs_project.api import OrchestrationRunManifest
     from vs_runtime.api import AgentRole, OrchestrationResumeDecision
     from vs_runtime.api.infrastructure import AgentExecutionConfiguration
-    from vs_sim.api import Event
+    from vs_sim.api import Event, OutputSink
 
 _RUN_ID = "lost-stage"
 _HANDLE = "handle-1"
@@ -114,9 +114,10 @@ class _LosesStageCommands(FakeCommandRunner):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink,
     ) -> CommandResult:
         del cancel  # no stage of this test is cancelled
-        result = super().execute(command, timeout=timeout)
+        result = super().execute(command, timeout=timeout, output=output)
         if _ACCURACY in command or _BENCHMARK in command:
             return self.lost
         return result
@@ -130,10 +131,15 @@ class _Session:
     view: RunEnvironmentView = field(
         default_factory=lambda: RunEnvironmentView(
             paths=AgentPaths(accuracy_command=_ACCURACY, benchmark_command=_BENCHMARK),
+            workspace_git_writable=True,
             cli_sandboxed=True,
             env_kind="modal",
         )
     )
+
+    @property
+    def capture_commands(self) -> CommandRunner:
+        return self.sandbox
 
     def __enter__(self) -> _Session:
         return self
@@ -294,7 +300,7 @@ def _measure_with_lost_command(
             )
             runtime = create_workspace_runtime(
                 workspace_resources=factory,
-                blocking=BlockingOperations(runner=InlineBlockingRunner()),
+                blocking=BlockingOperations(runner=InlineBlockingRunner(), threads=SimThreads()),
                 validation_passes=MemoryValidationPasses(),
             )
             evaluation = create_evaluation(

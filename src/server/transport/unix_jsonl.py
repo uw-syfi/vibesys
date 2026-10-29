@@ -19,9 +19,12 @@ from server.api.protocol import (
     SubscribeRequest,
 )
 from server.transport.subscriptions import (
+    DeliveryWatermark,
     SubscriptionAdmissionClosedError,
     SubscriptionTracker,
 )
+from vs_project.api import CONTROL_HELLO_MAX_BYTES
+from vs_sim.api import WorkerStartRefusedError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -31,6 +34,7 @@ if TYPE_CHECKING:
 
     from server.api.service import RunApi, SubscriptionBootstrap
     from server.transport.subscriptions import StreamDelivery
+    from vs_project.api import OperatorKey
     from vs_sim.api import Connection, Event, Listener, Network, Threads, Worker
 
 # Polling slack on the teardown path. After the last client hangs up, the
@@ -61,6 +65,25 @@ subscriber to leave, so it would never exit. The WebSocket gateway's analogue is
 """
 MAX_REQUEST_LINE_BYTES = 1024 * 1024
 """The longest request line a session buffers; the WebSocket gateway's inbound frame cap."""
+HELLO_TIMEOUT_SECONDS = 2.0
+"""How long after it is accepted a connection may take to present the whole operator key.
+
+One deadline for the whole hello, however it is split, so a peer that trickles one byte at
+a time is refused at the same time as a silent one. Every operator client sends its hello
+as its first write after connecting (``vs_project.api.OperatorDialer``), so it needs only
+the time a local write takes; the bound is short because it is also how long a peer
+without the key holds a slot.
+"""
+MAX_UNADMITTED_SESSIONS = 8
+"""How many connections may wait to present the key at once.
+
+When every slot is taken, accepting another connection closes the one that has waited
+longest, rather than the new one. Peers without the key therefore cannot lock the
+operator out by keeping the slots full: the operator's connection presents its hello in
+its first write, and is admitted unless this many connections arrive after it before the
+server reads that write. With :data:`HELLO_TIMEOUT_SECONDS`, the slots bound what such
+peers hold: at most this many workers, each for at most that long.
+"""
 
 _LOG = logging.getLogger(__name__)
 
@@ -100,6 +123,21 @@ class RequestLineTooLongError(ValueError):
         )
 
 
+class ControlKeyRefusedError(PermissionError):
+    """A connection did not open with the operator key's hello; the server hung up."""
+
+    diagnostic_code = "control_key_refused"
+
+    def __init__(self) -> None:
+        """Say what the socket needs and the likely cause, never what it got."""
+        super().__init__(
+            "this control socket serves only the operator: the first line was not the "
+            "operator key's hello (vs_project.api.OperatorKey.hello). If you are the operator, "
+            "your client most likely read a different key than the server's: check that both "
+            "run with the same XDG_RUNTIME_DIR, since the key lives in its vibesys directory"
+        )
+
+
 class _PeerGoneError(Exception):
     """The client's end of the connection is gone; nothing more can reach it."""
 
@@ -112,6 +150,12 @@ class _OwnedClientSession:
     worker_ready: Event
     worker: Worker | None = None
     owner: object | None = None
+    accepted: int = 0
+    """The order the server accepted it in: the lowest waiting one is evicted first."""
+    admitted: bool = False
+    """Whether the connection presented the key; written under the server's guard."""
+    evicted: bool = False
+    """Whether the server closed it unadmitted to make room; written under the guard."""
 
 
 class _ClientSession:
@@ -123,15 +167,33 @@ class _ClientSession:
         api: RunApi,
         subscriptions: SubscriptionTracker,
         threads: Threads,
+        key: OperatorKey,
     ) -> None:
         self._connection = connection
+        self._key = key
+        self._pending = b""
         self._api = api
         self._subscriptions = subscriptions
         self._threads = threads
         self._hangup_watcher: Worker | None = None
 
+    def refuse(self) -> None:
+        """Answer a connection that did not present the key with ``control_key_refused``."""
+        with suppress(_PeerGoneError):
+            self._write_message(
+                ProtocolErrorMessage.from_exception(
+                    ControlKeyRefusedError(),
+                    operation="Control socket admission",
+                    code=ControlKeyRefusedError.diagnostic_code,
+                )
+            )
+
     def handle(self) -> None:
-        """Serve requests until the client hangs up, or until its subscription ends."""
+        """Serve requests until the client hangs up, or until its subscription ends.
+
+        Called only once :meth:`admit` is true: nothing is served before the client
+        presents the operator key.
+        """
         api = self._api
         for line in self._lines():
             request = (
@@ -160,6 +222,29 @@ class _ClientSession:
                 response = api.failure(request.request_id, request.client_id, exc)
             self._write_message(response)
 
+    def admit(self) -> bool:
+        """Read the first line, at most ``CONTROL_HELLO_MAX_BYTES``; whether it is the key's hello.
+
+        The whole line must arrive within ``HELLO_TIMEOUT_SECONDS`` of this call. Bytes
+        after the hello stay buffered for :meth:`_lines`, so a client may send its first
+        request in the same write.
+        """
+        deadline = self._threads.now() + HELLO_TIMEOUT_SECONDS
+        received = b""
+        while b"\n" not in received:
+            remaining = deadline - self._threads.now()
+            if len(received) >= CONTROL_HELLO_MAX_BYTES or remaining <= 0:
+                return False
+            try:
+                chunk = self._connection.recv(CONTROL_HELLO_MAX_BYTES - len(received), remaining)
+            except OSError:
+                return False
+            if not chunk:
+                return False
+            received += chunk
+        hello, _, self._pending = received.partition(b"\n")
+        return self._key.admits(hello + b"\n")
+
     def _lines(self) -> Iterator[bytes | None]:
         """Yield each newline-terminated request, then any unterminated rest at end of stream.
 
@@ -171,22 +256,15 @@ class _ClientSession:
         """
         pending = b""
         discarding = False
-        while True:
-            try:
-                chunk = self._connection.recv(_RECV_BYTES)
-            except OSError:
-                chunk = b""
-            if not chunk:
-                if pending and not discarding:
-                    yield pending
-                return
+        for chunk in self._chunks():
+            data = chunk
             if discarding:
-                newline = chunk.find(b"\n")
+                newline = data.find(b"\n")
                 if newline < 0:
                     continue
                 discarding = False
-                chunk = chunk[newline + 1 :]
-            pending += chunk
+                data = data[newline + 1 :]
+            pending += data
             *lines, pending = pending.split(b"\n")
             for line in lines:
                 yield line + b"\n" if len(line) < MAX_REQUEST_LINE_BYTES else None
@@ -194,6 +272,21 @@ class _ClientSession:
                 pending = b""
                 discarding = True
                 yield None
+        if pending and not discarding:
+            yield pending
+
+    def _chunks(self) -> Iterator[bytes]:
+        """What the client sent after its hello, then each read, until end of stream or error."""
+        if self._pending:
+            yield self._pending
+        while True:
+            try:
+                chunk = self._connection.recv(_RECV_BYTES)
+            except OSError:
+                return
+            if not chunk:
+                return
+            yield chunk
 
     def _stream(self, request: SubscribeRequest, delivery: StreamDelivery) -> None:
         api = self._api
@@ -209,12 +302,14 @@ class _ClientSession:
             # subscribe first; the failure then reaches the client as a
             # stream error, exactly as it did when the replay was read after
             # the handshake.
+            # Keep both fields in the same event-store generation.
+            snapshot = api.snapshot()
             self._write_message(
                 SubscribedMessage(
                     request_id=request.request_id,
                     client_id=request.client_id,
-                    run_id=api.snapshot().run_id,
-                    latest_sequence=api.latest_sequence,
+                    run_id=snapshot.run_id,
+                    latest_sequence=snapshot.sequence,
                 )
             )
             raise
@@ -227,7 +322,7 @@ class _ClientSession:
             )
         )
         cursor, reported_floor, store_id = self._write_bootstrap(request, bootstrap)
-        delivery.delivered(cursor)
+        delivery.delivered(DeliveryWatermark(store_id=store_id, sequence=cursor))
         hung_up = self._threads.event()
         self._hangup_watcher = self._threads.spawn(
             partial(self._watch_for_hangup, hung_up), name="vibesys-server-jsonl-hangup"
@@ -243,7 +338,7 @@ class _ClientSession:
                 # willing to replay. Bootstrap again at a fresh tail rather
                 # than deliver a window the bound was meant to exclude.
                 cursor, reported_floor, store_id = self._rebootstrap(request, cursor, store_id)
-                delivery.delivered(cursor)
+                delivery.delivered(DeliveryWatermark(store_id=store_id, sequence=cursor))
                 continue
             # ``wait_for_change`` only tells us that the stream changed. Take
             # one watermark-consistent snapshot before writing so a resumed
@@ -257,7 +352,7 @@ class _ClientSession:
                 # the two logs compare in length. Bootstrap against the store
                 # that is live now; the client re-folds from the batch's id.
                 cursor, reported_floor, store_id = self._rebootstrap(request, cursor, store_id)
-                delivery.delivered(cursor)
+                delivery.delivered(DeliveryWatermark(store_id=store_id, sequence=cursor))
                 continue
             self._write_event_batch(
                 EventBatchMessage(
@@ -269,7 +364,7 @@ class _ClientSession:
                 )
             )
             cursor = checkpoint.through_sequence
-            delivery.delivered(cursor)
+            delivery.delivered(DeliveryWatermark(store_id=store_id, sequence=cursor))
 
     def close(self) -> None:
         """Close the connection and drain the subscription's hangup watcher."""
@@ -372,22 +467,28 @@ class _ClientSession:
 
 
 class UnixJsonlServer:
-    """Own a private Unix socket serving one or more concurrent clients.
+    """Own a private Unix socket serving one or more concurrent clients that hold the key.
 
     Each client is served on its own worker. A client that hangs up at any
     point, including between its request and the response, ends only its own
     session; the server neither reports it nor stops serving the others.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-313304 [PLR0913]; the key is a required, separate admission input; folding it into the network would make a listener that dials, into the api would make every transport (the WebSocket gateway has its own capability) carry it, and a parameter object would only rename these six independent inputs.
         self,
         path: Path,
         api: RunApi,
         subscriptions: SubscriptionTracker | None,
         threads: Threads,
         network: Network,
+        *,
+        key: OperatorKey,
     ) -> None:
         """Create a Unix server, optionally sharing subscription accounting.
+
+        ``key`` is the operator key every connection must present first
+        (``vs_project.api.OperatorKey``); the socket's ``0600`` mode does not keep out an
+        agent that runs as the operator's uid.
 
         ``threads`` runs the accept loop and each client, and paces idle
         streams; ``network`` binds the socket. A client that leaves a message
@@ -399,10 +500,12 @@ class UnixJsonlServer:
         self._threads = threads
         self._subscriptions = subscriptions or SubscriptionTracker(threads=threads)
         self._network = network
+        self._key = key
         self._listener: Listener | None = None
         self._acceptor: Worker | None = None
         self._guard = self._threads.lock()
         self._sessions: set[_OwnedClientSession] = set()
+        self._accepted = 0
         self._thread_identity = self._threads.local(object)
         self._closing = False
 
@@ -452,30 +555,81 @@ class UnixJsonlServer:
                 if self._closing:
                     connection.close()
                     return
-                self._discard_finished_sessions_locked()
-                session = _OwnedClientSession(connection, self._threads.event())
-                self._sessions.add(session)
-            try:
-                worker = self._threads.spawn(
-                    partial(self._serve, session),
-                    name="vibesys-server-jsonl-client",
-                    daemon=True,
-                )
-            except BaseException:
-                with self._guard:
-                    self._sessions.discard(session)
-                connection.close()
-                session.worker_ready.set()
-                raise
+                session, evicted = self._track_locked(connection)
+            if evicted is not None:
+                # Its worker's read of the hello fails, and the worker returns unadmitted.
+                evicted.close()
+            if not self._start_worker(session):
+                return
+
+    def _start_worker(self, session: _OwnedClientSession) -> bool:
+        """Serve ``session`` on its own worker; ``False`` when the server is closing."""
+        connection = session.connection
+        try:
+            worker = self._threads.spawn(
+                partial(self._serve, session),
+                name="vibesys-server-jsonl-client",
+                daemon=True,
+            )
+        except WorkerStartRefusedError as exc:
             with self._guard:
-                session.worker = worker
+                self._sessions.discard(session)
+                closing = self._closing
+            connection.close()
             session.worker_ready.set()
+            if closing:
+                return False
+            _LOG.warning("failed to spawn client worker thread: %s; retrying", exc)
+            self._threads.sleep(_ACCEPT_RETRY_BACKOFF_SECONDS)
+            return True
+        except BaseException:
+            with self._guard:
+                self._sessions.discard(session)
+            connection.close()
+            session.worker_ready.set()
+            raise
+        with self._guard:
+            session.worker = worker
+        session.worker_ready.set()
+        return True
+
+    def _track_locked(
+        self, connection: Connection
+    ) -> tuple[_OwnedClientSession, Connection | None]:
+        """Track ``connection`` for a worker; return it and the oldest waiting one it evicts.
+
+        When the unadmitted slots are full, the connection that has waited longest is
+        marked evicted, and the caller closes it once it has released the guard.
+
+        Closing the newcomer instead would let peers that reconnect as soon as they are
+        refused keep every slot, and the operator out, for as long as they like.
+        """
+        self._discard_finished_sessions_locked()
+        waiting = [owned for owned in self._sessions if not owned.admitted and not owned.evicted]
+        evicted: Connection | None = None
+        if len(waiting) >= MAX_UNADMITTED_SESSIONS:
+            oldest = min(waiting, key=lambda owned: owned.accepted)
+            oldest.evicted = True
+            evicted = oldest.connection
+        self._accepted += 1
+        session = _OwnedClientSession(connection, self._threads.event(), accepted=self._accepted)
+        self._sessions.add(session)
+        return session, evicted
 
     def _serve(self, owned: _OwnedClientSession) -> None:
         owned.worker_ready.wait()
         owned.owner = self._thread_identity.get()
-        session = _ClientSession(owned.connection, self.api, self._subscriptions, self._threads)
+        session = _ClientSession(
+            owned.connection, self.api, self._subscriptions, self._threads, self._key
+        )
         try:
+            if not session.admit():
+                session.refuse()
+                return
+            with self._guard:
+                if owned.evicted:
+                    return
+                owned.admitted = True
             session.handle()
         except _PeerGoneError:
             pass
@@ -490,13 +644,19 @@ class UnixJsonlServer:
             if session.worker is None or session.worker.is_alive()
         }
 
+    def client_count(self) -> int:
+        """How many clients hold a connection now, admitted or not."""
+        with self._guard:
+            self._discard_finished_sessions_locked()
+            return len(self._sessions)
+
     def wait_for_subscriber(self, timeout: float) -> bool:
         """Wait until a presentation client has established its event stream."""
         return self._subscriptions.wait_for_subscriber(timeout)
 
-    def wait_until_delivered(self, sequence: int, timeout: float) -> bool:
-        """Close subscription admission and wait for streams to reach ``sequence``."""
-        return self._subscriptions.wait_until_delivered(sequence, timeout)
+    def wait_until_delivered(self, watermark: DeliveryWatermark, timeout: float) -> bool:
+        """Close subscription admission and wait for streams to reach *watermark*."""
+        return self._subscriptions.wait_until_delivered(watermark, timeout)
 
     def wait_for_subscriber_disconnect(self) -> None:
         """Keep terminal events queryable until the last active subscriber exits."""

@@ -57,8 +57,14 @@ Architecture:
 
 Data and validation:
 
-- Use Pydantic models for external contracts and `StrEnum` or `Literal` for
-  closed sets. No raw strings where an enum or registry exists.
+- Anything that crosses a process or is persisted is a `.proto` message, validated
+  with protovalidate in the same file; the `.proto` is the single source of truth.
+  Existing Pydantic contracts migrate during the transport migration
+  ([run-transport.md](docs/contributing/run-transport.md)); a new contract starts as a `.proto`.
+  Use `StrEnum` or `Literal` for closed sets. No raw strings where an enum or registry exists.
+- Never commit private server names, internal hostnames, personal paths, or keys and tokens;
+  use generic placeholders such as `host-a`. No repository check can hold this, because the
+  names themselves are private.
 - Reject unknown config, metadata, and routing keys. Validate early with errors
   that name the offending key or path.
 - Keep one source of truth per fact, and one authoritative definition of each
@@ -76,7 +82,8 @@ Checks:
 - Run `./scripts/check_format.sh`, `./scripts/check_lint.sh`, and only the
   checks and tests the change can affect; CI runs the rest on the PR. A docs- or
   skills-only change runs no test suite. `./support/repoctl/repoctl test` runs
-  the checks CI would select for the change. Size limits and lint-waiver mechanics
+  the checks CI would select for the change, and names any group it skips
+  because that group cannot run locally. Size limits and lint-waiver mechanics
   are in
   [`docs/contributing/coding-best-practices.md`](docs/contributing/coding-best-practices.md).
 

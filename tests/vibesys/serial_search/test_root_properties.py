@@ -21,6 +21,8 @@ from tests.vibesys.orchestration.single._host import config as single_config
 from tests.vibesys.search_faults import Step, Stop, play, steps, stops
 from tests.vibesys.vibesys_flows import across_restarts
 
+from vibesys.hypothesis.readmodel import project_hypothesis_state
+from vibesys.run.contracts import IterationTree
 from vs_core.api import RequestTurn, StartAttempt, Wait
 from vs_sim.api.testing import examples
 
@@ -51,6 +53,11 @@ def _check_always(host: SerialHost, rounds: int) -> None:
     assert len(host.opened) <= rounds, f"more starts than rounds: {where}"
     designers = [item for item in host.open(RequestTurn) if item.label == "orchestrator"]
     assert len(designers) <= 1, f"two designer turns: {where}"
+    # Every published record projects to a sound iteration tree: the run projects each one.
+    record = host.record
+    if record is not None:
+        tree = project_hypothesis_state(record).iterations
+        assert isinstance(tree, IterationTree), f"unprojectable record: {where}"
 
 
 @SEARCHES

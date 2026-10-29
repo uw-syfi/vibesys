@@ -7,7 +7,7 @@ from types import UnionType
 from typing import TYPE_CHECKING, Annotated, Any, get_args, get_origin
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
@@ -15,6 +15,7 @@ from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
     Access,
     ClockAdvanced,
+    ContractError,
     CoreState,
     Decision,
     Event,
@@ -135,6 +136,24 @@ def test_every_committed_input_reloads_the_exact_envelope(times: list[int]) -> N
     assert not shell.advance()
 
 
+@pytest.mark.regression
+@example(times=[1, 2, 3])
+@given(times=st.lists(st.integers(1, 20), min_size=1, max_size=8))
+def test_admission_is_durable_before_its_answer_is_observable(times: list[int]) -> None:
+    store = FakeStateStore()
+    shell = runtime(store)
+    shell.start("host", now_at=0, lease_duration=100)
+    for instant in sorted(times):
+        transition = shell.admit(ClockAdvanced(now_at=instant), now_at=instant)
+        stored = store.load()
+        assert isinstance(stored, StoredEnvelope)
+        restored = RuntimeRecord[FlowState].decode(stored, OperationRegistry())
+        assert restored == shell.record
+        assert restored.envelope.core.revision >= transition.state.revision
+        assert shell.admitted_core == restored.envelope.core
+        assert not shell.advance()
+
+
 @pytest.mark.parametrize(
     "fault", [CommitFault.UNKNOWN_BEFORE, CommitFault.UNKNOWN_AFTER, CommitFault.UNKNOWN_SYNC]
 )
@@ -177,6 +196,32 @@ def test_woken_search_state_commits_with_receipts_and_callbacks() -> None:
     assert shell.record.envelope.event_cursor == EventCursor(sequence=0)
 
 
+@search("timing", config=CounterConfig)
+async def timing(ctx: Flow, config: CounterConfig) -> None:
+    """A search that, in its first step, asks to be woken a second after the run clock."""
+    del config
+    await ctx.first(ctx.timer(ctx.clock.now() + 1))
+    await ctx.first(ctx.stopped)
+
+
+@given(start=st.floats(min_value=0, max_value=4e9, allow_nan=False))
+def test_a_new_run_starts_its_search_at_the_time_it_starts(start: float) -> None:
+    """The first step reads the start time: no span before it, no deadline already past."""
+    store = FakeStateStore()
+    shell = CoreRuntime(
+        store,
+        timing.driver(CounterConfig()),
+        declared(timing),
+        config=CounterConfig(),
+        bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
+    )
+    shell.start("host", now_at=start, lease_duration=100)
+    assert shell.next_wake_at == start + 1
+    spans = shell.record.envelope.strategy.live.trace.spans
+    assert spans
+    assert all(span.started_at == start for span in spans)
+
+
 def test_unknown_record_fields_fail_before_lease_acquisition() -> None:
     store = FakeStateStore()
     fence = store.acquire("writer", now=0, duration=1)
@@ -194,7 +239,8 @@ def test_unknown_record_fields_fail_before_lease_acquisition() -> None:
     store.commit(
         None, StoredEnvelope(revision=0, schema_version=1, payload=payload.encode()), fence, now=0
     )
-    with pytest.raises(ValidationError, match="unexpected"):
+    # At the current version an unknown field is what a newer VibeSys that kept the version adds.
+    with pytest.raises(ContractError, match=r"unexpected.*written by a newer VibeSys"):
         runtime(store).start("reader", now_at=1, lease_duration=1)
     assert store.acquire("reader", now=1, duration=1) is not None
 
@@ -464,3 +510,107 @@ def test_a_strategy_state_that_breaks_its_own_invariant_never_becomes_durable() 
     with pytest.raises(ValidationError):
         shell.advance()
     assert store.load() == before
+
+
+@example(duration=60, gap=100, resume=False)
+@example(duration=60, gap=100, resume=True)
+@given(
+    duration=st.integers(min_value=1, max_value=86400),
+    gap=st.integers(1, 100000),
+    resume=st.booleans(),
+)
+def test_only_operator_resume_renews_the_original_duration(
+    duration: int, gap: int, *, resume: bool
+) -> None:
+    store = FakeStateStore()
+    initial = declared(counter)
+    initial = initial.model_copy(
+        update={"run": initial.run.model_copy(update={"duration_seconds": float(duration)})}
+    )
+    for started in (0, gap, gap * 2):
+        shell = CoreRuntime(
+            store,
+            counter.driver(CounterConfig()),
+            initial,
+            config=CounterConfig(),
+            bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
+        )
+        shell.start("host", now_at=started, lease_duration=1, resume=resume)
+        expected = started + duration if resume else duration
+        assert shell.record.envelope.core.run.deadline_at == expected
+        assert shell.record.envelope.core.run.duration_seconds == duration
+        shell.release_lease(now_at=started)
+
+
+@pytest.mark.regression
+@example(epochs=[1, 5, 8])
+@given(epochs=st.lists(st.integers(1, 100), min_size=1, max_size=5, unique=True).map(sorted))
+def test_recovery_uses_published_epochs_even_when_startup_did_not_acquire_a_lease(
+    epochs: list[int],
+) -> None:
+    store = FakeStateStore()
+    initial = declared(counter)
+    for position, epoch in enumerate(epochs):
+        shell = CoreRuntime(
+            store,
+            counter.driver(CounterConfig()),
+            initial,
+            config=CounterConfig(),
+            bindings=CoreRuntimeBindings(
+                transitions=ShellTraceTransitions(),
+                epoch=lambda epoch=epoch: epoch,
+            ),
+        )
+        shell.start("host", now_at=float(position), lease_duration=1)
+        assert shell.record.envelope.core.records.recovery.epoch == epoch
+        assert shell.record.envelope.fence.epoch == epoch
+        shell.renew(now_at=float(position), lease_duration=1)
+        shell.record_renewal()
+        assert shell.record.envelope.core.records.recovery.epoch == epoch
+        shell.release_lease(now_at=float(position))
+
+
+def test_a_native_recovery_requires_a_published_successor_before_taking_authority() -> None:
+    store = FakeStateStore()
+    bindings = CoreRuntimeBindings(transitions=ShellTraceTransitions(), epoch=lambda: 1)
+    first = CoreRuntime(
+        store,
+        counter.driver(CounterConfig()),
+        declared(counter),
+        config=CounterConfig(),
+        bindings=bindings,
+    )
+    first.start("host", now_at=0, lease_duration=1)
+    first.release_lease(now_at=0)
+    before = store.load()
+    successor = CoreRuntime(
+        store,
+        counter.driver(CounterConfig()),
+        declared(counter),
+        config=CounterConfig(),
+        bindings=bindings,
+    )
+    with pytest.raises(ContractError, match=r"run\.log must publish a successor"):
+        successor.start("host", now_at=1, lease_duration=1)
+    assert store.load() == before
+    assert store.acquire("other", now=1, duration=1) is not None
+
+
+def test_an_unavailable_published_epoch_does_not_acquire_a_lease() -> None:
+    store = FakeStateStore()
+
+    def unavailable() -> int:
+        message = "published epoch unavailable"
+        raise ValueError(message)
+
+    shell = CoreRuntime(
+        store,
+        counter.driver(CounterConfig()),
+        declared(counter),
+        config=CounterConfig(),
+        bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions(), epoch=unavailable),
+    )
+    with pytest.raises(ValueError, match="published epoch unavailable"):
+        shell.start("host", now_at=0, lease_duration=1)
+    assert store.load() is None
+    assert store.acquire("other", now=0, duration=1) is not None

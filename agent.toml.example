@@ -1,6 +1,9 @@
-[model]
-name = "gpt-5.4"
-# Choose a model supported by the selected CLI provider.
+# [model]
+# name = "gpt-5.6-sol"
+# Optional. Must be a vetted model of the selected CLI provider (the list is
+# vs_agent.provider_policy.HARNESSES); omitted, each provider runs its default:
+# codex gpt-5.6-sol, claude claude-opus-5. --model overrides, and
+# --allow-unvetted-model (terminal only) runs a model outside the list.
 
 # [thinking]
 # level = "medium"          # minimal, low, medium, high (Gemini 3+ models)
@@ -16,6 +19,8 @@ name = "gpt-5.4"
 # cli_provider = "codex"      # used when backend = "cli";
 # one of: claude, gemini, codex, opencode
 # cli_timeout = 1800          # per-invocation timeout in seconds
+# backend = "scripted"        # agent-less runs: the real backend, scripted agents, no model
+# scripted_seed = 0           # the scripted agents' seed; read only with backend = "scripted"
 
 # [agent.quota]
 # What the run does when a provider runs out of quota or is rate limited for
@@ -37,7 +42,7 @@ name = "gpt-5.4"
 # wait_seconds = 14400       # positive integer seconds; only with "wait" or "fallback"
 # retry_seconds = 300        # seconds between attempts when no reset time is known
 # fallback_provider = "codex"   # claude | codex | gemini | opencode; not the run's own provider
-# fallback_model = "gpt-5.4"    # needs fallback_provider, and the reverse
+# fallback_model = "gpt-5.6-sol"  # a vetted model of fallback_provider; needs it, and the reverse
 
 # [evaluation]
 # Added to declared stage execution budgets to bound evaluation suspension.
@@ -46,6 +51,11 @@ name = "gpt-5.4"
 # after the job's state could not be read (at least the interval).
 # observe_interval_seconds = 10
 # observe_backoff_cap_seconds = 120
+# How long one measurement's job may wait in the executor's queue (Slurm PENDING)
+# before it is given up, and how often a job still queued is reported with its
+# pending reason. Queue time never counts against a measurement's own limit.
+# queue_wait_budget_seconds = 43200  # default 12 hours
+# queue_notice_interval_seconds = 600
 
 # [run]
 # Optional wall-clock budget for one run. Omitted means unbounded (the round
@@ -57,17 +67,6 @@ name = "gpt-5.4"
 # authenticated with `gh auth login`.
 # owner = "your-github-user"
 visibility = "private"  # private, public, or internal
-
-# [tui]
-# Theme for the interactive client, as light/dark pairs:
-#   "dark" (default) / "light"                            — the baseline palette
-#   "solarized-dark" / "solarized-light"                  — low-glare terminal palette
-#   "catppuccin-mocha" / "catppuccin-latte"               — softer, more expressive
-#   "high-contrast-dark" / "high-contrast-light"          — accessibility-focused
-#
-# The --theme flag overrides this value, and /theme switches for the current
-# session without changing the file. Ignored in headless mode.
-# theme = "dark"
 
 # [backend]
 # Hardware/runtime backend to target. Supported values are "cuda", "metal",

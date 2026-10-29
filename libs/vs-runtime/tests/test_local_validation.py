@@ -19,6 +19,8 @@ from vs_runtime.api.infrastructure import (
     LocalValidator,
 )
 from vs_runtime.api.testing import FakeCommands, FakeWorkspace, MemoryValidationPasses
+from vs_sandbox.api.testing import FakeCommandRunner
+from vs_sim.api import DISCARD
 from vs_sim.api.testing import examples
 
 
@@ -81,6 +83,49 @@ def test_executes_trusted_recipe_and_reuses_exact_pass(tmp_path: Path) -> None:
     result = results[0]
     assert isinstance(result, dict)
     assert result["reused"] is True
+
+
+@pytest.mark.parametrize("split_at", range(1, len("API_TOKEN")))
+def test_failed_recipe_uses_the_diagnostic_created_before_command_output_was_bounded(
+    tmp_path: Path,
+    split_at: int,
+) -> None:
+    async def exercise() -> tuple[str, str]:
+        _write_recipe(tmp_path)
+        credential = "API_TOKEN=validation-secret"
+        suffix = "z" * (81 + split_at - len(credential) - 1)
+        runner = FakeCommandRunner(max_output_chars=100)
+        runner.script_process(
+            "python -m pytest -q test_queue.py",
+            stderr="p" * 32 + credential + " " + suffix,
+            returncode=1,
+        )
+        bounded = runner.execute("python -m pytest -q test_queue.py", output=DISCARD)
+        assert "validation-secret" in bounded.output
+        commands = FakeCommands()
+        commands.script(
+            CommandResult(
+                output=bounded.output,
+                exit_code=bounded.exit_code,
+                truncated=bounded.truncated,
+                diagnostic_output=bounded.diagnostic_output,
+            )
+        )
+        (result,) = await LocalValidator(commands, MemoryValidationPasses()).run(
+            FakeWorkspace(path=tmp_path),
+            recipe_artifact="validation/recipes.json",
+            report_location="validation/report.json",
+        )
+        assert not result.passed
+        assert result.operator_output is not None
+        return result.output, result.operator_output
+
+    output, operator_output = asyncio.run(exercise())
+
+    assert "validation-secret" in output
+    assert "validation-secret" not in operator_output
+    assert len(output) <= 100
+    assert len(operator_output) <= 100
 
 
 def test_workspace_mutation_fails_recipe_and_restores_entry_revision(tmp_path: Path) -> None:

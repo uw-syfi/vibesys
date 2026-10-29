@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, ClassVar
 from vs_project._exclude_file import append_excludes
 from vs_project._git_process import git_environment
 from vs_project._nested_repositories import GITLINK_MODE, require_no_nested_repository
+from vs_project._ref_names import require_branch_prefix
 from vs_project.api.git_repository import (
     COMMIT_IDENTITY_EMAIL,
     COMMIT_IDENTITY_NAME,
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
 
 
 _BRANCH_PREFIX = "refs/heads/"
+_REGULAR_FILE_MODES = frozenset({"100644", "100755"})
 
 
 _LIST_INDEX = ("ls-files", "--stage", "-z")
@@ -126,9 +128,11 @@ class CliGitRepository:
     def _failure(args: Sequence[str], result: ProcessOutcome) -> GitCommandError:
         return GitCommandError(["git", *args], result.returncode, _text(result.stderr).strip())
 
-    def _run_checked(self, args: Sequence[str]) -> ProcessOutcome:
+    def _run_checked(
+        self, args: Sequence[str], *, index_file: Path | None = None
+    ) -> ProcessOutcome:
         """Run ``git <args>``; a nonzero exit is reported to the fault sink and raised."""
-        result = self._run(args)
+        result = self._run(args, index_file=index_file)
         if result.returncode != 0:
             error = self._failure(args, result)
             self._faults.warning(
@@ -147,16 +151,22 @@ class CliGitRepository:
         the guarded command the same way, before it reads the work tree.
         """
         listing = self._run(_LIST_INDEX, index_file=index_file)
-        worktrees = self._run(["worktree", "list", "--porcelain", "-z"])
         require_no_nested_repository(
             self._work_tree or self._root,
             pathspecs,
             gitlinks=_gitlinks(listing.stdout) if listing.returncode == 0 else (),
-            linked_worktrees=(
-                Path(record.removeprefix("worktree "))
-                for record in _text(worktrees.stdout).split("\0")
-                if worktrees.returncode == 0 and record.startswith("worktree ")
-            ),
+            linked_worktrees=self._linked_worktrees,
+        )
+
+    def _linked_worktrees(self) -> tuple[Path, ...]:
+        """The work trees ``git worktree list`` reports now; none when Git cannot list them."""
+        worktrees = self._run(["worktree", "list", "--porcelain", "-z"])
+        if worktrees.returncode != 0:
+            return ()
+        return tuple(
+            Path(record.removeprefix("worktree "))
+            for record in _text(worktrees.stdout).split("\0")
+            if record.startswith("worktree ")
         )
 
     def _prefix(self) -> str:
@@ -271,6 +281,12 @@ class CliGitRepository:
         result = self._run(["cat-file", "blob", f"{revision}:{path}"])
         return None if result.returncode != 0 else result.stdout
 
+    def has_ref_pointing_at(self, commit: str, prefix: str) -> bool:
+        result = self._run(
+            ["for-each-ref", "--count=1", f"--points-at={commit}", "--format=%(refname)", prefix]
+        )
+        return result.returncode == 0 and bool(result.stdout.strip())
+
     def has_ref_containing(self, commit: str, prefix: str) -> bool:
         result = self._run(
             [
@@ -283,10 +299,144 @@ class CliGitRepository:
         )
         return result.returncode == 0 and bool(result.stdout.strip())
 
+    def branches(self, prefix: str) -> tuple[str, ...]:
+        hierarchy = f"{_BRANCH_PREFIX}{require_branch_prefix(prefix)}"
+        result = self._run(["for-each-ref", "--format=%(refname)", hierarchy])
+        if result.returncode != 0:
+            return ()
+        names = (line.removeprefix(_BRANCH_PREFIX) for line in _text(result.stdout).splitlines())
+        return tuple(sorted(name for name in names if name.startswith(prefix)))
+
+    def tree_files(self, revision: Revision, directory: str) -> tuple[str, ...]:
+        commit = self.resolve_commit(revision)
+        if commit is None:
+            return ()
+        result = self._run(["ls-tree", "-r", "-z", "--full-tree", commit, "--", f"{directory}/"])
+        if result.returncode != 0:
+            return ()
+        records = (record.partition("\t") for record in _text(result.stdout).split("\0"))
+        return tuple(
+            sorted(
+                path
+                for metadata, _, path in records
+                if metadata.split(" ")[0] in _REGULAR_FILE_MODES
+                and path.startswith(f"{directory}/")
+            )
+        )
+
     # -- changing refs -------------------------------------------------------
 
     def update_ref(self, ref: str, commit: str) -> None:
         self._run_checked(["update-ref", ref, commit])
+
+    def create_ref(self, ref: str, commit: str) -> str:
+        if not ref.startswith("refs/") or not self.is_valid_ref_name(ref):
+            raise GitCommandError(["update-ref", ref, commit], 1, f"invalid ref name: {ref}")
+        target = self.resolve_commit(commit)
+        args = ["update-ref", "--no-deref", ref, target or commit, "0" * len(target or commit)]
+        result = self._run(args)
+        if result.returncode == 0:
+            resolved = self.resolve_commit(ref)
+            if resolved is not None:
+                return resolved
+        elif target is not None and self._run(["symbolic-ref", "-q", ref]).returncode != 0:
+            winner = self.resolve_commit(ref)
+            if winner is not None:
+                return winner
+        raise self._failure(args, result)
+
+    def create_commit(
+        self,
+        revision: Revision,
+        parents: Sequence[str],
+        message: str,
+        *,
+        preserve_from: Revision,
+        preserve_paths: Sequence[str] = (),
+    ) -> str:
+        with tempfile.TemporaryDirectory(prefix="vibesys-publication-") as scratch:
+            index = Path(scratch) / "index"
+            self._run_checked(["read-tree", revision], index_file=index)
+            for path in preserve_paths:
+                # restore also removes source entries absent from preserve_from. A path
+                # absent from both trees has nothing to restore and is not a Git pathspec.
+                present = (
+                    self._run_checked(["ls-tree", "-r", "--name-only", revision, "--", path]).stdout
+                    or self._run_checked(
+                        ["ls-tree", "-r", "--name-only", preserve_from, "--", path]
+                    ).stdout
+                )
+                if present:
+                    self._run_checked(
+                        [
+                            "restore",
+                            "--source",
+                            preserve_from,
+                            "--staged",
+                            "--",
+                            f":(literal){path}",
+                        ],
+                        index_file=index,
+                    )
+            tree = _text(self._run_checked(["write-tree"], index_file=index).stdout).strip()
+            parent_args = [arg for parent in parents for arg in ("-p", parent)]
+            return _text(
+                self._run_checked(["commit-tree", tree, *parent_args, "-m", message]).stdout
+            ).strip()
+
+    def advance_branch(self, branch: str, commit: str) -> bool:
+        if not self.is_valid_branch_name(branch):
+            return False
+        target = self.resolve_commit(commit)
+        if target is None:
+            return False
+        # Local fetch owns both atomic ref locking and the checked-out-branch and
+        # fast-forward rules. update-ref bypasses the former; branch -f bypasses the latter.
+        repository = str(self._git_dir or self._root)
+        return (
+            self._run(
+                [
+                    "fetch",
+                    "--no-write-fetch-head",
+                    "--no-tags",
+                    "--no-recurse-submodules",
+                    "--",
+                    repository,
+                    f"{target}:refs/heads/{branch}",
+                ]
+            ).returncode
+            == 0
+        )
+
+    def fast_forward_checkout(
+        self,
+        branch: str,
+        commit: str,
+        *,
+        untracked_exclusions: Sequence[str] = (),
+    ) -> bool:
+        self.require_plain_work_tree(())
+        target = self.resolve_commit(commit)
+        if target is None:
+            return False
+        paths = [".", *(f":(exclude){path}" for path in untracked_exclusions)]
+        tracked_exclusions = (
+            self.tracked_changes_since_head(untracked_exclusions) if untracked_exclusions else ()
+        )
+        if self.current_branch() != branch or self.uncommitted_paths(paths) or tracked_exclusions:
+            return False
+        return (
+            self._run(
+                [
+                    "merge",
+                    "--ff-only",
+                    "--no-overwrite-ignore",
+                    "--no-edit",
+                    target,
+                ]
+            ).returncode
+            == 0
+        )
 
     def switch_branch(self, branch: str, *, create: bool = False) -> None:
         self._run_checked(["switch", *(["-c"] if create else []), branch])

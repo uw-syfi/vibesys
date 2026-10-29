@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Literal, assert_never
+from typing import TYPE_CHECKING, Annotated, Literal, Self, assert_never
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 from pydantic import BaseModel, Field, SerializeAsAny, ValidationInfo, model_validator
 
@@ -22,6 +25,7 @@ from .common import (
     ContractValidationError,
     Count,
     ExecuteRegisteredOperation,
+    InvocationId,
     LifecycleClass,
     Observation,
     ObservationStatus,
@@ -38,6 +42,7 @@ from .common import (
     Seconds,
     SetupFailureKind,
     Value,
+    unset,
     validate_setup_failure,
 )
 from .evaluation import (
@@ -108,16 +113,32 @@ type Request = Annotated[
 ]
 
 
+class Attribution(StrEnum):
+    """Where a request core creates takes its ``decision_id`` and ``admission_id`` from."""
+
+    CAUSE = "cause"
+    """The step that creates it: an unset field is filled from the decision and admission
+    of the signal being handled, for a request that is that decision's own work."""
+    OWN = "own"
+    """The request itself, as the reducer built it; an unset ``decision_id`` stays unset.
+
+    For a request whose id names what it belongs to (a job's poll or cancel, a submission
+    core allocates for an agent's call or a base run): any signal in a step may ask for
+    it, so filling it from the asker would give one id a payload per asker."""
+
+
 class Outbound(Value):
     """A request together with how long it may take: the one way core creates a request.
 
     ``until`` is a ``Within`` (a duration from now, plus watches) or ``Inherited`` (the
     same ``Until`` as the decision that caused the request). Requests carry no deadline;
     core stores the resolved ``Until`` on the ``RequestRecord`` when it registers this.
+    ``attribution`` says whether the step's cause may fill the request's decision.
     """
 
     request: Request
     until: Within | Inherited | Until | FromDispatch
+    attribution: Attribution = Attribution.CAUSE
 
 
 def within(request: Request, limit: float, *watches: Watch) -> Outbound:
@@ -137,6 +158,71 @@ class Scheduled(Value):
     until: Until
     limit_from_dispatch: Seconds | None = None
     """The seconds the work may take once dispatched, when ``until`` is only a placeholder."""
+
+
+class CapacityHold(Value):
+    """The time a turn spent held at the run's capacity gate, as the gate last reported it.
+
+    The gate holds a turn its provider stopped (an outage, a spent quota) inside the turn's own
+    call, so that time is the provider's, not the turn's work, and it is never charged to the
+    turn's limit (``_turn_holds``). A report is cumulative: the latest replaces every earlier
+    one. A hold runs from the turn's first capacity stop to the release after its last one, so
+    the sends between its waits count too; only a send that ends the hold is the turn's.
+
+    ``credit`` is the time of the turn's holds that ended; the gate bounds each of them (by its
+    policy, or by the operator who resumed the run), so core credits it whole. ``since`` is
+    when the hold the turn is in began (None when it is in none), and ``released_at`` when
+    the gate last let the turn go: the end of the current hold's latest wait, or with no
+    current hold the end of the hold that ended last (None while it waits, or if never held).
+    A ``parked`` hold waits for the operator or a timed resume with the run paused, not for a
+    backoff. ``budget`` is the most the current hold is credited: the outage budget the gate
+    applies.
+
+    ``resend_grace`` is the least time the send after a release has before core ends the
+    turn, whatever own time the turn had left: the gate sizes it to one failing send, so a
+    turn near its limit is not cut while its resend is still failing (an outage that started
+    late in the turn), and the next stop reopens the hold before the grace runs out.
+    """
+
+    credit: Seconds = 0.0
+    since: Seconds | None = None
+    released_at: Seconds | None = None
+    parked: bool = False
+    budget: Seconds
+    resend_grace: Seconds = 0.0
+
+    @model_validator(mode="after")
+    def consistent(self) -> Self:
+        """A park belongs to a hold, and a parked hold is not released."""
+        if self.since is None and self.parked:
+            raise ContractValidationError("since", "a parked hold names its start")
+        if (
+            self.released_at is not None
+            and self.since is not None
+            and self.released_at < self.since
+        ):
+            raise ContractValidationError("released_at", "a hold is released after it began")
+        if self.parked and self.released_at is not None:
+            raise ContractValidationError("parked", "a parked hold waits; it is not released")
+        return self
+
+    @property
+    def holding(self) -> bool:
+        """Whether the gate holds the turn now: it waits, for a backoff or parked."""
+        return self.since is not None and self.released_at is None
+
+
+class TurnHeld(Value):
+    """The run's capacity gate reports how long it has held the turn ``invocation_id``.
+
+    The host's control bridge turns the gate's latest report into this event. Core keeps it on
+    the turn's open dispatch record, whose limit it extends (``_turn_holds``); a report for a
+    turn with no open dispatch record changes nothing.
+    """
+
+    kind: Literal["turn_held"] = "turn_held"
+    invocation_id: InvocationId
+    hold: CapacityHold
 
 
 class RequestPhase(StrEnum):
@@ -176,7 +262,11 @@ class RequestRecord(OutcomeValue):
     retry_at: Seconds | None = None
     """Core time at which the request goes out again after a retryable failure, else None."""
     until: Until
-    """When core ends this record if it is still open, and the watches that end it sooner."""
+    """When core ends this record if it is still open, and the watches that end it sooner.
+
+    A record that started a job has no limit while the job is queued, and each queued
+    interval moves ``at`` later by its length, so its limit counts from the job's start
+    (``_wait_clock``)."""
     failure: Failed | None = None
     """Why core ended it without a result (limit passed, watch fired), else None."""
     limit_from_dispatch: Seconds | None = None
@@ -188,6 +278,9 @@ class RequestRecord(OutcomeValue):
     """
     dispatched_at: Seconds | None = None
     """When the shell first dispatched a request whose limit counts from then, else None."""
+    capacity_hold: CapacityHold | None = Field(default=None, exclude_if=unset)
+    """For a turn's dispatch: the latest hold the run's capacity gate reported for the turn,
+    which extends its limit (``_turn_holds``), else None."""
     dispatched_in: Count | None = None
     """The host epoch whose dispatch is the request's latest, else None (never dispatched).
 
@@ -335,7 +428,11 @@ class RecoveryCheck(Value):
 
     target: RequestId
     inspection: RequestId | None = None
-    resolution: Literal["pending", "safe-prepared", "reattached", "terminal", "blocked"] = "pending"
+    resolution: Literal[
+        "pending", "safe-prepared", "reattached", "terminal", "unknown", "blocked"
+    ] = "pending"
+    """How the check resolved. ``unknown``: its target's result is discarded whatever it was (a
+    cancel of a job) and its executor could not say, so recovery settled it without an answer."""
     wait: WaitOn | None
     """What a pending check waits on: its target while that is open, the inspections recovery
     sent about the target and the children it left, and the owned jobs that settle children
@@ -372,7 +469,8 @@ class RecoveryBarrier(Value):
             check.resolution in ("pending", "blocked") for check in self.checks
         ):
             raise ContractValidationError(
-                "checks", "READY requires safe-prepared, reattached or terminal proof"
+                "checks",
+                "READY requires safe-prepared, reattached, terminal or unknown-settled checks",
             )
         return self
 
@@ -401,14 +499,23 @@ class HostEpoch(Value):
         return self
 
 
+_LEDGER_INDEXES = ("_by_resource", "_inspections", "_positions")
+"""The slots of `RecordsState` that hold its ledger indexes.
+
+Named here, once, so that `RecordsState.model_copy` reads this tuple instead of the class's
+``__slots__``, a dunder the purity ratchet keeps core from reading.
+"""
+
+
 class RecordsState(Value):
     """Records state lifecycle contract."""
 
-    # The indexes from request identity, and from the resource a request names, to positions
-    # in ``records``, each built on its first lookup. A state never changes, so neither do its
-    # indexes; a copy is a new state and builds its own. Like `Value`'s slots they stay out of
-    # equality, copies and serialization.
-    __slots__ = ("_by_resource", "_positions")
+    # The indexes from request identity, from the resource a request names, and from the request
+    # an inspection inspects, to positions in ``records``, each built on its first lookup. A
+    # state never changes, so neither do its indexes. Like `Value`'s slots they stay out of
+    # equality and serialization; a copy that keeps the same ``records`` tuple keeps them too
+    # (see `model_copy`).
+    __slots__ = _LEDGER_INDEXES
 
     records: tuple[RequestRecord, ...] = ()
     children: tuple[ChildLease, ...] = ()
@@ -425,6 +532,23 @@ class RecordsState(Value):
         if epochs and epochs[-1] != self.recovery.epoch:
             raise ContractValidationError("hosts", "the newest host epoch is the recovery epoch")
         return self
+
+    def model_copy(self, *, update: Mapping[str, object] | None = None, deep: bool = False) -> Self:
+        """A copy that keeps the ledger indexes when it keeps the very same ``records`` tuple.
+
+        The indexes are positions in ``records`` and nothing else, so they hold for any copy
+        whose ``records`` is the same object. Without this, each copy that changed only
+        ``children`` or ``recovery`` rebuilt the index on its next lookup: recovery copies the
+        state once per finished record, so a restart cost the square of the ledger.
+        """
+        copy = super().model_copy(update=update, deep=deep)
+        if copy.records is self.records:
+            for slot in _LEDGER_INDEXES:
+                try:
+                    object.__setattr__(copy, slot, object.__getattribute__(self, slot))
+                except AttributeError:
+                    continue
+        return copy
 
     def positions(self, request_id: RequestId | None) -> tuple[int, ...]:
         """Where the records of ``request_id`` sit in ``records``: one place, or none.
@@ -456,6 +580,22 @@ class RecordsState(Value):
                     index[named] = (*index.get(named, ()), position)
             object.__setattr__(self, "_by_resource", index)
         return tuple(self.records[position] for position in index.get(resource_id, ()))
+
+    def inspections_of(self, target: RequestId) -> tuple[RequestRecord, ...]:
+        """The records of the inspections of ``target``, in ledger order.
+
+        A lookup costs a dictionary read instead of a scan of every record.
+        """
+        try:
+            index: dict[RequestId, tuple[int, ...]] = object.__getattribute__(self, "_inspections")
+        except AttributeError:
+            index = {}
+            for position, record in enumerate(self.records):
+                if isinstance(record.request, InspectRequest):
+                    named = record.request.target
+                    index[named] = (*index.get(named, ()), position)
+            object.__setattr__(self, "_inspections", index)
+        return tuple(self.records[position] for position in index.get(target, ()))
 
     def find(self, request_id: RequestId | None) -> tuple[RequestRecord, ...]:
         """The records of ``request_id``, in ledger order (see `positions`)."""
@@ -646,7 +786,11 @@ class RequestObserved(OutcomeValue):
 
 
 class RecoveryStarted(Value):
-    """A host acquired the lease: epoch ``epoch`` starts at ``now_at``."""
+    """Reconcile a replacement writer at ``now_at`` under host authority ``epoch``.
+
+    This input preserves the run and its flow journal. ``EpochResumed`` alone
+    authorizes fresh run authority after an operator Resume.
+    """
 
     kind: Literal["recovery_started"] = "recovery_started"
     epoch: Count
@@ -788,7 +932,8 @@ type RecordsEvent = Annotated[
     | ReconciliationCommandLapsed
     | RecoveryCheckWaitLapsed
     | OperationRetireRequested
-    | HostRenewed,
+    | HostRenewed
+    | TurnHeld,
     Field(discriminator="kind"),
 ]
 

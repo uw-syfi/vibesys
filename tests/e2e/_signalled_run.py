@@ -57,7 +57,7 @@ def main(project_root: Path, slurm_config: Path) -> None:
     request = RunRequest(
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id=PLUGIN_ID, config_version=1, options={}),
-        config=Config.model_validate({"model": {"name": PLUGIN_ID}}),
+        config=Config.model_validate({"model": {"name": "claude-sonnet-5"}}),
         input_bundle=load_task(project_root),
         objective="Improve the queue.",
         exp_name=PLUGIN_ID,

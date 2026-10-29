@@ -16,8 +16,8 @@ Your workspace is an isolated candidate at `{{ rev(base_revision) }}`; edit it f
 {% if invariants %}- Invariants: {{ invariants }}
 {% endif %}{% if activation_evidence %}- Activation evidence: {{ activation_evidence }}
 {% endif %}{% if falsification_criteria %}- Falsifier: {{ falsification_criteria }}
-{% endif %}{% if minimum_acceptance_criteria %}- Minimum acceptance: {{ minimum_acceptance_criteria }}
-{% endif %}
+{% endif %}- Expected-effect bar: ratio over the base `{{ minimum_ratio }}`, derived by the framework.
+
 Read the code and the objective with tools. Do not rely on stale history.
 Reuse a matching framework validation PASS when its declared inputs are unchanged.
 
@@ -62,19 +62,12 @@ offered load. Do not manufacture a gain through accounting, admission, failure,
 timeout, load selection, or mixed operating points. Clean up processes, tasks,
 sockets, and accelerators on every exit.
 
-Evaluate the causal result against the plan's independent minimum, not its
-forecast. Classify Pareto retention separately: a feasible nondominated tradeoff
+Evaluate the causal result against the plan's bar, not its forecast. Classify Pareto retention separately: a feasible nondominated tradeoff
 may be retained without meeting all terminal gates. Canonical fields come only
 from one fresh canonical selected row; targeted values remain provisional.
 
-{% if official_due %}
-Official evaluation is scheduled after this round because
-`{{ official_reason or 'framework policy' }}`. Do not duplicate
-framework-owned commands.
-{% else %}
-Official evaluation is deferred; do not run a ceremonial full sweep or immutable
-accuracy check merely for bookkeeping.
-{% endif %}
+The trusted gates measure this round's candidate after it passes self-review. Do not
+duplicate framework-owned commands.
 
 ## Profile
 
@@ -105,5 +98,8 @@ evidence identity, reward-hack risk and resource lifecycle only.
 
 Self-review the exact scoped outcome, invariants, evidence identity, reward-hack
 risk, and resource lifecycle. PASS only when that outcome is supported; it does
-not assert global completion. Return only the schema-valid JSON object. The
+not assert global completion.
+
+{% include 'reply_markdown.j2' %}
+Return only the schema-valid JSON object. The
 framework records it and feeds profile fields to the next designer.

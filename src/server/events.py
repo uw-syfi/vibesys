@@ -26,8 +26,10 @@ from pydantic import (
     ConfigDict,
     Field,
     FiniteFloat,
+    NonNegativeFloat,
     ValidationError,
     WithJsonSchema,
+    field_validator,
     model_validator,
 )
 
@@ -40,12 +42,25 @@ from server.event_index import (
 )
 from server.host_api import StartupProgress, StartupStage
 from server.run_lifecycle import RunStatus
+from server.span_index import SpanIndexLog
 from vibesys.api import (
     AgentOutputChannel,
+    AgentReply,
     AgentStatusData,
+    CheckoutStatus,
+    GateKind,
+    QuotaWaitCancelledData,
+    QuotaWaitingData,
+    RunEndingData,
     RunFailedData,
+    RunOverview,
+    SpanId,
+    SteerDeliveryData,
+    SteerProposal,
     TodoItemData,
     ToolResultPayload,
+    WireSpan,
+    WorkspaceRootProbeData,
 )
 from vibesys.api import (
     CommandResultPayload as _CommandResultPayload,
@@ -53,6 +68,7 @@ from vibesys.api import (
 from vibesys.api import (
     JsonResultPayload as _JsonResultPayload,
 )
+from vs_redaction.api import redact_diagnostic_text
 
 CommandResultPayload = _CommandResultPayload
 JsonResultPayload = _JsonResultPayload
@@ -85,12 +101,15 @@ class EventType(StrEnum):
     CONFIGURATION_FAILED = "configuration_failed"
     RUN_STARTED = "run_started"
     RUN_STARTUP_PROGRESS = "run_startup_progress"
+    WORKSPACE_ROOT_PROBE = "workspace_root_probe"
     EXPERIMENTS_CHANGED = "experiments_changed"
     ITERATIONS_CHANGED = "iterations_changed"
     RUN_INTERRUPTED = "run_interrupted"
     RUN_STATUS_CHANGED = "run_status_changed"
     CHAT = "chat"
     CHAT_THREAD_CREATED = "chat_thread_created"
+    STEER_PROPOSED = "steer_proposed"
+    STEER_DELIVERY = "steer_delivery"
     STATUS_QUERY = "status_query"
     CONTROL = "control"
     INVOCATION_STARTED = "invocation_started"
@@ -107,6 +126,7 @@ class EventType(StrEnum):
     ROUND_FINISHED = "round_finished"
     RUN_FINISHED = "run_finished"
     RUN_FAILED = "run_failed"
+    RUN_ENDING = "run_ending"
     OUTPUT = "output"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
@@ -116,6 +136,8 @@ class EventType(StrEnum):
     QUOTA_PAUSED = "quota_paused"
     QUOTA_RESUMED = "quota_resumed"
     QUOTA_ABANDONED = "quota_abandoned"
+    QUOTA_WAITING = "quota_waiting"
+    QUOTA_WAIT_CANCELLED = "quota_wait_cancelled"
     PROVIDER_SWITCHED = "provider_switched"
     GATE_STARTED = "gate_started"
     GATE_FINISHED = "gate_finished"
@@ -123,6 +145,14 @@ class EventType(StrEnum):
     RUN_CONFIGURED = "run_configured"
     FRAMEWORK_WARNING = "framework_warning"
     WINNER_SELECTED = "winner_selected"
+    INPUT_MEASUREMENT_FAILED = "input_measurement_failed"
+    MEASUREMENT_COMPARED = "measurement_compared"
+    COMPARISONS_READ = "comparisons_read"
+    WORKSTREAM_FINISHED = "workstream_finished"
+    TURN_USAGE_RECORDED = "turn_usage_recorded"
+    SPAN_STARTED = "span_started"
+    SPAN_UPDATED = "span_updated"
+    SPAN_ENDED = "span_ended"
 
 
 class EventStatus(StrEnum):
@@ -189,14 +219,6 @@ ChatThreadId = TypeAliasType(
     ],
 )
 """Portable identity shared by chat requests, events, and transcript paths."""
-
-
-class GateKind(StrEnum):
-    """Closed set of framework-owned gates a candidate passes through."""
-
-    VALIDATION = "validation"
-    ACCURACY = "accuracy"
-    BENCHMARK = "benchmark"
 
 
 class FrameworkSource(StrEnum):
@@ -266,6 +288,20 @@ class ChatThreadCreatedData(EventPayload):
     created_at: datetime
 
 
+class SteerProposedData(EventPayload):
+    """A steer the chat agent suggests; the operator edits, sends or dismisses it.
+
+    Recorded on the chat thread (the event header's ``chat_thread_id``) whose turn called
+    ``propose_steer``. It is a proposal only: nothing reaches the run until the operator sends
+    a ``command.control`` steer, which the proposal's fields prefill. ``proposal_id`` names it
+    for the client's card, and is unique within the run.
+    """
+
+    kind: Literal["steer_proposed"] = "steer_proposed"
+    proposal_id: str = Field(min_length=1)
+    proposal: SteerProposal
+
+
 class InvocationStartedData(EventPayload):
     """Prompts submitted at the start of a model invocation."""
 
@@ -308,6 +344,12 @@ class AgentExecutionStartedData(EventPayload):
     activity: AgentExecutionActivityData
     provider: str | None = None
     model: str | None = None
+    reasoning_effort: str | None = None
+    """The reasoning effort the session was configured with; ``None`` when the provider's default."""
+    harness_version: str | None = None
+    """The provider CLI's version when a driver reported it; ``None`` when unknown."""
+    client: Literal["scripted", "provider"] | None = None
+    """Who executed the turn. The provider and model stay the role's selection."""
 
 
 class AgentExecutionFinishedData(EventPayload):
@@ -316,6 +358,8 @@ class AgentExecutionFinishedData(EventPayload):
     kind: Literal["agent_execution_finished"] = "agent_execution_finished"
     result: Any = None
     error: str | None = None
+    reply: AgentReply | None = Field(default=None, exclude_if=lambda value: value is None)
+    """The typed reply of a structured turn. See ``vibesys.events.AgentExecutionFinishedData``."""
 
 
 class OutputData(EventPayload):
@@ -344,6 +388,8 @@ class RunStartedData(EventPayload):
     # Policy-owned role hints let frontends seed per-round placeholders.
     # Empty when the policy does not declare roles.
     expected_roles: tuple[str, ...] = ()
+    overview: RunOverview | None = Field(default=None, exclude_if=lambda value: value is None)
+    """The run's objective and evaluator; see ``vibesys.events.RunOverview``."""
 
 
 class RunInterruptedData(EventPayload):
@@ -354,17 +400,61 @@ class RunInterruptedData(EventPayload):
     signal: str | None = None
 
 
+class StartupState(StrEnum):
+    """What a startup stage is doing at the moment of one observation."""
+
+    RUNNING = "running"
+    """The stage began, or moved to a new step of its own (its progress)."""
+    WAITING = "waiting"
+    """The stage is blocked on something outside the run host, named by the wait condition."""
+    FINISHED = "finished"
+    """The stage ended without failing."""
+
+
+class StartupWaitCondition(StrEnum):
+    """What a waiting startup stage waits on."""
+
+    QUEUED = "queued"
+    """A scheduler holds the job in its queue."""
+    RUNNING = "running"
+    """The scheduler runs the job; the stage waits for it to end."""
+
+
 class RunStartupProgressData(EventPayload):
-    """A starting run reached ``stage``, or progressed within it.
+    """A starting run's ``stage`` began, moved, waited, or finished.
 
     Journaled while the run acquires its resources, before it is ready. The
-    stage only moves forward; ``progress`` is present when the stage reports
-    it (an image build's steps done of total, and the step now running).
+    run's stage only moves forward. ``state`` is ``running`` when a stage begins
+    and at each step of its ``progress`` (an image build's steps done of total,
+    and the step now running), ``waiting`` while it is blocked on something
+    outside the run host (``condition``, and the ``elapsed_seconds`` waited so
+    far), and ``finished`` with the ``elapsed_seconds`` the stage took. A stage
+    that fails journals no ``finished``; the run's failure says why it ended.
     """
 
     kind: Literal["run_startup_progress"] = "run_startup_progress"
     stage: StartupStage
     progress: StartupProgress | None = None
+    state: StartupState = StartupState.RUNNING
+    condition: StartupWaitCondition | None = None
+    """What a ``waiting`` stage waits on; present exactly then."""
+    elapsed_seconds: NonNegativeFloat | None = None
+    """Seconds waited (``waiting``) or taken (``finished``); absent while ``running``."""
+
+    @model_validator(mode="after")
+    def _detail_matches_state(self) -> RunStartupProgressData:
+        waiting = self.state is StartupState.WAITING
+        running = self.state is StartupState.RUNNING
+        if (self.condition is not None) != waiting:
+            message = "condition is present exactly when state is waiting"
+            raise ValueError(message)
+        if (self.elapsed_seconds is None) != running:
+            message = "elapsed_seconds is present exactly when state is not running"
+            raise ValueError(message)
+        if self.progress is not None and not running:
+            message = "progress is present only while state is running"
+            raise ValueError(message)
+        return self
 
 
 class RunStatusChangedData(EventPayload):
@@ -485,8 +575,10 @@ class RateLimitUpdateData(EventPayload):
 class QuotaPausedData(EventPayload):
     """A turn stopped on a provider capacity limit and the run paused for it.
 
-    ``condition`` is ``quota_exhausted`` (a usage, spend or billing limit) or
-    ``rate_limited`` (sustained rate limiting); ``detail`` is the provider's
+    ``condition`` is ``quota_exhausted`` (a usage, spend or billing limit),
+    ``rate_limited`` (sustained rate limiting) or ``unavailable`` (a provider outage:
+    only the stopped turn waits, under its outage budget, and the run is not paused);
+    ``detail`` is the provider's
     diagnostic and ``resets_at`` the epoch second the provider said capacity
     returns, when it said. The run stays paused until it resumes; ``resumes_at`` is the
     epoch second the run's quota policy resumes it by itself, ``None`` when only the
@@ -496,7 +588,7 @@ class QuotaPausedData(EventPayload):
 
     kind: Literal["quota_paused"] = "quota_paused"
     provider: str
-    condition: Literal["quota_exhausted", "rate_limited"]
+    condition: Literal["quota_exhausted", "rate_limited", "unavailable"]
     detail: str
     resets_at: float | None = None
     resumes_at: float | None = None
@@ -506,11 +598,19 @@ class QuotaPausedData(EventPayload):
 
 
 class QuotaResumedData(EventPayload):
-    """A run paused on a capacity limit resumed on the same provider and sent the turn again."""
+    """A turn stopped on a capacity limit is sent again on the same provider.
+
+    ``condition`` is the limit it stopped on, as in ``quota_paused`` (``None`` in events
+    recorded before the field existed). ``waited_seconds`` is how long that stop held the
+    turn: for ``unavailable`` the turn's own backoff, during which the rest of the run went
+    on; otherwise the run's pause.
+    """
 
     kind: Literal["quota_resumed"] = "quota_resumed"
     provider: str
+    condition: Literal["quota_exhausted", "rate_limited", "unavailable"] | None = None
     reason: Literal["operator", "wait_elapsed"] = "operator"
+    waited_seconds: float = 0.0
 
 
 class ProviderSwitchedData(EventPayload):
@@ -530,32 +630,53 @@ class ProviderSwitchedData(EventPayload):
 
 
 class QuotaAbandonedData(EventPayload):
-    """The quota policy ended a turn with the quota error instead of pausing or waiting longer."""
+    """The quota policy ended a turn with the quota error instead of pausing or waiting longer.
+
+    ``waited_seconds`` is how long this last stop held the turn before it ended (zero when
+    it ended without waiting, and in events recorded before the field existed).
+    """
 
     kind: Literal["quota_abandoned"] = "quota_abandoned"
     provider: str
-    condition: Literal["quota_exhausted", "rate_limited"]
+    condition: Literal["quota_exhausted", "rate_limited", "unavailable"]
     detail: str
     reason: str
+    waited_seconds: float = 0.0
 
 
 class SubprocessOutputData(EventPayload):
     """Captured output from a managed subprocess."""
 
     kind: Literal["subprocess_output"] = "subprocess_output"
+    span_id: SpanId | None = Field(default=None, exclude_if=lambda value: value is None)
+    """The operation that owns this stage, when its submission named one."""
     process_id: str
     process_kind: str
     stream: OutputStream
     content: str
 
+    @field_validator("content")
+    @classmethod
+    def _redact_content(cls, value: str) -> str:
+        return redact_diagnostic_text(value)
+
 
 class JudgeResultData(EventPayload):
-    """Verdict and feedback returned by the judge."""
+    """Verdict and feedback returned by the judge.
+
+    See ``vibesys.events.JudgeResultData`` for ``skipped``/``skip_reason``/
+    ``implementer_outcome``.
+    """
 
     kind: Literal["judge_result"] = "judge_result"
     verdict: Literal["pass", "fail"]
     feedback: str
     attempt: int
+    skipped: bool = False
+    skip_reason: str | None = None
+    implementer_outcome: (
+        Literal["continue", "supported", "nominated", "disproven", "implementation_failed"] | None
+    ) = None
 
 
 class BenchmarkResultData(EventPayload):
@@ -568,7 +689,14 @@ class BenchmarkResultData(EventPayload):
 
 
 class RoundFinishedData(EventPayload):
-    """Summary of attempt, judge, and performance outcomes for a round."""
+    """Wire summary of judge and performance outcomes for one recorded round.
+
+    A projected dynamic implementation round carries a non-null envelope
+    ``round_label`` matching its accompanying ``workstream_finished`` event.
+    ``attempts`` is strategy-neutral; dynamic currently reports one and does
+    not use it as an implementer-turn count. The CLI glossary owns the public
+    round, workstream, and attempt definitions.
+    """
 
     kind: Literal["round_finished"] = "round_finished"
     attempts: int
@@ -584,6 +712,8 @@ class GateStartedData(EventPayload):
     """One framework gate began evaluating the current candidate."""
 
     kind: Literal["gate_started"] = "gate_started"
+    span_id: SpanId | None = Field(default=None, exclude_if=lambda value: value is None)
+    """The operation that owns this stage, when its submission named one."""
     gate: GateKind
     # The validation recipe being executed; None for accuracy and benchmark.
     recipe: str | None = None
@@ -598,11 +728,15 @@ class GateFinishedData(EventPayload):
 
     ``metric``/``value``/``unit`` are set only on a passing benchmark gate.
     ``unit`` keeps the historical fallback of the metric name when the
-    contract declares no unit. ``output_tail`` carries the trailing command
-    output on failure.
+    contract declares no unit. ``output_tail`` carries bounded, credential-redacted
+    trailing command output on failure. ``round_label`` groups the per-recipe local-validation
+    gates of one attempt back together, so a client folds them into a
+    pass-fraction itself rather than the backend aggregating one.
     """
 
     kind: Literal["gate_finished"] = "gate_finished"
+    span_id: SpanId | None = Field(default=None, exclude_if=lambda value: value is None)
+    """The operation that owns this stage, when its submission named one."""
     gate: GateKind
     recipe: str | None = None
     # True when a prior PASS for the exact same input was reused instead of
@@ -612,8 +746,14 @@ class GateFinishedData(EventPayload):
     value: FiniteFloat | None = None
     unit: str | None = None
     output_tail: str | None = None
+    round_label: str | None = None
     source: FrameworkSource = FrameworkSource.GATES
     source_label: str | None = None
+
+    @field_validator("output_tail")
+    @classmethod
+    def _redact_output_tail(cls, value: str | None) -> str | None:
+        return None if value is None else redact_diagnostic_text(value)
 
 
 class WorkspaceSnapshotData(EventPayload):
@@ -634,7 +774,11 @@ class WorkspaceSnapshotData(EventPayload):
 
 
 class RunConfiguredData(EventPayload):
-    """One per run: the resolved configuration a loop starts with."""
+    """One per run: the resolved configuration a loop starts with.
+
+    See ``vibesys.events.RunConfiguredData`` for ``max_continuation_rounds``/
+    ``max_unmeasured_turns``.
+    """
 
     kind: Literal["run_configured"] = "run_configured"
     run_log_path: str
@@ -645,6 +789,8 @@ class RunConfiguredData(EventPayload):
     search_policy: str | None = None
     benchmark_contract: bool = False
     pareto_objectives: str | None = None
+    max_continuation_rounds: int | None = None
+    max_unmeasured_turns: int | None = None
     source: FrameworkSource = FrameworkSource.LOOP
 
 
@@ -669,6 +815,210 @@ class WinnerSelectedData(EventPayload):
     selection: Literal["candidate", "baseline"]
     revision: str
     settlement_id: str | None = None
+    checkout_status: CheckoutStatus | None = None
+    """The checkout publication status, when this selection recorded one."""
+
+
+class InputMeasurementFailureKind(StrEnum):
+    """Why the run's input failed its own trusted measurement. Closed.
+
+    See ``vibesys.events.InputMeasurementFailureKind``, which this mirrors member-for-member.
+    """
+
+    NO_EVIDENCE = "no-evidence"
+    READINGS_REFUSED = "readings-refused"
+    READINGS_UNDECODABLE = "readings-undecodable"
+    ACCURACY_FAILED = "accuracy-failed"
+    BENCHMARK_FAILED = "benchmark-failed"
+    WAIT_ENDED = "wait-ended"
+
+
+class InputMeasurementFailedData(EventPayload):
+    """The run's input failed its trusted measurement, so the run has no trusted baseline.
+
+    Mirrors ``vibesys.events.InputMeasurementFailedData`` field for field.
+    """
+
+    kind: Literal["input_measurement_failed"] = "input_measurement_failed"
+    failure: InputMeasurementFailureKind
+    stage: str | None = None
+    summary: str = ""
+    attempts: int = Field(default=1, ge=1)
+    compared: bool = False
+
+
+class MeasurementVerdict(StrEnum):
+    """Which side of the noise a candidate falls on. Mirrors ``vs_core.api.ComparisonVerdict``."""
+
+    BETTER = "better"
+    WITHIN_NOISE = "within_noise"
+    WORSE = "worse"
+    INCONCLUSIVE = "inconclusive"
+
+
+class MeasurementComparedData(EventPayload):
+    """A candidate's measurement was compared with its base's. See ``vibesys.events``."""
+
+    kind: Literal["measurement_compared"] = "measurement_compared"
+    metric: str
+    unit: str | None = None
+    direction: Literal["max", "min"]
+    candidate_commit: str
+    base_commit: str
+    candidate_value: FiniteFloat
+    base_value: FiniteFloat
+    ratio: FiniteFloat
+    noise: FiniteFloat
+    verdict: MeasurementVerdict
+    candidate_samples: int
+    base_samples: int
+    source: FrameworkSource = FrameworkSource.GATES
+
+
+class ComparisonStatus(StrEnum):
+    """What a run knows of one comparison baseline. Closed; mirrored by ``server.events``."""
+
+    MEASURED = "measured"
+    FAILED = "failed"
+    NOT_CONFIGURED = "not_configured"
+    NOT_MEASURED = "not_measured"
+
+
+class ComparisonReadingData(BaseModel):
+    """One comparison baseline as the run read it from the project's store.
+
+    ``value`` is the mean of ``samples`` runs of the task's benchmark against the engine, and
+    ``spread`` their relative standard deviation (absent for one run). ``reason`` explains a
+    failed or unconfigured comparison. A hidden-from-agents comparison is still shown here:
+    the operator sees it; only the planner's prompt omits it.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str
+    label: str
+    status: ComparisonStatus
+    metric: str | None = None
+    unit: str | None = None
+    direction: Literal["max", "min"] | None = None
+    value: FiniteFloat | None = None
+    spread: FiniteFloat | None = None
+    samples: int | None = None
+    hosts: tuple[str, ...] = ()
+    reason: str | None = None
+
+
+class ComparisonsReadData(EventPayload):
+    """The comparison baselines a run read when it started or resumed; the newest event wins.
+
+    A run never measures a comparison: ``vibesys compare`` does, once, and stores the reading.
+    """
+
+    kind: Literal["comparisons_read"] = "comparisons_read"
+    comparisons: tuple[ComparisonReadingData, ...]
+
+
+class WorkstreamFailureKind(StrEnum):
+    """Why a workstream ended without a measured candidate. Closed.
+
+    See ``vibesys.events.WorkstreamFailureKind``, which this mirrors
+    member-for-member.
+    """
+
+    STOPPED = "stopped"
+    PARENT_UNVERIFIED = "parent-unverified"
+    REFUSED = "refused"
+    ENDED = "ended"
+    OUT_OF_BUDGET = "out-of-budget"
+    TURN_FAILED = "turn-failed"
+    INVALID_REPLY = "invalid-reply"
+    RENDER_FAILED = "render-failed"
+    WAIT_REFUSED = "wait-refused"
+    CHECKPOINT_DECLINED = "checkpoint-declined"
+    NO_CHANGED_CANDIDATE = "no-changed-candidate"
+    IMPLEMENTATION_FAILED = "implementation-failed"
+    REVIEW_REJECTED = "review-rejected"
+    NO_TRUSTED_EVIDENCE = "no-trusted-evidence"
+    EVIDENCE_REFUSED = "evidence-refused"
+    EVIDENCE_UNDECODABLE = "evidence-undecodable"
+    PROFILE_CAPTURE_UNAVAILABLE = "profile-capture-unavailable"
+    TURN_LIMIT = "turn-limit"
+    REPEATED_TURN = "repeated-turn"
+
+
+class WorkstreamFailureData(BaseModel):
+    """One workstream's typed account of why it ended without a measured candidate."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: WorkstreamFailureKind
+    role: str | None = None
+    turns: int | None = None
+    limit: int | None = None
+    text: str = ""
+
+    @field_validator("text")
+    @classmethod
+    def _redact_text(cls, value: str) -> str:
+        return redact_diagnostic_text(value)
+
+
+class WorkstreamFinishedData(EventPayload):
+    """Wire summary for one projected, recorded policy round and its typed failure, if any.
+
+    See ``vibesys.events.WorkstreamFinishedData`` for the generic producer's
+    serial and dynamic behavior. Its current round projection always reports
+    ``setup_failure`` and ``refunded`` as ``False``; in the dynamic policy
+    specifically, profile and merge workstreams do not emit this event.
+    """
+
+    kind: Literal["workstream_finished"] = "workstream_finished"
+    setup_failure: bool
+    refunded: bool
+    repeated_error: bool
+    last_error: WorkstreamFailureData | None = None
+
+
+class TurnUsageData(EventPayload):
+    """Settled token and cost accounting for one finished agent turn.
+
+    See ``vibesys.events.TurnUsageData``.
+    """
+
+    kind: Literal["turn_usage_recorded"] = "turn_usage_recorded"
+    input_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
+    cache_read_input_tokens: int | None = None
+    output_tokens: int | None = None
+    reasoning_output_tokens: int | None = None
+    total_cost_usd: float | None = None
+    duration_ms: int | None = None
+    span_id: SpanId | None = None
+    """The agent-turn span of the run trace this turn ran as."""
+
+
+class _SpanData(EventPayload):
+    """A span of the run trace, whole. See ``vibesys.events.SpanStartedData``."""
+
+    span: WireSpan
+
+
+class SpanStartedData(_SpanData):
+    """A span started."""
+
+    kind: Literal["span_started"] = "span_started"
+
+
+class SpanUpdatedData(_SpanData):
+    """A span changed."""
+
+    kind: Literal["span_updated"] = "span_updated"
+
+
+class SpanEndedData(_SpanData):
+    """A span ended."""
+
+    kind: Literal["span_ended"] = "span_ended"
 
 
 EventData = Annotated[
@@ -684,6 +1034,7 @@ EventData = Annotated[
     | RunStartedData
     | RunStartupProgressData
     | RunFailedData
+    | RunEndingData
     | RunInterruptedData
     | RunStatusChangedData
     | ExperimentsChangedData
@@ -697,19 +1048,32 @@ EventData = Annotated[
     | RoundFinishedData
     | ToolCallData
     | ToolResultData
+    | SteerProposedData
+    | SteerDeliveryData
     | TodoUpdateData
     | UsageUpdateData
     | RateLimitUpdateData
     | QuotaPausedData
     | QuotaResumedData
     | QuotaAbandonedData
+    | QuotaWaitingData
+    | QuotaWaitCancelledData
+    | WorkspaceRootProbeData
     | ProviderSwitchedData
     | GateStartedData
     | GateFinishedData
     | WorkspaceSnapshotData
     | RunConfiguredData
     | FrameworkWarningData
-    | WinnerSelectedData,
+    | WinnerSelectedData
+    | InputMeasurementFailedData
+    | MeasurementComparedData
+    | ComparisonsReadData
+    | WorkstreamFinishedData
+    | TurnUsageData
+    | SpanStartedData
+    | SpanUpdatedData
+    | SpanEndedData,
     Field(discriminator="kind"),
 ]
 
@@ -739,6 +1103,17 @@ class RunEvent(BaseModel):
     # Which experiment-chat thread a chat event belongs to. None is the
     # default thread, preserving events written before threads existed.
     chat_thread_id: ChatThreadId | None = None
+    span_id: SpanId | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "The agent-turn span of the run trace this event belongs to: the server stamps it on "
+            "every event whose execution_id ran as a recorded agent-turn span (the turn's output, "
+            "tool calls and results, activity and usage), so a client joins a transcript to the "
+            "trace by id and never by invocation, name or time. Absent when the event is not "
+            "part of a turn, or when it was recorded before its span was."
+        ),
+    )
     data: EventData | None = None
     # Absent on ordinary and legacy events so adding the marker does not change
     # their serialized bytes. True means the recording boundary cut variable
@@ -962,6 +1337,13 @@ class _StoredRecord:
     event: RunEvent | None = None
 
 
+READER_APPENDABLE_EVENTS = frozenset({EventType.CHAT, EventType.CHAT_THREAD_CREATED})
+"""What a reader of a finished run may still add to its journal: the conversation about it.
+
+Nothing else is appended, so the run's own record (its steps, results and state) never changes.
+"""
+
+
 class EventStore:
     """Serialize event access so readers never observe partial JSONL writes.
 
@@ -981,12 +1363,22 @@ class EventStore:
     """
 
     def __init__(
-        self, path: Path, run_id: str, *, read_only: bool = False, threads: Threads
+        self,
+        path: Path,
+        run_id: str,
+        *,
+        read_only: bool = False,
+        appendable: frozenset[EventType] = frozenset(),
+        threads: Threads,
     ) -> None:
-        """Open an indexed event file, optionally without cache writes."""
+        """Open an indexed event file, optionally without cache writes.
+
+        A read-only store refuses every append except those of the ``appendable`` types.
+        """
         self.path = path
         self.run_id = run_id
         self.read_only = read_only
+        self._appendable = appendable
         # Names this store's sequence space. Sequences are only comparable
         # within one store, and a run replaces its store mid-flight when the
         # durable log is attached, so a consumer holding folded state needs an
@@ -1005,9 +1397,11 @@ class EventStore:
         )
         self._sequences = [record.header.sequence for record in self._records]
         self._next_sequence = self._sequences[-1] + 1 if self._sequences else 1
+        # The span index beside the journal: a writable store keeps it level with every append.
+        self._span_index = None if read_only else SpanIndexLog(path)
 
     def append(self, event: RunEvent) -> RunEvent:  # noqa: D102  # lint-waiver: LW-101045 [D102]; the append contract is documented by the surrounding event-store protocol
-        if self.read_only:
+        if self.read_only and event.type not in self._appendable:
             raise PermissionError("Event store is read-only")  # noqa: TRY003  # lint-waiver: LW-101032 [TRY003]; reject writes while serving a reopened read-only run
         with self._changed:
             if self._malformed_tail_offset is not None:
@@ -1028,8 +1422,12 @@ class EventStore:
                 update={"sequence": self._next_sequence, "run_id": self.run_id}
             )
             event = _bounded_recorded_event(event)
-            with self.path.open("a", encoding="utf-8") as stream:
-                stream.write(event.model_dump_json() + "\n")
+            line = event.model_dump_json().encode()
+            offset = self.path.stat().st_size if self.path.exists() else 0
+            with self.path.open("ab") as stream:
+                stream.write(line + b"\n")
+            if self._span_index is not None:
+                self._span_index.append(offset, line)
             self._next_sequence += 1
             self._records.append(
                 _StoredRecord(

@@ -3,6 +3,7 @@ name = "vibesys-evaluator-microservice"
 version = "0.1.0"
 protocol_version = 1
 toolchains = ["go"]
+go_module = "."
 
 [entrypoints]
 python = ["${PYTHON}"]

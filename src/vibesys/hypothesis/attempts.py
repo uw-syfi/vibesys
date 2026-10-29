@@ -200,6 +200,10 @@ class AttemptState:
     review_started: bool = False
     revalidation_required: bool = False
     official_reason: str | None = None
+    evaluated_only: bool = False
+    """The trusted gates measured a revision the agent evaluated although the reply offered no
+    ready candidate (blocked, failed, continuing, or no reply): the measurement is recorded as
+    evidence, and the revision is never retained for it."""
     framework_benchmark: FrameworkBenchmarkOutcome = field(
         default_factory=FrameworkBenchmarkOutcome
     )

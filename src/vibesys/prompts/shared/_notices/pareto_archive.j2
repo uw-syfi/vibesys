@@ -23,7 +23,7 @@ Measured frontier claims not yet usable as trusted parents (retain the commit, b
 - {{ omitted.count }} older untrusted {{ "claim" if omitted.count == 1 else "claims" }} omitted from this context ({% if omitted.first_round == omitted.last_round %}round {{ omitted.first_round }}{% else %}rounds {{ omitted.first_round }}-{{ omitted.last_round }}{% endif %}); do not treat any omitted claim as a trusted parent.
 {% endif %}
 {% for claim in archive.pending_claims %}
-- round {{ claim.round_number }}, commit {{ claim.commit[:12] }}: {{ metric_row(claim.metrics) }}; operating point: {{ claim.operating_point or "(unspecified)" }}; artifact: {{ claim.artifact or "(missing)" }}; reason: {{ claim.reason or "(unspecified)" }}
+- round {{ claim.round_number }}, commit {{ claim.commit[:12] }}: {{ metric_row(claim.metrics) }}; operating point: {{ claim.operating_point or "(unspecified)" }}; artifact: {{ claim.artifact or "(missing)" }}; reason: {{ (claim.reason or "(unspecified)") | indent(2) }}
 {% endfor %}
 {% endif %}
 {% endif %}

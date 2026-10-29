@@ -191,9 +191,10 @@ STAGE_OUTPUT_TAIL_CHARS = 4000
 class EvaluationStepResult(BaseModel):
     """Terminal result and elapsed duration for one planned stage.
 
-    ``stdout_tail`` and ``stderr_tail`` are what the stage's command printed, for an
-    operator watching the run. They are no evidence: they never enter an evidence
-    identity and no agent reads them.
+    ``stdout_tail``, ``stderr_tail`` and ``service_log_tail`` are credential-redacted
+    tails (each at most ``STAGE_OUTPUT_TAIL_CHARS``) of what the
+    stage's command printed, for an operator watching the run. They are no
+    evidence: they never enter an evidence identity and no agent reads them.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -202,18 +203,30 @@ class EvaluationStepResult(BaseModel):
     state: StageState
     result: JsonValue | None = None
     failure: str | None = None
+    operator_failure: str | None = None
+    """Credential-safe failure projection for hosts; excluded from evidence identity."""
+    operator_summary: str | None = None
+    """Credential-safe semantic summary for hosts; excluded from evidence identity."""
     failure_kind: StageFailureKind | None = None
     """Absent legacy provenance retains execution stop-on-failure semantics."""
     duration_s: FiniteFloat | None = Field(default=None, ge=0)
     stdout_tail: str | None = Field(default=None, max_length=STAGE_OUTPUT_TAIL_CHARS)
     stderr_tail: str | None = Field(default=None, max_length=STAGE_OUTPUT_TAIL_CHARS)
+    service_log_tail: str | None = Field(default=None, max_length=STAGE_OUTPUT_TAIL_CHARS)
+    """The shared service's log tail beside a failed stage, kept apart from ``failure`` (the
+    stage's own output) so a reader that must cut the text keeps the stage's verdict."""
+    host: str | None = Field(default=None, min_length=1, max_length=255)
+    """The machine the stage ran on, when its executor knows it; never part of the evidence."""
 
     @model_validator(mode="after")
     def _result_matches_state(self) -> EvaluationStepResult:
         if self.state is StageState.FAILED and not self.failure:
             raise ValueError("failed stage requires failure")  # noqa: TRY003  # lint-waiver: LW-930022 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
         if self.state is not StageState.FAILED and (
-            self.failure is not None or self.failure_kind is not None
+            self.failure is not None
+            or self.operator_failure is not None
+            or self.failure_kind is not None
+            or self.service_log_tail is not None
         ):
             raise ValueError("only failed stage may include failure")  # noqa: TRY003  # lint-waiver: LW-930023 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
         return self
@@ -228,12 +241,21 @@ class ExecutorObservation(BaseModel):
     current_stage: str | None = None
     stage_results: tuple[EvaluationStepResult, ...] = ()
     failure: str | None = None
+    operator_failure: str | None = None
+    """Credential-safe terminal failure projection for hosts, separate from raw failure."""
+    run_environment_unavailable: bool = False
+    """The run environment refused the evaluation because it can run no such work at all
+    (its workspace root failed its probe for good); no retry can succeed."""
 
     @model_validator(mode="after")
     def _terminal_failure_matches_state(self) -> ExecutorObservation:
         if self.state is EvaluationState.FAILED and not self.failure:
             raise ValueError("failed evaluation requires failure")  # noqa: TRY003  # lint-waiver: LW-930024 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
-        if self.state is not EvaluationState.FAILED and self.failure is not None:
+        if self.state is not EvaluationState.FAILED and (
+            self.failure is not None
+            or self.operator_failure is not None
+            or self.run_environment_unavailable
+        ):
             raise ValueError("only failed evaluation may include failure")  # noqa: TRY003  # lint-waiver: LW-930025 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
         if (
             self.state in {EvaluationState.SUCCEEDED, EvaluationState.FAILED}
@@ -293,6 +315,7 @@ class StoredEvaluation(BaseModel):
     current_stage: str | None = None
     stage_results: tuple[EvaluationStepResult, ...] = ()
     failure: str | None = None
+    operator_failure: str | None = None
     submission_pending: bool = False
     # None is a legacy unknown dispatch state; never infer that it is safe to skip cleanup.
     dispatch_authorized: bool | None = None
@@ -324,6 +347,7 @@ class EvaluationLifecycleEvent(BaseModel):
     current_stage: str | None = None
     stage_results: tuple[EvaluationStepResult, ...] = ()
     failure: str | None = None
+    operator_failure: str | None = None
     submission_pending: bool = False
     cancel_requested: bool = False
 

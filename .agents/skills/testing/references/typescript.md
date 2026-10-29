@@ -10,7 +10,6 @@ TypeScript idioms for the testing rules, with `bun:test`.
 | No patching | Banned: `mock`, `mock.module`, `spyOn`, and assigning over an imported function or object member. Allowed: environment variables and temp directories as inputs |
 | Fakes | An in-memory implementation of the same interface, kept beside the interface and shared by consumers |
 | Exemption | `// test-isolation: <reason>` on the site's line or the line above |
-| Terminal UI layout | Reproduce a geometry symptom through the UI framework's test renderer, not a formatter unit test |
 
 ## Contract suite wiring
 

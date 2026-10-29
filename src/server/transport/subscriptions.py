@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -67,18 +68,38 @@ class ThreadingSettleWindow:
         return condition.wait_for(predicate, timeout=seconds)
 
 
+@dataclass(frozen=True, slots=True)
+class DeliveryWatermark:
+    """The event-store generation and sequence one stream has written through."""
+
+    store_id: str
+    sequence: int
+
+    def covers(self, target: DeliveryWatermark) -> bool:
+        """Whether this watermark contains *target* in the same sequence space."""
+        return self.store_id == target.store_id and self.sequence >= target.sequence
+
+
 class StreamDelivery:
-    """One subscription stream's progress: the last sequence it wrote to its client."""
+    """One subscription stream's progress: the last watermark written to its client."""
 
     def __init__(self, condition: Condition) -> None:
         """Start before any batch; ``SubscriptionTracker.track`` creates these."""
         self._condition = condition
-        self.sequence = -1
+        self.watermark: DeliveryWatermark | None = None
 
-    def delivered(self, sequence: int) -> None:
-        """Record that every event through ``sequence`` was written to the client."""
+    def delivered(self, watermark: DeliveryWatermark) -> None:
+        """Record that every event through *watermark* was written to the client."""
         with self._condition:
-            self.sequence = max(self.sequence, sequence)
+            current = self.watermark
+            self.watermark = (
+                watermark
+                if current is None or current.store_id != watermark.store_id
+                else DeliveryWatermark(
+                    store_id=watermark.store_id,
+                    sequence=max(current.sequence, watermark.sequence),
+                )
+            )
             self._condition.notify_all()
 
 
@@ -126,8 +147,8 @@ class SubscriptionTracker:
                 self._streams.remove(stream)
                 self._condition.notify_all()
 
-    def wait_until_delivered(self, sequence: int, timeout: float) -> bool:
-        """Close admission, then wait until every admitted stream reached ``sequence``.
+    def wait_until_delivered(self, watermark: DeliveryWatermark, timeout: float) -> bool:
+        """Close admission, then wait until every admitted stream reached *watermark*.
 
         A server whose run has ended calls this before closing its transport,
         so an attached client reads the terminal status before the connection
@@ -139,7 +160,10 @@ class SubscriptionTracker:
         with self._condition:
             self._accepting = False
             return self._condition.wait_for(
-                lambda: all(stream.sequence >= sequence for stream in self._streams),
+                lambda: all(
+                    stream.watermark is not None and stream.watermark.covers(watermark)
+                    for stream in self._streams
+                ),
                 timeout=timeout,
             )
 

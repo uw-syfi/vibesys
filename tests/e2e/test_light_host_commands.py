@@ -72,7 +72,7 @@ def test_instances_list_loads_no_engine(
     stdout = _run_light(["instances", "list", "--json"], env, record_property)
 
     assert json.loads(stdout) == {
-        "version": 4,
+        "version": 5,
         "instances": [],
         "ended": [],
         "unreadable": [],
@@ -110,3 +110,36 @@ def test_example_list_loads_no_engine(env: dict[str, str], record_property: Reco
 
     names = [entry["name"] for entry in json.loads(stdout)["examples"]]
     assert "data-structures/stack" in names
+
+
+def test_intent_admission_loads_contracts_without_the_run_engine(
+    env: dict[str, str], record_property: RecordProperty
+) -> None:
+    started = time.monotonic()
+    result = subprocess.run(
+        [sys.executable, "-X", "importtime", "-m", "entrypoints.host", "post-intent"],
+        input=b"",
+        env=env,
+        capture_output=True,
+        timeout=HANG_GUARD_S,
+        check=False,
+    )
+    record_property("admission_cold_ms", round((time.monotonic() - started) * 1000))
+    assert result.returncode == 0, result.stderr.decode()[-2000:]
+    assert result.stdout
+    loaded = loaded_modules(result.stderr.decode())
+    assert "vs_proto.api" in loaded
+    engines = (
+        "vs_runtime._core_loop",
+        "vs_runtime.api.infrastructure",
+        "vibesys.run",
+        "vibesys.api.transport",
+        "vs_agent",
+        "server",
+        "launch",
+    )
+    assert [
+        name
+        for name in loaded
+        if any(name == root or name.startswith(root + ".") for root in engines)
+    ] == []

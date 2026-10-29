@@ -1130,6 +1130,8 @@ def test_pause_resume_duplicate_controls_preserve_held_occupancy_and_receipts(
         control = core.ControlInput(
             control_id=core.ControlId(root=f"control-{index}"),
             action="pause" if index % 2 else "resume",
+            owner=core.PauseOwner.QUOTA if index % 2 else None,
+            when=None if index % 2 else "now",
         )
         result = _step(state, core.RunControlEvent(control=control, now_at=float(supplied)))
         state = result.state
@@ -1158,7 +1160,11 @@ def test_resuming_paused_queue_wakes_already_paid_fifo_head() -> None:
     state = _step(
         state,
         core.RunControlEvent(
-            control=core.ControlInput(control_id=core.ControlId(root="pause"), action="pause"),
+            control=core.ControlInput(
+                control_id=core.ControlId(root="pause"),
+                action="pause",
+                owner=core.PauseOwner.QUOTA,
+            ),
             now_at=5.0,
         ),
     ).state
@@ -1168,7 +1174,9 @@ def test_resuming_paused_queue_wakes_already_paid_fifo_head() -> None:
     _assert_attempts_boundary(
         state,
         core.RunControlEvent(
-            control=core.ControlInput(control_id=core.ControlId(root="resume"), action="resume"),
+            control=core.ControlInput(
+                control_id=core.ControlId(root="resume"), action="resume", when="now"
+            ),
             now_at=10.0,
         ),
         "attempt_admitted",

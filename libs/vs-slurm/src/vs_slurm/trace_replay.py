@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from vs_sim.api import ProcessOutcome
+from vs_sim.api import ProcessOutcome, forward_output
 
 from .fake_connector import (
     REQUESTS_FILE,
@@ -40,7 +40,7 @@ from .scheduler_read import split_framed
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_sim.api import ProcessRun, ProcessSpec
+    from vs_sim.api import OutputSink, ProcessRun, ProcessSpec
     from vs_sim.api.testing import ManualClock
 
 _SQUEUE_FORMAT = "%T|%r|%S"
@@ -213,7 +213,7 @@ class TraceConnector:
         """How many ``scancel`` commands were received."""
         return sum(1 for command in self.commands() if command.startswith("scancel "))
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
         """Answer one connector request; scheduler commands come from the traces."""
         request = _decode_connector_request(spec.input)
         query, end = split_framed(str(request.get("command", "")))
@@ -223,24 +223,30 @@ class TraceConnector:
         except _SchedulerRefused as refusal:
             self._log(request)
             self.clock.advance(self._command_seconds)
-            return _connector_process_result(
-                {
-                    "version": 1,
-                    "returncode": 1,
-                    "stdout": "",
-                    "stderr": f"{refusal}\n",
-                },
-                max_output_bytes=spec.max_output_bytes,
+            return forward_output(
+                _connector_process_result(
+                    {
+                        "version": 1,
+                        "returncode": 1,
+                        "stdout": "",
+                        "stderr": f"{refusal}\n",
+                    },
+                    max_output_bytes=spec.max_output_bytes,
+                ),
+                output,
             )
         if answer is None:
-            completed = self._inner.run(spec, timeout=timeout)
+            completed = self._inner.run(spec, timeout=timeout, output=output)
             if "sbatch" in tokens and isinstance(completed, ProcessOutcome):
                 self._register(tokens, completed.stdout.decode())
         else:
             self._log(request)
-            completed = _connector_process_result(
-                {"version": 1, "returncode": 0, "stdout": answer + end, "stderr": ""},
-                max_output_bytes=spec.max_output_bytes,
+            completed = forward_output(
+                _connector_process_result(
+                    {"version": 1, "returncode": 0, "stdout": answer + end, "stderr": ""},
+                    max_output_bytes=spec.max_output_bytes,
+                ),
+                output,
             )
         self.clock.advance(self._command_seconds)
         return completed

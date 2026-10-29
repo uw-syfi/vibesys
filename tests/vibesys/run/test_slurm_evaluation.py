@@ -14,6 +14,7 @@ from tests.vibesys.vibesys_grid import diagonal
 
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_evaluation.api import (
+    STAGE_OUTPUT_TAIL_CHARS,
     ContentDigest,
     EvaluationCoordinator,
     EvaluationFailed,
@@ -29,9 +30,12 @@ from vs_evaluation.api import (
     StageFailureKind,
     StageState,
     TrustedEvidence,
-    loop_evaluation_deadline,
 )
-from vs_evaluation.api.testing import InMemoryEvaluationStore, wait_until_executor_started
+from vs_evaluation.api.testing import (
+    FakeDeadlineFactory,
+    InMemoryEvaluationStore,
+    wait_until_executor_started,
+)
 from vs_project.api import StateNamespace
 from vs_runtime.api import ProfileField, RunCleanupError
 from vs_runtime.api.infrastructure import ScalarBenchmarkContract, TrustedEvaluationPlan
@@ -67,11 +71,16 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from vs_core.api import AdoptionPublication, CheckoutUpdate
     from vs_runtime.api import CandidateWorkspace, Workspace, Workspaces
     from vs_sim.api import Event
 
 # The blocking wait runs on a worker thread of the Slurm runner, so its latches are the OS's.
 _THREADS = OsThreads()
+
+# The executor stages and runs real far-side processes on worker threads, so a coordinator
+# wait bounded on the event loop's clock times out whenever the host is slow. The coordinator
+# tests pass a manual deadline that never fires; pytest-timeout alone guards against a hang.
 
 
 class _World:
@@ -147,8 +156,16 @@ class _TrackedWorkspaces:
         self.candidates.append(candidate)
         return cast("CandidateWorkspace", candidate)
 
-    async def adopt(self, revision: str) -> None:
-        await self._inner.adopt(revision)
+    async def create_measured_candidate(self, revision: str) -> CandidateWorkspace:
+        return await self.create_candidate(revision)
+
+    async def adopt(
+        self, revision: str, *, message: str = "vibesys: adopt revision"
+    ) -> AdoptionPublication:
+        return await self._inner.adopt(revision, message=message)
+
+    async def update_checkout(self, publication: AdoptionPublication) -> CheckoutUpdate:
+        return await self._inner.update_checkout(publication)
 
     async def export_patch(self, revision: str) -> str:
         return await self._inner.export_patch(revision)
@@ -503,7 +520,7 @@ async def test_coordinator_retains_completed_stages_after_late_infrastructure_fa
         InMemoryEvaluationStore(),
         ManualClock(),
         max_await_timeout_s=5,
-        deadline_factory=loop_evaluation_deadline,
+        deadline_factory=FakeDeadlineFactory(),
     )
     handle = await coordinator.submit(_request(snapshot))
     assert isinstance(await handle.await_result(5), EvaluationFailed)
@@ -610,7 +627,7 @@ async def test_unsupported_profile_evaluation_fails_instead_of_staying_queued(
         InMemoryEvaluationStore(),
         clock,
         max_await_timeout_s=5,
-        deadline_factory=loop_evaluation_deadline,
+        deadline_factory=FakeDeadlineFactory(),
     )
 
     handle = await coordinator.submit(_request(snapshot, (EvidenceKind.PROFILE,)))
@@ -650,7 +667,7 @@ async def test_a_kind_without_a_command_is_rejected_not_passed(
         InMemoryEvaluationStore(),
         ManualClock(),
         max_await_timeout_s=5,
-        deadline_factory=loop_evaluation_deadline,
+        deadline_factory=FakeDeadlineFactory(),
     )
 
     availability = await executor.availability(ResourceRequirements())
@@ -797,6 +814,71 @@ async def test_failed_accuracy_fails_the_evaluation_with_its_diagnostics(tmp_pat
     accuracy = TrustedEvidence.model_validate(observed.stage_results[0].result)
     assert accuracy.outcome is EvidenceOutcome.FAILED
     assert observed.stage_results[1].state is StageState.SKIPPED
+    await executor.close()
+
+
+_SECRET = "sk-" + "a1b2c3d4e5f6a7b8c9d0e1f2a3b4"
+_SECRET_SERVICE_LOG = (
+    "decode step\n" * 1_000 + f"OPENAI_API_KEY={_SECRET}\n" + "final traceback line"
+)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_stage_keeps_a_bounded_credential_free_service_log_tail(
+    tmp_path: Path,
+) -> None:
+    run = _World(tmp_path / "project")
+    snapshot = await run.workspaces.root.snapshot("candidate")
+    config = _config()
+    runner = _Runner(
+        tmp_path / "runner",
+        stages=(
+            SlurmBatchStageResult(
+                name="accuracy",
+                exit_code=0,
+                stdout="ok",
+                stderr="",
+                elapsed_seconds=1.0,
+                skipped=False,
+            ),
+            SlurmBatchStageResult(
+                name="benchmark",
+                exit_code=124,
+                stdout="",
+                stderr="",
+                elapsed_seconds=600.0,
+                skipped=False,
+            ),
+        ),
+        service_log_tail=_SECRET_SERVICE_LOG,
+    )
+    runner.job_exit_code = 1
+    executor = SlurmSemanticEvaluationExecutor(
+        config,
+        SlurmExecutionPolicy(),
+        SlurmEvaluationPlan(
+            config_path=tmp_path / "slurm.toml",
+            accuracy_command=("python", "accuracy.py"),
+            benchmark_command=("python", "benchmark.py"),
+        ),
+        TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
+        _TrackedWorkspaces(run.workspaces),
+        _namespace(tmp_path),
+        tmp_path / "handles",
+        cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
+        clock=ManualClock(),
+        sleeper=ManualClock(),
+    )
+
+    await executor.submit(_request(snapshot), handle_id="fused")
+    observed = await _terminal(executor, "fused")
+
+    tail = observed.stage_results[1].service_log_tail
+    assert tail is not None
+    assert len(tail) <= STAGE_OUTPUT_TAIL_CHARS
+    assert _SECRET not in tail
+    assert "OPENAI_API_KEY" in tail
+    assert tail.endswith("final traceback line")
     await executor.close()
 
 

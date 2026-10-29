@@ -17,10 +17,10 @@ from typing import TYPE_CHECKING
 from vibesys.candidates.api import limits_for
 from vibesys.orchestration.dynamic.core_policy.api import requirements_for
 from vibesys.orchestration.dynamic.search.api import (
-    OPERATIONS,
     DynamicConfig,
     EvidenceReading,
     EvidenceReadings,
+    HandoffWritten,
     InterpretEvidence,
     MetricRow,
     ParentVerification,
@@ -28,6 +28,7 @@ from vibesys.orchestration.dynamic.search.api import (
     RenderedArtifacts,
     RenderRoleArtifacts,
     VerifyParentRevision,
+    WriteHandoff,
     budget,
     dynamic,
 )
@@ -69,7 +70,14 @@ from vs_runtime.api.core import handle_for
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vs_core.api import CoreState, MeasurementPlan, Request, RequestId, Scope
+    from vs_core.api import (
+        CoreState,
+        MeasurementPlan,
+        OperationRegistry,
+        Request,
+        RequestId,
+        Scope,
+    )
 
 _STAGE_SECONDS = 20_000
 """Longer than a host lease and any restart in a test, so a measurement outlives the host that began it."""
@@ -100,6 +108,16 @@ _KINDS = {
 }
 
 
+def _registry() -> OperationRegistry:
+    found = dynamic.registry()
+    assert found is not None
+    return found
+
+
+REGISTRY = _registry()
+"""The codec of every operation a dynamic run records: the kit's and the handoff write."""
+
+
 class _Bounds:
     """The declarations of a backend whose requests are retried twice and polled quickly.
 
@@ -113,6 +131,8 @@ class _Bounds:
     cancellation_bound_seconds = 60.0
     cleanup_bound_seconds = 60.0
     reconciliation_bound_seconds = 5000.0
+    queue_wait_budget_seconds = 43_200.0
+    queue_notice_interval_seconds = 600.0
 
 
 def config(**overrides: object) -> DynamicConfig:
@@ -128,7 +148,7 @@ def limits(selected: DynamicConfig) -> Limits:
 def harness(selected: DynamicConfig, **overrides: object) -> Harness:
     """What hosts the dynamic search of ``selected`` on the real core."""
     hosting = Harness(
-        registry=OPERATIONS.registry(),
+        registry=REGISTRY,
         facts=FACTS,
         limits=limits(selected),
         envelope_type=RunEnvelope[FlowState],
@@ -141,6 +161,10 @@ def harness(selected: DynamicConfig, **overrides: object) -> Harness:
 def lease(session_id: SessionId) -> ResourceId:
     """The lease an executor holds for a session: the same name from ensure through close."""
     return ResourceId(root=f"lease:{session_id.root}")
+
+
+def _handoff_path(call: int) -> str:
+    return f".vibesys/state/runs/run/orchestrator-handoff/calls/call-{call:04d}.md"
 
 
 @dataclass
@@ -163,6 +187,8 @@ class Executors:
     exhausted: str | None = None
     jobs: int = 0
     readings: dict[EvidenceId, EvidenceReading] = field(default_factory=dict)
+    handoffs: set[int] = field(default_factory=set)
+    """The planning calls whose handoff file the owner wrote."""
 
     def headline(self, commit: str) -> float | None:
         """What the candidate of ``commit`` measures (a pure function of its commit)."""
@@ -204,9 +230,7 @@ class Executors:
         refs: list[EvidenceRef] = []
         stages: list[EvaluationStageResult] = []
         for stage in request.plan.stages:
-            reading = self._reading(
-                request.plan, _KINDS[stage.stage_id], stage.stage_id, commit
-            ).model_copy(update={"kind": EvidenceKind.LOCAL_VALIDATION})
+            reading = self._reading(request.plan, _KINDS[stage.stage_id], stage.stage_id, commit)
             self.readings[reading.evidence_id] = reading
             refs.append(self._ref(request.scope, request.request_id, request.plan, reading))
             outcome = (
@@ -293,11 +317,7 @@ class Executors:
         assert isinstance(plan.candidate, RevisionRef)
         return EvidenceRef(
             evidence_id=reading.evidence_id,
-            kind=(
-                EvidenceKind.LOCAL_VALIDATION
-                if plan.purpose == "local-validation"
-                else reading.kind
-            ),
+            kind=reading.kind,
             purpose=plan.purpose,
             scope=scope,
             source_request=source,
@@ -337,7 +357,11 @@ class Executors:
     # -- registered operations -------------------------------------------
 
     def _operation(self, request: ExecuteRegisteredOperation) -> Answer:
-        typed = OPERATIONS.registry().decode(request.operation)
+        typed = REGISTRY.decode(request.operation)
+        if isinstance(typed, WriteHandoff):
+            self.handoffs.add(typed.call)
+            listed = tuple(_handoff_path(call) for call in sorted(self.handoffs))
+            return Succeeded(outcome=HandoffWritten(path=_handoff_path(typed.call), listed=listed))
         if isinstance(typed, VerifyParentRevision):
             return Succeeded(outcome=ParentVerification(status="succeeded", verified=True))
         if isinstance(typed, InterpretEvidence):

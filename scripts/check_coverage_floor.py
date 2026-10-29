@@ -58,20 +58,46 @@ def is_allowlisted(path: str, allowlist: list[str]) -> bool:
     return False
 
 
-def main() -> int:
+def scoped_files(
+    files: dict[str, dict[str, dict[str, float]]], modules: set[str], floor: float
+) -> tuple[dict[str, dict[str, dict[str, float]]], bool]:
+    """Restrict partial reports and reject missing requested measurements."""
+    missing = sorted(modules - files.keys())
+    for path in missing:
+        print(
+            f"{path}: missing from coverage report; check the coverage source/omit configuration",
+            file=sys.stderr,
+        )
+    for path in sorted(modules & files.keys()):
+        percent = files[path]["summary"]["percent_covered"]
+        print(f"{path}: {percent:.1f}% (floor {floor:.0f}%)")
+    return {path: data for path, data in files.items() if not modules or path in modules}, bool(
+        missing
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
     """Enforce the per-module coverage floor, returning a process exit code."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("coverage_json", type=Path, help="Path to a `coverage json` report")
     parser.add_argument("--pyproject", type=Path, default=DEFAULT_PYPROJECT)
-    args = parser.parse_args()
+    parser.add_argument(
+        "--module",
+        action="append",
+        help="Check only this source file; repeat for a partial-suite report",
+    )
+    args = parser.parse_args(argv)
 
     floor, allowlist = load_config(args.pyproject)
     report = json.loads(args.coverage_json.read_text())
 
+    modules: set[str] = set(args.module or ())
+    files, missing = scoped_files(report["files"], modules, floor)
+
     failures: list[tuple[str, float]] = []
     seen_exact_allowlist_entries: set[str] = set()
 
-    for path, file_report in sorted(report["files"].items()):
+    for path, file_report in sorted(files.items()):
         summary = file_report["summary"]
         if summary["num_statements"] == 0:
             # Nothing executable to measure, e.g. an empty __init__.py.
@@ -90,10 +116,12 @@ def main() -> int:
     stale = [
         entry
         for entry in allowlist
-        if not entry.endswith("/") and entry not in seen_exact_allowlist_entries
+        if not entry.endswith("/")
+        and (not modules or entry in modules)
+        and entry not in seen_exact_allowlist_entries
     ]
 
-    exit_code = 0
+    exit_code = int(bool(missing))
 
     if failures:
         exit_code = 1

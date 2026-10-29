@@ -11,6 +11,7 @@ PACKAGE_SOURCE_ROOTS = (
     Path("src"),
     Path("libs/vs-evaluator-protocol/src"),
     Path("libs/vs-decode/src"),
+    Path("libs/vs-redaction/src"),
     Path("libs/vs-evaluation/src"),
     Path("libs/vs-async-ops/src"),
     Path("libs/vs-github/src"),
@@ -25,6 +26,9 @@ PACKAGE_SOURCE_ROOTS = (
     Path("libs/vs-mcp/src"),
     Path("libs/vs-faults/src"),
     Path("libs/vs-sim/src"),
+    Path("libs/vs-logs/src"),
+    Path("libs/vs-proto/src"),
+    Path("libs/vs-runlog/src"),
 )
 _BUILD_AND_CACHE_DIRECTORIES = frozenset(
     {
@@ -50,9 +54,8 @@ _CLIENT_LOCAL_DIRECTORIES = frozenset(
     }
 )
 _CLIENT_LOCAL_FILENAMES = frozenset({".env", ".envrc"})
-# Where the shipped workspace packages live: the deprecated `tui` at the workspace root, and the
-# library packages under `libs/`. Feature and app packages are not part of the source distribution.
-_CLIENT_PACKAGE_MANIFESTS = ("*/package.json", "libs/*/package.json")
+# The Python distribution keeps shared client library sources for reproducible builds.
+_CLIENT_PACKAGE_MANIFESTS = ("libs/*/package.json",)
 
 
 class InvalidPackageNamesError(ValueError):
@@ -70,11 +73,6 @@ class ClientSourceDiscoveryError(RuntimeError):
     def __init__(self, repo_root: Path) -> None:
         """Name the checkout whose client source boundary could not be read."""
         super().__init__(f"could not read Git-tracked client sources from {repo_root}")
-
-
-def release_has_native_payload() -> bool:
-    """Return whether setuptools is building a target-specific release wheel."""
-    return os.environ.get("VIBESYS_WHEEL_TARGET") is not None
 
 
 def clear_distribution_build_outputs(build_lib: Path, packages: list[str]) -> None:

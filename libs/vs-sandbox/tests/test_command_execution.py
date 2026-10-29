@@ -11,6 +11,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_sandbox.api.testing import FakeCommandRunner
+from vs_sim.api import DISCARD
 from vs_sim.api.testing import SimThreads
 
 _NOTICE_ROOM = 200
@@ -30,7 +31,7 @@ def test_a_finished_command_maps_to_a_bounded_result_whose_streams_compose_the_o
     sandbox = FakeCommandRunner(max_output_chars=cap)
     sandbox.script_process("cmd", stdout=stdout, stderr=stderr, returncode=returncode)
 
-    result = sandbox.execute("cmd")
+    result = sandbox.execute("cmd", output=DISCARD)
 
     assert result.output == result.stdout + result.stderr
     assert len(result.output) <= cap
@@ -53,7 +54,7 @@ def test_a_timed_out_command_reports_124_within_the_cap(
     sandbox = FakeCommandRunner(max_output_chars=cap)
     sandbox.script_hang("cmd", stdout=stdout, stderr=stderr)
 
-    result = sandbox.execute("cmd", timeout=timeout)
+    result = sandbox.execute("cmd", timeout=timeout, output=DISCARD)
 
     assert result.exit_code == _TIMEOUT_STATUS
     assert not result.cancelled
@@ -74,8 +75,8 @@ def test_a_stopped_command_within_the_cap_keeps_partial_output_and_ends_with_its
     cancel = SimThreads().event()
     cancel.set()
 
-    timed_out = sandbox.execute("cmd", timeout=timeout)
-    cancelled = sandbox.execute("cmd", timeout=timeout, cancel=cancel)
+    timed_out = sandbox.execute("cmd", timeout=timeout, output=DISCARD)
+    cancelled = sandbox.execute("cmd", timeout=timeout, cancel=cancel, output=DISCARD)
 
     assert not timed_out.truncated
     assert timed_out.stdout == stdout

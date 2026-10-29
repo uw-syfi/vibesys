@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import http.server
 import os
 import signal
@@ -51,6 +52,8 @@ from vs_sim.api.testing import (
     ForegroundUnderTest,
     GatedBlockingRunner,
     InlineBlockingRunner,
+    LockOwnershipContract,
+    LockOwnershipUnderTest,
     LoopbackHttpContract,
     LoopbackHttpUnderTest,
     ManualClock,
@@ -286,6 +289,34 @@ class TestFakeProcessSignaller(ProcessSignallerContract):
                 None if pid not in signaller.live_pids else pytest.fail("process is still live")
             ),
             lambda: None,
+        )
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="ownership inspection uses procfs")
+class TestPidfdLockOwnership(LockOwnershipContract):
+    def lock_ownership_under_test(self) -> LockOwnershipUnderTest:
+        directory = tempfile.TemporaryDirectory()
+        path = Path(directory.name) / "writer.lock"
+        path.with_name("other").touch()
+        stream = path.open("ab")
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+
+        def close() -> None:
+            stream.close()
+            directory.cleanup()
+
+        return LockOwnershipUnderTest(
+            PidfdProcessSignaller(), os.getpid(), path, stream.close, close
+        )
+
+
+class TestFakeLockOwnership(LockOwnershipContract):
+    def lock_ownership_under_test(self) -> LockOwnershipUnderTest:
+        pid = 1234
+        path = Path("/run-a/writer.lock")
+        signaller = FakeProcessSignaller({pid}, held_locks={pid: {path}})
+        return LockOwnershipUnderTest(
+            signaller, pid, path, signaller.held_locks[pid].clear, lambda: None
         )
 
 

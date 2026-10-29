@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
@@ -36,6 +38,7 @@ from vs_core.api import (
     ArtifactRef,
     DispatchTurn,
     InputId,
+    InputMode,
     ObservationStatus,
     RequestId,
     ScopeInputTarget,
@@ -56,7 +59,6 @@ from vs_sim.api.testing import InlineBlockingRunner, ManualClock, SimThreads, ex
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from pathlib import Path
 
     from vs_core.api import RequestBase
     from vs_runtime.api.infrastructure import RuntimeWorkspace
@@ -209,6 +211,42 @@ def test_the_message_carries_every_prompt_then_the_inputs_in_sequence_order(
         )
         for workspaces in env.hosts:
             asyncio.run(workspaces.close())
+
+
+_GOLDENS = Path(__file__).with_name("fixtures") / "session_turn"
+
+
+def test_a_turn_with_a_steer_and_standing_guidance_shows_each_once_in_its_own_section(
+    production: Production,
+) -> None:
+    """The turn message pins its operator sections byte for byte.
+
+    Regenerate with ``UPDATE_PROMPT_SNAPSHOTS=1`` and review the fixture diff as a prompt diff.
+    """
+    prompt = production.put("Optimise the kernel.")
+    steer = reserved(production.put("profile the decode loop first"), 2)
+    guidance = reserved(production.put("keep the weights in bf16"), 1).model_copy(
+        update={"mode": InputMode.STANDING}
+    )
+    message = production.resolver.message(
+        turn_spec().model_copy(update={"prompts": (prompt,)}), (steer, guidance)
+    )
+    assert message is not None
+    for text in (
+        "Optimise the kernel.",
+        "profile the decode loop first",
+        "keep the weights in bf16",
+    ):
+        assert message.count(text) == 1
+    standing = message.index("Standing guidance from the operator")
+    steering = message.index("New steering from the operator")
+    assert message.index("Optimise") < standing < message.index("bf16") < steering
+    assert steering < message.index("decode loop")
+    path = _GOLDENS / "steer_and_guidance.txt"
+    if os.environ.get("UPDATE_PROMPT_SNAPSHOTS") == "1":
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(str(message), encoding="utf-8")
+    assert path.read_text(encoding="utf-8") == str(message)
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,55 @@
+/*
+ * The bundled fonts: Schibsted Grotesk (sans) and JetBrains Mono (mono), under the SIL Open Font
+ * License (the texts are beside the files in ./fonts). Only the weights the type scale uses are
+ * shipped: 400, 500 and 600 of both, and JetBrains Mono 700 for the wordmark (`display`). All are
+ * from the families' official releases (JetBrains Mono 2.304). Nothing is fetched from the network.
+ */
+@font-face {
+  font-family: "Schibsted Grotesk";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url("./fonts/SchibstedGrotesk-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Schibsted Grotesk";
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url("./fonts/SchibstedGrotesk-Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Schibsted Grotesk";
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url("./fonts/SchibstedGrotesk-SemiBold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url("./fonts/JetBrainsMono-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url("./fonts/JetBrainsMono-Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url("./fonts/JetBrainsMono-SemiBold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url("./fonts/JetBrainsMono-Bold.woff2") format("woff2");
+}

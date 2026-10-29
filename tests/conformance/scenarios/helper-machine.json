@@ -1,0 +1,75 @@
+{
+  "id": "helper-machine",
+  "protocol": "host-helper",
+  "title": "Describe the machine and inspect a missing checkout",
+  "description": "machine.describe answers the machine's description, and checkout.inspect on a path that does not exist answers not_found.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "checkout_inspect",
+          "machine_describe"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "checkout_inspect",
+          "machine_describe"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "machine.describe",
+        "request_id": "m",
+        "deadline_ms": 30000
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "machine.describe",
+        "request_id": "m"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "checkout.inspect",
+        "request_id": "c",
+        "deadline_ms": 10000,
+        "path": "/nonexistent-vibesys-conformance/checkout"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "checkout.inspect",
+        "request_id": "c",
+        "inspection": {
+          "state": "not_found"
+        }
+      }
+    }
+  ]
+}

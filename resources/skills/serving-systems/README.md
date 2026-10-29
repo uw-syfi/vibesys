@@ -14,7 +14,7 @@ Skills are organized by **abstraction layer** with explicit extensibility axes.
 |:-----|:-----|:--------|
 | [`models/`](references/models/) | model architecture | What does each model look like? Weight layout, attention type, tokenization, modalities. |
 | [`algorithms/`](references/algorithms/) | idea / algorithm | Cross-cutting serving concepts: continuous batching, paged attention, speculative decoding, MoE routing, parallelism, quantization schemes. |
-| [`frameworks/`](references/frameworks/) | programming framework | **Cross-platform only** — PyTorch and Triton idioms for serving. Platform-bound frameworks (MLX, torch-neuronx, NxD) live under that platform's directory. |
+| [`frameworks/`](references/frameworks/) | programming framework | **Cross-platform only** — PyTorch and Triton idioms for serving. Platform-bound frameworks (MLX, native TorchNeuron) live under that platform's directory. |
 | [`platforms/`](references/platforms/) | compute backend | One directory per `ComputeBackend` (`cuda`, `rocm`, `trainium`, `metal`, `cpu`), each with `floor.md`, `hardware.md`, `profiler.md` plus its own kernel-library notes. Only the selected backend's directory is materialized. Kernel *implementation* is out of scope; see agent-gpu-skills. |
 | [`engines/`](references/engines/) | reference system | Source-code lookup into vLLM, SGLang, TensorRT-LLM. Short SKILL.md + "where's X" grep tables. |
 | [`tooling/`](references/tooling/) | orthogonal workflow | FastAPI serving, accuracy checking, serving benchmarks, profiling, I/O handling. |
@@ -83,8 +83,8 @@ vibesys-skills/
 │   │                             measurement-protocol, counter-triage,
 │   │                             roofline, aiter-engagement
 │   ├── trainium/                 floor, hardware, profiler + neuron-pytorch,
-│   │                             nxd-inference, nxd-kv-cache,
-│   │                             neuron-flash-attention
+│   │                             static-kv-cache, tensor-parallel,
+│   │                             attention, nki-kernels
 │   ├── metal/                    floor, hardware, profiler, mlx, mlx-serving
 │   └── cpu/                      floor, hardware, profiler
 ├── engines/                      vllm, sglang, trtllm

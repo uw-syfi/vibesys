@@ -61,7 +61,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
 from vs_decode.api import Unreadable, ValidationOptions, decode_json
-from vs_sim.api import OutputStream, ProcessOutcome, ProcessOutputTooLarge
+from vs_sim.api import (
+    OutputStream,
+    ProcessOutcome,
+    ProcessOutputTooLarge,
+    forward_output,
+)
 
 from . import fake_shell
 from .connector_protocol import (
@@ -74,7 +79,7 @@ from .scheduler_read import split_framed
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vs_sim.api import ProcessRun, ProcessSpec
+    from vs_sim.api import OutputSink, ProcessRun, ProcessSpec
 
     from .runner import SlurmJobStatus
 
@@ -92,6 +97,9 @@ POLLED_FILE = "polled"
 CANCELLED_FILE = "cancelled"
 RUN_FILE = "run"
 HOLD_FILE = "hold"
+_LOGIN_SHELL_DIRECTORY = "login-shell"
+# A job inherits the environment of the ssh session that submitted it, which carries this.
+_SSH_CLIENT = "192.0.2.1 50000 22"
 _JOBS_DIRECTORY = "jobs"
 _PENDING = "PENDING"
 _SACCT_STATE_WIDTH = 10
@@ -103,6 +111,8 @@ _STDIN_REQUIRED = "connector stdin must contain one request"
 _LOST_REPLY = "submit reply lost after scheduler acceptance"
 _LOST_CLAIM_REPLY = "claim reply lost before intent publication"
 _UNKNOWN_FAULT = "unknown scripted connector fault"
+_FOREIGN_JOB_ID = "1"
+"""The ended job ``collide_name`` gives an operation's name; no submission is allocated it."""
 
 
 def sacct_row(state: str, exit_code: str, *, parsable: bool) -> str:
@@ -131,6 +141,39 @@ def executing_cluster(state: Path) -> Path:
     return state
 
 
+def login_rc(state: Path, text: str) -> None:
+    """Give jobs a cluster ``bash`` that reads an operator login rc file holding ``text``.
+
+    The shell models the cluster's ``bash``, which is built to run under sshd: started with
+    ``-c`` while ``SSH_CLIENT`` or ``SSH2_CLIENT`` is set (a job inherits them from the ssh
+    session that submitted it), it reads the rc file before the command. The file stands for
+    the cluster's profile scripts, which export login values such as a shared cache
+    directory. Any other start of ``bash`` is the host's own.
+    """
+    directory = state / _LOGIN_SHELL_DIRECTORY
+    directory.mkdir(parents=True, exist_ok=True)
+    rc = directory / "rc"
+    rc.write_text(text, encoding="utf-8")
+    shell = directory / "bash"
+    shell.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = -c ] && { [ -n "${SSH_CLIENT+x}" ] || [ -n "${SSH2_CLIENT+x}" ]; }; then\n'
+        f'  exec /bin/bash -c ". {shlex.quote(str(rc))}\n$2"\n'
+        "fi\n"
+        'exec /bin/bash "$@"\n',
+        encoding="utf-8",
+    )
+    shell.chmod(0o755)
+
+
+def _job_environment(state: Path, job_id: str) -> dict[str, str]:
+    environment = {**os.environ, "SLURM_JOB_ID": job_id, "SSH_CLIENT": _SSH_CLIENT}
+    directory = state / _LOGIN_SHELL_DIRECTORY
+    if directory.is_dir():
+        environment["PATH"] = f"{directory}{os.pathsep}{environment.get('PATH', '')}"
+    return environment
+
+
 def _pending_remote(state: Path, path: str) -> Path:
     return state / "remote" / path.lstrip("/")
 
@@ -138,7 +181,7 @@ def _pending_remote(state: Path, path: str) -> Path:
 def _pending_metadata(state: Path, command: str) -> str:
     lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
-    paths = {word for word in lexer if word.startswith("/") and word != "/dev/null"}
+    paths = {word for word in lexer if word.startswith("/") and word not in {"/", "/dev/null"}}
     if not paths:
         translated = command
     else:
@@ -312,7 +355,7 @@ def release_job(state: Path, job_id: str) -> None:
         completed = subprocess.run(  # noqa: S603
             ("/bin/bash", str(script)),
             cwd=directory,
-            env={**os.environ, "SLURM_JOB_ID": job_id},
+            env=_job_environment(state, job_id),
             stdout=log,
             stderr=subprocess.STDOUT,
             check=False,
@@ -426,6 +469,33 @@ def _connector_process_result(response: ConnectorResponse, *, max_output_bytes: 
     return ProcessOutcome(0, payload, b"")
 
 
+def _plain_process_result(
+    returncode: int,
+    stdout: str,
+    stderr: str,
+    *,
+    max_output_bytes: int,
+) -> ProcessRun:
+    """Apply the process contract's per-stream bound to a fake local command."""
+    out = stdout.encode()
+    err = stderr.encode()
+    if len(out) > max_output_bytes:
+        return ProcessOutputTooLarge(
+            max_output_bytes,
+            OutputStream.STDOUT,
+            out[:max_output_bytes],
+            err[:max_output_bytes],
+        )
+    if len(err) > max_output_bytes:
+        return ProcessOutputTooLarge(
+            max_output_bytes,
+            OutputStream.STDERR,
+            out,
+            err[:max_output_bytes],
+        )
+    return ProcessOutcome(returncode, out, err)
+
+
 def handle(state: Path, request: dict[str, object]) -> dict[str, object]:
     """Record one connector request and return its protocol response.
 
@@ -529,17 +599,44 @@ class FakeConnector:
         self._plans: dict[str, _SubmitPlan] = {}
         self._jobs: dict[str, _ScheduledJob] = {}
         self._forgotten_names: set[str] = set()
+        self._collisions: set[str] = set()
         self._accept_callbacks: dict[str, Callable[[], None]] = {}
         self._dispatch_callbacks: dict[str, Callable[[], None]] = {}
         self._dispatched: set[str] = set()
         self._intercept: ConnectorIntercept | None = None
+        self._refused_downloads: set[str] = set()
+
+    def submitted_job_ids(self) -> tuple[str, ...]:
+        """Return scheduler identities accepted by this fake, in numeric order."""
+        ids = {job.job_id for job in self._jobs.values()}
+        ids.update(
+            path.name for path in (self.state / _JOBS_DIRECTORY).glob("*") if path.name.isdecimal()
+        )
+        return tuple(sorted(ids, key=int))
+
+    def refuse_download(self, remote_name: str) -> None:
+        """Fail local-transport downloads whose source ends in ``remote_name``."""
+        self._refused_downloads.add(remote_name)
 
     def forget_name_history(self, operation_id: str | None = None) -> None:
-        """Expire name-based scheduler history while retaining numeric job observations."""
+        """Expire the name-based accounting history of ended jobs, keeping numeric observations.
+
+        As in Slurm, ``squeue -n`` still lists a queued or running job by its name, and
+        ``sacct --name`` still finds one; only a job that has ended is forgotten by name.
+        """
         suffix = hashlib.sha256(operation_id.encode()).hexdigest()[:32] if operation_id else None
         self._forgotten_names.update(
             name for name in self._jobs if suffix is None or name.endswith(suffix)
         )
+
+    def collide_name(self, operation_id: str) -> None:
+        """Give an ended foreign job this operation's scheduler name: ``sacct --name`` lists it too."""
+        self._collisions.add(hashlib.sha256(operation_id.encode()).hexdigest()[:32])
+
+    def has_live_job(self, operation_id: str) -> bool:
+        """Whether a scripted job of this operation is queued or running, read without advancing it."""
+        suffix = hashlib.sha256(operation_id.encode()).hexdigest()[:32]
+        return any(job.active for name, job in self._jobs.items() if name.endswith(suffix))
 
     def on_accept(self, operation_id: str, callback: Callable[[], None]) -> None:
         """Run a deterministic synchronization barrier after scheduler acceptance."""
@@ -607,16 +704,69 @@ class FakeConnector:
         """
         self._intercept = intercept
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
-        """Answer a connector request without a transport subprocess; it takes no time."""
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        """Answer connector or explicit fake local-transport commands without a process."""
         del timeout
+        try:
+            marker = spec.argv.index("fake-connector")
+        except ValueError:
+            marker = -1
+        if marker >= 0 and spec.argv[marker + 1 : marker + 2] == ("shell",):
+            request: ConnectorRequest = {
+                "version": 1,
+                "operation": "exec",
+                "command": spec.argv[-1],
+            }
+            response = (
+                self._answer(request)
+                if self._intercept is None
+                else self._intercept(request, self._answer)
+            )
+            run = _plain_process_result(
+                int(str(response["returncode"])),
+                str(response["stdout"]),
+                str(response["stderr"]),
+                max_output_bytes=spec.max_output_bytes,
+            )
+            return forward_output(run, output)
+        local_rsync = marker >= 0 and spec.argv[marker + 1 : marker + 2] == ("rsync",)
+        rsync_index = marker + 2
+        if not local_rsync:
+            rsync_index = next(
+                (
+                    index + 1
+                    for index, argument in enumerate(spec.argv)
+                    if Path(argument).name == "rsync"
+                ),
+                -1,
+            )
+            local_rsync = rsync_index > 0
+        if local_rsync:
+            arguments = list(spec.argv[rsync_index:])
+            with (self.state / REQUESTS_FILE).open("a", encoding="utf-8") as log:
+                log.write(json.dumps({"operation": "rsync", "argv": arguments}) + "\n")
+            operands = arguments[arguments.index("--") + 1 :]
+            refused = any(
+                operands[0].rstrip("/").endswith(name) for name in self._refused_downloads
+            )
+            if not refused:
+                _rsync(self.state, arguments)
+            run = _plain_process_result(
+                23 if refused else 0,
+                "",
+                "scripted download failure" if refused else "",
+                max_output_bytes=spec.max_output_bytes,
+            )
+            return forward_output(run, output)
         request = _decode_connector_request(spec.input)
         response = (
             self._answer(request)
             if self._intercept is None
             else self._intercept(request, self._answer)
         )
-        return _connector_process_result(response, max_output_bytes=spec.max_output_bytes)
+        return forward_output(
+            _connector_process_result(response, max_output_bytes=spec.max_output_bytes), output
+        )
 
     def _answer(self, request: dict[str, object]) -> dict[str, object]:
         query, end = split_framed(str(request.get("command", "")))
@@ -630,8 +780,11 @@ class FakeConnector:
                 log.write(json.dumps({**request, "command": query}) + "\n")
             if response["returncode"] == 0:
                 response = {**response, "stdout": str(response["stdout"]) + end}
-        if response["stdout"] == "CREATED" and tokens[:2] == ["mkdir", "-p"]:
-            plan = self._plans.get(hashlib.sha256(Path(tokens[2]).name.encode()).hexdigest()[:32])
+        if response["stdout"] == "CREATED" and "intent.json" in str(request.get("command", "")):
+            operation_id = (
+                Path(next(token for token in tokens if "intent.pending." in token)).parents[1].name
+            )
+            plan = self._plans.get(hashlib.sha256(operation_id.encode()).hexdigest()[:32])
             if plan is not None and plan.lost_claim_reply:
                 raise OSError(_LOST_CLAIM_REPLY)
         if "sbatch" in tokens:
@@ -672,15 +825,17 @@ class FakeConnector:
             name = tokens[tokens.index("-n") + 1]
             if name not in self._jobs:
                 return None
-            job = None if name in self._forgotten_names else self._jobs.get(name)
-            if job is not None and job.active:
+            job = self._jobs[name]
+            if job.active:
                 output = f"{job.job_id}\n"
         elif "--name" in tokens:
             name = tokens[tokens.index("--name") + 1]
+            foreign = _FOREIGN_JOB_ID + "\n" if name.rsplit("-", 1)[-1] in self._collisions else ""
             if name not in self._jobs:
-                return None
-            job = None if name in self._forgotten_names else self._jobs.get(name)
-            output = f"{job.job_id}\n" if job is not None else ""
+                return None if not foreign else _reply(foreign)
+            job = self._jobs[name]
+            forgotten = name in self._forgotten_names and not job.active
+            output = ("" if forgotten else f"{job.job_id}\n") + foreign
         else:
             job_id = tokens[1] if tokens[0] == "scancel" else tokens[tokens.index("-j") + 1]
             job = next((item for item in self._jobs.values() if item.job_id == job_id), None)
@@ -689,7 +844,7 @@ class FakeConnector:
             if job.purged and not job.active and tokens[0] in {"squeue", "scancel"}:
                 return _purged_reply(tokens[0], job.job_id)
             output = self._job_output(job, tokens)
-        return {"version": 1, "returncode": 0, "stdout": output, "stderr": ""}
+        return _reply(output)
 
     @staticmethod
     def _job_output(job: _ScheduledJob, tokens: list[str]) -> str:
@@ -712,6 +867,11 @@ class FakeConnector:
         output = sacct_row(job.status.value.upper(), "0:0", parsable="-P" in tokens)
         job.advance()
         return output
+
+
+def _reply(stdout: str) -> dict[str, object]:
+    """A scheduler program's successful answer."""
+    return {"version": 1, "returncode": 0, "stdout": stdout, "stderr": ""}
 
 
 def _purged_reply(program: str, job_id: str) -> dict[str, object]:

@@ -10,13 +10,10 @@ job's argv. Nothing here knows about the agent's container.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from functools import cache
-from pathlib import PurePath
 from typing import TYPE_CHECKING, Protocol
 
-from vs_sandbox.host_sandbox import HostSandbox
-from vs_sandbox.host_sandbox import build as build_host_sandbox
+from vs_sandbox.host_sandbox import build_remote_job_prefix
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -47,10 +44,10 @@ class HostJobConfinement:
     exactly as for an agent on the host. Enforcement is required, so a host
     without the mechanism refuses the job.
 
-    The job runs on another machine, so the prefix names bubblewrap by its
-    program name and the job's own ``PATH`` finds it there. The submit host
-    proves only that its own copy works; the absolute path it found (a copy
-    in the operator's home, say) need not exist on a compute node.
+    The job runs on another machine, so the host-sandbox builder emits only a
+    prefix that the compute node can resolve. Bubblewrap and Seatbelt are named
+    by program name and found through the job's own ``PATH``. Landlock is
+    refused because its Python entry point is local to the submit host.
     """
 
     def __init__(
@@ -71,17 +68,9 @@ class HostJobConfinement:
         return [*self._prefixes(workspace), *argv]
 
     def _prefix(self, workspace: Path) -> list[str]:
-        sandbox = build_host_sandbox(
+        return build_remote_job_prefix(
             workspace,
             env=self._env,
             resources=self._resources,
             project_path_policy=self._project_path_policy,
-            require_enforcement=True,
         )
-        if sandbox is None:  # require_enforcement raises instead
-            message = "brokered jobs require host confinement"
-            raise RuntimeError(message)
-        if isinstance(sandbox, HostSandbox):
-            sandbox = replace(sandbox, bwrap_path=PurePath(sandbox.bwrap_path).name)
-        # Everything before the placeholder argv is the confinement prefix.
-        return sandbox.wrap([])

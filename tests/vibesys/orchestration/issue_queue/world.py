@@ -98,6 +98,8 @@ class _Bounds:
     cancellation_bound_seconds = 60.0
     cleanup_bound_seconds = 60.0
     reconciliation_bound_seconds = 5000.0
+    queue_wait_budget_seconds = 43_200.0
+    queue_notice_interval_seconds = 600.0
 
 
 def issue_queue_config(**settings: object) -> IssueQueueConfig:
@@ -376,11 +378,7 @@ class IssueQueueWorld:
             refs.append(
                 EvidenceRef(
                     evidence_id=EvidenceId(root=f"{stage.stage_id}:{plan.purpose}:{commit}"),
-                    kind=(
-                        EvidenceKind.LOCAL_VALIDATION
-                        if plan.purpose == "local-validation"
-                        else _KINDS[stage.stage_id]
-                    ),
+                    kind=_KINDS[stage.stage_id],
                     purpose=plan.purpose,
                     scope=job.scope,
                     source_request=job.submission_id,

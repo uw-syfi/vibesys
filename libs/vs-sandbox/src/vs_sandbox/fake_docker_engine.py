@@ -21,12 +21,15 @@ from vs_sandbox.container_runtime import (
     NESTED_DAEMON_START_SCRIPT,
 )
 from vs_sandbox.docker_cli import EXEC_MARKER_ENV, SIGNAL_EXEC_SCRIPT
+from vs_sandbox.fake_docker_command import docker_result
 from vs_sandbox.process_execution import shell_exit_status
+from vs_sim.api import OutputStream
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from vs_sim.api import PipedProcess, PipedProcessLauncher
+    from vs_sandbox.fake_docker_command import DockerResult
+    from vs_sim.api import OutputSink, PipedProcess, PipedProcessLauncher
 
 # The container program's parent, standing in for the ``docker exec`` client.
 # It starts the program in a session of its own (the daemon's side), records
@@ -235,6 +238,10 @@ def _parse_exec(argv: tuple[str, ...]) -> _Exec:
     return _Exec(argv[index], env, workdir, user, tuple(argv[index + 1 :]))
 
 
+DEFAULT_MEMORY_TOTAL = 64 * 1024**3
+"""The host memory a fake daemon reports unless told otherwise: 64 GiB."""
+
+
 class FakeDockerEngine:
     """A :class:`~vs_sandbox.docker_cli.DockerCli` backed by local processes.
 
@@ -288,6 +295,7 @@ class FakeDockerEngine:
         that goes with the engine. *launcher* starts the host processes that
         stand in for spawned ``docker exec`` clients.
         """
+        self.daemon_id = "fake-daemon"
         self._launcher = launcher
         self._scratch: tempfile.TemporaryDirectory[str] | None = None
         if state_dir is None:
@@ -296,6 +304,7 @@ class FakeDockerEngine:
         self._state_dir = state_dir
         self._agent_ids = agent_ids
         self._runtimes = tuple(runtimes)
+        self._memory_total: int | None = DEFAULT_MEMORY_TOTAL
         self._nested_daemons_start = nested_daemons_start
         self._containers: dict[str, _Container] = {}
         self.calls: list[tuple[str, ...]] = []
@@ -304,6 +313,8 @@ class FakeDockerEngine:
         self._signal_requests_unreadable = 0
         self._runs_lost_after_creating: list[bool] = []
         self._removals_lost = 0
+        self._removing: set[str] = set()
+        self._pull_progress = ""
 
     def containers(self) -> tuple[FakeContainer, ...]:
         """Every container the daemon still holds, stopped ones included."""
@@ -329,12 +340,20 @@ class FakeDockerEngine:
         """
         self._runs_lost_after_creating = list(outcomes)
 
+    def pulls_on_run(self, progress: str) -> None:
+        """Make every later ``docker run`` print *progress* to stderr, as pulling its image does."""
+        self._pull_progress = progress
+
     def removals_lost(self, count: int) -> None:
         """Fault: the next *count* ``docker rm`` clients die by ``SIGKILL`` before the daemon acts.
 
         Each answers exit ``-9`` with no output, and the container stays.
         """
         self._removals_lost = count
+
+    def report_memory(self, total: int | None) -> None:
+        """Have ``docker info`` report *total* bytes of host memory; ``None`` fails to report it."""
+        self._memory_total = total
 
     def signal_requests_find_nothing(self, count: int) -> None:
         """Fault: the next *count* signal requests reach no process.
@@ -362,10 +381,15 @@ class FakeDockerEngine:
         self._signal_requests_unreadable = count
 
     def run(
-        self, argv: Sequence[str], *, timeout_seconds: float
+        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink
     ) -> subprocess.CompletedProcess[str]:
-        """Run one ``docker`` subcommand to completion."""
-        arguments = tuple(argv)
+        """Run one ``docker`` subcommand to completion, writing what it printed to *output*."""
+        result = self._answer(tuple(argv), timeout_seconds)
+        output.write(OutputStream.STDOUT, result.stdout.encode())
+        output.write(OutputStream.STDERR, result.stderr.encode())
+        return result
+
+    def _answer(self, arguments: tuple[str, ...], timeout_seconds: float) -> DockerResult:
         self.calls.append(arguments)
         match arguments[1]:
             case "run":
@@ -377,11 +401,23 @@ class FakeDockerEngine:
             case "ps":
                 return self._list(arguments)
             case "info":
-                runtimes = {name: {"path": name} for name in self._runtimes}
-                return subprocess.CompletedProcess(arguments, 0, json.dumps(runtimes) + "\n", "")
+                return self._info(arguments)
             case other:
                 message = f"FakeDockerEngine does not model `docker {other}`"
                 raise AssertionError(message)
+
+    def _info(self, arguments: tuple[str, ...]) -> DockerResult:
+        """Answer ``docker info``: the daemon's id, the host's memory, or its runtimes."""
+        match arguments[2:]:
+            case ("--format", "{{.ID}}"):
+                return docker_result(stdout=self.daemon_id + "\n")
+            case ("--format", "{{.MemTotal}}") if self._memory_total is None:
+                return docker_result(returncode=1, stderr="template: no MemTotal\n")
+            case ("--format", "{{.MemTotal}}"):
+                return docker_result(stdout=f"{self._memory_total}\n")
+            case _:
+                runtimes = {name: {"path": name} for name in self._runtimes}
+                return subprocess.CompletedProcess(arguments, 0, json.dumps(runtimes) + "\n", "")
 
     def spawn(self, argv: Sequence[str]) -> PipedProcess:
         """Start a ``docker exec`` whose program survives its client's death."""
@@ -449,7 +485,7 @@ class FakeDockerEngine:
                 f"docker: Error response from daemon: unknown or invalid runtime name: {runtime}.\n"
             )
             return subprocess.CompletedProcess(arguments, _RUN_ERROR_EXIT, "", stderr)
-        identifier = f"fake{len(self._containers):04d}{uuid.uuid4().hex[:8]}"
+        identifier = uuid.uuid4().hex + uuid.uuid4().hex
         self._containers[identifier] = _Container(
             mounts, read_only, workdir, name, labels, runtime, env=env
         )
@@ -457,7 +493,18 @@ class FakeDockerEngine:
             if self._runs_lost_after_creating.pop(0):
                 raise subprocess.TimeoutExpired(arguments, 0)
             return subprocess.CompletedProcess(arguments, 130, "", "")
-        return subprocess.CompletedProcess(arguments, 0, f"{identifier}\n", "")
+        return subprocess.CompletedProcess(arguments, 0, f"{identifier}\n", self._pull_progress)
+
+    def hold_removal(self, container_id: str) -> None:
+        """Leave a container in the daemon's removal-in-progress state until completed."""
+        if container_id not in self._containers:
+            raise KeyError(container_id)
+        self._removing.add(container_id)
+
+    def finish_removal(self, container_id: str) -> None:
+        """Complete a held removal, including all processes in that domain."""
+        self._removing.remove(container_id)
+        self._end(("docker", "rm", "-f", container_id))
 
     def _end(self, arguments: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
         if arguments[1] == "rm" and self._removals_lost:
@@ -474,6 +521,11 @@ class FakeDockerEngine:
                 reference,
             )
             container = self._containers.get(identifier)
+            if identifier in self._removing:
+                return docker_result(
+                    returncode=1,
+                    stderr=f"Error response from daemon: removal of container {identifier} is already in progress",
+                )
             if container is None:
                 return self._no_such_container(arguments, reference)
             for marker in container.markers:

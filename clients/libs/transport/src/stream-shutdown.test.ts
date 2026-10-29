@@ -1,5 +1,5 @@
 import {describe, it} from 'node:test';
-import {closeStreamAndTransport} from './stream-shutdown.js';
+import {closeStreamAndTransport, settleAll} from './stream-shutdown.js';
 import {expect} from './test-support/expect.js';
 
 class DeferredClose {
@@ -95,6 +95,27 @@ describe('closeStreamAndTransport', () => {
     expect(failure).toMatchObject({
       message: 'could not close event stream and transport',
       errors: [streamFailure, transportFailure],
+    });
+  });
+});
+
+describe('settleAll', () => {
+  it('reports shared nested failures once in stable leaf ownership order', async () => {
+    const observerFailure = new Error('observer failed');
+    const socketFailure = new Error('socket failed');
+    const closing = settleAll(
+      [
+        Promise.reject(new AggregateError([observerFailure, socketFailure], 'child close failed')),
+        Promise.reject(socketFailure),
+      ],
+      'parent close failed',
+    );
+
+    const failure = await closing.catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect(failure).toMatchObject({
+      message: 'parent close failed',
+      errors: [observerFailure, socketFailure],
     });
   });
 });

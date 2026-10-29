@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
-from . import _host_epochs
+from . import _host_epochs, _wait_clock
+from ._failure_routing import FailureHearer, failure_hearer
+from ._measurements import cancel_settled
 from ._proofs import (
     Mismatch,
     Missing,
@@ -16,13 +19,12 @@ from ._proofs import (
     current_closure,
     descriptor_matches,
     fresh_observation,
-    invocation_for,
     observation_for,
-    operation_for,
     released_owner,
     resolved_observation,
-    submission_budget_for,
 )
+from ._recovery_owners import known_owner, operation_decision, typed_job_owner
+from ._recovery_unanswered import Inspection, Settlement, settlement
 from ._registry import ContractError
 from ._request_forward import turn_of
 from ._session_scope import lost_turn_authority
@@ -51,10 +53,12 @@ from .types.common import (
 )
 from .types.evaluation import (
     CancelOwnedJob,
-    OwnedJob,
+    JobTerminationRequested,
+    MeasurementSubmissionEnded,
     RegisteredOwnedJob,
     SubmitMeasurement,
 )
+from .types.job_observations import WaitEnd
 from .types.kernel import AreaChange
 from .types.records import (
     BlockRequest,
@@ -83,19 +87,28 @@ from .types.sessions import (
     EnsureSession,
     InvocationCancellationRequested,
     ResumeSessionTurn,
-    SessionPhase,
 )
 from .types.until import Failed, FailureReason, WhileAlive, WhileOpen
 from .types.waits import WaitKind, WaitOn, WaitSubject
 
 if TYPE_CHECKING:
-    from .types.common import Observation, ResourceId
-    from .types.kernel import RecordsContext, RunState, Signal
-    from .types.records import RecordsEvent, RecordsState, Request, RequestRecord, TargetObservation
-    from .types.sessions import Invocation, SessionView
-    from .types.strategy import Operation
+    from collections.abc import Mapping
 
-type Resolution = Literal["pending", "safe-prepared", "reattached", "terminal", "blocked"]
+    from .types.common import Observation, ResourceId
+    from .types.evaluation import EvaluationState
+    from .types.kernel import RecordsContext, RunState, Signal
+    from .types.records import (
+        HostEpoch,
+        RecordsEvent,
+        RecordsState,
+        Request,
+        RequestRecord,
+        TargetObservation,
+    )
+
+type Resolution = Literal[
+    "pending", "safe-prepared", "reattached", "terminal", "unknown", "blocked"
+]
 
 
 def _child_sources(child: ChildLease, state: RecordsState) -> Verdict[tuple[Observation, ...]]:
@@ -179,184 +192,6 @@ def _child_inspection_fact(
     return Proven((target.observation,))
 
 
-def _operation_decision(record: RequestRecord, context: RecordsContext) -> Operation | None:
-    request = record.request
-    if not isinstance(request, ExecuteRegisteredOperation):
-        return None
-    proof = operation_for(context.run.receipts, request)
-    return proof.value if isinstance(proof, Proven) else None
-
-
-def _invocation_owner(
-    record: RequestRecord, context: RecordsContext, invocation: Invocation, observation: Observation
-) -> bool:
-    request = record.request
-    registered = None
-    if isinstance(request, DispatchTurn | ResumeSessionTurn):
-        turn = request.turn
-    elif isinstance(request, ExecuteRegisteredOperation):
-        decision = _operation_decision(record, context)
-        if (
-            decision is None
-            or decision.registered_turn is None
-            or request.operation.schema_ref.lifecycle != LifecycleClass.SESSION_TURN
-            or record.lifecycle != LifecycleClass.SESSION_TURN
-        ):
-            return False
-        turn = decision.registered_turn
-        registered = request.operation_id
-    else:
-        return False
-    proof = invocation_for(context.sessions.invocations, turn, observation.scope)
-    previous = invocation.observation
-    return (
-        isinstance(proof, Proven)
-        and proof.value == invocation
-        and (registered is None or invocation.registered_operation == registered)
-        and (
-            previous is None
-            or (
-                isinstance(observation_for(record, previous), Proven)
-                and previous.resource_id in (None, observation.resource_id)
-            )
-        )
-    )
-
-
-def _typed_job_owner(
-    record: RequestRecord,
-    context: RecordsContext,
-    observation: Observation,
-    job: OwnedJob | RegisteredOwnedJob,
-) -> bool:
-    """One canonical job correspondence for reattachment and lease transfer."""
-    request = record.request
-    if (
-        not isinstance(observation_for(record, observation), Proven)
-        or job.scope != observation.scope
-        or job.resource_id not in (None, observation.resource_id)
-        or (
-            job.observation is not None
-            and (
-                not isinstance(observation_for(record, job.observation), Proven)
-                or job.observation.resource_id not in (None, observation.resource_id)
-            )
-        )
-    ):
-        return False
-    if isinstance(job, OwnedJob):
-        return (
-            isinstance(request, SubmitMeasurement)
-            and job.submission_id == record.request_id
-            and job.plan == request.plan
-        )
-    if not isinstance(request, ExecuteRegisteredOperation):
-        return False
-    decision = _operation_decision(record, context)
-    descriptor = descriptor_matches(
-        context.registry,
-        context.run.capabilities,
-        request.operation,
-        LifecycleClass.OWNED_JOB,
-        OperationNormalizationKind.NONE,
-    )
-    return (
-        decision is not None
-        and isinstance(descriptor, Proven)
-        and descriptor.value.resource_pool == job.resource_pool
-        and job.request_id == record.request_id
-        and job.operation_id == request.operation_id
-        and job.expected_measurement == decision.registered_measurement
-    )
-
-
-def _submission_owner(record: RequestRecord, context: RecordsContext) -> bool:
-    if not isinstance(record.request, SubmitMeasurement):
-        return False
-    return isinstance(
-        submission_budget_for(
-            record.request, context.evaluation.submission_budgets, context.run.receipts
-        ),
-        Proven,
-    )
-
-
-def _workspace_owner(
-    record: RequestRecord, context: RecordsContext, observation: Observation
-) -> bool:
-    request = record.request
-    if not isinstance(request, EnsureWorkspace):
-        return False
-    # The attempt keeps the ensure request pending only while it acquires. Once it
-    # consumed the accepted answer (it left ACQUIRING) the workspace is the attempt's own,
-    # and a restart must still recognise the resource as owned: otherwise the recovery
-    # check of a completed ensure never resolves.
-    consumed = (
-        record.phase == RequestPhase.COMPLETED
-        and observation.accepted
-        and observation.status == ObservationStatus.SUCCEEDED
-    )
-    return any(
-        owner.attempt_id == request.attempt.attempt_id
-        and owner.generation == request.attempt.generation
-        and isinstance(current_admission(owner, observation.scope, request.admission_id), Proven)
-        and owner.workspace == request.plan
-        and (
-            record.request_id in owner.pending_records
-            or (consumed and owner.phase != AttemptPhase.ACQUIRING)
-        )
-        for owner in context.attempts.attempts
-    )
-
-
-def _session_created(record: RequestRecord, observation: Observation, session: SessionView) -> bool:
-    """The session is the one this completed ensure created, and it is busy with its first turn.
-
-    A session's own acceptance waits for that turn's reply, and the turn waits for recovery
-    to be ready, so recovery cannot wait for acceptance to recognise the ensure's resource.
-    An idle session has no turn to wait on, so it needs its acceptance as before.
-    """
-    return (
-        record.phase == RequestPhase.COMPLETED
-        and observation.accepted
-        and observation.status == ObservationStatus.SUCCEEDED
-        and session.phase in (SessionPhase.ACQUIRING, SessionPhase.EXECUTING)
-        and session.resource_id is not None
-        and observation.resource_id == session.resource_id
-    )
-
-
-def _known_owner(record: RequestRecord, context: RecordsContext, observation: Observation) -> bool:
-    if any(
-        _typed_job_owner(record, context, observation, job)
-        for job in (*context.evaluation.jobs, *context.evaluation.registered_jobs)
-    ):
-        return True
-    if _submission_owner(record, context) or _workspace_owner(record, context, observation):
-        return True
-    if isinstance(record.request, EnsureSession) and any(
-        session.scope == observation.scope
-        and session.resource_id in (None, observation.resource_id)
-        and session.spec == record.request.spec
-        and session.generation == observation.scope.generation
-        and (
-            record.request.required_resource is None
-            or observation.resource_id == record.request.required_resource
-        )
-        and (
-            (session.accepted and session.resource_id is not None)
-            or record.request_id in session.pending_records
-            or _session_created(record, observation, session)
-        )
-        for session in context.sessions.sessions
-    ):
-        return True
-    return any(
-        _invocation_owner(record, context, invocation, observation)
-        for invocation in context.sessions.invocations
-    )
-
-
 def _prepared_episode(record: RequestRecord, context: RecordsContext) -> bool:
     request = record.request
     if record.lifecycle == LifecycleClass.QUERY or isinstance(
@@ -434,7 +269,7 @@ def _reopen_resolved(record: RequestRecord, context: RecordsContext) -> bool:
     )
     if not isinstance(descriptor, Proven):
         return False
-    decision = _operation_decision(record, context)
+    decision = operation_decision(record, context)
     if decision is None:
         return False
     if descriptor.value.normalization != OperationNormalizationKind.SCOPE_REOPEN:
@@ -514,6 +349,21 @@ def _resource_identified(
 
 
 def _resolution(record: RequestRecord, context: RecordsContext) -> Resolution:
+    if record.phase == RequestPhase.BLOCKED and record.lifecycle == LifecycleClass.QUERY:
+        # Core ended this query at its limit, before the host that asked it died. It started
+        # nothing and owns nothing, and nobody waits on it (its owner heard it blocked), so no
+        # executor answer can matter: an inspection that finds it begun and unsealed (the host
+        # died as the poll ran) must not hold the run in recovery, as it did a run whose old
+        # polls of jobs core had long released came back unknown.
+        # "terminal" settles only the recovery check, even for an Unknown observation;
+        # it proves no external acceptance, termination or release and changes no ledger
+        # facts. test_ambiguous_acceptance_never_replays_any_lifecycle_class exhausts this
+        # exception and requires every other ambiguous class/phase to stay pending.
+        return "terminal"
+    return _observed_resolution(record, context)
+
+
+def _observed_resolution(record: RequestRecord, context: RecordsContext) -> Resolution:
     observation = record.observation
     if record.phase == RequestPhase.PREPARED and observation is None:
         return "safe-prepared" if _prepared_episode(record, context) else "pending"
@@ -529,10 +379,20 @@ def _resolution(record: RequestRecord, context: RecordsContext) -> Resolution:
     terminal = observation.terminal and observation.status != ObservationStatus.PENDING
     # A completed request that does not own its resource has nothing left to recover: it
     # creates no children and its resource is another request's to release.
+    # A cancel of a job reports ``cancelled``: the executor accepted the cancellation, and the
+    # job it names is the submission's to release. Its observation never lists children, so
+    # it can never prove a manifest: it was read as unresolved, and a recovery that inspected
+    # it got the same facts back and waited for good.
     names_only = (
         not _owns_resource(record)
         and observation.accepted
-        and observation.status == ObservationStatus.SUCCEEDED
+        and (
+            observation.status == ObservationStatus.SUCCEEDED
+            or (
+                isinstance(record.request, CancelOwnedJob)
+                and observation.status == ObservationStatus.CANCELLED
+            )
+        )
     )
     # A rejection that accepted nothing performed nothing: no resource, no children to find.
     refused = (
@@ -558,7 +418,7 @@ def _resolution(record: RequestRecord, context: RecordsContext) -> Resolution:
         observation.accepted
         and observation.resource_id is not None
         and observation.children_complete
-        and _known_owner(record, context, observation)
+        and known_owner(record, context, observation)
     ):
         return "reattached"
     return "pending"
@@ -695,7 +555,7 @@ def _transfer_children(state: RecordsState, context: RecordsContext) -> RecordsS
                 and source.request.admission_id == ancestor.request.admission_id
                 and (child.observation is None or child.observation.request_id == source.request_id)
                 and observation is not None
-                and _typed_job_owner(source, context, observation, job)
+                and typed_job_owner(source, context, observation, job)
                 and (
                     source.request.scope == child.scope
                     and observation.request_id == request_id
@@ -752,25 +612,22 @@ def _aggregate_resolution(
 _IN_FLIGHT = (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
 
 
-def _check_wait(
+def _waiting_on(
     state: RecordsState,
     context: RecordsContext,
     check: RecoveryCheck,
     sent: frozenset[RequestId],
     epoch: int,
-) -> WaitOn | None:
-    """What a pending check waits on now: the requests and jobs whose answer re-resolves it.
+) -> tuple[tuple[RequestId, ...], tuple[WaitSubject, ...]]:
+    """The requests and jobs whose answer re-resolves *check*, the target's own included.
 
     Any committed answer about the target re-resolves the check (``_observe``): the target
     itself while it is open, and every inspection of it, the check's own, an earlier epoch's
     sent again, and the inspections of the children it left. A child its typed job ledger
     tracks settles when that job does, so the check names the job, but only when every child
     has one: a child nobody answers for keeps the check from ever resolving. *sent* holds the
-    requests this transition sends. A check left with nothing keeps the wait it had, naming
-    what it waited on, so the run halts with it named.
+    requests this transition sends.
     """
-    if check.resolution != "pending":
-        return None
     record = state.record(check.target)
     children = [child for child in state.children if check.target in child.source_requests]
     expected = [check.target, check.inspection]
@@ -778,11 +635,7 @@ def _check_wait(
         expected += [
             _child_inspection(record, child.resource_id, epoch).request_id for child in children
         ]
-    expected += [
-        row.request_id
-        for row in state.records
-        if isinstance(row.request, InspectRequest) and row.request.target == check.target
-    ]
+    expected += [row.request_id for row in state.inspections_of(check.target)]
     requests = tuple(
         dict.fromkeys(
             request
@@ -812,9 +665,112 @@ def _check_wait(
         if children and None not in jobs
         else ()
     ) + _owner_sessions(record, context)
+    return requests, subjects
+
+
+def _check_wait(
+    state: RecordsState,
+    context: RecordsContext,
+    check: RecoveryCheck,
+    sent: frozenset[RequestId],
+    epoch: int,
+) -> WaitOn | None:
+    """What a pending check waits on now: the requests and jobs whose answer re-resolves it.
+
+    A check left with nothing keeps the wait it had, naming what it waited on, so the run
+    halts with it named (`_settle_unanswered` settles one nothing can ever answer first).
+    """
+    if check.resolution != "pending":
+        return None
+    requests, subjects = _waiting_on(state, context, check, sent, epoch)
     if not requests and not subjects:
         return check.wait
     return WaitOn(requests=requests, subjects=subjects)
+
+
+_NO_LIMIT = 1.7976931348623157e308
+"""The limit of a request with none: a run with no deadline gives its requests the largest float
+(``Seconds`` allows no infinity)."""
+
+
+def _unbounded(state: RecordsState, context: RecordsContext, record: RequestRecord) -> bool:
+    """Whether no limit will end *record*: it is not open, or its limit is the end of time."""
+    if not is_open(record):
+        return True
+    bound = _wait_clock.record_bound(record, context.evaluation, context.run, state.hosts)
+    return bound.at >= _NO_LIMIT
+
+
+def _inspection_of(state: RecordsState, check: RecoveryCheck) -> Inspection:
+    """What became of the inspection this epoch sent about the check's target."""
+    if check.inspection is None:
+        return Inspection.NONE
+    row = state.record(check.inspection)
+    answer = None if row is None else row.observation
+    # An inspection the executor failed to run until its retries or its bound ran out says
+    # nothing about the target; one it ran, whatever it found, answered.
+    if (
+        row is None
+        or row.phase == RequestPhase.BLOCKED
+        or answer is None
+        or answer.status != ObservationStatus.SUCCEEDED
+        or not answer.accepted
+    ):
+        return Inspection.UNREACHABLE
+    return Inspection.ANSWERED
+
+
+_VERDICT: Mapping[Settlement, Resolution] = MappingProxyType(
+    {
+        "resend": "safe-prepared",
+        "unknown": "unknown",
+        "terminal": "terminal",
+        "blocked": "blocked",
+    }
+)
+
+
+def _settle_unanswered(
+    state: RecordsState,
+    context: RecordsContext,
+    barrier: RecoveryBarrier,
+    sent: frozenset[RequestId],
+) -> tuple[RecordsState, RecoveryBarrier]:
+    """Settle every pending check that nothing is left to answer.
+
+    The inspections about its target have all ended and no child job or session can move it:
+    waiting more would hold recovery open in silence. The policy is `settlement`; a ``resend``
+    puts the record back to PREPARED, which the check then reads as safe to dispatch. Only
+    ``unknown`` (a result that is discarded) settles at once: any other verdict about an open
+    record with a limit waits for that limit, which ends the record and blocks its check.
+    """
+    checks = list(barrier.checks)
+    for index, check in enumerate(checks):
+        record = state.record(check.target)
+        if check.resolution != "pending" or record is None:
+            continue
+        requests, subjects = _waiting_on(state, context, check, sent, barrier.epoch)
+        # The target itself answers nothing: its host is dead, and it is not dispatched yet.
+        if subjects or any(request != check.target for request in requests):
+            continue
+        verdict = settlement(
+            record,
+            inspection=_inspection_of(state, check),
+            owes_release=any(
+                check.target in child.source_requests and not _child_proven(child, state)
+                for child in state.children
+            ),
+            resendable=_prepared_episode(record, context),
+        )
+        if verdict != "unknown" and not _unbounded(state, context, record):
+            continue  # its own limit ends it when that passes, as it ends any open record
+        if verdict == "resend" and record.phase != RequestPhase.PREPARED:
+            state = _replace_record(
+                state,
+                resent(record, context.run.now_at, context.run.limits.reconciliation_bound),
+            )
+        checks[index] = check.model_copy(update={"resolution": _VERDICT[verdict], "wait": None})
+    return state, barrier.model_copy(update={"checks": tuple(checks)})
 
 
 def _owner_sessions(
@@ -823,7 +779,7 @@ def _owner_sessions(
     """The waiting sessions an ensure's check waits on to learn whether they own its resource.
 
     An ensure resolves as reattached once its session is known to hold the resource it
-    reported (``_known_owner``). A session still settling its own state (unknown after a
+    reported (``known_owner``). A session still settling its own state (unknown after a
     crash, inspecting a turn) moves the check when it settles, so the check names it.
     """
     if record is None or not isinstance(record.request, EnsureSession):
@@ -871,6 +827,7 @@ def _finish(
     sent_ids = frozenset(
         outbound.request.request_id for outbound in sent if outbound.request.request_id is not None
     )
+    state, barrier = _settle_unanswered(state, context, barrier, sent_ids)
     barrier = barrier.model_copy(
         update={
             "checks": tuple(
@@ -1563,10 +1520,18 @@ def _deadline(
     # the answer or the inspection's bound, because the limit may have passed while the host
     # was down and the far side may have finished in time.
     timed = event.reason == FailureReason.TIMED_OUT
+    # A limit counts from the job's start, and a job may wait in its queue only for the
+    # queue budget (``_wait_clock``): the bound says when, and which of the two ended it.
+    bound = _wait_clock.record_bound(record, context.evaluation, context.run, state.hosts)
+    reason = (
+        FailureReason.QUEUE_BUDGET_SPENT
+        if timed and bound.by == WaitEnd.QUEUE_BUDGET
+        else event.reason
+    )
     concluded = not is_open(record) and not unresolved_children
     asked_until = _awaiting_report(state, record)
     if (
-        (timed and now_at < record.until.at)
+        (timed and now_at < bound.at)
         or (timed and asked_until is not None and now_at < asked_until)
         or (resolution == "terminal" and not unresolved_children)
         or (timed and concluded and resolution == "reattached")
@@ -1588,14 +1553,23 @@ def _deadline(
         scope=record.request.scope,
         admission_id=record.request.admission_id,
         target=record.request_id,
-        reason=event.reason,
+        reason=reason,
     )
     requests: list[Outbound] = []
     signals = _lost_turn(context, record, first=previous_block is None)
     if previous_block is None:
         requests.append(_probe(block, context))
     state, events = _end_open_record(
-        state, record, event.reason, lost=bool(signals), first=previous_block is None
+        state,
+        record,
+        _failure(record, reason, bound.at),
+        lost=bool(signals),
+        first=previous_block is None,
+    )
+    signals = (
+        *signals,
+        *_orphaned_jobs(state, context, record, reason),
+        *_submission_ended(record, reason),
     )
     observation = record.observation
     resources = []
@@ -1664,7 +1638,11 @@ def _lapse_command(
     if command is None or not command_open(command) or now_at < command.until.at:
         return AreaChange(state=state)
     blocked = command.model_copy(update={"phase": RequestPhase.BLOCKED})
-    return AreaChange(state=_replace_record(state, blocked))
+    lapsed = _replace_record(state, blocked)
+    if not recovery_waits(lapsed.recovery.phase):
+        return AreaChange(state=lapsed)
+    # The check this command answered for may have nothing left to answer it.
+    return _finish(lapsed, lapsed.recovery, context)
 
 
 def _cancelled_here(record: RequestRecord) -> bool:
@@ -1688,7 +1666,7 @@ def _cancelled_here(record: RequestRecord) -> bool:
 
 
 def _end_open_record(
-    state: RecordsState, record: RequestRecord, reason: FailureReason, *, lost: bool, first: bool
+    state: RecordsState, record: RequestRecord, failure: Failed, *, lost: bool, first: bool
 ) -> tuple[RecordsState, tuple[Failed, ...]]:
     """Block a record whose result is still owed, and the failure its owner hears of it.
 
@@ -1698,8 +1676,15 @@ def _end_open_record(
     """
     if not is_open(record):
         return state, ()
-    failed = None if lost else record.failure or _failure(record, reason)
-    heard = (failed,) if failed is not None and first and not _decision_ended(state, record) else ()
+    failed = None if lost else record.failure or failure
+    heard = (
+        (failed,)
+        if failed is not None
+        and first
+        and _heard_by_decision(record)
+        and not _decision_ended(state, record)
+        else ()
+    )
     blocked = record.model_copy(update={"phase": RequestPhase.BLOCKED, "failure": failed})
     return _replace_record(state, blocked), heard
 
@@ -1726,23 +1711,110 @@ def _lost_turn(
     )
 
 
+def _orphaned_jobs(
+    state: RecordsState, context: RecordsContext, record: RequestRecord, reason: FailureReason
+) -> tuple[JobTerminationRequested, ...]:
+    """The termination of every unfinished job a submission started, when core ends it.
+
+    A strategy's ``Measure`` waits on its submission's record. Once that record ends at its
+    limit or a watch, nothing waits on the job any longer: evaluation cancels it rather than
+    leave it in the scheduler's queue, holding nodes nobody will read. A cancel of such a job
+    that ends blocked at its bound proved nothing, so core asks again, within the backend's
+    retry limit (``cancel_settled``); each such cancel's own end brings it back here. A job
+    whose id arrives only after its submission ended is cancelled when that late answer ends
+    the submission again. A job an agent submitted is its wait's to end (``_continuations``).
+    """
+    source = _orphan_source(state, context, record)
+    if source is None:
+        return ()
+    cause = (
+        "deadline"
+        if reason in (FailureReason.TIMED_OUT, FailureReason.QUEUE_BUDGET_SPENT)
+        else "retirement"
+    )
+    return tuple(
+        JobTerminationRequested(resource_id=job.resource_id, cause=cause)
+        for job in context.evaluation.jobs
+        if job.submission_id == source
+        and job.resource_id is not None
+        and not job.terminal
+        and not cancel_settled(state, context.run, job.resource_id)
+    )
+
+
+def _submission_ended(
+    record: RequestRecord, reason: FailureReason
+) -> tuple[MeasurementSubmissionEnded, ...]:
+    """The end of a measurement submission core blocks while its result is still owed.
+
+    Every measurement submission, whoever asked for it: its budget entry is the evaluation
+    area's, and a run the comparisons of its input wait on must end there even when no
+    observation ever reaches it (its submission hung, or a restarted host could not find it).
+    """
+    if not isinstance(record.request, SubmitMeasurement) or not is_open(record):
+        return ()
+    return (MeasurementSubmissionEnded(request_id=record.request_id, reason=reason),)
+
+
+def _heard_by_decision(record: RequestRecord) -> bool:
+    """Whether the record's decision hears its failure (``_failure_routing``)."""
+    return failure_hearer(record.request) == FailureHearer.DECISION
+
+
+def _orphan_source(
+    state: RecordsState, context: RecordsContext, record: RequestRecord
+) -> RequestId | None:
+    """The strategy's submission whose jobs core now ends, as *record* ends; else ``None``.
+
+    That is *record* itself when it is the submission, and the job's submission when
+    *record* is a cancel of a job whose submission core ended before.
+    """
+    request = record.request
+    if isinstance(request, SubmitMeasurement):
+        source: RequestId | None = record.request_id
+    elif isinstance(request, CancelOwnedJob):
+        source = next(
+            (
+                job.submission_id
+                for job in context.evaluation.jobs
+                if job.resource_id == request.resource_id
+            ),
+            None,
+        )
+        ended = state.record(source) if source is not None else None
+        if ended is None or ended.failure is None:
+            return None
+    else:
+        return None
+    if any(call.request_id == source for call in context.evaluation.agent_calls) or any(
+        run.request_id == source for run in context.evaluation.core_runs
+    ):
+        return None
+    return source
+
+
 def _decision_ended(state: RecordsState, record: RequestRecord) -> bool:
     """Whether another request of the record's decision already ended with a failure.
 
-    A decision hears of its ending once. Its later requests (the submission a measurement
-    still holds open after its observation timed out) end quietly: the owner has moved on.
+    A decision hears of its ending once; its later requests end quietly, as the owner has
+    moved on.
     """
     decision = record.request.decision_id
     return decision is not None and any(
         row.failure is not None
+        and _heard_by_decision(row)
         and row.request.decision_id == decision
         and row.request_id != record.request_id
         for row in state.records
     )
 
 
-def _failure(record: RequestRecord, reason: FailureReason) -> Failed:
-    """The typed result a record ends with: what ended it, and which watch or limit."""
+def _failure(record: RequestRecord, reason: FailureReason, limit_at: float) -> Failed:
+    """The typed result a record ends with: what ended it, and which watch or limit.
+
+    ``limit_at`` is the record's bound (``_wait_clock.record_bound``): its stated limit plus
+    its job's queue credit, or when its job's queue budget ran out.
+    """
     watch = next(
         (
             watch
@@ -1756,7 +1828,9 @@ def _failure(record: RequestRecord, reason: FailureReason) -> Failed:
         reason=reason,
         decision=record.request.decision_id,
         watch=watch,
-        limit_at=record.until.at if reason == FailureReason.TIMED_OUT else None,
+        limit_at=limit_at
+        if reason in (FailureReason.TIMED_OUT, FailureReason.QUEUE_BUDGET_SPENT)
+        else None,
     )
 
 
@@ -1783,6 +1857,29 @@ def is_open(record: RequestRecord) -> bool:
     )
 
 
+def resent(record: RequestRecord, now_at: float, reconciliation_bound: float) -> RequestRecord:
+    """An open record the executor can account for, back to PREPARED to go out again unchanged.
+
+    It is neither observed nor reported to its owner: the owner never learns it was
+    interrupted, and the replay equals the straight run. A command (an inspection, cancel or
+    block) is core's own and has no owner's limit: sent again, it gets a fresh reconciliation
+    bound from *now_at*, or a re-send that waited out its first bound would lapse before it is
+    answered.
+    """
+    until = record.until
+    if command_open(record):
+        until = until.model_copy(update={"at": max(until.at, now_at + reconciliation_bound)})
+    return record.model_copy(
+        update={
+            "phase": RequestPhase.PREPARED,
+            "observation": None,
+            "sequence": None,
+            "retry_at": None,
+            "until": until,
+        }
+    )
+
+
 def command_open(record: RequestRecord) -> bool:
     """An inspection, cancel or block that has not ended: its limit ends it if nothing else."""
     return not _canonical(record) and record.phase in (
@@ -1792,15 +1889,25 @@ def command_open(record: RequestRecord) -> bool:
     )
 
 
+def _limit_passed(
+    record: RequestRecord, evaluation: EvaluationState, run: RunState, hosts: tuple[HostEpoch, ...]
+) -> bool:
+    return _wait_clock.record_bound(record, evaluation, run, hosts).at <= run.now_at
+
+
 def overdue_reconciliations(
-    state: RecordsState, now_at: float
+    state: RecordsState, evaluation: EvaluationState, run: RunState
 ) -> tuple[ReconciliationDeadline | ReconciliationCommandLapsed, ...]:
-    """One deadline event per open record, or lapse per open command, whose limit has passed."""
+    """One deadline event per open record, or lapse per open command, whose limit has passed.
+
+    A record's limit is its bound, derived from its jobs' facts (``_wait_clock.record_bound``).
+    """
+    now_at = run.now_at
     return (
         *(
             ReconciliationDeadline(request_id=record.request_id, now_at=now_at)
             for record in state.records
-            if is_open(record) and record.until.at <= now_at
+            if is_open(record) and _limit_passed(record, evaluation, run, state.hosts)
         ),
         *(
             ReconciliationCommandLapsed(request_id=record.request_id, now_at=now_at)
@@ -1810,14 +1917,22 @@ def overdue_reconciliations(
     )
 
 
-def next_reconciliation_at(state: RecordsState) -> float | None:
+def next_reconciliation_at(
+    state: RecordsState, evaluation: EvaluationState, run: RunState
+) -> float | None:
     """The earliest time a ``ClockAdvanced`` would end an open record at its limit."""
-    return min(
+    limits = (
         (
-            max(record.until.at, _awaiting_report(state, record) or record.until.at)
-            for record in state.records
-            if is_open(record) or command_open(record)
-        ),
+            record,
+            _wait_clock.record_bound(record, evaluation, run, state.hosts).at
+            if is_open(record)
+            else record.until.at,
+        )
+        for record in state.records
+        if is_open(record) or command_open(record)
+    )
+    return min(
+        (max(limit_at, _awaiting_report(state, record) or limit_at) for record, limit_at in limits),
         default=None,
     )
 

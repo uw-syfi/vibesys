@@ -1,4 +1,6 @@
 version = 1
+backends = ["cpu"]
+metric = "total_ops_per_sec"
 
 [agent]
 domain = "generic"
@@ -7,7 +9,13 @@ domain = "generic"
 name = "vibesys-evaluator-queue"
 version = "0.1.0"
 
-[accuracy]
+# Candidate code: runs confined in a fresh checkout of the measured commit and
+# must produce queue-candidate.so, which the evaluator requires.
+[build]
+command = ["make", "queue-candidate.so"]
+timeout_seconds = 600
+
+[check]
 entrypoint = "vibesys-queue"
 args = [
   "check", "--workspace", "${PROJECT_ROOT}",
@@ -15,11 +23,22 @@ args = [
 ]
 timeout_seconds = 120
 
-[benchmark]
+[measure]
 entrypoint = "vibesys-queue"
 args = [
   "benchmark", "--workspace", "${PROJECT_ROOT}",
   "--scenario", "mpsc", "--repetitions", "3",
 ]
 timeout_seconds = 300
-result_protocol = 2
+
+[catalogue]
+domain = "data-structures"
+
+[catalogue.hardware]
+accelerator = "CPU"
+count = 1
+vendor = "cpu"
+
+[catalogue.workload]
+name = "Multiple producers, single consumer"
+description = "A bounded FIFO queue where several threads add items and one thread removes them; checked for linearizability, scored in operations per second."

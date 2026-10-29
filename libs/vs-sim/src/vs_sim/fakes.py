@@ -8,11 +8,12 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from vs_sim.concurrency import WorkerReservationStateError, WorkerStartRefusedError
 from vs_sim.gate import arrival
 from vs_sim.loopback_http import HttpReply
+from vs_sim.output import OutputStream
 from vs_sim.processes import (
     ForegroundChild,
-    OutputStream,
     PipedProcess,
     ProcessGroupUnreaped,
     ProcessOutcome,
@@ -24,12 +25,131 @@ from vs_sim.processes import (
 from vs_sim.states import Changes, wait_for_state
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Coroutine, Mapping, Sequence
     from pathlib import Path
 
     from vs_sim.clock import Sleeper
+    from vs_sim.concurrency import (
+        Condition,
+        Event,
+        Lock,
+        ReservableThreads,
+        ThreadLocal,
+        Threads,
+        Worker,
+        WorkerReservation,
+    )
+    from vs_sim.output import OutputSink
     from vs_sim.probes import ProbeResult
     from vs_sim.processes import ProcessRun
+
+
+class RefusingThreads:
+    """A Threads Fake that delegates every operation except scripted worker starts.
+
+    ``refusals`` maps a worker name to how many matching starts should fail. The
+    wrapper leaves the delegate's scheduling and synchronization semantics intact. It
+    intentionally implements only the general :class:`Threads` role; use
+    :class:`RefusingReservableThreads` when callers need pre-start ownership.
+    """
+
+    def __init__(self, delegate: Threads, refusals: Mapping[str, int]) -> None:
+        """Wrap *delegate* and script the positive refusal counts in *refusals*."""
+        self._delegate = delegate
+        self._remaining = {name: count for name, count in refusals.items() if count > 0}
+
+    def spawn(self, target: Callable[[], object], *, name: str, daemon: bool = True) -> Worker:
+        """Refuse a scripted start, otherwise spawn it through the delegate."""
+        if self._refuses(name):
+            raise WorkerStartRefusedError(name)
+        return self._delegate.spawn(target, name=name, daemon=daemon)
+
+    def _refuses(self, name: str) -> bool:
+        remaining = self._remaining.get(name, 0)
+        if remaining <= 0:
+            return False
+        self._remaining[name] = remaining - 1
+        return True
+
+    def lock(self) -> Lock:
+        """Return a lock from the delegate."""
+        return self._delegate.lock()
+
+    def rlock(self) -> Lock:
+        """Return a reentrant lock from the delegate."""
+        return self._delegate.rlock()
+
+    def condition(self, lock: Lock | None = None) -> Condition:
+        """Return a condition from the delegate."""
+        return self._delegate.condition(lock)
+
+    def event(self) -> Event:
+        """Return an event from the delegate."""
+        return self._delegate.event()
+
+    def local[T](self, initial: Callable[[], T]) -> ThreadLocal[T]:
+        """Return thread-local storage from the delegate."""
+        return self._delegate.local(initial)
+
+    def sleep(self, seconds: float) -> None:
+        """Sleep on the delegate's timeline."""
+        self._delegate.sleep(seconds)
+
+    def now(self) -> float:
+        """Read the delegate's monotonic timeline."""
+        return self._delegate.now()
+
+    def run_async[T](self, main: Coroutine[object, object, T]) -> T:
+        """Run an async entrypoint through the delegate."""
+        return self._delegate.run_async(main)
+
+
+class RefusingReservableThreads(RefusingThreads):
+    """A ReservableThreads Fake that scripts both direct and reserved start refusals."""
+
+    def __init__(self, delegate: ReservableThreads, refusals: Mapping[str, int]) -> None:
+        """Wrap a reservable delegate without narrowing :class:`RefusingThreads`."""
+        super().__init__(delegate, refusals)
+        self._reservable_delegate = delegate
+
+    def reserve(
+        self, target: Callable[[], object], *, name: str, daemon: bool = True
+    ) -> WorkerReservation:
+        """Prepare a worker whose start applies the same scripted refusal."""
+        return _RefusingWorkerReservation(
+            self._refuses,
+            self._reservable_delegate.reserve(target, name=name, daemon=daemon),
+        )
+
+
+class _RefusingWorkerReservation:
+    def __init__(
+        self,
+        refuses: Callable[[str], bool],
+        reservation: WorkerReservation,
+    ) -> None:
+        self._refuses = refuses
+        self._reservation = reservation
+        self._attempted = False
+        self._settled = False
+
+    @property
+    def name(self) -> str:
+        return self._reservation.name
+
+    def start(self) -> None:
+        if self._attempted or self._settled:
+            raise WorkerReservationStateError(self.name)
+        self._attempted = True
+        if self._refuses(self.name):
+            raise WorkerStartRefusedError(self.name)
+        self._reservation.start()
+
+    def settle(self) -> None:
+        if self._settled:
+            return
+        self._reservation.settle()
+        self._settled = True
 
 
 class InlineBlockingRunner:
@@ -155,15 +275,24 @@ class FakeSignalSource:
 class FakeProcessSignaller:
     """Stable process signalling over an in-memory set of live process IDs."""
 
-    def __init__(self, live_pids: set[int]) -> None:
-        """Treat exactly ``live_pids`` as openable process identities."""
+    def __init__(
+        self, live_pids: set[int], *, held_locks: dict[int, set[Path]] | None = None
+    ) -> None:
+        """Treat exactly ``live_pids`` as openable identities with their held flocks."""
         self.live_pids = set(live_pids)
+        self.held_locks = {} if held_locks is None else held_locks
         self.opened: list[int] = []
         self.terminated: list[int] = []
 
     def exists(self, pid: int) -> bool:
         """Whether ``pid`` is one of the live ids."""
         return pid in self.live_pids
+
+    def owns_lock(self, pid: int, path: Path) -> bool:
+        """A live process owns only the exact flocks registered for it."""
+        if pid not in self.live_pids:
+            raise ProcessLookupError(pid)
+        return path in self.held_locks.get(pid, set())
 
     def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
         """Open ``pid``, evaluate ``current``, and record a permitted termination."""
@@ -268,7 +397,8 @@ class FakeProcesses:
     commands took. A command whose ``duration_s`` exceeds the timeout, or one that
     ``runs_until_signalled``, times out as the real group would after being killed, and one
     that ``survives_kill`` is left unreaped. A never-ending command without a timeout would
-    hang the caller, so the Fake refuses it.
+    hang the caller, so the Fake refuses it. Everything a scripted command writes reaches
+    ``output`` before :meth:`run` returns, as the real run's chunks do.
     """
 
     script: Callable[[ProcessSpec], ProcessScript]
@@ -278,12 +408,14 @@ class FakeProcesses:
     first_pid: int = 1000
     """The process ID of the first run; each later run gets the next one."""
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
         """Record ``spec``, let its running time pass, and end it the way its script says."""
         pid = self.first_pid + len(self.ran)
         self.ran.append(spec)
         script = self.script(spec)
         stdout = script.stdout + (spec.input if script.echo_input else b"")
+        output.write(OutputStream.STDOUT, stdout)
+        output.write(OutputStream.STDERR, script.stderr)
         if too_large := _too_large(spec.max_output_bytes, stdout, script.stderr):
             return too_large
         endless = script.runs_until_signalled
@@ -331,9 +463,9 @@ class RefusingProcesses:
     A test that does need a command to run scripts it with :class:`FakeProcesses` instead.
     """
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
         """Fail: this test runs no process."""
-        del timeout
+        del timeout, output
         message = f"this test runs no process, but ran {' '.join(spec.argv)}"
         _REFUSED.append(message)
         raise ProcessStartRefusedError(message)
@@ -506,8 +638,8 @@ class ScriptedStreamingCommand:
     """A :class:`~vs_sim.streaming.StreamingCommand` whose commands come from a script.
 
     ``script`` maps an argument vector and working directory to what that command does,
-    or to ``None`` for a program that does not exist. Like the real command, each stderr
-    line reaches the callback on the calling thread before :meth:`run` returns or raises.
+    or to ``None`` for a program that does not exist. Like the real command, everything it
+    writes reaches ``output`` before :meth:`run` returns or raises.
     """
 
     script: Callable[[tuple[str, ...], Path], StreamedRun | None]
@@ -520,7 +652,7 @@ class ScriptedStreamingCommand:
         *,
         cwd: Path,
         timeout_seconds: float,
-        on_stderr_line: Callable[[str], None],
+        output: OutputSink,
     ) -> subprocess.CompletedProcess[str]:
         """Record the call and play the scripted command."""
         command = tuple(argv)
@@ -528,9 +660,10 @@ class ScriptedStreamingCommand:
         scripted = self.script(command, cwd)
         if scripted is None:
             raise FileNotFoundError(2, "No such file or directory", command[0])
-        for line in scripted.stderr_lines:
-            on_stderr_line(line)
         stderr = "".join(f"{line}\n" for line in scripted.stderr_lines)
+        for line in scripted.stderr_lines:
+            output.write(OutputStream.STDERR, f"{line}\n".encode())
+        output.write(OutputStream.STDOUT, scripted.stdout.encode())
         if scripted.blocks:
             raise subprocess.TimeoutExpired(command, timeout_seconds, scripted.stdout, stderr)
         return subprocess.CompletedProcess(command, scripted.returncode, scripted.stdout, stderr)

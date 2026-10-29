@@ -66,6 +66,7 @@ from vs_core.api import (
     TimedOut,
     UnobservedJobFacts,
     Until,
+    WaitEnd,
     WorkspaceMode,
     WorkspacePlan,
     initial_state,
@@ -395,7 +396,7 @@ def test_publication_receipt_cannot_rewrite_frozen_timeout(reached: float) -> No
     timeout = TimedOut(
         deadline_at=10.0,
         reached_at=reached,
-        unfinished=(JobTimeout(resource_id=ResourceId(root="job")),),
+        unfinished=(JobTimeout(resource_id=ResourceId(root="job"), by=WaitEnd.LIMIT, at=10.0),),
     )
     receipt = ResumeAuthorizationReceipt(
         continuation_id=ContinuationId(root="wait"),

@@ -181,6 +181,9 @@ def make_local_shell_sandbox(
 
 _REGISTRY: dict[ComputeBackend, Callable[..., ComputeBackendImpl]] = {}
 _HOST_ONLY: set[ComputeBackend] = set()
+_AVAILABILITY: dict[ComputeBackend, Callable[[CommandProbe], str | None]] = {}
+_DEFAULT_IMAGES: dict[ComputeBackend, str] = {}
+_PRESENCE: dict[ComputeBackend, Callable[[CommandProbe], bool]] = {}
 
 
 def register_compute_backend(
@@ -188,17 +191,69 @@ def register_compute_backend(
     factory: Callable[..., ComputeBackendImpl],
     *,
     host_only: bool = False,
+    unavailable: Callable[[CommandProbe], str | None] | None = None,
+    default_image: str | None = None,
 ) -> None:
     """Register the factory used to construct one compute backend.
 
     ``host_only`` declares that the backend's accelerator cannot be reached
-    from a container, so its agent has to run on the host.
+    from a container, so its agent has to run on the host. ``default_image``
+    is the image the factory falls back to when a run names none. ``unavailable``
+    says, through a command probe, why this host cannot provide the backend's
+    accelerator (``None`` when it can); it makes the decision the backend's own
+    ``ensure_accelerator_available`` makes, and a backend without one always can.
     """
     _REGISTRY[backend] = factory
     if host_only:
         _HOST_ONLY.add(backend)
     else:
         _HOST_ONLY.discard(backend)
+    if default_image is None:
+        _DEFAULT_IMAGES.pop(backend, None)
+    else:
+        _DEFAULT_IMAGES[backend] = default_image
+    if unavailable is None:
+        _AVAILABILITY.pop(backend, None)
+    else:
+        _AVAILABILITY[backend] = unavailable
+
+
+def register_backend_presence(
+    backend: ComputeBackend, present: Callable[[CommandProbe], bool]
+) -> None:
+    """Declare how to tell, through a command probe, that this host has *backend*'s hardware.
+
+    ``backend_provided`` reads it, besides the ``unavailable`` reason; a backend without
+    one needs no hardware.
+    """
+    _PRESENCE[backend] = present
+
+
+def accelerator_unavailable(backend: ComputeBackend, probe: CommandProbe) -> str | None:
+    """Why this host cannot provide *backend*'s accelerator, asked through *probe*, or ``None``.
+
+    A run raises this reason from ``ensure_accelerator_available`` before its image
+    build; asking here lets a check made before the run report it instead.
+    """
+    _ensure_defaults()
+    check = _AVAILABILITY.get(backend)
+    return None if check is None else check(probe)
+
+
+def backend_provided(backend: ComputeBackend, probe: CommandProbe) -> bool:
+    """Whether this host has what *backend* targets, asked through *probe*.
+
+    The one answer to "which backends can this host run": a backend that declares an
+    unavailability reason (CUDA's) is provided when it has none, and one that declares
+    how to detect its hardware (ROCm, Trainium, Metal) when that hardware is present.
+    CPU, which needs no hardware, is always provided. Selection among a task's declared
+    backends and the preflight's check of the chosen one both read it.
+    """
+    _ensure_defaults()
+    if accelerator_unavailable(backend, probe) is not None:
+        return False
+    present = _PRESENCE.get(backend)
+    return True if present is None else present(probe)
 
 
 def backend_is_host_only(backend: ComputeBackend) -> bool:
@@ -208,6 +263,17 @@ def backend_is_host_only(backend: ComputeBackend) -> bool:
     """
     _ensure_defaults()
     return backend in _HOST_ONLY
+
+
+def backend_default_image(backend: ComputeBackend) -> str | None:
+    """Return the image *backend* runs in when the run names none, or ``None``.
+
+    A task Dockerfile is built on top of it (as ``BASE_IMAGE``) before the run
+    starts, before the backend itself is constructed. ``None`` means the
+    backend declares no container image (Metal).
+    """
+    _ensure_defaults()
+    return _DEFAULT_IMAGES.get(backend)
 
 
 def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-731406 [PLR0913]; one keyword per construction input every registered backend shares.
@@ -224,6 +290,7 @@ def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-731406 [PLR0913]
     launcher: PipedProcessLauncher,
     clock: Clock,
     probe: CommandProbe,
+    events: object | None = None,
 ) -> ComputeBackendImpl:
     """Construct the registered implementation for one compute stack.
 
@@ -231,6 +298,9 @@ def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-731406 [PLR0913]
     sandboxes measure command timeouts on, *launcher* starts its host shell
     commands, and *probe* runs the status commands (``nvidia-smi``, ``rocm-smi``) it asks.
     ``clock`` counts seconds since the epoch; a backend stamps what it records with it.
+    ``events`` is a backend-specific contention-events seam (only the CUDA
+    backend reads it today); every registered factory accepts and may ignore
+    it so this call stays uniform across backends.
     """
     _ensure_defaults()
     if backend not in _REGISTRY:
@@ -245,6 +315,7 @@ def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-731406 [PLR0913]
         launcher=launcher,
         clock=clock,
         probe=probe,
+        events=events,
     )
 
 
@@ -261,8 +332,10 @@ def _rocm_backend(  # noqa: PLR0913
     launcher: PipedProcessLauncher,
     clock: Clock,
     probe: CommandProbe,
+    events: object | None = None,
 ) -> ComputeBackendImpl:
     """The ROCm backend, discovering its GPUs through ``probe``."""
+    del events  # ROCm watches no contention; accepted so the registry call stays uniform
     rocm = import_module("vs_sandbox.rocm_backend")
     return rocm.RocmBackend(
         log_dir,
@@ -289,8 +362,10 @@ def _trainium_backend(  # noqa: PLR0913
     launcher: PipedProcessLauncher,
     clock: Clock,
     probe: CommandProbe,
+    events: object | None = None,
 ) -> ComputeBackendImpl:
     """The Trainium backend, discovering its devices through ``probe``."""
+    del events  # Trainium watches no contention; accepted so the registry call stays uniform
     trainium = import_module("vs_sandbox.trainium_backend")
     return trainium.TrainiumBackend(
         log_dir,
@@ -304,19 +379,50 @@ def _trainium_backend(  # noqa: PLR0913
     )
 
 
+_APPLE_CPU_BRAND = ("sysctl", "-n", "machdep.cpu.brand_string")
+"""Names the CPU on macOS; Apple Silicon's brand starts with ``Apple`` (the helper's GPU query)."""
+
+
+def _apple_silicon_present(probe: CommandProbe) -> bool:
+    result = probe.run(_APPLE_CPU_BRAND, timeout_seconds=5.0)
+    return result is not None and result.returncode == 0 and result.stdout.startswith("Apple ")
+
+
 def _register_defaults() -> None:
     cuda = import_module("vs_sandbox.cuda_backend")
     local = import_module("vs_sandbox.local_compute_backend")
+    rocm = import_module("vs_sandbox.rocm_backend")
+    trainium = import_module("vs_sandbox.trainium_backend")
 
-    register_compute_backend(ComputeBackend.CUDA, cuda.CudaBackend)
+    register_compute_backend(
+        ComputeBackend.CUDA,
+        cuda.CudaBackend,
+        default_image=cuda.DEFAULT_IMAGE,
+        unavailable=cuda.cuda_accelerator_unavailable,
+    )
     register_compute_backend(
         ComputeBackend.METAL,
         local.metal_backend,
         host_only=ComputeBackend.METAL in local.HOST_ONLY_BACKENDS,
     )
-    register_compute_backend(ComputeBackend.TRAINIUM, _trainium_backend)
-    register_compute_backend(ComputeBackend.ROCM, _rocm_backend)
-    register_compute_backend(ComputeBackend.CPU, local.cpu_backend)
+    register_compute_backend(
+        ComputeBackend.TRAINIUM, _trainium_backend, default_image=trainium.DEFAULT_IMAGE
+    )
+    register_compute_backend(ComputeBackend.ROCM, _rocm_backend, default_image=rocm.DEFAULT_IMAGE)
+    register_backend_presence(ComputeBackend.METAL, _apple_silicon_present)
+    register_backend_presence(
+        ComputeBackend.TRAINIUM,
+        lambda probe: bool(
+            SystemAcceleratorDiscovery(probe=probe).discover_trainium().device_nodes
+        ),
+    )
+    register_backend_presence(
+        ComputeBackend.ROCM,
+        lambda probe: bool(SystemAcceleratorDiscovery(probe=probe).discover_rocm().device_nodes),
+    )
+    register_compute_backend(
+        ComputeBackend.CPU, local.cpu_backend, default_image=local.DEFAULT_CPU_IMAGE
+    )
 
 
 @cache
@@ -330,7 +436,10 @@ __all__ = [
     "ContentionMonitor",
     "Device",
     "SandboxKind",
+    "accelerator_unavailable",
+    "backend_default_image",
     "backend_is_host_only",
+    "backend_provided",
     "create_compute_backend",
     "register_compute_backend",
 ]

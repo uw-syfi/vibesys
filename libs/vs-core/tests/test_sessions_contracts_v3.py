@@ -221,7 +221,12 @@ def test_operator_stop_result_is_allowed_only_for_stop(action: str) -> None:
     event = core.RunControlEvent.model_validate({**payload, "result": result})
     assert TypeAdapter(core.CoreEvent).validate_json(event.model_dump_json()) == event
     payload["control"] = core.ControlInput.model_validate(
-        {"control_id": core.ControlId(root="other"), "action": action}
+        {
+            "control_id": core.ControlId(root="other"),
+            "action": action,
+            "owner": core.PauseOwner.OPERATOR if action == "pause" else None,
+            "when": "now" if action == "resume" else None,
+        }
     )
     with pytest.raises(ValidationError, match="result"):
         core.RunControlEvent.model_validate({**payload, "result": result})

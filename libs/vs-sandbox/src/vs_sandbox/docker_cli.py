@@ -18,7 +18,7 @@ from vs_sim.api import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from vs_sim.api import PipedProcess, PipedProcessLauncher, Processes
+    from vs_sim.api import OutputSink, PipedProcess, PipedProcessLauncher, Processes
 
 # The stop script for one ``docker exec`` command. Passed as
 # ``sh -c SCRIPT sh MARKER SIGNAL TENTHS SESSIONS SINCE`` so no operand needs
@@ -129,9 +129,13 @@ class DockerCli(Protocol):
     """Run ``docker`` commands on behalf of :class:`~vs_sandbox.docker_sandbox.DockerSandbox`."""
 
     def run(
-        self, argv: Sequence[str], *, timeout_seconds: float
+        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink
     ) -> subprocess.CompletedProcess[str]:
         """Run *argv* to completion with captured text streams.
+
+        Every chunk the command writes also reaches *output*, in order per
+        stream, before this returns or raises; the result is the same whatever
+        *output* is.
 
         Raises ``subprocess.TimeoutExpired`` past *timeout_seconds* and
         ``OSError`` when ``docker`` cannot be launched.
@@ -155,7 +159,7 @@ class SubprocessDockerCli:
         self._launcher = launcher
 
     def run(
-        self, argv: Sequence[str], *, timeout_seconds: float
+        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink
     ) -> subprocess.CompletedProcess[str]:
         """Run *argv* with captured output, in a process group of its own.
 
@@ -167,7 +171,9 @@ class SubprocessDockerCli:
         :class:`subprocess.TimeoutExpired` reaches the caller.
         """
         arguments = list(argv)
-        match self._processes.run(ProcessSpec(tuple(arguments)), timeout=timeout_seconds):
+        match self._processes.run(
+            ProcessSpec(tuple(arguments)), timeout=timeout_seconds, output=output
+        ):
             case ProcessOutcome(returncode=returncode, stdout=stdout, stderr=stderr):
                 return subprocess.CompletedProcess(
                     arguments, returncode, _text(stdout), _text(stderr)

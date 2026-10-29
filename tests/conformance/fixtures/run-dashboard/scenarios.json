@@ -1,0 +1,92 @@
+{
+ "description": "Runs told as scenarios (an idea's outcome, what its gate read against an input that reads 100, and when the reading landed) and the chart each must draw: the host helper's digest points (tests/server/test_run_dashboard.py) and the run page's performance fold (run-dashboard-conformance.test.ts) both read this file, so the two folds and the statement that checks them cannot drift apart.",
+ "input": 100,
+ "scenarios": [
+  {
+   "name": "step-line",
+   "description": "Ideas that pass, pass without beating the best, fail after a great reading, still run, and fail before any reading.",
+   "direction": "max",
+   "ideas": [
+    {"outcome": "passed", "reading": 120, "landed": 10},
+    {"outcome": "passed", "reading": 110, "landed": 20},
+    {"outcome": "failed", "reading": 300, "landed": 30},
+    {"outcome": "passed", "reading": 150, "landed": 40},
+    {"outcome": "running", "reading": null, "landed": 50},
+    {"outcome": "failed", "reading": null, "landed": 60}
+   ],
+   "points": [
+    {"ratio": 1.2, "verdict": "kept"},
+    {"ratio": 1.1, "verdict": "not_better"},
+    {"ratio": 3.0, "verdict": "failed"},
+    {"ratio": 1.5, "verdict": "kept"},
+    {"ratio": null, "verdict": "running"},
+    {"ratio": null, "verdict": "failed"}
+   ]
+  },
+  {
+   "name": "landed-out-of-order",
+   "description": "The idea that began first lands last: the chart plots results in the order they landed.",
+   "direction": "max",
+   "ideas": [
+    {"outcome": "passed", "reading": 150, "landed": 50},
+    {"outcome": "passed", "reading": 120, "landed": 20}
+   ],
+   "points": [
+    {"ratio": 1.2, "verdict": "kept"},
+    {"ratio": 1.5, "verdict": "kept"}
+   ]
+  },
+  {
+   "name": "landed-at-the-same-instant",
+   "description": "Ideas whose results land at one instant, the run clock's first (0), are plotted in the order they began, whatever each one's reading or outcome.",
+   "direction": "max",
+   "ideas": [
+    {"outcome": "running", "reading": null, "landed": 0},
+    {"outcome": "passed", "reading": 150, "landed": 0},
+    {"outcome": "failed", "reading": 120, "landed": 0},
+    {"outcome": "running", "reading": 10, "landed": 0}
+   ],
+   "points": [
+    {"ratio": null, "verdict": "running"},
+    {"ratio": 1.5, "verdict": "kept"},
+    {"ratio": 1.2, "verdict": "failed"},
+    {"ratio": 0.1, "verdict": "running"}
+   ]
+  },
+  {
+   "name": "minimize",
+   "description": "A lower reading is better and an improvement reads as the input over the result.",
+   "direction": "min",
+   "ideas": [
+    {"outcome": "passed", "reading": 80, "landed": 5},
+    {"outcome": "passed", "reading": 100, "landed": 9},
+    {"outcome": "passed", "reading": 50, "landed": 12}
+   ],
+   "points": [
+    {"ratio": 1.25, "verdict": "kept"},
+    {"ratio": 1.0, "verdict": "not_better"},
+    {"ratio": 2.0, "verdict": "kept"}
+   ]
+  },
+  {
+   "name": "slower-than-the-input",
+   "description": "An idea that passed but reads below the input stands as not better: the input stays the best.",
+   "direction": "max",
+   "ideas": [{"outcome": "passed", "reading": 80, "landed": 5}],
+   "points": [{"ratio": 0.8, "verdict": "not_better"}]
+  },
+  {
+   "name": "nothing-measured",
+   "description": "No gate read anything: there is no input to compare with and no ratio to draw.",
+   "direction": "max",
+   "ideas": [
+    {"outcome": "failed", "reading": null, "landed": 5},
+    {"outcome": "running", "reading": null, "landed": 99}
+   ],
+   "points": [
+    {"ratio": null, "verdict": "failed"},
+    {"ratio": null, "verdict": "running"}
+   ]
+  }
+ ]
+}

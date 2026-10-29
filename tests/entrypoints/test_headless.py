@@ -7,7 +7,7 @@ import json
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Literal, TypedDict
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -28,8 +28,10 @@ from entrypoints.cli import (
     parse_cli_invocation,
     run_environment_spec_from_args,
 )
+from entrypoints.cli.environment import TaskImageBuild
 from entrypoints.headless import main
 from vibesys.api.metrics import MetricSpace, Objective
+from vibesys.api.request import TaskImageError, backend_default_image, task_image_reference
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend, DomainName
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
@@ -44,6 +46,7 @@ from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.issue_queue.launch import IssueQueueLaunch
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.core_run import RunEnd
+from vs_agent.api.testing import DockerBuildResult, FakeDockerBuildRunner, docker_build_result
 from vs_project.api import (
     AgentRoleExecutionRecord,
     OrchestrationDescriptor,
@@ -56,13 +59,41 @@ from vs_runtime.api import RunStatus as PluginRunStatus
 from vs_runtime.api.infrastructure import RunEnvironmentSpec, run_environment_record
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
     from pathlib import Path
+
+    from vs_sim.api import OutputSink
 
 _LOOP_RUN_TARGETS = {
     "agent": "vibesys.api._session.run_plugin",
     "plain": "vibesys.api._session.run_plugin",
     "evolve": "vibesys.api._session.run_plugin",
 }
+
+
+def test_help_explains_dynamic_workstream_budget(capsys: pytest.CaptureFixture[str]) -> None:
+    """The public CLI distinguishes serial rounds from dynamic admissions and turns."""
+    with pytest.raises(SystemExit, match="0"):
+        main(["--help"])
+
+    help_text = " ".join(capsys.readouterr().out.split()).replace("- ", "-")
+    assert "Serial agent loops: N rounds" in help_text
+    assert "N times --max-in-flight admitted workstreams" in help_text
+    assert "failed workspace admissions are refunded" in help_text
+    assert "together with --max-rounds this sets the admission budget" in help_text
+
+    retries_help = help_text.rsplit("--max-retries-per-round N", maxsplit=1)[1].split(
+        "--max-in-flight N", maxsplit=1
+    )[0]
+    assert "maximum paid implementer turns inside each round (default: 3)" in retries_help
+    assert "The dynamic loop ignores this flag and uses --max-unmeasured-turns" in retries_help
+    assert "default: 2" not in retries_help
+
+    unmeasured_help = help_text.rsplit("--max-unmeasured-turns N", maxsplit=1)[1].split(
+        "--evaluation-slots N", maxsplit=1
+    )[0]
+    assert "before it settles as failed (default: 2)" in unmeasured_help
+    assert "default: 3" not in unmeasured_help
 
 
 def agent_descriptor(
@@ -103,7 +134,14 @@ command = ["uv", "run", "python", "benchmark/benchmark.py"]
     return project
 
 
-def _write_repository_task(project: Path, name: str) -> Path:
+_TASK_RESOURCES = """
+[resources]
+accelerators_per_node = 1
+accelerator_backend = "cuda"
+"""
+
+
+def _write_repository_task(project: Path, name: str, *, resources: bool = False) -> Path:
     task = project / ".vibesys" / "tasks" / name
     task.mkdir(parents=True)
     (task / "OBJECTIVE.md").write_text(f"Optimize {name}.\n")
@@ -120,6 +158,7 @@ command = ["python", "-c", "print('ok')"]
 [benchmark]
 command = ["python", "-c", "print('1')"]
 """
+        + (_TASK_RESOURCES if resources else "")
     )
     return task
 
@@ -296,7 +335,6 @@ def _agent_configuration(
         max_rounds=max_rounds,
         max_retries_per_round=4,
         judge_every=2,
-        official_eval_every=5,
         operator_constraints=("Preserve the ABI.",),
         profile_guided=profile_guided,
     )
@@ -515,6 +553,36 @@ def test_dynamic_builds_an_independent_descriptor_with_parallelism(
     assert request.orchestration.options["profile_guided"] is None
 
 
+@pytest.mark.parametrize(
+    ("declared", "flag", "expected"),
+    [
+        (None, None, "inprocess"),
+        ("service", None, "service"),
+        ("inprocess", None, "inprocess"),
+        ("service", "inprocess", "inprocess"),
+        (None, "service", "service"),
+    ],
+)
+def test_the_evaluation_interface_is_the_flag_else_the_inputs_declaration_else_inprocess(
+    tmp_path: Path, declared: str | None, flag: str | None, expected: str
+) -> None:
+    project = _write_input_project(tmp_path)
+    if declared is not None:
+        manifest = project / ".vibesys" / "tasks" / "default" / "vibesys.input.toml"
+        manifest.write_text(
+            manifest.read_text().replace(
+                'domain = "generic"', f'domain = "generic"\ninterface = "{declared}"'
+            )
+        )
+    argv = ["--outer-loop", "dynamic", "--input", str(project)]
+    if flag is not None:
+        argv += ["--interface", flag]
+
+    request = build_run_request(parse_cli_invocation(argv))
+
+    assert request.orchestration.options["interface"] == expected
+
+
 def test_current_directory_is_the_default_direct_project(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -565,25 +633,63 @@ def test_task_dockerfile_selects_docker_without_building_during_validation(
     build.assert_not_called()
 
 
-def test_task_dockerfile_builds_once_for_a_launch(tmp_path: Path) -> None:
+def _docker_builds(runner: FakeDockerBuildRunner) -> list[tuple[str, ...]]:
+    return [argv for argv, _, _ in runner.calls if argv[1] == "build"]
+
+
+_CONTAINER_ENVIRONMENTS = ("docker", "modal", "skypilot", "slurm")
+
+
+def _container_environment_flags(environment: str, tmp_path: Path) -> list[str]:
+    if environment == "slurm":
+        config = _write_slurm_operator_config(tmp_path / "operator-slurm.toml")
+        return ["--run-environment", "slurm", "--slurm-config", str(config)]
+    return {
+        "docker": [],
+        "modal": ["--modal"],
+        "skypilot": ["--skypilot", "--cluster-profile", "gpu"],
+    }[environment]
+
+
+@pytest.mark.parametrize("environment", _CONTAINER_ENVIRONMENTS)
+@pytest.mark.parametrize("backend", [ComputeBackend.CUDA, ComputeBackend.ROCM, ComputeBackend.CPU])
+def test_task_dockerfile_builds_once_on_the_backend_base_for_every_container_environment(
+    environment: str, backend: ComputeBackend, tmp_path: Path
+) -> None:
+    """Regression: Slurm, Modal and SkyPilot refused a task Dockerfile, and no
+    environment passed the backend's default image as ``BASE_IMAGE``."""
     project = tmp_path / "repository"
     project.mkdir()
-    task = _write_repository_task(project, "latency")
+    task = _write_repository_task(project, "latency", resources=environment == "skypilot")
     dockerfile = task / "Dockerfile"
-    dockerfile.write_text("FROM python:3.12-bookworm\n")
-    invocation = parse_cli_invocation(["--project", str(project), "--task", "latency"])
-    image_id = f"sha256:{'a' * 64}"
+    dockerfile.write_text("ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n")
+    invocation = parse_cli_invocation(
+        [
+            "--project",
+            str(project),
+            "--task",
+            "latency",
+            *_container_environment_flags(environment, tmp_path),
+        ]
+    )
+    image_id = f"sha256:{'c' * 64}"
+    runner = FakeDockerBuildRunner(image_id=image_id)
 
-    with patch("entrypoints.cli.environment.build_task_image", return_value=image_id) as build:
-        spec = run_environment_spec_from_args(
-            invocation.args,
-            build_task_docker_image=True,
-        )
+    spec = run_environment_spec_from_args(
+        invocation.args, task_image=TaskImageBuild(backend=backend, runner=runner)
+    )
 
-    assert spec.name == "docker"
-    assert spec.options["image"] == image_id
-    build.assert_called_once()
-    assert build.call_args.args == (dockerfile.resolve(),)
+    reference = task_image_reference(
+        dockerfile.resolve(), base_image=backend_default_image(backend)
+    )
+    assert spec.name == environment
+    assert spec.options["image"] == reference
+    assert spec.image_id == image_id
+    assert spec.task_dockerfile == dockerfile.resolve()
+    assert run_environment_record(spec).image == reference
+    (build,) = _docker_builds(runner)
+    assert reference in build
+    assert f"BASE_IMAGE={backend_default_image(backend)}" in build
 
 
 @pytest.mark.parametrize(
@@ -624,28 +730,45 @@ def test_each_outer_loop_builds_the_task_image_once(
     build.assert_called_once()
     assert build.call_args.args == (dockerfile.resolve(),)
     assert request.run_environment is not None
-    assert request.run_environment.options["image"] == image_id
+    assert request.run_environment.options["image"] == task_image_reference(
+        dockerfile.resolve(), base_image=build.call_args.kwargs["base_image"]
+    )
 
 
-@pytest.mark.parametrize(
-    "flags",
-    [
-        ["--modal"],
-        ["--skypilot"],
-        ["--docker-image", "custom:latest"],
-    ],
-)
-def test_fresh_task_dockerfile_rejects_conflicting_environment_flags(
-    flags: list[str],
+@pytest.mark.parametrize("environment", _CONTAINER_ENVIRONMENTS)
+def test_fresh_task_dockerfile_rejects_an_explicit_docker_image(
+    environment: str,
     tmp_path: Path,
 ) -> None:
     project = tmp_path / "repository"
     project.mkdir()
+    task = _write_repository_task(project, "latency", resources=environment == "skypilot")
+    (task / "Dockerfile").write_text("FROM python:3.12-bookworm\n")
+    flags = [
+        *_container_environment_flags(environment, tmp_path),
+        "--docker-image",
+        "custom:latest",
+    ]
+
+    with pytest.raises(TaskImageError, match="cannot be combined with --docker-image"):
+        parse_cli_invocation(["--project", str(project), "--task", "latency", *flags])
+
+
+def test_a_host_derived_environment_refuses_the_task_image_before_building(
+    tmp_path: Path,
+) -> None:
+    """Regression: Metal on macOS built the task image, then derived ``host`` and refused it."""
+    project = tmp_path / "repository"
+    project.mkdir()
     task = _write_repository_task(project, "latency")
     (task / "Dockerfile").write_text("FROM python:3.12-bookworm\n")
+    invocation = parse_cli_invocation(["--project", str(project), "--task", "latency"])
+    runner = FakeDockerBuildRunner()
+    build = TaskImageBuild(backend=ComputeBackend.METAL, runner=runner, platform="darwin")
 
-    with pytest.raises(ValueError, match="task Dockerfile"):
-        parse_cli_invocation(["--project", str(project), "--task", "latency", *flags])
+    with pytest.raises(TaskImageError, match="runs the agent on the host"):
+        run_environment_spec_from_args(invocation.args, task_image=build)
+    assert runner.calls == []
 
 
 def _declare_docker_in_docker(task: Path) -> None:
@@ -993,7 +1116,7 @@ def test_omitted_config_uses_builtin_defaults(
 
     config, skills, _ = load_config_and_skills(args, domain=DomainName.GENERIC)
 
-    assert config.model.name == "gpt-5.4"
+    assert config.model.name is None  # the provider default applies
     assert skills is None
 
 
@@ -1010,7 +1133,7 @@ def test_omitted_config_loads_only_the_launch_directory_config(
     args = parse_cli_invocation(["--input", str(project)]).args
 
     config, _, _ = load_config_and_skills(args, domain=DomainName.GENERIC)
-    assert config.model.name == "gpt-5.4"
+    assert config.model.name is None  # the provider default applies
 
     (launch / "agent.toml").write_text('[model]\nname = "launch-model"\n')
     config, _, _ = load_config_and_skills(args, domain=DomainName.GENERIC)
@@ -1106,10 +1229,11 @@ def test_repository_resume_restores_the_recorded_task(
     assert invocation.args.input_bundle.task_root == selected.resolve()
 
 
-def test_repository_resume_migrates_a_recorded_local_environment_to_docker_without_building(
+def test_repository_resume_refuses_a_task_dockerfile_the_record_has_no_image_for(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Regression: resume silently ran without the task image the task declares."""
     project = tmp_path / "repository"
     project.mkdir()
     task = _write_repository_task(project, "latency")
@@ -1124,46 +1248,223 @@ def test_repository_resume_migrates_a_recorded_local_environment_to_docker_witho
     )
     monkeypatch.chdir(project)
 
-    args = parse_cli_invocation(["--resume", run_id]).args
-    with patch("entrypoints.cli.environment.build_task_image") as build:
-        spec = run_environment_spec_from_args(args, build_task_docker_image=True)
-
-    assert spec.name == "docker"
-    assert spec.options["image"] is None
-    build.assert_not_called()
+    with pytest.raises(TaskImageError, match="recorded without a task image"):
+        parse_cli_invocation(["--resume", run_id])
 
 
-def test_repository_resume_rebuilds_a_recorded_task_docker_environment(
+class _FakeDockerDaemon:
+    """The local images a resume inspects and rebuilds, by tag and by ID.
+
+    A build points its tag at ``next_id``, as a daemon whose build cache is gone
+    might; ``image inspect`` answers for a live tag or ID and fails otherwise.
+    """
+
+    def __init__(self, images: dict[str, str], *, next_id: str) -> None:
+        self.images = dict(images)
+        self.next_id = next_id
+        self.builds: list[tuple[str, ...]] = []
+
+    def run(
+        self, argv: Sequence[str], *, cwd: Path, timeout: float, output: OutputSink
+    ) -> DockerBuildResult:
+        del cwd, timeout, output
+        command = tuple(argv)
+        if command[1] == "build":
+            self.builds.append(command)
+            self.images[command[command.index("--tag") + 1]] = self.next_id
+            return docker_build_result(command)
+        if command[1:3] == ("image", "inspect"):
+            name = command[-1]
+            image_id = self.images.get(name) or (name if name in self.images.values() else "")
+            return docker_build_result(command, returncode=0 if image_id else 1, stdout=image_id)
+        if command[1:3] == ("image", "ls"):
+            return docker_build_result(command)
+        message = f"unscripted docker command: {command}"
+        raise AssertionError(message)
+
+
+_OLD_ID = f"sha256:{'a' * 64}"
+_NEW_ID = f"sha256:{'b' * 64}"
+
+
+def _resume_task_image(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    *,
+    environment: Literal["docker", "slurm"],
+    recorded: Callable[[Path], str],
+    daemon: Callable[[str], _FakeDockerDaemon],
+) -> tuple[Callable[[], RunEnvironmentSpec], _FakeDockerDaemon, str]:
+    """Record a run with a task image, then return a resume of it and its daemon."""
     project = tmp_path / "repository"
     project.mkdir()
-    task = _write_repository_task(project, "latency")
-    dockerfile = task / "Dockerfile"
+    dockerfile = _write_repository_task(project, "latency") / "Dockerfile"
     dockerfile.write_text("FROM python:3.12-bookworm\n")
-    recorded_image = f"sha256:{'a' * 64}"
-    rebuilt_image = f"sha256:{'b' * 64}"
+    image = recorded(dockerfile.resolve())
+    slurm_config = (
+        str(_write_slurm_operator_config(tmp_path / "operator-slurm.toml"))
+        if environment == "slurm"
+        else None
+    )
     run_id = "20260811-120000-11111111-agent"
     _write_project_run(
         project,
         run_id,
         configuration=_agent_configuration(
-            run_environment=RunEnvironmentRecord(name="docker", image=recorded_image)
+            run_environment=RunEnvironmentRecord(
+                name=environment, image=image, config_path=slurm_config
+            )
         ),
         created_at=datetime(2026, 8, 11, 12, tzinfo=UTC),
         options=_RunFixtureOptions(task_name="latency"),
     )
     monkeypatch.chdir(project)
-
     args = parse_cli_invocation(["--resume", run_id]).args
-    with patch("entrypoints.cli.environment.build_task_image", return_value=rebuilt_image) as build:
-        spec = run_environment_spec_from_args(args, build_task_docker_image=True)
+    fake = daemon(image)
+    build = TaskImageBuild(backend=ComputeBackend.CUDA, runner=fake)
+    return (lambda: run_environment_spec_from_args(args, task_image=build)), fake, image
 
-    assert spec.name == "docker"
-    assert spec.options["image"] == rebuilt_image
-    build.assert_called_once()
-    assert build.call_args.args == (dockerfile.resolve(),)
+
+def _current_reference(dockerfile: Path) -> str:
+    return task_image_reference(dockerfile, base_image=backend_default_image(ComputeBackend.CUDA))
+
+
+@pytest.mark.parametrize("environment", ["docker", "slurm"])
+@pytest.mark.parametrize("recorded_image", ["present", "gone"])
+def test_resume_with_unchanged_task_inputs_runs_the_recorded_reference(
+    environment: Literal["docker", "slurm"],
+    recorded_image: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: a pruned build cache gave a new image ID and resume was refused.
+
+    A recorded image still in the daemon is reused without a build; once it
+    is gone, unchanged inputs rebuild it, and the new ID resumes.
+    """
+    present = recorded_image == "present"
+    resume, daemon, reference = _resume_task_image(
+        tmp_path,
+        monkeypatch,
+        environment=environment,
+        recorded=_current_reference,
+        daemon=lambda image: _FakeDockerDaemon(
+            {image: _OLD_ID} if present else {}, next_id=_NEW_ID
+        ),
+    )
+
+    spec = resume()
+
+    assert spec.name == environment
+    assert run_environment_record(spec).image == reference
+    # The environment runs the image's ID, never the mutable tag.
+    assert spec.image_id == (_OLD_ID if present else _NEW_ID)
+    if present:
+        assert daemon.builds == []
+    else:
+        (build,) = daemon.builds
+        assert reference in build
+        assert f"BASE_IMAGE={backend_default_image(ComputeBackend.CUDA)}" in build
+
+
+def _reference_then_edit(dockerfile: Path) -> str:
+    """Record the current reference, then change the Dockerfile after the run started."""
+    reference = _current_reference(dockerfile)
+    dockerfile.write_text("FROM python:3.13-bookworm\n")
+    return reference
+
+
+@pytest.mark.parametrize("environment", ["docker", "slurm"])
+@pytest.mark.parametrize("recorded_image", ["present", "gone"])
+def test_changed_task_inputs_resume_on_the_local_image_and_are_refused_once_it_is_gone(
+    environment: Literal["docker", "slurm"],
+    recorded_image: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Regression: editing a benchmark mid-campaign refused resume though the image was local."""
+    present = recorded_image == "present"
+    resume, daemon, reference = _resume_task_image(
+        tmp_path,
+        monkeypatch,
+        environment=environment,
+        recorded=_reference_then_edit,
+        daemon=lambda image: _FakeDockerDaemon(
+            {image: _OLD_ID} if present else {}, next_id=_NEW_ID
+        ),
+    )
+
+    if present:
+        spec = resume()
+        assert run_environment_record(spec).image == reference
+        assert spec.image_id == _OLD_ID
+        assert "inputs changed" in capsys.readouterr().err
+    else:
+        with pytest.raises(TaskImageError, match="inputs changed"):
+            resume()
+    assert daemon.builds == []
+
+
+def test_identical_task_inputs_in_a_copied_project_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: ``--runs-dir`` copies the project, so the task's path differs on resume;
+    identical inputs at another path were refused as changed."""
+
+    def reference_at_another_path(dockerfile: Path) -> str:
+        elsewhere = tmp_path / "original" / "latency"
+        elsewhere.mkdir(parents=True)
+        for path in dockerfile.parent.iterdir():
+            if path.is_file():
+                (elsewhere / path.name).write_bytes(path.read_bytes())
+        return _current_reference(elsewhere / "Dockerfile")
+
+    resume, daemon, recorded = _resume_task_image(
+        tmp_path,
+        monkeypatch,
+        environment="slurm",
+        recorded=reference_at_another_path,
+        daemon=lambda _image: _FakeDockerDaemon({}, next_id=_NEW_ID),
+    )
+
+    spec = resume()
+
+    assert run_environment_record(spec).image == recorded
+    assert spec.image_id == _NEW_ID
+    (build,) = daemon.builds
+    assert recorded not in build  # rebuilt under this location's tag
+
+
+@pytest.mark.parametrize(
+    "case", ["present", "gone, rebuilt identically", "gone, rebuilt differently"]
+)
+def test_a_run_recorded_with_an_image_id_resumes_only_on_that_id(
+    case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run from before input-keyed references rebuilds as it was built, without BASE_IMAGE."""
+    present = case == "present"
+    rebuilt = _NEW_ID if case.endswith("differently") else _OLD_ID
+    resumes = not case.endswith("differently")
+    resume, daemon, _ = _resume_task_image(
+        tmp_path,
+        monkeypatch,
+        environment="slurm",
+        recorded=lambda _dockerfile: _OLD_ID,
+        daemon=lambda image: _FakeDockerDaemon(
+            {"other:tag": image} if present else {}, next_id=rebuilt
+        ),
+    )
+
+    if resumes:
+        spec = resume()
+        assert run_environment_record(spec).image == _OLD_ID
+        assert spec.image_id == _OLD_ID
+    else:
+        with pytest.raises(TaskImageError, match="predates input-keyed task images"):
+            resume()
+    assert len(daemon.builds) == (0 if present else 1)
+    assert not any(arg.startswith("BASE_IMAGE=") for build in daemon.builds for arg in build)
 
 
 def test_repository_resume_rejects_a_different_task(tmp_path: Path) -> None:
@@ -1446,7 +1747,7 @@ def test_collection_resume_requires_project_metadata(tmp_path: Path) -> None:
     assert "not a VibeSys project" in exc.value.diagnostic.message
 
 
-def test_resume_switches_to_the_recorded_run_branch(
+def test_resume_reads_the_recorded_run_without_switching_the_project_branch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1492,10 +1793,11 @@ def test_resume_switches_to_the_recorded_run_branch(
     )
     _git(project, "switch", "-q", "main")
     monkeypatch.chdir(project)
+    original = (task_path(project) / "OBJECTIVE.md").read_text()
 
     invocation = parse_cli_invocation(["--resume", run_id])
 
-    assert invocation.args.input_bundle.objective == "Objective on the run branch.\n"
+    assert invocation.args.input_bundle.objective == original
     branch = run_test_command(
         ["git", "branch", "--show-current"],
         cwd=project,
@@ -1503,7 +1805,8 @@ def test_resume_switches_to_the_recorded_run_branch(
         capture_output=True,
         text=True,
     ).stdout.strip()
-    assert branch == f"vibesys-runs/{run_id}"
+    assert branch == "main"
+    assert (task_path(project) / "OBJECTIVE.md").read_text() == original
 
 
 def test_agent_resume_restores_its_configuration(
@@ -1525,7 +1828,6 @@ def test_agent_resume_restores_its_configuration(
 
     assert args.max_rounds == 7
     assert args.max_retries_per_round == 4
-    assert args.official_eval_every == 5
     assert args.inner_loop == "single-agent"
     assert args.interface == "service"
     assert args.constraint == ["Preserve the ABI."]
@@ -1819,9 +2121,9 @@ def test_resume_rejects_changes_to_immutable_configuration(
     monkeypatch.chdir(project)
 
     with pytest.raises(ConfigurationError) as exc:
-        parse_cli_invocation(["--resume", run_id, "--official-eval-every", "3"])
+        parse_cli_invocation(["--resume", run_id, "--max-retries-per-round", "9"])
     assert exc.value.diagnostic.code == "project_resume_configuration_mismatch"
-    assert "official_eval_every" in exc.value.diagnostic.message
+    assert "max_retries_per_round" in exc.value.diagnostic.message
 
 
 def _write_unsupported_schema_run(project: Path, run_id: str) -> None:
@@ -2054,7 +2356,6 @@ def test_dispatch_owns_headless_rendering(
     cli.dispatch(["--input", str(project)])
 
     assert [call.args[0].type for call in renderer.handle.call_args_list] == [
-        CoreEventType.RUN_STARTED,
         CoreEventType.RUN_FINISHED,
     ]
 
@@ -2077,7 +2378,6 @@ def test_dispatch_records_failure_through_the_headless_renderer(
         cli.dispatch(["--input", str(project)])
 
     assert [call.args[0].type for call in renderer.handle.call_args_list] == [
-        CoreEventType.RUN_STARTED,
         CoreEventType.RUN_FAILED,
     ]
 
@@ -2234,3 +2534,41 @@ def test_resume_of_a_host_run_leaves_the_environment_to_be_derived_from_its_back
     # Docker here is the pre-derivation default; the runtime turns it into the
     # host environment for a host-only backend on macOS and rejects it elsewhere.
     assert run_environment_spec_from_args(args).name == "docker"
+
+
+@pytest.mark.parametrize("environment", ["docker", "slurm"])
+@pytest.mark.parametrize("present", [False, True])
+def test_chat_reader_resolves_saved_task_image_without_building(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    environment: Literal["docker", "slurm"],
+    *,
+    present: bool,
+) -> None:
+    _, daemon, image = _resume_task_image(
+        tmp_path,
+        monkeypatch,
+        environment=environment,
+        recorded=_current_reference,
+        daemon=lambda image: _FakeDockerDaemon(
+            {image: _OLD_ID} if present else {}, next_id=_NEW_ID
+        ),
+    )
+
+    def reader() -> RunEnvironmentSpec:
+        args = parse_cli_invocation(["--resume", "20260811-120000-11111111-agent"]).args
+        return run_environment_spec_from_args(
+            args,
+            task_image=TaskImageBuild(
+                backend=ComputeBackend.CUDA, runner=daemon, allow_build=False
+            ),
+        )
+
+    if present:
+        spec = reader()
+        assert spec.image_id == _OLD_ID
+        assert spec.options["image"] == image
+    else:
+        with pytest.raises(ValueError, match="chat reader cannot rebuild"):
+            reader()
+    assert daemon.builds == []

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 from typing import TYPE_CHECKING
 
 import pytest
@@ -163,3 +164,13 @@ def test_product_host_closes_resources_when_composition_fails(tmp_path: Path) ->
 
     assert backend.monitor.started
     assert backend.monitor.stopped
+
+
+@pytest.mark.parametrize("module", ["vibesys.api", "vs_core.api"])
+def test_facade_exports_resolve_and_cache_the_declared_public_interface(module: str) -> None:
+    facade = importlib.import_module(module)
+    assert set(dir(facade)) == set(facade.__all__)
+    for name in facade.__all__:
+        assert getattr(facade, name) is getattr(facade, name)
+    with pytest.raises(AttributeError):
+        _ = facade.not_a_public_export

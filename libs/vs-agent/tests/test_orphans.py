@@ -16,15 +16,18 @@ from vs_agent.api import OrphanReapError, reap_orphaned_agents
 from vs_agent.api.testing import DockerResult, docker_result, docker_timed_out
 from vs_sandbox.api import RUN_ID_LABEL
 from vs_sandbox.fake_docker_engine import FakeDockerEngine
+from vs_sim.api import DISCARD
 from vs_sim.api.testing import FakePipedProcessLauncher, examples
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from vs_sim.api import OutputSink
+
 
 def _start(engine: FakeDockerEngine, run_id: str | None) -> str:
     label = [] if run_id is None else ["--label", f"{RUN_ID_LABEL}={run_id}"]
-    result = engine.run(["docker", "run", "-d", *label, "image"], timeout_seconds=1)
+    result = engine.run(["docker", "run", "-d", *label, "image"], timeout_seconds=1, output=DISCARD)
     return result.stdout.strip()
 
 
@@ -109,7 +112,10 @@ class _BrokenDocker:
     def __init__(self, returncode: int | None) -> None:
         self._returncode = returncode
 
-    def run(self, argv: Sequence[str], *, timeout_seconds: float) -> DockerResult:
+    def run(
+        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink
+    ) -> DockerResult:
+        del output
         if self._returncode is None:
             raise docker_timed_out(list(argv), timeout_seconds)
         return docker_result(list(argv), self._returncode, "", "daemon down")
@@ -134,7 +140,10 @@ class _RemovalAnswers:
         self._returncode = returncode
         self._stderr = stderr
 
-    def run(self, argv: Sequence[str], *, timeout_seconds: float) -> DockerResult:
+    def run(
+        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink
+    ) -> DockerResult:
+        del output
         if argv[1] == "ps":
             return docker_result(list(argv), 0, f"{self._container_id}\n", "")
         assert list(argv[1:3]) == ["rm", "-f"]

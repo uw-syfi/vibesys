@@ -1,0 +1,8 @@
+   # Stop a background service or profiler: signal its whole process group (a
+   # multi-process server's workers would otherwise survive and keep GPU memory),
+   # wait a bounded time, then SIGKILL. Never use a bare `kill $PID; wait $PID`.
+   stop_group() { # usage: stop_group PID [SIGNAL=TERM] [WAIT_SECONDS=30]
+     kill -"${2:-TERM}" -- -"$1" 2>/dev/null
+     for _ in $(seq 1 "${3:-30}"); do kill -0 -- -"$1" 2>/dev/null || return 0; sleep 1; done
+     kill -KILL -- -"$1" 2>/dev/null; wait "$1" 2>/dev/null
+   }

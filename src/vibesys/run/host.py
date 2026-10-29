@@ -7,8 +7,14 @@ from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import TYPE_CHECKING, cast
 
+from vibesys.comparisons.api import (
+    ComparisonReport,
+    comparisons_read_data,
+    stored_comparisons,
+    visible_comparison_variables,
+)
 from vibesys.composition import AgentToolContext, agent_spec_from_config, resolve_run_agent_specs
-from vibesys.events import CoreEventType, FrameworkSource, FrameworkWarningData
+from vibesys.events import CoreEventType, EventStatus, FrameworkSource, FrameworkWarningData
 from vibesys.orchestration.skill_selection import platform_skill_selection
 from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.contracts import ProfilerKind
@@ -20,20 +26,30 @@ from vibesys.run.core_services import (
     CoreServices,
     agent_session_spec,
     build_core_services,
+    turn_executor,
 )
-from vibesys.run.evaluation import create_evaluation
+from vibesys.run.evaluation import CoreLocalValidationEvents, create_evaluation
+from vibesys.run.evaluation_socket import prepare_queue_status_socket
 from vibesys.run.measurement_events import CoreMeasurementEvents
 from vibesys.run.profilers import WITHHELD_TOOLS_ENV, ProfilerToolOffer, profiler_tool_offer
+from vibesys.run.queue_status import queue_status_reader, queue_status_service
 from vibesys.run.resources import open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
-from vs_agent.api import AgentSessionKey, AgentSessionState, DurableSessionStore
-from vs_runtime.api import PollingEvaluationExecutor, RetryingEvaluationExecutor
+from vs_agent.api import (
+    AgentSessionKey,
+    AgentSessionState,
+    DurableSessionStore,
+    ProviderRoutedExecutor,
+)
+from vs_runtime.api import PollingEvaluationExecutor, RetryingEvaluationExecutor, TryHandles
+from vs_runtime.api.core import MeasurementDecisions
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     BlockingOperations,
     CapacityHandling,
     QuotaPolicy,
     RunHostComponents,
+    StateBuildStore,
     StateValidationPasses,
     WorkspaceResourceFactory,
     bounded_stop,
@@ -68,15 +84,17 @@ if TYPE_CHECKING:
         RunFacts,
         Workspaces,
     )
-    from vs_runtime.api.core import RunTiming
+    from vs_runtime.api.core import RunTiming, StageOutputOpener
     from vs_runtime.api.infrastructure import (
         AgentExecutionEnvironment,
+        AgentExecutionScope,
+        OwnedWorkspaces,
         RunState,
         StopTimer,
         WorkspaceRuntime,
     )
     from vs_sandbox.api import ComputeBackendImpl, DockerSandbox
-    from vs_sim.api import BlockingRunner, Network, ReleaseStack, SleepingClock
+    from vs_sim.api import BlockingRunner, Network, ReleaseStack
 
 
 type StatelessToolServer = Callable[[object], ToolServerDescriptor | None]
@@ -91,12 +109,19 @@ def _profiler_tool_offer(resources: _PreparedRun) -> ProfilerToolOffer:
     )
 
 
-def _tool_context(resources: _PreparedRun) -> AgentToolContext:
+def _tool_context(resources: _PreparedRun, queue_status_socket: Path) -> AgentToolContext:
     env = resources.environment_resources.view.profiler_mcp_env
     withheld = _profiler_tool_offer(resources).withheld
     if withheld:
         env = (*env, (WITHHELD_TOOLS_ENV, ",".join(withheld)))
-    return AgentToolContext(resources.facts.profiler_id, env)
+    return AgentToolContext(
+        resources.facts.profiler_id, env, queue_status_socket=str(queue_status_socket)
+    )
+
+
+def _slurm_handle_root(namespace: StateNamespace) -> Path:
+    """Where the run's cluster evaluation executor keeps its handles and cluster records."""
+    return namespace.external_directory() / "slurm-provider-handles"
 
 
 _NO_PROFILE_CAPTURE_NOTE = (
@@ -143,6 +168,7 @@ class _ProductHostFactory:
     core_services: CoreServices | None = field(default=None, init=False)
     local_evaluation: Evaluation | None = field(default=None, init=False)
     facts: RunFacts | None = field(default=None, init=False)
+    comparisons: tuple[ComparisonReport, ...] = field(default=(), init=False)
 
     def prepare(self, ownership: ReleaseStack) -> RunHostComponents:
         """Open product resources and compose the core services over them."""
@@ -158,6 +184,7 @@ class _ProductHostFactory:
             plugin.agents,
             backend=self.request.agent_backend,
             provider=self.request.cli_provider,
+            allow_unvetted_model=self.request.allow_unvetted_model,
         )
         if agent_specs:
             _require_supported_fallback(self.request.config.agent.quota.to_policy(), agent_specs)
@@ -173,7 +200,7 @@ class _ProductHostFactory:
         return self._components(resources, ownership)
 
     def _components(self, resources: _PreparedRun, ownership: ReleaseStack) -> RunHostComponents:
-        blocking = BlockingOperations(self.blocking)
+        blocking = BlockingOperations(self.blocking, self.timing.threads)
         project = resources.project_resources
         environment = resources.environment_resources
         logger = project.logger
@@ -206,6 +233,9 @@ class _ProductHostFactory:
             validation_passes=StateValidationPasses(
                 project.project.state.local_namespace(project.state.run_id, "validation")
             ),
+            builds=StateBuildStore(
+                project.project.state.local_namespace(project.state.run_id, "builds")
+            ),
         )
         workspaces = agent_runtime.workspaces
         evaluation = create_evaluation(
@@ -218,12 +248,40 @@ class _ProductHostFactory:
         evaluation = stop_gated_evaluation(evaluation, self.integration.control)
         self.local_evaluation = evaluation
         self.facts = resources.facts
+        self.comparisons = self._read_comparisons(resources)
         self.core_services = self._core_services(
             resources, workspace_resources, agent_runtime, evaluation, ownership
         )
         if self.core_services.profile_capture_withheld:
             logger.lprint(_NO_PROFILE_CAPTURE_NOTE)
+        self._journal_comparisons()
         return RunHostComponents(workspaces=workspaces, blocking=blocking)
+
+    def _read_comparisons(self, resources: _PreparedRun) -> tuple[ComparisonReport, ...]:
+        """What the project's store holds for the task's comparison baselines.
+
+        Reads only: a run never measures a comparison (``vibesys compare`` does), so this starts
+        no job and cannot block the run.
+        """
+        bundle = self.request.input_bundle
+        if not bundle.manifest.comparison:
+            return ()
+        cluster = resources.environment_resources.view.cluster_evaluation
+        return stored_comparisons(
+            resources.project_resources.project,
+            bundle,
+            None if cluster is None else cluster.settings,
+        )
+
+    def _journal_comparisons(self) -> None:
+        """Journal the comparison readings the run found."""
+        if not self.comparisons:
+            return
+        self.integration.events.emit(
+            CoreEventType.COMPARISONS_READ,
+            status=EventStatus.COMPLETED,
+            data=comparisons_read_data(self.comparisons),
+        )
 
     def _root_agent_environment_opener(
         self,
@@ -263,16 +321,13 @@ class _ProductHostFactory:
             reasoning_effort=spec.reasoning_effort,
         )
 
-    def _offered_roles(self, resources: _PreparedRun) -> tuple[AgentRole, ...]:
+    def _offered_roles(self, context: AgentToolContext) -> tuple[AgentRole, ...]:
         """The plugin's roles, without a stateless tool whose provider declines for this run.
 
         A provider that declines (the selected profiler is ``none``) says the run has no such
         tool, and a strategy only runs the turns that use it when the run offers it. A stateless
         tool with no provider at all is a wiring mistake and stays for composition to refuse.
         """
-        if not self.plugin.agents:
-            return ()
-        context = _tool_context(resources)
         declined = frozenset(
             tool
             for tool, server in (self.stateless_tool_servers or {}).items()
@@ -291,13 +346,8 @@ class _ProductHostFactory:
             for role in self.plugin.agents
         )
 
-    def _stateless_tool_servers(
-        self, resources: _PreparedRun, roles: tuple[AgentRole, ...]
-    ) -> dict[str, ToolServerDescriptor]:
+    def _stateless_tool_servers(self, context: AgentToolContext) -> dict[str, ToolServerDescriptor]:
         """The server of each stateless tool this run's environment can serve, by tool id."""
-        if not roles:
-            return {}
-        context = _tool_context(resources)
         served = {
             tool: server(context) for tool, server in (self.stateless_tool_servers or {}).items()
         }
@@ -318,43 +368,72 @@ class _ProductHostFactory:
             raise ValueError(message)
         project = resources.project_resources
         workspaces = agent_runtime.workspaces
-        roles, agents, role_models = self._core_agent_resources(
-            resources, workspace_resources, agent_runtime, ownership
-        )
         namespace = project.project.state.local_namespace(project.state.run_id, "core-evaluation")
+        roles, agents, role_models, stateless_servers = self._core_agent_resources(
+            resources, workspace_resources, agent_runtime, namespace, ownership
+        )
+        # Each stage's output goes to the run's log store under its gate, named by the
+        # measurement's handle and try, as its gate events name it: an in-process stage's as
+        # its command prints it, a Slurm stage's as each scheduler poll reads it.
+        tries = TryHandles()
+        decisions = MeasurementDecisions()
+        stage_output = tries.stage_output(decisions.stage_output(resources.stage_output))
         executor = self._semantic_executor(
-            self.integration, resources, workspaces, namespace, self.timing.clock
+            resources,
+            workspaces,
+            namespace,
+            stage_output,
+            ledger_identity=(project.project.state.load_project().project_id, project.state.run_id),
         )
         return build_core_services(
             policy,
             CoreResources(
                 run_id=project.state.run_id,
                 project=project.project,
+                resuming=project.resuming,
                 facts=resources.facts,
                 options=self.options,
                 workspaces=workspaces,
                 evaluation=RetryingEvaluationExecutor(
                     executor
                     if executor is not None
-                    else PollingEvaluationExecutor(evaluation, workspaces, clock=self.timing.clock),
+                    else PollingEvaluationExecutor(
+                        evaluation,
+                        workspaces,
+                        clock=self.timing.clock,
+                        stage_output=stage_output,
+                        control=self.integration.control,
+                    ),
                     self.request.config.evaluation.evaluation_retries(),
                     project.project.state.local_namespace(
                         project.state.run_id, "core-evaluation-tries"
                     ),
+                    tries=tries,
                 ),
                 environment=self._core_environment(resources),
                 roles=roles,
                 role_models=role_models,
                 agents=agents,
+                control=self.integration.control,
                 clock=self.timing.clock,
                 github=self.integration.github,
                 threads=self.integration.threads,
                 blocking=self.blocking,
                 network=self.network,
                 evaluation_diagnostics=self._evaluation_diagnostic,
-                stateless_tool_servers=self._stateless_tool_servers(resources, roles),
+                stateless_tool_servers=stateless_servers,
                 commands=agent_runtime.commands,
-                measurement_observer=CoreMeasurementEvents(self.integration.events),
+                capture_commands=agent_runtime.capture_commands,
+                # No round_label: this instance is built once for the run and
+                # shared across every candidate's local-validation attempts,
+                # so no single label identifies "one attempt" for it (see
+                # CoreLocalValidationEvents.__init__). Its GATE_FINISHED
+                # events stay ungrouped until this path carries its own
+                # per-attempt identity to pass through here.
+                local_validation_events=CoreLocalValidationEvents(self.integration.events),
+                measurement_observer=CoreMeasurementEvents(self.integration.events, decisions),
+                measurement_decisions=decisions,
+                epoch=lambda: self.integration.events.epoch,
                 commit_observer=self.integration.core_commit_observer(
                     project.state.run_id, self.projector, self.plugin.id
                 ),
@@ -366,13 +445,23 @@ class _ProductHostFactory:
         resources: _PreparedRun,
         workspace_resources: WorkspaceResourceFactory,
         agent_runtime: WorkspaceRuntime,
+        namespace: StateNamespace,
         ownership: ReleaseStack,
-    ) -> tuple[tuple[AgentRole, ...], CoreAgentResources | None, dict[str, str]]:
-        """Resolve offered roles and open their indivisible session bundle, if any."""
-        roles = self._offered_roles(resources)
-        if not roles:
-            return (), None, {}
-        if self.agent_client_factory is None:
+    ) -> tuple[
+        tuple[AgentRole, ...],
+        CoreAgentResources | None,
+        dict[str, str],
+        Mapping[str, ToolServerDescriptor],
+    ]:
+        """Resolve offered roles and open their indivisible session bundle, if any.
+
+        A plugin that declares no roles opens no agent environment, provider client,
+        session store, invocation journal, queue status service, or tool servers.
+        """
+        if not self.plugin.agents:
+            return (), None, {}, {}
+        factory = self.agent_client_factory
+        if factory is None:
             raise CoreCompositionError(
                 "agent_client_factory", "a core run with agent roles needs a client factory"
             )
@@ -393,28 +482,79 @@ class _ProductHostFactory:
             self.request.config,
             backend=self.request.agent_backend,
             provider=self.request.cli_provider,
+            allow_unvetted_model=self.request.allow_unvetted_model,
         )
-        # One client serves every role, so each role's own model and effort ride the spec.
-        base = replace(
-            base,
-            role_models={role: spec.model for role, spec in specs.items() if spec.model},
-            role_reasoning_efforts={
-                role: spec.reasoning_effort for role, spec in specs.items() if spec.reasoning_effort
-            },
+        events = CoreAgentEventSink(self.integration.events.record, self.timing.clock)
+        agents: dict[str, _ProviderAgents] = {}
+        for provider, spec in _provider_specs(base, specs).items():
+            agents[provider] = self._open_provider_agents(
+                factory, spec, scope, session_store, agent_runtime, events, ownership
+            )
+        turns = ProviderRoutedExecutor(
+            {provider: turn_executor(agent.client) for provider, agent in agents.items()}
         )
+        configuration = partial(self._agent_configuration, resources)
+        # Every core session shares one run-scoped journal, named by a fixed member key.
+        invocations = self.invocation_store_factory(
+            project.state, AgentSessionKey.for_member("core", "run")
+        )
+        tool_context = _tool_context(
+            resources,
+            self._serve_queue_status(resources, _slurm_handle_root(namespace), ownership),
+        )
+        roles = self._offered_roles(tool_context)
+        role_models = {
+            role: spec.model
+            for role, spec in specs.items()
+            if spec.model and spec.model != base.model
+        }
+        return (
+            roles,
+            CoreAgentResources(
+                agent_turns=turns,
+                invocation_slot=invocations,
+                configuration=configuration,
+                session_spec=agent_session_spec(
+                    environments={
+                        provider: agent.environment for provider, agent in agents.items()
+                    },
+                    specs=specs,
+                    variables=scope.environment_variables,
+                    configuration=configuration,
+                ),
+                lifecycle=self.integration.agent_execution_event,
+            ),
+            role_models,
+            self._stateless_tool_servers(tool_context),
+        )
+
+    def _open_provider_agents(  # noqa: PLR0913  # lint-waiver: LW-948091 [PLR0913]; each argument is an independently owned resource the host already opened, and this reads them once per provider.
+        self,
+        factory: Callable[..., AgentClientProtocol],
+        spec: AgentSpec,
+        scope: AgentExecutionScope,
+        session_store: DurableSessionStore,
+        agent_runtime: WorkspaceRuntime,
+        events: CoreAgentEventSink,
+        ownership: ReleaseStack,
+    ) -> _ProviderAgents:
+        """Open the agent environment and client of one provider, released with ``ownership``.
+
+        The client is bound to ``spec.provider``, so each role's own model and effort ride
+        ``spec`` for the roles that run on it.
+        """
         environment = scope.open_environment(
             AgentExecutionConfiguration(
-                agent_id="core", spec=base, reasoning_effort=base.reasoning_effort
+                agent_id="core", spec=spec, reasoning_effort=spec.reasoning_effort
             )
         )
         ownership.callback(environment.close)
-        events = CoreAgentEventSink(self.integration.events.record, self.timing.clock)
-        client = self.agent_client_factory(
-            spec=base,
+        client = factory(
+            spec=spec,
             clock=self.timing.clock,
             session_store=session_store,
             backends=(
-                {role.id: environment.backends["chat"] for role in roles}
+                {role.id: environment.backends["chat"] for role in self.plugin.agents}
                 if environment.backends is not None
                 else None
             ),
@@ -444,32 +584,34 @@ class _ProductHostFactory:
             ),
             clock=self.timing.clock,
         )
-        configuration = partial(self._agent_configuration, resources)
-        invocations = self.invocation_store_factory(
-            project.state, AgentSessionKey.for_member("core", "run")
-        )
-        role_models = {
-            role: spec.model
-            for role, spec in specs.items()
-            if spec.model and spec.model != base.model
-        }
-        return (
-            roles,
-            CoreAgentResources(
-                client=client,
-                invocation_slot=invocations,
-                configuration=configuration,
-                session_spec=agent_session_spec(
-                    client=client,
-                    environment=environment,
-                    specs=specs,
-                    variables=scope.environment_variables,
-                    configuration=configuration,
-                ),
-                lifecycle=self.integration.agent_execution_event,
+        return _ProviderAgents(environment, client)
+
+    def _serve_queue_status(
+        self, resources: _PreparedRun, handle_root: Path, ownership: ReleaseStack
+    ) -> Path:
+        """Serve the run's read-only queue status to its agents; return the socket path.
+
+        The service stops when ``ownership`` releases; its socket sits in the run's private
+        socket directory, which every agent container mounts.
+        """
+        project = resources.project_resources
+        socket_path = prepare_queue_status_socket(project.project.root, project.state.run_id)
+        service = queue_status_service(
+            queue_status_reader(
+                resources.environment_resources.view,
+                run_id=project.state.run_id,
+                handle_root=handle_root,
+                processes=self.integration.system.slurm_processes,
+                clock=self.timing.clock,
             ),
-            role_models,
+            socket_path,
+            network=self.network,
+            threads=self.integration.threads,
+            clock=self.timing.clock,
         )
+        ownership.callback(service.close)
+        service.start()
+        return socket_path
 
     def _core_environment(self, resources: _PreparedRun) -> CoreEnvironment:
         """The evaluation environment and product bounds as facts: capacity, pacing, lifecycle."""
@@ -488,12 +630,15 @@ class _ProductHostFactory:
             queue_allowance_seconds=config.evaluation.queue_allowance_seconds,
             observe_interval_seconds=config.evaluation.observe_interval_seconds,
             observe_backoff_cap_seconds=config.evaluation.observe_backoff_cap_seconds,
+            queue_wait_budget_seconds=config.evaluation.queue_wait_budget_seconds,
+            queue_notice_interval_seconds=config.evaluation.queue_notice_interval_seconds,
             request_retries=config.evaluation.request_retries(),
             max_run_seconds=config.run.max_run_seconds,
             cancellation_bound_seconds=config.run.cancellation_bound_seconds,
             cleanup_bound_seconds=config.run.cleanup_bound_seconds,
             reconciliation_bound_seconds=config.run.reconciliation_bound_seconds,
             lifecycle=lifecycle,
+            prompt_variables=visible_comparison_variables(self.comparisons),
         )
 
     def _evaluation_diagnostic(self, line: str) -> None:
@@ -505,18 +650,20 @@ class _ProductHostFactory:
             ),
         )
 
-    @staticmethod
     def _semantic_executor(
-        integration: LocalRunIntegration,
+        self,
         resources: _PreparedRun,
         workspaces: Workspaces,
         namespace: StateNamespace,
-        clock: SleepingClock,
+        stage_output: StageOutputOpener,
+        *,
+        ledger_identity: tuple[str, str],
     ) -> SlurmSemanticEvaluationExecutor | None:
         """Build the cluster's semantic execution adapter when the environment reports one."""
         cluster = resources.environment_resources.view.cluster_evaluation
         if cluster is None:
             return None
+        clock = self.timing.clock
         return SlurmSemanticEvaluationExecutor(
             cluster.settings.config,
             cluster.settings.policy,
@@ -524,10 +671,14 @@ class _ProductHostFactory:
             resources.evaluation_plan,
             workspaces,
             namespace,
-            namespace.external_directory() / "slurm-provider-handles",
+            _slurm_handle_root(namespace),
             clock=clock,
             sleeper=clock,
-            processes=integration.system.slurm_processes,
+            processes=self.integration.system.slurm_processes,
+            ledger_identity=ledger_identity,
+            stage_output=stage_output,
+            root_proof=cluster.root_proof,
+            control=self.integration.control,
         )
 
     async def stop_new_work(self) -> None:
@@ -536,7 +687,10 @@ class _ProductHostFactory:
         Every core measurement, an agent's included, is a job of the run's evaluation
         executor. Core refuses new submissions once the stop is committed, and the executor
         cancels the jobs still on the cluster when ``close_core_services`` closes it as the
-        run exits (``tests/system/agent_evaluation/test_stops_on_stop.py``). The legacy
+        run exits; with the operator's evaluation ledger, #2757, it cancels those no other run
+        wants, unless the ledger policy keeps jobs on a stop
+        (``tests/system/agent_evaluation/test_stops_on_stop.py``,
+        ``libs/vs-sandbox/tests/test_slurm_shutdown_leaves_no_job.py``). The legacy
         evaluation service this hook once cancelled was never installed on a core run.
         """
 
@@ -555,7 +709,7 @@ class CoreHost:
     ``services.evaluation`` instead.
     """
 
-    workspaces: Workspaces
+    workspaces: OwnedWorkspaces
     evaluation: Evaluation
     facts: RunFacts
     services: CoreServices
@@ -649,6 +803,37 @@ __all__ = [
 ]
 
 
+@dataclass(frozen=True, slots=True)
+class _ProviderAgents:
+    """The agent environment and the client of the roles that run on one provider."""
+
+    environment: AgentExecutionEnvironment
+    client: AgentClientProtocol
+
+
+def _provider_specs(base: AgentSpec, specs: Mapping[str, AgentSpec]) -> dict[str, AgentSpec]:
+    """One client spec per provider the roles use, carrying those roles' models and efforts.
+
+    A provider's client runs only its own roles, so a role's model belongs to the client of the
+    role's provider. A run whose plugin declares no role still gets the run's own provider.
+    """
+    providers = dict.fromkeys(spec.provider for spec in specs.values()) or {base.provider: None}
+    clients: dict[str, AgentSpec] = {}
+    for provider in providers:
+        mine = {role: spec for role, spec in specs.items() if spec.provider == provider}
+        first = next(iter(mine.values()), None)
+        clients[provider] = replace(
+            base,
+            provider=provider,
+            model=base.model if provider == base.provider or first is None else first.model,
+            role_models={role: spec.model for role, spec in mine.items() if spec.model},
+            role_reasoning_efforts={
+                role: spec.reasoning_effort for role, spec in mine.items() if spec.reasoning_effort
+            },
+        )
+    return clients
+
+
 def _candidate_agent_sandbox(runtime: WorkspaceRuntime, path: Path) -> DockerSandbox | None:
     """The container that mounts the candidate checked out at ``path``.
 
@@ -661,8 +846,8 @@ def _candidate_agent_sandbox(runtime: WorkspaceRuntime, path: Path) -> DockerSan
 def _require_supported_fallback(policy: QuotaPolicy, agent_specs: Mapping[str, AgentSpec]) -> None:
     """Reject a fallback a core run cannot honor, before the run starts.
 
-    A core run drives every role through one agent client bound to one provider, so it
-    cannot open a session on another provider. A fallback is therefore refused rather than
+    A core run fixes each role's provider when it starts (one agent client per provider), so
+    it cannot open a session on another provider. A fallback is therefore refused rather than
     accepted and ignored; a fallback that is a role's own provider is refused first, since
     it could never be a switch.
     """
@@ -676,8 +861,8 @@ def _require_supported_fallback(policy: QuotaPolicy, agent_specs: Mapping[str, A
             )
             raise ValueError(message)
     message = (
-        f"agent.quota.fallback_provider {policy.fallback.provider!r}: a run drives every role "
-        "through one agent client on one provider, so it cannot switch provider on a quota "
+        f"agent.quota.fallback_provider {policy.fallback.provider!r}: a run fixes each role's "
+        "provider when it starts, so it cannot switch provider on a quota "
         "stop; remove agent.quota.fallback_provider and fallback_model (policy = 'fallback' "
         "needs them, so use 'pause', 'wait' or 'fail')"
     )

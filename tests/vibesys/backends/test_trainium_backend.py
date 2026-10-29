@@ -74,6 +74,29 @@ class TestTrainiumSandbox:
         )
         assert isinstance(sb, LocalShellRunner)
 
+    def test_local_keeps_every_torchneuron_cache_under_the_run_log_dir(
+        self, tmp_path: Path
+    ) -> None:
+        # TorchNeuron's caches default to /tmp; a local run has no cache mounts,
+        # so each one must be redirected under the run's writable log dir.
+        impl = _make_backend(tmp_path)
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        sb = impl.make_sandbox(
+            SandboxKind.LOCAL,
+            host_workspace=str(workspace),
+            log_path=None,
+        )
+        assert isinstance(sb, LocalShellRunner)
+        env = sb.env
+        cache = tmp_path / "logs" / "neuron-compile-cache"
+        tmp = tmp_path / "logs" / "neuron-tmp"
+        assert env["TORCH_NEURONX_NEFF_CACHE_DIR"] == str(cache / "neff")
+        assert env["TORCH_NEURONX_HLO_CACHE_DIR"] == str(cache / "hlo")
+        assert env["NKI_TRACE_CACHE_URL"] == str(cache / "nki")
+        assert env["TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR"] == str(tmp / "neff-locks")
+        assert env["TMPDIR"] == str(tmp)
+
     def test_docker_forwards_neuron_devices_and_no_gpus(self, tmp_path: Path) -> None:
         docker = recording_docker_cli()
         impl = _make_backend(
@@ -103,8 +126,12 @@ class TestTrainiumSandbox:
         assert argv[argv.index("--shm-size") + 1] == "16g"
         assert any(mount.endswith(":/opt/neuron-compile-cache") for mount in mounts)
         assert any(mount.endswith(":/opt/neuron-tmp") for mount in mounts)
-        assert "NEURON_COMPILE_CACHE_URL=/opt/neuron-compile-cache" in env
+        assert "TORCH_NEURONX_NEFF_CACHE_DIR=/opt/neuron-compile-cache/neff" in env
+        assert "TORCH_NEURONX_HLO_CACHE_DIR=/opt/neuron-compile-cache/hlo" in env
+        assert "NKI_TRACE_CACHE_URL=/opt/neuron-compile-cache/nki" in env
+        assert "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR=/opt/neuron-tmp/neff-locks" in env
         assert "TMPDIR=/opt/neuron-tmp" in env
+        assert not any(item.startswith("NEURON_COMPILE_CACHE_URL=") for item in env)
 
     def test_docker_forwards_resources_to_the_sandbox(self, tmp_path: Path) -> None:
         docker = recording_docker_cli()

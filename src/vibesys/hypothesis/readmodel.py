@@ -103,7 +103,7 @@ class HypothesisView(BaseModel):
     perf_baseline_round: int | None = None
     perf_baseline_commit: str | None = None
     perf_delta_reason: PerfDeltaReason | None = None
-    kept: bool | None = None
+    best: bool | None = None
     strategy_disposition: str
     strategy_reason: str | None = None
     active: bool
@@ -309,7 +309,7 @@ def _hypothesis_view(hypothesis: Hypothesis, *, active_id: str | None) -> Hypoth
             _text(measurement.baseline_commit) if measurement is not None else None
         ),
         perf_delta_reason=HypothesisSearch.delta_reason(hypothesis),
-        kept=hypothesis.candidate_retained,
+        best=hypothesis.candidate_retained,
         strategy_disposition=hypothesis.strategy.value,
         strategy_reason=hypothesis.strategy_reason,
         active=hypothesis.hypothesis_id == active_id,

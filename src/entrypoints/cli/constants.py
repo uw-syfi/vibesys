@@ -9,10 +9,7 @@ from __future__ import annotations
 _OUTER_LOOPS = ("agent", "profile-guided", "dynamic", "plain", "evolve")
 
 
-_DEFAULT_CONFIG_TEXT = '[model]\nname = "gpt-5.4"\n'
-
-
-_IGNORED_CONFIG_SECTIONS = frozenset({"tui"})
+_IGNORED_CONFIG_SECTIONS = frozenset()
 
 
 _RUN_ENVIRONMENT_OPTION_CLI_FIELDS: dict[str, str] = {

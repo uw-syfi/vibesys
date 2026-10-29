@@ -5,13 +5,15 @@ from __future__ import annotations
 import json
 import os
 import stat
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
+from tests.server.support import operator_dialer
 from tests.support.task_project import write_task
 
 from entrypoints import launcher
@@ -19,7 +21,7 @@ from entrypoints.detached_run import SERVER_EXITED, RecordPublisher
 from entrypoints.detached_run import main as detached_run_main
 from entrypoints.instances import main as instances_main
 from entrypoints.instances import run
-from entrypoints.launcher import _headless_requested
+from entrypoints.launcher import headless_command
 from entrypoints.server import (
     _DetachedGatewayEffects,
     _headless_argv,
@@ -43,12 +45,16 @@ from server.host_api import (
     StartupStage,
     StopOutcome,
 )
+from server.host_run_reads import ProjectRun, run_summaries
 from server.instances import ControlSocketStopRequester
 from server.registry import (
+    INSTANCES_DIRECTORY,
+    READERS_DIRECTORY,
     TOMBSTONE_RETENTION_SECONDS,
     FakeInstanceLogs,
     FakeInstanceMetadataStore,
     FakeInstanceStore,
+    FakeStopIntents,
     FileInstanceLogs,
     FileInstanceMetadataStore,
     FileInstanceStore,
@@ -60,7 +66,7 @@ from server.registry import (
     driving,
     instance_root,
 )
-from vibesys.api import CoreEvent, RunRequest, RunResult
+from vibesys.api import CoreEvent, RunRequest, RunResult, StopMode
 from vibesys.api.testing import FakeRuns
 from vibesys.orchestration.dynamic.launch import DynamicLaunch
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
@@ -97,8 +103,8 @@ class _FinishedSession:
     async def await_result(self) -> RunResult:
         return RunResult(run_id=self._run_id, loop="plain", succeeded=True)
 
-    def stop(self) -> None:
-        pass
+    def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
+        del mode
 
     def close(self) -> None:
         pass
@@ -166,7 +172,17 @@ class _ChildEffects(_DetachedGatewayEffects):
     (``--run-id``) in the first record it publishes.
     """
 
-    def __init__(self, root: Path, *, serves: bool, exit_status: int | None = None) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        serves: bool,
+        exit_status: int | None = None,
+        output: bytes = b"child output\n",
+        registry_directory: str = INSTANCES_DIRECTORY,
+    ) -> None:
+        self.output = output
+        self.registry_directory = registry_directory
         self.root = root
         self.serves = serves
         self.child = _Child(exit_status)
@@ -178,12 +194,12 @@ class _ChildEffects(_DetachedGatewayEffects):
     def spawn(self, command: list[str], environment: dict[str, str], output: BinaryIO) -> _Child:
         self.command = command
         self.environment = environment
-        output.write(b"child output\n")
+        output.write(self.output)
         output.flush()
         instance_id = command[command.index("--instance-id") + 1]
         socket_path = command[command.index("--control-socket") + 1]
         run_id = command[command.index("--run-id") + 1]
-        hold = FileInstanceStore(self.root).hold(instance_id)
+        hold = FileInstanceStore(self.root, directory=self.registry_directory).hold(instance_id)
         self.holds.append(hold)
         status = InstanceStatus.SERVING if self.serves else InstanceStatus.STARTING
         hold.publish(_record(instance_id, socket_path, status, run_id))
@@ -235,6 +251,72 @@ def test_a_detached_launch_reports_a_child_that_exits_before_serving(tmp_path: P
         _spawn_detached_instance(["--local", "--run-id", _RUN_ID], tmp_path, effects)
 
 
+class _SlowStartEffects(_ChildEffects):
+    """A child that is alive from the start but publishes its record only after *delay* seconds."""
+
+    def __init__(self, root: Path, *, delay: float) -> None:
+        super().__init__(root, serves=False)
+        self.delay = delay
+        self.ready_at: float | None = None
+
+    def spawn(self, command: list[str], environment: dict[str, str], output: BinaryIO) -> _Child:
+        child = super().spawn(command, environment, output)
+        self.ready_at = self.clock.now() + self.delay
+        self._command_arguments = command
+        return child
+
+    def sleep(self, seconds: float) -> None:
+        super().sleep(seconds)
+        if self.ready_at is not None and self.clock.now() >= self.ready_at:
+            command = self._command_arguments
+            self.ready_at = None
+            instance_id = command[command.index("--instance-id") + 1]
+            self.holds[0].publish(
+                _record(
+                    instance_id,
+                    command[command.index("--control-socket") + 1],
+                    InstanceStatus.SERVING,
+                    command[command.index("--run-id") + 1],
+                )
+            )
+
+
+@pytest.mark.regression
+@given(delay=st.floats(min_value=0, max_value=120, allow_nan=False))
+@example(delay=26.0)
+def test_a_cold_start_that_is_slow_but_alive_is_not_given_up_on(delay: float) -> None:
+    """A first start after an install took 26 s and a 10 s bound failed it with an empty log."""
+    with tempfile.TemporaryDirectory() as directory:
+        effects = _SlowStartEffects(Path(directory), delay=delay)
+
+        record = _spawn_detached_instance(
+            ["--local", "--run-id", _RUN_ID], Path(directory), effects
+        )
+
+        assert record.status is InstanceStatus.SERVING
+        assert effects.child.terminated is False
+        effects.holds[0].release()
+
+
+def test_a_start_that_hangs_says_in_its_log_and_error_that_it_was_alive(tmp_path: Path) -> None:
+    effects = _ChildEffects(tmp_path, serves=False)
+
+    with pytest.raises(RuntimeError, match=r"(?s)did not become ready.*still running, not crashed"):
+        _spawn_detached_instance(["--local", "--run-id", _RUN_ID], tmp_path, effects)
+
+    log = next(tmp_path.glob("runs/*/server.log")).read_text()
+    assert log.startswith("child output\n")
+    assert "launcher stopped this server" in log
+    effects.holds[0].release()
+
+
+def test_a_child_that_crashes_without_output_says_its_log_was_empty(tmp_path: Path) -> None:
+    effects = _ChildEffects(tmp_path, serves=False, exit_status=1, output=b"")
+
+    with pytest.raises(RuntimeError, match=r"exited with status 1.*wrote nothing"):
+        _spawn_detached_instance(["--local", "--run-id", _RUN_ID], tmp_path, effects)
+
+
 def test_a_detached_launch_stops_a_child_that_never_serves(tmp_path: Path) -> None:
     effects = _ChildEffects(tmp_path, serves=False)
 
@@ -248,6 +330,63 @@ def test_a_detached_launch_stops_a_child_that_never_serves(tmp_path: Path) -> No
 def test_detached_server_flags_never_reach_run_parsing() -> None:
     assert _headless_argv(["--detach", "--instance-id", INSTANCE, "--local"]) == ["--local"]
     assert _headless_argv([f"--instance-id={INSTANCE}", "--local"]) == ["--local"]
+
+
+def test_reopen_options_never_reach_run_parsing() -> None:
+    assert _headless_argv(["--reopen", "/logs", "--local"]) == ["--local"]
+    assert _headless_argv(["--reopen=/logs", "--local"]) == ["--local"]
+
+
+def test_a_detached_reopen_starts_a_reader_registered_apart_from_the_runs(
+    resumable: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The read-only server of a run's journal is launched without parsing a run to start."""
+    effects = _ChildEffects(resumable, serves=True, registry_directory=READERS_DIRECTORY)
+
+    _launch_detached_instance(["--detach", "--reopen", "/logs/run", "--run-id", _RUN_ID], effects)
+
+    record = LiveInstanceRecord.model_validate_json(capsys.readouterr().out)
+    assert record.run_id == _RUN_ID
+    assert effects.command[1:3] == ["-m", "entrypoints.detached_run"]
+    assert "--reopen" in effects.command
+    readers = LiveRegistry(FileInstanceStore(resumable, directory=READERS_DIRECTORY), ManualClock())
+    runs = LiveRegistry(FileInstanceStore(resumable), ManualClock())
+    assert [each.id for each in readers.list().instances] == [record.id]
+    assert runs.list().instances == ()
+    effects.holds[0].release()
+
+
+def test_a_detached_reopen_does_not_wait_for_a_live_server_of_the_same_run(
+    resumable: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    live = FileInstanceStore(resumable).hold(INSTANCE)
+    live.publish(_record(INSTANCE, "/run.sock", InstanceStatus.SERVING))
+    effects = _ChildEffects(resumable, serves=True, registry_directory=READERS_DIRECTORY)
+
+    _launch_detached_instance(["--detach", "--reopen", "/logs/run", "--run-id", _RUN_ID], effects)
+
+    record = LiveInstanceRecord.model_validate_json(capsys.readouterr().out)
+    assert record.id != INSTANCE
+    effects.holds[0].release()
+    live.release()
+
+
+def test_a_detached_reopen_without_a_valid_run_is_refused_before_any_spawn(
+    resumable: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    effects = _ChildEffects(resumable, serves=True, registry_directory=READERS_DIRECTORY)
+
+    for arguments in (
+        ["--detach", "--reopen", "/logs/run"],
+        ["--detach", "--reopen", "/l", "--run-id", "../x"],
+    ):
+        with pytest.raises(SystemExit) as exit_info:
+            _launch_detached_instance(arguments, effects)
+        assert exit_info.value.code == 2
+        failure = DetachedLaunchFailure.model_validate_json(capsys.readouterr().out)
+        assert failure.code == "invalid_arguments"
+
+    assert effects.command == []
 
 
 def test_a_detached_launch_chooses_its_own_control_socket(
@@ -424,7 +563,7 @@ def test_driving_finds_exactly_a_live_server_with_that_run(run_ids: list[str], w
 
 
 def test_the_launcher_routes_detached_runs_to_python() -> None:
-    assert _headless_requested(["--detach"]) is True
+    assert headless_command(["--detach"])[2] == "entrypoints.server"
 
 
 def test_the_launcher_routes_input_checks_to_python() -> None:
@@ -462,6 +601,7 @@ def _run(
     metadata: FakeInstanceMetadataStore | None = None,
 ) -> tuple[int, str]:
     clock = ManualClock()
+    threads = SimThreads()
     return run(
         argv,
         registry=LiveRegistry(store, ManualClock()),
@@ -474,10 +614,15 @@ def _run(
         # Nothing listens on the simulated network, so every stop falls back
         # to the signal path, as it does for a server that does not answer.
         effects=StopEffects(
-            ControlSocketStopRequester(SimNetwork(SimThreads()), clock=ManualClock()),
+            ControlSocketStopRequester(
+                operator_dialer(SimNetwork(threads)),
+                clock=ManualClock(),
+                deadline_clock=threads,
+            ),
             FakeProcessSignaller(set()),
             clock,
             clock.advance,
+            FakeStopIntents(),
         ),
     )
 
@@ -506,7 +651,7 @@ def test_list_json_is_one_versioned_document() -> None:
     assert code == 0
     listing = InstanceList.model_validate_json(output)
     assert [record.id for record in listing.instances] == [INSTANCE]
-    assert json.loads(output)["version"] == 4
+    assert json.loads(output)["version"] == 5
 
 
 def test_list_human_names_each_server_or_says_there_are_none() -> None:
@@ -634,7 +779,8 @@ def test_the_command_reads_this_users_runtime_root(
     assert instances_main(["list", "--json"]) == 0
     assert InstanceList.model_validate_json(capsys.readouterr().out).instances == ()
     assert stat.S_IMODE((tmp_path / "vibesys").stat().st_mode) == 0o700
-    assert [entry.name for entry in (tmp_path / "vibesys").iterdir()] == ["instances"]
+    # A client never creates the operator key: only a server does, as it starts.
+    assert sorted(entry.name for entry in (tmp_path / "vibesys").iterdir()) == ["instances"]
 
 
 def _starting(instance_id: str) -> LiveInstanceRecord:
@@ -692,11 +838,12 @@ def test_a_detached_server_record_follows_its_run_and_names_it_throughout() -> N
 
 
 def test_resolved_project_replaces_the_launch_directory_before_listening(tmp_path: Path) -> None:
-    """A live inspection sees the parsed project in both identity contracts."""
+    """A live inspection stores the opened project's root in both identity contracts."""
     launch_directory = tmp_path / "launcher-cwd"
     project = tmp_path / "selected-project"
     launch_directory.mkdir()
     project.mkdir()
+    opened = Project.open(project)
     store = FakeInstanceStore()
     metadata = FakeInstanceMetadataStore()
     clock = ManualClock()
@@ -707,7 +854,7 @@ def test_resolved_project_replaces_the_launch_directory_before_listening(tmp_pat
 
     with registry.register(INSTANCE) as hold:
         publisher = RecordPublisher(hold, starting, clock, metadata=metadata, threads=SimThreads())
-        publisher.resolved(project_root=project, task="latency")
+        publisher.resolved(project_root=opened.root, task="latency")
         publisher.listening()
 
         inspection = InstanceInspector(store, FakeInstanceLogs(), metadata, ManualClock()).inspect(
@@ -716,9 +863,50 @@ def test_resolved_project_replaces_the_launch_directory_before_listening(tmp_pat
         assert inspection.state.value == "live"
         assert inspection.record is not None
         assert inspection.metadata is not None
-        assert inspection.record.project_root == str(project.resolve())
-        assert inspection.metadata.project_root == str(project.resolve())
+        assert inspection.record.project_root == str(opened.root)
+        assert inspection.metadata.project_root == str(opened.root)
         publisher.end()
+
+
+def test_a_tilde_path_and_a_symlink_publish_the_opened_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One directory: ``Project.root`` after open, for a ``~`` spelling and a symlink."""
+    home = tmp_path / "home"
+    real = home / "proj"
+    real.mkdir(parents=True)
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+    monkeypatch.setenv("HOME", str(home))
+    opened = Project.open("~/proj")
+    assert Project.open(link).root == opened.root
+
+    store = FakeInstanceStore()
+    metadata = FakeInstanceMetadataStore()
+    clock = ManualClock()
+    registry = LiveRegistry(store, clock)
+    with registry.register(INSTANCE) as hold:
+        publisher = RecordPublisher(
+            hold, _starting(INSTANCE), clock, metadata=metadata, threads=SimThreads()
+        )
+        publisher.resolved(project_root=opened.root, task="latency")
+        record = registry.find(INSTANCE)
+        assert record is not None
+        assert record.project_root == str(opened.root)
+        publisher.end()
+
+    listing = InstanceList(instances=(record,))
+    run = ProjectRun(
+        run_id=record.run_id,
+        task="latency",
+        display_name="latency",
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    joined = run_summaries(opened.root, (run,), listing)
+    assert joined.project_root == str(opened.root)
+    assert joined.runs[0].instance_id == INSTANCE
+    missed = run_summaries(link, (run,), listing)
+    assert missed.runs[0].instance_id is None
 
 
 _EARLY_FAILURE = FailureReason(
@@ -812,7 +1000,7 @@ def test_detached_start_retains_resolved_identity_for_later_inspection(
     monkeypatch.setenv("VIBESYS_DETACHED_CHILD", "1")
     root = instance_root(os.environ, os.getuid())
     (root / "runs" / INSTANCE).mkdir(parents=True, mode=0o700)
-    socket = tmp_path / "control.sock"
+    socket = root / "control.sock"
 
     detached_run_main(
         [

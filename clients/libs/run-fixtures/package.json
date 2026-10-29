@@ -1,0 +1,39 @@
+{
+  "name": "@vibesys/run-fixtures",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "vibesys": {
+    "layer": "domain",
+    "entries": {
+      ".": "neutral"
+    }
+  },
+  "exports": {
+    ".": {
+      "@vibesys/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/.*.tsbuildinfo"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.lib.json",
+    "check": "tsc -b",
+    "test": "node ../../tools/scripts/run_bun_tests.mjs ./src"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "@vibesys/run-state": "workspace:*",
+    "@vibesys/store": "workspace:*",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@vibesys/contracts": "workspace:*",
+    "@bufbuild/protobuf": "2.16.0",
+    "@vibesys/proto": "workspace:*"
+  }
+}

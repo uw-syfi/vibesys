@@ -10,7 +10,7 @@ from tests.support.task_project import write_task
 
 from entrypoints.cli import build_run_request, parse_cli_invocation
 from entrypoints.headless import main
-from vibesys.api import ConfigurationError, ProfilerKind
+from vibesys.api import ConfigurationError, ProfilerKind, agent_spec_from_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -165,3 +165,62 @@ def test_remote_resume_rejects_unknown_local_config_before_clone(
         )
     assert raised.value.diagnostic.code == "config_load_failed"
     assert not (tmp_path / "runs").exists()
+
+
+def test_claude_without_a_config_runs_a_claude_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _input_project(tmp_path / "input")
+    monkeypatch.chdir(tmp_path)  # no agent.toml in the launch directory
+    request = build_run_request(
+        parse_cli_invocation(["--input", str(project), "--cli-provider", "claude"])
+    )
+    spec = agent_spec_from_config(request.config, provider=request.cli_provider)
+    assert (spec.provider, spec.model) == ("claude", "claude-opus-5")
+
+
+@pytest.mark.parametrize("loop", ["agent", "plain", "evolve"])
+def test_unvetted_model_precedes_unauthenticated_repository_setup(
+    tmp_path: Path, loop: str
+) -> None:
+    invocation = parse_cli_invocation(
+        [
+            "--outer-loop",
+            loop,
+            "--input",
+            str(_input_project(tmp_path / "input")),
+            "--runs-dir",
+            str(tmp_path / "runs"),
+            "--cli-provider",
+            "claude",
+            "--model",
+            "gpt-5.4",
+        ]
+    )
+    with pytest.raises(ConfigurationError, match="claude-opus-5") as raised:
+        build_run_request(invocation)
+    assert raised.value.diagnostic.code == "agent_harness_unvetted"
+    assert "--model" in raised.value.diagnostic.message
+    assert not (tmp_path / "runs").exists()
+
+
+def test_the_terminal_may_opt_out_of_the_vetted_models(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _input_project(tmp_path / "input")
+    monkeypatch.chdir(tmp_path)
+    request = build_run_request(
+        parse_cli_invocation(
+            [
+                "--input",
+                str(project),
+                "--cli-provider",
+                "claude",
+                "--model",
+                "claude-next",
+                "--allow-unvetted-model",
+            ]
+        )
+    )
+    assert request.allow_unvetted_model
+    assert request.config.model.name == "claude-next"

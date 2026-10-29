@@ -516,7 +516,7 @@ class TestEventStore:
             def __enter__(self) -> FailingCloseStream:
                 return self
 
-            def write(self, _text: str) -> None:
+            def write(self, _data: bytes) -> None:
                 return None
 
             def __exit__(
@@ -533,7 +533,7 @@ class TestEventStore:
             mode: str = "r",
             **options: Unpack[_PathOpenOptions],
         ) -> TextIO | FailingCloseStream:
-            if target == path and mode == "a":
+            if target == path and mode == "ab":
                 return FailingCloseStream()
             return cast(
                 "TextIO",

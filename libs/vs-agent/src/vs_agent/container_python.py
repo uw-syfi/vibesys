@@ -37,6 +37,7 @@ CONTAINER_SERVER_PACKAGES: tuple[str, ...] = (
     "vs-evaluator-protocol",
     "vs-mcp",
     "vs-project",
+    "vs-redaction",
     "vs-runtime",
     "vs-sandbox",
     "vs-sim",

@@ -1,0 +1,379 @@
+[
+  {
+    "id": "hosts-v1-empty",
+    "kind": "hosts",
+    "source": {
+      "version": 1,
+      "hosts": {}
+    },
+    "protobufHex": "0801",
+    "expected": {
+      "version": 2,
+      "hosts": {}
+    }
+  },
+  {
+    "id": "hosts-v2",
+    "kind": "hosts",
+    "source": {
+      "version": 2,
+      "hosts": {
+        "local": {
+          "checkout": "/project"
+        },
+        "ssh:host-a": {
+          "checkout": "~/checkout",
+          "runTransportV2": false
+        },
+        "ssh:user@host-a:22": {
+          "checkout": "~",
+          "runTransportV2": true
+        }
+      }
+    },
+    "protobufHex": "080112130a056c6f63616c120a0a082f70726f6a656374121a0a0a7373683a686f73742d61120c0a0a7e2f636865636b6f757412190a127373683a7573657240686f73742d613a323212030a017e",
+    "expected": {
+      "version": 2,
+      "hosts": {
+        "local": {
+          "checkout": "/project"
+        },
+        "ssh:host-a": {
+          "checkout": "~/checkout"
+        },
+        "ssh:user@host-a:22": {
+          "checkout": "~"
+        }
+      }
+    },
+    "retainedProtobufHex": "080112130a056c6f63616c120a0a082f70726f6a656374121c0a0a7373683a686f73742d61120e0a0a7e2f636865636b6f75741000121b0a127373683a7573657240686f73742d613a323212050a017e1001"
+  },
+  {
+    "id": "preferences-v1",
+    "kind": "preferences",
+    "source": {
+      "version": 1,
+      "appearance": {
+        "mode": "system",
+        "light": "paper",
+        "dark": "ink"
+      },
+      "notifications": {
+        "enabled": true
+      },
+      "archived": [
+        {
+          "host": "local",
+          "runId": "run-a"
+        }
+      ]
+    },
+    "protobufHex": "080112060801100118041801220e0a056c6f63616c120572756e2d61",
+    "expected": {
+      "version": 1,
+      "appearance": {
+        "mode": "system",
+        "light": "paper",
+        "dark": "ink"
+      },
+      "notifications": {
+        "enabled": true
+      },
+      "archived": [
+        {
+          "host": "local",
+          "runId": "run-a"
+        }
+      ]
+    }
+  },
+  {
+    "id": "recent-v1",
+    "kind": "recent",
+    "source": {
+      "version": 1,
+      "runs": [
+        {
+          "host": "ssh:host-a",
+          "project": "~/project",
+          "task": "task-a",
+          "runId": "run-a",
+          "attachedAt": 123456,
+          "instanceId": "0123456789ab"
+        },
+        {
+          "host": "ssh:host-a",
+          "project": "~/project",
+          "task": "task-a",
+          "runId": null,
+          "attachedAt": 123456,
+          "instanceId": "0123456789ab"
+        }
+      ]
+    },
+    "protobufHex": "0801123f0a130a0a7373683a686f73742d61120572756e2d6112097e2f70726f6a6563741a067461736b2d61220c30313233343536373839616229000000000024fe40",
+    "expected": {
+      "file": {
+        "version": 4,
+        "runs": [
+          {
+            "host": "ssh:host-a",
+            "project": "~/project",
+            "task": "task-a",
+            "runId": "run-a",
+            "instanceId": "0123456789ab",
+            "attachedAt": 123456
+          }
+        ]
+      },
+      "skipped": [],
+      "invalid": []
+    }
+  },
+  {
+    "id": "recent-v2",
+    "kind": "recent",
+    "source": {
+      "version": 2,
+      "runs": [
+        {
+          "host": "ssh:host-a",
+          "project": "~/project",
+          "task": "task-a",
+          "runId": "run-a",
+          "attachedAt": 123456
+        }
+      ]
+    },
+    "protobufHex": "080112310a130a0a7373683a686f73742d61120572756e2d6112097e2f70726f6a6563741a067461736b2d6129000000000024fe40",
+    "expected": {
+      "file": {
+        "version": 4,
+        "runs": [
+          {
+            "host": "ssh:host-a",
+            "project": "~/project",
+            "task": "task-a",
+            "runId": "run-a",
+            "instanceId": null,
+            "attachedAt": 123456
+          }
+        ]
+      },
+      "skipped": [],
+      "invalid": []
+    }
+  },
+  {
+    "id": "recent-v3",
+    "kind": "recent",
+    "source": {
+      "version": 3,
+      "runs": [
+        {
+          "host": "ssh:host-a",
+          "project": "~/project",
+          "task": "task-a",
+          "runId": "run-a",
+          "attachedAt": 123456,
+          "instanceId": "0123456789ab"
+        }
+      ]
+    },
+    "protobufHex": "0801123f0a130a0a7373683a686f73742d61120572756e2d6112097e2f70726f6a6563741a067461736b2d61220c30313233343536373839616229000000000024fe40",
+    "expected": {
+      "file": {
+        "version": 4,
+        "runs": [
+          {
+            "host": "ssh:host-a",
+            "project": "~/project",
+            "task": "task-a",
+            "runId": "run-a",
+            "instanceId": "0123456789ab",
+            "attachedAt": 123456
+          }
+        ]
+      },
+      "skipped": [],
+      "invalid": []
+    }
+  },
+  {
+    "id": "recent-v4",
+    "kind": "recent",
+    "source": {
+      "version": 4,
+      "runs": [
+        {
+          "host": "ssh:host-a",
+          "project": "~/project",
+          "task": "task-a",
+          "runId": "run-a",
+          "attachedAt": 123456,
+          "instanceId": "0123456789ab",
+          "start": {
+            "harness": {
+              "provider": "provider-a",
+              "model": "model-a"
+            },
+            "options": {
+              "rounds": 3,
+              "time_limit_s": 60,
+              "results": "keep",
+              "roles": [
+                {
+                  "role": "judge",
+                  "model": null,
+                  "reasoning_effort": "high"
+                }
+              ]
+            },
+            "agents": {
+              "judge": {
+                "provider": "provider-b",
+                "model": "model-b"
+              }
+            },
+            "measure_on": {
+              "kind": "slurm",
+              "cluster": "cluster-a"
+            },
+            "args": [
+              "--flag",
+              "é"
+            ]
+          }
+        }
+      ]
+    },
+    "protobufHex": "080112a4010a130a0a7373683a686f73742d61120572756e2d6112097e2f70726f6a6563741a067461736b2d61220c30313233343536373839616229000000000024fe4032630a150a0a70726f76696465722d6112076d6f64656c2d6112110803103c180122090a056a7564676518041a1e0a056a7564676512150a0a70726f76696465722d6212076d6f64656c2d62220b1209636c75737465722d612a062d2d666c61672a02c3a9",
+    "expected": {
+      "file": {
+        "version": 4,
+        "runs": [
+          {
+            "host": "ssh:host-a",
+            "project": "~/project",
+            "task": "task-a",
+            "runId": "run-a",
+            "instanceId": "0123456789ab",
+            "attachedAt": 123456,
+            "start": {
+              "harness": {
+                "provider": "provider-a",
+                "model": "model-a"
+              },
+              "options": {
+                "rounds": 3,
+                "time_limit_s": 60,
+                "results": "keep",
+                "roles": [
+                  {
+                    "role": "judge",
+                    "model": null,
+                    "reasoning_effort": "high"
+                  }
+                ]
+              },
+              "agents": {
+                "judge": {
+                  "provider": "provider-b",
+                  "model": "model-b"
+                }
+              },
+              "measure_on": {
+                "kind": "slurm",
+                "cluster": "cluster-a"
+              },
+              "args": [
+                "--flag",
+                "é"
+              ]
+            }
+          }
+        ]
+      },
+      "skipped": [],
+      "invalid": []
+    }
+  },
+  {
+    "id": "recent-v4-retained-invalid",
+    "kind": "recent",
+    "source": {
+      "version": 4,
+      "runs": [
+        {
+          "host": "ssh:host-a",
+          "project": "~/project",
+          "task": "task-a",
+          "runId": "run-a",
+          "attachedAt": 123456,
+          "instanceId": "0123456789ab"
+        },
+        {
+          "host": "ssh:host-a",
+          "project": "~/project",
+          "task": "task-a",
+          "runId": "run-a",
+          "attachedAt": 123456,
+          "instanceId": "0123456789ab",
+          "unexpected": true
+        },
+        {
+          "host": "ssh:host-a",
+          "project": "~/project",
+          "task": "task-a",
+          "runId": "run-b",
+          "attachedAt": 123456,
+          "instanceId": "0123456789ab"
+        }
+      ]
+    },
+    "protobufHex": "0801123f0a130a0a7373683a686f73742d61120572756e2d6112097e2f70726f6a6563741a067461736b2d61220c30313233343536373839616229000000000024fe40123f0a130a0a7373683a686f73742d61120572756e2d6212097e2f70726f6a6563741a067461736b2d61220c30313233343536373839616229000000000024fe401a92010801128d017b22686f7374223a227373683a686f73742d61222c2270726f6a656374223a227e2f70726f6a656374222c227461736b223a227461736b2d61222c2272756e4964223a2272756e2d61222c2261747461636865644174223a3132333435362c22696e7374616e63654964223a22303132333435363738396162222c22756e6578706563746564223a747275657d",
+    "expected": {
+      "file": {
+        "version": 4,
+        "runs": [
+          {
+            "host": "ssh:host-a",
+            "project": "~/project",
+            "task": "task-a",
+            "runId": "run-a",
+            "instanceId": "0123456789ab",
+            "attachedAt": 123456
+          },
+          {
+            "host": "ssh:host-a",
+            "project": "~/project",
+            "task": "task-a",
+            "runId": "run-b",
+            "instanceId": "0123456789ab",
+            "attachedAt": 123456
+          }
+        ]
+      },
+      "skipped": [
+        {
+          "index": 1,
+          "reason": "recent.json: runs[1].unexpected is not a known field"
+        }
+      ],
+      "invalid": [
+        {
+          "raw": {
+            "host": "ssh:host-a",
+            "project": "~/project",
+            "task": "task-a",
+            "runId": "run-a",
+            "attachedAt": 123456,
+            "instanceId": "0123456789ab",
+            "unexpected": true
+          },
+          "after": 1
+        }
+      ]
+    }
+  }
+]

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import selectors
 import signal
 import threading
 from pathlib import Path
@@ -35,6 +36,7 @@ from vs_sim.api.testing import (
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+    from types import FrameType
 
 pytest_plugins = ["pytester"]
 
@@ -265,10 +267,23 @@ def test_the_header_names_the_seed_policy(suite: pytest.Pytester) -> None:
 
 
 def _alarm_during_a_worker_wait() -> str:
-    """What ``timeout_method = "signal"`` does: SIGALRM raises from its handler in the main thread."""
-    release = threading.Event()
+    """What ``timeout_method = "signal"`` does: SIGALRM raises from its handler in the main thread.
 
-    def on_alarm(_number: int, _frame: object) -> None:
+    The bound is meant to land while the run is stuck on its worker thread. A fixed timer
+    landed wherever a slow child happened to be (starting the loop, submitting the call,
+    importing), and an exception raised there left the loop unable to close: the child hung
+    for the 60 s hang guard in CI, or reported a deadlock. The handler raises only once the
+    worker is waiting and the main thread is blocked in the loop's selector, and otherwise
+    sets the timer again, so where it lands no longer depends on how fast the child runs.
+    """
+    release = threading.Event()
+    holding = threading.Event()
+
+    def on_alarm(_number: int, frame: FrameType | None) -> None:
+        blocked = frame is not None and frame.f_code.co_filename == selectors.__file__
+        if not (holding.is_set() and blocked):
+            signal.setitimer(signal.ITIMER_REAL, 0.01)
+            return
         message = "the test bound"
         raise TimeoutError(message)
 
@@ -276,6 +291,7 @@ def _alarm_during_a_worker_wait() -> str:
     signal.setitimer(signal.ITIMER_REAL, 0.05)
 
     def hold() -> None:
+        holding.set()
         release.wait(60)
 
     async def main() -> None:
@@ -732,7 +748,7 @@ def test_a_test_whose_product_code_swallows_a_refused_process_start_still_fails(
         """
         from pathlib import Path
 
-        from vs_sim.api import ProcessSpec
+        from vs_sim.api import DISCARD, ProcessSpec
         from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher
 
         def best_effort_cleanup(run):
@@ -744,7 +760,7 @@ def test_a_test_whose_product_code_swallows_a_refused_process_start_still_fails(
 
         def test_swallowed_run_refusal():
             spec = ProcessSpec(argv=("docker", "rm", "x"))
-            assert best_effort_cleanup(lambda: NO_PROCESSES.run(spec, timeout=None)) == "cleanup skipped"
+            assert best_effort_cleanup(lambda: NO_PROCESSES.run(spec, timeout=None, output=DISCARD)) == "cleanup skipped"
 
         def test_swallowed_piped_refusal():
             launcher = FakePipedProcessLauncher()

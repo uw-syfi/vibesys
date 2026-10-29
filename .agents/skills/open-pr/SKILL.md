@@ -51,6 +51,11 @@ uv run pytest
 
    - Run only the checks the change can affect; CI runs the rest. If a check
      you need cannot run, say so in the PR body.
+   - For a change to the TypeScript clients, run `./scripts/check_clients.sh` before
+     pushing: it runs CI's client checks, including the gallery comparison in
+     CI's Linux image (needs Docker); `./scripts/install_pre_push_hook.sh` installs it as an
+     opt-in pre-push hook. For a change to what a user sees on the
+     desktop, also use the `verify-desktop-ui` skill and fill the Screens field.
 
 6. Commit intentionally:
    - Stage only the PR's files.

@@ -40,26 +40,36 @@ from agentshim.testing import (
 )
 from hypothesis import given
 from hypothesis import strategies as st
+from pydantic import BaseModel
 
 from vibesys.events import CommandResultPayload
 from vibesys.orchestration.multi.models import ImplementerResponse, JudgeResponse
 
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent import session_launch as subject
+
+# test-isolation: timeout translation is the boundary this launcher test exercises
+from vs_agent import shim_translation, shim_turns
 from vs_agent.api import (
     CONTAINER_PYTHON,
+    MAX_WHITESPACE_RUN,
     NULL_AGENT_EVENT_SINK,
     AgentClient,
     AgentEvent,
     AgentEventKind,
     AgentOutputSchemaError,
+    AgentQuotaError,
     AgentSessionKey,
+    AgentTurnResult,
     AgentTurnTimeoutError,
+    AgentUsage,
     MCPServerSpec,
+    QuotaCondition,
     SessionResumeError,
     SessionScope,
     container_import_roots,
 )
+from vs_agent.api.testing import FakeProvider
 
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent.contracts import (
@@ -1247,9 +1257,10 @@ def test_a_fresh_turn_that_fails_is_not_retried(
     del sandbox_builds
     session, fake = _session(tmp_path, provider, FakeRun(returncode=1, stderr=["boom\n"]))
 
-    with pytest.raises(agentshim.CliExitError):
+    with pytest.raises(agentshim.CliExitError) as excinfo:
         session.run_turn(AgentTurnRequest(message="one"))
 
+    assert not isinstance(excinfo.value, AgentQuotaError)
     assert len(fake.requests) == 1
 
 
@@ -1331,10 +1342,13 @@ def test_a_transient_error_that_outlasts_every_delay_propagates(
         transient_retry_delays=delays,
     )
 
-    with pytest.raises(agentshim.CliExitError) as excinfo:
+    with pytest.raises(AgentQuotaError) as excinfo:
         session.run_turn(AgentTurnRequest(message="one"))
 
-    assert excinfo.value.kind is _TRANSIENT
+    # It reaches the caller as an outage, for the run's capacity gate to wait out.
+    assert excinfo.value.condition is QuotaCondition.UNAVAILABLE
+    assert isinstance(excinfo.value.__cause__, agentshim.CliExitError)
+    assert excinfo.value.__cause__.kind is _TRANSIENT
     # The first attempt and one retry per delay.
     assert len(fake.requests) == 1 + len(delays)
 
@@ -1385,7 +1399,7 @@ def test_a_resumed_turn_that_exhausts_its_retries_keeps_the_conversation(
         transient_retry_delays=(),
     )
     session.run_turn(AgentTurnRequest(message="one"))
-    with pytest.raises(agentshim.CliExitError):
+    with pytest.raises(AgentQuotaError):
         session.run_turn(AgentTurnRequest(message="two"))
 
     result = session.run_turn(AgentTurnRequest(message="three"))
@@ -1394,13 +1408,47 @@ def test_a_resumed_turn_that_exhausts_its_retries_keeps_the_conversation(
     assert "s-1" in fake.requests[2].argv
 
 
+@pytest.mark.regression
+@pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)
+def test_a_sustained_outage_reaches_the_caller_after_one_attempt(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """The production schedule hides no retry of a send from the capacity gate.
+
+    Before (S179), five retries hid about fifteen minutes of every send, which the gate could
+    neither see nor keep off the turn's limit; one 30 s retry still hid a second CLI attempt
+    (review of #3283, weak spot 1).
+    """
+    del sandbox_builds
+    session, fake = _session(
+        tmp_path,
+        provider,
+        lambda _request: scripted_failure(provider, _TRANSIENT),
+        transient_retry_delays=subject.TRANSIENT_RETRY_DELAYS_S,
+    )
+
+    with pytest.raises(AgentQuotaError) as excinfo:
+        session.run_turn(AgentTurnRequest(message="one"))
+
+    assert excinfo.value.condition is QuotaCondition.UNAVAILABLE
+    assert len(fake.requests) == 1
+    assert subject.TRANSIENT_RETRY_DELAYS_S == ()
+
+
 @pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)
 def test_cancel_stops_a_turn_waiting_out_a_transient_error(
     sandbox_builds: list[dict[str, Any]],
     tmp_path: Path,
     provider: str,
 ) -> None:
-    """A cancelled turn raises the provider error instead of retrying it."""
+    """A cancelled turn ends instead of retrying, with the capacity type of its failure.
+
+    Before (S179), a cancel made the failure a plain provider error, so a turn that core
+    cancelled while its provider was down was reported lost by its transport. The client
+    never sends a cancelled turn to its gate, so nothing waits for a turn nobody wants.
+    """
     del sandbox_builds
     sessions: list[LaunchedSession] = []
 
@@ -1419,9 +1467,10 @@ def test_cancel_stops_a_turn_waiting_out_a_transient_error(
     )
     sessions.append(session)
 
-    with pytest.raises(agentshim.CliExitError):
+    with pytest.raises(AgentQuotaError) as excinfo:
         session.run_turn(AgentTurnRequest(message="one"))
 
+    assert excinfo.value.condition is QuotaCondition.UNAVAILABLE
     assert len(fake.requests) == 1
 
 
@@ -1542,6 +1591,143 @@ def test_a_turn_that_times_out_is_reported_as_a_launcher_timeout(
 
     assert raised.value.timeout_seconds == 45
     assert isinstance(raised.value.__cause__, agentshim.CliTimeoutError)
+
+
+def test_timeout_translation_preserves_usage_parsed_before_the_deadline() -> None:
+    """A partial provider reply is billed even though the turn has no answer."""
+    error = agentshim.CliTimeoutError(("claude",), 45)
+    error.partial = agentshim.ParsedTurn(
+        text="unfinished",
+        usage=agentshim.ProviderUsage(
+            tokens=TokenUsage(
+                input_tokens=1200,
+                output_tokens=30,
+                cached_input_tokens=1000,
+            )
+        ),
+        cost_usd=0.01,
+    )
+
+    translated = shim_translation.timeout_error_from(error)
+
+    assert translated.usage is not None
+    assert translated.usage.input_tokens == 1200
+    assert translated.usage.cache_read_input_tokens == 1000
+    assert translated.usage.output_tokens == 30
+    assert translated.usage.total_cost_usd == 0.01
+
+
+class _StructuredReply(BaseModel):
+    answer: str
+
+
+def test_a_completed_turn_rejected_by_the_reply_guard_records_all_terminal_accounting(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    """A locally rejected result retains every provider-reported accounting field."""
+    del sandbox_builds
+    launcher, _fake = _launcher(
+        "claude",
+        scripted_turn(
+            "claude",
+            structured_output={"answer": " " * (MAX_WHITESPACE_RUN + 1)},
+            usage=TokenUsage(input_tokens=80, output_tokens=20),
+            skills_offered=["serving-systems", "profiling"],
+            skills_invoked=["profiling"],
+        ),
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    client = AgentClient(
+        launcher,
+        provider="claude",
+        log_dir=log_dir,
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
+
+    with pytest.raises(AgentOutputSchemaError) as raised:
+        client.invoke(
+            kind="implementer",
+            workspace=workspace,
+            system_prompt="system",
+            user_prompt="work",
+            response_cls=_StructuredReply,
+            round_label="round-1",
+        )
+
+    expected = {
+        "input_tokens": 80,
+        "output_tokens": 20,
+        "total_cost_usd": 0.01,
+    }
+    assert raised.value.usage is not None
+    assert {field: getattr(raised.value.usage, field) for field in expected} == expected
+    assert raised.value.usage.duration_ms is not None
+    record = json.loads((log_dir / "usage.jsonl").read_text())
+    assert {field: record[field] for field in expected} == expected
+    assert record["duration_ms"] == raised.value.usage.duration_ms
+    assert record["skills_offered"] == 2
+    assert record["skills_invoked"] == ["profiling"]
+    assert record["skill_uses"] == 1
+
+
+def test_a_completed_interrupted_turn_records_all_terminal_accounting(
+    tmp_path: Path,
+) -> None:
+    """Cancellation keeps its public error while retaining completed accounting."""
+    terminal = AgentTurnResult(
+        text="partial",
+        usage=AgentUsage(
+            input_tokens=1200,
+            output_tokens=30,
+            total_cost_usd=0.25,
+            duration_ms=321,
+        ),
+        skills=AgentSkillUse(
+            offered=("serving-systems", "profiling"),
+            invoked=("profiling",),
+        ),
+    )
+
+    def cancel(_request: AgentTurnRequest) -> None:
+        error = agentshim.TurnCancelledError("turn interrupted")
+        # The provider turn completed with terminal evidence before the
+        # cancellation was surfaced. Production attaches the same carrier.
+        vars(error)["_vibesys_terminal_turn_result"] = terminal
+        raise error
+
+    client = AgentClient(
+        FakeProvider(on_turn=cancel, threads=SimThreads()),
+        provider="claude",
+        log_dir=tmp_path,
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
+
+    with pytest.raises(agentshim.TurnCancelledError) as raised:
+        client.invoke_text(
+            kind="implementer",
+            workspace=tmp_path,
+            system_prompt="system",
+            user_prompt="work",
+            round_label="round-1",
+        )
+
+    assert type(raised.value) is agentshim.TurnCancelledError
+    record = json.loads((tmp_path / "usage.jsonl").read_text())
+    assert record["input_tokens"] == 1200
+    assert record["output_tokens"] == 30
+    assert record["total_cost_usd"] == 0.25
+    assert record["duration_ms"] == 321
+    assert record["skills_offered"] == 2
+    assert record["skills_invoked"] == ["profiling"]
+    assert record["skill_uses"] == 1
 
 
 def test_the_codex_thread_budget_retires_a_conversation(
@@ -1751,6 +1937,7 @@ def test_a_cancelled_resumed_turn_raises_and_keeps_its_conversation(
     threads.run(scenario)
 
     assert len(cancelled) == 1
+    assert shim_turns.terminal_result_from(cancelled[0]) is not None
     assert threads.errors == []
     assert "thread-1" in fake.requests[2].argv
 

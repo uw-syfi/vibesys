@@ -19,6 +19,7 @@ from vibesys.events import (
     TodoUpdateData,
     ToolCallData,
     ToolResultData,
+    TurnUsageData,
     UsageUpdateData,
 )
 from vibesys.run import CoreAgentEventSink, EventJournal
@@ -26,6 +27,7 @@ from vs_agent.api import (
     AgentEventSink,
     AgentQuotaError,
     AgentRateLimit,
+    AgentUsage,
     Attribution,
     ProviderSwitch,
     QuotaCondition,
@@ -169,6 +171,41 @@ def test_adapters_are_isolated_by_their_injected_run_journals(tmp_path: Path) ->
     assert [event.run_id for event in second_journal.read()] == ["run-2"]
 
 
+def test_a_finished_turn_s_settled_usage_is_recorded_with_routing_metadata(
+    tmp_path: Path,
+) -> None:
+    journal, sink = _attached_sink(tmp_path, "run-1")
+    usage = AgentUsage(
+        input_tokens=1234,
+        cache_creation_input_tokens=56,
+        cache_read_input_tokens=78,
+        output_tokens=90,
+        total_cost_usd=0.42,
+        duration_ms=1500,
+    )
+
+    sink.turn_usage_recorded(
+        usage,
+        agent_kind="implementer",
+        round_label="round-2",
+        invocation_id="invocation-7",
+    )
+
+    (event,) = journal.read()
+    assert event.type is CoreEventType.TURN_USAGE_RECORDED
+    assert event.agent_kind == "implementer"
+    assert event.round_label == "round-2"
+    assert event.execution_id == "invocation-7"
+    assert event.data == TurnUsageData(
+        input_tokens=1234,
+        cache_creation_input_tokens=56,
+        cache_read_input_tokens=78,
+        output_tokens=90,
+        total_cost_usd=0.42,
+        duration_ms=1500,
+    )
+
+
 def test_a_rate_limit_report_is_recorded_with_its_resolved_exhaustion(tmp_path: Path) -> None:
     journal, sink = _attached_sink(tmp_path, "run-1")
 
@@ -200,8 +237,8 @@ def test_a_quota_pause_and_its_resolutions_are_recorded_with_the_provider_diagno
 
     error = AgentQuotaError("claude", QuotaCondition.RATE_LIMITED, "429 too many", 1.5e9)
     sink.quota_paused(error, QuotaPlan("fallback", 1.6e9, "codex", "gpt-5"), where)
-    sink.quota_resumed("claude", "wait_elapsed", where)
-    sink.quota_abandoned(error, "policy", Attribution("implementer"))
+    sink.quota_resumed(error, "wait_elapsed", 90.0, where)
+    sink.quota_abandoned(error, "policy", 30.0, Attribution("implementer"))
     sink.provider_switched(
         ProviderSwitch("claude", "codex", "gpt-5", "operator", "the operator resumed"), where
     )
@@ -224,9 +261,15 @@ def test_a_quota_pause_and_its_resolutions_are_recorded_with_the_provider_diagno
         fallback_provider="codex",
         fallback_model="gpt-5",
     )
-    assert resumed.data == QuotaResumedData(provider="claude", reason="wait_elapsed")
+    assert resumed.data == QuotaResumedData(
+        provider="claude", condition="rate_limited", reason="wait_elapsed", waited_seconds=90.0
+    )
     assert abandoned.data == QuotaAbandonedData(
-        provider="claude", condition="rate_limited", detail="429 too many", reason="policy"
+        provider="claude",
+        condition="rate_limited",
+        detail="429 too many",
+        reason="policy",
+        waited_seconds=30.0,
     )
     assert switched.data == ProviderSwitchedData(
         from_provider="claude",

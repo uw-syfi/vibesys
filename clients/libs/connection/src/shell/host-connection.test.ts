@@ -4,9 +4,10 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import type {ChannelEndOutcome} from '@vibesys/contracts/host-helper';
 import {FakeClock} from '@vibesys/transport/testing';
-import type {Cause, ConnectionConfig} from '../state/host-connection.js';
+import type {Cause, CheckoutProblem, ConnectionConfig} from '../state/host-connection.js';
 import {ECHO_SERVER, FakeHelper, FakeLink, record} from '../testing/fake-helper.js';
-import {deferredKillProcess, fakeProcess} from '../testing/fake-process.js';
+import {FakeLogStore, type LogStoreFixture} from '../testing/fake-log-store.js';
+import {deferredKillProcess, fakeProcess, pipeHeldProcess} from '../testing/fake-process.js';
 import {hostConnectionContract, phaseReached} from '../testing/host-connection-contract.js';
 import {ConnectionManager} from './connection-manager.js';
 import {ConnectionError, HelperRequestError} from './helper-channel.js';
@@ -106,6 +107,7 @@ class UnretiringHelperLink implements Link {
         return process.running;
       },
       exit: process.exit,
+      terminated: process.terminated,
       kill(signal) {
         signals.push(signal);
       },
@@ -677,6 +679,50 @@ describe('HostConnection over the FakeHelper', () => {
     helper.end(null);
   });
 
+  test('closing confirms a dead helper whose descendant still holds its pipes', async () => {
+    const clock = new FakeClock();
+    const helper = pipeHeldProcess();
+    helper.stdout.resume();
+    helper.stderr.resume();
+    let announceSpawn = (): void => {};
+    const spawned = new Promise<void>(resolve => {
+      announceSpawn = resolve;
+    });
+    const logged: string[] = [];
+    const link: Link = {
+      host: 'fake',
+      async establish() {},
+      networkChanged() {},
+      spawnHelper: () => {
+        announceSpawn();
+        return helper.process;
+      },
+      heard() {},
+      explain: () => new ConnectionError('link', 'the helper ended'),
+      async release() {},
+    };
+    const connection = new HostConnection({
+      link,
+      checkout: '/src/vibesys',
+      appVersion: 'test',
+      config: CONFIG,
+      scheduleTimeout: clock.scheduleTimeout,
+      log: message => logged.push(message),
+    });
+    const ready = rejection(connection.ready());
+    await spawned;
+
+    const closing = connection[Symbol.asyncDispose]();
+    await helper.process.terminated;
+    clock.advanceBy(2_000);
+
+    // The helper process is gone; only its pipes are held. That is not a failed retirement.
+    await closing;
+    expect(logged.filter(line => line.includes('could not confirm'))).toEqual([]);
+    expect(await ready).toBeInstanceOf(ConnectionError);
+    helper.releasePipes();
+  });
+
   test('an aborted opened control joins one retirement and closes on unconfirmed termination', async () => {
     const clock = new FakeClock();
     const link = new UnretiringHelperLink();
@@ -828,18 +874,43 @@ describe('HostConnection over the FakeHelper', () => {
     await phaseReached(connection, 'incompatible');
   });
 
-  const bootstraps: readonly {code: number; stdout: string; says: string}[] = [
-    {code: 64, stdout: 'predates 0.0.9', says: 'predates the desktop helper (version 0.0.9)'},
-    {code: 65, stdout: 'nodir', says: '/src/vibesys on fake is not a directory.'},
-    {code: 65, stdout: 'nopyproject', says: 'has no pyproject.toml'},
-    {code: 65, stdout: 'notvibesys', says: 'does not declare the vibesys project'},
-    {code: 66, stdout: 'missing', says: 'uv was not found on fake'},
+  const bootstraps: readonly {
+    code: number;
+    stdout: string;
+    says: string;
+    checkout: CheckoutProblem | null;
+  }[] = [
+    {
+      code: 64,
+      stdout: 'predates 0.0.9',
+      says: 'predates the desktop helper (version 0.0.9)',
+      checkout: 'too-old',
+    },
+    {
+      code: 65,
+      stdout: 'nodir',
+      says: '/src/vibesys on fake is not a directory.',
+      checkout: 'missing',
+    },
+    {code: 65, stdout: 'nopyproject', says: 'has no pyproject.toml', checkout: 'missing'},
+    {
+      code: 65,
+      stdout: 'notvibesys',
+      says: 'does not declare the vibesys project',
+      checkout: 'missing',
+    },
+    {code: 66, stdout: 'missing', says: 'uv was not found on fake', checkout: null},
     // A reserved status without its own line is not the bootstrap's report.
-    {code: 64, stdout: 'Welcome to the cluster', says: 'exited with 64'},
-    {code: 65, stdout: 'Traceback (most recent call last):', says: 'exited with 65'},
-    {code: 66, stdout: '', says: 'exited with 66'},
+    {code: 64, stdout: 'Welcome to the cluster', says: 'exited with 64', checkout: null},
+    {
+      code: 65,
+      stdout: 'Traceback (most recent call last):',
+      says: 'exited with 65',
+      checkout: null,
+    },
+    {code: 66, stdout: '', says: 'exited with 66', checkout: null},
   ];
-  for (const {code, stdout, says} of bootstraps) {
+  for (const {code, stdout, says, checkout} of bootstraps) {
     test(`a bootstrap that exits ${code} saying ${JSON.stringify(stdout)} stops as incompatible`, async () => {
       const link = new FakeLink();
       link.helper.bootstrapExit = {code, stdout};
@@ -847,6 +918,9 @@ describe('HostConnection over the FakeHelper', () => {
       const error = await rejection(connection.ready());
       expect((error as ConnectionError).reason).toBe('incompatible');
       expect(error.message).toContain(says);
+      expect((error as ConnectionError).checkout).toBe(checkout);
+      const phase = connection.phase;
+      expect(phase.kind === 'incompatible' ? phase.checkout : 'not incompatible').toBe(checkout);
     });
   }
 
@@ -870,6 +944,7 @@ describe('HostConnection over the FakeHelper', () => {
     client_stalled: 'link',
     server_failed: 'link',
     client_failed: 'link',
+    server_unresponsive: 'link',
   };
   for (const [outcome, cause] of Object.entries(outcomes) as [ChannelEndOutcome, Cause | null][]) {
     test(`a relay that ends ${outcome} ends its stream ${cause ?? 'normally'}`, async () => {
@@ -1643,6 +1718,9 @@ describe('ConnectionManager', () => {
 /** The `helper-*` conformance scenarios, replayed against the FakeHelper over its wire. */
 describe('FakeHelper conformance', () => {
   const directory = join(REPOSITORY, 'tests/conformance/scenarios');
+  const logStoreFixture = JSON.parse(
+    readFileSync(join(REPOSITORY, 'tests/conformance/fixtures/helper-log-store.json'), 'utf8'),
+  ) as LogStoreFixture;
   const scenarios = readdirSync(directory).filter(name => name.startsWith('helper-'));
 
   for (const name of scenarios) {
@@ -1650,7 +1728,9 @@ describe('FakeHelper conformance', () => {
       const scenario = JSON.parse(readFileSync(join(directory, name), 'utf8')) as {
         steps: {dir: 'c2s' | 's2c'; frame?: unknown; expect?: unknown}[];
       };
-      const process = new FakeHelper().spawn();
+      const helper = new FakeHelper();
+      if (name.startsWith('helper-logs-')) helper.logStore = FakeLogStore.from(logStoreFixture);
+      const process = helper.spawn();
       const lines: unknown[] = [];
       let buffer = '';
       let wake: () => void = () => {};

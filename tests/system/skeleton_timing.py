@@ -383,7 +383,7 @@ class Plan:
     max_turns: int = 8
     stop_when: Callable[[TurnTimeline, HoldingCluster], bool] | None = None
     mode: core.StopMode = core.StopMode.DRAIN
-    pause_when: Callable[[TurnTimeline, HoldingCluster], bool] | None = None
+    quota_hold_when: Callable[[TurnTimeline, HoldingCluster], bool] | None = None
     control_poll_s: float = 30.0
     observe_s: float = 1.0
     publish_s: float = 0.0
@@ -429,12 +429,12 @@ class _Operator:
         """Send the controls the plan's conditions call for; whether the run was stopped."""
         plan, marks = self.plan, self.marks
         if (
-            plan.pause_when is not None
+            plan.quota_hold_when is not None
             and "pause" not in marks
-            and plan.pause_when(self.timeline, self.cluster)
+            and plan.quota_hold_when(self.timeline, self.cluster)
         ):
             marks["pause"] = self.clock.now()
-            self.channel.request_pause()
+            self.channel.pause_for_quota()
         if self.observed.paused_at is not None and "resume" not in marks:
             marks["resume"] = self.clock.now()
             self.channel.resume()
@@ -448,7 +448,7 @@ class _Operator:
         """Watch the run on the virtual clock until every control the plan asks for was sent."""
         plan = self.plan
         while not self._act():
-            if plan.stop_when is None and (plan.pause_when is None or "resume" in self.marks):
+            if plan.stop_when is None and (plan.quota_hold_when is None or "resume" in self.marks):
                 return
             await self.clock.sleep(0.25)
 

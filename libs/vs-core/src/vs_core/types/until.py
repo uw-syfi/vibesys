@@ -18,6 +18,12 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
+from vs_core._generated.vibesys.core.v1.failures_cv import (
+    REPLY_ERROR_MESSAGE_LIMIT,
+    ReplyError,
+)
+from vs_core._generated.vibesys.core.v1.vocabulary_cv import ReplyErrorCode
+
 from .common import (
     AttemptRef,
     DecisionId,
@@ -62,6 +68,10 @@ class FailureReason(StrEnum):
     """The agent's turn asked to wait for evaluations and the run could not honor it;
     ``refusal`` says why."""
 
+    QUEUE_BUDGET_SPENT = "queue-budget-spent"
+    """Its job waited in the executor's queue for the run's whole ``queue_wait_budget``
+    without starting (``Failed.limit_at`` is when the budget ran out)."""
+
     OUT_OF_BUDGET = "out-of-budget"
     MEASUREMENT_UNTRUSTED = "measurement-untrusted"
 
@@ -77,6 +87,10 @@ class WaitRefusal(StrEnum):
 
     NOT_PUBLISHED = "not-published"
     """Core recorded the wait but could not publish it."""
+
+    NOT_RESUMABLE = "not-resumable"
+    """Core recorded the wait, but its evaluations ended in a history that can never back a
+    resume (``ResumeRefused``), so no resume will come."""
 
 
 class WhileOpen(Value):
@@ -147,30 +161,7 @@ class Until(Value):
     watches: tuple[Watch, ...] = ()
 
 
-class ReplyErrorCode(StrEnum):
-    """Why a reply did not validate against the agent's reply model. Closed."""
-
-    MISSING = "missing"
-    UNEXPECTED = "unexpected"
-    WRONG_TYPE = "wrong-type"
-    INVALID_VALUE = "invalid-value"
-    NOT_JSON = "not-json"
-
-
-REPLY_ERROR_MESSAGE_LIMIT = 500
 """Characters kept of one validator message, so an unbounded reply cannot grow the state."""
-
-
-class ReplyError(Value):
-    """One typed problem in a reply: where it is and what is wrong.
-
-    ``message`` is the validator's own wording when it reported one (a provider's schema
-    check does); the reply model's check leaves it empty and ``code`` says what is wrong.
-    """
-
-    path: tuple[str | int, ...]
-    code: ReplyErrorCode
-    message: str = Field(default="", max_length=REPLY_ERROR_MESSAGE_LIMIT)
 
 
 _TURN_REASONS = frozenset(
@@ -187,8 +178,8 @@ _TURN_REASONS = frozenset(
 class Failed(Value):
     """A request ended without a result. Every field is typed; nothing is free text.
 
-    Each reason carries its own fields, and only those: ``TIMED_OUT`` the ``limit_at`` (the
-    run-clock time of the limit that passed), ``WORKSPACE_CLOSED`` / ``OWNER_GONE`` the
+    Each reason carries its own fields, and only those: ``TIMED_OUT`` and
+    ``QUEUE_BUDGET_SPENT`` the ``limit_at`` (the run-clock time of the bound that passed), ``WORKSPACE_CLOSED`` / ``OWNER_GONE`` the
     ``watch`` that fired, ``REFUSED`` the ``cause`` core gave, ``INVALID_REPLY`` the reply
     ``errors``.
 
@@ -215,7 +206,7 @@ class Failed(Value):
         """Refuse a field that does not belong to the reason, or a reason missing its field."""
         expected = {
             "watch": self.reason in (FailureReason.WORKSPACE_CLOSED, FailureReason.OWNER_GONE),
-            "limit_at": self.reason == FailureReason.TIMED_OUT,
+            "limit_at": self.reason in (FailureReason.TIMED_OUT, FailureReason.QUEUE_BUDGET_SPENT),
             "cause": self.reason == FailureReason.REFUSED,
             "errors": self.reason == FailureReason.INVALID_REPLY,
             "turn_failure": self.reason == FailureReason.TURN_FAILED,
@@ -238,3 +229,21 @@ class Failed(Value):
                 message = f"reason {self.reason.value} needs {name}"
                 raise ValueError(message)
         return self
+
+
+__all__ = [
+    "REPLY_ERROR_MESSAGE_LIMIT",
+    "Failed",
+    "FailureReason",
+    "FromDispatch",
+    "Inherited",
+    "Limit",
+    "ReplyError",
+    "ReplyErrorCode",
+    "Until",
+    "WaitRefusal",
+    "Watch",
+    "WhileAlive",
+    "WhileOpen",
+    "Within",
+]

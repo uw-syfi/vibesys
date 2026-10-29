@@ -9,14 +9,17 @@ import pytest
 from tests.support import run_test_command
 from tests.support.real_git import NO_GITHUB, REAL_GIT, real_git_tracker
 
+from vibesys.errors import ConfigurationError
 from vibesys.repository import RepositoryVisibility
 from vibesys.run.experiment_repo import ExperimentRepository
 from vs_github.api import GitHubCLI
-from vs_project.api import GitTracker, NullGitTrackerEvents
+from vs_project.api import Git, GitTracker, NullGitTrackerEvents
 from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from vs_sim.api import ProcessSpec
 _IDENTITY = {
     "GIT_AUTHOR_NAME": "test",
     "GIT_AUTHOR_EMAIL": "test@example.com",
@@ -113,6 +116,72 @@ def test_armed_publication_close_pushes_exactly_once(tmp_path: Path) -> None:
     branch = "vibesys-runs/publish-test"
     assert _git(remote, "rev-parse", f"refs/heads/{branch}") == tracker.current_sha()
     assert messages.count(f"[repo] pushed {branch} to origin") == 1
+
+
+def test_armed_publication_close_retries_a_failed_push_until_it_succeeds(
+    tmp_path: Path,
+) -> None:
+    branch = "vibesys-runs/publish-test"
+    branch_ref = f"refs/heads/{branch}"
+    candidate_ref = "refs/vibesys/publish-test/candidates/candidate-1"
+    push_command = (
+        "push",
+        "-u",
+        "origin",
+        f"{branch_ref}:{branch_ref}",
+        f"{candidate_ref}:{candidate_ref}",
+    )
+    push_attempts = 0
+
+    def script(spec: ProcessSpec) -> ProcessScript:
+        nonlocal push_attempts
+        argv = spec.argv[1:]
+        if argv == ("remote", "get-url", "origin"):
+            return ProcessScript(stdout=b"https://github.com/example/project.git\n")
+        if argv == ("rev-parse", "--show-toplevel"):
+            return ProcessScript(stdout=f"{tmp_path.resolve()}\n".encode())
+        if argv == ("symbolic-ref", "--quiet", "--short", "HEAD"):
+            return ProcessScript(stdout=f"{branch}\n".encode())
+        if argv == (
+            "for-each-ref",
+            "--format=%(refname)",
+            "refs/vibesys/publish-test/candidates/",
+        ):
+            return ProcessScript(stdout=f"{candidate_ref}\n".encode())
+        if argv == push_command:
+            push_attempts += 1
+            if push_attempts == 1:
+                return ProcessScript(returncode=1, stderr=b"temporary remote outage")
+            return ProcessScript()
+        message = f"unexpected Git command: {argv!r}"
+        raise AssertionError(message)
+
+    processes = FakeProcesses(script, pass_time=ManualClock().advance)
+    messages: list[str] = []
+    publisher = ExperimentRepository(
+        tmp_path,
+        messages.append,
+        git=Git(processes),
+        github=NO_GITHUB,
+    )
+    publisher.configure(
+        None,
+        RepositoryVisibility.PRIVATE,
+        existing_run=True,
+        collection_project=True,
+    )
+    publisher.arm()
+
+    with pytest.raises(ConfigurationError) as failed:
+        publisher.close()
+    assert failed.value.diagnostic.code == "repository_sync_failed"
+
+    publisher.close()
+    publisher.close()
+
+    pushes = [spec.argv[1:] for spec in processes.ran if spec.argv[1:4] == ("push", "-u", "origin")]
+    assert pushes == [push_command, push_command]
+    assert messages == [f"[repo] pushed {branch} to origin"]
 
 
 @pytest.mark.parametrize(

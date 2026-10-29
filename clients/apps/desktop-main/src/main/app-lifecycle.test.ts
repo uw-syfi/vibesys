@@ -72,6 +72,143 @@ describe('AppLifecycle', () => {
     expect(exits).toEqual([0]);
     expect(clock.pending).toBe(0);
   });
+
+  test('a synchronous release failure cannot skip both the bound and process exit', () => {
+    const exits: number[] = [];
+    let bounds = 0;
+    const app = new AppLifecycle({
+      release: () => {
+        throw new Error('release failed before returning its promise');
+      },
+      exit: code => exits.push(code),
+      scheduleTimeout: () => {
+        bounds += 1;
+        return () => {};
+      },
+      releaseBoundMs: 5_000,
+    });
+
+    expect(() => app.quit(7)).not.toThrow();
+    expect(app.state).toEqual({kind: 'exited', code: 7});
+    expect(exits).toEqual([7]);
+    expect(bounds).toBe(0);
+  });
+
+  test('a bound acquisition failure exits instead of waiting forever for release', () => {
+    const exits: number[] = [];
+    const app = new AppLifecycle({
+      release: () => new Promise<void>(() => {}),
+      exit: code => exits.push(code),
+      scheduleTimeout: () => {
+        throw new Error('timer unavailable');
+      },
+      releaseBoundMs: 5_000,
+    });
+
+    expect(() => app.quit(4)).not.toThrow();
+    expect(app.state).toEqual({kind: 'exited', code: 4});
+    expect(exits).toEqual([4]);
+  });
+
+  test('a failed bound cancellation cannot prevent process exit', async () => {
+    const exits: number[] = [];
+    const app = new AppLifecycle({
+      release: () => Promise.resolve(),
+      exit: code => exits.push(code),
+      scheduleTimeout: () => () => {
+        throw new Error('timer cancellation failed');
+      },
+      releaseBoundMs: 5_000,
+    });
+
+    app.quit(3);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(app.state).toEqual({kind: 'exited', code: 3});
+    expect(exits).toEqual([3]);
+  });
+
+  test('a reentrant bound is retired after its callback exits the app', () => {
+    const exits: number[] = [];
+    let cancellations = 0;
+    const app = new AppLifecycle({
+      release: () => new Promise<void>(() => {}),
+      exit: code => exits.push(code),
+      scheduleTimeout: callback => {
+        callback();
+        return () => {
+          cancellations += 1;
+        };
+      },
+      releaseBoundMs: 0,
+    });
+
+    app.quit(2);
+
+    expect(app.state).toEqual({kind: 'exited', code: 2});
+    expect(exits).toEqual([2]);
+    expect(cancellations).toBe(1);
+  });
+
+  test('a reentrant bound retires its handle without swallowing an exit failure', () => {
+    const failure = new Error('exit failed');
+    let cancellations = 0;
+    const app = new AppLifecycle({
+      release: () => new Promise<void>(() => {}),
+      exit: () => {
+        throw failure;
+      },
+      scheduleTimeout: callback => {
+        callback();
+        return () => {
+          cancellations += 1;
+        };
+      },
+      releaseBoundMs: 0,
+    });
+
+    expect(() => app.quit(6)).toThrow(failure);
+    expect(app.state).toEqual({kind: 'exited', code: 6});
+    expect(cancellations).toBe(1);
+  });
+
+  test('a callback failure wins when a reentrant scheduler also fails', () => {
+    const exitFailure = new Error('exit failed');
+    const app = new AppLifecycle({
+      release: () => new Promise<void>(() => {}),
+      exit: () => {
+        throw exitFailure;
+      },
+      scheduleTimeout: callback => {
+        callback();
+        throw new Error('scheduler failed after callback');
+      },
+      releaseBoundMs: 0,
+    });
+
+    expect(() => app.quit(8)).toThrow(exitFailure);
+    expect(app.state).toEqual({kind: 'exited', code: 8});
+  });
+
+  test('a deferred bound does not swallow an exit failure', () => {
+    const failure = new Error('exit failed after the bound');
+    const clock = new FakeClock();
+    const app = new AppLifecycle({
+      release: () => new Promise<void>(() => {}),
+      exit: () => {
+        throw failure;
+      },
+      scheduleTimeout: clock.scheduleTimeout,
+      releaseBoundMs: 1,
+    });
+
+    app.quit(9);
+
+    expect(() => clock.advanceBy(1)).toThrow(failure);
+    expect(app.state).toEqual({kind: 'exited', code: 9});
+  });
 });
 
 function count(counted: {releases: number; exits: number[]}, effects: readonly QuitEffect[]): void {

@@ -1,5 +1,6 @@
 """Run logging: the per-run log file, ``lprint``, and the stderr tee."""
 
+import logging
 import re
 import sys
 import threading
@@ -12,6 +13,15 @@ from vs_sim.api import Clock, utc_datetime
 # Matches ANSI escape sequences (CSI colors, cursor control, and simple
 # single-character escapes) so the durable log stays plain text even when
 # subprocesses write colored diagnostics to stderr.
+LPRINT_LOGGER = "run"
+"""The ``logging`` logger every ``lprint`` line is also logged to, at ``INFO``.
+
+A process that configures logging (a detached run's narration stream) sees the run's
+progress lines there; one that does not drops them, since ``INFO`` is below the default.
+"""
+
+_LPRINT = logging.getLogger(LPRINT_LOGGER)
+
 _ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-9;?]*[ -/]*[@-~]|[@-Z\\-_])")
 
 
@@ -142,7 +152,9 @@ class RunLogger:
             return self.file.closed
 
     def lprint(self, text: str) -> None:
+        """Write ``text`` through ``emit`` and log it, ANSI-free, to :data:`LPRINT_LOGGER`."""
         self._emit(text, self.writer)
+        _LPRINT.info("%s", strip_ansi(text))
 
     def switch(self, label: int | str) -> TextIO:
         """Switch to a per-phase log file (``run-<datetime>-<label>.log``).

@@ -12,6 +12,8 @@ is then, so core's own corrections and re-asks are off for it.
 
 from vibesys.orchestration.dynamic.models import (
     ImplementerResult,
+    MergeResult,
+    PlanOutline,
     PortfolioPlan,
     ProfilerResult,
     ReviewResult,
@@ -41,6 +43,7 @@ EXCHANGES = Exchanges(
 
 PLANNER = Role(
     name=AgentName.PLANNER.value,
+    title="Planner",
     prompt="portfolio.j2",
     reply=PortfolioPlan,
     workspace=None,
@@ -52,8 +55,29 @@ PLANNER = Role(
 )
 """Plans the free slots of the run; works in no workspace."""
 
+OUTLINER = Role(
+    name=AgentName.OUTLINER.value,
+    title="Outliner",
+    prompt="outline.j2",
+    reply=PlanOutline,
+    workspace=None,
+    access=Access.READ_ONLY,
+    turn_time=minutes(30),
+    corrections=1,
+    lost_turns=2,
+    lost_turn_backoff=LOST_TURN_BACKOFF,
+    charge=Charge.TURN,
+    exchanges=Exchanges(correction=EXCHANGES.correction),
+)
+"""Outlines the steps of the task's plan from its documents, when the task declares none.
+
+Asked once, at the start of a run that follows the plan; core corrects a reply whose steps do
+not form a plan, and asks again after a lost turn.
+"""
+
 IMPLEMENTER = Role(
     name=AgentName.IMPLEMENTER.value,
+    title="Implementer",
     prompt="implement.j2",
     reply=ImplementerResult,
     workspace=WorkspaceMode.ISOLATED_CHILD,
@@ -70,6 +94,7 @@ IMPLEMENTER = Role(
 
 JUDGE = Role(
     name=AgentName.JUDGE.value,
+    title="Judge",
     prompt="review.j2",
     reply=ReviewResult,
     workspace=WorkspaceMode.READ_ONLY_REVISION,
@@ -86,6 +111,7 @@ JUDGE = Role(
 
 PROFILER = Role(
     name=AgentName.PROFILER.value,
+    title="Profiler",
     prompt="profile_request.j2",
     reply=ProfilerResult,
     workspace=WorkspaceMode.READ_ONLY_REVISION,
@@ -98,4 +124,23 @@ PROFILER = Role(
 )
 """Looks at a revision to inform later plans; produces no candidate."""
 
-ROLES = (PLANNER, IMPLEMENTER, JUDGE, PROFILER)
+CORRECTION = Exchanges(correction="reply_correction.j2")
+"""The only exchange core starts with an agent that never waits: asking it to fix its reply."""
+
+MERGER = Role(
+    name=AgentName.MERGER.value,
+    title="Merger",
+    prompt="merge.j2",
+    reply=MergeResult,
+    workspace=WorkspaceMode.ISOLATED_CHILD,
+    access=Access.WRITE_CANDIDATE,
+    turn_time=hours(1),
+    corrections=1,
+    lost_turns=2,
+    lost_turn_backoff=LOST_TURN_BACKOFF,
+    charge=Charge.ATTEMPT,
+    exchanges=CORRECTION,
+)
+"""Merges candidates into main on a checkout of main: a new session for every merge."""
+
+ROLES = (PLANNER, IMPLEMENTER, JUDGE, PROFILER, MERGER, OUTLINER)

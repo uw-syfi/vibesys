@@ -1,0 +1,857 @@
+{
+  "id": "helper-logs-cancel",
+  "protocol": "host-helper",
+  "title": "Withdraw waiting reads past the worker limit",
+  "description": "A follower that stops withdraws its waiting read with logs.cancel: the read answers at once with what it holds (here an empty chunk at the end of an open stream), then the cancel answers, so its worker is free. Seventeen withdrawals in a row, one more than a channel's request workers, are never refused channel_busy. The Python unit tests pin the timing (no virtual time passes); this scenario pins the wire shape and order.",
+  "role": "logs",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "logs",
+          "logs_cancel"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "logs",
+          "logs_cancel"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "f0",
+        "deadline_ms": 30000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "offset": 66
+        },
+        "max_bytes": 65536,
+        "wait_ms": 25000
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.cancel",
+        "request_id": "c0",
+        "deadline_ms": 10000,
+        "read_id": "f0"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "f0",
+        "chunk": {
+          "offset": 66,
+          "data": "",
+          "next_offset": 66,
+          "eof": true,
+          "closed": false,
+          "truncated_before": false,
+          "pipes": []
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.cancel",
+        "request_id": "c0",
+        "read_id": "f0"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "f1",
+        "deadline_ms": 30000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "offset": 66
+        },
+        "max_bytes": 65536,
+        "wait_ms": 25000
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.cancel",
+        "request_id": "c1",
+        "deadline_ms": 10000,
+        "read_id": "f1"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "f1",
+        "chunk": {
+          "offset": 66,
+          "data": "",
+          "next_offset": 66,
+          "eof": true,
+          "closed": false,
+          "truncated_before": false,
+          "pipes": []
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.cancel",
+        "request_id": "c1",
+        "read_id": "f1"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "f2",
+        "deadline_ms": 30000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "offset": 66
+        },
+        "max_bytes": 65536,
+        "wait_ms": 25000
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.cancel",
+        "request_id": "c2",
+        "deadline_ms": 10000,
+        "read_id": "f2"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "f2",
+        "chunk": {
+          "offset": 66,
+          "data": "",
+          "next_offset": 66,
+          "eof": true,
+          "closed": false,
+          "truncated_before": false,
+          "pipes": []
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.cancel",
+        "request_id": "c2",
+        "read_id": "f2"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "f3",
+        "deadline_ms": 30000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "offset": 66
+        },
+        "max_bytes": 65536,
+        "wait_ms": 25000
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.cancel",
+        "request_id": "c3",
+        "deadline_ms": 10000,
+        "read_id": "f3"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "f3",
+        "chunk": {
+          "offset": 66,
+          "data": "",
+          "next_offset": 66,
+          "eof": true,
+          "closed": false,
+          "truncated_before": false,
+          "pipes": []
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.cancel",
+        "request_id": "c3",
+        "read_id": "f3"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "f4",
+        "deadline_ms": 30000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "offset": 66
+        },
+        "max_bytes": 65536,
+        "wait_ms": 25000
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.cancel",
+        "request_id": "c4",
+        "deadline_ms": 10000,
+        "read_id": "f4"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "f4",
+        "chunk": {
+          "offset": 66,
+          "data": "",
+          "next_offset": 66,
+          "eof": true,
+          "closed": false,
+          "truncated_before": false,
+          "pipes": []
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.cancel",
+        "request_id": "c4",
+        "read_id": "f4"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "f5",
+        "deadline_ms": 30000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "offset": 66
+        },
+        "max_bytes": 65536,
+        "wait_ms": 25000
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.cancel",
+        "request_id": "c5",
+        "deadline_ms": 10000,
+        "read_id": "f5"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "f5",
+        "chunk": {
+          "offset": 66,
+          "data": "",
+          "next_offset": 66,
+          "eof": true,
+          "closed": false,
+          "truncated_before": false,
+          "pipes": []
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.cancel",
+        "request_id": "c5",
+        "read_id": "f5"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "f6",
+        "deadline_ms": 30000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "offset": 66
+        },
+        "max_bytes": 65536,
+        "wait_ms": 25000
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.cancel",
+        "request_id": "c6",
+        "deadline_ms": 10000,
+        "read_id": "f6"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "f6",
+        "chunk": {
+          "offset": 66,
+          "data": "",
+          "next_offset": 66,
+          "eof": true,
+          "closed": false,
+          "truncated_before": false,
+          "pipes": []
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.cancel",
+        "request_id": "c6",
+        "read_id": "f6"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "f7",
+        "deadline_ms": 30000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "offset": 66
+        },
+        "max_bytes": 65536,
+        "wait_ms": 25000
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.cancel",
+        "request_id": "c7",
+        "deadline_ms": 10000,
+        "read_id": "f7"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "f7",
+        "chunk": {
+          "offset": 66,
+          "data": "",
+          "next_offset": 66,
+          "eof": true,
+          "closed": false,
+          "truncated_before": false,
+          "pipes": []
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.cancel",
+        "request_id": "c7",
+        "read_id": "f7"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "f8",
+        "deadline_ms": 30000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "offset": 66
+        },
+        "max_bytes": 65536,
+        "wait_ms": 25000
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.cancel",
+        "request_id": "c8",
+        "deadline_ms": 10000,
+        "read_id": "f8"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "f8",
+        "chunk": {
+          "offset": 66,
+          "data": "",
+          "next_offset": 66,
+          "eof": true,
+          "closed": false,
+          "truncated_before": false,
+          "pipes": []
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.cancel",
+        "request_id": "c8",
+        "read_id": "f8"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "f9",
+        "deadline_ms": 30000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "offset": 66
+        },
+        "max_bytes": 65536,
+        "wait_ms": 25000
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.cancel",
+        "request_id": "c9",
+        "deadline_ms": 10000,
+        "read_id": "f9"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "f9",
+        "chunk": {
+          "offset": 66,
+          "data": "",
+          "next_offset": 66,
+          "eof": true,
+          "closed": false,
+          "truncated_before": false,
+          "pipes": []
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.cancel",
+        "request_id": "c9",
+        "read_id": "f9"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "f10",
+        "deadline_ms": 30000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "offset": 66
+        },
+        "max_bytes": 65536,
+        "wait_ms": 25000
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.cancel",
+        "request_id": "c10",
+        "deadline_ms": 10000,
+        "read_id": "f10"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "f10",
+        "chunk": {
+          "offset": 66,
+          "data": "",
+          "next_offset": 66,
+          "eof": true,
+          "closed": false,
+          "truncated_before": false,
+          "pipes": []
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.cancel",
+        "request_id": "c10",
+        "read_id": "f10"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "f11",
+        "deadline_ms": 30000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "offset": 66
+        },
+        "max_bytes": 65536,
+        "wait_ms": 25000
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.cancel",
+        "request_id": "c11",
+        "deadline_ms": 10000,
+        "read_id": "f11"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "f11",
+        "chunk": {
+          "offset": 66,
+          "data": "",
+          "next_offset": 66,
+          "eof": true,
+          "closed": false,
+          "truncated_before": false,
+          "pipes": []
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.cancel",
+        "request_id": "c11",
+        "read_id": "f11"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "f12",
+        "deadline_ms": 30000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "offset": 66
+        },
+        "max_bytes": 65536,
+        "wait_ms": 25000
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.cancel",
+        "request_id": "c12",
+        "deadline_ms": 10000,
+        "read_id": "f12"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "f12",
+        "chunk": {
+          "offset": 66,
+          "data": "",
+          "next_offset": 66,
+          "eof": true,
+          "closed": false,
+          "truncated_before": false,
+          "pipes": []
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.cancel",
+        "request_id": "c12",
+        "read_id": "f12"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "f13",
+        "deadline_ms": 30000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "offset": 66
+        },
+        "max_bytes": 65536,
+        "wait_ms": 25000
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.cancel",
+        "request_id": "c13",
+        "deadline_ms": 10000,
+        "read_id": "f13"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "f13",
+        "chunk": {
+          "offset": 66,
+          "data": "",
+          "next_offset": 66,
+          "eof": true,
+          "closed": false,
+          "truncated_before": false,
+          "pipes": []
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.cancel",
+        "request_id": "c13",
+        "read_id": "f13"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "f14",
+        "deadline_ms": 30000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "offset": 66
+        },
+        "max_bytes": 65536,
+        "wait_ms": 25000
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.cancel",
+        "request_id": "c14",
+        "deadline_ms": 10000,
+        "read_id": "f14"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "f14",
+        "chunk": {
+          "offset": 66,
+          "data": "",
+          "next_offset": 66,
+          "eof": true,
+          "closed": false,
+          "truncated_before": false,
+          "pipes": []
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.cancel",
+        "request_id": "c14",
+        "read_id": "f14"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "f15",
+        "deadline_ms": 30000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "offset": 66
+        },
+        "max_bytes": 65536,
+        "wait_ms": 25000
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.cancel",
+        "request_id": "c15",
+        "deadline_ms": 10000,
+        "read_id": "f15"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "f15",
+        "chunk": {
+          "offset": 66,
+          "data": "",
+          "next_offset": 66,
+          "eof": true,
+          "closed": false,
+          "truncated_before": false,
+          "pipes": []
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.cancel",
+        "request_id": "c15",
+        "read_id": "f15"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "f16",
+        "deadline_ms": 30000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "offset": 66
+        },
+        "max_bytes": 65536,
+        "wait_ms": 25000
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.cancel",
+        "request_id": "c16",
+        "deadline_ms": 10000,
+        "read_id": "f16"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "f16",
+        "chunk": {
+          "offset": 66,
+          "data": "",
+          "next_offset": 66,
+          "eof": true,
+          "closed": false,
+          "truncated_before": false,
+          "pipes": []
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.cancel",
+        "request_id": "c16",
+        "read_id": "f16"
+      }
+    }
+  ]
+}

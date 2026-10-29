@@ -102,7 +102,7 @@ def test_separately_proposed_measurement_keeps_current_admission_episode() -> No
         accuracy_gated=(),
     )
     decision = core.Measure(decision_id=core.DecisionId(root="measure"), scope=scope, plan=plan)
-    signal = core.MeasurementRequested(scope=scope, plan=plan)
+    signal = core.MeasurementRequested(decision_id=decision.decision_id, scope=scope, plan=plan)
     request = core.SubmitMeasurement(scope=scope, plan=plan)
     result = core.trace_step(
         state,

@@ -1,47 +1,85 @@
 /**
- * Sandboxed preload of the welcome view: the page's only way out of its sandbox.
+ * Sandboxed preload of the app shell: the page's only way out of its sandbox. (Its name and the
+ * `welcome` channel prefix are the surface's historical ones.)
  *
- * It exposes one function per welcome request (`@vibesys/ipc`'s `WelcomeBridge`); each is an
- * `invoke` the main process answers only for the welcome view's own web contents, and parses with
- * `@vibesys/ipc`'s `parseWelcomeRequest` (`welcome.test.ts` holds the two to the same arguments).
- * Four events come back: the window's state (`onChrome`), the recent runs (`onRecent`), a host to
- * show (`onShowHost`), and a host's runs as its helper pushed them (`onListing`). Sandboxed
+ * It exposes one function per request (`@vibesys/ipc`'s `WelcomeBridge`); each is an `invoke` the
+ * main process answers only for a window's own shell document, and parses with `@vibesys/ipc`'s
+ * `parseWelcomeRequest` (`welcome.test.ts` holds the two to the same arguments). Three events come
+ * back: the recent runs (`onRecent`), a host's runs as its helper pushed them (`onListing`), and the
+ * preferences (`onPreferences`). Before the page's scripts run it asks, synchronously, for what the first paint needs
+ * (the stored theme and the window controls' inset) and sets it on the document. Sandboxed
  * preloads cannot be ES modules or import local files, hence `.cts` and the channel names repeated
  * here; the types keep them in step. It loads only Electron (the package-graph checker's
  * `preload-sandbox`): the payload types come from the bridge interface, which types every member
  * below.
  */
-import type {WelcomeBridge, WelcomeEvent, WelcomeResult} from '@vibesys/ipc';
+import type {FirstPaint, WelcomeBridge, WelcomeEvent, WelcomeResult} from '@vibesys/ipc';
 
 type Channels = typeof import('@vibesys/ipc').WELCOME_CHANNELS;
 type Events = typeof import('@vibesys/ipc').WELCOME_EVENTS;
 
 const CHANNELS: Channels = {
   overview: 'vibesys:welcome:overview',
-  hosts: 'vibesys:welcome:hosts',
-  host: 'vibesys:welcome:host',
   setCheckout: 'vibesys:welcome:set-checkout',
   cancelCheckout: 'vibesys:welcome:cancel-checkout',
-  cancelInspection: 'vibesys:welcome:cancel-inspection',
   signIn: 'vibesys:welcome:sign-in',
   complete: 'vibesys:welcome:complete',
-  inspect: 'vibesys:welcome:inspect',
+  logs: 'vibesys:welcome:logs',
+  releaseLogs: 'vibesys:welcome:release-logs',
   tasks: 'vibesys:welcome:tasks',
-  start: 'vibesys:welcome:start',
-  cancelStart: 'vibesys:welcome:cancel-start',
+  harnesses: 'vibesys:welcome:harnesses',
   attach: 'vibesys:welcome:attach',
+  attachReader: 'vibesys:welcome:attach-reader',
   resume: 'vibesys:welcome:resume',
-  showRun: 'vibesys:welcome:show-run',
-  showWelcome: 'vibesys:welcome:show-welcome',
-  retry: 'vibesys:welcome:retry',
-  stop: 'vibesys:welcome:stop',
+  releaseRun: 'vibesys:welcome:release-run',
+  readEvents: 'vibesys:welcome:read-events',
+  readTrace: 'vibesys:welcome:read-trace',
+  readSummary: 'vibesys:welcome:read-summary',
+  readSpan: 'vibesys:welcome:read-span',
+  runDigests: 'vibesys:welcome:run-digests',
+  projectRuns: 'vibesys:welcome:project-runs',
+  usageWindow: 'vibesys:welcome:usage-window',
+  preferences: 'vibesys:welcome:preferences',
+  setAppearance: 'vibesys:welcome:set-appearance',
+  setNotifications: 'vibesys:welcome:set-notifications',
+  archive: 'vibesys:welcome:archive',
+  machines: 'vibesys:welcome:machines',
+  machine: 'vibesys:welcome:machine',
+  inspectCheckout: 'vibesys:welcome:inspect-checkout',
+  removeMachine: 'vibesys:welcome:remove-machine',
+  compute: 'vibesys:welcome:compute',
+  testCluster: 'vibesys:welcome:test-cluster',
+  addCluster: 'vibesys:welcome:add-cluster',
+  removeCluster: 'vibesys:welcome:remove-cluster',
+  agentLogins: 'vibesys:welcome:agent-logins',
+  startLogin: 'vibesys:welcome:start-login',
+  describeMachine: 'vibesys:welcome:describe-machine',
+  preflight: 'vibesys:welcome:preflight',
+  examples: 'vibesys:welcome:examples',
+  createFromExample: 'vibesys:welcome:create-from-example',
+  copyOut: 'vibesys:welcome:copy-out',
+  startRun: 'vibesys:welcome:start-run',
+  helperFeatures: 'vibesys:welcome:helper-features',
+  taskGoal: 'vibesys:welcome:task-goal',
+  exampleDestination: 'vibesys:welcome:example-destination',
+  openRunWindow: 'vibesys:welcome:open-run-window',
+  showMainWindow: 'vibesys:welcome:show-main-window',
+  openSettings: 'vibesys:welcome:open-settings',
+  openExternal: 'vibesys:welcome:open-external',
 };
 const EVENTS: Events = {
-  chrome: 'vibesys:welcome:chrome',
+  hostSettings: 'vibesys:welcome:host-settings-changed',
   recent: 'vibesys:welcome:recent',
-  showHost: 'vibesys:welcome:show-host',
   listing: 'vibesys:welcome:listing',
+  preferences: 'vibesys:welcome:preferences-changed',
 };
+const FIRST_PAINT_CHANNEL: typeof import('@vibesys/ipc').FIRST_PAINT_CHANNEL =
+  'vibesys:welcome:first-paint';
+const CONNECT_CHANNEL: typeof import('@vibesys/ipc').CONNECT_CHANNEL = 'vibesys:connect';
+const WAKE_CHANNEL: typeof import('@vibesys/ipc').WAKE_CHANNEL = 'vibesys:wake';
+const OPEN_SETTINGS_CHANNEL: typeof import('@vibesys/ipc').OPEN_SETTINGS_CHANNEL =
+  'vibesys:open-settings';
+const RUN_PORT_MESSAGE: typeof import('@vibesys/ipc').RUN_PORT_MESSAGE = 'vibesys:run-port';
 
 /** Effects the sandbox grants this preload, injectable so the exposed bridge has a public Fake. */
 interface WelcomePreloadCapabilities {
@@ -49,7 +87,12 @@ interface WelcomePreloadCapabilities {
   /** Ask the main process on `channel`; it answers with a `WelcomeResult`. */
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
   /** Hear every value the main process sends on `channel`. */
-  on(channel: string, listener: (value: unknown) => void): void;
+  on(channel: string, listener: (value: unknown) => void): () => void;
+  /**
+   * Open one run connection: hand one end of a new channel to the main process and the other to
+   * the page, as a window message named `id`.
+   */
+  connectRun(id: string): void;
 }
 
 /** Build the page capability from its Electron boundary effects. */
@@ -62,30 +105,66 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
   }
   return {
     platform: capabilities.platform,
+    onHostSettingsChanged: listener => capabilities.on(EVENTS.hostSettings, listener),
     overview: () => call(CHANNELS.overview),
-    hosts: () => call(CHANNELS.hosts),
-    host: host => call(CHANNELS.host, host),
     setCheckout: (host, path, change) => call(CHANNELS.setCheckout, host, path, change),
     cancelCheckout: change => call(CHANNELS.cancelCheckout, change),
-    cancelInspection: inspection => call(CHANNELS.cancelInspection, inspection),
     signIn: host => call(CHANNELS.signIn, host),
     complete: (host, directory) => call(CHANNELS.complete, host, directory),
-    inspect: (host, instance, includeLog, inspection) =>
-      call(CHANNELS.inspect, host, instance, includeLog, inspection),
+    logs: (host, instance, request) => call(CHANNELS.logs, host, instance, request),
+    releaseLogs: () => call(CHANNELS.releaseLogs),
     tasks: (host, project) => call(CHANNELS.tasks, host, project),
-    start: (host, project, task, args, start) =>
-      call(CHANNELS.start, host, project, task, args, start),
-    cancelStart: start => call(CHANNELS.cancelStart, start),
+    harnesses: host => call(CHANNELS.harnesses, host),
     attach: (host, instance) => call(CHANNELS.attach, host, instance),
+    attachReader: (host, project, runId) => call(CHANNELS.attachReader, host, project, runId),
     resume: (host, project, run) => call(CHANNELS.resume, host, project, run),
-    showRun: () => call(CHANNELS.showRun),
-    showWelcome: () => call(CHANNELS.showWelcome),
-    retry: () => call(CHANNELS.retry),
-    stop: (host, instance, force) => call(CHANNELS.stop, host, instance, force),
-    onChrome: on(EVENTS.chrome),
+    releaseRun: () => call(CHANNELS.releaseRun),
+    readEvents: (host, project, runId, fromSequence, max) =>
+      call(CHANNELS.readEvents, host, project, runId, fromSequence, max),
+    readTrace: (host, project, runId, fromSequence, max) =>
+      call(CHANNELS.readTrace, host, project, runId, fromSequence, max),
+    readSummary: (host, project, runId) => call(CHANNELS.readSummary, host, project, runId),
+    readSpan: (host, project, runId, spanId, fromSequence, max) =>
+      call(CHANNELS.readSpan, host, project, runId, spanId, fromSequence, max),
+    runDigests: (host, project, runIds) => call(CHANNELS.runDigests, host, project, runIds),
+    projectRuns: (host, project) => call(CHANNELS.projectRuns, host, project),
+    usageWindow: (host, project, runIds, since, until) =>
+      call(CHANNELS.usageWindow, host, project, runIds, since, until),
+    connectRun: id => capabilities.connectRun(id),
+    onWake: listener => capabilities.on(WAKE_CHANNEL, () => listener()),
+    preferences: () => call(CHANNELS.preferences),
+    setAppearance: appearance => call(CHANNELS.setAppearance, appearance),
+    setNotifications: enabled => call(CHANNELS.setNotifications, enabled),
+    archive: (run, archived) => call(CHANNELS.archive, run, archived),
+    machines: () => call(CHANNELS.machines),
+    machine: host => call(CHANNELS.machine, host),
+    inspectCheckout: (host, path) => call(CHANNELS.inspectCheckout, host, path),
+    removeMachine: host => call(CHANNELS.removeMachine, host),
+    compute: host => call(CHANNELS.compute, host),
+    testCluster: (host, cluster) => call(CHANNELS.testCluster, host, cluster),
+    addCluster: (host, cluster) => call(CHANNELS.addCluster, host, cluster),
+    removeCluster: (host, name) => call(CHANNELS.removeCluster, host, name),
+    agentLogins: host => call(CHANNELS.agentLogins, host),
+    startLogin: (host, provider) => call(CHANNELS.startLogin, host, provider),
+    describeMachine: host => call(CHANNELS.describeMachine, host),
+    preflight: (host, inputs) => call(CHANNELS.preflight, host, inputs),
+    examples: host => call(CHANNELS.examples, host),
+    createFromExample: (host, example, destination) =>
+      call(CHANNELS.createFromExample, host, example, destination),
+    copyOut: (host, source, destination) => call(CHANNELS.copyOut, host, source, destination),
+    startRun: (host, inputs) => call(CHANNELS.startRun, host, inputs),
+    helperFeatures: host => call(CHANNELS.helperFeatures, host),
+    taskGoal: (host, project, task) => call(CHANNELS.taskGoal, host, project, task),
+    exampleDestination: (host, example, destination) =>
+      call(CHANNELS.exampleDestination, host, example, destination),
+    openRunWindow: run => call(CHANNELS.openRunWindow, run),
+    showMainWindow: () => call(CHANNELS.showMainWindow),
+    openSettings: () => call(CHANNELS.openSettings),
+    openExternal: url => call(CHANNELS.openExternal, url),
+    onOpenSettings: listener => capabilities.on(OPEN_SETTINGS_CHANNEL, () => listener()),
     onRecent: on(EVENTS.recent),
-    onShowHost: on(EVENTS.showHost),
     onListing: on(EVENTS.listing),
+    onPreferences: on(EVENTS.preferences),
   };
 }
 
@@ -98,10 +177,108 @@ if (process.type === 'renderer') {
     createWelcomePreload({
       platform: process.platform,
       invoke: (channel, ...args) => electron.ipcRenderer.invoke(channel, ...args),
-      on: (channel, listener) =>
-        electron.ipcRenderer.on(channel, (_event, value) => listener(value)),
+      on: (channel, listener) => {
+        const receive = (_event: Electron.IpcRendererEvent, value: unknown): void =>
+          listener(value);
+        electron.ipcRenderer.on(channel, receive);
+        return () => {
+          electron.ipcRenderer.removeListener(channel, receive);
+        };
+      },
+      connectRun: id => {
+        const {port1: port, port2: remote} = new MessageChannel();
+        electron.ipcRenderer.postMessage(CONNECT_CHANNEL, null, [remote]);
+        // A port cannot cross the context bridge as a value; it can as this window's message.
+        window.postMessage({type: RUN_PORT_MESSAGE, id}, '*', [port]);
+      },
     }),
   );
+  electron.contextBridge.exposeInMainWorld(
+    'vibesysGateway',
+    createGatewayPreload({
+      channel: () => {
+        const {port1, port2} = new MessageChannel();
+        return {
+          listen: (receive, failed) => {
+            port1.onmessage = event => receive(event.data);
+            port1.onmessageerror = failed;
+          },
+          send: request => electron.ipcRenderer.postMessage('vibesys:gateway', request, [port2]),
+          close: () => port1.close(),
+        };
+      },
+    }),
+  );
+  prepareFirstPaint(electron.ipcRenderer.sendSync(FIRST_PAINT_CHANNEL));
 }
 
-export = createWelcomePreload;
+/**
+ * Set the stored theme and the window controls' inset (`--chrome-inset-width`,
+ * `--chrome-inset-height`) on the root element as the parser inserts it, before the first paint. A
+ * preload runs before the document has a root element, so this waits for it with a mutation
+ * observer, whose callback runs before the page renders.
+ */
+function prepareFirstPaint(reply: unknown): void {
+  const firstPaint = reply as FirstPaint | undefined;
+  if (firstPaint === undefined || firstPaint === null) return;
+  const apply = (): boolean => {
+    const root = document.documentElement;
+    if (root === null) return false;
+    root.setAttribute('data-theme', firstPaint.theme);
+    root.style.setProperty('--chrome-inset-width', `${firstPaint.chromeInset.width}px`);
+    root.style.setProperty('--chrome-inset-height', `${firstPaint.chromeInset.height}px`);
+    return true;
+  };
+  if (apply()) return;
+  const observer = new MutationObserver(() => {
+    if (apply()) observer.disconnect();
+  });
+  observer.observe(document, {childList: true});
+}
+
+export = Object.assign(createWelcomePreload, {createGatewayPreload});
+
+/** The transferred channel, injectable without granting a preload more runtime imports. */
+interface GatewayPreloadChannel {
+  listen(receive: (value: unknown) => void, failed: () => void): void;
+  send(request: Uint8Array): void;
+  close(): void;
+}
+
+/** A byte-only capability; generated schemas and application state stay outside the preload. */
+function createGatewayPreload(capabilities: {
+  channel(): GatewayPreloadChannel;
+}): import('@vibesys/ipc').GatewayPortBridge {
+  return {
+    open(request, receive, failed) {
+      const channel = capabilities.channel();
+      let closed = false;
+      const close = (): void => {
+        if (closed) return;
+        closed = true;
+        channel.close();
+      };
+      channel.listen(
+        value => {
+          if (closed) return;
+          if (!(value instanceof Uint8Array)) {
+            close();
+            failed('gateway reply must be protobuf bytes');
+          } else receive(value);
+        },
+        () => {
+          if (closed) return;
+          close();
+          failed('gateway reply could not be delivered');
+        },
+      );
+      try {
+        channel.send(request);
+      } catch (error) {
+        close();
+        throw error;
+      }
+      return {cancel: close};
+    },
+  };
+}

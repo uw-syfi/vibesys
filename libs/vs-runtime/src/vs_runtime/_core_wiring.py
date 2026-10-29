@@ -30,7 +30,12 @@ from vs_core.api import (
 from vs_runtime._core_loop import CoreRuntimeBindings
 from vs_runtime._core_requests import ExecutorRole, RefusingRequestExecution, RequestExecutors
 from vs_runtime._evaluation_requests import MeasurementRequests
-from vs_runtime._measurement_progress import IgnoreMeasurement, MeasurementObserver
+from vs_runtime._evidence_ledger import ReceiptEvidenceLedger
+from vs_runtime._measurement_progress import (
+    IgnoreMeasurement,
+    MeasurementDecisions,
+    MeasurementObserver,
+)
 from vs_runtime._observation_factory import ObservationFactory
 from vs_runtime._operation_catalog import OperationCatalog
 from vs_runtime._operation_receipts import NamespaceOperationReceipts
@@ -44,9 +49,10 @@ from vs_runtime._workspace_requests import RuntimeWorkspaceRequests
 
 if TYPE_CHECKING:
     from vs_agent.api import ClientAgentSessions
-    from vs_core.api import LifecycleCapability, SnapshotAndRetainRun
+    from vs_core.api import Continuation, DispatchTurn, LifecycleCapability, SnapshotAndRetainRun
     from vs_evaluation.api import PollingEvaluationExecutor
     from vs_project.api import StateNamespace
+    from vs_runtime._run_control import RunControlChannel
     from vs_runtime._session_requests import SessionResolver, TurnYields
     from vs_runtime._workspaces import RuntimeWorkspaces
     from vs_sim.api import BlockingRunner, Threads
@@ -59,6 +65,9 @@ class MeasurementServices:
     executor: PollingEvaluationExecutor
     observer: MeasurementObserver = dataclasses.field(default_factory=IgnoreMeasurement)
     """Hears each measurement stage start and end; it never changes a result."""
+    decisions: MeasurementDecisions = dataclasses.field(default_factory=MeasurementDecisions)
+    """Learns which decision each measurement answers; share it with the stage output opener."""
+    control: RunControlChannel | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -71,7 +80,7 @@ class SessionServices:
 
     agent_sessions: ClientAgentSessions
     resolver: SessionResolver
-    yields: TurnYields | None = None
+    yields: TurnYields[DispatchTurn, Continuation] | None = None
     """Turns that asked to wait; None when no tool lets an agent yield."""
 
 
@@ -99,6 +108,7 @@ class CoreStartup:
 
     deadline_at: float
     limits: Limits
+    duration_seconds: float | None = None
     lifecycle: frozenset[LifecycleCapability] = frozenset()
     requirements: EvidenceRequirements = dataclasses.field(default_factory=EvidenceRequirements)
 
@@ -130,6 +140,7 @@ def new_core_state(
             run_id=RunId(root=run_id),
             now_at=0.0,
             deadline_at=startup.deadline_at,
+            duration_seconds=startup.duration_seconds,
             facts=facts,
             capabilities=selected,
             limits=startup.limits,
@@ -171,6 +182,7 @@ def core_bindings(  # noqa: PLR0913  # lint-waiver: LW-260141 [PLR0913]; the run
     store = ReceiptStore(receipts, threads)
     catalog = operations or empty_catalog()
     if sessions is None:
+        session = None
         session_requests = RefusingRequestExecution(ExecutorRole.SESSIONS)
         proof = _NoRunInvocations()
     else:
@@ -182,12 +194,24 @@ def core_bindings(  # noqa: PLR0913  # lint-waiver: LW-260141 [PLR0913]; the run
             JournalRunInvocations(sessions.agent_sessions, store), sessions.agent_sessions, store
         )
     executors = RequestExecutors(
-        workspaces=RuntimeWorkspaceRequests(workspaces, store, proof, blocking),
+        workspaces=RuntimeWorkspaceRequests(
+            workspaces, store, proof, blocking, ReceiptEvidenceLedger(store)
+        ),
         sessions=session_requests,
-        evaluation=MeasurementRequests(measurement.executor, store, measurement.observer),
+        evaluation=MeasurementRequests(
+            measurement.executor,
+            store,
+            measurement.observer,
+            measurement.decisions,
+            control=measurement.control,
+        ),
         operations=RegisteredOperationRequests(
             catalog, NamespaceOperationReceipts(store), ObservationFactory(store)
         ),
         semantic_events=JournalSemanticEvents(store, receipts),
     )
-    return CoreRuntimeBindings(registry=catalog.registry, executors=executors)
+    return CoreRuntimeBindings(
+        registry=catalog.registry,
+        executors=executors,
+        steering=None if session is None else session.turns,
+    )

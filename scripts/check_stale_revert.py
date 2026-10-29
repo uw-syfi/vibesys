@@ -63,6 +63,16 @@ MIN_UNDONE_ADDITION = 10
 MAX_REPLACEMENT_LINES = 3
 """Lines the change may add in that file, an intended edit beside the stale copy."""
 
+GIT_COMMAND_TIMEOUT_SECONDS = 120
+"""Longest one git command may run; the CI job holding this step is limited to 5 minutes."""
+GIT_LOW_SPEED_LIMIT = 1000
+GIT_LOW_SPEED_SECONDS = 60
+"""A transfer under ``GIT_LOW_SPEED_LIMIT`` bytes a second for this long is aborted by git itself.
+
+The CI checkout is a partial clone (``filter: blob:none``), so ``blame``, ``show`` and
+``diff`` fetch blobs from the remote on demand: any git command here can wait on the network.
+"""
+
 _DECLARATION = re.compile(
     r"^(?:This reverts commit (?P<sha>[0-9a-f]{40})\b"
     r"|(?:Reverts|Reland|Restores) (?:[\w.-]+/[\w.-]+)?#(?P<number>\d+)\b)",
@@ -86,10 +96,36 @@ class StaleFile:
     """For a line-level finding, how many of ``undone``'s lines the change deletes; else 0."""
 
 
+def bounded_git_argv(*args: str) -> list[str]:
+    """The git command line for ``args``, with git's own low-speed abort on every transfer."""
+    return [
+        "git",
+        "-c",
+        f"http.lowSpeedLimit={GIT_LOW_SPEED_LIMIT}",
+        "-c",
+        f"http.lowSpeedTime={GIT_LOW_SPEED_SECONDS}",
+        *args,
+    ]
+
+
 def _run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    argv = ["git", *args]
-    # lint-waiver: LW-235001 [S603]; fixed git subcommands over refs and repo-relative paths, no shell; stdlib so CI runs it before installing the environment.
-    return subprocess.run(argv, cwd=root, capture_output=True, text=True, check=False)  # noqa: S603
+    argv = bounded_git_argv(*args)
+    try:
+        # lint-waiver: LW-235001 [S603]; fixed git subcommands over refs and repo-relative paths, no shell; stdlib so CI runs it before installing the environment.
+        return subprocess.run(  # noqa: S603
+            argv,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=GIT_COMMAND_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        message = (
+            f"stale-revert check: git {' '.join(args)} exceeded {GIT_COMMAND_TIMEOUT_SECONDS} s "
+            "(a network wait on the remote); rerun the job once the remote answers"
+        )
+        raise RuntimeError(message) from error
 
 
 def _git(root: Path, *args: str) -> str:
@@ -151,6 +187,7 @@ def _edits(root: Path, base: str, head: str, changed: list[str]) -> dict[str, _E
     diff = _git(root, "diff", "-U0", "--no-renames", "--diff-filter=M", base, head, "--", *changed)
     deleted: dict[str, set[int]] = {}
     added: dict[str, list[str]] = {}
+    gitlinks: set[str] = set()
     path = ""
     for line in diff.splitlines():
         if line.startswith("--- a/"):
@@ -160,13 +197,18 @@ def _edits(root: Path, base: str, head: str, changed: list[str]) -> dict[str, _E
         elif match := _HUNK.match(line):
             start, count = int(match.group(1)), int(match.group(2) or 1)
             deleted[path].update(range(start, start + count))
+        elif line.startswith("-Subproject commit "):
+            gitlinks.add(path)
         elif line.startswith("+") and not line.startswith("+++ "):
             added[path].append(line[1:])
+    # A submodule pin is a commit id, not lines: it has nothing to blame, and CI's checkout
+    # holds no submodule objects to blame it with.
     return {
         path: _Edit(
             frozenset(deleted[path]), frozenset(x.strip() for x in added[path]), len(added[path])
         )
         for path in deleted
+        if path not in gitlinks
     }
 
 
@@ -309,8 +351,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--head", default="HEAD")
     args = parser.parse_args(argv)
     root = Path(__file__).resolve().parent.parent
-    _ensure_base(root, args.base_ref)
-    found = stale_files(root, args.base_ref, args.head)
+    try:
+        _ensure_base(root, args.base_ref)
+        found = stale_files(root, args.base_ref, args.head)
+    except RuntimeError as error:
+        sys.stderr.write(f"{error}\n")
+        return 2
     for stale in found:
         what = f"deletes {stale.lines} lines of" if stale.lines else "undoes"
         sys.stdout.write(

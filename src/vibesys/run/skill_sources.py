@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from vibesys.config import BUNDLED_RESOURCES
 from vibesys.constants import PROJECT_ROOT, ComputeBackend, DomainName
 from vibesys.orchestration.skill_selection import (
     SkillMetadata,
@@ -36,6 +37,23 @@ def resolve_skill_source_dirs(
     return [str(path) for path in resolved]
 
 
+def chat_skill_dirs() -> tuple[Path, ...]:
+    """The skills a run's chat agent is installed with: every skill of the bundled chat tree.
+
+    The tree is separate from the optimization agents' (``resources/skills``), whose discovery
+    has no way to scope a skill to one kind of agent, so a chat skill never reaches them. No
+    sidecar applies: these skills teach steering and reading a run, on every backend and domain.
+    Empty when no bundled tree is installed.
+    """
+    root = BUNDLED_RESOURCES.directory("chat-skills")
+    if root is None:
+        return ()
+    skills = discover_skill_dirs(root)
+    for skill_dir in skills:
+        load_skill_frontmatter(skill_dir)
+    return tuple(skills)
+
+
 def validate_skill_tree(root: Path) -> list[SkillMetadata]:
     """Validate every skill and VibeSys sidecar under *root*."""
     rules = discover_sidecar_rules(root)
@@ -47,4 +65,4 @@ def validate_skill_tree(root: Path) -> list[SkillMetadata]:
     return metadata
 
 
-__all__ = ["resolve_skill_source_dirs", "validate_skill_tree"]
+__all__ = ["chat_skill_dirs", "resolve_skill_source_dirs", "validate_skill_tree"]

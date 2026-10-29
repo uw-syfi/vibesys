@@ -1,3 +1,4 @@
+import {getOption} from '@bufbuild/protobuf';
 /**
  * Which hosts the app offers and how it runs VibeSys on each, as pure, validated data.
  *
@@ -14,7 +15,11 @@ import {
   SSH_ALIAS,
   validHostPath,
 } from '@vibesys/hosts';
+import {RetainedDesktopHostSettingsSchema, retained_json_key} from '@vibesys/proto';
 import {object, onlyKeys, SettingsError} from './parse.js';
+import {sshHostPatternsMatch} from './ssh-pattern.js';
+
+export {sshGlobSegmentMatches, sshHostPatternsMatch} from './ssh-pattern.js';
 
 /** How the app runs VibeSys on one host. */
 export interface HostSettings {
@@ -71,6 +76,25 @@ export function parseSettings(value: unknown): SettingsFile {
   return {version: 2, hosts: parsed};
 }
 
+/** Read-only JSON import: drop the retired selection, rejecting every other unknown key. */
+export function decodeRetainedSettings(value: unknown): SettingsFile {
+  const record = object(value, 'hosts.json');
+  if (record['version'] !== 2) return parseSettings(value);
+  const hosts = object(record['hosts'], 'hosts.json: hosts');
+  return parseSettings({
+    ...record,
+    hosts: Object.fromEntries(
+      Object.entries(hosts).map(([key, value]) => {
+        const current = {...object(value, `hosts.json: hosts.${key}`)};
+        delete current[
+          getOption(RetainedDesktopHostSettingsSchema.field.discardedSelection, retained_json_key)
+        ];
+        return [key, current];
+      }),
+    ),
+  });
+}
+
 export function settingsFor(file: SettingsFile, id: HostId): HostSettings | null {
   return file.hosts[hostKey(id)] ?? null;
 }
@@ -84,27 +108,203 @@ export function withHostSettings(
     version: 2,
     hosts: {
       ...file.hosts,
-      [hostKey(id)]: {checkout: validHostPath(settings.checkout, 'the checkout')},
+      [hostKey(id)]: parseHostSettings(settings, 'the host'),
     },
   };
 }
 
+/** `file` without `id`'s settings: the app no longer runs VibeSys there. */
+export function withoutHost(file: SettingsFile, id: HostId): SettingsFile {
+  const key = hostKey(id);
+  return {
+    version: 2,
+    hosts: Object.fromEntries(Object.entries(file.hosts).filter(([each]) => each !== key)),
+  };
+}
+
+/** One discovery-relevant directive in an OpenSSH client configuration, in source order. */
+export type SshConfigDirective =
+  | {
+      readonly kind: 'host';
+      readonly line: number;
+      readonly patterns: readonly string[];
+      readonly aliases: readonly string[];
+    }
+  | {readonly kind: 'match'; readonly line: number; readonly conditions: readonly string[]}
+  | {readonly kind: 'include'; readonly line: number; readonly patterns: readonly string[]};
+
+export type SshConfigSyntaxReason =
+  | 'empty-argument'
+  | 'invalid-quotes'
+  | 'missing-argument'
+  | 'trailing-escape';
+
+/** A malformed OpenSSH configuration line, before any filesystem traversal occurs. */
+export class SshConfigSyntaxError extends Error {
+  override readonly name = 'SshConfigSyntaxError';
+
+  constructor(
+    readonly line: number,
+    readonly directive: string,
+    readonly reason: SshConfigSyntaxReason,
+  ) {
+    super(`SSH config line ${line}: ${directive} has ${syntaxReason(reason)}`);
+  }
+}
+
 /**
- * The concrete host aliases of an ssh config file, in order and without duplicates. `Host` lines
- * may list several names; names with patterns (`*`, `?`, `!`) are skipped. `Include` is not
- * followed: hosts defined only in included files are not offered.
+ * Parse only the `Host` and `Include` directives needed by host discovery. This is deliberately
+ * pure: filesystem expansion and recursion belong to the desktop main-process adapter.
  */
+export function sshConfigDirectives(text: string): readonly SshConfigDirective[] {
+  const directives: SshConfigDirective[] = [];
+  for (const [index, raw] of text.split('\n').entries()) {
+    const lineNumber = index + 1;
+    const line = sshConfigLine(raw);
+    if (line === null) continue;
+    const match = /^([a-z][a-z0-9-]*)(.*)$/i.exec(line);
+    if (match === null) continue;
+    const directive = match[1] ?? '';
+    const remainder = match[2] ?? '';
+    const argumentsText = remainder.trimStart().startsWith('=')
+      ? remainder.trimStart().slice(1).trimStart()
+      : remainder.trimStart();
+    const words = sshConfigWords(argumentsText, lineNumber, directive);
+    switch (directive.toLowerCase()) {
+      case 'host': {
+        requireSshArguments(words, lineNumber, directive);
+        const aliases = words.filter(
+          name => !name.startsWith('!') && !/[*?]/.test(name) && SSH_ALIAS.test(name),
+        );
+        directives.push({kind: 'host', line: lineNumber, patterns: words, aliases});
+        break;
+      }
+      case 'include': {
+        requireSshArguments(words, lineNumber, directive);
+        if (words.some(word => word === '')) {
+          throw new SshConfigSyntaxError(lineNumber, directive, 'empty-argument');
+        }
+        directives.push({kind: 'include', line: lineNumber, patterns: words});
+        break;
+      }
+      case 'match':
+        requireSshArguments(words, lineNumber, directive);
+        directives.push({kind: 'match', line: lineNumber, conditions: words});
+        break;
+    }
+  }
+  return Object.freeze(directives);
+}
+
+/** The concrete aliases declared directly in one config file, in order and without duplicates. */
 export function sshConfigHosts(text: string): string[] {
   const hosts: string[] = [];
-  for (const raw of text.split('\n')) {
-    const line = raw.replace(/#.*/, '').trim();
-    const match = /^host(?:\s*=\s*|\s+)(.+)$/i.exec(line);
-    if (match === null) continue;
-    for (const name of (match[1] ?? '').split(/\s+/)) {
-      const unquoted = name.replace(/^"(.*)"$/, '$1');
-      if (/[*?!]/.test(unquoted) || !SSH_ALIAS.test(unquoted) || hosts.includes(unquoted)) continue;
-      hosts.push(unquoted);
+  for (const directive of sshConfigDirectives(text)) {
+    if (directive.kind !== 'host') continue;
+    for (const alias of directive.aliases) {
+      if (sshHostPatternsMatch(directive.patterns, alias) && !hosts.includes(alias)) {
+        hosts.push(alias);
+      }
     }
   }
   return hosts;
+}
+
+/** Remove an unquoted comment while retaining quoted `#` and escaped characters. */
+function sshConfigLine(raw: string): string | null {
+  let quoted = false;
+  let escaped = false;
+  let line = '';
+  for (const character of raw) {
+    if (escaped) {
+      line += character;
+      escaped = false;
+      continue;
+    }
+    escaped = character === '\\';
+    const nextQuote = quoteAfter(character, quoted);
+    if (nextQuote !== undefined) quoted = nextQuote;
+    if (character === '#' && !quoted) break;
+    line += character;
+  }
+  const trimmed = line.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+/** Split the argument half of a directive using OpenSSH's double-quote and backslash rules. */
+function sshConfigWords(value: string, line: number, directive: string): string[] {
+  const words: string[] = [];
+  let cursor = 0;
+  while (cursor < value.length) {
+    while (/\s/.test(value[cursor] ?? '')) cursor += 1;
+    if (cursor >= value.length) break;
+    const parsed = sshConfigWord(value, cursor, line, directive);
+    words.push(parsed.value);
+    cursor = parsed.next;
+  }
+  return words;
+}
+
+function sshConfigWord(
+  input: string,
+  start: number,
+  line: number,
+  directive: string,
+): {readonly value: string; readonly next: number} {
+  let value = '';
+  let cursor = start;
+  let quoted = false;
+  while (cursor < input.length) {
+    const character = input[cursor] ?? '';
+    if (character === '\\') {
+      const escaped = escapedSshCharacter(input, cursor, line, directive);
+      value += escaped.value;
+      cursor = escaped.index;
+    } else {
+      const nextQuote = quoteAfter(character, quoted);
+      if (nextQuote !== undefined) quoted = nextQuote;
+      else if (/\s/.test(character) && !quoted) break;
+      else value += character;
+    }
+    cursor += 1;
+  }
+  if (quoted) throw new SshConfigSyntaxError(line, directive, 'invalid-quotes');
+  return {value, next: cursor};
+}
+
+function escapedSshCharacter(
+  input: string,
+  escapeIndex: number,
+  line: number,
+  directive: string,
+): {readonly index: number; readonly value: string} {
+  const index = escapeIndex + 1;
+  const value = input[index];
+  if (value === undefined) {
+    throw new SshConfigSyntaxError(line, directive, 'trailing-escape');
+  }
+  return {index, value};
+}
+
+function quoteAfter(character: string, quoted: boolean): boolean | undefined {
+  return character === '"' ? !quoted : undefined;
+}
+
+function requireSshArguments(words: readonly string[], line: number, directive: string): void {
+  if (words.length === 0) {
+    throw new SshConfigSyntaxError(line, directive, 'missing-argument');
+  }
+}
+
+function syntaxReason(reason: SshConfigSyntaxReason): string {
+  switch (reason) {
+    case 'empty-argument':
+      return 'an empty argument';
+    case 'invalid-quotes':
+      return 'invalid quotes';
+    case 'missing-argument':
+      return 'no argument';
+    case 'trailing-escape':
+      return 'a trailing escape';
+  }
 }

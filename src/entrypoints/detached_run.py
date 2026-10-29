@@ -10,6 +10,15 @@ which reports its milestones and its run's lifecycle facts to the
 ``RecordPublisher`` held here. However the server exits, the publisher leaves
 its last record, with the phase the run ended in, as the instance's tombstone.
 
+Before anything else, it installs the run's narration handler on the root logger and
+the uncaught-exception hooks (``sys.excepthook``, ``threading.excepthook``). Records and
+tracebacks wait in the handler's bounded buffer until run assembly opens the run's log
+store (``vibesys.run.logs.open_run_logs``) and attaches the narration stream, which the
+desktop app shows. What dies before that (a bad argument, an import error, a project
+that does not resolve) is a typed launch failure on the record, or reaches only
+``server.log`` for the person reading the terminal output; logging's last resort keeps
+writing warnings to stderr as it did, so ``server.log`` shows what it always showed.
+
 This module is light: ``tests/architecture/test_light_entrypoints.py`` holds
 its module-level imports to the same allowlist as the host commands.
 """
@@ -17,8 +26,11 @@ its module-level imports to the same allowlist as the host commands.
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
+import threading
+from contextlib import contextmanager
 from functools import partial
 from importlib import import_module
 from pathlib import Path
@@ -26,16 +38,23 @@ from typing import TYPE_CHECKING
 
 from entrypoints.launcher import source_checkout_root
 from server.host_api import (
+    EndRecord,
     FailureReason,
     InstanceInspectionMetadata,
     InstanceStatus,
     LiveInstanceRecord,
+    PauseCause,
+    RunEndingFact,
+    RunEndOutcome,
     RunPhase,
     RunStatus,
     StartupFact,
     StartupStage,
+    one_line,
 )
 from server.registry import (
+    INSTANCES_DIRECTORY,
+    READERS_DIRECTORY,
     FileInstanceMetadataStore,
     FileInstanceStore,
     InstanceHold,
@@ -46,11 +65,14 @@ from server.registry import (
     instance_root,
     parse_instance_id,
 )
+from vs_logs.api import NarrationHandler, uncaught_hook, uncaught_thread_hook
 from vs_project.api import ProjectStateError, validate_run_id
 from vs_sim.api import OsThreads, SystemClock
 
 if TYPE_CHECKING:
-    from vibesys.api import Runs
+    from collections.abc import Iterator
+
+    from vibesys.api import RunReaders, Runs
     from vs_sim.api import Clock, Threads
 
 SERVER_EXITED = FailureReason(
@@ -69,11 +91,88 @@ so a fast build does not rewrite the record per step.
 """
 
 
+_PAUSE_STATUSES = frozenset({RunStatus.PAUSING, RunStatus.PAUSED})
+
+_PLAIN_REASONS: dict[RunEndOutcome, str] = {
+    RunEndOutcome.ADOPTED: "The chosen candidate was adopted.",
+    RunEndOutcome.KEPT_INPUT: "Nothing beat the input; the input was kept.",
+    RunEndOutcome.NO_WINNER: "The search ended with no winner.",
+    RunEndOutcome.ADOPTION_FAILED: "The chosen winner could not be adopted.",
+    RunEndOutcome.STOPPED: "Stopped by request.",
+    RunEndOutcome.DEADLINE: "The run deadline passed.",
+    RunEndOutcome.FINISH_REFUSED: "Core refused the run's result.",
+    RunEndOutcome.FAILED: "The run failed.",
+    RunEndOutcome.FORCE_STOPPED: "Force stopped before a safe point.",
+}
+"""The reason an end record gives when nothing more specific was reported."""
+
+
+def pause_cause_after(
+    pending: PauseCause | None, before: RunStatus, after: RunStatus
+) -> PauseCause | None:
+    """The cause a pause waits under once the run moved from ``before`` to ``after``.
+
+    A cause is reported before the pause it explains (``quota_paused`` comes ahead of the
+    status change), so it is kept until the run leaves its pause.
+    """
+    if before in _PAUSE_STATUSES and after not in _PAUSE_STATUSES:
+        return None
+    return pending
+
+
+def paused_by(phase: RunPhase, pending: PauseCause | None) -> PauseCause | None:
+    """Who paused a run in ``phase``: the reported cause, else the operator."""
+    if phase.status is not RunStatus.PAUSED:
+        return None
+    return pending or PauseCause.USER
+
+
+def end_record(
+    phase: RunPhase, ending: RunEndingFact | None, *, terminated: bool
+) -> EndRecord | None:
+    """The tombstone's ``end`` for a run that ended in ``phase``; ``None`` when nothing names it.
+
+    The end preserves the previous epoch's outcome and reason. Every ending can be
+    resumed; the launcher independently validates retained storage and writer exclusion.
+    """
+    outcome = _outcome(phase, ending, terminated=terminated)
+    if outcome is None:
+        return None
+    reported = ending.summary if ending is not None and ending.outcome is outcome else ""
+    failure = "" if phase.reason is None else phase.reason.message
+    reason = one_line(reported) or one_line(failure) or _PLAIN_REASONS[outcome]
+    resumable = True
+    return EndRecord(
+        outcome=outcome,
+        reason=reason,
+        resumable=resumable,
+        resume_from_round=ending.rounds_finished + 1 if ending is not None and resumable else None,
+        uncompared=ending is not None and ending.outcome is outcome and ending.uncompared,
+    )
+
+
+def _outcome(
+    phase: RunPhase, ending: RunEndingFact | None, *, terminated: bool
+) -> RunEndOutcome | None:
+    if terminated:
+        return RunEndOutcome.FORCE_STOPPED
+    if ending is not None and ending.outcome is not None:
+        return ending.outcome
+    match phase.status:
+        case RunStatus.STOPPED:
+            return RunEndOutcome.STOPPED
+        case RunStatus.FAILED:
+            return RunEndOutcome.FAILED
+        case _:
+            return None
+
+
 class RecordPublisher:
     """Keep a held instance's record current, and leave it as the tombstone.
 
     The record's phase is folded here (``RunPhase.advance``) from the facts the
-    server reports; ``end`` writes the final record. A change of startup
+    server reports, and ``paused`` with it (``paused_by``); ``end`` writes the final
+    record with its ``end`` (``end_record``). A change of startup
     progress alone is written at most once per
     ``PROGRESS_WRITE_INTERVAL_SECONDS``: one arriving sooner is held, and a
     worker on ``threads`` writes the latest held phase when the interval ends,
@@ -100,20 +199,23 @@ class RecordPublisher:
         self._threads = threads
         self._lock = self._threads.lock()
         self._held: RunPhase | None = None
+        self._pause_cause: PauseCause | None = None
+        self._ending: RunEndingFact | None = None
+        self._terminated = False
         self._flush_scheduled = False
         self._written_at = self._threads.now()
         hold.publish(record)
 
     def resolved(self, *, project_root: Path, task: str) -> None:
-        """Retain the immutable identity after the invocation selected its project and task."""
-        resolved_root = str(project_root.resolve())
+        """Retain the opened project's root. Callers pass ``Project.root``; this stores it."""
+        published = str(project_root)
         with self._lock:
-            self._publish(project_root=resolved_root)
+            self._publish(project_root=published)
             record = self._record
         self._metadata.publish(
             InstanceInspectionMetadata(
                 id=record.id,
-                project_root=resolved_root,
+                project_root=published,
                 run_id=record.run_id,
                 task=task,
                 pid=record.pid,
@@ -143,6 +245,7 @@ class RecordPublisher:
         with self._lock:
             current = self._held or self._record.phase
             phase = current.advance(status=status, failure=failure, startup=startup)
+            self._pause_cause = pause_cause_after(self._pause_cause, current.status, phase.status)
             if phase == current:
                 return
             written = self._record.phase
@@ -156,11 +259,31 @@ class RecordPublisher:
                 return
             self._publish(phase=phase)
 
+    def pausing_for(self, cause: PauseCause) -> None:
+        """The run pauses for ``cause``; a run already paused now reports it."""
+        with self._lock:
+            self._pause_cause = cause
+            phase = self._held or self._record.phase
+            if paused_by(phase, cause) != self._record.paused:
+                self._publish(phase=phase)
+
+    def ending(self, fact: RunEndingFact) -> None:
+        """Keep how the run's durable record stood as it ended, for the tombstone."""
+        with self._lock:
+            self._ending = fact
+
+    def terminated(self) -> None:
+        """The server was terminated; its tombstone reports a force stop."""
+        with self._lock:
+            self._terminated = True
+
     def end(self) -> None:
-        """Write the tombstone: the phase the run ended in, or ``SERVER_EXITED``."""
+        """Write the tombstone: the phase the run ended in, or ``SERVER_EXITED``, and its end."""
         self.observe(failure=SERVER_EXITED)
         with self._lock:
-            self._publish(ended_at=self._clock.now())
+            phase = self._held or self._record.phase
+            end = end_record(phase, self._ending, terminated=self._terminated)
+            self._publish(phase=phase, ended_at=self._clock.now(), end=end)
 
     def _flush(self, wait: float) -> None:
         """Write the held phase once the interval since the latest write has passed.
@@ -180,10 +303,13 @@ class RecordPublisher:
                         self._publish(phase=self._held)
                     return
 
-    def _publish(self, **update: object) -> None:
-        """Write the record with ``update``; the caller holds ``self._lock``."""
-        if "phase" not in update and self._held is not None:
-            update["phase"] = self._held
+    def _publish(self, phase: RunPhase | None = None, **update: object) -> None:
+        """Write the record at ``phase`` (else the held or written one) with ``update``.
+
+        ``paused`` follows the phase written. The caller holds ``self._lock``.
+        """
+        written = phase or self._held or self._record.phase
+        update |= {"phase": written, "paused": paused_by(written, self._pause_cause)}
         self._held = None
         self._record = LiveInstanceRecord.model_validate({**self._record.model_dump(), **update})
         self._written_at = self._threads.now()
@@ -203,6 +329,7 @@ def _identity(arguments: list[str]) -> argparse.Namespace:
     parser.add_argument("--instance-id", type=parse_instance_id, required=True)
     parser.add_argument("--run-id", type=_run_id, required=True)
     parser.add_argument("--control-socket", type=Path, required=True)
+    parser.add_argument("--reopen", type=Path, default=None)
     identity, _ = parser.parse_known_args(arguments)
     return identity
 
@@ -226,13 +353,57 @@ def _starting_record(identity: argparse.Namespace, root: Path, clock: Clock) -> 
     )
 
 
-def main(argv: list[str] | None = None, *, runs: Runs | None = None) -> None:
+@contextmanager
+def narration_installed() -> Iterator[NarrationHandler]:
+    """Send this process's log records and uncaught exceptions to a narration handler.
+
+    The handler buffers until run assembly attaches the run's narration stream.
+    Installing a root handler retires ``logging.lastResort``, so it is installed too:
+    warnings still reach stderr (``server.log``) as before. Leaving the block closes the
+    handler and restores the logging configuration and hooks it found.
+    """
+    handler = NarrationHandler(warn=sys.stderr.write)
+    root = logging.getLogger()
+    installed = [handler] if logging.lastResort is None else [handler, logging.lastResort]
+    level = root.level
+    previous_hook = sys.excepthook
+    previous_thread_hook = threading.excepthook
+    for each in installed:
+        root.addHandler(each)
+    root.setLevel(logging.INFO)
+    sys.excepthook = uncaught_hook(handler, previous_hook)
+    threading.excepthook = uncaught_thread_hook(handler, previous_thread_hook)
+    try:
+        yield handler
+    finally:
+        handler.close()
+        sys.excepthook = previous_hook
+        threading.excepthook = previous_thread_hook
+        for each in installed:
+            root.removeHandler(each)
+        root.setLevel(level)
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    runs: Runs | None = None,
+    run_readers: RunReaders | None = None,
+) -> None:
     """Hold this server's registry id for its lifetime and serve its run."""
+    with narration_installed():
+        _serve(argv, runs, run_readers)
+
+
+def _serve(argv: list[str] | None, runs: Runs | None, run_readers: RunReaders | None) -> None:
     arguments = sys.argv[1:] if argv is None else argv
     identity = _identity(arguments)
     root = instance_root(os.environ, os.getuid())
     clock = SystemClock()
-    with LiveRegistry(FileInstanceStore(root), clock).register(identity.instance_id) as hold:
+    # A read-only server (``--reopen``) is a reader: it registers apart from the runs.
+    directory = INSTANCES_DIRECTORY if identity.reopen is None else READERS_DIRECTORY
+    registry = LiveRegistry(FileInstanceStore(root, directory=directory), clock)
+    with registry.register(identity.instance_id) as hold:
         publisher = RecordPublisher(
             hold,
             _starting_record(identity, root, clock),
@@ -241,7 +412,9 @@ def main(argv: list[str] | None = None, *, runs: Runs | None = None) -> None:
             threads=OsThreads(),
         )
         try:
-            import_module("entrypoints.server").main(arguments, observer=publisher, runs=runs)
+            import_module("entrypoints.server").main(
+                arguments, observer=publisher, runs=runs, run_readers=run_readers
+            )
         finally:
             publisher.end()
 

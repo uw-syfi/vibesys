@@ -6,10 +6,16 @@ import type {
   InstanceList,
   LiveInstanceRecord,
   RunPhase,
+  RunStatus,
   UnreadableRecord,
 } from '@vibesys/contracts/host-helper';
 import type {ConnectionStatus} from './connection-status.js';
 import type {HostKey} from './host.js';
+
+/** Who paused a paused run: the user, or a usage limit. */
+export type RunPause = NonNullable<LiveInstanceRecord['paused']> | null;
+/** A tombstone's end record: the outcome, a one-line reason, and whether it can resume. */
+export type RunEnd = NonNullable<LiveInstanceRecord['end']> | null;
 
 /** One run a host's registry lists: a live server, or an ended one kept as a tombstone. */
 export interface HostRun {
@@ -17,8 +23,14 @@ export interface HostRun {
   readonly id: string;
   readonly projectRoot: string;
   readonly runId: string;
-  /** The run's phase (`RunStatus`), with its startup stage while starting. */
+  /** The run's phase (`RunStatus`) in words, with its startup stage while starting. */
   readonly status: string;
+  /** The run's phase as the registry records it. */
+  readonly phase: RunStatus;
+  /** Who paused it, exactly while its phase is `paused`. */
+  readonly paused: RunPause;
+  /** How it ended, on a tombstone that records it; null while live, or on an older tombstone. */
+  readonly end: RunEnd;
   readonly startedAt: number;
   /** Why the run failed, when it did. */
   readonly reason: string | null;
@@ -33,6 +45,10 @@ export type HostListing =
       readonly ended: readonly HostRun[];
       /** Records this app cannot read (another VibeSys version), by id. */
       readonly unreadable: readonly string[];
+      /** Runs whose project cannot be resolved; liveness may also be unknown. */
+      readonly unknownProject?: readonly (Omit<HostRun, 'projectRoot'> & {
+        readonly alive?: boolean;
+      })[];
       /** Ids whose lock could not be read: neither known live nor known ended, by id. */
       readonly unverified: readonly string[];
     }
@@ -43,6 +59,18 @@ export type HostListing =
     };
 
 type ListedHost = Extract<HostListing, {readonly kind: 'listed'}>;
+
+/**
+ * The hosts that answer in `after` and did not in `before` (absent counts as not answering): a
+ * read that failed because such a host was unreachable may now succeed.
+ */
+export function hostsComeUp(
+  before: readonly HostListing[],
+  after: readonly HostListing[],
+): readonly HostKey[] {
+  const was = new Set(before.flatMap(each => (each.kind === 'listed' ? [each.host] : [])));
+  return after.flatMap(each => (each.kind === 'listed' && !was.has(each.host) ? [each.host] : []));
+}
 
 /** What one coherent registry listing proves about an instance. */
 export type InstanceObservation<Record, Unreadable = string> =
@@ -57,7 +85,9 @@ export type InstanceObservation<Record, Unreadable = string> =
 
 const STAGES: Readonly<Record<NonNullable<RunPhase['stage']>, string>> = {
   resolving: 'Resolving',
+  probing_workspace: 'Probing workspace',
   building_image: 'Building image',
+  building_tools: 'Building tools',
   starting_container: 'Starting container',
 };
 
@@ -83,9 +113,43 @@ function hostRun(record: LiveInstanceRecord): HostRun {
     projectRoot: record.project_root,
     runId: record.run_id,
     status: instancePhaseText(phase),
+    phase: phase.status,
+    paused: record.paused ?? null,
+    end: record.end ?? null,
     startedAt: record.started_at,
     reason: phase.reason == null ? null : phase.reason.message,
   };
+}
+
+/**
+ * Whether the directory the app remembers a run in names the registry's `root` for it. The app keeps
+ * what the user typed (`~/x`, a trailing slash) and the registry the resolved absolute path.
+ */
+function sameProject(remembered: string, root: string): boolean {
+  const trimmed = (path: string): string => path.replace(/\/+$/, '');
+  const [want, have] = [trimmed(remembered), trimmed(root)];
+  return want === have || (want.startsWith('~/') && have.endsWith(want.slice(1)));
+}
+
+/**
+ * The newest of `servers` (a host's live or ended records) that drives or drove run `runId` in
+ * `project`: a run resumed many times has one record per server, and the latest speaks for it.
+ */
+export function newestServerOf(
+  servers: readonly HostRun[],
+  runId: string,
+  project?: string,
+): HostRun | undefined {
+  return servers
+    .filter(
+      server =>
+        server.runId === runId &&
+        (project === undefined || sameProject(project, server.projectRoot)),
+    )
+    .reduce<HostRun | undefined>(
+      (best, server) => (best === undefined || best.startedAt < server.startedAt ? server : best),
+      undefined,
+    );
 }
 
 /** `listing` from `host`'s registry, as the views list it. */

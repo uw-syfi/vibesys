@@ -4,19 +4,29 @@ import json
 import socket
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Never
+from typing import Any, Never, cast
 
 import pytest
-from tests.server.support import REQUEST_TIME, ServerParts, build_server_parts
+from tests.server.support import (
+    CONTROL_KEY,
+    REQUEST_TIME,
+    ServerParts,
+    build_server_parts,
+    operator_dialer,
+)
 
 from server.api.protocol import (
     ChatQuery,
     EventsQuery,
+    ProtocolRequest,
     Request,
+    Response,
+    RunSnapshot,
     SnapshotQuery,
     StopCommand,
     SubscribeRequest,
 )
+from server.api.service import RunApi
 from server.chat.manager import ChatAnswer
 from server.events import EventType
 from server.run_lifecycle import RunStatus
@@ -38,6 +48,7 @@ def _served[T](
     body: Callable[[ServerParts, _Dial], T],
     *,
     prepare: Callable[[ServerParts], None] = lambda _parts: None,
+    api_factory: Callable[[ServerParts], RunApi] = lambda parts: parts.api,
 ) -> T:
     """Run ``body`` against a Unix JSONL server on the simulated network and threads."""
     threads = SimThreads(schedule_seed=0)
@@ -49,11 +60,19 @@ def _served[T](
         try:
             prepare(parts)
             server = UnixJsonlServer(
-                socket_path, parts.api, threads=threads, network=network, subscriptions=None
+                socket_path,
+                api_factory(parts),
+                threads=threads,
+                network=network,
+                subscriptions=None,
+                key=CONTROL_KEY,
             )
             server.start()
             try:
-                return body(parts, lambda: network.connect(str(socket_path), HANG_GUARD_S))
+                return body(
+                    parts,
+                    lambda: operator_dialer(network).connect(str(socket_path), HANG_GUARD_S),
+                )
             finally:
                 server.close()
         finally:
@@ -129,7 +148,7 @@ def test_transport_round_trips_the_stop_command(socket_dir: Path) -> None:
 
         assert response["ok"] is True
         assert response["client_id"] == "unix-client"
-        assert response["ack"] == {"action": "stop", "status": "pending"}
+        assert response["ack"] == {"action": "pause_now", "status": "pending"}
         assert parts.controller.run_status() is RunStatus.STOPPING
 
     _served(socket_dir, socket_dir / "logs", body)
@@ -213,6 +232,72 @@ def test_subscription_streams_one_consistent_append_batch(socket_dir: Path) -> N
     assert streamed["through_sequence"] == streamed["events"][-1]["sequence"]
 
 
+class _BootstrapFailureApi:
+    """Run API Fake exposing which state built the failure acknowledgement."""
+
+    def __init__(self, delegate: RunApi) -> None:
+        self._delegate = delegate
+        self.latest_sequence_reads = 0
+        self.snapshots: list[RunSnapshot] = []
+
+    def decode_request(self, frame: str | bytes) -> ProtocolRequest | Response:
+        return self._delegate.decode_request(frame)
+
+    def snapshot(self) -> RunSnapshot:
+        snapshot = self._delegate.snapshot()
+        self.snapshots.append(snapshot)
+        return snapshot
+
+    @property
+    def latest_sequence(self) -> int:
+        # Model a different event-store generation becoming visible between
+        # two reads. The acknowledgement must not ask for this second value.
+        self.latest_sequence_reads += 1
+        return self._delegate.latest_sequence + 1
+
+    def subscription_bootstrap(
+        self,
+        _after_sequence: int,
+        _tail: int | None,
+        *,
+        store_id: str | None = None,
+    ) -> Never:
+        del store_id
+        raise RuntimeError
+
+
+def test_bootstrap_failure_acknowledgement_uses_one_snapshot(socket_dir: Path) -> None:
+    fakes: list[_BootstrapFailureApi] = []
+
+    def fake_api(parts: ServerParts) -> RunApi:
+        fake = _BootstrapFailureApi(parts.api)
+        fakes.append(fake)
+        return cast("RunApi", fake)
+
+    def body(_parts: ServerParts, dial: _Dial) -> tuple[dict[str, Any], dict[str, Any]]:
+        client = dial()
+        try:
+            _send(client, SubscribeRequest(timestamp=REQUEST_TIME, client_id="failed-bootstrap"))
+            return _receive(client), _receive(client)
+        finally:
+            client.close()
+
+    subscribed, failure = _served(
+        socket_dir,
+        socket_dir / "logs",
+        body,
+        api_factory=fake_api,
+    )
+
+    fake = fakes[0]
+    assert subscribed["type"] == "subscribed"
+    assert subscribed["run_id"] == fake.snapshots[0].run_id
+    assert subscribed["latest_sequence"] == fake.snapshots[0].sequence
+    assert fake.latest_sequence_reads == 0
+    assert failure["type"] == "protocol_error"
+    assert failure["code"] == "stream_failed"
+
+
 def test_subscription_reports_structured_stream_failure(
     tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -277,7 +362,12 @@ def test_transport_rejects_overlong_path_before_binding(tmp_path: Path) -> None:
     try:
         with pytest.raises(SocketPathTooLongError) as failure:
             UnixJsonlServer(
-                path, parts.api, subscriptions=None, threads=OsThreads(), network=UnixNetwork()
+                path,
+                parts.api,
+                subscriptions=None,
+                threads=OsThreads(),
+                network=UnixNetwork(),
+                key=CONTROL_KEY,
             ).start()
 
         assert failure.value.path == path

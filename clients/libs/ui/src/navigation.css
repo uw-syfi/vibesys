@@ -1,0 +1,364 @@
+/* The navigation column and the window frame around it: sidebar entries, groups, the resizable app column. Imported by components.css. */
+
+/* --- sidebar ----------------------------------------------------------------------------------- */
+
+.vs-sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.vs-sidebar-title {
+  display: flex;
+  padding: 0 var(--space-3) var(--space-2);
+}
+.vs-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  border: var(--hairline) solid transparent;
+  border-radius: var(--radius);
+}
+.vs-sidebar-item:hover {
+  background: var(--panel-2);
+}
+.vs-sidebar-item[data-active] {
+  background: var(--selection);
+  border-color: var(--line);
+}
+.vs-sidebar-link {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: var(--control);
+  margin: 0;
+  padding: var(--space-3);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.vs-sidebar-link > .vs-icon {
+  margin-top: var(--space-1);
+}
+.vs-sidebar-item[data-disabled]:hover {
+  background: transparent;
+}
+.vs-sidebar-item[data-disabled] .vs-sidebar-link {
+  color: var(--muted);
+  cursor: default;
+}
+.vs-sidebar-item[data-disabled][data-active] .vs-sidebar-link {
+  color: var(--text);
+}
+.vs-sidebar-dot {
+  display: flex;
+  padding-top: var(--space-2);
+}
+.vs-sidebar-marker {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--space-6);
+  height: var(--space-6);
+  border: var(--hairline) solid var(--line);
+  border-radius: 50%;
+  color: var(--text);
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: 1;
+}
+.vs-sidebar-marker[data-state="current"] {
+  border-color: var(--text);
+  background: var(--text);
+  color: var(--bg);
+}
+.vs-sidebar-marker[data-state="muted"] {
+  color: var(--muted);
+}
+.vs-sidebar-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+/* A group of entries under a small header: its entries are one line each. */
+.vs-sidebar-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0);
+  min-width: 0;
+}
+.vs-sidebar-group-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3) var(--space-1);
+}
+.vs-sidebar-group-title > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-sidebar-group-title > :last-child {
+  flex: none;
+}
+/* A group's entry: when and how it came out, wrapping rather than cut, then what else it did. */
+.vs-sidebar-text[data-compact] > :first-child {
+  overflow-wrap: anywhere;
+}
+.vs-sidebar-item {
+  flex-wrap: wrap;
+}
+.vs-sidebar-break {
+  flex-basis: 100%;
+  height: 0;
+}
+.vs-sidebar-action {
+  flex: none;
+  margin: 0 0 var(--space-3) calc(var(--space-3) * 2 + var(--space-4));
+  padding: var(--space-1) var(--space-3);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  cursor: pointer;
+}
+.vs-sidebar-action:hover {
+  background: var(--panel-2);
+}
+.vs-sidebar-more {
+  align-self: flex-start;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  text-decoration: none;
+  cursor: pointer;
+}
+.vs-sidebar-more:hover {
+  color: var(--text);
+}
+
+/* --- app frame --------------------------------------------------------------------------------- */
+
+.vs-app-frame,
+.vs-window-frame {
+  /* The title-bar row: as tall as the window's own controls, and at least one control. */
+  --titlebar-row: max(var(--chrome-inset-height, var(--space-0)), var(--control));
+  position: relative;
+  display: flex;
+  height: 100%;
+  background: var(--bg);
+}
+.vs-app-nav {
+  box-sizing: border-box;
+  position: relative;
+  display: flex;
+  flex: 0 0 var(--sidebar-width, var(--sidebar));
+  flex-direction: column;
+  gap: var(--space-5);
+  width: var(--sidebar-width, var(--sidebar));
+  max-height: 100%;
+  overflow: hidden;
+  /* The title-bar row (the window's own controls and the toggle) sits over the column's top: start below it. */
+  padding: calc(var(--titlebar-row) + var(--space-2)) var(--space-4) var(--space-5);
+  /* The column's background moves the window; its controls stay controls. */
+  -webkit-app-region: drag;
+  border-right: var(--hairline) solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+}
+.vs-app-nav :is(a, button, input, select, textarea, [tabindex]) {
+  -webkit-app-region: no-drag;
+}
+.vs-app-nav .vs-sidebar-item,
+.vs-app-nav .vs-sidebar-group,
+.vs-app-nav .vs-sidebar-section {
+  -webkit-app-region: no-drag;
+}
+/*
+ * Hidden, the column leaves a rail of icon buttons: the same title-bar offset and background. It
+ * is as wide as the window's own controls and the toggle after them need, so the page beside it
+ * starts at the same place, top and left, as with the column shown.
+ */
+.vs-app-rail {
+  --rail-start: max(var(--chrome-inset-width, var(--space-0)), var(--space-4));
+  box-sizing: border-box;
+  display: none;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: calc(var(--rail-start) + var(--control) + var(--space-4));
+  max-height: 100%;
+  padding: calc(var(--titlebar-row) + var(--space-2)) var(--space-4) var(--space-5)
+    var(--rail-start);
+  -webkit-app-region: drag;
+  border-right: var(--hairline) solid var(--line);
+  background: var(--panel-2);
+}
+.vs-app-frame[data-nav-hidden] .vs-app-rail {
+  display: flex;
+}
+.vs-app-rail :is(a, button, [tabindex]) {
+  -webkit-app-region: no-drag;
+}
+.vs-app-rail > :last-child {
+  margin-top: auto;
+}
+.vs-app-nav-pinned {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.vs-app-nav-top {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.vs-app-nav-resize {
+  position: absolute;
+  top: var(--titlebar-row);
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  width: var(--space-2);
+  margin: 0;
+  border: 0;
+  cursor: col-resize;
+  touch-action: none;
+  -webkit-app-region: no-drag;
+}
+.vs-app-nav-resize:hover,
+.vs-app-nav-resize:focus-visible {
+  background: var(--line);
+}
+/*
+ * Hidden, the column has no width, border or padding, and is not visible: `visibility` goes last,
+ * after the size has changed, and takes the column out of the accessibility tree and the tab order.
+ */
+.vs-app-nav {
+  transition:
+    flex-basis var(--duration-fast) var(--easing),
+    width var(--duration-fast) var(--easing),
+    padding var(--duration-fast) var(--easing),
+    border-width var(--duration-fast) var(--easing),
+    visibility 0s linear;
+}
+.vs-app-nav[data-hidden] {
+  flex-basis: 0;
+  width: 0;
+  padding-right: 0;
+  padding-left: 0;
+  border-right-width: 0;
+  overflow: hidden;
+  visibility: hidden;
+  transition:
+    flex-basis var(--duration-fast) var(--easing),
+    width var(--duration-fast) var(--easing),
+    padding var(--duration-fast) var(--easing),
+    border-width var(--duration-fast) var(--easing),
+    visibility 0s linear var(--duration-fast);
+}
+.vs-app-nav-top,
+.vs-app-nav-footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.vs-app-nav-footer {
+  flex: none;
+  gap: var(--space-1);
+  padding-top: var(--space-4);
+  border-top: var(--hairline) solid var(--line);
+}
+.vs-app-main {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  max-height: 100%;
+}
+.vs-app-content {
+  flex: 1 1 0;
+  min-height: 0;
+}
+/*
+ * The title-bar row's control floats over the row, after the window's own controls and centered on
+ * them; the same place with the column shown or hidden.
+ */
+.vs-app-titlebar-control {
+  position: absolute;
+  top: 0;
+  left: max(var(--chrome-inset-width, var(--space-0)), var(--space-4));
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  height: var(--titlebar-row);
+  -webkit-app-region: no-drag;
+}
+.vs-app-titlebar-control * {
+  -webkit-app-region: no-drag;
+}
+/*
+ * A narrow window never stacks the column above the page: the rail always stays beside the page
+ * (what the column is hidden to, at any width), and a shown column floats over the rail and the
+ * page's start instead of taking width from it. The page is first on screen at every width.
+ */
+@media (max-width: 799px) {
+  .vs-app-rail {
+    display: flex;
+  }
+  .vs-app-frame:not([data-nav-hidden]) .vs-app-rail {
+    visibility: hidden;
+  }
+  .vs-app-nav {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 10;
+    box-shadow: var(--elevation-overlay);
+  }
+  .vs-app-nav[data-hidden] {
+    box-shadow: none;
+  }
+}
+/* A window without a navigation column: the title-bar row, then the page filling the rest. */
+.vs-window-frame {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg);
+}
+/* A window without a column: an empty drag strip of the title-bar row's height above the page. */
+.vs-app-strip {
+  flex: none;
+  box-sizing: border-box;
+  height: var(--titlebar-row);
+  -webkit-app-region: drag;
+  background: var(--bg);
+}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Never, TypeAlias, TypeVar
@@ -12,15 +13,21 @@ from pydantic import BaseModel
 from vs_agent.api import (
     NULL_SKILL_SELECTION,
 )
-from vs_project.api import Git
+from vs_core.api import AdoptionPublication, CheckoutStatus, CheckoutUpdate
+from vs_project.api import Git, adoption_branch
 from vs_runtime._local_validation import LocalValidationRecipeError, check_recipe_artifact_path
-from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
+from vs_runtime._trusted_evaluation import (
+    TrustedAccuracyResult,
+    TrustedBenchmarkResult,
+    TrustedBuildResult,
+)
 from vs_runtime._workspace_access import WorkspaceAccessRecovery
 from vs_runtime.contracts import (
     AccuracyEvaluation,
     AccuracyReceipt,
     BenchmarkEvaluation,
     BenchmarkObjective,
+    BuildEvaluation,
     CandidateWorkspace,
     CommandResult,
     LocalValidationEvaluation,
@@ -35,15 +42,23 @@ from vs_runtime.contracts import (
     validate_trusted_shell_command,
     validate_workspace_writable_paths,
 )
+from vs_sim.api import DISCARD, OutputStream
 from vs_sim.api.testing import FakeProcesses, ProcessScript
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from vs_agent.api import CapacityStops
     from vs_runtime._agent_lifecycle import AgentExecutionLifecycleEvent
-    from vs_runtime._run_control import RunControlChannel, RunControlTransition
+    from vs_runtime._run_control import (
+        CapacityWaitEnd,
+        PauseWake,
+        RunControlChannel,
+        RunControlTransition,
+    )
+    from vs_runtime._workspace_holds import WorkspaceHolds
     from vs_sandbox.api import CommandRunner, HostResource, ProjectPathPolicy
-    from vs_sim.api import ProcessSpec, Threads
+    from vs_sim.api import OutputSink, ProcessSpec, Threads
 
 
 class FakeAgentExecutionEnvironment:
@@ -114,6 +129,7 @@ class FakeTrustedEvaluationExecutor:
 
     def __init__(self) -> None:
         """Create an executor with passing, unexecuted defaults."""
+        self.build_confinements: list[CommandRunner | None] = []
         self.accuracy_calls: list[FakeTrustedAccuracyCall] = []
         self.benchmark_calls: list[FakeTrustedBenchmarkCall] = []
         self._accuracy_results: list[TrustedAccuracyResult] = []
@@ -127,8 +143,19 @@ class FakeTrustedEvaluationExecutor:
         """Replace queued benchmark outcomes."""
         self._benchmark_results = list(results)
 
-    async def accuracy(self, *, command_override: str | None = None) -> TrustedAccuracyResult:
-        """Record one call and return the next scripted outcome."""
+    async def build(
+        self, *, confinement: CommandRunner | None, output: OutputSink
+    ) -> TrustedBuildResult:
+        """Record one call and pass without running anything; it prints nothing."""
+        del output
+        self.build_confinements.append(confinement)
+        return TrustedBuildResult(executed=False, passed=True)
+
+    async def accuracy(
+        self, *, command_override: str | None = None, output: OutputSink
+    ) -> TrustedAccuracyResult:
+        """Record one call and return the next scripted outcome; it prints nothing."""
+        del output
         self.accuracy_calls.append(FakeTrustedAccuracyCall(command_override))
         if self._accuracy_results:
             return self._accuracy_results.pop(0)
@@ -139,8 +166,10 @@ class FakeTrustedEvaluationExecutor:
         *,
         command_override: str | None = None,
         required_metrics: frozenset[str] = frozenset(),
+        output: OutputSink,
     ) -> TrustedBenchmarkResult:
-        """Record one call and return the next scripted outcome."""
+        """Record one call and return the next scripted outcome; it prints nothing."""
+        del output
         self.benchmark_calls.append(FakeTrustedBenchmarkCall(command_override, required_metrics))
         if self._benchmark_results:
             return self._benchmark_results.pop(0)
@@ -172,9 +201,9 @@ class FakeRunControlEventSink:
 class FakeCapacityTimer:
     """A virtual clock for the capacity gate: waits cost no real time.
 
-    ``wait_resumed`` advances the clock by the requested seconds and lets the real
-    control channel settle the wait with a zero timeout, so the channel's PAUSED and
-    RESUMED transitions are the production ones. With ``operator_resumes_after`` set,
+    ``pause_for_quota`` advances the clock by the requested seconds and lets the real
+    control channel settle the wait with a timed resume due at once, so the channel's
+    PAUSED and RESUMED transitions are the production ones. With ``operator_resumes_after`` set,
     the operator resumes the run that many virtual seconds into any wait that lasts
     longer.
     """
@@ -185,26 +214,70 @@ class FakeCapacityTimer:
         *,
         start: float = 1_000_000.0,
         operator_resumes_after: float | None = None,
+        during_capacity_wait: Callable[[float], bool] | None = None,
     ) -> None:
-        """Start the virtual clock at ``start`` epoch seconds."""
+        """Start the virtual clock at ``start`` epoch seconds.
+
+        ``during_capacity_wait`` is the operator during a wait for capacity: called with the
+        wait's length, it returns True when it acted (resumed, paused or asked again).
+        """
         self._control = control
         self._now = start
         self._operator_after = operator_resumes_after
+        self._during_capacity_wait = during_capacity_wait
         self.waits: list[float] = []
+        self.capacity_waits: list[float] = []
 
     def now(self) -> float:
         """Return the virtual epoch second."""
         return self._now
 
-    def wait_resumed(self, seconds: float) -> bool:
-        """Spend ``seconds`` of virtual time, or fewer when the operator resumes first."""
+    def wait_for_capacity(
+        self, seconds: float, request: int, turn: CapacityStops
+    ) -> CapacityWaitEnd:
+        """Let ``during_capacity_wait`` act as the operator, else spend ``seconds`` of virtual time.
+
+        The real channel then settles the wait with a zero timeout, so its outcome and its
+        transitions are the production ones. A cancelled ``turn`` spends no time.
+        """
+        self.capacity_waits.append(seconds)
+        acted = self._during_capacity_wait is not None and self._during_capacity_wait(seconds)
+        if not acted and not turn.cancelled:
+            self._now += seconds
+        return self._control.wait_for_capacity(0.0, request, ended=lambda: turn.cancelled)
+
+    def pause_for_quota(self, seconds: float, turn: CapacityStops) -> PauseWake:
+        """Pause the run and spend ``seconds`` of virtual time, or fewer when the operator resumes first.
+
+        A cancelled ``turn`` spends no time and leaves the timed resume armed ``seconds``
+        ahead on the channel's own clock, as production does.
+        """
         self.waits.append(seconds)
-        if self._operator_after is not None and self._operator_after < seconds:
+        operator_first = self._operator_after is not None and self._operator_after < seconds
+        if turn.cancelled:
+            self._control.pause_for_quota(seconds)
+        elif operator_first and self._operator_after is not None:
+            self._control.pause_for_quota(seconds)
             self._now += self._operator_after
             self._control.resume()
         else:
+            self._control.pause_for_quota(0.0)
             self._now += seconds
-        return self._control.wait_resumed(0.0)
+        return self._control.wait_resumed(ended=lambda: turn.cancelled)
+
+    def park_for_capacity(self, turn: CapacityStops, *, waiting: bool) -> int | PauseWake:
+        """Park on the real channel, as production does; a cancelled ``turn`` ends the park."""
+        return self._control.park_for_capacity(waiting=waiting, ended=lambda: turn.cancelled)
+
+    def wait_out(self, turn: CapacityStops, seconds: float) -> None:
+        """Spend ``seconds`` of virtual time holding one turn; ``waits`` records it.
+
+        Nothing ends the wait sooner: a test that cancels or stops a turn mid-wait runs the
+        production timer on the simulated threads instead.
+        """
+        del turn
+        self.waits.append(seconds)
+        self._now += seconds
 
 
 class FakeProjectMaterializationEffects:
@@ -354,6 +427,8 @@ class FakeWorkspaces:
         self.export_patch_calls: list[str] = []
         self._closing = False
         self._closed = False
+        self._holds: Callable[[], WorkspaceHolds] | None = None
+        self._measured: list[CandidateWorkspace] = []
 
     def script_candidate_retain(
         self, *results: BaseException | None, after_retention: bool = False
@@ -426,20 +501,43 @@ class FakeWorkspaces:
         self._candidates.append(candidate)
         return candidate
 
-    async def adopt(self, revision: str) -> None:
-        """Adopt a retained revision even after its candidate was discarded."""
-        if not self._root.knows_revision(revision):
-            message = f"candidate revision is not retained by this run: {revision!r}"
+    async def create_measured_candidate(self, revision: str) -> CandidateWorkspace:
+        """A candidate of *revision*; the fake declares no unread paths, so it withholds none."""
+        candidate = await self.create_candidate(revision)
+        self._measured.append(candidate)
+        return candidate
+
+    @property
+    def measured_candidates(self) -> tuple[CandidateWorkspace, ...]:
+        """The candidates opened to evaluate (``create_measured_candidate``), in order."""
+        return tuple(self._measured)
+
+    async def adopt(
+        self, revision: str, *, message: str = "vibesys: adopt revision"
+    ) -> AdoptionPublication:
+        """Publish a retained revision, without changing the root tree or index."""
+        return self._root.publish(revision, message)
+
+    async def update_checkout(self, publication: AdoptionPublication) -> CheckoutUpdate:
+        """The Fake models its own run branch; pending edits refuse checkout changes."""
+        if not self._root.has_publication(publication):
+            message = "publication does not belong to this run"
             raise RuntimeContractError(message)
-        await self._root.restore(revision)
+        if await self._root.pending_changes():
+            return CheckoutUpdate(status=CheckoutStatus.DIRTY_TREE)
+        if not self._root.can_fast_forward(publication):
+            return CheckoutUpdate(status=CheckoutStatus.DIVERGED)
+        self._root.apply_checkout(publication)
+        return CheckoutUpdate(status=CheckoutStatus.FAST_FORWARDED)
 
     async def export_patch(self, revision: str) -> str:
         """Export one retained revision against the fake trusted baseline."""
         if not self._root.knows_revision(revision):
             raise _UnknownWorkspaceRevisionError(revision)
         self.export_patch_calls.append(revision)
-        default = self._default_patch or f"patch for {revision}"
-        return self._patches.get(revision, default)
+        source = self._root.tree_identity(revision) or revision
+        default = self._default_patch or f"patch for {source}"
+        return self._patches.get(revision, self._patches.get(source, default))
 
     async def retains(self, revision: str) -> bool:
         """Return whether the revision is retained, as opposed to merely present."""
@@ -465,6 +563,19 @@ class FakeWorkspaces:
     def retain_candidate_revision(self, revision: str) -> None:
         """Keep a snapshotted candidate revision reachable from the root."""
         self._root.add_retained_revision(revision)
+
+    def follow(self, holds: Callable[[], WorkspaceHolds]) -> None:
+        """Read what core references from *holds* when deciding what a stop keeps."""
+        self._holds = holds
+
+    async def release_unheld(self) -> None:
+        """Remove the worktrees a dead host left that core no longer references."""
+        if self._holds is None:
+            return
+        kept = self._holds().workspace_ids()
+        for leftover in self.leaked_candidates():
+            if leftover.id not in kept:
+                leftover.discard_leftover()
 
     def begin_close(self) -> None:
         """Reject new candidates before asynchronous teardown."""
@@ -585,6 +696,9 @@ class FakeWorkspace:
         self._id = workspace_id
         self._revision = revision
         self._tree_revision = revision
+        self._tree_aliases: dict[str, str] = {}
+        self._publications: dict[str, AdoptionPublication] = {}
+        self._publication_parents: dict[str, tuple[str, ...]] = {}
         self._trusted_input_baseline = (
             revision if trusted_input_baseline is None else trusted_input_baseline
         )
@@ -601,6 +715,7 @@ class FakeWorkspace:
         self._directories: set[str] = set()
         self.restore_calls: list[tuple[str, bool]] = []
         self._snapshot_labels: dict[str, str] = {}
+        self._measured_inputs: dict[str, str] = {}
         self.agent_restore_calls: list[tuple[str, tuple[str, ...]]] = []
 
     @property
@@ -638,6 +753,55 @@ class FakeWorkspace:
         self._tree_revision = revision
         self.add_retained_revision(revision)
         return revision
+
+    def publish(self, revision: str, message: str) -> AdoptionPublication:
+        """Keep publication history with the repository, across collection restarts."""
+        if not self.retains(revision):
+            detail = f"candidate revision is not retained by this run: {revision!r}"
+            raise RuntimeContractError(detail)
+        existing = self._publications.get(revision)
+        if existing is not None:
+            return existing
+        commit = hashlib.sha1(
+            f"{revision}:{message}:{len(self._publications)}".encode(),
+            usedforsecurity=False,
+        ).hexdigest()
+        result = AdoptionPublication(
+            revision=revision, commit=commit, branch=adoption_branch("fake-run")
+        )
+        parents = [self.revision]
+        if self._publications:
+            parents.append(tuple(self._publications.values())[-1].commit)
+        self._publication_parents[commit] = tuple(
+            parent for parent in parents if parent is not None
+        )
+        self._publications[revision] = result
+        self.add_retained_revision(commit)
+        self._tree_aliases[commit] = self.tree_identity(revision) or revision
+        return result
+
+    def has_publication(self, publication: AdoptionPublication) -> bool:
+        """Whether this repository owns exactly this publication receipt."""
+        return self._publications.get(publication.revision) == publication
+
+    def can_fast_forward(self, publication: AdoptionPublication) -> bool:
+        """Whether the current run head is in the publication's ancestry."""
+        pending = [publication.commit]
+        ancestors: set[str] = set()
+        while pending:
+            current = pending.pop()
+            if current not in ancestors:
+                ancestors.add(current)
+                pending.extend(self._publication_parents.get(current, ()))
+        return self._revision in ancestors
+
+    def apply_checkout(self, publication: AdoptionPublication) -> None:
+        """Advance the Fake's clean run checkout after a publication."""
+        self._revision = publication.commit
+        self._tree_revision = publication.commit
+        self._tree_aliases[publication.commit] = (
+            self.tree_identity(publication.revision) or publication.revision
+        )
 
     async def restore(self, revision: str, *, clean: bool = True) -> None:
         """Materialize a known tree while leaving recorded history unchanged."""
@@ -716,11 +880,26 @@ class FakeWorkspace:
 
     async def matches_revision(self, revision: str) -> bool:
         """Return whether the fake tree is exactly the revision's tree."""
-        return self._tree_revision == revision
+        return self.tree_identity(self._tree_revision) == self.tree_identity(revision)
+
+    def tree_identity(self, revision: str | None) -> str | None:
+        """The shared tree identity of a source and every publication of it."""
+        return None if revision is None else self._tree_aliases.get(revision, revision)
 
     async def find_snapshot(self, label: str) -> str | None:
         """Return the revision the snapshot with this label recorded."""
         return self._snapshot_labels.get(label)
+
+    def script_measured_input(self, revision: str, digest: str) -> None:
+        """Make *revision* read as the measured input *digest*, as an unread-only change does."""
+        self._measured_inputs[revision] = digest
+
+    async def measured_input(self, revision: str) -> str:
+        """The scripted digest of *revision*, else one of its own."""
+        source = self.tree_identity(revision) or revision
+        return self._measured_inputs.get(
+            revision, self._measured_inputs.get(source, f"input:{source}")
+        )
 
     def knows_revision(self, revision: str) -> bool:
         """Return whether this fake can materialize a revision, retained or dangling."""
@@ -765,6 +944,10 @@ class FakeCandidateWorkspace(FakeWorkspace):
         self._discarded = False
         self.orphaned = False
         self._revision_prefix = config.revision_prefix
+
+    def tree_identity(self, revision: str | None) -> str | None:
+        """Resolve publication trees through this run's shared repository."""
+        return self._owner.root.tree_identity(revision)
 
     def knows_revision(self, revision: str) -> bool:
         """Resolve revisions through the owning run's shared repository."""
@@ -869,7 +1052,7 @@ class FakeLocalValidationCall:
     report_location: str
 
 
-FakeEvaluationKind: TypeAlias = Literal["accuracy", "benchmark"]
+FakeEvaluationKind: TypeAlias = Literal["build", "accuracy", "benchmark"]
 
 
 class FakeEvaluationGate:
@@ -918,9 +1101,12 @@ class FakeEvaluation:
     input, whose ``id`` is ``None``) consume :attr:`root_benchmark_results`
     first, so a test can script the input and candidates independently of how
     their calls interleave. A gate holds the n-th call of one kind (counted
-    from zero across all workspaces) until the test releases it.
+    from zero across all workspaces) until the test releases it. What
+    :attr:`printed` scripts for a kind is written to each call's ``output``
+    before its gate holds it, as a running command prints before it ends.
     """
 
+    default_build: BuildEvaluation = field(default_factory=lambda: BuildEvaluation(executed=False))
     default_accuracy: AccuracyEvaluation = field(
         default_factory=lambda: AccuracyEvaluation(executed=False)
     )
@@ -930,6 +1116,8 @@ class FakeEvaluation:
     default_local_validation: LocalValidationEvaluation = field(
         default_factory=lambda: LocalValidationEvaluation(passed=True)
     )
+    build_results: list[BuildEvaluation | BaseException] = field(default_factory=list)
+    build_calls: list[Workspace] = field(default_factory=list)
     accuracy_results: list[AccuracyEvaluation | BaseException] = field(default_factory=list)
     benchmark_results: list[BenchmarkEvaluation | BaseException] = field(default_factory=list)
     root_benchmark_results: list[BenchmarkEvaluation | BaseException] = field(default_factory=list)
@@ -938,7 +1126,13 @@ class FakeEvaluation:
     benchmark_calls: list[FakeBenchmarkCall] = field(default_factory=list)
     local_validation_calls: list[FakeLocalValidationCall] = field(default_factory=list)
     run_id: str = "test-run"
+    printed: dict[FakeEvaluationKind, tuple[bytes, bytes]] = field(default_factory=dict)
+    """The (stdout, stderr) each accuracy or benchmark call of a kind prints."""
     _gates: dict[tuple[FakeEvaluationKind, int], FakeEvaluationGate] = field(default_factory=dict)
+
+    def script_build(self, *results: BuildEvaluation | BaseException) -> None:
+        """Queue build results or failures in call order."""
+        self.build_results.extend(results)
 
     def script_accuracy(self, *results: AccuracyEvaluation | BaseException) -> None:
         """Queue accuracy results or failures in call order."""
@@ -966,20 +1160,41 @@ class FakeEvaluation:
         self._gates[key] = gate
         return gate
 
-    async def _pass_gate(self, kind: FakeEvaluationKind, call: int, workspace: Workspace) -> None:
+    async def _pass_gate(
+        self,
+        kind: FakeEvaluationKind,
+        call: int,
+        workspace: Workspace,
+        output: OutputSink,
+    ) -> None:
+        stdout, stderr = self.printed.get(kind, (b"", b""))
+        output.write(OutputStream.STDOUT, stdout)
+        output.write(OutputStream.STDERR, stderr)
         gate = self._gates.get((kind, call))
         if gate is not None:
             await gate.hold(workspace)
+
+    async def build(self, workspace: Workspace, *, output: OutputSink) -> BuildEvaluation:
+        """Record the request, print the scripted output, and return the next scripted result."""
+        self.build_calls.append(workspace)
+        await self._pass_gate("build", len(self.build_calls) - 1, workspace, output)
+        result = self.build_results.pop(0) if self.build_results else self.default_build
+        if isinstance(result, BaseException):
+            raise result
+        return result
 
     async def accuracy(
         self,
         workspace: Workspace,
         *,
         reuse: AccuracyReceipt | None = None,
+        output: OutputSink,
     ) -> AccuracyEvaluation:
-        """Record the request and return the next scripted result."""
+        """Record the request, print the scripted output, and return the next scripted result."""
         self.accuracy_calls.append(FakeAccuracyCall(workspace, reuse))
-        await self._pass_gate("accuracy", len(self.accuracy_calls) - 1, workspace)
+        # A reused pass runs no command, so it prints nothing.
+        printing = output if reuse is None else DISCARD
+        await self._pass_gate("accuracy", len(self.accuracy_calls) - 1, workspace, printing)
         if reuse is not None:
             if reuse.run_id != self.run_id:
                 message = "accuracy receipt belongs to another run"
@@ -1012,11 +1227,12 @@ class FakeEvaluation:
         workspace: Workspace,
         *,
         objectives: tuple[BenchmarkObjective, ...] = (),
+        output: OutputSink,
     ) -> BenchmarkEvaluation:
-        """Record the request and return the next scripted result."""
+        """Record the request, print the scripted output, and return the next scripted result."""
         validate_objectives(objectives)
         self.benchmark_calls.append(FakeBenchmarkCall(workspace, objectives))
-        await self._pass_gate("benchmark", len(self.benchmark_calls) - 1, workspace)
+        await self._pass_gate("benchmark", len(self.benchmark_calls) - 1, workspace, output)
         if workspace.id is None and self.root_benchmark_results:
             result = self.root_benchmark_results.pop(0)
         elif self.benchmark_results:

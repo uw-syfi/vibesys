@@ -98,8 +98,8 @@ class ExperimentRepository:
         """Publish an armed repository exactly once."""
         if self._closed:
             return
-        self._closed = True
         if not self._armed:
+            self._closed = True
             return
         try:
             self.push()
@@ -111,6 +111,7 @@ class ExperimentRepository:
                     message=f"Could not push project repository: {exc}",
                 )
             ) from exc
+        self._closed = True
 
     @property
     def _repository(self) -> GitRemoteRepository:

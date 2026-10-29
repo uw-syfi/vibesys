@@ -55,7 +55,15 @@ def test_observe_pacing_preserves_a_cap_that_covers_the_interval(interval: int, 
     )
 
 
-@pytest.mark.parametrize("field", ["observe_interval_seconds", "observe_backoff_cap_seconds"])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "observe_interval_seconds",
+        "observe_backoff_cap_seconds",
+        "queue_wait_budget_seconds",
+        "queue_notice_interval_seconds",
+    ],
+)
 @pytest.mark.parametrize("value", [0, -1, True, "5", 1.5])
 def test_observe_pacing_rejects_invalid_values(field: str, value: object) -> None:
     with pytest.raises(ValidationError, match=field):

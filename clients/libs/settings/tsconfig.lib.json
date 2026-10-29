@@ -24,6 +24,12 @@
     },
     {
       "path": "../runs/tsconfig.lib.json"
+    },
+    {
+      "path": "../ui/tsconfig.tokens.json"
+    },
+    {
+      "path": "../proto/tsconfig.lib.json"
     }
   ]
 }

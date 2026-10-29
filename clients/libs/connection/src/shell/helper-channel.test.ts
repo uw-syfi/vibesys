@@ -129,7 +129,7 @@ describe('HelperChannel reply correlation', () => {
     reply(process, {
       type: 'instances.list',
       request_id: pingRequest['request_id'],
-      listing: {version: 4, instances: [], ended: [], unreadable: [], unverified: []},
+      listing: {version: 5, instances: [], ended: [], unreadable: [], unverified: []},
     });
 
     const [caught, listingError] = await Promise.all([rejection(ping), rejection(listing)]);
@@ -148,7 +148,7 @@ describe('HelperChannel reply correlation', () => {
     const channel = await openChannel(process, nextLine);
     const pushes: string[] = [];
     channel.onPush(push => pushes.push(push.watch_id));
-    const listing = {version: 4, instances: [], ended: [], unreadable: [], unverified: []};
+    const listing = {version: 5, instances: [], ended: [], unreadable: [], unverified: []};
 
     process.stdout.write(
       `${JSON.stringify({type: 'instances.changed', watch_id: 'first', listing})}\n${JSON.stringify({type: 'instances.changed', watch_id: 'second', listing})}\n`,

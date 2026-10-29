@@ -10,6 +10,7 @@ export {
   type ScheduleTimeout,
   sameControlChannelState,
 } from './control-channel.js';
+export {GrpcCode, GrpcError, grpcCode, isNotFound} from './grpc-status.js';
 export {NewlineFramer} from './newline-framer.js';
 export {
   PersistentEventStream,
@@ -42,7 +43,12 @@ export {
   StreamReconciler,
   type StreamReconcilerOptions,
 } from './stream-reconciler.js';
-export {closeStreamAndTransport} from './stream-shutdown.js';
+export {
+  closeStreamAndTransport,
+  type ObserverDelivery,
+  ObserverFailureBoundary,
+  settleAll,
+} from './stream-shutdown.js';
 export {
   type ControlTransport,
   type EventSubscription,

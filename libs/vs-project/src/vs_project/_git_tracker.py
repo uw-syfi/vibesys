@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
+import importlib
+import json
 import os
 import re
 import shutil
+from contextlib import suppress
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from vs_project._framework_writes import FRAMEWORK_WRITES
+from vs_project._run_branches import adoption_branch, run_branch, run_of_branch
 from vs_project._state_io import STATE_DOCUMENT_MAX_BYTES
 from vs_project._workspace_tree import (
     EntryKind,
@@ -18,12 +23,18 @@ from vs_project._workspace_tree import (
     open_workspace_tree,
 )
 from vs_project.api.git_repository import GitError, PatchStyle, StagingError
+from vs_project.errors import ProjectStateError
 from vs_project.project import Project
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from vs_project._git_events import GitTrackerEvents
+    from vs_project._revision_publication import (
+        CheckoutOutcome,
+        PublishedRevision,
+        RevisionPublisher,
+    )
     from vs_project._state import GitSnapshotPlan, ProjectGitIntegration, StateSnapshot
     from vs_project._workspace_tree import WorkspaceTree
     from vs_project.api.git_repository import GitRepository, RepositoryLocation
@@ -56,8 +67,8 @@ class FrameworkSnapshotStatus(StrEnum):
 class GitTracker:
     """Snapshot tracking for one canonical project repository.
 
-    The project root is also the Git worktree root. Each run advances its own
-    ``vibesys-runs/<run-id>`` branch. Machine-local framework state is excluded
+    The project root is also the Git worktree root. A new run creates its own
+    ``vibesys-runs/<run-id>`` branch; Resume preserves the operator's current checkout. Machine-local framework state is excluded
     through repository-local Git configuration. ``excluded_dirs`` and
     ``excluded_files`` name directories and files, at any depth, that are
     framework inputs rather than candidate content and are never committed.
@@ -127,7 +138,9 @@ class GitTracker:
             dict.fromkeys(_normalize_project_paths(trusted_input_paths))
         )
         self._trusted_input_baseline: str | None = None
-        self._project_branch = f"vibesys-runs/{run_id}"
+        self._project_branch = run_branch(run_id)
+        self._home_branch: str | None = None
+        self._resumed = False
         self._state_integration: ProjectGitIntegration = Project.open(
             self.root
         ).state.git_integration(run_id)
@@ -135,11 +148,26 @@ class GitTracker:
         self._work_tree: Path | None = None
 
     def init(self, *, existing: bool, trusted_input_baseline: str | None = None) -> None:
-        """Create a run branch, or resume the existing branch for this run."""
+        """Create a run branch, or resume without changing the operator checkout."""
         self._init_project(
             existing=existing,
             trusted_input_baseline=trusted_input_baseline,
         )
+        self._adopt_earlier_run_state()
+
+    def _adopt_earlier_run_state(self) -> None:
+        """Count the untracked run state earlier processes left below ``.vibesys`` as theirs.
+
+        Every run leaves its store, artifacts and publications in the checkout, never
+        committed (see ``baseline_changes``), and a resumed run finds its own. They are not
+        a change this run's agents made, and restoring the workspace never touches them,
+        so ``pending_changes`` reporting them would fail every isolated turn. Only the
+        bytes there now are adopted: an agent that rewrites one is still reported.
+        """
+        prefix = f"{self._state_integration.metadata_pathspec}/"
+        for path in self._git.unversioned_paths(include_ignored=False):
+            if path.startswith(prefix):
+                FRAMEWORK_WRITES.adopt(self.root / path)
 
     def add_worktree(self, worktree_dir: Path, commit: str) -> None:
         """Create a detached linked worktree at *commit*.
@@ -185,6 +213,35 @@ class GitTracker:
             shutil.rmtree(destination, ignore_errors=True)
         self._git.prune_worktrees()
 
+    def publish_revision(
+        self,
+        revision: str,
+        message: str,
+        *,
+        preserve_paths: tuple[str, ...] = (),
+    ) -> PublishedRevision:
+        """Publish a retained winner without reading or changing the operator checkout."""
+        if not self.is_retained(revision):
+            message = f"candidate revision is not retained by this run: {revision!r}"
+            raise ValueError(message)
+        paths = tuple(path.as_posix() for path in _normalize_project_paths(preserve_paths))
+        return self._publisher(paths).publish(revision, message)
+
+    def update_checkout(self, publication: PublishedRevision) -> CheckoutOutcome:
+        """Optionally fast-forward only this run's clean checked-out branch."""
+        return self._publisher().update_checkout(publication)
+
+    def _publisher(self, preserve_paths: tuple[str, ...] = ()) -> RevisionPublisher:
+        """Build a publisher when a revision is published, not when the tracker is imported."""
+        publisher = importlib.import_module("vs_project._revision_publication").RevisionPublisher
+        return publisher(
+            self._git,
+            self.run_id,
+            self._state_integration.metadata_pathspec,
+            preserve_paths,
+            input_revision=self._trusted_input_baseline,
+        )
+
     def retain_candidate(self, candidate_id: str, commit: str) -> str:
         """Keep a candidate commit reachable after its worktree is removed."""
         if not self._CANDIDATE_ID.fullmatch(candidate_id):
@@ -204,7 +261,7 @@ class GitTracker:
     def is_retained(self, commit: str) -> bool:
         """Whether this run keeps ``commit`` reachable, as opposed to merely present.
 
-        A commit is retained when it is an ancestor of the root checkout's HEAD or
+        A commit is retained when it is an ancestor of this run's working or publication branch or
         of the trusted-input baseline, or of any candidate ref created by
         ``retain_candidate``. A commit that exists in the object database but that
         no ref reaches (a dangling commit) is not retained, and neither is an
@@ -216,7 +273,15 @@ class GitTracker:
         sha = self._git.resolve_commit(commit)
         if sha is None:
             return False
-        anchors = [anchor for anchor in ("HEAD", self._trusted_input_baseline) if anchor]
+        anchors = [
+            anchor
+            for anchor in (
+                self.project_branch,
+                adoption_branch(self.run_id),
+                self._trusted_input_baseline,
+            )
+            if anchor
+        ]
         if any(self._git.is_ancestor(sha, anchor) for anchor in anchors):
             return True
         return self._git.has_ref_containing(sha, f"refs/vibesys/{self.run_id}/candidates/")
@@ -268,6 +333,47 @@ class GitTracker:
             [".", *self._state_integration.metadata_restore_exclusions],
             style=PatchStyle.EXACT,
         )
+
+    def measured_input(self, commit: str, unread: Sequence[str]) -> str:
+        """The digest of what an evaluation of *commit* reads: its tree, less *unread*.
+
+        *unread* names workspace paths (files or directories) the task's evaluation never
+        reads, such as an agent's notes. Two commits that differ only there have the same
+        digest, so they are one measured input. The digest covers the sorted *unread* list
+        and every other tracked path,
+        VibeSys's own files included, as the patch from the baseline commit, which is part of
+        the digest too, so commits of different workspaces never share one.
+
+        A worktree of *commit* after :meth:`withhold_unread` holds exactly what this digests:
+        two commits with one digest are evaluated on byte-identical trees.
+        """
+        root = self._git.root_commit(commit)
+        if root is None:
+            message = f"cannot resolve workspace baseline for commit {commit}"
+            raise ValueError(message)
+        withheld = sorted({Path(path).as_posix().rstrip("/") for path in unread})
+        skipped = [f":(exclude){_wildcard_safe(path)}" for path in withheld]
+        patch = self._git.diff_patch(root, commit, [".", *skipped], style=PatchStyle.EXACT)
+        digest = hashlib.sha256(f"{root}\n".encode())
+        # The declaration is part of the input: one tree read under another declaration is
+        # another evaluated tree, since a different set of paths is withheld from it.
+        digest.update(f"{json.dumps(withheld)}\n".encode())
+        digest.update(patch.encode())
+        return f"sha256:{digest.hexdigest()}"
+
+    def withhold_unread(self, unread: Sequence[str]) -> None:
+        """Remove *unread* from this worktree, so it holds what :meth:`measured_input` digests.
+
+        Each path is removed with everything below it; a symlink is removed itself, never
+        followed. A path with a symlink or a file on the way to it names nothing in the
+        tree (the entry on the way is what the tree holds, and the digest covers it), so
+        it is left as it is. Call it on a fresh worktree of a commit, before evaluating it.
+        """
+        with open_workspace_tree(self.root) as tree:
+            for path in unread:
+                # A symlink on the way: nothing of the tree lies below it.
+                with suppress(WorkspacePathError):
+                    tree.remove(Path(path).as_posix().rstrip("/"))
 
     def diff_name_status(self, base: str, head: str) -> str | None:
         """Return the NUL-delimited ``--name-status`` diff between two commits.
@@ -487,13 +593,13 @@ class GitTracker:
             self._events.snapshot_recorded(label, commit=None)
 
     def current_sha(self) -> str | None:
-        """Return the HEAD commit sha, or ``None`` if it cannot be resolved.
+        """Return the selected run tip, or ``None`` if it cannot be resolved.
 
         Never cached: it reads the repository files on each call (no process
         spawn for the plain layout), so commits made by anyone, including an
         agent's own ``git commit``, are observed immediately.
         """
-        return self._git.head()
+        return self._git.resolve_commit(self.project_branch) if self._resumed else self._git.head()
 
     @property
     def history_root(self) -> Path:
@@ -522,7 +628,8 @@ class GitTracker:
 
         The framework writes its own run state below ``.vibesys`` while a turn is in
         flight, so a path is not reported when it is exactly what the framework last
-        published there (see ``_framework_writes``). Any other change below
+        published there (see ``_framework_writes``), or what an earlier process left there
+        and this run found when it started (see ``init``). Any other change below
         ``.vibesys`` is reported like a change anywhere else: an isolated role must
         not rewrite framework state either.
         """
@@ -530,6 +637,23 @@ class GitTracker:
         return [
             path for path in changed if not FRAMEWORK_WRITES.is_framework_state(self.root / path)
         ]
+
+    def baseline_changes(self) -> list[str]:
+        """Return the changes that keep the project from being a clean run baseline.
+
+        These are the candidate paths changed since ``HEAD`` (tracked or untracked) and
+        the committed VibeSys metadata changed since ``HEAD``. Untracked paths below the
+        framework metadata directory are not counted: they are VibeSys's own run state
+        (a run's store, artifacts and publications are written there and never
+        committed), every run that ends, fails or is killed leaves them behind, and no
+        candidate can contain them because candidate staging excludes that directory.
+        Unlike ``pending_changes`` this does not depend on what this process wrote, so a
+        new run or a resume in a new process sees the same answer as the run that wrote
+        the state.
+        """
+        metadata = self._state_integration.metadata_pathspec
+        candidate = self._git.uncommitted_paths([".", f":(exclude){metadata}"])
+        return sorted({*candidate, *self._pending_committed_framework_metadata()})
 
     def checkout_tree(
         self,
@@ -715,7 +839,8 @@ class GitTracker:
         if commit is None:
             message = f"trusted input baseline {revision!r} is not a commit"
             raise ValueError(message)
-        if not self._git.is_ancestor(commit, "HEAD"):
+        selected = self.project_branch if self._resumed else "HEAD"
+        if not self._git.is_ancestor(commit, selected):
             message = f"trusted input baseline {revision!r} is not an ancestor of HEAD"
             raise ValueError(message)
         return commit
@@ -738,7 +863,7 @@ class GitTracker:
         self._install_project_excludes()
         self._require_private_inputs_absent_from_history()
         if existing:
-            self._resume_user_project(branch, trusted_input_baseline)
+            self._resume_user_project(trusted_input_baseline)
             return
 
         self._start_user_project(
@@ -774,19 +899,13 @@ class GitTracker:
             raise ValueError(message)
         return True
 
-    def _resume_user_project(
-        self,
-        branch: str,
-        trusted_input_baseline: str | None,
-    ) -> None:
-        if not self._branch_exists(branch):
-            message = f"cannot resume VibeSys run {self.run_id!r}: branch {branch!r} does not exist"
+    def _resume_user_project(self, trusted_input_baseline: str | None) -> None:
+        """Reattach the immutable input without checking out or cleaning the operator root."""
+        if not self._branch_exists(self.project_branch):
+            message = f"VibeSys run branch does not exist: {self.project_branch}"
             raise ValueError(message)
-        if self._current_branch() != branch:
-            self._require_clean_project(
-                "cannot switch to the resumed VibeSys branch with pending project changes"
-            )
-            self._git.switch_branch(branch)
+        self._resumed = True
+        self._home_branch = self._home_of(self._current_branch())
         if trusted_input_baseline is not None:
             self.configure_trusted_input_baseline(trusted_input_baseline)
 
@@ -812,17 +931,76 @@ class GitTracker:
             self._add_all()
             self._git.commit("initial: project baseline", allow_empty=True)
 
+        if self._branch_exists(branch):
+            message = f"VibeSys run branch already exists: {branch}"
+            raise ValueError(message)
+        current = self._current_branch()
+        home = self._home_of(current)
+        if current is not None and home is None:
+            message = (
+                f"the project is on VibeSys run branch {current!r}, and the branch that run "
+                "started from is unknown; check out the branch a new run should start from"
+            )
+            raise ValueError(message)
+        if home is not None:
+            # Noted before the checkout moves, so a run killed at any later point still
+            # tells the next run (or a resume) where the checkout belongs.
+            self._state_integration.record_home_branch(home)
+            if current != home:
+                self._git.switch_branch(home)
+
         branch_point = self.current_sha()
         if branch_point is None:
             message = "user-project baseline commit could not be resolved"
             raise ValueError(message)
-
-        if self._branch_exists(branch):
-            message = f"VibeSys run branch already exists: {branch}"
-            raise ValueError(message)
         self._git.switch_branch(branch, create=True)
+        self._home_branch = home
         self._trusted_input_baseline = branch_point
         self._events.baseline_configured(branch_point)
+
+    @property
+    def home_branch(self) -> str | None:
+        """The branch this run started from, which the next run checks out before branching.
+
+        ``None`` before ``init``, for a detached checkout, and for a resumed run whose
+        origin is unknown.
+        """
+        return self._home_branch
+
+    def _home_of(self, current: str | None) -> str | None:
+        """The branch a run started on ``current`` belongs to: ``current``, unless it is a run's."""
+        if current is None:
+            return None
+        if run_of_branch(current) is None:
+            return current
+        return self._home_of_run_branch(current)
+
+    def _home_of_run_branch(self, branch: str) -> str | None:
+        """The home of the run whose branch is ``branch``: noted, or else inferred.
+
+        A run that predates noting its home (its branch may hold earlier runs' commits)
+        belongs to the one local branch outside the run branches that it descends from.
+        """
+        run_id = run_of_branch(branch)
+        try:
+            noted = None if run_id is None else self._state_integration.recorded_home_branch(run_id)
+        except ProjectStateError:
+            noted = None
+        if noted is not None and self._is_home_candidate(noted):
+            return noted
+        descended_from = [
+            name
+            for name in self._git.branches("")
+            if self._is_home_candidate(name) and self._git.is_ancestor(name, branch)
+        ]
+        return descended_from[0] if len(descended_from) == 1 else None
+
+    def _is_home_candidate(self, name: str) -> bool:
+        return (
+            run_of_branch(name) is None
+            and self._git.is_valid_branch_name(name)
+            and self._branch_exists(name)
+        )
 
     def _install_project_excludes(self) -> None:
         """Idempotently add local/private paths to ``.git/info/exclude``."""
@@ -863,7 +1041,7 @@ class GitTracker:
         return path in {".env", "agent.toml"} or path.startswith(".env.")
 
     def _require_clean_project(self, message: str) -> None:
-        changes = self.pending_changes()
+        changes = self.baseline_changes()
         if changes:
             message = f"{message}: {', '.join(changes)}"
             raise ValueError(message)

@@ -2,7 +2,7 @@
 
 import shutil
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import Literal, TypedDict, Unpack
@@ -43,12 +43,13 @@ from vibesys.run.resources import (
     _PreparedRun,
     open_run_resources,
 )
-from vs_agent.api import cli_mcp_config_files, cli_skill_dirs
+from vs_agent.api import cli_mcp_config_files, cli_skill_dirs, task_agent_host_resources
 from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Project
 from vs_runtime.api import AgentRole, boot_trace
 from vs_runtime.api.infrastructure import (
     EvaluatorPackageRequirement,
     RunEnvironmentSpec,
+    prepare_trusted_evaluator,
     resolve_evaluator_package,
 )
 from vs_runtime.api.testing import idle_environment_system
@@ -169,7 +170,6 @@ def _options(max_rounds: int = 1) -> AgentOrchestrationOptions:
         max_rounds=max_rounds,
         max_retries_per_round=1,
         judge_every=1,
-        official_eval_every=1,
     )
 
 
@@ -200,7 +200,7 @@ def _create_context(
     request = RunRequest(
         project_root=project,
         orchestration=descriptor,
-        config=options.get("config") or Config.model_validate({"model": {"name": "gpt-test"}}),
+        config=options.get("config") or Config.model_validate({"model": {"name": "gpt-5.5"}}),
         input_bundle=bundle,
         objective=options.get("objective", "Make the queue faster.\n"),
         exp_name=exp_name,
@@ -217,17 +217,20 @@ def _create_context(
     plugin = registration.plugin
     agent_roles = options.get("agent_roles", plugin.agents)
     ownership = ReleaseStack()
+    integration = options.get("integration")
+    if integration is None:
+        integration = LocalRunIntegration(
+            clock=ManualClock(),
+            git=REAL_GIT,
+            github=NO_GITHUB,
+            threads=SimThreads(),
+            system=idle_environment_system(),
+        )
+    ownership.callback(integration.close)
     try:
         prepared = open_run_resources(
             request,
-            options.get("integration")
-            or LocalRunIntegration(
-                clock=ManualClock(),
-                git=REAL_GIT,
-                github=NO_GITHUB,
-                threads=SimThreads(),
-                system=idle_environment_system(),
-            ),
+            integration,
             ownership=ownership,
             agent_specs=resolve_agent_specs(
                 request.config,
@@ -305,7 +308,7 @@ def test_direct_run_uses_one_project_root_and_canonical_state(tmp_path: Path) ->
         policy = environment.request.project_path_policy
         state_paths = project_resources.project.state.sandbox_paths()
         assert state_paths.read_only_path in policy.read_only_paths
-        assert state_paths.hidden_path in policy.hidden_paths
+        assert set(state_paths.hidden_paths) <= set(policy.hidden_paths)
         assert project_resources.project.state.candidate_worktrees_directory(run_id).is_dir()
 
     manifest = Project.open(project).state.load_run(run_id)
@@ -457,6 +460,47 @@ def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_on
         assert all(resources[root] is HostResourceAccess.READ_ONLY for root in expected_tool_roots)
 
 
+def test_prepared_go_module_cache_is_readable_but_not_writable_through_host_confinement(
+    tmp_path: Path,
+) -> None:
+    package_root = tmp_path / "evaluator"
+    package_root.mkdir()
+    (package_root / "go.mod").write_text(
+        "module example.com/evaluator\n\ngo 1.23\n", encoding="utf-8"
+    )
+    (package_root / "go.sum").write_text("", encoding="utf-8")
+    (package_root / "vibesys.evaluator.toml").write_text(
+        """schema_version = 1
+name = "vibesys-evaluator-test"
+version = "1.0.0"
+protocol_version = 1
+toolchains = ["go"]
+go_module = "."
+[entrypoints]
+check = ["go", "-C", "${PACKAGE_ROOT}", "run", "."]
+""",
+        encoding="utf-8",
+    )
+    prepared = prepare_trusted_evaluator(package_root, tmp_path / "operator-cache")
+    module = prepared.requirements.go_module
+    assert module is not None
+    module.cache_root.mkdir(parents=True)
+    sentinel = module.cache_root / "cached-module.txt"
+    sentinel.write_text("prepared", encoding="utf-8")
+
+    declarations = task_agent_host_resources(
+        cli_sandboxed=False,
+        evaluator_package_root=package_root,
+        evaluator_tool_roots=prepared.tool_roots,
+    )
+    cache_resource = next(
+        resource for resource in declarations if resource.path == module.cache_root
+    )
+
+    assert (cache_resource.path / sentinel.name).read_text(encoding="utf-8") == "prepared"
+    assert cache_resource.access is HostResourceAccess.READ_ONLY
+
+
 def test_evaluator_tools_built_for_one_project_are_reused_by_another(tmp_path: Path) -> None:
     packages_root = BUNDLED_RESOURCES.directory("evaluators")
     assert packages_root is not None
@@ -519,7 +563,7 @@ def test_context_assembly_logs_stage_timings(tmp_path: Path) -> None:
     """Every assembly span up to and past the experiments gate reaches the run log.
 
     This is a regression guard for the diagnostic used to find where
-    ``open_run_resources`` spends time before the TUI's hypothesis screen
+    ``open_run_resources`` spends time before the client's hypothesis screen
     can leave "loading experiments..." (the gate flips when the second
     ``LocalRunIntegration.attach`` records ``EXPERIMENTS_CHANGED``).
     """
@@ -552,7 +596,7 @@ def test_dispatch_preamble_spans_reach_run_log(tmp_path: Path) -> None:
 
     ``_dispatch`` and ``_run_agent`` (main.py) do substantial work before a
     ``RunLogger`` exists and record ``boot_trace`` spans as they go.
-    ``_assemble_run_resources`` must drain that buffer at entry, so the
+    ``open_run_resources`` must drain that buffer at entry, so the
     preamble's spans reach the persistent run log ahead of assembly's own.
     """
     project = tmp_path / "queue"
@@ -662,9 +706,10 @@ def test_copied_repository_task_materializes_model_outside_authored_inputs(
             task_name="latency",
             task_root=task,
         ) as ctx:
-            run_id = ctx.project_resources.state.run_id
             workspace = ctx.environment_resources.request.workspace
-            runtime_model = runs_dir / ".cache" / "llm-serving" / run_id / "model"
+            runtime_model = (
+                ctx.project_resources.project.state.model_cache_directory("llm-serving") / "model"
+            )
             copied_reference = workspace / ".vibesys" / "tasks" / "latency" / "reference"
 
             assert not (reference / "model").exists()
@@ -699,6 +744,67 @@ def test_direct_repository_task_materializes_model_in_local_state(tmp_path: Path
             assert ctx.project_resources.git.trusted_input_changes() == []
 
         assert _git(project, "status", "--porcelain") == ""
+
+
+def _model_mounts(ctx: _PreparedRun) -> dict[str, Path]:
+    """The resolved host directory behind each container model mount."""
+    return {
+        mount.container_path: mount.host_path.resolve()
+        for mount in ctx.environment_resources.request.environment_bind_mounts
+        if mount.container_path in {"/model", "/draft_model"}
+    }
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [fake_docker_environment, unconfined_host_spec],
+    ids=["isolated", "host"],
+)
+@pytest.mark.parametrize("with_draft", [False, True], ids=["primary", "with-draft"])
+def test_collection_resume_mounts_the_external_models_a_fresh_launch_mounted(
+    tmp_path: Path,
+    environment: Callable[[], RunEnvironmentSpec],
+    *,
+    with_draft: bool,
+) -> None:
+    # A task whose reference names external weights (a symlink, no meta.json)
+    # must resume with the same /model and /draft_model the fresh launch had,
+    # although the copied project holds only a marker or nothing in their place.
+    source = tmp_path / "serving"
+    _write_project(source)
+    task = _write_serving_task(source)
+    reference = task / "reference"
+    (reference / "meta.json").unlink()
+    weights = tmp_path / "weights"
+    weights.mkdir()
+    (reference / "model").symlink_to(weights, target_is_directory=True)
+    if with_draft:
+        draft = tmp_path / "draft-weights"
+        draft.mkdir()
+        (reference / "draft_model").symlink_to(draft, target_is_directory=True)
+    runs_dir = tmp_path / "runs"
+
+    with _create_context(
+        source,
+        runs_dir=runs_dir,
+        task_name="latency",
+        run_environment=environment(),
+    ) as first:
+        project = first.environment_resources.request.workspace
+        run_id = first.project_resources.state.run_id
+        fresh_mounts = _model_mounts(first)
+
+    assert fresh_mounts["/model"] == weights.resolve()
+    assert ("/draft_model" in fresh_mounts) is with_draft
+    with _create_context(
+        project,
+        runs_dir=runs_dir,
+        task_name="latency",
+        exp_name=run_id,
+        existing=True,
+        run_environment=environment(),
+    ) as resumed:
+        assert _model_mounts(resumed) == fresh_mounts
 
 
 def test_copied_run_provisions_self_contained_project_in_collection(tmp_path: Path) -> None:
@@ -1024,7 +1130,7 @@ def test_cli_backend_accepts_active_profiler_configuration(
         configuration=configuration,
         config=Config.model_validate(
             {
-                "model": {"name": "gpt-test"},
+                "model": {"name": "gpt-5.5"},
                 "agent": {"backend": "cli", "cli_provider": "codex"},
             }
         ),

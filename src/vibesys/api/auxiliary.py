@@ -8,12 +8,14 @@ and create sessions through ``Run.agents`` instead.
 from __future__ import annotations
 
 import re
+from enum import StrEnum
 from pathlib import Path
-from typing import Protocol, Self
+from typing import Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from vibesys.api.store import RunRecord
+from vs_runtime.api.infrastructure import SteerMode, SteerTarget
 
 
 class RunReady(BaseModel):
@@ -29,6 +31,8 @@ class RunReady(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
 
     record: RunRecord
+    project_root: Path
+    """The opened project's root. Callers read this field and do not canonicalize it again."""
     log_directory: Path
     frontend_state_directory: Path
     agent_provider: str
@@ -93,6 +97,17 @@ class AuxiliaryReadableInput(BaseModel):
         return value
 
 
+class AuxiliarySkills(StrEnum):
+    """Which bundled skills an auxiliary conversation is installed with."""
+
+    RUN = "run"
+    """The run's own skill set: what its optimization agents get."""
+    CHAT = "chat"
+    """The skills that teach a chat agent to read a run and propose steers.
+
+    A separate bundled tree, so optimization agents never see them."""
+
+
 class AuxiliaryAgentLaunch(BaseModel):
     """Session-fixed policy for one product-owned auxiliary conversation.
 
@@ -111,6 +126,7 @@ class AuxiliaryAgentLaunch(BaseModel):
     system_prompt: str
     continuation_prompt: str | None = None
     readable_inputs: tuple[AuxiliaryReadableInput, ...] = ()
+    skills: AuxiliarySkills = AuxiliarySkills.RUN
 
     @field_validator("role", "member_id", "provider", "model", "system_prompt")
     @classmethod
@@ -131,6 +147,39 @@ class AuxiliaryAgentLaunch(BaseModel):
             message = "auxiliary agent readable input environment variables must be unique"
             raise ValueError(message)
         return self
+
+
+STEER_PROPOSAL_KIND = "steer_proposal"
+"""The ``kind`` of a ``SteerProposalReceipt``: what ``propose_steer`` returns."""
+
+
+class SteerProposal(BaseModel):
+    """Guidance a chat agent suggests, in the fields of a ``SteerRequest``.
+
+    It carries no ``control_id`` and nothing in it reaches the run: only an operator's
+    ``command.control`` with a ``SteerRequest`` does. The tool that returns it is the
+    agent's only steering tool, so the agent cannot send guidance.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    text: str = Field(min_length=1)
+    target: SteerTarget = SteerTarget()
+    mode: SteerMode = SteerMode.NEXT_TURN
+
+
+class SteerProposalReceipt(BaseModel):
+    """What ``propose_steer`` returns: the proposal, and what the agent should tell the operator.
+
+    The run server reads this from the chat turn's tool result and publishes it as the typed
+    ``steer_proposed`` event.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["steer_proposal"] = STEER_PROPOSAL_KIND
+    proposal: SteerProposal
+    note: str
 
 
 class ManagedAgent(Protocol):
@@ -167,9 +216,13 @@ class AuxiliaryAgents(Protocol):
 
 
 __all__ = [
+    "STEER_PROPOSAL_KIND",
     "AuxiliaryAgentLaunch",
     "AuxiliaryAgents",
     "AuxiliaryReadableInput",
+    "AuxiliarySkills",
     "ManagedAgent",
     "RunReady",
+    "SteerProposal",
+    "SteerProposalReceipt",
 ]

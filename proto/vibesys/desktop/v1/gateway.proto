@@ -1,0 +1,40 @@
+syntax = "proto3";
+package vibesys.desktop.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1";
+
+enum DesktopGatewayKind {
+  DESKTOP_GATEWAY_KIND_UNSPECIFIED = 0;
+  DESKTOP_GATEWAY_KIND_UNARY = 1;
+  DESKTOP_GATEWAY_KIND_STREAM = 2;
+}
+
+// Electron routes this message as protobuf bytes. The preload owns the port,
+// while the caller owns decoding and cancellation; neither transports JSON.
+message DesktopGatewayRequest {
+  DesktopGatewayKind kind = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string host = 2 [(buf.validate.field).string.pattern = "^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$"];
+  string method = 3 [(buf.validate.field).string = {
+    max_bytes: 1024
+    pattern: "^/[A-Za-z][A-Za-z0-9_.]*/[A-Za-z][A-Za-z0-9_]*$"
+  }];
+  bytes bytes = 4 [(buf.validate.field).bytes.max_len = 16777216];
+}
+message DesktopGatewayEnd {
+  optional string error = 1 [(buf.validate.field).string.max_bytes = 65536];
+  // The gRPC status code when the gateway refused the call, so a typed refusal
+  // (not found, unavailable) is not flattened into a retryable disconnect.
+  optional int32 status = 2 [(buf.validate.field).int32 = {gte: 0, lte: 16}];
+}
+message DesktopGatewayReply {
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    bytes bytes = 1 [(buf.validate.field).bytes.max_len = 16777216];
+    DesktopGatewayEnd end = 2;
+  }
+}

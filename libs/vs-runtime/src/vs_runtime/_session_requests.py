@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING, Protocol, assert_never
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from vs_agent.api import (
+    AgentExecutionCancelledError,
     AgentOutputSchemaError,
     AgentSessionKey,
     AgentTurnRequest,
@@ -50,6 +51,7 @@ from vs_agent.api import (
     SessionConfigurationError,
     SessionPersistenceError,
     SessionResumeError,
+    SteerOutcome,
     Unknown,
     parse_typed_response,
 )
@@ -57,6 +59,8 @@ from vs_core.api import (
     REPLY_ERROR_MESSAGE_LIMIT,
     DispatchTurn,
     EnsureSession,
+    InputId,
+    InputMidTurnReleased,
     InspectTurn,
     InvocationRef,
     ObservationStatus,
@@ -77,6 +81,7 @@ from vs_core.api import (
     SnapshotAndRetainRun,
     TargetObservation,
     TurnObserved,
+    TurnPermit,
     TurnSpec,
     WorkspaceRef,
 )
@@ -85,6 +90,7 @@ from vs_runtime._access_settlement import (
     AccessReceipt,
     AccessSettlement,
     AccessSettlementError,
+    AccessUnrestorableError,
     AccessViolation,
     access_unproven,
 )
@@ -114,7 +120,14 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_agent.api import AgentSessions, AgentSessionSpec, ClientAgentSessions, InvocationOutcome
-    from vs_core.api import Continuation, DecisionId, InvocationId, Observation, RequestBase
+    from vs_core.api import (
+        Continuation,
+        DecisionId,
+        InvocationId,
+        MidTurnOffer,
+        Observation,
+        RequestBase,
+    )
     from vs_prompts.api import RenderedPrompt
     from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
     from vs_runtime._receipt_store import ReceiptStore
@@ -127,7 +140,12 @@ _DISPATCHES = "session-dispatches"
 
 def session_binding_key(request: RequestBase, session_id: SessionId) -> str:
     """The one key under which a session's binding and dispatches are stored."""
-    return f"{owner_key(request)}/{session_id.root}"
+    return scope_binding_key(request.scope, session_id)
+
+
+def scope_binding_key(scope: Scope, session_id: SessionId) -> str:
+    """``session_binding_key`` for a session of ``scope``, without a request in hand."""
+    return f"{scope.owner.kind}:{scope.owner.root}:{scope.generation}/{session_id.root}"
 
 
 def load_session_binding(store: ReceiptStore, bkey: str) -> SessionBinding | None:
@@ -202,6 +220,13 @@ class SessionResolver(Protocol):
         """The provider session configuration for *turn* (role, workspace, policy)."""
         ...
 
+    def hold_permit(self, execution_id: str, scope: Scope, permit: TurnPermit) -> None:
+        """Record the logical-turn permit before preparation publishes the execution.
+
+        A resolver with no control channel records nothing.
+        """
+        ...
+
     def output_schema(self, ref: SchemaRef) -> type[BaseModel] | None:
         """The pydantic type that validates replies for *ref*."""
         ...
@@ -229,6 +254,10 @@ class SessionResolver(Protocol):
         Rendering is the resolver's job (templates); this executor never builds
         prompt text. ``None`` means an artifact is missing or fails its digest.
         """
+        ...
+
+    def mid_turn_message(self, item: SessionInput) -> RenderedPrompt | None:
+        """The message offering ``item`` to a turn already running; ``None`` as ``message``."""
         ...
 
 
@@ -295,6 +324,24 @@ class _Facts:
     settles: bool = True
     """False when the answer proves nothing about what the request holds (a reused identity),
     so even a terminal one claims no release and no complete children."""
+    refused_steers: tuple[str, ...] = ()
+    """Interrupt-mode inputs the provider took into the turn and did not keep, by input id."""
+
+
+def _refusals(
+    invocation: InvocationRef, facts: _Facts, now_at: float
+) -> tuple[InputMidTurnReleased, ...]:
+    """The interrupt-mode inputs the turn's provider refused, released ahead of its acceptance.
+
+    They ride in the same result as the turn's end, so the refusal commits with it and core
+    gives each input to the next turn instead of delivering it with this one.
+    """
+    return tuple(
+        InputMidTurnReleased(
+            input_id=InputId(root=steer_id), invocation=invocation, now_at=now_at, refused=True
+        )
+        for steer_id in facts.refused_steers
+    )
 
 
 def _reply_errors(violations: tuple[SchemaViolation, ...]) -> tuple[ReplyError, ...]:
@@ -355,6 +402,17 @@ def _violated(violation: AccessViolation, resource_id: ResourceId) -> _Facts:
     )
 
 
+def _unrestorable(error: AccessUnrestorableError, resource_id: ResourceId) -> _Facts:
+    """An ended turn whose writes outside its access could not be undone: it fails for good.
+
+    Retrying the revert would leave the same paths, so the turn is not left unknown
+    until its limit; its output is withheld and the reason is stated.
+    """
+    return _Facts(
+        ObservationStatus.FAILED, accepted=True, resource_id=resource_id, diagnostic=str(error)
+    )
+
+
 def _unknown(diagnostic: str, resource_id: ResourceId | None = None) -> _Facts:
     return _Facts(
         ObservationStatus.UNKNOWN, terminal=False, resource_id=resource_id, diagnostic=diagnostic
@@ -373,6 +431,17 @@ class _Dispatch:
     schema: type[BaseModel]
     workspace: AccessGuardedWorkspace
     grant: AccessGrant
+    standalone: bool
+    """The message is the role's own prompt, so the turn may run in a fresh conversation."""
+
+
+def _stands_alone(turn: TurnSpec) -> bool:
+    """Whether the turn's message carries the role's whole prompt rather than answering the last.
+
+    A paid or free turn asks the role's own prompt. A correction answers the reply before it
+    and a resume answers the wait the conversation recorded, so both need that conversation.
+    """
+    return turn.charge_class in ("paid", "free") and turn.predecessor is None
 
 
 _WITHDRAWN = "the invocation was withdrawn before dispatch"
@@ -402,14 +471,16 @@ class _Call:
     context: ExecutionContext
 
 
-class TurnYields(Protocol):
+class TurnYields[TurnT, WaitT](Protocol):
     """Where a turn that asked to wait gets its continuation.
 
-    Asked once when a dispatched turn ends. A returned continuation becomes the turn's
-    ``suspension``; core validates it and publishes it after the checkpoint.
+    Asked once when a dispatched turn ends. The positional core binds a
+    ``DispatchTurn`` to a ``Continuation`` that core validates and publishes after
+    the checkpoint. The native replay log binds a physical turn's span identity to
+    its durable ``ReplayTurnWait``, which the archive checks against the log.
     """
 
-    def yielded(self, request: DispatchTurn) -> Continuation | None:
+    def yielded(self, request: TurnT, /) -> WaitT | None:
         """The continuation this turn yielded, or None when it did not wait."""
         ...
 
@@ -422,7 +493,7 @@ class RuntimeSessionRequests:
         sessions: ClientAgentSessions,
         resolver: SessionResolver,
         store: ReceiptStore,
-        yields: TurnYields | None = None,
+        yields: TurnYields[DispatchTurn, Continuation] | None = None,
         *,
         blocking: BlockingRunner,
     ) -> None:
@@ -441,6 +512,35 @@ class RuntimeSessionRequests:
         """Judges each invocation's writes; the lifecycle executors share it."""
         self._observations = ObservationFactory(store)
         self._locks: dict[str, asyncio.Lock] = {}
+
+    def offer_mid_turn(self, offer: MidTurnOffer) -> SteerOutcome:
+        """Offer an interrupt-mode input to the running turn ``offer`` names.
+
+        Only this instance can reach a turn it runs. A session it never bound, an unreadable
+        binding or input text, or a journal that disowns the invocation leaves no turn here
+        that could take the message: ``NO_RUNNING_TURN``, so core gives it to the next turn.
+        A ``DELIVERED`` message the provider then refuses comes back with the turn's result,
+        which releases it before the turn's acceptance commits.
+        """
+        invocation = offer.invocation
+        try:
+            binding = load_session_binding(
+                self._store, scope_binding_key(offer.scope, invocation.session_id)
+            )
+        except ReceiptCorruptError:
+            return SteerOutcome.NO_RUNNING_TURN
+        message = self._resolver.mid_turn_message(offer.input)
+        if binding is None or message is None:
+            return SteerOutcome.NO_RUNNING_TURN
+        try:
+            return self._sessions.steer(
+                AgentSessionKey.parse(binding.session_key),
+                invocation.invocation_id.root,
+                message,
+                steer_id=offer.input.input_id.root,
+            )
+        except InvocationConflictError:
+            return SteerOutcome.NO_RUNNING_TURN
 
     async def execute(
         self, request: SessionRoleRequest, context: ExecutionContext
@@ -560,7 +660,10 @@ class RuntimeSessionRequests:
                 and facts.status == ObservationStatus.SUCCEEDED
                 else None
             )
-            events = (self._turn_event(invocation, observation, facts, suspension),)
+            events = (
+                *_refusals(invocation, facts, context.now_at),
+                self._turn_event(invocation, observation, facts, suspension),
+            )
         return ExecutionResult(
             observation=RequestObserved(
                 observation=observation,
@@ -696,7 +799,9 @@ class RuntimeSessionRequests:
                 _unknown(f"cannot read the conversation checkpoint: {error}", binding.resource_id)
             ) from error
 
-    async def _resolve(self, request: DispatchTurn, bkey: str) -> tuple[SessionBinding, _Dispatch]:
+    async def _resolve(
+        self, request: DispatchTurn, bkey: str, permit: TurnPermit | None = None
+    ) -> tuple[SessionBinding, _Dispatch]:
         """The ensured session and the resolved dispatch, or a refusal naming what is missing."""
         turn = request.turn
         binding = load_session_binding(self._store, bkey)
@@ -711,9 +816,12 @@ class RuntimeSessionRequests:
         grant = self._resolver.access_grant(turn)
         if workspace is None or grant is None:
             raise _RefusalError(_rejected("the turn's workspace or access cannot be resolved"))
+        scope = turn.workspace if isinstance(turn.workspace, Scope) else turn.workspace.scope
+        if permit is not None:
+            self._resolver.hold_permit(turn.invocation_id.root, scope, permit)
         spec = self._resolver.agent_spec(turn, workspace)
         template = self._resolver.template(turn)
-        message = self._resolver.message(turn, request.inputs)
+        message = self._resolver.message(turn, (*request.inputs, *request.guidance))
         if spec is None or template is None or message is None:
             raise _RefusalError(
                 _rejected("the turn's session, prompts or inputs cannot be resolved")
@@ -740,19 +848,24 @@ class RuntimeSessionRequests:
             schema,
             workspace,
             grant,
+            _stands_alone(turn),
         )
         return binding, dispatch
 
     async def _dispatch(self, request: DispatchTurn, call: _Call) -> _Facts:
         turn = request.turn
         bkey = self._binding_key(request, turn.session.session_id)
-        binding, dispatch = await self._resolve(request, bkey)
+        binding, dispatch = await self._resolve(request, bkey, call.context.permit)
         access_key = AccessKey(binding=bkey, invocation=dispatch.invocation)
         if self.settlement.receipt(access_key) is None:
             # Before the dispatch is recorded: a refusal here proves no provider call began.
             try:
                 await self._settle_ended_peers(dispatch.workspace.path, access_key)
                 self.settlement.require_clear(dispatch.workspace.path, access_key)
+            except AccessUnrestorableError as error:
+                # An earlier turn's writes cannot be undone: no turn may baseline this
+                # workspace, now or on a retry, so refuse for good and say why.
+                return _rejected(str(error), binding.resource_id)
             except AccessSettlementError as error:
                 return _retryable(str(error), binding.resource_id)
         fence = invocation_fence(bkey, dispatch.invocation)
@@ -822,13 +935,23 @@ class RuntimeSessionRequests:
             await self.settlement.begin(
                 access_key, turn.workspace, dispatch.workspace, dispatch.grant
             )
+        except AccessUnrestorableError as error:
+            # The workspace cannot be read by host Git, so no baseline exists and asking
+            # again finds the same tree: refuse for good. No provider call began.
+            return _rejected(str(error), binding.resource_id)
         except AccessSettlementError as error:
             # The baseline was refused, so no provider call began: ask again, do not inspect.
             return _retryable(str(error), binding.resource_id)
-        outcome = await self._judged_outcome(access_key, bkey, binding, dispatch, call)
-        if isinstance(outcome, _Facts):
-            return outcome
-        return await self._finish(outcome, bkey, binding, dispatch, turn.output_schema)
+        try:
+            outcome = await self._judged_outcome(access_key, bkey, binding, dispatch, call)
+            if isinstance(outcome, _Facts):
+                return outcome
+            return await self._finish(outcome, bkey, binding, dispatch, turn.output_schema)
+        finally:
+            # ``begin`` acquired live ownership. Every later exit ends it here; an
+            # unsettled durable receipt becomes the workspace fence, while successful
+            # settlement has already removed that fence.
+            self.settlement.fence(access_key)
 
     async def _judged_outcome(
         self,
@@ -841,21 +964,27 @@ class RuntimeSessionRequests:
         """The dispatch's journal outcome, or the facts of a dispatch that ended without one."""
         try:
             return await self._outcome(bkey, binding, dispatch, call)
-        except _WithdrawnError:
+        except (AgentExecutionCancelledError, _WithdrawnError) as cancelled:
             # Cancelled before the provider call: no turn ran, so it wrote nothing to judge.
             try:
                 await self.settlement.settle(access_key)
             except AccessSettlementError as error:
                 return _unknown(str(error), binding.resource_id)
-            return _rejected(_WITHDRAWN, binding.resource_id)
+            return (
+                _Facts(
+                    ObservationStatus.CANCELLED,
+                    accepted=True,
+                    resource_id=binding.resource_id,
+                    diagnostic=str(cancelled),
+                )
+                if isinstance(cancelled, AgentExecutionCancelledError)
+                else _rejected(_WITHDRAWN, binding.resource_id)
+            )
         except InvocationConflictError as error:
-            self.settlement.fence(access_key)
             return _rejected(f"invocation conflicts with its journal: {error}", binding.resource_id)
         except SessionConfigurationError as error:
-            self.settlement.fence(access_key)
             return _rejected(f"session configuration refused: {error}", binding.resource_id)
         except (SessionPersistenceError, SessionResumeError) as error:
-            self.settlement.fence(access_key)
             return _unknown(f"dispatch state is unreadable: {error}", binding.resource_id)
 
     async def _outcome(
@@ -929,10 +1058,11 @@ class RuntimeSessionRequests:
         facts = self._translate(outcome, binding, dispatch.schema, ref)
         key = AccessKey(binding=bkey, invocation=dispatch.invocation)
         if not isinstance(outcome, (Completed, InvalidResponse)):
-            self.settlement.fence(key)
             return facts
         try:
             violation = await self.settlement.settle(key)
+        except AccessUnrestorableError as error:
+            return _unrestorable(error, binding.resource_id)
         except AccessSettlementError as error:
             raise _RefusalError(_unknown(str(error), binding.resource_id)) from error
         return facts if violation is None else _violated(violation, binding.resource_id)
@@ -1023,7 +1153,7 @@ class RuntimeSessionRequests:
             dispatch.spec,
             replace(dispatch.template, expected_provider_session_id=checkpoint.provider_session_id),
         )
-        return sessions.resume(key, dispatch.message, invocation)
+        return sessions.resume(key, dispatch.message, invocation, standalone=dispatch.standalone)
 
     @staticmethod
     def _translate(
@@ -1044,6 +1174,7 @@ class RuntimeSessionRequests:
                         resource_id=resource,
                         diagnostic=f"reply fails its schema: {error.detail}",
                         reply_errors=_reply_errors(error.violations),
+                        refused_steers=outcome.result.refused_steers,
                     )
                 return _Facts(
                     ObservationStatus.SUCCEEDED,
@@ -1051,6 +1182,7 @@ class RuntimeSessionRequests:
                     resource_id=resource,
                     output_schema=ref,
                     output_json=reply.model_dump_json(),
+                    refused_steers=outcome.result.refused_steers,
                 )
             case InvalidResponse():
                 return _Facts(
@@ -1113,6 +1245,9 @@ class RuntimeSessionRequests:
                 violation = await self.settlement.settle(
                     AccessKey(binding=bkey, invocation=invocation.invocation_id.root)
                 )
+            except AccessUnrestorableError as error:
+                violation = None
+                target = _unrestorable(error, binding.resource_id)
             except AccessSettlementError as error:
                 raise _RefusalError(_unknown(str(error), binding.resource_id)) from error
             if violation is not None:
@@ -1186,7 +1321,10 @@ class RuntimeSessionRequests:
                     reply_errors=target.reply_errors,
                 ),
             ),
-            owner_events=(self._turn_event(request.invocation, seen, target),),
+            owner_events=(
+                *_refusals(request.invocation, target, context.now_at),
+                self._turn_event(request.invocation, seen, target),
+            ),
         )
 
 

@@ -30,6 +30,7 @@ from tests.support.light_imports import BUDGET_MS, is_heavy, loaded_modules
 from server.host_api import InstanceStatus, LiveInstanceRecord, RunPhase, RunStatus
 from server.registry import FileInstanceStore, instance_root
 from server.transport.unix_jsonl import UnixJsonlServer
+from vs_project.api import create_operator_key
 from vs_sim.api import OsThreads, UnixNetwork
 from vs_sim.api.testing import swept
 
@@ -54,7 +55,31 @@ _SCENARIOS = tuple(
 # vs_project._workspace_tree (GitTracker restores preserved memory by descriptor) adds 1;
 # vs_project._nested_repositories (host Git refuses a work tree holding a nested repository)
 # adds 1.
-_MODULE_CEILING = 335
+# server.host_helper_logs (the logs handlers: chunk cuts and the long poll) adds 1; the
+# vs_logs reader itself loads on the first logs request, never for hello (asserted below).
+# vs_redaction, its api, and its pattern/stream implementations add 4 light,
+# standard-library-only modules so every host diagnostic boundary uses the same bounded credential
+# matcher and stream redactor instead of retaining a second implementation.
+# The reservable worker implementation adds the standard-library-only ``queue`` and ``_queue``
+# modules so a refused native worker start can be reported before relay I/O is committed.
+# server.host_envelope and server.host_run_summary (the helper's request and reply bases and the
+# runs.summary messages, split out of server.host_api) add 2; the summary's fold and cache load on
+# the first runs.summary, never for hello (asserted below).
+# server.host_harness (the harness choice and its display names, split from host_api to hold its
+# file-length ceiling) adds 1.
+# server.run_digest (the run digest fold) and server.host_machine_facts (the machine facts
+# moved out of host_api) add 2 more; the summary's fold and cache load on the first request.
+# server.host_run_events (the run history's messages, split out of host_api) and
+# server.span_index (the journal's span index, read by the span and tail requests) add 2 light
+# modules: the standard library and Pydantic only.
+# vs_project._operator_key (the key every control-socket connection presents first) adds 1,
+# loading neither hmac nor secrets; main already loaded 355 before it.
+# server.host_run_dashboard (the run tile's contracts, split from host_api to hold its file-length
+# ceiling) adds 1: Pydantic and the standard library only.
+# server.host_run_reader (the run.reader messages) and server.host_helper_readers (finding or
+# starting the read-only server Chat reads an ended run through) add 2: the standard library,
+# Pydantic and light server modules only.
+_MODULE_CEILING = 359
 """The most modules a helper may load to answer ``hello``; lower it as the helper sheds imports."""
 _HELLO = {
     "type": "hello",
@@ -119,12 +144,18 @@ class _HelperChannel:
 
 
 @pytest.fixture
-def env(tmp_path: Path) -> dict[str, str]:
-    runtime = tmp_path / "runtime"
-    runtime.mkdir(mode=0o700)
+def env(socket_dir: Path) -> dict[str, str]:
+    """A user environment whose runtime root holds the run sockets.
+
+    The helper dials a run's control socket only inside the user's runtime
+    root, so the runtime directory is the shallow ``socket_dir`` and every run
+    socket in these tests sits under its ``vibesys`` directory.
+    """
+    socket_dir.chmod(0o700)
+    (socket_dir / "vibesys").mkdir(mode=0o700)
     return {
         **os.environ,
-        "XDG_RUNTIME_DIR": str(runtime),
+        "XDG_RUNTIME_DIR": str(socket_dir),
         "PYTHONPATH": os.pathsep.join(sys.path),
     }
 
@@ -155,16 +186,34 @@ def test_hello_loads_no_engine_and_reports_its_start_up_time(
     record_property("hello_modules", len(loaded))
     assert "pydantic" in loaded, "importtime reported no modules; the check would be vacuous"
     assert [name for name in loaded if is_heavy(name)] == []
+    assert "vs_project._fingerprint" not in loaded
     assert len(loaded) <= _MODULE_CEILING
     # #2351: minting an instance id with ``secrets`` loaded ``secrets``, ``hmac``
     # and ``base64`` on every hello and pushed the count over the ceiling.
     assert {"secrets", "hmac"}.isdisjoint(loaded)
+    # Logs cost nothing until a client reads one: vs_logs loads on the first logs request.
+    assert [name for name in loaded if name.split(".")[0] == "vs_logs"] == []
+    # Run indexing shares Project's state I/O boundary, with no extra eager module.
+    assert "vs_project._run_index" not in loaded
+    # Publication loads when a run publishes a revision, never for hello.
+    assert "vs_project._revision_publication" not in loaded
+    # Retained-file reads serve the fact importer and a semantic restart, never hello.
+    assert "vs_project._retained" not in loaded
+    # Transport dependencies load only when a run publishes or reads a log.
+    assert {"vs_runlog", "vs_proto", "google_crc32c", "google.protobuf"}.isdisjoint(loaded)
+    # The launcher's light commands load on dispatch: hello pays for none of them, so the
+    # ``evals`` command's Slurm ledger (about 85 modules) stays out of the helper.
+    assert [name for name in loaded if name.split(".")[0] == "vs_slurm"] == []
+    # Saved-run import and paging load only for a saved-run request.
+    assert "server.host_saved_runs" not in loaded
+    # The run summary's fold and cache load on the first summary request.
+    assert {"server.run_summary", "server.run_summary_cache"}.isdisjoint(loaded)
 
 
 def test_run_connect_makes_the_channel_a_relay_to_the_run(
     env: dict[str, str], tmp_path: Path, socket_dir: Path
 ) -> None:
-    socket_path = socket_dir / "helper.sock"
+    socket_path = socket_dir / "vibesys" / "helper.sock"
     instance_id = "0123456789ab"
     parts = build_server_parts(tmp_path / "logs")
     store = FileInstanceStore(instance_root(env, os.getuid()))
@@ -186,7 +235,13 @@ def test_run_connect_makes_the_channel_a_relay_to_the_run(
             )
         )
         with UnixJsonlServer(
-            socket_path, parts.api, subscriptions=None, threads=OsThreads(), network=UnixNetwork()
+            socket_path,
+            parts.api,
+            subscriptions=None,
+            threads=OsThreads(),
+            network=UnixNetwork(),
+            # The key the helper subprocess finds in the runtime root it is given.
+            key=create_operator_key(env, os.getuid()),
         ):
             channel = _HelperChannel(env)
             channel.send(_HELLO)

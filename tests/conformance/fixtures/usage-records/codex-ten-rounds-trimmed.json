@@ -1,0 +1,590 @@
+{
+ "description": "Eight turns trimmed from a real ten-round Codex run on a queue task, prompts stripped and sequences renumbered. Round 1 shows an orchestrator turn, an implementer turn, a judge turn and a resumed implementer chain (execution ids with a resume suffix); one judge execution was given a reasoning effort of high by hand, because the run predates the field and recorded none. The start of the first round-2 implementer execution was removed, so its record has no role, harness, model, effort or start time but keeps its spend and end time. usage_records(events) returns exactly records.",
+ "events": [
+  {
+   "sequence": 1,
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "timestamp": "2026-10-18T17:15:13.823948Z",
+   "type": "run_started",
+   "text": "",
+   "status": "active",
+   "round_label": null,
+   "agent_kind": null,
+   "execution_id": null,
+   "data": {
+    "kind": "run_started",
+    "outer_loop": "multi-agent",
+    "input": "queue-rs",
+    "max_rounds": 10,
+    "expected_roles": [
+     "multi-orchestrator",
+     "multi-profiler",
+     "multi-implementer",
+     "multi-judge"
+    ],
+    "overview": {
+     "overview_version": 1,
+     "objective": {
+      "text": "Optimize a bounded FIFO queue.",
+      "metric": "total_ops_per_sec",
+      "unit": null,
+      "direction": null,
+      "objectives": [],
+      "correctness_check": []
+     },
+     "benchmarks": {
+      "evaluator": {
+       "name": "vibesys-evaluator-queue",
+       "version": "0.1.0"
+      }
+     }
+    }
+   }
+  },
+  {
+   "sequence": 2,
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "timestamp": "2026-10-18T17:17:03.653095Z",
+   "type": "agent_execution_started",
+   "text": "",
+   "status": "active",
+   "round_label": "multi-orchestrator-session-turn",
+   "agent_kind": "multi-orchestrator",
+   "execution_id": "inv:orchestrator:000001:0",
+   "data": {
+    "kind": "agent_execution_started",
+    "stage": "multi-orchestrator",
+    "attempt": null,
+    "system_prompt": "",
+    "user_prompt": "",
+    "activity": {
+     "kind": "agent_execution_activity_changed",
+     "mode": "thinking",
+     "summary": "multi-orchestrator is working",
+     "tool": null
+    },
+    "provider": "codex",
+    "model": "gpt-6-luna"
+   }
+  },
+  {
+   "sequence": 3,
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "timestamp": "2026-10-18T17:17:29.830691Z",
+   "type": "turn_usage_recorded",
+   "text": "",
+   "status": null,
+   "round_label": "multi-orchestrator-session-turn",
+   "agent_kind": "multi-orchestrator",
+   "execution_id": "inv:orchestrator:000001:0",
+   "data": {
+    "kind": "turn_usage_recorded",
+    "input_tokens": 90710,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 69760,
+    "output_tokens": 2110,
+    "reasoning_output_tokens": 441,
+    "total_cost_usd": 0.0038476,
+    "duration_ms": 24434,
+    "span_id": null
+   }
+  },
+  {
+   "sequence": 4,
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "timestamp": "2026-10-18T17:17:36.376283Z",
+   "type": "agent_execution_started",
+   "text": "",
+   "status": "active",
+   "round_label": "multi-implementer-session-turn",
+   "agent_kind": "multi-implementer",
+   "execution_id": "inv:implementer:000001:0",
+   "data": {
+    "kind": "agent_execution_started",
+    "stage": "multi-implementer",
+    "attempt": null,
+    "system_prompt": "",
+    "user_prompt": "",
+    "activity": {
+     "kind": "agent_execution_activity_changed",
+     "mode": "thinking",
+     "summary": "multi-implementer is working",
+     "tool": null
+    },
+    "provider": "codex",
+    "model": "gpt-6-luna"
+   }
+  },
+  {
+   "sequence": 5,
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "timestamp": "2026-10-18T17:18:37.055020Z",
+   "type": "turn_usage_recorded",
+   "text": "",
+   "status": null,
+   "round_label": "multi-implementer-session-turn",
+   "agent_kind": "multi-implementer",
+   "execution_id": "inv:implementer:000001:0",
+   "data": {
+    "kind": "turn_usage_recorded",
+    "input_tokens": 249227,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 233344,
+    "output_tokens": 4877,
+    "reasoning_output_tokens": 1398,
+    "total_cost_usd": 0.00636024,
+    "duration_ms": 57814,
+    "span_id": null
+   }
+  },
+  {
+   "sequence": 6,
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "timestamp": "2026-10-18T17:18:40.020882Z",
+   "type": "agent_execution_started",
+   "text": "",
+   "status": "active",
+   "round_label": "multi-judge-session-turn",
+   "agent_kind": "multi-judge",
+   "execution_id": "inv:judge:000001:0",
+   "data": {
+    "kind": "agent_execution_started",
+    "stage": "multi-judge",
+    "attempt": null,
+    "system_prompt": "",
+    "user_prompt": "",
+    "activity": {
+     "kind": "agent_execution_activity_changed",
+     "mode": "thinking",
+     "summary": "multi-judge is working",
+     "tool": null
+    },
+    "provider": "codex",
+    "model": "gpt-6-luna",
+    "reasoning_effort": "high"
+   }
+  },
+  {
+   "sequence": 7,
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "timestamp": "2026-10-18T17:18:59.620603Z",
+   "type": "turn_usage_recorded",
+   "text": "",
+   "status": null,
+   "round_label": "multi-judge-session-turn",
+   "agent_kind": "multi-judge",
+   "execution_id": "inv:judge:000001:0",
+   "data": {
+    "kind": "turn_usage_recorded",
+    "input_tokens": 94740,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 71936,
+    "output_tokens": 1390,
+    "reasoning_output_tokens": 613,
+    "total_cost_usd": 0.00369476,
+    "duration_ms": 17692,
+    "span_id": null
+   }
+  },
+  {
+   "sequence": 8,
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "timestamp": "2026-10-18T17:19:00.414475Z",
+   "type": "agent_execution_started",
+   "text": "",
+   "status": "active",
+   "round_label": "multi-implementer-session-turn",
+   "agent_kind": "multi-implementer",
+   "execution_id": "inv:implementer:000001:1",
+   "data": {
+    "kind": "agent_execution_started",
+    "stage": "multi-implementer",
+    "attempt": null,
+    "system_prompt": "",
+    "user_prompt": "",
+    "activity": {
+     "kind": "agent_execution_activity_changed",
+     "mode": "thinking",
+     "summary": "multi-implementer is working",
+     "tool": null
+    },
+    "provider": "codex",
+    "model": "gpt-6-luna"
+   }
+  },
+  {
+   "sequence": 9,
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "timestamp": "2026-10-18T17:20:35.300598Z",
+   "type": "turn_usage_recorded",
+   "text": "",
+   "status": null,
+   "round_label": "multi-implementer-session-turn",
+   "agent_kind": "multi-implementer",
+   "execution_id": "inv:implementer:000001:1",
+   "data": {
+    "kind": "turn_usage_recorded",
+    "input_tokens": 478166,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 459776,
+    "output_tokens": 4438,
+    "reasoning_output_tokens": 1784,
+    "total_cost_usd": 0.00865576,
+    "duration_ms": 94858,
+    "span_id": null
+   }
+  },
+  {
+   "sequence": 10,
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "timestamp": "2026-10-18T17:21:11.020657Z",
+   "type": "agent_execution_started",
+   "text": "",
+   "status": "active",
+   "round_label": "multi-implementer-session-turn",
+   "agent_kind": "multi-implementer",
+   "execution_id": "inv:implementer:000001:1/resume",
+   "data": {
+    "kind": "agent_execution_started",
+    "stage": "multi-implementer",
+    "attempt": null,
+    "system_prompt": "",
+    "user_prompt": "",
+    "activity": {
+     "kind": "agent_execution_activity_changed",
+     "mode": "thinking",
+     "summary": "multi-implementer is working",
+     "tool": null
+    },
+    "provider": "codex",
+    "model": "gpt-6-luna"
+   }
+  },
+  {
+   "sequence": 11,
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "timestamp": "2026-10-18T17:24:52.541883Z",
+   "type": "turn_usage_recorded",
+   "text": "",
+   "status": null,
+   "round_label": "multi-implementer-session-turn",
+   "agent_kind": "multi-implementer",
+   "execution_id": "inv:implementer:000001:1/resume",
+   "data": {
+    "kind": "turn_usage_recorded",
+    "input_tokens": 1255704,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 1230208,
+    "output_tokens": 13642,
+    "reasoning_output_tokens": 8094,
+    "total_cost_usd": 0.02167268,
+    "duration_ms": 221495,
+    "span_id": null
+   }
+  },
+  {
+   "sequence": 12,
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "timestamp": "2026-10-18T17:29:27.654992Z",
+   "type": "agent_execution_started",
+   "text": "",
+   "status": "active",
+   "round_label": "multi-judge-session-turn",
+   "agent_kind": "multi-judge",
+   "execution_id": "inv:judge:000001%232:0",
+   "data": {
+    "kind": "agent_execution_started",
+    "stage": "multi-judge",
+    "attempt": null,
+    "system_prompt": "",
+    "user_prompt": "",
+    "activity": {
+     "kind": "agent_execution_activity_changed",
+     "mode": "thinking",
+     "summary": "multi-judge is working",
+     "tool": null
+    },
+    "provider": "codex",
+    "model": "gpt-6-luna"
+   }
+  },
+  {
+   "sequence": 13,
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "timestamp": "2026-10-18T17:29:53.083852Z",
+   "type": "turn_usage_recorded",
+   "text": "",
+   "status": null,
+   "round_label": "multi-judge-session-turn",
+   "agent_kind": "multi-judge",
+   "execution_id": "inv:judge:000001%232:0",
+   "data": {
+    "kind": "turn_usage_recorded",
+    "input_tokens": 124422,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 99968,
+    "output_tokens": 1581,
+    "reasoning_output_tokens": 786,
+    "total_cost_usd": 0.00423558,
+    "duration_ms": 24245,
+    "span_id": null
+   }
+  },
+  {
+   "sequence": 14,
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "timestamp": "2026-10-18T17:37:24.492546Z",
+   "type": "turn_usage_recorded",
+   "text": "",
+   "status": null,
+   "round_label": "multi-implementer-session-turn",
+   "agent_kind": "multi-implementer",
+   "execution_id": "inv:implementer:000002:0",
+   "data": {
+    "kind": "turn_usage_recorded",
+    "input_tokens": 420108,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 394240,
+    "output_tokens": 5090,
+    "reasoning_output_tokens": 2824,
+    "total_cost_usd": 0.009074200000000001,
+    "duration_ms": 73904,
+    "span_id": null
+   }
+  },
+  {
+   "sequence": 15,
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "timestamp": "2026-10-18T17:39:09.195744Z",
+   "type": "agent_execution_started",
+   "text": "",
+   "status": "active",
+   "round_label": "multi-judge-session-turn",
+   "agent_kind": "multi-judge",
+   "execution_id": "inv:judge:000002:0",
+   "data": {
+    "kind": "agent_execution_started",
+    "stage": "multi-judge",
+    "attempt": null,
+    "system_prompt": "",
+    "user_prompt": "",
+    "activity": {
+     "kind": "agent_execution_activity_changed",
+     "mode": "thinking",
+     "summary": "multi-judge is working",
+     "tool": null
+    },
+    "provider": "codex",
+    "model": "gpt-6-luna"
+   }
+  },
+  {
+   "sequence": 16,
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "timestamp": "2026-10-18T17:39:45.284169Z",
+   "type": "turn_usage_recorded",
+   "text": "",
+   "status": null,
+   "round_label": "multi-judge-session-turn",
+   "agent_kind": "multi-judge",
+   "execution_id": "inv:judge:000002:0",
+   "data": {
+    "kind": "turn_usage_recorded",
+    "input_tokens": 100339,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 75264,
+    "output_tokens": 2704,
+    "reasoning_output_tokens": 1728,
+    "total_cost_usd": 0.00461214,
+    "duration_ms": 34891,
+    "span_id": null
+   }
+  }
+ ],
+ "records": [
+  {
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "execution_id": "inv:orchestrator:000001:0",
+   "span_id": null,
+   "round_label": "multi-orchestrator-session-turn",
+   "role": "multi-orchestrator",
+   "harness": "codex",
+   "model": "gpt-6-luna",
+   "client": null,
+   "reasoning_effort": null,
+   "harness_version": null,
+   "started_at": "2026-10-18T17:17:03.653095Z",
+   "ended_at": "2026-10-18T17:17:29.830691Z",
+   "tokens": {
+    "input": 90710,
+    "cache_read": 69760,
+    "cache_write": 0,
+    "output": 2110,
+    "reasoning": 441
+   },
+   "cost_usd": 0.0038476,
+   "duration_ms": 24434
+  },
+  {
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "execution_id": "inv:implementer:000001:0",
+   "span_id": null,
+   "round_label": "multi-implementer-session-turn",
+   "role": "multi-implementer",
+   "harness": "codex",
+   "model": "gpt-6-luna",
+   "client": null,
+   "reasoning_effort": null,
+   "harness_version": null,
+   "started_at": "2026-10-18T17:17:36.376283Z",
+   "ended_at": "2026-10-18T17:18:37.055020Z",
+   "tokens": {
+    "input": 249227,
+    "cache_read": 233344,
+    "cache_write": 0,
+    "output": 4877,
+    "reasoning": 1398
+   },
+   "cost_usd": 0.00636024,
+   "duration_ms": 57814
+  },
+  {
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "execution_id": "inv:judge:000001:0",
+   "span_id": null,
+   "round_label": "multi-judge-session-turn",
+   "role": "multi-judge",
+   "harness": "codex",
+   "model": "gpt-6-luna",
+   "client": null,
+   "reasoning_effort": "high",
+   "harness_version": null,
+   "started_at": "2026-10-18T17:18:40.020882Z",
+   "ended_at": "2026-10-18T17:18:59.620603Z",
+   "tokens": {
+    "input": 94740,
+    "cache_read": 71936,
+    "cache_write": 0,
+    "output": 1390,
+    "reasoning": 613
+   },
+   "cost_usd": 0.00369476,
+   "duration_ms": 17692
+  },
+  {
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "execution_id": "inv:implementer:000001:1",
+   "span_id": null,
+   "round_label": "multi-implementer-session-turn",
+   "role": "multi-implementer",
+   "harness": "codex",
+   "model": "gpt-6-luna",
+   "client": null,
+   "reasoning_effort": null,
+   "harness_version": null,
+   "started_at": "2026-10-18T17:19:00.414475Z",
+   "ended_at": "2026-10-18T17:20:35.300598Z",
+   "tokens": {
+    "input": 478166,
+    "cache_read": 459776,
+    "cache_write": 0,
+    "output": 4438,
+    "reasoning": 1784
+   },
+   "cost_usd": 0.00865576,
+   "duration_ms": 94858
+  },
+  {
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "execution_id": "inv:implementer:000001:1/resume",
+   "span_id": null,
+   "round_label": "multi-implementer-session-turn",
+   "role": "multi-implementer",
+   "harness": "codex",
+   "model": "gpt-6-luna",
+   "client": null,
+   "reasoning_effort": null,
+   "harness_version": null,
+   "started_at": "2026-10-18T17:21:11.020657Z",
+   "ended_at": "2026-10-18T17:24:52.541883Z",
+   "tokens": {
+    "input": 1255704,
+    "cache_read": 1230208,
+    "cache_write": 0,
+    "output": 13642,
+    "reasoning": 8094
+   },
+   "cost_usd": 0.02167268,
+   "duration_ms": 221495
+  },
+  {
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "execution_id": "inv:judge:000001%232:0",
+   "span_id": null,
+   "round_label": "multi-judge-session-turn",
+   "role": "multi-judge",
+   "harness": "codex",
+   "model": "gpt-6-luna",
+   "client": null,
+   "reasoning_effort": null,
+   "harness_version": null,
+   "started_at": "2026-10-18T17:29:27.654992Z",
+   "ended_at": "2026-10-18T17:29:53.083852Z",
+   "tokens": {
+    "input": 124422,
+    "cache_read": 99968,
+    "cache_write": 0,
+    "output": 1581,
+    "reasoning": 786
+   },
+   "cost_usd": 0.00423558,
+   "duration_ms": 24245
+  },
+  {
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "execution_id": "inv:implementer:000002:0",
+   "span_id": null,
+   "round_label": "multi-implementer-session-turn",
+   "role": null,
+   "harness": null,
+   "model": null,
+   "client": null,
+   "reasoning_effort": null,
+   "harness_version": null,
+   "started_at": null,
+   "ended_at": "2026-10-18T17:37:24.492546Z",
+   "tokens": {
+    "input": 420108,
+    "cache_read": 394240,
+    "cache_write": 0,
+    "output": 5090,
+    "reasoning": 2824
+   },
+   "cost_usd": 0.009074200000000001,
+   "duration_ms": 73904
+  },
+  {
+   "run_id": "20261018-171509-ae6c6387-queue-rs-20261018-171509",
+   "execution_id": "inv:judge:000002:0",
+   "span_id": null,
+   "round_label": "multi-judge-session-turn",
+   "role": "multi-judge",
+   "harness": "codex",
+   "model": "gpt-6-luna",
+   "client": null,
+   "reasoning_effort": null,
+   "harness_version": null,
+   "started_at": "2026-10-18T17:39:09.195744Z",
+   "ended_at": "2026-10-18T17:39:45.284169Z",
+   "tokens": {
+    "input": 100339,
+    "cache_read": 75264,
+    "cache_write": 0,
+    "output": 2704,
+    "reasoning": 1728
+   },
+   "cost_usd": 0.00461214,
+   "duration_ms": 34891
+  }
+ ]
+}

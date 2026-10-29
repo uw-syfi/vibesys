@@ -1,0 +1,113 @@
+{
+  "id": "helper-logs-read-tail",
+  "protocol": "host-helper",
+  "title": "Read a stream's tail, then whole lines from an offset",
+  "description": "A tail read starts at the first line start in its window and, at the end of the open stream, keeps the unfinished last line. A read whose window more bytes follow ends after its last line end. Each chunk says which pipe wrote its bytes.",
+  "role": "logs",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "logs"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "logs"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "t",
+        "deadline_ms": 10000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "tail_bytes": 30
+        },
+        "max_bytes": 65536,
+        "wait_ms": 0
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "t",
+        "chunk": {
+          "offset": 47,
+          "data": "Step 3/8 : RUN make",
+          "next_offset": 66,
+          "eof": true,
+          "closed": false,
+          "truncated_before": false,
+          "pipes": [
+            {
+              "offset": 47,
+              "length": 19,
+              "pipe": "stdout"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "o",
+        "deadline_ms": 10000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000001",
+        "start": {
+          "offset": 0
+        },
+        "max_bytes": 30,
+        "wait_ms": 0
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "o",
+        "chunk": {
+          "offset": 0,
+          "data": "Step 1/8 : FROM python\n",
+          "next_offset": 23,
+          "eof": false,
+          "closed": false,
+          "truncated_before": false,
+          "pipes": [
+            {
+              "offset": 0,
+              "length": 23,
+              "pipe": "stdout"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

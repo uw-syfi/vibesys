@@ -14,6 +14,7 @@ import pytest
 from jinja2 import Environment, meta
 
 from vs_core.api import (
+    ComparisonPolicy,
     EvidenceId,
     EvidenceKind,
     ObservationStatus,
@@ -41,8 +42,19 @@ from vibesys.metrics import Objective
 from vibesys.orchestration.dynamic.search.api import (
     Blocker,
     BlockerKind,
+    CombinePick,
+    CombineSource,
+    EvaluationQueueView,
+    Expectation,
+    HandoffNote,
+    MainMeasurement,
+    MergeableRow,
+    MergeOutcome,
+    MergeRecord,
+    MergeSource,
     PlannerPrompt,
     ReviewEvaluation,
+    StrayUnapplied,
 )
 from vibesys.orchestration.evolve.population import Individual
 from vibesys.orchestration.issue_queue.search.api import IssueBrief, PriorPerformance
@@ -70,7 +82,7 @@ from vibesys.orchestration.skill_selection import (
     resolve_agent_resource_paths,
 )
 from vibesys.profile_focus import FocusLedger
-from vibesys.prompts import render_template
+from vibesys.prompts import core_protocol_variables, render_template
 from vibesys.run.contracts import ProfilerKind
 from vibesys.run.project_policy import build_project_path_policy
 from vibesys.run.workspace_policy import (
@@ -223,6 +235,7 @@ def representative_context() -> dict[str, object]:
         "profile_focus",
         "profile_name",
         "profiler_entry",
+        "profiler_id",
         "profiler_kind",
         "profiler_mcp_name",
         "profiler_support_name",
@@ -242,9 +255,11 @@ def representative_context() -> dict[str, object]:
         "runtime_notes",
         "schema",
         "service_command",
+        "service_log",
         "session_state_dir",
         "signature",
         "stage_failure",
+        "stage_output",
         "status",
         "step",
         "summary",
@@ -266,7 +281,6 @@ def representative_context() -> dict[str, object]:
         "max_issues_per_perf_eval",
         "nodes",
         "num_failed_attempts",
-        "official_eval_every",
         "remaining",
         "retry",
         "round_number",
@@ -275,16 +289,23 @@ def representative_context() -> dict[str, object]:
         context[name] = 2
     # True renders the optional evaluation section of the core-policy prompts.
     context["agent_evaluation"] = True
+    context["git_writable"] = True
+    # True renders the Docker notes' reproduce-on-this-hardware sentence.
+    context["hardware_attached"] = True
     for name in [
+        "baseline_pending",
         "framework_benchmark_enabled",
         "framework_revert_applied",
         "gate_revalidation_pending",
         "has_history",
+        "input_at_fault",
+        "input_compared",
         "is_cold_start",
         "not_allowed",
         "official_eval_cadence_due",
         "official_evaluation_due",
         "profiling",
+        "queue_budget_spent",
         "repair_seed",
         "require_unseen_id",
         "searched",
@@ -301,6 +322,7 @@ def representative_context() -> dict[str, object]:
         "read_only_paths",
         "recommended_skills",
         "results",
+        "roadmap",
         "sections",
         "seeded_workspace_paths",
         "updated_hypothesis_ids",
@@ -310,11 +332,13 @@ def representative_context() -> dict[str, object]:
         "campaign",
         "cap",
         "checkpoint",
+        "ended_by",
         "input_failure",
+        "input_first_attempt",
+        "input_overdue",
         "invalid_type",
         "omitted",
         "portfolio_view",
-        "timed_out",
     ]:
         context[name] = None
     issue = Issue(
@@ -332,7 +356,9 @@ def representative_context() -> dict[str, object]:
         decision=PreRoundDecision(need_profile=True, profile_focus="queue", reasoning="Measure."),
         evaluation_suspension=True,
         exhaustion_info=ExhaustionNotice(round_number=1, attempts=2, feedback="Retry."),
-        facts=RunFacts(domain_id="generic", objective="Improve throughput."),
+        facts=RunFacts(
+            agent_git_writable=True, domain_id="generic", objective="Improve throughput."
+        ),
         filenames={1: "issue-1.md"},
         groups=((IssueStatus.OPEN, (issue,)),),
         gate_approved_perf_metric=1.0,
@@ -409,7 +435,9 @@ def render_packaged_prompts(installed: Path) -> int:
     context["objective"] = resolve_agent_resource_paths(
         source_objective, list(resource_roots.values())
     )
-    context["facts"] = RunFacts(domain_id="generic", objective=str(context["objective"]))
+    context["facts"] = RunFacts(
+        agent_git_writable=True, domain_id="generic", objective=str(context["objective"])
+    )
     context["agent_gpu"] = {
         "max_gpus": 2,
         "max_time_minutes": 2,
@@ -418,6 +446,17 @@ def render_packaged_prompts(installed: Path) -> int:
     }
     context["prompts"] = ("Review the candidate.",)
     context["steers"] = ({"mode": "steer", "text": "Focus on the cache."},)
+    context["guidance"] = ("Keep the weights in bf16.",)
+    context["text"] = "Switch the cache to fp8 now."
+    # An operator's cancel_item notice, naming one attempt of each fate.
+    context.update(
+        action="cancel_item",
+        subject="I-1",
+        stopped=("A-1",),
+        unqueued=("A-2",),
+        parked=("A-3",),
+        settling=("A-4",),
+    )
     hidden = (
         build_project_path_policy(workspace, evaluator_source=None).resolve(workspace).hidden_paths
     )
@@ -513,6 +552,7 @@ def core_policy_context() -> dict[str, object]:
         remaining=3,
         base_revision=revision,
         base_accuracy_passed=True,
+        main_revision=revision,
         offer_snapshot="fixture-offer",
         older_ids=(),
         baseline=(),
@@ -529,6 +569,7 @@ def core_policy_context() -> dict[str, object]:
         feedback_cut=True,
     )
     return {
+        "agent_git_writable": True,
         "domain_sections": dict.fromkeys(
             ("implementer", "judge", "single_agent", "orchestrator", "profiler"), ""
         ),
@@ -564,6 +605,8 @@ def core_policy_context() -> dict[str, object]:
         "offer_snapshot": "fixture-offer",
         "base_accuracy_passed": True,
         "repeated_failure": None,
+        "comparisons": (),
+        **core_protocol_variables(ComparisonPolicy()),
         "required_fields": (),
         "prior_failure_tail": "AssertionError: fixture",
         "prior_failure_fence": "```",
@@ -576,6 +619,54 @@ def core_policy_context() -> dict[str, object]:
         # A correction names the request it repeats; the template only asks whether it is set.
         "of": "planning request",
         "turns_without_candidate": 2,
+        # The outline turn of a plan-mode run cites the plan's documents (a staged input here).
+        "documents": ("reference/reference.py",),
+        # The handoff file of one planning call (`WriteHandoff`'s fields).
+        "handoff_paths": (
+            ".vibesys/state/agent-visible/run-1/orchestrator-handoff/calls/call-0001.md",
+        ),
+        "call": 1,
+        "reasoning": "Batch the decode loop first.",
+        "scheduled": (),
+        "updates": (),
+        "handoff": HandoffNote(
+            expectations=(
+                Expectation(
+                    work_id="h1",
+                    expected="Throughput rises.",
+                    if_it_succeeds="Merge it.",
+                    if_it_fails="Profile the queue.",
+                ),
+            ),
+            doubts=("The benchmark may be noisy.",),
+        ),
+        # The run's main and its merges (`MergePrompt` and the planner's main fields).
+        "main_revision": revision,
+        "main_measurement": MainMeasurement(revision=revision, merge_id="m1", accuracy_passed=True),
+        "merge_running": "m2",
+        "mergeable": (MergeableRow(hypothesis_id="h1", revision=revision),),
+        "merges": (
+            MergeRecord(
+                merge_id="m1",
+                sequence=2,
+                candidates=(MergeSource(hypothesis_id="h1", revision=revision),),
+                base=revision,
+                outcome=MergeOutcome.REFUSED,
+                reason="The two changes rewrite the same kernel.",
+            ),
+        ),
+        "rebase_onto": revision,
+        "rebase_from": revision,
+        "reply_rejected": (StrayUnapplied(index=1, hypothesis_id="h9"),),
+        "combine": (
+            CombineSource(hypothesis_id="h1", revision=revision, built_on=revision),
+            CombineSource(hypothesis_id="h2", revision=revision, built_on=revision),
+        ),
+        "combine_missing": (CombinePick(hypothesis_id="h3", revision="c3"),),
+        "merge_id": "m1",
+        "candidates": (MergeSource(hypothesis_id="h1", revision=revision, built_on=revision),),
+        "instructions": "Apply h1, then h2.",
+        "watch_for": "Both change the scheduler.",
         # The issue queue's typed contexts.
         "board": (
             IssueBrief(id=1, type="feature", status="open", title="Add streaming", attempts=0),
@@ -599,12 +690,11 @@ def core_policy_context() -> dict[str, object]:
         "claims": ImplementerClaims(
             summary="fixture",
             expected_behavior="fixture",
-            hypothesis_outcome="nominated",
+            status="implemented",
             candidate_disposition="unassessed",
         ),
         "validation_failure": ValidationFailure(recipe="unit", error="boom", output="tail"),
         "validation_recipe_schema": '{"version": 1}',
-        "evidence_directory": "profile/round-0001/",
         "profiler_kind": "linux_cpu",
         # The single strategy's plan prompt (`PlanPrompt`) fields.
         "benchmark_enabled": True,
@@ -613,7 +703,9 @@ def core_policy_context() -> dict[str, object]:
         "frontier": (),
         "last_profile": None,
         "max_rounds": 3,
-        "official_cadence_due": False,
+        "input_value": None,
+        "measurement_noise": None,
+        "passed": (),
         "older_rounds": 0,
         "pending_claims": (),
         "regression_kind": None,
@@ -623,14 +715,12 @@ def core_policy_context() -> dict[str, object]:
         "dominated_by_rounds": (),
         "falsification_criteria": "fixture",
         "invariants": "fixture",
-        "minimum_acceptance_criteria": "fixture",
+        "minimum_ratio": 1.0,
         "no_valid_reply": None,
         "problem": None,
         "agent": "implementer",
         "retained": revision,
         "errors": (ReplyError(path=("reasoning",), code=ReplyErrorCode.MISSING),),
-        "official_due": True,
-        "official_reason": "cadence",
         "profiler_id": "linux_cpu",
         "title": "fixture title",
     }
@@ -649,6 +739,12 @@ def template_context(
     if path.parent.name == "_progress" and path.name == "profile.j2":
         values["summary"] = ProfilerSummary(
             analysis="Measured queue.", bottlenecks="Queue.", suggestions="Batch."
+        )
+    if path.name == "portfolio.j2":
+        # The portfolio template reads `evaluations` as the evaluation queue; the review
+        # templates read the same name as a candidate's evaluations.
+        values["evaluations"] = EvaluationQueueView(
+            pick="ranked", slots=1, input_holds_slot=True, ranking=("w1",)
         )
     if "response" in free:
         values["response"] = response_for(path)
@@ -700,7 +796,7 @@ def response_for(path: Path) -> object:
         {
             "summary": "Implemented.",
             "expected_behavior": "Correct.",
-            "hypothesis_outcome": "continue",
+            "status": "continue",
         }
     )
 

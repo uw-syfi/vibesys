@@ -77,7 +77,7 @@ def _held() -> tuple[EvidenceRef, TrustedEvidence]:
     )
     ref = EvidenceRef(
         evidence_id=EvidenceId(root=evidence.evidence_id),
-        kind=EvidenceKind.LOCAL_VALIDATION,
+        kind=EvidenceKind.BENCHMARK,
         purpose="local-validation",
         scope=Scope(owner=RunId(root="run"), generation=0),
         source_request=RequestId(root="request"),

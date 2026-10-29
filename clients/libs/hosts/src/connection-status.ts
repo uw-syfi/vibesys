@@ -11,4 +11,6 @@ export type ConnectionStatus =
   | {readonly kind: 'auth-needed'; readonly detail: string}
   | {readonly kind: 'incompatible'; readonly detail: string}
   | {readonly kind: 'run-ended'}
-  | {readonly kind: 'closed'};
+  | {readonly kind: 'closed'}
+  /** This window's own channel to the run was refused: the host's session ceiling is spent. */
+  | {readonly kind: 'capacity'; readonly detail: string};

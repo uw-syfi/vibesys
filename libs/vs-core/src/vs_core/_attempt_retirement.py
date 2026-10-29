@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from ._acquisition_stall import is_stalled_acquisition
 from ._deadlines import cleanup
+from ._submission_receipts import same_conclusion
 from .types.attempts import (
     AttemptCheckpoint,
     AttemptClosure,
@@ -97,10 +98,9 @@ def _identity(owner: AttemptView, suffix: str) -> RequestId:
 
 
 def _record(context: AttemptsContext, identity: RequestId) -> RequestRecord | None:
-    # Compare the id strings: a `RequestId` differs from another only by its root, and the ledger
-    # holds every record of the run, so a model comparison per row dominated each step.
-    root = identity.root
-    rows = tuple(row for row in context.records.records if row.request_id.root == root)
+    # The ledger holds every record of the run, and closing an attempt looks up one identity per
+    # record, so a scan here made the step cost the square of the ledger; `find` reads the index.
+    rows = context.records.find(identity)
     return rows[0] if len(rows) == 1 and rows[0].request.request_id == identity else None
 
 
@@ -1062,7 +1062,7 @@ def _job_proof(
             source = job.request_id if hasattr(job, "request_id") else job.submission_id
             return (
                 job.scope == _scope(owner)
-                and job.observation == observation
+                and same_conclusion(job.observation, observation)
                 and source == observation.request_id
                 and _typed_job_released(context, job)
             )
@@ -1694,7 +1694,7 @@ def _known_job_observation(
     return any(
         job.scope == _scope(owner)
         and job.resource_id == observation.resource_id
-        and job.observation == observation
+        and same_conclusion(job.observation, observation)
         and (job.request_id if isinstance(job, RegisteredOwnedJob) else job.submission_id)
         == observation.request_id
         for job in (*context.evaluation.jobs, *context.evaluation.registered_jobs)
@@ -1840,6 +1840,7 @@ def _record_retention(
         request_id=expected.request_id,
         revision=revision,
         retention=expected.retention,
+        measured_input=observation.measured_input,
     )
     return owner.model_copy(update={"checkpoints": (*owner.checkpoints, checkpoint)})
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -20,11 +21,14 @@ from vs_agent.api import (
     AgentInvocationRecord,
     AgentInvocationState,
     AgentOutputSchemaError,
+    AgentQuotaError,
+    AgentSessionCheckpoint,
     AgentSessionKey,
     AgentSessionSpec,
     AgentSessionState,
     AgentSpawnError,
     AgentTurnRequest,
+    AgentTurnResult,
     AgentTurnTimeoutError,
     ClientAgentSessions,
     Completed,
@@ -32,10 +36,12 @@ from vs_agent.api import (
     InvalidResponse,
     InvocationConflictError,
     Pending,
+    QuotaCondition,
     SessionConfigurationError,
     SessionPersistenceError,
     SessionResumeError,
     SessionScope,
+    SteerOutcome,
     Unknown,
 )
 from vs_agent.api.testing import (
@@ -44,6 +50,8 @@ from vs_agent.api.testing import (
     FakeExecutor,
     FakeProvider,
     FakeRun,
+    FakeSteering,
+    FakeTurnScript,
     fake_agentshim_launcher,
     scripted_turn,
 )
@@ -60,7 +68,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
     from pathlib import Path
 
-    from vs_agent.api import AgentInvocationStore
+    from vs_agent.api import AgentInvocationStore, CapacityStops
     from vs_project.api import StateNamespace
     from vs_prompts.api import RenderedPrompt
     from vs_sim.api.testing import Sim
@@ -121,13 +129,13 @@ class _Harness:
     threads: SimThreads
 
     def reconstruct(self) -> ClientAgentSessions:
-        factory = FakeAgentSessions if self.implementation == "fake" else ClientAgentSessions
+        factory = ClientAgentSessions if self.implementation == "client" else FakeAgentSessions
         sessions = factory(self.client, self.ledger, threads=self.threads)
         sessions.bind(KEY, self.spec, self.turn)
         return sessions
 
 
-@pytest.fixture(params=["fake", "client"])
+@pytest.fixture(params=["fake", "steerable-fake", "client"])
 def harness(
     request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sim: Sim
 ) -> Iterator[_Harness]:
@@ -146,6 +154,12 @@ def harness(
     boundary = _Boundary()
     if request.param == "fake":
         launcher = FakeProvider(answer="done", on_turn=lambda _: boundary.accept(), threads=threads)
+    elif request.param == "steerable-fake":
+        launcher = FakeProvider(
+            script=FakeTurnScript(("done",), steering=FakeSteering.CONSUMED),
+            on_turn=lambda _: boundary.accept(),
+            threads=threads,
+        )
     else:
 
         def execute(_request: object) -> FakeRun:
@@ -179,11 +193,11 @@ def harness(
         message="", instructions="", expected_provider_session_id=client.provider_session_id(KEY)
     )
     ledger = (
-        FakeAgentInvocationStore()
-        if request.param == "fake"
-        else namespace.slot("invocations.json", AgentInvocationState)
+        namespace.slot("invocations.json", AgentInvocationState)
+        if request.param == "client"
+        else FakeAgentInvocationStore()
     )
-    factory = FakeAgentSessions if request.param == "fake" else ClientAgentSessions
+    factory = ClientAgentSessions if request.param == "client" else FakeAgentSessions
     sessions = factory(client, ledger, threads=threads)
     sessions.bind(KEY, spec, turn)
     (tmp_path / "message.j2").write_text("{{ content }}", encoding="utf-8")
@@ -285,6 +299,9 @@ class _ExitStatusError(Exception):
         OSError("pipe"),
         _ExitStatusError("claude exited with status 1"),
         RuntimeError("claude exited with code 1"),
+        # A turn that ends on a capacity stop keeps its capacity type in the detail (S179).
+        # An exhausted quota: a client's own gate resends only a transient stop.
+        AgentQuotaError("claude", QuotaCondition.QUOTA_EXHAUSTED, "usage limit reached"),
     ],
     ids=lambda error: type(error).__name__,
 )
@@ -346,10 +363,32 @@ def test_nondurable_key_is_configuration_error(harness: _Harness) -> None:
 
 def test_malformed_ledger_fails_typed_before_dispatch(harness: _Harness) -> None:
     slot = harness.namespace.slot("malformed.json", AgentInvocationState)
-    harness.namespace.write_bytes("malformed.json", b'{"schema_version":2}')
+    harness.namespace.write_bytes("malformed.json", b'{"schema_version":3}')
     sessions = ClientAgentSessions(harness.client, slot, threads=SimThreads())
     sessions.bind(KEY, harness.spec, harness.turn)
     with pytest.raises(SessionPersistenceError, match="read invocation ledger"):
+        sessions.resume(KEY, harness.message, "resume-1")
+    assert harness.boundary.calls == 1
+
+
+def test_a_ledger_an_older_version_wrote_is_refused_naming_the_remedy(harness: _Harness) -> None:
+    """A version-1 ledger (before ``refused_steers`` was stored) is refused before dispatch,
+    and the error names the version it found and what to do: start a new run."""
+    completed = Completed(
+        session_key=str(KEY),
+        invocation_id="turn-1",
+        result=AgentTurnResult(text="done", provider_session_id="p"),
+        checkpoint=AgentSessionCheckpoint(session_key=str(KEY), provider_session_id="p"),
+    )
+    record = AgentInvocationRecord(payload_digest="digest", outcome=completed)
+    stored = json.loads(AgentInvocationState(invocations={"turn-1": record}).model_dump_json())
+    stored["schema_version"] = 1
+    del stored["invocations"]["turn-1"]["outcome"]["result"]["refused_steers"]
+    slot = harness.namespace.slot("v1.json", AgentInvocationState)
+    harness.namespace.write_bytes("v1.json", json.dumps(stored).encode())
+    sessions = ClientAgentSessions(harness.client, slot, threads=SimThreads())
+    sessions.bind(KEY, harness.spec, harness.turn)
+    with pytest.raises(SessionPersistenceError, match=r"version 1 .*start a new run"):
         sessions.resume(KEY, harness.message, "resume-1")
     assert harness.boundary.calls == 1
 
@@ -648,12 +687,12 @@ class _SchemaFailureStore(FakeAgentInvocationStore):
 
     def load_optional(self) -> AgentInvocationState | None:
         if self.operation == "load":
-            return AgentInvocationState.model_validate({"schema_version": 2})
+            return AgentInvocationState.model_validate({"schema_version": 3})
         return super().load_optional()
 
     def save(self, model: AgentInvocationState) -> None:
         if self.operation == "save":
-            AgentInvocationState.model_validate({"schema_version": 2})
+            AgentInvocationState.model_validate({"schema_version": 3})
         super().save(model)
 
 
@@ -869,12 +908,210 @@ def test_release_refuses_while_an_invocation_is_active_and_cancel_ignores_idle_t
     assert "active invocation" in seen[0]
 
 
-@pytest.mark.parametrize("method", ["cancel", "release"])
+def test_a_steer_reaches_no_turn_but_the_running_invocation(harness: _Harness) -> None:
+    seen: list[SteerOutcome] = []
+
+    def during_turn() -> None:
+        seen.append(harness.sessions.steer(KEY, "idle", "text", steer_id="s1"))
+
+    harness.boundary.effect = during_turn
+    assert isinstance(harness.sessions.resume(KEY, harness.message, "busy"), Completed)
+    after = harness.sessions.steer(KEY, "busy", "text", steer_id="s1")
+    assert seen == [SteerOutcome.NO_RUNNING_TURN]
+    assert after is SteerOutcome.NO_RUNNING_TURN
+
+
+_STEERED = {
+    "fake": SteerOutcome.UNSUPPORTED,
+    "steerable-fake": SteerOutcome.DELIVERED,
+    "client": SteerOutcome.UNSUPPORTED,
+}
+"""What the running turn answers a steer: the plain fake and the one-shot Codex process cannot
+take one, and the steerable fake takes it."""
+
+
+def test_a_steer_to_the_running_invocation_is_answered_by_its_provider(
+    harness: _Harness,
+) -> None:
+    seen: list[SteerOutcome] = []
+
+    def during_turn() -> None:
+        seen.append(harness.sessions.steer(KEY, "busy", "text", steer_id="s1"))
+
+    harness.boundary.effect = during_turn
+    result = harness.sessions.resume(KEY, harness.message, "busy")
+    assert isinstance(result, Completed)
+    assert seen == [_STEERED[harness.implementation]]
+    assert result.result.refused_steers == ()
+
+
+@pytest.mark.parametrize("method", ["cancel", "steer", "release"])
 def test_cancel_and_release_reject_a_nondurable_key(harness: _Harness, method: str) -> None:
     key = AgentSessionKey(SessionScope.ROLE, "worker")
     call = {
         "cancel": lambda: harness.sessions.cancel(key, "inv"),
+        "steer": lambda: harness.sessions.steer(key, "inv", "text", steer_id="s1"),
         "release": lambda: harness.sessions.release(key),
     }[method]
     with pytest.raises(SessionConfigurationError, match="not durable"):
         call()
+
+
+@pytest.mark.parametrize(
+    ("steering", "rejections"), [(FakeSteering.CONSUMED, 0), (FakeSteering.REJECTED, 1)]
+)
+def test_a_steerable_fake_hands_back_a_refused_steer_once(
+    tmp_path: Path, steering: FakeSteering, rejections: int
+) -> None:
+    """The steerable fake reports a message's fate as a provider does: consumed, or refused
+    after it was accepted, which reaches the caller's fallback exactly once."""
+    threads = SimThreads()
+    rejected: list[str] = []
+    client: AgentClient | None = None
+
+    def steer_now(_request: AgentTurnRequest) -> None:
+        assert client is not None
+        outcome = client.steer("change course", on_rejected=lambda: rejected.append("back"))
+        assert outcome is SteerOutcome.DELIVERED
+
+    provider = FakeProvider(
+        script=FakeTurnScript(("done",), steering=steering), on_turn=steer_now, threads=threads
+    )
+    client = AgentClient(provider, provider="codex", clock=ManualClock(), threads=threads)
+    spec = AgentSessionSpec(
+        role="implementer",
+        provider="codex",
+        workspace=tmp_path,
+        policy=AgentExecutionPolicy(require_enforcement=False),
+    )
+    client.run(session_spec=spec, turn=AgentTurnRequest(message="first"), session_key=KEY)
+    client.close()
+
+    assert rejected == ["back"] * rejections
+    assert client.steer("late", on_rejected=lambda: None) is SteerOutcome.NO_RUNNING_TURN
+
+
+@dataclass
+class _ImmediateGate:
+    """A capacity gate that lets every stopped turn go again at once."""
+
+    stops: int = 0
+
+    def wait_for_capacity(
+        self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str, stops: CapacityStops
+    ) -> None:
+        del error, turn, role, stops
+        self.stops += 1
+
+    def turn_served(self, provider: str, model: str | None) -> None:
+        del provider, model
+
+
+_FATES = {
+    "consumed": (FakeSteering.CONSUMED, False, ()),
+    "refused": (FakeSteering.REJECTED, False, ("s1",)),
+    "quota-stop-then-resent": (FakeSteering.CONSUMED, True, ("s1",)),
+}
+"""How the provider settles a steer it took, and what the turn's result must say: a message
+the provider refused, or never settled before a capacity stop, is in ``refused_steers``."""
+
+
+@pytest.mark.parametrize("factory", [FakeAgentSessions, ClientAgentSessions])
+@pytest.mark.parametrize("fate", sorted(_FATES))
+def test_a_steer_the_provider_took_is_settled_once_by_the_turn_result(
+    tmp_path: Path, factory: type[ClientAgentSessions], fate: str
+) -> None:
+    """Every ``DELIVERED`` steer ends the turn consumed or named in ``refused_steers``, once.
+
+    A quota stop resends the same turn without the message, so the message counts as refused
+    even though the resent turn completes; the completed invocation keeps the answer durably.
+    """
+    steering, stops, refused = _FATES[fate]
+    threads = SimThreads()
+    # The first answer opens the conversation the steered turn continues.
+    answers: tuple[object, ...] = ("opened", "done")
+    if stops:
+        quota = AgentQuotaError("codex", QuotaCondition.QUOTA_EXHAUSTED, "used up")
+        answers = ("opened", quota, "done")
+    outcomes: list[SteerOutcome] = []
+    holder: list[ClientAgentSessions] = []
+
+    def steer_on_first_send(_request: AgentTurnRequest) -> None:
+        if holder and not outcomes:
+            outcomes.append(holder[0].steer(KEY, "busy", "change course", steer_id="s1"))
+
+    provider = FakeProvider(
+        script=FakeTurnScript(answers, steering=steering),  # type: ignore[arg-type]
+        on_turn=steer_on_first_send,
+        threads=threads,
+    )
+    client = AgentClient(provider, provider="codex", clock=ManualClock(), threads=threads)
+    gate = _ImmediateGate()
+    client.set_capacity_gate(gate)
+    spec = AgentSessionSpec(
+        role="implementer",
+        provider="codex",
+        workspace=tmp_path,
+        policy=AgentExecutionPolicy(require_enforcement=False),
+    )
+    client.run(session_spec=spec, turn=AgentTurnRequest(message="first"), session_key=KEY)
+    sessions = factory(client, FakeAgentInvocationStore(), threads=threads)
+    sessions.bind(
+        KEY,
+        spec,
+        AgentTurnRequest(
+            message="",
+            instructions="",
+            expected_provider_session_id=client.provider_session_id(KEY),
+        ),
+    )
+    holder.append(sessions)
+    (tmp_path / "message.j2").write_text("{{ content }}", encoding="utf-8")
+    message = TemplateRenderer(tmp_path).render_template("message.j2", content="work")
+    result = sessions.resume(KEY, message, "busy")
+    client.close()
+
+    assert outcomes == [SteerOutcome.DELIVERED]
+    assert gate.stops == int(stops)
+    assert isinstance(result, Completed)
+    assert result.result.refused_steers == refused
+    assert sessions.inspect(KEY, "busy") == result
+
+
+def test_a_refusal_left_by_a_turn_that_raised_reaches_no_later_turn(tmp_path: Path) -> None:
+    """A steer refused in a turn that raised is named in no later turn's ``refused_steers``.
+
+    A turn whose reply fails its schema raises, and the client keeps its live session for the
+    caller's correction turn. The raising turn returns no result, so its refusal belongs to no
+    turn; the correction turn on the same session reports only its own.
+    """
+    threads = SimThreads()
+    rejection = AgentOutputSchemaError("invalid reply")
+    outcomes: list[SteerOutcome] = []
+    holder: list[AgentClient] = []
+
+    def steer_on_second_send(_request: AgentTurnRequest) -> None:
+        if holder and not outcomes:
+            outcomes.append(holder[0].steer_session(KEY, "change course", steer_id="s1"))
+
+    provider = FakeProvider(
+        script=FakeTurnScript(("opened", rejection, "done"), steering=FakeSteering.REJECTED),
+        on_turn=steer_on_second_send,
+        threads=threads,
+    )
+    client = AgentClient(provider, provider="codex", clock=ManualClock(), threads=threads)
+    spec = AgentSessionSpec(
+        role="implementer",
+        provider="codex",
+        workspace=tmp_path,
+        policy=AgentExecutionPolicy(require_enforcement=False),
+    )
+    client.run(session_spec=spec, turn=AgentTurnRequest(message="first"), session_key=KEY)
+    holder.append(client)
+    with pytest.raises(AgentOutputSchemaError):
+        client.run(session_spec=spec, turn=AgentTurnRequest(message="steered"), session_key=KEY)
+    after = client.run(session_spec=spec, turn=AgentTurnRequest(message="fix"), session_key=KEY)
+    client.close()
+
+    assert outcomes == [SteerOutcome.DELIVERED]
+    assert after.refused_steers == ()

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, cast
 
-from launch.agents import BuiltInSessionAgents
+from launch.agents import BuiltInSessionAgents, default_agent_client_factory
 from launch.catalog import built_in_orchestrations
 from launch.composition import STATELESS_TOOL_SERVERS
 from vibesys.api.request import validate_descriptor as _validate_descriptor
@@ -19,7 +19,8 @@ from vibesys.api.request import validate_run_request as _validate_run_request
 from vibesys.api.store import open_run_store as _open_run_store
 from vibesys.api.wiring import NativeProfilerPreflight, SessionImplementations
 from vibesys.api.wiring import create_session as _create_session
-from vs_agent.api import SHIPPED_PROVIDERS, AgentInvocationState, build_agent_client
+from vibesys.api.wiring import open_run_reader as _open_run_reader
+from vs_agent.api import SHIPPED_PROVIDERS, AgentInvocationState, launch_shell_environment
 from vs_github.api import GitHubCLI
 from vs_project.api import Git, generate_run_id
 from vs_runtime.api.infrastructure import EnvironmentSystem
@@ -28,12 +29,14 @@ from vs_sandbox.api import SubprocessDockerCli, create_compute_backend
 from vs_sim.api import ProcessesProbe, utc_datetime
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from vibesys.api import (
         CoreEvent,
         OrchestrationDescriptor,
         OrchestrationRegistry,
+        RunReader,
+        RunReaders,
         RunRequest,
         RunResult,
         Runs,
@@ -64,6 +67,8 @@ class LaunchSettings:
     """Runs the run's blocking calls off the event loop."""
     network: Network
     """Opens the run's sockets."""
+    checkout: tuple[str, bool] = ("", False)
+    """The source tree and dirty state, or unknown for an installed distribution."""
     registry: OrchestrationRegistry | None = None
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None
     backend_factory: Callable[..., ComputeBackendImpl] | None = None
@@ -81,6 +86,8 @@ class LaunchSettings:
     """Opens each run's ``StateStore``; ``None`` is the local crash-atomic one."""
     profiler_preflight: ProfilerPreflight | None = None
     """Checks native profiler availability; ``None`` probes the host through ``processes``."""
+    login_environment: Callable[[], Mapping[str, str]] | None = None
+    """Reads the user's login shell environment; ``None`` reads it as provider CLIs are found."""
 
 
 def create_session(
@@ -92,9 +99,39 @@ def create_session(
 ) -> RunSession:
     """Compose a session with built-ins or an explicitly supplied catalog."""
     selected_registry = _catalog(registry if registry is not None else settings.registry)
+
+    def publish(event: CoreEvent) -> None:
+        # Pre-attachment observations have no durable journal identity yet.
+        if not event.run_id and (request.run_id is not None or request.resume is not None):
+            event = event.model_copy(update={"run_id": request.resolved_run_id})
+        sink(event)
+
+    return _create_session(
+        request,
+        sink=publish,
+        registry=selected_registry,
+        implementations=_implementations(settings, selected_registry),
+    )
+
+
+def default_run_readers(settings: LaunchSettings) -> RunReaders:
+    """Assemble the opener of finished runs for conversation, over the built-in catalog."""
+    registry = _catalog(settings.registry)
+    implementations = _implementations(settings, registry)
+
+    def open_reader(request: RunRequest) -> RunReader:
+        return _open_run_reader(request, registry=registry, implementations=implementations)
+
+    return open_reader
+
+
+def _implementations(
+    settings: LaunchSettings, selected_registry: OrchestrationRegistry
+) -> SessionImplementations:
+    """The execution implementations ``settings`` selects, for a session or a reader."""
     timing = settings.timing
     client_factory = (
-        partial(build_agent_client, threads=timing.threads)
+        default_agent_client_factory(threads=timing.threads)
         if settings.agent_client_factory is None
         else settings.agent_client_factory
     )
@@ -111,54 +148,56 @@ def create_session(
         if settings.backend_factory is None
         else settings.backend_factory
     )
-    agents = BuiltInSessionAgents(client_factory) if settings.agents is None else settings.agents
-
-    def publish(event: CoreEvent) -> None:
-        # Pre-attachment observations have no durable journal identity yet.
-        if not event.run_id and (request.run_id is not None or request.resume is not None):
-            event = event.model_copy(update={"run_id": request.resolved_run_id})
-        sink(event)
-
-    return _create_session(
-        request,
-        sink=publish,
-        registry=selected_registry,
-        implementations=SessionImplementations(
-            agent_client_factory=client_factory,
-            backend_factory=backend_factory,
-            profiler_preflight=(
-                NativeProfilerPreflight(settings.processes)
-                if settings.profiler_preflight is None
-                else settings.profiler_preflight
-            ),
-            agents=agents,
-            stop_timer=timing.clock.sleep if settings.stop_timer is None else settings.stop_timer,
-            timing=timing,
-            blocking=settings.blocking,
+    agents = (
+        BuiltInSessionAgents(
+            client_factory,
             network=settings.network,
-            invocation_store_factory=(
-                _durable_invocation_store
-                if settings.invocation_store_factory is None
-                else settings.invocation_store_factory
-            ),
-            stateless_tool_servers=STATELESS_TOOL_SERVERS,
             git=Git(settings.processes),
-            github=GitHubCLI(settings.processes),
-            git_repository=settings.git_repository,
-            system=EnvironmentSystem(
-                threads=timing.threads,
-                network=settings.network,
-                processes=settings.processes,
-                launcher=settings.piped_processes,
-                slurm_processes=(
-                    settings.processes
-                    if settings.slurm_processes is None
-                    else settings.slurm_processes
-                ),
-            ),
-            state_stores=settings.state_stores,
-            agent_providers=tuple(sorted(SHIPPED_PROVIDERS)),
+            registry=selected_registry,
+        )
+        if settings.agents is None
+        else settings.agents
+    )
+
+    return SessionImplementations(
+        checkout=settings.checkout,
+        agent_client_factory=client_factory,
+        backend_factory=backend_factory,
+        profiler_preflight=(
+            NativeProfilerPreflight(settings.processes)
+            if settings.profiler_preflight is None
+            else settings.profiler_preflight
         ),
+        agents=agents,
+        stop_timer=timing.clock.sleep if settings.stop_timer is None else settings.stop_timer,
+        timing=timing,
+        blocking=settings.blocking,
+        network=settings.network,
+        invocation_store_factory=(
+            _durable_invocation_store
+            if settings.invocation_store_factory is None
+            else settings.invocation_store_factory
+        ),
+        stateless_tool_servers=STATELESS_TOOL_SERVERS,
+        git=Git(settings.processes),
+        github=GitHubCLI(settings.processes),
+        git_repository=settings.git_repository,
+        system=EnvironmentSystem(
+            login_environment=(
+                launch_shell_environment
+                if settings.login_environment is None
+                else settings.login_environment
+            ),
+            threads=timing.threads,
+            network=settings.network,
+            processes=settings.processes,
+            launcher=settings.piped_processes,
+            slurm_processes=(
+                settings.processes if settings.slurm_processes is None else settings.slurm_processes
+            ),
+        ),
+        state_stores=settings.state_stores,
+        agent_providers=tuple(sorted(SHIPPED_PROVIDERS)),
     )
 
 
@@ -209,11 +248,22 @@ def validate_descriptor(
     _validate_descriptor(descriptor, registry=_catalog(registry))
 
 
+def orchestration_roles(
+    descriptor: OrchestrationDescriptor, *, registry: OrchestrationRegistry | None = None
+) -> tuple[str, ...]:
+    """The role ids the selected orchestration plugin declares, in declaration order."""
+    return tuple(agent.id for agent in _catalog(registry).resolve(descriptor.id).plugin.agents)
+
+
 def validate_run_request(
-    request: RunRequest, *, git: Git, registry: OrchestrationRegistry | None = None
+    request: RunRequest,
+    *,
+    git: Git,
+    registry: OrchestrationRegistry | None = None,
+    read_only: bool = False,
 ) -> None:
     """Validate execution settings and the selected built-in policy; ``git`` starts Git."""
-    _validate_run_request(request, registry=_catalog(registry), git=git)
+    _validate_run_request(request, registry=_catalog(registry), git=git, read_only=read_only)
 
 
 def open_run_store(
@@ -230,8 +280,10 @@ __all__ = [
     "LaunchSettings",
     "built_in_orchestrations",
     "create_session",
+    "default_run_readers",
     "default_runs",
     "open_run_store",
+    "orchestration_roles",
     "validate_descriptor",
     "validate_run_request",
 ]

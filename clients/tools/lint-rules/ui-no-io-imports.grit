@@ -1,5 +1,5 @@
-// ui/ may not reach the backend or the host platform. Backend access is `@vibesys/transport` and
-// `@vibesys/transport-node` (and the desktop connection layer) only; `electron` and `node:*` are
+// ui/ may not reach the backend or the host platform. Backend access is `@vibesys/transport`
+// (and the desktop connection layer) only; `electron` and `node:*` are
 // shell and main-process APIs. The module source is matched, not the import statement: a statement
 // pattern (`import $clause from $source`) misses a named import of more than one specifier.
 language js;
@@ -8,7 +8,7 @@ JsModuleSource() as $source where {
   $source <: or { r".*@vibesys/transport.*", r".*electron.*", r".*node:.*" },
   register_diagnostic(
     span = $source,
-    message = "ui/ must not import @vibesys/transport, @vibesys/transport-node, electron, or node:* modules. Receive data as props and emit events; the shell owns I/O.",
+    message = "ui/ must not import @vibesys/transport, electron, or node:* modules. Receive data as props and emit events; the shell owns I/O.",
     severity = "error"
   )
 }

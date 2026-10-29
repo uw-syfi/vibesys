@@ -27,14 +27,14 @@ from vs_sandbox.api.skypilot import (
     decode_response,
     encode_message,
 )
-from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads
+from vs_sim.api.testing import HANG_GUARD_S, RefusingThreads, SimNetwork, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from pathlib import Path
 
     from vs_sandbox.api.skypilot import RemoteJobInfo
-    from vs_sim.api import Connection, Listener
+    from vs_sim.api import Connection, Listener, Threads
 
 _ADDRESS = "bridge.sock"
 
@@ -114,7 +114,7 @@ class _Setup:
         self,
         tmp_path: Path,
         network: SimNetwork,
-        threads: SimThreads,
+        threads: Threads,
         runner: _Runner | None = None,
     ) -> None:
         workspace = tmp_path / "workspace"
@@ -158,6 +158,32 @@ def _run(tmp_path: Path, scenario: Callable[[_Setup], None]) -> None:
     threads = SimThreads()
     setup = _Setup(tmp_path, SimNetwork(threads), threads)
     threads.run(lambda: scenario(setup))
+
+
+def test_a_refused_request_worker_drops_only_that_connection(tmp_path: Path) -> None:
+    """One transient worker-start refusal does not kill the bridge's accept loop."""
+    simulator = SimThreads()
+    threads = RefusingThreads(simulator, {"skypilot-bridge-request-lease": 1})
+    setup = _Setup(tmp_path, SimNetwork(threads), threads)
+
+    def scenario() -> None:
+        setup.bridge.start()
+        try:
+            refused = setup.dial()
+            refused.send(b"{}\n")
+            assert _read_line(refused) == b""
+            refused.close()
+
+            served = setup.dial()
+            served.send(b"{}\n")
+            assert isinstance(decode_response(_read_line(served)), ErrorFrame)
+            served.close()
+        finally:
+            setup.bridge.close()
+
+    simulator.run(scenario)
+
+    assert any("request worker did not start" in line for line in setup.logs)
 
 
 def test_an_evaluation_streams_output_then_the_result_and_is_acknowledged(tmp_path: Path) -> None:

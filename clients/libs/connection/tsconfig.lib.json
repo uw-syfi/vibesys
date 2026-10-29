@@ -27,10 +27,19 @@
       "path": "../hosts/tsconfig.lib.json"
     },
     {
+      "path": "../logs/tsconfig.lib.json"
+    },
+    {
       "path": "../machine/tsconfig.lib.json"
     },
     {
       "path": "../transport/tsconfig.lib.json"
+    },
+    {
+      "path": "../proto/tsconfig.lib.json"
+    },
+    {
+      "path": "../request-identity/tsconfig.lib.json"
     }
   ]
 }

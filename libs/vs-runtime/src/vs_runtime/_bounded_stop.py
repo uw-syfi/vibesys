@@ -19,10 +19,12 @@ if TYPE_CHECKING:
         AccuracyReceipt,
         BenchmarkEvaluation,
         BenchmarkObjective,
+        BuildEvaluation,
         Evaluation,
         LocalValidationEvaluation,
         Workspace,
     )
+    from vs_sim.api import OutputSink
 
 type StopTimer = Callable[[float], Awaitable[None]]
 """Wait the given number of seconds; ``asyncio.sleep`` in production."""
@@ -90,10 +92,11 @@ class _StopSupervisor:
             # ``wait`` leaves *cleanup* running if this watcher is cancelled.
             await asyncio.wait({cleanup})
             await self._timer(self._grace_s)
-            if self._channel.stop_requested():
-                self.forced = True
-                self._task.cancel()
-                return
+            # Nothing undoes a stop (a resume is refused while one is pending), so a stop
+            # that outlived the grace is still in force.
+            self.forced = True
+            self._task.cancel()
+            return
 
     async def _stop_new_work(self) -> None:
         try:
@@ -107,7 +110,10 @@ class _StopSupervisor:
         if self.forced:
             remaining = self._task.uncancel()
             if isinstance(error, asyncio.CancelledError) and remaining == 0:
-                outcome = RunStopped()
+                outcome = RunStopped(
+                    f"the stop outlived its {self._grace_s:g} s grace, so the work still "
+                    "running was cancelled"
+                )
         for failure in self.failures:
             outcome.add_note(f"stop cleanup failed: {failure!r}")
         return outcome
@@ -125,11 +131,11 @@ async def bounded_stop(
 
     When a stop is requested while the block runs, ``on_stop`` runs at once
     (it rejects and cancels new external work), then *timer* waits
-    ``grace_s``. If the stop is still pending after that wait, the task
+    ``grace_s``. If the block is still running after that wait, the task
     running the block is cancelled, the same cancellation a repeated signal
     delivers, so the block unwinds through its own teardown; the block then
-    leaves as :class:`RunStopped`. A resume within the grace period disarms
-    the cancellation. A failure of ``on_stop`` does not disarm it: the error
+    leaves as :class:`RunStopped`. Nothing disarms the cancellation: a stop only
+    escalates, and the channel refuses a resume while one is pending. A failure of ``on_stop`` does not disarm it: the error
     is raised when the block ends, or noted on the error the block ends with.
 
     ``on_stop`` runs to completion even when the block ends first: leaving the
@@ -166,21 +172,28 @@ class _StopGatedEvaluation:
         self._inner = inner
         self._channel = channel
 
+    async def build(self, workspace: Workspace, *, output: OutputSink) -> BuildEvaluation:
+        return await self.until_stop(self._inner.build(workspace, output=output))
+
     async def accuracy(
         self,
         workspace: Workspace,
         *,
         reuse: AccuracyReceipt | None = None,
+        output: OutputSink,
     ) -> AccuracyEvaluation:
-        return await self.until_stop(self._inner.accuracy(workspace, reuse=reuse))
+        return await self.until_stop(self._inner.accuracy(workspace, reuse=reuse, output=output))
 
     async def benchmark(
         self,
         workspace: Workspace,
         *,
         objectives: tuple[BenchmarkObjective, ...] = (),
+        output: OutputSink,
     ) -> BenchmarkEvaluation:
-        return await self.until_stop(self._inner.benchmark(workspace, objectives=objectives))
+        return await self.until_stop(
+            self._inner.benchmark(workspace, objectives=objectives, output=output)
+        )
 
     async def validate_local(
         self,
@@ -222,7 +235,8 @@ class _StopGatedEvaluation:
         if not work.cancelled():
             return work.result()
         self._channel.raise_if_stopped()
-        raise RunStopped
+        message = "an evaluation was cancelled before it finished"
+        raise RunStopped(message)
 
 
 def stop_gated_evaluation(inner: Evaluation, channel: RunControlChannel) -> Evaluation:

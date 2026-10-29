@@ -5,6 +5,12 @@
       "path": "./tsconfig.lib.json"
     },
     {
+      "path": "./tsconfig.legacy.json"
+    },
+    {
+      "path": "./tsconfig.tokens.json"
+    },
+    {
       "path": "./tsconfig.test.json"
     }
   ]

@@ -10,7 +10,7 @@ import {FakeLink, phaseReached, record} from '@vibesys/connection/testing';
 import type {InstanceList} from '@vibesys/contracts/host-helper';
 import type {ConnectionStatus} from '@vibesys/hosts';
 import type {MainToPage} from '@vibesys/ipc';
-import {exactResumeRunId} from '@vibesys/runs';
+import {exactResumeRunId, type RunRef} from '@vibesys/runs';
 import type {StoredRecentRun} from '@vibesys/settings';
 import {FakeClock} from '@vibesys/transport/testing';
 import type {RelayPort} from './relay.js';
@@ -19,6 +19,10 @@ import {RunControl} from './run-control.js';
 const HOST = {kind: 'local'} as const;
 const RUN_A = '00000000000a';
 const RUN_B = '00000000000b';
+
+function runRef(runId: string): RunRef {
+  return {host: 'local', runId};
+}
 
 interface Gate {
   readonly received: Promise<void>;
@@ -40,6 +44,14 @@ function gate(): Gate {
     receive: () => receive(),
     release: () => release(),
   };
+}
+
+/** Await a dial count reaching `count`, bounded so a routing mistake fails fast, not by hanging. */
+async function dialed(read: () => number, count: number): Promise<void> {
+  for (let turn = 0; turn < 200 && read() < count; turn += 1) {
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  expect(read()).toBe(count);
 }
 
 type LeaseFailure = {readonly error: Error; readonly mode: 'reject' | 'throw'};
@@ -255,10 +267,7 @@ function world(
       pages.opened += 1;
       return {wake: () => (pages.woken += 1), close: () => (pages.closed += 1)};
     },
-    confirm: async () => {
-      pages.confirms += 1;
-      return true;
-    },
+
     remember: (run, current) => recents.remember(run, current),
     changed: () => {
       calls.changes += 1;
@@ -431,6 +440,29 @@ describe('RunControl over the FakeHelper', () => {
     await w.connection[Symbol.asyncDispose]();
   });
 
+  test('a chosen harness reaches run.start as typed data; no choice sends no harness field', async () => {
+    const w = world();
+    const harness = {provider: 'claude', model: 'claude-a'};
+    expect(await w.runs.start(HOST, '/p', 'spsc', [], null, harness)).toBe('started');
+    expect(await w.runs.start(HOST, '/p', 'spsc', ['--max-rounds', '2'])).toBe('started');
+    const starts = w.link.helper.requests.filter(request => request.type === 'run.start');
+    expect(starts.map(request => ('harness' in request ? request.harness : 'absent'))).toEqual([
+      harness,
+      'absent',
+    ]);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('a harness the host does not offer fails the start without launching', async () => {
+    const w = world();
+    const harness = {provider: 'claude', model: 'not-vetted'};
+    await expect(w.runs.start(HOST, '/p', 'spsc', [], null, harness)).rejects.toThrow(
+      'vetted models: claude-a',
+    );
+    expect(w.link.helper.host.instances).toEqual([]);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
   test('a run whose server ends is shown ended, from the pushed registry', async () => {
     const w = world();
     w.link.helper.publish(record('00000000000a', 'run-a', '/p'));
@@ -496,7 +528,7 @@ describe('RunControl over the FakeHelper', () => {
     await w.connection[Symbol.asyncDispose]();
   });
 
-  test('a newer attach remains selected when an older attach answers last', async () => {
+  test('an older attach that answers late still binds independently alongside a newer attach to a different target', async () => {
     const w = world();
     w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
     w.link.helper.publish(record(RUN_B, 'run-b', '/p'));
@@ -509,14 +541,16 @@ describe('RunControl over the FakeHelper', () => {
     delayed.release();
     await older;
 
-    expect(w.runs.attached()?.instanceId).toBe(RUN_B);
-    expect(w.pages).toMatchObject({opened: 1, closed: 0});
-    expect(w.remembered.map(run => run.runId)).toEqual(['run-b']);
+    // The older attach's target differs from the newer one's, so its late answer still binds it;
+    // `attached()` (the title strip's single legacy value) now reflects whichever bound last.
+    expect(w.runs.attached()?.instanceId).toBe(RUN_A);
+    expect(w.pages).toMatchObject({opened: 2, closed: 0});
+    expect(w.remembered.map(run => run.runId)).toEqual(['run-b', 'run-a']);
     expect(w.link.helper.stops).toEqual([]);
     await w.connection[Symbol.asyncDispose]();
   });
 
-  test('a winning attach replaces the previous binding without invalidating itself', async () => {
+  test('two attaches to different targets both bind, independently, each remembered', async () => {
     const w = world();
     w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
     w.link.helper.publish(record(RUN_B, 'run-b', '/p'));
@@ -525,12 +559,78 @@ describe('RunControl over the FakeHelper', () => {
     await w.runs.attach(HOST, RUN_B);
 
     expect(w.runs.attached()?.instanceId).toBe(RUN_B);
-    expect(w.pages).toMatchObject({opened: 2, closed: 1});
+    expect(w.pages).toMatchObject({opened: 2, closed: 0});
     expect(w.remembered.map(run => run.runId)).toEqual(['run-a', 'run-b']);
     await w.connection[Symbol.asyncDispose]();
   });
 
-  test('an older attach stays superseded when the newer attach fails', async () => {
+  test('same run id on different hosts keeps both bindings and routes independently', async () => {
+    const localLink = new FakeLink();
+    const remoteLink = new FakeLink();
+    localLink.helper.publish(record(RUN_A, 'shared-run', '/local'));
+    remoteLink.helper.publish(record(RUN_B, 'shared-run', '/remote'));
+    const makeConnection = (link: FakeLink): HostConnection =>
+      new HostConnection({
+        link,
+        checkout: '/src/vibesys',
+        appVersion: 'test',
+        config: DEFAULT_CONNECTION_CONFIG,
+        scheduleTimeout: new FakeClock().scheduleTimeout,
+        log: () => {},
+      });
+    const local = makeConnection(localLink);
+    const remote = makeConnection(remoteLink);
+    const localRun = {host: 'local', runId: 'shared-run'} as const;
+    const remoteRun = {host: 'ssh:bravo', runId: 'shared-run'} as const;
+    const pages = new Map<string, {closed: number}>();
+    const releases = {local: 0, remote: 0};
+    let localDials = 0;
+    let remoteDials = 0;
+    localLink.helper.host.runs.set(RUN_A, () => (localDials += 1));
+    remoteLink.helper.host.runs.set(RUN_B, () => (remoteDials += 1));
+    const runs = new RunControl({
+      connection: async id =>
+        id.kind === 'local'
+          ? lease(local, () => (releases.local += 1))
+          : lease(remote, () => (releases.remote += 1)),
+      openPage: run => {
+        const page = {closed: 0};
+        pages.set(run.host, page);
+        return {wake: () => {}, close: () => (page.closed += 1)};
+      },
+      remember: async () => {},
+      changed: () => {},
+      log: () => {},
+      now: () => 7,
+    });
+
+    await runs.attach(HOST, RUN_A);
+    await runs.attach({kind: 'ssh', alias: 'bravo'}, RUN_B);
+
+    expect([...pages.values()].map(page => page.closed)).toEqual([0, 0]);
+    expect(releases).toEqual({local: 0, remote: 0});
+    // Connecting under one host's composite identity dials only that host's channel: the two
+    // same-named runs never cross-route to each other's instance.
+    runs.connect(new FakeRelayPort(), localRun);
+    await dialed(() => localDials, 1);
+    expect(remoteDials).toBe(0);
+    runs.connect(new FakeRelayPort(), remoteRun);
+    await dialed(() => remoteDials, 1);
+    expect(localDials).toBe(1);
+
+    runs.detach(localRun);
+    expect(pages.get('local')?.closed).toBe(1);
+    expect(pages.get('ssh:bravo')?.closed).toBe(0);
+    expect(releases).toEqual({local: 1, remote: 0});
+    runs.connect(new FakeRelayPort(), remoteRun);
+    await dialed(() => remoteDials, 2);
+
+    runs.detach(remoteRun);
+    await local[Symbol.asyncDispose]();
+    await remote[Symbol.asyncDispose]();
+  });
+
+  test('an older attach proceeds unaffected when an attach to a different target fails', async () => {
     const w = world();
     w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
     const delayed = w.link.helper.deferNext('instances.list');
@@ -541,9 +641,9 @@ describe('RunControl over the FakeHelper', () => {
     delayed.release();
     await older;
 
-    expect(w.runs.attached()).toBeNull();
-    expect(w.pages.opened).toBe(0);
-    expect(w.remembered).toEqual([]);
+    expect(w.runs.attached()?.instanceId).toBe(RUN_A);
+    expect(w.pages.opened).toBe(1);
+    expect(w.remembered.map(run => run.runId)).toEqual(['run-a']);
     await w.connection[Symbol.asyncDispose]();
   });
 
@@ -551,11 +651,16 @@ describe('RunControl over the FakeHelper', () => {
     [
       'start',
       async (runs: RunControl) => {
-        expect(await runs.start(HOST, '/p', 'spsc', [])).toBe('cancelled');
+        expect(await runs.start(HOST, '/p', 'spsc', [])).toBe('started');
       },
     ],
-    ['resume', (runs: RunControl) => runs.resume(HOST, '/p', exactResumeRunId('run-a'))],
-  ] as const)('a superseded %s stops its newly created run once without replacing the newer attach', async (_kind, launch) => {
+    [
+      'resume',
+      async (runs: RunControl) => {
+        await runs.resume(HOST, '/p', exactResumeRunId('run-a'));
+      },
+    ],
+  ] as const)('a %s to a new instance completes independently alongside an attach to a different, already-live target', async (_kind, launch) => {
     const w = world();
     w.link.helper.publish(record(RUN_B, 'run-b', '/p'));
     const delayed = w.link.helper.deferNext('run.start');
@@ -566,10 +671,12 @@ describe('RunControl over the FakeHelper', () => {
     delayed.release();
     await older;
 
-    expect(w.runs.attached()?.instanceId).toBe(RUN_B);
-    expect(w.pages).toMatchObject({opened: 1, closed: 0, confirms: 0});
-    expect(w.link.helper.stops).toEqual([{instanceId: '000000000001', force: false}]);
-    expect(w.link.helper.host.instances.map(entry => entry.id)).toEqual([RUN_B]);
+    // Neither target touches the other's claim: the attach binds immediately, and the launch's
+    // own binding lands once its deferred reply arrives, becoming the last one bound.
+    expect(w.runs.attached()?.instanceId).toBe('000000000001');
+    expect(w.pages).toMatchObject({opened: 2, closed: 0, confirms: 0});
+    expect(w.link.helper.stops).toEqual([]);
+    expect(w.link.helper.host.instances.map(entry => entry.id)).toEqual([RUN_B, '000000000001']);
     await w.connection[Symbol.asyncDispose]();
   });
 
@@ -647,52 +754,49 @@ describe('RunControl over the FakeHelper', () => {
   });
 
   test('a target adopted while stale cleanup waits is rechecked before the stop write', async () => {
-    const w = world({deferConnectionCall: 3});
-    w.link.helper.publish(record(RUN_B, 'run-b', '/p'));
+    const w = world({deferConnectionCall: 2});
     const delayedStart = w.link.helper.deferNext('run.start');
 
-    const older = w.runs.start(HOST, '/p', 'spsc', []);
+    const older = w.runs.start(HOST, '/p', 'spsc', [], {owner: 'doc', sequence: 1});
     await delayedStart.received;
-    const launched = w.link.helper.host.instances.find(instance => instance.id !== RUN_B);
+    const launched = w.link.helper.host.instances[0];
     if (launched === undefined) throw new Error('run.start did not publish its serving record');
-    await w.runs.attach(HOST, RUN_B);
+    // Withdraw the start explicitly: a different-target attach no longer supersedes it, so this is
+    // the one way, besides a same-target race, to abandon a launch before it ever claims a target.
+    w.runs.cancelStart({owner: 'doc', sequence: 1});
     delayedStart.release();
     const cleanup = w.deferredConnection;
     if (cleanup === null) throw new Error('cleanup connection was not deferred');
     await cleanup.received;
 
-    const delayedAttach = w.link.helper.deferNext('instances.list');
     const adopting = w.runs.attach(HOST, launched.id);
-    await delayedAttach.received;
     cleanup.release();
     await w.waitForLog(`waiting for the newer selection of run ${launched.id}`);
     expect(w.link.helper.stops).toEqual([]);
 
-    delayedAttach.release();
     const [, outcome] = await Promise.all([adopting, older]);
     expect(outcome).toBe('cancelled');
     expect(w.runs.attached()?.instanceId).toBe(launched.id);
-    expect(w.link.helper.host.instances.map(instance => instance.id)).toEqual([RUN_B, launched.id]);
+    expect(w.link.helper.host.instances.map(instance => instance.id)).toEqual([launched.id]);
     await w.connection[Symbol.asyncDispose]();
   });
 
   test('a withdrawn stale cleanup stops once when its new same-target attach fails', async () => {
-    const w = world({deferConnectionCalls: [3, 4], failConnectionCall: 4});
-    w.link.helper.publish(record(RUN_B, 'run-b', '/p'));
+    const w = world({deferConnectionCalls: [2, 3], failConnectionCall: 3});
     const delayedStart = w.link.helper.deferNext('run.start');
 
-    const older = w.runs.start(HOST, '/p', 'spsc', []);
+    const older = w.runs.start(HOST, '/p', 'spsc', [], {owner: 'doc', sequence: 1});
     await delayedStart.received;
-    const launched = w.link.helper.host.instances.find(instance => instance.id !== RUN_B);
+    const launched = w.link.helper.host.instances[0];
     if (launched === undefined) throw new Error('run.start did not publish its serving record');
-    await w.runs.attach(HOST, RUN_B);
+    w.runs.cancelStart({owner: 'doc', sequence: 1});
     delayedStart.release();
-    const cleanup = w.deferredConnectionAt(3);
+    const cleanup = w.deferredConnectionAt(2);
     if (cleanup === null) throw new Error('cleanup connection was not deferred');
     await cleanup.received;
 
     const adopting = w.runs.attach(HOST, launched.id);
-    const heldAttach = w.deferredConnectionAt(4);
+    const heldAttach = w.deferredConnectionAt(3);
     if (heldAttach === null) throw new Error('attach connection was not deferred');
     await heldAttach.received;
     cleanup.release();
@@ -703,12 +807,12 @@ describe('RunControl over the FakeHelper', () => {
     await expect(adopting).rejects.toThrow('the cleanup connection failed');
     expect(await older).toBe('cancelled');
     expect(w.link.helper.stops).toEqual([{instanceId: launched.id, force: false}]);
-    expect(w.link.helper.host.instances.map(instance => instance.id)).toEqual([RUN_B]);
-    expect(w.runs.attached()?.instanceId).toBe(RUN_B);
+    expect(w.link.helper.host.instances).toEqual([]);
+    expect(w.runs.attached()).toBeNull();
     await w.connection[Symbol.asyncDispose]();
   });
 
-  test('a superseded resume of an already-live run never stops that run', async () => {
+  test('a resume of an already-live run binds independently alongside an attach to a different target, without stopping it', async () => {
     const w = world();
     w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
     w.link.helper.publish(record(RUN_B, 'run-b', '/p'));
@@ -720,7 +824,9 @@ describe('RunControl over the FakeHelper', () => {
     delayed.release();
     await older;
 
-    expect(w.runs.attached()?.instanceId).toBe(RUN_B);
+    // The resume discovers run-a is already live and adopts that same record (`alreadyLive`),
+    // which binds after the attach to the unrelated RUN_B and so becomes the last one bound.
+    expect(w.runs.attached()?.instanceId).toBe(RUN_A);
     expect(w.link.helper.stops).toEqual([]);
     expect(w.link.helper.host.instances.map(entry => entry.id)).toEqual([RUN_A, RUN_B]);
     await w.connection[Symbol.asyncDispose]();
@@ -738,13 +844,15 @@ describe('RunControl over the FakeHelper', () => {
     delayed.release();
     await Promise.all([older, newer]);
 
+    // Different targets: both bind, and both get remembered once the gated commit lets the first
+    // (queued ahead of the second in the one recent-runs writer) go through.
     expect(w.runs.attached()?.instanceId).toBe(RUN_B);
-    expect(w.remembered.map(run => run.runId)).toEqual(['run-b']);
-    expect(w.pages).toMatchObject({opened: 1, closed: 0});
+    expect(w.remembered.map(run => run.runId)).toEqual(['run-a', 'run-b']);
+    expect(w.pages).toMatchObject({opened: 2, closed: 0});
     await w.connection[Symbol.asyncDispose]();
   });
 
-  test('detach invalidates a selection waiting to be remembered', async () => {
+  test('detach of a still-attaching target is a no-op: no window exists yet to close', async () => {
     const w = world();
     w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
     const delayed = w.recents.deferNext();
@@ -752,34 +860,37 @@ describe('RunControl over the FakeHelper', () => {
     const attaching = w.runs.attach(HOST, RUN_A);
     await delayed.received;
     expect(w.connection.held).toBe(true);
-    w.runs.detach();
+    // The eventual run id is already known (the published record's), but nothing is bound to it
+    // yet, so no page has opened for it to close. Detaching it here must not reach into the claim
+    // still navigating toward it; the attach proceeds exactly as if this call had not happened.
+    w.runs.detach(runRef('run-a'));
     delayed.release();
     await attaching;
 
-    expect(w.runs.attached()).toBeNull();
-    expect(w.remembered).toEqual([]);
-    expect(w.pages.opened).toBe(0);
-    expect(w.connection.held).toBe(false);
+    expect(w.runs.attached()).toMatchObject({instanceId: RUN_A, runId: 'run-a'});
+    expect(w.remembered.map(run => run.runId)).toEqual(['run-a']);
+    expect(w.pages.opened).toBe(1);
+    expect(w.connection.held).toBe(true);
     await w.connection[Symbol.asyncDispose]();
   });
 
-  test('a stale-run cleanup failure is logged without changing the newer binding', async () => {
-    const w = world({failConnectionCall: 3});
-    w.link.helper.publish(record(RUN_B, 'run-b', '/p'));
+  test('a stale-run cleanup failure is logged and leaves nothing bound', async () => {
+    const w = world({failConnectionCall: 2});
     const delayed = w.link.helper.deferNext('run.start');
 
-    const older = w.runs.start(HOST, '/p', 'spsc', []);
+    const older = w.runs.start(HOST, '/p', 'spsc', [], {owner: 'doc', sequence: 1});
     await delayed.received;
-    await w.runs.attach(HOST, RUN_B);
+    w.runs.cancelStart({owner: 'doc', sequence: 1});
     delayed.release();
     expect(await older).toBe('cancelled');
 
-    expect(w.calls.connections).toBe(3);
-    expect(w.runs.attached()?.instanceId).toBe(RUN_B);
+    expect(w.calls.connections).toBe(2);
+    expect(w.runs.attached()).toBeNull();
+    await w.waitForLog('could not stop superseded run');
     expect(w.logs).toContain(
       'could not stop superseded run 000000000001: the cleanup connection failed',
     );
-    expect(w.pages).toMatchObject({opened: 1, closed: 0});
+    expect(w.pages).toMatchObject({opened: 0, closed: 0});
     await w.connection[Symbol.asyncDispose]();
   });
 
@@ -788,7 +899,7 @@ describe('RunControl over the FakeHelper', () => {
     w.link.helper.publish(record('00000000000c', 'run-c', '/p'));
     await w.runs.attach({kind: 'local'}, '00000000000c');
     expect(w.connection.held).toBe(true);
-    w.runs.detach();
+    w.runs.detach(runRef('run-c'));
     expect(w.connection.held).toBe(false);
     await w.connection[Symbol.asyncDispose]();
   });
@@ -803,7 +914,7 @@ describe('RunControl over the FakeHelper', () => {
     const message =
       'could not retire run 00000000000a on This Mac: retirement remained unconfirmed';
 
-    expect(() => w.runs.detach()).not.toThrow();
+    expect(() => w.runs.detach(runRef('run-a'))).not.toThrow();
     expect(w.runs.attached()).toBeNull();
     expect(w.pages).toMatchObject({opened: 1, closed: 1});
     expect(w.calls.releases).toBe(1);
@@ -815,19 +926,20 @@ describe('RunControl over the FakeHelper', () => {
   test('a failed old-binding retirement is observed once and leaves its replacement selected', async () => {
     const w = world({failLeaseReleaseCall: 1});
     w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
-    w.link.helper.publish(record(RUN_B, 'run-b', '/p'));
     await w.runs.attach(HOST, RUN_A);
     const message =
       'could not retire run 00000000000a on This Mac: retirement remained unconfirmed';
 
-    await w.runs.attach(HOST, RUN_B);
-    expect(w.runs.attached()?.instanceId).toBe(RUN_B);
+    // Re-attaching to the same target replaces this run's own prior binding (`#releaseBinding`
+    // for that same `run_id`), the one case where a second attach's bind does retire an older one.
+    await w.runs.attach(HOST, RUN_A);
+    expect(w.runs.attached()?.instanceId).toBe(RUN_A);
     expect(w.pages).toMatchObject({opened: 2, closed: 1});
     expect(w.calls.releases).toBe(1);
     await w.waitForLog(message);
     expect(w.logs).toEqual([message]);
 
-    w.runs.detach();
+    w.runs.detach(runRef('run-a'));
     expect(w.calls.releases).toBe(2);
     await w.connection[Symbol.asyncDispose]();
   });
@@ -916,7 +1028,7 @@ describe('RunControl over the FakeHelper', () => {
 
     const ports = Array.from({length: 4}, () => new FakeRelayPort());
     for (const port of ports) {
-      w.runs.connect(port);
+      w.runs.connect(port, runRef('run-a'));
       port.disconnect();
       port.disconnect();
     }
@@ -953,7 +1065,6 @@ describe('RunControl over the FakeHelper', () => {
     const runs = new RunControl({
       connection: async () => firstLease,
       openPage: () => ({wake: () => {}, close: () => {}}),
-      confirm: async () => true,
       remember: (run, current) => recents.remember(run, current),
       changed: () => {},
       log: () => {},
@@ -969,8 +1080,108 @@ describe('RunControl over the FakeHelper', () => {
     await attaching;
     expect(runs.attached()).toMatchObject({instanceId: RUN_A, connection: {kind: 'connected'}});
     expect(first.held).toBe(true);
-    runs.detach();
+    runs.detach(runRef('run-a'));
     expect(first.phase.kind).toBe('closed');
     await secondLease[Symbol.asyncDispose]();
+  });
+});
+
+describe('RunControl.attachReader over the FakeHelper', () => {
+  const ENDED = {
+    run_id: 'run-a',
+    task: 'spsc',
+    display_name: 'run',
+    created_at: '2026-10-17T03:00:00Z',
+    phase: null,
+    instance_id: null,
+  } as const;
+
+  function endedWorld() {
+    const w = world();
+    w.link.helper.host.runHistory.set('/p', [ENDED]);
+    return w;
+  }
+
+  async function opened(read: () => number, count: number): Promise<void> {
+    for (let turn = 0; turn < 200 && read() < count; turn += 1) {
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    expect(read()).toBe(count);
+  }
+
+  test('a run that ended is read through one read-only server, bound under the run id', async () => {
+    const w = endedWorld();
+
+    expect(await w.runs.attachReader(HOST, '/p', 'run-a')).toEqual({kind: 'attached'});
+
+    const [reader] = [...w.link.helper.host.readers.values()];
+    expect(w.link.helper.host.readerStarts).toEqual(['run-a']);
+    expect(w.runs.attached()).toMatchObject({instanceId: reader, runId: 'run-a', project: '/p'});
+    expect(w.pages.opened).toBe(1);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('the window connections of a bound reader reach the read-only server', async () => {
+    const w = endedWorld();
+    let connections = 0;
+    w.link.helper.host.readerServer = () => {
+      connections += 1;
+    };
+    await w.runs.attachReader(HOST, '/p', 'run-a');
+
+    w.runs.connect(new FakeRelayPort(), runRef('run-a'));
+    w.runs.connect(new FakeRelayPort(), runRef('run-a'));
+
+    await opened(() => connections, 2);
+    expect(w.link.helper.host.readerStarts).toEqual(['run-a']);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('attaching again while the reader lives shares it, and a reader that ended is replaced', async () => {
+    const w = endedWorld();
+
+    await w.runs.attachReader(HOST, '/p', 'run-a');
+    w.runs.detach(runRef('run-a'));
+    await w.runs.attachReader(HOST, '/p', 'run-a');
+    expect(w.link.helper.host.readerStarts).toEqual(['run-a']);
+
+    w.runs.detach(runRef('run-a'));
+    w.link.helper.endReader('run-a');
+    await w.runs.attachReader(HOST, '/p', 'run-a');
+    expect(w.link.helper.host.readerStarts).toEqual(['run-a', 'run-a']);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('a run with a live server is bound to it and starts no reader', async () => {
+    const w = endedWorld();
+    w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
+
+    await w.runs.attachReader(HOST, '/p', 'run-a');
+
+    expect(w.runs.attached()).toMatchObject({instanceId: RUN_A, runId: 'run-a'});
+    expect(w.link.helper.host.readerStarts).toEqual([]);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('a helper that does not offer chat on ended runs is asked nothing and binds nothing', async () => {
+    const w = endedWorld();
+    w.link.helper.features.delete('chat_ended_runs');
+
+    expect(await w.runs.attachReader(HOST, '/p', 'run-a')).toEqual({kind: 'unsupported'});
+
+    expect(w.link.helper.requests.some(request => request.type === 'run.reader')).toBe(false);
+    expect(w.runs.attached()).toBeNull();
+    expect(w.pages.opened).toBe(0);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('a run the project does not have is refused and binds nothing', async () => {
+    const w = endedWorld();
+
+    await expect(w.runs.attachReader(HOST, '/p', 'run-z')).rejects.toThrow('no run run-z');
+
+    expect(w.runs.attached()).toBeNull();
+    expect(w.link.helper.host.readerStarts).toEqual([]);
+    await w.connection[Symbol.asyncDispose]();
   });
 });

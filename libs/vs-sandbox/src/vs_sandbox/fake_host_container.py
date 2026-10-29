@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
-    from vs_sim.api import PipedProcessLauncher, Threads
+    from vs_sim.api import OutputSink, PipedProcessLauncher, Threads
 
 
 class HostExecutedContainer(LocalShellRunner):
@@ -28,8 +28,9 @@ class HostExecutedContainer(LocalShellRunner):
     run's commands but no Docker daemon.
     """
 
-    def start(self) -> None:
-        """Start nothing: the host is already running."""
+    def start(self, *, output: OutputSink) -> None:
+        """Start nothing: the host is already running, so nothing is written to *output*."""
+        del output
 
     def stop(self) -> None:
         """Stop nothing: the host keeps running."""

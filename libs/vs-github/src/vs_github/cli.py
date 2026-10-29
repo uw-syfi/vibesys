@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_sim.api import Processes
+from vs_sim.api import DISCARD
 
 
 class GitHubCLIError(RuntimeError):
@@ -190,7 +191,7 @@ class GitHubCLI:
     ) -> _Output:
         command = ("gh", *arguments)
         try:
-            run = self.processes.run(ProcessSpec(command, cwd=cwd), timeout=None)
+            run = self.processes.run(ProcessSpec(command, cwd=cwd), timeout=None, output=DISCARD)
         except FileNotFoundError as exc:
             message = (
                 "GitHub CLI (`gh`) is required for remote experiment repositories. "

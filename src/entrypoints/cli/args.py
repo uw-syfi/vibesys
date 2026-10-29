@@ -8,6 +8,18 @@ from pathlib import Path
 
 from entrypoints.cli.constants import _OUTER_LOOPS
 from entrypoints.cli.errors import _configuration_error, _RunArgumentParser
+from server.host_api import (
+    CLI_PROVIDER_FLAG,
+    LOCAL_FLAG,
+    MAX_RUN_SECONDS_FLAG,
+    MODEL_FLAG,
+    PUBLISH_FLAG,
+    REPO_FLAG,
+    ROLE_MODEL_FLAG,
+    ROLE_PROVIDER_FLAG,
+    ROLE_REASONING_EFFORT_FLAG,
+    UNVETTED_MODEL_FLAG,
+)
 from vibesys.api import (
     KNOWN_COMPUTE_BACKENDS,
     ComputeBackend,
@@ -36,6 +48,8 @@ _REMOVED_DOCKER_FLAG_MESSAGE = (
     "Drop the flag; use --modal, --skypilot, or --slurm-config to choose where "
     "evaluation runs."
 )
+_MAX_RETRIES_PER_ROUND_DEFAULT = 3
+_MAX_UNMEASURED_TURNS_DEFAULT = 2
 
 
 class _RemovedDockerFlag(argparse.Action):
@@ -290,6 +304,10 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
             "'none' to disable standalone profiling, "
             "'nsys' for NVIDIA Nsight Systems (needs /proc/driver/nvidia), "
             "'ncu' for NVIDIA Nsight Compute (CUDA kernel-writing only), "
+            "'flashinfer' for per-block intra-kernel timelines recorded with FlashInfer's "
+            "profiler macros (CUDA kernel-writing only, opt-in), "
+            "'ncu_flashinfer' for both in one profiler session "
+            "(CUDA kernel-writing only, opt-in), "
             "'rocprof' for AMD rocprofv3 / rocprof-compute (ROCm system trace, "
             "PMC counters, ATT, kernel-altitude counters), "
             "'torch' for torch.profiler (works under the Modal run environment), "
@@ -447,7 +465,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="SkyPilot CLI executable. Default: sky.",
     )
     parser.add_argument(
-        "--repo",
+        REPO_FLAG,
         default=None,
         metavar="[OWNER/]NAME",
         help=(
@@ -457,9 +475,55 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
-        "--local",
+        LOCAL_FLAG,
         action="store_true",
         help="Keep this experiment local under --runs-dir; do not create or sync GitHub.",
+    )
+    parser.add_argument(
+        PUBLISH_FLAG,
+        action="store_true",
+        help=(
+            "Publish this run's project to GitHub under the generated repository name, as a "
+            "run under --runs-dir does. A run in place stays local without it or --repo."
+        ),
+    )
+    parser.add_argument(
+        MAX_RUN_SECONDS_FLAG,
+        type=_positive_int,
+        default=None,
+        metavar="SECONDS",
+        help="Wall-clock budget for the run. Overrides [run].max_run_seconds in agent.toml.",
+    )
+    parser.add_argument(
+        ROLE_PROVIDER_FLAG,
+        type=_role_setting,
+        action="append",
+        default=[],
+        metavar="ROLE=PROVIDER",
+        help=(
+            "CLI provider for one agent role. Overrides agent.roles.ROLE.provider; repeatable. "
+            "A role that names a provider other than the run's and no model runs that "
+            "provider's default model."
+        ),
+    )
+    parser.add_argument(
+        ROLE_MODEL_FLAG,
+        type=_role_setting,
+        action="append",
+        default=[],
+        metavar="ROLE=MODEL",
+        help="Model for one agent role. Overrides agent.roles.ROLE.model; repeatable.",
+    )
+    parser.add_argument(
+        ROLE_REASONING_EFFORT_FLAG,
+        type=_role_setting,
+        action="append",
+        default=[],
+        metavar="ROLE=EFFORT",
+        help=(
+            "Reasoning effort for one agent role. Overrides agent.roles.ROLE.reasoning_effort; "
+            "repeatable."
+        ),
     )
     parser.add_argument(
         "--repo-visibility",
@@ -473,15 +537,17 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--agent-backend",
-        choices=["cli"],
+        choices=["cli", "scripted"],
         default=None,
         help=(
             "Which agent backend implementation to use. Overrides "
-            "[agent].backend in agent.toml. Defaults to 'cli'."
+            "[agent].backend in agent.toml. Defaults to 'cli'. 'scripted' runs the real "
+            "backend with scripted agents and no model (dynamic search only; the seed is "
+            "[agent].scripted_seed)."
         ),
     )
     parser.add_argument(
-        "--cli-provider",
+        CLI_PROVIDER_FLAG,
         choices=list(SHIPPED_PROVIDERS),
         default=None,
         help=(
@@ -490,13 +556,31 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        MODEL_FLAG,
+        default=None,
+        help=(
+            "Agent model. Overrides [model].name in agent.toml; when neither names one, "
+            "the CLI provider's default model. Must be a vetted model of the provider."
+        ),
+    )
+    parser.add_argument(
+        UNVETTED_MODEL_FLAG,
+        action="store_true",
+        help=(
+            "Run a provider and model pair outside VibeSys's vetted harness list. "
+            "Runs started from the desktop app cannot opt out."
+        ),
+    )
+    parser.add_argument(
         "--backend",
         type=ComputeBackend,
         choices=list(ComputeBackend),
         default=None,
         help=(
-            "Compute backend to target. Overrides [backend].name in "
-            f"agent.toml. Defaults to 'cuda'. Supported: {', '.join(KNOWN_COMPUTE_BACKENDS)}."
+            "Override the compute backend the task declares (`backends` in its "
+            "vibesys.input.toml); it must be one the task declares. For a task that "
+            "declares none, falls back to [backend].name in agent.toml (default 'cuda'). "
+            f"Supported: {', '.join(KNOWN_COMPUTE_BACKENDS)}."
         ),
     )
 
@@ -531,6 +615,25 @@ def _apply_common_args(parser: argparse.ArgumentParser, *, resumable: bool) -> N
     )
 
 
+def _positive_int(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        number = 0
+    if number <= 0:
+        message = f"expected a positive whole number, got {value!r}"
+        raise argparse.ArgumentTypeError(message)
+    return number
+
+
+def _role_setting(value: str) -> tuple[str, str]:
+    role, separator, setting = value.partition("=")
+    if not separator or not role or not setting:
+        message = f"expected ROLE=VALUE, got {value!r}"
+        raise argparse.ArgumentTypeError(message)
+    return role, setting
+
+
 def _run_id(value: str) -> str:
     try:
         return validate_run_id(value)
@@ -538,7 +641,7 @@ def _run_id(value: str) -> str:
         raise argparse.ArgumentTypeError(str(exc)) from None
 
 
-def _make_parser(prog: str, description: str, *, resumable: bool = True) -> argparse.ArgumentParser:
+def _make_parser(prog: str, description: str, *, resumable: bool = True) -> _RunArgumentParser:
     parser = _RunArgumentParser(prog=prog, description=description)
     _apply_common_args(parser, resumable=resumable)
     return parser
@@ -565,7 +668,7 @@ def _build_validate_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _build_input_check_parser() -> argparse.ArgumentParser:
+def _build_input_check_parser() -> _RunArgumentParser:
     parser = _make_parser(
         prog="vibesys check-input",
         description=(
@@ -577,28 +680,105 @@ def _build_input_check_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _build_agent_parser() -> argparse.ArgumentParser:
+def _build_agent_parser() -> _RunArgumentParser:
     parser = _make_parser(
         prog="vibesys --outer-loop agent",
         description="Run the autonomous orchestrator-driven build loop.",
     )
-    parser.add_argument("--max-rounds", type=int, default=24)
-    parser.add_argument("--max-retries-per-round", type=int, default=3)
+    parser.add_argument(
+        "--max-rounds",
+        type=int,
+        default=24,
+        metavar="N",
+        help=(
+            "Serial agent loops: N rounds. Dynamic loop: N times --max-in-flight "
+            "admitted workstreams; failed workspace admissions are refunded "
+            "(default: 24)."
+        ),
+    )
+    parser.add_argument(
+        "--max-retries-per-round",
+        type=int,
+        default=_MAX_RETRIES_PER_ROUND_DEFAULT,
+        metavar="N",
+        help=(
+            "Serial agent loops only: maximum paid implementer turns inside each round "
+            f"(default: {_MAX_RETRIES_PER_ROUND_DEFAULT}). The dynamic loop ignores this flag "
+            "and uses "
+            "--max-unmeasured-turns."
+        ),
+    )
     parser.add_argument(
         "--max-in-flight",
         type=int,
         default=2,
         metavar="N",
-        help="Maximum independent dynamic workstreams dispatched concurrently (default: 2).",
+        help=(
+            "Maximum dynamic workstreams whose agents work concurrently; together with "
+            "--max-rounds this sets the admission budget (default: 2)."
+        ),
     )
     parser.add_argument(
         "--max-unmeasured-turns",
         type=int,
-        default=2,
+        default=_MAX_UNMEASURED_TURNS_DEFAULT,
         metavar="N",
         help=(
             "Dynamic loop: turns of one workstream that may end without a candidate "
-            "reaching measurement before it settles as failed (default: 2)."
+            "reaching measurement before it settles as failed "
+            f"(default: {_MAX_UNMEASURED_TURNS_DEFAULT})."
+        ),
+    )
+    parser.add_argument(
+        "--evaluation-slots",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Dynamic loop: trusted evaluations held at once, the input's included; which "
+            "waiting candidate one measures is chosen only when it frees (default: as many as "
+            "the run environment's evaluation executor admits at once)."
+        ),
+    )
+    parser.add_argument(
+        "--max-backlog",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Dynamic loop: workstreams whose candidate waits for or holds a trusted evaluation "
+            "without holding an agent slot, so new work starts meanwhile; 0 keeps each agent "
+            "slot until its workstream ends, so new work waits for measurements (default: every "
+            "waiting workstream, up to the largest value accepted)."
+        ),
+    )
+    parser.add_argument(
+        "--evaluation-pick",
+        choices=("newest", "ranked"),
+        default="newest",
+        help=(
+            "Dynamic loop: which waiting candidate a free trusted evaluation measures: the "
+            "newest, or the orchestrator's ranking then the newest (default: newest)."
+        ),
+    )
+    parser.add_argument(
+        "--input-wait-seconds",
+        type=float,
+        default=3600.0,
+        metavar="SECONDS",
+        help=(
+            "Dynamic loop: how long a workstream waits for the input's measurement before the "
+            "orchestrator is told it is overdue (default: 3600)."
+        ),
+    )
+    parser.add_argument(
+        "--dynamic-mode",
+        choices=("explore", "follow_plan"),
+        default="explore",
+        help=(
+            "Dynamic loop: 'explore' proposes and tests hypotheses; 'follow_plan' implements "
+            "the task's [plan] steps in order and is refused when the task declares no plan "
+            "(default: explore)."
         ),
     )
     parser.add_argument(
@@ -631,24 +811,14 @@ def _build_agent_parser() -> argparse.ArgumentParser:
             "nominated candidates and the final round are always reviewed (default: 3)."
         ),
     )
-    parser.add_argument(
-        "--official-eval-every",
-        type=int,
-        default=3,
-        metavar="N",
-        help=(
-            "Run configured framework-owned accuracy/benchmark gates every N "
-            "accepted candidate checkpoints; orchestrator requests and the final "
-            "round run them immediately (default: 3)."
-        ),
-    )
     _add_modality_argument(parser)
     parser.add_argument(
         "--interface",
         choices=["inprocess", "service"],
-        default="inprocess",
+        default=None,
         help=(
-            "Process boundary used by the evaluator. 'inprocess' (default): "
+            "Process boundary used by the evaluator; defaults to the input's "
+            "[agent].interface, else 'inprocess'. 'inprocess': "
             "the evaluator invokes the candidate directly using the input-defined "
             "contract. 'service': the evaluator communicates with a running "
             "service over its network interface. Language, tooling, and artifact "
@@ -705,7 +875,7 @@ def _parse_cli_objective(spec: str) -> Objective:
     return Objective(name=name, direction=direction)
 
 
-def _build_evolve_parser() -> argparse.ArgumentParser:
+def _build_evolve_parser() -> _RunArgumentParser:
     parser = _make_parser(
         prog="vibesys --outer-loop evolve",
         description="Run the evolutionary-search build loop.",
@@ -799,7 +969,7 @@ def _build_evolve_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _build_plain_parser() -> argparse.ArgumentParser:
+def _build_plain_parser() -> _RunArgumentParser:
     parser = _make_parser(
         prog="vibesys --outer-loop plain",
         description=(

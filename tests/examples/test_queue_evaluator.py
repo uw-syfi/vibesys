@@ -12,6 +12,9 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from tests.support import run_test_command
 
+from vibesys.inputs import load_task
+from vs_runtime.api.infrastructure import verify_outputs
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -37,8 +40,13 @@ def _queue_evaluator(project_root: Path) -> Path:
 
 
 def _task_manifest(repository: Path, task_name: str) -> dict[str, Any]:
+    """The task's manifest table, its short-form check and measure under their stage names."""
     manifest_path = repository / ".vibesys" / "tasks" / task_name / "vibesys.input.toml"
-    return tomllib.loads(manifest_path.read_text())
+    manifest = tomllib.loads(manifest_path.read_text())
+    for short, stage in (("check", "accuracy"), ("measure", "benchmark")):
+        if short in manifest:
+            manifest[stage] = manifest.pop(short)
+    return manifest
 
 
 def _evaluator_command(
@@ -149,10 +157,13 @@ def test_queue_task_manifests_use_versioned_evaluator_entrypoint() -> None:
         for section, args in expected_args.items():
             assert manifest[section]["entrypoint"] == "vibesys-queue"
             assert manifest[section]["args"] == args
-        # The benchmark speaks the evaluator result protocol, so it reports a
-        # complete validated metric row instead of one scraped scalar.
-        assert manifest["benchmark"]["result_protocol"] == 2
-        assert "result" not in manifest["benchmark"]
+        # The benchmark speaks the evaluator result protocol (the short form's default), so
+        # it reports a complete validated metric row instead of one scraped scalar.
+        parsed = load_task(repository, task_name).manifest
+        assert parsed.benchmark.result_protocol == 2
+        assert parsed.benchmark.result is None
+        # The candidate library the evaluator loads is built by the task, confined.
+        assert manifest["build"]["command"] == ["make", "queue-candidate.so"]
 
     evaluator = _queue_evaluator(project_root)
     assert (evaluator / "DESIGN.md").exists()
@@ -520,3 +531,41 @@ def test_queue_evaluator_rejects_adversarial_histories() -> None:
 
     evaluator = _queue_evaluator(Path(__file__).parents[2])
     run_test_command(["go", "test", "./..."], cwd=evaluator, check=True)
+
+
+@pytest.mark.usefixtures("queue_native_runner")
+def test_mpmc_baseline_builds_with_its_declared_build_and_passes_its_check(tmp_path: Path) -> None:
+    """Regression: queue-rs/mpmc declared no build, so its baseline failed its check (#2959).
+
+    The task's own build runs in a fresh copy of the repository, the evaluator's required
+    output is verified there, and the task's check passes on what the build produced.
+    """
+    if shutil.which("go") is None or shutil.which("cargo") is None:
+        pytest.skip("Go and Rust are required by the trusted queue evaluator")
+    project_root = Path(__file__).parents[2]
+    repository = _queue_repository(project_root)
+    bundle = load_task(repository, "mpmc")
+    build = bundle.manifest.build
+    assert build is not None, "queue-rs/mpmc declares no build of queue-candidate.so"
+    assert bundle.candidate_outputs == ("queue-candidate.so",)
+    assert bundle.missing_build is None
+    checkout = tmp_path / "checkout"
+    shutil.copytree(
+        repository, checkout, ignore=shutil.ignore_patterns("queue-candidate.so", "target")
+    )
+
+    run_test_command(list(build.command), cwd=checkout, check=True)
+
+    ((verified, _contents),) = verify_outputs(checkout, bundle.candidate_outputs)
+    assert verified.path == "queue-candidate.so"
+    assert verified.size > 0
+    # The task's check exactly, except that its per-history time budget (a wall-clock bound
+    # that a loaded CI worker can exceed) only guards against a hang here.
+    check = [
+        *(part.replace("${PROJECT_ROOT}", str(checkout)) for part in bundle.accuracy_command),
+        "--check-budget",
+        "10m",
+    ]
+    completed = run_test_command(check, cwd=checkout, check=False, capture_output=True, text=True)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert "PASS - mpmc reservation-aware bounded FIFO" in completed.stdout

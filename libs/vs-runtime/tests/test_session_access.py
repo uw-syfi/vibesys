@@ -10,6 +10,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
+from pydantic import BaseModel
 from tests.support.session_lifecycle_world import (
     cancel_request,
     close_request,
@@ -18,6 +19,7 @@ from tests.support.session_lifecycle_world import (
     resume_request,
 )
 from tests.support.session_world import (
+    SCOPE,
     SessionHost,
     dispatch_request,
     ensure_request,
@@ -26,25 +28,32 @@ from tests.support.session_world import (
 )
 from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_env
 
-from vs_agent.api import AgentSessionState, DurableSessionStore
+from vs_agent.api import AgentSessionKey, AgentSessionState, DurableSessionStore, InvocationOutcome
+from vs_agent.api.testing import FakeAgentSessions
 from vs_core.api import Access, ObservationStatus
-from vs_runtime.api import RuntimeContractError
+from vs_runtime.api import RuntimeContractError, WorkspaceAccess
 from vs_runtime.api.core import (
+    AccessGrant,
     AccessGuardedWorkspace,
+    AccessKey,
+    AccessSettlement,
+    AccessSettlementError,
     ExecutionResult,
     JournalRunInvocations,
     ReceiptStore,
     ReleasedRunInvocations,
+    RuntimeSessionRequests,
 )
 from vs_runtime.api.executor_contexts import context_for
+from vs_runtime.api.testing import FakeWorkspace
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import pairwise_rows
+from vs_sim.api.testing import InlineBlockingRunner, SimThreads, pairwise_rows
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
-    from vs_core.api import RequestBase
+    from vs_core.api import RequestBase, Scope, WorkspaceRef
     from vs_runtime.api.infrastructure import RuntimeWorkspace
 
 
@@ -117,6 +126,147 @@ class Watched:
     async def restore_for_agent(self, revision: str, *, preserve_paths: tuple[str, ...]) -> None:
         self._probe.restores += 1
         await self._inner.restore_for_agent(revision, preserve_paths=preserve_paths)
+
+
+class StoreFault(StrEnum):
+    """One durable access-write boundary a test asks the real receipt store to fail."""
+
+    NONE = "none"
+    RECEIPT_WRITE = "receipt-write"
+    BEGIN_INDEX_AFTER_WRITE = "begin-index-after-write"
+    SETTLEMENT_INDEX_BEFORE_WRITE = "settlement-index-before-write"
+
+
+class FaultingAccessStore(ReceiptStore):
+    """A real receipt store with one scheduled access-receipt write failure."""
+
+    def __init__(self, world: AccessWorld) -> None:
+        super().__init__(world.env.receipts_namespace(), threads=SimThreads())
+        self.fault = StoreFault.NONE
+        self.hide_access_receipt = False
+
+    def load[ReceiptT: BaseModel](
+        self, family: str, part: str, key: str, model: type[ReceiptT]
+    ) -> ReceiptT | None:
+        if self.hide_access_receipt and family == "session-access" and part == "access":
+            return None
+        return super().load(family, part, key, model)
+
+    def replace(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
+        if self.fault is StoreFault.RECEIPT_WRITE and family == "session-access":
+            self.fault = StoreFault.NONE
+            message = "access receipt write failed"
+            raise OSError(message)
+        super().replace(family, part, key, receipt)
+
+    def modify[ReceiptT: BaseModel, ResultT](
+        self,
+        family: str,
+        part: str,
+        key: str,
+        model: type[ReceiptT],
+        decide: Callable[[ReceiptT | None], tuple[ReceiptT | None, ResultT]],
+    ) -> ResultT:
+        if (
+            self.fault is StoreFault.SETTLEMENT_INDEX_BEFORE_WRITE
+            and family == "session-access-unsettled"
+        ):
+            self.fault = StoreFault.NONE
+            message = "access fence release failed"
+            raise OSError(message)
+        result = super().modify(family, part, key, model, decide)
+        if (
+            self.fault is StoreFault.BEGIN_INDEX_AFTER_WRITE
+            and family == "session-access-unsettled"
+        ):
+            self.fault = StoreFault.NONE
+            message = "access fence acknowledgement was lost"
+            raise OSError(message)
+        return result
+
+
+class FaultingWorkspace(FakeWorkspace):
+    """The faithful in-memory workspace, with a scheduled restoration failure."""
+
+    fail_restore = False
+
+    async def restore_for_agent(self, revision: str, *, preserve_paths: tuple[str, ...]) -> None:
+        if self.fail_restore:
+            message = "workspace restore failed"
+            raise RuntimeContractError(message)
+        await super().restore_for_agent(revision, preserve_paths=preserve_paths)
+
+
+@dataclass
+class WorkspaceLookup:
+    """Mutable public workspace lookup used to model resource disappearance."""
+
+    workspace: AccessGuardedWorkspace | None
+
+    async def __call__(self, ref: WorkspaceRef | Scope) -> AccessGuardedWorkspace | None:
+        del ref
+        return self.workspace
+
+
+@dataclass
+class SettlementWorld:
+    """Public access-settlement surface over one durable store and Fake workspace."""
+
+    settlement: AccessSettlement
+    workspace: FaultingWorkspace
+    lookup: WorkspaceLookup
+    key: AccessKey
+    grant: AccessGrant
+
+    async def begin(self) -> None:
+        """Begin the world's default writer."""
+        await self.settlement.begin(self.key, SCOPE, self.workspace, self.grant)
+
+
+def settlement_world(
+    world: AccessWorld,
+    *,
+    store: ReceiptStore | None = None,
+    access: WorkspaceAccess = WorkspaceAccess.READ_ONLY,
+) -> SettlementWorld:
+    """Build the smallest public access-settlement composition."""
+    workspace = FaultingWorkspace(path=world.root.path)
+    lookup = WorkspaceLookup(workspace)
+    settlement = AccessSettlement(store or world.store(), lookup)
+    workspace.access_recovery.guard(lambda: settlement.fenced_by(workspace.path))
+    return SettlementWorld(
+        settlement,
+        workspace,
+        lookup,
+        AccessKey(binding="binding", invocation="inv-1"),
+        AccessGrant(role_id="worker", access=access),
+    )
+
+
+class DispatchExit(StrEnum):
+    """Unexpected post-begin exits exercised through the session executor."""
+
+    CANCELLED = "cancelled"
+    ERROR = "error"
+
+
+class UnexpectedDispatchError(Exception):
+    """An unclassified session implementation failure after access began."""
+
+
+class FaultingAgentSessions(FakeAgentSessions):
+    """Production journal semantics with one scheduled inspect exit."""
+
+    exit: DispatchExit | None = None
+
+    def inspect(self, key: AgentSessionKey, invocation_id: str) -> InvocationOutcome:
+        exit_ = self.exit
+        self.exit = None
+        if exit_ is DispatchExit.CANCELLED:
+            raise asyncio.CancelledError
+        if exit_ is DispatchExit.ERROR:
+            raise UnexpectedDispatchError
+        return super().inspect(key, invocation_id)
 
 
 @dataclass
@@ -194,6 +344,135 @@ def world(tmp_path: Path) -> Iterator[AccessWorld]:
 
 def status(result: ExecutionResult) -> ObservationStatus:
     return result.observation.observation.status
+
+
+@pytest.mark.asyncio
+async def test_failed_settlement_fences_the_workspace_without_a_restart(
+    world: AccessWorld,
+) -> None:
+    access = settlement_world(world)
+    await access.begin()
+    access.workspace.script_pending_changes(["candidate.py"])
+    access.lookup.workspace = None
+
+    with pytest.raises(AccessSettlementError, match="workspace is gone"):
+        await access.settlement.settle(access.key)
+
+    assert access.settlement.fenced_by(access.workspace.path) == (access.key.text,)
+    with pytest.raises(RuntimeContractError, match="workspace is fenced"):
+        await access.workspace.snapshot("must-not-adopt-dirty-writes")
+    peer = AccessKey(binding="binding", invocation="inv-2")
+    with pytest.raises(AccessSettlementError, match="writes are not judged"):
+        await access.settlement.begin(peer, SCOPE, access.workspace, access.grant)
+    assert access.settlement.receipt(peer) is None
+
+    access.lookup.workspace = access.workspace
+    await access.settlement.settle(access.key)
+    assert access.settlement.fenced_by(access.workspace.path) == ()
+
+
+@pytest.mark.asyncio
+async def test_failed_restore_keeps_the_ended_writer_visible_to_peers(
+    world: AccessWorld,
+) -> None:
+    access = settlement_world(world)
+    await access.begin()
+    access.workspace.script_pending_changes(["candidate.py"], ["candidate.py"], [])
+    access.workspace.fail_restore = True
+
+    with pytest.raises(AccessSettlementError, match="workspace restore failed"):
+        await access.settlement.settle(access.key)
+
+    assert access.settlement.fenced_by(access.workspace.path) == (access.key.text,)
+    access.workspace.fail_restore = False
+    await access.settlement.settle(access.key)
+    assert access.settlement.fenced_by(access.workspace.path) == ()
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [StoreFault.RECEIPT_WRITE, StoreFault.SETTLEMENT_INDEX_BEFORE_WRITE],
+)
+@pytest.mark.asyncio
+async def test_failed_settlement_persistence_is_fenced_and_idempotently_retried(
+    world: AccessWorld, fault: StoreFault
+) -> None:
+    store = FaultingAccessStore(world)
+    access = settlement_world(world, store=store, access=WorkspaceAccess.READ_WRITE)
+    await access.begin()
+    store.fault = fault
+
+    with pytest.raises(OSError, match=r"access (receipt write|fence release) failed"):
+        await access.settlement.settle(access.key)
+
+    assert access.settlement.fenced_by(access.workspace.path) == (access.key.text,)
+    await access.settlement.settle(access.key)
+    assert access.settlement.fenced_by(access.workspace.path) == ()
+    await access.settlement.settle(access.key)
+    assert access.settlement.fenced_by(access.workspace.path) == ()
+
+
+@pytest.mark.asyncio
+async def test_failed_begin_releases_activity_but_preserves_its_written_fence(
+    world: AccessWorld,
+) -> None:
+    store = FaultingAccessStore(world)
+    access = settlement_world(world, store=store)
+    store.fault = StoreFault.BEGIN_INDEX_AFTER_WRITE
+
+    with pytest.raises(OSError, match="acknowledgement was lost"):
+        await access.begin()
+
+    assert access.settlement.receipt(access.key) is not None
+    assert access.settlement.fenced_by(access.workspace.path) == (access.key.text,)
+    await access.settlement.settle(access.key)
+    assert access.settlement.fenced_by(access.workspace.path) == ()
+
+
+@pytest.mark.asyncio
+async def test_missing_receipt_releases_activity_without_hiding_its_durable_index(
+    world: AccessWorld,
+) -> None:
+    store = FaultingAccessStore(world)
+    access = settlement_world(world, store=store)
+    await access.begin()
+    store.hide_access_receipt = True
+
+    assert await access.settlement.settle(access.key) is None
+    assert access.settlement.fenced_by(access.workspace.path) == (access.key.text,)
+
+    store.hide_access_receipt = False
+    await access.settlement.settle(access.key)
+    assert access.settlement.fenced_by(access.workspace.path) == ()
+
+
+@pytest.mark.parametrize("exit_", list(DispatchExit))
+@pytest.mark.asyncio
+async def test_every_post_begin_dispatch_exit_exposes_the_durable_fence(
+    world: AccessWorld, exit_: DispatchExit
+) -> None:
+    store = world.store()
+    sessions = FaultingAgentSessions(world.host.client, world.host.journal, threads=SimThreads())
+    executor = RuntimeSessionRequests(
+        sessions,
+        world.host.resolver,
+        store,
+        blocking=InlineBlockingRunner(),
+    )
+    ensured = await executor.execute(ensure_request(), context_for(ensure_request()))
+    assert isinstance(ensured, ExecutionResult)
+    sessions.exit = exit_
+    request = dispatch_request()
+
+    expected = (
+        asyncio.CancelledError if exit_ is DispatchExit.CANCELLED else UnexpectedDispatchError
+    )
+    with pytest.raises(expected):
+        await executor.execute(request, context_for(request))
+
+    assert executor.settlement.fenced_by(world.root.path)
+    with pytest.raises(RuntimeContractError, match="workspace is fenced"):
+        await world.root.snapshot("after-abandoned-dispatch")
 
 
 @pytest.mark.asyncio
@@ -559,3 +838,73 @@ async def test_a_turn_refused_for_a_lost_writer_is_retried_after_that_writer_is_
     assert status(cancelled) is ObservationStatus.CANCELLED
     retried = await world.route(dispatch_request("req-1", "inv-1"))
     assert status(retried) is ObservationStatus.SUCCEEDED
+
+
+# The revert never touches the framework's state directory, so a read-only turn that
+# writes there leaves writes a complete revert cannot undo (the shape of a run that sat
+# at its turn limit when another run's leftover state was taken for the agent's writes).
+@pytest.mark.parametrize(
+    "stray",
+    [".vibesys/state/runs/other-run/store.json", ".vibesys/state/runs/other-run/a/b.lock"],
+)
+@pytest.mark.asyncio
+async def test_a_turn_whose_writes_cannot_be_undone_fails_and_later_turns_are_refused(
+    world: AccessWorld, stray: str
+) -> None:
+    world.writes = {stray: "{}\n"}
+    await world.execute(ensure_request())
+    result = await world.execute(dispatch_request())
+    observed = result.observation.observation
+    # Not left unknown until the turn's limit: the turn fails now, saying why.
+    assert observed.status is ObservationStatus.FAILED
+    assert observed.terminal
+    assert observed.accepted
+    assert result.observation.outcome_json is None
+    assert "could not be restored" in observed.diagnostic
+    assert stray in observed.diagnostic
+
+    world.writes = {}
+    for restarted in (False, True):
+        if restarted:
+            world.restart()
+        later = await world.execute(
+            dispatch_request(f"req-later-{restarted}", invocation=f"inv-later-{restarted}")
+        )
+        refused = later.observation.observation
+        assert refused.status is ObservationStatus.REJECTED
+        assert refused.terminal
+        assert stray in refused.diagnostic
+
+
+# A tool cache holds Git checkouts (uv's source-distribution cache, Cargo's registry), so
+# an agent that points one into its workspace leaves a nested repository that host Git
+# refuses to read. That refusal used to escape the turn and end the whole run.
+@pytest.mark.parametrize(
+    "access", [Access.READ_ONLY, Access.WRITE_ARTIFACTS, Access.WRITE_CANDIDATE]
+)
+@pytest.mark.parametrize(
+    "nested",
+    [".cache/uv/sdists-v10/.git/HEAD", ".cache/cargo/git/checkouts/crate-1/abc/.git/HEAD"],
+)
+@pytest.mark.asyncio
+async def test_a_turn_that_leaves_a_nested_repository_fails_alone_and_the_host_survives(
+    world: AccessWorld, access: Access, nested: str
+) -> None:
+    world.host.resolver.access = access
+    world.writes = {nested: "ref: refs/heads/main\n"}
+    await world.execute(ensure_request())
+
+    result = await world.execute(dispatch_request())
+
+    observed = result.observation.observation
+    assert observed.status is ObservationStatus.FAILED
+    assert observed.terminal
+    assert observed.accepted
+    assert result.observation.outcome_json is None
+    assert nested.removesuffix("/HEAD") in observed.diagnostic
+
+    world.writes = {}
+    later = await world.execute(dispatch_request("req-later", invocation="inv-later"))
+    refused = later.observation.observation
+    assert refused.status is ObservationStatus.REJECTED
+    assert nested.removesuffix("/HEAD") in refused.diagnostic

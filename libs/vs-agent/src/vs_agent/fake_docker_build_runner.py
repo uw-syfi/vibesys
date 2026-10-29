@@ -6,15 +6,14 @@ import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vs_agent.images import (
-    DOCKER_PROGRESS_LINE_CHARACTERS,
-    DockerBuildResult,
-    DockerCommandResult,
-)
+from vs_agent.images import DockerBuildResult, DockerCommandResult
+from vs_sim.api import OutputStream
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Iterable, Sequence
     from pathlib import Path
+
+    from vs_sim.api import OutputSink
 
 DEFAULT_IMAGE_ID = "sha256:" + "a" * 64
 
@@ -25,11 +24,15 @@ type DockerResult = subprocess.CompletedProcess[str]
 class FakeDockerBuildRunner:
     """Answer image builds and ``docker image inspect`` from scripted results.
 
-    A build succeeds and inspection reports ``image_id`` unless a result (or an
-    exception to raise) is scripted. Every call is recorded in ``calls``. Like
-    the real runner, a command streams each line of its result's ``stderr``
-    to ``on_stderr_line`` before returning; a script's build ``stderr`` is
-    where Docker's progress output goes.
+    It models the daemon's image store: a build that succeeds adds its
+    ``--tag`` to ``images``, and inspecting a name absent from ``images``
+    fails like Docker's "No such image". Inspecting a name in ``images``
+    reports ``image_id`` unless a result (or an exception to raise) is
+    scripted. A build succeeds unless one is scripted. Every call is recorded
+    in ``calls``. Like
+    the real runner, a command writes its result's ``stdout`` and ``stderr``
+    to ``output`` before returning; a script's build ``stderr`` is where
+    Docker's progress output goes.
     """
 
     def __init__(
@@ -38,8 +41,10 @@ class FakeDockerBuildRunner:
         build_result: DockerBuildResult | BaseException | None = None,
         inspect_result: DockerBuildResult | BaseException | None = None,
         image_id: str = DEFAULT_IMAGE_ID,
+        images: Iterable[str] = (),
     ) -> None:
-        """Script the build and inspect outcomes."""
+        """Script the build and inspect outcomes; *images* are the names the daemon already has."""
+        self.images: set[str] = set(images)
         self.build_result = build_result or docker_build_result()
         self.inspect_result = inspect_result or docker_build_result(stdout=image_id)
         self.calls: list[tuple[tuple[str, ...], Path, float]] = []
@@ -50,17 +55,25 @@ class FakeDockerBuildRunner:
         *,
         cwd: Path,
         timeout: float,
-        on_stderr_line: Callable[[str], None] | None = None,
+        output: OutputSink,
     ) -> DockerBuildResult:
         """Record the command and return the scripted outcome for its kind."""
         normalized = tuple(argv)
         self.calls.append((normalized, cwd, timeout))
+        if normalized[1:3] == ("image", "inspect") and normalized[-1] not in self.images:
+            absent = docker_build_result(
+                normalized, 1, "", f"Error response from daemon: No such image: {normalized[-1]}"
+            )
+            output.write(OutputStream.STDERR, (absent.stderr or "").encode())
+            return absent
         result = self.build_result if normalized[1] in ("build", "run") else self.inspect_result
+        built = normalized[1] == "build" and not isinstance(result, BaseException)
+        if built and result.returncode == 0 and "--tag" in normalized:
+            self.images.add(normalized[normalized.index("--tag") + 1])
         if isinstance(result, BaseException):
             raise result
-        if on_stderr_line is not None:
-            for line in (result.stderr or "").splitlines():
-                on_stderr_line(line[:DOCKER_PROGRESS_LINE_CHARACTERS])
+        output.write(OutputStream.STDOUT, (result.stdout or "").encode())
+        output.write(OutputStream.STDERR, (result.stderr or "").encode())
         return result
 
 

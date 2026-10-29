@@ -45,11 +45,13 @@ from vs_runtime.api.core import (
     ExecutionContext,
     ExecutionResult,
     ExecutorRole,
+    MeasurementDecisions,
     MeasurementObserver,
     MeasurementRequests,
     ReceiptStore,
     RequestExecutors,
     SealedExecution,
+    StageRun,
     StageSettled,
     StageStarted,
     revision_ref,
@@ -65,6 +67,7 @@ from vs_runtime.api.slurm_evaluation_stack import (
     plan,
     submission,
 )
+from vs_sim.api import DISCARD
 from vs_sim.api.testing import SimThreads, examples, swept
 from vs_slurm.api import SlurmJobStatus
 
@@ -80,6 +83,8 @@ if TYPE_CHECKING:
         ResourceRequirements,
     )
     from vs_project.api import StateNamespace
+    from vs_runtime.api.infrastructure import RunControlChannel
+    from vs_sim.api import OutputSink
 
 # Each example builds real workspaces. A pull request draws a sample; the nightly depth
 # (`--depth=nightly`) searches deeper.
@@ -133,7 +138,10 @@ class World:
         self.cluster = cluster
         self.stack = stack
 
+    control: RunControlChannel | None = None
     observer: MeasurementObserver | None = None
+    executor: PollingEvaluationExecutor | None = None
+    """An executor over the stack's own, when a test watches what reaches it."""
 
     def requests(
         self, crash_at: int | None = None
@@ -149,7 +157,8 @@ class World:
             None if crash_at is None else 2 * crash_at,
         )
         store = ReceiptStore(cast("StateNamespace", faulting), threads=SimThreads())
-        return MeasurementRequests(self.stack.executor, store, self.observer), faulting
+        executor = self.stack.executor if self.executor is None else self.executor
+        return MeasurementRequests(executor, store, self.observer, control=self.control), faulting
 
 
 @asynccontextmanager
@@ -271,6 +280,31 @@ async def test_a_failed_benchmark_is_reported_failed_with_its_reason() -> None:
         by_stage = {e.stage_id: e for e in settled_events}
         assert by_stage["accuracy"].passed
         assert not by_stage["benchmark"].passed
+
+
+async def test_a_stage_of_a_submitted_measurement_names_the_decision_it_answers() -> None:
+    """A gate stage's output is named by the measurement's decision: its run-trace span."""
+    async with world() as w:
+        decisions = MeasurementDecisions()
+        _requests, faulting = w.requests()
+        store = ReceiptStore(cast("StateNamespace", faulting), threads=SimThreads())
+        requests = MeasurementRequests(w.stack.executor, store, decisions=decisions)
+        sub = submission("sub", candidate=w.stack.snapshot).model_copy(
+            update={"decision_id": DecisionId(root="measure-1")}
+        )
+        resource = resource_of(await requests.execute(sub, context_for(sub)))
+        opened: list[StageRun] = []
+
+        def opener(run: StageRun) -> contextlib.nullcontext[OutputSink]:
+            opened.append(run)
+            return contextlib.nullcontext(DISCARD)
+
+        with decisions.stage_output(opener)(StageRun(handle_id=resource.root, stage_id="accuracy")):
+            pass
+        with decisions.stage_output(opener)(StageRun(handle_id="unknown", stage_id="accuracy")):
+            pass
+
+        assert [run.decision_id for run in opened] == ["measure-1", None]
 
 
 # happy path
@@ -603,6 +637,11 @@ async def _boundary_scenarios(
 ) -> dict[str, EvaluationRoleRequest]:
     resource = resource_of(await submit(w, "seed"))
     await settled(w, resource)
+    # This harness compares the number of receipt writes across fresh worlds.
+    # Fence out the executor owner's concurrent terminal publication first, so
+    # the cancel case cannot alternate between a live-job and settled-job path.
+    terminal = await w.stack.executor.poll(resource.root)
+    assert terminal.phase is PollPhase.ENDED
     return {
         "submit": submission("again", candidate=w.stack.snapshot),
         "observe": query(ObserveOwnedJob, "observe", resource),
@@ -947,6 +986,18 @@ async def test_a_benchmark_without_a_result_record_is_ambiguous_and_keeps_its_ev
     # The failure text is kept, so a second failure can tell the agent what happened.
     assert target.evidence
     assert _CRASH_TAIL in target.observation.diagnostic
+
+
+async def test_a_failed_jobs_diagnostic_carries_the_service_log_beside_the_stage_output() -> None:
+    cluster = ScenarioCluster()
+    cluster.benchmark_exit = 1
+    cluster.benchmark_output = "benchmark stage output"
+    cluster.service_log_tail = "server traceback: CUDA out of memory"
+    target, _jobs = await _failed_target(cluster)
+    diagnostic = target.observation.diagnostic
+    assert "server traceback: CUDA out of memory" in diagnostic
+    # The stage's own output ends the text, where a reader that cuts it keeps the verdict.
+    assert diagnostic.endswith("benchmark stage output")
 
 
 @settings(

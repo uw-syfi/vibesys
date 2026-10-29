@@ -1,0 +1,15 @@
+{
+  // Unit tests, with the page sources they import.
+  "extends": "./tsconfig.lib.json",
+  "compilerOptions": {
+    "types": ["vite/client", "bun"],
+    "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": [],
+  "references": [
+    {"path": "../../libs/ui/tsconfig.lib.json"},
+    {"path": "../../features/new-run/tsconfig.renderer.json"},
+    {"path": "../../features/new-run/tsconfig.state.json"}
+  ]
+}

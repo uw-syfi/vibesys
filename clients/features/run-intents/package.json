@@ -1,0 +1,58 @@
+{
+  "name": "@vibesys/feature-run-intents",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "vibesys": {
+    "layer": "feature",
+    "entries": {
+      "./state": "neutral",
+      "./renderer": "dom"
+    }
+  },
+  "exports": {
+    "./state": {
+      "@vibesys/source": "./src/state/index.ts",
+      "types": "./dist/state/index.d.ts",
+      "default": "./dist/state/index.js"
+    },
+    "./renderer": {
+      "@vibesys/source": "./src/renderer/index.tsx",
+      "types": "./dist/renderer/index.d.ts",
+      "default": "./dist/renderer/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/.*.tsbuildinfo"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.state.json tsconfig.renderer.json",
+    "check": "tsc -b",
+    "test": "node ../../tools/scripts/run_bun_tests.mjs ./src"
+  },
+  "dependencies": {
+    "@vibesys/hosts": "workspace:*",
+    "@vibesys/ipc": "workspace:*",
+    "@vibesys/machine": "workspace:*",
+    "@vibesys/ui": "workspace:*",
+    "react": "19.1.1",
+    "xstate": "5.33.2",
+    "@vibesys/runs": "workspace:*",
+    "@vibesys/request-identity": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "@types/node": "^24.0.0",
+    "@types/react": "19.1.13",
+    "typescript": "^5.8.3",
+    "@vibesys/proto": "workspace:*",
+    "@bufbuild/protobuf": "2.16.0",
+    "@types/react-dom": "19.1.9",
+    "react-dom": "19.1.1",
+    "happy-dom": "20.14.5",
+    "@vibesys/transport": "workspace:*",
+    "fast-check": "4.10.2",
+    "@vibesys/run-skeleton": "workspace:*"
+  }
+}

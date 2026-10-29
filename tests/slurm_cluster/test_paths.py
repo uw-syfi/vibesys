@@ -33,7 +33,9 @@ def test_a_job_runs_on_the_compute_node_in_the_directory_the_agent_ran_from(
     assert made.read_text(encoding="utf-8") == "made\n"
     assert made.stat().st_uid == os.getuid()
     assert gpu_run.agent("cat nested/dir/made-by-job.txt").output == "made\n"
-    assert slurm_cluster.queue() == []
+    # Slurm keeps the job in COMPLETING for a moment after its script exits; the job is
+    # gone once the queue drains.
+    slurm_cluster.wait_for_empty_queue()
 
 
 def test_a_file_the_agent_names_by_absolute_path_is_the_same_file_in_the_job(

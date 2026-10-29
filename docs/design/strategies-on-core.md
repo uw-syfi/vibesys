@@ -47,18 +47,25 @@ Readers who know the product but not `vs-core` need these terms.
 - **Operation**: a strategy-declared request for I/O that is not a turn or a measurement
   (render a prompt, verify a revision, read evidence). An owner in a library executes it; the
   outcome returns as `OperationResult`.
-- **Adoption**: copying the selected retained candidate into the project root and verifying
-  it. Core runs it after `ProposeWinner` and reports `AdoptionResult`.
+- **Adoption**: publishing the selected retained candidate as a commit on a run-owned
+  publication branch. Core runs it after `ProposeWinner` and reports `AdoptionResult`,
+  including the published commit. Publication never changes the operator's files or index.
+  An independent optional step fast-forwards only the run's own clean checked-out branch;
+  another branch, dirty tree, divergence or Git's overwrite refusal produces a typed skip.
+  Git protects untracked and ignored files. Repeating adoption reuses its publication,
+  including after a resume. Shared Git and workspace contract suites enforce these rules.
 - **Suspension**: a turn that ends by waiting for an evaluation job. Core publishes
   `TurnSuspended`, later `ResumeAuthorized` once, and the strategy asks the resumed turn.
   If the turn's workspace checkpoint is declined or fails, core instead ends the turn with
   `YieldPublicationFailed` (a named reason) and the strategy treats it as a failed turn.
+  If the evaluations end in an attempt history that can never back a resume, core ends the
+  wait with `ResumeRefused` (a named reason) instead of `ResumeAuthorized`.
 - **Shell**: the async host in `vs-runtime` that executes core's requests and feeds outcomes
   back as events. **Durable boundary**: one atomic commit of state plus the records it implies.
 
 Core events the strategies fold, with the consequence of each: `AttemptReady` (slot and
-workspace held, begin turns), `TurnResult` (reply or typed failure), `TurnSuspended`, `YieldPublicationFailed` and
-`ResumeAuthorized` (wait, failed wait, and resume), `MeasurementResult` (trusted evidence ids),
+workspace held, begin turns), `TurnResult` (reply or typed failure), `TurnSuspended`, `YieldPublicationFailed`,
+`ResumeAuthorized` and `ResumeRefused` (wait, failed wait, resume, and refused resume), `MeasurementResult` (trusted evidence ids),
 `OperationResult`, `AttemptExhausted` (budget spent), `AttemptSettled`, `AdoptionResult`,
 `RequestBlocked` (effect unknown), `Rejected` (decision refused), `ControlChanged` (operator
 stop), `RunEnded`.
@@ -361,8 +368,7 @@ each paid turn atomically with its dispatch), `accuracy_receipt` (the evidence l
   retained candidate (its parent if that round retained nothing), exactly as `dynamic` treats
   `continue_hypothesis`.
 - A round that ran the official gates and passed settles `eligible` when review passed and,
-  with a measured baseline, the headline beats it. A round the cadence skipped
-  (`official_eval_every > 1`) settles `eligible=False` with `retention="candidate"`: a
+  with a measured baseline, the headline beats it. A round no gate measured (its review was deferred) settles `eligible=False` with `retention="candidate"`: a
   buildable parent that can never be adopted (assumption A1, to verify in Phase 2: core accepts
   such a settlement and a later `StartAttempt` may use it as `base`). The fallback if core
   refuses is `retention="wip"`, and the last fallback is to measure every round.
@@ -389,7 +395,7 @@ The role ids are strategy-scoped like `dynamic-*`; see Q6 for per-role model con
 
 Kept with the same names and meaning: `--max-rounds`, `--max-retries-per-round` (becomes
 `paid_invocation_limit`), `--judge-every` (accepted, unused by `single`, as today),
-`--official-eval-every`, `--constraint`, `--modality`, `--interface`, `--objective` and the
+`--constraint`, `--modality`, `--interface`, `--objective` and the
 metric space, the profile-guided input from the bundle. `--max-in-flight`,
 `--max-unmeasured-turns` stay documented as dynamic-only. `--turn-drop-backoff-seconds`
 becomes a loop-wide option because a lost provider connection is now a strategy event for
@@ -429,7 +435,7 @@ stop) are the same decisions with `multi` roles. The differences:
 | Legacy step (`multi/orchestration.py`, `turns.py`) | Core decision or request | Answered by |
 |---|---|---|
 | pre-round turn (`PreRoundDecision`) | `RequestTurn(free, run scope)` by `multi-orchestrator` | `TurnResult` |
-| profiler turn (`ProfilerSummary`), failure is advisory | `RequestTurn(free, run scope, WRITE_ARTIFACTS profile dir)` by `multi-profiler`; a failed turn becomes a note and the plan proceeds | `TurnResult` |
+| profiler turn (`ProfilerSummary`), failure is advisory | `RequestTurn(free, run scope, READ_ONLY)` by `multi-profiler`; a failed turn becomes a note and the plan proceeds | `TurnResult` |
 | plan turn and correction | as `single` | `TurnResult` |
 | implementer turn, continuation prompt when `next_step` | paid `RequestTurn(WRITE_CANDIDATE)`; the strategy picks the template (first or continuation) from `HypothesisRecord.next_step` | `TurnResult` |
 | `_review`: `review_due`, judge turn | free `RequestTurn(READ_ONLY)` on `turn_candidate`, only when `review_due` | `TurnResult` |
@@ -460,7 +466,7 @@ requires the configured gates. A round that skipped review (sparse policy) is no
 | Role id | Access | Required capabilities | Tools |
 |---|---|---|---|
 | `multi-orchestrator` | `LIMITED` (`roadmap/`) | none | none |
-| `multi-profiler` | `LIMITED` (profile directory) | none | `profiler` (stateless, B15) |
+| `multi-profiler` | `READ_ONLY` | none | `profiler` (stateless, B15) |
 | `multi-implementer` | `READ_WRITE` | `CONTINUATION` plus `MCP_SERVERS` | `evaluation` |
 | `multi-judge` | `READ_ONLY` | `CONTINUATION` plus `MCP_SERVERS` | `evaluation` |
 
@@ -471,7 +477,7 @@ would change what the agent can do. It holds no run state, so it is not a second
 ### 5.6 CLI options
 
 As `single`, plus `--judge-every` with its documented meaning (review every N rounds;
-nominated candidates and the final round always). `profile-guided` takes the same input and
+implemented candidates and the final round always). `profile-guided` takes the same input and
 runs `CaptureCommand` before the pre-round turn.
 
 ### 5.7 Crash and replay
@@ -892,11 +898,11 @@ and before dispatch, and after dispatch and before the observation is committed.
 
 ### 9.3 Phase 3: single
 
-- **Added properties.** S1: a round the cadence skipped is never a winner and is accepted as
-  the next round's base. S2: differential test against the golden transcripts of the legacy
+- **Added properties.** S1: a round no gate measured is never a winner or
+  a base. S2: differential test against the golden transcripts of the legacy
   loop: for generated per-round outcomes, round records, endings and the final record equal the
-  transcript. S3: the attempt base equals `HypothesisSearch.start`'s rollback target for any
-  `revert_to_round`. S4: a PASS with a dominated Pareto claim becomes FAIL on every path.
+  transcript. S3: the attempt base is the best, a passed idea the plan names with
+  `base_round`, or the input (the ledger records the base it is given). S4: a PASS with a dominated Pareto claim becomes FAIL on every path.
   S5: paid turns per round never exceed `max_retries_per_round`. S6: the attribution result is
   folded once under replay and `ProfileFocus` advances monotonically.
 - **Kept tests.** `tests/vibesys/orchestration/single/`: `test_prompt_exact_text.py`,
@@ -1002,8 +1008,8 @@ mapping above, each deliberate:
 - Prompts are domain-agnostic as `single`'s are: the evidence the loop kept in progress files (history,
   frontier, notices, the implementer's claims for the judge, the profile) is rendered from typed
   rows, the validation recipe contract is rendered from its schema, and the profiler prompt is the
-  per-kind shared template plus where to write its bounded evidence (`profile/round-NNNN/`). The
-  run's domain pack is rendered once by the plan (`domain_sections`) into one slot of each role's
+  per-kind shared template (the profiler writes nothing in the project: its reply is the
+  evidence). The run's domain pack is rendered once by the plan (`domain_sections`) into one slot of each role's
   prompt, and skill-recommendation resolution is not rendered; the modality and interface texts
   are.
 - Properties M1 to M4 are tests of the strategy on the production shell (the roles asked per round

@@ -1,0 +1,98 @@
+// Rule S3 of the desktop design system (docs/contributing/clients-architecture.md, "Design
+// system enforcement"). Every feature and app builds its UI only from `@vibesys/ui`, so it renders
+// no interactive or styled intrinsic element and styles nothing
+// itself: no `style`, `className` or `dangerouslySetInnerHTML` prop on any element, and no
+// `button`, `a`, `input`, `select`, `textarea`, `label`, `dialog`, `details`, `summary`, `form`,
+// `table`, `svg` or `pre`. A plain `div` or `span` groups text inside a slot and stays allowed.
+// biome.json applies this rule to every feature and app source.
+language js;
+
+or {
+  JsxAttribute(name = $prop) as $attribute where {
+    $prop <: r"(?:style|className|dangerouslySetInnerHTML)",
+    register_diagnostic(
+      span = $attribute,
+      message = "strict-no-raw-elements (S3): a strict package styles nothing itself, so this prop is not allowed. Compose `Stack`, `Row`, `Card`, `Text` and the other components of `@vibesys/ui`, and pass tokens such as a `SpaceToken` like '4' through their props. If no component fits, add one to `@vibesys/ui`.",
+      severity = "error"
+    )
+  },
+  or {
+    JsxOpeningElement(name = $tag),
+    JsxSelfClosingElement(name = $tag)
+  } as $element where {
+    or {
+      and {
+        $tag <: r"(?:button|a)",
+        register_diagnostic(
+          span = $element,
+          message = "strict-no-raw-elements (S3): a raw <button> or <a> is not allowed in a strict package. Use `<Button>` from `@vibesys/ui` (it renders an <a> when given `href`).",
+          severity = "error"
+        )
+      },
+      and {
+        $tag <: r"(?:input|textarea|label)",
+        register_diagnostic(
+          span = $element,
+          message = "strict-no-raw-elements (S3): a raw <input>, <textarea> or <label> is not allowed in a strict package. Use `<Field>` with `TextInput` or `PathInput` from `@vibesys/ui`, or `Checkbox`, `Switch` or `SegmentedControl` for a choice.",
+          severity = "error"
+        )
+      },
+      and {
+        $tag <: r"select",
+        register_diagnostic(
+          span = $element,
+          message = "strict-no-raw-elements (S3): a raw <select> is not allowed in a strict package. Use `<Select>` from `@vibesys/ui`.",
+          severity = "error"
+        )
+      },
+      and {
+        $tag <: r"dialog",
+        register_diagnostic(
+          span = $element,
+          message = "strict-no-raw-elements (S3): a raw <dialog> is not allowed in a strict package. Use `<Dialog>` from `@vibesys/ui`.",
+          severity = "error"
+        )
+      },
+      and {
+        $tag <: r"(?:details|summary)",
+        register_diagnostic(
+          span = $element,
+          message = "strict-no-raw-elements (S3): a raw <details> or <summary> is not allowed in a strict package. Use `<Timeline>`, `<TreeRow>` or `<Menu>` from `@vibesys/ui`, or add a disclosure component to it.",
+          severity = "error"
+        )
+      },
+      and {
+        $tag <: r"form",
+        register_diagnostic(
+          span = $element,
+          message = "strict-no-raw-elements (S3): a raw <form> is not allowed in a strict package. Compose `<Field>` controls and a `<Button>` from `@vibesys/ui`, and handle the action in the Button's press handler.",
+          severity = "error"
+        )
+      },
+      and {
+        $tag <: r"table",
+        register_diagnostic(
+          span = $element,
+          message = "strict-no-raw-elements (S3): a raw <table> is not allowed in a strict package. Use `<Table>` from `@vibesys/ui`.",
+          severity = "error"
+        )
+      },
+      and {
+        $tag <: r"svg",
+        register_diagnostic(
+          span = $element,
+          message = "strict-no-raw-elements (S3): a raw <svg> is not allowed in a strict package. Use `<Icon>` or `<Chart>` from `@vibesys/ui`, or add the drawing to it.",
+          severity = "error"
+        )
+      },
+      and {
+        $tag <: r"pre",
+        register_diagnostic(
+          span = $element,
+          message = "strict-no-raw-elements (S3): a raw <pre> is not allowed in a strict package. Use `<LogPane>` for log output or `<Text>` with the `code` style from `@vibesys/ui`.",
+          severity = "error"
+        )
+      }
+    }
+  }
+}

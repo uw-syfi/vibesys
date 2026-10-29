@@ -8,14 +8,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._proofs import Proven, current_admission, invocation_for
+from ._proofs import Proven, continues_admitted_work, current_admission, invocation_for
 from .types.attempts import AttemptPhase
 from .types.common import (
     AttemptId,
     LifecycleClass,
     ObservationStatus,
     RequestId,
-    RunStatus,
     Scope,
 )
 from .types.records import ExecuteRegisteredOperation
@@ -159,7 +158,11 @@ def attempt_for(context: SessionsContext, scope: Scope) -> AttemptView | None:
 
 
 def scope_active(context: SessionsContext, scope: Scope) -> bool:
-    """True while the scope may start new work: live admission, or a running run."""
+    """True while the scope may start new work: live admission, or a run that carries on.
+
+    A paused run carries on (``continues_admitted_work``): its new work arrives only as
+    decisions, which the shell holds while it is paused.
+    """
     if isinstance(scope.owner, AttemptId):
         owner = attempt_for(context, scope)
         return (
@@ -168,10 +171,9 @@ def scope_active(context: SessionsContext, scope: Scope) -> bool:
             and owner.closure is None
             and isinstance(current_admission(owner, scope, owner.admission_id), Proven)
         )
-    return (
-        scope == Scope(owner=context.run.run_id, generation=context.run.generation)
-        and context.run.status == RunStatus.RUNNING
-    )
+    return scope == Scope(
+        owner=context.run.run_id, generation=context.run.generation
+    ) and continues_admitted_work(context.run)
 
 
 def proven_invocation(state: SessionsState, ref: InvocationRef) -> Invocation | None:

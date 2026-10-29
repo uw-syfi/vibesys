@@ -11,12 +11,11 @@ import nki
 import nki.isa as nisa
 import nki.language as nl
 
-# === Self-contained utilities ===
 
+# === Self-contained utilities ===
 
 def kernel_assert(condition: bool, error_text: str):
     assert condition, f"[INTERNAL_ERROR] [NCC_INKI016] Kernel validation exception: {error_text}"
-
 
 def div_ceil(n: int, d: int) -> int:
     return (n + d - 1) // d
@@ -85,12 +84,12 @@ def elementwise_exp(x: nl.ndarray) -> nl.ndarray:
     num_f_tiles = div_ceil(last_dim, F_TILE_SIZE)
 
     # === Main Processing Loop ===
-    for p_idx in nl.affine_range(num_p_tiles):
+    for p_idx in range(num_p_tiles):
         p_start = p_idx * P_MAX
         p_end = min(p_start + P_MAX, outer_dim)
         p_size = p_end - p_start
 
-        for f_idx in nl.affine_range(num_f_tiles):
+        for f_idx in range(num_f_tiles):
             f_start = f_idx * F_TILE_SIZE
             f_end = min(f_start + F_TILE_SIZE, last_dim)
             f_size = f_end - f_start
@@ -126,13 +125,12 @@ if __name__ == "__main__":
     This test validates correctness against PyTorch reference implementation.
     """
     import os
-
     import torch
     from torch_xla.core import xla_model as xm
 
     # Set environment variables for profiling/debugging
-    os.environ["NEURON_RT_INSPECT_ENABLE"] = "1"
-    os.environ["NEURON_RT_INSPECT_DEVICE_PROFILE"] = "1"
+    os.environ['NEURON_RT_INSPECT_ENABLE'] = '1'
+    os.environ['NEURON_RT_INSPECT_DEVICE_PROFILE'] = '1'
     os.environ["NEURON_RT_INSPECT_OUTPUT_DIR"] = "./output_elementwise_exp"
     os.environ["NEURON_CC_FLAGS"] = "--target trn2"
     os.environ["NEURON_PLATFORM_TARGET_OVERRIDE"] = "trn2"

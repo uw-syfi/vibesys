@@ -1,0 +1,28 @@
+{
+  "branch": "vibesys-runs/run",
+  "created_at": "2026-01-01T00:00:00Z",
+  "display_name": "Example",
+  "input_fingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
+  "orchestration": {
+    "config_version": 1,
+    "id": "single-agent",
+    "options": {
+      "interface": "service",
+      "max_rounds": 2
+    }
+  },
+  "project_id": "example",
+  "run_environment": {
+    "app": null,
+    "gpu": null,
+    "image": null,
+    "model_volume": null,
+    "name": "local",
+    "resources": null
+  },
+  "run_id": "run",
+  "schema_version": 4,
+  "task_name": null,
+  "trusted_input_baseline": "0000000000000000000000000000000000000000",
+  "vibesys_version": "test"
+}

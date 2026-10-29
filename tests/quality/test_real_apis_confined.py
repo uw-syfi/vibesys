@@ -881,8 +881,9 @@ REAL_API_EDGES: dict[Key, str] = {
     ("src/entrypoints/server.py", "interpreter"): (
         "entrypoint: names the interpreter in the helper command it starts"
     ),
-    ("src/entrypoints/web.py", "interpreter"): (
-        "entrypoint: names the interpreter in the server command it starts"
+    ("src/entrypoints/detached_run.py", "threading"): (
+        "entrypoint: installs and restores threading.excepthook, a process-global interpreter "
+        "hook no vs_sim interface stands in for; it starts no thread"
     ),
     **{
         ("src/entrypoints/server.py", rule): (
@@ -903,12 +904,20 @@ REAL_API_EDGES: dict[Key, str] = {
     **{
         (relative, "fs_sync"): f"{_OWN_STORE}: {what}"
         for relative, what in (
+            ("libs/vs-runlog/src/vs_runlog/_atomic.py", "atomic head and keyframe publication"),
+            ("libs/vs-runlog/src/vs_runlog/_lock.py", "the run lifetime lock"),
+            ("libs/vs-project/src/vs_project/_operator_key.py", "the operator key file"),
             ("libs/vs-project/src/vs_project/_state.py", "the project state lock file"),
             ("libs/vs-project/src/vs_project/_state_io.py", "atomic state file replacement"),
             ("libs/vs-project/src/vs_project/_state_store.py", "LocalStateStore's lock file"),
+            (
+                "libs/vs-project/src/vs_project/_admission.py",
+                "FileAdmissionStore's identity and target locks",
+            ),
             ("libs/vs-runtime/src/vs_runtime/_artifact_store.py", "artifact files and receipts"),
             ("libs/vs-runtime/src/vs_runtime/_receipt_store.py", "the receipt namespace lock"),
             ("libs/vs-runtime/src/vs_runtime/_slot_meter.py", "the lease ledger"),
+            ("libs/vs-logs/src/vs_logs/_volume.py", "atomic pipe-mark file replacement"),
             ("libs/vs-evaluation/src/vs_evaluation/filesystem_store.py", "the lifecycle store"),
             ("src/server/event_index.py", "the event journal's index"),
             ("src/server/registry.py", "each live server's registry record lock"),
@@ -984,9 +993,9 @@ REAL_API_PENDING: dict[Key, Pending] = {
         "the repair container runs subprocess.run itself; route it through DockerCli",
     ),
     ("libs/vs-sandbox/src/vs_sandbox/evaluator_tools.py", "subprocess"): Pending(
-        8,
+        4,
         Owner.LANE_A,
-        "_run_docker_command goes through DockerCli; the in-container install program is an edge",
+        "type only: the injected tool runner's CompletedProcess and TimeoutExpired",
     ),
     ("libs/vs-sandbox/src/vs_sandbox/fake_docker_command.py", "subprocess"): Pending(
         2, Owner.LANE_A, "type only: result type aliases"
@@ -1203,6 +1212,42 @@ type Edge = tuple[EdgeKind, str]
 # parse JSON or TOML directly. Everything else asks the owner of the data. Keep one line
 # per module: its kind, and a note naming the data.
 FILE_IO_EDGE_MODULES: dict[str, Edge] = {
+    "libs/vs-project/src/vs_project/_fingerprint.py": (
+        EdgeKind.INPUT_LOADER,
+        "Project's portable input fingerprint reader, extracted from its state implementation",
+    ),
+    "src/entrypoints/chat_session.py": (
+        EdgeKind.PROCESS_BOUNDARY,
+        "the detached session's process output log",
+    ),
+    "src/vibesys/chat/_legacy.py": (
+        EdgeKind.LOG,
+        "the one-shot import that reads the authoritative server journal into session logs",
+    ),
+    "src/vibesys/chat/_session.py": (
+        EdgeKind.LOG,
+        "session log shell: reads the run head and its own answer blobs through Project paths",
+    ),
+    "libs/vs-runlog/src/vs_runlog/_atomic.py": (
+        EdgeKind.LOG,
+        "durable atomic publication of run store protobuf files",
+    ),
+    "libs/vs-runlog/src/vs_runlog/_lock.py": (
+        EdgeKind.LOG,
+        "the run.lock lifetime descriptor",
+    ),
+    "libs/vs-runlog/src/vs_runlog/_file.py": (
+        EdgeKind.LOG,
+        "the run.log file sink and recovery reader; framing stays in the pure _framing module",
+    ),
+    "libs/vs-runlog/src/vs_runlog/_observe.py": (
+        EdgeKind.LOG,
+        "the observation reader of run.head and the committed run.log prefix; the upgrade stays pure",
+    ),
+    "src/vibesys/run/runlog_conversion.py": (
+        EdgeKind.LOG,
+        "the one-shot run.log sink that reads the authoritative JSONL journal and stages conversion",
+    ),
     "libs/vs-agent/src/vs_agent/images.py": (
         EdgeKind.GENERATOR,
         "content-addresses the build context it hands to docker build",
@@ -1235,9 +1280,21 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         EdgeKind.STORE,
         "the local progress log",
     ),
+    "libs/vs-runtime/src/vs_runtime/_comparison.py": (
+        EdgeKind.STORE,
+        "the file-backed comparison cache, its build-context digest and scratch directory",
+    ),
+    "libs/vs-project/src/vs_project/_task_files.py": (
+        EdgeKind.INPUT_LOADER,
+        "task objectives",
+    ),
     "libs/vs-project/src/vs_project/_cli_git_repository.py": (
         EdgeKind.STORE,
         "GitRepository implementation over the git CLI (git state is files)",
+    ),
+    "libs/vs-project/src/vs_project/_operator_key.py": (
+        EdgeKind.STORE,
+        "the operator key file, created once with O_EXCL and read with O_NOFOLLOW",
     ),
     "libs/vs-project/src/vs_project/_exclude_file.py": (
         EdgeKind.STORE,
@@ -1264,9 +1321,9 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         EdgeKind.STORE,
         "GitRepository implementation over pygit2 (git state is files)",
     ),
-    "libs/vs-project/src/vs_project/_run_logs.py": (
-        EdgeKind.LOG,
-        "the one reader of the run log files RunLogger writes",
+    "libs/vs-project/src/vs_project/_retained.py": (
+        EdgeKind.STORE,
+        "bounded read-only listing and reads of a stopped run's retained files",
     ),
     "libs/vs-project/src/vs_project/_state.py": (
         EdgeKind.STORE,
@@ -1274,9 +1331,13 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     ),
     "libs/vs-project/src/vs_project/_state_io.py": (
         EdgeKind.STORE,
-        "atomic, durable state document writes and reads",
+        "atomic, durable state documents and atomic host run discovery links",
     ),
     "libs/vs-project/src/vs_project/_state_store.py": (EdgeKind.STORE, "the local StateStore"),
+    "libs/vs-project/src/vs_project/_admission.py": (
+        EdgeKind.STORE,
+        "retained admission receipts and scoped identity/target exclusion",
+    ),
     "libs/vs-project/src/vs_project/_workspace_tree.py": (
         EdgeKind.AGENT_WORKSPACE,
         "every host read or write of an agent-chosen path, walked by descriptor",
@@ -1302,6 +1363,7 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         "bundled evaluator packages",
     ),
     "libs/vs-runtime/src/vs_runtime/_event_journal.py": (EdgeKind.STORE, "the event journal"),
+    "libs/vs-logs/src/vs_logs/_volume.py": (EdgeKind.STORE, "log stream segments and index"),
     "libs/vs-runtime/src/vs_runtime/_host_command_bridge.py": (
         EdgeKind.AGENT_WORKSPACE,
         "stages the host command client for the agent",
@@ -1406,6 +1468,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     ),
     "libs/vs-slurm/src/vs_slurm/cluster_store.py": (EdgeKind.STORE, "the cluster state store"),
     "libs/vs-slurm/src/vs_slurm/config.py": (EdgeKind.OPERATOR_CONFIG, "the Slurm cluster file"),
+    "libs/vs-slurm/src/vs_slurm/phase_files.py": (
+        EdgeKind.TRANSFER,
+        "reads the small result files a job leaves in the staged-back results tree",
+    ),
     "libs/vs-slurm/src/vs_slurm/fake_cluster.py": (
         EdgeKind.FAKE,
         "Slurm cluster Fake whose state is files",
@@ -1418,6 +1484,14 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     "libs/vs-slurm/src/vs_slurm/identity.py": (
         EdgeKind.PACKAGED_RESOURCE,
         "the digest of its own source",
+    ),
+    "libs/vs-slurm/src/vs_slurm/ledger.py": (
+        EdgeKind.GENERATOR,
+        "content-addresses the workspace an evaluation request submits",
+    ),
+    "libs/vs-slurm/src/vs_slurm/ledger_store.py": (
+        EdgeKind.STORE,
+        "the evaluation ledger on the cluster, published through a local scratch file",
     ),
     "libs/vs-slurm/src/vs_slurm/remote_operations.py": (
         EdgeKind.TRANSFER,
@@ -1437,6 +1511,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         EdgeKind.INPUT_LOADER,
         "task inputs named on the command line",
     ),
+    "src/entrypoints/evals.py": (
+        EdgeKind.TRANSFER,
+        "the scratch directory the ledger and cluster transports stage through",
+    ),
     "src/entrypoints/example_catalog.py": (EdgeKind.PACKAGED_RESOURCE, "the example catalog"),
     "src/entrypoints/examples.py": (
         EdgeKind.GENERATOR,
@@ -1444,27 +1522,54 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     ),
     "src/entrypoints/launcher.py": (EdgeKind.PACKAGED_RESOURCE, "package versions"),
     "src/entrypoints/server.py": (EdgeKind.PROCESS_BOUNDARY, "log file and socket directory"),
-    "src/entrypoints/web.py": (EdgeKind.STATIC_FILES, "the web client build"),
     "src/entrypoints/web_assets.py": (EdgeKind.STATIC_FILES, "the web client build manifest"),
     "src/server/api/schema.py": (EdgeKind.GENERATOR, "protocol schema files"),
+    "src/entrypoints/protocol_schema.py": (EdgeKind.GENERATOR, "the protocol schema file"),
     "src/server/chat/transcript.py": (EdgeKind.STORE, "chat transcripts"),
     "src/server/event_index.py": (EdgeKind.STORE, "the event index"),
+    "src/server/span_index.py": (EdgeKind.STORE, "the journal's span index"),
     "src/server/events.py": (EdgeKind.STORE, "the run's wire event log"),
+    "src/server/host_compute_runtime.py": (
+        EdgeKind.STORE,
+        "the machine's compute settings file and the Modal and Slurm files it reads",
+    ),
+    "src/server/host_helper_machine.py": (
+        EdgeKind.OS_ADAPTER,
+        "checkout pyproject reader for the host helper's machine probe",
+    ),
     "src/server/host_helper_os.py": (
         EdgeKind.OS_ADAPTER,
         "OS adapter and project pyproject loader for the host helper",
     ),
     "src/server/registry.py": (EdgeKind.STORE, "the server instance registry"),
-    "src/server/settings.py": (EdgeKind.INPUT_LOADER, "server settings"),
+    "src/server/run_digest_store.py": (
+        EdgeKind.STORE,
+        "FileProjects reads committed run heads, keyframes and their bounded log suffix",
+    ),
+    "src/server/run_summary_cache.py": (
+        EdgeKind.STORE,
+        "the run summary's cache beside the event journal",
+    ),
     "src/server/transport/discovery.py": (
         EdgeKind.STORE,
         "instance records, and a /proc OS adapter",
     ),
     "src/server/transport/websocket.py": (EdgeKind.STATIC_FILES, "the web client"),
+    "src/launch/scripted_agents.py": (
+        EdgeKind.AGENT_WORKSPACE,
+        "the scripted implementer's source edits and the reads of the candidate it and the judge make",
+    ),
+    "src/vibesys/api/host_operations/_candidate.py": (
+        EdgeKind.INPUT_LOADER,
+        "read-only loader of candidate checkout metadata (pyproject and git HEAD)",
+    ),
     "src/vibesys/config.py": (EdgeKind.INPUT_LOADER, "VibeSys configuration"),
+    "src/vibesys/fact_import/_descriptors.py": (
+        EdgeKind.PACKAGED_RESOURCE,
+        "the facts importer's frozen snapshot descriptors",
+    ),
     "src/vibesys/domains/rendering.py": (EdgeKind.PACKAGED_RESOURCE, "role templates"),
     "src/vibesys/inputs/_manifest.py": (EdgeKind.INPUT_LOADER, "the task manifest"),
-    "src/vibesys/inputs/_objectives.py": (EdgeKind.INPUT_LOADER, "task objectives"),
     "src/vibesys/inputs/_synthesis.py": (EdgeKind.GENERATOR, "writes a synthesized task folder"),
     "src/vibesys/orchestration/skill_selection.py": (
         EdgeKind.PACKAGED_RESOURCE,
@@ -1684,6 +1789,10 @@ PARSE_EDGE_MODULES: dict[str, tuple[ParseKind, str]] = {
         ParseKind.FAKE,
         "a scripted reply value, as the response model",
     ),
+    "libs/vs-core/src/vs_core/_corevalue.py": (
+        ParseKind.MODEL_HOOK,
+        "the generated value's Pydantic-compatible parse method; its ingress callers remain scanned",
+    ),
     "libs/vs-core/src/vs_core/_registry.py": (
         ParseKind.OWN_STORE,
         "persisted operation wires and run envelopes, and in-memory re-validation",
@@ -1718,6 +1827,10 @@ PARSE_EDGE_MODULES: dict[str, tuple[ParseKind, str]] = {
         ParseKind.FAKE,
         "the flow test kit's state round trip",
     ),
+    "libs/vs-core/src/vs_core/testing/persisted_schema.py": (
+        ParseKind.OWN_STORE,
+        "persisted-shape snapshots that its own schema_snapshot wrote, tracked in the repository",
+    ),
     "libs/vs-decode/src/vs_decode/_decode.py": (
         ParseKind.DECODER,
         "the bounded, strict decode every other module goes through",
@@ -1725,10 +1838,6 @@ PARSE_EDGE_MODULES: dict[str, tuple[ParseKind, str]] = {
     "libs/vs-evaluation/src/vs_evaluation/testing.py": (
         ParseKind.FAKE,
         "the in-memory evaluation store's values",
-    ),
-    "libs/vs-runtime/src/vs_runtime/_core_record.py": (
-        ParseKind.OWN_STORE,
-        "core records this runtime persisted",
     ),
     "libs/vs-runtime/src/vs_runtime/_receipt_store.py": (
         ParseKind.OWN_STORE,
@@ -1751,6 +1860,14 @@ PARSE_EDGE_MODULES: dict[str, tuple[ParseKind, str]] = {
         "operation records the cluster store wrote, and in-memory re-validation",
     ),
     "src/server/events.py": (ParseKind.OWN_STORE, "the run's event log this server appends"),
+    "src/server/run_summary.py": (
+        ParseKind.OWN_STORE,
+        "the run's event log lines this server appended, folded into the summary",
+    ),
+    "src/server/run_summary_cache.py": (
+        ParseKind.OWN_STORE,
+        "the summary cache this helper wrote beside the journal",
+    ),
     "src/vibesys/hypothesis/rounds.py": (ParseKind.OWN_STORE, "the saved hypothesis ledger"),
     "src/vibesys/issue_queue_board.py": (ParseKind.OWN_STORE, "a recorded progress payload"),
     "src/vibesys/orchestration/evolve/population/openevolve_selector.py": (
@@ -1911,6 +2028,14 @@ PROGRAM_ENTRIES: dict[str, str] = {
     "libs/vs-evaluation/src/vs_evaluation/agent_core_mcp.py": (
         "the evaluation tool server an agent CLI starts over stdio; its main builds the "
         "Network and clock it reaches the run's evaluation socket with"
+    ),
+    "libs/vs-evaluation/src/vs_evaluation/tool_relay_mcp.py": (
+        "the tool relay's agent-side server an agent CLI starts over stdio, and its startup check; "
+        "its main builds the Network and clock it reaches the host's relay socket with"
+    ),
+    "libs/vs-evaluation/src/vs_evaluation/queue_status_mcp.py": (
+        "the queue status tool server an agent CLI starts over stdio; its main builds the "
+        "Network and clock it reaches the run's queue status socket with"
     ),
 }
 

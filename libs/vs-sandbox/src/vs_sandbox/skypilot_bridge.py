@@ -46,7 +46,14 @@ from vs_sandbox.skypilot_states import (
     allocation_gone,
     is_driver_failure,
 )
-from vs_sim.api import CloseOnce, NothingLeft, OsThreads, Released, UnixNetwork
+from vs_sim.api import (
+    CloseOnce,
+    NothingLeft,
+    OsThreads,
+    Released,
+    UnixNetwork,
+    WorkerStartRefusedError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -58,6 +65,7 @@ if TYPE_CHECKING:
 
 _MAX_REQUEST_BYTES = 4096
 _SEND_BOUND_SECONDS = 30.0
+_ACCEPT_RETRY_SECONDS = 0.1
 _OUTPUT_CHUNK_CHARACTERS = 64 * 1024
 _LOG_SPOOL_READ_CHARACTERS = 64 * 1024
 _MAX_ARTIFACT_BYTES = 512 * 1024
@@ -510,10 +518,18 @@ class SkyPilotBridge:
                 connection = listener.accept()
             except OSError:
                 return  # the listener was closed
-            self._threads.spawn(
-                lambda c=connection: self._serve(c),
-                name=f"skypilot-bridge-request-{self._cluster_name}",
-            )
+            try:
+                self._threads.spawn(
+                    lambda c=connection: self._serve(c),
+                    name=f"skypilot-bridge-request-{self._cluster_name}",
+                )
+            except WorkerStartRefusedError as error:
+                connection.close()
+                self._log(
+                    "[warn] SkyPilot bridge request worker did not start: "
+                    f"{type(error).__name__}; retrying"
+                )
+                self._threads.sleep(_ACCEPT_RETRY_SECONDS)
 
     def _serve(self, connection: Connection) -> None:
         wire = _Wire(connection, self._log)

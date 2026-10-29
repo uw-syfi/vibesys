@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, cast
@@ -32,6 +33,7 @@ from vs_runtime.api import (
     validate_workspace_writable_paths,
 )
 from vs_runtime.api.testing import FakeCommands, FakeEvaluation, FakeWorkspace, FakeWorkspaces
+from vs_sim.api import DISCARD
 
 
 class _Options(BaseModel):
@@ -145,6 +147,7 @@ def test_agent_turn_timeout_error_preserves_the_policy_budget() -> None:
 
 def test_run_facts_are_strict_and_immutable() -> None:
     facts = RunFacts(
+        agent_git_writable=True,
         domain_id="llm_serving",
         objective="Increase serving throughput.",
         environment_notes="Run the service through its public endpoint.",
@@ -160,7 +163,12 @@ def test_run_facts_are_strict_and_immutable() -> None:
     with pytest.raises(ValidationError):
         facts.workspace_sources[0].__setattr__("dest", "other")
     with pytest.raises(ValidationError):
-        RunFacts(domain_id="generic", objective="Improve the candidate.", objective_location="")
+        RunFacts(
+            agent_git_writable=True,
+            domain_id="generic",
+            objective="Improve the candidate.",
+            objective_location="",
+        )
 
 
 @pytest.mark.parametrize(
@@ -285,7 +293,12 @@ def test_fake_commands_are_argv_based_scriptable_and_recorded() -> None:
     async def scenario() -> None:
         run = _Run()
         workspace = run.workspaces.root
-        expected = CommandResult(output="profile data", exit_code=7, truncated=True)
+        expected = CommandResult(
+            output="profile data",
+            exit_code=7,
+            truncated=True,
+            diagnostic_output="profile data",
+        )
         run.commands.script(expected)
 
         result = await run.commands.run(
@@ -318,6 +331,35 @@ def test_fake_commands_are_argv_based_scriptable_and_recorded() -> None:
         assert run.commands.calls[1].timeout_seconds == 45
 
     asyncio.run(scenario())
+
+
+def test_command_result_derives_diagnostic_only_from_complete_output() -> None:
+    result = CommandResult(output="API_TOKEN=runtime-secret", exit_code=1)
+
+    assert result.output == "API_TOKEN=runtime-secret"
+    assert "runtime-secret" not in result.diagnostic_output
+
+
+def test_command_result_rejects_truncation_without_a_prebounded_diagnostic() -> None:
+    with pytest.raises(ValidationError, match="requires diagnostic_output"):
+        CommandResult(output="OKEN=runtime-secret", exit_code=1, truncated=True)
+
+
+def test_command_result_derives_an_empty_diagnostic_for_empty_truncated_output() -> None:
+    result = CommandResult(output="", exit_code=1, truncated=True)
+
+    assert result.diagnostic_output == ""
+
+
+def test_command_result_preserves_an_explicitly_empty_diagnostic() -> None:
+    result = CommandResult(
+        output="API_TOKEN=runtime-secret",
+        exit_code=1,
+        truncated=True,
+        diagnostic_output="",
+    )
+
+    assert result.diagnostic_output == ""
 
 
 @pytest.mark.parametrize(
@@ -388,10 +430,13 @@ def test_fake_evaluation_preserves_semantic_results_and_requests() -> None:
         run.evaluation.script_benchmark(benchmark)
         run.evaluation.script_local_validation(local_validation)
 
-        accuracy_result = await run.evaluation.accuracy(workspace)
+        accuracy_result = await run.evaluation.accuracy(workspace, output=DISCARD)
         assert accuracy_result.executed
         assert accuracy_result.receipt is not None
-        assert await run.evaluation.benchmark(workspace, objectives=(objective,)) == benchmark
+        assert (
+            await run.evaluation.benchmark(workspace, objectives=(objective,), output=DISCARD)
+            == benchmark
+        )
         assert (
             await run.evaluation.validate_local(
                 workspace,
@@ -410,7 +455,9 @@ def test_fake_evaluation_preserves_semantic_results_and_requests() -> None:
         restored = AccuracyReceipt.model_validate_json(serialized)
         resumed_host = _Run(run_id=run.run_id, project_root=workspace.path)
         reused = await resumed_host.evaluation.accuracy(
-            resumed_host.workspaces.root, reuse=restored
+            resumed_host.workspaces.root,
+            reuse=restored,
+            output=DISCARD,
         )
         assert reused == AccuracyEvaluation(executed=False, receipt=restored)
         assert resumed_host.evaluation.accuracy_calls[-1].reuse == restored
@@ -481,7 +528,17 @@ def test_fake_evaluation_rejects_duplicate_objective_names() -> None:
             await run.evaluation.benchmark(
                 run.workspaces.root,
                 objectives=(objective, objective),
+                output=DISCARD,
             )
         assert run.evaluation.benchmark_calls == []
 
     asyncio.run(scenario())
+
+
+def test_the_runtime_facade_resolves_and_caches_every_declared_export() -> None:
+    facade = importlib.import_module("vs_runtime.api")
+    assert set(dir(facade)) == set(facade.__all__)
+    for name in facade.__all__:
+        assert getattr(facade, name) is getattr(facade, name)
+    with pytest.raises(AttributeError):
+        _ = facade.not_a_public_export

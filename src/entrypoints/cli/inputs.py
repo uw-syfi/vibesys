@@ -9,8 +9,14 @@ from typing import TYPE_CHECKING
 from entrypoints.cli.args import _build_validate_parser, _parse_command_flag
 from entrypoints.cli.constants import _STANDALONE_INPUT_DESTS
 from entrypoints.cli.environment import _validate_run_environment_profiler
-from entrypoints.cli.errors import _configuration_error
-from vibesys.api import DomainName, ProfilerKind
+from entrypoints.cli.errors import _cause_error, _configuration_error
+from vibesys.api import (
+    DomainName,
+    ProfilerKind,
+    TaskNeedsProvisioning,
+    TaskNotFound,
+    TaskUnusable,
+)
 from vibesys.api.request import (
     InputSynthesisError,
     SynthesizedInputSpec,
@@ -19,11 +25,13 @@ from vibesys.api.request import (
     synthesize_input_bundle,
     validate_experiment_name,
 )
-from vs_project.api import Project, ProjectLayoutError
+from vs_project.api import Project, ProjectLayoutError, TaskNotFoundError
 from vs_sim.api import SystemClock, utc_datetime
 
 if TYPE_CHECKING:
     import argparse
+
+    from vibesys.api.request import InputBundle
 
 
 def _run_validate(argv: list[str]) -> None:
@@ -179,20 +187,28 @@ def _validate_target_inputs(args: argparse.Namespace) -> None:
     try:
         args.input_bundle = load_task(input_arg, task_name)
         args.task = args.input_bundle.task_name
+    except TaskNotFoundError as exc:
+        if exc.task_name is None:
+            _cause_error(TaskUnusable(task=None, problem=str(exc)))
+        _cause_error(TaskNotFound(task=exc.task_name, available=tuple(map(str, exc.available))))
     except (FileNotFoundError, ProjectLayoutError, ValueError) as exc:
-        _configuration_error(str(exc), code="invalid_input", stage="input_loading")
+        _cause_error(TaskUnusable(task=task_name, problem=str(exc)))
 
     _apply_bundle_profiler_default(args)
 
     if args.resume is None and args.runs_dir is None:
-        workspace = args.input_bundle.manifest.workspace
-        if workspace is not None and workspace.sources:
-            _configuration_error(
-                "A direct project run requires candidate source at the project root. "
-                "Use --runs-dir to provision [workspace] inputs into a copied project.",
-                code="direct_project_materialization_unsupported",
-                stage="input_validation",
-            )
+        _require_project_provisioned(args.input_bundle)
+
+
+def _require_project_provisioned(bundle: InputBundle) -> None:
+    """Refuse a task whose candidate source is provisioned into a copy of the project.
+
+    A run without ``--runs-dir`` starts in the project as it is, so source declared under
+    ``[workspace]`` has nowhere to be placed.
+    """
+    workspace = bundle.manifest.workspace
+    if workspace is not None and workspace.sources:
+        _cause_error(TaskNeedsProvisioning(task=bundle.task_name))
 
 
 def _apply_bundle_profiler_default(args: argparse.Namespace) -> None:
@@ -239,8 +255,6 @@ def _validate_agent(args: argparse.Namespace) -> None:
         _configuration_error("Error: --max-retries-per-round must be >= 1.")
     if args.judge_every < 1:
         _configuration_error("Error: --judge-every must be >= 1.")
-    if args.official_eval_every < 1:
-        _configuration_error("Error: --official-eval-every must be >= 1.")
     if getattr(args, "outer_loop", "agent") == "dynamic" and args.max_in_flight < 1:
         _configuration_error("Error: --max-in-flight must be >= 1.")
     if (

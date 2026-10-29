@@ -27,6 +27,7 @@ Import only the package's entries:
 | `@vibesys/run-state/rounds` | round identity (`RoundKey`), each round's agent phases and timing, planned rounds, outcomes, experiment ownership, the active focus |
 | `@vibesys/run-state/performance` | the client-neutral performance series |
 | `@vibesys/run-state/transcript` | the transcript model (`TranscriptEntry`, `ChatThread`) |
+| `@vibesys/run-state/usage` | what usage records (`UsageRecord`, one per agent turn) add up to: `foldUsage` by role, harness, model, round or run, and `usageOverTime` in equal buckets; it reads only records, so it folds one run or many |
 
 Replay joins, merge helpers, array indexes, and transcript fold machinery are package-private so
 their representation can change without migrating a frontend. The reducer kernel that screen stores
@@ -38,6 +39,6 @@ arrays, records, or entries. Development builds recursively freeze projection-ow
 consumer write fails before it can corrupt another generation. Production builds omit that runtime
 guard and its traversal, so correctness must not depend on the freeze.
 
-Frontends own presentation state outside this package. The TUI adds focus, selection, theme,
-layout, and local chat placeholders. The web client adds transport lifecycle and React state. No
+Frontends own presentation state outside this package. The desktop app adds focus, selection, theme,
+layout, local chat placeholders, transport lifecycle and React state. No
 frontend imports a file below the package's entries or reproduces event-fold behavior.

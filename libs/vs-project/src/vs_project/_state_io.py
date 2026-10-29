@@ -26,6 +26,23 @@ STATE_DOCUMENT_MAX_BYTES = 256 * 1024 * 1024
 """The largest state document read; far past any the framework writes."""
 
 
+def publish_run_link(link: Path, directory: Path) -> Path:
+    """Publish a run's absolute discovery target, replacing only an existing symlink."""
+    index = link.parent
+    index.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if link.exists() and not link.is_symlink():
+        message = f"run index entry is not a symlink: {link}"
+        raise ProjectStateError(message)
+    directory.mkdir(parents=True, exist_ok=True)
+    if link.is_symlink() and link.resolve() == directory.resolve():
+        return link
+    with tempfile.TemporaryDirectory(prefix=".publish-", dir=index) as temporary:
+        staged = Path(temporary) / "link"
+        staged.symlink_to(directory.resolve(), target_is_directory=True)
+        staged.replace(link)
+    return link
+
+
 def _serialize_state_model(model: BaseModel) -> bytes:
     """Return canonical JSON bytes for a typed state model."""
     try:
@@ -202,6 +219,32 @@ def atomic_write_bytes(
             filesystem.remove_temporary(temporary_path)
 
 
+def exclusive_write_bytes(path: Path, contents: bytes) -> bool:
+    """Durably create ``path`` with ``contents``, unless something already exists there.
+
+    The bytes are written and synced under a private name, then linked into place: the
+    kernel's link refuses an existing name, so of two writers racing for one name exactly
+    one creates it, and a reader sees the complete bytes or no file. Returns whether this
+    call created the file; the caller syncs the directory chain it owns.
+    """
+    filesystem = LocalAtomicWriteEffects()
+    temporary_path: Path | None = None
+    try:
+        with filesystem.temporary(path) as (temporary_path, stream):
+            stream.write(contents)
+            stream.flush()
+            filesystem.sync_file(stream)
+        try:
+            with FRAMEWORK_WRITES.creating(path, contents):
+                os.link(temporary_path, path, follow_symlinks=False)
+        except FileExistsError:
+            return False
+        return True
+    finally:
+        if temporary_path is not None:
+            filesystem.remove_temporary(temporary_path)
+
+
 def _atomic_write_bytes(path: Path, contents: bytes) -> None:
     """Replace owned state bytes through the shared durability mechanism."""
     atomic_write_bytes(path, contents)
@@ -266,7 +309,7 @@ def decode_state_document[ModelT: BaseModel](
     *,
     source: Path | str,
     context: dict[str, Any] | None = None,
-    versioned_by: tuple[str, int] | None = None,
+    versioned_by: tuple[str, int | range] | None = None,
 ) -> ModelT:
     """Strictly decode persisted bytes as ``model_type``: the one path every reader uses.
 
@@ -275,13 +318,15 @@ def decode_state_document[ModelT: BaseModel](
     ``StateDocumentDamagedError`` naming ``source`` and the failing fields,
     never echoing the document. ``versioned_by=(field, expected)`` makes a
     document whose integer ``field`` differs from ``expected`` report both
-    versions instead of a schema error.
+    versions instead of a schema error. ``expected`` may be a range of versions, for a model
+    that still reads what older releases wrote; the newest is the one reported.
     """
     if versioned_by is not None:
         field, expected = versioned_by
+        readable = range(expected, expected + 1) if isinstance(expected, int) else expected
         found = _declared_version(data, field)
-        if found is not None and found != expected:
-            raise StateDocumentDamagedError.unsupported_version(source, found, expected)
+        if found is not None and found not in readable:
+            raise StateDocumentDamagedError.unsupported_version(source, found, readable[-1])
     decoded = decode_json(
         data,
         model_type,

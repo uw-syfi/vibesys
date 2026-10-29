@@ -13,6 +13,20 @@ interface FakeDesktop {
   readonly name: 'desktop';
 }
 
+interface Deferred<Value> {
+  readonly promise: Promise<Value>;
+  resolve(value: Value): void;
+}
+
+/** A causal operation controlled by the test, without clocks or scheduler ordering. */
+function deferred<Value>(): Deferred<Value> {
+  let resolve = (_value: Value): void => {};
+  const promise = new Promise<Value>(settle => {
+    resolve = settle;
+  });
+  return {promise, resolve};
+}
+
 interface StartupWorld {
   readonly startup: AppStartup<string, FakeManager, FakeDesktop>;
   readonly lifecycle: AppLifecycle;
@@ -151,4 +165,105 @@ describe('AppStartup', () => {
     expect(w.quitCodes).toEqual([]);
     expect(w.exits).toEqual([]);
   });
+
+  test('release during readiness makes shutdown terminal before manager construction', async () => {
+    const ready = deferred<void>();
+    const events: string[] = [];
+    const startup = new AppStartup<string, FakeManager, FakeDesktop>({
+      ready: () => ready.promise,
+      connectionManager: async () => {
+        events.push('manager');
+        return manager(events);
+      },
+      openWindow: async () => {
+        events.push('window');
+        return {name: 'desktop'};
+      },
+      openInitial: async () => {
+        events.push('open');
+      },
+      log: message => events.push(`log:${message}`),
+    });
+    const quits: number[] = [];
+    const starting = startup.start('initial', {quit: code => quits.push(code)});
+
+    const releasing = startup.release();
+    ready.resolve();
+    await Promise.all([starting, releasing]);
+
+    expect(events).toEqual([]);
+    expect(quits).toEqual([]);
+  });
+
+  test('release joins an admitted manager acquisition and disposes its late result', async () => {
+    const acquisitionStarted = deferred<void>();
+    const acquired = deferred<FakeManager>();
+    const events: string[] = [];
+    const startup = new AppStartup<string, FakeManager, FakeDesktop>({
+      ready: async () => {},
+      connectionManager: () => {
+        events.push('manager');
+        acquisitionStarted.resolve();
+        return acquired.promise;
+      },
+      openWindow: async () => {
+        events.push('window');
+        return {name: 'desktop'};
+      },
+      openInitial: async () => {
+        events.push('open');
+      },
+      log: message => events.push(`log:${message}`),
+    });
+    const quits: number[] = [];
+    const starting = startup.start('initial', {quit: code => quits.push(code)});
+    await acquisitionStarted.promise;
+
+    const releasing = startup.release().then(() => {
+      events.push('released');
+    });
+    acquired.resolve(manager(events));
+    await Promise.all([starting, releasing]);
+
+    expect(events).toEqual(['manager', 'release', 'released']);
+    expect(quits).toEqual([]);
+  });
+
+  test('release while window construction is pending stops the initial launch', async () => {
+    const windowStarted = deferred<void>();
+    const opened = deferred<FakeDesktop>();
+    const events: string[] = [];
+    const startup = new AppStartup<string, FakeManager, FakeDesktop>({
+      ready: async () => {},
+      connectionManager: async () => manager(events),
+      openWindow: () => {
+        events.push('window');
+        windowStarted.resolve();
+        return opened.promise;
+      },
+      openInitial: async () => {
+        events.push('open');
+      },
+      log: message => events.push(`log:${message}`),
+    });
+    const quits: number[] = [];
+    const starting = startup.start('initial', {quit: code => quits.push(code)});
+    await windowStarted.promise;
+
+    await startup.release();
+    opened.resolve({name: 'desktop'});
+    await starting;
+
+    expect(events).toEqual(['window', 'release']);
+    expect(quits).toEqual([]);
+  });
 });
+
+function manager(events: string[]): FakeManager {
+  return {
+    name: 'manager',
+    async [Symbol.asyncDispose](): Promise<void> {
+      events.push('release');
+    },
+  };
+}

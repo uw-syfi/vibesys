@@ -54,6 +54,7 @@ func exactFIFOModel(capacity int) porcupine.Model {
 				return false, state
 			}
 		},
+		Hash: func(state any) uint64 { return hashValues(state.([]uint64)...) },
 		Equal: func(first, second any) bool {
 			return slices.Equal(first.([]uint64), second.([]uint64))
 		},

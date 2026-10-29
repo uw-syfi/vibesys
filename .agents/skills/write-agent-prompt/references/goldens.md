@@ -18,7 +18,7 @@ fragment name. Goldens exist for:
   execution, so its diff shows which keys changed and not how. Render the
   changed key through the domain-section renderer to read the text.
 - Run-environment notes, hypothesis notices, profile-focus ledger text,
-  operator constraints folded into the objective, and TUI chat prompts.
+  operator constraints folded into the objective, and interactive chat prompts.
 
 Byte-exact goldens write the fixture instead of comparing when
 `UPDATE_PROMPT_SNAPSHOTS=1` is set.

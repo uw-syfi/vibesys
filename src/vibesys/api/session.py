@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
+from vs_runtime.api.infrastructure import StopMode
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -12,6 +14,7 @@ if TYPE_CHECKING:
     from vibesys.api.contracts import EventSink, RunResult, RunView
     from vibesys.plugin_catalog import OrchestrationRegistry
     from vibesys.run.contracts import RunRequest
+    from vs_runtime.api.infrastructure import ControlAck, ControlRequest
 
 
 class RunQuery(Protocol):
@@ -25,13 +28,24 @@ class RunQuery(Protocol):
 class RunControl(Protocol):
     """Messages to the run loop, the sole writer of run state.
 
-    `steer`/`pause`/`resume`/`stop` are messages to the writer, which holds
-    an exclusive write lease, not writes performed by the caller. `pause`
+    `submit` is the one entry point every control ingress calls (the server's socket, the
+    headless inbox): it takes a `ControlRequest`, the one schema of operator controls, and
+    applies it through the per-action methods below. `steer`/`pause`/`resume`/`stop` are
+    messages to the writer, which holds an exclusive write lease, not writes performed by
+    the caller. `pause`
     means: reach the next safe boundary, checkpoint durable state, and
     release the lease. `resume` means: acquire the lease, restore the
     checkpoint, and continue. A cross-process resume is
     `Runs.resume(RunRequest(resume=ResumeRef(run_id), ...))`.
     """
+
+    def submit(self, request: ControlRequest) -> ControlAck:
+        """Apply one operator control request and say what became of it.
+
+        Once per ``control_id``: the same request again returns the first answer and changes
+        nothing; a different request under the same id answers ``ControlStatus.CONFLICT``.
+        """
+        ...
 
     def steer(self, text: str) -> None:
         """Send free-text steering input to the active run."""
@@ -42,18 +56,30 @@ class RunControl(Protocol):
         ...
 
     def resume(self) -> None:
-        """Request the run acquire the write lease and continue from checkpoint."""
-        ...
+        """Request the run acquire the write lease and continue from checkpoint.
 
-    def resume_with_fallback(self) -> None:
-        """Resume, and switch a run paused on a provider capacity limit to its fallback.
-
-        A run with no configured fallback resumes as `resume` does.
+        A stop only escalates: while a stop is pending, a resume changes nothing.
         """
         ...
 
-    def stop(self) -> None:
-        """Request the run terminate."""
+    def resume_with_fallback(self) -> bool:
+        """Resume, and switch a run paused on a provider capacity limit to its fallback.
+
+        False, changing nothing, when the run is not paused on a capacity limit. A run with
+        no configured fallback resumes as `resume` does.
+        """
+        ...
+
+    def resume_when_capacity_returns(self) -> bool:
+        """Keep a run paused on a provider capacity limit paused until capacity returns.
+
+        False, changing nothing, when the run is not paused on a capacity limit. `resume`
+        ends the wait at once and `pause` cancels it.
+        """
+        ...
+
+    def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
+        """Request the run terminate, draining or cancelling work in flight as ``mode`` says."""
         ...
 
 

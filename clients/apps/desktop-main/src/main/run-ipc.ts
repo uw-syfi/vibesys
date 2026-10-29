@@ -1,13 +1,19 @@
 /**
- * Admission for the run page's privileged protocol connection.
+ * Admission for a shell document's privileged protocol connection to its run.
  *
  * Electron wiring translates an incoming MessagePort into `PendingRunPort`; this module owns the
- * decision to start and expose that port, or close it without handing it to the run controller.
+ * decision to start and expose that port, or close it without handing it to a window.
+ *
+ * `ipcMain` is one process-wide channel, shared by every open window: a connect Electron delivers
+ * to it is not scoped to the window whose document actually sent it. Admission is therefore one
+ * registry of competing windows, not one independent listener per window — a second window's
+ * listener would otherwise see the first window's rightfully admitted connect, fail its own
+ * sender-id check, and close the port out from under the window that just started it.
  */
 import type {RelayPort} from '@vibesys/feature-run-control/main';
 import {isSameAppPage} from './app-assets.js';
 
-/** A renderer port that has not crossed the run-page authority boundary yet. */
+/** A renderer port that has not crossed the run authority boundary yet. */
 export interface PendingRunPort extends RelayPort {
   start(): void;
 }
@@ -22,6 +28,14 @@ export interface RunConnectEvent {
 /** The narrow IPC boundary needed by the run connection binder. */
 export interface RunIpc {
   onConnect(listener: (event: RunConnectEvent) => void): void;
+}
+
+/** One window's admission claim: its run-showing document, and where it hands off an admitted port. */
+export interface RunPageAdmission {
+  /** This window's run-showing webContents id, or null while its surface binds no run. */
+  currentSenderId(): number | null;
+  /** Hand an admitted port to this window's run. */
+  connect(port: RelayPort): void;
 }
 
 interface AdoptedRunPort {
@@ -87,37 +101,61 @@ function describe(error: unknown): string {
 }
 
 /**
- * Admit connection ports only from the current run view's exact document.
+ * The one `ipcMain` listener this process installs for the connect channel of the pages that show
+ * runs (`expectedUrl`: the app shell, which shows a run in its own document).
  *
- * `currentSenderId` is read for every event because replacing a run page immediately retires the
- * old WebContents authority. Rejected ports are closed here and never reach `connect`. `connect`
- * synchronously installs the admitted owner's message and close listeners before returning; only
- * then does this boundary start Electron's queued delivery.
+ * Every open window registers its admission for as long as it exists; `register`'s return value
+ * withdraws it, which every registrant must call exactly once. A connect is admitted by whichever
+ * registered window's run-showing document sent it; a port no registered window claims is refused and
+ * closed here, never handed to more than one window and never silently dropped. `connect` is called
+ * with the admitted port's feature-owned side, with its message and close listeners already
+ * installed synchronously; only then does this boundary start Electron's queued delivery.
  */
-export function bindRunIpc(
-  ipc: RunIpc,
-  expectedUrl: string,
-  currentSenderId: () => number | null,
-  connect: (port: RelayPort) => void,
-  log: (message: string) => void,
-): void {
-  ipc.onConnect(event => {
+export class RunIpcRegistry {
+  readonly #expectedUrl: string;
+  readonly #log: (message: string) => void;
+  readonly #pages = new Set<RunPageAdmission>();
+
+  constructor(ipc: RunIpc, expectedUrl: string, log: (message: string) => void) {
+    this.#expectedUrl = expectedUrl;
+    this.#log = log;
+    ipc.onConnect(event => this.#admit(event));
+  }
+
+  /** Compete `page`'s admission for every future connect; its return value withdraws it. */
+  #expected(senderUrl: string | null): boolean {
+    return isSameAppPage(senderUrl, this.#expectedUrl);
+  }
+
+  register(page: RunPageAdmission): () => void {
+    this.#pages.add(page);
+    return () => this.#pages.delete(page);
+  }
+
+  #admit(event: RunConnectEvent): void {
     const port = event.port;
     if (port === null) return;
-    if (event.senderId !== currentSenderId() || !isSameAppPage(event.senderUrl, expectedUrl)) {
-      log('refused a connection from a view that is not bound to a run');
-      port.close();
-      return;
+    if (this.#expected(event.senderUrl)) {
+      for (const page of this.#pages) {
+        if (page.currentSenderId() !== event.senderId) continue;
+        this.#activate(port, page);
+        return;
+      }
     }
+    this.#log('refused a connection from a view that is not bound to a run');
+    port.close();
+  }
+
+  #activate(port: PendingRunPort, page: RunPageAdmission): void {
     let adopted: AdoptedRunPort | null = null;
     try {
       adopted = adopt(port);
-      connect(adopted.relay);
+      page.connect(adopted.relay);
       adopted.start();
     } catch (error) {
       if (adopted === null) port.close();
       else adopted.dispose();
-      log(`could not activate the run page connection: ${describe(error)}`);
+      this.#log(`could not activate the run connection: ${describe(error)}`);
     }
-  });
+  }
 }

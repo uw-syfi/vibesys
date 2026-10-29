@@ -28,10 +28,66 @@ The selected run environment expands it to the candidate repository root before
 running the resolved command. This is necessary for tools such as `go -C`,
 which change cwd.
 
+## Candidate outputs
+
+A package whose evaluator loads a file the candidate builds names it:
+
+```toml
+candidate_outputs = ["queue-candidate.so"]
+```
+
+Each entry is a normalized workspace-relative file path outside `.git/` and
+`.vibesys/`. A task using the package must declare a `[build]` that produces
+every entry; `vibesys preflight` and the example registry's `candidate-build`
+check refuse one that does not. After the confined build, VibeSys verifies each
+output (a regular file, not a symlink), records it outside the workspace, places
+it at its path in the checkout where each trusted command runs, and passes the
+paths, `:`-joined, in `VIBESYS_CANDIDATE_OUTPUTS`.
+
 The local collection is the initial package source. Published packages can
 later provide the same metadata and entry-point names through a registry-backed
 resolver. Repository-specific checks and workloads belong with their task, not
 in this directory.
+
+## Go modules
+
+A source package whose entrypoints use `go run` declares its package-relative
+module root explicitly:
+
+```toml
+toolchains = ["go"]
+go_module = "."
+
+[entrypoints]
+example-check = ["go", "-C", "${PACKAGE_ROOT}", "run", "."]
+```
+
+The declared directory must contain both `go.mod` and `go.sum`; a `go run`
+entrypoint without this declaration is invalid package metadata. Module roots
+cannot live below package paths excluded from the immutable content digest
+(`.git`, `__pycache__`, or `target`). Local `replace` directives use Go's
+single-line or block form and may use a double-quoted path without escapes;
+every replacement module is checked recursively. An absolute target, a target
+outside the evaluator package, a target below a digest-excluded component, or
+an opaque replacement syntax is rejected with the declaring `go.mod` line and directive.
+This keeps every source file that can affect the module graph inside the package
+digest and therefore inside its cache identity. During trusted environment
+preparation, VibeSys downloads the complete module graph into an
+operator-owned cache keyed by the immutable evaluator-package digest, then
+verifies the graph with proxy and checksum-database access disabled. Docker
+builds a missing cache in a short-lived sandbox using the exact target image;
+local and remote environments prepare it through their existing pre-readiness
+setup boundary. Docker revalidates reused cache contents offline in the target
+image before every mount. Slurm stages the verified cache as a read-only
+support tree.
+
+Every trusted command from that package, including Python or shell wrappers
+that launch Go children, receives the prepared `GOMODCACHE` and runs with
+`GOPROXY=off`, `GOSUMDB=off`, `GOWORK=off`, `GOTOOLCHAIN=local`, and
+`-mod=readonly`. Candidate commands do not inherit this policy. This is why the
+hotel-correctness wrapper can compose the exact resolved microservice package
+through a temporary modfile without downloading dependencies when its gate
+starts.
 
 ## Cargo tools from Git
 
@@ -55,7 +111,13 @@ The revision must be a full lowercase commit SHA. VibeSys always passes
 occupy one complete entrypoint argument and may reference only a binary from
 the corresponding declaration.
 
-VibeSys installs tools in the environment that executes the evaluator. Local
+VibeSys installs tools in the environment that executes the evaluator. A
+host install looks for `cargo` only when a tool is not already installed and
+verified, first on the `PATH` of the user's login shell (the lookup that finds
+provider CLIs), then on the process's own, so a run started over a plain `ssh`
+command or by the desktop helper finds `~/.cargo/bin` as a terminal run does.
+When none has `cargo`, the install fails naming the tool, the `PATH` it searched
+and the fix (install Rust for the user, or source `~/.cargo/env` from `~/.profile`). Local
 runs use an operator-owned cache outside the candidate workspace. Docker uses
 a short-lived sandbox with the target image to build and verify tools, then
 mounts only the selected installation roots read-only into the agent sandbox.
@@ -69,7 +131,7 @@ receipt, and binary SHA256 verification. Modal and SkyPilot exclude reserved
 evaluator package, tool, and toolchain paths from candidate staging and replace
 the tool, toolchain, and bootstrap directories during setup. Cargo runs from a
 fresh working directory and ignores candidate Cargo, Rust, and Git configuration
-overrides. Remote Go evaluator launches disable parent `go.work` discovery, and
+overrides. Remote Go evaluator launches use only the prepared offline module cache, and
 the queue evaluator copies its trusted Rust helper to an isolated build directory
 before invoking Cargo.
 

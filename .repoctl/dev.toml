@@ -1,0 +1,41 @@
+# `repoctl dev`: build this checkout's desktop app and open it on a profile of its own, optionally
+# after shipping the committed HEAD to a machine over ssh. Paths are relative to the repository
+# root, and `build/` is ignored by git. See docs/contributing/desktop-development.md.
+
+[local]
+client_directory = "clients"
+# The same build `test:e2e` runs: turbo builds the app and every workspace package it uses, and
+# skips what is current. `pnpm start` alone builds only the app package.
+build_command = ["pnpm", "exec", "turbo", "run", "build", "--filter=@vibesys/app-desktop-main..."]
+python_sync_command = ["uv", "sync"]
+install_command = ["pnpm", "install", "--frozen-lockfile"]
+# Install runs when a digest of these files differs from the one recorded after the last success.
+install_inputs = [
+  "clients/pnpm-lock.yaml",
+  "clients/pnpm-workspace.yaml",
+  "clients/package.json",
+  "clients/apps/*/package.json",
+  "clients/features/*/package.json",
+  "clients/libs/*/package.json",
+]
+install_stamp = "build/dev/install.stamp"
+app_directory = "clients/apps/desktop-main"
+app_command = ["pnpm", "exec", "electron", "."]
+# The app's own settings, recent runs and Chromium data go here, so other Electron apps and the
+# installed VibeSys keep theirs.
+app_env = { VIBESYS_USER_DATA_DIR = "{profile}" }
+profile_directory = "build/dev/desktop-profile"
+
+[machine]
+# The desktop app's saved hosts files, the source of truth for each machine's checkout; the first
+# that exists is read (macOS, then Linux). `--checkout` overrides it.
+app_hosts_files = ["~/Library/Application Support/VibeSys/hosts.json", "~/.config/VibeSys/hosts.json"]
+# Ref on the machine that receives HEAD; the checkout is then switched to that commit, detached.
+ship_ref = "refs/vibesys-dev/head"
+sync_command = ["uv", "sync"]
+# The command of the app's ssh exec channel (`desktop-connection.md`, "Bootstrap"), run in the checkout.
+helper_command = ["uv", "run", "--no-sync", "python", "-I", "-m", "entrypoints.host_helper"]
+# Where `uv` lives when the non-interactive ssh shell does not have it on PATH.
+path_directories = ["$HOME/.local/bin", "$HOME/.cargo/bin", "/opt/homebrew/bin", "/usr/local/bin"]
+hello_seconds = 60
+hello_poll_seconds = 3

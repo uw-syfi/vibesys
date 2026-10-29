@@ -6,6 +6,12 @@
     },
     {
       "path": "./tsconfig.test.json"
+    },
+    {
+      "path": "./tsconfig.intents.json"
+    },
+    {
+      "path": "./tsconfig.chat.json"
     }
   ]
 }

@@ -32,6 +32,7 @@ EXCHANGES = Exchanges(
 
 ROUTER = Role(
     name="router",
+    title="Router",
     agent="orchestrator",
     prompt="pre_round.j2",
     reply=PreRoundDecision,
@@ -52,10 +53,11 @@ prompt and recorded runs are the designer's.
 
 PROFILER = Role(
     name="profiler",
+    title="Profiler",
     prompt="profiler.j2",
     reply=ProfilerSummary,
     workspace=None,
-    access=Access.WRITE_ARTIFACTS,
+    access=Access.READ_ONLY,
     turn_time=hours(1),
     corrections=1,
     lost_turns=2,
@@ -63,10 +65,11 @@ PROFILER = Role(
     charge=Charge.TURN,
     exchanges=Exchanges(correction="reply_correction.j2"),
 )
-"""Collects and analyses a profile, writing bounded evidence below `profile/`."""
+"""Collects and analyses a profile, writing nothing in the project: its reply is the evidence."""
 
 IMPLEMENTER = Role(
     name="implementer",
+    title="Implementer",
     prompt="implement.j2",
     reply=ImplementerResponse,
     workspace=WorkspaceMode.ISOLATED_CHILD,
@@ -83,6 +86,7 @@ IMPLEMENTER = Role(
 
 JUDGE = Role(
     name="judge",
+    title="Judge",
     prompt="judge.j2",
     reply=JudgeResponse,
     workspace=WorkspaceMode.READ_ONLY_REVISION,

@@ -4,6 +4,9 @@ from vs_sim.child import ChildDiedError, run_in_child
 from vs_sim.concurrency_contracts import (
     NetworkContract,
     NetworkUnderTest,
+    OsThreadsBootstrapProbe,
+    ReservableThreadsContract,
+    ReservableThreadsUnderTest,
     ThreadsContract,
     ThreadsUnderTest,
 )
@@ -14,6 +17,8 @@ from vs_sim.contracts import (
     CommandProbeContract,
     ForegroundLauncherContract,
     ForegroundUnderTest,
+    LockOwnershipContract,
+    LockOwnershipUnderTest,
     LoopbackHttpContract,
     LoopbackHttpUnderTest,
     PipedProcessContract,
@@ -43,6 +48,7 @@ from vs_sim.crash import (
     swept,
 )
 from vs_sim.depth import Depth, depth, examples, set_depth, using_depth
+from vs_sim.fake_byte_source import FakeByteSource
 from vs_sim.fake_piped_process import ScriptedPipedProcess
 from vs_sim.fake_signal_relay import FakeMainThreadWake, FakeSignalRelay
 from vs_sim.fakes import (
@@ -62,6 +68,8 @@ from vs_sim.fakes import (
     ProcessScript,
     ProcessStartRefusedError,
     RefusingProcesses,
+    RefusingReservableThreads,
+    RefusingThreads,
     ScriptedProbe,
     ScriptedStreamingCommand,
     StreamedRun,
@@ -73,6 +81,12 @@ from vs_sim.gate import Gate, arrival, start_thread, wait_until_started, wait_un
 from vs_sim.host_clock import CrashableClock, HostCrashedError, ProbedClock, clock_from
 from vs_sim.hostile_input import DEEP_NESTING, OVERSIZED_BYTES, hostile_json_frames
 from vs_sim.manual import ManualClock
+from vs_sim.output_contracts import (
+    ByteSourceContract,
+    ByteSourceUnderTest,
+    OutputSinkContract,
+    OutputSinkUnderTest,
+)
 from vs_sim.pairwise import pairwise_rows
 from vs_sim.seeds import (
     SCHEDULE_SEED_OPTION,
@@ -143,6 +157,8 @@ __all__ = [
     "WORKER_GUARD_S",
     "WORLDS",
     "BlockingRunnerContract",
+    "ByteSourceContract",
+    "ByteSourceUnderTest",
     "CallCounter",
     "Changes",
     "ChildDiedError",
@@ -153,6 +169,7 @@ __all__ = [
     "Depth",
     "End",
     "EventTrace",
+    "FakeByteSource",
     "FakeForegroundChild",
     "FakeForegroundLauncher",
     "FakeLoopbackHttp",
@@ -174,6 +191,8 @@ __all__ = [
     "InlineBlockingRunner",
     "LinkFault",
     "LinkFaultKind",
+    "LockOwnershipContract",
+    "LockOwnershipUnderTest",
     "LoopbackHttpContract",
     "LoopbackHttpUnderTest",
     "MainThreadWakeContract",
@@ -181,6 +200,9 @@ __all__ = [
     "ManualClock",
     "NetworkContract",
     "NetworkUnderTest",
+    "OsThreadsBootstrapProbe",
+    "OutputSinkContract",
+    "OutputSinkUnderTest",
     "PipedProcessContract",
     "PipedStart",
     "PipedUnderTest",
@@ -195,7 +217,11 @@ __all__ = [
     "ProcessesContract",
     "ProcessesUnderTest",
     "RefusingProcesses",
+    "RefusingReservableThreads",
+    "RefusingThreads",
     "RelayUnderTest",
+    "ReservableThreadsContract",
+    "ReservableThreadsUnderTest",
     "RestartLimitError",
     "Restarted",
     "RunnerUnderTest",

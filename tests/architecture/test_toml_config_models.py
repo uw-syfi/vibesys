@@ -36,8 +36,14 @@ _ALLOWED: dict[tuple[str, str], str] = {
     ("src/entrypoints/launcher.py", "source_checkout_root"): (
         "identifies the checkout by pyproject name; not a VibeSys config surface"
     ),
-    ("src/server/host_helper_os.py", "_declares_vibesys"): (
-        "tells a person picking a path which directories are VibeSys checkouts by pyproject name"
+    ("src/server/host_helper_machine.py", "vibesys_version"): (
+        "recognizes a VibeSys checkout by its pyproject name and reads its version"
+    ),
+    ("src/server/host_compute_runtime.py", "_operator_cluster"): (
+        "reads the operator slurm.toml's [slurm] table, which vs_slurm's SlurmConfig validates strictly"
+    ),
+    ("src/server/host_compute_runtime.py", "modal"): (
+        "reads Modal's own config file, whose schema VibeSys does not own, for whether a token is held"
     ),
     ("libs/vs-runtime/src/vs_runtime/_input_project.py", "_path_sources"): (
         "reads a third-party pyproject.toml (uv sources)"

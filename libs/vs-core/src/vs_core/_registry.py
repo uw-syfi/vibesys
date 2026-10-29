@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, get_args, get_origin, overload
+from typing import TYPE_CHECKING, Final, Literal, get_args, get_origin, overload
 
-from pydantic import JsonValue, TypeAdapter, ValidationError
+from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
+from ._envelope_migrations import (
+    OLDEST_SUPPORTED_ENVELOPE_VERSION,
+    upgrade_envelope_document,
+)
 from ._outcomes import prove_outcome
 from ._values import (
     ImmutableSchemaError,
@@ -33,12 +37,22 @@ from .types.records import OperationResult, RequestObserved
 from .types.sessions import TurnSpec
 from .types.strategy import Command, Operation, StrategyState, Wait
 
-ENVELOPE_SCHEMA_VERSION = 12
+ENVELOPE_SCHEMA_VERSION = 42
+"""The version of the envelope a run writes now.
+
+A shape change that every saved envelope survives (a new field with a default, a closed set or
+union that gains a member, a looser bound) keeps it: ``scripts/check_persisted_schema_compat.py``
+accepts exactly those under an unchanged version. Any other change, and a change in what a
+stored value means, raises it. Unenforced: telling a meaning change from a refactor needs a
+reviewer. Raising it needs, in the same change, the migration of the previous version in
+``vs_core._envelope_migrations`` and a fixture envelope saved by the previous version's code
+(``tests/envelopes``) that the migration rewrites; ``tests/test_envelope_migrations.py`` fails
+without them. A run saved at any version from the oldest supported one resumes through that
+chain.
+"""
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from pydantic import BaseModel
 
     from .types.common import Observation, RequestId
     from .types.kernel import CoreState, RunEnvelope
@@ -107,15 +121,6 @@ class OperationMigration:
 
     source: OperationSchemaRef
     target: OperationSchemaRef
-    rewrite: Callable[[str], str]
-
-
-@dataclass(frozen=True)
-class EnvelopeMigration:
-    """Explicit pure conversion, never an implicit decode fallback."""
-
-    source_version: int
-    target_version: int
     rewrite: Callable[[str], str]
 
 
@@ -258,21 +263,6 @@ class OperationRegistry:
         self.decode(target)
         return target
 
-    def migrate_envelope[S: StrategyState](
-        self, model: type[RunEnvelope[S]], source: str, migration: EnvelopeMigration
-    ) -> RunEnvelope[S]:
-        """Apply a selected version conversion and strictly validate the full result."""
-        version = _read_envelope_version(source, ("migration", "source"))
-        if version != migration.source_version:
-            raise ContractError(("migration", "source"), "envelope source version mismatch")
-        if migration.target_version != ENVELOPE_SCHEMA_VERSION:
-            raise ContractError(("migration", "target"), "unregistered envelope target version")
-        transformed = migration.rewrite(source)
-        envelope = self.decode_envelope(model, transformed)
-        if envelope.schema_version != migration.target_version:
-            raise ContractError(("migration", "target"), "envelope result version mismatch")
-        return envelope
-
     def encode_outcome(self, schema: OperationSchemaRef, outcome: BaseModel) -> str:
         """Validate exact registered outcome identity before durable serialization."""
         entry = self._find(schema)
@@ -336,7 +326,12 @@ class OperationRegistry:
         record, which embeds it) calls this once instead of paying for a throwaway
         canonical encoding.
         """
-        _validate_envelope_version(envelope.schema_version)
+        if envelope.schema_version != ENVELOPE_SCHEMA_VERSION:
+            raise ContractError(
+                ("schema_version",),
+                f"envelope version {envelope.schema_version!r} is not the version "
+                f"{ENVELOPE_SCHEMA_VERSION} a run writes",
+            )
         self.validate_core(envelope.core)
         validate_immutable_schema(type(envelope.strategy))
         if not deeply_immutable(envelope):
@@ -362,10 +357,16 @@ class OperationRegistry:
     def decode_envelope[S: StrategyState](
         self, model: type[RunEnvelope[S]], source: str
     ) -> RunEnvelope[S]:
-        """Resume only with matching schemas and the same registered codec."""
-        _validate_envelope_version(_read_envelope_version(source, ("schema_version",)))
-        envelope = model.model_validate_json(
-            source, context={"operation_registry": self, "persisted_operation": True}
+        """Resume with matching schemas and the same registered codec.
+
+        An envelope of an older supported version is brought to the current one first
+        (`upgrade_envelope`); every other version is refused.
+        """
+        envelope = decode_stored(
+            model,
+            source,
+            ("schema_version",),
+            context={"operation_registry": self, "persisted_operation": True},
         )
         if envelope.strategy_id != envelope.core.run.declaration.strategy_id:
             raise ContractError(("strategy_id",), "strategy declaration mismatch")
@@ -422,15 +423,104 @@ _ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 """Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
 
 
-def check_envelope_version(source: str | bytes, at: tuple[str, ...]) -> None:
-    """Refuse a stored envelope of another version before decoding anything of its shape.
+_NEWER_WRITER_ERRORS: Final = frozenset(
+    {
+        "extra_forbidden",
+        "unexpected_keyword_argument",
+        "literal_error",
+        "enum",
+        "union_tag_invalid",
+        "greater_than",
+        "greater_than_equal",
+        "less_than",
+        "less_than_equal",
+        "string_too_long",
+        "string_too_short",
+        "too_long",
+        "too_short",
+    }
+)
+"""The validation errors a compatible extension of the shape causes in a build that predates it.
 
-    ``source`` is the stored JSON document and ``at`` the keys leading to the envelope's
-    ``schema_version`` inside it. The shape of an envelope changes with its version, so
-    validating an old one in full fails on whichever field moved, with an error that does not
-    say the run is from another VibeSys; this check says it first.
+A change that every saved document survives keeps ``ENVELOPE_SCHEMA_VERSION``: a new field, a
+closed set that gains a member, a looser bound (``vs_core.testing.persisted_schema``). A
+document that uses one fails an older build with exactly these errors.
+"""
+
+
+def decode_stored[M: BaseModel](
+    model: type[M], source: str | bytes, at: tuple[str, ...], *, context: dict[str, object]
+) -> M:
+    """The stored JSON ``source``, holding an envelope at ``at``, validated as ``model``.
+
+    The envelope is brought to the current version first (`upgrade_envelope`). A document
+    stored at the current version that fails on what a compatible later change adds (a
+    field, a closed-set member, a bound this build does not have) was written by a newer
+    VibeSys that kept the version: it is refused as such, naming those places. Any other
+    failure is the validation error itself.
     """
-    _validate_envelope_version(_read_envelope_version(source, at, at))
+    upgraded, stored = _upgrade(source, at)
+    try:
+        return model.model_validate_json(upgraded, context=context)
+    except ValidationError as error:
+        unknown = [
+            item
+            for item in error.errors(include_url=False, include_context=False)
+            if item["type"] in _NEWER_WRITER_ERRORS
+        ]
+        if stored != ENVELOPE_SCHEMA_VERSION or not unknown:
+            raise
+        # A union reports every branch it tried, so name each unknown place, not one guess.
+        places = "; ".join(
+            f"{'.'.join(map(str, item['loc']))} ({item['msg'].lower()})" for item in unknown[:3]
+        )
+        raise ContractError(
+            tuple(unknown[0]["loc"]),
+            f"this VibeSys does not know {places} in an envelope of its own version "
+            f"{stored}: it was written by a newer VibeSys; resume it with that version",
+        ) from error
+
+
+def upgrade_envelope(source: str | bytes, at: tuple[str, ...]) -> str:
+    """The stored JSON ``source`` with its envelope at the current version.
+
+    ``at`` is the keys leading to the envelope's ``schema_version`` inside ``source``. An
+    envelope of the current version is returned as it is. One of an older supported version
+    goes through the migration chain (`vs_core._envelope_migrations`), which the caller then
+    validates in full. A version older than the oldest supported one, or newer than this
+    VibeSys writes, is refused before anything of its shape is validated, with an error that
+    names the version and who wrote it: validating it in full would fail on whichever field
+    moved.
+    """
+    return _upgrade(source, at)[0]
+
+
+def _upgrade(source: str | bytes, at: tuple[str, ...]) -> tuple[str, int]:
+    """`upgrade_envelope`, and the version the envelope was stored at."""
+    version = _read_envelope_version(source, at, at)
+    _validate_envelope_version(version)
+    if version == ENVELOPE_SCHEMA_VERSION:
+        return (source if isinstance(source, str) else source.decode()), version
+    document = _ANY_JSON.validate_json(source)
+    holder = _holder(document, at[:-1], at)
+    upgraded = upgrade_envelope_document(holder, to=ENVELOPE_SCHEMA_VERSION)
+    if len(at) == 1:
+        document = upgraded
+    else:
+        _holder(document, at[:-2], at)[at[-2]] = upgraded
+    return _ANY_JSON.dump_json(document).decode(), version
+
+
+def _holder(
+    document: JsonValue, keys: tuple[str, ...], at: tuple[str, ...]
+) -> dict[str, JsonValue]:
+    """The object ``keys`` leads to in ``document``; ``at`` names the envelope in the error."""
+    found = document
+    for key in keys:
+        found = found.get(key) if isinstance(found, dict) else None
+    if not isinstance(found, dict):
+        raise ContractError(at, "envelope object required")
+    return found
 
 
 def _read_envelope_version(
@@ -449,18 +539,22 @@ def _read_envelope_version(
 
 
 def _validate_envelope_version(version: object) -> None:
-    if type(version) is not int or version != ENVELOPE_SCHEMA_VERSION:
-        older = type(version) is int and version < ENVELOPE_SCHEMA_VERSION
-        origin = (
-            "it was written by an older VibeSys and there is no migration; start a new run"
-            if older
-            else "it was written by a newer VibeSys; resume it with that version"
-        )
-        raise ContractError(
-            ("schema_version",),
-            f"envelope version {version!r} is not supported; version {ENVELOPE_SCHEMA_VERSION} "
-            f"required: {origin}",
-        )
+    if (
+        type(version) is int
+        and OLDEST_SUPPORTED_ENVELOPE_VERSION <= version <= ENVELOPE_SCHEMA_VERSION
+    ):
+        return
+    older = type(version) is int and version < OLDEST_SUPPORTED_ENVELOPE_VERSION
+    origin = (
+        "it was written by an older VibeSys than can be resumed; start a new run"
+        if older
+        else "it was written by a newer VibeSys; resume it with that version"
+    )
+    raise ContractError(
+        ("schema_version",),
+        f"envelope version {version!r} is not supported; versions "
+        f"{OLDEST_SUPPORTED_ENVELOPE_VERSION} to {ENVELOPE_SCHEMA_VERSION} are: {origin}",
+    )
 
 
 def _normalize[M: BaseModel](

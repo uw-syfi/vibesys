@@ -1,0 +1,145 @@
+{
+  "format": 1,
+  "name": "startup",
+  "description": "Startup stages and process streams are recorded natively.",
+  "runId": "20261015-163047",
+  "state": "live",
+  "objective": {
+    "text": "Maximize trusted end-to-end throughput of the MPMC queue.",
+    "metric": "total_ops_per_sec",
+    "unit": "ops/s",
+    "direction": "max"
+  },
+  "events": [
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "run_started",
+      "data": {
+        "kind": "run_started",
+        "overview": {
+          "objective": {
+            "text": "Maximize trusted end-to-end throughput of the MPMC queue.",
+            "metric": "total_ops_per_sec",
+            "unit": "ops/s",
+            "direction": "max",
+            "correctness_check": []
+          }
+        },
+        "outer_loop": "dynamic",
+        "input": "objective.md",
+        "expected_roles": [
+          "orchestrator",
+          "implementer",
+          "judge"
+        ]
+      },
+      "sequence": 1
+    },
+    {
+      "sequence": 2,
+      "type": "run_startup_progress",
+      "timestamp": "2026-10-15T16:36:21Z",
+      "data": {
+        "kind": "run_startup_progress",
+        "stage": "building_image",
+        "state": "finished",
+        "elapsed_seconds": 330
+      }
+    },
+    {
+      "sequence": 3,
+      "type": "run_startup_progress",
+      "timestamp": "2026-10-15T16:36:21Z",
+      "data": {
+        "kind": "run_startup_progress",
+        "stage": "starting_container",
+        "state": "running"
+      }
+    }
+  ],
+  "nativeStreams": [
+    {
+      "reference": {
+        "id": "startup-container",
+        "kind": "STREAM_KIND_LOG",
+        "title": "container output",
+        "state": "STREAM_STATE_OPENED",
+        "owner": {
+          "startup": "STARTUP_STAGE_STARTING_CONTAINER"
+        }
+      },
+      "text": "[docker] starting container\n[readiness] claude: binary ok\n"
+    },
+    {
+      "reference": {
+        "id": "candidate-build",
+        "kind": "STREAM_KIND_LOG",
+        "title": "cargo build",
+        "state": "STREAM_STATE_ENDED",
+        "length": "25",
+        "owner": {
+          "gate": {
+            "execution": "input-measurement",
+            "gate": "LOG_GATE_BUILD",
+            "attempt": 1
+          }
+        }
+      },
+      "text": "Finished release profile\n"
+    },
+    {
+      "reference": {
+        "id": "tool-build",
+        "kind": "STREAM_KIND_LOG",
+        "title": "tool output",
+        "state": "STREAM_STATE_ENDED",
+        "length": "11",
+        "owner": {
+          "toolBuild": "perf"
+        }
+      },
+      "text": "perf ready\n"
+    },
+    {
+      "reference": {
+        "id": "narration",
+        "kind": "STREAM_KIND_LOG",
+        "title": "run output",
+        "state": "STREAM_STATE_OPENED",
+        "owner": {
+          "narration": true
+        }
+      },
+      "text": "16:36:20 INFO container ready\n"
+    }
+  ],
+  "nativeTransitions": [
+    {
+      "name": "startup-running",
+      "lifecycle": {
+        "running": {}
+      }
+    },
+    {
+      "name": "startup-draining",
+      "lifecycle": {
+        "draining": {
+          "goal": "DRAIN_GOAL_PARK"
+        }
+      }
+    },
+    {
+      "name": "startup-ended",
+      "lifecycle": {
+        "ended": {
+          "outcome": "OUTCOME_FAILED",
+          "resumable": true,
+          "failure": {
+            "kind": "RUN_FAILURE_KIND_DEADLINE",
+            "reason": "W6’s benchmark timed out after 300 s."
+          }
+        }
+      }
+    }
+  ]
+}

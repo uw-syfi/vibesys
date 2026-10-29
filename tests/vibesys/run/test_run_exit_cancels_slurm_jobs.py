@@ -78,7 +78,7 @@ def _request(project_root: Path, config_path: Path) -> RunRequest:
     return RunRequest(
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id=_PLUGIN.id, config_version=1, options={}),
-        config=Config.model_validate({"model": {"name": "slurm-exit"}}),
+        config=Config.model_validate({"model": {"name": "claude-opus-5"}}),
         input_bundle=load_task(project_root),
         objective="Improve the queue.",
         exp_name="slurm-exit",

@@ -30,14 +30,16 @@ from .common import (
     ScopeReopenNormalization,
     Seconds,
     Value,
+    unset,
 )
 from .evaluation_history import (
     EvaluationHistoryCursor,
     EvaluationTerminalFacts,
     RepeatedFailureGuidance,
 )
-from .job_observations import JobProgress, MeasurementFailure, TimedOut
-from .until import Within
+from .job_observations import JobProgress, JobTimeout, MeasurementFailure, TimedOut
+from .measurement import BaseClaim, BaseRef, Comparison, CoreRun, Reading, Runaway, Sample
+from .until import FailureReason, Within
 from .waits import WaitOn
 
 
@@ -95,6 +97,22 @@ class MeasurementPlan(Value):
     submitted_at: Seconds
     queue_allowance: Seconds
     reusable_evidence: tuple[EvidenceId, ...] = ()
+    dedicated_measurement_resources: bool = Field(default=False, exclude_if=unset)
+    """The executor gives this measurement its resources alone (``RunFacts``' capability).
+
+    Only a run with it may answer another measurement: an agent's evaluation on a shared
+    host is timed beside other work, so it can never stand for an official run.
+    """
+    measured_input: str | None = Field(default=None, min_length=1, exclude_if=unset)
+    """The digest of what the evaluation reads at ``candidate``, when the runtime computed it.
+
+    The runtime owns it: the content of the candidate's tree without the paths the task
+    declares its evaluation never reads (an agent's notes, say). Two revisions with one
+    measured input are one measured candidate, so a notes-only commit is no new candidate.
+    An agent's evaluation plan carries it from the runtime's snapshot, and core sets it on a
+    Measure plan from the scope's checkpoint of the revision. None when nobody computed it;
+    then only the commit identifies the candidate.
+    """
     accuracy_stage: str | None = Field(default=None, min_length=1)
     """The stage whose pass is the correctness (accuracy) gate, named explicitly.
 
@@ -163,9 +181,6 @@ class EvidenceAcceptanceReceipt(Value):
         return self
 
 
-_PROOF_KINDS = frozenset({EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK})
-
-
 class EvidenceRef(Value):
     """Evidence ref lifecycle contract."""
 
@@ -183,28 +198,38 @@ class EvidenceRef(Value):
     status: ObservationStatus
     artifacts: tuple[ArtifactRef, ...] = ()
     acceptance_receipt: EvidenceAcceptanceReceipt | None = None
+    reused_from: RequestId | None = Field(default=None, exclude_if=unset)
+    """The earlier submission whose finished job this record re-reads; None for a new run.
+
+    A reused record names its own submission as ``source_request`` and its own purpose and
+    candidate, but no new job ran: it is the result of ``reused_from``'s job, which core
+    checked carries the same evidence id and status (`vs_core._measurement_reuse`).
+    """
+
+    reading: Reading | None = Field(default=None, exclude_if=unset)
+    """The benchmark record's headline reading, as the trusted record states it.
+
+    Set by the runtime on a benchmark record only. Core keeps it so that the decisions over
+    samples (`vs_core._comparison`) are pure state that a resume replays, instead of numbers
+    held only in the runtime's ledger. An official measurement's record enters core's ledger
+    stating the mean of the samples that answer it (`vs_core._comparison.as_answer`), and the
+    headline a reader decodes from any record is this reading, so ranking reads the value the
+    comparison states. A run's own reading is its ``Sample``'s.
+    """
+
+    unmet_requirement: str | None = Field(default=None, exclude_if=unset)
+    """The capability the evaluator named as unmet on a failed benchmark record, if it named one.
+
+    Set by the runtime from the evaluator's `requirement_not_met` error. It says the revision
+    lacks something the task requires, so measuring that revision again cannot help: core takes
+    no further run of it (`vs_core._base_runs.requirement_unmet`). Kept on the ref, as
+    ``reading`` is, so that decision is pure state a resume replays.
+    """
 
     @property
     def key(self) -> EvidenceKey:
         """Run-wide identity: evidence IDs are unique only within a source request."""
         return EvidenceKey(source_request=self.source_request, evidence_id=self.evidence_id)
-
-    @model_validator(mode="after")
-    def local_validation_is_never_proof(self) -> EvidenceRef:
-        """Keep an agent's own evaluation out of the kinds that prove eligibility.
-
-        Local-validation purpose records come from the agent's in-turn
-        ``submit_evaluation`` tool. They are advice, never accuracy or benchmark
-        proof, so they carry a kind that no eligibility requirement or
-        ``accuracy_proof`` ever selects. Without this, a candidate with an agent
-        record and its official record would hold two CORRECTNESS rows and
-        ``accuracy_proof`` would call them ambiguous.
-        """
-        if self.purpose == "local-validation" and self.kind in _PROOF_KINDS:
-            raise ContractValidationError(
-                "kind", "a local-validation record cannot be correctness or benchmark proof"
-            )
-        return self
 
     @model_validator(mode="after")
     def original_acceptance(self) -> EvidenceRef:
@@ -261,15 +286,41 @@ class OwnedJob(Value):
     terminal: bool = False
     released: bool = False
     evidence: tuple[EvidenceRef, ...] = ()
+    reuses: RequestId | None = Field(default=None, exclude_if=unset)
+    """The earlier submission whose finished job answers this one (`SubmitMeasurement.reuses`)."""
+    base: BaseRef | None = Field(default=None, exclude_if=unset)
+    """The revision this run's candidate is compared with (`SubmitMeasurement.base`)."""
     pacing: ObservePacing = ObservePacing()
     wait: WaitOn | None = None
     """What the live job waits on: its next poll's timer, or the poll in flight. A terminal
     job waits on nothing."""
+    collecting: RequestId | None = Field(default=None, exclude_if=unset)
+    """The collection of the ended job's evidence still under way, if one is.
+
+    The job ended without its records, so core asked for them (``CollectEvidence``); until
+    that request ends, whether the run gave a sample is not known, and the comparisons it
+    serves take no replacement run (`vs_core._base_runs.after_run`)."""
+    answer_until: Seconds | None = Field(default=None, exclude_if=unset)
+    """For an ended official run: until when a sample that lands may still restate its answer
+    (`vs_core._comparison.restated_answers`). Set when the run ends, to ``SETTLE_RUNS`` times its
+    limit later, and brought forward to the step its comparison settles; from then on its
+    ledger record states the figure the flow that waited for it took its verdict on."""
+    queue_credit: Seconds = 0
+    """Seconds of queue time this job's facts earned: its limit counts from its start.
+
+    Each interval from a fact that says the job is pending to its next fact earns its length,
+    but at most ``observe_backoff_cap``: a poll that answers that often keeps the credit
+    exact, and a pending fact nobody refreshes (the scheduler stopped answering) stops
+    earning (``_wait_clock``)."""
 
     @model_validator(mode="after")
     def waits_while_live(self) -> OwnedJob:
         """Only a live job waits, and it always names what will move it."""
         _job_wait(terminal=self.terminal, wait=self.wait)
+        if self.collecting is not None and (not self.terminal or self.evidence):
+            raise ContractValidationError(
+                "collecting", "only an ended job without its evidence collects it"
+            )
         return self
 
 
@@ -300,6 +351,13 @@ class RegisteredOwnedJob(Value):
     wait: WaitOn | None = None
     """What the live job waits on: its operation request until that names the job, then
     its next poll's timer or the poll in flight. A terminal job waits on nothing."""
+    queue_credit: Seconds = 0
+    """Seconds of queue time this job's facts earned: its limit counts from its start.
+
+    Each interval from a fact that says the job is pending to its next fact earns its length,
+    but at most ``observe_backoff_cap``: a poll that answers that often keeps the credit
+    exact, and a pending fact nobody refreshes (the scheduler stopped answering) stops
+    earning (``_wait_clock``)."""
 
     @model_validator(mode="after")
     def waits_while_live(self) -> RegisteredOwnedJob:
@@ -320,6 +378,13 @@ class ContinuationPhase(StrEnum):
     BLOCKED = "blocked"
 
 
+def settling_named(comparisons: tuple[Comparison, ...], settling: tuple[str, ...]) -> None:
+    """Every settling input is the candidate input of one of ``comparisons``, named once."""
+    known = {comparison.candidate_input for comparison in comparisons}
+    if len(set(settling)) != len(settling) or not set(settling) <= known:
+        raise ContractValidationError("settling", "names an input of no comparison, or twice")
+
+
 class ResumeAuthorizationReceipt(Value):
     """Immutable publication proof, independent of the current continuation phase.
 
@@ -335,6 +400,18 @@ class ResumeAuthorizationReceipt(Value):
     history_cursor: EvaluationHistoryCursor | None
     timeout: TimedOut | None = None
     repeated_failure: RepeatedFailureGuidance | None = None
+    comparisons: tuple[Comparison, ...] = Field(default=(), exclude_if=unset)
+    """The attempt's comparisons with a base the resume tells its agent of, as held now.
+
+    Those of the candidates the wait's jobs measured, and every other one of the attempt whose
+    verdict changed since the attempt's last resume told it (`comparisons_to_publish`). Each is
+    recomputed over the samples fresh now, so a base whose samples partly went stale is
+    compared over the rest, and an input none of whose base samples is fresh is left out
+    (`latest_comparisons`).
+    """
+    settling: tuple[str, ...] = Field(default=(), exclude_if=unset)
+    """The candidate inputs of ``comparisons`` core still has runs under way for: each such
+    comparison is provisional, and changes when they land."""
 
     @model_validator(mode="after")
     def guidance_cursor(self) -> ResumeAuthorizationReceipt:
@@ -346,6 +423,7 @@ class ResumeAuthorizationReceipt(Value):
             raise ContractValidationError(
                 "repeated_failure.cursor", "differs from publication cursor"
             )
+        settling_named(self.comparisons, self.settling)
         return self
 
 
@@ -368,6 +446,13 @@ class Continuation(Value):
     deadline_at: Seconds
     phase: ContinuationPhase
     timeout: TimedOut | None = None
+    spent: tuple[JobTimeout, ...] = ()
+    """Jobs whose own queue budget ran out while the wait went on, in the order they ran
+    out: core cancelled each, and the wait goes on with its other jobs. Each is reported
+    unfinished, ``by`` ``QUEUE_BUDGET``, when the wait ends."""
+    downtime_credit: Seconds = 0
+    """Host downtime credited to the wait's limit while it was open, as an open request
+    record's limit is moved past it (``open_host_epoch``): while no host runs nothing waits."""
     park_authority: RequestId | None = None
     reopen_authority: RequestId | None = None
     cancelled_resolutions: tuple[ResourceId, ...] = ()
@@ -390,6 +475,9 @@ class Continuation(Value):
             raise ContractValidationError(
                 "authorization_receipt.timeout", "differs from frozen timeout"
             )
+        spent = tuple(job.resource_id for job in self.spent)
+        if len(set(spent)) != len(spent) or not set(spent) <= set(self.jobs):
+            raise ContractValidationError("spent", "names each of the wait's own jobs at most once")
         return self
 
 
@@ -418,6 +506,8 @@ class MeasurementIdentity(Value):
     stages: tuple[MeasurementStageIdentity, ...]
     accuracy_stage: str | None = Field(default=None, min_length=1)
     accuracy_gated: tuple[EvidenceKind, ...]
+    measured_input: str | None = Field(default=None, min_length=1, exclude_if=unset)
+    """The plan's ``measured_input``: what the evaluation reads at ``candidate``, if known."""
 
     @classmethod
     def from_plan(cls, plan: MeasurementPlan, candidate: RevisionRef) -> MeasurementIdentity:
@@ -425,6 +515,7 @@ class MeasurementIdentity(Value):
         return cls(
             purpose=plan.purpose,
             candidate=candidate,
+            measured_input=plan.measured_input,
             evaluator_digest=plan.evaluator_digest,
             workload_digest=plan.workload_digest,
             environment_digest=plan.environment_digest,
@@ -440,6 +531,19 @@ class MeasurementIdentity(Value):
             accuracy_stage=plan.accuracy_stage,
             accuracy_gated=tuple(sorted(set(plan.accuracy_gated))),
         )
+
+    def measures_same_input(self, other: MeasurementIdentity) -> bool:
+        """Whether ``other`` runs this evaluation on the same input, whatever its purpose.
+
+        Every field but the purpose must match, except the candidate: one commit is one input,
+        and two commits are one input when both measured inputs are known and equal (a commit
+        that changed only paths the evaluation never reads).
+        """
+        same_input = self.candidate == other.candidate or (
+            self.measured_input is not None and self.measured_input == other.measured_input
+        )
+        rest = {"purpose": self.purpose, "candidate": self.candidate, "measured_input": None}
+        return same_input and other.model_copy(update=rest) == self.model_copy(update=rest)
 
     @model_validator(mode="after")
     def canonical_stage_dag(self) -> MeasurementIdentity:
@@ -486,6 +590,10 @@ class PreparedSubmissionReceipt(Value):
     ordinal: int = Field(ge=1)
     observation: Observation | None = None
     failure: MeasurementFailure | None = None
+    ended_unobserved: FailureReason | None = Field(default=None, exclude_if=unset)
+    """Why core ended the submission (blocked its record at a limit or a watch) while no job of
+    it was known: its run is over, though no observation said so (``MeasurementSubmissionEnded``).
+    A job a late observation names is under way until that job ends."""
 
 
 class HistoricalSubmissionReceipt(Value):
@@ -504,7 +612,9 @@ type SubmissionReceipt = Annotated[
 class SubmissionBudget(Value):
     """Immutable first submission bound for one scope and measurement identity.
 
-    The first limit cannot exceed the run ceiling. Workload rejection is durable;
+    The first limit cannot exceed the run ceiling, but for the budget core opens for its own
+    runs of an attempt's base, whose limit is ``MAX_CORE_BASE_RUNS``
+    (`vs_core._base_runs`). Workload rejection is durable;
     conclusive infrastructure failure may retry within this bound. Transport
     reconciliation accounting remains RequestRecord.retry_count, not this receipt list.
     """
@@ -544,38 +654,94 @@ class EvaluationState(Value):
     evidence: tuple[EvidenceRef, ...] = ()
     submission_budgets: tuple[SubmissionBudget, ...] = ()
     agent_calls: tuple[AgentCall, ...] = ()
+    core_runs: tuple[CoreRun, ...] = Field(default=(), exclude_if=unset)
+    """The runs core asked for itself (of a base, or of a candidate again), which have no decision
+    or agent call to name them."""
+    base_claims: tuple[BaseClaim, ...] = Field(default=(), exclude_if=unset)
+    """The strategy's own runs of a base that core awaits instead of starting another."""
+    samples: tuple[Sample, ...] = Field(default=(), exclude_if=unset)
+    """Every conclusive framework run of a measured input, in the order the runs ended.
+
+    The one record of what each input measured. A measurement is all the samples of one input
+    under one evaluation, and a base is measured once because its samples are found here
+    (`vs_core._comparison`). The state is the cache: nothing else holds a base's numbers.
+    """
+    comparisons: tuple[Comparison, ...] = Field(default=(), exclude_if=unset)
+    """Each comparison of a candidate with its base, as the samples held made it, oldest first.
+
+    Appended whenever a new sample changes what a candidate compares to, so the log shows how
+    a verdict firmed up as runs were added. The newest of a (scope, candidate input) is current.
+    """
+    runaways: tuple[Runaway, ...] = Field(default=(), exclude_if=unset)
+    """The scopes whose agent asked for an egregious number of evaluations, once each.
+
+    Evaluations have no allowance; this log only lets the run say so (`vs_core._runaway`).
+    """
+
+    def asked_without_decision(self, request_id: RequestId, scope: Scope) -> bool:
+        """Whether ``request_id`` is a submission core admitted for an agent call or itself.
+
+        Such a submission has no ``Measure`` decision, so core's own record of the call or of
+        its own run is what proves where it came from.
+        """
+        return any(
+            call.request_id == request_id and call.scope == scope for call in self.agent_calls
+        ) or any(run.request_id == request_id and run.scope == scope for run in self.core_runs)
 
     def evidence_for(self, key: EvidenceKey) -> EvidenceRef | None:
         """The ledger record with this full identity, or None."""
         return next((item for item in self.evidence if item.key == key), None)
 
     def accuracy_proof(self, candidate: RevisionRef) -> EvidenceRef | None:
-        """The one accepted accuracy proof for a candidate, or None.
+        """The accepted accuracy proof for a candidate, or None.
 
-        Ingress admits successful CORRECTNESS evidence only after the accuracy
-        stage and gate passed, so a ledger record that is trusted, successful and
-        carries its acceptance receipt proves accuracy. Two such records are
-        ambiguous and prove nothing. Operations that retain or promote a revision
-        carry this record by value, and the owner checks it against the revision.
+        Ingress admits successful CORRECTNESS evidence only after the accuracy stage and gate
+        passed, so a ledger record that is trusted, successful and carries its acceptance
+        receipt proves accuracy. Every conclusive run of a revision is a sample of its one
+        measurement, whoever asked for it (the agent's tool or the framework's check): the
+        proof is the first such record, and only while no trusted run of the revision failed
+        accuracy, since a candidate that passes on one run and fails on another has no proof.
+        Operations that retain or promote a revision carry this record by value, and the
+        owner checks it against the revision.
         """
-        proofs = tuple(
+        runs = tuple(
             item
             for item in self.evidence
             if item.candidate == candidate
             and item.kind == EvidenceKind.CORRECTNESS
-            and item.status == ObservationStatus.SUCCEEDED
             and item.provenance == "trusted"
             and item.acceptance_receipt is not None
         )
-        return proofs[0] if len(proofs) == 1 else None
+        passed = tuple(item for item in runs if item.status == ObservationStatus.SUCCEEDED)
+        failed = any(item.status == ObservationStatus.FAILED for item in runs)
+        return passed[0] if passed and not failed else None
+
+    def measurements_of(self, candidate: RevisionRef) -> tuple[EvidenceRef, ...]:
+        """The trusted, successful measurements of a revision, whoever asked for them.
+
+        These are what the revision is known to measure: the agent's own runs, the framework's
+        checks and the input's baseline. Profiling is left out. Ledger order is kept.
+        """
+        return tuple(
+            item
+            for item in self.evidence
+            if item.candidate == candidate
+            and item.purpose in ("official", "baseline", "local-validation")
+            and item.status == ObservationStatus.SUCCEEDED
+            and item.provenance == "trusted"
+        )
 
 
 class MeasurementRequested(Value):
     """Measurement requested lifecycle contract."""
 
     kind: Literal["measurement_requested"] = "measurement_requested"
+    decision_id: DecisionId
+    """The ``Measure`` decision asking: the one an answer without a request is addressed to."""
     scope: Scope
     plan: MeasurementPlan
+    compared: bool = Field(default=False, exclude_if=unset)
+    """The strategy reads the candidate's comparison with its base (``Measure.compared``)."""
 
 
 class AgentMeasurementRequested(Value):
@@ -604,7 +770,7 @@ class AgentRejection(StrEnum):
     """Why core refused an agent's evaluation call; nothing was charged."""
 
     RUN_STOPPING = "run_stopping"
-    """The run is no longer running, so it starts no new work."""
+    """The run is closing or has ended, so it starts no new work (a paused run still does)."""
     NOT_ADMITTED = "not_admitted"
     """The scope is not a current admitted owner: a stale generation, or a closed attempt."""
     INVALID_PLAN = "invalid_plan"
@@ -626,7 +792,11 @@ class AgentCall(Value):
     request_id: RequestId | None = None
     """The submission it names, or None when core rejected the call."""
     deadline_at: Seconds | None = None
-    """The named submission's deadline, bounded by the run's; None when rejected."""
+    """The named submission's stated deadline, bounded by the run's; None when rejected.
+
+    Answered as the call time plus the limit, and never moved: it is what the agent was told.
+    A wait on the job reads the limit from the submission's record, which a host restart
+    moves past its downtime, and adds the job's queue credit (``_wait_clock``)."""
     repeat: bool = False
     """Whether the call named a submission an earlier call (or a Measure) had allocated."""
     rejection: AgentRejection | None = None
@@ -692,6 +862,8 @@ class JobObserved(Value):
     # proves (see `MeasurementFailure`) and lets the submission be retried only when
     # it says infrastructure.
     failure: MeasurementFailure | None = None
+    operator_diagnostic: str = ""
+    """Credential-safe host projection kept separate from the raw diagnostic."""
 
     @model_validator(mode="after")
     def correlated_progress(self) -> JobObserved:
@@ -715,6 +887,8 @@ class RegisteredJobObserved(Value):
     observation: Observation
     evidence: tuple[EvidenceRef, ...] = ()
     evaluation_result: EvaluationTerminalFacts | None = None
+    operator_diagnostic: str = ""
+    """Credential-safe host projection kept separate from the raw diagnostic."""
 
     @model_validator(mode="after")
     def correlated_progress(self) -> RegisteredJobObserved:
@@ -745,11 +919,13 @@ class DeadlineReached(Value):
 
 
 class JobWaitLapsed(Value):
-    """A request a live job waits on ended without moving the job.
+    """A request a job waits on ended without moving the job.
 
     Internal signal raised once a step's other signals settle, never shell input: the poll
     blocked at its bound, or the job refused its answer (stale or foreign). The job polls
-    again after its backoff instead of waiting on a request that is over.
+    again after its backoff instead of waiting on a request that is over. For an ended job it
+    is the collection of its evidence that ended (``OwnedJob.collecting``): the job stops
+    collecting, and the comparisons its run serves take the runs they still need.
     """
 
     kind: Literal["job_wait_lapsed"] = "job_wait_lapsed"
@@ -784,6 +960,11 @@ class ResumeAuthorized(Value):
     timeout: TimedOut | None = None
     history_cursor: EvaluationHistoryCursor | None = None
     repeated_failure: RepeatedFailureGuidance | None = None
+    comparisons: tuple[Comparison, ...] = Field(default=(), exclude_if=unset)
+    """The comparisons the resume tells its agent of, frozen at authorization
+    (``ResumeAuthorizationReceipt.comparisons``)."""
+    settling: tuple[str, ...] = Field(default=(), exclude_if=unset)
+    """The candidate inputs of ``comparisons`` core still had runs under way for."""
 
     @model_validator(mode="after")
     def guidance_cursor(self) -> ResumeAuthorized:
@@ -795,7 +976,41 @@ class ResumeAuthorized(Value):
             raise ContractValidationError(
                 "repeated_failure.cursor", "differs from publication cursor"
             )
+        settling_named(self.comparisons, self.settling)
         return self
+
+
+class ResumeRefusal(StrEnum):
+    """Why core will never authorize a waiting continuation's resume. Closed.
+
+    Core authorizes the resume of an attempt's turn only when the attempt's evaluation
+    history is complete and extends the turn's paid-cycle prefix, the same rule the resume's
+    dispatch checks (``vs_core._continuations.resume_refusal``).
+    """
+
+    HISTORY_UNAVAILABLE = "history_unavailable"
+    """Every submission of the attempt ended and its history is still not complete (a
+    submission's facts or proofs are missing or conflict), so it never will be."""
+    PREFIX_MISMATCH = "prefix_mismatch"
+    """The history does not extend the waiting turn's paid-cycle prefix."""
+    ATTEMPT_CLOSED = "attempt_closed"
+    """The attempt the turn waited in closed (an operator's cancel, or the search's own close)
+    before core authorized the resume: core stopped the jobs the wait was on."""
+
+
+class ResumeRefused(Value):
+    """The other way a continuation's wait ends besides ``ResumeAuthorized``: no resume.
+
+    Core cancels the continuation and authorizes nothing, so the run never dispatches a
+    resume its own check would refuse. The suspended turn stays ended; a strategy handles
+    this like a refused wait: it settles the attempt or asks a new turn.
+    """
+
+    kind: Literal["resume_refused"] = "resume_refused"
+    continuation_id: ContinuationId
+    invocation: InvocationRef
+    """The suspended turn whose resume is refused."""
+    reason: ResumeRefusal
 
 
 MEASUREMENT_DIAGNOSTIC_LIMIT = 4000
@@ -818,14 +1033,45 @@ class MeasurementResult(Value):
     None only when no request was prepared: rejection at admission, or a result
     served entirely from reusable evidence.
     """
+    decision_id: DecisionId | None = Field(default=None, exclude_if=unset)
+    """The strategy decision this result answers at once, when no request of its own does.
+
+    Set for a result core gives when it accepts a ``Measure``: a refusal, evidence it already
+    holds, or the earlier run of an input it measured (``source_request`` names that run, not
+    this decision's). None for a result a request ends with, which names its decision through
+    the request, and for an agent's own evaluation, which answers no decision.
+    """
     evidence: tuple[EvidenceRef, ...]
     status: ObservationStatus
     diagnostic: str = ""
-    """The executor's failure text, its last `MEASUREMENT_DIAGNOSTIC_LIMIT` characters.
+    """The executor's raw failure text, bounded to its trailing
+    ``MEASUREMENT_DIAGNOSTIC_LIMIT`` characters.
 
     It is the only account of a failure that left no evidence, such as a benchmark that
     died without a result record, so the strategy can tell the agent why it was given up.
     """
+    operator_diagnostic: str = ""
+    """Credential-safe bounded projection for operator-facing events only."""
+
+
+class JobQueued(Value):
+    """A job still waits in its executor's queue: core reports it each ``queue_notice_interval``.
+
+    Published for operators; a search does not receive it. ``pending_reason`` is the
+    executor's own reason code (Slurm's ``Priority``, ``Resources``, ``ReqNodeNotAvail``),
+    or None when the executor gave none: core never invents one.
+    """
+
+    kind: Literal["job_queued"] = "job_queued"
+    scope: Scope
+    resource_id: ResourceId
+    source_request: RequestId
+    """The request that started the job: its submission, or its registered operation."""
+    queued_s: Seconds
+    """Queue time the job has been credited so far."""
+    budget_left_s: Seconds
+    """Queue time left before core ends the measurement with ``QUEUE_BUDGET_SPENT``."""
+    pending_reason: str | None = None
 
 
 class SubmitMeasurement(RequestBase):
@@ -833,6 +1079,25 @@ class SubmitMeasurement(RequestBase):
 
     kind: Literal["submit_measurement"] = "submit_measurement"
     plan: MeasurementPlan
+    reuses: RequestId | None = Field(default=None, exclude_if=unset)
+    """An earlier submission of the same input whose finished job answers this one.
+
+    Core sets it only under the reuse rule (`vs_core._measurement_reuse`). The runtime then
+    runs no job: it reads the earlier job's result again as this submission's evidence, each
+    record naming ``reuses`` as ``reused_from``.
+    """
+    base: BaseRef | None = Field(default=None, exclude_if=unset)
+    """The revision the plan's candidate is compared with, when an agent asked for the run.
+
+    Core sets it from the attempt's own base and the base's measured input the runtime
+    computed. The run's sample names it, so its comparison can find the base's samples.
+    """
+    requested_by: InvocationRef | None = Field(default=None, exclude_if=unset)
+    """The turn that asked, when no Measure decision names the submission.
+
+    The permit cap reads this identity. Another invocation in the scope does not
+    stand in for it. A Measure decision leaves it unset: that wait names its own limit.
+    """
 
 
 class ObserveOwnedJob(RequestBase):
@@ -853,6 +1118,9 @@ class CancelOwnedJob(RequestBase):
     """Cancel owned job lifecycle contract."""
 
     kind: Literal["cancel_owned_job"] = "cancel_owned_job"
+    for_park: bool = False
+    immediate: bool = False
+    """Release the physical job while preserving the logical measurement for relaunch."""
     resource_id: ResourceId
 
 
@@ -1015,6 +1283,19 @@ class MeasurementSubmissionObserved(Value):
     failure: MeasurementFailure | None = None
 
 
+class MeasurementSubmissionEnded(Value):
+    """Core ended a measurement submission whose result was still owed: its record is blocked.
+
+    ``reason`` is what ended it. The records area tells the evaluation area, which owns the submission's budget entry: a
+    submission that never named a job ends there, as a run that will not report. A submission
+    whose job is known ends with that job instead.
+    """
+
+    kind: Literal["measurement_submission_ended"] = "measurement_submission_ended"
+    request_id: RequestId
+    reason: FailureReason
+
+
 type EvaluationEvent = Annotated[
     RegisteredJobObserved
     | RegisteredJobRequested
@@ -1032,7 +1313,8 @@ type EvaluationEvent = Annotated[
     | ContinuationScopeReopened
     | JobsDrainRequested
     | RunJobsCancelRequested
-    | MeasurementSubmissionObserved,
+    | MeasurementSubmissionObserved
+    | MeasurementSubmissionEnded,
     Field(discriminator="kind"),
 ]
 type EvaluationRequest = Annotated[

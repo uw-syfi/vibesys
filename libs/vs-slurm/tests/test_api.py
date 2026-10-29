@@ -16,10 +16,12 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from vs_sim.api import ProcessOutcome, ProcessRun, ProcessSpec, ProcessTimedOut
+from vs_sim.api import DISCARD, OutputSink, ProcessOutcome, ProcessRun, ProcessSpec, ProcessTimedOut
 from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
+    PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE,
     SCHEDULER_READ_END,
+    SERVICE_NOT_READY_EXIT_CODE,
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchStage,
@@ -33,6 +35,7 @@ from vs_slurm.api import (
     SlurmJobStatus,
     SlurmService,
     SlurmSubmissionRejectedError,
+    SlurmTransferInterruptedError,
     SlurmTreeArtifact,
     load_slurm_config,
     runtime_content_identity,
@@ -110,12 +113,16 @@ class _FakeConnector:
         self.batch_stage_results = batch_stage_results or {}
         self.fail_operation = "sync_to" if content_cache_behavior == "upload-failure" else None
         self.failed_get_suffix: str | None = None
+        # Whether the cluster then answers that the failed download's path is absent
+        # (a missing result) or present (the download was cut short).
+        self.failed_get_absent = False
         self.race_publish_before_next_publish = content_cache_behavior == "concurrent-publisher"
         self.content_cache_behavior = content_cache_behavior
         self.ready_content_objects: set[str] = set()
         self.locked_content_objects: set[str] = set()
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        del output
         argv, stdin = spec.argv, spec.input.decode() or None
         assert tuple(argv) == ("cluster-connector",)
         assert timeout == 20
@@ -176,6 +183,16 @@ class _FakeConnector:
                 (local_path / "trace.csv").write_text("trace\n", encoding="utf-8")
         return ""
 
+    def _absent(self, remote_path: str) -> bool:
+        """Whether the remote path a failed download named does not exist."""
+        if remote_path.endswith("/.vibesys-slurm-results") and not self.batch_stage_results:
+            return True
+        return (
+            self.failed_get_absent
+            and self.failed_get_suffix is not None
+            and remote_path.endswith(self.failed_get_suffix)
+        )
+
     def _write_batch_results(self, local_path: Path) -> None:
         local_path.mkdir(parents=True, exist_ok=True)
         for result_index, result_files in self.batch_stage_results.items():
@@ -192,6 +209,8 @@ class _FakeConnector:
 
     def _answer(self, command: str) -> str:
         tokens = shlex.split(command)
+        if tokens[:3] == ["if", "test", "-e"]:
+            return "absent\n" if self._absent(tokens[3].rstrip(";")) else "present\n"
         cache_response = self._content_cache_response(tokens)
         if cache_response is not None:
             return cache_response
@@ -231,7 +250,8 @@ class _FakeConnector:
 class _FilesystemConnector:
     """Faithful local filesystem implementation of the connector protocol."""
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        del output
         argv, stdin = spec.argv, spec.input.decode() or None
         del timeout
         assert tuple(argv) == ("cluster-connector",)
@@ -426,7 +446,8 @@ class _FakeSshProcess:
         self.environments: list[dict[str, str] | None] = []
         self._program = program
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        del output
         argv, stdin = spec.argv, spec.input.decode() or None
         environment, command = _split_clean_environment(argv)
         self.environments.append(environment)
@@ -476,6 +497,8 @@ def test_runner_uses_builtin_ssh_and_rsync_transport(tmp_path: Path) -> None:
             "ssh",
             "-F",
             "/operator/ssh-config",
+            "-o",
+            "BatchMode=yes",
             "--",
             "cluster.example",
             "mkdir -p /operator/campaign/runs/test-cluster/ssh_01 "
@@ -491,7 +514,7 @@ def test_runner_uses_builtin_ssh_and_rsync_transport(tmp_path: Path) -> None:
         "--delete",
         "--exclude=.git/",
         "-e",
-        "ssh -F /operator/ssh-config",
+        "ssh -F /operator/ssh-config -o BatchMode=yes",
         "--",
     )
     assert ".tmp.ssh_01.workspace/payload/" in sync_argv[-1]
@@ -778,7 +801,8 @@ def test_bounded_wait_requires_positive_timeout(tmp_path: Path) -> None:
 
 
 class _TimedOutProcess:
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        del output
         stdin = spec.input.decode() or None
         del stdin
         return ProcessTimedOut(timeout or 0.0, b"", b"")
@@ -819,6 +843,250 @@ def test_service_and_setup_are_request_policy(tmp_path: Path) -> None:
     assert "source /operator/setup.sh" in connector.uploaded_script
     assert 'python -m server --port "${PORT}"' in connector.uploaded_script
     assert 'http://127.0.0.1:"${PORT}"' in connector.uploaded_script
+
+
+def _submitted_service_job(tmp_path: Path, config: SlurmConfig) -> tuple[str, str]:
+    """Run one service job on the stub connector; return its job script and sbatch command."""
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    connector = _FakeConnector()
+    service = SlurmService(
+        command=("python", "-m", "server", "--port", "VIBESYS_DYNAMIC_PORT"),
+        readiness_url="http://127.0.0.1:VIBESYS_DYNAMIC_PORT/health",
+        startup_timeout_seconds=30,
+    )
+    SlurmJobRunner(config, processes=connector, clock=ManualClock()).run(
+        SlurmJobRequest(workspace=workspace, command=("python", "check.py"), service=service),
+        pause=_unpaused,
+    )
+    assert connector.uploaded_script is not None
+    submissions = [
+        str(request["command"])
+        for request in connector.requests
+        if request["operation"] == "exec" and "sbatch-rr" in str(request["command"])
+    ]
+    assert len(submissions) == 1
+    return connector.uploaded_script, submissions[0]
+
+
+@given(grace=st.integers(min_value=1, max_value=20), exit_wait=st.integers(1, 1800))
+@settings(max_examples=examples(pr=5, nightly=20), deadline=None)
+def test_teardown_ends_every_session_the_job_started_and_outlives_them_within_a_bound(
+    grace: int, exit_wait: int
+) -> None:
+    """Regressions (2026-10-15, 2026-10-16): teardown left processes for Slurm to kill.
+
+    First the script waited unbounded on the service's parent pid only; then it sent
+    SIGKILL to the service's group and exited 5 s later, while vLLM workers holding GPU
+    memory were still exiting, and Slurm's step kill failed and drained the node. The
+    service and the command now each run in a session of their own; teardown signals every
+    live process of both, waits for the last one to exit up to the configured exit wait,
+    and fails the job naming any left. Running the script under bash, with a worker held
+    in its exit, is the real-tier test in ``tests/e2e/test_slurm_service_teardown.py``.
+    """
+    with tempfile.TemporaryDirectory() as temporary:
+        script, _submission = _submitted_service_job(
+            Path(temporary),
+            _config(
+                service_stop_grace_seconds=grace,
+                process_exit_wait_seconds=exit_wait,
+                sbatch_arguments=(),
+            ),
+        )
+
+    lines = script.splitlines()
+    marked = 'VS_SLURM_JOB_PROCESS="$vs_token" setsid'
+    service = lines.index(
+        f'{marked} python -m server --port "${{PORT}}" > .vs-slurm-service.log 2>&1 &'
+    )
+    command = lines.index(f"{marked} python check.py &")
+    assert lines[service + 1 : service + 3] == [
+        "service_pid=$!",
+        'vs_groups="$vs_groups $service_pid"',
+    ]
+    assert lines[command + 1 : command + 5] == [
+        "command_pid=$!",
+        'vs_groups="$vs_groups $command_pid"',
+        'wait "$command_pid"',
+        "job_status=$?",
+    ]
+    trap = lines.index("trap vs_stop_groups EXIT")
+    assert trap < service < command
+    assert lines[trap + 1] == "trap 'exit 143' TERM"
+    teardown = "\n".join(lines[lines.index("vs_stop_groups() {") : trap])
+    term = teardown.index("vs_signal TERM")
+    kill = teardown.index("vs_signal KILL")
+    assert teardown.index("trap '' TERM") < term
+    assert f"deadline=$((SECONDS + {grace}))" in teardown[term:kill]
+    assert f"deadline=$((SECONDS + {exit_wait}))" in teardown[kill:]
+    assert teardown.count('while vs_scan && [ "$SECONDS" -lt "$deadline" ]') == 2
+    failure = teardown[teardown.index('[ -n "$vs_alive$vs_unknown" ] || return 0') :]
+    assert f"still alive {exit_wait} s after SIGKILL" in failure
+    # A service that never became ready keeps its status; any other job fails with 71.
+    kept = failure.index(f'[ "$status" -ne {SERVICE_NOT_READY_EXIT_CODE} ] || return 0')
+    assert kept < failure.index(f"exit {PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE}")
+    assert f"printf '%s\\n' {PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE} > " in failure[kept:]
+
+
+@given(grace=st.integers(min_value=1, max_value=20), exit_wait=st.integers(1, 1800))
+@settings(max_examples=examples(pr=5, nightly=20), deadline=None)
+def test_teardown_bounds_every_read_that_can_block_on_another_process(
+    grace: int, exit_wait: int
+) -> None:
+    """Review (2026-10-16): one unbounded read of /proc/*/environ could hang the teardown.
+
+    Reading another process's environment or command line takes that process's mmap_lock,
+    which an exiting or driver-stuck process (the case teardown exists for) can hold
+    indefinitely; the script then never reached its deadline, never exited 71, and the job
+    outlived its time limit. Every such read now runs under ``timeout -s KILL``, and a read
+    that did not finish keeps the teardown waiting (the process is unknown) instead of
+    ending the scan. A real-tier test cannot hold another process's mmap_lock from user
+    space without privileges, so the script's shape is pinned here.
+    """
+    with tempfile.TemporaryDirectory() as temporary:
+        script, _submission = _submitted_service_job(
+            Path(temporary),
+            _config(
+                service_stop_grace_seconds=grace,
+                process_exit_wait_seconds=exit_wait,
+                sbatch_arguments=(),
+            ),
+        )
+
+    readers = [
+        line
+        for line in script.splitlines()
+        if re.search(r"/environ|/cmdline|\bps\b|\bpgrep\b|\bpkill\b", line)
+    ]
+    assert len(readers) == 2, readers
+    assert all(re.search(r"\btimeout -s KILL \d+ (grep|ps) ", line) for line in readers), readers
+    scan = script[script.index("vs_scan_once() {") : script.index("vs_scan() {")]
+    check = script[script.index("vs_check() {") : script.index("vs_scan_once() {")]
+    # A read cut short (124, or 137 when timeout kills itself too) leaves the process
+    # unknown, and an unknown process keeps the scan reporting the job as not yet gone.
+    assert '124 | 137) vs_unknown="$vs_unknown $1" ;;' in check
+    assert scan.rstrip().endswith('[ -n "$vs_alive$vs_unknown" ]\n}')
+    teardown = script[script.index("vs_stop_groups() {") :]
+    assert '[ -n "$vs_alive$vs_unknown" ] || return 0' in teardown
+
+
+def test_jobs_are_submitted_without_scheduler_requeue(tmp_path: Path) -> None:
+    """VibeSys owns retries: a requeue after a node failure would silently rerun finished work."""
+    _script, submission = _submitted_service_job(tmp_path, _config())
+
+    argv = shlex.split(submission.split("&&", 1)[1])
+    assert argv[0] == "/operator/bin/sbatch-rr"
+    assert argv.index("--no-requeue") > argv.index("00:20:00")
+    assert argv[-1].endswith("/run.sbatch")
+    assert "--requeue" not in argv
+
+
+@pytest.mark.parametrize("arguments", [("--requeue",), ("-p", "gpu", "--requeue")])
+def test_operator_sbatch_arguments_cannot_turn_requeue_back_on(arguments: tuple[str, ...]) -> None:
+    with pytest.raises(ValidationError, match="--requeue"):
+        _config(sbatch_arguments=arguments)
+
+
+@given(grace=st.one_of(st.integers(max_value=0), st.integers(min_value=21)))
+def test_service_stop_grace_outside_its_range_is_rejected_by_name(grace: int) -> None:
+    """On Slurm's SIGTERM the script's SIGKILL must come 10 s before Slurm's, at KillWait 30 s."""
+    with pytest.raises(ValidationError, match="service_stop_grace_seconds"):
+        _config(service_stop_grace_seconds=grace)
+
+
+@given(exit_wait=st.one_of(st.integers(max_value=0), st.integers(min_value=1801)))
+def test_process_exit_wait_outside_its_range_is_rejected_by_name(exit_wait: int) -> None:
+    with pytest.raises(ValidationError, match="process_exit_wait_seconds"):
+        _config(process_exit_wait_seconds=exit_wait, sbatch_arguments=())
+
+
+def test_teardown_bounds_default_and_load_from_the_operator_file(tmp_path: Path) -> None:
+    config = _config()
+    assert (config.service_stop_grace_seconds, config.process_exit_wait_seconds) == (20, 120)
+    path = tmp_path / "slurm.toml"
+    path.write_text(
+        """[slurm]
+name = "research-cluster"
+remote_workspace_root = "/operator/runs"
+service_stop_grace_seconds = "10"
+process_exit_wait_seconds = 300
+
+[slurm.transport]
+kind = "ssh"
+host = "cluster.example"
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(SlurmConfigError, match="service_stop_grace_seconds"):
+        load_slurm_config(path)
+    path.write_text(
+        path.read_text(encoding="utf-8").replace('"10"', "10"),
+        encoding="utf-8",
+    )
+    loaded = load_slurm_config(path)
+    assert (loaded.service_stop_grace_seconds, loaded.process_exit_wait_seconds) == (10, 300)
+
+
+def _time_limit_spellings(seconds: int) -> list[str]:
+    """Every ``sbatch`` spelling of a time limit of ``seconds`` (a whole number of them)."""
+    days, rest = divmod(seconds, 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes, secs = divmod(rest, 60)
+    spellings = [
+        f"{seconds // 60}:{secs}",
+        f"{hours + 24 * days}:{minutes:02d}:{secs:02d}",
+        f"{days}-{hours}:{minutes}:{secs}",
+    ]
+    if secs == 0:
+        spellings.extend([str(seconds // 60), f"{days}-{hours}:{minutes}"])
+        if minutes == 0:
+            spellings.append(f"{days}-{hours}")
+    return spellings
+
+
+@given(
+    limit=st.integers(1, 3 * 86400),
+    grace=st.integers(1, 20),
+    exit_wait=st.integers(1, 1800),
+    spelling=st.data(),
+    form=st.sampled_from(["--time={}", "-t{}", "--time {}", "-t {}"]),
+)
+def test_teardown_must_fit_inside_the_sbatch_time_limit_in_any_spelling(
+    limit: int, grace: int, exit_wait: int, spelling: st.DataObject, form: str
+) -> None:
+    """The script waits up to grace plus exit wait at its end; Slurm's limit must allow it."""
+    value = spelling.draw(st.sampled_from(_time_limit_spellings(limit)))
+    arguments = ("-p", "gpu", *form.format(value).split(" "))
+    settings_ = {"service_stop_grace_seconds": grace, "process_exit_wait_seconds": exit_wait}
+    if grace + exit_wait < limit:
+        assert _config(sbatch_arguments=arguments, **settings_).process_exit_wait_seconds == (
+            exit_wait
+        )
+    else:
+        with pytest.raises(ValidationError, match="process_exit_wait_seconds"):
+            _config(sbatch_arguments=arguments, **settings_)
+
+
+@given(limit_minutes=st.integers(1, 4 * 60), grace=st.integers(1, 20))
+def test_the_default_exit_wait_shrinks_to_fit_the_sbatch_time_limit(
+    limit_minutes: int, grace: int
+) -> None:
+    config = _config(sbatch_arguments=("-t", str(limit_minutes)), service_stop_grace_seconds=grace)
+    expected = min(120, limit_minutes * 60 - grace - 1)
+    assert config.process_exit_wait_seconds == expected
+    assert grace + config.process_exit_wait_seconds < limit_minutes * 60
+
+
+@pytest.mark.parametrize("value", ["0", "INFINITE", "unlimited", "0:0"])
+def test_no_time_limit_leaves_teardown_unbounded_by_it(value: str) -> None:
+    config = _config(sbatch_arguments=("--time", value), process_exit_wait_seconds=1800)
+    assert config.process_exit_wait_seconds == 1800
+
+
+@pytest.mark.parametrize("arguments", [("-t", "20m"), ("--time=1:2:3:4",), ("-t",), ("--time=",)])
+def test_an_unreadable_time_limit_is_rejected_by_name(arguments: tuple[str, ...]) -> None:
+    with pytest.raises(ValidationError, match="sbatch_arguments"):
+        _config(sbatch_arguments=arguments)
 
 
 @pytest.mark.parametrize("path", ["/outside/out.json", "../out.json", "nested/../out.json"])
@@ -1202,9 +1470,14 @@ def test_batch_collection_keeps_available_evidence_when_metadata_is_missing(
 
 @pytest.mark.parametrize("allocation_exit", [0, 70])
 @pytest.mark.parametrize("failed_get", [".vibesys-slurm-results", "metrics.json"])
+@pytest.mark.parametrize("absent", [True, False], ids=["absent", "cut"])
 def test_batch_collection_transport_failures_never_publish_successful_evidence(
-    tmp_path: Path, allocation_exit: int, failed_get: str
+    tmp_path: Path, allocation_exit: int, failed_get: str, *, absent: bool
 ) -> None:
+    """A failed download is a missing result only when the cluster says the path is absent.
+
+    Otherwise the download was cut short: collection reads nothing from it and raises.
+    """
     workspace = tmp_path / "candidate"
     workspace.mkdir()
     connector = _FakeConnector(
@@ -1220,6 +1493,7 @@ def test_batch_collection_transport_failures_never_publish_successful_evidence(
         },
     )
     connector.failed_get_suffix = failed_get
+    connector.failed_get_absent = absent
     runner = SlurmJobRunner(_config(), processes=connector, clock=ManualClock())
     handle = runner.submit_batch(
         SlurmBatchRequest(
@@ -1234,6 +1508,10 @@ def test_batch_collection_transport_failures_never_publish_successful_evidence(
         )
     )
 
+    if not absent:
+        with pytest.raises(SlurmTransferInterruptedError, match=failed_get):
+            runner.collect_batch(handle)
+        return
     result = runner.collect_batch(handle)
 
     if failed_get == "metrics.json":
@@ -1468,12 +1746,15 @@ def test_input_that_changes_during_staging_is_reported_as_a_transient_condition(
     edited.write_text("v1\n", encoding="utf-8")
 
     class _EditingConnector(_FilesystemConnector):
-        def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        def run(
+            self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink
+        ) -> ProcessRun:
+            del output
             stdin = spec.input.decode() or None
             assert stdin is not None
             if json.loads(stdin)["operation"] == "sync_to":
                 edited.write_text("v2\n", encoding="utf-8")
-            return super().run(spec, timeout=timeout)
+            return super().run(spec, timeout=timeout, output=DISCARD)
 
     runner = SlurmJobRunner(
         _config(remote_workspace_root=str(tmp_path / "remote")),
@@ -1641,7 +1922,8 @@ class _SubmissionFaultConnector(_FakeConnector):
         self.during_sbatch = during_sbatch
         self.scheduler_called = False
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        del output
         stdin = spec.input.decode() or None
         assert stdin is not None
         request = json.loads(stdin)
@@ -1653,7 +1935,7 @@ class _SubmissionFaultConnector(_FakeConnector):
         ):
             response = {"version": 1, "returncode": 255, "stdout": "", "stderr": "private"}
             return ProcessOutcome(0, json.dumps(response).encode(), b"")
-        return super().run(spec, timeout=timeout)
+        return super().run(spec, timeout=timeout, output=DISCARD)
 
 
 @pytest.mark.parametrize("during_sbatch", [False, True])
@@ -1677,7 +1959,8 @@ class _SubmissionFaultSshProcess(_FakeSshProcess):
         self.phase = phase
         self.scheduler_called = False
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        del output
         argv = spec.argv
         command = argv[-1]
         is_sbatch = argv[0] == "ssh" and "sbatch-rr " in command
@@ -1691,7 +1974,7 @@ class _SubmissionFaultSshProcess(_FakeSshProcess):
         }[self.phase]
         if should_fail:
             return ProcessOutcome(255, b"", b"private SSH failure")
-        return super().run(spec, timeout=timeout)
+        return super().run(spec, timeout=timeout, output=DISCARD)
 
 
 @pytest.mark.parametrize("phase", ["mkdir", "staging", "rsync", "script-upload", "sbatch"])

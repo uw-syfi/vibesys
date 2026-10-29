@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
 from tests.support.docker_environment import host_container_backend
+from tests.support.dynamic_script import REGISTRY
 from tests.support.loop_invariants import RunRecords, check, terminal_event
 from tests.support.loop_spec import loop_spec
 from tests.support.real_git import REAL_PROCESSES
@@ -49,11 +50,11 @@ from vibesys.api import (
     RunResult,
     RunStatus,
     RunStopped,
+    relaunch,
 )
 from vibesys.candidates import api as candidates
 from vibesys.dynamic_roles import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vibesys.orchestration.dynamic.search.api import (
-    OPERATIONS,
     FinishedWork,
     HypothesisRecord,
     RunSnapshot,
@@ -134,10 +135,7 @@ def check(value):
 check(namespace["VALUE"])
 """
 
-_AGENT_CONFIG = (
-    '[model]\nname = "scripted"\n[evaluation]\n'
-    "observe_interval_seconds = 1\nobserve_backoff_cap_seconds = 1\n"
-)
+_AGENT_CONFIG = "[evaluation]\nobserve_interval_seconds = 1\nobserve_backoff_cap_seconds = 1\n"
 
 
 class _SharedCancelClient(FakeAgentClient):
@@ -407,11 +405,23 @@ def workstream(
 def portfolio(
     *workstreams: Mapping[str, object], updates: Iterable[Mapping[str, object]] = ()
 ) -> dict[str, object]:
-    """Return one planner reply."""
+    """Return one planner reply, with a handoff note expecting something of each workstream."""
     return {
         "reasoning": "Independent mechanisms limit throughput.",
         "workstreams": list(workstreams),
         "hypothesis_updates": list(updates),
+        "handoff": {
+            "expectations": [
+                {
+                    "work_id": item.get("hypothesis_id", item.get("profile_id")),
+                    "expected": "Throughput improves.",
+                    "if_it_succeeds": "Build on it.",
+                    "if_it_fails": "Try another mechanism.",
+                }
+                for item in workstreams
+            ],
+            "doubts": [],
+        },
     }
 
 
@@ -497,6 +507,9 @@ class LoopInput:
             'name = "fake"\n'
             f'remote_workspace_root = "{remote}"\n'
             f"poll_interval_seconds = {poll_interval_s}\n"
+            # Each evaluation holds its node alone, so an agent's run may stand for the
+            # official one (``SlurmConfig.dedicated_measurement_resources``).
+            'sbatch_arguments = ["--exclusive"]\n'
             f'transport = {{ kind = "connector", command = {command} }}\n',
             encoding="utf-8",
         )
@@ -622,6 +635,7 @@ def run_request(  # noqa: PLR0913
     agents: AgentsSource,
     *,
     verify: bool = True,
+    relaunch_saved: bool = False,
     budget_s: float = SIMULATED_BUDGET_S,
     on_handle: Callable[[RunHandle], None] | None = None,
     stop_timer: StopTimer | None = None,
@@ -669,7 +683,10 @@ def run_request(  # noqa: PLR0913
         events.extend([event async for event in handle.events()])
 
     async def run() -> LoopRun:
-        handle = runs.resume(request) if request.resume is not None else runs.start(request)
+        if relaunch_saved:
+            handle = relaunch(request, runs)
+        else:
+            handle = runs.resume(request) if request.resume is not None else runs.start(request)
         collector = asyncio.ensure_future(collect(handle))
         if on_handle is not None:
             on_handle(handle)
@@ -761,9 +778,7 @@ class CoreRecords:
         envelope = load_envelope(self.project, run_id)
         assert envelope is not None, f"no committed record for {run_id}"
         self.envelope: dict[str, Any] = envelope
-        decoded = OPERATIONS.registry().decode_envelope(
-            RunEnvelope[FlowState], json.dumps(envelope)
-        )
+        decoded = REGISTRY.decode_envelope(RunEnvelope[FlowState], json.dumps(envelope))
         published = FlowDriver.published(decoded.strategy, RunSnapshot)
         assert published is not None, "the search published no record"
         self.snapshot: RunSnapshot = published
@@ -796,12 +811,14 @@ class CoreRecords:
 
     def baseline_metric(self) -> float | None:
         """Return the trusted baseline's first metric value, if it was measured."""
-        reading = candidates.reading(self.snapshot.baseline)
+        baseline = self.snapshot.baseline
+        reading = None if baseline is None else candidates.reading(baseline)
         return reading.metrics[0].value if reading is not None and reading.metrics else None
 
     def baseline_failure(self) -> candidates.InputFailure | None:
-        """Return why the input could not be measured, or None when it was."""
-        return candidates.failure(self.snapshot.baseline)
+        """Return why the input could not be measured, or None when it was (or is still pending)."""
+        baseline = self.snapshot.baseline
+        return None if baseline is None else candidates.failure(baseline)
 
     def hypothesis(self, hypothesis_id: str) -> HypothesisRecord:
         """Return the search's record of one hypothesis."""

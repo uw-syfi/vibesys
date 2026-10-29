@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
+from protobuf.wkt.google.protobuf.wrappers_pb import StringValue
 from tests.support.container_credentials import set_container_cli_credentials
 from tests.support.core_plugins import core_policy
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
@@ -20,6 +25,7 @@ from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.composition import resolve_agent_specs
 from vibesys.config import AgentCfg, Config
 from vibesys.constants import ComputeBackend
+from vibesys.events import CoreEventType
 from vibesys.inputs import load_task
 from vibesys.orchestration.profilers import ProfilerKind, ProfilerPreflightResult
 from vibesys.plugin_registration import OrchestrationRegistration
@@ -31,6 +37,7 @@ from vs_agent.api import (
     AgentCapabilities,
     AgentQuotaError,
     AgentTurnRequest,
+    CapacityStops,
     QuotaCondition,
 )
 from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore
@@ -39,6 +46,7 @@ from vs_core.api import (
     validate_startup,
 )
 from vs_project.api import OrchestrationDescriptor, Project, StoredEnvelope
+from vs_runlog.api import RunLogReader
 from vs_runtime.api import (
     AgentRole,
     CorePlan,
@@ -55,7 +63,6 @@ from vs_sim.api.testing import ManualClock, SimThreads, VirtualClock, run_virtua
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from vibesys.run.core_services import CoreServices
     from vs_agent.api import AgentClientProtocol, CapacityGate
@@ -127,7 +134,7 @@ def _request(
         run_environment=fake_docker_environment(),
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id="core-test", config_version=1, options={}),
-        config=config or Config.model_validate({"model": {"name": "core-test"}}),
+        config=config or Config.model_validate({"model": {"name": "claude-sonnet-5"}}),
         input_bundle=load_task(project_root),
         objective="Improve the queue.",
         exp_name="core-test",
@@ -144,6 +151,7 @@ def _open(
     client_factory: Callable[..., AgentClientProtocol] | None,
     journal: bool,
     config: Config | None = None,
+    emitted: tuple[str, ...] = (),
 ) -> Callable[[], CoreServices]:
     project_root = tmp_path / "project"
     templates = tmp_path / "templates"
@@ -176,6 +184,8 @@ def _open(
                 network=UnixNetwork(),
                 profiler_preflight=FakeProfilerPreflight(),
             ) as host:
+                for text in emitted:
+                    integration.events.emit(CoreEventType.FRAMEWORK_WARNING, text)
                 return host.services
         finally:
             integration.close()
@@ -273,8 +283,8 @@ def test_a_fallback_that_is_the_providers_own_fails_at_startup_naming_the_key(
 ) -> None:
     config = Config.model_validate(
         {
-            "model": {"name": "core-test"},
-            "agent": {"quota": {"fallback_provider": "claude", "fallback_model": "opus"}},
+            "model": {"name": "claude-sonnet-5"},
+            "agent": {"quota": {"fallback_provider": "claude", "fallback_model": "claude-opus-5"}},
         }
     )
 
@@ -294,16 +304,24 @@ def _built_clients(tmp_path: Path, config: Config) -> list[_GateRecordingClient]
 
 
 def test_every_client_the_core_path_builds_gets_the_runs_quota_gate(tmp_path: Path) -> None:
-    clients = _built_clients(tmp_path, Config.model_validate({"model": {"name": "core-test"}}))
+    clients = _built_clients(
+        tmp_path, Config.model_validate({"model": {"name": "claude-sonnet-5"}})
+    )
 
     assert clients
     assert all(len(client.gates) == 1 for client in clients)
 
 
+def _one_stop() -> CapacityStops:
+    stops = CapacityStops(SimThreads())
+    stops.count = 1
+    return stops
+
+
 def test_the_quota_policy_of_the_config_reaches_the_gate(tmp_path: Path) -> None:
     """Under ``fail`` a quota stop ends the turn at once, where ``pause`` would hold it."""
     config = Config.model_validate(
-        {"model": {"name": "core-test"}, "agent": {"quota": {"policy": "fail"}}}
+        {"model": {"name": "claude-sonnet-5"}, "agent": {"quota": {"policy": "fail"}}}
     )
     [client] = _built_clients(tmp_path, config)
     [gate] = client.gates
@@ -314,7 +332,7 @@ def test_the_quota_policy_of_the_config_reaches_the_gate(tmp_path: Path) -> None
             error,
             AgentTurnRequest(message="m", label=None, invocation_id=None),
             role="r",
-            attempt=1,
+            stops=_one_stop(),
         )
 
 
@@ -323,11 +341,12 @@ def test_the_quota_policy_of_the_config_reaches_the_gate(tmp_path: Path) -> None
 # consumed by the gate tests above, the rest show up in the specs the run resolves.
 _AGENT_KEY_SAMPLES: dict[str, object] = {
     "backend": "stub",
-    "cli_provider": "gemini",
+    "cli_provider": "claude",
     "cli_timeout": 17,
     "env_passthrough": ("SOME_TOKEN",),
     "quota": {"policy": "fail"},
-    "roles": {"implementer": {"model": "role-model"}},
+    "roles": {"implementer": {"model": "gpt-5.6-luna"}},
+    "scripted_seed": 7,
 }
 
 
@@ -342,10 +361,9 @@ def test_a_changed_agent_config_key_changes_the_specs_the_run_resolves(key: str)
     def specs(config: Config) -> object:
         return resolve_agent_specs(config, (role,), backend=None, provider=None)
 
-    base = Config.model_validate({"model": {"name": "core-test"}})
-    changed = Config.model_validate(
-        {"model": {"name": "core-test"}, "agent": {key: _AGENT_KEY_SAMPLES[key]}}
-    )
+    # Without [model].name each provider runs its own default model.
+    base = Config()
+    changed = Config.model_validate({"agent": {key: _AGENT_KEY_SAMPLES[key]}})
 
     assert specs(changed) != specs(base)
 
@@ -355,8 +373,8 @@ def test_a_fallback_a_core_run_cannot_switch_to_fails_at_startup_naming_the_key(
 ) -> None:
     config = Config.model_validate(
         {
-            "model": {"name": "core-test"},
-            "agent": {"quota": {"fallback_provider": "codex", "fallback_model": "gpt-5"}},
+            "model": {"name": "claude-sonnet-5"},
+            "agent": {"quota": {"fallback_provider": "codex", "fallback_model": "gpt-5.5"}},
         }
     )
 
@@ -447,3 +465,37 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
     assert isinstance(stored, StoredEnvelope)
     core = json.loads(stored.payload)["envelope"]["core"]["run"]
     assert (core["status"], core["result"]["outcome"]) == ("terminal", "failure")
+
+
+@pytest.mark.regression
+@given(texts=st.lists(st.text(max_size=24), max_size=5))
+@example(texts=["live"])
+@example(texts=["\x85"])
+def test_core_host_tees_startup_and_live_events(texts: list[str]) -> None:
+    with TemporaryDirectory() as directory, pytest.MonkeyPatch.context() as environ:
+        root = Path(directory)
+        environ.setenv("VIBESYS_STATE_HOME", str(root / "state"))
+        _open(root, client_factory=_resumable_client, journal=True, emitted=tuple(texts))()
+        project_root = root / "project"
+        (run_id,) = Project.logged_run_ids_for(project_root)
+        journal = Project.event_journal_path_for(project_root, run_id).read_text().split("\n")[:-1]
+        with Project.run_log_path_for(project_root, run_id).open("rb") as stream:
+            records = list(RunLogReader(stream))
+        assert records[0].body is not None
+        assert records[0].body.field == "epoch_started"
+        assert any(
+            record.body is not None and record.body.field == "lifecycle" for record in records
+        )
+        assert all(
+            record.body is not None and record.body.field != "legacy_event" for record in records
+        )
+        notices = [
+            StringValue.from_binary(record.body.value.detail.value).value
+            if record.body.value.detail is not None
+            else record.body.value.message
+            for record in records
+            if record.body is not None and record.body.field == "notice"
+        ]
+        if texts:
+            assert notices[-len(texts) :] == texts
+            assert [json.loads(line)["text"] for line in journal[-len(texts) :]] == texts

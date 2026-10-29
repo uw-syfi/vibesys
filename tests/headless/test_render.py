@@ -9,6 +9,9 @@ from vibesys.api import (
     FrameworkWarningData,
     GateFinishedData,
     GateStartedData,
+    InputMeasurementFailedData,
+    InputMeasurementFailureKind,
+    MeasurementComparedData,
     ProviderSwitchedData,
     QuotaAbandonedData,
     QuotaPausedData,
@@ -16,6 +19,7 @@ from vibesys.api import (
     RateLimitUpdateData,
     RunConfiguredData,
     WinnerSelectedData,
+    WorkspaceRootProbeData,
     WorkspaceSnapshotData,
 )
 from vibesys.events import (
@@ -31,6 +35,7 @@ from vibesys.events import (
     UsageUpdateData,
     make_core_event,
 )
+from vs_core.api import ComparisonVerdict
 
 
 def _render(
@@ -215,6 +220,69 @@ class TestFrameworkEvents:
         assert candidate == f"[result] selected trusted winner {'c' * 12} (settlement s-1)\n"
         assert baseline.startswith("[result] selected the trusted input unchanged")
 
+    def test_a_failed_input_measurement_names_how_the_stage_and_what_it_printed(self) -> None:
+        out = _render_event(
+            CoreEventType.INPUT_MEASUREMENT_FAILED,
+            InputMeasurementFailedData(
+                failure=InputMeasurementFailureKind.ACCURACY_FAILED,
+                stage="correctness",
+                summary="accuracy stage exceeded its 1200 s limit",
+            ),
+        )
+        bare = _render_event(
+            CoreEventType.INPUT_MEASUREMENT_FAILED,
+            InputMeasurementFailedData(failure=InputMeasurementFailureKind.READINGS_UNDECODABLE),
+        )
+
+        assert out.startswith(
+            "[input] the input's trusted measurement failed (accuracy-failed, stage correctness)"
+        )
+        assert out.endswith(":\naccuracy stage exceeded its 1200 s limit\n")
+        assert bare.startswith(
+            "[input] the input's trusted measurement failed (readings-undecodable)"
+        )
+        assert bare.count("\n") == 1
+        assert "a candidate adopted now is adopted without an input comparison" in bare
+
+    def test_a_failed_input_measurement_says_how_often_it_was_taken_and_what_is_the_bar(
+        self,
+    ) -> None:
+        out = _render_event(
+            CoreEventType.INPUT_MEASUREMENT_FAILED,
+            InputMeasurementFailedData(
+                failure=InputMeasurementFailureKind.WAIT_ENDED, attempts=2, compared=True
+            ),
+        )
+
+        assert out.startswith(
+            "[input] the input's trusted measurement failed (wait-ended, measured twice); "
+            "the run goes on, its benchmark numbers stay the bar candidates must beat"
+        )
+
+    def test_a_comparison_states_the_verdict_the_values_and_the_sample_counts(self) -> None:
+        out = _render_event(
+            CoreEventType.MEASUREMENT_COMPARED,
+            MeasurementComparedData(
+                metric="throughput",
+                unit="tok/s",
+                direction="max",
+                candidate_commit="c" * 40,
+                base_commit="b" * 40,
+                candidate_value=130.0,
+                base_value=100.0,
+                ratio=1.3,
+                noise=0.0283,
+                verdict=ComparisonVerdict.BETTER,
+                candidate_samples=2,
+                base_samples=1,
+            ),
+        )
+
+        assert out == (
+            f"[compare] {'c' * 12} vs base {'b' * 12}: better, 130 tok/s vs 100 tok/s, "
+            "ratio 1.300 \u00b1 0.028 (2 and 1 samples)\n"
+        )
+
     def test_run_configuration_header(self) -> None:
         out = _render_event(
             CoreEventType.RUN_CONFIGURED,
@@ -246,6 +314,61 @@ class TestFrameworkEvents:
 
         assert detailed == "[warn] profiler failed: boom\n"
         assert bare == "[warn] odd state\n"
+
+
+class TestWorkspaceRootProbeEvents:
+    def test_a_queued_probe_names_its_job_wait_and_scheduler_reason(self) -> None:
+        out = _render_event(
+            CoreEventType.WORKSPACE_ROOT_PROBE,
+            WorkspaceRootProbeData(
+                state="queued",
+                job_id="5000",
+                pending_reason="Resources",
+                waited_seconds=600.0,
+                queue_timeout_seconds=1800.0,
+            ),
+            status=EventStatus.ACTIVE,
+        )
+
+        assert out == (
+            "[slurm] workspace-root probe job 5000 has waited 10 min of up to 30 min in the queue "
+            "(scheduler reason: Resources); Slurm work waits for it, agents carry on\n"
+        )
+
+    def test_a_proven_and_a_failed_probe_say_whether_slurm_work_goes_ahead(self) -> None:
+        proven = _render_event(
+            CoreEventType.WORKSPACE_ROOT_PROBE,
+            WorkspaceRootProbeData(state="proven"),
+            status=EventStatus.COMPLETED,
+        )
+        failed = _render_event(
+            CoreEventType.WORKSPACE_ROOT_PROBE,
+            WorkspaceRootProbeData(state="failed", failure="probe job 5000 was never scheduled"),
+            status=EventStatus.FAILED,
+        )
+
+        assert proven == "[slurm] workspace root proven shared with the compute nodes\n"
+        assert failed == (
+            "[slurm] workspace-root probe failed; Slurm work is refused and the run ends: "
+            "probe job 5000 was never scheduled\n"
+        )
+
+    def test_a_retrying_probe_says_when_the_next_attempt_starts_and_why(self) -> None:
+        out = _render_event(
+            CoreEventType.WORKSPACE_ROOT_PROBE,
+            WorkspaceRootProbeData(
+                state="retrying",
+                failure="probe job 5000 was never scheduled",
+                attempt=2,
+                retry_in_seconds=120.0,
+            ),
+            status=EventStatus.ACTIVE,
+        )
+
+        assert out == (
+            "[slurm] workspace-root probe attempt 2 starts in 2 min; Slurm work keeps "
+            "waiting, agents carry on. Last attempt: probe job 5000 was never scheduled\n"
+        )
 
 
 class TestRateLimitEvents:
@@ -316,6 +439,78 @@ class TestQuotaEvents:
             CoreEventType.QUOTA_RESUMED, QuotaResumedData(provider="claude", reason="wait_elapsed")
         )
         assert out == "[quota] the wait elapsed; sending the paused claude turn again\n"
+
+    def test_an_outage_says_only_the_turn_waits(self) -> None:
+        out = _render_event(
+            CoreEventType.QUOTA_PAUSED,
+            QuotaPausedData(
+                provider="claude",
+                condition="unavailable",
+                detail="503",
+                resumes_at=1_791_954_019,
+                policy="wait",
+            ),
+        )
+        assert out == (
+            "[quota] claude unavailable: 503; this turn waits, the run goes on; "
+            "trying again at 2026-10-14 05:00 UTC\n"
+        )
+
+    def test_an_outage_resume_shows_how_long_the_turn_waited(self) -> None:
+        out = _render_event(
+            CoreEventType.QUOTA_RESUMED,
+            QuotaResumedData(
+                provider="claude",
+                condition="unavailable",
+                reason="wait_elapsed",
+                waited_seconds=600.0,
+            ),
+        )
+        assert out == "[quota] claude turn waited 10 min out of an outage; sending it again\n"
+
+    def test_the_run_end_reports_the_total_outage_wait(self) -> None:
+        """Every outage wait counts, including the last wait of a turn it ended (a cancel,
+        the run's deadline), which publishes ``quota_abandoned`` instead of a resume."""
+        out = StringIO()
+        renderer = HeadlessRenderer(out=out)
+        resumed = ((3600.0, "unavailable"), (60.0, "unavailable"), (900.0, None))
+        for waited, condition in resumed:
+            renderer.handle(
+                make_core_event(
+                    CoreEventType.QUOTA_RESUMED,
+                    data=QuotaResumedData(
+                        provider="claude",
+                        condition=condition,
+                        reason="wait_elapsed",
+                        waited_seconds=waited,
+                    ),
+                    timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+                )
+            )
+        for waited, condition in ((65.0, "unavailable"), (900.0, "rate_limited")):
+            renderer.handle(
+                make_core_event(
+                    CoreEventType.QUOTA_ABANDONED,
+                    data=QuotaAbandonedData(
+                        provider="claude",
+                        condition=condition,
+                        detail="503",
+                        reason="the turn was cancelled after 1 min 5 s",
+                        waited_seconds=waited,
+                    ),
+                    timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+                )
+            )
+        renderer.finish()
+
+        assert out.getvalue().splitlines()[-1] == (
+            "[quota] turns waited out provider outages for 1 h 2 min 5 s in total"
+        )
+
+    def test_a_run_without_an_outage_reports_none(self) -> None:
+        out = StringIO()
+        HeadlessRenderer(out=out).finish()
+        assert out.getvalue() == ""
 
     def test_an_abandoned_turn_names_the_policys_reason(self) -> None:
         out = _render_event(

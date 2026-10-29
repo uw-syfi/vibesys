@@ -17,6 +17,7 @@ from vibesys.api import (
     RunSession,
     RunStatus,
     RunStopped,
+    StopMode,
 )
 from vibesys.api.testing import FakeRunHandle
 
@@ -36,8 +37,8 @@ class _Session:
     def close(self) -> None:
         pass
 
-    def stop(self) -> None:
-        pass
+    def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
+        del mode
 
     async def await_result(self) -> RunResult | None:
         if isinstance(self._ending, BaseException):
@@ -164,3 +165,41 @@ def test_check_input_failure_exits_one_with_a_concise_reason(
     assert output.err == ""
     assert output.out.endswith("\nInput gates failed.\nReason: benchmark evidence was unreadable\n")
     assert output.out.count("Input gates failed.") == 1
+
+
+def test_a_run_that_adopted_an_uncompared_candidate_says_so_when_it_completes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """H1: "run completed" alone would read as a plain win; the line names the missing comparison."""
+    project = _write_input_project(tmp_path)
+    ok = RunResult(
+        run_id="exit-status",
+        loop="agent",
+        succeeded=True,
+        status=RunStatus.COMPLETED,
+        uncompared=True,
+    )
+
+    cli.dispatch(["--outer-loop", "agent", "--input", str(project)], _Runs(ok))
+
+    assert "adopted without an input comparison" in capsys.readouterr().out
+
+
+def test_a_stopped_run_that_held_an_uncompared_candidate_says_so(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """B1: the stop line names the missing comparison as the completion line does."""
+    project = _write_input_project(tmp_path)
+    stopped = RunResult(
+        run_id="exit-status",
+        loop="agent",
+        succeeded=False,
+        status=RunStatus.STOPPED,
+        stop_reason="stopped: adopted: s1",
+        uncompared=True,
+    )
+
+    with pytest.raises(SystemExit):
+        cli.dispatch(["--outer-loop", "agent", "--input", str(project)], _Runs(stopped))
+
+    assert "adopted without an input comparison" in capsys.readouterr().out

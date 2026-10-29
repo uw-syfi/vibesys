@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_sim.api import Processes
+from vs_sim.api import DISCARD
 
 # The status a run stopped for too much output reports: its group was killed with SIGKILL.
 _KILLED_STATUS = -9
@@ -173,7 +174,7 @@ class Git:
         environment = git_environment() if env is None else env
         _require_policy(environment)
         spec = ProcessSpec(argv, cwd=cwd, env=environment)
-        match self._processes.run(spec, timeout=timeout):
+        match self._processes.run(spec, timeout=timeout, output=DISCARD):
             case ProcessOutcome() as outcome:
                 return outcome
             case ProcessTimedOut(timeout=limit, stdout=stdout, stderr=stderr):

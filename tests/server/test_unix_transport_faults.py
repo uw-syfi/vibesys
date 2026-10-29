@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import TypeAdapter
-from tests.server.support import REQUEST_TIME, build_server_parts
+from tests.server.support import CONTROL_KEY, REQUEST_TIME, build_server_parts, operator_dialer
 
 from server.api.protocol import (
     MAX_SERVER_MESSAGE_BYTES,
@@ -37,7 +37,7 @@ from server.chat.manager import ChatAnswer
 from server.transport.subscriptions import SubscriptionTracker
 from server.transport.unix_jsonl import MAX_REQUEST_LINE_BYTES as MAX
 from server.transport.unix_jsonl import UnixJsonlServer
-from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads, examples
+from vs_sim.api.testing import HANG_GUARD_S, RefusingThreads, SimNetwork, SimThreads, examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -155,8 +155,9 @@ def test_unix_subscription_uses_the_same_bounded_active_checkpoint_frames(
             subscriptions=None,
             threads=threads,
             network=network,
+            key=CONTROL_KEY,
         ):
-            client = network.connect(str(socket_path))
+            client = operator_dialer(network).connect(str(socket_path))
             client.send(_frame("subscribe"))
             pending = bytearray()
             SubscribedMessage.model_validate_json(_read_buffered_line(client, pending))
@@ -234,10 +235,10 @@ def test_a_client_fault_at_any_boundary_costs_only_that_client(
         parts = build_server_parts(None, threads=threads)
         network = SimNetwork(threads)
         tracker = SubscriptionTracker(threads=threads)
-        with UnixJsonlServer(socket_path, parts.api, tracker, threads, network):
+        with UnixJsonlServer(socket_path, parts.api, tracker, threads, network, key=CONTROL_KEY):
             done = []
             for index, fault in enumerate(faults):
-                client = network.connect(str(socket_path))
+                client = operator_dialer(network).connect(str(socket_path))
                 threads.spawn(
                     lambda c=client, f=fault: done.append((f, _exchange(c, f, threads))),
                     name=f"client-{index}",
@@ -256,7 +257,7 @@ def test_a_client_fault_at_any_boundary_costs_only_that_client(
             for fault, lines in done:
                 _check_answers(fault, lines)
 
-            healthy = network.connect(str(socket_path))
+            healthy = operator_dialer(network).connect(str(socket_path))
             healthy.send(_frame("query.snapshot"))
             reply = Response.model_validate_json(_read_line(healthy))
             assert reply.ok, reply
@@ -281,13 +282,18 @@ def test_a_client_that_hangs_up_before_its_answer_ends_only_its_own_session(
         parts = build_server_parts(None, threads=threads)
         network = SimNetwork(threads)
         with UnixJsonlServer(
-            socket_path, parts.api, threads=threads, network=network, subscriptions=None
+            socket_path,
+            parts.api,
+            threads=threads,
+            network=network,
+            subscriptions=None,
+            key=CONTROL_KEY,
         ):
-            gone = network.connect(str(socket_path))
+            gone = operator_dialer(network).connect(str(socket_path))
             gone.send(_frame("query.snapshot"))
             gone.close()
             threads.sleep(1.0)
-            again = network.connect(str(socket_path))
+            again = operator_dialer(network).connect(str(socket_path))
             again.send(_frame("query.snapshot"))
             assert Response.model_validate_json(_read_line(again)).ok
             again.close()
@@ -330,12 +336,12 @@ def test_closing_the_server_hangs_up_on_every_client_however_far_it_got(
         parts = build_server_parts(None, threads=threads)
         network = SimNetwork(threads)
         tracker = SubscriptionTracker(threads=threads)
-        server = UnixJsonlServer(socket_path, parts.api, tracker, threads, network)
+        server = UnixJsonlServer(socket_path, parts.api, tracker, threads, network, key=CONTROL_KEY)
         server.start()
         done: list[tuple[_Fault, list[bytes]]] = []
         clients_done = threads.event()
         for index, fault in enumerate(faults):
-            client = network.connect(str(socket_path))
+            client = operator_dialer(network).connect(str(socket_path))
 
             def run(c: Connection = client, f: _Fault = fault) -> None:
                 frame = _frame(f.kind)
@@ -392,10 +398,15 @@ def test_close_drains_a_started_request_before_returning(tmp_path: Path) -> None
 
         parts.chat.install_default_handler(answer)
         server = UnixJsonlServer(
-            socket_path, parts.api, threads=threads, network=network, subscriptions=None
+            socket_path,
+            parts.api,
+            threads=threads,
+            network=network,
+            subscriptions=None,
+            key=CONTROL_KEY,
         )
         server.start()
-        client = network.connect(str(socket_path))
+        client = operator_dialer(network).connect(str(socket_path))
         client.send(
             ChatQuery(timestamp=REQUEST_TIME, text="finish before close").model_dump_json().encode()
             + b"\n"
@@ -428,7 +439,12 @@ def test_close_called_by_requests_does_not_cross_join_their_workers(tmp_path: Pa
         parts = build_server_parts(None, threads=threads)
         network = SimNetwork(threads)
         server = UnixJsonlServer(
-            socket_path, parts.api, threads=threads, network=network, subscriptions=None
+            socket_path,
+            parts.api,
+            threads=threads,
+            network=network,
+            subscriptions=None,
+            key=CONTROL_KEY,
         )
         arrived: list[str] = []
         all_entered = threads.event()
@@ -448,7 +464,7 @@ def test_close_called_by_requests_does_not_cross_join_their_workers(tmp_path: Pa
 
         parts.chat.install_default_handler(answer)
         server.start()
-        clients = [network.connect(str(socket_path)) for _ in range(2)]
+        clients = [operator_dialer(network).connect(str(socket_path)) for _ in range(2)]
         for index, client in enumerate(clients):
             client.send(
                 ChatQuery(timestamp=REQUEST_TIME, text=f"close {index}").model_dump_json().encode()
@@ -484,8 +500,8 @@ def test_a_subscriber_that_wrote_after_subscribing_is_seen_hanging_up_on_an_idle
         parts = build_server_parts(None, threads=threads)
         network = SimNetwork(threads)
         tracker = SubscriptionTracker(threads=threads)
-        with UnixJsonlServer(socket_path, parts.api, tracker, threads, network):
-            client = network.connect(str(socket_path))
+        with UnixJsonlServer(socket_path, parts.api, tracker, threads, network, key=CONTROL_KEY):
+            client = operator_dialer(network).connect(str(socket_path))
             client.send(_frame("subscribe"))
             assert tracker.wait_for_subscriber(HANG_GUARD_S)
             client.send(_frame("query.snapshot"))
@@ -518,9 +534,14 @@ def test_a_frame_nested_past_the_recursion_limit_is_rejected_and_the_session_goe
         parts = build_server_parts(None, threads=threads)
         network = SimNetwork(threads)
         with UnixJsonlServer(
-            socket_path, parts.api, threads=threads, network=network, subscriptions=None
+            socket_path,
+            parts.api,
+            threads=threads,
+            network=network,
+            subscriptions=None,
+            key=CONTROL_KEY,
         ):
-            client = network.connect(str(socket_path))
+            client = operator_dialer(network).connect(str(socket_path))
             client.send(b"[" * 100_000 + b"\n" + _frame("query.snapshot"))
             rejection = Response.model_validate_json(_read_line(client))
             assert not rejection.ok
@@ -555,9 +576,14 @@ def test_a_request_line_past_the_bound_is_rejected_and_the_session_goes_on(
         parts = build_server_parts(None, threads=threads)
         network = SimNetwork(threads)
         with UnixJsonlServer(
-            socket_path, parts.api, threads=threads, network=network, subscriptions=None
+            socket_path,
+            parts.api,
+            threads=threads,
+            network=network,
+            subscriptions=None,
+            key=CONTROL_KEY,
         ):
-            client = network.connect(str(socket_path))
+            client = operator_dialer(network).connect(str(socket_path))
             _send(client, oversized + _frame("query.snapshot"), tuple(sorted(cuts)))
             rejection = Response.model_validate_json(_read_line(client))
             assert not rejection.ok
@@ -692,9 +718,14 @@ def test_a_transient_accept_failure_is_logged_and_retried_not_treated_as_a_close
     def main() -> None:
         parts = build_server_parts(None, threads=threads)
         with UnixJsonlServer(
-            socket_path, parts.api, threads=threads, network=network, subscriptions=None
+            socket_path,
+            parts.api,
+            threads=threads,
+            network=network,
+            subscriptions=None,
+            key=CONTROL_KEY,
         ):
-            client = network.connect(str(socket_path))
+            client = operator_dialer(network).connect(str(socket_path))
             client.send(_frame("query.snapshot"))
             reply = Response.model_validate_json(_read_line(client))
             assert reply.ok, reply
@@ -727,7 +758,12 @@ def test_closing_the_server_ends_the_accept_loop_even_through_an_emfile_shaped_o
     def main() -> None:
         parts = build_server_parts(None, threads=threads)
         server = UnixJsonlServer(
-            socket_path, parts.api, threads=threads, network=network, subscriptions=None
+            socket_path,
+            parts.api,
+            threads=threads,
+            network=network,
+            subscriptions=None,
+            key=CONTROL_KEY,
         )
         server.start()
         server.close()
@@ -749,7 +785,12 @@ def test_close_drains_accept_when_listener_close_does_not_interrupt_it(tmp_path:
     def main() -> None:
         parts = build_server_parts(None, threads=threads)
         server = UnixJsonlServer(
-            socket_path, parts.api, threads=threads, network=network, subscriptions=None
+            socket_path,
+            parts.api,
+            threads=threads,
+            network=network,
+            subscriptions=None,
+            key=CONTROL_KEY,
         )
         server.start()
         server.close()
@@ -759,3 +800,42 @@ def test_close_drains_accept_when_listener_close_does_not_interrupt_it(tmp_path:
         parts.close()
 
     threads.run(main)
+
+
+def test_worker_spawn_failure_is_logged_and_retried_not_killing_accept_loop(
+    tmp_path: Path,
+) -> None:
+    """A worker thread-spawn failure drops that connection and keeps accepting.
+
+    Regression test for #2696: previously a WorkerStartRefusedError from
+    threads.spawn() propagated out of _accept_loop, permanently terminating
+    the accept-loop daemon thread. The failed connection must be closed, the
+    failure retried with backoff, and a subsequent connection must succeed.
+    """
+    base_threads = SimThreads(schedule_seed=0)
+    threads = RefusingThreads(base_threads, {"vibesys-server-jsonl-client": 1})
+    socket_path = tmp_path / "control.sock"
+    network = SimNetwork(base_threads)
+
+    def main() -> None:
+        parts = build_server_parts(None, threads=threads)
+        with UnixJsonlServer(
+            socket_path,
+            parts.api,
+            threads=threads,
+            network=network,
+            subscriptions=None,
+            key=CONTROL_KEY,
+        ):
+            client1 = operator_dialer(network).connect(str(socket_path))
+            base_threads.sleep(0.15)
+            assert client1.recv(1, HANG_GUARD_S) == b""
+            client1.close()
+
+            client2 = operator_dialer(network).connect(str(socket_path))
+            client2.send(_frame("query.snapshot"))
+            reply = Response.model_validate_json(_read_line(client2))
+            assert reply.ok, reply
+            client2.close()
+
+    base_threads.run(main)

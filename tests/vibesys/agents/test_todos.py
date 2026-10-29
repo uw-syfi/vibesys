@@ -1,6 +1,6 @@
 """Tests for provider todo/plan tool-call extraction.
 
-The TUI and headless renderers consume neutral ``todo_update`` events; these
+Clients and headless renderers consume neutral ``todo_update`` events; these
 tests pin the adapter that translates each CLI provider's tool convention
 into that contract, and the ``AgentLogger`` hook that publishes it.
 """

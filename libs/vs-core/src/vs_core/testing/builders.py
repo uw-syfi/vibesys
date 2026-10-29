@@ -34,6 +34,8 @@ def sample_limits(**overrides: object) -> Limits:
         "reconciliation_bound": 60.0,
         "observe_interval": 10.0,
         "observe_backoff_cap": 120.0,
+        "queue_wait_budget": 43_200.0,
+        "queue_notice_interval": 600.0,
     }
     return Limits.model_validate({**values, **overrides})
 

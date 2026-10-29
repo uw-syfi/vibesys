@@ -139,7 +139,7 @@ class RunController:
             self._journal.record(EventType.CONTROL, "/stop", status=EventStatus.PENDING)
 
     def resume(self) -> None:
-        """Resume controlled invocations and clear a pending pause or stop."""
+        """Resume controlled invocations and clear a pending pause; a pending stop stays."""
         with self._condition:
             self._apply_locked(RunTrigger.RESUMED)
             self._journal.record(EventType.CONTROL, "/resume", status=EventStatus.CONSUMED)
@@ -148,6 +148,20 @@ class RunController:
         """Queue operator guidance for the next controlled invocation."""
         with self._condition:
             self._journal.record(EventType.CONTROL, f"/steer: {text}", status=EventStatus.PENDING)
+
+    def standing_guidance(self, text: str) -> None:
+        """Journal operator guidance in force for every later turn, until withdrawn."""
+        with self._condition:
+            self._journal.record(
+                EventType.CONTROL, f"/steer --standing: {text}", status=EventStatus.ACTIVE
+            )
+
+    def withdraw(self, withdraws: str) -> None:
+        """Journal a withdrawal of the standing guidance sent under ``withdraws``."""
+        with self._condition:
+            self._journal.record(
+                EventType.CONTROL, f"/withdraw: {withdraws}", status=EventStatus.PENDING
+            )
 
     def start_agent_execution(
         self,
@@ -296,17 +310,65 @@ class RunController:
             self._journal.record(EventType.CONTROL, "/stop", status=EventStatus.CONSUMED)
 
     def record_steer_consumed(
-        self, *, agent_kind: str | None, round_label: str | None, execution_id: str | None
+        self,
+        *,
+        agent_kind: str | None,
+        round_label: str | None,
+        execution_id: str | None,
+        mid_turn: bool = False,
+        note: str = "",
     ) -> None:
-        """Journal that queued steering was spliced into an invocation's prompt."""
+        """Journal that queued steering reached an invocation: in its prompt, or mid-turn.
+
+        ``note`` says why an interrupt-mode steer reached the next turn instead.
+        """
+        command = "/steer --interrupt" if mid_turn else "/steer"
         with self._condition:
             self._journal.record(
                 EventType.CONTROL,
-                "/steer",
+                f"{command}: {note}" if note else command,
                 status=EventStatus.CONSUMED,
                 agent_kind=agent_kind,
                 round_label=round_label,
                 execution_id=execution_id,
+            )
+
+    def action(self, summary: str) -> None:
+        """Journal an operator action queued for the run; ``summary`` is the action and its subject."""
+        with self._condition:
+            self._journal.record(EventType.CONTROL, f"/{summary}", status=EventStatus.PENDING)
+
+    def record_action_applied(self, summary: str) -> None:
+        """Journal that the run applied an operator action; ``summary`` is the action and its subject."""
+        with self._condition:
+            self._journal.record(
+                EventType.CONTROL, f"/{summary} applied", status=EventStatus.COMPLETED
+            )
+
+    def record_steer_dropped(self, reason: str) -> None:
+        """Journal that an accepted steer reached no one; ``reason`` names the steer and why."""
+        with self._condition:
+            self._journal.record(
+                EventType.CONTROL, f"/steer dropped: {reason}", status=EventStatus.FAILED
+            )
+
+    def record_control_refused(self, reason: str) -> None:
+        """Journal that the run refused an acknowledged control; ``reason`` names it and why."""
+        with self._condition:
+            self._journal.record(
+                EventType.CONTROL, f"/control refused: {reason}", status=EventStatus.FAILED
+            )
+
+    def record_request_rejected(self, text: str) -> None:
+        """Journal that the run set aside a request from its control inbox; ``text`` says why."""
+        with self._condition:
+            self._journal.record(EventType.CONTROL, f"/{text}", status=EventStatus.FAILED)
+
+    def record_guidance_ended(self, reason: str) -> None:
+        """Journal that standing guidance reaches no turn any more; ``reason`` names it and why."""
+        with self._condition:
+            self._journal.record(
+                EventType.CONTROL, f"/guidance ended: {reason}", status=EventStatus.COMPLETED
             )
 
     def status(self) -> str:

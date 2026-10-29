@@ -1,0 +1,3 @@
+http://azure.archive.ubuntu.com/ubuntu/	priority:1
+https://archive.ubuntu.com/ubuntu/	priority:2
+https://security.ubuntu.com/ubuntu/	priority:3

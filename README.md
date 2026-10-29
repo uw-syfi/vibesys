@@ -99,14 +99,12 @@ For example:
 
 ```toml
 [model]
-name = "gpt-5.4"
+name = "gpt-5.6-sol"  # optional: each provider has a default model
 
 [agent]
 backend = "cli"
 cli_provider = "codex"
 
-[backend]
-name = "cpu"
 ```
 
 See [`examples/`](examples/) for complete objectives and manifests across data

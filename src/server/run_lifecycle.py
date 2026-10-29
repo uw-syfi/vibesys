@@ -127,8 +127,10 @@ def _starting_moves(
             _STARTING_STOP if held.requested is RunRequest.STOP else _STARTING_PAUSE
         ),
         (held, RunTrigger.STOP_REQUESTED): _STARTING_STOP,
-        # A resume cancels the pending request; the run keeps starting.
-        (held, RunTrigger.RESUMED): _STARTING,
+        # A resume cancels a pending pause; the run keeps starting. Nothing undoes a stop.
+        (held, RunTrigger.RESUMED): (
+            _STARTING_STOP if held.requested is RunRequest.STOP else _STARTING
+        ),
         (held, RunTrigger.COMPLETED): _COMPLETED,
         (held, RunTrigger.FAILED): _FAILED,
     }
@@ -174,8 +176,8 @@ _TRANSITIONS: Final[MappingProxyType[tuple[RunState, RunTrigger], RunState]] = M
         # A pause cannot downgrade a stop already pending at the boundary.
         (_STOPPING, RunTrigger.PAUSE_REQUESTED): _STOPPING,
         (_STOPPING, RunTrigger.INVOCATION_FINISHED): _STOPPED,
-        # A resume that beats the boundary cancels the stop, like a pause.
-        (_STOPPING, RunTrigger.RESUMED): _RUNNING,
+        # A stop only escalates: a resume never cancels it (the run's control refuses one).
+        (_STOPPING, RunTrigger.RESUMED): _STOPPING,
         (_STOPPING, RunTrigger.STOP_REQUESTED): _STOPPING,
         (_STOPPING, RunTrigger.COMPLETED): _COMPLETED,
         (_STOPPING, RunTrigger.FAILED): _FAILED,

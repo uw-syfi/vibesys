@@ -8,7 +8,8 @@
  * and the app shows as "authentication needed". Questions (`yes/no`) are asked in the clear,
  * everything else with a hidden field.
  */
-import {chmod, lstat, mkdir, writeFile} from 'node:fs/promises';
+import {randomUUID} from 'node:crypto';
+import {lstat, mkdir, open, rename, unlink} from 'node:fs/promises';
 import {dirname} from 'node:path';
 
 const ASKPASS_SCRIPT = `#!/bin/sh
@@ -35,12 +36,54 @@ fi
 exit 1
 `;
 
-/** Write the helper to `path` (owner-only, executable) and return it. */
+/** Atomically install the helper as an owner-only executable and return its path. */
 export async function installAskpass(path: string): Promise<string> {
   await mkdir(dirname(path), {recursive: true});
-  await writeFile(path, ASKPASS_SCRIPT, {mode: 0o700});
-  await chmod(path, 0o700);
+  const staging = await stagePrivateText(path, ASKPASS_SCRIPT, 0o700);
+  try {
+    await rename(staging, path);
+  } catch (error) {
+    // Best effort: a failed cleanup must not hide the reason the replace itself failed.
+    await unlink(staging).catch(() => {});
+    throw error;
+  }
   return path;
+}
+
+const MAX_STAGING_ATTEMPTS = 8;
+
+/** Create a complete private regular file without ever opening an existing path. */
+async function stagePrivateText(target: string, text: string, mode: number): Promise<string> {
+  let collision: unknown;
+  for (let attempt = 0; attempt < MAX_STAGING_ATTEMPTS; attempt += 1) {
+    const staging = `${target}.${randomUUID()}.tmp`;
+    try {
+      await writeNewPrivateText(staging, text, mode);
+      return staging;
+    } catch (error) {
+      if (!hasCode(error, 'EEXIST')) throw error;
+      collision = error;
+    }
+  }
+  throw new Error(`could not create a private staging file beside ${target}`, {cause: collision});
+}
+
+async function writeNewPrivateText(path: string, text: string, mode: number): Promise<void> {
+  const file = await open(path, 'wx', mode);
+  try {
+    await file.writeFile(text);
+    // Creation mode is umask-sensitive; chmod the owned descriptor to make the contract exact.
+    await file.chmod(mode);
+    await file.close();
+  } catch (error) {
+    await file.close().catch(() => {});
+    await unlink(path).catch(() => {});
+    throw error;
+  }
+}
+
+function hasCode(error: unknown, code: string): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 }
 
 /** What the filesystem proved about the control path entry itself, without following it. */

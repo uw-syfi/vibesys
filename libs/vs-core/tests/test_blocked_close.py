@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -47,8 +47,12 @@ def _record(
     *,
     accepted: bool,
     named: bool,
+    answered: bool = True,
 ) -> core.CoreState:
-    """A run with one open record whose executor answered without a conclusion and went silent."""
+    """A run with one open record whose executor answered without a conclusion and went silent.
+
+    Unless ``answered`` is false: then the executor never answered at all (a slow submission).
+    """
     phase, status = answer
     state = _silent(phase, status, terminal=False)
     [record] = state.records.records
@@ -59,7 +63,13 @@ def _record(
             "resource_id": core.ResourceId(root="held") if named else None,
         }
     )
-    held = record.model_copy(update={"lifecycle": lifecycle, "observation": observation})
+    held = record.model_copy(
+        update={
+            "lifecycle": lifecycle,
+            "observation": observation if answered else None,
+            "phase": phase if answered else core.RequestPhase.DISPATCHED,
+        }
+    )
     return state.model_copy(
         update={"records": state.records.model_copy(update={"records": (held,)})}
     )
@@ -283,19 +293,28 @@ def test_a_job_whose_poll_blocked_while_the_host_was_down_is_polled_again(down_f
 
 @settings(max_examples=examples(pr=4, nightly=100))
 @given(case=_CASES)
-def test_a_host_that_restarts_a_run_closed_around_a_blocked_record_finds_nothing_to_do(
+def test_a_closed_blocked_request_survives_writer_recovery_and_operator_resume(
     case: _Case,
 ) -> None:
-    """The run ended, so the record's forced end is final: a new host only reloads the run."""
+    """A new epoch opens admission; the old record's forced outcome remains history."""
     state = _record(case.lifecycle, case.answer, accepted=case.accepted, named=case.named)
     closed = _close_after(
         state, restart=case.restart, late_by=case.late_by, stop_first=case.stop_first
     )
     if closed.run.status != core.RunStatus.TERMINAL:
         return
-    restarted = core.step(closed, core.RecoveryStarted(epoch=3, now_at=BOUND + case.late_by + 200))
-    assert restarted.requests == ()
-    assert restarted.state.run.status == core.RunStatus.TERMINAL
+    recovered = core.step(closed, core.RecoveryStarted(epoch=3, now_at=BOUND + case.late_by + 200))
+    assert recovered.requests == ()
+    assert recovered.state.run.status == core.RunStatus.TERMINAL
+    restarted = core.step(
+        recovered.state, core.EpochResumed(epoch=4, now_at=BOUND + case.late_by + 201)
+    )
+    assert all(isinstance(request, core.InspectRequest) for request in restarted.requests)
+    assert restarted.state.run.status == core.RunStatus.RUNNING
+    assert restarted.state.run.park is None
+    assert not restarted.state.scheduling.admission_closed
+    assert _original(restarted.state).request == _original(closed).request
+    assert _original(restarted.state).failure == _original(closed).failure
 
 
 @settings(max_examples=examples(pr=4, nightly=100))
@@ -332,17 +351,18 @@ class _Later(NamedTuple):
     terminal: bool
 
 
-@settings(max_examples=examples(pr=20, nightly=300))
-@given(
-    later=st.builds(
-        _Later,
-        status=st.sampled_from(list(core.ObservationStatus)),
-        accepted=st.booleans(),
-        released=st.booleans(),
-        children_complete=st.booleans(),
-        terminal=st.booleans(),
-    )
+_LATER_ANSWERS = st.builds(
+    _Later,
+    status=st.sampled_from(list(core.ObservationStatus)),
+    accepted=st.booleans(),
+    released=st.booleans(),
+    children_complete=st.booleans(),
+    terminal=st.booleans(),
 )
+
+
+@settings(max_examples=examples(pr=20, nightly=300))
+@given(later=_LATER_ANSWERS)
 def test_a_later_answer_for_a_record_the_close_ended_proves_its_release_or_is_typed(
     later: _Later,
 ) -> None:
@@ -388,3 +408,87 @@ def test_a_later_answer_for_a_record_the_close_ended_proves_its_release_or_is_ty
     assert record.observation.diagnostic == ended.diagnostic
     assert record.observation.released == later.released
     assert record.observation.children_complete == later.children_complete
+
+
+def _judged(run: core.CoreState, answer: core.Observation) -> tuple[object, ...]:
+    """What core makes of ``answer``: the typed contradiction, a refusal, or the record it leaves.
+
+    The record is read without the answer's own name and number, which differ by construction.
+    """
+    try:
+        after = core.step(run, core.RequestObserved(observation=answer)).state
+    except core.ClosedRecordContradictionError:
+        return ("contradiction",)
+    except core.ContractError as error:
+        return ("refused", error.path, error.detail)
+    record = _original(after)
+    seen = record.observation
+    assert seen is not None
+    return (
+        record.phase,
+        seen.status,
+        seen.accepted,
+        seen.resource_id,
+        seen.released,
+        seen.children_complete,
+        seen.diagnostic,
+    )
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=20, nightly=300))
+@example(
+    later=_Later(
+        status=core.ObservationStatus.FAILED,
+        accepted=True,
+        released=True,
+        children_complete=True,
+        terminal=True,
+    ),
+    answered=True,
+)
+@example(
+    later=_Later(
+        status=core.ObservationStatus.PENDING,
+        accepted=True,
+        released=False,
+        children_complete=False,
+        terminal=False,
+    ),
+    answered=False,
+)
+@given(later=_LATER_ANSWERS, answered=st.booleans())
+def test_the_executors_next_answer_to_a_record_the_close_ended_is_judged_like_a_later_one(
+    later: _Later, *, answered: bool
+) -> None:
+    """Core's end of a blocked record takes no number from the executor that may still answer.
+
+    The end is core's own conclusion, numbered right after the executor's last answer (0 when
+    it never answered). The executor's own next answer carries that same number: a submission
+    whose job id came back only after its bound passed and the run closed (a slow ``sbatch``).
+    Core judges that answer on what it says, exactly as one numbered a step later: it refines
+    the record or is the typed contradiction, never a sequence conflict that halts the host.
+    """
+    state = _record(
+        core.LifecycleClass.IDEMPOTENT_WRITE,
+        _SILENT_ANSWERS[0],
+        accepted=answered,
+        named=False,
+        answered=answered,
+    )
+    run = _close_after(state, restart=False, late_by=1.0, stop_first=True)
+    ended = _original(run).observation
+    assert ended is not None
+    answers = [
+        ended.model_copy(
+            update={
+                "event_id": core.EventId(root=f"executor:{sequence}"),
+                "sequence": sequence,
+                "diagnostic": "",
+                **later._asdict(),
+            }
+        )
+        for sequence in (ended.sequence, ended.sequence + 1)
+    ]
+    at_the_end, after_it = (_judged(run, answer) for answer in answers)
+    assert at_the_end == after_it

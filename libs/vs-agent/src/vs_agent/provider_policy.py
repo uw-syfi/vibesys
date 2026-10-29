@@ -5,7 +5,10 @@ a provider *is*: its binary, state directories, auth environment variables,
 skill-discovery paths, and container install recipe. This module owns what
 VibeSys *decides* to do with that: which providers it ships, what a shipped
 provider's container environment needs, which CLI version its container image
-pins, and which VibeSys behaviors are scoped to a single provider.
+pins, and which VibeSys behaviors are scoped to a single provider. Which
+models a provider runs, and its default model, are agentshim's facts
+(``ProviderProfile.models``); this module only restricts them to the shipped
+providers.
 
 Before this module existed, several of these decisions were copied by hand
 into the modules that needed them (a shipped-provider tuple in the session
@@ -16,6 +19,8 @@ new decision (or a change to an existing one) has one place to make it.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 from vs_agent import provider_profiles
 
@@ -28,6 +33,113 @@ declarations nor a container install recipe for, so it is not offered here.
 
 DEFAULT_CLI_PROVIDER = "codex"
 """The CLI provider selected when neither a flag nor config names one."""
+
+
+# --- Vetted harnesses --------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Harness:
+    """One CLI provider and one model it runs."""
+
+    provider: str
+    model: str
+
+
+def harnesses() -> tuple[Harness, ...]:
+    """The provider and model pairs VibeSys runs agents with, the one list of them.
+
+    Derived at call time from agentshim, which owns which models each provider's
+    CLI runs and which is its default (``ProviderProfile.models``, default
+    first). VibeSys's policy is only which providers it ships, and which it
+    offers first: :data:`DEFAULT_CLI_PROVIDER`, then :data:`SHIPPED_PROVIDERS`
+    in order. A run uses only these pairs unless its operator opts out at the
+    terminal (``--allow-unvetted-model``). A shipped provider for which
+    agentshim names no model (Gemini today) runs only with that opt-out.
+    """
+    order = (DEFAULT_CLI_PROVIDER, *(p for p in SHIPPED_PROVIDERS if p != DEFAULT_CLI_PROVIDER))
+    return tuple(
+        Harness(provider, model) for provider in order for model in vetted_models(provider)
+    )
+
+
+ALLOWED_MODELS_SETTING = "allowed_models"
+"""The host-settings key that names the models a live run on this host may use.
+
+An empty value, or a missing file, means the host sets no restriction.
+"""
+
+
+class ModelNotAllowedError(ValueError):
+    """A live run's model is outside the host's allowed set.
+
+    ``setting`` is the host-settings key, ``role`` the role whose model it is
+    (``None`` for the run's own model), ``model`` the refused id, and
+    ``allowed`` the set the host named.
+    """
+
+    def __init__(self, *, role: str | None, model: str, allowed: frozenset[str]) -> None:
+        """Name the setting, the role, the model, and the allowed set."""
+        self.setting = ALLOWED_MODELS_SETTING
+        self.role = role
+        self.model = model
+        self.allowed = tuple(sorted(allowed))
+        whose = "the run" if role is None else f"role {role}"
+        listed = ", ".join(self.allowed) if self.allowed else "none"
+        super().__init__(
+            f"{self.setting}: model {model!r} for {whose} is outside the allowed set; "
+            f"allowed models: {listed}"
+        )
+
+    def at_role(self, role: str | None) -> ModelNotAllowedError:
+        """This refusal, naming ``role`` when it does not already name one."""
+        if role is None or self.role is not None:
+            return self
+        return ModelNotAllowedError(role=role, model=self.model, allowed=frozenset(self.allowed))
+
+
+def check_allowed_model(model: str, *, role: str | None, allowed: frozenset[str]) -> None:
+    """Raise :class:`ModelNotAllowedError` when ``allowed`` is set and omits ``model``.
+
+    An empty ``allowed`` is no restriction. The check compares model ids only.
+    """
+    if allowed and model not in allowed:
+        raise ModelNotAllowedError(role=role, model=model, allowed=allowed)
+
+
+class UnvettedHarnessError(ValueError):
+    """A provider and model pair outside :func:`harnesses`."""
+
+    def __init__(self, provider: str, model: str | None) -> None:
+        """Name the pair and the models vetted for ``provider``; ``model`` None names none."""
+        self.provider = provider
+        self.model = model
+        self.allowed = vetted_models(provider)
+        allowed = ", ".join(self.allowed) if self.allowed else "none"
+        chosen = "no model is named" if model is None else f"model {model!r} is not vetted"
+        super().__init__(f"{chosen} for provider {provider!r}; vetted models: {allowed}")
+
+
+def vetted_models(provider: str) -> tuple[str, ...]:
+    """The models vetted for ``provider``, its default first; none for a provider VibeSys does not ship.
+
+    agentshim's ``ProviderProfile.models`` for a shipped provider, read at call time.
+    """
+    if provider not in SHIPPED_PROVIDERS:
+        return ()
+    return provider_profiles.provider_profile(provider).models
+
+
+def default_model(provider: str) -> str | None:
+    """The model a run on ``provider`` uses when nothing names one; ``None`` if none is vetted."""
+    models = vetted_models(provider)
+    return models[0] if models else None
+
+
+def check_harness(provider: str, model: str) -> None:
+    """Raise :class:`UnvettedHarnessError` unless ``(provider, model)`` is vetted."""
+    if model not in vetted_models(provider):
+        raise UnvettedHarnessError(provider, model)
 
 
 # --- Docker container environment -------------------------------------------
@@ -61,7 +173,8 @@ from this dict are rejected up front in ``build_agent_client``.
 CODEX_DOCKER_CLI_VERSION = "0.160.0"
 """Keep the editor container aligned with the verified host CLI feature set.
 
-Luna and its Max reasoning level require a newer CLI than the old 0.125 pin.
+The models VibeSys runs through Codex, and their reasoning levels, need a newer
+CLI than the old 0.125 pin.
 It must also be at least the CLI version agentshim generated its ``codex
 app-server`` protocol from: an older server omits fields that protocol requires,
 and a container turn then fails to decode ``thread/start``.
@@ -123,7 +236,7 @@ NODE_VERSION = "24.21.0"
 verified against upstream."""
 
 CLI_VERSIONS: dict[str, str] = {
-    "claude": "2.1.268",
+    "claude": "2.1.304",
     "codex": CODEX_DOCKER_CLI_VERSION,
     "gemini": "0.59.0",
     "opencode": "1.18.30",
@@ -135,6 +248,25 @@ Codex draws from :data:`CODEX_DOCKER_CLI_VERSION` instead of repeating its own
 literal: that constant is this module's own single source for the pin, used
 both here and (formerly) by ``cli_docker``'s now-removed per-run container
 install for Modal and SkyPilot.
+"""
+
+CLAUDE_CLI_MIN_FOR_GENERATION: dict[str, str] = {
+    "5.5": "2.1.293",
+}
+"""The oldest Claude Code release that recognizes every model of a Claude
+generation, by agentshim's ``generation_id``.
+
+A Claude Code older than its model does not know the model's id: it prints
+``unrecognized_model`` on every session and prices the model at a fallback rate
+(2.1.268 billed a 5.5 model about 2.6 times too high, before agentshim priced
+turns itself). The pin in :data:`CLI_VERSIONS` and the models agentshim lists
+move separately, so ``test_claude_cli_pin`` fails when the newest generation
+agentshim lists has no entry here, or the pin is older than an entry.
+Read an entry off the binary: the first release whose ``claude`` executable
+contains every model id of the generation (``npm pack
+@anthropic-ai/claude-code-<platform>@<version>``, then ``grep -a`` each id).
+For 5.5 the Opus model is in 2.1.281, Sonnet in 2.1.284 and Haiku, the last, in
+2.1.293.
 """
 
 # The toolchain pins (Rust, Go, and the container-runtime tools) live in

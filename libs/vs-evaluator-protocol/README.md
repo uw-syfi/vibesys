@@ -28,6 +28,10 @@ The public API has three groups:
   metrics are optimized. A task cannot rank on an optional metric, since a
   successful run may omit it and the frontier would silently lose the round.
 
+An `error` record may carry an `ErrorKind`: `TRANSIENT` (the default, and what
+every record without the key reads as) or `REQUIREMENT_NOT_MET`, with the
+`requirement` it names. A `Measurement` of a failure reports both.
+
 Every rejection raises `ProtocolError` with a `ReasonCode` and a message
 naming the offending record and key. Record models reject unknown keys and
 type coercion.

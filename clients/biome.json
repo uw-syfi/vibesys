@@ -14,9 +14,16 @@
       "**/*.cts",
       "**/*.mts",
       "tools/scripts/**/*.mjs",
+      "libs/proto/**/*.mjs",
+      "libs/ui/src/**/*.css",
+      "!libs/ui/src/tokens.css",
       "!**/dist",
-      "!libs/contracts/src/generated"
+      "!libs/contracts/src/generated",
+      "!libs/proto/src/generated"
     ]
+  },
+  "css": {
+    "formatter": { "enabled": false }
   },
   "formatter": {
     "enabled": true,
@@ -59,24 +66,36 @@
   },
   "overrides": [
     {
-      "includes": ["**/ui/**/*.ts", "**/ui/**/*.tsx", "!**/*.test.ts", "!**/*.test.tsx"],
+      "includes": [
+        "features/**/src/**/*.ts",
+        "features/**/src/**/*.tsx",
+        "apps/**/src/**/*.ts",
+        "apps/**/src/**/*.tsx",
+        "!**/*.test.ts",
+        "!**/*.test.tsx"
+      ],
       "plugins": [
-        "./tools/lint-rules/ui-no-io-calls.grit",
-        "./tools/lint-rules/ui-no-effect-hooks.grit",
-        "./tools/lint-rules/ui-no-io-imports.grit"
+        "./tools/lint-rules/strict-no-raw-elements.grit",
+        "./tools/lint-rules/strict-no-raw-values.grit"
       ]
     },
     {
       "includes": [
-        "apps/web/src/**/*.ts",
-        "apps/web/src/**/*.tsx",
-        "features/*/src/**/*.ts",
-        "features/*/src/**/*.tsx",
-        "!apps/web/src/platform/backend.ts",
+        "libs/ui/src/**/*.ts",
+        "libs/ui/src/**/*.tsx",
+        "!libs/ui/src/tokens/**",
         "!**/*.test.ts",
         "!**/*.test.tsx"
       ],
-      "plugins": ["./tools/lint-rules/web-fetch-only-in-backend.grit"]
+      "plugins": ["./tools/lint-rules/strict-no-raw-values.grit"]
+    },
+    {
+      "includes": [
+        "libs/ui/src/**/*.css",
+        "!libs/ui/src/tokens.css",
+        "!libs/ui/src/primitives.css"
+      ],
+      "plugins": ["./tools/lint-rules/ui-no-raw-css-values.grit"]
     },
     {
       "includes": [
@@ -84,12 +103,16 @@
         "**/ui/**/*.tsx",
         "!**/*.test.ts",
         "!**/*.test.tsx",
-        "!tui/src/ui/activity-bar.ts",
-        "!tui/src/ui/agent-map.ts",
-        "!tui/src/ui/chat-composer.ts",
-        "!tui/src/ui/experiment-log.ts",
-        "!tui/src/ui/round-rail.ts"
+        "!libs/ui/scripts/**"
       ],
+      "plugins": [
+        "./tools/lint-rules/ui-no-io-calls.grit",
+        "./tools/lint-rules/ui-no-effect-hooks.grit",
+        "./tools/lint-rules/ui-no-io-imports.grit"
+      ]
+    },
+    {
+      "includes": ["**/ui/**/*.ts", "**/ui/**/*.tsx", "!**/*.test.ts", "!**/*.test.tsx"],
       "plugins": ["./tools/lint-rules/ui-no-timers.grit"]
     },
     {
@@ -100,9 +123,7 @@
         "features/*/src/**/effects/**/*.tsx",
         "libs/connection/src/state/**/*.ts",
         "!**/*.test.ts",
-        "!**/*.test.tsx",
-        "!features/gateway-connect/src/renderer/effects/gateway-connect.ts",
-        "!features/hosts/src/renderer/effects/stores.ts"
+        "!**/*.test.tsx"
       ],
       "plugins": ["./tools/lint-rules/features-no-hand-rolled-control.grit"]
     },

@@ -28,7 +28,6 @@ from vs_agent.api.testing import FakeAgentClient
 from vs_core.api import StopMode
 from vs_runtime.api.infrastructure import (
     CapacityHandling,
-    ProviderFallback,
     QuotaAction,
     QuotaPolicy,
     RunControlChannel,
@@ -57,12 +56,16 @@ class _RecordingSink(NullAgentEventSink):
     def quota_paused(self, error: AgentQuotaError, plan: QuotaPlan, where: Attribution) -> None:
         self.paused.append((error, plan, where.agent_kind))
 
-    def quota_resumed(self, provider: str, reason: str, where: Attribution) -> None:
-        del where
-        self.resumed.append((provider, reason))
+    def quota_resumed(
+        self, error: AgentQuotaError, reason: str, waited_seconds: float, where: Attribution
+    ) -> None:
+        del waited_seconds, where
+        self.resumed.append((error.provider, reason))
 
-    def quota_abandoned(self, error: AgentQuotaError, reason: str, where: Attribution) -> None:
-        del where
+    def quota_abandoned(
+        self, error: AgentQuotaError, reason: str, waited_seconds: float, where: Attribution
+    ) -> None:
+        del waited_seconds, where
         self.abandoned.append((error, reason))
 
     def provider_switched(self, switch: ProviderSwitch, where: Attribution) -> None:
@@ -113,7 +116,7 @@ class _Run:
             client,
             control=control,
             events=self.sink,
-            handling=CapacityHandling(self.policy, ProviderFallback(None, threads), self.timer),
+            handling=CapacityHandling.for_policy(self.policy, threads, self.timer),
             clock=self.clock,
         )
         return threads.run(
@@ -189,9 +192,14 @@ def test_a_stop_while_paused_on_quota_ends_the_turn_without_sending_it_again() -
     assert run.sink.resumed == []
 
 
+# An outage (``UNAVAILABLE``) names no limit and never pauses the run; test_provider_outage.py
+# covers it. Every condition that names a limit pauses.
+LIMITS = [condition for condition in QuotaCondition if condition is not QuotaCondition.UNAVAILABLE]
+
+
 @given(
     stops=st.integers(min_value=1, max_value=4),
-    condition=st.sampled_from(QuotaCondition),
+    condition=st.sampled_from(LIMITS),
     resets_at=st.none() | st.floats(min_value=1.0, max_value=4e9, allow_nan=False),
 )
 def test_any_run_of_quota_stops_pauses_once_each_and_loses_no_turn(

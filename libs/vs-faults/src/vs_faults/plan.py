@@ -88,6 +88,8 @@ class HostFault(StrEnum):
     """
 
     CRASH_AFTER = "crash_after"  # the call completes and takes effect, then the host process dies
+    CRASH_BEFORE = "crash_before"  # the host process dies before the call takes effect
+    IO_ERROR = "io_error"  # the call fails with an OSError and takes no effect; the host lives
 
 
 class ProcessFault(StrEnum):

@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from ._submission_receipts import same_conclusion
 from .types.common import (
     ExecuteRegisteredOperation,
     LifecycleClass,
@@ -71,15 +72,28 @@ class Mismatch(_Verdict):
 
 type Verdict[T] = Proven[T] | Missing | Mismatch
 
+_UNACCEPTED_ENDS = frozenset(
+    (ObservationStatus.FAILED, ObservationStatus.REJECTED, ObservationStatus.CANCELLED)
+)
+"""The ends a job the executor never accepted can have."""
+
 
 def _submission_rows(
     scope: Scope, evaluation: EvaluationState, records: RecordsState
 ) -> tuple[RequestRecord, ...]:
-    """The scope's measurement submissions in canonical outbox order."""
+    """The scope's measurement submissions in canonical outbox order, core's own runs left out.
+
+    Core runs the base, or a candidate's input again, in an attempt's scope only to make a
+    comparison it can trust (``EvaluationState.core_runs``). No decision of the attempt asked
+    for such a run, so it is not the attempt's history: its sample reaches the agent through the
+    comparisons core publishes, and the agent never waits for it (``attempt_settled``).
+    """
+    core = {run.request_id for run in evaluation.core_runs if run.scope == scope}
     return tuple(
         row
         for row in records.records
         if row.request.scope == scope
+        and row.request_id not in core
         and (
             isinstance(row.request, SubmitMeasurement)
             or (
@@ -95,20 +109,50 @@ def _submission_rows(
 
 
 def attempt_settled(scope: Scope, evaluation: EvaluationState, records: RecordsState) -> bool:
-    """Whether every measurement submission issued in ``scope`` has a terminal observation.
+    """Whether every measurement submission the attempt issued in ``scope`` has ended.
 
-    Invariant: core never authorizes a resume for a scope while this is False. A resume is
-    proven against the attempt's evaluation history, and that history is complete only when
-    each submission's outcome is final; a submission that is still running (or whose request
-    has not run) leaves it incomplete, so the resume would be unprovable. Authorization is
-    deferred, not refused: each submission's conclusive observation wakes the scope's
-    waiting continuations again.
+    Core's own runs in the scope are not the attempt's (``_submission_rows``): the agent's resume
+    never waits for them, and the comparison they serve grows when they land.
+
+    Core decides no resume for a scope while this is False: a submission that is still
+    running (or whose request has not run) may yet complete the history, so the decision is
+    deferred, and each submission's conclusive observation wakes the scope's waiting
+    continuations again. Once it is True the history ``produce_history`` returns is final,
+    and ``vs_core._continuations.resume_refusal`` of it either authorizes the resume or
+    refuses it for good. This is never the authorization rule by itself.
     """
+    rows = _submission_rows(scope, evaluation, records)
     return all(
         row.observation is not None
         and row.observation.terminal
         and row.observation.status not in (ObservationStatus.PENDING, ObservationStatus.UNKNOWN)
-        for row in _submission_rows(scope, evaluation, records)
+        for row in rows
+    ) and _none_pending(scope, evaluation, rows)
+
+
+def _none_pending(
+    scope: Scope, evaluation: EvaluationState, rows: tuple[RequestRecord, ...]
+) -> bool:
+    """Whether every submission core allocated in ``scope`` has been recorded or has a job.
+
+    A submission core allocates while it steps another event (a close call earns the base one
+    more run as a candidate's job ends) has its receipt at once; its request becomes a record
+    only when the step ends, and a job only once the executor accepts it. Until then it is
+    issued and unobserved, and no row speaks for it. A receipt whose job exists has been through
+    the records: its row may be gone (a legacy history), which leaves the history unavailable,
+    not the scope unsettled.
+    """
+    held = (
+        {row.request_id for row in rows}
+        | {job.submission_id for job in evaluation.jobs if job.scope == scope}
+        | {run.request_id for run in evaluation.core_runs if run.scope == scope}
+    )
+    return all(
+        receipt.request_id in held
+        for budget in evaluation.submission_budgets
+        if budget.scope == scope
+        for receipt in budget.receipts
+        if isinstance(receipt, PreparedSubmissionReceipt)
     )
 
 
@@ -122,6 +166,7 @@ def produce_history(
     """Certify exact submission coverage, retaining unavailable partial history."""
     submissions = _submission_rows(scope, evaluation, records)
     ids = tuple(row.request_id for row in submissions)
+    core = {run.request_id for run in evaluation.core_runs if run.scope == scope}
     expected = {job.submission_id for job in evaluation.jobs if job.scope == scope} | {
         job.request_id
         for job in evaluation.registered_jobs
@@ -132,10 +177,12 @@ def produce_history(
         for budget in evaluation.submission_budgets
         if budget.scope == scope
         for receipt in budget.receipts
+        if not (isinstance(receipt, PreparedSubmissionReceipt) and receipt.request_id in core)
     )
     expected.update(
         receipt.request_id for receipt in receipts if isinstance(receipt, PreparedSubmissionReceipt)
     )
+    expected -= core
     produced = []
     for ordinal, row in enumerate(submissions, 1):
         observation = row.observation
@@ -156,7 +203,16 @@ def produce_history(
             or observation.scope != scope
             or not observation.terminal
             or observation.status in (ObservationStatus.PENDING, ObservationStatus.UNKNOWN)
-            or (observation.accepted and row.evaluation_result is None)
+            # Only a success owes facts. Executors withhold them for an accepted job that
+            # failed or was cancelled, so that submission is a conclusive empty record.
+            or (
+                observation.accepted
+                and observation.status == ObservationStatus.SUCCEEDED
+                and row.evaluation_result is None
+            )
+            # A job the executor never accepted cannot have succeeded: no record proves it
+            # (``AttemptEvaluationRecord.terminal_receipt``), so it leaves history unavailable.
+            or (not observation.accepted and observation.status not in _UNACCEPTED_ENDS)
         ):
             continue
         facts = row.evaluation_result.model_dump() if row.evaluation_result is not None else {}
@@ -240,7 +296,7 @@ def _builtin_identity(
         len(jobs) != 1
         or jobs[0].scope != request.scope
         or jobs[0].plan != request.plan
-        or jobs[0].observation != row.observation
+        or not same_conclusion(jobs[0].observation, row.observation)
         or (
             row.observation is not None
             and row.observation.accepted
@@ -277,7 +333,7 @@ def _registered_identity(
         len(jobs) != 1
         or jobs[0].operation_id != request.operation_id
         or jobs[0].scope != request.scope
-        or jobs[0].observation != row.observation
+        or not same_conclusion(jobs[0].observation, row.observation)
         or (
             row.observation is not None
             and row.observation.accepted

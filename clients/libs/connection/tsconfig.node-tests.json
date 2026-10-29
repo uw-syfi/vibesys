@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.lib.json",
+  "compilerOptions": {
+    "composite": false,
+    "incremental": false,
+    "declaration": false,
+    "rootDir": ".",
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "src/**/*.ts",
+    "node-tests/**/*.ts"
+  ],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/testing/**"
+  ]
+}

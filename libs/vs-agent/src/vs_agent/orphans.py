@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_sandbox.api import DockerCli
+from vs_sim.api import DISCARD
 
 _DOCKER_TIMEOUT_SECONDS = 60.0
 
@@ -56,17 +57,32 @@ def reap_orphaned_agents(
     marked processes in that container; the default is ``docker exec`` through the
     host's ``docker`` client. Containers are handled in listing order.
     """
-    confine = confinement_for or _exec_confinement
     orphans = _labelled_containers(docker, run_id)
-    for container_id in orphans:
-        log(f"[recover] ending orphaned agent container {container_id[:12]} of run {run_id}")
+    reap_recorded_agents(orphans, docker=docker, log=log, confinement_for=confinement_for)
+    return orphans
+
+
+def reap_recorded_agents(
+    containers: tuple[str, ...],
+    *,
+    docker: DockerCli,
+    log: Callable[[str], None],
+    confinement_for: Callable[[str], agentshim.Confinement] | None = None,
+) -> None:
+    """Reap exact immutable container IDs from a durable writer manifest.
+
+    Removal acknowledgement is not termination proof. The environment must
+    independently verify absence on the recorded daemon before reusing backing.
+    """
+    confine = confinement_for or _exec_confinement
+    for container_id in containers:
+        log(f"[recover] ending recorded agent container {container_id[:12]}")
         try:
             confine(container_id).reap()
         except agentshim.ReapError as exc:
             msg = f"could not reap agents in orphaned container {container_id}: {exc}"
             raise OrphanReapError(msg) from exc
         _remove(docker, container_id)
-    return orphans
 
 
 def _exec_confinement(container_id: str) -> agentshim.Confinement:
@@ -95,7 +111,7 @@ def _run(
 ) -> subprocess.CompletedProcess[str]:
     """Run *argv*; a client that cannot finish, or (when *check*) a failure, is an error."""
     try:
-        result = docker.run(argv, timeout_seconds=_DOCKER_TIMEOUT_SECONDS)
+        result = docker.run(argv, timeout_seconds=_DOCKER_TIMEOUT_SECONDS, output=DISCARD)
     except (OSError, subprocess.TimeoutExpired) as exc:
         msg = f"could not {what}: {exc}"
         raise OrphanReapError(msg) from exc

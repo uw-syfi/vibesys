@@ -1,0 +1,71 @@
+{
+  "id": "helper-preflight-project-missing",
+  "protocol": "host-helper",
+  "title": "Preflight a run in a missing project",
+  "description": "run.preflight with typed options naming a directory that does not exist is answered project_missing with the path, and no preflight runs.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "preflight",
+          "run_options"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "preflight",
+          "run_options"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "run.preflight",
+        "request_id": "p",
+        "deadline_ms": 30000,
+        "project": "/nonexistent-vibesys-conformance/project",
+        "task": "spsc",
+        "options": {
+          "rounds": 3,
+          "time_limit_s": 600,
+          "results": "keep",
+          "roles": [
+            {
+              "role": "implementer",
+              "model": null,
+              "reasoning_effort": "high"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "p",
+        "code": "project_missing"
+      }
+    }
+  ]
+}

@@ -1,23 +1,316 @@
 /*
- * The design tokens (colors, type, the title bar's height) for light and dark, and the styles of
- * the primitives this package renders: Button, StatusChip, Combobox's input, and Dialog's sheet
- * and card. An app imports this first and styles its own layout after it.
+ * GENERATED, do not edit. Change the tables in src/tokens/ (or the primitives' styles in
+ * src/primitives.css), then regenerate with `pnpm --dir clients/libs/ui generate:tokens`.
  */
 :root {
-  color-scheme: light dark;
-  --page: #f6f7f9; --panel: #ffffff; --line: #dfe3ea; --text: #1b2230; --muted: #5d6676;
-  --accent: #3557d6; --accent-text: #ffffff; --hover: #eef1f6; --selected: #e3e9fb;
-  --error: #b3261e; --warn: #8a5a00; --ok: #1e7d43;
-  --titlebar: 40px;
-  font: 13px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-sans: "Schibsted Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --text-display-family: var(--font-mono);
+  --text-display-size: 30px;
+  --text-display-line: 29px;
+  --text-display-weight: 700;
+  --text-display-tracking: -0.03em;
+  --text-display-transform: none;
+  --text-title-family: var(--font-sans);
+  --text-title-size: 26px;
+  --text-title-line: 32px;
+  --text-title-weight: 600;
+  --text-title-tracking: -0.01em;
+  --text-title-transform: none;
+  --text-heading-family: var(--font-sans);
+  --text-heading-size: 18px;
+  --text-heading-line: 24px;
+  --text-heading-weight: 600;
+  --text-heading-tracking: 0em;
+  --text-heading-transform: none;
+  --text-item-family: var(--font-sans);
+  --text-item-size: 15px;
+  --text-item-line: 20px;
+  --text-item-weight: 600;
+  --text-item-tracking: 0em;
+  --text-item-transform: none;
+  --text-body-family: var(--font-sans);
+  --text-body-size: 14px;
+  --text-body-line: 20px;
+  --text-body-weight: 400;
+  --text-body-tracking: 0em;
+  --text-body-transform: none;
+  --text-body-strong-family: var(--font-sans);
+  --text-body-strong-size: 14px;
+  --text-body-strong-line: 20px;
+  --text-body-strong-weight: 500;
+  --text-body-strong-tracking: 0em;
+  --text-body-strong-transform: none;
+  --text-small-family: var(--font-sans);
+  --text-small-size: 13px;
+  --text-small-line: 18px;
+  --text-small-weight: 400;
+  --text-small-tracking: 0em;
+  --text-small-transform: none;
+  --text-caption-family: var(--font-sans);
+  --text-caption-size: 12px;
+  --text-caption-line: 16px;
+  --text-caption-weight: 500;
+  --text-caption-tracking: 0em;
+  --text-caption-transform: none;
+  --text-code-family: var(--font-mono);
+  --text-code-size: 12.5px;
+  --text-code-line: 18px;
+  --text-code-weight: 400;
+  --text-code-tracking: 0em;
+  --text-code-transform: none;
+  --text-section-family: var(--font-mono);
+  --text-section-size: 11.5px;
+  --text-section-line: 16px;
+  --text-section-weight: 500;
+  --text-section-tracking: 0.08em;
+  --text-section-transform: uppercase;
+  --text-section-color: var(--muted);
+  --text-metric-family: var(--font-mono);
+  --text-metric-size: 22px;
+  --text-metric-line: 28px;
+  --text-metric-weight: 600;
+  --text-metric-tracking: 0em;
+  --text-metric-transform: none;
+  --text-hero-family: var(--font-mono);
+  --text-hero-size: 34px;
+  --text-hero-line: 40px;
+  --text-hero-weight: 600;
+  --text-hero-tracking: -0.02em;
+  --text-hero-transform: none;
+  --space-0: 0px;
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 48px;
+  --control-sm: 32px;
+  --control: 40px;
+  --row: 44px;
+  --sidebar: 264px;
+  --rail: 64px;
+  --content: 1060px;
+  --content-wide: 1100px;
+  --content-narrow: 900px;
+  --column-main: 520px;
+  --column-aside: 300px;
+  --column-field: 240px;
+  --column-tile: 200px;
+  --column-swatch: 160px;
+  --column-figure: 320px;
+  --column-metric: 360px;
+  --column-chart: 248px;
+  --chart-height: 48px;
+  --pane-list: 380px;
+  --pane-outline: 340px;
+  --pane-master: 480px;
+  --panes-floor: 288px;
+  --row-dense: 28px;
+  --gantt-label: 220px;
+  --gantt-label-max: 420px;
+  --gantt-figure: 96px;
+  --gantt-bar: 12px;
+  --hairline: 1px;
+  --focus-ring: 2px;
+  --focus-offset: 1px;
+  --icon: 16px;
+  --wordmark-compact: 40px;
+  --dot: 8px;
+  --dot-ring: 3px;
+  --check: 18px;
+  --menu: 220px;
+  --log: 320px;
+  --log-sm: 160px;
+  --thread: 480px;
+  --measure: 105ch;
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 8px;
+  --radius-full: 9999px;
+  --elevation-flat: none;
+  --elevation-raised: 0 4px 12px rgb(0 0 0 / 0.12);
+  --elevation-overlay: 0 12px 40px rgb(0 0 0 / 0.25);
+  --scrim: rgb(10 14 22 / 0.5);
+  --duration-instant: 0ms;
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --easing: cubic-bezier(0.2, 0, 0, 1);
+  --series-0: #56b4e9;
+  --series-1: #e69f00;
+  --series-2: #3dbb8c;
+  --series-3: #cc79a7;
+  --series-4: #d9cf4a;
+  --series-5: #9b82e0;
+  --series-6: #5ec4c4;
+  --series-7: #c4a27c;
+  --selection: color-mix(in srgb, var(--accent) 14%, var(--bg));
+  --log-err: color-mix(in srgb, var(--err) 60%, var(--log-text));
+  --chip-accent-bg: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  --chip-accent-border: color-mix(in srgb, var(--accent) 35%, var(--panel));
+  --banner-accent-bg: color-mix(in srgb, var(--accent) 8%, var(--bg));
+  --chip-ok-bg: color-mix(in srgb, var(--ok) 12%, var(--panel));
+  --chip-ok-border: color-mix(in srgb, var(--ok) 35%, var(--panel));
+  --banner-ok-bg: color-mix(in srgb, var(--ok) 8%, var(--bg));
+  --chip-warn-bg: color-mix(in srgb, var(--warn) 12%, var(--panel));
+  --chip-warn-border: color-mix(in srgb, var(--warn) 35%, var(--panel));
+  --banner-warn-bg: color-mix(in srgb, var(--warn) 8%, var(--bg));
+  --chip-err-bg: color-mix(in srgb, var(--err) 12%, var(--panel));
+  --chip-err-border: color-mix(in srgb, var(--err) 35%, var(--panel));
+  --banner-err-bg: color-mix(in srgb, var(--err) 8%, var(--bg));
+  --page: var(--bg);
+  --error: var(--err);
+  --accent-text: var(--bg);
+  --hover: var(--panel-2);
+  --selected: var(--selection);
+  --titlebar: var(--control);
+}
+:root {
+  color-scheme: light;
+  --bg: #f7f6f3;
+  --panel: #ffffff;
+  --panel-2: #f0eee9;
+  --line: #e3e0d8;
+  --text: #191817;
+  --muted: #64615b;
+  --accent: #2f5bea;
+  --ok: #167a3a;
+  --warn: #925500;
+  --err: #b42318;
+  --log-bg: #15161a;
+  --log-text: #d9dde5;
+  --grid: #19181711;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --page: #0c1018; --panel: #121826; --line: #232c3d; --text: #e9edf5; --muted: #98a2b5;
-    --accent: #6f8cff; --accent-text: #0c1018; --hover: #1a2233; --selected: #22304d;
-    --error: #ff8a80; --warn: #ffcc80; --ok: #7bd88f;
+    color-scheme: dark;
+    --bg: #0a0a0a;
+    --panel: #111111;
+    --panel-2: #191919;
+    --line: #272727;
+    --text: #ededed;
+    --muted: #a0a0a0;
+    --accent: #4f8cff;
+    --ok: #3fb950;
+    --warn: #d6a03a;
+    --err: #f2665f;
+    --log-bg: #050505;
+    --log-text: #d4d4d4;
+    --grid: #ededed11;
   }
 }
+:root[data-theme="paper"] {
+  color-scheme: light;
+  --bg: #f7f6f3;
+  --panel: #ffffff;
+  --panel-2: #f0eee9;
+  --line: #e3e0d8;
+  --text: #191817;
+  --muted: #64615b;
+  --accent: #2f5bea;
+  --ok: #167a3a;
+  --warn: #925500;
+  --err: #b42318;
+  --log-bg: #15161a;
+  --log-text: #d9dde5;
+  --grid: #19181711;
+}
+:root[data-theme="mist"] {
+  color-scheme: light;
+  --bg: #f3f5f8;
+  --panel: #ffffff;
+  --panel-2: #ebeff4;
+  --line: #dbe1e8;
+  --text: #0f172a;
+  --muted: #566173;
+  --accent: #6d28d9;
+  --ok: #147a3a;
+  --warn: #8f5300;
+  --err: #b91c1c;
+  --log-bg: #111522;
+  --log-text: #d6dcea;
+  --grid: #0f172a11;
+}
+:root[data-theme="sand"] {
+  color-scheme: light;
+  --bg: #f2eee5;
+  --panel: #fbf8f2;
+  --panel-2: #ebe5d8;
+  --line: #dcd3c1;
+  --text: #29231a;
+  --muted: #675d4b;
+  --accent: #0e726a;
+  --ok: #39721d;
+  --warn: #8a5000;
+  --err: #a8321c;
+  --log-bg: #1c1913;
+  --log-text: #e6dfcf;
+  --grid: #29231a11;
+}
+:root[data-theme="ink"] {
+  color-scheme: dark;
+  --bg: #0a0a0a;
+  --panel: #111111;
+  --panel-2: #191919;
+  --line: #272727;
+  --text: #ededed;
+  --muted: #a0a0a0;
+  --accent: #4f8cff;
+  --ok: #3fb950;
+  --warn: #d6a03a;
+  --err: #f2665f;
+  --log-bg: #050505;
+  --log-text: #d4d4d4;
+  --grid: #ededed11;
+}
+:root[data-theme="midnight"] {
+  color-scheme: dark;
+  --bg: #0a0f1e;
+  --panel: #10172c;
+  --panel-2: #161f3a;
+  --line: #243055;
+  --text: #e6eaf5;
+  --muted: #9ba7c5;
+  --accent: #9787ff;
+  --ok: #4cc38a;
+  --warn: #e0aa4f;
+  --err: #ff7a85;
+  --log-bg: #060a16;
+  --log-text: #d3daf0;
+  --grid: #e6eaf511;
+}
+:root[data-theme="terminal"] {
+  color-scheme: dark;
+  --bg: #050806;
+  --panel: #0a110c;
+  --panel-2: #0f1a12;
+  --line: #1c2c20;
+  --text: #d6f5de;
+  --muted: #86a891;
+  --accent: #3ddc84;
+  --ok: #3ddc84;
+  --warn: #e3c35a;
+  --err: #ff6b6b;
+  --log-bg: #020403;
+  --log-text: #bdf0cb;
+  --grid: #d6f5de11;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-instant: 0ms;
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+  }
+}
+/*
+ * The styles of the primitives this package renders: Button, StatusChip, Combobox's input, and
+ * Dialog's sheet and card, drawn from the tokens. `tokens.css` is generated with this file appended
+ * (`pnpm --dir clients/libs/ui generate:tokens`): an app imports that one file first and styles its
+ * own layout after it.
+ */
+:root { font: 13px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; }
 * { box-sizing: border-box; }
 button, input { font: inherit; color: inherit; -webkit-app-region: no-drag; }
 button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
@@ -38,5 +331,5 @@ input:focus, button:focus-visible { outline: 2px solid var(--accent); outline-of
 .ok { color: var(--ok); }
 /* Dialogs are modal <dialog>s: the platform makes the page behind inert and handles Esc. */
 dialog.sheet { padding: 0; border: none; background: transparent; color: var(--text); max-width: none; max-height: none; }
-dialog.sheet::backdrop { background: rgba(10, 14, 22, 0.5); }
-.card { width: min(680px, 92vw); max-height: 86vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+dialog.sheet::backdrop { background: var(--scrim); }
+.card { width: min(680px, 92vw); max-height: 86vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; box-shadow: var(--elevation-overlay); }

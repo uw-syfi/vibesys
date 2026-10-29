@@ -1,0 +1,44 @@
+{
+  "format": 1,
+  "name": "parked",
+  "description": "Native parked lifecycle after the empty scenario.",
+  "runId": "20261015-163047",
+  "state": "live",
+  "objective": {
+    "text": "Maximize trusted end-to-end throughput of the MPMC queue.",
+    "metric": "total_ops_per_sec",
+    "unit": "ops/s",
+    "direction": "max"
+  },
+  "events": [
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "run_started",
+      "data": {
+        "kind": "run_started",
+        "overview": {
+          "objective": {
+            "text": "Maximize trusted end-to-end throughput of the MPMC queue.",
+            "metric": "total_ops_per_sec",
+            "unit": "ops/s",
+            "direction": "max",
+            "correctness_check": []
+          }
+        },
+        "outer_loop": "dynamic",
+        "input": "objective.md",
+        "expected_roles": [
+          "orchestrator",
+          "implementer",
+          "judge"
+        ]
+      },
+      "sequence": 1
+    }
+  ],
+  "nativeLifecycles": [
+    {
+      "parked": {}
+    }
+  ]
+}

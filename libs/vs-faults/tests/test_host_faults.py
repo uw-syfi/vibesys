@@ -8,7 +8,15 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_faults.api import Boundary, FaultGate, FaultPlan, FaultRule, HostCrashError, HostFault
+from vs_faults.api import (
+    Boundary,
+    FaultGate,
+    FaultPlan,
+    FaultRule,
+    HostCrashError,
+    HostFault,
+    InjectedIOError,
+)
 
 BOUNDARIES = st.sampled_from([Boundary.EXECUTOR_REQUEST, Boundary.DURABLE_WRITE])
 TARGETS = st.sampled_from(["a", "b", "c"])
@@ -67,6 +75,24 @@ def test_heal_stops_injection_and_async_calls_crash_after_their_effect() -> None
     gate.heal()
     asyncio.run(gate.around_async(Boundary.EXECUTOR_REQUEST, "a", effect))
     assert ran == ["a", "a"]
+
+
+@pytest.mark.parametrize(
+    ("fault", "error"),
+    [(HostFault.CRASH_BEFORE, HostCrashError), (HostFault.IO_ERROR, InjectedIOError)],
+)
+def test_a_fault_before_the_effect_leaves_the_call_undone(
+    fault: HostFault, error: type[Exception]
+) -> None:
+    rule = FaultRule(boundary=Boundary.DURABLE_WRITE, target="a", at=2, fault=fault)
+    gate = FaultGate(FaultPlan(seed=0, rules=(rule,)))
+    ran: list[int] = []
+    gate.around(Boundary.DURABLE_WRITE, "a", lambda: ran.append(1))
+    with pytest.raises(error):
+        gate.around(Boundary.DURABLE_WRITE, "a", lambda: ran.append(2))
+    gate.around(Boundary.DURABLE_WRITE, "a", lambda: ran.append(3))
+    assert ran == [1, 3]
+    assert [call.ordinal for call in gate.calls] == [1, 2, 3]
 
 
 def test_a_rule_for_a_non_host_boundary_is_not_a_host_fault() -> None:

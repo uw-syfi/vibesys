@@ -17,7 +17,7 @@ Production-proven transpose and layout transformation patterns. LLMs often strug
 |------------|-------|-------|
 | **Partition Dimension (P)** | ≤ 128 | First dimension of SBUF/PSUM, cannot reshape or stride |
 | **SBUF Free Dimension (F)** | ≤ 32,767 | Second+ dimensions |
-| **PSUM Free Dimension (F)** | ≤ 512 (gen2/3) / ≤ 4,096 (gen4) | For nc_transpose destination |
+| **PSUM Free Dimension (F)** | 512 (gen2/3); gen4: 4096 fp32 / 8192 bf16 | For nc_transpose destination |
 | **nc_transpose step size** | 2 for fp8/int8, 1 otherwise | Generation-specific |
 | **TensorView partition rule** | Cannot permute dim 0 in SBUF | Hardware constraint |
 
@@ -130,13 +130,13 @@ else:  # gen4
 
 | Constraint | Limit | Solution |
 |------------|-------|----------|
-| PSUM free dimension | ≤ 512 (gen2/3) / ≤ 4,096 (gen4) | Tile the transpose operation |
+| PSUM free dimension | 512 (gen2/3); gen4: 4096 fp32 / 8192 bf16 | Tile the transpose operation |
 | Step size | 2 for fp8/int8 | Check dtype, adjust PSUM allocation |
 | Partition dimension | ≤ 128 | Standard SBUF limit, tile if needed |
 | PSUM → HBM | Not direct | Copy PSUM → SBUF → HBM |
 
 **Common error**: "PSUM dimension exceeds limit"
-- **Cause**: Free dimension > 512 (gen2/3) or > 4096 (gen4)
+- **Cause**: Free dimension exceeds the PSUM limit — 512 (gen2/3); gen4: 4096 fp32 / 8192 bf16
 - **Fix**: Tile the transpose into smaller chunks
 
 ---
@@ -608,7 +608,7 @@ Need to change tensor layout?
 +-- Involves partition dimension (dim 0)?
 |   +-- YES: Need P↔F transpose?
 |   |   +-- Use nisa.nc_transpose() (Section 2)
-|   |       - Ensure PSUM free dim ≤ 512 (gen2/3) or ≤ 4096 (gen4)
+|   |       - Ensure PSUM free dim within limit: 512 (gen2/3); gen4 4096 fp32 / 8192 bf16
 |   |       - Use step_size=2 for fp8/int8
 |   |
 |   +-- NO: Continue below
@@ -655,9 +655,9 @@ Need to change tensor layout?
 | Constraint | Limit | Memory Type | Notes |
 |------------|-------|-------------|-------|
 | **Partition (P)** | ≤ 128 | SBUF, PSUM | First dimension, fixed hardware limit |
-| **Free (F)** | ≤ 32,767 | SBUF | Second+ dimensions |
-| **PSUM Free (F)** | ≤ 512 (gen2/3) / ≤ 4,096 (gen4) | PSUM | nc_transpose destination, matmul result |
-| **MatMul K** | ≤ 2,048 | Any | Contraction dimension |
+| **Free (F)** | per-partition byte capacity (`nl.tile_size.sbuf_fmax`) | SBUF | Second+ dimensions; generation-/dtype-dependent |
+| **PSUM Free (F)** | 512 (gen2/3); gen4: 4096 fp32 / 8192 bf16 | PSUM | nc_transpose destination, matmul result |
+| **MatMul K** | ≤ 128 (contraction = partition dim) | SBUF | Effective 256/512 with double_row / Quad-MX; see `/neuron-nki-docs` `nc_matmul` |
 
 #### Partition Dimension Rules (SBUF)
 
@@ -694,7 +694,7 @@ Need to change tensor layout?
 | Error Message / Symptom | Likely Cause | Solution | Section |
 |-------------------------|--------------|----------|---------|
 | "Partition dimension exceeds 128" | P > 128 | Tile outer loop to keep P ≤ 128 | 7 |
-| "PSUM dimension exceeds limit" | F > 512 (gen2/3) / 4,096 (gen4) | Tile nc_transpose operation | 2 |
+| "PSUM dimension exceeds limit" | F > 512 (gen2/3) / 4096 fp32 (gen4) / 8192 bf16 (gen4) | Tile nc_transpose operation | 2 |
 | "Cannot reshape partition" | Reshape changes dim 0 | Only reshape free dimensions (dim≥1) | 3, 7 |
 | "Partition must stay outermost" | TensorView.permute moved dim 0 | Keep partition at dim 0, or use nc_transpose | 3, 7 |
 | "Stride not supported on partition" | Used `tensor[::2, :]` | Use contiguous slice + loop instead | 7 |
@@ -761,28 +761,23 @@ output = TensorView(input_sb) \
 # (e.g., to reuse SBUF space, or when modifying in-place).
 ```
 
-#### Anti-pattern 4: Ignoring Generation Constraints
+#### Anti-pattern 4: Assuming a Single PSUM Free-Dim Limit
 
 ```python
-# ❌ Anti-pattern: Hardcoded PSUM limits without generation check
-PSUM_FREE_MAX = 512  # Assumes gen2/gen3, fails on gen4
-
-psum_result = nl.ndarray((128, PSUM_FREE_MAX), dtype=nl.float16, buffer=nl.psum)
-nisa.nc_transpose(dst=psum_result, data=input_large)  # May be suboptimal on gen4
-
-# ✅ Fix: Check generation and use appropriate limits
-import nki.isa as nisa
-
-if nki.isa.get_nc_version() == nki.isa.nc_version.gen4:
-    PSUM_FREE_MAX = 4096  # gen4 supports larger
-else:
-    PSUM_FREE_MAX = 512   # gen2/gen3
+# ❌ Anti-pattern: silently assume 512 for every target/dtype
+PSUM_FREE_MAX = 512  # Correct only on gen2/gen3; under-tiles on gen4 (4096 fp32 / 8192 bf16)
 
 psum_result = nl.ndarray((128, PSUM_FREE_MAX), dtype=nl.float16, buffer=nl.psum)
 nisa.nc_transpose(dst=psum_result, data=input_large)
 
-# Why: gen4 (Trn3) supports 8x larger PSUM free dimension (4096 vs 512).
-# Tiling more than necessary hurts performance. Check generation for optimal tile sizes.
+# ✅ Fix: use the documented limit for the target generation and dst dtype.
+# The PSUM free-dim limit is generation- and dtype-gated and is NOT a queryable
+# tile_size field:
+#   gen2/gen3: 512
+#   gen4:      4096 (float32 dst) / 8192 (bfloat16 dst)
+# Confirm the current value in the nc_matmul doc block via /neuron-nki-docs,
+# then tile the free dimension to it. Do not derive it from psum_bank_fmax
+# (a fixed 512) or branch on nc_version.
 ```
 
 ### Debugging Strategies
@@ -827,10 +822,13 @@ nisa.nc_transpose(dst=psum_result, data=input_large)
    from nkilib.core.utils.kernel_assert import kernel_assert  # or inline from references/nkilib/core/utils/kernel_assert.py
 
    kernel_assert(P <= 128, f"Partition dimension {P} exceeds limit 128")
-   kernel_assert(F <= 32767, f"Free dimension {F} exceeds SBUF limit 32767")
+   # SBUF free-dim is a per-partition byte capacity (gen/dtype-dependent).
+   sbuf_fmax = nl.tile_size.sbuf_fmax  # per-partition free-dim limit in fp32 elements
+   kernel_assert(F <= sbuf_fmax, f"Free dimension {F} exceeds SBUF limit {sbuf_fmax}")
 
    if buffer == nl.psum:
-       psum_limit = 4096 if nki.isa.get_nc_version() == nki.isa.nc_version.gen4 else 512
+       # PSUM free-dim limit is gen/dtype-gated (gen2/3: 512; gen4: 4096 fp32 / 8192 bf16).
+       # See the nc_matmul doc block via /neuron-nki-docs for the authoritative value.
        kernel_assert(F <= psum_limit, f"PSUM free dimension {F} exceeds limit {psum_limit}")
    ```
 

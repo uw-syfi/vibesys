@@ -38,10 +38,9 @@ clients/*/.vibesys-node-tests-*/
 clients/*/*/.vibesys-node-tests-*/
 # `tools/scripts/new_package.test.mjs` scaffolds into these and removes them when it finishes.
 clients/.vibesys-scaffold-test-*/
-clients/apps/web/artifacts/
-clients/apps/web/test-results/
-clients/apps/web/.browser-dist/
-clients/apps/web/.desktop-dist/
+clients/apps/desktop-main/test-results/
+clients/apps/ui-gallery/test-results/
+clients/apps/desktop-shell/test-results/
 # `tsc -b` build info for the check-only projects, and Turborepo's local cache and task logs.
 clients/**/.tsbuild/
 .turbo/
@@ -275,16 +274,6 @@ sandbox-*/
 
 # TypeScript client build/install output
 node_modules/
-clients/tui/dist/
-clients/apps/web/.vibesys-demo/
-
-# TUI bundle staged into the package by setup.py's build_py step
-src/vibesys/_tui/
-
-# Lockfiles written by the wheel-time TUI build (repo uses pnpm-lock.yaml)
-clients/tui/package-lock.json
-clients/tui/bun.lock
-clients/tui/bun.lockb
 
 # Go workspaces are developer-local, never committed. A committed go.work would
 # point evaluators at the local SDK source, so CI would test a build that no
@@ -294,3 +283,9 @@ clients/tui/bun.lockb
 # sdk/README.md for the co-development workflow.
 go.work
 go.work.sum
+
+# Local descriptor collector is rebuilt at install/build time.
+clients/libs/proto/src/generated/schema-files.ts
+
+# Descriptor-bearing fixtures are generated and validated at test time.
+proto/testdata/records/epoch_started.pb

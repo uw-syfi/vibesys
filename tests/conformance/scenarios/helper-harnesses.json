@@ -1,0 +1,95 @@
+{
+  "id": "helper-harnesses",
+  "protocol": "host-helper",
+  "title": "Vetted harnesses and the opt-out a start refuses",
+  "description": "After a hello that negotiated harnesses, harnesses.list answers the vetted pairs; run.start refuses the terminal's opt-out flag (here abbreviated, as argparse accepts it) as invalid_request and a harness no list offers as unvetted_harness, both before reading the project.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "harnesses"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "harnesses"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "harnesses.list",
+        "request_id": "l",
+        "deadline_ms": 10000
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "harnesses.list",
+        "request_id": "l"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "run.start",
+        "request_id": "o",
+        "deadline_ms": 10000,
+        "project": "/nonexistent/vibesys-conformance-project",
+        "args": [
+          "--allow-unvetted=1"
+        ]
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "o",
+        "code": "invalid_request"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "run.start",
+        "request_id": "u",
+        "deadline_ms": 10000,
+        "project": "/nonexistent/vibesys-conformance-project",
+        "harness": {
+          "provider": "no-such-provider",
+          "model": "no-such-model"
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "u",
+        "code": "unvetted_harness"
+      }
+    }
+  ]
+}

@@ -10,10 +10,14 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
+from ._comparison import comparisons_to_publish, moment_of
 from ._deadlines import bound_to_run, cleanup, limit_to, time_remains
 from ._evaluation_history import attempt_settled, produce_history
+from ._proofs import continues_admitted_work
 from ._registry import ContractError
 from ._session_scope import dispatching_request
+from ._submission_receipts import same_conclusion
+from ._wait_clock import Bound, wait_bounds
 from .types.attempts import (
     AttemptEvaluationHistoryUpdated,
     AttemptPhase,
@@ -44,13 +48,16 @@ from .types.evaluation import (
     InspectOwnedJob,
     JobTerminationRequested,
     ObserveOwnedJob,
+    OwnedJob,
     RegisteredOwnedJob,
     ResumeAuthorizationReceipt,
     ResumeAuthorized,
+    ResumeRefusal,
+    ResumeRefused,
     TurnSuspended,
 )
-from .types.evaluation_history import EvaluationHistoryAvailability
-from .types.job_observations import JobTimeout, TimedOut
+from .types.evaluation_history import AttemptEvaluationHistory, EvaluationHistoryAvailability
+from .types.job_observations import JobTimeout, TimedOut, WaitEnd
 from .types.kernel import AreaChange, EvaluationContext
 from .types.records import InspectRequest, Outbound, RequestPhase, within
 from .types.scope_reopen import ScopedAdmissionReopenOutcome
@@ -58,16 +65,18 @@ from .types.sessions import Access, DispatchTurn, InspectTurn, ResumeSessionTurn
 from .types.strategy import Accepted, Operation
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .types.attempts import AttemptsState, AttemptView
     from .types.common import EvidenceKey, InvocationRef, Observation, ResourceId
     from .types.evaluation import (
         EvaluationEvent,
         EvaluationState,
         EvidenceRef,
-        OwnedJob,
     )
-    from .types.evaluation_history import AttemptEvaluationHistory, EvaluationHistoryCursor
+    from .types.evaluation_history import EvaluationHistoryCursor
     from .types.kernel import RunState, SessionsContext, Signal, StrategyEvent
+    from .types.measurement import Comparison
     from .types.records import ChildLease, Request, RequestRecord
     from .types.sessions import Invocation, SessionsState
 
@@ -135,6 +144,58 @@ def paid_prefix_refusal(
     return None
 
 
+def resume_refusal(
+    history: AttemptEvaluationHistory, prefix: EvaluationHistoryCursor | None
+) -> ResumeRefusal | None:
+    """Why an attempt's turn that waited from ``prefix`` cannot resume on ``history``, or None.
+
+    The one rule for both ends of a resume: authorization asks it of the history it
+    publishes, and the resume's dispatch asks it of that same history as the attempt still
+    stores it (``published_history``), so core never authorizes a resume that its dispatch
+    would refuse.
+    """
+    if history.availability != EvaluationHistoryAvailability.COMPLETE:
+        return ResumeRefusal.HISTORY_UNAVAILABLE
+    if paid_prefix_refusal(history, prefix) is not None:
+        return ResumeRefusal.PREFIX_MISMATCH
+    return None
+
+
+def published_history(
+    history: AttemptEvaluationHistory, cursor: EvaluationHistoryCursor | None
+) -> AttemptEvaluationHistory:
+    """``history`` as it stood when core published ``cursor`` with a resume's authorization.
+
+    The scope may submit again between the authorization and the resume's dispatch, and that
+    submission leaves the whole stored history incomplete until it ends. (Core's own runs in
+    the scope are not the attempt's history, so they never do: ``_evaluation_history``.)
+    Coverage and records only grow, so the prefix through ``cursor`` is what authorization
+    proved. With nothing submitted since, that is the stored history itself; no cursor, or one
+    the stored coverage does not hold, is an unavailable history.
+    """
+    if (
+        cursor is None
+        or cursor.ordinal > len(history.covered_submissions)
+        or (
+            cursor.ordinal
+            and history.covered_submissions[cursor.ordinal - 1] != cursor.submission_id
+        )
+    ):
+        return AttemptEvaluationHistory()
+    if cursor.ordinal == len(history.covered_submissions):
+        return history
+    covered = history.covered_submissions[: cursor.ordinal]
+    records = tuple(record for record in history.records if record.ordinal <= cursor.ordinal)
+    complete = tuple(record.submission_id for record in records) == covered
+    return AttemptEvaluationHistory(
+        availability=EvaluationHistoryAvailability.COMPLETE
+        if complete
+        else EvaluationHistoryAvailability.UNAVAILABLE,
+        covered_submissions=covered,
+        records=records,
+    )
+
+
 def exhausted(attempts: AttemptsState, scope: Scope) -> bool:
     """Whether ``scope`` is an attempt that ended (a spent paid limit, for one).
 
@@ -192,17 +253,46 @@ def suspension_refusal_in(
     scope is refused while the first holds the claim. ``holder`` is the invocation asking:
     its own claim is not a reason to refuse it.
     """
-    if not _active(context, scope):
-        return SuspensionRefusal.SCOPE_NOT_ACTIVE
-    claimed = any(
+    return suspension_gate(
+        active=lambda: _active(context, scope),
+        claimed=lambda: _claimed(context, state, scope, holder),
+    )
+
+
+def _claimed(
+    context: EvaluationContext, state: EvaluationState, scope: Scope, holder: InvocationRef | None
+) -> bool:
+    return any(
         row.pending_suspension is not None and row.scope == scope and row.invocation != holder
         for row in context.sessions.invocations
-    )
-    if claimed or any(
+    ) or any(
         _open(context, row) and _invocation(context, row).scope == scope
         for row in state.continuations
-    ):
+    )
+
+
+def suspension_gate(
+    *,
+    active: Callable[[], bool],
+    claimed: Callable[[], bool],
+    owned: Callable[[], bool] | None = None,
+    remains: Callable[[], bool] | None = None,
+) -> SuspensionRefusal | None:
+    """The one ordering of suspension refusals, whichever state supplies the facts.
+
+    The positional core and the native replay log each answer the same questions: is the
+    scope active, does another wait already claim it, does it own every job it waits on,
+    and is time left before the wait's capped bound. Each is asked only if the earlier
+    ones pass. ``owned`` and ``remains`` are None when no continuation is checked yet.
+    """
+    if not active():
+        return SuspensionRefusal.SCOPE_NOT_ACTIVE
+    if claimed():
         return SuspensionRefusal.OPEN_CONTINUATION
+    if owned is not None and not owned():
+        return SuspensionRefusal.JOB_NOT_OWNED
+    if remains is not None and not remains():
+        return SuspensionRefusal.DEADLINE_EXCEEDED
     return None
 
 
@@ -219,18 +309,30 @@ def commit_refusal_in(
     malformed continuation. With ``wait`` it also checks the continuation's jobs and
     deadline.
     """
-    refusal = suspension_refusal_in(context, state, invocation.scope, holder=invocation.invocation)
-    if refusal is not None or wait is None:
-        return refusal
-    owned = (*state.jobs, *state.registered_jobs)
+    scope, jobs = invocation.scope, (*state.jobs, *state.registered_jobs)
+
+    def active() -> bool:
+        return _active(context, scope)
+
+    def claimed() -> bool:
+        return _claimed(context, state, scope, invocation.invocation)
+
+    if wait is None:
+        return suspension_gate(active=active, claimed=claimed)
+    checked: Continuation = wait
+
     # An empty or repeating job list is a malformed continuation, not a refusal: it halts.
-    for identity in wait.jobs:
-        matching = tuple(row for row in owned if row.resource_id == identity)
-        if len(matching) != 1 or matching[0].scope != invocation.scope:
-            return SuspensionRefusal.JOB_NOT_OWNED
-    if not time_remains(context.run, wait.deadline_at):
-        return SuspensionRefusal.DEADLINE_EXCEEDED
-    return None
+    def owned() -> bool:
+        for identity in checked.jobs:
+            matching = tuple(row for row in jobs if row.resource_id == identity)
+            if len(matching) != 1 or matching[0].scope != scope:
+                return False
+        return True
+
+    def remains() -> bool:
+        return time_remains(context.run, wait_deadline(state, context, checked).at)
+
+    return suspension_gate(active=active, claimed=claimed, owned=owned, remains=remains)
 
 
 def _inspection(context: EvaluationContext, request: Request) -> Outbound:
@@ -239,10 +341,52 @@ def _inspection(context: EvaluationContext, request: Request) -> Outbound:
 
 
 def _until_wait_ends(
-    context: EvaluationContext, continuation: Continuation, request: Request
+    state: EvaluationState, context: EvaluationContext, continuation: Continuation, request: Request
 ) -> Outbound:
-    """A poll of a job an agent waits on ends when that wait's deadline passes."""
-    return within(request, limit_to(context.run, continuation.deadline_at))
+    """A poll of a job an agent waits on ends when that wait's bound passes."""
+    deadline = wait_deadline(state, context, continuation)
+    return within(request, limit_to(context.run, deadline.at))
+
+
+def _live(state: EvaluationState, wait: Continuation) -> tuple[OwnedJob | RegisteredOwnedJob, ...]:
+    """``wait``'s jobs it still waits on: neither settled nor ended by their queue budget."""
+    spent = {job.resource_id for job in wait.spent}
+    return tuple(
+        job for job in _jobs(state, wait) if not _settled(job) and job.resource_id not in spent
+    )
+
+
+def wait_deadline(state: EvaluationState, context: EvaluationContext, wait: Continuation) -> Bound:
+    """When ``wait`` next changes, and why: at the earliest bound of the jobs it waits on.
+
+    Each job's limit counts from its own start, and its queue budget bounds how long it may
+    wait to start (``_wait_clock``). A job's queue budget ends that job alone; any other
+    bound ends the wait. The bound is always a time; past the run deadline the run's end is
+    the bound.
+    """
+    bounds = wait_bounds(state, context.records, context.run, wait, _live(state, wait))
+    return min(bounds, key=lambda bound: bound.at, default=Bound(wait.deadline_at, WaitEnd.LIMIT))
+
+
+def credit_downtime(state: EvaluationState, run: RunState, credit: float) -> EvaluationState:
+    """Every open wait (waiting or parked, not frozen) credited ``credit`` seconds of downtime.
+
+    While no host runs nothing waits, so a wait's limit moves past the downtime exactly as an
+    open request record's does (``open_host_epoch``); ``_wait_clock`` caps it at the run
+    deadline the same way. A terminal run's waits are already ended.
+    """
+    if credit <= 0 or run.status == RunStatus.TERMINAL:
+        return state
+    open_phases = (ContinuationPhase.WAITING, ContinuationPhase.PARKED)
+    continuations = tuple(
+        row.model_copy(update={"downtime_credit": row.downtime_credit + credit})
+        if row.phase in open_phases and row.timeout is None
+        else row
+        for row in state.continuations
+    )
+    if continuations == state.continuations:
+        return state
+    return state.model_copy(update={"continuations": continuations})
 
 
 def bounded_wait(run: RunState, wait: Continuation) -> Continuation:
@@ -307,7 +451,7 @@ def _attempt(context: EvaluationContext, scope: Scope) -> AttemptView | None:
 
 
 def _active(context: EvaluationContext, scope: Scope) -> bool:
-    if context.run.status != RunStatus.RUNNING:
+    if not continues_admitted_work(context.run):
         return False
     if scope.owner == context.run.run_id:
         return scope.generation == context.run.generation
@@ -484,32 +628,31 @@ def _released_dependencies(
         )
 
 
-def _deadline_proof(state: EvaluationState, continuation: Continuation) -> None:
-    if continuation.timeout is not None and (
-        continuation.timeout.deadline_at != continuation.deadline_at
-        or any(
-            item.resource_id not in continuation.jobs for item in continuation.timeout.unfinished
-        )
+def _timeout_proof(continuation: Continuation) -> None:
+    """A frozen timeout names only the wait's own jobs, and never precedes the stated deadline.
+
+    Only a job's queue budget may end a wait before the deadline its agent stated.
+    """
+    timeout = continuation.timeout
+    if timeout is not None and (
+        (timeout.by != WaitEnd.QUEUE_BUDGET and timeout.deadline_at < continuation.deadline_at)
+        or any(item.resource_id not in continuation.jobs for item in timeout.unfinished)
+        or any(item not in timeout.unfinished for item in continuation.spent)
     ):
         raise ContractError(
             ("continuation", "timeout"),
-            "frozen timeout must match its deadline and owned dependencies",
-        )
-    if continuation.timeout is None and any(
-        job.observation is not None and job.observation.observed_at >= continuation.deadline_at
-        for job in _jobs(state, continuation)
-    ):
-        # A post-update wakeup has lost the previous progress needed to freeze
-        # before the observation. It cannot stand in for the missing proof.
-        raise ContractError(
-            ("continuation", "timeout"),
-            "deadline must freeze before job facts; prior progress is unavailable",
+            "frozen timeout must not precede its stated deadline and names owned dependencies",
         )
 
 
 def _ready(state: EvaluationState, continuation: Continuation) -> bool:
-    return continuation.timeout is not None or all(
-        _settled(job) for job in _jobs(state, continuation)
+    """Whether the wait has ended: it froze, or every job settled and none ran out of budget.
+
+    A wait one of whose jobs spent its queue budget ends by freezing (``_deadline``), so the
+    agent hears which job ran out.
+    """
+    return continuation.timeout is not None or (
+        not continuation.spent and all(_settled(job) for job in _jobs(state, continuation))
     )
 
 
@@ -534,7 +677,7 @@ def _authorize(
     _job_ownership(state, context, continuation)
     if continuation.phase != ContinuationPhase.WAITING or not _ready(state, continuation):
         return AreaChange(state=state)
-    _deadline_proof(state, continuation)
+    _timeout_proof(continuation)
     invocation = _invocation(context, continuation)
     if not _active(context, invocation.scope):
         return AreaChange(state=state)
@@ -562,16 +705,40 @@ def _authorize(
                 state, continuation.model_copy(update={"phase": ContinuationPhase.AUTHORIZED})
             )
         )
+    return _publish(state, context, continuation, invocation, evidence)
+
+
+def _publish(
+    state: EvaluationState,
+    context: EvaluationContext,
+    continuation: Continuation,
+    invocation: Invocation,
+    evidence: tuple[EvidenceRef, ...],
+) -> AreaChange[EvaluationState]:
+    """Authorize the settled wait's resume once, or refuse it for good (``resume_refusal``)."""
     owner = _attempt(context, invocation.scope)
     history = (
         produce_history(invocation.scope, state, context.records, owner, context.run)
         if owner
         else None
     )
-    cursor = (
-        history.cursor
-        if history is not None and history.availability == EvaluationHistoryAvailability.COMPLETE
-        else None
+    if history is not None:
+        # Every submission has ended (``attempt_settled``), so this history is final: a
+        # refusal now is a refusal forever, and the wait ends without a resume.
+        refusal = resume_refusal(history, invocation.evaluation_prefix)
+        if refusal is not None:
+            return _refuse(state, continuation, refusal, _history_update(owner, history))
+    cursor = history.cursor if history is not None else None
+    comparisons, settling = comparisons_to_publish(
+        state,
+        invocation.scope,
+        (
+            job.plan.measured_input
+            for job in _jobs(state, continuation)
+            if isinstance(job, OwnedJob) and job.plan.measured_input is not None
+        ),
+        _told(state, context, invocation.scope),
+        moment_of(context.run),
     )
     publication = ResumeAuthorizationReceipt(
         continuation_id=continuation.continuation_id,
@@ -579,6 +746,8 @@ def _authorize(
         evidence=evidence,
         timeout=continuation.timeout,
         history_cursor=cursor,
+        comparisons=comparisons,
+        settling=settling,
     )
     authorized = continuation.model_copy(
         update={
@@ -596,16 +765,66 @@ def _authorize(
                 evidence=authorized.evidence,
                 timeout=authorized.timeout,
                 history_cursor=publication.history_cursor,
+                comparisons=comparisons,
+                settling=settling,
             ),
         ),
-        signals=(
-            AttemptEvaluationHistoryUpdated(
-                attempt=AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
-                history=history,
+        signals=_history_update(owner, history),
+    )
+
+
+def _told(
+    state: EvaluationState, context: EvaluationContext, scope: Scope
+) -> tuple[tuple[Comparison, bool], ...]:
+    """Every comparison the scope's earlier resumes told of, oldest first, and if it was settling.
+
+    Read from each authorized continuation's receipt (``ResumeAuthorizationReceipt.settling``).
+    """
+    scopes = {row.invocation: row.scope for row in context.sessions.invocations}
+    return tuple(
+        (comparison, comparison.candidate_input in receipt.settling)
+        for row in state.continuations
+        if (receipt := row.authorization_receipt) is not None
+        and scopes.get(row.invocation) == scope
+        for comparison in receipt.comparisons
+    )
+
+
+def _history_update(
+    owner: AttemptView | None, history: AttemptEvaluationHistory | None
+) -> tuple[Signal, ...]:
+    """The signal storing the history a continuation's end published, when it has one.
+
+    The ends of the jobs a continuation awaits leave publishing the history to it.
+    """
+    if owner is None or history is None:
+        return ()
+    return (
+        AttemptEvaluationHistoryUpdated(
+            attempt=AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
+            history=history,
+        ),
+    )
+
+
+def _refuse(
+    state: EvaluationState,
+    continuation: Continuation,
+    reason: ResumeRefusal,
+    signals: tuple[Signal, ...],
+) -> AreaChange[EvaluationState]:
+    """End a wait whose resume core will never authorize: cancel it and say why."""
+    cancelled = continuation.model_copy(update={"phase": ContinuationPhase.CANCELLED})
+    return AreaChange(
+        state=_store(state, cancelled),
+        events=(
+            ResumeRefused(
+                continuation_id=continuation.continuation_id,
+                invocation=continuation.invocation,
+                reason=reason,
             ),
-        )
-        if owner is not None and history is not None
-        else (),
+        ),
+        signals=signals,
     )
 
 
@@ -631,6 +850,8 @@ def _validate_new(
     if (
         continuation.phase != ContinuationPhase.WAITING
         or continuation.timeout is not None
+        or continuation.spent
+        or continuation.downtime_credit
         or continuation.evidence
         or continuation.park_authority is not None
         or continuation.reopen_authority is not None
@@ -929,9 +1150,11 @@ def _publication_history(
 ) -> _PublicationProof:
     owner = _attempt(context, invocation.scope)
     cursor = proof.cursor
+    # The history as published: the scope may have submitted again since (``published_history``).
     if (
         owner is None
-        or owner.evaluation_history.availability != EvaluationHistoryAvailability.COMPLETE
+        or published_history(owner.evaluation_history, cursor).availability
+        != EvaluationHistoryAvailability.COMPLETE
     ):
         return _PublicationMissing("history")
     covered = owner.evaluation_history.covered_submissions
@@ -1004,7 +1227,7 @@ def _suspend(
         for row in state.continuations
     )
     updated = state.model_copy(update={"continuations": (*history, continuation)})
-    _deadline_proof(updated, continuation)
+    _timeout_proof(continuation)
     # The strategy learns of the suspension exactly once, when the continuation is
     # first recorded; a replay returns above without events.
     notice: tuple[StrategyEvent, ...] = (TurnSuspended(continuation=continuation),)
@@ -1020,6 +1243,7 @@ def _suspend(
         )
         requests.append(
             _until_wait_ends(
+                state,
                 context,
                 continuation,
                 request_type(scope=job.scope, resource_id=_resource(job)),
@@ -1031,25 +1255,82 @@ def _suspend(
 def _deadline(
     state: EvaluationState, context: EvaluationContext, continuation: Continuation, now_at: float
 ) -> AreaChange[EvaluationState]:
+    """Apply every bound of ``continuation`` the clock has reached at ``now_at``.
+
+    A job whose queue budget ran out ends alone: it joins ``spent`` and core cancels it, and
+    the wait goes on with the jobs it still waits on. Any other bound of a job it waits on
+    ends the whole wait, freezing every unfinished job. A wait left with no job to wait on
+    after one spent its budget ends at once, by that budget.
+    """
     if (
-        now_at < continuation.deadline_at
-        or continuation.phase not in (ContinuationPhase.WAITING, ContinuationPhase.PARKED)
+        continuation.phase not in (ContinuationPhase.WAITING, ContinuationPhase.PARKED)
         or continuation.timeout is not None
     ):
         return AreaChange(state=state)
     _job_ownership(state, context, continuation)
-    _deadline_proof(state, continuation)
-    if _ready(state, continuation):
-        return AreaChange(state=state)
-    unfinished = tuple(
-        JobTimeout(resource_id=_resource(job), progress=job.progress)
-        for job in _jobs(state, continuation)
-        if not _settled(job)
+    live = _live(state, continuation)
+    bounds = dict(
+        zip(
+            (_resource(job) for job in live),
+            wait_bounds(state, context.records, context.run, continuation, live),
+            strict=True,
+        )
     )
-    frozen = continuation.model_copy(
+    ends = tuple(
+        bound
+        for bound in bounds.values()
+        if bound.by != WaitEnd.QUEUE_BUDGET and bound.at <= now_at
+    )
+    ending = min(ends, key=lambda bound: bound.at, default=None)
+    # A budget that ran out before the wait ended ends its job alone; one the wait's end
+    # came first for is that end's.
+    spends_until = now_at if ending is None else ending.at
+    spending = tuple(
+        job
+        for job in live
+        if bounds[_resource(job)].by == WaitEnd.QUEUE_BUDGET
+        and bounds[_resource(job)].at <= spends_until
+    )
+    spent = (
+        *continuation.spent,
+        *(
+            JobTimeout(
+                resource_id=_resource(job),
+                progress=job.progress,
+                by=WaitEnd.QUEUE_BUDGET,
+                at=bounds[_resource(job)].at,
+            )
+            for job in spending
+        ),
+    )
+    cancels = tuple(
+        JobTerminationRequested(resource_id=_resource(job), cause="deadline") for job in spending
+    )
+    updated = continuation.model_copy(update={"spent": spent})
+    still = tuple(job for job in live if job not in spending)
+    if ending is not None:
+        deadline = ending
+    elif spent and not still:
+        deadline = Bound(at=max(item.at for item in spent), by=WaitEnd.QUEUE_BUDGET)
+    elif spending:
+        return AreaChange(state=_store(state, updated), signals=cancels)
+    else:
+        return AreaChange(state=state)
+    by_resource = {item.resource_id: item for item in spent}
+    unfinished = tuple(
+        by_resource.get(
+            _resource(job),
+            JobTimeout(
+                resource_id=_resource(job), progress=job.progress, by=deadline.by, at=deadline.at
+            ),
+        )
+        for job in _jobs(state, continuation)
+        if _resource(job) in by_resource or job in still
+    )
+    frozen = updated.model_copy(
         update={
             "timeout": TimedOut(
-                deadline_at=continuation.deadline_at, reached_at=now_at, unfinished=unfinished
+                deadline_at=deadline.at, reached_at=now_at, unfinished=unfinished, by=deadline.by
             ),
             "evidence": _feedback_evidence(
                 tuple(
@@ -1066,13 +1347,42 @@ def _deadline(
         update={
             "signals": (
                 *change.signals,
+                *cancels,
                 *tuple(
-                    JobTerminationRequested(resource_id=job.resource_id, cause="deadline")
-                    for job in unfinished
+                    JobTerminationRequested(resource_id=_resource(job), cause="deadline")
+                    for job in still
                 ),
             )
         }
     )
+
+
+def reach_deadlines(
+    state: EvaluationState, context: EvaluationContext
+) -> AreaChange[EvaluationState]:
+    """Freeze every wait whose deadline the run clock has reached, as ``DeadlineReached`` does.
+
+    Run time moves only with the events core consumes, and the event that carries it past
+    a wait's deadline is often a fact about the very job the wait is on: the next poll of a
+    job still queued. The timeout must record the jobs as they were at the deadline, so the
+    evaluation area runs this before it applies any event, while the jobs still hold the
+    facts they had then. A job's new fact can also move its bound earlier (a job that was
+    pending starts, so the credit its pending fact could still earn is gone), so the area
+    runs this again after the event: a wait whose bound already passed freezes at once.
+    """
+    change: AreaChange[EvaluationState] = AreaChange(state=state)
+    for identity in tuple(row.continuation_id for row in state.continuations):
+        row = next(r for r in change.state.continuations if r.continuation_id == identity)
+        if row.timeout is not None:
+            continue
+        reached = _deadline(change.state, context, row, context.run.now_at)
+        change = AreaChange(
+            state=reached.state,
+            signals=(*change.signals, *reached.signals),
+            requests=(*change.requests, *reached.requests),
+            events=(*change.events, *reached.events),
+        )
+    return change
 
 
 def _changed(
@@ -1090,13 +1400,15 @@ def _changed(
         job = next(
             job for job in _jobs(state, continuation) if job.resource_id == event.resource_id
         )
-        if job.observation != event.observation:
+        # A wake may carry an earlier reading of the job's end than the job holds now.
+        if not same_conclusion(job.observation, event.observation):
             continue
         _job_ownership(state, context, continuation)
-        _deadline_proof(state, continuation)
+        _timeout_proof(continuation)
         if job.status == ObservationStatus.UNKNOWN:
             requests.append(
                 _until_wait_ends(
+                    state,
                     context,
                     continuation,
                     InspectOwnedJob(
@@ -1180,7 +1492,18 @@ def _retire(
         for job in _jobs(state, continuation)
         if not _settled(job)
     )
-    return AreaChange(state=_store(state, retired), signals=signals)
+    # A cancel ends a wait whose resume core has not authorized: the suspended turn hears why,
+    # as it hears any wait core will never resume (S191), instead of waiting out the run.
+    events: tuple[ResumeRefused, ...] = ()
+    if phase == ContinuationPhase.CANCELLED and continuation.phase != ContinuationPhase.AUTHORIZED:
+        events = (
+            ResumeRefused(
+                continuation_id=continuation.continuation_id,
+                invocation=continuation.invocation,
+                reason=ResumeRefusal.ATTEMPT_CLOSED,
+            ),
+        )
+    return AreaChange(state=_store(state, retired), signals=signals, events=events)
 
 
 def _reopen_decision(
@@ -1230,7 +1553,7 @@ def _reopen(
     if decision is None or decision.registered_scope_reopen != normalization:
         raise ContractError(("normalization",), "requires canonical registered reopening proof")
     _job_ownership(state, context, continuation)
-    _deadline_proof(state, continuation)
+    _timeout_proof(continuation)
     if (
         continuation.phase == ContinuationPhase.REOPENING
         and continuation.reopen_authority == event.request.request_id

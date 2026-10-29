@@ -32,6 +32,9 @@
       "path": "../../libs/ipc/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/logs/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/settings/tsconfig.lib.json"
     }
   ]

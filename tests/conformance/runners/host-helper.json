@@ -1,13 +1,27 @@
 {
   "id": "host-helper",
-  "description": "Host helper scenarios replayed over one channel each: in process against the helper core and shell on simulated I/O (tests/conformance/test_host_helper.py), and over stdio against a real helper command, python -m entrypoints.host_helper or VIBESYS_HOST_HELPER_COMMAND (tests/e2e/test_host_helper.py). Every scenario assumes an empty registry and no project at the paths it names.",
+  "description": "Host helper scenarios replayed over one channel each: in process against the helper core and shell on simulated I/O (tests/conformance/test_host_helper.py), and over stdio against a real helper command, python -m entrypoints.host_helper or VIBESYS_HOST_HELPER_COMMAND (tests/e2e/test_host_helper.py). Every scenario assumes an empty registry and no project at the paths it names. The examples group runs in process only, against a helper with no example catalog (as from an installed distribution). The logs group runs in process only, over a log store seeded with the streams tests/conformance/test_host_helper.py writes; the real helper serves logs once the vs_logs store is wired (live-log-visibility PR 2).",
   "groups": {
     "handshake": [
       "helper-handshake",
       "helper-handshake-required",
       "helper-incompatible",
       "helper-invalid-request",
-      "helper-feature-gated"
+      "helper-feature-gated",
+      "helper-preflight-roles-gated",
+      "helper-examples-catalogue-gated",
+      "helper-preflight-backend-gated",
+      "helper-preflight-causes-gated",
+      "helper-harnesses",
+      "helper-run-summary-gated",
+      "helper-run-summary-trace-gated",
+      "helper-run-summary-ending-gated",
+      "helper-run-events-kinds-gated",
+      "helper-compute-gated",
+      "helper-agent-logins-gated",
+      "helper-usage-window-gated",
+      "helper-run-reader-gated",
+      "helper-examples-destination-gated"
     ],
     "registry": [
       "helper-instances-empty",
@@ -18,7 +32,23 @@
     ],
     "host-paths": [
       "helper-project-missing",
-      "helper-paths-missing"
+      "helper-paths-missing",
+      "helper-machine",
+      "helper-preflight-project-missing",
+      "helper-run-summary-project-missing",
+      "helper-run-history-skips"
+    ],
+    "examples": [
+      "helper-examples-unavailable",
+      "helper-examples-destination-unavailable"
+    ],
+    "logs": [
+      "helper-logs-list",
+      "helper-logs-read-tail",
+      "helper-logs-follow",
+      "helper-logs-cancel",
+      "helper-logs-truncated",
+      "helper-logs-unknown"
     ]
   }
 }

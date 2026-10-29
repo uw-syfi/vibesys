@@ -17,9 +17,26 @@ Treat the pinned checkout(s)—{% for source in workspace_sources %}`{{ source.d
 
 At the first baseline, after an architecture change, and on a plateau, use
 `serving-systems/references/tooling/performance-modeling.md` to build a ranged
-whole-decode roofline and reconcile the current-architecture ceiling with
+whole-step roofline and reconcile the current-architecture ceiling with
 end-to-end wall time and an observer-controlled profile. Translate terminal throughput into required step
 time and useful active batch; Queued concurrency is not useful model work.
+
+Model the phase the objective's metric is bound by. Decode-bound tasks (output
+throughput, TPOT) use a decode-step roofline. Prefill-bound tasks (TTFT,
+prompt-heavy throughput) use a prefill roofline: tokens per second per pipeline
+stage and per device at the benchmark's prompt lengths, not decode-step graphs.
+
+Attribute before optimizing. Compare throughput on isolated requests with
+throughput under the benchmark's real load. A gap is a cost that appears only
+under load: batch composition, scheduler, host input preparation, garbage
+collection, pipeline-parallel bubbles, or long-context kernels. Assign an
+experiment to the largest unattributed gap before any micro-optimization.
+Size each candidate in ms per step against the measurement noise; a change
+smaller than the noise cannot be confirmed alone, so batch such changes into
+one experiment. When the parts of one serving design (a scheduler, a
+prefix cache with exact resume, stage kernels) each measure within noise or
+worse alone, do not drop them: if the run can combine retained candidates,
+combine those parts into one candidate and measure them together.
 
 Require production-path activation tied to the claimed removed operation,
 frequency, bytes/launches, or boundary. Telemetry in token/layer/request loops

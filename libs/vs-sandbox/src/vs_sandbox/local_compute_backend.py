@@ -25,6 +25,7 @@ from vs_sandbox.compute_backends import (
     SandboxKind,
     make_local_shell_sandbox,
 )
+from vs_sandbox.container_memory import ContainerMemoryCap
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
     from vs_sim.api import Clock, CommandProbe, PipedProcessLauncher, Threads
 
-_DEFAULT_CPU_IMAGE = "python:3.12-bookworm"
+DEFAULT_CPU_IMAGE = "python:3.12-bookworm"
 
 HOST_ONLY_BACKENDS = frozenset({ComputeBackend.METAL})
 """Backends whose accelerator no container can reach (the capability's one source)."""
@@ -72,6 +73,7 @@ class LocalBackend:
         self._lprint = log or print
         self.image = image
         self._docker = docker
+        self._memory = ContainerMemoryCap(docker)
         self._threads = threads
         self._launcher = launcher
         # No accelerator to pick — kept for protocol parity with other backends
@@ -121,6 +123,8 @@ class LocalBackend:
                 _exception_message_2 = f"{self.name.value} backend requires a Docker image"
                 raise ValueError(_exception_message_2)
             return docker_sandbox(
+                # A runaway process dies inside its container, not the host.
+                memory_limit=self._memory.limit(),
                 host_workspace=host_workspace,
                 # ``DockerEnvironment.open()`` (the plain Docker path)
                 # always resolves and passes an agent image, so this only
@@ -183,9 +187,10 @@ def metal_backend(  # noqa: PLR0913
     launcher: PipedProcessLauncher,
     clock: Clock,
     probe: CommandProbe,
+    events: object | None = None,
 ) -> LocalBackend:
     """Apple Silicon / Metal backend (local execution only); it records no timestamps."""
-    del clock, probe
+    del clock, probe, events  # no timestamps; no device to watch for contention
     return LocalBackend(
         ComputeBackend.METAL,
         log_dir,
@@ -210,14 +215,15 @@ def cpu_backend(  # noqa: PLR0913
     launcher: PipedProcessLauncher,
     clock: Clock,
     probe: CommandProbe,
+    events: object | None = None,
 ) -> LocalBackend:
     """CPU-only backend (no GPU; CPU-bound targets like KV stores / servers); no timestamps."""
-    del clock, probe
+    del clock, probe, events  # no timestamps; no device to watch for contention
     return LocalBackend(
         ComputeBackend.CPU,
         log_dir,
         log=log,
-        image=image or _DEFAULT_CPU_IMAGE,
+        image=image or DEFAULT_CPU_IMAGE,
         docker=docker,
         threads=threads,
         launcher=launcher,

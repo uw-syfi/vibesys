@@ -9,38 +9,81 @@ set -euo pipefail
 # a stalled connection ends in a failure that names the step instead of hanging
 # the image build until the caller's budget runs out. Only operations that are
 # safe to repeat are retried: downloads to a path and package installs.
-NET_ATTEMPTS=5
+NET_ATTEMPTS=3
+NET_DEADLINE=120
 retry() {
-    local attempt=1
-    until "$@"; do
+    local attempt=1 status
+    while true; do
+        echo "network start ${attempt}/${NET_ATTEMPTS} (limit ${NET_DEADLINE}s): $*" >&2
+        if timeout --kill-after=5 "${NET_DEADLINE}" "$@"; then
+            echo "network done: $*" >&2
+            return 0
+        else
+            status=$?
+        fi
+        echo "network failed (exit ${status}): $*" >&2
         if [ "${attempt}" -ge "${NET_ATTEMPTS}" ]; then
             echo "giving up after ${attempt} attempts: $*" >&2
-            return 1
+            return "${status}"
         fi
-        echo "retry ${attempt}/${NET_ATTEMPTS} after failure: $*" >&2
         sleep $((attempt * 5))
         attempt=$((attempt + 1))
     done
 }
-# Fail a transfer that stalls (under 10 KB/s for 30 s) or runs over 10 minutes.
+# Bound connection setup, stalled transfers, and total download time.
 fetch() {
-    retry curl -fsSL --connect-timeout 20 --speed-limit 10240 --speed-time 30 --max-time 600 "$@"
+    retry curl -fsSL --connect-timeout 20 --speed-limit 10240 --speed-time 30 --max-time "${NET_DEADLINE}" "$@"
 }
+# Per-request cap. A transfer that keeps sending stays under it, so the update
+# also has a total deadline (APT_UPDATE_DEADLINE).
 APT_BOUNDS=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2)
+# GPU bases ship NVIDIA CUDA or AMD ROCm lists. Their indexes are large, and a
+# slow transfer never trips Acquire::http::Timeout, so one update can run until
+# the CI job is cancelled. Features install only distribution packages.
+# Two update attempts (30s each), two install attempts (45s each), one 5s
+# backoff per phase, and four 5s kill graces fit within 180s in total.
+APT_ATTEMPTS=2
+APT_UPDATE_DEADLINE=30
+APT_INSTALL_DEADLINE=45
+drop_vendor_apt_sources() {
+    local dir=/etc/apt/sources.list.d
+    [ -d "${dir}" ] || return 0
+    find "${dir}" -type f \( \
+        -iname '*nvidia*' -o -iname '*cuda*' -o -iname '*rocm*' -o -iname '*amdgpu*' \
+        -o -exec grep -Eqi 'nvidia\.com|repo\.radeon\.com|rocm|amdgpu' {} \; \
+    \) -delete
+}
 apt_update_and_install() {
-    apt-get update -qq "${APT_BOUNDS[@]}" &&
-        apt-get install -y -qq --no-install-recommends "${APT_BOUNDS[@]}" "$@"
+    drop_vendor_apt_sources
+    NET_ATTEMPTS="${APT_ATTEMPTS}" NET_DEADLINE="${APT_UPDATE_DEADLINE}" \
+        retry apt-get update -qq "${APT_BOUNDS[@]}" &&
+        NET_ATTEMPTS="${APT_ATTEMPTS}" NET_DEADLINE="${APT_INSTALL_DEADLINE}" \
+        retry apt-get install -y -qq --no-install-recommends "${APT_BOUNDS[@]}" "$@"
 }
 apt_install() {
-    retry apt_update_and_install "$@"
+    local package missing=()
+    for package in "$@"; do
+        if [ "$(dpkg-query -W -f='${Status}' "${package}" 2>/dev/null)" != 'install ok installed' ]; then
+            missing+=("${package}")
+        fi
+    done
+    if [ "${#missing[@]}" -eq 0 ]; then
+        echo "apt packages already installed; skipping update and install: $*" >&2
+        return 0
+    fi
+    apt_update_and_install "${missing[@]}"
 }
 # npm's own defaults (a 300 s request timeout, 2 retries) outlast a CI job's budget.
 npm_install_global() {
-    retry npm install -g --include=optional --fetch-retries=3 --fetch-timeout=60000 \
-        --fetch-retry-mintimeout=5000 --fetch-retry-maxtimeout=30000 "$@"
+    local package
+    for package in "$@"; do
+        retry npm install -g --include=optional --prefer-offline --no-audit --no-fund \
+            --fetch-retries=1 --fetch-timeout=30000 \
+            --fetch-retry-mintimeout=5000 --fetch-retry-maxtimeout=10000 "${package}" || return $?
+    done
 }
 pip_install() {
-    retry pip install --no-cache-dir --retries 5 --timeout 30 "$@"
+    retry pip install --retries 1 --timeout 30 "$@"
 }
 # <<< vibesys network helpers
 

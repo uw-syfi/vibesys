@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Protocol
 from vs_runtime._workspace_access import WorkspaceAccessRecovery
 from vs_runtime.contracts import (
     AgentWorkspaceRouteError,
+    CaptureStopUnconfirmedError,
     RuntimeContractError,
     WorkspaceRestoreError,
     Workspaces,
@@ -18,17 +19,25 @@ from vs_runtime.contracts import (
 )
 from vs_sim.api import AsyncCloseOnce, NothingLeft, Released, ReleaseStack
 
+_ROOT_CAPTURE_WORKSPACE = "root"
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
     from pathlib import Path
 
+    from vs_core.api import AdoptionPublication, CheckoutUpdate
     from vs_runtime._agent_execution import AgentExecutionScope
-    from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
+    from vs_runtime._trusted_evaluation import (
+        TrustedAccuracyResult,
+        TrustedBenchmarkResult,
+        TrustedBuildResult,
+    )
+    from vs_runtime._workspace_holds import WorkspaceHolds
     from vs_runtime._workspace_receipts import BaselineEntry, RootBaselineDrift
     from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
     from vs_runtime.contracts import CandidateWorkspace, Workspace
-    from vs_sandbox.api import CommandRunner
-    from vs_sim.api import BlockingRunner
+    from vs_sandbox.api import CaptureExecutionIdentity, CommandRunner
+    from vs_sim.api import BlockingRunner, Event, OutputSink
 
 
 class WorkspaceResource(Protocol):
@@ -47,6 +56,10 @@ class WorkspaceResource(Protocol):
     def trusted_input_baseline(self) -> str | None: ...
 
     def snapshot(self, label: str) -> str: ...
+
+    def publish(self, revision: str, message: str) -> AdoptionPublication: ...
+
+    def update_checkout(self, publication: AdoptionPublication) -> CheckoutUpdate: ...
 
     def restore(
         self,
@@ -80,6 +93,14 @@ class WorkspaceResource(Protocol):
 
     def candidate_patch(self, revision: str) -> str: ...
 
+    def measured_input(self, revision: str) -> str:
+        """The digest of what the task's evaluation of *revision* reads (``GitTracker``)."""
+        ...
+
+    def withhold_unread(self) -> None:
+        """Remove the paths the task declares unread, so the files are what the digest covers."""
+        ...
+
     def is_retained(self, revision: str) -> bool: ...
 
     def trusted_input_changes(self) -> list[str]: ...
@@ -87,6 +108,13 @@ class WorkspaceResource(Protocol):
     def is_directory(self, path: str) -> bool: ...
 
     def execute(self, command: str, timeout_seconds: int | None) -> CommandExecutionResult: ...
+
+    def execute_capture(
+        self, command: str, timeout_seconds: int | None, cancel: Event
+    ) -> CommandExecutionResult: ...
+
+    @property
+    def capture_execution(self) -> CaptureExecutionIdentity | None: ...
 
     def agent_scope(self) -> AgentExecutionScope: ...
 
@@ -97,15 +125,32 @@ class WorkspaceResource(Protocol):
     @property
     def evaluation_spec(self) -> WorkspaceEvaluationSpec: ...
 
-    async def trusted_accuracy(self, command_override: str | None) -> TrustedAccuracyResult: ...
+    async def candidate_build(self, output: OutputSink) -> TrustedBuildResult:
+        """Run the candidate's build here under agent confinement, writing to *output*."""
+        ...
+
+    async def trusted_accuracy(
+        self, command_override: str | None, output: OutputSink
+    ) -> TrustedAccuracyResult:
+        """Run trusted accuracy here, writing its command's output to *output*."""
+        ...
 
     async def trusted_benchmark(
         self,
         command_override: str | None,
         required_metrics: frozenset[str],
-    ) -> TrustedBenchmarkResult: ...
+        output: OutputSink,
+    ) -> TrustedBenchmarkResult:
+        """Run the trusted benchmark here, writing its command's output to *output*."""
+        ...
 
-    def close(self) -> None: ...
+    def close(self) -> None:
+        """Discard: release what this workspace owns, a candidate's content included."""
+        ...
+
+    def detach(self) -> None:
+        """Release this host's live handles and keep the content for ``reattach_candidate``."""
+        ...
 
 
 class WorkspaceResourceProvider(Protocol):
@@ -123,6 +168,32 @@ class WorkspaceResourceProvider(Protocol):
         """Reopen a candidate worktree a stopped host left on disk, keeping its content."""
         ...
 
+    def leftover_candidates(self) -> tuple[str, ...]:
+        """The workspace IDs of the candidate worktrees on disk, live or left by a stopped host."""
+        ...
+
+    def unsettled_candidates(self) -> frozenset[str]:
+        """Candidate IDs durably retained because a command may still use them."""
+        ...
+
+    def record_capture_intent(
+        self, workspace_id: str, execution: CaptureExecutionIdentity, /
+    ) -> None:
+        """Durably protect a candidate before its external command is submitted."""
+        ...
+
+    def clear_capture_intent(self, workspace_id: str, /) -> None:
+        """Clear protection after the external command is confirmed settled."""
+        ...
+
+    def reconcile_capture_intents(self) -> frozenset[str]:
+        """Try to settle durable captures and return those still unresolved."""
+        ...
+
+    def remove_leftover(self, workspace_id: str, /) -> None:
+        """Remove a candidate worktree no live handle owns, with its Git registration."""
+        ...
+
 
 class OwnedWorkspaces(Workspaces, Protocol):
     """Composition lifetime for a runtime-owned workspace collection."""
@@ -132,6 +203,14 @@ class OwnedWorkspaces(Workspaces, Protocol):
 
     async def close(self) -> None:
         """Release workspaces in dependency order."""
+        ...
+
+    def follow(self, holds: Callable[[], WorkspaceHolds]) -> None:
+        """Decide what outlives this host from what core references, as *holds* reads it."""
+        ...
+
+    async def release_unheld(self) -> None:
+        """Discard every candidate worktree on disk that core no longer references."""
         ...
 
 
@@ -324,6 +403,10 @@ class RuntimeWorkspace:
     async def candidate_patch(self, revision: str) -> str:
         return await run_sync(self._owner.runner, self._resource.candidate_patch, revision)
 
+    async def measured_input(self, revision: str) -> str:
+        """The digest of what the task's evaluation of *revision* reads."""
+        return await run_sync(self._owner.runner, self._resource.measured_input, revision)
+
     async def trusted_input_changes(self) -> list[str]:
         return await run_sync(self._owner.runner, self._resource.trusted_input_changes)
 
@@ -356,6 +439,12 @@ class RuntimeWorkspaces:
         self._lifecycle_lock = asyncio.Lock()
         self._candidate_locks: dict[str, asyncio.Lock] = {}
         self._candidates: dict[str, RuntimeCandidateWorkspace] = {}
+        self._members: set[str] = set()
+        """Member-keyed candidates: core may hold them, so a host stop may keep them on disk."""
+        self._unsettled: set[str] = set()
+        """Live candidates a command may still use; host close must detach, never discard."""
+        self._holds: Callable[[], WorkspaceHolds] | None = None
+        """What core references now; ``None`` until a run follows core, so members are kept."""
         self._closed = False
         self._close = AsyncCloseOnce()
         self._root_release = AsyncCloseOnce()
@@ -405,6 +494,16 @@ class RuntimeWorkspaces:
                 if workspace_id in self._candidates:
                     message = f"member {member_id!r} already has a live candidate workspace"
                     raise RuntimeContractError(message)
+                if member_id is not None:
+                    unsettled = await run_sync(self._runner, self._resources.unsettled_candidates)
+                    if workspace_id in unsettled and workspace_id in await run_sync(
+                        self._runner, self._resources.leftover_candidates
+                    ):
+                        message = (
+                            f"member {member_id!r} has an unresolved candidate workspace "
+                            "retained by the previous host"
+                        )
+                        raise RuntimeContractError(message)
                 task = asyncio.create_task(
                     self._runner.run(self._open_candidate, workspace_id, revision)
                 )
@@ -417,7 +516,24 @@ class RuntimeWorkspaces:
                     else:
                         await run_sync(self._runner, task.result().close)
                     raise
+                if member_id is not None:
+                    self._members.add(workspace_id)
                 return self._register(workspace_id, resource)
+
+    async def create_measured_candidate(self, revision: str) -> CandidateWorkspace:
+        """A fresh candidate of *revision* holding exactly what its measured input digests.
+
+        The paths the task declares unread are removed (``WorkspaceResource.withhold_unread``),
+        so an evaluation in it reads what ``measured_input`` names, and two revisions with one
+        measured input are evaluated on byte-identical trees. A failure discards the candidate.
+        """
+        candidate = await self.create_candidate(revision)
+        try:
+            await run_sync(self._runner, self.resource_for(candidate).withhold_unread)
+        except BaseException:
+            await candidate.discard()
+            raise
+        return candidate
 
     def _open_candidate(self, workspace_id: str, revision: str) -> WorkspaceResource:
         """Open the candidate, refusing a revision the run's repository does not hold.
@@ -461,14 +577,26 @@ class RuntimeWorkspaces:
                 )
                 if resource is None:
                     return None
+                self._members.add(workspace_id)
                 return self._register(workspace_id, resource)
 
     def live_candidate(self, member_id: str) -> RuntimeCandidateWorkspace | None:
         """Return the live candidate of one member, or ``None`` once released."""
         return self._candidates.get(member_workspace_id(member_id))
 
-    async def adopt(self, revision: str) -> None:
-        await self.root.restore(revision)
+    async def adopt(
+        self, revision: str, *, message: str = "vibesys: adopt revision"
+    ) -> AdoptionPublication:
+        async with self._root_lock:
+            return await run_sync(
+                self._runner, self.resource_for(self.root).publish, revision, message
+            )
+
+    async def update_checkout(self, publication: AdoptionPublication) -> CheckoutUpdate:
+        async with self._root_lock:
+            return await run_sync(
+                self._runner, self.resource_for(self.root).update_checkout, publication
+            )
 
     async def export_patch(self, revision: str) -> str:
         return await self.root.candidate_patch(revision)
@@ -516,6 +644,51 @@ class RuntimeWorkspaces:
             raise TypeError(message)
         return workspace
 
+    async def begin_capture(
+        self, workspace: Workspace, execution: CaptureExecutionIdentity | None
+    ) -> None:
+        """Fence a capture in memory, persisting only independently recoverable work."""
+        managed = self.workspace_for(workspace)
+        workspace_id = managed.id or _ROOT_CAPTURE_WORKSPACE
+        if workspace_id in self._unsettled:
+            raise CaptureStopUnconfirmedError
+        self._unsettled.add(workspace_id)
+        if execution is None:
+            return
+        try:
+            await run_sync(
+                self._runner,
+                self._resources.record_capture_intent,
+                workspace_id,
+                execution,
+            )
+        except BaseException as cause:
+            error = CaptureStopUnconfirmedError()
+            error.add_note(
+                "durable capture intent could not be established; the candidate remains retained"
+            )
+            raise error from cause
+
+    async def finish_capture(self, workspace: Workspace) -> None:
+        """Remove in-memory and, when present, durable protection after settlement."""
+        managed = self.workspace_for(workspace)
+        workspace_id = managed.id or _ROOT_CAPTURE_WORKSPACE
+        if self.resource_for(managed).capture_execution is not None:
+            try:
+                await run_sync(self._runner, self._resources.clear_capture_intent, workspace_id)
+            except BaseException as cause:
+                error = CaptureStopUnconfirmedError()
+                error.add_note(
+                    "settlement was observed but its durable capture intent could not be cleared"
+                )
+                raise error from cause
+        self._unsettled.discard(workspace_id)
+
+    async def retain_unsettled(self, workspace: Workspace) -> None:
+        """Compatibility entrypoint that establishes durable protection immediately."""
+        managed = self.workspace_for(workspace)
+        await self.begin_capture(managed, self.resource_for(managed).capture_execution)
+
     def is_root(self, workspace: Workspace) -> bool:
         self.resource_for(workspace)
         return workspace is self.root
@@ -561,6 +734,12 @@ class RuntimeWorkspaces:
             resource = self.resource_for(candidate)
             lock = self._candidate_locks[resource.id or ""]
             async with lock, self._root_lock:
+                # A live capture enters this set before its intent is persisted. Persisted-only
+                # candidates are refused before reattach, so discard needs no second blocking
+                # state read (which could queue ahead of this close on a single-worker runner).
+                if resource.id in self._unsettled:
+                    message = "candidate workspace has an unresolved capture"
+                    raise RuntimeContractError(message)
                 steps = ReleaseStack()
                 steps.callback(resource.close)
                 try:
@@ -570,10 +749,76 @@ class RuntimeWorkspaces:
                     # or the run's close tries again. Callers read the failure as a group.
                     message = "candidate workspace cleanup failed"
                     raise ExceptionGroup(message, [error]) from error
-                self._candidates.pop(resource.id or "", None)
-                self._candidate_locks.pop(resource.id or "", None)
-                candidate._closed = True  # noqa: SLF001  # lint-waiver: LW-228417 [SLF001]; the owning collection terminates its handle after cleanup.
+                self._forget(resource, candidate)
         return proof
+
+    async def _detach(self, candidate: RuntimeCandidateWorkspace) -> None:
+        """Release a member's live handles at a host stop and keep its worktree on disk.
+
+        Core still holds a member's workspace (its attempt is open, its access may be unjudged),
+        so the stop of this host is not its release: the next host reattaches it with its work.
+        Only a discard, which core asks for when it releases the attempt, removes it.
+        """
+        async with self._lifecycle_lock:
+            resource = self.resource_for(candidate)
+            lock = self._candidate_locks[resource.id or ""]
+            async with lock, self._root_lock:
+                await run_sync(self._runner, resource.detach)
+                self._forget(resource, candidate)
+
+    def _forget(self, resource: WorkspaceResource, candidate: RuntimeCandidateWorkspace) -> None:
+        """Drop a released or detached candidate and end its handle."""
+        self._candidates.pop(resource.id or "", None)
+        self._candidate_locks.pop(resource.id or "", None)
+        self._members.discard(resource.id or "")
+        self._unsettled.discard(resource.id or "")
+        candidate._closed = True  # noqa: SLF001  # lint-waiver: LW-228417 [SLF001]; the owning collection terminates its handle after cleanup.
+
+    def follow(self, holds: Callable[[], WorkspaceHolds]) -> None:
+        """Decide what outlives this host from what core references, as *holds* reads it.
+
+        From now on :meth:`close` keeps on disk only the member candidates core still holds
+        (including unresolved operation scratch) and discards the rest with their worktrees.
+        """
+        self._holds = holds
+
+    def _kept(self) -> frozenset[str] | None:
+        """The candidate workspace IDs a host stop keeps; ``None`` while core is not followed."""
+        if self._holds is None:
+            return None
+        return self._holds().workspace_ids()
+
+    async def release_unheld(self) -> None:
+        """Discard every candidate worktree on disk that core no longer references.
+
+        A stopped host left these behind: members of attempts that have since ended, a
+        member no later host reattached, scratch candidates of a host that died. Live
+        candidates are this host's and stay. Does nothing until :meth:`follow` is called.
+        """
+        async with self._lifecycle_lock, self._root_lock:
+            steps = ReleaseStack()
+            self._unsettled = set(
+                await run_sync(self._runner, self._resources.reconcile_capture_intents)
+            )
+            await self._sweep(steps)
+            await run_sync(self._runner, steps.close)
+
+    async def _sweep(self, steps: ReleaseStack) -> None:
+        """Add to *steps* a removal of each worktree on disk neither core nor this host holds.
+
+        The caller holds the root lock: a removal changes the root's worktree registrations.
+        """
+        kept = self._kept()
+        if kept is None:
+            return
+        unsettled = await run_sync(self._runner, self._resources.unsettled_candidates)
+        for workspace_id in await run_sync(self._runner, self._resources.leftover_candidates):
+            if (
+                workspace_id not in kept
+                and workspace_id not in unsettled
+                and workspace_id not in self._candidates
+            ):
+                steps.callback(self._resources.remove_leftover, workspace_id)
 
     def begin_close(self) -> None:
         """Reject new work and cancel in-flight trusted evaluations before teardown."""
@@ -584,7 +829,14 @@ class RuntimeWorkspaces:
             evaluation.cancel()
 
     async def close(self) -> None:
-        """Close candidate pairs, then the root resource."""
+        """Close candidates by what core holds, then the root resource.
+
+        A member candidate core still holds, or whose command has an unconfirmed stop, is
+        detached: its worktree stays for the next host. Every other candidate is discarded,
+        and so is every worktree on disk core no longer references. A final run therefore
+        leaves no settled candidate behind, but never removes unresolved remote-command scratch.
+        Before :meth:`follow`, core's state is unknown and every member candidate is kept.
+        """
         self.begin_close()
         await self._close.run(self._close_once)
 
@@ -592,9 +844,15 @@ class RuntimeWorkspaces:
         errors: list[BaseException] = []
         async with self._lifecycle_lock:
             candidates = tuple(self._candidates.values())
+        kept = self._kept()
         for candidate in reversed(candidates):
             try:
-                await candidate.discard()
+                if candidate.id in self._unsettled or (
+                    candidate.id in self._members and (kept is None or candidate.id in kept)
+                ):
+                    await self._detach(candidate)
+                else:
+                    await candidate.discard()
             except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-228410 [BLE001]; run cleanup attempts every candidate in reverse creation order.
                 errors.append(error)
         self.root._closed = True  # noqa: SLF001  # lint-waiver: LW-228418 [SLF001]; collection close terminates its root handle with the run.
@@ -612,4 +870,6 @@ class RuntimeWorkspaces:
         steps = ReleaseStack()
         steps.callback(self.root._resource.close)  # noqa: SLF001  # lint-waiver: LW-228420 [SLF001]; collection close releases the root resource after all candidates.
         async with self._root_lock:
+            # Worktrees core no longer references go before the root that registers them.
+            await self._sweep(steps)
             return await run_sync(self._runner, steps.close)

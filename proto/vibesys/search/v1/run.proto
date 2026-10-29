@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package vibesys.search.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/search/v1;searchv1";
+
+// Search settlement vocabulary. Core lifecycle outcomes remain strategy-neutral.
+enum EndReason {
+  END_REASON_UNSPECIFIED = 0;
+  END_REASON_ADOPTED = 1;
+  END_REASON_KEPT_INPUT = 2;
+  END_REASON_NO_WINNER = 3;
+  END_REASON_ADOPTION_FAILED = 4;
+  END_REASON_STOPPED = 5;
+  END_REASON_DEADLINE = 6;
+  END_REASON_FAILED = 7;
+  END_REASON_FINISH_REFUSED = 8;
+}
+
+// Packed in RunDescription.detail. Its descriptor travels in the epoch header.
+message SearchRunDescription {
+  optional uint32 max_workstreams = 1;
+}
+
+// Packed in Ended.detail, for failed and successful search settlements alike.
+message SearchEnded {
+  optional EndReason reason = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  bool uncompared = 2;
+}
+
+// Packed in RunFailure.detail. Generic failure fields stay in store.v1.
+message SearchRunFailure {
+  uint32 workstreams_started = 1;
+  uint32 workstream_budget = 2;
+  uint32 candidates_kept = 3;
+  optional string adopted_candidate = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+}

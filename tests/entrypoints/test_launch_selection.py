@@ -8,10 +8,12 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.entrypoints.test_launch_frontends import _request
 from tests.support.core_plugins import capability_plugin, core_policy, failing_plugin
+from tests.support.real_git import NO_GIT
 from tests.support.skeleton_strategy import SkeletonStrategy
 
 from launch import (
     LaunchSettings,
+    built_in_orchestrations,
     default_runs,
     validate_descriptor,
 )
@@ -38,12 +40,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.api import AuxiliaryAgents, ManagedAgent
-    from vibesys.api.wiring import RunResources
+    from vibesys.api.wiring import AuxiliaryResources
     from vs_agent.api import AgentEventSink, AgentInvocationStore
     from vs_project.api import GitFaultSink
     from vs_runtime.api.infrastructure import RunState, ScopedAgentEnvironment
     from vs_sandbox.api import HostResource
-    from vs_sim.api import Threads
+    from vs_sim.api import Network, Threads
 
 
 _IMPLEMENTER = AgentRole(id="skeleton-implementer", system_prompt="Implement the requested change.")
@@ -95,8 +97,13 @@ class FalseyFakeBackendFactory:
 
 
 class FalseyFakeSessionAgents:
-    def __init__(self, client_factory: FalseyFakeAgentFactory) -> None:
-        self.implementation = BuiltInSessionAgents(client_factory=client_factory)
+    def __init__(self, client_factory: FalseyFakeAgentFactory, network: Network) -> None:
+        self.implementation = BuiltInSessionAgents(
+            client_factory=client_factory,
+            network=network,
+            git=NO_GIT,
+            registry=built_in_orchestrations(),
+        )
         self.calls = 0
 
     def __bool__(self) -> bool:
@@ -104,7 +111,7 @@ class FalseyFakeSessionAgents:
 
     def open_environment(
         self,
-        resources: RunResources,
+        resources: AuxiliaryResources,
         *,
         mounts: tuple[HostResource, ...] = (),
         agent_backend: str | None = None,
@@ -120,7 +127,7 @@ class FalseyFakeSessionAgents:
     def create_agent(
         self,
         launch: AuxiliaryAgentLaunch,
-        resources: RunResources,
+        resources: AuxiliaryResources,
         agent_events: AgentEventSink,
     ) -> ManagedAgent:
         self.calls += 1
@@ -168,7 +175,8 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path, sim: S
     threads = sim.threads()
     agents_factory = FalseyFakeAgentFactory(threads)
     backend_factory = FalseyFakeBackendFactory(threads)
-    agents = FalseyFakeSessionAgents(agents_factory)
+    network = SimNetwork(threads)
+    agents = FalseyFakeSessionAgents(agents_factory, network)
     invocation_stores = FalseyInvocationStoreFactory()
     settings = FalseyLaunchSettings(
         timing=RunTiming(sim.clock, PRODUCTION_LEASE_SECONDS, threads),
@@ -182,7 +190,7 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path, sim: S
         git_repository=FakeGitRepositories().repository,
         stop_timer=FakeStopTimer(threads=threads),
         blocking=InlineBlockingRunner(),
-        network=SimNetwork(threads),
+        network=network,
     )
     validate_descriptor(request.orchestration, registry=registry)
     runs = default_runs(settings)

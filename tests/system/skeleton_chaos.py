@@ -344,12 +344,18 @@ class FaultyCluster(ScenarioCluster):
             self.settled.add(_operation(target, outcome))
         return outcome
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
         """Cancel the job, or fail the scancel."""
         fault = self._strike(ClusterOperation.SCANCEL)
         if fault in _UNREADABLE:
             return self._unknown(target, by_job_id=by_job_id, reason=f"scancel: {fault.value}")
-        outcome = super().cancel(target, by_job_id=by_job_id)
+        outcome = super().cancel(target, by_job_id=by_job_id, observed=observed)
         if outcome.kind == "cancel_requested":
             self.cancel_requested.add(_operation(target, outcome))
         return outcome

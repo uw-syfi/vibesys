@@ -47,7 +47,7 @@ from vs_runtime.api.slurm_evaluation_stack import (
     plan,
     submission,
 )
-from vs_sim.api.testing import SimThreads, examples
+from vs_sim.api.testing import SimThreads, examples, loop_threads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -297,6 +297,7 @@ async def test_an_executor_that_raises_leaves_every_request_kind_with_a_typed_ou
     tmp_path: Path,
 ) -> None:
     """Whatever the executor raises, at whichever call, the request ends in an observation."""
+    loop_threads()
     with tempfile.TemporaryDirectory(dir=tmp_path) as raw:
         base = Path(raw)
         (base / "project").mkdir()
@@ -329,6 +330,7 @@ async def test_a_scope_closes_over_a_job_whose_launch_failed_however_its_cancel_
 ) -> None:
     """A job that never launched has nothing to cancel: the close reads the executor, not the
     failed cancel, so it releases instead of reporting a job it can never end."""
+    loop_threads()
     with tempfile.TemporaryDirectory(dir=tmp_path) as raw:
         base = Path(raw)
         (base / "project").mkdir()

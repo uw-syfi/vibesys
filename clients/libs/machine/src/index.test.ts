@@ -69,4 +69,26 @@ describe('actorStore', () => {
     store.dispatch({type: 'show'});
     expect({value: store.getState(), heard}).toEqual({value: 'shown', heard: 1});
   });
+
+  test('snapshots subscriptions while publishing a changed view', () => {
+    const actor = createActor(notice, {clock: clockFrom(new ManualClock().schedule)}).start();
+    const store = actorStore(actor, snapshot => snapshot.value);
+    const trace: string[] = [];
+    const added = () => trace.push('added');
+    let changed = false;
+    let unsubscribeRemoved: () => void = () => undefined;
+    store.subscribe(() => {
+      trace.push('first');
+      if (changed) return;
+      changed = true;
+      unsubscribeRemoved();
+      store.subscribe(added);
+    });
+    unsubscribeRemoved = store.subscribe(() => trace.push('removed'));
+
+    store.dispatch({type: 'show'});
+    store.dispatch({type: 'dismiss'});
+
+    expect(trace).toEqual(['first', 'removed', 'first', 'added']);
+  });
 });

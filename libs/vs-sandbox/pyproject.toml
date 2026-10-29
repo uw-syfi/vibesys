@@ -15,6 +15,7 @@ dependencies = [
     "vs-decode",
     "vs-evaluation",
     "vs-project",
+    "vs-redaction",
     "vs-sim",
     "vs-slurm",
 ]
@@ -29,5 +30,6 @@ vs_sandbox = ["py.typed", "devcontainer-cli/Dockerfile", "devcontainer-cli/test_
 vs-decode = { workspace = true }
 vs-evaluation = { workspace = true }
 vs-project = { workspace = true }
+vs-redaction = { workspace = true }
 vs-sim = { workspace = true }
 vs-slurm = { workspace = true }

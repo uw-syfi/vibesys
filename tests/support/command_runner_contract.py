@@ -15,6 +15,9 @@ The contract (also documented in :mod:`vs_sandbox.command_execution`):
   reads it as a stage timeout, the candidate exceeding its budget).
 * A cancel stops the whole process tree the same way, keeps the partial
   output, and returns ``cancelled=True``.
+* Every byte the command writes reaches the ``output`` sink, in order per
+  stream and past the cap too, including what it wrote before a timeout or
+  cancel stopped it; the runner's own notices are not command output and do not.
 
 A suite holds one implementation to the contract by subclassing
 :class:`CommandRunnerContract` and providing a ``harness`` fixture. The
@@ -39,13 +42,15 @@ from typing import TYPE_CHECKING, Protocol
 
 import pytest
 
-from vs_sandbox.api import CommandResult, CommandRunner
+from vs_sandbox.api import CaptureCommandRunner, CommandResult, CommandRunner
+from vs_sim.api import Capture
 from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_sim.api import Event, Threads
+from vs_sim.api import DISCARD
 
 CAP = 200
 TIMEOUT_SECONDS = 2
@@ -105,13 +110,24 @@ class Harness(Protocol):
 class _Execution:
     """One ``execute`` call running on its own thread."""
 
-    def __init__(self, harness: Harness, command: str, *, timeout: int, cancel: Event) -> None:
+    def __init__(
+        self,
+        harness: Harness,
+        command: str,
+        *,
+        timeout: int,
+        cancel: Event,
+        output: Capture | None = None,
+    ) -> None:
         self._result: CommandResult | None = None
         self._error: BaseException | None = None
+        sink = Capture(0) if output is None else output
 
         def run() -> None:
             try:
-                self._result = harness.sandbox.execute(command, timeout=timeout, cancel=cancel)
+                self._result = harness.sandbox.execute(
+                    command, timeout=timeout, cancel=cancel, output=sink
+                )
             except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-731014 [BLE001]; the case re-raises whatever the worker raised.
                 self._error = error
             finally:
@@ -134,6 +150,27 @@ def _assert_streams_compose_output(result: CommandResult) -> None:
     assert result.output == result.stdout + result.stderr
 
 
+def _everything() -> Capture:
+    """A sink that keeps every byte the contract's commands write."""
+    return Capture(1 << 20)
+
+
+def assert_preset_cancellation_contract(
+    runner: CaptureCommandRunner,
+    threads: Threads,
+    command: str,
+) -> CommandResult:
+    """Prove the cancellation semantic shared by ordinary and capture runners."""
+    cancel = threads.event()
+    cancel.set()
+
+    result = runner.execute(command, timeout=3600, cancel=cancel, output=DISCARD)
+
+    assert result.cancelled
+    assert result.output == result.stdout + result.stderr
+    return result
+
+
 class CommandRunnerContract:
     """Cases for ``CommandRunner.execute``; a subclass supplies the ``harness`` fixture."""
 
@@ -143,7 +180,7 @@ class CommandRunnerContract:
         assert harness.sandbox.id == harness.sandbox.id
 
     def test_streams_and_status_of_a_normal_exit_are_kept_apart(self, harness: Harness) -> None:
-        result = harness.sandbox.execute(harness.emit("hello\n", "warn\n", 0))
+        result = harness.sandbox.execute(harness.emit("hello\n", "warn\n", 0), output=DISCARD)
 
         assert isinstance(result, CommandResult)
         assert (result.exit_code, result.stdout, result.stderr) == (0, "hello\n", "warn\n")
@@ -152,7 +189,7 @@ class CommandRunnerContract:
         _assert_streams_compose_output(result)
 
     def test_a_nonzero_status_is_reported_unchanged(self, harness: Harness) -> None:
-        result = harness.sandbox.execute(harness.emit("out", "err", _NONZERO))
+        result = harness.sandbox.execute(harness.emit("out", "err", _NONZERO), output=DISCARD)
 
         assert result.exit_code == _NONZERO
         assert (result.stdout, result.stderr) == ("out", "err")
@@ -164,14 +201,14 @@ class CommandRunnerContract:
     def test_a_signalled_command_reports_128_plus_the_signal(
         self, harness: Harness, signal_number: int, status: int
     ) -> None:
-        result = harness.sandbox.execute(harness.killed_by(signal_number))
+        result = harness.sandbox.execute(harness.killed_by(signal_number), output=DISCARD)
 
         assert result.exit_code == status
         assert not result.cancelled
         _assert_streams_compose_output(result)
 
     def test_an_empty_command_is_rejected_with_exit_code_one(self, harness: Harness) -> None:
-        result = harness.sandbox.execute("")
+        result = harness.sandbox.execute("", output=DISCARD)
 
         assert result.exit_code == 1
         assert result.stdout == ""
@@ -182,17 +219,19 @@ class CommandRunnerContract:
     @pytest.mark.parametrize("timeout", [0, -1])
     def test_a_non_positive_timeout_is_rejected(self, harness: Harness, timeout: int) -> None:
         with pytest.raises(ValueError, match="timeout must be positive"):
-            harness.sandbox.execute(harness.emit("x", "", 0), timeout=timeout)
+            harness.sandbox.execute(harness.emit("x", "", 0), timeout=timeout, output=DISCARD)
 
     def test_output_within_the_cap_is_not_truncated(self, harness: Harness) -> None:
-        result = harness.sandbox.execute(harness.emit("a" * (CAP // 2), "b" * (CAP // 2), 0))
+        result = harness.sandbox.execute(
+            harness.emit("a" * (CAP // 2), "b" * (CAP // 2), 0), output=DISCARD
+        )
 
         assert not result.truncated
         assert (len(result.stdout), len(result.stderr)) == (CAP // 2, CAP // 2)
         _assert_streams_compose_output(result)
 
     def test_output_past_the_cap_is_cut_marked_and_flagged(self, harness: Harness) -> None:
-        result = harness.sandbox.execute(harness.emit("a" * (CAP * 3), "", 0))
+        result = harness.sandbox.execute(harness.emit("a" * (CAP * 3), "", 0), output=DISCARD)
 
         assert result.truncated
         assert len(result.output) <= CAP
@@ -204,7 +243,7 @@ class CommandRunnerContract:
         self, harness: Harness
     ) -> None:
         diagnostics = "".join(f"line {number}\n" for number in range(CAP))
-        result = harness.sandbox.execute(harness.emit("", diagnostics, 1))
+        result = harness.sandbox.execute(harness.emit("", diagnostics, 1), output=DISCARD)
 
         assert result.truncated
         assert len(result.output) <= CAP
@@ -213,7 +252,9 @@ class CommandRunnerContract:
 
     def test_an_unset_cancel_event_leaves_the_command_alone(self, harness: Harness) -> None:
         result = harness.sandbox.execute(
-            harness.emit("done", "", 0), cancel=harness.threads.event()
+            harness.emit("done", "", 0),
+            cancel=harness.threads.event(),
+            output=DISCARD,
         )
 
         assert result.exit_code == 0
@@ -223,7 +264,9 @@ class CommandRunnerContract:
     def test_a_timeout_stops_the_process_tree_and_keeps_partial_output(
         self, harness: Harness
     ) -> None:
-        result = harness.sandbox.execute(harness.hang(announce=False), timeout=TIMEOUT_SECONDS)
+        result = harness.sandbox.execute(
+            harness.hang(announce=False), timeout=TIMEOUT_SECONDS, output=DISCARD
+        )
 
         assert result.exit_code == 124
         assert not result.cancelled
@@ -255,11 +298,69 @@ class CommandRunnerContract:
         assert harness.processes_gone()
 
     def test_a_cancel_set_before_the_call_cancels_it(self, harness: Harness) -> None:
-        cancel = harness.threads.event()
-        cancel.set()
+        assert_preset_cancellation_contract(
+            harness.sandbox,
+            harness.threads,
+            harness.hang(announce=False),
+        )
 
-        result = harness.sandbox.execute(harness.hang(announce=False), timeout=3600, cancel=cancel)
+        assert harness.processes_gone()
+
+    def test_every_byte_written_reaches_the_output_sink_and_the_result_is_unchanged(
+        self, harness: Harness
+    ) -> None:
+        command = harness.emit("hello\nworld\n", "warn\n", _NONZERO)
+        output = _everything()
+
+        streamed = harness.sandbox.execute(command, output=output)
+        unstreamed = harness.sandbox.execute(command, output=DISCARD)
+
+        assert (output.stdout, output.stderr) == (b"hello\nworld\n", b"warn\n")
+        assert streamed == unstreamed
+
+    def test_output_past_the_cap_still_reaches_the_output_sink_whole(
+        self, harness: Harness
+    ) -> None:
+        output = _everything()
+
+        result = harness.sandbox.execute(harness.emit("a" * (CAP * 3), "b" * CAP, 0), output=output)
+
+        assert result.truncated
+        assert (output.stdout, output.stderr) == (b"a" * (CAP * 3), b"b" * CAP)
+
+    def test_a_timeout_delivers_the_output_written_before_it_and_no_notice(
+        self, harness: Harness
+    ) -> None:
+        output = _everything()
+
+        result = harness.sandbox.execute(
+            harness.hang(announce=False), timeout=TIMEOUT_SECONDS, output=output
+        )
+
+        assert result.exit_code == 124
+        assert (output.stdout, output.stderr) == (
+            PARTIAL_STDOUT.encode(),
+            PARTIAL_STDERR.encode(),
+        )
+
+    def test_a_cancel_delivers_the_output_written_before_it_and_no_notice(
+        self, harness: Harness
+    ) -> None:
+        output = _everything()
+
+        def program() -> CommandResult:
+            cancel = harness.threads.event()
+            execution = _Execution(
+                harness, harness.hang(announce=True), timeout=3600, cancel=cancel, output=output
+            )
+            harness.wait_until_running()
+            cancel.set()
+            return execution.result()
+
+        result = harness.run(program)
 
         assert result.cancelled
-        _assert_streams_compose_output(result)
-        assert harness.processes_gone()
+        assert (output.stdout, output.stderr) == (
+            PARTIAL_STDOUT.encode(),
+            PARTIAL_STDERR.encode(),
+        )

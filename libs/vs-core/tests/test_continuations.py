@@ -1,5 +1,7 @@
 """Continuation authorization uses durable yield, checkpoint and job proofs."""
 
+import hashlib
+import json
 from itertools import product
 from typing import ClassVar, Literal
 
@@ -96,13 +98,23 @@ def roundtrip(state: core.CoreState) -> core.CoreState:
     ).core
 
 
+def _without_history(attempts: tuple[core.AttemptView, ...]) -> tuple[core.AttemptView, ...]:
+    return tuple(
+        row.model_copy(update={"evaluation_history": core.AttemptEvaluationHistory()})
+        for row in attempts
+    )
+
+
 def persisted_step(state: core.CoreState, event: core.CoreEvent) -> core.Transition:
     original = state.model_dump_json()
     result = core.step(state, event)
     assert result == core.step(roundtrip(state), event)
     assert state.model_dump_json() == original
     assert roundtrip(result.state) == result.state
-    assert core.project(result.state).attempts == core.project(state).attempts
+    # Authorizing a resume stores the history it published; nothing else of an attempt moves.
+    assert _without_history(core.project(result.state).attempts) == _without_history(
+        core.project(state).attempts
+    )
     assert core.project(result.state).scheduling.charged == core.project(state).scheduling.charged
     assert core.project(result.state).scheduling.refunded == core.project(state).scheduling.refunded
     assert result.state.evaluation.jobs == state.evaluation.jobs
@@ -177,9 +189,168 @@ def job_change(
     )
 
 
+def _digest(value: core.Value) -> str:
+    source = json.dumps(value.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(source.encode()).hexdigest()
+
+
+def certified(state: core.CoreState, *, facts: bool = True) -> core.CoreState:
+    """``state`` whose attempt's evaluation history is complete once its jobs end.
+
+    Idempotent: a job whose submission already has a row keeps it.
+
+    Core authorizes an attempt's resume only from a complete history that extends the
+    waiting turn's paid-cycle prefix (``ResumeRefused`` otherwise), so a fixture that
+    expects a resume carries every proof that history needs: the attempt's admission
+    receipt, the empty prefix on the turn, and one submission row and budget per job.
+    """
+    (owner,) = state.attempts.attempts
+    assert owner.admission_id is not None
+    start = core.StartAttempt(
+        decision_id=owner.admission_id,
+        scope=core.Scope(owner=state.run.run_id, generation=owner.generation),
+        attempt_id=owner.attempt_id,
+        item_id=owner.item_id,
+        workspace=owner.workspace,
+        budget=owner.budget,
+    )
+    origin = core.DecisionReceipt(
+        decision_id=start.decision_id,
+        decision=start,
+        feedback=core.Accepted(decision_id=start.decision_id),
+        payload_digest=_digest(start),
+    )
+    recorded = {row.request_id for row in state.records.records}
+    jobs, rows, budgets = [], [], []
+    for original in state.evaluation.jobs:
+        if original.submission_id in recorded:
+            jobs.append(original)
+            continue
+        recipe = original.plan.recipe.model_copy(
+            update={"digest": f"recipe-{original.submission_id.root}"}
+        )
+        assert original.observation is not None
+        job = original.model_copy(
+            update={
+                "plan": original.plan.model_copy(update={"recipe": recipe}),
+                "observation": original.observation.model_copy(
+                    update={"admission_id": owner.admission_id}
+                ),
+            }
+        )
+        jobs.append(job)
+        request = core.SubmitMeasurement(
+            request_id=job.submission_id,
+            scope=job.scope,
+            admission_id=owner.admission_id,
+            plan=job.plan,
+        )
+        ended = job.observation is not None and job.observation.terminal
+        rows.append(
+            core.RequestRecord(
+                request_id=job.submission_id,
+                request=request,
+                payload_digest=_digest(request),
+                lifecycle=core.LifecycleClass.OWNED_JOB,
+                phase=core.RequestPhase.COMPLETED,
+                observation=job.observation,
+                evaluation_result=_FACTS if facts and ended else None,
+                until=core.Until(at=100.0),
+                addressed_by=(),
+            )
+        )
+        identity = core.MeasurementIdentity(
+            purpose=job.plan.purpose,
+            candidate=state.run.facts.baseline,
+            evaluator_digest=job.plan.evaluator_digest,
+            workload_digest=job.plan.workload_digest,
+            environment_digest=job.plan.environment_digest,
+            recipe_digest=recipe.digest,
+            stages=(core.MeasurementStageIdentity(stage_id="measure"),),
+            accuracy_gated=(),
+        )
+        budgets.append(
+            core.SubmissionBudget(
+                scope=job.scope,
+                identity=identity,
+                limit=core.MAX_SUBMISSIONS_PER_MEASUREMENT,
+                receipts=(core.PreparedSubmissionReceipt(request_id=job.submission_id, ordinal=1),),
+            )
+        )
+    invocations = tuple(
+        row.model_copy(update={"evaluation_prefix": core.EvaluationHistoryCursor()})
+        for row in state.sessions.invocations
+    )
+    return state.model_copy(
+        update={
+            "run": state.run.model_copy(
+                update={
+                    "receipts": state.run.receipts
+                    if origin in state.run.receipts
+                    else (*state.run.receipts, origin)
+                }
+            ),
+            "sessions": state.sessions.model_copy(update={"invocations": invocations}),
+            "records": state.records.model_copy(
+                update={"records": (*state.records.records, *rows)}
+            ),
+            "evaluation": state.evaluation.model_copy(
+                update={
+                    "jobs": tuple(jobs),
+                    "submission_budgets": (*state.evaluation.submission_budgets, *budgets),
+                }
+            ),
+        }
+    )
+
+
+_FACTS = core.EvaluationTerminalFacts(
+    stages=(
+        core.EvaluationStageResult(stage_id="measure", outcome=core.EvaluationStageOutcome.PASSED),
+    ),
+    accuracy_passed=True,
+)
+
+
+def synced(state: core.CoreState) -> core.CoreState:
+    """``state`` with each ended job's end on its submission row, as core's ledger keeps it.
+
+    For a test that hands core a job's committed end directly: the row takes the end and,
+    for a success, its facts.
+    """
+    ends = {
+        job.submission_id: job.observation
+        for job in state.evaluation.jobs
+        if job.observation is not None and job.observation.terminal
+    }
+    rows = tuple(
+        row.model_copy(
+            update={
+                "observation": ends[row.request_id],
+                "evaluation_result": _FACTS
+                if ends[row.request_id].status == core.ObservationStatus.SUCCEEDED
+                else None,
+            }
+        )
+        if row.request_id in ends
+        else row
+        for row in state.records.records
+    )
+    return state.model_copy(update={"records": state.records.model_copy(update={"records": rows})})
+
+
 def fixture(
-    *, registered: bool = False, run_owned: bool = False, settled: bool = False
+    *,
+    registered: bool = False,
+    run_owned: bool = False,
+    settled: bool = False,
+    history: bool = True,
 ) -> tuple[core.CoreState, core.Continuation]:
+    """A suspended turn waiting on three jobs.
+
+    With ``history`` (the default) an attempt's evaluation history is complete once its jobs
+    end (``certified``); without it, it never is, and its resume is refused.
+    """
     state = core.initial_state()
     scope = core.Scope(
         owner=state.run.run_id if run_owned else core.AttemptId(root="attempt"), generation=0
@@ -337,6 +508,8 @@ def fixture(
             ),
         }
     )
+    if history and not run_owned:
+        state = certified(state)
     return state, continuation
 
 
@@ -416,8 +589,10 @@ def test_wait_all_reordering_duplicate_and_stale_notifications_authorize_once(
             }
         )
         # These are A-owned committed facts, supplied to B through its public wake signal.
-        state = state.model_copy(
-            update={"evaluation": state.evaluation.model_copy(update={field: tuple(jobs)})}
+        state = synced(
+            state.model_copy(
+                update={"evaluation": state.evaluation.model_copy(update={field: tuple(jobs)})}
+            )
         )
         result = persisted_step(
             state,
@@ -625,7 +800,13 @@ def test_retirement_records_exact_park_authority_without_resume(
         core.ContinuationPhase.PARKED if disposition == "park" else core.ContinuationPhase.CANCELLED
     )
     assert stored.park_authority == authority
-    assert result.events == ()
+    # a cancel ends the wait for good: the suspended turn hears it will never resume
+    refused = core.ResumeRefused(
+        continuation_id=continuation.continuation_id,
+        invocation=continuation.invocation,
+        reason=core.ResumeRefusal.ATTEMPT_CLOSED,
+    )
+    assert result.events == (() if disposition == "park" else (refused,))
     assert result.requests == ()
     replay = persisted_step(result.state, event)
     assert replay.events == ()
@@ -701,7 +882,7 @@ def reopened_fixture() -> tuple[core.CoreState, core.Continuation, core.Continua
             "registry": codec.descriptors,
             "run": state.run.model_copy(
                 update={
-                    "receipts": (receipt,),
+                    "receipts": (receipt, *state.run.receipts),
                     "capabilities": core.Capabilities(operations=codec.descriptors),
                 }
             ),
@@ -733,7 +914,7 @@ def reopened_fixture() -> tuple[core.CoreState, core.Continuation, core.Continua
         park_authority=park_authority,
         observation=proof,
     )
-    return state, continuation, event
+    return synced(state), continuation, event
 
 
 def test_positive_registered_reopen_proof_authorizes_same_conversation_once() -> None:
@@ -745,6 +926,9 @@ def test_positive_registered_reopen_proof_authorizes_same_conversation_once() ->
             continuation_id=continuation.continuation_id,
             next_invocation=continuation.next_invocation,
             evidence=(),
+            history_cursor=core.EvaluationHistoryCursor(
+                ordinal=3, submission_id=state.evaluation.jobs[-1].submission_id
+            ),
         ),
     )
     assert result.state.evaluation.continuations[0].phase == core.ContinuationPhase.AUTHORIZED
@@ -1003,7 +1187,9 @@ def test_run_owned_profiler_cannot_bypass_writable_checkpoint_guard(access: core
             "sessions": state.sessions.model_copy(
                 update={"sessions": (session,), "invocations": (invocation,)}
             ),
-            "records": state.records.model_copy(update={"records": (record,)}),
+            "records": state.records.model_copy(
+                update={"records": (record, *state.records.records[1:])}
+            ),
         }
     )
     if access == core.Access.WRITE_CANDIDATE:
@@ -1023,7 +1209,8 @@ def test_late_job_changes_cannot_rewrite_frozen_timeout_or_resume(sequence: int)
         deadline_at=10.0,
         reached_at=10.0,
         unfinished=tuple(
-            core.JobTimeout(resource_id=job, progress=None) for job in continuation.jobs
+            core.JobTimeout(resource_id=job, progress=None, by=core.WaitEnd.LIMIT, at=10.0)
+            for job in continuation.jobs
         ),
     )
     continuation = continuation.model_copy(
@@ -1157,7 +1344,7 @@ def test_all_canonical_turn_sources_authorize_without_new_attempt_charge(
         )
         run = state.run.model_copy(
             update={
-                "receipts": (receipt,),
+                "receipts": (*state.run.receipts, receipt),
                 "capabilities": core.Capabilities(operations=codec.descriptors),
             }
         )
@@ -1201,7 +1388,9 @@ def test_all_canonical_turn_sources_authorize_without_new_attempt_charge(
     state = state.model_copy(
         update={
             "sessions": state.sessions.model_copy(update={"invocations": (*history, invocation)}),
-            "records": state.records.model_copy(update={"records": (record,)}),
+            "records": state.records.model_copy(
+                update={"records": (record, *state.records.records[1:])}
+            ),
         }
     )
     if proof not in ("matching", "manifest-equal"):
@@ -1216,9 +1405,7 @@ def test_all_canonical_turn_sources_authorize_without_new_attempt_charge(
 
 
 @pytest.mark.parametrize("at", [9.0, 10.0, 11.0])
-def test_terminal_observation_requires_deadline_freeze_before_boundary_authorization(
-    at: float,
-) -> None:
+def test_a_wait_suspended_after_its_deadline_is_refused_not_authorized(at: float) -> None:
     state, continuation = fixture(settled=True)
     jobs = tuple(
         job.model_copy(
@@ -1227,8 +1414,14 @@ def test_terminal_observation_requires_deadline_freeze_before_boundary_authoriza
         for job in state.evaluation.jobs
         if job.observation is not None
     )
-    state = state.model_copy(
-        update={"evaluation": state.evaluation.model_copy(update={"jobs": jobs})}
+    # Core's clock is never behind a fact it holds.
+    state = synced(
+        state.model_copy(
+            update={
+                "run": state.run.model_copy(update={"now_at": at}),
+                "evaluation": state.evaluation.model_copy(update={"jobs": jobs}),
+            }
+        )
     )
     event = core.TurnSuspended(continuation=continuation)
     if at < continuation.deadline_at:
@@ -1237,9 +1430,7 @@ def test_terminal_observation_requires_deadline_freeze_before_boundary_authoriza
         assert isinstance(result.events[0], core.ResumeAuthorized)
         assert result.events[0].timeout is None
     else:
-        # B receives only post-update facts. The frozen contract lacks the prior
-        # progress snapshot, so it must reject rather than invent timeout evidence.
-        with pytest.raises(core.ContractError, match="deadline"):
+        with pytest.raises(core.ContractError, match="no time left"):
             core.step(state, event)
 
 
@@ -1287,9 +1478,9 @@ def test_current_live_owner_guard_holds_at_admission_and_delayed_authorization(
             "run": state.run.model_copy(update={"status": run_status}),
         }
     )
-    permitted = (
-        phase == core.AttemptPhase.ACTIVE and run_status == core.RunStatus.RUNNING and not closing
-    )
+    # A paused run carries on with the work it admitted: a wait is recorded and resumed.
+    carries_on = run_status in (core.RunStatus.RUNNING, core.RunStatus.PAUSED)
+    permitted = phase == core.AttemptPhase.ACTIVE and carries_on and not closing
     if permitted:
         result = persisted_step(state, core.TurnSuspended(continuation=continuation))
         assert len(result.events) == 1
@@ -1349,15 +1540,17 @@ def test_only_conclusive_terminal_dependencies_complete_wait_all(
             ),
         }
     )
-    state = state.model_copy(
-        update={
-            "evaluation": state.evaluation.model_copy(
-                update={
-                    field: tuple(jobs),
-                    "continuations": (continuation,),
-                }
-            )
-        }
+    state = synced(
+        state.model_copy(
+            update={
+                "evaluation": state.evaluation.model_copy(
+                    update={
+                        field: tuple(jobs),
+                        "continuations": (continuation,),
+                    }
+                )
+            }
+        )
     )
     result = persisted_step(
         state,
@@ -1549,7 +1742,11 @@ def test_scope_close_and_timeout_never_substitute_for_dependency_release(
                 "timeout": core.TimedOut(
                     deadline_at=10.0,
                     reached_at=10.0,
-                    unfinished=(core.JobTimeout(resource_id=job.resource_id),),
+                    unfinished=(
+                        core.JobTimeout(
+                            resource_id=job.resource_id, by=core.WaitEnd.LIMIT, at=10.0
+                        ),
+                    ),
                 )
             }
         )
@@ -1656,7 +1853,9 @@ def test_new_suspension_never_accepts_caller_manufactured_authority_or_feedback(
             "timeout": core.TimedOut(
                 deadline_at=10.0,
                 reached_at=10.0,
-                unfinished=(core.JobTimeout(resource_id=owned.resource_id),),
+                unfinished=(
+                    core.JobTimeout(resource_id=owned.resource_id, by=core.WaitEnd.LIMIT, at=10.0),
+                ),
             )
             if timeout
             else None,
@@ -1781,7 +1980,11 @@ def test_feedback_deduplicates_equal_evidence_and_rejects_conflicting_identity(
                 "timeout": core.TimedOut(
                     deadline_at=10.0,
                     reached_at=10.0,
-                    unfinished=(core.JobTimeout(resource_id=first.resource_id),),
+                    unfinished=(
+                        core.JobTimeout(
+                            resource_id=first.resource_id, by=core.WaitEnd.LIMIT, at=10.0
+                        ),
+                    ),
                 ),
             }
         )
@@ -1904,6 +2107,7 @@ def test_parent_release_never_substitutes_for_independent_child_proof(
             ),
         }
     )
+    state = synced(certified(state))
     if proof == "positive":
         result = persisted_step(state, event)
         assert len(result.events) == 1
@@ -2009,7 +2213,11 @@ def test_reopen_normalization_and_exact_cancelled_set_are_required_before_forwar
         state = state.model_copy(
             update={"evaluation": state.evaluation.model_copy(update={"jobs": jobs})}
         )
-    state = state.model_copy(update={"run": state.run.model_copy(update={"receipts": (receipt,)})})
+    state = state.model_copy(
+        update={
+            "run": state.run.model_copy(update={"receipts": (receipt, *state.run.receipts[1:])})
+        }
+    )
     with pytest.raises(core.ContractError):
         core.step(state, event)
 
@@ -2180,7 +2388,7 @@ def test_a_suspension_needs_the_turns_exact_paid_prefix(
 ) -> None:
     """A turn with no paid prefix (dispatched while a measurement was in flight), or one that
     is not a prefix of the attempt's covered submissions, takes no suspension."""
-    state, continuation = fixture(settled=True)
+    state, continuation = fixture(settled=True, history=False)
     state = _with_history(state, _COVERED[:covered])
     cursor = (
         core.EvaluationHistoryCursor(

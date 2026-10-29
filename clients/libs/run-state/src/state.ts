@@ -3,6 +3,7 @@
  * the clone and publish helpers every step of the fold goes through.
  */
 import type {Diagnostic, RunEvent, RunSnapshot, RunStatus} from '@vibesys/contracts';
+import type {UsageRecord} from '@vibesys/contracts/host-helper';
 import type {BenchmarkRecord} from './benchmark.js';
 import type {ExecutionStatus} from './execution-status.js';
 import {
@@ -20,7 +21,10 @@ import {
   type RunMapProvenance,
   rehydrateRunMapProvenance,
 } from './run-map.js';
+import {EMPTY_LEDGER, type TokenLedger} from './token-usage.js';
 import type {TranscriptEntry} from './transcript-fold.js';
+import type {ExecutionStarts} from './usage-records.js';
+import type {WorkstreamMap} from './workstream.js';
 
 export type AgentExecutionMode = 'thinking' | 'responding' | 'tool' | 'waiting';
 
@@ -64,16 +68,37 @@ export interface UsageMeter {
  * `resetsAt` is when the provider said capacity returns and `resumesAt` when the
  * run's quota policy resumes it by itself, both epoch seconds or `null`.
  * `fallback` is the provider and model an operator may resume with, `null` when
- * the run has none configured.
+ * the run has none configured. `waiting` is the operator's request to resume when capacity
+ * returns (`quota_waiting`), with when the run expects to (`resumesAt`, epoch seconds, `null` when
+ * the provider gave no reset time); `null` when no wait is under way (none asked, or
+ * `quota_wait_cancelled`).
  */
 export interface QuotaPause {
   readonly provider: string;
+  /** Never `unavailable`: an outage holds only its own turn and never pauses the run. */
   readonly condition: 'quota_exhausted' | 'rate_limited';
   readonly detail: string;
   readonly resetsAt: number | null;
   readonly resumesAt: number | null;
   readonly policy: string | null;
   readonly fallback: {readonly provider: string; readonly model: string | null} | null;
+  readonly waiting: {readonly resumesAt: number | null} | null;
+}
+
+/**
+ * One provider replaced by its fallback, folded from `provider_switched`.
+ *
+ * `sequence` is that event's own folded sequence, so a consumer can tell this is still the fact
+ * that settled the current `pause` (`sequence === QuotaState.sequence`) rather than a switch an
+ * intervening pause/resume/abandon has since superseded.
+ */
+export interface ProviderSwitch {
+  readonly sequence: number;
+  readonly fromProvider: string;
+  readonly toProvider: string;
+  readonly toModel: string;
+  readonly reason: 'policy' | 'operator';
+  readonly detail: string;
 }
 
 /**
@@ -81,10 +106,109 @@ export interface QuotaPause {
  * `0` before any; `pause` is `null` once that event settled the stop (resumed,
  * abandoned or switched). Whether the run is still parked is the run status's
  * to say, so a consumer shows `pause` only while the status is pausing or paused.
+ *
+ * `lastSwitch` is sticky: a provider switch is a fact about the run's history, not a transient
+ * stop, so it survives later pauses and resumes once set. `null` before the run's first switch.
  */
 export interface QuotaState {
   readonly sequence: number;
   readonly pause: QuotaPause | null;
+  readonly lastSwitch: ProviderSwitch | null;
+}
+
+/**
+ * The run's chosen result, folded from `winner_selected`. `selection` says whether a candidate
+ * beat the trusted input or it was kept unchanged; `settlementId` names the settled attempt that
+ * produced a candidate, `null` for the baseline. `null` before that once-per-run event.
+ */
+export interface WinnerSelection {
+  readonly selection: 'candidate' | 'baseline';
+  readonly revision: string;
+  readonly settlementId: string | null;
+}
+
+/**
+ * Why the run's input failed its own trusted measurement, folded from the once-per-run
+ * `input_measurement_failed` (S173). `compared` says whether candidates are still compared with the
+ * input (its accuracy check failed but its benchmark passed); otherwise a candidate the run adopts
+ * is adopted without an input comparison. `attempts` is 2 when the input was measured again.
+ * `null` while the input is pending or measured.
+ */
+export interface InputMeasurementFailure {
+  readonly failure: string;
+  readonly stage: string | null;
+  /** The redacted tail of what the failed stage printed. */
+  readonly summary: string;
+  readonly attempts: number;
+  readonly compared: boolean;
+}
+
+/**
+ * How a candidate's measurement compared with its base's, folded from `measurement_compared`:
+ * `better`, `within_noise` or `worse` once the noise is allowed for, `inconclusive` before it can be. This is the framework's own
+ * reading of whether an idea's effect held, whatever its ratio to the input says.
+ */
+export interface MeasurementComparison {
+  readonly verdict: 'better' | 'within_noise' | 'worse' | 'inconclusive';
+  /** The candidate's value over its base's. */
+  readonly ratio: number;
+  /** The metric compared: the name of the headline reading it states the value of. */
+  readonly metric: string;
+  /** The candidate's value as the comparison used it: the mean of its `candidateSamples` runs. */
+  readonly candidateValue: number;
+  /** The base's value as the comparison used it: the mean of its `baseSamples` runs. */
+  readonly baseValue: number;
+  /** The commit the candidate was compared with: the input's, or another idea's. */
+  readonly baseCommit: string;
+  readonly candidateSamples: number;
+  readonly baseSamples: number;
+}
+
+/**
+ * One comparison baseline of the task as the run read it from its project's store (the newest
+ * `comparisons_read`): another engine's reading of the same benchmark, shown beside the run's
+ * results. `value` is the mean of `samples` runs and `spread` their relative standard deviation;
+ * each is null when the event does not carry it. `reason` says why a failed or unconfigured one is.
+ */
+export interface ComparisonBaseline {
+  readonly name: string;
+  readonly label: string;
+  readonly status: 'measured' | 'failed' | 'not_configured' | 'not_measured';
+  readonly metric: string | null;
+  readonly unit: string | null;
+  readonly direction: 'max' | 'min' | null;
+  readonly value: number | null;
+  readonly spread: number | null;
+  readonly samples: number | null;
+  readonly hosts: readonly string[];
+  readonly reason: string | null;
+}
+
+/**
+ * One stop of an agent turn on a provider capacity limit, folded from the `quota_resumed` or
+ * `quota_abandoned` event that ended it. The turn did no work for `waitedSeconds`, which ended at
+ * the event's `endedAt` (the host's wall time, as every event stamps it).
+ */
+export interface QuotaStop {
+  readonly sequence: number;
+  readonly provider: string;
+  /** The limit it stopped on; null in events recorded before the field existed. */
+  readonly condition: 'quota_exhausted' | 'rate_limited' | 'unavailable' | null;
+  readonly outcome: 'resumed' | 'abandoned';
+  readonly waitedSeconds: number;
+  /** The event's timestamp: when the stop ended. */
+  readonly endedAt: string;
+  /**
+   * When the run paused on this limit (the `quota_paused` that began it), null when the stop held
+   * a turn without pausing the run.
+   */
+  readonly pausedAt: string | null;
+  /**
+   * When the run actually resumed after pausing (the status change back to running, or the end of
+   * the run); null while it is still paused, and for a stop that did not pause the run. A run can
+   * stay paused after the stop ended, until an operator resumes it.
+   */
+  readonly resumedAt: string | null;
 }
 
 type RunStartupProgressData = Extract<
@@ -96,14 +220,30 @@ type RunStartupProgressData = Extract<
  * The latest startup stage and progress fact, while the run's environment opens.
  *
  * `null` before the first `run_startup_progress` event. The backend stops
- * reporting once the run is ready and emits no explicit "done" event, so this
- * is never cleared once set; a consumer shows it only while `status` is
+ * reporting once the run is ready, so this is never cleared once set; a consumer shows it only while `status` is
  * `starting`, the same discipline `QuotaState` documents for `pause`.
  */
 export interface RunStartupState {
   readonly stage: RunStartupProgressData['stage'];
+  /**
+   * What the stage is doing: `running` as it begins and at each step, `waiting` while blocked on
+   * something outside the run host (`condition`), `finished` once it has ended.
+   */
+  readonly state: NonNullable<RunStartupProgressData['state']>;
+  /** What a `waiting` stage waits on; `null` in any other state. */
+  readonly condition: NonNullable<RunStartupProgressData['condition']> | null;
+  /** Seconds waited so far (`waiting`) or the stage took (`finished`); `null` while `running`. */
+  readonly elapsedSeconds: number | null;
   /** `null` while the stage reports no progress of its own (resolving, say). */
   readonly progress: Readonly<{done: number; total: number | null; label: string}> | null;
+  /**
+   * The envelope timestamp of the first startup event of the current stage; it resets when the
+   * stage changes. A consumer subtracts it from its own clock to say how long the stage has run,
+   * so the fold stays free of wall-clock reads.
+   */
+  readonly stageSince: string;
+  /** The envelope timestamp of the latest startup event: the last time the backend was heard. */
+  readonly lastActivityAt: string;
 }
 
 /** Thread id used for chat events recorded without one. */
@@ -120,6 +260,48 @@ export interface ChatThread {
   readonly title: string;
   readonly provider: string | null;
   readonly model: string | null;
+}
+
+/** A question put to a chat thread, as the terminal `chat` event recorded it. */
+export interface ChatQuestion {
+  /** The event's sequence as text, unique within the run. */
+  readonly id: string;
+  readonly text: string;
+}
+
+/**
+ * A steer a thread's agent proposed (`steer_proposed`): the fields a `SteerRequest` is prefilled
+ * with. Nothing here reached the run; only the operator's `command.control` does.
+ */
+export interface ChatProposal {
+  /** The server's id for the proposal, unique within the run. */
+  readonly id: string;
+  readonly sequence: number;
+  readonly text: string;
+  readonly target: {readonly kind: 'run' | 'role' | 'attempt' | 'item'; readonly id: string | null};
+  readonly mode: 'next_turn' | 'standing' | 'interrupt';
+}
+
+/** Where one operator steer or withdrawal stands, as the wire names it. */
+export type SteerDeliveryStep = Extract<
+  NonNullable<RunEvent['data']>,
+  {kind: 'steer_delivery'}
+>['delivery']['state'];
+
+/** One step in a steer's life, as the server reported it. */
+export interface SteerDeliveryFact {
+  readonly sequence: number;
+  readonly step: SteerDeliveryStep;
+  /** The id the operator sent the steer or withdrawal under; null for a control sent without one. */
+  readonly controlId: string | null;
+  readonly action: 'steer' | 'withdraw' | null;
+  /** For a queued withdrawal: the control id of the steer it ends. */
+  readonly withdraws: string | null;
+  /** The role whose turn took the steer. */
+  readonly role: string | null;
+  readonly attemptId: string | null;
+  /** Why a steer ended unreached or was refused. */
+  readonly reason: string | null;
 }
 
 /** Backend diagnostic facts. Visibility and dismissal belong to the UI. */
@@ -219,6 +401,12 @@ export interface CoreState {
   readonly foldedOutOfBand: readonly number[];
   readonly status: CoreRunStatus;
   readonly startup: RunStartupState | null;
+  /**
+   * Seconds each startup stage took, summed over its `finished` reports (a stage runs again after
+   * a restart); a stage that never reported finishing is absent. Unlike `startup`, it keeps every
+   * stage the run opened its environment with.
+   */
+  readonly startupTook: Readonly<Partial<Record<RunStartupState['stage'], number>>>;
   /** @deprecated Last event cursor; use `activeRunFocus` for current work. */
   readonly agentKind: string | null;
   /** @deprecated Last event cursor; use `activeRunFocus` for current work. */
@@ -251,10 +439,47 @@ export interface CoreState {
   readonly chatTranscripts: Readonly<Record<string, readonly TranscriptEntry[]>>;
   /** The default thread first, then created threads in replay order. */
   readonly chatThreads: readonly ChatThread[];
+  /** The thread the server last wrote to, from the snapshot; null before one names it. */
+  readonly lastChatThreadId: string | null;
+  /** The steps of operator steers' lives the server reported, in journal order. */
+  readonly steerDeliveries: readonly SteerDeliveryFact[];
+  /** Each thread's answered questions, in journal order, keyed by thread id. */
+  readonly chatQuestions: Readonly<Record<string, readonly ChatQuestion[]>>;
+  /** The steers each thread's agent proposed, in journal order, keyed by thread id. */
+  readonly chatProposals: Readonly<Record<string, readonly ChatProposal[]>>;
   readonly todos: readonly ExecutionTodos[];
   readonly usage: UsageMeter | null;
   readonly quota: QuotaState;
+  /** Every stop on a capacity limit that held a turn for some time, in journal order. */
+  readonly quotaStops: readonly QuotaStop[];
+  /** When the run's open capacity pause began (`quota_paused`), null while it has none. */
+  readonly quotaPausedAt: string | null;
+  readonly winner: WinnerSelection | null;
+  readonly inputFailure: InputMeasurementFailure | null;
+  /**
+   * The latest comparison with its base of each candidate commit, keyed by `candidate_commit`.
+   * Folded from events, so a snapshot read does not carry it.
+   */
+  readonly comparisons: Readonly<Record<string, MeasurementComparison>>;
+  /** The comparison baselines the run last read (`comparisons_read`), in the task's order. */
+  readonly baselines: readonly ComparisonBaseline[];
   readonly benchmarks: readonly BenchmarkRecord[];
+  /**
+   * Per-workstream (round) terminal facts folded from `workstream_finished` and
+   * `turn_usage_recorded`, keyed internally by the event's `round_label`. Join with `rounds` by
+   * `RoundKey` (see `sameRoundKey`) for a round's lifecycle timing; a round with neither event yet
+   * has no entry here.
+   */
+  readonly workstreams: WorkstreamMap;
+  /**
+   * Token spend folded from `turn_usage_recorded`: the run's total and each agent-turn span's.
+   * Join a span's usage to its agent through the trace (see `TokenLedger`).
+   */
+  readonly tokens: TokenLedger;
+  /** The agent executions that started, by execution id: who ran each turn (see `UsageRecord`). */
+  readonly executionStarts: ExecutionStarts;
+  /** One record per finished agent turn, in journal order; their tokens sum to `tokens.total`. */
+  readonly usageRecords: readonly UsageRecord[];
   readonly diagnostics: readonly CoreDiagnostic[];
   /** Sequence of the latest semantic experiment invalidation. */
   readonly experimentsRevision: number;
@@ -284,6 +509,7 @@ export function initialCoreState(): CoreState {
     foldedOutOfBand: [],
     status: 'connecting',
     startup: null,
+    startupTook: {},
     agentKind: null,
     roundLabel: null,
     outerLoop: null,
@@ -302,10 +528,24 @@ export function initialCoreState(): CoreState {
     // The default thread has no backend record, so it has no backend-owned
     // title either. Naming it is the consumer's job.
     chatThreads: [{id: DEFAULT_CHAT_THREAD_ID, title: '', provider: null, model: null}],
+    lastChatThreadId: null,
+    steerDeliveries: [],
+    chatQuestions: {},
+    chatProposals: {},
     todos: [],
     usage: null,
-    quota: {sequence: 0, pause: null},
+    quota: {sequence: 0, pause: null, lastSwitch: null},
+    quotaStops: [],
+    quotaPausedAt: null,
+    winner: null,
+    inputFailure: null,
+    comparisons: {},
+    baselines: [],
     benchmarks: [],
+    workstreams: {},
+    tokens: EMPTY_LEDGER,
+    executionStarts: {},
+    usageRecords: [],
     diagnostics: [],
     experimentsRevision: 0,
     typedToolEvents: false,
@@ -352,7 +592,9 @@ export function rehydrateCoreState(state: CoreState): CoreState {
  * a new status in the protocol is a compile error here rather than a silent
  * `false`.
  */
-export function hasRunEnded(state: CoreState): boolean {
+export function hasRunEnded(
+  state: CoreState,
+): state is CoreState & {readonly status: EndedRunStatus} {
   return endedRunStatus(state.status) !== null;
 }
 

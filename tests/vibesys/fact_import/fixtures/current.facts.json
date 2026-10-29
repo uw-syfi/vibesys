@@ -1,0 +1,1491 @@
+{
+  "facts": [
+    {
+      "contentReference": {
+        "artifactId": {
+          "kind": "artifact",
+          "root": "recipe"
+        },
+        "digest": "recipe"
+      },
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.jobs[0].plan.recipe",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.jobs[1].plan.recipe",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.records.records[0].request.plan.recipe",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.records.records[1].request.plan.recipe",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.run.facts.task.recipe",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.jobs[0].plan.recipe",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.jobs[1].plan.recipe",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.records.records[0].request.plan.recipe",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.records.records[1].request.plan.recipe",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.run.facts.task.recipe",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[0].plan.recipe",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[1].plan.recipe",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.records.records[0].request.plan.recipe",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.records.records[1].request.plan.recipe",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.run.facts.task.recipe",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[0].plan.recipe",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[1].plan.recipe",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.records.records[0].request.plan.recipe",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.records.records[1].request.plan.recipe",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.run.facts.task.recipe",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        }
+      ]
+    },
+    {
+      "contentReference": {
+        "artifactId": {
+          "kind": "artifact",
+          "root": "prompt-1"
+        },
+        "digest": "d"
+      },
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.strategy.journal[1].recorded.result_json.outcome.prompts[0]",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_FLOW",
+          "path": "flow.json",
+          "selector": "$.journal[1].recorded.result_json.outcome.prompts[0]",
+          "sha256": "d98db9393805ff7b21a49faaaec41f4990cfe1e3944974d0a5595ead3ae5ce8b"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.strategy.journal[1].recorded.result_json.outcome.prompts[0]",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.strategy.journal[1].recorded.result_json.outcome.prompts[0]",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.strategy.journal[1].recorded.result_json.outcome.prompts[0]",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        }
+      ]
+    },
+    {
+      "candidate": {
+        "revision": {
+          "digest": "git-commit:c1",
+          "revisionId": {
+            "kind": "revision",
+            "root": "c1"
+          }
+        }
+      },
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.comparisons[0].candidate",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.evidence[0].candidate",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.evidence[1].candidate",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.jobs[0].evidence[0].candidate",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.jobs[0].evidence[1].candidate",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.jobs[0].plan.candidate",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.samples[0].commit",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.submission_budgets[0].identity.candidate",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.records.records[0].request.plan.candidate",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.comparisons[0].candidate",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.evidence[0].candidate",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.evidence[1].candidate",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.jobs[0].evidence[0].candidate",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.jobs[0].evidence[1].candidate",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.jobs[0].plan.candidate",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.samples[0].commit",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.submission_budgets[0].identity.candidate",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.records.records[0].request.plan.candidate",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.comparisons[0].candidate",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.evidence[0].candidate",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.evidence[1].candidate",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[0].evidence[0].candidate",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[0].evidence[1].candidate",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[0].plan.candidate",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.samples[0].commit",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.submission_budgets[0].identity.candidate",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.records.records[0].request.plan.candidate",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.comparisons[0].candidate",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.evidence[0].candidate",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.evidence[1].candidate",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[0].evidence[0].candidate",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[0].evidence[1].candidate",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[0].plan.candidate",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.samples[0].commit",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.submission_budgets[0].identity.candidate",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.records.records[0].request.plan.candidate",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        }
+      ]
+    },
+    {
+      "candidate": {
+        "revision": {
+          "digest": "base-digest",
+          "revisionId": {
+            "kind": "revision",
+            "root": "base"
+          }
+        }
+      },
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.attempts.attempts[0].workspace.base",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.comparisons[0].base",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.evidence[2].candidate",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.evidence[3].candidate",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.jobs[0].base.commit",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.jobs[1].evidence[0].candidate",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.jobs[1].evidence[1].candidate",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.jobs[1].plan.candidate",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.samples[0].base.commit",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.samples[1].commit",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.submission_budgets[1].identity.candidate",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.records.records[0].request.base.commit",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.records.records[1].request.plan.candidate",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.run.facts.baseline",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.strategy.facts.baseline",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_FLOW",
+          "path": "flow.json",
+          "selector": "$.facts.baseline",
+          "sha256": "d98db9393805ff7b21a49faaaec41f4990cfe1e3944974d0a5595ead3ae5ce8b"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.attempts.attempts[0].workspace.base",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.comparisons[0].base",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.evidence[2].candidate",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.evidence[3].candidate",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.jobs[0].base.commit",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.jobs[1].evidence[0].candidate",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.jobs[1].evidence[1].candidate",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.jobs[1].plan.candidate",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.samples[0].base.commit",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.samples[1].commit",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.submission_budgets[1].identity.candidate",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.records.records[0].request.base.commit",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.records.records[1].request.plan.candidate",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.run.facts.baseline",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.strategy.facts.baseline",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.attempts.attempts[0].workspace.base",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.comparisons[0].base",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.evidence[2].candidate",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.evidence[3].candidate",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[0].base.commit",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[1].evidence[0].candidate",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[1].evidence[1].candidate",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[1].plan.candidate",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.samples[0].base.commit",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.samples[1].commit",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.submission_budgets[1].identity.candidate",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.records.records[0].request.base.commit",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.records.records[1].request.plan.candidate",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.run.facts.baseline",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.strategy.facts.baseline",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.attempts.attempts[0].workspace.base",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.comparisons[0].base",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.evidence[2].candidate",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.evidence[3].candidate",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[0].base.commit",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[1].evidence[0].candidate",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[1].evidence[1].candidate",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[1].plan.candidate",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.samples[0].base.commit",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.samples[1].commit",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.submission_budgets[1].identity.candidate",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.records.records[0].request.base.commit",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.records.records[1].request.plan.candidate",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.run.facts.baseline",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.strategy.facts.baseline",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        }
+      ]
+    },
+    {
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.run.facts",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.run.facts",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.run.facts",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.run.facts",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        }
+      ],
+      "input": {
+        "baseline": {
+          "digest": "base-digest",
+          "revisionId": {
+            "kind": "revision",
+            "root": "base"
+          }
+        },
+        "baselineRevision": "base",
+        "environmentDigest": "environment",
+        "evaluatorDigest": "evaluator",
+        "objective": "two opaque items",
+        "task": {
+          "baseStaleness": 600.0,
+          "benchmarkStage": "benchmark",
+          "measured": [
+            "accuracy",
+            "benchmark"
+          ],
+          "objectives": [
+            {
+              "direction": "TASK_OBJECTIVE_DIRECTION_MAX",
+              "name": "tok_s"
+            }
+          ],
+          "operationSeconds": 10.0,
+          "queueAllowance": 10.0,
+          "recipe": {
+            "artifactId": {
+              "kind": "artifact",
+              "root": "recipe"
+            },
+            "digest": "recipe"
+          },
+          "relativeNoise": 0.02,
+          "runawayEvaluations": "40",
+          "stages": [
+            {
+              "executionSeconds": 20.0,
+              "stageId": "accuracy"
+            },
+            {
+              "executionSeconds": 70.0,
+              "stageId": "benchmark"
+            }
+          ]
+        },
+        "workloadDigest": "workload"
+      }
+    },
+    {
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.strategy.facts",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_FLOW",
+          "path": "flow.json",
+          "selector": "$.facts",
+          "sha256": "d98db9393805ff7b21a49faaaec41f4990cfe1e3944974d0a5595ead3ae5ce8b"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.strategy.facts",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.strategy.facts",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.strategy.facts",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        }
+      ],
+      "input": {
+        "baseline": {
+          "digest": "base-digest",
+          "revisionId": {
+            "kind": "revision",
+            "root": "base"
+          }
+        },
+        "baselineRevision": "base",
+        "environmentDigest": "environment",
+        "evaluatorDigest": "evaluator",
+        "objective": "two opaque items",
+        "workloadDigest": "workload"
+      }
+    },
+    {
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.evidence[0]",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.jobs[0].evidence[0]",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.evidence[0]",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.jobs[0].evidence[0]",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.evidence[0]",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[0].evidence[0]",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.evidence[0]",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[0].evidence[0]",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        }
+      ],
+      "measurement": {
+        "evidence": {
+          "acceptanceReceipt": {
+            "observationSequence": "2",
+            "scope": {
+              "generation": "0",
+              "owner": {
+                "attempt": {
+                  "kind": "attempt",
+                  "root": "a"
+                }
+              }
+            },
+            "sourceRequest": {
+              "kind": "request",
+              "root": "measurement:a:0:645af40394647812c74849c1:1"
+            },
+            "status": "OBSERVATION_STATUS_SUCCEEDED"
+          },
+          "candidate": {
+            "digest": "git-commit:c1",
+            "revisionId": {
+              "kind": "revision",
+              "root": "c1"
+            }
+          },
+          "environmentDigest": "environment",
+          "evaluatorDigest": "evaluator",
+          "evidenceId": {
+            "kind": "evidence",
+            "root": "measurement:a:0:645af40394647812c74849c1:1-accuracy"
+          },
+          "kind": "EVIDENCE_KIND_CORRECTNESS",
+          "observationSequence": "2",
+          "provenance": "EVIDENCE_PROVENANCE_TRUSTED",
+          "purpose": "EVIDENCE_PURPOSE_LOCAL_VALIDATION",
+          "scope": {
+            "generation": "0",
+            "owner": {
+              "attempt": {
+                "kind": "attempt",
+                "root": "a"
+              }
+            }
+          },
+          "sourceRequest": {
+            "kind": "request",
+            "root": "measurement:a:0:645af40394647812c74849c1:1"
+          },
+          "status": "OBSERVATION_STATUS_SUCCEEDED",
+          "workloadDigest": "workload"
+        }
+      }
+    },
+    {
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.evidence[2]",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.jobs[1].evidence[0]",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.evidence[2]",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.jobs[1].evidence[0]",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.evidence[2]",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[1].evidence[0]",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.evidence[2]",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[1].evidence[0]",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        }
+      ],
+      "measurement": {
+        "evidence": {
+          "acceptanceReceipt": {
+            "observationSequence": "2",
+            "scope": {
+              "generation": "0",
+              "owner": {
+                "attempt": {
+                  "kind": "attempt",
+                  "root": "a"
+                }
+              }
+            },
+            "sourceRequest": {
+              "kind": "request",
+              "root": "measurement:a:0:e4b312bd65534ced978f5a3a:1"
+            },
+            "status": "OBSERVATION_STATUS_SUCCEEDED"
+          },
+          "candidate": {
+            "digest": "base-digest",
+            "revisionId": {
+              "kind": "revision",
+              "root": "base"
+            }
+          },
+          "environmentDigest": "environment",
+          "evaluatorDigest": "evaluator",
+          "evidenceId": {
+            "kind": "evidence",
+            "root": "measurement:a:0:e4b312bd65534ced978f5a3a:1-accuracy"
+          },
+          "kind": "EVIDENCE_KIND_CORRECTNESS",
+          "observationSequence": "2",
+          "provenance": "EVIDENCE_PROVENANCE_TRUSTED",
+          "purpose": "EVIDENCE_PURPOSE_BASELINE",
+          "scope": {
+            "generation": "0",
+            "owner": {
+              "attempt": {
+                "kind": "attempt",
+                "root": "a"
+              }
+            }
+          },
+          "sourceRequest": {
+            "kind": "request",
+            "root": "measurement:a:0:e4b312bd65534ced978f5a3a:1"
+          },
+          "status": "OBSERVATION_STATUS_SUCCEEDED",
+          "workloadDigest": "workload"
+        }
+      }
+    },
+    {
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.evidence[1]",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.jobs[0].evidence[1]",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.evidence[1]",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.jobs[0].evidence[1]",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.evidence[1]",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[0].evidence[1]",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.evidence[1]",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[0].evidence[1]",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        }
+      ],
+      "measurement": {
+        "evidence": {
+          "acceptanceReceipt": {
+            "observationSequence": "2",
+            "scope": {
+              "generation": "0",
+              "owner": {
+                "attempt": {
+                  "kind": "attempt",
+                  "root": "a"
+                }
+              }
+            },
+            "sourceRequest": {
+              "kind": "request",
+              "root": "measurement:a:0:645af40394647812c74849c1:1"
+            },
+            "status": "OBSERVATION_STATUS_SUCCEEDED"
+          },
+          "candidate": {
+            "digest": "git-commit:c1",
+            "revisionId": {
+              "kind": "revision",
+              "root": "c1"
+            }
+          },
+          "environmentDigest": "environment",
+          "evaluatorDigest": "evaluator",
+          "evidenceId": {
+            "kind": "evidence",
+            "root": "measurement:a:0:645af40394647812c74849c1:1-benchmark"
+          },
+          "kind": "EVIDENCE_KIND_BENCHMARK",
+          "observationSequence": "2",
+          "provenance": "EVIDENCE_PROVENANCE_TRUSTED",
+          "purpose": "EVIDENCE_PURPOSE_LOCAL_VALIDATION",
+          "reading": {
+            "direction": "DIRECTION_MAX",
+            "metric": "tok_s",
+            "repetitions": "1",
+            "unit": "tok/s",
+            "value": 123.7
+          },
+          "scope": {
+            "generation": "0",
+            "owner": {
+              "attempt": {
+                "kind": "attempt",
+                "root": "a"
+              }
+            }
+          },
+          "sourceRequest": {
+            "kind": "request",
+            "root": "measurement:a:0:645af40394647812c74849c1:1"
+          },
+          "status": "OBSERVATION_STATUS_SUCCEEDED",
+          "workloadDigest": "workload"
+        }
+      }
+    },
+    {
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.evidence[3]",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.jobs[1].evidence[1]",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.evidence[3]",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.jobs[1].evidence[1]",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.evidence[3]",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[1].evidence[1]",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.evidence[3]",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.jobs[1].evidence[1]",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        }
+      ],
+      "measurement": {
+        "evidence": {
+          "acceptanceReceipt": {
+            "observationSequence": "2",
+            "scope": {
+              "generation": "0",
+              "owner": {
+                "attempt": {
+                  "kind": "attempt",
+                  "root": "a"
+                }
+              }
+            },
+            "sourceRequest": {
+              "kind": "request",
+              "root": "measurement:a:0:e4b312bd65534ced978f5a3a:1"
+            },
+            "status": "OBSERVATION_STATUS_SUCCEEDED"
+          },
+          "candidate": {
+            "digest": "base-digest",
+            "revisionId": {
+              "kind": "revision",
+              "root": "base"
+            }
+          },
+          "environmentDigest": "environment",
+          "evaluatorDigest": "evaluator",
+          "evidenceId": {
+            "kind": "evidence",
+            "root": "measurement:a:0:e4b312bd65534ced978f5a3a:1-benchmark"
+          },
+          "kind": "EVIDENCE_KIND_BENCHMARK",
+          "observationSequence": "2",
+          "provenance": "EVIDENCE_PROVENANCE_TRUSTED",
+          "purpose": "EVIDENCE_PURPOSE_BASELINE",
+          "reading": {
+            "direction": "DIRECTION_MAX",
+            "metric": "tok_s",
+            "repetitions": "1",
+            "unit": "tok/s",
+            "value": 100.0
+          },
+          "scope": {
+            "generation": "0",
+            "owner": {
+              "attempt": {
+                "kind": "attempt",
+                "root": "a"
+              }
+            }
+          },
+          "sourceRequest": {
+            "kind": "request",
+            "root": "measurement:a:0:e4b312bd65534ced978f5a3a:1"
+          },
+          "status": "OBSERVATION_STATUS_SUCCEEDED",
+          "workloadDigest": "workload"
+        }
+      }
+    },
+    {
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.samples[1]",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.samples[1]",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.samples[1]",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.samples[1]",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        }
+      ],
+      "measurement": {
+        "sample": {
+          "commit": {
+            "digest": "base-digest",
+            "revisionId": {
+              "kind": "revision",
+              "root": "base"
+            }
+          },
+          "dedicatedResources": true,
+          "evaluation": "faf53bc18253eb7beb2003c34736cefa36ac014145f5844ed3b48ac6a231ff72",
+          "gates": [
+            "accuracy",
+            "benchmark"
+          ],
+          "host": "environment",
+          "measuredInput": "base",
+          "observedAt": 1.0,
+          "reading": {
+            "direction": "DIRECTION_MAX",
+            "metric": "tok_s",
+            "repetitions": "1",
+            "unit": "tok/s",
+            "value": 100.0
+          },
+          "run": {
+            "kind": "request",
+            "root": "measurement:a:0:e4b312bd65534ced978f5a3a:1"
+          },
+          "scope": {
+            "generation": "0",
+            "owner": {
+              "attempt": {
+                "kind": "attempt",
+                "root": "a"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.core.evaluation.samples[0]",
+          "sha256": "52fd88b02631bba84ae609665bc3f838babc63e8a9254244d9929b75cf95cfcf"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.core.evaluation.samples[0]",
+          "sha256": "cbb5d6fe5b400b622f42cbf53271c5c02cf0c7a70133eaf4fe43a479951d45c4"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.core.evaluation.samples[0]",
+          "sha256": "2d8f15b013574fef252018fbf28d733ddabab97b960a8e9999792f2be3c8517a"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.core.evaluation.samples[0]",
+          "sha256": "b6cc1d4aebcb3b2c46fcac549e8783fe69e164a34d1f02e86316378f4a74efed"
+        }
+      ],
+      "measurement": {
+        "sample": {
+          "base": {
+            "commit": {
+              "digest": "base-digest",
+              "revisionId": {
+                "kind": "revision",
+                "root": "base"
+              }
+            },
+            "measuredInput": "base"
+          },
+          "commit": {
+            "digest": "git-commit:c1",
+            "revisionId": {
+              "kind": "revision",
+              "root": "c1"
+            }
+          },
+          "dedicatedResources": true,
+          "evaluation": "faf53bc18253eb7beb2003c34736cefa36ac014145f5844ed3b48ac6a231ff72",
+          "gates": [
+            "accuracy",
+            "benchmark"
+          ],
+          "host": "environment",
+          "measuredInput": "input-1",
+          "observedAt": 1.0,
+          "reading": {
+            "direction": "DIRECTION_MAX",
+            "metric": "tok_s",
+            "repetitions": "1",
+            "unit": "tok/s",
+            "value": 123.7
+          },
+          "run": {
+            "kind": "request",
+            "root": "measurement:a:0:645af40394647812c74849c1:1"
+          },
+          "scope": {
+            "generation": "0",
+            "owner": {
+              "attempt": {
+                "kind": "attempt",
+                "root": "a"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "runId": "run",
+  "schemaVersion": 1
+}

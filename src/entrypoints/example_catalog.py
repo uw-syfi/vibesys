@@ -4,7 +4,7 @@ A VibeSys source checkout keeps runnable examples under ``examples/<category>/``
 Each is a project root whose tasks live in ``.vibesys/tasks/<task>/``, and each
 is declared once in ``examples/registry.toml``. This module owns that file's
 format (the one definition the CLI and the registry tests share) and turns it
-into an :class:`ExampleList`, the typed listing ``vibesys example list --json``
+into an :class:`~server.host_examples.ExampleList`, the typed listing ``vibesys example list --json``
 prints and the desktop helper reads.
 
 Reading the catalog never imports the run engine: ``vibesys example`` is a light
@@ -20,7 +20,22 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
-from vs_project.api import Project, ProjectError
+from server.host_examples import (
+    ExampleHardware,
+    ExampleList,
+    ExampleModel,
+    ExampleSummary,
+    ExampleTask,
+    ExampleWorkload,
+)
+from server.host_helper_os import read_task_goal
+from server.host_preflight import Backend
+from vs_project.api import (
+    CatalogueInput,
+    Project,
+    ProjectError,
+    TaskDirectory,
+)
 
 REGISTRY_RELATIVE = PurePosixPath("examples/registry.toml")
 """Where the registry lives in a checkout."""
@@ -34,6 +49,8 @@ class Check(StrEnum):
     VALIDATE = "validate"  # the `vibesys validate` contract
     PATH_REFS = "path-refs"  # `${PROJECT_ROOT}/...` paths in task commands exist
     TRUST_POLICY = "trust-policy"  # files the commands read are read-only for the agent
+    CANDIDATE_BUILD = "candidate-build"  # a task whose evaluator requires outputs declares a build
+    BACKEND = "backend"  # every task declares the compute backends it targets
 
 
 class KnownFailing(BaseModel):
@@ -121,32 +138,6 @@ class Registry(BaseModel):
         return self
 
 
-class ExampleSummary(BaseModel):
-    """One example in ``vibesys example list --json``."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    name: str
-    """The value ``vibesys example new`` accepts, e.g. ``data-structures/stack``."""
-    category: str
-    """The ``examples/<category>/`` directory the example is catalogued under."""
-    tasks: tuple[str, ...]
-    """Task names, sorted; empty for an external repository that is not fetched."""
-    external_repo: bool
-    """Whether ``example new`` clones another repository instead of copying files."""
-
-
-class ExampleList(BaseModel):
-    """``vibesys example list --json``: every catalogued example, by category then name."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    version: Literal[1] = 1
-    checkout: str
-    """The resolved VibeSys checkout whose ``examples/`` the listing was read from."""
-    examples: tuple[ExampleSummary, ...]
-
-
 class CatalogError(Exception):
     """The catalog is missing, malformed, or does not name the requested example."""
 
@@ -171,8 +162,8 @@ def load_registry(checkout: Path) -> Registry:
         raise CatalogError(message) from exc
 
 
-def example_tasks(root: Path) -> tuple[str, ...]:
-    """Return the sorted task names under ``root/.vibesys/tasks``; empty when there are none.
+def _task_directories(root: Path) -> tuple[TaskDirectory, ...]:
+    """The tasks under ``root/.vibesys/tasks`` sorted by name; empty when there are none.
 
     An external repository that is not fetched has no directory yet, so no tasks.
     """
@@ -182,13 +173,67 @@ def example_tasks(root: Path) -> tuple[str, ...]:
         project = Project.open(root)
         if not project.is_initialized():
             return ()
-        return tuple(sorted(task.name.value for task in project.discover_tasks()))
+        return tuple(sorted(project.discover_tasks(), key=lambda task: task.name.value))
     except ProjectError as exc:
         message = f"{root}: {exc}"
         raise CatalogError(message) from exc
 
 
-def list_examples(checkout: Path) -> ExampleList:
+def example_tasks(root: Path) -> tuple[str, ...]:
+    """Return the sorted task names under ``root/.vibesys/tasks``; empty when there are none."""
+    return tuple(task.name.value for task in _task_directories(root))
+
+
+def read_task_detail(task: TaskDirectory) -> ExampleTask | None:
+    """What ``task`` is about; ``None`` when its input file declares no ``[catalogue]``.
+
+    Reads only the facts a client shows: the ``[catalogue]`` table, the first of ``backends``,
+    ``objectives.toml`` and the goal file. Anything malformed raises ``CatalogError`` naming
+    its file, so one bad task is not silently listed without its facts.
+    """
+    try:
+        document = tomllib.loads(task.manifest_path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        message = f"cannot read {task.manifest_path}: {exc}"
+        raise CatalogError(message) from exc
+    table = document.get("catalogue")
+    if table is None:
+        return None
+    try:
+        catalogue = CatalogueInput.model_validate(table)
+        backends = document.get("backends") or ()
+        backend = Backend(backends[0]) if backends else None
+    except (ValidationError, ValueError) as exc:
+        message = f"invalid {task.manifest_path}: {exc}"
+        raise CatalogError(message) from exc
+    try:
+        goal = read_task_goal(task)
+    except (OSError, ValueError) as exc:
+        message = f"cannot read the goal of {task.manifest_path}: {exc}"
+        raise CatalogError(message) from exc
+    return ExampleTask(
+        task=goal.task,
+        objectives=goal.objectives,
+        goal=goal.goal,
+        goal_truncated=goal.goal_truncated,
+        domain=catalogue.domain,
+        hardware=ExampleHardware(backend=backend, **catalogue.hardware.model_dump()),
+        model=None if catalogue.model is None else ExampleModel(**catalogue.model.model_dump()),
+        workload=(
+            None
+            if catalogue.workload is None
+            else ExampleWorkload(**catalogue.workload.model_dump())
+        ),
+    )
+
+
+def example_task_details(root: Path) -> tuple[ExampleTask, ...]:
+    """The catalogue facts of each task of the example at ``root`` that declares them."""
+    details = (read_task_detail(task) for task in _task_directories(root))
+    return tuple(detail for detail in details if detail is not None)
+
+
+def list_examples(checkout: Path, *, with_task_details: bool = True) -> ExampleList:
     """Describe every registered example of ``checkout``, sorted by category and name."""
     root = checkout.expanduser().resolve()
     entries = sorted(load_registry(root).example, key=lambda entry: (entry.category, entry.name))
@@ -200,6 +245,9 @@ def list_examples(checkout: Path) -> ExampleList:
                 category=entry.category,
                 tasks=example_tasks(root / entry.path),
                 external_repo=entry.external_repo,
+                task_details=(
+                    example_task_details(root / entry.path) if with_task_details else None
+                ),
             )
             for entry in entries
         ),

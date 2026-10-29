@@ -73,12 +73,19 @@ export class ConnectionManager implements AsyncDisposable {
   readonly #releasing = new Set<Promise<void>>();
   /** A host cannot be reopened until its prior ssh control master has finished exiting. */
   readonly #retiring = new Map<HostKey, Promise<void>>();
+  readonly #disposalListeners = new Set<() => void>();
   readonly #created = new Set<(host: HostKey, connection: HostConnection) => void>();
   #disposed = false;
   #disposing: Promise<void> | null = null;
 
   constructor(options: ConnectionManagerOptions) {
     this.#options = options;
+  }
+
+  /** Retire any additional transport owners before this manager releases its host links. */
+  onDisposing(listener: () => void): void {
+    if (this.#disposed) listener();
+    else this.#disposalListeners.add(listener);
   }
 
   /**
@@ -96,17 +103,20 @@ export class ConnectionManager implements AsyncDisposable {
     this.#active();
     const existing = this.#shown.get(key);
     let connection: HostConnection;
+    let created = false;
     if (existing?.checkout === checkout) {
       connection = existing.connection;
     } else {
       connection = this.#build(host, checkout);
       this.#shown.set(key, {checkout, connection});
-      for (const listener of this.#created) listener(key, connection);
       if (existing !== undefined) this.#replace(existing.connection);
+      created = true;
     }
     this.#leases.set(connection, (this.#leases.get(connection) ?? 0) + 1);
     const releaseHold = connection.hold();
-    return new Lease(connection, () => this.#releaseLease(key, connection, releaseHold));
+    const lease = new Lease(connection, () => this.#releaseLease(key, connection, releaseHold));
+    if (created) this.#notifyCreated(key, connection);
+    return lease;
   }
 
   /** The connection to `host`, if one was built. */
@@ -130,10 +140,40 @@ export class ConnectionManager implements AsyncDisposable {
     return this.#build(host, checkout);
   }
 
-  /** Hear every connection the manager builds; returns the unsubscribe. */
+  /** Hear every connection the manager builds; failures are reported and results are not awaited. */
   onConnection(listener: (host: HostKey, connection: HostConnection) => void): () => void {
     this.#created.add(listener);
     return () => this.#created.delete(listener);
+  }
+
+  /** Notify after ownership is complete; a non-owning observer cannot interrupt acquisition. */
+  #notifyCreated(host: HostKey, connection: HostConnection): void {
+    for (const listener of [...this.#created]) {
+      try {
+        const notified = listener(host, connection);
+        void Promise.resolve(notified).catch(error => {
+          this.#log(
+            `${connection.where}: could not notify a connection listener: ${errorMessage(error)}`,
+          );
+        });
+      } catch (error) {
+        this.#log(
+          `${connection.where}: could not notify a connection listener: ${errorMessage(error)}`,
+        );
+      }
+    }
+  }
+
+  /** Diagnostics are fire-and-forget and cannot change resource ownership or its public result. */
+  #log(message: string): void {
+    try {
+      const logged = this.#options.log(message);
+      void Promise.resolve(logged).catch(() => {
+        // The diagnostic has no later owner; consume its rejected thenable here.
+      });
+    } catch {
+      // Diagnostics cannot revoke ownership or replace the failure being reported.
+    }
   }
 
   /**
@@ -162,6 +202,31 @@ export class ConnectionManager implements AsyncDisposable {
       managed.operations -= 1;
       await this.#releaseUnused(key, managed);
     }
+  }
+
+  /** Hold the existing host link while a second transport owns a channel on it. */
+  async leaseLink(host: HostId): Promise<{readonly link: Link; release(): Promise<void>}> {
+    const key = hostKey(host);
+    for (
+      let retiring = this.#retiring.get(key);
+      retiring !== undefined;
+      retiring = this.#retiring.get(key)
+    ) {
+      await retiring;
+    }
+    this.#active();
+    const managed = this.#managedLink(host);
+    managed.operations += 1;
+    let released = false;
+    return {
+      link: managed.link,
+      release: async () => {
+        if (released) return;
+        released = true;
+        managed.operations -= 1;
+        await this.#releaseUnused(key, managed);
+      },
+    };
   }
 
   /** The machine woke, or the network came back: every connection checks what it waits on. */
@@ -231,7 +296,7 @@ export class ConnectionManager implements AsyncDisposable {
   #build(host: HostId, checkout: string): HostConnection {
     const key = hostKey(host);
     const managed = this.#managedLink(host);
-    const {appVersion, scheduleTimeout, log, config} = this.#options;
+    const {appVersion, scheduleTimeout, config} = this.#options;
     let connection: HostConnection;
     connection = new HostConnection({
       link: managed.link,
@@ -239,7 +304,7 @@ export class ConnectionManager implements AsyncDisposable {
       appVersion,
       config: config ?? DEFAULT_CONNECTION_CONFIG,
       scheduleTimeout,
-      log,
+      log: message => this.#log(message),
       releaseStarted: release => this.#admissionBarrier(key, release),
       released: failure => {
         if (failure === null) {
@@ -276,13 +341,7 @@ export class ConnectionManager implements AsyncDisposable {
         // Keep the rejected promise as a terminal admission barrier: replacing the link could run
         // two masters against the same path. A later host operation and manager disposal surface
         // the original failure, while this observer prevents an unhandled background rejection.
-        try {
-          this.#options.log(
-            `could not retire ${key}: ${error instanceof Error ? error.message : String(error)}`,
-          );
-        } catch {
-          // Diagnostics cannot replace the retained admission barrier as the failure owner.
-        }
+        this.#log(`could not retire ${key}: ${errorMessage(error)}`);
       },
     );
     return releasing;
@@ -305,11 +364,7 @@ export class ConnectionManager implements AsyncDisposable {
   }
 
   #releaseFailed(key: HostKey, connection: HostConnection, failure: Error): void {
-    try {
-      this.#options.log(`could not retire ${connection.where}: ${failure.message}`);
-    } catch {
-      // The admission barrier, not diagnostics, owns the unconfirmed connection resource.
-    }
+    this.#log(`could not retire ${connection.where}: ${failure.message}`);
     // `releaseStarted` already published the rejecting release as this host's barrier. Keeping the
     // connection in its managed link also prevents that link from being retired underneath it.
     if (!this.#retiring.has(key)) {
@@ -321,6 +376,14 @@ export class ConnectionManager implements AsyncDisposable {
 
   async #dispose(): Promise<void> {
     this.#disposed = true;
+    for (const listener of this.#disposalListeners) {
+      try {
+        listener();
+      } catch (error) {
+        this.#log(`could not retire a transport: ${errorMessage(error)}`);
+      }
+    }
+    this.#disposalListeners.clear();
     this.#shown.clear();
     this.#replaced.clear();
     this.#leases.clear();
@@ -345,5 +408,13 @@ export class ConnectionManager implements AsyncDisposable {
 
   #active(): void {
     if (this.#disposed) throw new Error('the connection manager was released');
+  }
+}
+
+function errorMessage(error: unknown): string {
+  try {
+    return error instanceof Error ? String(error.message) : String(error);
+  } catch {
+    return 'an unprintable failure';
   }
 }

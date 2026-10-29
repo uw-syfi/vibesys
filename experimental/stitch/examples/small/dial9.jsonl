@@ -1,0 +1,1 @@
+{"task_id":"search-task","poll_id":"1","service":"hotel_frontend","trace_id":"example-trace","parent_span_id":"search-span","pid":7,"tid":8,"start_ns":10000000000,"end_ns":11000000000,"name":"search handler poll","source_file":"src/search.rs","source_line":1}

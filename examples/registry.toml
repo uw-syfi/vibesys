@@ -26,18 +26,30 @@ path = "examples/data-structures/kvstore-default"
 
 [[example]]
 path = "examples/data-structures/ordered-map"
+known_failing = [
+  { check = "candidate-build", reason = "its tasks declare no build of the candidate library its evaluator requires", tracking = "#2964" },
+]
 
 [[example]]
 path = "examples/data-structures/prioqueue"
+known_failing = [
+  { check = "candidate-build", reason = "its tasks declare no build of the candidate library its evaluator requires", tracking = "#2964" },
+]
 
 [[example]]
 path = "examples/data-structures/repositories/queue-rs"
 
 [[example]]
 path = "examples/data-structures/stack"
+known_failing = [
+  { check = "candidate-build", reason = "its tasks declare no build of the candidate library its evaluator requires", tracking = "#2964" },
+]
 
 [[example]]
 path = "examples/data-structures/unordered-map"
+known_failing = [
+  { check = "candidate-build", reason = "its tasks declare no build of the candidate library its evaluator requires", tracking = "#2964" },
+]
 
 [[example]]
 path = "examples/database/differential-dataflow"

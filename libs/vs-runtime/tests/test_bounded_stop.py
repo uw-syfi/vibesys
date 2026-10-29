@@ -11,7 +11,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_core.api import StopMode
-from vs_runtime.api import Evaluation
+from vs_runtime.api import BenchmarkEvaluation, Evaluation
 from vs_runtime.api.infrastructure import (
     RunStopped,
     StopGraceError,
@@ -25,7 +25,7 @@ from vs_runtime.api.testing import (
     FakeStopTimer,
     FakeWorkspace,
 )
-from vs_sim.api import yield_now
+from vs_sim.api import DISCARD, yield_now
 from vs_sim.api.testing import SimThreads, arrival, yield_until
 
 _GRACE_S = 60.0
@@ -81,6 +81,30 @@ async def test_a_stop_that_outlives_the_grace_cancels_the_block_as_a_landed_stop
     assert task.cancelling() == 0
 
 
+@pytest.mark.regression
+@pytest.mark.asyncio
+async def test_a_stop_that_outlives_the_grace_says_so() -> None:
+    """PR #3225 G2: a forced stop raised a bare ``RunStopped``, so the run's result had no reason."""
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    timer = FakeStopTimer(threads=SimThreads())
+
+    async def run() -> None:
+        async with bounded_stop(channel, grace_s=_GRACE_S, on_stop=_StopWork(), timer=timer):
+            await asyncio.Event().wait()
+
+    task = asyncio.create_task(run())
+    await yield_now()
+    channel.request_stop(StopMode.DRAIN)
+    await _until_armed(timer)
+    timer.expire()
+
+    with pytest.raises(RunStopped) as stopped:
+        await task
+    assert str(stopped.value) == (
+        "the stop outlived its 60 s grace, so the work still running was cancelled"
+    )
+
+
 @pytest.mark.asyncio
 async def test_a_block_that_ends_within_the_grace_is_not_cancelled() -> None:
     channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
@@ -101,29 +125,26 @@ async def test_a_block_that_ends_within_the_grace_is_not_cancelled() -> None:
     assert await task == "drained"
 
 
+@pytest.mark.regression
 @pytest.mark.asyncio
-async def test_a_resume_within_the_grace_disarms_the_cancellation() -> None:
+async def test_a_resume_within_the_grace_does_not_disarm_the_cancellation() -> None:
+    """PR #3209 MED-3: a resume cleared the stop, so a hung turn held the closing run forever."""
     channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
     timer = FakeStopTimer(threads=SimThreads())
-    finish = asyncio.Event()
 
-    async def run() -> str:
+    async def run() -> None:
         async with bounded_stop(channel, grace_s=_GRACE_S, on_stop=_StopWork(), timer=timer):
-            await finish.wait()
-        return "resumed"
+            await asyncio.Event().wait()
 
     task = asyncio.create_task(run())
     await yield_now()
     channel.request_stop(StopMode.DRAIN)
     await _until_armed(timer)
-    channel.resume()
+    assert not channel.resume()
     timer.expire()
-    for _ in range(5):
-        await yield_now()
-    assert not task.done()
-    finish.set()
 
-    assert await task == "resumed"
+    with pytest.raises(RunStopped):
+        await task
 
 
 @pytest.mark.asyncio
@@ -207,11 +228,9 @@ def test_stop_listeners_see_each_request_until_unsubscribed() -> None:
 
     assert not channel.stop_requested()
     channel.request_stop(StopMode.DRAIN)
-    channel.resume()
-    assert not channel.stop_requested()
     unsubscribe()
     unsubscribe()
-    channel.request_stop(StopMode.DRAIN)
+    channel.request_stop(StopMode.CANCEL)
 
     assert seen == [True]
     assert channel.stop_requested()
@@ -223,13 +242,13 @@ async def test_gated_evaluation_refuses_new_work_after_a_stop() -> None:
     inner = FakeEvaluation()
     evaluation = stop_gated_evaluation(inner, channel)
     workspace = FakeWorkspace(path=Path("/workspace"), workspace_id="candidate")
-    await evaluation.accuracy(workspace)
+    await evaluation.accuracy(workspace, output=DISCARD)
 
     channel.request_stop(StopMode.DRAIN)
     with pytest.raises(RunStopped):
-        await evaluation.accuracy(workspace)
+        await evaluation.accuracy(workspace, output=DISCARD)
     with pytest.raises(RunStopped):
-        await evaluation.benchmark(workspace)
+        await evaluation.benchmark(workspace, output=DISCARD)
     with pytest.raises(RunStopped):
         await evaluation.validate_local(
             workspace, recipe_artifact="recipe.sh", report_location="report.md"
@@ -248,7 +267,7 @@ async def test_gated_evaluation_cancels_a_running_evaluation_at_the_stop() -> No
     evaluation = stop_gated_evaluation(inner, channel)
     workspace = FakeWorkspace(path=Path("/workspace"), workspace_id="candidate")
 
-    running = asyncio.create_task(evaluation.benchmark(workspace))
+    running = asyncio.create_task(evaluation.benchmark(workspace, output=DISCARD))
     await arrival(gate.entered.wait(), running)
     channel.request_stop(StopMode.DRAIN)
 
@@ -258,6 +277,28 @@ async def test_gated_evaluation_cancels_a_running_evaluation_at_the_stop() -> No
     assert not gate.released
 
 
+class _CancelledBenchmark(FakeEvaluation):
+    """An evaluation whose benchmark is cancelled from inside, with no stop requested."""
+
+    async def benchmark(self, workspace: object, **kwargs: object) -> BenchmarkEvaluation:
+        del workspace, kwargs
+        raise asyncio.CancelledError
+
+
+@pytest.mark.regression
+@pytest.mark.asyncio
+async def test_an_evaluation_cancelled_without_a_stop_lands_naming_why() -> None:
+    """PR #3225 G2: the gate's fallback raised a bare ``RunStopped``, told as a stop on request."""
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    evaluation = stop_gated_evaluation(_CancelledBenchmark(), channel)
+    workspace = FakeWorkspace(path=Path("/workspace"), workspace_id="candidate")
+
+    with pytest.raises(RunStopped) as stopped:
+        await evaluation.benchmark(workspace, output=DISCARD)
+    assert not channel.stop_requested()
+    assert str(stopped.value) == "an evaluation was cancelled before it finished"
+
+
 @pytest.mark.asyncio
 async def test_gated_evaluation_returns_a_result_that_finishes_before_any_stop() -> None:
     channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
@@ -265,7 +306,7 @@ async def test_gated_evaluation_returns_a_result_that_finishes_before_any_stop()
     evaluation = stop_gated_evaluation(inner, channel)
     workspace = FakeWorkspace(path=Path("/workspace"), workspace_id="candidate")
 
-    result = await evaluation.benchmark(workspace)
+    result = await evaluation.benchmark(workspace, output=DISCARD)
 
     assert result == inner.default_benchmark
 

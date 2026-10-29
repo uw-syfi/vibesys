@@ -9,11 +9,19 @@ import sys
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.server.support import operator_dialer
 
 from entrypoints.server import real_gateway_effects
 from server.host_api import RunStatus, StopOutcome, StopRoute
 from server.instances import ControlSocketStopRequester
-from server.registry import CRASHED, FileInstanceStore, LiveRegistry, StopEffects, instance_root
+from server.registry import (
+    CRASHED,
+    FakeStopIntents,
+    FileInstanceStore,
+    LiveRegistry,
+    StopEffects,
+    instance_root,
+)
 from vs_sim.api import OsThreads, PidfdProcessSignaller, SystemClock, UnixNetwork
 from vs_sim.api.testing import HANG_GUARD_S, stop_process
 
@@ -92,10 +100,15 @@ def test_stop_terminates_a_live_server_and_removes_its_record(
     result = registry.stop(
         INSTANCE,
         StopEffects(
-            ControlSocketStopRequester(UnixNetwork(), clock=SystemClock()),
+            ControlSocketStopRequester(
+                operator_dialer(UnixNetwork()),
+                clock=SystemClock(),
+                deadline_clock=threads,
+            ),
             PidfdProcessSignaller(),
             threads,
             threads.sleep,
+            FakeStopIntents(),
         ),
     )
 

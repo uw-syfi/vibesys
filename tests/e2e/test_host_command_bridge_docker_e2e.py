@@ -49,16 +49,21 @@ if TYPE_CHECKING:
 _ENABLE_ENV = "VIBESYS_E2E_DOCKER"
 _IMAGE = "python:3.12-slim"
 _CLIENT_IN_CONTAINER = "/opt/vibesys/vibesys-gpu"
-# Stands in for srun and scancel: records its argv and cwd, then runs what follows
-# `--`. Without a `--` it is scancel, or the squeue check after it (the one asking
-# for a headerless listing, answered with no job). scancel reports the
-# cancellation on a FIFO the test blocks on, so the test waits for the event
-# itself rather than polling for it.
-# Stands in for the Slurm shell: it receives the command line (`srun ...` or
-# `scancel ...`) as its one argument, as the local transport's shell does.
+# Stands in for the Slurm shell: it receives the command line (`sinfo ...`,
+# `srun ...` or `scancel ...`) as its one argument, as the local transport's
+# shell does. `sinfo` reports the `main` partition's two-hour limit, as a real
+# scheduler would before submission. Otherwise it records its argv and cwd,
+# then runs what follows `--`. Without a `--` it is scancel, or the squeue check
+# after it (the one asking for a headerless listing, answered with no job).
+# scancel reports the cancellation on a FIFO the test blocks on, so the test
+# waits for the event itself rather than polling for it.
 _FAKE_SLURM = """\
 import os, shlex, sys
-sys.argv = [sys.argv[0], *shlex.split(sys.argv[1])[1:]]
+program, *args = shlex.split(sys.argv[1])
+if program == "sinfo":
+    print("main* 2:00:00")
+    raise SystemExit(0)
+sys.argv = [sys.argv[0], *args]
 with open({log!r}, "a") as log:
     log.write(repr(sys.argv[1:]) + " cwd=" + os.getcwd() + "\\n")
 if "--" in sys.argv:

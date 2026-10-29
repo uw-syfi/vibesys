@@ -11,7 +11,14 @@ import * as transcript from './transcript/index.js';
 describe('published run-state surface', () => {
   it('exports only the fold, its read helpers, and each projection from its own entry', () => {
     expect(Object.keys(fold).sort()).toEqual([
+      'EMPTY_LEDGER',
+      'NO_TOKENS',
+      'addTokens',
       'executionStatusFor',
+      'foldEventBatch',
+      'foldEventRebootstrap',
+      'foldResponseEvents',
+      'foldSnapshot',
       'hasRunEnded',
       'initialCoreState',
       'initialIterationNavigation',
@@ -28,6 +35,7 @@ describe('published run-state surface', () => {
       'reduceResponseEvents',
       'reduceSnapshot',
       'rehydrateCoreState',
+      'totalTokens',
     ]);
     expect(Object.keys(rounds).sort()).toEqual([
       'activeRunFocus',
@@ -51,7 +59,14 @@ describe('published run-state surface', () => {
       'projectPerformance',
       'recordsBenchmark',
     ]);
-    expect(Object.keys(transcript).sort()).toEqual(['DEFAULT_CHAT_THREAD_ID']);
+    expect(Object.keys(transcript).sort()).toEqual([
+      'DEFAULT_CHAT_THREAD_ID',
+      'appendNativeTranscript',
+      'emptyNativeTranscript',
+      'nativeTranscriptEntries',
+      'nativeTranscriptHashes',
+      'transcriptBySpan',
+    ]);
   });
 
   it('rejects writes throughout a development projection without corrupting another snapshot', () => {
@@ -132,7 +147,149 @@ describe('published run-state surface', () => {
   it('treats an unset Node environment as production-safe', () => {
     withNodeEnvironment(undefined, expectPublicationGuardsDisabled);
   });
+
+  it('keeps unsequenced transcript evidence in its agent scope with unique identities', () => {
+    for (const sequence of [undefined, 0] as const) {
+      const first = unsequencedOutput({
+        sequence,
+        timestamp: '2026-01-01T00:00:00Z',
+        agentKind: 'implementer',
+        roundLabel: 'round-1-implementer',
+        content: 'implementation evidence',
+      });
+      const second = unsequencedOutput({
+        sequence,
+        timestamp: sequence === 0 ? '2026-01-01T00:00:01Z' : first.timestamp,
+        agentKind: 'judge',
+        roundLabel: 'round-1-judge',
+        content: 'judge evidence',
+      });
+
+      const state = fold.reduceEventBatch(fold.initialCoreState(), [first, second]);
+
+      expect(
+        state.transcript.map(entry => ({
+          content: entry.content,
+          agentKind: entry.agentKind,
+          roundLabel: entry.roundLabel,
+        })),
+      ).toEqual([
+        {
+          content: 'implementation evidence',
+          agentKind: 'implementer',
+          roundLabel: 'round-1-implementer',
+        },
+        {content: 'judge evidence', agentKind: 'judge', roundLabel: 'round-1-judge'},
+      ]);
+      expect(new Set(state.transcript.map(entry => entry.id)).size).toBe(state.transcript.length);
+    }
+  });
+
+  it('coalesces one legacy turn but gives distinct unsequenced cards distinct identities', () => {
+    const chunk = {
+      sequence: 0 as const,
+      timestamp: '2026-01-01T00:00:00Z',
+      agentKind: 'implementer',
+      roundLabel: 'round-1-implementer',
+    };
+    const withTurn = fold.reduceEventBatch(fold.initialCoreState(), [
+      unsequencedOutput({...chunk, content: 'one '}),
+      unsequencedOutput({...chunk, timestamp: '2026-01-01T00:00:01Z', content: 'turn'}),
+    ]);
+    expect(withTurn.transcript.map(entry => entry.content)).toEqual(['one turn']);
+
+    const withCards = fold.reduceEventBatch(withTurn, [
+      unsequencedPhase(chunk),
+      unsequencedPhase(chunk),
+    ]);
+    expect(withCards.transcript.map(entry => entry.content)).toEqual([
+      'one turn',
+      'started',
+      'started',
+    ]);
+    expect(new Set(withCards.transcript.map(entry => entry.id)).size).toBe(
+      withCards.transcript.length,
+    );
+  });
+
+  it('keeps an unsequenced event key stable when an older prefix is backfilled', () => {
+    const scope = {
+      sequence: 0 as const,
+      timestamp: '2026-01-01T00:00:00Z',
+      agentKind: 'implementer',
+      roundLabel: 'round-1-implementer',
+    };
+    const newer = unsequencedOutput({...scope, content: 'newer evidence'});
+    const tail = fold.reduceEventBatch(fold.initialCoreState(), [newer]);
+    const newerId = tail.transcript[0]?.id;
+
+    const merged = fold.reduceEventPrefix(
+      tail,
+      [unsequencedOutput({...scope, content: 'older evidence'}), unsequencedPhase(scope)],
+      0,
+    );
+
+    expect(merged.transcript.find(entry => entry.content === 'newer evidence')?.id).toBe(newerId);
+    expect(new Set(merged.transcript.map(entry => entry.id)).size).toBe(merged.transcript.length);
+  });
+
+  it('keeps unsequenced presentation identities bounded for maximum-size payloads', () => {
+    const content = 'x'.repeat(1_000_000);
+    const state = fold.reduceEvent(
+      fold.initialCoreState(),
+      unsequencedOutput({
+        sequence: 0,
+        timestamp: '2026-01-01T00:00:00Z',
+        agentKind: 'implementer',
+        roundLabel: 'round-1-implementer',
+        content,
+      }),
+    );
+
+    expect(state.transcript[0]?.content).toHaveLength(content.length);
+    expect(state.transcript[0]?.id.length).toBeLessThan(100);
+  });
 });
+
+interface UnsequencedOutput {
+  readonly sequence: 0 | undefined;
+  readonly timestamp: string;
+  readonly agentKind: string;
+  readonly roundLabel: string;
+  readonly content: string;
+}
+
+function unsequencedOutput({
+  sequence,
+  timestamp,
+  agentKind,
+  roundLabel,
+  content,
+}: UnsequencedOutput): RunEvent {
+  return {
+    ...(sequence === undefined ? {} : {sequence}),
+    timestamp,
+    type: 'agent_output_chunk',
+    agent_kind: agentKind,
+    round_label: roundLabel,
+    data: {kind: 'agent_output_chunk', channel: 'assistant', content},
+  };
+}
+
+function unsequencedPhase({
+  sequence,
+  timestamp,
+  agentKind,
+  roundLabel,
+}: Omit<UnsequencedOutput, 'content'>): RunEvent {
+  return {
+    ...(sequence === undefined ? {} : {sequence}),
+    timestamp,
+    type: 'phase_started',
+    agent_kind: agentKind,
+    round_label: roundLabel,
+  };
+}
 
 function executionStarted(): RunEvent {
   return {

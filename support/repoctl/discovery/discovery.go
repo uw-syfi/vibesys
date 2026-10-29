@@ -24,6 +24,13 @@ type Component struct {
 	OwnershipGroup       string   `toml:"ownership_group"`
 	SelectAllJobs        bool     `toml:"select_all_jobs"`
 	SelectAllCollections bool     `toml:"select_all_collections"`
+	// LocalJobs replaces SelectAllJobs and SelectAllCollections in `repoctl test`
+	// (never in `plan`, which CI uses): the component selects only these jobs there.
+	LocalJobs []string `toml:"local_jobs"`
+	// LocalIgnoreRoots are roots CI still owns. `repoctl test` treats a change
+	// under one of them as ignored, so it selects no job from this component.
+	// Each entry must also be one of Roots.
+	LocalIgnoreRoots []string `toml:"local_ignore_roots"`
 }
 
 // Spec is one policy discovery entry. Adapter selects the parser. Class,

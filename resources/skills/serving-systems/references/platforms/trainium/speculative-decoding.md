@@ -12,7 +12,7 @@ Do not let accepted length reach the graph shape.
 
 - **Verify at fixed width `k+1`, always.** The verify forward's shape is constant regardless of how many tokens will be accepted. This satisfies contract invariant 1 (one target forward) at a shape the compiler sees once.
 - **Compute the accept prefix on device.** Comparison and prefix-stop are elementwise over a `k+1`-wide tensor; the result is a length *value*, not a shape.
-- **Advance the KV extent by a masked write, not a resize.** The resident aliased cache ([`nxd-kv-cache.md`](nxd-kv-cache.md)) is already sized to the bucket; commit accepted positions by masking, and let rejected positions be overwritten on the next step.
+- **Advance the KV extent by a masked write, not a resize.** The resident in-place cache ([`static-kv-cache.md`](static-kv-cache.md)) is already sized to `max_len`; commit accepted positions by masking, and let rejected positions be overwritten on the next step.
 - **Never branch the graph on accepted length.** A Python `if accept_len == n` that selects a differently-shaped path defeats the whole design.
 
 Net: one compiled verify graph per `(batch bucket, k)`, not per accepted length.
@@ -27,7 +27,7 @@ If the drafter shares the target's tokenizer, both read the same token id stream
 
 The gating discipline in the contract applies, with an added prerequisite: **the compile-side cost must be amortized before measuring.** Warm every `(bucket, k)` graph for both drafter and target, then measure rolling-average effective tok/s over N≥5 warm requests.
 
-Evaluate the floor items first. Speculative decoding is a later-stage optimization; if the KV cache is still crossing the graph boundary per token ([`floor.md`](floor.md) §3), fixing that yields more and makes the spec-decode measurement meaningful.
+Evaluate the floor items first. Speculative decoding is a later-stage optimization; if the hot path is still eager or the KV cache is still crossing the device boundary per token ([`floor.md`](floor.md) §1, §3), fixing that yields more and makes the spec-decode measurement meaningful.
 
 ## Satisfying the contract's invariants here
 
@@ -36,8 +36,8 @@ Evaluate the floor items first. Speculative decoding is a later-stage optimizati
 | 1. One target forward | Fixed `k+1` width verify |
 | 2. Drafter decodes incrementally | Own resident KV + own bucket ladder |
 | 3. Accept prefix then stop | On-device prefix-stop; produces a value, not a shape |
-| 4. Roll back all length trackers | Masked commit into the aliased buffer; extent tracker moves with it |
-| 5. Verify uses the normal execution path | Same compiled-graph submission path as ordinary decode |
+| 4. Roll back all length trackers | Masked commit into the resident buffer; extent tracker (a device tensor) moves with it |
+| 5. Verify uses the normal execution path | Same compiled region as ordinary decode, at width `k+1` |
 
 ## Pitfalls
 
@@ -51,4 +51,4 @@ Evaluate the floor items first. Speculative decoding is a later-stage optimizati
 
 - [`floor.md`](floor.md) — higher-priority optimizations to land first
 - [`continuous-batching.md`](continuous-batching.md) — the bucket ladder this extends
-- [`nxd-kv-cache.md`](nxd-kv-cache.md) — the aliased buffer accepted tokens commit into
+- [`static-kv-cache.md`](static-kv-cache.md) — the resident buffer accepted tokens commit into

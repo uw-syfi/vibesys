@@ -5,6 +5,7 @@ import {
   responseError,
   streamFailure,
 } from '@vibesys/contracts';
+import {newRequestId} from '@vibesys/request-identity';
 import {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
 import {
   type AbortSignalLike,
@@ -149,7 +150,14 @@ interface ControlChannelOptions {
    * the schedule the subscription shares.
    */
   readonly reconnectDelaysMs?: readonly number[] | undefined;
-  /** Observe connectivity changes; see `ControlChannelState`. */
+  /**
+   * Observe connectivity changes; see `ControlChannelState`. Observer failures
+   * never interrupt channel ownership and are rethrown by `close()` after every
+   * connection owner has settled. They are programming errors in a non-owning
+   * notification, not evidence that a server request failed, so poisoning an
+   * unrelated request would report a false transport outcome. Terminal
+   * `close()` is the mandatory join point every public adapter already owns.
+   */
   readonly onConnectionState?: ((state: ControlChannelState) => void) | undefined;
   /** Timer seam; defaults to real timers. */
   readonly scheduleTimeout?: ScheduleTimeout | undefined;
@@ -201,6 +209,11 @@ type ControlPhase =
 interface DialReport {
   readonly error: BackendClientError;
   readonly fault: boolean;
+}
+
+/** A callback failure retained until the channel's terminal error boundary. */
+interface ObserverFailure {
+  readonly reason: unknown;
 }
 
 /**
@@ -293,6 +306,12 @@ export class ControlChannel {
    * starting and stopping, does reach the caller.
    */
   #reported: ControlChannelState | undefined;
+  /**
+   * The first connection-state observer failure. Reporting is notification,
+   * not a lifecycle owner, so it cannot interrupt a transition; terminal close
+   * is the existing asynchronous error boundary that surfaces the failure.
+   */
+  #observerFailure: ObserverFailure | null = null;
   /** The failure that took the channel down, kept as the cause of what it fails. */
   #lastError: BackendClientError | null = null;
   /**
@@ -398,7 +417,9 @@ export class ControlChannel {
   /**
    * Close the channel: cancel a pending redial, fail every request still owed
    * an answer (on the wire or held for a resend), and release the live
-   * connection. Terminal; a later request rejects rather than dialing.
+   * connection. Terminal; a later request rejects rather than dialing. Once
+   * those owners settle, exposes every connection-state observer and teardown
+   * failure in stable transition-then-owner order.
    */
   close(): Promise<void> {
     if (this.#closing !== null) return this.#closing;
@@ -421,10 +442,15 @@ export class ControlChannel {
     // failures created while the dial completions above are settling.
     const retirementResults = await Promise.allSettled([...this.#retiringConnections]);
     this.#retiringConnections.clear();
-    const failure = [...dialResults, ...retirementResults].find(
-      (result): result is PromiseRejectedResult => result.status === 'rejected',
-    );
-    if (failure !== undefined) throw failure.reason;
+    const failures = [
+      ...(this.#observerFailure === null ? [] : [this.#observerFailure.reason]),
+      ...[...dialResults, ...retirementResults].flatMap(result =>
+        result.status === 'rejected' ? [result.reason] : [],
+      ),
+    ];
+    if (failures.length === 0) return;
+    if (failures.length === 1) throw failures[0];
+    throw new AggregateError(failures, 'could not close every control channel owner');
   }
 
   /**
@@ -460,10 +486,7 @@ export class ControlChannel {
    * the command applied invisibly seconds later. An idempotent request waits
    * either way, because repeating it is free.
    *
-   * Note for readers tracing coverage: the refusal branch is unreachable from
-   * `clients/apps/web`, which issues only `query.snapshot` and so takes the
-   * idempotent default on every call. `websocket.test.ts` and
-   * `node/client.test.ts` reach it directly.
+   * `websocket.test.ts` and `node/client.test.ts` reach the refusal branch directly.
    */
   #enqueue(entry: ControlRequest): void {
     const phase = this.#phase;
@@ -832,10 +855,38 @@ export class ControlChannel {
       this.#exhaust();
       return;
     }
-    this.#cancelRedial = this.#scheduleTimeout(() => {
-      this.#cancelRedial = null;
-      this.#startDial();
-    }, delayMs);
+    // Publish an owner before invoking the structural scheduler: it may fire
+    // synchronously, and close or an explicit reconnect may also re-enter while
+    // it is acquiring the underlying cancellation handle.
+    let scheduledCancel: (() => void) | null = null;
+    const cancelRedial = (): void => scheduledCancel?.();
+    this.#cancelRedial = cancelRedial;
+    try {
+      scheduledCancel = this.#scheduleTimeout(() => {
+        // A cancelled scheduler is allowed to deliver a late callback. Only
+        // the owner still installed in the slot may start this dial.
+        if (this.#cancelRedial !== cancelRedial) return;
+        this.#cancelRedial = null;
+        this.#startDial();
+      }, delayMs);
+    } catch (error) {
+      // The callback may have fired before the scheduler threw. In that case
+      // it already consumed this owner and started the recovery, so the stale
+      // acquisition failure has no transition left to settle. Otherwise a
+      // retry timer could not be acquired: make that the typed terminal cause
+      // of this bounded series and answer every request the retry owned. This
+      // path is reached from void transport callbacks and must never escape.
+      if (this.#cancelRedial === cancelRedial) {
+        this.#cancelRedial = null;
+        this.#lastError = channelError(error);
+        this.#exhaust();
+      }
+      return;
+    }
+    // A synchronous callback, close, or explicit reconnect already consumed
+    // the owner before its concrete handle existed. Retire that handle now
+    // instead of restoring an already-finished redial into the ownership slot.
+    if (this.#cancelRedial !== cancelRedial) scheduledCancel();
   }
 
   /**
@@ -911,7 +962,9 @@ export class ControlChannel {
    *
    * Derived rather than passed in, so there is one definition of what the
    * channel's connectivity is and no call site can report a state the channel
-   * is not actually in.
+   * is not actually in. The observer is an external notification boundary: a
+   * failure is retained for `close()` but cannot interrupt the transition that
+   * owns a dial, retry, connection, or held request.
    */
   #reportState(): void {
     const state: ControlChannelState =
@@ -925,12 +978,12 @@ export class ControlChannel {
           };
     if (sameControlChannelState(this.#reported, state)) return;
     this.#reported = state;
-    this.#onConnectionState?.(state);
+    try {
+      this.#onConnectionState?.(state);
+    } catch (reason) {
+      this.#observerFailure ??= {reason};
+    }
   }
-}
-
-function newRequestId(): string {
-  return globalThis.crypto.randomUUID();
 }
 
 /**

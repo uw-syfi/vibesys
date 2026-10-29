@@ -10,8 +10,10 @@ from vs_runtime._access_settlement import (
     AccessReceipt,
     AccessSettlement,
     AccessSettlementError,
+    AccessUnrestorableError,
     AccessViolation,
 )
+from vs_runtime._adoption_commit import adoption_commit_message
 from vs_runtime._agent_evaluation import (
     EVALUATION_TOOL_ID,
     AgentEvaluationBridge,
@@ -22,6 +24,12 @@ from vs_runtime._agent_evaluation import (
     SnapshotWorkspace,
 )
 from vs_runtime._capture_command_operation import CaptureCommandOwner
+from vs_runtime._control_bridge import (
+    IntentJournal,
+    OperatorInbox,
+    RunControlBridge,
+    SteerArtifacts,
+)
 from vs_runtime._core_loop import (
     AdmissionBusyError,
     CommitObserver,
@@ -59,6 +67,8 @@ from vs_runtime._core_record import (
     PublicationLease,
     RuntimeRecord,
     WinnerSelection,
+    new_comparisons,
+    new_runaways,
     winner_selection,
 )
 from vs_runtime._core_requests import (
@@ -85,15 +95,14 @@ from vs_runtime._core_run import (
     HEARTBEAT_TASK,
     PRODUCTION_LEASE_SECONDS,
     WAIT_TASK,
+    CoreHeldWorkspaces,
     CoreRunHost,
     NextWake,
-    RunControlBridge,
     RunLoopConfig,
     RunOutcome,
     RunStalledError,
     RunTiming,
     StallNotes,
-    SteerArtifacts,
     core_next_wake,
     drive_core,
     start_core,
@@ -134,11 +143,15 @@ from vs_runtime._export_patch_operation import ExportPatchOwner
 from vs_runtime._issue_board_operations import BoardTexts, IssueBoardOwner
 from vs_runtime._measurement_progress import (
     IgnoreMeasurement,
+    MeasurementDecisions,
     MeasurementObserver,
     StageMetric,
+    StageOutputOpener,
+    StageRun,
     StageSettled,
     StageStarted,
 )
+from vs_runtime._mid_turn_steering import MidTurnSteering, TurnSteering
 from vs_runtime._observation_factory import (
     ObservationFactory,
     ObservationFacts,
@@ -260,6 +273,7 @@ __all__ = [
     "AccessReceipt",
     "AccessSettlement",
     "AccessSettlementError",
+    "AccessUnrestorableError",
     "AccessViolation",
     "AdmissionBusyError",
     "AgentEvaluationBridge",
@@ -281,6 +295,7 @@ __all__ = [
     "Conflict",
     "ContinuationBinding",
     "CoreContractGapError",
+    "CoreHeldWorkspaces",
     "CoreResumeError",
     "CoreRunHost",
     "CoreRuntime",
@@ -313,6 +328,7 @@ __all__ = [
     "Indeterminate",
     "Inspected",
     "Inspection",
+    "IntentJournal",
     "InterpretEvidenceOwner",
     "IssueBoardOwner",
     "JobRecord",
@@ -322,9 +338,11 @@ __all__ = [
     "LeaseUnavailableError",
     "LifecycleReportingExecutor",
     "MayHold",
+    "MeasurementDecisions",
     "MeasurementObserver",
     "MeasurementRequests",
     "MeasurementServices",
+    "MidTurnSteering",
     "NamespaceOperationReceipts",
     "NeverBegun",
     "NextWake",
@@ -342,6 +360,7 @@ __all__ = [
     "OperationPorts",
     "OperationReceipts",
     "OperationRole",
+    "OperatorInbox",
     "OrphanWaitError",
     "OwedKey",
     "OwedSubmission",
@@ -407,6 +426,8 @@ __all__ = [
     "Settled",
     "SnapshotWorkspace",
     "StageMetric",
+    "StageOutputOpener",
+    "StageRun",
     "StageSettled",
     "StageStarted",
     "StallNotes",
@@ -418,6 +439,7 @@ __all__ = [
     "Transient",
     "TurnDispatcher",
     "TurnMessages",
+    "TurnSteering",
     "TurnYields",
     "Unrecorded",
     "ValidateLocalOwner",
@@ -425,6 +447,7 @@ __all__ = [
     "WinnerSelection",
     "WorkspaceReceipts",
     "WorkspaceRequests",
+    "adoption_commit_message",
     "as_target",
     "bind_operations",
     "build_operation_catalog",
@@ -434,7 +457,9 @@ __all__ = [
     "drive_core",
     "empty_catalog",
     "handle_for",
+    "new_comparisons",
     "new_core_state",
+    "new_runaways",
     "open_session_requests",
     "operation_roles",
     "owner_key",

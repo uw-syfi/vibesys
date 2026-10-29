@@ -1,0 +1,82 @@
+{
+  "id": "helper-run-history-skips",
+  "protocol": "host-helper",
+  "title": "Span and tail reads on a missing project",
+  "description": "runs.events_for_span and runs.read_tail, with their features negotiated, naming a directory that does not exist are each answered project_missing with the path.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "run_span_events",
+          "run_tail"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "run_span_events",
+          "run_tail"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "runs.events_for_span",
+        "request_id": "es",
+        "deadline_ms": 10000,
+        "project": "/nonexistent-vibesys-conformance/project",
+        "run_id": "20261010-120000-11111111-run",
+        "span_id": "op:turn",
+        "from_sequence": 1,
+        "max": 100
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "es",
+        "code": "project_missing"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "runs.read_tail",
+        "request_id": "rt",
+        "deadline_ms": 10000,
+        "project": "/nonexistent-vibesys-conformance/project",
+        "run_id": "20261010-120000-11111111-run",
+        "before_sequence": 50,
+        "tail": 100
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "rt",
+        "code": "project_missing"
+      }
+    }
+  ]
+}

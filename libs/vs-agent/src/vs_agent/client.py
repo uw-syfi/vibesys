@@ -9,10 +9,13 @@ from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel
 
+from vs_agent import provider_profiles
 from vs_agent.callbacks import AgentLogger
 from vs_agent.cli_common import agent_label, materialize_skills
+from vs_agent.context_budget import ContextUse
 from vs_agent.contracts import (
     AgentCapabilities,
+    AgentContextOverflowError,
     AgentEvent,
     AgentEventKind,
     AgentExecutionPolicy,
@@ -23,8 +26,10 @@ from vs_agent.contracts import (
     AgentSkillUse,
     AgentTurnRequest,
     AgentTurnResult,
+    AgentTurnTimeoutError,
     AgentUsage,
     AuthStatus,
+    CapacityStops,
     MCPServerSpec,
     ProviderNotReadyError,
     ReadinessProbe,
@@ -37,8 +42,10 @@ from vs_agent.runner import parse_typed_response
 from vs_agent.session_errors import SessionResumeError
 from vs_agent.session_key import AgentSessionKey, SessionScope
 from vs_agent.session_store import NullSessionStore, SessionStore
+from vs_agent.shim_turns import terminal_result_from
 from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
+from vs_agent.ungated_retry import BoundedRetryCapacityGate
 from vs_agent.usage_records import USAGE_FILE, append_usage_record, usage_dict
 from vs_sim.api import CloseOnce, NothingLeft, Released, utc_datetime
 
@@ -69,6 +76,14 @@ class _CachedSession:
     #: in. Kept beside the live handle so a caller can name the conversation
     #: its next turn continues without a durable store being wired.
     provider_session_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _TurnAccounting:
+    """Usage evidence available when a turn ends, successfully or otherwise."""
+
+    usage: AgentUsage
+    skills: AgentSkillUse
 
 
 def _emit_and_log(
@@ -259,6 +274,9 @@ class AgentClient:
         # Where each key's last completed turn ran, kept across evictions so a
         # caller can tell a retired conversation from a replaced one.
         self._last_turn_sessions: dict[AgentSessionKey, str | None] = {}
+        # The context each key's conversation held after its last completed turn, when the
+        # provider reported it. Process-local: a restarted run resumes without the reading.
+        self._context_tokens: dict[AgentSessionKey, int | None] = {}
         #: Roles whose provider CLI passed its readiness probe on this client.
         self._check_readiness = check_readiness
         self._ready_roles: set[str] = set()
@@ -270,7 +288,8 @@ class AgentClient:
         self._clock = clock
         self._active_lock = self._threads.lock()
         self._active_sessions: list[LaunchedSession] = []
-        self._capacity_gate: CapacityGate | None = None
+        # No run holds this client until it installs its own gate: one transient resend.
+        self._capacity_gate: CapacityGate = BoundedRetryCapacityGate()
 
     @property
     def capabilities(self) -> AgentCapabilities:
@@ -473,6 +492,7 @@ class AgentClient:
             model_name=spec.model,
             agent_label=label,
             progress=progress,
+            context_window=provider_profiles.model_context_window(spec.provider, spec.model),
             agent_kind=spec.role,
             round_label=turn.label,
             invocation_id=turn.invocation_id,
@@ -497,6 +517,7 @@ class AgentClient:
             channel="prompt",
         )
         result: AgentTurnResult | None = None
+        accounting = _TurnAccounting(AgentUsage(), AgentSkillUse())
         stream = _LoggerObserver(logger, observer, provider=spec.provider)
         try:
             result = self._run(
@@ -505,7 +526,16 @@ class AgentClient:
                 session_key=session_key,
                 observer=stream,
             )
+            accounting = _TurnAccounting(result.usage, result.skills)
         except Exception as exc:
+            terminal_result = terminal_result_from(exc)
+            if terminal_result is not None:
+                accounting = _TurnAccounting(terminal_result.usage, terminal_result.skills)
+            elif (
+                isinstance(exc, (AgentTurnTimeoutError, AgentOutputSchemaError))
+                and exc.usage is not None
+            ):
+                accounting = _TurnAccounting(exc.usage, AgentSkillUse())
             stream.close()
             _emit_and_log(
                 self._sink, f"\n=== {label} ROUND ERROR: {turn.label} ===", self._run_log_file
@@ -519,28 +549,34 @@ class AgentClient:
             self._write_usage_record(
                 kind=spec.role,
                 round_label=turn.label,
+                invocation_id=turn.invocation_id,
                 model=spec.model,
                 reasoning_effort=spec.reasoning_effort,
-                result=result,
+                accounting=accounting,
             )
         if result is None:
             message = "successful invocation did not produce a result"
             raise AssertionError(message)
         return result, logger
 
-    def _write_usage_record(
+    def _write_usage_record(  # noqa: PLR0913  # lint-waiver: LW-011218 [PLR0913]; the audit row and the settled-usage event need the same independent facts about one finished turn.
         self,
         *,
         kind: str,
         round_label: str | None,
+        invocation_id: str | None,
         model: str | None,
         reasoning_effort: str | None,
-        result: AgentTurnResult | None,
+        accounting: _TurnAccounting,
     ) -> None:
+        self._sink.turn_usage_recorded(
+            accounting.usage,
+            agent_kind=kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
+        )
         if self._log_dir is None:
             return
-        usage = result.usage if result is not None else AgentUsage()
-        skills = result.skills if result is not None else AgentSkillUse()
         try:
             append_usage_record(
                 self._log_dir,
@@ -549,8 +585,8 @@ class AgentClient:
                 provider=self._provider,
                 model=model,
                 reasoning_effort=reasoning_effort,
-                usage=usage,
-                skills=skills,
+                usage=accounting.usage,
+                skills=accounting.skills,
                 recorded_at=utc_datetime(self._clock),
             )
         except OSError as exc:
@@ -562,7 +598,11 @@ class AgentClient:
             )
 
     def set_capacity_gate(self, gate: CapacityGate) -> None:
-        """Hand every later provider capacity limit to ``gate`` instead of failing the turn."""
+        """Hand every later provider capacity limit to ``gate``.
+
+        It replaces the client's own gate, which sends a transient stop again once
+        (:class:`~vs_agent.ungated_retry.BoundedRetryCapacityGate`).
+        """
         self._capacity_gate = gate
 
     def run(
@@ -599,6 +639,59 @@ class AgentClient:
 
         fingerprint = session_spec_fingerprint(session_spec)
         turn = self._bind_continuation(session_key, session_spec, turn)
+        fresh = turn.renewable and self._near_context_limit(session_key, session_spec)
+        if fresh:
+            turn = self._retire(session_key, turn, "its context is near the model's window")
+        continued = self.provider_session_id(session_key)
+        try:
+            result, cached = self._run_keyed(session_spec, turn, session_key, observer, fresh=fresh)
+        except AgentContextOverflowError as overflow:
+            if not turn.renewable or fresh or continued is None:
+                raise
+            # Once, in a fresh conversation: a fresh one that overflows again carries a
+            # message too long for the model, which no further renewal can fix.
+            turn = self._retire(session_key, turn, f"the provider refused it: {overflow.detail}")
+            result, cached = self._run_keyed(session_spec, turn, session_key, observer, fresh=True)
+        expected = turn.expected_provider_session_id
+
+        self._validate_continuation_result(
+            session_key,
+            expected,
+            result,
+            require_provider_checkpoint=turn.require_provider_checkpoint,
+        )
+
+        # Recorded whether or not the conversation was restarted, and exactly as
+        # reported: this is where the turn ran, which a reset afterwards does not
+        # change.
+        self._last_turn_sessions[session_key] = result.provider_session_id
+        if result.restarted:
+            # The session restarted or abandoned the conversation this key names,
+            # so both the live session and the checkpoint describe history that
+            # no longer exists.
+            self._evict(session_key)
+            self._session_store.clear(session_key)
+        else:
+            if result.provider_session_id is not None:
+                cached.provider_session_id = result.provider_session_id
+            self._checkpoint(session_key, session_spec, fingerprint, result)
+            self._context_tokens[session_key] = cached.session.context_tokens
+        return result
+
+    def _run_keyed(
+        self,
+        session_spec: AgentSessionSpec,
+        turn: AgentTurnRequest,
+        session_key: AgentSessionKey,
+        observer: AgentObserver,
+        *,
+        fresh: bool = False,
+    ) -> tuple[AgentTurnResult, _CachedSession]:
+        """Run the turn on the key's live session, opening it (and adopting its checkpoint) first.
+
+        A *fresh* turn opens its session without adopting the checkpoint, which keeps naming
+        the retired conversation until this turn completes and ``_run`` replaces it.
+        """
         expected = turn.expected_provider_session_id
         cached = self._sessions.get(session_key)
         if cached is not None and cached.spec != session_spec:
@@ -608,8 +701,12 @@ class AgentClient:
             self._evict(session_key)
             cached = None
         if cached is None:
-            session = self._create_checkpointed_session(
-                session_spec, session_key, fingerprint, expected
+            session = (
+                self._open_session(session_spec)
+                if fresh
+                else self._create_checkpointed_session(
+                    session_spec, session_key, session_spec_fingerprint(session_spec), expected
+                )
             )
             # A fresh session in a resumed process holds no conversation. Offer
             # it the checkpointed provider ID so its very first turn resumes
@@ -635,29 +732,33 @@ class AgentClient:
             except Exception as cleanup_error:  # preserve the turn failure  # noqa: BLE001  # lint-waiver: LW-010123 [BLE001]; AgentClient.run must evict a failed provider session while re-raising the turn's original failure.
                 error.add_note(f"agent session cleanup also failed: {cleanup_error}")
             raise
+        return result, cached
 
-        self._validate_continuation_result(
-            session_key,
-            expected,
-            result,
-            require_provider_checkpoint=turn.require_provider_checkpoint,
+    def _near_context_limit(self, key: AgentSessionKey, spec: AgentSessionSpec) -> bool:
+        """Whether the key's conversation reached the renewal share of its model's window."""
+        tokens = self._context_tokens.get(key)
+        if tokens is None or self.provider_session_id(key) is None:
+            return False
+        window = provider_profiles.model_context_window(spec.provider, spec.model)
+        return ContextUse(tokens=tokens, window=window).near_limit()
+
+    def _retire(self, key: AgentSessionKey, turn: AgentTurnRequest, why: str) -> AgentTurnRequest:
+        """Release the key's live conversation: *turn* runs in a fresh one.
+
+        The checkpoint and the context reading still describe the retired conversation, and
+        stay until the fresh turn completes and replaces them. A fresh turn that fails (an
+        outage, a quota stop, a crash) leaves the key resumable on its old conversation, and
+        the next standalone turn retires it again.
+        """
+        retired = turn.expected_provider_session_id or self.provider_session_id(key)
+        self._evict(key)
+        _emit_and_log(
+            self._sink,
+            f"[session] {turn.label or key}: retired conversation {retired} ({why}); "
+            "the turn runs in a fresh conversation.",
+            self._run_log_file,
         )
-
-        # Recorded whether or not the conversation was restarted, and exactly as
-        # reported: this is where the turn ran, which a reset afterwards does not
-        # change.
-        self._last_turn_sessions[session_key] = result.provider_session_id
-        if result.restarted:
-            # The session restarted or abandoned the conversation this key names,
-            # so both the live session and the checkpoint describe history that
-            # no longer exists.
-            self._evict(session_key)
-            self._session_store.clear(session_key)
-        else:
-            if result.provider_session_id is not None:
-                cached.provider_session_id = result.provider_session_id
-            self._checkpoint(session_key, session_spec, fingerprint, result)
-        return result
+        return replace(turn, expected_provider_session_id=None)
 
     def provider_session_id(self, session_key: AgentSessionKey) -> str | None:
         """Name the provider conversation the next turn on ``session_key`` continues.
@@ -737,7 +838,11 @@ class AgentClient:
             or result.restarted
         ):
             self._evict(key)
-            self._session_store.clear(key)
+            if expected is not None:
+                # The checkpointed conversation is the one the provider reset. A turn that
+                # expected none ran in a fresh conversation, so any checkpoint still names a
+                # retired conversation this failure says nothing about.
+                self._session_store.clear(key)
             raise SessionResumeError(str(key), "provider reset or replaced the conversation")
 
     def _validate_continuation(
@@ -862,6 +967,20 @@ class AgentClient:
         session = active[-1]
         return session.steer(text, on_rejected=on_rejected)
 
+    def steer_session(self, key: AgentSessionKey, text: str, *, steer_id: str) -> SteerOutcome:
+        """Offer *text* to the turn running now in the conversation *key* names.
+
+        A key with no live session runs no turn; otherwise the session answers as
+        :meth:`steer` does, without queuing anything. A ``DELIVERED`` message the
+        provider does not keep is named by *steer_id* in the turn's
+        ``AgentTurnResult.refused_steers``.
+        """
+        cached = self._sessions.get(key)
+        if cached is None:
+            return SteerOutcome.NO_RUNNING_TURN
+        steers = cached.session.steers
+        return cached.session.steer(text, on_rejected=lambda: steers.note_refused(steer_id))
+
     def cancel_session(self, key: AgentSessionKey) -> None:
         """Stop the in-flight turn of one keyed conversation, keeping its checkpoint.
 
@@ -908,28 +1027,42 @@ class AgentClient:
         """Publish a turn before running it so cross-thread cancellation cannot miss it.
 
         A turn that stops on a provider capacity limit goes to the capacity
-        gate, when one is installed, and is sent again on the same live
-        session once the gate returns; the gate raises to end the turn.
+        gate (the run's, or the client's own one-resend gate) and is sent again
+        on the same live session once the gate returns; the gate raises to end
+        the turn. The
+        turn's :class:`CapacityStops` record outlives each send, so a
+        cancellation that lands while the gate waits ends the wait, and one
+        that lands after it keeps the turn from being sent again.
         """
+        stops = CapacityStops(self._threads, model=session.spec.model)
+        # A turn call that raised left its refusals behind; they belong to no later turn.
+        session.steers.take_refused()
         with self._active_lock:
             if self._cancelled:
                 msg = "agent client is cancelled"
                 raise RuntimeError(msg)
             self._active_sessions.append(session)
+            session.track(stops)
         try:
-            stops = 0
             while True:
                 try:
-                    return session.run_turn(turn, observer)
+                    result = session.run_turn(turn, observer)
                 except AgentQuotaError as error:
-                    gate = self._capacity_gate
-                    if gate is None:
+                    if stops.cancelled:
+                        # A cancelled turn is not waited for: it ends with its capacity type.
                         raise
-                    stops += 1
-                    gate.wait_for_capacity(error, turn, role=role, attempt=stops)
+                    stops.count += 1
+                    self._capacity_gate.wait_for_capacity(error, turn, role=role, stops=stops)
+                    if stops.cancelled:
+                        # Cancelled after the gate let the turn go: it is not sent again.
+                        raise error from None
+                else:
+                    self._capacity_gate.turn_served(session.profile.name, stops.model)
+                    return result
         finally:
             with self._active_lock:
                 self._active_sessions.remove(session)
+                session.track(None)
 
     def _evict(self, key: AgentSessionKey) -> None:
         cached = self._sessions.pop(key, None)

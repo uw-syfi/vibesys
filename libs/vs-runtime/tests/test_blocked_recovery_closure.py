@@ -20,6 +20,7 @@ from vs_core.api import (
     CoreState,
     EnsureSession,
     EventId,
+    InspectRequest,
     LifecycleClass,
     Observation,
     ObservationStatus,
@@ -126,3 +127,99 @@ def test_a_blocked_recovery_whose_closure_needs_an_unprovable_release_halts_at_o
     assert core.run.result is not None
     assert core.run.result.outcome == "blocked"
     assert clock.now() < state.run.deadline_at
+
+
+def _digest(request: InspectRequest) -> str:
+    return sha256(
+        json.dumps(request.model_dump(mode="json"), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _answered_block(phase: RequestPhase) -> CoreState:
+    """The run above, after the reconciliation deadline's last inspection answered unknown."""
+    core = _unprovable_release()
+    (record,) = core.records.records
+    inspection = InspectRequest(
+        request_id=RequestId(root="recovery:deadline:1:submission"),
+        scope=record.request.scope,
+        target=record.request_id,
+    )
+    assert inspection.request_id is not None
+    answered = RequestRecord(
+        request_id=inspection.request_id,
+        request=inspection,
+        payload_digest=_digest(inspection),
+        lifecycle=LifecycleClass.QUERY,
+        phase=phase,
+        until=Until(at=100.0),
+        addressed_by=(),
+        observation=Observation(
+            event_id=EventId(root="answered"),
+            request_id=inspection.request_id,
+            scope=inspection.scope,
+            sequence=1,
+            observed_at=0.0,
+            status=ObservationStatus.UNKNOWN,
+            terminal=True,
+        ),
+    )
+    barrier = core.records.recovery.model_copy(
+        update={
+            "checks": (
+                RecoveryCheck(
+                    target=record.request_id,
+                    inspection=inspection.request_id,
+                    resolution="blocked",
+                    wait=None,
+                ),
+            )
+        }
+    )
+    return core.model_copy(
+        update={
+            "records": core.records.model_copy(
+                update={"records": (record, answered), "recovery": barrier}
+            )
+        }
+    )
+
+
+@pytest.mark.parametrize("phase", [RequestPhase.COMPLETED, RequestPhase.BLOCKED])
+def test_a_check_blocked_after_its_last_answer_stops_the_run_despite_unrelated_timers(
+    phase: RequestPhase,
+) -> None:
+    """Recovery that can never open stops the run now, not when an unrelated timer runs out.
+
+    Regression: on a resumed run, four cancels blocked after their last inspection answered,
+    while other turns' reconciliation deadlines were still 90 minutes out. Recovery stayed
+    blocked, admission closed, and the run idled without a word until those timers fired.
+    """
+    state = _answered_block(phase)
+    # Another turn's timer, due long after recovery blocked; it ends when the run stops.
+    unrelated = state.run.deadline_at - 10.0
+    shell = CoreRuntime(
+        FakeStateStore(),
+        counter.driver(CounterConfig()),
+        state,
+        config=CounterConfig(),
+    )
+    clock = VirtualClock(1.0)
+    host = CoreRunHost(shell, FakePublicationDelivery(), clock)
+    config = RunLoopConfig(host_id="blocked", lease_duration=100.0, recovery_poll_interval=50.0)
+    start_core(host, config)
+    with pytest.raises(RunStalledError):
+        run_virtual(
+            clock,
+            drive_core(
+                host,
+                config,
+                next_wake=lambda core: (
+                    unrelated if core.run.result is None and core.run.now_at < unrelated else None
+                ),
+            ),
+        )
+    core = shell.record.envelope.core
+    assert core.run.result is not None
+    assert core.run.result.outcome == "blocked"
+    assert core.run.result.reason == "recovery blocked: outcome unknown for submission"
+    assert clock.now() < unrelated

@@ -85,13 +85,14 @@ describe('resolveRequestPolicy', () => {
     expect(policy).toEqual({idempotent: false, dedicatedConnection: true, timeoutMs: 5});
   });
 
-  it('treats a type absent from the table as the read default', () => {
+  it('gives a read the read policy', () => {
     expect(resolveRequestPolicy('query.design')).toEqual(DEFAULT_REQUEST_POLICY);
   });
 
   it('exposes the table as data a double-submit guard can read', () => {
     expect(REQUEST_POLICIES['command.pause']?.idempotent).toBe(true);
     expect(REQUEST_POLICIES['command.steer']?.idempotent).toBe(false);
+    expect(REQUEST_POLICIES['command.control']?.idempotent).toBe(false);
   });
 });
 

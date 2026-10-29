@@ -69,8 +69,9 @@ def start(
     return host
 
 
-def plan(host: Host, *entries: dict[str, object], **extra: str) -> None:
-    host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(*entries, **extra))
+def plan(host: Host, *entries: dict[str, object], reasoning: str = "portfolio") -> None:
+    reply = plan_reply(*entries, reasoning=reasoning)
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), reply)
 
 
 def answer_all_but_the_planner(host: Host) -> None:
@@ -101,12 +102,16 @@ def test_a_lost_planner_turn_is_asked_again_with_the_same_request_and_no_complai
     *, restarting: bool
 ) -> None:
     host = start(restarting=restarting)
+    assert isinstance(planner_context(host), PlannerPrompt)
+    # The first ask went out while the input was being measured; the asks after it show the
+    # measurement, and each is the one before it again.
+    host.run.lose(host.run.expect_turn(role=PLANNER_LABEL))
+    answer_all_but_the_planner(host)
     first = planner_context(host)
-    assert isinstance(first, PlannerPrompt)
+    assert isinstance(first, PlannerCorrection)
 
-    for _ in range(2):
-        host.run.lose(host.run.expect_turn(role=PLANNER_LABEL))
-        answer_all_but_the_planner(host)
+    host.run.lose(host.run.expect_turn(role=PLANNER_LABEL))
+    answer_all_but_the_planner(host)
 
     again = planner_context(host)
     assert isinstance(again, PlannerCorrection)

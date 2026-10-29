@@ -6,7 +6,9 @@
   "vibesys": {
     "layer": "domain",
     "entries": {
-      ".": "neutral"
+      ".": "neutral",
+      "./intents": "neutral",
+      "./chat": "neutral"
     }
   },
   "exports": {
@@ -14,6 +16,16 @@
       "@vibesys/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./intents": {
+      "@vibesys/source": "./src/intents/index.ts",
+      "types": "./dist/intents/index.d.ts",
+      "default": "./dist/intents/index.js"
+    },
+    "./chat": {
+      "@vibesys/source": "./src/chat/index.ts",
+      "types": "./dist/chat/index.d.ts",
+      "default": "./dist/chat/index.js"
     }
   },
   "files": [
@@ -21,7 +33,7 @@
     "!dist/.*.tsbuildinfo"
   ],
   "scripts": {
-    "build": "tsc -b tsconfig.lib.json",
+    "build": "tsc -b tsconfig.lib.json tsconfig.intents.json tsconfig.chat.json",
     "check": "tsc -b",
     "test": "node ../../tools/scripts/run_bun_tests.mjs ./src"
   },
@@ -32,6 +44,8 @@
   },
   "dependencies": {
     "@vibesys/contracts": "workspace:*",
-    "@vibesys/hosts": "workspace:*"
+    "@vibesys/hosts": "workspace:*",
+    "@vibesys/proto": "workspace:*",
+    "@bufbuild/protobuf": "2.16.0"
   }
 }

@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from vibesys.run.evaluation_socket import prepare_evaluation_socket
 from vs_agent.api import (
+    AgentBackend,
     AgentExecutionPolicy,
     AgentSessionSpec,
     AgentTurnExecutor,
@@ -34,6 +35,7 @@ from vs_runtime.api.core import (
     CoreStartup,
     IgnoreCommits,
     IgnoreMeasurement,
+    MeasurementDecisions,
     MeasurementServices,
     OperationPorts,
     OwedSubmissions,
@@ -63,8 +65,8 @@ if TYPE_CHECKING:
     from vs_core.api import CoreState, LifecycleCapability, RequestRetries, SearchDef
     from vs_github.api import GitHubClient
     from vs_mcp.api import ToolServerDescriptor
-    from vs_project.api import Project, StateNamespace, StateStore
-    from vs_runtime.api import AgentRole, Commands, CorePolicy, RunFacts
+    from vs_project.api import ControlInbox, Project, StateNamespace, StateStore
+    from vs_runtime.api import AgentRole, CaptureCommands, Commands, CorePolicy, RunFacts
     from vs_runtime.api.core import (
         CommitObserver,
         CoreRuntimeBindings,
@@ -76,6 +78,8 @@ if TYPE_CHECKING:
         AgentConfigurationResolver,
         AgentExecutionEnvironment,
         AgentExecutionLifecycleSink,
+        LocalValidationEvents,
+        RunControlChannel,
         RunEnvironmentView,
         RuntimeWorkspaces,
         TrustedEvaluationPlan,
@@ -110,6 +114,8 @@ class CoreEnvironment:
     queue_allowance_seconds: int
     observe_interval_seconds: int
     observe_backoff_cap_seconds: int
+    queue_wait_budget_seconds: int
+    queue_notice_interval_seconds: int
     request_retries: RequestRetries
     max_run_seconds: int | None
     cancellation_bound_seconds: int
@@ -117,6 +123,8 @@ class CoreEnvironment:
     reconciliation_bound_seconds: int
     lifecycle: frozenset[LifecycleCapability]
     """Lifecycle capabilities this host offers the strategy."""
+    prompt_variables: Mapping[str, object] = field(default_factory=dict)
+    """Data the host adds to the run's prompts (see ``CoreRunContext.prompt_variables``)."""
 
 
 def ignore_lifecycle(event: object) -> None:
@@ -133,7 +141,8 @@ def ignore_diagnostic(line: str) -> None:
 class CoreAgentResources:
     """Agent-session resources, absent as a group from a zero-agent run."""
 
-    client: AgentClientProtocol
+    agent_turns: AgentTurnExecutor
+    """Runs each role's keyed turns, on the provider that role's spec names."""
     invocation_slot: AgentInvocationStore
     configuration: AgentConfigurationResolver
     session_spec: SessionSpecFactory
@@ -173,15 +182,25 @@ class CoreResources:
     network: Network
     """Serves the in-turn agent evaluation socket."""
     measurement_observer: MeasurementObserver = field(default_factory=IgnoreMeasurement)
+    measurement_decisions: MeasurementDecisions = field(default_factory=MeasurementDecisions)
+    """Which decision each measurement answers; the same one names stage output by its gate."""
     """Hears each measurement stage start and end, for the host's event stream."""
+    epoch: Callable[[], int | None] = lambda: None
+    """Published writer identity; unjournaled hosts leave epoch selection to their runtime."""
     commit_observer: CommitObserver = field(default_factory=IgnoreCommits)
     """Hears each confirmed commit, for committed views and round events."""
+    resuming: bool = False
+    control: RunControlChannel | None = None
     evaluation_diagnostics: Callable[[str], None] = ignore_diagnostic
     """Receives one line for each agent evaluation call the run refused as busy."""
     stateless_tool_servers: Mapping[str, ToolServerDescriptor] = field(default_factory=dict)
     """The server of each stateless tool a role may declare, keyed by tool id."""
     commands: Commands | None = None
-    """Sandboxed process execution in a run workspace, which a command-capturing operation uses."""
+    """Ordinary editor process execution in a run workspace, used by local validation."""
+    capture_commands: CaptureCommands | None = None
+    """Role-specific process execution used only by command-capturing operations."""
+    local_validation_events: LocalValidationEvents | None = None
+    """Hears each recipe's start and settled result, for the host's event stream."""
 
     def __post_init__(self) -> None:
         """Reject a role declaration whose session capability bundle disagrees."""
@@ -233,6 +252,9 @@ class CoreServices:
     """The in-turn evaluation tool service, when the plan offers one; the run loop serves it."""
     profile_capture_withheld: bool = False
     """The plan would offer profile work, but the run environment cannot capture a profile."""
+    """The operator force-stopped this run before (``record_stop_request``): it only ends."""
+    control_inbox: ControlInbox | None = None
+    """The run's durable control inbox, where ``vibesys control`` writes; the loop reads it."""
 
     async def close(self) -> None:
         """Release the evaluation executor; workspaces and the client close with the host."""
@@ -272,7 +294,12 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         threads=resources.threads,
         blocking=resources.blocking,
         workspaces=resources.workspaces,
-        measurement=MeasurementServices(resources.evaluation, resources.measurement_observer),
+        measurement=MeasurementServices(
+            resources.evaluation,
+            observer=resources.measurement_observer,
+            decisions=resources.measurement_decisions,
+            control=resources.control,
+        ),
         sessions=sessions,
         operations=catalog,
     )
@@ -281,7 +308,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         search=plan.search,
         config=plan.config,
         state=state,
-        bindings=replace(bindings, commits=resources.commit_observer),
+        bindings=replace(bindings, commits=resources.commit_observer, epoch=resources.epoch),
         catalog=catalog,
         store=resources.project.state_store(run_id),
         publications=publications,
@@ -291,6 +318,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         clock=resources.clock,
         agent_evaluation=bridge,
         profile_capture_withheld=plan.profile_capture_withheld,
+        control_inbox=resources.project.state.control_inbox(run_id),
     )
 
 
@@ -314,12 +342,15 @@ def _context(resources: CoreResources, artifacts: ArtifactStore) -> CoreRunConte
         queue_allowance_seconds=environment.queue_allowance_seconds,
         observe_interval_seconds=environment.observe_interval_seconds,
         observe_backoff_cap_seconds=environment.observe_backoff_cap_seconds,
+        queue_wait_budget_seconds=environment.queue_wait_budget_seconds,
+        queue_notice_interval_seconds=environment.queue_notice_interval_seconds,
         request_retries=environment.request_retries,
         max_run_seconds=environment.max_run_seconds,
         cancellation_bound_seconds=environment.cancellation_bound_seconds,
         cleanup_bound_seconds=environment.cleanup_bound_seconds,
         reconciliation_bound_seconds=environment.reconciliation_bound_seconds,
         role_models=resources.role_models,
+        prompt_variables=environment.prompt_variables,
     )
 
 
@@ -356,6 +387,7 @@ def _initial_state(
         offered=catalog,
         startup=CoreStartup(
             deadline_at=resources.clock.now() + plan.deadline_seconds,
+            duration_seconds=plan.deadline_seconds,
             limits=plan.limits,
             lifecycle=_lifecycle(resources, suspendable=suspendable),
             requirements=plan.requirements,
@@ -439,10 +471,12 @@ def _catalog(
         retention_label=policy.retention_label,
         variables=plan.prompt_variables,
         commands=resources.commands,
+        capture_commands=resources.capture_commands,
         replies=plan.search.reply_schemas,
         validation_passes=StateValidationPasses(
             resources.project.state.local_namespace(resources.run_id, "validation")
         ),
+        local_validation_events=resources.local_validation_events,
     )
     owned = (
         ()
@@ -477,6 +511,7 @@ def _session_services(
         return None
     resolver = ProductionSessionResolver(
         ResolverInputs(
+            control=resources.control,
             roles=resources.roles,
             schemas=plan.search.reply_schemas,
             workspaces=resources.workspaces,
@@ -492,31 +527,39 @@ def _session_services(
         )
     )
     return SessionServices(
-        _agent_sessions(agent_resources, resources.threads),
+        _agent_sessions(agent_resources, resources.threads, resources.control),
         resolver,
         yields=composition.bridge,
     )
 
 
-def _agent_sessions(resources: CoreAgentResources, threads: Threads) -> ClientAgentSessions:
-    client = resources.client
+def turn_executor(client: AgentClientProtocol) -> AgentTurnExecutor:
+    """``client`` as the keyed-turn executor a durable core session needs.
+
+    Raises :class:`CoreCompositionError` for a client that is not one.
+    """
     if not isinstance(client, AgentTurnExecutor):
         detail = "a durable core session needs a client that implements AgentTurnExecutor"
         resource = "agent client"
         raise CoreCompositionError(resource, detail)
-    reported = report_turns(client, resources.lifecycle)
+    return client
+
+
+def _agent_sessions(
+    resources: CoreAgentResources, threads: Threads, control: RunControlChannel | None
+) -> ClientAgentSessions:
+    reported = report_turns(resources.agent_turns, resources.lifecycle, control=control)
     return ClientAgentSessions(reported, resources.invocation_slot, threads=threads)
 
 
 def agent_session_spec(
     *,
-    client: AgentClientProtocol,
-    environment: AgentExecutionEnvironment,
+    environments: Mapping[str, AgentExecutionEnvironment],
     specs: Mapping[str, AgentSpec],
     variables: Callable[[], Mapping[str, str]],
     configuration: AgentConfigurationResolver,
 ) -> SessionSpecFactory:
-    """Provider session configuration for each role, from the run's one agent environment.
+    """Provider session configuration for each role, from the agent environment of its provider.
 
     A role's own mounts (the evaluation tool socket, profiler files) come from its
     `configuration`; without them a confined agent cannot reach the tools it is offered.
@@ -524,10 +567,11 @@ def agent_session_spec(
 
     def spec_for(role: AgentRole, workspace: Path) -> AgentSessionSpec:
         spec = specs[role.id]
+        environment = environments[spec.provider]
         env = {} if environment.use_docker else dict(variables())
         return AgentSessionSpec(
             role=role.id,
-            provider=client.provider or spec.provider,
+            provider=spec.provider,
             workspace=workspace,
             policy=AgentExecutionPolicy(
                 project_paths=environment.project_path_policy,
@@ -535,7 +579,8 @@ def agent_session_spec(
                 require_enforcement=not environment.use_docker,
                 containerized=environment.use_docker,
             ),
-            model=client.model_for_kind(role.id),
+            model=spec.model,
+            scripted=spec.backend is AgentBackend.SCRIPTED,
             mcp_servers=(),
             skills=environment.skill_source_dirs,
             environment=tuple(sorted(env.items())),
@@ -553,4 +598,5 @@ __all__ = [
     "CoreServices",
     "agent_session_spec",
     "build_core_services",
+    "turn_executor",
 ]

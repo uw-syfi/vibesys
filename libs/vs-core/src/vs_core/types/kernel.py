@@ -29,6 +29,7 @@ from .common import (
     RevisionNumber,
     RunFacts,
     RunId,
+    RunPark,
     RunStatus,
     SchemaRef,
     Seconds,
@@ -39,10 +40,13 @@ from .evaluation import (
     EvaluationEvent,
     EvaluationState,
     EvidenceRef,
+    JobQueued,
     MeasurementResult,
     ResumeAuthorized,
+    ResumeRefused,
     TurnSuspended,
 )
+from .measurement import ComparisonSettled
 from .records import (
     OperationResult,
     OperationView,
@@ -114,8 +118,11 @@ class RunState(Value):
     run_id: RunId
     generation: Count = 0
     status: RunStatus = RunStatus.RUNNING
+    park: RunPark | None = None
     now_at: Seconds
     deadline_at: Seconds
+    duration_seconds: Seconds | None = Field(default=None, gt=0)
+    """Original epoch duration; older records use the supplied run configuration once."""
     facts: RunFacts
     capabilities: Capabilities = Capabilities()
     limits: Limits
@@ -227,11 +234,36 @@ class RunControlEvent(Value):
         return self
 
 
+class EpochResumed(Value):
+    """An operator opens fresh run authority, then reconciles retained work.
+
+    Writer recovery uses ``RecoveryStarted`` and preserves the run's closure and
+    journal. Only this input authorizes constructing a successor run.
+    """
+
+    kind: Literal["epoch_resumed"] = "epoch_resumed"
+    epoch: Count
+    now_at: Seconds
+
+
 class ControlChanged(Value):
     """Control changed lifecycle contract."""
 
     kind: Literal["control_changed"] = "control_changed"
     control: ControlInput
+
+
+class StopLiftRecorded(Value):
+    """An explicit resume lifted the run's standing stop (the control that did it).
+
+    Core publishes it after the ``ControlChanged`` of the same control, so a consumer sees
+    the stop and then its lift. It is recorded only while the stop stands and the run has not
+    committed its ending (`vs_core._run_pause.control_refusal`).
+    """
+
+    kind: Literal["stop_lift_recorded"] = "stop_lift_recorded"
+    control: ControlInput
+    new_epoch: bool = Field(default=False, exclude_if=lambda value: not value)
 
 
 class RunEnded(Value):
@@ -255,7 +287,8 @@ type CoreEvent = Annotated[
     | EvaluationEvent
     | SettlementEvent
     | RecordsEvent
-    | RunControlEvent,
+    | RunControlEvent
+    | EpochResumed,
     Field(discriminator="kind"),
 ]
 type StrategyEvent = Annotated[
@@ -267,15 +300,19 @@ type StrategyEvent = Annotated[
     | InputDropped
     | AttemptExhausted
     | CheckpointResolved
+    | ComparisonSettled
     | InterruptCompleted
     | MeasurementResult
+    | JobQueued
     | ResumeAuthorized
+    | ResumeRefused
     | TurnSuspended
     | YieldPublicationFailed
     | InterruptFailed
     | OperationResult
     | Failed
     | ControlChanged
+    | StopLiftRecorded
     | AdoptionResult
     | AdoptionFailed
     | RunEnded,
@@ -319,6 +356,7 @@ class SchedulingContext(AreaContext):
     records: RecordsState
     sessions: SessionsState
     settlement: SettlementState
+    evaluation: EvaluationState
 
 
 class AttemptsContext(AreaContext):
@@ -386,10 +424,15 @@ class Transition(Value):
 class RunEnvelope[S: StrategyState](Value):
     """Atomic core, strategy, fence and cursor envelope with explicit versioning.
 
-    ``schema_version`` is ``ENVELOPE_SCHEMA_VERSION`` when written; the shape each version
-    names is pinned in vs-core's ``tests/envelope_schema_versions.txt``. Decoding an envelope
+    ``schema_version`` is ``ENVELOPE_SCHEMA_VERSION`` when written; the shape is pinned by
+    vs-core's ``tests/envelope.persisted-schema.txt``, and a change every saved envelope
+    survives keeps the version (``scripts/check_persisted_schema_compat.py``). An envelope of
+    an older supported version is migrated to the current one before it is decoded
+    (``vs_core._envelope_migrations``, checked by ``tests/test_envelope_migrations.py``); one
     of any other version is refused, before its shape is validated, with an error that names
-    the version and says whether an older or a newer VibeSys wrote it; there is no migration.
+    the version and says whether an older or a newer VibeSys wrote it. One of the current
+    version holding a field or value this build does not know is refused as written by a
+    newer VibeSys (`vs_core._registry.decode_stored`).
     """
 
     schema_version: int = Field(ge=1)

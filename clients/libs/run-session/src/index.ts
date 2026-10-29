@@ -9,6 +9,11 @@ export {connectRun, type RunConnectionOptions} from './connect.js';
 export type {WebSessionState, WebSessionStatus} from './connection.js';
 export type {
   BrowserLifecycle,
+  ChatHarness,
+  ChatResponse,
+  ChatResult,
+  ChatThreadResponse,
+  ChatThreadResult,
   IterationLoad,
   PageVisibility,
   RunCommand,
@@ -16,13 +21,16 @@ export type {
   RunConnection,
   RunStreamHandlers,
   TransportHooks,
+  WebChatOptions,
 } from './ports.js';
 export {
   createRunStore,
   type IterationPublicationOutcome,
   type IterationRunMismatch,
   type RunAction,
+  type RunDispatchOutcome,
   type RunStore,
+  type RunTracePublication,
   runStep,
 } from './run.js';
 export {WebSession, type WebSessionOptions} from './web-session.js';

@@ -10,9 +10,9 @@ import {defaultScheduleTimeout, type ScheduleTimeout} from './control-channel.js
 import type {EventSubscription, SubscribeOptions} from './transport.js';
 
 /**
- * The slice of `ServerClient` a persistent stream drives. Both the production
- * client and any transport the caller wraps around it (a tui `ServerTransport`,
- * a test fake) satisfy this structurally, so the abstraction lives here in
+ * The slice of a server transport a persistent stream drives. The production
+ * transport and any the caller wraps around it (a test fake) satisfy this
+ * structurally, so the abstraction lives here in
  * `@vibesys/transport` without depending on anything above it.
  */
 export interface StreamTransport {
@@ -54,6 +54,7 @@ export type StreamRebootstrapDisposition =
 type StreamRecovery = 'idle' | 'initial' | 'bootstrap' | 'retry' | 'rebootstrap';
 type ActiveStreamRecovery = Exclude<StreamRecovery, 'idle'>;
 type QueuedStreamRecovery = Extract<StreamRecovery, 'retry' | 'rebootstrap'>;
+type ProtocolErrorMessage = Extract<PersistentStreamMessage, {type: 'protocol_error'}>;
 
 export interface PersistentEventStreamCallbacks {
   /**
@@ -140,7 +141,7 @@ function isProtocolFault(error: Error): boolean {
 }
 
 /**
- * Owns the dial/redial loop for a `ServerClient` subscription: it bootstraps
+ * Owns the dial/redial loop for a server transport subscription: it bootstraps
  * once, watches for the socket to drop, and resubscribes from the caller's
  * cursor on a finite backoff. The caller supplies where to resume from, whether
  * a drop is worth reconnecting, and where messages and connection changes go;
@@ -401,6 +402,45 @@ export class PersistentEventStream {
   ): Promise<boolean> {
     const token = ++this.#connectionSeq;
     this.#activeExecutionCheckpoints.reset();
+    const capabilityProbe = options?.tail !== undefined || options?.storeId !== undefined;
+    let handshakePending = capabilityProbe;
+    let deferredProtocolError: ProtocolErrorMessage | null = null;
+    const deliver = (message: ServerMessage): void => {
+      // `subscribed` is the synchronous transport-level proof that this dial
+      // was accepted. Clear the probe window here, inside the transport's
+      // observer boundary, rather than waiting for the subscribe promise's
+      // continuation: an accepted peer may send a terminal protocol frame in
+      // the same socket callback/chunk. That frame must reach the application
+      // through the transport boundary so an observer failure still retires
+      // the acquired handle.
+      const accepted = message.type === 'subscribed';
+      if (accepted) handshakePending = false;
+      if (accepted && deferredProtocolError !== null) {
+        const terminal = deferredProtocolError;
+        deferredProtocolError = null;
+        this.#deliver(terminal, resumed, token);
+        return;
+      }
+      // Old peers emit their terminal protocol_error before the typed
+      // rejection that proves a capability option unsupported. Until the
+      // handshake settles, retain that one frame: a ServerError consumes it
+      // with the probe, while every other outcome publishes it normally.
+      if (!handshakePending) {
+        this.#deliver(message, resumed, token);
+        return;
+      }
+      if (deferredProtocolError !== null) return;
+      if (message.type === 'protocol_error') {
+        deferredProtocolError = message;
+        // The dial is terminal unless its promise supplies the typed
+        // rejection that authorizes fallback. Preserve that ownership fact
+        // now so an explicit recovery arriving before promise settlement is
+        // retained; the fallback path clears it after proving the probe.
+        if (this.#recovery !== 'idle') this.#recoveryFailed = true;
+        return;
+      }
+      this.#deliver(message, resumed, token);
+    };
     let settleDial: () => void = () => undefined;
     const pendingDial = new Promise<void>(resolve => {
       settleDial = resolve;
@@ -410,12 +450,25 @@ export class PersistentEventStream {
     // they return the promise that eventually yields this handle.
     this.#pendingDial = pendingDial;
     try {
-      const subscription = await this.#transport.subscribe(
-        afterSequence,
-        message => this.#deliver(message, resumed, token),
-        error => this.#handleDisconnect(error, token),
-        options,
-      );
+      let subscription: EventSubscription;
+      try {
+        subscription = await this.#transport.subscribe(
+          afterSequence,
+          deliver,
+          error => this.#handleDisconnect(error, token),
+          options,
+        );
+      } catch (error) {
+        handshakePending = false;
+        if (deferredProtocolError !== null && !isServerRejection(error)) {
+          this.#deliver(deferredProtocolError, resumed, token);
+        }
+        throw error;
+      }
+      handshakePending = false;
+      if (deferredProtocolError !== null) {
+        this.#deliver(deferredProtocolError, resumed, token);
+      }
       // A transport may report this socket's disconnect before its subscribe
       // promise hands the handle back. Such a handle is already dead and cannot
       // become authoritative merely because its promise resolves afterward.

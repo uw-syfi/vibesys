@@ -1,0 +1,425 @@
+import {expect, test} from 'bun:test';
+import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
+import type {HostKey} from '@vibesys/hosts';
+import {FakeGatewayBridge} from '@vibesys/ipc/testing';
+import {
+  HostCallRequestSchema,
+  HostCallResponseSchema,
+  IntentAction,
+  IntentStep,
+  LifecycleSchema,
+  PostIntentRequestSchema,
+  RecordSchema,
+  RelaunchRefusal,
+  RunLiveness,
+  type Record as StoreRecord,
+} from '@vibesys/proto';
+import {relaunchRequest} from '@vibesys/runs/intents';
+import {FakeClock} from '@vibesys/transport/testing';
+import {waitFor} from 'xstate';
+import {FakeRecords} from './fake-records.js';
+import {intentsActor, relaunchActor} from './index.js';
+
+const encodeRecord = (record: StoreRecord) => toBinary(RecordSchema, record);
+
+function fixture(enabled = true) {
+  const bridge = new FakeGatewayBridge();
+  const clock = new FakeClock();
+  const records = new FakeRecords(encodeRecord);
+  const actor = intentsActor({
+    bridge,
+    host: 'local' as HostKey,
+    runId: 'run-1',
+    enabled,
+    schedule: clock.schedule,
+    records: records.subscribe,
+  });
+  actor.start();
+  return {bridge, actor, clock, records};
+}
+const request = create(PostIntentRequestSchema, {
+  projectRoot: '/project',
+  expectedEpoch: 1n,
+  runId: 'run-1',
+  requestId: 'r-1',
+  intent: {case: 'pause', value: {}},
+});
+function admission(requestId = 'r-1') {
+  return toBinary(
+    HostCallResponseSchema,
+    create(HostCallResponseSchema, {
+      result: {case: 'postIntent', value: {requestId, orderedReader: true}},
+    }),
+  );
+}
+
+test('a successful unary HostCall means pending until the records of the run say applied or refused', async () => {
+  for (const step of [IntentStep.APPLIED, IntentStep.REFUSED]) {
+    const {bridge, actor, records} = fixture();
+    try {
+      actor.send({type: 'send', request});
+      const call = bridge.calls[0];
+      expect(call?.method).toBe('/vibesys.api.v1.HostService/HostCall');
+      const sent = fromBinary(HostCallRequestSchema, call?.bytes as Uint8Array);
+      expect(sent.checkout).toBe('');
+      expect(sent.method.case).toBe('postIntent');
+      call?.resolve(admission());
+      await waitFor(actor, snapshot => snapshot.matches({active: 'idle'}), {timeout: 1000});
+      expect(actor.getSnapshot().context.entries[0]?.status).toBe('pending');
+      const record = create(RecordSchema, {
+        seq: 1n,
+        body: {
+          case: 'intent',
+          value: {
+            controlId: 'r-1',
+            action: IntentAction.PAUSE,
+            step,
+            ...(step === IntentStep.REFUSED ? {reason: 'run ended'} : {}),
+          },
+        },
+      });
+      records.publish([record]);
+      expect(actor.getSnapshot().context.entries[0]?.status).toBe(
+        step === IntentStep.APPLIED ? 'applied' : 'refused',
+      );
+    } finally {
+      actor.stop();
+    }
+    expect(bridge.calls.every(call => call.cancelled)).toBe(true);
+    expect(bridge.streams).toHaveLength(0);
+    expect(records.subscribers).toBe(0);
+  }
+});
+
+test('switch off makes no transport call', () => {
+  const {actor, bridge} = fixture(false);
+  actor.send({type: 'send', request});
+  expect(bridge.calls).toHaveLength(0);
+  expect(bridge.streams).toHaveLength(0);
+  actor.stop();
+});
+
+test('timeout cancels the unary and a late reply cannot settle its retry', async () => {
+  const {actor, bridge, clock} = fixture();
+  try {
+    actor.send({type: 'send', request});
+    clock.advanceBy(35_000);
+    expect(bridge.calls[0]?.cancelled).toBe(true);
+    expect(actor.getSnapshot().context.entries[0]?.status).toBe('uncertain');
+    actor.send({type: 'retry', requestId: 'r-1'});
+    expect(bridge.calls[1]?.bytes).toEqual(bridge.calls[0]?.bytes);
+    bridge.calls[0]?.resolve(admission());
+    bridge.calls[1]?.resolve(admission());
+    await waitFor(actor, snapshot => snapshot.matches({active: 'idle'}), {timeout: 1000});
+    expect(actor.getSnapshot().context.entries).toHaveLength(1);
+    expect(actor.getSnapshot().context.entries[0]?.status).toBe('pending');
+  } finally {
+    actor.stop();
+  }
+});
+
+test('typed refusals are final; malformed replies and wrong ids stay unconfirmed', async () => {
+  for (const [reply, status] of [
+    [new Uint8Array([255]), 'uncertain'],
+    [admission('other'), 'uncertain'],
+    [
+      toBinary(
+        HostCallResponseSchema,
+        create(HostCallResponseSchema, {
+          result: {
+            case: 'configurationFailed',
+            value: {
+              code: 'invalid_input',
+              stage: 'post_intent',
+              message: 'unknown run',
+              stderr: 'detail',
+              exitCode: 2,
+            },
+          },
+        }),
+      ),
+      'refused',
+    ],
+  ] as const) {
+    const {actor, bridge} = fixture();
+    try {
+      actor.send({type: 'send', request});
+      bridge.calls[0]?.resolve(reply);
+      await waitFor(actor, snapshot => snapshot.matches({active: 'idle'}), {timeout: 1000});
+      expect(actor.getSnapshot().context.entries[0]?.status).toBe(status);
+      expect(actor.getSnapshot().context.error === null).toBe(status === 'refused');
+    } finally {
+      actor.stop();
+    }
+  }
+});
+
+test("history reads no log of its own: a lost, ended or missing log is the reader's to report, once", () => {
+  const {actor, bridge, clock, records} = fixture();
+  try {
+    actor.send({type: 'send', request});
+    // The reviewer's repro: a Tail that ended with NotFound used to be reopened every second.
+    clock.advanceBy(60_000);
+    expect(bridge.streams).toHaveLength(0);
+    expect(records.subscribers).toBe(1);
+  } finally {
+    actor.stop();
+  }
+  expect(records.subscribers).toBe(0);
+  expect(clock.pending).toBe(0);
+});
+
+test('replayed and reordered deliveries fold to the same outcomes', () => {
+  const {actor, records} = fixture();
+  try {
+    const record = (seq: bigint, step: IntentStep) =>
+      create(RecordSchema, {
+        seq,
+        epoch: 1,
+        body: {
+          case: 'intent',
+          value: {controlId: 'r-1', action: IntentAction.PAUSE, step},
+        },
+      });
+    const applied = record(2n, IntentStep.APPLIED);
+    records.publish([applied]);
+    // A reconnect replays the prefix, including an older observation of the same control.
+    records.publish([record(1n, IntentStep.REFUSED), applied]);
+    expect(actor.getSnapshot().context.outcomes).toHaveLength(1);
+    expect(actor.getSnapshot().context.outcomes[0]?.status).toBe('applied');
+  } finally {
+    actor.stop();
+  }
+});
+
+test('relaunch confirms an epoch or a typed refusal and owns every transport call', async () => {
+  for (const outcome of [
+    {case: 'epoch', value: 2n} as const,
+    {case: 'refusal', value: RelaunchRefusal.LOCKED} as const,
+    {case: 'refusal', value: RelaunchRefusal.CHECKOUT_MISSING} as const,
+    {case: 'refusal', value: RelaunchRefusal.EPOCH_CHANGED} as const,
+  ]) {
+    const bridge = new FakeGatewayBridge();
+    const clock = new FakeClock();
+    const actor = relaunchActor({
+      bridge,
+      host: 'local' as HostKey,
+      request: relaunchRequest('/project', 'run-1', 1n),
+      observation: {
+        epoch: 1n,
+        lifecycle: create(LifecycleSchema, {state: {case: 'parked', value: {}}}),
+      },
+      schedule: clock.schedule,
+    });
+    actor.start();
+    try {
+      actor.send({type: 'relaunch'});
+      actor.send({type: 'relaunch'});
+      expect(bridge.calls).toHaveLength(1);
+      const call = bridge.calls[0];
+      const sent = fromBinary(HostCallRequestSchema, call?.bytes as Uint8Array);
+      expect(sent.checkout).toBe('');
+      expect(sent.method).toMatchObject({
+        case: 'relaunch',
+        value: {runId: 'run-1', projectRoot: '/project', expectedEpoch: 1n},
+      });
+      call?.resolve(
+        toBinary(
+          HostCallResponseSchema,
+          create(HostCallResponseSchema, {
+            result: {case: 'relaunch', value: {outcome}},
+          }),
+        ),
+      );
+      await waitFor(actor, snapshot => snapshot.matches('settled'), {timeout: 1000});
+      expect(actor.getSnapshot().context.result?.outcome).toEqual(outcome);
+      actor.send({type: 'relaunch'});
+      expect(bridge.calls).toHaveLength(1);
+    } finally {
+      actor.stop();
+    }
+    expect(bridge.calls.every(call => call.cancelled)).toBe(true);
+    expect(bridge.streams).toHaveLength(0);
+  }
+});
+
+test('relaunch deadline and owner shutdown cancel the call; late replies never settle', async () => {
+  for (const mode of ['deadline', 'stop'] as const) {
+    const bridge = new FakeGatewayBridge();
+    const clock = new FakeClock();
+    const actor = relaunchActor({
+      bridge,
+      host: 'local' as HostKey,
+      request: relaunchRequest('/project', 'run-1', 1n),
+      observation: {
+        epoch: 1n,
+        lifecycle: create(LifecycleSchema, {state: {case: 'parked', value: {}}}),
+      },
+      schedule: clock.schedule,
+    });
+    actor.start();
+    actor.send({type: 'relaunch'});
+    if (mode === 'deadline') clock.advanceBy(35_000);
+    else actor.stop();
+    expect(bridge.calls[0]?.cancelled).toBe(true);
+    bridge.calls[0]?.resolve(
+      toBinary(
+        HostCallResponseSchema,
+        create(HostCallResponseSchema, {
+          result: {case: 'relaunch', value: {outcome: {case: 'epoch', value: 2n}}},
+        }),
+      ),
+    );
+    await Promise.resolve();
+    expect(actor.getSnapshot().context.result).toBeNull();
+    if (mode === 'deadline') expect(actor.getSnapshot().value).toBe('uncertain');
+    actor.stop();
+  }
+});
+
+test('relaunch rejects malformed, missing, stale and unknown outcomes as uncertain', async () => {
+  for (const bytes of [
+    new Uint8Array([255]),
+    admission(),
+    toBinary(
+      HostCallResponseSchema,
+      create(HostCallResponseSchema, {
+        result: {case: 'relaunch', value: {}},
+      }),
+    ),
+    toBinary(
+      HostCallResponseSchema,
+      create(HostCallResponseSchema, {
+        result: {case: 'relaunch', value: {outcome: {case: 'epoch', value: 1n}}},
+      }),
+    ),
+    toBinary(
+      HostCallResponseSchema,
+      create(HostCallResponseSchema, {
+        result: {
+          case: 'relaunch',
+          value: {outcome: {case: 'refusal', value: 99 as RelaunchRefusal}},
+        },
+      }),
+    ),
+  ]) {
+    const bridge = new FakeGatewayBridge();
+    const clock = new FakeClock();
+    const actor = relaunchActor({
+      bridge,
+      host: 'local' as HostKey,
+      request: relaunchRequest('/project', 'run-1', 1n),
+      observation: {
+        epoch: 1n,
+        lifecycle: create(LifecycleSchema, {state: {case: 'parked', value: {}}}),
+      },
+      schedule: clock.schedule,
+    });
+    actor.start();
+    try {
+      actor.send({type: 'relaunch'});
+      bridge.calls[0]?.resolve(bytes);
+      await waitFor(actor, snapshot => snapshot.matches('uncertain'), {timeout: 1000});
+      expect(actor.getSnapshot().context.result).toBeNull();
+    } finally {
+      actor.stop();
+    }
+  }
+});
+
+test('a confirming epoch supersedes HostCall and cancels the obsolete wait', async () => {
+  const bridge = new FakeGatewayBridge();
+  const clock = new FakeClock();
+  const actor = relaunchActor({
+    bridge,
+    host: 'local' as HostKey,
+    request: relaunchRequest('/project', 'run-1', 1n),
+    observation: {
+      epoch: 1n,
+      lifecycle: create(LifecycleSchema, {state: {case: 'parked', value: {}}}),
+    },
+    schedule: clock.schedule,
+  });
+  actor.start();
+  try {
+    actor.send({type: 'relaunch'});
+    actor.send({
+      type: 'writer',
+      facts: {
+        observation: {
+          epoch: 2n,
+          lifecycle: create(LifecycleSchema, {state: {case: 'running', value: {}}}),
+        },
+        liveness: {epoch: 2n, value: RunLiveness.ALIVE},
+        fresh: true,
+      },
+    });
+    expect(bridge.calls[0]?.cancelled).toBe(true);
+    bridge.calls[0]?.resolve(
+      toBinary(
+        HostCallResponseSchema,
+        create(HostCallResponseSchema, {
+          result: {case: 'relaunch', value: {outcome: {case: 'epoch', value: 2n}}},
+        }),
+      ),
+    );
+    await waitFor(actor, snapshot => snapshot.matches('settled'), {timeout: 1000});
+    expect(actor.getSnapshot().context.result).toBeNull();
+    expect(actor.getSnapshot().context.observation.epoch).toBe(2n);
+    actor.send({
+      type: 'writer',
+      facts: {
+        observation: {
+          epoch: 2n,
+          lifecycle: create(LifecycleSchema, {state: {case: 'parked', value: {}}}),
+        },
+        liveness: {epoch: 2n, value: RunLiveness.ENDED},
+        fresh: true,
+      },
+    });
+    expect(actor.getSnapshot().value).toBe('ready');
+    actor.send({type: 'relaunch'});
+    const sent = fromBinary(HostCallRequestSchema, bridge.calls[1]?.bytes as Uint8Array);
+    expect(sent.method).toMatchObject({case: 'relaunch', value: {expectedEpoch: 2n}});
+  } finally {
+    actor.stop();
+  }
+  expect(bridge.streams.every(stream => stream.cancelled)).toBe(true);
+});
+
+test('an interrupted writer fact enables relaunch only for the current epoch', () => {
+  const bridge = new FakeGatewayBridge();
+  const clock = new FakeClock();
+  const observation = {
+    epoch: 2n,
+    lifecycle: create(LifecycleSchema, {state: {case: 'running', value: {}}}),
+  };
+  const actor = relaunchActor({
+    bridge,
+    host: 'local' as HostKey,
+    request: relaunchRequest('/project', 'run-1', 2n),
+    observation,
+    schedule: clock.schedule,
+  });
+  actor.start();
+  try {
+    for (const liveness of [
+      {epoch: 1n, value: RunLiveness.INTERRUPTED},
+      {epoch: 2n, value: RunLiveness.ALIVE},
+      {epoch: 2n, value: RunLiveness.UNSPECIFIED},
+    ]) {
+      actor.send({type: 'writer', facts: {observation, liveness, fresh: true}});
+      actor.send({type: 'relaunch'});
+      expect(bridge.calls).toHaveLength(0);
+    }
+    actor.send({
+      type: 'writer',
+      facts: {observation, liveness: {epoch: 2n, value: RunLiveness.INTERRUPTED}, fresh: true},
+    });
+    actor.send({type: 'relaunch'});
+    expect(bridge.calls).toHaveLength(1);
+  } finally {
+    actor.stop();
+  }
+  expect(bridge.streams).toHaveLength(0);
+});

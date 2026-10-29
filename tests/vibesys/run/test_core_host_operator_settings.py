@@ -31,7 +31,7 @@ from vibesys.run.contracts import RunRequest
 from vibesys.run.core_run import RunEnd, drive_core_run
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
-from vs_agent.api import AgentCapabilities
+from vs_agent.api import AgentCapabilities, AgentSpec
 from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import AgentRole, CorePlan, CoreRunContext, OrchestrationPlugin, RunStatus
@@ -41,6 +41,7 @@ from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     import pytest
@@ -53,7 +54,10 @@ def _resumable_client(**_kwargs: object) -> FakeAgentClient:
 
 
 def _run(
-    tmp_path: Path, config: Config, strategy: SkeletonStrategy | None = None
+    tmp_path: Path,
+    config: Config,
+    strategy: SkeletonStrategy | None = None,
+    client_factory: Callable[..., FakeAgentClient] = _resumable_client,
 ) -> tuple[RunEnd, list[CoreRunContext]]:
     """Open the product host over an idle policy and drive its run to the end."""
     project_root = tmp_path / "project"
@@ -103,7 +107,7 @@ def _run(
     )
     # A paused run asks for nothing; it stays open until the deadline stops it.
     if strategy is None:
-        integration.control.request_pause()
+        integration.control.pause_for_quota()
     clock = VirtualClock(at=0.0)
 
     async def exercise() -> RunEnd:
@@ -114,7 +118,7 @@ def _run(
                 plugin=plugin,
                 options=EmptyOptions(),
                 timing=RunTiming(clock, 60.0, OsThreads()),
-                agent_client_factory=_resumable_client,
+                agent_client_factory=client_factory,
                 backend_factory=host_container_backend,
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
                 stop_timer=FakeStopTimer(threads=OsThreads()),
@@ -166,3 +170,46 @@ def test_a_run_that_spent_its_attempt_budget_keeping_nothing_fails_as_budget_exh
     assert end.failure.kind is RunFailureKind.BUDGET_EXHAUSTED
     assert (end.failure.workstreams_started, end.failure.candidates_kept) == (1, 0)
     assert end.failure.workstream_budget == 1
+
+
+def test_a_role_on_another_provider_runs_on_a_client_of_that_provider_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The run's provider is claude: its one role asks for codex, so only a codex client opens."""
+    set_container_cli_credentials(monkeypatch)
+    opened: list[AgentSpec] = []
+
+    def recording_client(*, spec: AgentSpec, **kwargs: object) -> FakeAgentClient:
+        opened.append(spec)
+        return _resumable_client(**kwargs)
+
+    config = Config.model_validate(
+        {
+            "model": {"name": "core-test"},
+            "run": {"max_run_seconds": 7},
+            "agent": {"roles": {"implementer": {"provider": "codex", "model": "role-model"}}},
+        }
+    )
+
+    _run(tmp_path, config, client_factory=recording_client)
+
+    assert [(spec.provider, dict(spec.role_models)) for spec in opened] == [
+        ("codex", {"implementer": "role-model"})
+    ]
+
+
+def test_a_run_without_role_providers_opens_one_client_of_the_runs_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    set_container_cli_credentials(monkeypatch)
+    opened: list[AgentSpec] = []
+
+    def recording_client(*, spec: AgentSpec, **kwargs: object) -> FakeAgentClient:
+        opened.append(spec)
+        return _resumable_client(**kwargs)
+
+    config = Config.model_validate({"model": {"name": "core-test"}, "run": {"max_run_seconds": 7}})
+
+    _run(tmp_path, config, client_factory=recording_client)
+
+    assert [(spec.provider, spec.model) for spec in opened] == [("claude", "core-test")]

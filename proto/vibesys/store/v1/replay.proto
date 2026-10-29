@@ -1,0 +1,428 @@
+syntax = "proto3";
+package vibesys.store.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/descriptor.proto";
+import "vibesys/store/v1/agent_attrs.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
+
+// Every prompt-context field declares whether it changes semantic input or policy.
+enum ReplayFieldKind {
+  REPLAY_FIELD_KIND_UNSPECIFIED = 0;
+  REPLAY_FIELD_KIND_IDENTITY = 1;
+  REPLAY_FIELD_KIND_POLICY = 2;
+}
+extend google.protobuf.MessageOptions {
+  // Contexts classify their own fields. Shared facts inherit the classification
+  // of the enclosing context field and need no replay-specific annotations.
+  bool replay_context = 51102;
+}
+extend google.protobuf.FieldOptions {
+  ReplayFieldKind replay_field = 51100;
+  // Only repeated fields may be sets. The writer sorts and deduplicates them.
+  bool replay_set = 51101;
+}
+
+// Names are semantic, never source locations or live collection positions.
+message OperationKey {
+  string operation = 1 [(buf.validate.field).string.min_len = 1];
+  repeated KeyComponent scope = 2;
+}
+enum KeyComponentKind {
+  KEY_COMPONENT_KIND_UNSPECIFIED = 0;
+  KEY_COMPONENT_KIND_PARENT = 1;
+  KEY_COMPONENT_KIND_ITEM = 2;
+  KEY_COMPONENT_KIND_SAMPLE = 3;
+  KEY_COMPONENT_KIND_REVISION = 4;
+  KEY_COMPONENT_KIND_RECORDED_POSITION = 5;
+}
+message KeyComponent {
+  KeyComponentKind kind = 1 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  string value = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+// All historical budget arithmetic reads this observation's value during replay.
+message ReplayAllowance {
+  uint64 iterations = 1;
+  uint64 capacity = 2;
+  double remaining = 3 [(buf.validate.field).double = {gte: 0, finite: true}];
+  // Absent dimensions are explicitly unbounded. Remaining is retained prompt
+  // context; executable resource admission uses these named bounds.
+  ReplayResources resources = 4;
+}
+
+message ReplayResources {
+  optional double money_usd = 1 [(buf.validate.field).double = {gte: 0, finite: true}];
+  optional uint64 input_tokens = 2;
+  optional uint64 output_tokens = 3;
+}
+message ReplayPolicy {
+  string role = 1;
+  string template = 2;
+  bytes content = 3;
+  string reply_type = 4 [(buf.validate.field).string.min_len = 1];
+  // Derived by the writer from the reachable retained reply descriptors.
+  optional bytes reply_schema_digest = 5 [(buf.validate.field).bytes.len = 32];
+  // The writer retains the complete typed request, including policy fields that
+  // do not enter identity. Executors never decode the canonical identity framing.
+  // Absent only in recorder prototypes predating typed request retention.
+  google.protobuf.Any request = 6;
+  // An upper bound enforced by the execution owner. A bounded epoch rejects
+  // external requests that omit a bound for a constrained dimension. Free
+  // operations explicitly reserve zero.
+  ReplayResources reservation = 7;
+  // Execution owners may opt additional request families into physical children.
+  // Agent turns always derive this bound from their retained typed request.
+  optional double physical_within_seconds = 8 [(buf.validate.field).double = {gt: 0, finite: true}];
+}
+
+// Immutable execution metadata, separate from mutable span labels. Outcome Any
+// is decoded with the epoch's retained descriptors, never the current reply type.
+message OperationReplay {
+  option (buf.validate.message).cel = {
+    id: "operation_replay.reply_schema"
+    message: "recorded operations require the writer's reply schema proof"
+    expression: "has(this.policy) && has(this.policy.reply_schema_digest)"
+  };
+  option (buf.validate.message).cel = {
+    id: "operation_replay.acceptance"
+    message: "an outcome requires its immutable acceptance sequence"
+    expression: "has(this.outcome) == has(this.accepted_sequence) && (!has(this.accepted_child) || has(this.outcome))"
+  };
+  OperationKey key = 1 [(buf.validate.field).required = true];
+  uint32 encoding_version = 2 [(buf.validate.field).uint32.const = 1];
+  bytes identity = 3 [(buf.validate.field).bytes.min_len = 1];
+  bytes identity_digest = 4 [(buf.validate.field).bytes.len = 32];
+  bytes dependencies = 5 [(buf.validate.field).bytes.len = 32];
+  ReplayPolicy policy = 6 [(buf.validate.field).required = true];
+  google.protobuf.Any outcome = 7;
+  // seq and clock come exclusively from the accepting Record envelope.
+  bool paid = 8;
+  optional double cost_usd = 9 [(buf.validate.field).double = {gte: 0, finite: true}];
+  ReplayAllowance allowance = 10 [(buf.validate.field).required = true];
+  // Later span updates retain this sequence; they are not new acceptances.
+  optional uint64 accepted_sequence = 11 [(buf.validate.field).uint64.gt = 0];
+  // New physical execution records retain the winner by child span identity.
+  optional string accepted_child = 12 [(buf.validate.field).string.min_len = 1];
+  // Recorded with the logical start, before the first physical child can exist.
+  ReplayTurnBound turn_bound = 13;
+}
+
+// A turn's observation names its immutable bound and the durable wait it yielded.
+message ReplayTurnObservation {
+  option (buf.validate.message).cel = {
+    id: "replay_turn_observation.suspension"
+    message: "only a succeeded turn yields its durable wait"
+    expression: "!has(this.suspension) || this.succeeded"
+  };
+  ReplayTurnBound bound = 1 [(buf.validate.field).required = true];
+  bool succeeded = 2;
+  ReplayTurnWait suspension = 3;
+}
+
+// deadline is the stated limit. The turn ends at that limit plus its credited hold,
+// by the same rule as the positional turn bound.
+message ReplayTurnBound {
+  string origin = 1 [(buf.validate.field).string.min_len = 1];
+  double deadline = 2 [(buf.validate.field).double = {gte: 0, finite: true}];
+  double hold_credit_seconds = 3 [(buf.validate.field).double = {gte: 0, finite: true}];
+}
+
+// A child is execution evidence, never another semantic operation.
+message ReplayPhysical {
+  string logical = 1 [(buf.validate.field).string.min_len = 1];
+  string external_id = 2 [(buf.validate.field).string.min_len = 1];
+  string host_incarnation = 3 [(buf.validate.field).string.min_len = 1];
+  double deadline = 4 [(buf.validate.field).double = {gte: 0, finite: true}];
+  uint64 ordinal = 5;
+  optional uint64 withdrawn_sequence = 6 [(buf.validate.field).uint64.gt = 0];
+  optional uint64 observed_sequence = 7 [(buf.validate.field).uint64.gt = 0];
+  optional bytes termination_proof_digest = 8 [(buf.validate.field).bytes.len = 32];
+  // Positive owner inspection of a fenced invocation that never began.
+  bool confirmed_absent = 9;
+  // W8a: proof-backed intent before releasing access or restoring retained input.
+  optional uint64 settlement_sequence = 10 [(buf.validate.field).uint64.gt = 0];
+  // Steer input ids this turn consumed at its start: every applied, unconsumed
+  // steer for no turn or for this child's logical turn, in application order.
+  repeated string guidance = 11 [(buf.validate.field).repeated = {unique: true, items: {string: {min_len: 1}}}];
+}
+
+// The environment records every writable grant before execution, including
+// tool/build jobs and grants belonging to other runs. Closing this ledger
+// forbids further grants in the execution domain; it does not prove death.
+message WriterBacking {
+  string environment = 1 [(buf.validate.field).string.min_len = 1];
+  string identity = 2 [(buf.validate.field).string.min_len = 1];
+  uint64 generation = 3;
+  string authority = 4 [(buf.validate.field).string.min_len = 1];
+}
+message WriterIdentity {
+  string run_id = 1 [(buf.validate.field).string.min_len = 1];
+  string host_incarnation = 2 [(buf.validate.field).string.min_len = 1];
+  string physical_id = 3 [(buf.validate.field).string.min_len = 1];
+  // An immutable execution-domain ID, never a reusable container name.
+  string domain_id = 4 [(buf.validate.field).string.min_len = 1];
+}
+message WriterManifest {
+  option (buf.validate.message).cel = {
+    id: "writer_manifest.unique"
+    message: "writer physical identities must be unique"
+    expression: "this.writers.map(x, x.physical_id).unique()"
+  };
+  WriterBacking backing = 1 [(buf.validate.field).required = true];
+  repeated WriterIdentity writers = 2;
+  bool closed = 3;
+}
+message WriterTerminationProof {
+  option (buf.validate.message).cel = {
+    id: "writer_proof.closed"
+    message: "termination proof needs a closed manifest and every domain verified absent"
+    expression: "has(this.manifest) && this.manifest.closed && this.manifest.writers.all(x, x.domain_id in this.absent_domains) && this.absent_domains.all(x, this.manifest.writers.exists(w, w.domain_id == x))"
+  };
+  WriterManifest manifest = 1 [(buf.validate.field).required = true];
+  repeated string absent_domains = 2 [(buf.validate.field).repeated.unique = true];
+}
+enum WriterReconciliationStatus {
+  WRITER_RECONCILIATION_STATUS_UNSPECIFIED = 0;
+  WRITER_RECONCILIATION_STATUS_PROVEN_STOPPED = 1;
+  WRITER_RECONCILIATION_STATUS_PENDING = 2;
+  WRITER_RECONCILIATION_STATUS_UNKNOWN = 3;
+  WRITER_RECONCILIATION_STATUS_UNSUPPORTED = 4;
+}
+message WriterReconciliation {
+  option (buf.validate.message).cel = {
+    id: "writer_reconciliation.proof"
+    message: "ProvenStopped requires termination proof for the exact reconciliation manifest"
+    expression: "(this.status == 1) == has(this.proof) && (!has(this.proof) || this.proof.manifest == this.manifest)"
+  };
+  WriterManifest manifest = 1 [(buf.validate.field).required = true];
+  WriterReconciliationStatus status = 2 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  WriterTerminationProof proof = 3;
+  string detail = 4;
+}
+message WriterRegistryState {
+  option (buf.validate.message).cel = {
+    id: "writer_registry.proof"
+    message: "registry proof must bind its exact manifest"
+    expression: "!has(this.proof) || this.proof.manifest == this.manifest"
+  };
+  WriterManifest manifest = 1 [(buf.validate.field).required = true];
+  WriterTerminationProof proof = 2;
+}
+
+// Timer-only progress is an observation, not a keyed paid operation.
+message ReplayClock {
+  ReplayAllowance allowance = 1 [(buf.validate.field).required = true];
+}
+
+message ReplayNotice {
+  option (buf.validate.message).cel = {
+    id: "replay_notice.paid_results"
+    message: "unused entries must identify accepted paid results"
+    expression: "this.unused.all(x, x.paid && has(x.outcome))"
+  };
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  repeated OperationReplay unused = 2 [(buf.validate.field).repeated.min_items = 1];
+  repeated OperationKey pending = 3;
+}
+message ReplayAcknowledgement {
+  // A launch without a preceding unacknowledged notice still records its id.
+  optional string notice_id = 1 [(buf.validate.field).string.min_len = 1];
+  string launch_request_id = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+// A surviving observation can complete its operation after a writer crash.
+// Recording this does not itself deliver an answer to a continuation.
+message ReplayObservation {
+  option (buf.validate.message).cel = {
+    id: "replay_observation.usage_cost"
+    message: "reported usage cost must agree with observation cost"
+    expression: "!has(this.usage) || !has(this.usage.cost_usd) || (has(this.cost_usd) && this.cost_usd == this.usage.cost_usd)"
+  };
+  google.protobuf.Any outcome = 1 [(buf.validate.field).required = true];
+  bool paid = 2;
+  optional double cost_usd = 3 [(buf.validate.field).double = {gte: 0, finite: true}];
+  TokenUsage usage = 4;
+  // Required for a physical child of a bound turn; the archive checks it against the log.
+  ReplayTurnObservation turn = 5;
+}
+
+// Earlier answers remain usable when only prompts or limits change.
+message ReplayPolicyDrift {
+  uint64 results = 1 [(buf.validate.field).uint64.gt = 0];
+  repeated string roles = 2;
+  repeated string templates = 3;
+}
+
+// Authenticated execution evidence. The producer start precedes this obligation,
+// and this obligation precedes the tool reply or a turn's accepted yield.
+message ReplayToolSubmission {
+  string turn = 1 [(buf.validate.field).string.min_len = 1];
+  string call_id = 2 [(buf.validate.field).string.min_len = 1];
+  string reply_id = 3 [(buf.validate.field).string.min_len = 1];
+  string producer = 4 [(buf.validate.field).string.min_len = 1];
+  // The requesting turn's permit; the producer cannot outlive it.
+  ReplayTurnPermit permit = 5 [(buf.validate.field).required = true];
+}
+
+// The admission one logical turn's requests consume: the epoch whose physical
+// start admitted it, its logical origin and that turn's own recorded bound,
+// never the minimum deadline of the turns sharing its scope.
+message ReplayTurnPermit {
+  uint32 epoch = 1 [(buf.validate.field).uint32.gt = 0];
+  string turn = 2 [(buf.validate.field).string.min_len = 1];
+  ReplayTurnBound bound = 3 [(buf.validate.field).required = true];
+}
+
+// One operator control, as the run read it from its inbox. epoch is the epoch
+// the operator acted on; a control for any other epoch is stale.
+message ReplayControl {
+  string request_id = 1 [(buf.validate.field).string.min_len = 1];
+  uint32 epoch = 2 [(buf.validate.field).uint32.gt = 0];
+  oneof action {
+    option (buf.validate.oneof).required = true;
+    ReplayPause pause = 3;
+    ReplayPauseNow pause_now = 4;
+    ReplaySteer steer = 5;
+  }
+}
+// Admit no new logical turn; continuations of this epoch's permits may finish.
+message ReplayPause {}
+// Withdraw every unfinished physical child, then cancel it; start nothing more.
+message ReplayPauseNow {}
+// Operator guidance, consumed by the next turn start it applies to.
+message ReplaySteer {
+  string input_id = 1 [(buf.validate.field).string.min_len = 1];
+  // The logical turn the guidance was written for; stale once that turn ended.
+  optional string turn = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+enum ReplayControlStale {
+  REPLAY_CONTROL_STALE_UNSPECIFIED = 0;
+  // Written for an epoch other than the open one.
+  REPLAY_CONTROL_STALE_EPOCH = 1;
+  // Its logical turn is unknown or has ended.
+  REPLAY_CONTROL_STALE_TURN = 2;
+}
+
+// Recorded before the inbox entry is settled or rejected. The archive
+// recomputes it from the prefix, so a stale control can never be applied.
+message ReplayControlDisposition {
+  ReplayControl control = 1 [(buf.validate.field).required = true];
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+    ReplayControlApplied applied = 2;
+    ReplayControlStale stale = 3 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  }
+}
+message ReplayControlApplied {
+  // Pause: this epoch's admitted permits, whose continuations may still start.
+  repeated ReplayTurnPermit draining = 1;
+  // Pause-now: the unfinished physical children it withdraws before cancelling.
+  repeated string withdrawn = 2 [(buf.validate.field).repeated = {unique: true, items: {string: {min_len: 1}}}];
+}
+message ReplayToolAcknowledgement {
+  string turn = 1 [(buf.validate.field).string.min_len = 1];
+  string reply_id = 2 [(buf.validate.field).string.min_len = 1];
+}
+message ReplayTurnWait {
+  string turn = 1 [(buf.validate.field).string.min_len = 1];
+  repeated string reply_ids = 2 [(buf.validate.field).repeated = {min_items: 1, unique: true, items: {string: {min_len: 1}}}];
+}
+
+// Closed accounting dimensions. vs_core's registry defines each dimension's
+// unit and which resource totals include it (input includes both cache kinds).
+enum AccountingDimension {
+  ACCOUNTING_DIMENSION_UNSPECIFIED = 0;
+  ACCOUNTING_DIMENSION_MONEY_USD = 1;
+  ACCOUNTING_DIMENSION_INPUT_TOKENS = 2;
+  ACCOUNTING_DIMENSION_CACHE_READ_TOKENS = 3;
+  ACCOUNTING_DIMENSION_CACHE_CREATION_TOKENS = 4;
+  ACCOUNTING_DIMENSION_OUTPUT_TOKENS = 5;
+  ACCOUNTING_DIMENSION_REASONING_TOKENS = 6;
+  ACCOUNTING_DIMENSION_DURATION_MS = 7;
+  ACCOUNTING_DIMENSION_ADMISSIONS = 8;
+  ACCOUNTING_DIMENSION_ATTEMPTS = 9;
+  ACCOUNTING_DIMENSION_TURNS = 10;
+  ACCOUNTING_DIMENSION_RETRY_BUDGET = 11;
+}
+
+// A physical invocation for usage, or the original charge for admission,
+// attempt and turn counts. Import IDs, revisions and epochs never mint one.
+enum AccountingOccurrenceKind {
+  ACCOUNTING_OCCURRENCE_KIND_UNSPECIFIED = 0;
+  ACCOUNTING_OCCURRENCE_KIND_INVOCATION = 1;
+  ACCOUNTING_OCCURRENCE_KIND_CHARGE = 2;
+}
+
+message AccountingOccurrence {
+  AccountingOccurrenceKind kind = 1 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+  string id = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+// Exact integer counts, finite amounts, or an explicitly unknown quantity.
+message AccountingQuantity {
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    uint64 count = 1;
+    double amount = 2 [(buf.validate.field).double = {finite: true, gte: 0}];
+    bool unknown = 3 [(buf.validate.field).bool.const = true];
+  }
+}
+
+// One cumulative reading of one chargeable occurrence. The owner's source
+// sequence is the revision: a higher revision replaces a lower one.
+message AccountingObservation {
+  AccountingOccurrence occurrence = 1 [(buf.validate.field).required = true];
+  AccountingDimension dimension = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+  uint64 revision = 3;
+  AccountingQuantity charged = 4 [(buf.validate.field).required = true];
+  // Absent is no refund. It uses the charge's unit, so money refunds may be fractional.
+  AccountingQuantity refunded = 5;
+  // Source-request and external identities that name the same occurrence.
+  repeated string aliases = 6 [(buf.validate.field).repeated = {unique: true, items: {string: {min_len: 1}}}];
+  // Zero is imported history; a native reading names the occurrence's start epoch.
+  uint32 origin_epoch = 7;
+}
+
+// One declared cell of an aggregate: the occurrence's reading at the watermark.
+message AccountingCell {
+  AccountingOccurrence occurrence = 1 [(buf.validate.field).required = true];
+  AccountingQuantity baseline = 2 [(buf.validate.field).required = true];
+}
+
+// An aggregate total over declared disjoint cells and nested aggregates, at a
+// source watermark. It is never another occurrence.
+message AccountingCoverage {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  AccountingDimension dimension = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+  uint64 watermark = 3;
+  AccountingQuantity total = 4 [(buf.validate.field).required = true];
+  repeated AccountingCell cells = 5;
+  repeated string nested = 6 [(buf.validate.field).repeated = {unique: true, items: {string: {min_len: 1}}}];
+}
+
+// Notice detail: published import history, or a delayed observation appended
+// through the run's single writer. Only an import publication declares coverage.
+message AccountingEvidence {
+  option (buf.validate.message).cel = {
+    id: "accounting_evidence.coverage"
+    message: "only an import publication declares aggregate coverage"
+    expression: "has(this.import_id) || this.coverage.size() == 0"
+  };
+  option (buf.validate.message).cel = {
+    id: "accounting_evidence.import_origin"
+    message: "imported history originates in no native epoch"
+    expression: "!has(this.import_id) || this.observations.all(o, o.origin_epoch == 0u)"
+  };
+  option (buf.validate.message).cel = {
+    id: "accounting_evidence.content"
+    message: "accounting evidence carries an observation or coverage"
+    expression: "this.observations.size() > 0 || this.coverage.size() > 0"
+  };
+  optional string import_id = 1 [(buf.validate.field).string.min_len = 1];
+  repeated AccountingObservation observations = 2;
+  repeated AccountingCoverage coverage = 3;
+}

@@ -2,8 +2,8 @@ import {fileURLToPath} from 'node:url';
 import {pathAlternation, workspaceLayout} from './tools/scripts/workspace_layout.mjs';
 
 // Scanned sources: each package's `src/`, plus the non-shipping code that lives next to it (the
-// replay harness `tui/dev`, the benchmarks, the web end-to-end specs) and the workspace's own
-// tooling (`tools`). Both sets come from the workspace layout rather than a name list, so a new
+// benchmarks) and the workspace's own tooling (`tools`). Both sets come from the workspace layout
+// rather than a name list, so a new
 // package, or a new directory inside one, is covered by these rules on its first commit.
 // `tools/scripts/check_ts_architecture.mjs` derives the scan roots from the same place.
 const layout = workspaceLayout(fileURLToPath(new URL('.', import.meta.url)));
@@ -11,12 +11,10 @@ const PACKAGE_DIRECTORIES = pathAlternation(layout.packages.map(({directory}) =>
 const PACKAGES = `^(?:${PACKAGE_DIRECTORIES})/`;
 // Capturing, so a rule can exclude the importer's own package with a `$1` back-reference.
 const OWN_PACKAGE = `^(${PACKAGE_DIRECTORIES})/`;
-const PACKAGE_SOURCES = `^(?:${PACKAGE_DIRECTORIES})/src/`;
 const TOOLING = `^(?:${pathAlternation(layout.toolingDirectories)})/`;
 const SCANNED = `${PACKAGES}|${TOOLING}`;
 const TEST_FILE = '\\.test\\.[cm]?[jt]sx?$';
-const TRANSPORT_TEST_ONLY =
-  '^libs/(?:transport|transport-node|contracts)/src/(?:test-support/|testing/)';
+const TRANSPORT_TEST_ONLY = '^libs/(?:transport|contracts)/src/(?:test-support/|testing/)';
 const STORE_TEST_ONLY = '^libs/store/src/testing/';
 // A package's own test-support directory (`connection/src/testing/`): Fakes that only tests import.
 const PACKAGE_TEST_SUPPORT = '^libs/[^/]+/src/testing/';
@@ -28,15 +26,7 @@ const ANY_TEST_SUPPORT = [
   `^(?:${PACKAGE_DIRECTORIES})/src/(?:testing|test-support)/`,
   `^(?:${PACKAGE_DIRECTORIES})/src/.*/(?:testing|test-support)/`,
 ];
-// The replay harness is tooling, but it has its own rule below, with the reason it exists; the
-// remaining tooling directories are plain leaf tools.
-const DEV_HARNESS = 'tui/dev';
-if (!layout.toolingDirectories.includes(DEV_HARNESS)) {
-  throw new Error(`.dependency-cruiser.mjs: ${DEV_HARNESS} is no longer a tooling directory`);
-}
-const LEAF_TOOL_DIRECTORIES = pathAlternation(
-  layout.toolingDirectories.filter(directory => directory !== DEV_HARNESS),
-);
+const LEAF_TOOL_DIRECTORIES = pathAlternation(layout.toolingDirectories);
 const LEAF_TOOLS = `^(?:${LEAF_TOOL_DIRECTORIES})/`;
 // The importer of a `tools-are-leaves` edge: any file in a leaf tool directory, or any other file
 // in a package. Group 1 is the importer's own leaf tool directory, so `to.pathNot: '^$1/'`
@@ -52,14 +42,9 @@ const LEAF_TOOL_IMPORTER = `^(${LEAF_TOOL_DIRECTORIES})/|${PACKAGES}`;
 // Only a feature's browser parts: a later `main/` (Node) entry is not held to the renderer rules.
 const FEATURE = '^features/[^/]+/src/(?:state|renderer)/';
 const RENDERER_PART = part => `^features/[^/]+/src/renderer/${part}/`;
-// The web app (`apps/web/src`) is composition only: `app/` (the entries and the composition) over
-// `platform/` (the browser's services: the one backend adapter, lifecycle, storage, the desktop
-// shell's bridge). `docs/contributing/web-development.md` describes the layout.
-const WEB = '^apps/web/src/';
 const TRANSPORT = ['^libs/transport(?:-node)?/', '/node_modules/@vibesys/transport(?:-node)?/'];
 // The protocol vocabulary, which presentational code never names.
 const CONTRACTS = ['^libs/contracts/', '/node_modules/@vibesys/contracts/'];
-const WEB_BACKEND_ADAPTER = `${WEB}platform/backend\\.ts$`;
 
 function featureRules() {
   return [
@@ -76,6 +61,7 @@ function featureRules() {
           '^features/$1/src/renderer/(?!state/)',
           '(?:^|/)node_modules/(?:react|react-dom|electron)/',
           ...TRANSPORT,
+          '^libs/request-identity/',
         ],
         dependencyTypesNot: ['type-only'],
       },
@@ -112,25 +98,6 @@ function featureRules() {
   ];
 }
 
-function webAppRules() {
-  return [
-    {
-      name: 'web-platform-does-not-import-app',
-      severity: 'error',
-      from: {path: `${WEB}platform/`, pathNot: TEST_FILE},
-      to: {path: `${WEB}app/`},
-    },
-    {
-      // One path to the backend: `platform/backend.ts` is the only module that imports
-      // @vibesys/transport's runtime values (`web-fetch-only-in-backend.grit` holds `fetch` to it).
-      name: 'web-transport-only-in-backend-adapter',
-      severity: 'error',
-      from: {path: WEB, pathNot: [TEST_FILE, WEB_BACKEND_ADAPTER]},
-      to: {path: TRANSPORT, dependencyTypesNot: ['type-only']},
-    },
-  ];
-}
-
 // The desktop app's Electron main process is composed from packages, as its renderer is
 // (`docs/contributing/clients-architecture.md`): `@vibesys/connection` (the connection manager, a
 // pure `state/` machine and a `shell/` that owns its processes, channels, and timers),
@@ -149,10 +116,8 @@ const MAIN_PROCESS = [
   '^libs/settings/src/',
   '^features/[^/]+/src/main/',
 ];
-// The desktop renderer app (`apps/desktop-renderer/src`) is composition only: `main.tsx` (the
-// entry) over `wiring/` (the feature stores over the welcome bridge) and `ui/` (the view composed
-// from the features' views), which never reach each other.
-const DESKTOP_RENDERER = '^apps/desktop-renderer/src/';
+// The desktop shell app (`apps/desktop-shell/src`) is the one desktop renderer.
+const DESKTOP_SHELL = '^apps/desktop-shell/src/';
 const UI_RUNTIME = '(?:^|/)node_modules/(?:react|react-dom|electron)/';
 
 function desktopRules() {
@@ -181,7 +146,7 @@ function desktopRules() {
       severity: 'error',
       from: {path: CONNECTION_STATE, pathNot: TEST_FILE},
       to: {
-        path: [CONNECTION_SHELL, UI_RUNTIME, ...TRANSPORT, ...CONTRACTS],
+        path: [CONNECTION_SHELL, UI_RUNTIME, ...TRANSPORT, ...CONTRACTS, '^libs/request-identity/'],
         dependencyTypesNot: ['type-only'],
       },
     },
@@ -201,29 +166,15 @@ function desktopRules() {
   ];
 }
 
-/** The renderers' rules: the desktop renderer app's layers, and what no renderer may reach. */
+/** The renderers' rules: what no renderer may reach. */
 function rendererRules() {
   return [
-    {
-      // The view renders the stores' state and reports events; the stores and the bridge are the
-      // wiring's.
-      name: 'desktop-renderer-ui-does-not-import-wiring',
-      severity: 'error',
-      from: {path: `${DESKTOP_RENDERER}ui/`, pathNot: TEST_FILE},
-      to: {path: [`${DESKTOP_RENDERER}wiring/`, `${DESKTOP_RENDERER}main\\.tsx$`]},
-    },
-    {
-      name: 'desktop-renderer-wiring-does-not-import-ui',
-      severity: 'error',
-      from: {path: `${DESKTOP_RENDERER}wiring/`, pathNot: TEST_FILE},
-      to: {path: [`${DESKTOP_RENDERER}ui/`, `${DESKTOP_RENDERER}main\\.tsx$`]},
-    },
     {
       // Renderer code (the renderer apps and the features) reaches the main process only through
       // its preload's bridge.
       name: 'renderers-do-not-import-electron',
       severity: 'error',
-      from: {path: [DESKTOP_RENDERER, WEB, FEATURE], pathNot: TEST_FILE},
+      from: {path: [DESKTOP_SHELL, FEATURE], pathNot: TEST_FILE},
       to: {path: '(?:^|/)node_modules/electron/', dependencyTypesNot: ['type-only']},
     },
     {
@@ -231,7 +182,7 @@ function rendererRules() {
       // the preload's bridge.
       name: 'web-opens-no-sockets-or-processes',
       severity: 'error',
-      from: {path: [DESKTOP_RENDERER, WEB, FEATURE], pathNot: TEST_FILE},
+      from: {path: [DESKTOP_SHELL, FEATURE], pathNot: TEST_FILE},
       to: {dependencyTypes: ['core'], path: '^(?:node:)?(?:net|child_process)$'},
     },
   ];
@@ -264,24 +215,11 @@ export default {
       },
     },
     {
-      // `tui/dev/` is the development replay harness. It is kept out of
-      // `dist` by `rootDir: "src"`, but `tui/tsconfig.check.json` widens the root so
-      // the harness itself is typechecked, and that widening makes a src -> dev
-      // import typecheck cleanly. The build still rejects it (TS6059); this says
-      // so at the layer that owns the rule rather than leaving it to a later step.
-      // The harness may import any public workspace export, but no package code
-      // (in any package, test files included) may import it.
-      name: 'shipping-path-does-not-depend-on-dev-harness',
-      severity: 'error',
-      from: {path: PACKAGES, pathNot: `^${DEV_HARNESS}/`},
-      to: {path: `^${DEV_HARNESS}/`},
-    },
-    {
       // Benchmarks, end-to-end specs, and workspace scripts are leaf tools: they consume the
       // packages, never the other way round, so a package build or test cannot depend on them.
       // Each tool may reach its own directory and no other's, which is what the `$1`
       // back-reference on `LEAF_TOOL_IMPORTER` says. Excluding every tool from `from` instead
-      // would permit `web/e2e -> tools` and `web/e2e -> tui/benchmarks`.
+      // would permit one tool directory to import another.
       name: 'tools-are-leaves',
       severity: 'error',
       from: {path: LEAF_TOOL_IMPORTER},
@@ -343,109 +281,9 @@ export default {
         dependencyTypesNot: ['aliased-tsconfig-paths'],
       },
     },
-    // Layering inside `tui/src`. `docs/contributing/tui-architecture.md` gives the package
-    // ownership of interaction state, effects, and OpenTUI rendering/input; these rules encode
-    // that split over the current module structure. Test files are exempt: they wire layers
-    // together on purpose.
-    {
-      // Widgets render the TUI-owned session model. Wire types stop in the model/controller
-      // layer, so generated backend contracts cannot spread into presentation modules.
-      name: 'tui-ui-does-not-depend-on-transport',
-      severity: 'error',
-      from: {path: '^tui/src/ui/', pathNot: TEST_FILE},
-      to: {
-        path: [
-          '^libs/(?:transport|transport-node|contracts)/',
-          '/node_modules/@vibesys/(?:transport|transport-node|contracts)/',
-        ],
-      },
-    },
-    {
-      // The replay harness consumes published workspace entry points. A relative import into any
-      // package's src tree bypasses that interface, including an import into tui's own src tree.
-      name: 'dev-cannot-deep-import-src',
-      severity: 'error',
-      from: {path: `^${DEV_HARNESS}/`},
-      to: {path: PACKAGE_SOURCES, dependencyTypesNot: ['aliased-tsconfig-paths']},
-    },
-    {
-      // OpenTUI is the rendering runtime. It lives in `ui/`, the composition root
-      // (`index.ts`, `runtime.ts`), and the render-only self-test; state, command, and
-      // controller modules stay renderer-free so they run under plain unit tests.
-      name: 'tui-opentui-is-confined-to-ui-and-composition-root',
-      severity: 'error',
-      from: {
-        path: '^tui/src/',
-        pathNot: [TEST_FILE, '^tui/src/(?:ui/|index\\.ts$|runtime\\.ts$|self-test\\.ts$)'],
-      },
-      to: {path: '@opentui[+/]'},
-    },
-    {
-      // State and command modules (`session-model`, `chat-menu`, `commands`, `palette-model`,
-      // `diff-viewer`, ...) are below the effectful `session-controller` and the wiring that
-      // creates it.
-      name: 'tui-state-does-not-depend-on-controller-or-wiring',
-      severity: 'error',
-      from: {
-        path: '^tui/src/',
-        pathNot: [TEST_FILE, '^tui/src/ui/', '^tui/src/(?:runtime|index|launcher|self-test)\\.ts$'],
-      },
-      to: {path: '^tui/src/(?:session-controller|runtime|index|launcher)\\.ts$'},
-    },
-    {
-      // State, command, and controller modules expose presentation-ready values to widgets; they
-      // do not reach back into widget helpers. Shared pure presentation models live above ui/.
-      name: 'state-does-not-import-src/ui',
-      severity: 'error',
-      from: {
-        path: '^tui/src/',
-        pathNot: [TEST_FILE, '^tui/src/ui/', '^tui/src/(?:runtime|index|launcher|self-test)\\.ts$'],
-      },
-      to: {path: '^tui/src/ui/'},
-    },
-    {
-      // Widgets render state and call the controller; they do not construct the app or the
-      // runtime that owns them.
-      name: 'tui-ui-does-not-depend-on-composition-root',
-      severity: 'error',
-      from: {path: '^tui/src/ui/', pathNot: TEST_FILE},
-      to: {path: '^tui/src/(?:runtime|index|launcher)\\.ts$'},
-    },
-    {
-      // Widgets receive the controller as an argument and only name its interface; a value
-      // import would let rendering code build or reach into the effect layer.
-      name: 'tui-ui-uses-controller-by-type-only',
-      severity: 'error',
-      from: {path: '^tui/src/ui/', pathNot: TEST_FILE},
-      to: {path: '^tui/src/session-controller\\.ts$', dependencyTypesNot: ['type-only']},
-    },
     ...desktopRules(),
     ...rendererRules(),
     ...featureRules(),
-    ...webAppRules(),
-    {
-      // `index.ts` (the frontend process) and `launcher.ts` (the `vibesys` bin) run on import,
-      // so nothing may import them.
-      name: 'tui-entrypoints-are-not-imported',
-      severity: 'error',
-      from: {path: '^tui/(?:src|dev|benchmarks)/', pathNot: TEST_FILE},
-      to: {path: '^tui/src/(?:index|launcher)\\.ts$'},
-    },
-    {
-      // The launcher runs under Node before the renderer exists and only spawns the server and
-      // frontend processes. It shares theme names with the frontend and nothing else, so it
-      // never loads OpenTUI, the controller, or the workspace packages.
-      name: 'tui-launcher-stays-standalone',
-      severity: 'error',
-      from: {path: '^tui/src/launcher\\.ts$'},
-      to: {
-        path: [
-          '^tui/src/(?!launcher\\.ts$|theme\\.ts$)',
-          '^libs/(?:transport|transport-node|contracts|run-state|store)/',
-          '@opentui[+/]',
-        ],
-      },
-    },
   ],
   options: {
     tsConfig: {fileName: 'tools/tsconfig.architecture.json'},
@@ -453,6 +291,7 @@ export default {
     preserveSymlinks: true,
     tsPreCompilationDeps: true,
     enhancedResolveOptions: {
+      exportsFields: ['exports'],
       conditionNames: ['types', 'import', 'node', 'default'],
       extensions: ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.d.ts', '.json'],
     },

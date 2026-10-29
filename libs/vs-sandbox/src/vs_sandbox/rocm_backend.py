@@ -42,6 +42,7 @@ from vs_sandbox.compute_backends import (
     SandboxKind,
     make_local_shell_sandbox,
 )
+from vs_sandbox.container_memory import ContainerMemoryCap
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -58,7 +59,7 @@ if TYPE_CHECKING:
 # container's ROCm must stay compatible with the host kernel driver —
 # a floating tag is the one most likely to drift past it. Override with
 # ``--docker-image`` when the host ROCm version differs.
-_DEFAULT_IMAGE = "rocm/pytorch:rocm6.3_ubuntu22.04_py3.10_pytorch_release_2.4.0"
+DEFAULT_IMAGE = "rocm/pytorch:rocm6.3_ubuntu22.04_py3.10_pytorch_release_2.4.0"
 
 # PyTorch wheel index matching the image's ROCm. The agent is instructed to
 # use ``uv add torch`` in a fresh venv, which is isolated from the image's
@@ -98,13 +99,16 @@ class RocmBackend:
         threads: Threads,
         launcher: PipedProcessLauncher,
         clock: Clock,
+        events: object | None = None,
     ) -> None:
         """Configure ROCm execution with its log directory and image override."""
         del clock  # nothing this backend records carries a timestamp
+        del events  # ROCm contention monitoring is not implemented yet
         self.log_dir = Path(log_dir)
         self._lprint = log or print
-        self.image = image or _DEFAULT_IMAGE
+        self.image = image or DEFAULT_IMAGE
         self._docker = docker
+        self._memory = ContainerMemoryCap(docker)
         self._threads = threads
         self._launcher = launcher
         # No per-device auto-selection yet; pinning is via HIP_VISIBLE_DEVICES.
@@ -171,6 +175,8 @@ class RocmBackend:
         if kind is SandboxKind.DOCKER:
             devices = list(self._devices) if attach_accelerator else []
             return docker_sandbox(
+                # A runaway process dies inside its container, not the host.
+                memory_limit=self._memory.limit(),
                 host_workspace=host_workspace,
                 image=container_image or self.image,
                 gpus=None,  # ROCm uses --device, not --gpus

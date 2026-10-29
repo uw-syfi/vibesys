@@ -14,9 +14,9 @@
  * identity latched between the operation settling and the machine taking its output) and a
  * rejected stream batch are reported as `projection-rejected`.
  */
-import type {RunSnapshot, TuiDefaults} from '@vibesys/contracts';
+import type {RunSnapshot} from '@vibesys/contracts';
 import {
-  type CoreState,
+  foldSnapshot,
   hasRunEnded,
   type IterationNavigationState,
   initialIterationNavigation,
@@ -31,19 +31,24 @@ import {
 } from './connection.js';
 import type {
   BrowserLifecycle,
+  ChatHarness,
+  ChatResult,
+  ChatThreadResult,
   IterationLoad,
   RunCommand,
   RunCommandOutcome,
   RunConnection,
   RunStreamHandlers,
   TransportHooks,
+  WebChatOptions,
 } from './ports.js';
 import {
   createRunStore,
   type IterationPublicationOutcome,
   type RunAction,
+  type RunDispatchOutcome,
   type RunStore,
-  runStep,
+  type RunTracePublication,
 } from './run.js';
 import {
   type IterationQueryOutcome,
@@ -67,13 +72,11 @@ export interface WebSessionOptions {
    */
   readonly connect: (hooks: TransportHooks) => RunConnection;
   readonly lifecycle: BrowserLifecycle;
-}
-
-/** The new foreign-run rejection produced by one run-fold transition, if any. */
-function runIdentityRejection(previous: CoreState, current: CoreState): Error | null {
-  const before = previous.diagnostics.find(item => item.id === 'core-state:run-identity-mismatch');
-  const rejected = current.diagnostics.find(item => item.id === 'core-state:run-identity-mismatch');
-  return rejected === undefined || rejected === before ? null : new Error(rejected.summary);
+  /**
+   * Hear accepted trace inputs after the authoritative run fold. Rebootstrap publications state
+   * whether the established stream store preserves or replaces the current trace base.
+   */
+  readonly onTracePublication?: (publication: RunTracePublication) => void;
 }
 
 export class WebSession {
@@ -81,6 +84,7 @@ export class WebSession {
   readonly #actor: Actor<typeof sessionMachine>;
   readonly #connection: RunConnection;
   readonly #lifecycle: BrowserLifecycle;
+  readonly #onTracePublication: (publication: RunTracePublication) => void;
   readonly #listeners = new Set<() => void>();
   /** The machine's newest snapshot: listeners hear only when it changes. */
   #snapshot: SessionSnapshot;
@@ -96,8 +100,9 @@ export class WebSession {
   #startupSettled: () => void = () => undefined;
   #closed: Promise<void> | null = null;
 
-  constructor({connect, lifecycle}: WebSessionOptions) {
+  constructor({connect, lifecycle, onTracePublication}: WebSessionOptions) {
     this.#lifecycle = lifecycle;
+    this.#onTracePublication = onTracePublication ?? (() => undefined);
     // The machine runs before the connection opens, so a report made while connecting has a
     // machine to reach, and an action that throws always has an observer that releases.
     this.#actor = createActor(this.#provided());
@@ -175,11 +180,34 @@ export class WebSession {
     return this.#closed;
   }
 
+  /** Fold the answer's events without advancing the subscription cursor. */
+  async ask(text: string, options: WebChatOptions = {}): Promise<ChatResult> {
+    const response = await this.#connection.ask(text, options);
+    if (this.#closed === null && !options.signal?.aborted) {
+      const action: RunAction = {type: 'response-events', events: response.events};
+      const outcome = this.#dispatchRun(action);
+      this.#publishTrace(outcome);
+      this.#reportRunIdentityRejection(outcome);
+    }
+    return response.chat;
+  }
+
+  /** Create a chat thread, folding its creation event the way an answer's events are folded. */
+  async createChatThread(
+    harness: ChatHarness | null,
+    options: {readonly signal?: AbortSignalLike} = {},
+  ): Promise<ChatThreadResult> {
+    const response = await this.#connection.createChatThread(harness, options);
+    if (this.#closed === null && !options.signal?.aborted) {
+      const outcome = this.#dispatchRun({type: 'response-events', events: response.events});
+      this.#publishTrace(outcome);
+      this.#reportRunIdentityRejection(outcome);
+    }
+    return response.thread;
+  }
+
   /** Send one operator command without letting presentation code own the transport. */
   command = (input: RunCommand): Promise<RunCommandOutcome> => this.#connection.command(input);
-
-  /** Read the server-selected presentation defaults through the session-owned connection. */
-  tuiDefaults = (): Promise<TuiDefaults | null> => this.#connection.tuiDefaults();
 
   #reach(): Reachability {
     return {visible: this.#lifecycle.visibilityState !== 'hidden', online: this.#lifecycle.online};
@@ -253,16 +281,14 @@ export class WebSession {
   }
 
   #applySnapshot(snapshot: RunSnapshot): void {
-    const previous = this.store.getState();
-    this.#dispatchRun({type: 'snapshot', snapshot});
-    const rejection = runIdentityRejection(previous, this.store.getState());
-    if (rejection !== null) {
+    const outcome = this.#dispatchRun({type: 'snapshot', snapshot});
+    if (this.#reportRunIdentityRejection(outcome)) {
       // The load's dry run accepted this snapshot, but the run latched another identity before the
       // machine took the load's output. The machine already trusted it, so report the rejection:
       // the page stays stale until a later fenced snapshot succeeds.
-      this.#send({type: 'projection-rejected', error: rejection});
       return;
     }
+    this.#publishTrace(outcome);
     // A snapshot carries a journal position but no events, so it must not advance the event
     // cursor. Retain that position only when core-state accepted its run identity. Within one
     // stream-store generation the evidence is monotone: core-state can reject a stale same-run
@@ -307,8 +333,7 @@ export class WebSession {
       (boundary === null || context.connectionGeneration > boundary);
     const firstGeneration = previousStoreId === null;
     const storeReplaced = previousStoreId !== null && storeId !== previousStoreId;
-    const previousRun = this.store.getState();
-    this.#dispatchRun({
+    const outcome = this.#dispatchRun({
       type: 'batch',
       message,
       reconciliation,
@@ -316,22 +341,23 @@ export class WebSession {
         ? {}
         : {activeExecutionCheckpoint: context.activeExecutionCheckpoint}),
     });
-    const rejection = runIdentityRejection(previousRun, this.store.getState());
+    const traceBaseReset = outcome.trace?.kind === 'rebootstrap' && outcome.trace.base === 'reset';
     this.#streamStoreId = storeId;
     if (storeReplaced) {
       // Store identity, not connection or chunk identity, proves a replacement. Retire old
       // evidence, then query through the server's atomic store precondition.
       this.#snapshotWatermark = null;
     }
-    if (firstGeneration || requestedFreshGeneration || storeReplaced) {
+    // An identity-less replay is valid but cannot prove that the old snapshot base still belongs
+    // to this trace. Its reset therefore establishes a fenced replacement load even when the event
+    // store is unchanged; otherwise snapshot-only history would remain cleared permanently.
+    if (firstGeneration || requestedFreshGeneration || storeReplaced || traceBaseReset) {
       this.#send({type: 'stream-established', storeId});
     }
     if (requestedFreshGeneration) this.#freshBoundaryAfterConnection = undefined;
     this.#lastBatchConnection = context.connectionGeneration;
-    if (rejection !== null) {
-      this.#send({type: 'projection-rejected', error: rejection});
-      return;
-    }
+    this.#publishTrace(outcome);
+    if (this.#reportRunIdentityRejection(outcome)) return;
     if (
       firstGeneration ||
       requestedFreshGeneration ||
@@ -390,16 +416,30 @@ export class WebSession {
       }
       return {ok: false, error: toError(error)};
     }
-    const run = this.store.getState();
-    const rejection = runIdentityRejection(run, runStep(run, {type: 'snapshot', snapshot}).state);
+    const rejection = foldSnapshot(this.store.getState(), snapshot).rejection;
     if (rejection === null) return {ok: true, snapshot};
     if (!signal.aborted) this.#dispatchRun({type: 'snapshot', snapshot});
-    return {ok: false, error: rejection};
+    return {ok: false, error: new Error(rejection.summary)};
   }
 
   /** Fold run data and report a deferred navigation result once run identity resolves against it. */
-  #dispatchRun(action: RunAction): void {
-    this.#reportIterationMismatch(this.store.dispatch(action));
+  #dispatchRun(action: RunAction): RunDispatchOutcome {
+    const outcome = this.store.dispatchWithOutcome(action);
+    this.#reportIterationMismatch(outcome.iterationMismatch);
+    return outcome;
+  }
+
+  /** Publish the secondary trace transition returned by the same authoritative fold. */
+  #publishTrace(outcome: RunDispatchOutcome): void {
+    if (outcome.trace !== null) this.#onTracePublication(outcome.trace);
+  }
+
+  /** Report a typed foreign identity while allowing its accepted event subset to publish. */
+  #reportRunIdentityRejection(outcome: RunDispatchOutcome): boolean {
+    const rejection = outcome.runIdentityRejection;
+    if (rejection === null) return false;
+    this.#send({type: 'projection-rejected', error: new Error(rejection.summary)});
+    return true;
   }
 
   /** Keep iteration projection failures on their independent session-health channel. */

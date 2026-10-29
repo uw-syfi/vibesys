@@ -30,6 +30,23 @@ describe('NewlineFramer', () => {
     }
   });
 
+  it('rejects EOF while a newline-delimited frame is incomplete', () => {
+    const framer = new NewlineFramer();
+    expect(framer.push('{"type":"event_batch"')).toEqual([]);
+
+    let thrown: unknown;
+    try {
+      framer.finish();
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(BackendClientError);
+    expect(thrown).toMatchObject({
+      kind: 'parse',
+      message: 'Server stream ended with an incomplete newline-delimited frame',
+    });
+  });
+
   it('holds a large newline-less remainder up to the cap', () => {
     const framer = new NewlineFramer();
     // A frame right at the cap is still a valid (if improbable) message.

@@ -22,9 +22,15 @@
  * signal and the connection's lifetime jointly own any run channel that dial opened.
  */
 
-import type {InstanceList} from '@vibesys/contracts/host-helper';
+import type {HelperFeature, InstanceList} from '@vibesys/contracts/host-helper';
+import type {LogListOutcome, LogReadFailure, LogReadInput, LogReadOutcome} from '@vibesys/logs';
 import {clockFrom} from '@vibesys/machine';
-import {abortReason, type ScheduleTimeout} from '@vibesys/transport';
+import {
+  type AbortSignalLike,
+  abortReason,
+  registerAbort,
+  type ScheduleTimeout,
+} from '@vibesys/transport';
 import {type Actor, createActor, fromPromise} from 'xstate';
 import {
   type Cause,
@@ -40,6 +46,7 @@ import {
   type Body,
   ConnectionError,
   HelperChannel,
+  HelperRequestError,
   type ReplyOf,
   type RunStream,
 } from './helper-channel.js';
@@ -69,6 +76,47 @@ type GuardedRequestResult<T> =
   | {readonly kind: 'answered'; readonly reply: T}
   | {readonly kind: 'failed'; readonly written: boolean; readonly error: unknown};
 
+/**
+ * One holder's use of the host's logs channel (`HostConnection.openLogs`). Its requests resolve a
+ * helper error, or the channel failing, as `{ok: false}`; an aborted request rejects with the
+ * abort reason and its reply is dropped, and an aborted read is withdrawn on the helper's side
+ * (`logs.cancel`) when the helper offers `logs_cancel`, so its long poll stops holding a worker.
+ * Releasing the last lease closes the channel.
+ */
+export interface LogsLease extends AsyncDisposable {
+  /** Without `signal`, the request lives until it settles or the lease's channel closes. */
+  list(instanceId: string, signal?: AbortSignalLike): Promise<LogListOutcome>;
+  read(input: LogReadInput, signal?: AbortSignalLike): Promise<LogReadOutcome>;
+}
+
+/** A logs request's failure as a follower reads it: the helper's code, or `transport`. */
+function logFailure(error: unknown): LogReadFailure {
+  if (error instanceof HelperRequestError) return {code: error.code, message: error.message};
+  return {code: 'transport', message: error instanceof Error ? error.message : String(error)};
+}
+
+/** Settle with `work`, or reject with the abort reason once `signal` aborts; nothing is undone. */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignalLike | undefined): Promise<T> {
+  if (signal === undefined) return work;
+  return new Promise<T>((resolve, reject) => {
+    const registration = registerAbort(signal, () => reject(abortReason(signal)));
+    if (registration.aborted) {
+      reject(abortReason(signal));
+      return;
+    }
+    work.then(
+      value => {
+        registration.detach();
+        resolve(value);
+      },
+      error => {
+        registration.detach();
+        reject(error);
+      },
+    );
+  });
+}
+
 /** What a phase that ends every wait means for a caller. */
 function terminalError(phase: Phase): ConnectionError | null {
   switch (phase.kind) {
@@ -77,7 +125,7 @@ function terminalError(phase: Phase): ConnectionError | null {
     case 'auth-needed':
       return new ConnectionError('auth', phase.detail);
     case 'incompatible':
-      return new ConnectionError('incompatible', phase.detail);
+      return new ConnectionError('incompatible', phase.detail, {checkout: phase.checkout});
     case 'closed':
       return new ConnectionError('link', 'the connection was closed');
     default:
@@ -135,6 +183,10 @@ export class HostConnection implements AsyncDisposable {
   #retirementFailure: ConnectionError | null = null;
   #closing: Promise<void> | null = null;
   #holds = 0;
+  /** Live `openLogs` leases; the logs channel lives while there is at least one. */
+  #logLeases = 0;
+  /** The host's one logs channel (`docs/contributing/desktop-connection.md`, "Logs"), once asked for. */
+  #logs: Promise<HelperChannel> | null = null;
 
   constructor(options: HostConnectionOptions) {
     this.#options = options;
@@ -178,10 +230,14 @@ export class HostConnection implements AsyncDisposable {
     // Released in reverse: the channels, and every process, after the machine stopped. Retiring
     // the process set also covers a helper whose opening operation had not returned its channel.
     this.#stack.defer(async () => {
+      const logs = this.#logs;
+      this.#logs = null;
+      const logChannel = logs === null ? null : await logs.catch(() => null);
       const channels = [
         ...this.#runs,
         ...this.#opened,
         ...(this.#control === null ? [] : [this.#control]),
+        ...(logChannel === null ? [] : [logChannel]),
       ];
       this.#runs.clear();
       this.#opened.clear();
@@ -224,6 +280,11 @@ export class HostConnection implements AsyncDisposable {
   /** The checkout the control channel's helper runs from, once it answered `hello`. */
   get checkoutRoot(): string | null {
     return this.#control?.hello?.checkout?.root ?? null;
+  }
+
+  /** The features the control channel's helper agreed to in `hello`, once it answered. */
+  get features(): readonly HelperFeature[] | null {
+    return this.#control?.hello?.features ?? null;
   }
 
   /** True while something holds the connection open (`hold`). */
@@ -371,6 +432,62 @@ export class HostConnection implements AsyncDisposable {
       this.#send({type: 'run-ended', instanceId, cause: failure.reason, detail: failure.message});
       throw failure;
     }
+  }
+
+  /**
+   * A lease on this host's logs channel: a request channel of its own, so a long poll or a 64 KiB
+   * reply never delays the control channel. The first request opens it once the host is ready; the
+   * channel then serves every lease, and is reopened by the next request if it ended. Releasing the
+   * last lease closes it. A host whose control `hello` did not negotiate `logs` answers every
+   * request `feature_not_negotiated` without opening a channel.
+   */
+  openLogs(): LogsLease {
+    this.#logLeases += 1;
+    let released = false;
+    const request = async <T extends 'logs.list' | 'logs.read'>(
+      body: Body & {readonly type: T},
+      signal: AbortSignalLike | undefined,
+    ): Promise<ReplyOf<T>> => {
+      if (released) throw new ConnectionError('link', 'the logs lease was released');
+      const channel = await untilAborted(this.#logsChannel(), signal);
+      return channel.request(body, signal);
+    };
+    const settle = async <T>(
+      signal: AbortSignalLike | undefined,
+      work: () => Promise<T>,
+    ): Promise<
+      | {readonly ok: true; readonly value: T}
+      | {readonly ok: false; readonly failure: LogReadFailure}
+    > => {
+      try {
+        return {ok: true, value: await work()};
+      } catch (error) {
+        if (signal?.aborted === true) throw abortReason(signal);
+        return {ok: false, failure: logFailure(error)};
+      }
+    };
+    return {
+      list: async (instanceId, signal) => {
+        const settled = await settle(signal, () =>
+          request({type: 'logs.list', instance_id: instanceId}, signal),
+        );
+        return settled.ok
+          ? {ok: true, instanceId, streams: settled.value.streams}
+          : {ok: false, failure: settled.failure};
+      },
+      read: async (input, signal) => {
+        const settled = await settle(signal, () => request({type: 'logs.read', ...input}, signal));
+        return settled.ok
+          ? {ok: true, chunk: settled.value.chunk}
+          : {ok: false, failure: settled.failure};
+      },
+      [Symbol.asyncDispose]: async () => {
+        if (released) return;
+        released = true;
+        this.#logLeases -= 1;
+        if (this.#logLeases === 0) await this.#closeLogs();
+      },
+    };
   }
 
   /** Close for good; resolves once every channel this connection started has ended. */
@@ -598,6 +715,52 @@ export class HostConnection implements AsyncDisposable {
       // Diagnostics cannot regain ownership of an unconfirmed process or prevent terminal cleanup.
     }
     this.#send({type: 'close'});
+  }
+
+  /** The logs channel, opened on first use once the host is ready and reopened after it ended. */
+  async #logsChannel(): Promise<HelperChannel> {
+    await this.ready();
+    if (this.#control?.supportsRequest('logs.read') !== true) {
+      throw new HelperRequestError({
+        type: 'error',
+        request_id: null,
+        code: 'feature_not_negotiated',
+        message: `the helper on ${this.where} does not offer logs`,
+        path: null,
+      });
+    }
+    const opening = this.#logs ?? this.#openLogs();
+    const channel = await opening;
+    if (channel.active) return channel;
+    if (this.#logs === opening) this.#logs = null;
+    return this.#logsChannel();
+  }
+
+  #openLogs(): Promise<HelperChannel> {
+    const opening = this.#openChannel(this.#abort.signal);
+    this.#logs = opening;
+    void opening.then(
+      channel => {
+        // Every lease was released while the channel opened: it serves no one.
+        if (this.#logs === opening && this.#logLeases === 0) void this.#closeLogs();
+        void channel.ended.then(() => {
+          if (this.#logs === opening) this.#logs = null;
+        });
+      },
+      () => {
+        if (this.#logs === opening) this.#logs = null;
+      },
+    );
+    return opening;
+  }
+
+  /** Retire the logs channel; a request still waiting on it fails and its lease may reopen one. */
+  async #closeLogs(): Promise<void> {
+    const opening = this.#logs;
+    if (opening === null) return;
+    this.#logs = null;
+    const channel = await opening.catch(() => null);
+    if (channel !== null) await this.#retireChannel(channel);
   }
 
   async #check(target: CheckTarget, signal: AbortSignal): Promise<Opened> {

@@ -31,6 +31,8 @@ class Winner(Value):
     settlement: SettlementId | None
     revision: RevisionRef
     hypothesis_id: str | None
+    value: float | None = None
+    """The candidate's headline value, when it was measured."""
 
 
 @dataclass(frozen=True)
@@ -70,5 +72,8 @@ def choose_winner(
     if best is None:
         return Winner(settlement=None, revision=baseline, hypothesis_id=None)
     return Winner(
-        settlement=best.settlement, revision=best.candidate, hypothesis_id=best.hypothesis_id
+        settlement=best.settlement,
+        revision=best.candidate,
+        hypothesis_id=best.hypothesis_id,
+        value=best.metrics[0].value if best.metrics else None,
     )

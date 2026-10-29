@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.hypothesis import cadence, transitions
-from vibesys.hypothesis.history import RoundHistory
 from vibesys.hypothesis.notices import (
     ExhaustionNotice,
     OfficialCandidateNotRetained,
@@ -27,14 +26,10 @@ from vibesys.hypothesis.results import (
     NewHypothesis,
     NextRoundDecision,
     PlanningContext,
-    RollbackTarget,
     StartedHypothesis,
 )
 from vibesys.hypothesis.state import HypothesisState
-from vibesys.hypothesis.transitions import (
-    FAILED_HYPOTHESIS_OUTCOMES,
-    CarryOver,
-)
+from vibesys.hypothesis.transitions import CarryOver
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -96,68 +91,27 @@ class HypothesisSearch:
             records=tuple(records),
             carry=carry,
             plateau_warning=transitions.detect_plateau(records),
-            provisional_candidates=transitions.provisional_candidates_since_official(records),
         )
         active = state.active_hypothesis
         if active is not None:
             return Continue(hypothesis=active, context=context)
-        default_parent_round = round_number - 1 if round_number > 1 else None
-        return NewHypothesis(default_parent_round=default_parent_round, context=context)
+        return NewHypothesis(context=context)
 
-    def start(  # noqa: PLR0913  # LW-731906 [PLR0913]; the input baseline is an independent run fact beside the current commit and records.
-        # > Bundling it with current_commit into a carrier type hides which revision is which;
-        # > moving it into HypothesisConfig mixes a run fact into policy configuration.
+    def start(
         self,
         state: HypothesisState,
         plan: OrchestratorPlan,
         *,
         round_number: int,
-        current_commit: str | None,
-        records: Sequence[RoundRecord],
-        input_baseline: str | None = None,
+        parent_round: int | None,
+        parent_commit: str | None,
     ) -> StartedHypothesis:
-        """Start a designer's new hypothesis and resolve its rollback target.
+        """Start a designer's new hypothesis on the base the caller resolved.
 
-        ``current_commit`` seeds the parent commit when no earlier round
-        recorded one. ``revert_to_round=0`` names the run's input
-        implementation: the hypothesis starts from ``input_baseline`` with no
-        parent round, as round 1 does. Rollback resolution
-        (``RoundHistory.resolve_rollback_commit``) is for orchestration's
-        workspace checkout; it never touches the filesystem itself.
+        ``parent_round`` is the idea the base came from (None for the input) and
+        ``parent_commit`` the commit the idea starts from: the ledger records them, it never
+        chooses them (the search that owns the best idea and the passed ones does).
         """
-        records = list(records)
-        revert_to_round = plan.revert_to_round
-        if revert_to_round is None:
-            parent_round = round_number - 1 if round_number > 1 else None
-        elif revert_to_round == 0:
-            parent_round = None
-        else:
-            parent_round = revert_to_round
-        parent = next(
-            (record for record in reversed(records) if record.round_number == parent_round),
-            None,
-        )
-        parent_commit = (
-            parent.commit if parent is not None and parent.commit is not None else current_commit
-        )
-        rollback: RollbackTarget | None = None
-        if revert_to_round == 0:
-            parent_commit = input_baseline or current_commit
-            rollback = RollbackTarget(
-                commit=input_baseline,
-                failed_child_round=None,
-                resolved=input_baseline is not None,
-            )
-        elif revert_to_round is not None:
-            if parent is None or not parent.commit:
-                rollback = RollbackTarget(commit=None, failed_child_round=None, resolved=False)
-            else:
-                commit, failed_child = RoundHistory(records=records).resolve_rollback_commit(
-                    parent, FAILED_HYPOTHESIS_OUTCOMES
-                )
-                rollback = RollbackTarget(
-                    commit=commit, failed_child_round=failed_child, resolved=commit is not None
-                )
         new_state = transitions.start_hypothesis(
             state,
             plan,
@@ -167,7 +121,7 @@ class HypothesisSearch:
         )
         hypothesis = new_state.active_hypothesis
         assert hypothesis is not None  # noqa: S101  # start_hypothesis always activates one  # LW-040040 [S101]; the invariant is established by the call just above, and the assert narrows the optional type for the checker.
-        return StartedHypothesis(state=new_state, hypothesis=hypothesis, rollback=rollback)
+        return StartedHypothesis(state=new_state, hypothesis=hypothesis)
 
     def attempts(self, *, retry: int) -> AttemptBudget:
         """Return this attempt's position within the round's retry budget."""
@@ -196,22 +150,9 @@ class HypothesisSearch:
             revalidation_required=revalidation_required,
         )
 
-    def official_due(
-        self,
-        *,
-        records: Sequence[RoundRecord],
-        round_number: int,
-        requested: bool,
-        candidate_ready: bool,
-    ) -> str | None:
-        """Return why an official evaluation is due this round, or ``None``."""
-        return cadence.official_due(
-            self.config,
-            records=records,
-            round_number=round_number,
-            requested=requested,
-            candidate_ready=candidate_ready,
-        )
+    def official_due(self, *, candidate_ready: bool) -> str | None:
+        """Return why the trusted gates measure the reviewed candidate, or ``None``."""
+        return cadence.official_due(candidate_ready=candidate_ready)
 
     def close_round(  # noqa: PLR0913  # LW-040042 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
         self,

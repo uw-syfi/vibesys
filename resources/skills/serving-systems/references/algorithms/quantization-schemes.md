@@ -90,7 +90,7 @@ one. Backend values are exact `ComputeBackend` names.
 |:--|:--|:--|
 | `rocm` | FP8 (E4M3/E5M2), INT8, INT4 weight-only | FP8 native from MI300 (CDNA3), FP4 from CDNA4. Kernel coverage is narrower than NVIDIA — confirm the scheme is implemented before designing around it. |
 | `metal` | `mx.quantize` group-wise INT4 / INT8 | No external toolchain; the fast kernels consume quantized weights directly. **The highest-leverage optimization on this backend** — decode is bandwidth-bound, so fewer bytes per token converts almost linearly to tokens/sec. Group size 64 is a reasonable default. No FP8/FP4. |
-| `trainium` | BF16 default; FP8 on Trn2 | Quantization is secondary here — the decisive decode win is the device-resident KV cache, not precision. |
+| `trainium` | BF16 on Trn2; FP8/MXFP8 only on Trn3 under TorchNeuron | Dequantize FP8 checkpoints to BF16 at load on Trn2 (or write the FP8 path in NKI). Quantization is secondary here — the decisive decode win is the device-resident KV cache, not precision. |
 | `cpu` | INT8 / INT4 weight-only, GGUF (Q4_K_M, Q5_K_S) | Largest single win on CPU: decode is bandwidth-bound and the arithmetic units are narrow. |
 
 ## Engine pointers

@@ -114,13 +114,9 @@ class ToolUsingWriter(CandidateWriter):
     network: SimNetwork = field(default_factory=lambda: SimNetwork(loop_threads()))
     """The in-memory network the bridge listens on and the tool dials."""
 
-    def __call__(self, request: AgentTurnRequest) -> None:
-        """Commit one change; the first turn then submits and validates its wait."""
-        super().__call__(request)
-        if self.turns > 1:
-            self.answer["waiting"] = False
-            return
-        tools = {
+    def tools(self) -> dict[str, Any]:
+        """The evaluation tools the provider launched for this agent, by name."""
+        return {
             tool.name: tool
             for tool in build_core_evaluation_tools(
                 socket_path=Path(self.descriptor_env["VS_EVALUATION_SOCKET"]),
@@ -129,6 +125,14 @@ class ToolUsingWriter(CandidateWriter):
                 clock=MonotonicClock(),
             )
         }
+
+    def __call__(self, request: AgentTurnRequest) -> None:
+        """Commit one change; the first turn then submits and validates its wait."""
+        super().__call__(request)
+        if self.turns > 1:
+            self.answer["waiting"] = False
+            return
+        tools = self.tools()
         submit = tools[SUBMIT_TOOL]
         for _ in range(self.submissions):
             try:

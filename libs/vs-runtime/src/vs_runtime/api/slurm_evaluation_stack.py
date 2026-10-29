@@ -30,8 +30,10 @@ from vs_runtime.api import render_stage_failure
 from vs_runtime.api.infrastructure import (
     ScalarBenchmarkContract,
     SemanticSlurmEvaluationExecutor,
+    TrustedBenchmarkContract,
     TrustedEvaluationPlan,
 )
+from vs_runtime.api.replay import EvaluationWorkspaceAcquisitions
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
 from vs_sandbox.api.slurm import (
     PROFILE_END,
@@ -55,7 +57,14 @@ from vs_slurm.api import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vs_evaluation.api import EvaluationStateNamespace
+    from vs_runtime.api.core import StageOutputOpener
+    from vs_runtime.api.infrastructure import RunControlChannel
+    from vs_runtime.api.replay import EvaluationWriterReconciliation
     from vs_runtime.contracts import CandidateWorkspace
+    from vs_sandbox.api.slurm import SlurmLedgerAttachment
+    from vs_sim.api import Sleeper
+    from vs_slurm.api import WorkspaceRootProof
 
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
 ADMISSION = DecisionId(root="admission-1")
@@ -78,10 +87,14 @@ class ScenarioCluster(FakeCluster):
         self.benchmark_exit: int | None = 0
         self.job_exit_code = 0
         self.benchmark_output = BENCHMARK_OUTPUT
+        self.accuracy_output = "ok"
+        self.service_log_tail = ""
         self.profile_output = f"profile captured\n{PROFILE_END}\n"
         self.submissions: list[str] = []
         self.batches: list[SlurmBatchRequest] = []
         """Every batch request the scheduler accepted, in submission order."""
+        self.nodes: list[str | None] = []
+        """The node each accepted batch ran on, in submission order; none when unscripted."""
         self.accepted = threading.Event()
 
     @property
@@ -107,6 +120,11 @@ class ScenarioCluster(FakeCluster):
         self.accepted.set()
         return outcome
 
+    def finish_jobs(self) -> None:
+        """Let every accepted scripted batch finish with its original real stage results."""
+        for operation, request in zip(self.submissions, self.batches, strict=True):
+            self.script(operation, states=(SlurmJobStatus.COMPLETED,), result=self._result(request))
+
     def _result(self, request: SlurmBatchRequest) -> SlurmBatchResult:
         if self.job_exit_code != 0:
             # An allocation that failed before its stages ran, as when its server never
@@ -124,7 +142,7 @@ class ScenarioCluster(FakeCluster):
         for stage in request.stages:
             exit_code = self.accuracy_exit if stage.name == "accuracy" else self.benchmark_exit
             output = {"benchmark": self.benchmark_output, "profile": self.profile_output}.get(
-                stage.name, "ok"
+                stage.name, self.accuracy_output
             )
             stages.append(
                 SlurmBatchStageResult(
@@ -144,7 +162,13 @@ class ScenarioCluster(FakeCluster):
             stages=tuple(stages),
             phase_timings_seconds={},
             content_cache_hits=0,
+            service_log_tail=self.service_log_tail,
+            node=self._node(),
         )
+
+    def _node(self) -> str | None:
+        index = len(self.submissions) - 1
+        return self.nodes[index] if 0 <= index < len(self.nodes) else None
 
 
 class _Candidates(FakeWorkspaces):
@@ -165,6 +189,7 @@ class Stack:
     executor: SemanticSlurmEvaluationExecutor
     cluster: ScenarioCluster
     snapshot: str
+    workspaces: FakeWorkspaces
 
 
 def _config() -> SlurmConfig:
@@ -173,29 +198,47 @@ def _config() -> SlurmConfig:
     )
 
 
-async def build_stack(
+async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; each optional Fake (cluster, profile, streams, pacing, ledger) is an independent test seam, and an options type would only rename them.
     root: Path,
     cluster: ScenarioCluster | None = None,
     *,
     profile_command: tuple[str, ...] | None = None,
+    stage_output: StageOutputOpener | None = None,
+    sleeper: Sleeper | None = None,
+    ledger: SlurmLedgerAttachment | None = None,
+    policy: SlurmExecutionPolicy | None = None,
+    benchmark_contract: TrustedBenchmarkContract | None = None,
+    root_proof: WorkspaceRootProof | None = None,
+    control: RunControlChannel | None = None,
+    namespace: EvaluationStateNamespace | None = None,
+    writer_reconciliation: EvaluationWriterReconciliation | None = None,
+    replay_recovery: bool = False,
 ) -> Stack:
     """Build the semantic Slurm executor over ``cluster``, reusing durable state under root.
 
     Job deadlines follow a clock that never moves, so none expires.
 
     With ``profile_command`` the run can capture a profile, whose stdout is
-    ``cluster.profile_output``.
+    ``cluster.profile_output``. ``stage_output`` opens each stage's output stream.
+    ``sleeper`` paces the executor's polls of a running job; by default a pause
+    passes at once. With ``ledger`` the run's evaluations go through that
+    evaluation ledger attachment. ``policy`` is the operator's execution policy, default none.
+    ``benchmark_contract`` is how the benchmark's result is read, by default one scalar metric.
+    With ``root_proof`` every evaluation waits for that workspace-root proof before it
+    reaches the cluster. ``namespace`` may supply semantic receipts independently of
+    the provider handle store, including missing-receipt recovery scenarios.
     """
     cluster = cluster or ScenarioCluster()
     workspaces = _Candidates(
         FakeWorkspace(path=root / "workspace"), supports_parallel_candidates=True
     )
     snapshot = await workspaces.root.snapshot("candidate")
-    state = scratch_state_directory(root, "evaluation")
-    namespace = StateNamespace(project_root=root, root=state, portable=False)
+    if namespace is None:
+        state = scratch_state_directory(root, "evaluation")
+        namespace = StateNamespace(project_root=root, root=state, portable=False)
     executor = SemanticSlurmEvaluationExecutor(
         _config(),
-        SlurmExecutionPolicy(),
+        policy or SlurmExecutionPolicy(),
         SlurmEvaluationPlan(
             config_path=root / "slurm.toml",
             accuracy_command=("python", "accuracy.py"),
@@ -205,20 +248,26 @@ async def build_stack(
         TrustedEvaluationPlan(
             accuracy_command="unused",
             benchmark_command="unused",
-            benchmark_contract=ScalarBenchmarkContract(
-                output_argument="--output", metric="throughput"
-            ),
+            benchmark_contract=benchmark_contract
+            or ScalarBenchmarkContract(output_argument="--output", metric="throughput"),
         ),
         workspaces,
-        namespace,  # type: ignore[arg-type]  # the evaluation namespace is a StateNamespace
+        namespace,
         root / "handles",
         stage_failure_text=render_stage_failure,
         clock=ManualClock(),
         # Pacing moves a timeline of its own, so polling never brings a deadline nearer.
-        sleeper=ManualClock(),
+        sleeper=sleeper or ManualClock(),
         cluster=cluster,
+        stage_output=stage_output,
+        ledger=ledger,
+        root_proof=root_proof,
+        control=control,
+        recovery=EvaluationWorkspaceAcquisitions(namespace, "slurm", writer_reconciliation)
+        if replay_recovery
+        else None,
     )
-    return Stack(executor, cluster, snapshot)
+    return Stack(executor, cluster, snapshot, workspaces)
 
 
 def plan(

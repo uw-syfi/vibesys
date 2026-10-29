@@ -109,11 +109,25 @@ class DockerCommandRunner(Protocol):
 
 @dataclass(frozen=True)
 class FinalImage:
-    """How the finished image starts and what its local tag is called."""
+    """The image to produce, and existing images whose layers it may reuse.
+
+    ``cache_from`` names Docker images with inline build-cache metadata. Cache
+    sources affect reuse only, never the resulting image's input-addressed tag.
+    """
 
     user: str
     workdir: str
     image_repository: str
+    cache_from: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Reject malformed cache sources before issuing any Docker command."""
+        if any(
+            not source or source.startswith("-") or any(c.isspace() for c in source)
+            for source in self.cache_from
+        ):
+            message = "cache_from must contain nonempty Docker image references without whitespace"
+            raise ValueError(message)
 
 
 @dataclass(frozen=True)
@@ -202,7 +216,10 @@ def build_feature_image(
     build inputs (the base image, the ordered Features with their options and
     files, the user, and the working directory), so rebuilding the same
     selection moves the same tag instead of adding another. Different inputs
-    get different tags. The image is identified by its immutable ID, which is
+    get different tags. When the daemon already has that tag, nothing is built:
+    the tag names every input, so the image is the result, and a build would
+    only re-send the context and re-export the image. A base named by a mutable
+    registry tag is an input known by name only, so it is the caller's to pin. The image is identified by its immutable ID, which is
     content-addressed: the same inputs on the same base give the same ID from
     Docker's layer cache, whatever the temporary build directory is called.
 
@@ -235,32 +252,40 @@ def build_feature_image(
         dockerfile.write_text(plan.dockerfile, encoding="utf-8")
         base_identity = _base_identity(run, base_image, cwd=context)
         tag = f"{final.image_repository}:{_input_digest(base_identity, plan, context)}"
-        run.checked(
-            (
-                "docker",
-                "build",
-                "--provenance=false",
-                "--tag",
-                tag,
-                "--file",
-                str(dockerfile),
-                "--build-arg",
-                f"{BASE_IMAGE_ARG}={base_image}",
-                str(context),
-            ),
-            cwd=context,
-            what="feature image build",
-        )
-        inspected = run.checked(
-            ("docker", "image", "inspect", "--format", "{{.Id}}", tag),
-            cwd=context,
-            what="image inspect",
-        )
+        present = run.attempt(_inspect_argv(tag), cwd=context)
+        if present.returncode == 0:
+            # The tag names every input, so this image already is the build's result.
+            inspected = present
+        else:
+            run.checked(
+                (
+                    "docker",
+                    "build",
+                    "--provenance=false",
+                    "--tag",
+                    tag,
+                    "--file",
+                    str(dockerfile),
+                    "--build-arg",
+                    f"{BASE_IMAGE_ARG}={base_image}",
+                    "--build-arg",
+                    "BUILDKIT_INLINE_CACHE=1",
+                    *(arg for source in final.cache_from for arg in ("--cache-from", source)),
+                    str(context),
+                ),
+                cwd=context,
+                what="feature image build",
+            )
+            inspected = run.checked(_inspect_argv(tag), cwd=context, what="image inspect")
     image_id = inspected.stdout.strip()
     if _IMAGE_ID.fullmatch(image_id) is None:
         message = f"Docker returned an invalid image ID for {tag}: {image_id[:_DIAGNOSTIC_LIMIT]!r}"
         raise FeatureImageBuildError(message)
     return FeatureImage(tag=tag, image_id=image_id)
+
+
+def _inspect_argv(image: str) -> tuple[str, ...]:
+    return ("docker", "image", "inspect", "--format", "{{.Id}}", image)
 
 
 def _base_identity(run: _Docker, base_image: str, *, cwd: Path) -> str:
@@ -270,7 +295,7 @@ def _base_identity(run: _Docker, base_image: str, *, cwd: Path) -> str:
     build while its ID stays the same; keying on the ID keeps the result's tag
     stable. A base that is not local (a registry name) keys on its name.
     """
-    result = run.attempt(("docker", "image", "inspect", "--format", "{{.Id}}", base_image), cwd=cwd)
+    result = run.attempt(_inspect_argv(base_image), cwd=cwd)
     image_id = result.stdout.strip()
     if result.returncode == 0 and _IMAGE_ID.fullmatch(image_id) is not None:
         return image_id

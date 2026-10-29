@@ -15,7 +15,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vs_sim.api.testing import examples
-from vs_slurm.api import SlurmConfig, SlurmConnectorTransport
+from vs_slurm.api import SlurmConfig, SlurmConnectorTransport, SlurmFileSource
 
 # test-isolation: the interpreter is the Fake under test and is not part of the library API.
 from vs_slurm.fake_shell import run
@@ -216,3 +216,32 @@ def test_evidence_past_the_size_cap_is_invalid_without_being_parsed(tmp_path: Pa
 
     with pytest.raises(RemoteOperationError):
         operations.inspect("op-1")
+
+
+@settings(max_examples=examples(pr=5, nightly=20), deadline=None)
+@given(
+    content=st.binary(max_size=80),
+    reads=st.lists(st.tuples(st.integers(0, 90), st.integers(1, 40)), min_size=1, max_size=4),
+)
+def test_cluster_file_reads_agree_with_bash(content: bytes, reads: list[tuple[int, int]]) -> None:
+    """The reads a SlurmFileSource issues return the same bytes under either shell."""
+    with tempfile.TemporaryDirectory() as directory:
+        path = PurePosixPath(directory) / "stdout.txt"
+        Path(path).write_bytes(content)
+
+        def both(command: str) -> str:
+            ours, oracle = _interpreted(command), _bash(command)
+            assert ours[0] == oracle[0] == 0, (ours, oracle)
+            return ours[1]
+
+        def oracle_only(command: str) -> str:
+            return _bash(command)[1]
+
+        for offset, count in reads:
+            assert SlurmFileSource(path, both).read(offset, count) == SlurmFileSource(
+                path, oracle_only
+            ).read(offset, count)
+        assert SlurmFileSource(path, both).size() == len(content)
+        absent = PurePosixPath(directory) / "absent.txt"
+        with pytest.raises(FileNotFoundError):
+            SlurmFileSource(absent, both).size()

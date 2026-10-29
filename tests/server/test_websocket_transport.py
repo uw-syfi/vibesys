@@ -27,13 +27,19 @@ from urllib.request import urlopen
 import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
-from tests.server.support import DEADLOCK_GUARD_S, REQUEST_TIME, build_server_parts
+from tests.server.support import (
+    CONTROL_KEY,
+    DEADLOCK_GUARD_S,
+    REQUEST_TIME,
+    ServerParts,
+    build_server_parts,
+)
 from websockets.asyncio.client import connect
-from websockets.asyncio.server import serve
+from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK, InvalidStatus
 from websockets.protocol import State
+from websockets.server import ServerProtocol
 
-from entrypoints import web as web_entrypoint
 from entrypoints.production import production_web_discovery
 from server.api.protocol import (
     ChatQuery,
@@ -51,7 +57,7 @@ from server.transport.discovery import (
     WebInstanceClaim,
     WebInstanceRecord,
 )
-from server.transport.subscriptions import SubscriptionTracker
+from server.transport.subscriptions import DeliveryWatermark, SubscriptionTracker
 from server.transport.unix_jsonl import UnixJsonlServer
 from server.transport.websocket import (
     WebSocketBindError,
@@ -64,6 +70,7 @@ from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import (
     HANG_GUARD_S,
     Gate,
+    InlineBlockingRunner,
     ManualClock,
     examples,
     join_or_fail,
@@ -72,17 +79,26 @@ from vs_sim.api.testing import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Sequence
+    from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
     from typing import Literal, Never
 
     from websockets.asyncio.client import ClientConnection
-    from websockets.asyncio.server import ServerConnection
     from websockets.http11 import Request
     from websockets.typing import Origin
 
     from server.api.protocol import ProtocolRequest, RunSnapshot
     from server.api.service import RunApi, SubscriptionBootstrap, SubscriptionCheckpoint
     from vs_sim.api import BlockingRunner, Event
+
+
+def _delivery_watermark(parts: ServerParts) -> DeliveryWatermark:
+    """Capture the journal generation and cursor under their shared lock."""
+    with parts.condition:
+        return DeliveryWatermark(
+            store_id=parts.journal.store_id_locked(),
+            sequence=parts.journal.latest_sequence_locked(),
+        )
+
 
 # The burst has to be larger than the send path can absorb, or the producing
 # coroutine never stalls and the write deadline under test never fires. The
@@ -172,15 +188,12 @@ def test_the_stated_transport_bounds_are_the_values_they_replaced() -> None:
     ``test_every_stated_bound_is_named_and_not_merely_positional``; this test
     is kept for the ordering the dict cannot see.
 
-    It also says nothing about which ``serve()`` keyword each field reaches.
-    Measured, that mapping is pinned by
-    ``test_a_half_open_subscriber_is_reaped_by_the_keepalive_and_lets_the_run_finish``
-    instead: it sets ``write_deadline_seconds`` to 300.0, so passing that field
-    as ``close_timeout`` parks the connection in ``CLOSING`` past its ceiling,
-    and it is the only failure in the suite. The stalled-subscriber test cannot
-    catch the same swap, because there ``write_deadline_seconds`` is the
-    shorter of the two. ``receive_frame_bytes`` reaching ``max_size`` is pinned
-    by ``test_an_inbound_frame_past_the_stated_cap_is_refused_by_the_gateway``,
+    It also says nothing about which consumer each field reaches. The owned-
+    keepalive tests below independently pin the interval, Ping-write, and Pong
+    bounds by their elapsed virtual time and reported value, including one real
+    ``ServerConnection`` whose Ping is paused in the dependency's public flow-
+    control path. ``receive_frame_bytes`` reaching ``max_size`` is pinned by
+    ``test_an_inbound_frame_past_the_stated_cap_is_refused_by_the_gateway``,
     which lowers it and sends a frame the default would have accepted.
     """
     assert WebSocketLimits() == WebSocketLimits(
@@ -513,7 +526,13 @@ _INDEX_BODY = b"<!doctype html><title>VibeSys</title>"
 _BUNDLE_BODY = b"export {};\n"
 
 
-def _asset_gateway(tmp_path: Path, *, allowed_origins: Sequence[str] = ()) -> WebSocketGateway:
+def _asset_gateway(
+    tmp_path: Path,
+    *,
+    allowed_origins: Sequence[str] = (),
+    limits: WebSocketLimits | None = None,
+    request_runner: BlockingRunner | None = None,
+) -> WebSocketGateway:
     parts = build_server_parts(tmp_path / "logs")
     assets = tmp_path / "web"
     (assets / "assets").mkdir(parents=True, exist_ok=True)
@@ -525,9 +544,10 @@ def _asset_gateway(tmp_path: Path, *, allowed_origins: Sequence[str] = ()) -> We
         parts.api,
         assets_dir=assets,
         allowed_origins=allowed_origins,
+        limits=limits,
         clock=ManualClock(),
         threads=OsThreads(),
-        request_runner=ThreadBlockingRunner(),
+        request_runner=request_runner or ThreadBlockingRunner(),
     )
 
 
@@ -1632,13 +1652,21 @@ class _SubscriptionFailureApi:
         self._delegate = delegate
         self._failure = failure
         self._error_type = error_type
+        self.latest_sequence_reads = 0
+        self.snapshots: list[RunSnapshot] = []
 
     def snapshot(self) -> RunSnapshot:
-        return self._delegate.snapshot()
+        snapshot = self._delegate.snapshot()
+        self.snapshots.append(snapshot)
+        return snapshot
 
     @property
     def latest_sequence(self) -> int:
+        self.latest_sequence_reads += 1
         return self._delegate.latest_sequence
+
+    def execute(self, request: ProtocolRequest) -> Response:
+        return self._delegate.execute(request)
 
     def subscription_bootstrap(
         self,
@@ -1665,6 +1693,78 @@ class _SubscriptionFailureApi:
     ) -> SubscriptionCheckpoint:
         del after_sequence, store_id, bootstrap_spine
         raise self._error_type
+
+
+class _HeldFailureAcknowledgementRunner:
+    """Hold the failure acknowledgement snapshot but no independent request."""
+
+    def __init__(self, acknowledgement_snapshot: Callable[..., object]) -> None:
+        self._acknowledgement_snapshot = acknowledgement_snapshot
+        self.snapshot_entered = Gate()
+        self.snapshot_completed = Gate()
+        self.release_snapshot = Gate()
+        self._completed: dict[str, Gate] = {}
+
+    def completed(self, request: ProtocolRequest) -> Gate:
+        """Return the signal for this request finishing its owned API call."""
+        return self._completed.setdefault(request.request_id, Gate())
+
+    async def run[**P, T](self, function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+        if function == self._acknowledgement_snapshot:
+            self.snapshot_entered.open()
+            await self.release_snapshot.wait()
+        result = function(*args, **kwargs)
+        if function == self._acknowledgement_snapshot:
+            self.snapshot_completed.open()
+        elif args and isinstance(args[0], SnapshotQuery):
+            self.completed(args[0]).open()
+        return result
+
+
+async def _assert_failure_acknowledgement_snapshot_isolated(
+    gateway: WebSocketGateway,
+    runner: _HeldFailureAcknowledgementRunner,
+    api: _SubscriptionFailureApi,
+) -> None:
+    control_request = SnapshotQuery(timestamp=REQUEST_TIME)
+    async with (
+        asyncio.timeout(DEADLOCK_GUARD_S),
+        _gateway_connection(gateway) as stream,
+        _gateway_connection(gateway) as control,
+    ):
+        try:
+            await stream.send(
+                SubscribeRequest(
+                    timestamp=REQUEST_TIME,
+                    client_id="failed-bootstrap",
+                ).model_dump_json()
+            )
+            acknowledgement = asyncio.create_task(stream.recv())
+            await runner.snapshot_entered.wait(acknowledgement)
+
+            await control.send(control_request.model_dump_json())
+            control_response = asyncio.create_task(control.recv())
+            await runner.completed(control_request).wait(control_response)
+
+            assert runner.snapshot_completed.is_open is False
+            assert json.loads(await control_response)["request_id"] == control_request.request_id
+
+            runner.release_snapshot.open()
+            subscribed = json.loads(await acknowledgement)
+            assert subscribed["type"] == "subscribed"
+            assert subscribed["run_id"] == api.snapshots[0].run_id
+            assert subscribed["latest_sequence"] == api.snapshots[0].sequence
+            failure = json.loads(await stream.recv())
+            assert failure["type"] == "protocol_error"
+            assert failure["request_id"] == subscribed["request_id"]
+            assert failure["client_id"] == "failed-bootstrap"
+            assert failure["code"] == "stream_failed"
+            with pytest.raises(ConnectionClosedOK):
+                await stream.recv()
+        finally:
+            runner.release_snapshot.open()
+
+    assert api.latest_sequence_reads == 0
 
 
 async def _assert_subscription_failure_lifecycle(
@@ -1710,19 +1810,18 @@ def test_gateway_converts_control_api_timeout_into_response() -> None:
 def test_gateway_acknowledges_subscription_before_bootstrap_failure(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path / "logs")
     api = _SubscriptionFailureApi(parts.api, "bootstrap")
+    runner = _HeldFailureAcknowledgementRunner(api.snapshot)
 
-    with WebSocketGateway(
-        cast("RunApi", api),
-        clock=ManualClock(),
-        threads=OsThreads(),
-        request_runner=ThreadBlockingRunner(),
-    ) as gateway:
-        asyncio.run(
-            _assert_subscription_failure_lifecycle(
-                gateway,
-                ("subscribed", "protocol_error"),
-            )
-        )
+    try:
+        with WebSocketGateway(
+            cast("RunApi", api),
+            clock=ManualClock(),
+            threads=OsThreads(),
+            request_runner=cast("BlockingRunner", runner),
+        ) as gateway:
+            asyncio.run(_assert_failure_acknowledgement_snapshot_isolated(gateway, runner, api))
+    finally:
+        parts.close()
 
 
 def test_gateway_reports_post_handshake_stream_failure_in_band(tmp_path: Path) -> None:
@@ -1888,22 +1987,14 @@ def test_a_half_open_subscriber_is_reaped_by_the_keepalive_and_lets_the_run_fini
     """The keepalive alone must carry an idle half-open peer through to run exit.
 
     The write deadline is left far above the ceiling so it cannot be what ends
-    this connection: the only mechanism under test is ping, ping timeout, and
-    the closing handshake giving up on a peer that never echoes the close.
-    Setting ``write_deadline_seconds`` that far out is also what makes this the
-    one test that pins the field-to-``serve()``-keyword mapping, since passing
-    it as ``close_timeout`` would park the connection in ``CLOSING`` for 300s.
+    this connection: the Ping write drains, then the owned Pong deadline aborts
+    the peer that never answers. This is the real-library composition check;
+    the Fake-connection regression below drives both deadline branches without
+    wall time and proves the tracker release policy independently of sockets.
 
-    Load sensitive by construction, with no seam to fix it here. The three
-    timers under test are ``websockets``' own, taken from ``loop.time()``
-    inside a dependency this repository does not own, so there is no clock to
-    inject without adding a production parameter for the test's benefit. The
-    chain completes in 1.40s to 1.51s against the 30s ceiling, measured stable
-    over 11 runs including 6 at a load average of 28 to 34 on a 64-core host,
-    so the margin is about 20x. If it is ever exceeded the signature to look
-    for is a connection parked in ``State.CLOSING``: only ``send_context``'s
-    ``raise_close_exc`` abort moves it to ``CLOSED``, and ``_stream`` polls for
-    exactly that.
+    Load sensitive by construction because it crosses real loopback sockets.
+    Its 30s ceiling only guards against a deadlock; the pass is the subscriber
+    tracker reaching zero, never an elapsed-time comparison.
     """
     limits = WebSocketLimits(
         ping_interval_seconds=0.1,
@@ -1921,6 +2012,7 @@ def test_a_half_open_subscriber_is_reaped_by_the_keepalive_and_lets_the_run_fini
                 tracker,
                 threads=OsThreads(),
                 network=UnixNetwork(),
+                key=CONTROL_KEY,
             ) as unix,
             WebSocketGateway(
                 parts.api,
@@ -1952,11 +2044,11 @@ def test_a_subscriber_that_stops_draining_is_abandoned_at_the_write_deadline(
 
     ``websockets`` ends every write in ``drain()``, which suspends while the
     transport is over its high-water mark. A peer that neither drains its
-    socket nor answers pings therefore stalled the gateway's stream loop *and*
-    the library's own keepalive ping and close frames, so before the write
-    deadline this subscription was never released and a non-detached run never
-    exited. Measured against the unfixed gateway the tracker still reported
-    the peer as active after 90 seconds.
+    socket nor answers pings therefore stalled the gateway's stream loop and
+    the keepalive Ping write, so before the write deadline this subscription
+    was never released and a non-detached run never exited. Measured against
+    the unfixed gateway the tracker still reported the peer as active after 90
+    seconds.
 
     The keepalive is pushed out past the ceiling here, so the write deadline is
     the only thing that can end the connection. That also makes the pass an
@@ -1991,6 +2083,7 @@ def test_a_subscriber_that_stops_draining_is_abandoned_at_the_write_deadline(
                 tracker,
                 threads=OsThreads(),
                 network=UnixNetwork(),
+                key=CONTROL_KEY,
             ) as unix,
             WebSocketGateway(
                 parts.api,
@@ -2046,7 +2139,7 @@ def test_a_write_that_never_drains_abandons_the_peer_and_frees_its_subscription(
         subscriptions=tracker,
         clock=ManualClock(),
         threads=OsThreads(),
-        request_runner=ThreadBlockingRunner(),
+        request_runner=InlineBlockingRunner(),
     )
 
     class FakeTransport:
@@ -2076,6 +2169,9 @@ def test_a_write_that_never_drains_abandons_the_peer_and_frees_its_subscription(
             del message
             raise TimeoutError
 
+        async def wait_closed(self) -> None:
+            await asyncio.Future()
+
         async def close(self) -> None:
             """Absorb the library-owned close in ``_handle_connection``'s teardown.
 
@@ -2104,6 +2200,266 @@ def test_a_write_that_never_drains_abandons_the_peer_and_frees_its_subscription(
     assert len(reported) == 1
     assert str(gateway.limits.write_deadline_seconds) in reported[0].getMessage()
     parts.close()
+
+
+class _ChangeWaitRunner:
+    """Park only the stream's idle journal poll until its peer is aborted."""
+
+    def __init__(self, closed: asyncio.Event) -> None:
+        self._closed = closed
+
+    async def run[**P, T](self, function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+        if getattr(function, "__name__", "") == "wait_for_change":
+            await self._closed.wait()
+            no_change = False
+            return cast("T", no_change)
+        return function(*args, **kwargs)
+
+
+class _KeepaliveStallConnection:
+    """A subscribed connection whose Ping write or Pong waiter never finishes."""
+
+    def __init__(self, closed: asyncio.Event, stall: Literal["ping", "pong"]) -> None:
+        self._closed = closed
+        self._stall = stall
+        self.frames = iter(
+            [SubscribeRequest(timestamp=REQUEST_TIME, client_id="stalled-ping").model_dump_json()]
+        )
+        self.sent: list[str] = []
+        self.state = "OPEN"
+        self.aborts = 0
+        self.transport = SimpleNamespace(abort=self.abort)
+
+    def __aiter__(self) -> _KeepaliveStallConnection:
+        return self
+
+    async def __anext__(self) -> str:
+        try:
+            return next(self.frames)
+        except StopIteration:
+            raise StopAsyncIteration from None
+
+    async def send(self, message: str) -> None:
+        self.sent.append(message)
+
+    async def ping(self) -> Awaitable[float]:
+        if self._stall == "ping":
+            unfinished: asyncio.Future[Awaitable[float]] = asyncio.Future()
+            return await unfinished
+        return asyncio.get_running_loop().create_future()
+
+    async def wait_closed(self) -> None:
+        await self._closed.wait()
+
+    async def close(self) -> None:
+        self.state = "CLOSED"
+        self._closed.set()
+
+    def abort(self) -> None:
+        self.aborts += 1
+        self.state = "CLOSED"
+        self._closed.set()
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        ("ping", "Ping write", 2.0, 3.0),
+        ("pong", "Pong wait", 3.0, 4.0),
+    ],
+)
+async def test_an_owned_keepalive_reaps_a_subscription_whichever_wait_stalls(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    case: tuple[Literal["ping", "pong"], str, float, float],
+) -> None:
+    """A blocked keepalive write cannot sit outside the gateway's deadline.
+
+    Both waits are driven on the test's virtual loop. The Fake Ping either
+    never finishes its write or returns a Pong waiter that never finishes; no
+    socket buffer, scheduling race, or wall-clock timeout decides the result.
+    The request is a real ``subscribe`` through the connection handler, so the
+    shared tracker is active while the keepalive stalls and must be empty when
+    the handler returns.
+    """
+    stall, reported_operation, reported_seconds, elapsed_seconds = case
+    closed = asyncio.Event()
+    limits = WebSocketLimits(
+        ping_interval_seconds=1.0,
+        ping_timeout_seconds=3.0,
+        close_timeout_seconds=4.0,
+        write_deadline_seconds=2.0,
+    )
+    gateway = _asset_gateway(
+        tmp_path,
+        limits=limits,
+        request_runner=_ChangeWaitRunner(closed),
+    )
+    connection = _KeepaliveStallConnection(closed, stall)
+    started = asyncio.get_running_loop().time()
+    with caplog.at_level(logging.WARNING, logger="server.transport.websocket"):
+        # test-isolation: the library callback is the owned keepalive mechanism;
+        # a connection Fake is the only way to stall its Ping and Pong halves
+        # independently without introducing a real socket or wall-clock race.
+        await gateway._handle_connection(  # noqa: SLF001  # lint-waiver: LW-101118 [SLF001]; exercise the public WebSocket protocol boundary with a deterministic connection Fake whose Ping write and Pong waiter are controllable
+            cast("ServerConnection", connection)
+        )
+
+    assert asyncio.get_running_loop().time() - started == elapsed_seconds
+    assert [json.loads(frame)["type"] for frame in connection.sent] == [
+        "subscribed",
+        "event_batch",
+    ]
+    assert connection.aborts == 1
+    assert gateway.subscriptions.wait_for_subscriber(0.0) is True
+    gateway.subscriptions.wait_for_none_active(settle_seconds=0.0)
+    warnings = [
+        record.getMessage() for record in caplog.records if record.levelno >= logging.WARNING
+    ]
+    assert len(warnings) == 1
+    assert reported_operation in warnings[0]
+    assert f"{reported_seconds}s" in warnings[0]
+
+
+class _PausedWriteTransport:
+    """Record bytes while holding a real WebSocket connection in flow control."""
+
+    def __init__(self) -> None:
+        self.writes: list[bytes] = []
+        self.aborts = 0
+
+    def write(self, data: bytes) -> None:
+        self.writes.append(data)
+
+    def is_closing(self) -> bool:
+        return False
+
+    def abort(self) -> None:
+        self.aborts += 1
+
+
+class _KeepaliveDependencyError(RuntimeError):
+    """A scripted unexpected failure from the WebSocket dependency."""
+
+
+class _KeepaliveFailureConnection:
+    """Raise at one dependency boundary while recording terminal transport action."""
+
+    def __init__(self, failure: Literal["close-wait", "ping", "pong"]) -> None:
+        self.failure = failure
+        self.state = "OPEN"
+        self.aborts = 0
+        self.transport = SimpleNamespace(abort=self.abort)
+
+    async def wait_closed(self) -> None:
+        if self.failure == "close-wait":
+            raise _KeepaliveDependencyError
+        await asyncio.Future()
+
+    async def ping(self) -> Awaitable[float]:
+        if self.failure == "ping":
+            raise _KeepaliveDependencyError
+        pong: asyncio.Future[float] = asyncio.Future()
+        pong.set_exception(_KeepaliveDependencyError())
+        return pong
+
+    def abort(self) -> None:
+        self.aborts += 1
+        self.state = "CLOSED"
+
+
+@pytest.mark.parametrize(
+    ("failure", "reported", "elapsed_seconds"),
+    [
+        ("close-wait", "close wait ended", 0.0),
+        ("ping", "Ping ended", 1.0),
+        ("pong", "Pong ended", 1.0),
+    ],
+)
+async def test_owned_keepalive_aborts_on_every_dependency_failure(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    failure: Literal["close-wait", "ping", "pong"],
+    reported: str,
+    elapsed_seconds: float,
+) -> None:
+    """An unexpected dependency failure cannot silently end the sole keepalive."""
+    gateway = _asset_gateway(
+        tmp_path,
+        limits=WebSocketLimits(
+            ping_interval_seconds=1.0,
+            ping_timeout_seconds=3.0,
+            close_timeout_seconds=4.0,
+            write_deadline_seconds=2.0,
+        ),
+        request_runner=InlineBlockingRunner(),
+    )
+    connection = _KeepaliveFailureConnection(failure)
+    started = asyncio.get_running_loop().time()
+
+    with caplog.at_level(logging.DEBUG, logger="server.transport.websocket"):
+        # test-isolation: the dependency-boundary Fake raises each failure without a real socket.
+        await gateway._keepalive(  # noqa: SLF001  # lint-waiver: LW-101119 [SLF001]; a deterministic connection Fake exercises failures from the public dependency calls without real sockets
+            cast("ServerConnection", connection)
+        )
+
+    assert asyncio.get_running_loop().time() - started == elapsed_seconds
+    assert connection.aborts == 1
+    assert any(reported in record.getMessage() for record in caplog.records)
+
+
+async def test_owned_keepalive_bounds_the_real_connection_ping_drain(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The gateway deadline owns the dependency's actual paused Ping write.
+
+    ``ServerConnection.ping()`` enters its public send context, serializes a
+    real Ping frame, and then waits in the dependency's flow-control drain.
+    Holding ``paused`` true reproduces the exact unbounded dependency path
+    without a socket, thread, or real clock.
+    """
+    limits = WebSocketLimits(
+        ping_interval_seconds=1.0,
+        ping_timeout_seconds=7.0,
+        close_timeout_seconds=4.0,
+        write_deadline_seconds=2.0,
+    )
+    gateway = _asset_gateway(
+        tmp_path,
+        limits=limits,
+        request_runner=InlineBlockingRunner(),
+    )
+    connection = ServerConnection(
+        ServerProtocol(state=State.OPEN),
+        cast("Any", SimpleNamespace()),
+        ping_interval=None,
+        ping_timeout=None,
+    )
+    transport = _PausedWriteTransport()
+    connection.transport = cast("Any", transport)
+    connection.paused = True
+
+    started = asyncio.get_running_loop().time()
+    try:
+        with caplog.at_level(logging.WARNING, logger="server.transport.websocket"):
+            await gateway._keepalive(  # noqa: SLF001  # lint-waiver: LW-101117 [SLF001]; compose the owned deadline with the dependency's public Ping and flow-control implementation
+                connection
+            )
+    finally:
+        for pong_waiter, _timestamp in connection.pong_waiters.values():
+            pong_waiter.cancel()
+        connection.pong_waiters.clear()
+        connection.connection_lost_waiter.cancel()
+
+    assert asyncio.get_running_loop().time() - started == 3.0
+    assert len(transport.writes) == 1
+    assert transport.writes[0][0] & 0x0F == 0x09
+    assert transport.aborts == 1
+    warnings = [
+        record.getMessage() for record in caplog.records if record.levelno >= logging.WARNING
+    ]
+    assert warnings == ["abandoning a websocket peer whose keepalive Ping write exceeded 2.0s"]
 
 
 # A backlog whose bootstrap batch is a multiple of the frame cap, so the replay
@@ -2378,9 +2734,7 @@ def test_gateway_publishes_and_cleans_project_instance_record(tmp_path: Path) ->
     assert not instance_path.exists()
 
 
-def test_browser_session_survives_launch_capability_rotation(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_browser_session_survives_launch_capability_rotation(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path / "logs")
     assets = tmp_path / "web"
     assets.mkdir()
@@ -2413,7 +2767,17 @@ def test_browser_session_survives_launch_capability_rotation(
         async def rotate_with_an_attached_socket() -> None:
             origin = cast("Origin", page_origin)
             async with connect(gateway.websocket_url, origin=origin) as attached:
-                assert web_entrypoint.main(["rotate", "--instance", str(instance_path)]) == 0
+                record = WebInstanceRecord.read(instance_path)
+                assert record is not None
+                endpoint = urlsplit(record.capability_rotation_url)
+                assert (
+                    _fetch(
+                        gateway.bound_port,
+                        f"{endpoint.path}?{endpoint.query}",
+                        {CAPABILITY_ROTATION_HEADER: "1"},
+                    )[0]
+                    == HTTPStatus.OK
+                )
                 await attached.send(SnapshotQuery(timestamp=REQUEST_TIME).model_dump_json())
                 assert json.loads(await attached.recv())["ok"] is True
                 await _assert_rejected(
@@ -2442,7 +2806,6 @@ def test_browser_session_survives_launch_capability_rotation(
         assert replacement.token == gateway.token
         assert replacement.token != old_token
         assert replacement.started_at == 1_000.0
-        assert replacement.url in capsys.readouterr().out
         assert _fetch(gateway.bound_port, "/")[0] == 403
         assert _fetch(gateway.bound_port, "/", {"Cookie": cookie})[0] == 200
         assert (
@@ -2536,12 +2899,12 @@ def test_a_browser_stream_reports_what_it_delivered_so_a_closing_server_can_wait
             assert json.loads(await websocket.recv())["type"] == "subscribed"
             assert json.loads(await websocket.recv())["type"] == "event_batch"
             caught_up.append(
-                tracker.wait_until_delivered(parts.api.latest_sequence, DEADLOCK_GUARD_S)
+                tracker.wait_until_delivered(_delivery_watermark(parts), DEADLOCK_GUARD_S)
             )
             parts.journal.publish_output("stdout", "the run's last line")
             assert json.loads(await websocket.recv())["type"] == "event_batch"
             caught_up.append(
-                tracker.wait_until_delivered(parts.api.latest_sequence, DEADLOCK_GUARD_S)
+                tracker.wait_until_delivered(_delivery_watermark(parts), DEADLOCK_GUARD_S)
             )
 
     with gateway:
@@ -2569,7 +2932,7 @@ def test_terminal_drain_refuses_a_late_browser_subscription(tmp_path: Path) -> N
         threads=OsThreads(),
         request_runner=ThreadBlockingRunner(),
     ) as gateway:
-        assert tracker.wait_until_delivered(parts.api.latest_sequence, 0.0)
+        assert tracker.wait_until_delivered(_delivery_watermark(parts), 0.0)
         refusal = asyncio.run(subscribe(gateway))
     parts.close()
 

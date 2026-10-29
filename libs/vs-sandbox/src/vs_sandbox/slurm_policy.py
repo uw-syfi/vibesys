@@ -18,12 +18,16 @@ from pydantic import (
 )
 
 from vs_sandbox.agent_gpu import AgentGpuConfig
+from vs_sandbox.slurm_comparison import ComparisonMachine
 from vs_slurm.api import (
+    MAX_WITHDRAWAL_WINDOW_SECONDS,
     PORT_PLACEHOLDER,
+    LedgerPolicy,
     SlurmConfig,
     SlurmLocalTransport,
     SlurmService,
     load_slurm_config,
+    withdrawal_window_seconds,
 )
 
 if TYPE_CHECKING:
@@ -61,7 +65,11 @@ class SlurmExecutionPolicy(BaseModel):
     """Commands and setup selected by VibeSys for jobs on a remote cluster.
 
     ``agent_gpu``, when present, lets the agent run its own GPU commands as
-    Slurm jobs (see :func:`agent_gpu_capability`).
+    Slurm jobs (see :func:`agent_gpu_capability`). ``ledger``, when present
+    (the ``[vibesys.ledger]`` table), submits evaluations through the project's
+    evaluation ledger on the cluster, so runs share the job of one request, and
+    with ``keep_jobs_on_stop`` a restarted run reattaches to its jobs instead of
+    resubmitting them (#2757).
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -73,6 +81,9 @@ class SlurmExecutionPolicy(BaseModel):
     accuracy_arguments: tuple[str, ...] = ()
     benchmark_arguments: tuple[str, ...] = ()
     agent_gpu: AgentGpuConfig | None = None
+    ledger: LedgerPolicy | None = None
+    comparison: ComparisonMachine | None = None
+    """The ``[vibesys.comparison]`` table: what this machine gives comparison baselines."""
 
     @field_validator("remote_python")
     @classmethod
@@ -127,6 +138,27 @@ class SlurmExecutionPolicy(BaseModel):
             return (self.remote_python, *parts[1:])
         return parts
 
+    def private_paths(self) -> tuple[str, ...]:
+        """The absolute cluster paths the operator wrote: interpreter, setup script, service and arguments.
+
+        What a stage reports may echo them; they are the operator's, not the agent's to see.
+        """
+        service = () if self.service is None else self.service.command
+        machine = (
+            ()
+            if self.comparison is None
+            else (self.comparison.image_cache_dir, self.comparison.model_cache_dir)
+        )
+        words = (
+            self.remote_python,
+            self.setup_script or "",
+            *service,
+            *self.accuracy_arguments,
+            *self.benchmark_arguments,
+            *machine,
+        )
+        return tuple(word for word in words if word.startswith("/"))
+
     def remote_service(self) -> SlurmService | None:
         """Return the configured service with its Python launcher translated."""
         if self.service is None:
@@ -172,7 +204,8 @@ class SlurmOperatorSettings:
 
     The cluster (``[slurm]``), the VibeSys policy (``[vibesys]``), and, through
     the policy, the agent GPU limits. Construction rejects a combination the
-    run could not honor (agent GPU commands without the local transport), so
+    run could not honor (agent GPU commands without the local transport, or a
+    transport timeout whose withdrawal mark outlasts the longest one allowed), so
     holding a value means the file is usable and no later read can differ.
     """
 
@@ -180,8 +213,9 @@ class SlurmOperatorSettings:
     policy: SlurmExecutionPolicy
 
     def __post_init__(self) -> None:
-        """Reject agent GPU limits that the cluster transport cannot serve."""
+        """Reject agent GPU limits the cluster transport cannot serve, and a ledger its timeout breaks."""
         agent_gpu_capability(self.config, self.policy)
+        _check_withdrawal_window(self.config, self.policy)
 
     @property
     def agent_gpu(self) -> AgentGpuConfig | None:
@@ -199,6 +233,29 @@ class SlurmOperatorSettings:
         if self.policy.agent_gpu is None or not isinstance(transport, SlurmLocalTransport):
             return None
         return transport.shell_command
+
+
+def _check_withdrawal_window(config: SlurmConfig, policy: SlurmExecutionPolicy) -> None:
+    """Refuse a transport timeout whose withdrawal mark outlasts ``MAX_WITHDRAWAL_WINDOW_SECONDS``.
+
+    A run's withdrawal mark holds ``withdrawal_window_seconds`` of the
+    transport timeout, and a reader that cannot decode the mark undoes it after
+    ``MAX_WITHDRAWAL_WINDOW_SECONDS``; ``WithdrawalTiming`` refuses the same
+    timeout when a withdrawal starts, and this names the file's keys at load.
+    The claim window is not bound by the mark's: an unreadable mark holds at
+    least ``MAX_WITHDRAWAL_WINDOW_SECONDS`` whatever the claim window.
+    """
+    if policy.ledger is None:
+        return
+    window = withdrawal_window_seconds(config.transport_timeout_seconds)
+    if window > MAX_WITHDRAWAL_WINDOW_SECONDS:
+        message = (
+            f"slurm.transport_timeout_seconds={config.transport_timeout_seconds:g} makes a "
+            f"withdrawal mark hold {window:g} s, more than the longest any withdrawal may "
+            f"hold ({MAX_WITHDRAWAL_WINDOW_SECONDS:g} s), with [vibesys.ledger] set; "
+            "lower slurm.transport_timeout_seconds"
+        )
+        raise SlurmPolicyError(message)
 
 
 def load_slurm_operator_settings(path: Path) -> SlurmOperatorSettings:

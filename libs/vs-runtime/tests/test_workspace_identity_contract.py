@@ -18,7 +18,7 @@ from tests.support.evidence_proofs import RetainWithProof, accepted_accuracy_pro
 from tests.support.real_git import REAL_GIT
 
 from vs_agent.api import NULL_SKILL_SELECTION
-from vs_core.api import HostFence, HostId, Until
+from vs_core.api import CheckoutStatus, HostFence, HostId, Until
 from vs_project.api import (
     GitError,
     NullGitTrackerEvents,
@@ -83,6 +83,10 @@ class _EnvironmentSession:
     sandbox: CommandRunner
     view: RunEnvironmentView
 
+    @property
+    def capture_commands(self) -> CommandRunner:
+        return self.sandbox
+
     def __enter__(self) -> _EnvironmentSession:
         return self
 
@@ -146,7 +150,9 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                 ),
                 lambda _request: _EnvironmentSession(
                     FakeCommandRunner(),
-                    RunEnvironmentView(paths=AgentPaths(), cli_sandboxed=True),
+                    RunEnvironmentView(
+                        paths=AgentPaths(), workspace_git_writable=True, cli_sandboxed=True
+                    ),
                 ),
                 clock=ManualClock(),
             )
@@ -165,7 +171,7 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
             )
             workspaces = create_workspace_runtime(
                 workspace_resources=resources,
-                blocking=BlockingOperations(runner=InlineBlockingRunner()),
+                blocking=BlockingOperations(runner=InlineBlockingRunner(), threads=SimThreads()),
                 validation_passes=MemoryValidationPasses(),
             ).workspaces
         try:
@@ -533,6 +539,7 @@ def test_parent_verification_over_real_git_accepts_only_retained_commits() -> No
 
             retained = await workspaces.root.snapshot("retained")
             candidate = await workspaces.create_candidate(retained, member_id="parent")
+            candidate.path.mkdir(parents=True, exist_ok=True)
             (candidate.path / "candidate.py").write_text("VALUE = 5\n", encoding="utf-8")
             held = await candidate.snapshot("held")
             await candidate.discard()
@@ -574,5 +581,67 @@ def test_retention_over_real_git_keeps_a_proven_commit_and_refuses_the_rest() ->
                 accuracy_proof=accepted_accuracy_proof(revision_ref("0" * 40)),
             )
             assert (await owner.execute(missing, context))["retained"] is False
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("implementation", _IMPLEMENTATIONS)
+def test_adoption_publishes_without_checkout_authority(implementation: Implementation) -> None:
+    async def exercise() -> None:
+        async with _workspaces(implementation) as workspaces:
+            baseline = workspaces.root.revision
+            assert baseline is not None
+            candidate = await workspaces.create_candidate(baseline)
+            candidate.path.mkdir(parents=True, exist_ok=True)
+            (candidate.path / "candidate.py").write_text("VALUE = 5\n", encoding="utf-8")
+            winner = await candidate.snapshot_and_retain("winner", retention_label="candidate")
+            await candidate.discard()
+            result = await workspaces.adopt(winner)
+            assert result.revision == winner
+            assert result.commit
+            assert result.branch
+            assert await workspaces.export_patch(result.commit) == await workspaces.export_patch(
+                winner
+            )
+            assert workspaces.root.revision == baseline
+            assert await workspaces.root.matches_revision(baseline)
+            assert await workspaces.adopt(winner) == result
+            checkout = await workspaces.update_checkout(result)
+            assert checkout.status is CheckoutStatus.FAST_FORWARDED
+            assert workspaces.root.revision == result.commit
+            assert await workspaces.root.matches_revision(winner)
+            assert await workspaces.adopt(winner) == result
+
+    asyncio.run(exercise())
+
+
+def test_fake_publication_history_survives_reopening_the_collection(tmp_path: Path) -> None:
+    async def exercise() -> None:
+        root = FakeWorkspace(path=tmp_path, known_revisions={"first", "second"})
+        workspaces = FakeWorkspaces(root)
+        first = await workspaces.adopt("first", message="first publication")
+        second = await workspaces.adopt("second", message="second publication")
+        await workspaces.close()
+        resumed = FakeWorkspaces(root, supports_parallel_candidates=True)
+        assert await resumed.adopt("first", message="retry") == first
+        assert await resumed.adopt("second", message="retry") == second
+        root.script_pending_changes(["operator.py"])
+        assert (await resumed.update_checkout(second)).status is CheckoutStatus.DIRTY_TREE
+        assert (await resumed.update_checkout(second)).status is CheckoutStatus.FAST_FORWARDED
+        assert (await resumed.update_checkout(first)).status is CheckoutStatus.DIVERGED
+        assert root.revision == second.commit
+        await root.restore(second.commit)
+        assert await root.matches_revision(second.revision)
+        candidate = await resumed.create_candidate(second.commit)
+        assert candidate.revision == second.commit
+        assert await candidate.matches_revision(second.revision)
+        assert await candidate.measured_input(second.commit) == await candidate.measured_input(
+            second.revision
+        )
+        await candidate.discard()
+        another = await resumed.adopt(second.commit)
+        assert (await resumed.update_checkout(another)).status is CheckoutStatus.FAST_FORWARDED
+        assert await root.matches_revision(second.revision)
+        await resumed.close()
 
     asyncio.run(exercise())

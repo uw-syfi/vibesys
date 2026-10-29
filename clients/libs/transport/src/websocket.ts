@@ -7,6 +7,7 @@ import {
   ServerError,
   streamFailure,
 } from '@vibesys/contracts';
+import {newRequestId} from '@vibesys/request-identity';
 import {
   ControlChannel,
   type ControlChannelState,
@@ -22,6 +23,7 @@ import {
   type RequestOptions,
   registerAbort,
 } from './request-policy.js';
+import {ObserverFailureBoundary, settleAll} from './stream-shutdown.js';
 import {
   type ControlTransport,
   type EventSubscription,
@@ -64,7 +66,10 @@ export interface WebSocketTransportOptions {
    * Observe control-channel connectivity: `disconnected` when a dial fails or
    * a live channel drops, `connected` when one comes up. Reported once per
    * transition, so a frontend can disable the controls a dead channel cannot
-   * carry instead of rendering them as live.
+   * carry instead of rendering them as live. A thrown observer error never
+   * interrupts transport ownership; `close()` reports it after every acquired
+   * bounded close owner settles. If acquiring that bound fails, the transport
+   * starts a best-effort physical close before exposing the structural error.
    */
   onConnectionState?: (state: ControlChannelState) => void;
   /** Override the browser constructor in tests or an embedded web runtime. */
@@ -113,16 +118,22 @@ export class WebSocketTransport implements ControlTransport {
   readonly #openingSockets = new Map<WebSocketLike, () => Promise<void>>();
   /** One physical close per socket, including closes already in progress. */
   readonly #socketCloses = new WeakMap<WebSocketLike, Promise<void>>();
-  /** In-progress closes that a later client-wide close must also join. */
+  /**
+   * In-progress closes a later client-wide close must join, plus settled close
+   * failures retained for that mandatory terminal error boundary.
+   */
   readonly #closingSockets = new Set<Promise<void>>();
+  /** Subscription callbacks retained until the transport's terminal join. */
+  readonly #subscriptionObservers = new ObserverFailureBoundary();
   readonly #scheduleTimeout: ScheduleTimeout;
   readonly #channel: ControlChannel;
 
   #closed = false;
+  #closing: Promise<void> | null = null;
 
   constructor(url: string, options: WebSocketTransportOptions = {}) {
     this.#url = url;
-    this.#clientId = options.clientId ?? globalThis.crypto.randomUUID();
+    this.#clientId = options.clientId ?? newRequestId();
     this.#connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
     this.#closeGraceMs = options.closeGraceMs ?? DEFAULT_CLOSE_GRACE_MS;
     this.#webSocket = options.webSocket ?? defaultWebSocket;
@@ -186,13 +197,18 @@ export class WebSocketTransport implements ControlTransport {
       let disconnected = false;
       let protocolErrorReceived = false;
       let cancelHandshake = (): void => {};
-      const disconnect = (error: Error): void => {
+      const disconnect = (error: Error, physicallyClosed = false): void => {
         if (disconnected || closing) return;
         disconnected = true;
         cancelHandshake();
+        // Publish physical retirement before releasing the live claim or
+        // notifying external code. A disconnect observer may call close()
+        // reentrantly; that close must join this exact socket owner.
+        if (!physicallyClosed) void this.#closeSocket(socket);
         this.#claimedSockets.delete(socket);
-        if (subscribed && !protocolErrorReceived) onDisconnect(error);
-        else if (!subscribed) reject(error);
+        if (subscribed && !protocolErrorReceived) {
+          this.#subscriptionObservers.capture(() => onDisconnect(error));
+        } else if (!subscribed) reject(error);
       };
       const settle = (): void => {
         cancelHandshake();
@@ -205,42 +221,49 @@ export class WebSocketTransport implements ControlTransport {
         reject(disconnectedError('Client closed during subscription'));
       };
       settleClaimed = settle;
+      const handleMessage = (message: ServerMessage): void => {
+        const delivery = this.#subscriptionObservers.capture(() => onMessage(message));
+        if (!delivery.ok) {
+          // A valid peer frame remains valid when local delivery fails. Retire
+          // this subscription with the observer's own error, never a parse
+          // classification, then contain any disconnect-observer failure too.
+          disconnect(toError(delivery.reason));
+          return;
+        }
+        if (message.type === 'protocol_error') {
+          protocolErrorReceived = true;
+          if (!subscribed) {
+            disconnect(new ServerError(message.message, message.diagnostic ?? null));
+            return;
+          }
+        }
+        if (!subscribed && message.type === 'subscribed') {
+          subscribed = true;
+          cancelHandshake();
+          resolve({
+            close: async () => {
+              closing = true;
+              cancelHandshake();
+              this.#claimedSockets.delete(socket);
+              await this.#closeSocket(socket);
+            },
+          });
+        }
+      };
       // One handler owns the accepted-subscription state machine, including
       // the protocol-error-before-close rule. Keeping it together prevents
       // the browser and Node adapters from drifting on ordering semantics.
       socket.onmessage = event => {
-        try {
-          const message = parseServerMessage(textFrame(event.data));
-          onMessage(message);
-          if (message.type === 'protocol_error') {
-            protocolErrorReceived = true;
-            if (!subscribed) {
-              disconnect(new ServerError(message.message, message.diagnostic ?? null));
-              void this.#closeSocket(socket);
-              return;
-            }
-          }
-          if (!subscribed && message.type === 'subscribed') {
-            subscribed = true;
-            cancelHandshake();
-            resolve({
-              close: async () => {
-                closing = true;
-                cancelHandshake();
-                this.#claimedSockets.delete(socket);
-                await this.#closeSocket(socket);
-              },
-            });
-          }
-        } catch (error) {
-          const failure = streamFailure(error);
-          disconnect(failure);
-          void this.#closeSocket(socket);
+        if (disconnected || closing) return;
+        const parsed = parseSubscriptionFrame(event.data);
+        if (!parsed.ok) {
+          disconnect(parsed.error);
+          return;
         }
+        handleMessage(parsed.message);
       };
       socket.onerror = () => {
         disconnect(transportFailure(new Error('WebSocket transport error')));
-        void this.#closeSocket(socket);
       };
       socket.onclose = () => {
         this.#claimedSockets.delete(socket);
@@ -248,6 +271,7 @@ export class WebSocketTransport implements ControlTransport {
           disconnectedError(
             subscribed ? 'Server event stream disconnected' : 'Server rejected the subscription',
           ),
+          true,
         );
       };
       const scheduledCancel = this.#scheduleTimeout(() => {
@@ -257,7 +281,6 @@ export class WebSocketTransport implements ControlTransport {
             `Server subscription timed out after ${this.#connectTimeoutMs}ms`,
           ),
         );
-        void this.#closeSocket(socket);
       }, this.#connectTimeoutMs);
       cancelHandshake = scheduledCancel;
       if (disconnected || closing) {
@@ -268,7 +291,6 @@ export class WebSocketTransport implements ControlTransport {
         socket.send(JSON.stringify(request));
       } catch (error) {
         disconnect(transportFailure(error));
-        void this.#closeSocket(socket);
       }
     });
   }
@@ -283,9 +305,22 @@ export class WebSocketTransport implements ControlTransport {
    * which has resolved but not yet been claimed, is closed here as an opening
    * socket. So there is no interleaving that returns from `close()` with a
    * socket still open.
+   *
+   * Observer and socket failures never make this fail fast: every acquired
+   * bounded close owner is joined first. If acquiring a grace bound fails, a
+   * best-effort physical close starts before the structural error is exposed.
+   * One failure is preserved or several are aggregated in stable
+   * control-then-socket order.
    */
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    if (this.#closing !== null) return this.#closing;
     this.#closed = true;
+    this.#closing = this.#closeOwnedSockets();
+    return this.#closing;
+  }
+
+  /** Perform the one terminal teardown every close caller joins. */
+  async #closeOwnedSockets(): Promise<void> {
     const channelClosed = this.#channel.close();
     const claimed = [...this.#claimedSockets.entries()];
     this.#claimedSockets.clear();
@@ -299,7 +334,10 @@ export class WebSocketTransport implements ControlTransport {
     await Promise.resolve();
     for (const settle of [...this.#openingSockets.values()]) closing.push(settle());
     closing.push(...this.#closingSockets);
-    await Promise.all([channelClosed, ...closing]);
+    await settleAll(
+      [channelClosed, this.#subscriptionObservers.settle(), ...closing],
+      'could not close every WebSocket transport connection',
+    );
   }
 
   /**
@@ -604,7 +642,7 @@ export class WebSocketTransport implements ControlTransport {
   #envelope(input: RequestInput): IssuedRequest {
     return {
       protocol_version: 1,
-      request_id: globalThis.crypto.randomUUID(),
+      request_id: newRequestId(),
       client_id: this.#clientId,
       timestamp: new Date().toISOString(),
       ...input,
@@ -619,13 +657,21 @@ export class WebSocketTransport implements ControlTransport {
     // runtime, or an already-closing socket may report `close` synchronously
     // and re-enter another shutdown path from that callback.
     let complete = (): void => {};
-    const closing = new Promise<void>(resolve => {
+    let fail = (_reason: unknown): void => {};
+    const closing = new Promise<void>((resolve, reject) => {
       complete = resolve;
+      fail = reject;
     });
     this.#socketCloses.set(socket, closing);
     this.#closingSockets.add(closing);
-    void closeSocket(socket, this.#closeGraceMs, this.#scheduleTimeout).then(complete);
-    void closing.then(() => this.#closingSockets.delete(closing));
+    void closeSocket(socket, this.#closeGraceMs, this.#scheduleTimeout).then(complete, fail);
+    void closing.then(
+      () => this.#closingSockets.delete(closing),
+      // A fire-and-forget retirement has no local consumer for a structural
+      // close failure. Keep its settled evidence, not a live resource, until
+      // terminal `close()` joins and reports it.
+      () => undefined,
+    );
     return closing;
   }
 }
@@ -664,6 +710,19 @@ function textFrame(data: unknown): string {
   return data;
 }
 
+type ParsedSubscriptionFrame =
+  | {readonly ok: true; readonly message: ServerMessage}
+  | {readonly ok: false; readonly error: BackendClientError};
+
+/** Parse peer data without admitting local delivery into the parse boundary. */
+function parseSubscriptionFrame(data: unknown): ParsedSubscriptionFrame {
+  try {
+    return {ok: true, message: parseServerMessage(textFrame(data))};
+  } catch (error) {
+    return {ok: false, error: streamFailure(error)};
+  }
+}
+
 function disconnectedError(message: string): BackendClientError {
   return new BackendClientError('disconnected', message);
 }
@@ -674,12 +733,16 @@ function transportFailure(error: unknown): BackendClientError {
   return new BackendClientError('disconnected', cause.message, {cause});
 }
 
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
 function closeSocket(
   socket: WebSocketLike,
   graceMs: number,
   schedule: ScheduleTimeout,
 ): Promise<void> {
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
     if (socket.readyState === CLOSED) {
       resolve();
       return;
@@ -693,11 +756,27 @@ function closeSocket(
       cancelTimeout();
       resolve();
     };
-    cancelTimeout = schedule(finish, graceMs);
     socket.onclose = () => {
       previousOnClose?.();
       finish();
     };
+    try {
+      cancelTimeout = schedule(finish, graceMs);
+    } catch (error) {
+      // The close owner still has to settle when its deadline cannot be
+      // acquired. Ask the browser to fail closed, then expose the structural
+      // scheduler failure; there is no bounded wait left that could safely
+      // keep this promise pending for a later close event.
+      settled = true;
+      reject(error);
+      try {
+        socket.close(1000, 'client closed');
+      } catch {
+        // The scheduler failure is the stable primary cause. The socket has no
+        // remaining bounded owner through which a second close error can flow.
+      }
+      return;
+    }
     try {
       socket.close(1000, 'client closed');
     } catch {

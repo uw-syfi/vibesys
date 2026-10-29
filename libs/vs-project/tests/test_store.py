@@ -323,7 +323,7 @@ def test_semantic_runtime_and_sandbox_paths(tmp_path: Path) -> None:
         store.state.candidate_worktrees_directory(run.run_id)
     )
     assert store.state.sandbox_paths().read_only_path == Path(".vibesys")
-    assert store.state.sandbox_paths().hidden_path is None
+    assert store.state.sandbox_paths().hidden_paths == (Path(".vibesys/state/runs"),)
     git = store.state.git_integration(run.run_id)
     assert git.local_exclude_pattern == "/.vibesys/state/local/"
     assert git.metadata_pathspec == ".vibesys/state"
@@ -376,6 +376,25 @@ def test_same_named_projects_have_distinct_external_state_directories(tmp_path: 
     assert second_log.parent.parent.parent.name.startswith("project-")
 
 
+def test_logged_runs_are_named_per_checkout_without_creating_any_state(tmp_path: Path) -> None:
+    first = tmp_path / "first" / "project"
+    second = tmp_path / "second" / "project"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+
+    store = Project.log_directory_for(first, "run-a").parents[2]
+
+    assert Project.logged_run_ids_for(first) == ()
+    assert not store.exists()
+
+    Project.log_directory_for(first, "run-b").mkdir(parents=True)
+    Project.log_directory_for(first, "run-a").mkdir(parents=True)
+    Project.log_directory_for(second, "run-c").mkdir(parents=True)
+
+    assert Project.logged_run_ids_for(first) == ("run-a", "run-b")
+    assert Project.logged_run_ids_for(second) == ("run-c",)
+
+
 def test_agent_homes_are_machine_local_per_run_and_outside_the_project(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
@@ -413,7 +432,7 @@ def test_repository_local_state_is_not_migrated_or_deleted(
     assert (logs / "run-events.jsonl").read_bytes() == b'{"type":"server_started"}\n'
     assert (agent / "active.json").read_bytes() == b'{"schema_version":1}\n'
     assert (worktree / "candidate.py").read_bytes() == b"candidate = True\n"
-    assert state.sandbox_paths().hidden_path == Path(".vibesys/state/local")
+    assert state.sandbox_paths().hidden_paths == (Path(".vibesys/state/local"),)
 
 
 def test_log_directory_does_not_probe_repository_local_symlinked_parent(tmp_path: Path) -> None:
@@ -1428,3 +1447,40 @@ def test_a_manifest_that_is_not_a_regular_file_is_a_read_failure_not_a_hang(
 
     with pytest.raises(ProjectStateError, match="Could not read VibeSys metadata"):
         store.state.load_project()
+
+
+def test_sandbox_paths_hide_the_run_record_and_machine_local_state(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    manifest = _run(store)
+    (tmp_path / ".vibesys/state/local").mkdir()
+
+    paths = store.state.sandbox_paths()
+
+    assert paths.read_only_path == Path(".vibesys")
+    assert set(paths.hidden_paths) == {Path(".vibesys/state/local"), Path(".vibesys/state/runs")}
+    # What agents may read is a sibling of the hidden directories, never below them.
+    visible = store.state.agent_visible_namespace(manifest.run_id, "notes")
+    visible.write_bytes("a.md", b"note\n")
+    path = PurePosixPath(visible.agent_visible_path("a.md"))
+    assert not any(path.is_relative_to(hidden.as_posix()) for hidden in paths.hidden_paths)
+    assert path.is_relative_to(paths.read_only_path.as_posix())
+
+
+def test_agent_visible_documents_are_run_scoped_and_snapshot_like_run_state(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    manifest = _run(store)
+    namespace = store.state.agent_visible_namespace(manifest.run_id, "notes")
+
+    namespace.write_bytes("calls/a.md", b"one\n")
+
+    assert namespace.read_bytes("calls/a.md") == b"one\n"
+    assert namespace.entries("calls") == ("a.md",)
+    assert namespace.agent_visible_path("calls/a.md") == (
+        f".vibesys/state/agent-visible/{manifest.run_id}/notes/calls/a.md"
+    )
+    assert store.state.portable_namespace(manifest.run_id, "notes").read_bytes("calls/a.md") is None
+    assert [item.relative_path.as_posix() for item in namespace.snapshot().files] == ["calls/a.md"]
+    with pytest.raises(ProjectStateError):
+        store.state.agent_visible_namespace("no-such-run", "notes")

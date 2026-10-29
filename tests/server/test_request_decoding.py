@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sys
 
+import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
@@ -143,6 +144,67 @@ def test_a_frame_past_the_size_cap_is_rejected_without_being_parsed() -> None:
     assert decoded.ok is False
     assert decoded.diagnostic is not None
     assert "larger than" in (decoded.diagnostic.detail or "")
+
+
+def test_conflicting_duplicate_request_types_are_rejected_before_dispatch() -> None:
+    frame = (
+        '{"type":"query.history","type":"command.stop",'
+        '"request_id":"duplicate-type","timestamp":"2026-10-15T00:00:00Z"}'
+    )
+
+    decoded = decode_request(frame, clock=ManualClock())
+
+    assert isinstance(decoded, Response)
+    assert decoded.ok is False
+    assert decoded.diagnostic is not None
+    assert decoded.diagnostic.summary == _REJECTED
+    assert ("type",) in (decoded.diagnostic.validation_paths or ())
+    assert (decoded.request_id, decoded.client_id) == ("duplicate-type", "")
+
+
+def test_duplicate_request_id_is_not_echoed_in_a_rejection() -> None:
+    frame = (
+        '{"type":"query.history","request_id":"first","request_id":"second",'
+        '"timestamp":"2026-10-15T00:00:00Z"}'
+    )
+
+    decoded = decode_request(frame, clock=ManualClock())
+
+    assert isinstance(decoded, Response)
+    assert decoded.request_id == "unknown"
+
+
+def test_oversized_correlation_id_is_not_retained_from_a_rejected_frame() -> None:
+    request_id = "r" * 129
+    frame = (
+        '{"type":"query.history","type":"command.stop",'
+        f'"request_id":"{request_id}","client_id":"client-2",'
+        '"timestamp":"2026-10-15T00:00:00Z"}'
+    )
+
+    decoded = decode_request(frame, clock=ManualClock())
+
+    assert isinstance(decoded, Response)
+    assert (decoded.request_id, decoded.client_id) == ("unknown", "client-2")
+
+
+@pytest.mark.parametrize("code_point", [0xD800, 0xDFFF], ids=["high", "low"])
+@pytest.mark.parametrize("placement", ["request-id", "object-key"])
+def test_raw_surrogate_request_rejection_never_echoes_it_and_always_serializes(
+    code_point: int, placement: str
+) -> None:
+    surrogate = chr(code_point)
+    if placement == "request-id":
+        frame = '{"type":"query.history","request_id":"' + surrogate + '"}'
+    else:
+        frame = '{"type":"query.history","request_id":"request-7","' + surrogate + '":"value"}'
+
+    decoded = decode_request(frame, clock=ManualClock())
+
+    assert isinstance(decoded, Response)
+    assert (decoded.request_id, decoded.client_id) == ("unknown", "")
+    serialized = decoded.model_dump_json()
+    assert json.loads(serialized)["request_id"] == "unknown"
 
 
 @settings(max_examples=examples(pr=20, nightly=200))

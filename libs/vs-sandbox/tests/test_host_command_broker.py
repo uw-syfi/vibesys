@@ -27,8 +27,10 @@ from vs_sandbox.api.slurm import (
     HOST_COMMAND_CLIENT,
     AgentGpuConfig,
     BrokerTransport,
+    CappedGpuLauncher,
     GpuCommand,
     GpuCommands,
+    GpuJobOutcome,
     GpuJobRequest,
     HostCommandBroker,
     RunRoots,
@@ -36,13 +38,14 @@ from vs_sandbox.api.slurm import (
 
 # test-isolation: the client is a single-file CLI that is intentionally absent from the library API.
 from vs_sandbox.host_command_client import Stop, execute
-from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads, examples
+from vs_sim.api.testing import HANG_GUARD_S, RefusingThreads, SimNetwork, SimThreads, examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
     from pathlib import Path
 
-    from vs_sim.api import Connection, Event
+    from vs_sandbox.api.slurm import GpuLauncher
+    from vs_sim.api import Connection, Event, Threads
     from vs_sim.api.testing import Sim
 
 SEEDS = st.one_of(st.none(), st.integers(0, 2**32))
@@ -54,11 +57,14 @@ _FRAMEWORK_RESULT = "/tmp/vibesys-framework-benchmark-0123456789abcdef.json"  # 
 class _RecordingLauncher:
     """Fake launcher: records the job and optionally blocks until it is cancelled."""
 
-    def __init__(self, threads: SimThreads, *, block: bool = False) -> None:
+    def __init__(
+        self, threads: Threads, *, block: bool = False, termination_confirmed: bool = True
+    ) -> None:
         self.commands: list[GpuCommand] = []
         self.requests: list[GpuJobRequest] = []
         self.cancelled = threads.event()
         self._block = block
+        self._termination_confirmed = termination_confirmed
 
     def run(
         self,
@@ -67,13 +73,47 @@ class _RecordingLauncher:
         *,
         write: Callable[[bytes], None],
         cancel: Event,
-    ) -> int:
+    ) -> GpuJobOutcome:
         self.requests.append(request)
         self.commands.append(command)
         write(b"started\n")
         if self._block and cancel.wait(HANG_GUARD_S):
             self.cancelled.set()
-        return 5
+        return GpuJobOutcome(
+            5,
+            termination_confirmed=self._termination_confirmed,
+            job_name="recording-launcher-job",
+        )
+
+    def reconcile(self, job_name: str) -> bool:
+        del job_name
+        return True
+
+
+class _ReturnSignallingLauncher:
+    """Wraps a launcher and sets one event per command once its ``run`` has returned."""
+
+    def __init__(self, inner: GpuLauncher, threads: Threads) -> None:
+        self._inner = inner
+        self._threads = threads
+        self._returned: dict[str, Event] = {}
+
+    def returned(self, name: str) -> Event:
+        """The event set when the command whose last argument is *name* has returned."""
+        return self._returned.setdefault(name, self._threads.event())
+
+    def run(
+        self,
+        request: GpuJobRequest,
+        command: GpuCommand,
+        *,
+        write: Callable[[bytes], None],
+        cancel: Event,
+    ) -> GpuJobOutcome:
+        try:
+            return self._inner.run(request, command, write=write, cancel=cancel)
+        finally:
+            self.returned(command.argv[-1]).set()
 
 
 class _PrefixConfinement:
@@ -112,7 +152,7 @@ _SIGINT = 2
 class _Network:
     """The simulated network the broker listens on and the clients dial."""
 
-    threads: SimThreads
+    threads: Threads
     network: SimNetwork
 
     @property
@@ -123,7 +163,7 @@ class _Network:
         return self.network.connect(address, HANG_GUARD_S)
 
 
-def _network(threads: SimThreads) -> _Network:
+def _network(threads: Threads) -> _Network:
     return _Network(threads, SimNetwork(threads))
 
 
@@ -205,6 +245,28 @@ def _simulate[T](sim: Sim, program: Callable[[_Network], T]) -> T:
     return threads.run(lambda: program(net))
 
 
+def test_a_refused_client_worker_drops_only_that_connection(
+    tmp_path: Path, workspace: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """One transient worker-start refusal does not kill the broker's accept loop."""
+    simulator = SimThreads()
+    threads = RefusingThreads(simulator, {"vibesys-command-job": 1})
+    net = _network(threads)
+
+    def program() -> None:
+        with _serving(net, tmp_path, workspace) as broker:
+            refused = _send_request(net, broker, {})
+            assert refused.recv(1, HANG_GUARD_S) == b""
+            refused.close()
+
+            served = _raw_request(net, broker, {})
+            assert "error" in served
+
+    simulator.run(program)
+
+    assert "client worker did not start" in caplog.text
+
+
 class TestGpuOperation:
     def test_confines_the_command_and_relays_output_and_status(
         self,
@@ -235,6 +297,27 @@ class TestGpuOperation:
         assert command.argv[-2:] == (str((workspace / "sub").resolve()), "nvidia-smi")
         assert command.env["KEEP_ME"] == "1"
         assert "CUDA_VISIBLE_DEVICES" not in command.env
+
+    def test_an_unconfirmed_stop_is_an_error_never_an_ordinary_exit(
+        self,
+        sim: Sim,
+        tmp_path: Path,
+        workspace: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsysbinary: pytest.CaptureFixture[bytes],
+    ) -> None:
+        monkeypatch.chdir(workspace)
+
+        def program(net: _Network) -> int:
+            launcher = _RecordingLauncher(net.threads, termination_confirmed=False)
+            with _serving(net, tmp_path, workspace, gpu=_gpu(launcher)) as broker:
+                _point_at(monkeypatch, broker)
+                return _run_client(net, ["true"])
+
+        assert _simulate(sim, program) == 2
+        captured = capsysbinary.readouterr()
+        assert captured.out == b"started\n"
+        assert b"termination could not be confirmed" in captured.err
 
     def test_a_sibling_directory_of_the_workspace_is_refused_by_name(
         self, sim: Sim, tmp_path: Path, workspace: Path
@@ -333,14 +416,14 @@ class TestGpuOperation:
                 *,
                 write: Callable[[bytes], None],
                 cancel: Event,
-            ) -> int:
+            ) -> GpuJobOutcome:
                 del request, command
                 for _ in range(1024):
                     if cancel.is_set():
                         self.cancelled.set()
                         break
                     write(b"x" * 4096)
-                return 0
+                return GpuJobOutcome(0)
 
         def program(net: _Network) -> bool:
             launcher = _Flooding(net.threads)
@@ -368,6 +451,46 @@ class TestGpuOperation:
             return cancelled
 
         assert _simulate(sim, program)
+
+    def test_an_agent_that_kills_a_command_waiting_for_the_cap_never_has_it_submitted(
+        self, sim: Sim, tmp_path: Path, workspace: Path
+    ) -> None:
+        """With a cap of one, a second command waits; closing it while it waits leaves the line."""
+
+        def program(net: _Network) -> tuple[list[str], str]:
+            launcher = _RecordingLauncher(net.threads, block=True)
+            capped = _ReturnSignallingLauncher(
+                CappedGpuLauncher(launcher, 1, net.threads), net.threads
+            )
+            gpu = GpuCommands(_config(), _PrefixConfinement(), {}, launcher=capped)
+            with _serving(net, tmp_path, workspace, gpu=gpu) as broker:
+                first = _send_request(
+                    net, broker, _gpu_call(broker, str(workspace), argv=["first"])
+                )
+                _read_frame(first)  # submitted, and holding the run's only slot
+                waiting = _send_request(
+                    net, broker, _gpu_call(broker, str(workspace), argv=["second"])
+                )
+                notice = base64.b64decode(_read_frame(waiting)["output"]).decode()
+                waiting.close()  # the agent kills its command while it waits
+                # The broker sees the hangup on its own thread. Free the slot only once
+                # the cancelled request has left the line: a slot that frees first may
+                # be handed to it before its cancel is seen, which no cap can prevent.
+                assert capped.returned("second").wait(HANG_GUARD_S)
+                first.close()  # the slot frees
+                third = _send_request(
+                    net, broker, _gpu_call(broker, str(workspace), argv=["third"])
+                )
+                # It may wait until the first job has wound down, then it is submitted.
+                while base64.b64decode(_read_frame(third)["output"]) != b"started\n":
+                    pass
+                third.close()
+            return [command.argv[-1] for command in launcher.commands], notice
+
+        submitted, notice = _simulate(sim, program)
+
+        assert submitted == ["first", "third"]
+        assert notice.startswith("[vibesys-gpu] waiting: 1 of this run's GPU jobs are active")
 
     def test_an_operation_the_run_does_not_offer_is_refused_by_name(
         self, sim: Sim, tmp_path: Path, workspace: Path

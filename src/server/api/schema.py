@@ -14,21 +14,32 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Never
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, create_model
 
 from server.api.iterations import IterationSlice
 from server.api.protocol import ProtocolRequest, Response, RunSnapshot, ServerMessage
 from server.events import RunEvent
 from server.host_api import (
+    HELPER_FIELD_FEATURES,
     HELPER_REQUEST_FEATURES,
     ChannelEnd,
     HelperMessage,
     HelperRequest,
+    RunStartCompensationFailure,
 )
-from vibesys.api import IterationKind, IterationMetric, IterationStatus, IterationSummary
+from server.host_run_events import EVENT_TYPES_BY_KINDS
+from vibesys.api import (
+    IterationKind,
+    IterationMetric,
+    IterationStatus,
+    IterationSummary,
+    LogOwner,
+)
+from vibesys.api.display_catalog import code_ids, display_names
+from vs_logs.api import NarrationLine
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping, Sequence
 
 _LOCAL_REF_PREFIX = "#/"
 _OPTION_ARGUMENT_COUNT = 2
@@ -103,6 +114,10 @@ class ProtocolDocument(BaseModel):
     event: RunEvent
     snapshot: RunSnapshot
     server_message: ServerMessage
+    log_owner: LogOwner
+    """What a run's log stream is for; the host helper's log listing carries it."""
+    narration_line: NarrationLine
+    """One JSON line of a ``run_narration`` stream, which a log view decodes."""
 
 
 class HostHelperDocument(BaseModel):
@@ -113,6 +128,7 @@ class HostHelperDocument(BaseModel):
     request: HelperRequest
     message: HelperMessage
     channel_end: ChannelEnd
+    compensation_failure: RunStartCompensationFailure
 
 
 def host_helper_json_schema() -> dict[str, Any]:
@@ -123,6 +139,10 @@ def host_helper_json_schema() -> dict[str, Any]:
     """
     document = require_tagged_union_discriminants(HostHelperDocument.model_json_schema())
     document["x-vibesys-feature-by-request"] = _host_helper_feature_by_request(document)
+    document["x-vibesys-feature-by-field"] = _host_helper_feature_by_field(document)
+    document["x-vibesys-event-types-by-kinds"] = {
+        kinds.value: list(types) for kinds, types in EVENT_TYPES_BY_KINDS.items()
+    }
     return document
 
 
@@ -140,6 +160,23 @@ def _host_helper_feature_by_request(document: dict[str, Any]) -> dict[str, str]:
             message = f"helper request tag {tag!r} has more than one feature gate"
             raise ValueError(message)
         result[tag] = feature.value
+    return result
+
+
+def _host_helper_feature_by_field(document: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """Export the server's optional-field gates, refusing a field the request does not have."""
+    request_tags = document["properties"]["request"]["discriminator"]["mapping"]
+    result: dict[str, dict[str, str]] = {}
+    for request_type, fields in HELPER_FIELD_FEATURES.items():
+        tag = request_type.model_fields["type"].default
+        if not isinstance(tag, str) or tag not in request_tags:
+            message = f"gated helper request {request_type.__name__} has no request-union tag"
+            raise ValueError(message)
+        for name in fields:
+            if name not in request_type.model_fields:
+                message = f"gated field {name!r} is not a field of {request_type.__name__}"
+                raise ValueError(message)
+        result[tag] = {name: feature.value for name, feature in fields.items()}
     return result
 
 
@@ -174,6 +211,10 @@ _HOST_HELPER_DESCRIPTOR_KEYWORDS = frozenset(
         "x-vibesys-max-utf8-bytes",
         # Generated from HELPER_REQUEST_FEATURES; both helper implementations consume it.
         "x-vibesys-feature-by-request",
+        # Generated from HELPER_FIELD_FEATURES; both helper implementations consume it.
+        "x-vibesys-feature-by-field",
+        # Generated from EVENT_TYPES_BY_KINDS: the event types a `runs.read_events` kind selects.
+        "x-vibesys-event-types-by-kinds",
     }
 )
 """What the TypeScript walker's strict mode enforces (``contracts/src/schema-walker.ts``)."""
@@ -209,14 +250,40 @@ def _require_keywords(node: object, supported: frozenset[str], path: str) -> Non
             _require_keywords(child, supported, f"{path}.{key}")
 
 
-def protocol_json_schema() -> dict[str, Any]:
+type SpanAttributeModels = Mapping[str, Mapping[str, type[BaseModel]]]
+"""For each orchestration, the attribute model of each kind of span it labels."""
+
+
+def protocol_json_schema(span_attributes: SpanAttributeModels | None = None) -> dict[str, Any]:
     """Return the published JSON Schema document for the server protocol.
 
     This is the authoritative export. The committed
     ``protocol.schema.json`` artifact and every generated client come from
     here, not from ``ProtocolDocument.model_json_schema()`` directly.
+    ``span_attributes`` are the orchestrations' span kinds (the composition root supplies the
+    built-in ones): the document's ``span_attributes`` holds each kind's attribute schema, so a
+    span label's ``attrs_json`` has a generated type per kind.
     """
-    return require_tagged_union_discriminants(ProtocolDocument.model_json_schema())
+    document = create_model(
+        "ProtocolDocument",
+        __base__=ProtocolDocument,
+        span_attributes=(_span_attributes_model(span_attributes or {}), None),
+    )
+    return require_tagged_union_discriminants(document.model_json_schema())
+
+
+def _span_attributes_model(span_attributes: SpanAttributeModels) -> type[BaseModel]:
+    """One optional field per orchestration, each one optional field per kind of span."""
+    fields: dict[str, Any] = {}
+    for orchestration, kinds in sorted(span_attributes.items()):
+        name = "".join(part.title() for part in orchestration.replace("-", "_").split("_"))
+        per_kind: dict[str, Any] = {kind: (m | None, None) for kind, m in sorted(kinds.items())}
+        model = create_model(f"{name}SpanAttributes", __config__=_STRICT, **per_kind)
+        fields[orchestration] = (model | None, None)
+    return create_model("SpanAttributes", __config__=_STRICT, **fields)
+
+
+_STRICT = ConfigDict(extra="forbid")
 
 
 def response_payload_json_schema() -> dict[str, Any]:
@@ -277,6 +344,21 @@ def run_event_json_schema() -> dict[str, Any]:
 def run_event_typescript() -> str:
     """Return the generated browser-compatible event-validation module."""
     return _schema_typescript("runEventSchema", run_event_json_schema())
+
+
+def display_names_typescript() -> str:
+    """Return the generated module of the role names a person reads and the ids a screen must not draw.
+
+    One definition (``vibesys.api.display_catalog``) with the TypeScript clients' copy
+    generated from it, so a screen never maps an id itself and the two cannot drift.
+    """
+    names = json.dumps(display_names().model_dump(), indent=2)
+    ids = json.dumps(code_ids().model_dump(), indent=2)
+    return (
+        "/* Generated from the Python display names (vibesys.api.display_catalog). Do not edit. */\n\n"
+        f"export const DISPLAY_NAMES = {names} as const;\n\n"
+        f"export const CODE_IDS = {ids} as const;\n"
+    )
 
 
 def _schema_typescript(name: str, schema: dict[str, Any]) -> str:
@@ -868,23 +950,6 @@ def fully_populated_response() -> Response:
                 "provider": "provider",
                 "model": "model",
             },
-            "chat_options": {
-                "providers": [
-                    {
-                        "provider": "provider",
-                        "models": [{"model": "model", "source": "run", "default": True}],
-                    }
-                ]
-            },
-            "tui_defaults": {
-                "runs_dir": "runs",
-                "input_path": "input.py",
-                "experiment_name": "experiment",
-                "repository_owner": None,
-                "repository_name": "repository",
-                "visibility": "private",
-                "theme": "dark",
-            },
             "snapshot": {
                 "run_id": "run",
                 "sequence": 1,
@@ -972,7 +1037,7 @@ def fully_populated_response() -> Response:
                     "perf_baseline_round": 0,
                     "perf_baseline_commit": "baseline",
                     "perf_delta_reason": "no_baseline_yet",
-                    "kept": True,
+                    "best": True,
                     "strategy_disposition": "available",
                     "strategy_reason": "reason",
                     "active": True,
@@ -1172,12 +1237,10 @@ def _mark_required(member: dict[str, Any], property_name: str, path: str) -> Non
     member["required"] = [key for key in properties if key in required]
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     """Write the public protocol JSON schema to the requested path."""
-    arguments = sys.argv[1:]
-    if len(arguments) == 1:
-        document, output = protocol_json_schema(), Path(arguments[0])
-    elif len(arguments) == _OPTION_ARGUMENT_COUNT and arguments[0] == "--host-helper-schema":
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if len(arguments) == _OPTION_ARGUMENT_COUNT and arguments[0] == "--host-helper-schema":
         document, output = host_helper_json_schema(), Path(arguments[1])
     elif len(arguments) == _OPTION_ARGUMENT_COUNT and arguments[0] == "--response-payload-schema":
         document, output = response_payload_json_schema(), Path(arguments[1])
@@ -1196,6 +1259,11 @@ def main() -> None:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(host_helper_typescript())
         return
+    elif len(arguments) == _OPTION_ARGUMENT_COUNT and arguments[0] == "--display-names-module":
+        output = Path(arguments[1])
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(display_names_typescript())
+        return
     elif len(arguments) == _OPTION_ARGUMENT_COUNT and arguments[0] == "--run-event-module":
         output = Path(arguments[1])
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -1204,9 +1272,10 @@ def main() -> None:
     else:
         message = (
             "usage: python -m server.api.schema "
-            "[--host-helper-schema|--host-helper-module|--response-payload-schema|"
+            "(--host-helper-schema|--host-helper-module|--response-payload-schema|"
             "--response-payload-module|"
-            "--response-payload-fixture|--run-event-module] OUTPUT"
+            "--response-payload-fixture|--run-event-module|--display-names-module) OUTPUT; the protocol schema itself "
+            "is written by python -m entrypoints.protocol_schema OUTPUT"
         )
         raise SystemExit(message)
     output.parent.mkdir(parents=True, exist_ok=True)

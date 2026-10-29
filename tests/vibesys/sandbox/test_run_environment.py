@@ -5,6 +5,8 @@ import json
 import shlex
 import subprocess
 import sys
+from dataclasses import replace
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import MagicMock
@@ -18,18 +20,19 @@ from vibesys.inputs import (
     load_project_task,
 )
 from vibesys.orchestration.profilers import ProfilerKind
-from vibesys.run.environment import open_run_environment
+from vibesys.run.environment import agent_environment_notes, open_run_environment
 from vs_agent.api.images import ImagePushError
 from vs_agent.api.testing import FakeDockerBuildRunner, fake_profiles
 from vs_project.api import Project, RunEnvironmentRecord, RunResourceRequest
+from vs_runtime._container_mount_plan import container_mount_plan
 from vs_runtime._run_environment import (
     _cli_container_env,
     _cli_provider_env_and_auth_files,
-    _container_mount_plan,
     _ensure_pushed_for_remote_backend,
     _SkyPilotRunEnvironmentSession,
 )
 from vs_runtime.api.infrastructure import (
+    SANDBOX_EVALUATOR_GO_MODULES_ROOT,
     EvaluatorPackageRequirement,
     ResolvedEvaluatorPackage,
     RunEnvironment,
@@ -37,12 +40,14 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentRequest,
     RunEnvironmentSession,
     RunEnvironmentSpec,
+    RunEnvironmentView,
     SkyPilotEnvironment,
     TrustedEvaluatorRequirements,
     build_run_environment,
     docker_evaluator_tools_root,
-    load_evaluator_package,
+    evaluator_go_module_ready_path,
     make_run_environment_spec,
+    prepare_trusted_evaluator,
     run_environment_record,
 )
 from vs_runtime.api.infrastructure import (
@@ -50,6 +55,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.testing import idle_environment_system, unconfined_host_environment
 from vs_sandbox.api import (
+    CommandResult,
     EnvironmentBindMount,
     HostResource,
     HostResourceAccess,
@@ -71,7 +77,8 @@ from vs_sandbox.api.slurm import (
     load_slurm_operator_settings,
     read_slurm_capture_plan,
 )
-from vs_sim.api import ProcessOutcome, ProcessSpec, UnixNetwork
+from vs_sandbox.api.testing import FakeLifecycleRunner
+from vs_sim.api import DISCARD, ProcessOutcome, ProcessSpec, UnixNetwork
 from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript
 
 if TYPE_CHECKING:
@@ -110,7 +117,7 @@ def _as_mount_tuples(resources: Sequence[HostResource]) -> list[tuple[str, str, 
     """Invert resource lowering for assertions written against the old shape.
 
     Lets tests keep comparing against plain ``(host, container, readonly)``
-    tuples after ``_container_mount_plan`` moved from raw bind mounts to a
+    tuples after ``container_mount_plan`` moved from raw bind mounts to a
     ``HostResource`` list.
     """
     return [
@@ -194,15 +201,24 @@ class FakeBackend:
 
     def __init__(self) -> None:
         self.sandbox = MagicMock()
+        self.evaluator_builder = FakeLifecycleRunner()
         self.calls: list[tuple[SandboxKind, dict[str, Any]]] = []
+        self.evaluator_builder_calls: list[tuple[SandboxKind, dict[str, Any]]] = []
 
     def make_sandbox(self, kind: SandboxKind, **kwargs: object) -> CommandRunner:
+        host_workspace = kwargs.get("host_workspace", "")
+        if (
+            kind is SandboxKind.DOCKER
+            and isinstance(host_workspace, str)
+            and Path(host_workspace).name == "evaluator-go-module-builder-workspace"
+        ):
+            self.evaluator_builder_calls.append((kind, kwargs))
+            return self.evaluator_builder
         self.calls.append((kind, kwargs))
         if kind is SandboxKind.DOCKER:
             # A real DockerSandbox derives agent_path from (host_workspace,
             # resources); give the mock the same behavior so AgentPaths
             # assertions exercise the real lookup instead of a bare Mock.
-            host_workspace = kwargs.get("host_workspace", "")
             resources = kwargs.get("resources", ())
             if not isinstance(host_workspace, str) or not isinstance(resources, (list, tuple)):
                 raise TypeError
@@ -251,13 +267,15 @@ def _request(tmp_path: Path, backend: FakeBackend, **overrides: object) -> RunEn
                 tools_root=cast("Path | None", tools_root)
             )
         else:
-            package = load_evaluator_package(cast("Path", package_root))
-            values["evaluator_requirements"] = TrustedEvaluatorRequirements(
-                package_root=package.root,
-                toolchains=frozenset(package.metadata.toolchains),
-                tools=package.metadata.tools,
-                tools_root=cast("Path | None", tools_root),
+            prepared = prepare_trusted_evaluator(
+                cast("Path", package_root),
+                cast("Path | None", tools_root) or tmp_path / "operator-tools",
             )
+            module = prepared.requirements.go_module
+            if module is not None:
+                module.cache_root.mkdir(parents=True)
+                evaluator_go_module_ready_path(module, module.cache_root).mkdir()
+            values["evaluator_requirements"] = prepared.requirements
     values.update(overrides)
     log_dir.mkdir(exist_ok=True)
     return RunEnvironmentRequest(**values)
@@ -543,6 +561,33 @@ remote_python = "/remote/venv/bin/python"
     session.close()
 
 
+def test_a_slurm_agent_on_a_linked_worktree_is_told_its_git_is_read_only(tmp_path: Path) -> None:
+    config_path = tmp_path / "slurm.toml"
+    config_path.write_text(
+        """[slurm]
+name = "test-cluster"
+remote_workspace_root = "/remote/vibesys"
+job_timeout_seconds = 900
+
+[slurm.transport]
+kind = "ssh"
+host = "test-cluster"
+
+[vibesys]
+remote_python = "/remote/venv/bin/python"
+""",
+        encoding="utf-8",
+    )
+    _add_linked_worktree(tmp_path / "project", tmp_path / "workspace")
+
+    session = _open(
+        build_run_environment(_slurm_spec(config_path)), _request(tmp_path, FakeBackend())
+    )
+    session.close()
+
+    assert session.view.agent_git_writable is False
+
+
 def test_a_slurm_service_with_a_staged_profiler_plans_a_trusted_capture(tmp_path: Path) -> None:
     config_path = tmp_path / "slurm.toml"
     config_path.write_text(
@@ -645,13 +690,14 @@ rsync_command = ["/bin/true"]
             "/bin/true",
             "-a",
             "-e",
-            "/usr/bin/true",
+            # The configured ssh_command with every prompt off (SlurmSshTransport.ssh_argv).
+            "/usr/bin/true -o BatchMode=yes",
             "--",
             f"{local}/",
             "test-cluster:/remote/vibesys/test-cluster/job/",
         )
         processes = BrokeredProcesses(socket, token, network=UnixNetwork())
-        run = processes.run(ProcessSpec(argv), timeout=5)
+        run = processes.run(ProcessSpec(argv), timeout=5, output=DISCARD)
         assert isinstance(run, ProcessOutcome)
         return run.returncode
 
@@ -783,6 +829,38 @@ def test_local_environment_materializes_effective_objective_outside_workspace(
     assert not objective_path.is_relative_to(tmp_path / "workspace")
 
 
+def test_host_agent_reads_a_committed_objective_through_a_copy_outside_the_project(
+    tmp_path: Path,
+) -> None:
+    """The committed objective sits in the hidden run record, so a host agent gets a copy."""
+    backend = FakeBackend()
+    env = unconfined_host_environment()
+    effective = "Optimize the service.\n"
+    workspace = tmp_path / "workspace"
+    committed = workspace / ".vibesys/state/runs/run-123/runtime/effective-objective.md"
+    committed.parent.mkdir(parents=True)
+    committed.write_text(effective)
+
+    session = _open(
+        env,
+        _request(
+            tmp_path,
+            backend,
+            objective=effective,
+            objective_document=committed,
+            workspace=workspace,
+        ),
+    )
+
+    objective_path = Path(session.view.paths.objective)
+    assert objective_path == tmp_path / "logs" / "effective-objective.md"
+    assert objective_path.read_text() == effective
+    assert not objective_path.is_relative_to(workspace)
+    assert session.view.agent_host_resources == (
+        HostResource(objective_path, HostResourceAccess.READ_ONLY),
+    )
+
+
 def test_docker_environment_opens_one_started_sandbox_with_agent_paths(
     tmp_path: Path,
     fake_agent_image: list[dict[str, Any]],
@@ -808,7 +886,7 @@ def test_docker_environment_opens_one_started_sandbox_with_agent_paths(
     assert session.view.profile_execution == "local"
     assert session.view.paths.accuracy_command == "uv run python accuracy_checker/checker.py"
     assert session.view.paths.benchmark_command == "uv run python benchmark/benchmark.py"
-    assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/workspace/.cache/uv"
+    assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/home/agent/.cache/uv"
     assert backend.calls[0][1]["lifecycle_hooks"] == []
     # The container always starts from a resolved agent image, built from the
     # backend's own base image, even when the run needs no evaluator tools.
@@ -819,6 +897,109 @@ def test_docker_environment_opens_one_started_sandbox_with_agent_paths(
 
     session.close()
     backend.sandbox.stop.assert_called_once()
+
+
+_READ_ONLY_GIT_NOTE = (
+    "`.git` is read-only; submit_evaluation snapshots your working tree, including new files; "
+    "do not commit"
+)
+
+
+def test_a_docker_agent_on_a_linked_worktree_is_told_its_git_is_read_only_and_not_to_commit(
+    tmp_path: Path, fake_agent_image: list[dict[str, Any]]
+) -> None:
+    del fake_agent_image
+    _add_linked_worktree(tmp_path / "project", tmp_path / "workspace")
+
+    session = _open(
+        build_run_environment(RunEnvironmentSpec("docker")), _request(tmp_path, FakeBackend())
+    )
+    session.close()
+
+    assert session.view.agent_git_writable is False
+    assert _READ_ONLY_GIT_NOTE in agent_environment_notes(session.view)
+
+
+class _RootLayout(StrEnum):
+    """How the run's root workspace keeps its Git metadata."""
+
+    MAIN_CHECKOUT = "main_checkout"
+    LINKED_WORKTREE = "linked_worktree"
+
+
+def _root_workspace(tmp_path: Path, layout: _RootLayout) -> Path:
+    workspace = tmp_path / "workspace"
+    if layout is _RootLayout.LINKED_WORKTREE:
+        _add_linked_worktree(tmp_path / "project", workspace)
+    else:
+        workspace.mkdir()
+        run_test_command(["git", "init", "-q"], cwd=workspace, check=True, capture_output=True)
+    return workspace
+
+
+def _git_metadata_read_only(resources: Sequence[HostResource], repository: Path) -> bool:
+    """Whether a mount set binds *repository*'s Git metadata, and only read-only."""
+    git_dirs = [r for r in resources if r.path.is_relative_to(repository.resolve() / ".git")]
+    return bool(git_dirs) and all(r.access is HostResourceAccess.READ_ONLY for r in git_dirs)
+
+
+@pytest.mark.parametrize("layout", list(_RootLayout))
+def test_a_docker_run_tells_agents_git_is_read_only_whatever_its_root_checkout(
+    tmp_path: Path, fake_agent_image: list[dict[str, Any]], layout: _RootLayout
+) -> None:
+    """Regression (review P2-3): the prompt-visible fact is the candidates', not the root's.
+
+    A Docker run writes every candidate in a linked worktree of its own, and that
+    worktree's Git metadata is mounted read-only, so no implementer can commit even when
+    the root the run started from is a writable main checkout.
+    """
+    del fake_agent_image
+    root = _root_workspace(tmp_path, layout)
+    environment = build_run_environment(RunEnvironmentSpec("docker"))
+    session = _open(environment, _request(tmp_path, FakeBackend(), workspace=root))
+    session.close()
+    candidate = tmp_path / "candidate"
+    _add_linked_worktree(tmp_path / "candidate-repo", candidate)
+    candidate_mounts = container_mount_plan(
+        _request(tmp_path, FakeBackend(), workspace=candidate)
+    ).resources
+
+    assert session.view.supports_parallel_candidate_evaluation is True
+    assert _git_metadata_read_only(candidate_mounts, tmp_path / "candidate-repo") is True
+    assert session.view.agent_git_writable is False
+    assert _READ_ONLY_GIT_NOTE in agent_environment_notes(session.view)
+
+
+@pytest.mark.parametrize("layout", list(_RootLayout))
+def test_a_container_mount_plan_reports_git_writable_exactly_when_it_mounts_git_writable(
+    tmp_path: Path, layout: _RootLayout
+) -> None:
+    """The fact comes from the plan that mounts the metadata, so the two cannot disagree."""
+    workspace = _root_workspace(tmp_path, layout)
+    repository = tmp_path / "project" if layout is _RootLayout.LINKED_WORKTREE else workspace
+
+    plan = container_mount_plan(_request(tmp_path, FakeBackend(), workspace=workspace))
+
+    # A main checkout's `.git` is inside the workspace, under its read-write mapping.
+    read_only = _git_metadata_read_only(plan.resources, repository)
+    assert read_only is (layout is _RootLayout.LINKED_WORKTREE)
+    assert plan.agent_git_writable is not read_only
+
+
+@pytest.mark.parametrize("layout", list(_RootLayout))
+def test_a_host_run_reports_the_git_writability_of_the_root_it_writes_in(
+    tmp_path: Path, layout: _RootLayout
+) -> None:
+    """A host run writes in its root; a linked root's metadata is bound read-only there too."""
+    root = _root_workspace(tmp_path, layout)
+    session = _open(
+        unconfined_host_environment(), _request(tmp_path, FakeBackend(), workspace=root)
+    )
+
+    assert session.view.supports_parallel_candidate_evaluation is False
+    writable = layout is _RootLayout.MAIN_CHECKOUT
+    assert session.view.agent_git_writable is writable
+    assert (_READ_ONLY_GIT_NOTE in agent_environment_notes(session.view)) is not writable
 
 
 def test_isolated_environment_mounts_and_translates_evaluator_package(
@@ -841,16 +1022,14 @@ def test_isolated_environment_mounts_and_translates_evaluator_package(
         )
     )
 
-    session = _open(
-        env,
-        _request(
-            tmp_path,
-            backend,
-            accuracy_command=command,
-            benchmark_command=command,
-            evaluator_package_root=package.root,
-        ),
+    request = _request(
+        tmp_path,
+        backend,
+        accuracy_command=command,
+        benchmark_command=command,
+        evaluator_package_root=package.root,
     )
+    session = _open(env, request)
 
     translated = session.view.paths.accuracy_command
     assert translated is not None
@@ -858,9 +1037,22 @@ def test_isolated_environment_mounts_and_translates_evaluator_package(
     assert "${PROJECT_ROOT}" not in translated
     assert "/opt/vibesys-evaluator-package" in translated
     assert "/workspace" in translated
+    translated_arguments = shlex.split(translated)
+    assert translated_arguments[:3] == [
+        "env",
+        f"GOMODCACHE={SANDBOX_EVALUATOR_GO_MODULES_ROOT}",
+        "GOPROXY=off",
+    ]
     assert (
         str(package.root),
         "/opt/vibesys-evaluator-package",
+        True,
+    ) in _as_mount_tuples(backend.calls[0][1]["resources"])
+    module = request.evaluator_requirements.go_module
+    assert module is not None
+    assert (
+        str(module.cache_root),
+        str(SANDBOX_EVALUATOR_GO_MODULES_ROOT),
         True,
     ) in _as_mount_tuples(backend.calls[0][1]["resources"])
     # The evaluator package's declared toolchains (go, rust) are baked into
@@ -913,6 +1105,7 @@ def test_local_environment_prepares_and_translates_evaluator_tool(
     backend.sandbox.execute.assert_called_once_with(
         evaluator_tools_install_command(package.metadata.tools, tools_root),
         timeout=660,
+        output=DISCARD,
     )
     tool = package.metadata.tools["request-factory"]
     benchmark = shlex.split(session.view.paths.benchmark_command or "")
@@ -928,6 +1121,44 @@ def test_local_environment_prepares_and_translates_evaluator_tool(
         "--dry-run",
     ]
     assert "${TOOL:" not in (session.view.paths.benchmark_command or "")
+
+
+def test_local_environment_installs_tools_with_the_login_shells_path(tmp_path: Path) -> None:
+    """A run started by a non-login shell still finds the user's cargo, as a login shell would."""
+    backend = FakeBackend()
+    backend.sandbox.execute.return_value = CommandResult(exit_code=0, output="", truncated=False)
+    package = resolve_evaluator_package(
+        EvaluatorPackageRequirement(name="vibesys-evaluator-request-factory", version="0.1.0")
+    )
+    tools_root = tmp_path / "operator-tools"
+    reads: list[str] = []
+
+    def login_environment() -> dict[str, str]:
+        reads.append("read")
+        return {"PATH": "/login/cargo/bin:/usr/bin", "HOME": "/home/user"}
+
+    request = _request(
+        tmp_path,
+        backend,
+        accuracy_command="true",
+        benchmark_command=shlex.join(package.command("request-factory-engine")),
+        evaluator_package_root=package.root,
+        evaluator_tools_root=tools_root,
+        system=replace(idle_environment_system(), login_environment=login_environment),
+    )
+    assert reads == []
+
+    _open(unconfined_host_environment(), request)
+
+    SandboxLifecycle(backend.calls[0][1]["lifecycle_hooks"]).before_ready(backend.sandbox)
+    backend.sandbox.execute.assert_called_once_with(
+        evaluator_tools_install_command(
+            package.metadata.tools, tools_root, search_path="/login/cargo/bin:/usr/bin"
+        ),
+        timeout=660,
+        output=DISCARD,
+    )
+    assert reads == ["read"]
 
 
 def test_local_environment_rejects_evaluator_tools_root_inside_workspace(
@@ -1288,8 +1519,8 @@ def test_local_environment_objective_defaults_to_the_bare_workspace_relative_nam
     assert session.view.paths.objective == "OBJECTIVE.md"
 
 
-def test_container_mount_plan_declares_named_resources_with_agent_paths(tmp_path: Path) -> None:
-    """``_container_mount_plan`` returns ``HostResource`` entries, not bind-mount
+def testcontainer_mount_plan_declares_named_resources_with_agent_paths(tmp_path: Path) -> None:
+    """``container_mount_plan`` returns ``HostResource`` entries, not bind-mount
     tuples, with ``access`` and ``agent_path`` set for every named mount."""
     backend = FakeBackend()
     history = tmp_path / "experiment-history"
@@ -1306,7 +1537,7 @@ def test_container_mount_plan_declares_named_resources_with_agent_paths(tmp_path
         cli_provider="codex",
     )
 
-    resources, _symlinks = _container_mount_plan(request)
+    resources = container_mount_plan(request).resources
 
     assert all(isinstance(resource, HostResource) for resource in resources)
     by_agent_path = {resource.agent_path: resource for resource in resources}
@@ -1502,7 +1733,6 @@ def test_docker_environment_exposes_framework_git_history_read_only(tmp_path: Pa
     assert (str(history), "/opt/vibesys-history", True) in _as_mount_tuples(kwargs["resources"])
     assert kwargs["extra_env"]["VIBESYS_GIT_HISTORY"] == "/opt/vibesys-history"
     assert "/opt/vibesys-history" in session.view.prompt_notes
-    assert "hashes without recoverable source are insufficient" in session.view.prompt_notes
 
 
 def test_docker_environment_uses_environment_bind_mounts(tmp_path: Path) -> None:
@@ -1724,6 +1954,41 @@ def test_modal_environment_wraps_custom_deployment_entrypoint(tmp_path: Path) ->
     assert session.view.paths.benchmark_command == f"{prefix} trusted-benchmark"
 
 
+_TOOL_CACHE_VARIABLES = ("UV_CACHE_DIR", "CARGO_HOME")
+
+
+@pytest.mark.parametrize("environment", ["docker", "modal"])
+@pytest.mark.parametrize("workspace_kind", ["candidate", "worktrees/m-attempt-1/workspace"])
+def test_a_tool_cache_never_lives_inside_the_candidate_workspace(
+    tmp_path: Path, environment: str, workspace_kind: str
+) -> None:
+    """Regression: uv and Cargo caches hold Git checkouts, so inside a workspace they poison it.
+
+    The workspace is one of the host paths a candidate or an attempt gets, mounted at
+    ``/workspace``; the cache is the container's, whichever path the workspace has.
+    """
+    backend = FakeBackend()
+    workspace = tmp_path / workspace_kind
+    workspace.mkdir(parents=True)
+    _open(
+        build_run_environment(RunEnvironmentSpec(environment)),
+        _request(
+            tmp_path,
+            backend,
+            workspace=workspace,
+            agent_backend="cli",
+            cli_provider="codex",
+        ),
+    )
+
+    extra_env = backend.calls[0][1]["extra_env"]
+    roots = [workspace, Path("/workspace")]
+    for name in _TOOL_CACHE_VARIABLES:
+        location = Path(extra_env[name])
+        assert location.is_absolute()
+        assert not any(location.is_relative_to(root) for root in roots), (name, location)
+
+
 def test_modal_environment_installs_nothing_at_container_start(tmp_path: Path) -> None:
     """The local Docker container starts from a prebuilt, pushed agent image
     and installs nothing at start, including the Modal Python SDK an earlier
@@ -1736,7 +2001,7 @@ def test_modal_environment_installs_nothing_at_container_start(tmp_path: Path) -
     _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
 
     assert "extra_init_commands" not in backend.calls[0][1]
-    assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/workspace/.cache/uv"
+    assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/home/agent/.cache/uv"
 
 
 def test_modal_environment_mounts_modal_auth_under_the_agent_home(
@@ -1963,15 +2228,18 @@ def test_modal_environment_runtime_notes_describe_profile_contract(tmp_path: Pat
     assert "from torch.autograd import DeviceType" not in notes
 
 
-def test_modal_environment_prompt_notes_reuse_workspace_uv_cache(tmp_path: Path) -> None:
+def test_modal_environment_prompt_notes_keep_the_uv_cache_out_of_the_workspace(
+    tmp_path: Path,
+) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
     _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
     notes = _modal_runtime_document(tmp_path)
 
-    assert "UV_CACHE_DIR=/workspace/.cache/uv" in notes
-    assert "persist outside Git checkpoints" in notes
+    assert "UV_CACHE_DIR" not in notes
+    assert "uv cache lives in the container home, never in the workspace" in notes
+    assert "persists outside Git checkpoints" in notes
     assert "do not delete or recreate `.venv`" in notes
     assert ".venv/bin/python -m ..." in notes
     assert "excluding `.venv` and `.cache`" in notes
@@ -2236,13 +2504,15 @@ def test_docker_modal_and_skypilot_build_the_same_kind_of_sandbox_from_one_resou
         EvaluatorPackageRequirement(name="vibesys-evaluator-queue", version="0.1.0")
     )
 
+    views: dict[str, RunEnvironmentView] = {}
+
     def _open_environment_case(
         env_name: str, env: RunEnvironment, backend: FakeBackend, **overrides: object
     ) -> None:
         root = tmp_path / env_name
         root.mkdir()
         _add_linked_worktree(root / "project", root / "workspace")
-        _open(
+        views[env_name] = _open(
             env,
             _request(
                 root,
@@ -2253,7 +2523,7 @@ def test_docker_modal_and_skypilot_build_the_same_kind_of_sandbox_from_one_resou
                 cli_provider="codex",
                 **overrides,
             ),
-        )
+        ).view
 
     docker_backend = FakeBackend()
     _open_environment_case(
@@ -2308,7 +2578,7 @@ remote_artifact_root = "/remote/vibesys"
     for env_name, backend in backends.items():
         assert backend.calls[0][0] is SandboxKind.DOCKER, env_name
 
-    # (b) The common mount set declared by `_container_mount_plan` — the
+    # (b) The common mount set declared by `container_mount_plan` — the
     # objective doc, the evaluator package, and the CLI auth/framework
     # mounts — carries identical access and agent_path everywhere.
     resources_by_env = {
@@ -2331,6 +2601,12 @@ remote_artifact_root = "/remote/vibesys"
 
     # (d) The workspace is a linked Git worktree.
     _assert_worktree_git_is_read_only_at_its_host_path(tmp_path, backends)
+
+    # What the agent is told follows what was mounted: every environment that mounts a
+    # linked worktree's metadata read-only reports its Git as not writable.
+    assert {name: view.agent_git_writable for name, view in views.items()} == dict.fromkeys(
+        backends, False
+    )
 
     # (c) Nothing outside the workspace-related mounts each plan legitimately
     # marks writable (SkyPilot's caller-state bridge, the shared login) is

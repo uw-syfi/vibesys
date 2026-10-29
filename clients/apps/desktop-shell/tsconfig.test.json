@@ -1,0 +1,53 @@
+{
+  "extends": "./tsconfig.lib.json",
+  "compilerOptions": {
+    "types": [
+      "vite/client",
+      "bun"
+    ],
+    "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo"
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ],
+  "exclude": [],
+  "references": [
+    {
+      "path": "../../features/app-shell/tsconfig.renderer.json"
+    },
+    {
+      "path": "../../features/app-shell/tsconfig.state.json"
+    },
+    {
+      "path": "../../features/new-run/tsconfig.renderer.json"
+    },
+    {
+      "path": "../../features/new-run/tsconfig.state.json"
+    },
+    {
+      "path": "../../features/settings/tsconfig.renderer.json"
+    },
+    {
+      "path": "../../features/settings/tsconfig.state.json"
+    },
+    {"path": "../../libs/ipc/tsconfig.testing.json"},
+    {"path": "../../libs/transport/tsconfig.testing.json"},
+    {"path": "../../libs/run-state/tsconfig.lib.json"},
+    {
+      "path": "../../libs/ipc/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/store/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/ui/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/proto/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.testing.json"
+    }
+  ]
+}

@@ -61,6 +61,7 @@ from entrypoints.server import (
 from server.runtime import WebPortObservation, WebPortState
 from server.transport.discovery import WebInstanceClaim, WebInstanceHold, WebInstanceRecord
 from server.transport.websocket import WebSocketLimits
+from vs_project.api import user_runtime_root
 from vs_sim.api.testing import SimThreads, stop_process
 
 if TYPE_CHECKING:
@@ -132,7 +133,6 @@ def test_control_socket_argument_forms() -> None:
     assert _control_socket_from_argv(["--control-socket", "control.sock"]) == Path("control.sock")
     assert _headless_argv(["--local", "--control-socket", "control.sock"]) == ["--local"]
     assert _headless_argv(["--control-socket=control.sock", "--local"]) == ["--local"]
-    assert _headless_argv(["--theme", "dark", "--local"]) == ["--local"]
 
 
 def test_web_server_arguments_are_consumed_before_run_parsing() -> None:
@@ -190,13 +190,18 @@ def _write_web_build_manifest(assets: Path, workspace: Path, source: Path) -> No
     (assets / ".vibesys-web-build.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
+def _socket_in_runtime_root() -> str:
+    """A control socket path the server accepts: inside the user's runtime root."""
+    return str(user_runtime_root(os.environ, os.getuid()) / "control.sock")
+
+
 def _asset_validation_arguments(tmp_path: Path, assets: Path) -> list[str]:
     return [
         "--web",
         "--web-instance",
         str(tmp_path / "web-gateway.json"),
         "--control-socket",
-        str(tmp_path / "control.sock"),
+        _socket_in_runtime_root(),
         "--web-assets",
         str(assets),
         "--zz-after-assets",
@@ -224,7 +229,7 @@ def test_web_gateway_rejects_a_manifest_after_its_source_changes(
     assert exit_info.value.code == 2
     assert f"web assets {assets} are stale" in diagnostic
     assert str(source_file) in diagnostic
-    assert "pnpm --dir clients/apps/web build" in diagnostic
+    assert "rebuild the supplied --web-assets bundle" in diagnostic
     assert not (tmp_path / "web-gateway.json").exists()
 
 
@@ -251,7 +256,7 @@ def test_web_gateway_rejects_a_manifest_after_a_build_input_file_changes(
     assert exit_info.value.code == 2
     assert f"web assets {assets} are stale" in diagnostic
     assert str(build_input) in diagnostic
-    assert "pnpm --dir clients/apps/web build" in diagnostic
+    assert "rebuild the supplied --web-assets bundle" in diagnostic
     assert not (tmp_path / "web-gateway.json").exists()
 
 
@@ -296,7 +301,7 @@ def test_web_gateway_rejects_assets_that_do_not_match_their_build_id(
     assert exit_info.value.code == 2
     assert f"web assets {assets} do not match build" in diagnostic
     assert str(assets / "index.html") in diagnostic
-    assert "pnpm --dir clients/apps/web build" in diagnostic
+    assert "rebuild the supplied --web-assets bundle" in diagnostic
 
 
 def test_web_reopen_accepts_a_log_directory_or_run_events_file(tmp_path: Path) -> None:
@@ -306,6 +311,8 @@ def test_web_reopen_accepts_a_log_directory_or_run_events_file(tmp_path: Path) -
     assert _read_only_log_from_argv([]) is None
     assert _read_only_log_from_argv(["--web-reopen", str(log_dir)]) == log_dir
     assert _read_only_log_from_argv(["--web-reopen", str(events)]) == log_dir
+    assert _read_only_log_from_argv(["--reopen", str(log_dir)]) == log_dir
+    assert _read_only_log_from_argv([f"--reopen={events}"]) == log_dir
 
 
 def test_web_origins_accept_repeated_explicit_origins() -> None:
@@ -420,6 +427,68 @@ def test_second_web_launch_reuses_live_instance(
     assert opened == [record.url]
 
 
+def test_second_launch_without_web_assets_reuses_gateway_and_opens_no_browser(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    instance_path = tmp_path / ".vibesys" / "web-gateway.json"
+    record = WebInstanceRecord(
+        pid=123,
+        port=43_211,
+        token="capability",  # noqa: S106  # lint-waiver: LW-101210 [S106]; use a fixed capability token in a launch-reuse fixture
+        url="http://127.0.0.1:43211/?token=capability",
+        project_root=str(tmp_path),
+        started_at=1.0,
+    )
+    opened: list[str] = []
+    # test-isolation: inject the discovered live gateway to exercise reuse without a real launcher
+    monkeypatch.setattr(
+        server_entrypoint, "_discover_web_instance", lambda _path, _finder, _threads: record
+    )
+    # test-isolation: capture browser opening so the test remains headless and deterministic
+    monkeypatch.setattr(
+        server_entrypoint.webbrowser, "open", lambda url, **_kwargs: opened.append(url)
+    )
+
+    main(["--web", "--web-instance", str(instance_path)])
+
+    assert capsys.readouterr().out == f"VibeSys gateway: {record.url}\n"
+    assert opened == []
+
+
+def test_detached_startup_with_web_assets_opens_the_browser(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assets = tmp_path / "dist"
+    assets.mkdir()
+    (assets / "index.html").write_text("<!doctype html>\n", encoding="utf-8")
+    process = RecordingDetachedProcess(status=None)
+    record = WebInstanceRecord(
+        pid=123,
+        port=43_211,
+        token="capability",  # noqa: S106  # lint-waiver: LW-101211 [S106]; use a fixed capability token in a detached-startup fixture
+        url="http://127.0.0.1:43211/?token=capability",
+        project_root=str(tmp_path),
+        started_at=1.0,
+    )
+    effects = RecordingDetachedEffects(process, times=[0.0, 0.0], record=record)
+    opened: list[str] = []
+    # test-isolation: keep the startup test headless while verifying the opened URL.
+    monkeypatch.setattr(
+        server_entrypoint.webbrowser, "open", lambda url, **_kwargs: opened.append(url)
+    )
+
+    _spawn_detached(
+        ["--web", "--detach", "--web-assets", str(assets)], tmp_path / "web-gateway.json", effects
+    )
+
+    assert capsys.readouterr().out == f"VibeSys web UI: {record.url}\n"
+    assert opened == [record.url]
+
+
 def test_detached_startup_surfaces_early_child_failure(tmp_path: Path) -> None:
     process = RecordingDetachedProcess(status=7)
     effects = RecordingDetachedEffects(process, times=[0.0, 0.0])
@@ -498,14 +567,14 @@ def test_detached_startup_reports_a_published_record(
 
     _spawn_detached(["--web", "--detach"], tmp_path / "web-gateway.json", effects)
 
-    assert capsys.readouterr().out == f"VibeSys web UI: {record.url}\n"
-    assert opened == [record.url]
+    assert capsys.readouterr().out == f"VibeSys gateway: {record.url}\n"
+    assert opened == []
     assert process.terminated is False
 
 
 def test_detached_startup_terminates_a_child_that_never_becomes_ready(tmp_path: Path) -> None:
     process = RecordingDetachedProcess(status=None)
-    effects = RecordingDetachedEffects(process, times=[0.0, 0.0, 11.0])
+    effects = RecordingDetachedEffects(process, times=[0.0, 0.0, 1e9])
 
     with pytest.raises(RuntimeError, match=r"(?s)Address already in use.*did not become ready"):
         _spawn_detached(["--web", "--detach"], tmp_path / "web-gateway.json", effects)
@@ -944,35 +1013,35 @@ def test_web_instance_claim_reports_ownership(tmp_path: Path) -> None:
     assert WebInstanceClaim.is_held(instance_path) is False
 
 
-def test_tui_defaults_use_launch_config_and_normalize_runs_dir(
+@pytest.mark.parametrize(
+    "place", ["elsewhere", "root's parent", "sibling with the root's name as prefix", "link out"]
+)
+def test_a_control_socket_outside_the_runtime_root_is_refused_at_startup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    place: str,
 ) -> None:
-    (tmp_path / "agent.toml").write_text(
-        '[model]\nname = "gpt-5.5"\n'
-        '[repository]\nowner = "my-lab"\nvisibility = "private"\n'
-        '[tui]\ntheme = "high-contrast-dark"\n'
-    )
-    monkeypatch.chdir(tmp_path)
+    """Operator clients present the key only inside the root, so the server binds only there."""
+    runtime = tmp_path / "runtime"
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+    root = runtime / "vibesys"
+    root.mkdir(parents=True, mode=0o700)
+    (tmp_path / "agent-writable").mkdir()
+    (root / "link-out").symlink_to(tmp_path / "agent-writable", target_is_directory=True)
+    socket = {
+        "elsewhere": tmp_path / "agent-writable" / "control.sock",
+        "root's parent": runtime / "control.sock",
+        "sibling with the root's name as prefix": runtime / "vibesys-other" / "control.sock",
+        "link out": root / "link-out" / "control.sock",
+    }[place]
 
-    main(["tui-defaults", "--runs-dir", "runs"])
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--control-socket", str(socket), "--local"])
 
-    defaults = json.loads(capsys.readouterr().out)
-    assert defaults["runs_dir"] == str((tmp_path / "runs").resolve())
-    assert defaults["repository_owner"] == "my-lab"
-    assert defaults["theme"] == "high-contrast-dark"
-
-
-def test_tui_defaults_reject_a_missing_explicit_config(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    missing = tmp_path / "missing.toml"
-    with pytest.raises(SystemExit) as exc:
-        main(["tui-defaults", "--config", str(missing)])
-    assert exc.value.code == 2
-    assert str(missing) in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert exit_info.value.code == 2
+    assert f"--control-socket {socket} is not inside the operator's runtime root {root}" in err
 
 
 def test_a_run_argument_diagnostic_reaches_stderr_before_any_transport_binds(
@@ -980,9 +1049,9 @@ def test_a_run_argument_diagnostic_reaches_stderr_before_any_transport_binds(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A launch from a non-project directory says so, on the argv the TUI sends.
+    """A launch from a non-project directory says so, on the argv a client sends.
 
-    This is the argv `clients/tui/src/launcher.ts` spawns, and the diagnostic
+    This is the argv the launcher spawns, and the diagnostic
     is the one that names the fix. `parse_cli_invocation` raises it before
     `ServerRuntime.run` binds the control socket, so the `CONFIGURATION_FAILED`
     event has no subscriber to reach and stderr is the only channel left. The
@@ -992,7 +1061,7 @@ def test_a_run_argument_diagnostic_reaches_stderr_before_any_transport_binds(
     monkeypatch.chdir(tmp_path)
 
     with pytest.raises(SystemExit) as exit_info:
-        main(["--control-socket", str(tmp_path / "control.sock")])
+        main(["--control-socket", _socket_in_runtime_root()])
 
     streams = capsys.readouterr()
     assert exit_info.value.code == 2
@@ -1062,7 +1131,7 @@ def test_every_run_argument_diagnostic_renders_its_message_and_its_usage(flag: s
     errors = StringIO()
 
     with redirect_stderr(errors), pytest.raises(SystemExit) as exit_info:
-        main(["--control-socket", "control.sock", flag])
+        main(["--control-socket", _socket_in_runtime_root(), flag])
 
     lines = errors.getvalue().splitlines()
     assert exit_info.value.code == 2
@@ -1089,7 +1158,7 @@ def test_every_rejected_web_port_names_the_flag_instead_of_exiting_silently(valu
     errors = StringIO()
 
     with redirect_stderr(errors), pytest.raises(SystemExit) as exit_info:
-        main(["--control-socket", "control.sock", "--web-port", value])
+        main(["--control-socket", _socket_in_runtime_root(), "--web-port", value])
 
     assert exit_info.value.code == 2
     assert errors.getvalue().startswith("vibesys: --web-port ")
@@ -1099,6 +1168,9 @@ def test_web_main_uses_ephemeral_socket_and_web_runtime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
     observed: dict[str, object] = {}
     invocation = object()
     request = SimpleNamespace(resolved_run_id="run-1", resolved_project_root=tmp_path.resolve())
@@ -1133,12 +1205,13 @@ def test_web_main_uses_ephemeral_socket_and_web_runtime(
     assert isinstance(observed["socket_path"], Path)
     assert observed["socket_path"].name == "control.sock"
     assert observed["socket_path"].parent.name.startswith("vibesys-web-")
+    # In the runtime root, where no confined agent can write and where clients dial.
+    assert observed["socket_path"].parent.parent == runtime / "vibesys"
     options = observed["options"]
     assert isinstance(options, dict)
     assert options["web"] is True
     assert options["web_port"] == 4312
     assert options["web_assets"] == tmp_path.resolve()
-    assert callable(options["tui_defaults"])
     assert options["run_id"] == "run-1"
     assert options["project_root"] == tmp_path.resolve()
     assert observed["request"] is request

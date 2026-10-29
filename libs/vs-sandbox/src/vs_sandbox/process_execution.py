@@ -16,13 +16,13 @@ from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING, Protocol
 
-from vs_sim.api import ProcessTimeoutError
+from vs_sim.api import OutputStream, ProcessTimeoutError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from io import TextIOBase
 
-    from vs_sim.api import PipedProcess, Threads
+    from vs_sim.api import OutputSink, PipedProcess, Threads
 
 #: The signals a stop sends, named here so only this adapter module refers to ``signal``.
 type StopSignal = signal.Signals
@@ -137,11 +137,16 @@ class PipedStoppableProcess:
     Two drain workers read stdout and stderr as the command writes them, so
     neither pipe fills and blocks the command; a wait returns the output once
     the leader exited and both pipes reached EOF. Like ``subprocess`` text
-    mode, CRLF and a lone CR become LF.
+    mode, CRLF and a lone CR become LF in what a wait returns.
+
+    Each chunk a drain reads is also written to *output* as it arrives, UTF-8
+    encoded and with its line endings as the command wrote them, so a caller
+    sees a long command's output while it runs. *output* receives the same text
+    whatever the wait later returns, before and after a stop alike.
     """
 
-    def __init__(self, process: PipedProcess, *, threads: Threads) -> None:
-        """Take ownership of *process* and start draining its pipes on *threads*."""
+    def __init__(self, process: PipedProcess, *, threads: Threads, output: OutputSink) -> None:
+        """Take ownership of *process* and start draining its pipes on *threads* into *output*."""
         self._process = process
         self._threads = threads
         self._stdout: list[str] = []
@@ -149,10 +154,12 @@ class PipedStoppableProcess:
         self._returncode: int | None = None
         self._drains = (
             threads.spawn(
-                partial(_drain, process.stdout, self._stdout), name="vibesys-command-stdout"
+                partial(_drain, process.stdout, self._stdout, output, OutputStream.STDOUT),
+                name="vibesys-command-stdout",
             ),
             threads.spawn(
-                partial(_drain, process.stderr, self._stderr), name="vibesys-command-stderr"
+                partial(_drain, process.stderr, self._stderr, output, OutputStream.STDERR),
+                name="vibesys-command-stderr",
             ),
         )
 
@@ -201,9 +208,10 @@ class PipedStoppableProcess:
 _DRAIN_CHARACTERS = 65_536
 
 
-def _drain(stream: TextIOBase, sink: list[str]) -> None:
+def _drain(stream: TextIOBase, kept: list[str], output: OutputSink, name: OutputStream) -> None:
     while chunk := stream.read(_DRAIN_CHARACTERS):
-        sink.append(chunk)
+        kept.append(chunk)
+        output.write(name, chunk.encode())
 
 
 def _universal_newlines(chunks: list[str]) -> str:

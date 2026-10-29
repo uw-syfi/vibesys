@@ -37,6 +37,7 @@ from vs_evaluator_protocol.api import (
     parse_records,
     read_measurement,
 )
+from vs_redaction.api import redact_diagnostic_text
 from vs_runtime._failure_classification import (
     RecordState,
     TerminalSignal,
@@ -47,6 +48,7 @@ from vs_runtime._failure_classification import (
 from vs_runtime._model_requests import ModelRequestError
 from vs_runtime.contracts import BenchmarkFailureKind
 from vs_sandbox.api import CommandResult
+from vs_sim.api import DISCARD
 
 # Parses untrusted JSON with nesting bounded, failing as a ValueError.
 _JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
@@ -60,7 +62,7 @@ if TYPE_CHECKING:
     from vs_project.api import GitTracker
     from vs_runtime.api.infrastructure import ModelRequestReconciler
     from vs_sandbox.api import CommandRunner
-    from vs_sim.api import BlockingRunner, Event, Threads
+    from vs_sim.api import BlockingRunner, Event, OutputSink, Threads
 
 _BENCHMARK_OUTPUT_PREFIX = "/tmp/vibesys-framework-benchmark-"  # noqa: S108  # lint-waiver: LW-837218 [S108]; remote sandbox bridges allowlist this fixed transport path and every nonce is removed after use.
 _BENCHMARK_MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__"
@@ -120,12 +122,12 @@ def _read_result_file(sandbox: CommandRunner, output_path: str) -> tuple[str, st
     and otherwise read back in bounded chunks. A file that cannot be read
     whole returns the truncated framing with a reason naming its size.
     """
-    whole = sandbox.execute(_framed_result_command(output_path))
+    whole = sandbox.execute(_framed_result_command(output_path), output=DISCARD)
     if not whole.truncated:
         return whole.output, None
     path = shlex.quote(output_path)
     try:
-        size = int(sandbox.execute(f"wc -c < {path}").output.strip())
+        size = int(sandbox.execute(f"wc -c < {path}", output=DISCARD).output.strip())
     except ValueError:
         return whole.output, "benchmark result file size could not be read"
     if size > _MAX_RESULT_BYTES:
@@ -147,7 +149,8 @@ def _read_chunks(sandbox: CommandRunner, path: str, size: int) -> bytes | None:
     data = bytearray()
     for offset in range(0, size, _RESULT_CHUNK_BYTES):
         chunk = sandbox.execute(
-            f"tail -c +{offset + 1} {path} | head -c {_RESULT_CHUNK_BYTES} | base64 | tr -d '\\n'"
+            f"tail -c +{offset + 1} {path} | head -c {_RESULT_CHUNK_BYTES} | base64 | tr -d '\\n'",
+            output=DISCARD,
         )
         if chunk.exit_code != 0 or chunk.truncated:
             return None
@@ -182,10 +185,54 @@ class ProtocolBenchmarkContract(BaseModel):
 type TrustedBenchmarkContract = ScalarBenchmarkContract | ProtocolBenchmarkContract
 
 
+class TrustedBuild(BaseModel):
+    """The candidate's build: confined candidate code, then the outputs it must produce.
+
+    ``command`` runs from the root of a fresh checkout of the measured commit under the run
+    environment's agent confinement, never as a trusted command. ``outputs`` are the
+    evaluator package's ``candidate_outputs``, verified after the command and passed to the
+    trusted check and measure stages.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    command: str = Field(min_length=1)
+    timeout_seconds: int | None = Field(default=None, gt=0)
+    outputs: tuple[str, ...] = ()
+
+
+_PATTERN_CHARACTERS = frozenset("*?[]\\:!")
+
+
+def check_unread_paths(paths: tuple[str, ...]) -> tuple[str, ...]:
+    """The paths, each checked to name a workspace file or directory plainly; raises naming one.
+
+    A path is relative, has no empty, ``.`` or ``..`` part, and holds no pattern or pathspec
+    character, so it excludes exactly itself (and, for a directory, what lies below it).
+    """
+    for path in paths:
+        parts = path.removesuffix("/").split("/")
+        if (
+            not path
+            or path.startswith("/")
+            or any(part in {"", ".", ".."} for part in parts)
+            or _PATTERN_CHARACTERS & set(path)
+        ):
+            message = (
+                f"unread path {path!r} must be a plain relative workspace path: no empty, '.'"
+                " or '..' part, and none of * ? [ ] \\ : !"
+            )
+            raise ValueError(message)
+    return paths
+
+
 class TrustedEvaluationPlan(BaseModel):
     """Resolved commands and transport contract for one workspace."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+    build: TrustedBuild | None = None
+    """The candidate's confined build, when the task declares one."""
 
     accuracy_command: str | None = Field(default=None, min_length=1)
     accuracy_timeout_seconds: int | None = Field(default=None, gt=0)
@@ -208,6 +255,16 @@ class TrustedEvaluationPlan(BaseModel):
         check_startup_cause_patterns
     )
 
+    unread_paths: tuple[str, ...] = ()
+    """Workspace paths (files or directories) the task's evaluation never reads.
+
+    Declared by the task, for example an agent's notes. A commit that changes only these is
+    the same measured input (``MeasurementPlan.measured_input``), so its official measurement
+    may reuse an earlier run of that input instead of running again.
+    """
+
+    _check_unread_paths = field_validator("unread_paths")(check_unread_paths)
+
     accuracy_gated: tuple[EvidenceKind, ...] = ()
     """The task's trust rule: kinds of evidence that count only if the accuracy stage passed.
 
@@ -216,7 +273,8 @@ class TrustedEvaluationPlan(BaseModel):
     """
 
     def execution_budget_seconds(
-        self, stages: tuple[Literal["accuracy", "benchmark", "profile", "framework_setup"], ...]
+        self,
+        stages: tuple[Literal["build", "accuracy", "benchmark", "profile", "framework_setup"], ...],
     ) -> int:
         """Sum declared timeouts for exactly the stages the evaluation will run.
 
@@ -227,6 +285,7 @@ class TrustedEvaluationPlan(BaseModel):
             message = "stages must be nonempty and unique"
             raise ValueError(message)
         timeouts = {
+            "build": None if self.build is None else self.build.timeout_seconds,
             "accuracy": self.accuracy_timeout_seconds,
             "benchmark": self.benchmark_timeout_seconds,
             "profile": self.profile_timeout_seconds,
@@ -244,7 +303,7 @@ class TrustedEvaluationPlan(BaseModel):
     def suspension_deadline_s(
         self,
         submitted_at_s: float,
-        stages: tuple[Literal["accuracy", "benchmark", "profile", "framework_setup"], ...],
+        stages: tuple[Literal["build", "accuracy", "benchmark", "profile", "framework_setup"], ...],
         queue_allowance_seconds: int,
     ) -> float:
         """Derive an absolute deadline from supplied time and declared bounds."""
@@ -286,10 +345,14 @@ class TrustedAccuracyResult(BaseModel):
     passed: bool
     output: str = ""
     failure: str | None = None
+    operator_output: str = ""
+    operator_failure: str | None = None
     # Whose fault a failed command is: present exactly when it failed, with no default.
     failure_kind: BenchmarkFailureKind | None = None
     stdout: str = ""
     stderr: str = ""
+    operator_stdout: str = ""
+    operator_stderr: str = ""
     provisioned_volumes: tuple[str, ...] = ()
 
     @model_validator(mode="after")
@@ -297,7 +360,62 @@ class TrustedAccuracyResult(BaseModel):
         if self.passed != (self.failure_kind is None):
             message = "a trusted accuracy result carries a failure kind exactly when it failed"
             raise ValueError(message)
+        if self.passed != (self.operator_failure is None):
+            message = "a failed accuracy result requires a separate operator-safe failure"
+            raise ValueError(message)
         return self
+
+
+class TrustedBuildResult(BaseModel):
+    """Policy-neutral result of one confined candidate build command."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    command: str | None = None
+    executed: bool
+    passed: bool
+    output: str = ""
+    failure: str | None = None
+    operator_output: str = ""
+    operator_failure: str | None = None
+    # Whose fault a failed build is: present exactly when it failed, with no default.
+    failure_kind: BenchmarkFailureKind | None = None
+
+    @model_validator(mode="after")
+    def _failure_kind_exactly_when_failed(self) -> TrustedBuildResult:
+        if self.passed != (self.failure_kind is None):
+            message = "a build result carries a failure kind exactly when it failed"
+            raise ValueError(message)
+        if self.passed != (self.operator_failure is None):
+            message = "a failed build result requires a separate operator-safe failure"
+            raise ValueError(message)
+        return self
+
+    @classmethod
+    def failed(
+        cls, failure: str, kind: BenchmarkFailureKind, *, command: str | None, executed: bool
+    ) -> TrustedBuildResult:
+        """A failed build whose failure text is all its output."""
+        operator_failure = redact_diagnostic_text(failure)
+        return cls(
+            command=command,
+            executed=executed,
+            passed=False,
+            output=failure,
+            failure=failure,
+            operator_output=operator_failure,
+            operator_failure=operator_failure,
+            failure_kind=kind,
+        )
+
+
+_TIMEOUT_EXIT = 124
+"""The exit status a ``CommandRunner`` reports for a command it stopped at its timeout."""
+
+NO_BUILD_CONFINEMENT = (
+    "this run environment has no agent confinement for the candidate's build, so the build "
+    "does not run; use a run environment that runs the agent in a container (docker)"
+)
 
 
 class TrustedBenchmarkResult(BaseModel):
@@ -310,12 +428,19 @@ class TrustedBenchmarkResult(BaseModel):
     passed: bool
     output: str = ""
     failure: str | None = None
+    operator_output: str = ""
+    operator_failure: str | None = None
     # Whose fault a failed run is: present exactly when the run failed, with no default.
     failure_kind: BenchmarkFailureKind | None = None
     # The validated evaluator error record's message, without transport framing.
     failure_reason: str | None = None
+    # The capability the evaluator named as unmet on a failed run, when it did.
+    unmet_requirement: str | None = None
+    operator_failure_reason: str | None = None
     stdout: str = ""
     stderr: str = ""
+    operator_stdout: str = ""
+    operator_stderr: str = ""
     row: Mapping[str, FiniteFloat] | None = None
     metrics: Mapping[str, TrustedMetricDeclaration] = Field(default_factory=dict)
     # What a failed run measured before it stopped, as its evaluator reported it.
@@ -327,14 +452,37 @@ class TrustedBenchmarkResult(BaseModel):
         if self.passed != (self.failure_kind is None):
             message = "a trusted benchmark result carries a failure kind exactly when it failed"
             raise ValueError(message)
+        if self.passed != (self.operator_failure is None):
+            message = "a failed benchmark result requires a separate operator-safe failure"
+            raise ValueError(message)
+        if (self.failure_reason is None) != (self.operator_failure_reason is None):
+            message = "a benchmark reason requires a separate operator-safe reason"
+            raise ValueError(message)
+        if self.passed and self.unmet_requirement is not None:
+            message = "only a failed benchmark result names an unmet requirement"
+            raise ValueError(message)
         return self
 
 
 class TrustedEvaluationExecutor(Protocol):
     """Serialize trusted evaluation effects for one workspace."""
 
-    async def accuracy(self, *, command_override: str | None = None) -> TrustedAccuracyResult:
-        """Run the configured accuracy command and enforce input integrity."""
+    async def build(
+        self, *, confinement: CommandRunner | None, output: OutputSink
+    ) -> TrustedBuildResult:
+        """Run the candidate's build confined; with no confinement it fails closed.
+
+        The command's stdout and stderr are written to *output* as it runs.
+        """
+        ...
+
+    async def accuracy(
+        self, *, command_override: str | None = None, output: OutputSink
+    ) -> TrustedAccuracyResult:
+        """Run the configured accuracy command and enforce input integrity.
+
+        The command's stdout and stderr are written to *output* as it runs.
+        """
         ...
 
     async def benchmark(
@@ -342,8 +490,13 @@ class TrustedEvaluationExecutor(Protocol):
         *,
         command_override: str | None = None,
         required_metrics: frozenset[str] = frozenset(),
+        output: OutputSink,
     ) -> TrustedBenchmarkResult:
-        """Run and decode the configured benchmark result contract."""
+        """Run and decode the configured benchmark result contract.
+
+        The benchmark command's stdout and stderr, framed result included, are
+        written to *output* as it runs; reading a truncated result back is not.
+        """
         ...
 
 
@@ -382,21 +535,36 @@ class RuntimeTrustedEvaluation:
         self._model_requests = model_requests
         self._lock = asyncio.Lock()
 
-    async def accuracy(self, *, command_override: str | None = None) -> TrustedAccuracyResult:
+    async def accuracy(
+        self, *, command_override: str | None = None, output: OutputSink
+    ) -> TrustedAccuracyResult:
         """Run one accuracy operation without overlapping workspace mutation."""
         async with self._lock:
-            return await self._run_sync(partial(self._accuracy, command_override))
+            return await self._run_sync(partial(self._accuracy, command_override, output))
+
+    async def build(
+        self, *, confinement: CommandRunner | None, output: OutputSink
+    ) -> TrustedBuildResult:
+        """Run the candidate's build under ``confinement`` without overlapping workspace mutation.
+
+        ``confinement`` is the run environment's agent confinement for this workspace; with
+        none the build fails closed and runs nothing. The command's output is written to
+        *output* as it runs.
+        """
+        async with self._lock:
+            return await self._run_sync(partial(self._build, confinement, output))
 
     async def benchmark(
         self,
         *,
         command_override: str | None = None,
         required_metrics: frozenset[str] = frozenset(),
+        output: OutputSink,
     ) -> TrustedBenchmarkResult:
         """Run one benchmark operation without overlapping workspace mutation."""
         async with self._lock:
             return await self._run_sync(
-                partial(self._benchmark, command_override, required_metrics)
+                partial(self._benchmark, command_override, required_metrics, output)
             )
 
     async def _run_sync[Result](
@@ -429,26 +597,104 @@ class RuntimeTrustedEvaluation:
             return (), f"Model-weight request could not be satisfied: {error}"
         return volumes, None
 
-    def _accuracy(self, command_override: str | None, cancel: Event) -> TrustedAccuracyResult:
+    def _build(
+        self, confinement: CommandRunner | None, sink: OutputSink, cancel: Event
+    ) -> TrustedBuildResult:
+        build = self._plan.build
+        if build is None:
+            return TrustedBuildResult(executed=False, passed=True)
+        refusal = self._build_refusal(build, confinement)
+        if refusal is not None or confinement is None:
+            return refusal or TrustedBuildResult.failed(
+                NO_BUILD_CONFINEMENT,
+                BenchmarkFailureKind.WORKLOAD,
+                command=build.command,
+                executed=False,
+            )
+        # A runner that cannot start the command raises; the executor records that as the
+        # evaluation's failure, as it does for any stage that raises.
+        result = confinement.execute(
+            build.command, timeout=self._timeout(build.timeout_seconds), cancel=cancel, output=sink
+        )
+        if changed := self._git.trusted_input_changes():
+            return TrustedBuildResult.failed(
+                "Evaluator-owned files changed during the build: " + ", ".join(changed),
+                BenchmarkFailureKind.WORKLOAD,
+                command=build.command,
+                executed=True,
+            )
+        if result.exit_code == 0 and not result.cancelled:
+            return TrustedBuildResult(
+                command=build.command,
+                executed=True,
+                passed=True,
+                output=result.output.strip(),
+                operator_output=result.diagnostic_output.strip(),
+            )
+        status = (
+            "timed out" if result.exit_code == _TIMEOUT_EXIT else f"exited with {result.exit_code}"
+        )
+        failure = f"Candidate build {status}.\n{result.output.strip()}".strip()
+        operator_failure = f"Candidate build {status}.\n{result.diagnostic_output.strip()}".strip()
+        return TrustedBuildResult(
+            command=build.command,
+            executed=True,
+            passed=False,
+            output=failure,
+            failure=failure,
+            operator_output=operator_failure,
+            operator_failure=operator_failure,
+            failure_kind=_command_failure_kind(RecordState.OUTCOME, result, None),
+        )
+
+    def _build_refusal(
+        self, build: TrustedBuild, confinement: CommandRunner | None
+    ) -> TrustedBuildResult | None:
+        """Why the build must not run at all, or None: no confinement, or tampered inputs."""
+        if confinement is None:
+            return TrustedBuildResult.failed(
+                NO_BUILD_CONFINEMENT,
+                BenchmarkFailureKind.WORKLOAD,
+                command=build.command,
+                executed=False,
+            )
+        if changed := self._git.trusted_input_changes():
+            return TrustedBuildResult.failed(
+                "Evaluator-owned files were modified: " + ", ".join(changed),
+                BenchmarkFailureKind.WORKLOAD,
+                command=build.command,
+                executed=False,
+            )
+        return None
+
+    def _accuracy(
+        self, command_override: str | None, sink: OutputSink, cancel: Event
+    ) -> TrustedAccuracyResult:
         command = self._plan.accuracy_command
         volumes, failure = self._provision()
         if failure is not None:
+            operator_failure = redact_diagnostic_text(failure)
             return TrustedAccuracyResult(
                 command=command,
                 executed=False,
                 passed=False,
                 output=failure,
                 failure=failure,
+                operator_output=operator_failure,
+                operator_failure=operator_failure,
                 failure_kind=BenchmarkFailureKind.INFRASTRUCTURE,
             )
         if changed := self._git.trusted_input_changes():
             failure = "Evaluator-owned files were modified: " + ", ".join(changed)
+            operator_failure = redact_diagnostic_text(failure)
             return TrustedAccuracyResult(
                 command=command,
                 executed=False,
                 passed=False,
                 output=failure,
                 failure=failure,
+                operator_output=operator_failure,
+                operator_failure=operator_failure,
                 failure_kind=BenchmarkFailureKind.WORKLOAD,
             )
         if command is None:
@@ -462,8 +708,14 @@ class RuntimeTrustedEvaluation:
             timeout=self._timeout(self._plan.accuracy_timeout_seconds),
             label="accuracy",
             cancel=cancel,
+            sink=sink,
         )
         output = execution_failure or result.output.strip()
+        operator_output = (
+            redact_diagnostic_text(execution_failure)
+            if execution_failure is not None
+            else result.diagnostic_output.strip()
+        )
         passed = execution_failure is None and result.exit_code == 0
         mutated = False
         if changed := self._git.trusted_input_changes():
@@ -471,6 +723,7 @@ class RuntimeTrustedEvaluation:
                 changed
             )
             output = f"{output}\n{mutation}".strip()
+            operator_output = f"{operator_output}\n{redact_diagnostic_text(mutation)}".strip()
             passed = False
             mutated = True
         return TrustedAccuracyResult(
@@ -479,6 +732,8 @@ class RuntimeTrustedEvaluation:
             passed=passed,
             output=output,
             failure=None if passed else output,
+            operator_output=operator_output,
+            operator_failure=None if passed else operator_output,
             # The exit status is the accuracy command's own verdict, so it leaves an outcome
             # whenever it reported one; a candidate that changed evaluator-owned files owns it.
             failure_kind=(
@@ -490,6 +745,8 @@ class RuntimeTrustedEvaluation:
             ),
             stdout=result.stdout,
             stderr=result.stderr,
+            operator_stdout=result.diagnostic_stdout,
+            operator_stderr=result.diagnostic_stderr,
             provisioned_volumes=volumes,
         )
 
@@ -497,18 +754,22 @@ class RuntimeTrustedEvaluation:
         self,
         command_override: str | None,
         required_metrics: frozenset[str],
+        sink: OutputSink,
         cancel: Event,
     ) -> TrustedBenchmarkResult:
         contract = self._plan.benchmark_contract
         command = self._plan.benchmark_command
         volumes, failure = self._provision()
         if failure is not None:
+            operator_failure = redact_diagnostic_text(failure)
             return TrustedBenchmarkResult(
                 command=command,
                 executed=False,
                 passed=False,
                 output=failure,
                 failure=failure,
+                operator_output=operator_failure,
+                operator_failure=operator_failure,
                 failure_kind=BenchmarkFailureKind.INFRASTRUCTURE,
             )
         if contract is None:
@@ -519,21 +780,27 @@ class RuntimeTrustedEvaluation:
             )
         if command is None:
             failure = "Benchmark result contract is configured without a benchmark command."
+            operator_failure = redact_diagnostic_text(failure)
             return TrustedBenchmarkResult(
                 executed=False,
                 passed=False,
                 output=failure,
                 failure=failure,
+                operator_output=operator_failure,
+                operator_failure=operator_failure,
                 failure_kind=BenchmarkFailureKind.WORKLOAD,
             )
         if changed := self._git.trusted_input_changes():
             failure = "Evaluator-owned files were modified: " + ", ".join(changed)
+            operator_failure = redact_diagnostic_text(failure)
             return TrustedBenchmarkResult(
                 command=command,
                 executed=False,
                 passed=False,
                 output=failure,
                 failure=failure,
+                operator_output=operator_failure,
+                operator_failure=operator_failure,
                 failure_kind=BenchmarkFailureKind.WORKLOAD,
             )
         output_path = f"{_BENCHMARK_OUTPUT_PREFIX}{uuid.uuid4().hex}.json"
@@ -548,11 +815,18 @@ class RuntimeTrustedEvaluation:
                 timeout=self._timeout(self._plan.benchmark_timeout_seconds),
                 label="benchmark",
                 cancel=cancel,
+                sink=sink,
             )
-            decoded = _Decoded(output=execution_failure or result.output.strip(), passed=False)
-            framed = decoded.output
+            raw_output = execution_failure or result.output.strip()
+            diagnostic_output = (
+                redact_diagnostic_text(execution_failure)
+                if execution_failure is not None
+                else result.diagnostic_output.strip()
+            )
+            decoded = _Decoded(output=raw_output, passed=False)
+            framed = raw_output
+            problem = None
             if execution_failure is None:
-                problem = None
                 if result.truncated:
                     # The sandbox keeps only the head of long output, which
                     # drops the framed result appended after the evaluator's
@@ -566,11 +840,18 @@ class RuntimeTrustedEvaluation:
                     exited_cleanly=result.exit_code == 0,
                 )
             output, passed, row = decoded.output, decoded.passed, decoded.row
+            operator_output = diagnostic_output
+            if problem is not None:
+                operator_output = f"{operator_output}\n{problem}".strip()
+            if decoded.violation is not None:
+                safe_violation = redact_diagnostic_text(decoded.violation)
+                operator_output = f"{operator_output}\n{safe_violation}".strip()
             if changed := self._git.trusted_input_changes():
                 mutation = "Evaluator-owned files changed during benchmark execution: " + ", ".join(
                     changed
                 )
                 output = f"{output}\n{mutation}".strip()
+                operator_output = f"{operator_output}\n{redact_diagnostic_text(mutation)}".strip()
                 passed = False
                 row = None
             return TrustedBenchmarkResult(
@@ -579,14 +860,22 @@ class RuntimeTrustedEvaluation:
                 passed=passed,
                 output=output,
                 failure=None if passed else output,
+                operator_output=operator_output,
+                operator_failure=None if passed else operator_output,
                 failure_kind=(
                     None
                     if passed
                     else _command_failure_kind(record_state(framed), result, execution_failure)
                 ),
                 failure_reason=decoded.reason,
+                unmet_requirement=None if passed else decoded.requirement,
+                operator_failure_reason=(
+                    None if decoded.reason is None else redact_diagnostic_text(decoded.reason)
+                ),
                 stdout=result.stdout,
                 stderr=result.stderr,
+                operator_stdout=result.diagnostic_stdout,
+                operator_stderr=result.diagnostic_stderr,
                 row=row,
                 metrics=decoded.metrics,
                 partial_measurement=decoded.partial,
@@ -594,7 +883,7 @@ class RuntimeTrustedEvaluation:
             )
         finally:
             with contextlib.suppress(Exception):
-                self._sandbox.execute(f"rm -f -- {shlex.quote(output_path)}")
+                self._sandbox.execute(f"rm -f -- {shlex.quote(output_path)}", output=DISCARD)
 
     def _execute(
         self,
@@ -603,9 +892,10 @@ class RuntimeTrustedEvaluation:
         timeout: int | None,
         label: str,
         cancel: Event,
+        sink: OutputSink,
     ) -> tuple[CommandResult, str | None]:
         try:
-            result = self._sandbox.execute(command, timeout=timeout, cancel=cancel)
+            result = self._sandbox.execute(command, timeout=timeout, cancel=cancel, output=sink)
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-837217 [BLE001]; trusted command failures are typed policy-visible outcomes rather than run-fatal exceptions.
             return CommandResult(output="", exit_code=None), (
                 f"{label} command could not be executed: {error}"
@@ -628,6 +918,8 @@ class _Decoded:
     metrics: Mapping[str, TrustedMetricDeclaration] = field(default_factory=dict)
     partial: PartialMeasurement | None = None
     reason: str | None = None
+    violation: str | None = None
+    requirement: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -649,6 +941,8 @@ class TrustedBenchmarkDecoding:
     # What the evaluator left in its result file; with the exit status it decides whose
     # fault a failed run is (`classify`).
     record: RecordState = RecordState.ABSENT
+    # The capability the evaluator's `error` record named as unmet, when it did.
+    requirement: str | None = None
 
 
 def record_state(framed: str) -> RecordState:
@@ -708,7 +1002,11 @@ def decode_trusted_benchmark_run(
         return TrustedBenchmarkDecoding(passed=False, violation=str(error), record=kind)
     if failure is not None:
         return TrustedBenchmarkDecoding(
-            passed=False, partial=failure.partial, reason=failure.failure, record=kind
+            passed=False,
+            partial=failure.partial,
+            reason=failure.failure,
+            record=kind,
+            requirement=failure.requirement,
         )
     if not exited_cleanly:
         return TrustedBenchmarkDecoding(passed=False, record=kind)
@@ -740,6 +1038,8 @@ def _decode_framed(
         metrics=decoded.metrics,
         partial=decoded.partial,
         reason=decoded.reason,
+        violation=decoded.violation,
+        requirement=decoded.requirement,
     )
 
 

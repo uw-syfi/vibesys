@@ -20,6 +20,7 @@ from vs_sim.api.testing import join_or_fail
 
 if TYPE_CHECKING:
     from pathlib import Path
+from vs_sim.api import DISCARD
 
 _EXIT_BOUND_SECONDS = 30.0  # Reached only when a stop failed; the pass path waits on the event.
 
@@ -45,7 +46,7 @@ def test_a_stop_after_a_lost_signal_request_still_ends_the_program(tmp_path: Pat
         docker=engine,
         threads=OsThreads(),
     )
-    sandbox.start()
+    sandbox.start(output=DISCARD)
     try:
         engine.signal_requests_find_nothing(1)
         cancel = threading.Event()
@@ -53,7 +54,7 @@ def test_a_stop_after_a_lost_signal_request_still_ends_the_program(tmp_path: Pat
         outcome: list[bool] = []
         worker = threading.Thread(
             target=lambda: outcome.append(
-                sandbox.execute(command, timeout=3600, cancel=cancel).cancelled
+                sandbox.execute(command, timeout=3600, cancel=cancel, output=DISCARD).cancelled
             )
         )
         worker.start()
@@ -91,7 +92,7 @@ def _cancel_a_running_program(
         docker=engine,
         threads=OsThreads(),
     )
-    sandbox.start()
+    sandbox.start(output=DISCARD)
     engine.signal_requests_fail(failing_signal_requests)
     engine.signal_requests_meet_unreadable(unreadable_signal_requests)
     cancel = threading.Event()
@@ -100,7 +101,9 @@ def _cancel_a_running_program(
     def run() -> None:
         try:
             outcome.append(
-                sandbox.execute("echo go > ready\nsleep 1000", timeout=3600, cancel=cancel)
+                sandbox.execute(
+                    "echo go > ready\nsleep 1000", timeout=3600, cancel=cancel, output=DISCARD
+                )
             )
         except CommandStopUnconfirmedError as error:
             outcome.append(error)

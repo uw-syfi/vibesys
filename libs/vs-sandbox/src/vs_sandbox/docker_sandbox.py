@@ -13,7 +13,7 @@ import uuid
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, override
+from typing import TYPE_CHECKING, ClassVar, Protocol, override
 
 from vs_project.api import atomic_write_bytes
 from vs_sandbox.command_execution import execute_command
@@ -37,10 +37,12 @@ from vs_sandbox.docker_states import (
     released,
 )
 from vs_sandbox.host_resources import HostResourceAccess
-from vs_sandbox.host_sandbox import WorkspaceSandbox
+from vs_sandbox.host_sandbox import SandboxUnavailableError, WorkspaceSandbox
 from vs_sandbox.lifecycle import SandboxLifecycle, SandboxLifecycleHooks
+from vs_sandbox.operator_root import exposed_grant, exposure_message
+from vs_sandbox.operator_root import operator_root as default_operator_root
 from vs_sandbox.process_execution import KILL, PipedStoppableProcess, RemoteProcesses
-from vs_sim.api import NotReleasedError, ProcessTimeoutError
+from vs_sim.api import DISCARD, NotReleasedError, ProcessTimeoutError
 
 if TYPE_CHECKING:
     import signal
@@ -49,7 +51,7 @@ if TYPE_CHECKING:
     from vs_sandbox.docker_states import ContainerLife
     from vs_sandbox.execution import CommandResult
     from vs_sandbox.host_resources import HostResource
-    from vs_sim.api import Event, Threads
+    from vs_sim.api import Event, OutputSink, Threads
 
 # Global registry of live containers for cleanup on exit / SIGINT: each container's id and
 # the Docker CLI that started it, which is the one that can stop it.
@@ -59,7 +61,7 @@ _live_containers: dict[str, DockerCli] = {}
 # Credentials reach the container as ``-e NAME=VALUE`` arguments on
 # ``docker run``, and every sink that records a command or the env dict is
 # durable and readable: the command log lives beside the run's other logs, the
-# metadata file is written into the bind-mounted workspace the agent edits, and
+# metadata file sits beside the command log, and
 # startup errors are surfaced to the caller.  Endpoint variables such as
 # ``*_BASE_URL`` stay visible because they are diagnostics, not secrets.
 _SECRET_ENV_NAME_PATTERN = re.compile(
@@ -142,7 +144,7 @@ def _cleanup_containers() -> None:
     """Stop and remove all tracked containers, each through the Docker CLI that started it."""
     for container_id, docker in list(_live_containers.items()):
         with suppress(OSError, subprocess.TimeoutExpired):
-            docker.run(["docker", "stop", container_id], timeout_seconds=30)
+            docker.run(["docker", "stop", container_id], timeout_seconds=30, output=DISCARD)
         if _remove_container(docker, container_id, timeout_seconds=10).released:
             _live_containers.pop(container_id, None)
 
@@ -188,7 +190,7 @@ def _remove_container(
     failure: Exception | None = None
     for _ in range(_REMOVE_ATTEMPTS):
         try:
-            result = docker.run(cmd, timeout_seconds=timeout_seconds)
+            result = docker.run(cmd, timeout_seconds=timeout_seconds, output=DISCARD)
         except (OSError, ProcessTimeoutError) as exc:
             failure = exc
             if log is not None:
@@ -306,6 +308,13 @@ class DockerSandbox(WorkspaceSandbox):
     __eq__ = object.__eq__
     __hash__ = object.__hash__
 
+    #: The container sees only its mounts, none of which may reach the operator's runtime
+    #: root, and neither the user's D-Bus nor the Docker daemon's socket is mounted (a
+    #: Slurm run's command broker socket is, and serves only its brokered commands), so it
+    #: claims the boundary. The container also has its own network namespace, so host
+    #: abstract sockets and host loopback TCP are out of its reach too.
+    claims_operator_control_boundary: ClassVar[bool] = True
+
     def __repr__(self) -> str:
         """Return a debug repr that never touches the unset dataclass fields."""
         return f"DockerSandbox(image={self._image!r}, container_id={self._container_id!r})"
@@ -320,6 +329,7 @@ class DockerSandbox(WorkspaceSandbox):
         group_add: list[str] | None = None,
         entrypoint: str | None = None,
         shm_size: str | None = None,
+        memory_limit: int | None = None,
         auto_remove: bool = False,
         default_timeout: int = 300,
         start_timeout: int = 120,
@@ -338,6 +348,7 @@ class DockerSandbox(WorkspaceSandbox):
         docker_in_docker: bool = False,
         same_path_workspace: bool = False,
         run_id: str | None = None,
+        operator_root: Path | None = None,
     ) -> None:
         """Initialize Docker sandbox configuration.
 
@@ -370,6 +381,11 @@ class DockerSandbox(WorkspaceSandbox):
                 (e.g. ``neuronx-cc``, PyTorch dataloaders) exhaust with
                 "No space left on device".  ``None`` (default) uses Docker's
                 default.
+            memory_limit: Bytes the container may use, swap included (emits
+                ``--memory`` and ``--memory-swap``). A process past it is killed
+                inside the container instead of starving the host; compute
+                backends pass ``container_memory_limit`` of the Docker host's
+                memory. ``None`` (default) leaves the container unbounded.
             auto_remove: Ask Docker to remove the container and its writable
                 layer whenever it stops.
             default_timeout: Default command timeout in seconds.
@@ -424,6 +440,10 @@ class DockerSandbox(WorkspaceSandbox):
             run_id: Id of the run this container belongs to, recorded as the
                 :data:`RUN_ID_LABEL` label. ``None`` leaves the container
                 unlabelled.
+            operator_root: The operator's runtime root, which no mount may
+                reach (:mod:`vs_sandbox.operator_root`); this process's own by
+                default. A mount that reaches it raises
+                ``SandboxUnavailableError``.
         """
         if docker_in_docker and (gpus is not None or devices):
             message = (
@@ -451,6 +471,7 @@ class DockerSandbox(WorkspaceSandbox):
         self._group_add: list[str] = list(group_add or [])
         self._entrypoint = entrypoint
         self._shm_size = shm_size
+        self._memory_limit = memory_limit
         self._auto_remove = auto_remove
         self._default_timeout = default_timeout
         self._start_timeout = start_timeout
@@ -458,6 +479,8 @@ class DockerSandbox(WorkspaceSandbox):
         self._env = env or {}
         self._resources: tuple[HostResource, ...] = tuple(resources)
         self._bind_mounts = list(bind_mounts or []) + _bind_mounts_for_resources(self._resources)
+        self._operator_root = default_operator_root() if operator_root is None else operator_root
+        self._refuse_exposed_root(host_workspace)
         self._agent_path_map: tuple[tuple[str, str], ...] = _agent_path_map(
             host_workspace, self._container_root, self._resources
         )
@@ -466,6 +489,12 @@ class DockerSandbox(WorkspaceSandbox):
         self._cached_container_path: str | None = None
         self._container_id: str | None = None
         self._logger = self._setup_logger(log_path)
+        # VibeSys-owned bookkeeping lives beside the command log, never in the
+        # workspace: the workspace is the agent's project, and a file there is
+        # swept into every candidate snapshot commit.
+        self._metadata_path = (
+            None if log_path is None else Path(log_path).with_suffix(".metadata.json")
+        )
         self._agent_uid = agent_uid if agent_uid is not None else os.getuid()
         self._agent_gid = agent_gid if agent_gid is not None else os.getgid()
         self._auth_files: list[tuple[str, str]] = list(auth_files or [])
@@ -524,8 +553,24 @@ class DockerSandbox(WorkspaceSandbox):
         # Fallback: pass through as-is (e.g. user explicitly set gpus="device=0")
         return gpus
 
+    def _refuse_exposed_root(self, host_workspace: str) -> None:
+        """Raise ``SandboxUnavailableError`` if a mount would reach the operator's runtime root.
+
+        The container sees only what is mounted, so no mount may reach the root, which
+        holds the key to the run's control socket. Run when the sandbox is built and again
+        as each ``docker run`` is built, since the engine binds a mount source as it
+        resolves then: a mounted symlink retargeted into the root since is caught there.
+        """
+        root = self._operator_root
+        grant = exposed_grant(
+            root, [host_workspace, *(host_path for host_path, _, _ in self._bind_mounts)]
+        )
+        if grant is not None:
+            raise SandboxUnavailableError(exposure_message("Docker", root, grant))
+
     def _start_command(self) -> list[str]:
         """Build the Docker argv for starting this configured sandbox."""
+        self._refuse_exposed_root(self._host_workspace)
         cmd = [
             "docker",
             "run",
@@ -537,6 +582,7 @@ class DockerSandbox(WorkspaceSandbox):
         ]
         cmd.extend(self._label_arguments())
         cmd.extend(self._container_runtime_arguments())
+        cmd.extend(self._memory_arguments())
         # PID 1 is `sleep infinity`, which ignores SIGTERM as an init-less PID 1,
         # so `docker stop` would wait out its grace period and SIGKILL it. The
         # engine's init (`--init`) is PID 1 instead: it forwards SIGTERM, reaps
@@ -588,12 +634,25 @@ class DockerSandbox(WorkspaceSandbox):
         """Return the ``docker run`` flags that label the container with its run."""
         return [] if self._run_id is None else ["--label", f"{RUN_ID_LABEL}={self._run_id}"]
 
+    def _memory_arguments(self) -> list[str]:
+        """Return the flags that cap the container's memory, swap included, when it has a cap."""
+        if self._memory_limit is None:
+            return []
+        limit = str(self._memory_limit)
+        return ["--memory", limit, "--memory-swap", limit]
+
     def _container_runtime_arguments(self) -> list[str]:
         """Return the ``docker run`` flags a docker-in-docker sandbox adds."""
         return ["--runtime", SYSBOX_DOCKER_RUNTIME] if self._docker_in_docker else []
 
-    def start(self) -> None:
-        """Start the Docker container."""
+    def start(self, *, output: OutputSink) -> None:
+        """Start the Docker container.
+
+        Every chunk ``docker run`` writes (an image pull's progress, the new
+        container's ID, a daemon error) reaches *output* as it is written.
+        ``docker.log`` still records the command and a bounded result after it
+        exits.
+        """
         if self._docker_in_docker:
             require_sysbox_runtime(self._docker)
         self._container_name = f"vibesys-{uuid.uuid4().hex[:12]}"
@@ -605,7 +664,7 @@ class DockerSandbox(WorkspaceSandbox):
         # sweep must know it if every removal below fails too.
         _live_containers[self._container_name] = self._docker
         try:
-            result = self._docker.run(cmd, timeout_seconds=self._start_timeout)
+            result = self._docker.run(cmd, timeout_seconds=self._start_timeout, output=output)
         except BaseException as exc:
             # The daemon may have created the container before the client
             # died, timed out, or was interrupted; its name is the only handle.
@@ -674,7 +733,7 @@ class DockerSandbox(WorkspaceSandbox):
             "shm_size": self._shm_size,
             "bind_mounts": [[host, container, ro] for host, container, ro in self._bind_mounts],
             # Credentials are omitted rather than masked: the metadata file is
-            # written into the agent-visible workspace, and a masked value
+            # durable and readable, and a masked value
             # would rebuild a broken container that looks authenticated.
             "env": _non_secret_env(self._env),
             "symlink_commands": [],
@@ -704,7 +763,7 @@ class DockerSandbox(WorkspaceSandbox):
         cmd = ["docker", "exec", "-u", "root", container_id, "bash", "-c", script]
         self._log_cmd(cmd)
         try:
-            result = self._docker.run(cmd, timeout_seconds=_ROOT_SETUP_TIMEOUT_S)
+            result = self._docker.run(cmd, timeout_seconds=_ROOT_SETUP_TIMEOUT_S, output=DISCARD)
         except subprocess.TimeoutExpired as exc:
             self._log_cmd(cmd, error=f"{what} timed out after {_ROOT_SETUP_TIMEOUT_S}s")
             message = f"{what} timed out after {_ROOT_SETUP_TIMEOUT_S}s"
@@ -730,6 +789,7 @@ class DockerSandbox(WorkspaceSandbox):
                 f"id -u {_AGENT_USER} && id -g {_AGENT_USER}",
             ],
             timeout_seconds=_ROOT_SETUP_TIMEOUT_S,
+            output=DISCARD,
         )
         if result.returncode != 0:
             return None
@@ -848,22 +908,22 @@ class DockerSandbox(WorkspaceSandbox):
         """Stop and remove a container; the caller keeps ownership unless it is released."""
         stop = ["docker", "stop", container_id]
         try:
-            self._log_cmd(stop, self._docker.run(stop, timeout_seconds=30))
+            self._log_cmd(stop, self._docker.run(stop, timeout_seconds=30, output=DISCARD))
         except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-009067 [BLE001]; cleanup must record failures but not replace an earlier startup or shutdown error.
             with suppress(Exception):
                 self._log_cmd(stop, error=f"container cleanup failed: {exc}")
         return _remove_container(self._docker, container_id, timeout_seconds=10, log=self._log_cmd)
 
     def _save_metadata(self) -> None:
-        """Write metadata to the host workspace (best-effort)."""
-        try:
-            metadata_path = Path(self._host_workspace) / ".docker_metadata.json"
-            atomic_write_bytes(metadata_path, json.dumps(self._metadata, indent=2).encode())
-        except OSError:
-            pass  # Non-fatal: workspace dir may not exist in tests
+        """Write metadata beside the command log, outside the workspace (best-effort)."""
+        if self._metadata_path is None:
+            return
+        # Non-fatal: the log directory may not exist in tests.
+        with suppress(OSError):
+            atomic_write_bytes(self._metadata_path, json.dumps(self._metadata, indent=2).encode())
 
     def save_symlink_commands(self, symlink_commands: list[str]) -> None:
-        """Update the metadata file with symlink commands for vibesys-shell."""
+        """Update the metadata file with symlink commands for the run."""
         self._metadata["symlink_commands"] = symlink_commands
         self._save_metadata()
 
@@ -897,7 +957,7 @@ class DockerSandbox(WorkspaceSandbox):
             return
         self.stop()
         self._gpus = gpus
-        self.start()
+        self.start(output=DISCARD)
 
     @property
     def container_id(self) -> str:
@@ -961,7 +1021,7 @@ class DockerSandbox(WorkspaceSandbox):
         """Read the running container's PATH via a one-shot ``docker exec``."""
         cmd = ["docker", "exec", container_id, "sh", "-c", "echo $PATH"]
         self._log_cmd(cmd)
-        result = self._docker.run(cmd, timeout_seconds=_ROOT_SETUP_TIMEOUT_S)
+        result = self._docker.run(cmd, timeout_seconds=_ROOT_SETUP_TIMEOUT_S, output=DISCARD)
         self._log_cmd(cmd, result)
         path = result.stdout.strip()
         if result.returncode != 0 or not path:
@@ -1001,6 +1061,7 @@ class DockerSandbox(WorkspaceSandbox):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink,
     ) -> CommandResult:
         """Execute *command* as root inside the started container.
 
@@ -1008,7 +1069,7 @@ class DockerSandbox(WorkspaceSandbox):
         user is not root, so a step that needs root (installing system
         packages) uses this instead.
         """
-        return self._execute(command, timeout=timeout, cancel=cancel, user="root")
+        return self._execute(command, timeout=timeout, cancel=cancel, user="root", output=output)
 
     def execute(
         self,
@@ -1016,6 +1077,7 @@ class DockerSandbox(WorkspaceSandbox):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink,
     ) -> CommandResult:
         """Execute a command inside the Docker container.
 
@@ -1026,7 +1088,7 @@ class DockerSandbox(WorkspaceSandbox):
         documented in :mod:`vs_sandbox.command_execution`; every sandbox kind
         shares it.
         """
-        return self._execute(command, timeout=timeout, cancel=cancel, user=None)
+        return self._execute(command, timeout=timeout, cancel=cancel, user=None, output=output)
 
     def _execute(
         self,
@@ -1035,6 +1097,7 @@ class DockerSandbox(WorkspaceSandbox):
         timeout: int | None,
         cancel: Event | None,
         user: str | None,
+        output: OutputSink,
     ) -> CommandResult:
         if self._container_id is None:
             raise DockerSandboxNotStartedError.operation_before_start()
@@ -1061,7 +1124,7 @@ class DockerSandbox(WorkspaceSandbox):
             cancel=cancel,
             max_output_chars=self._max_output_bytes,
             launch=lambda: PipedStoppableProcess(
-                self._docker.spawn(exec_cmd), threads=self._threads
+                self._docker.spawn(exec_cmd), threads=self._threads, output=output
             ),
             signal_remote=_ExecStop(self._docker, container_id, exec_id, user).send,
             threads=self._threads,
@@ -1076,7 +1139,7 @@ class DockerSandbox(WorkspaceSandbox):
 
     def __enter__(self) -> DockerSandbox:
         """Start the sandbox and return it as a context manager."""
-        self.start()
+        self.start(output=DISCARD)
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -1127,7 +1190,9 @@ class _ExecStop:
                 since,
             ]
             try:
-                result = self._docker.run(argv, timeout_seconds=_EXEC_STOP_TIMEOUT_S)
+                result = self._docker.run(
+                    argv, timeout_seconds=_EXEC_STOP_TIMEOUT_S, output=DISCARD
+                )
             except (OSError, subprocess.SubprocessError):
                 continue
             reply = parse_exec_stop_reply(result.stdout) if result.returncode == 0 else None

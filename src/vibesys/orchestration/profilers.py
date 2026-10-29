@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.constants import ComputeBackend, DomainName
 from vibesys.run.contracts import ProfilerKind
+from vs_core.api.search import markdown_prose
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -52,6 +53,7 @@ def default_profiler_for_backend(backend: ComputeBackend) -> ProfilerKind:
 _KERNEL_WRITING_PROFILERS: dict[ComputeBackend, ProfilerKind] = {
     ComputeBackend.CUDA: ProfilerKind.NCU,
     ComputeBackend.ROCM: ProfilerKind.ROCPROF,
+    ComputeBackend.TRAINIUM: ProfilerKind.NEURON,
 }
 
 
@@ -171,6 +173,24 @@ PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
             tool=ProfilerTool("ncu", ProfilerSite.GPU_WORKLOAD),
             driver_tools=frozenset({"query_metrics"}),
         ),
+        # Reads the per-block timeline a kernel records with FlashInfer's profiler macros.
+        # The profiler agent builds and runs the instrumented kernel in its own GPU job, so
+        # the server is pure Python and needs no executable. Opt-in: ``auto`` keeps NCU.
+        ProfilerDefinition(
+            ProfilerKind.FLASHINFER,
+            frozenset({DomainName.KERNEL_WRITING}),
+            backends=frozenset({ComputeBackend.CUDA}),
+        ),
+        # NCU and the FlashInfer timeline in one session: its server registers both
+        # packages' tools, so both are staged beside it. Opt-in, like FlashInfer alone.
+        ProfilerDefinition(
+            ProfilerKind.NCU_FLASHINFER,
+            frozenset({DomainName.KERNEL_WRITING}),
+            backends=frozenset({ComputeBackend.CUDA}),
+            extra_support_kinds=frozenset({ProfilerKind.NCU, ProfilerKind.FLASHINFER}),
+            tool=ProfilerTool("ncu", ProfilerSite.GPU_WORKLOAD),
+            driver_tools=frozenset({"query_metrics"}),
+        ),
         # The rocprof MCP server also exposes the torch analyzer's tools
         # (torch.profiler traces are a useful cross-check alongside rocprofv3
         # captures), so torch_profiler/ is staged alongside rocprof_profiler/.
@@ -204,7 +224,11 @@ PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
             frozenset({DomainName.LLM_SERVING}),
             requires_domain_torch_support=True,
         ),
-        ProfilerDefinition(ProfilerKind.NEURON, frozenset({DomainName.LLM_SERVING})),
+        # NKI kernels run as NEFFs on NeuronCores, so neuron-explorer captures
+        # kernel-writing candidates the same way it captures serving workloads.
+        ProfilerDefinition(
+            ProfilerKind.NEURON, frozenset({DomainName.LLM_SERVING, DomainName.KERNEL_WRITING})
+        ),
         # The native CPU profilers drive a program in the agent's own shell, so they run
         # only where that shell has the program (the host, or an image that ships it).
         ProfilerDefinition(
@@ -359,8 +383,8 @@ def resolve_profiler_choice(
     """Resolve ``--profiler`` into the effective profiler kind and, for ``auto``, the reason for none.
 
     ``auto`` is domain-aware. Generic workloads pick a native CPU profiler when
-    the host platform has one; kernel-writing runs pick NCU on CUDA and rocprof
-    on ROCm when the run environment supports it; LLM-serving runs use their
+    the host platform has one; kernel-writing runs pick NCU on CUDA, rocprof
+    on ROCm and neuron on Trainium when the run environment supports it; LLM-serving runs use their
     backend profiler unless the run environment dictates another safe default.
     """
     requested_kind = require_profiler_kind(requested, label="requested profiler")
@@ -499,10 +523,14 @@ class ProfilerSummary(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    analysis: str = Field(description="Detailed interpretation of the profile data.")
-    bottlenecks: str = Field(description="Ranked bottlenecks with concrete numbers.")
+    analysis: str = Field(
+        description=markdown_prose("Detailed interpretation of the profile data.")
+    )
+    bottlenecks: str = Field(
+        description=markdown_prose("Ranked bottlenecks with concrete numbers.")
+    )
     suggestions: str = Field(
-        description=(
+        description=markdown_prose(
             "Advisory optimization or measurement suggestions tied to bottlenecks; "
             "they do not impose a planning prerequisite."
         )

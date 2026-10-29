@@ -86,6 +86,263 @@ def test_package_rejects_embedded_python_token(tmp_path: Path) -> None:
         load_evaluator_package(root)
 
 
+@pytest.mark.parametrize(
+    "entrypoint_command",
+    [
+        '"go", "-C", "${PACKAGE_ROOT}", "run", "."',
+        '"env", "GODEBUG=x", "go", "run", "."',
+        '"env", "-i", "GODEBUG=x", "/usr/local/bin/go", "run", "."',
+        '"command", "-p", "go", "run", "."',
+        '"command", "--", "env", "GODEBUG=x", "go", "run", "."',
+        '"env", "-S", "\\"go\\" run ."',
+        '"sh", "-c", "exec \\"go\\" run ."',
+        '"sh", "-c", "exec go \\"$1\\" .", "vibesys-go", "run"',
+        '"bash", "-c", "GODEBUG=x exec /usr/local/bin/go -C . run ."',
+    ],
+)
+def test_supported_go_run_wrappers_require_a_declared_package_module(
+    tmp_path: Path,
+    entrypoint_command: str,
+) -> None:
+    root = _write_package(
+        tmp_path / "package",
+        entrypoint_command=entrypoint_command,
+    )
+
+    with pytest.raises(EvaluatorPackageError, match="uses go run but declares no go_module"):
+        load_evaluator_package(root)
+
+
+@pytest.mark.parametrize(
+    "entrypoint_command",
+    [
+        '"printf", "%s %s", "go", "run"',
+        '"sh", "-c", "echo go run ."',
+        '"command", "-v", "go", "run"',
+        '"go", "-C", "run", "version"',
+    ],
+)
+def test_unrelated_go_and_run_arguments_do_not_require_a_module(
+    tmp_path: Path,
+    entrypoint_command: str,
+) -> None:
+    root = _write_package(
+        tmp_path / "package",
+        entrypoint_command=entrypoint_command,
+    )
+
+    package = load_evaluator_package(root)
+
+    assert package.metadata.go_module is None
+
+
+def test_env_wrapped_go_run_accepts_a_complete_declared_module(tmp_path: Path) -> None:
+    root = _write_package(
+        tmp_path / "package",
+        extra_metadata='toolchains = ["go"]\ngo_module = "module"\n',
+        entrypoint_command=('"env", "GODEBUG=x", "go", "-C", "${PACKAGE_ROOT}/module", "run", "."'),
+    )
+    module = root / "module"
+    module.mkdir()
+    (module / "go.mod").write_text("module example.com/evaluator\n", encoding="utf-8")
+    (module / "go.sum").write_text("", encoding="utf-8")
+
+    package = load_evaluator_package(root)
+
+    assert package.go_module_root == module
+
+
+@pytest.mark.parametrize("excluded", [".git", "__pycache__", "target"])
+def test_go_module_cannot_hide_below_a_digest_excluded_directory(
+    tmp_path: Path,
+    excluded: str,
+) -> None:
+    root = _write_package(
+        tmp_path / "package",
+        extra_metadata=f'toolchains = ["go"]\ngo_module = "{excluded}/module"\n',
+    )
+    module = root / excluded / "module"
+    module.mkdir(parents=True)
+    (module / "go.mod").write_text("module example.com/evaluator\n", encoding="utf-8")
+    (module / "go.sum").write_text("", encoding="utf-8")
+
+    with pytest.raises(
+        EvaluatorPackageError,
+        match=rf"go_module cannot use digest-excluded path component '{excluded}'",
+    ):
+        load_evaluator_package(root)
+
+
+@pytest.mark.parametrize("target", ["./target/dep", "../outside-dep"])
+def test_local_go_replace_target_must_be_digest_covered_package_content(
+    tmp_path: Path,
+    target: str,
+) -> None:
+    root = _write_package(
+        tmp_path / "package",
+        extra_metadata='toolchains = ["go"]\ngo_module = "."\n',
+    )
+    (root / "go.mod").write_text(
+        "module example.com/evaluator\n\n"
+        "go 1.21\n\n"
+        "require example.com/dep v0.0.0\n"
+        f"replace example.com/dep => {target}\n",
+        encoding="utf-8",
+    )
+    (root / "go.sum").write_text("", encoding="utf-8")
+    target_root = (root / target).resolve()
+    target_root.mkdir(parents=True)
+    (target_root / "go.mod").write_text("module example.com/dep\n", encoding="utf-8")
+
+    with pytest.raises(
+        EvaluatorPackageError,
+        match=r"replace directive.*(digest-excluded|outside the evaluator package)",
+    ):
+        load_evaluator_package(root)
+
+
+def test_local_go_replace_validation_recurses_through_covered_modules(tmp_path: Path) -> None:
+    root = _write_package(
+        tmp_path / "package",
+        extra_metadata='toolchains = ["go"]\ngo_module = "."\n',
+    )
+    (root / "go.mod").write_text(
+        "module example.com/evaluator\n\n"
+        "go 1.21\n\n"
+        "require example.com/dep v0.0.0\n"
+        "replace example.com/dep => ./modules/dep\n",
+        encoding="utf-8",
+    )
+    (root / "go.sum").write_text("", encoding="utf-8")
+    dependency = root / "modules/dep"
+    dependency.mkdir(parents=True)
+    (dependency / "go.mod").write_text(
+        "module example.com/dep\n\n"
+        "go 1.21\n\n"
+        "require example.com/hidden v0.0.0\n"
+        "replace example.com/hidden => ../../target/hidden\n",
+        encoding="utf-8",
+    )
+    hidden = root / "target/hidden"
+    hidden.mkdir(parents=True)
+    (hidden / "go.mod").write_text("module example.com/hidden\n", encoding="utf-8")
+
+    with pytest.raises(
+        EvaluatorPackageError,
+        match=r"go\.mod:.*replace directive.*digest-excluded path component 'target'",
+    ):
+        load_evaluator_package(root)
+
+
+def test_covered_local_go_replace_module_participates_in_package_digest(tmp_path: Path) -> None:
+    root = _write_package(
+        tmp_path / "package",
+        extra_metadata='toolchains = ["go"]\ngo_module = "."\n',
+    )
+    (root / "go.mod").write_text(
+        "module example.com/evaluator\n\n"
+        "go 1.21\n\n"
+        "require example.com/dep v0.0.0\n"
+        "replace (\n"
+        "    example.com/dep => ./modules/dep\n"
+        ")\n",
+        encoding="utf-8",
+    )
+    (root / "go.sum").write_text("", encoding="utf-8")
+    dependency = root / "modules/dep"
+    dependency.mkdir(parents=True)
+    nested_go_mod = dependency / "go.mod"
+    nested_go_mod.write_text("module example.com/dep\n\ngo 1.21\n", encoding="utf-8")
+    original = load_evaluator_package(root).digest
+
+    nested_go_mod.write_text("module example.com/dep\n\ngo 1.22\n", encoding="utf-8")
+
+    assert load_evaluator_package(root).digest != original
+
+
+def test_versioned_remote_go_replace_does_not_require_package_content(tmp_path: Path) -> None:
+    root = _write_package(
+        tmp_path / "package",
+        extra_metadata='toolchains = ["go"]\ngo_module = "."\n',
+    )
+    (root / "go.mod").write_text(
+        "module example.com/evaluator\n\n"
+        "go 1.21\n\n"
+        "replace example.com/dep v1.0.0 => example.com/fork v1.2.0\n",
+        encoding="utf-8",
+    )
+    (root / "go.sum").write_text("", encoding="utf-8")
+
+    package = load_evaluator_package(root)
+
+    assert package.go_module_root == root
+
+
+@pytest.mark.parametrize(
+    "target",
+    ["`./modules/dep`", r'"\u002e\u002e/\u0074arget/dep"'],
+)
+def test_opaque_local_go_replace_names_the_unsupported_directive(
+    tmp_path: Path,
+    target: str,
+) -> None:
+    root = _write_package(
+        tmp_path / "package",
+        extra_metadata='toolchains = ["go"]\ngo_module = "."\n',
+    )
+    (root / "go.mod").write_text(
+        f"module example.com/evaluator\n\nreplace example.com/dep => {target}\n",
+        encoding="utf-8",
+    )
+    (root / "go.sum").write_text("", encoding="utf-8")
+    literal_spellings = {target.strip('`"'), target.strip('`"').replace("\\", "")}
+    for spelling in literal_spellings:
+        literal_target = root / spelling
+        literal_target.mkdir(parents=True)
+        (literal_target / "go.mod").write_text("module example.com/dep\n", encoding="utf-8")
+
+    with pytest.raises(
+        EvaluatorPackageError,
+        match=r"go\.mod:3 has unsupported replace directive.*dep",
+    ):
+        load_evaluator_package(root)
+
+
+@pytest.mark.parametrize(("missing", "error"), [("go.mod", "go.mod"), ("go.sum", "go.sum")])
+def test_declared_go_module_requires_complete_module_files(
+    tmp_path: Path, missing: str, error: str
+) -> None:
+    root = _write_package(
+        tmp_path / "package",
+        extra_metadata='toolchains = ["go"]\ngo_module = "module"\n',
+        entrypoint_command='"go", "-C", "${PACKAGE_ROOT}/module", "run", "."',
+    )
+    module = root / "module"
+    module.mkdir()
+    for name in {"go.mod", "go.sum"} - {missing}:
+        (module / name).write_text("module example.com/evaluator\n", encoding="utf-8")
+
+    with pytest.raises(EvaluatorPackageError, match=rf"required {error} is missing"):
+        load_evaluator_package(root)
+
+
+def test_declared_go_module_is_exposed_relative_to_the_immutable_package(
+    tmp_path: Path,
+) -> None:
+    root = _write_package(
+        tmp_path / "package",
+        extra_metadata='toolchains = ["go"]\ngo_module = "module"\n',
+    )
+    module = root / "module"
+    module.mkdir()
+    (module / "go.mod").write_text("module example.com/evaluator\n", encoding="utf-8")
+    (module / "go.sum").write_text("", encoding="utf-8")
+
+    package = load_evaluator_package(root)
+
+    assert package.go_module_root == module
+
+
 def test_digest_covers_paths_contents_and_executable_mode(tmp_path: Path) -> None:
     root = _write_package(tmp_path / "package")
     original = load_evaluator_package(root).digest
@@ -399,4 +656,25 @@ def test_metadata_rejects_invalid_entrypoints(tmp_path: Path, entrypoints: str, 
     root = _write_raw_entrypoints(tmp_path / "pkg", entrypoints)
 
     with pytest.raises(EvaluatorPackageError, match=error):
+        load_evaluator_package(root)
+
+
+def test_a_package_declares_the_outputs_a_candidate_build_must_produce(tmp_path: Path) -> None:
+    root = _write_package(
+        tmp_path / "package", extra_metadata='candidate_outputs = ["lib/queue.so", "q.so"]'
+    )
+
+    assert load_evaluator_package(root).metadata.candidate_outputs == ("lib/queue.so", "q.so")
+
+
+@pytest.mark.parametrize(
+    "output",
+    ["", "/abs/q.so", "../q.so", "lib/../q.so", "lib//q.so", "./q.so", "lib/", ".git/q.so", "a:b"],
+)
+def test_a_candidate_output_must_be_a_normalized_workspace_file(
+    tmp_path: Path, output: str
+) -> None:
+    root = _write_package(tmp_path / "package", extra_metadata=f'candidate_outputs = ["{output}"]')
+
+    with pytest.raises(EvaluatorPackageError, match="candidate"):
         load_evaluator_package(root)

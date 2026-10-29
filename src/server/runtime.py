@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 from contextlib import ExitStack, suppress
 from functools import partial
 from typing import TYPE_CHECKING, Protocol, TypeVar
@@ -22,13 +23,23 @@ from server.events import (
     ConfigurationFailedData,
     EventStatus,
     EventType,
+    QuotaPausedData,
+    RunEndingData,
     RunInterruptedData,
     RunStartupProgressData,
     RunStatusChangedData,
     ServerReadyData,
+    StartupState,
 )
 from server.execution import ExecutionTracker
-from server.host_api import FailureReason, StartupFact
+from server.host_api import (
+    FailureReason,
+    PauseCause,
+    RunEndingFact,
+    RunEndOutcome,
+    StartupFact,
+)
+from server.idle_watch import IdleWatch
 from server.integration import RunIntegrationAdapter
 from server.journal import WireJournal
 from server.read_model import RunInspector
@@ -62,7 +73,7 @@ from server.transport.discovery import (
 from server.transport.discovery import (
     WebPortState as WebPortState,  # noqa: PLC0414  # lint-waiver: LW-102905 [PLC0414]; re-export port classification through the runtime composition boundary for operator entrypoints
 )
-from server.transport.subscriptions import SubscriptionTracker
+from server.transport.subscriptions import DeliveryWatermark, SubscriptionTracker
 from server.transport.unix_jsonl import UnixJsonlServer
 from server.transport.websocket import (
     WEBSOCKET_CLOSE_TIMEOUT_SECONDS as WEBSOCKET_CLOSE_TIMEOUT_SECONDS,  # noqa: PLC0414  # lint-waiver: LW-107301 [PLC0414]; expose the transport's canonical close bound through the runtime boundary so launchers can outlast it without restating it
@@ -74,7 +85,8 @@ from server.transport.websocket import WebSocketGateway
 from server.transport.websocket import (
     browser_origin as browser_origin,  # noqa: PLC0414  # lint-waiver: LW-101108 [PLC0414]; re-export the browser-origin parser through the allowed runtime composition boundary, so the launcher validates `--web-origin` against the one definition the gateway enforces
 )
-from vibesys.api import ConfigurationError, RunStopped
+from vibesys.api import ConfigurationError, RunReady, RunStopped, StopMode, relaunch
+from vs_sim.api import Signals
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -82,17 +94,24 @@ if TYPE_CHECKING:
 
     from server.events import RunEvent
     from server.host_api import RunStatus
-    from server.settings import InteractiveSetupDefaults
-    from vibesys.api import RunHandle, RunRequest, RunResult, Runs, RunSession
+    from vibesys.api import RunHandle, RunReader, RunRequest, RunResult, Runs, RunSession
+    from vs_project.api import OperatorKey
     from vs_sim.api import Platform
 
 
+_LOG = logging.getLogger(__name__)
 _RunValueT = TypeVar("_RunValueT")
 DETACHED_DRAIN_TIMEOUT_SECONDS = 2.0
 """How long a detached server that is exiting waits for clients to read its last events."""
+READER_IDLE_SECONDS = 60.0
+"""How long a read-only server waits with no client connected before it ends."""
+_SHUTDOWN_POLL_SECONDS = 0.1
+"""How often a detached or read-only server waiting for its shutdown looks at its clients."""
 _TERMINAL_EVENT_TYPES = frozenset(
     {EventType.RUN_FINISHED, EventType.RUN_FAILED, EventType.RUN_INTERRUPTED}
 )
+_TERMINATING = frozenset({Signals.SIGTERM, Signals.SIGHUP})
+"""The signals that end a run now (the launcher terminating it), unlike a Ctrl-C's stop."""
 _FAILURE_EVENT_TYPES = frozenset(
     {EventType.RUN_FAILED, EventType.RUN_INTERRUPTED, EventType.CONFIGURATION_FAILED}
 )
@@ -101,6 +120,17 @@ _FAILURE_EVENT_TYPES = frozenset(
 def _project_scope(project_root: Path) -> str:
     """Return an opaque stable namespace for machine-local client state."""
     return hashlib.sha256(project_root.expanduser().resolve().as_posix().encode()).hexdigest()
+
+
+def _ending_fact(data: RunEndingData) -> RunEndingFact:
+    """The record's view of a run's ending: core's end reason is one of the record's outcomes."""
+    return RunEndingFact(
+        outcome=None if data.reason is None else RunEndOutcome(data.reason.value),
+        summary=data.summary,
+        resumable=data.resumable,
+        rounds_finished=data.rounds_finished,
+        uncompared=data.uncompared,
+    )
 
 
 class _Once:
@@ -136,6 +166,18 @@ class ServerLifecycleObserver(Protocol):
         """The run's status changed, it failed for ``failure``, or its startup progressed."""
         ...
 
+    def pausing_for(self, cause: PauseCause) -> None:
+        """The run is pausing, or paused, for ``cause`` rather than an operator's pause."""
+        ...
+
+    def ending(self, fact: RunEndingFact) -> None:
+        """How the run's durable record stood as the run ended."""
+        ...
+
+    def terminated(self) -> None:
+        """The server was terminated (a force stop) before its run reached a safe point."""
+        ...
+
 
 def failure_reason(event: RunEvent) -> FailureReason | None:
     """Why the run failed, if ``event`` is the failure that ended it."""
@@ -164,10 +206,10 @@ class ServerRuntime:
         self,
         *,
         socket_path: Path,
+        control_key: OperatorKey,
         runs: Runs,
         run_id: str | None = None,
         project_root: Path | None = None,
-        tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
         web: bool = False,
         web_port: int = 0,
         web_assets: Path | None = None,
@@ -176,6 +218,8 @@ class ServerRuntime:
         instance_path: Path | None = None,
         detach: bool = False,
         read_only_log: Path | None = None,
+        open_reader: Callable[[], RunReader] | None = None,
+        reader_idle_seconds: float | None = None,
         observer: ServerLifecycleObserver | None = None,
         platform: Platform,
     ) -> None:
@@ -187,9 +231,19 @@ class ServerRuntime:
         thread the server creates; its network binds the Unix control socket and its
         blocking runner runs the web gateway's synchronous requests.
 
+        ``control_key`` is the operator key a client of the control socket must present
+        before anything is served.
+
         ``run_id`` names the run every journaled event belongs to, from the
         first; only a read-only reopen (``read_only_log``) takes it from the
         recorded events instead.
+
+        A read-only server opens the finished run for conversation through ``open_reader`` when
+        it is given one; without it, chat on the run answers from its recorded events only.
+
+        A read-only server without the web gateway ends once no client has held a
+        connection for ``reader_idle_seconds`` (one nobody connects to ends that long
+        after it listened); without it, it serves until ``shutdown``.
         """
         clock = platform.clock
         self.platform = platform
@@ -197,6 +251,7 @@ class ServerRuntime:
         self.network = platform.network
         self.runs = runs
         self.socket_path = socket_path
+        self._control_key = control_key
         self.web = web
         self.web_port = web_port
         self.web_assets = web_assets
@@ -205,8 +260,11 @@ class ServerRuntime:
         self.instance_path = instance_path
         self.detach = detach
         self.read_only_log = read_only_log
+        self._open_reader = open_reader
+        self._reader_idle_seconds = reader_idle_seconds
         self.observer = observer
         self._shutdown = self.threads.event()
+        self._shutdown_signal: Signals | None = None
         # Set once the Unix socket accepts connections: how a same-process
         # client learns it can dial without polling the filesystem.
         self.transport_listening = self.threads.event()
@@ -256,7 +314,6 @@ class ServerRuntime:
             controls=self.controls,
             clock=clock,
             project_scope=_project_scope(project_root) if project_root is not None else None,
-            tui_defaults=tui_defaults,
             threads=self.threads,
         )
         self.chat.enable_terminal_retention()
@@ -272,14 +329,22 @@ class ServerRuntime:
 
         async def execute() -> RunResult:
             handle = (
-                self.runs.resume(request)
+                relaunch(request, self.runs)
                 if request.resume is not None
                 else self.runs.start(request)
             )
             session = handle.session
             session.on_committed_view(self.api.observe_committed_state)
 
-            session.on_ready(partial(self.integration.handle_run_ready, session))
+            def publish_opened_root(ready: RunReady) -> None:
+                if self.observer is not None:
+                    self.observer.resolved(
+                        project_root=ready.project_root,
+                        task=request.input_bundle.task_name,
+                    )
+                self.integration.handle_run_ready(session, ready)
+
+            session.on_ready(publish_opened_root)
             with self.condition:
                 self.handle = handle
                 self.session = session
@@ -309,6 +374,8 @@ class ServerRuntime:
     def run(self, run: Callable[[], _RunValueT]) -> _RunValueT | None:
         """Serve requests while executing ``run`` in the calling thread."""
         self._attach_journal()
+        if self._open_reader is not None:
+            self._attach_chat_reader(self._open_reader)
         if self.read_only_log is None:
             self.journal.record(
                 EventType.SERVER_READY,
@@ -326,6 +393,7 @@ class ServerRuntime:
                         threads=self.threads,
                         network=self.network,
                         subscriptions=subscriptions,
+                        key=self._control_key,
                     )
                 )
                 # Registered after the transport, so it runs before the
@@ -387,6 +455,15 @@ class ServerRuntime:
                             source="experiment-chat",
                         )
 
+    def _attach_chat_reader(self, open_reader: Callable[[], RunReader]) -> None:
+        """Give the finished run's chat an agent; a run that cannot be opened keeps its summary answers."""
+        try:
+            reader = open_reader()
+        except Exception:  # noqa: BLE001  # lint-waiver: LW-101299 [BLE001]; a finished run that cannot be opened for conversation is still served for reading, so the failure is logged, not raised
+            _LOG.warning("chat cannot read the finished run", exc_info=True)
+            return
+        self.integration.attach_reader(reader)
+
     @property
     def _detachable_mode(self) -> bool:
         """Whether the server lifetime is independent of its subscribers."""
@@ -403,20 +480,58 @@ class ServerRuntime:
         shared tracker closes subscription admission atomically with this
         wait, so a reconnect cannot arrive outside the drained set.
         """
-        transport.wait_until_delivered(self.api.latest_sequence, DETACHED_DRAIN_TIMEOUT_SECONDS)
+        with self.condition:
+            watermark = DeliveryWatermark(
+                store_id=self.journal.store_id_locked(),
+                sequence=self.journal.latest_sequence_locked(),
+            )
+        transport.wait_until_delivered(watermark, DETACHED_DRAIN_TIMEOUT_SECONDS)
 
-    def shutdown(self) -> None:
-        """Request a clean shutdown of a detached or read-only server."""
+    def interrupt(self) -> bool:
+        """Stop the run on Ctrl-C, cancelling its work in flight; False when no run is installed.
+
+        The stop goes through the run's control, the one authority for its stop, as an
+        operator's cancelling stop does; a repeated Ctrl-C changes nothing. The server
+        then leaves once the run has stopped, without waiting for its clients to go.
+        """
+        if not self.controls.stop(StopMode.CANCEL):
+            return False
+        self.shutdown(Signals.SIGINT)
+        return True
+
+    def shutdown(self, signal: Signals | None = None) -> None:
+        """Request a clean shutdown of a detached or read-only server.
+
+        *signal* names the signal that asked for it. The first one that ends the run
+        (SIGTERM or SIGHUP, ``_TERMINATING``) names how a run it interrupts ended; a Ctrl-C
+        (SIGINT), which only asked the run to stop, names it when nothing stronger came.
+        """
+        with self.condition:
+            held = self._shutdown_signal
+            if held is None or (held not in _TERMINATING and signal in _TERMINATING):
+                self._shutdown_signal = signal
         self._shutdown.set()
 
     def _wait_for_detached_shutdown(self, transport: UnixJsonlServer) -> None:
+        if self._shutdown.is_set():
+            return
         if not self._detachable_mode:
             transport.wait_for_subscriber_disconnect()
             return
         if not self.web and self.read_only_log is None:
             return
-        while not self._shutdown.wait(timeout=0.1):
-            pass
+        idle = (
+            None
+            if self._reader_idle_seconds is None
+            else IdleWatch.begin(self._reader_idle_seconds, self.threads.now())
+        )
+        while not self._shutdown.wait(timeout=_SHUTDOWN_POLL_SECONDS):
+            if idle is None:
+                continue
+            now = self.threads.now()
+            idle = idle.observe(transport.client_count(), now)
+            if idle.expired(now):
+                return
 
     @staticmethod
     def _wait_for_subscriber(transport: UnixJsonlServer) -> None:
@@ -467,19 +582,20 @@ class ServerRuntime:
                 record_event=False,
                 diagnostic=event_diagnostic,
             )
-            self.journal.record(
-                EventType.CONFIGURATION_FAILED,
-                event_diagnostic.summary,
-                status=EventStatus.FAILED,
-                data=ConfigurationFailedData(
-                    code=configuration_diagnostic.code,
-                    stage=configuration_diagnostic.stage,
-                    message=event_diagnostic.summary,
-                    usage=event_diagnostic.hint,
-                    exit_code=configuration_diagnostic.exit_code,
-                ),
-                diagnostic=event_diagnostic,
-            )
+            if not self._terminal_recorded_after(terminal_cursor):
+                self.journal.record(
+                    EventType.CONFIGURATION_FAILED,
+                    event_diagnostic.summary,
+                    status=EventStatus.FAILED,
+                    data=ConfigurationFailedData(
+                        code=configuration_diagnostic.code,
+                        stage=configuration_diagnostic.stage,
+                        message=event_diagnostic.summary,
+                        usage=event_diagnostic.hint,
+                        exit_code=configuration_diagnostic.exit_code,
+                    ),
+                    diagnostic=event_diagnostic,
+                )
             raise
         except BaseException as exc:
             self.controller.finish(
@@ -492,8 +608,15 @@ class ServerRuntime:
         return value
 
     def _finish_after_launcher_interrupt(self, terminal_cursor: int) -> None:
-        """End a run the launcher terminated, recording the interruption once."""
-        launcher_error = RuntimeError("launcher_terminated (SIGTERM)")
+        """End a run a signal interrupted, recording the interruption once.
+
+        SIGTERM and SIGHUP are the launcher terminating the run; any other cause (a Ctrl-C
+        with no run installed to stop) is an interruption, named by its signal if any.
+        """
+        with self.condition:
+            signal = self._shutdown_signal
+        reason = "launcher_terminated" if signal in _TERMINATING else "interrupted"
+        launcher_error = RuntimeError(reason if signal is None else f"{reason} ({signal.name})")
         event_diagnostic = exception_to_diagnostic(
             launcher_error,
             scope=DiagnosticScope.RUN,
@@ -517,8 +640,8 @@ class ServerRuntime:
                 EventType.RUN_INTERRUPTED,
                 status=EventStatus.FAILED,
                 data=RunInterruptedData(
-                    reason="launcher_terminated",
-                    signal="SIGTERM",
+                    reason=reason,
+                    signal=None if signal is None else signal.name,
                 ),
                 diagnostic=event_diagnostic,
             )
@@ -530,10 +653,21 @@ class ServerRuntime:
 
 def _report_phase_facts(observer: ServerLifecycleObserver, event: RunEvent) -> None:
     """Tell ``observer`` the lifecycle facts in one journaled event."""
-    if isinstance(event.data, RunStatusChangedData):
-        observer.observe(status=event.data.status)
-    elif isinstance(event.data, RunStartupProgressData):
-        observer.observe(startup=StartupFact(stage=event.data.stage, progress=event.data.progress))
+    data = event.data
+    if isinstance(data, RunStatusChangedData):
+        observer.observe(status=data.status)
+    elif isinstance(data, RunStartupProgressData):
+        # Only a stage's start and its steps move the run through its stages; a wait or a
+        # finish says nothing new about where the run is.
+        if data.state is StartupState.RUNNING:
+            observer.observe(startup=StartupFact(stage=data.stage, progress=data.progress))
+    elif isinstance(data, QuotaPausedData) and data.condition != "unavailable":
+        # An outage holds only its own turn; the run is not pausing for it.
+        observer.pausing_for(PauseCause.QUOTA)
+    elif isinstance(data, RunEndingData):
+        observer.ending(_ending_fact(data))
+    elif isinstance(data, RunInterruptedData):
+        observer.terminated()
     failure = failure_reason(event)
     if failure is not None:
         observer.observe(failure=failure)

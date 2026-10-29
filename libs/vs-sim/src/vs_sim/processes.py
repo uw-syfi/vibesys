@@ -17,10 +17,14 @@ from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
+from vs_sim.output import Capture, OutputStream, tee
+
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Mapping, MutableMapping, Sequence
     from pathlib import Path
     from typing import IO
+
+    from vs_sim.output import OutputSink
 
 
 # Preserve the established stdlib exception type while keeping the concrete
@@ -116,13 +120,6 @@ class ProcessGroupUnreaped:
     """What failed, in words, for a log line or error message."""
 
 
-class OutputStream(StrEnum):
-    """One of a command's two captured output streams."""
-
-    STDOUT = "stdout"
-    STDERR = "stderr"
-
-
 @dataclass(frozen=True)
 class ProcessOutputTooLarge:
     """The command wrote more than ``limit`` bytes to ``stream``; its whole group was then killed.
@@ -143,6 +140,18 @@ type ProcessRun = ProcessOutcome | ProcessTimedOut | ProcessGroupUnreaped | Proc
 """How a run ended: exited, timed out (cleaned up or left behind), or stopped for too much output."""
 
 
+def forward_output(run: ProcessRun, output: OutputSink) -> ProcessRun:
+    """Write what ``run`` kept of each stream to ``output``, and return ``run``.
+
+    For a :class:`Processes` whose command's output arrives all at once (a broker's reply, a
+    scripted answer) rather than chunk by chunk.
+    """
+    if not isinstance(run, ProcessGroupUnreaped):
+        output.write(OutputStream.STDOUT, run.stdout)
+        output.write(OutputStream.STDERR, run.stderr)
+    return run
+
+
 class Processes(Protocol):
     """Runs a command to completion: the blocking counterpart of :class:`ProcessLauncher`.
 
@@ -152,9 +161,12 @@ class Processes(Protocol):
     its whole group killed; the result says whether that ended everything
     (:class:`ProcessTimedOut`) or not (:class:`ProcessGroupUnreaped`). A command that writes
     past the cap has its whole group killed too (:class:`ProcessOutputTooLarge`).
+
+    Every chunk the command writes is also written to ``output`` as it is read, past the
+    cap too, before ``run`` returns; the result is the same whatever ``output`` is.
     """
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
         """Run ``spec`` until it exits or ``timeout`` seconds pass (``None``: no limit)."""
         ...
 
@@ -166,8 +178,8 @@ class OsProcesses:
         """Wait at most ``cleanup_timeout`` seconds for a killed group to release its output."""
         self._cleanup_timeout = cleanup_timeout
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
-        """Start ``spec`` as a group leader, feed its input and collect its output."""
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        """Start ``spec`` as a group leader, feed its input, and collect and forward its output."""
         if os.name != "posix":
             message = "owned process groups require a POSIX host"
             raise OSError(message)
@@ -183,20 +195,20 @@ class OsProcesses:
             process_group=0,
         )
         group = _OwnedProcessGroup(process)
-        captured = _Captured(spec.max_output_bytes)
+        captured = Capture(spec.max_output_bytes)
+        pipes = _Pipes(spec.input, captured, tee(captured, output))
         deadline = None if timeout is None else time.monotonic() + timeout
         try:
-            end = _pump(process, spec.input, deadline, captured, stop_at_limit=True)
+            end = _pump(process, deadline, pipes, feed=True)
         except BaseException as failure:
-            if isinstance(detail := self._kill(process, group, captured), str):
+            if isinstance(detail := self._kill(process, group, pipes), str):
                 failure.add_note(detail)
             raise
         if end is _PumpEnd.DONE:
             _close_pipes(process)
-            stdout, stderr = captured.streams()
-            return ProcessOutcome(group.reap(timeout=None), stdout, stderr)
-        cleanup = self._kill(process, group, captured)
-        stdout, stderr = captured.streams()
+            return ProcessOutcome(group.reap(timeout=None), captured.stdout, captured.stderr)
+        cleanup = self._kill(process, group, pipes)
+        stdout, stderr = captured.stdout, captured.stderr
         if end is _PumpEnd.TIMEOUT:
             if cleanup:
                 return ProcessGroupUnreaped(timeout or 0.0, process.pid, cleanup)
@@ -205,7 +217,7 @@ class OsProcesses:
         return ProcessOutputTooLarge(spec.max_output_bytes, stream, stdout, stderr, cleanup)
 
     def _kill(
-        self, process: subprocess.Popen[bytes], group: _OwnedProcessGroup, captured: _Captured
+        self, process: subprocess.Popen[bytes], group: _OwnedProcessGroup, pipes: _Pipes
     ) -> str:
         """Kill the group and drain its output within the cleanup bound; say what failed, if anything.
 
@@ -218,7 +230,7 @@ class OsProcesses:
         except OSError as error:
             problems.append(f"killing process group {process.pid} failed: {error}")
         deadline = time.monotonic() + self._cleanup_timeout
-        if _pump(process, b"", deadline, captured, stop_at_limit=False) is _PumpEnd.DONE:
+        if _pump(process, deadline, pipes, feed=False) is _PumpEnd.DONE:
             _close_pipes(process)
             try:
                 group.reap(timeout=self._cleanup_timeout)
@@ -244,58 +256,51 @@ class _PumpEnd(StrEnum):
     STDERR_FULL = "stderr_full"
 
 
-class _Captured:
-    """Both output streams of one run, each kept up to the run's cap."""
+class _Pipes:
+    """One run's input still to write and where its output goes: kept under the cap, and on."""
 
-    def __init__(self, limit: int) -> None:
-        self.limit = limit
-        self.stdout = bytearray()
-        self.stderr = bytearray()
+    def __init__(self, data: bytes, captured: Capture, output: OutputSink) -> None:
+        self.data = data
+        self.captured = captured
+        self.output = output
         self._input_offset = 0
 
-    def streams(self) -> tuple[bytes, bytes]:
-        return bytes(self.stdout), bytes(self.stderr)
-
-    def keep(self, stream: OutputStream, chunk: bytes) -> bool:
-        """Keep what fits under the cap; ``False`` once the stream went past it."""
-        buffer = self.stdout if stream is OutputStream.STDOUT else self.stderr
-        room = self.limit - len(buffer)
-        buffer += chunk[: max(room, 0)]
-        return len(chunk) <= room
-
-    def write_input(self, fd: int, data: bytes) -> bool:
+    def write_input(self, fd: int) -> bool:
         """Write the next input chunk; ``True`` once all of it was written or the reader left."""
         try:
             self._input_offset += os.write(
-                fd, data[self._input_offset : self._input_offset + _PIPE_CHUNK_BYTES]
+                fd, self.data[self._input_offset : self._input_offset + _PIPE_CHUNK_BYTES]
             )
         except BrokenPipeError:
             return True
-        return self._input_offset >= len(data)
+        return self._input_offset >= len(self.data)
+
+    def pending_input(self) -> bytes:
+        """The input not yet written."""
+        return self.data[self._input_offset :]
 
 
 def _pump(
     process: subprocess.Popen[bytes],
-    data: bytes,
     deadline: float | None,
-    captured: _Captured,
+    pipes: _Pipes,
     *,
-    stop_at_limit: bool,
+    feed: bool,
 ) -> _PumpEnd:
-    """Feed *data* to stdin and read both outputs until they close, the deadline, or the cap.
+    """Read both outputs until they close, the deadline, or the cap; feed stdin when *feed*.
 
-    With *stop_at_limit*, the first stream past the cap ends the pump; without it (a drain
-    after a kill) output past the cap is read and dropped.
+    Every chunk read goes to the pipes' output. While feeding, the first stream past the
+    cap ends the pump; a drain after a kill (no *feed*) closes stdin and reads on past it.
     """
     with selectors.DefaultSelector() as selector:
-        open_outputs = _register(selector, process, data)
+        open_outputs = _register(selector, process, pipes.pending_input() if feed else b"")
         while open_outputs:
             remaining = None if deadline is None else deadline - time.monotonic()
             if remaining is not None and remaining <= 0:
                 return _PumpEnd.TIMEOUT
             for key, _events in selector.select(remaining):
                 if key.data is None:
-                    if captured.write_input(key.fd, data):
+                    if pipes.write_input(key.fd):
                         selector.unregister(key.fd)
                         _close_quietly(process.stdin)
                     continue
@@ -303,8 +308,10 @@ def _pump(
                 if not chunk:
                     selector.unregister(key.fd)
                     open_outputs -= 1
-                elif not captured.keep(key.data, chunk) and stop_at_limit:
-                    return _FULL[key.data]
+                else:
+                    pipes.output.write(key.data, chunk)
+                    if feed and pipes.captured.omitted(key.data):
+                        return _FULL[key.data]
     return _PumpEnd.DONE
 
 
@@ -907,12 +914,27 @@ class ForegroundLauncher(Protocol):
         ...
 
 
+LAUNCHER_LIFELINE_ENV = "VIBESYS_LAUNCHER_LIFELINE"
+"""Names the descriptor of a child's launcher lifeline, set by ``InheritedStdioLauncher``.
+
+The child holds the read end of a pipe whose only write end its launcher holds, so the
+read reaches end-of-file exactly when the launcher has exited, however it ended
+(``follow_launcher``)."""
+
+
 class _InheritedHandle:
-    def __init__(self, process: asyncio.subprocess.Process) -> None:
+    def __init__(self, process: asyncio.subprocess.Process, lifeline: int) -> None:
         self._process = process
+        self._lifeline: int | None = lifeline
 
     async def wait(self) -> int:
-        return await self._process.wait()
+        try:
+            return await self._process.wait()
+        finally:
+            # The child has ended; the lifeline has nobody left to tell.
+            if self._lifeline is not None:
+                os.close(self._lifeline)
+                self._lifeline = None
 
     def send_signal(self, number: signal.Signals) -> None:
         if self._process.returncode is None:
@@ -920,7 +942,22 @@ class _InheritedHandle:
 
 
 class InheritedStdioLauncher:
-    """Starts real operating-system processes that use this process's terminal."""
+    """Starts real operating-system processes that use this process's terminal.
+
+    Each child leads a session of its own, with no controlling terminal, so the
+    terminal's job-control signals (interrupt, quit, suspend) reach only this process:
+    the parent decides what reaches the child, and a child never gets one keypress twice,
+    once from the terminal and once forwarded. The child still writes to the terminal
+    through the descriptors it inherits, and job control never stops it for that (under
+    ``stty tostop``) nor for setting the terminal's modes; the terminal is not its
+    controlling terminal. Nor can it or any process it starts open ``/dev/tty``: a program
+    that would prompt there (``ssh`` asking for a password or a host key) fails at once
+    instead of turning the terminal's echo off under the operator, or stopping the run.
+
+    Outside the terminal's session, the child no longer hears the terminal hang up. So
+    each child gets a lifeline (``LAUNCHER_LIFELINE_ENV``): a child that calls
+    ``follow_launcher`` hangs up when this process exits, by any means.
+    """
 
     async def start(
         self,
@@ -929,10 +966,73 @@ class InheritedStdioLauncher:
         cwd: Path | None = None,
     ) -> ForegroundChild:
         """Start ``argv`` on the running event loop with inherited standard streams."""
-        process = await asyncio.create_subprocess_exec(
-            *argv, env=None if env is None else dict(env), cwd=cwd
-        )
-        return _InheritedHandle(process)
+        given, held = os.pipe()
+        environment = {**(os.environ if env is None else env), LAUNCHER_LIFELINE_ENV: str(given)}
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *argv, env=environment, cwd=cwd, start_new_session=True, pass_fds=(given,)
+            )
+        except BaseException:
+            os.close(held)
+            raise
+        finally:
+            os.close(given)
+        return _InheritedHandle(process, held)
+
+
+class LauncherLifelineError(ValueError):
+    """``LAUNCHER_LIFELINE_ENV`` does not name a file descriptor."""
+
+    def __init__(self, value: str) -> None:
+        """Name the variable and the value it held."""
+        super().__init__(f"{LAUNCHER_LIFELINE_ENV} must be a file descriptor number, not {value!r}")
+
+
+def follow_launcher(environ: MutableMapping[str, str]) -> None:
+    """Act on this process's launcher lifeline, if ``InheritedStdioLauncher`` gave it one.
+
+    Call once, early, on the main thread of a launched child; ``environ`` is the process
+    environment. Without a lifeline this does nothing. With one, it takes the lifeline out
+    of ``environ`` and closes it on every ``exec`` (so no process the child starts reads it
+    as its own, or holds it open), and hangs up when the launcher exits: once the lifeline
+    reaches end-of-file, or cannot be read at all, this process sends itself SIGHUP, the
+    signal a closed terminal sent before the child led its own session, so the child's own
+    SIGHUP handling (a stop that cancels the run's work) runs even after a SIGKILL, OOM
+    kill or crash of the launcher. A pipe works on every Unix; Linux's
+    ``PR_SET_PDEATHSIG`` would not, and it fires when the parent *thread* exits, not the
+    process.
+
+    Raises ``LauncherLifelineError`` when ``LAUNCHER_LIFELINE_ENV`` does not hold a
+    descriptor number.
+    """
+    value = environ.pop(LAUNCHER_LIFELINE_ENV, None)
+    if value is None:
+        return
+    if not value.isdigit():
+        raise LauncherLifelineError(value)
+    lifeline = int(value)
+    inheritable = False  # os.set_inheritable takes its flag by position only
+    with suppress(OSError):
+        # A descriptor that is not open is not read either: the watcher hangs up at once.
+        os.set_inheritable(lifeline, inheritable)
+    threading.Thread(
+        target=_hang_up_at_end, args=(lifeline,), name="launcher-lifeline", daemon=True
+    ).start()
+
+
+def _hang_up_at_end(lifeline: int) -> None:
+    """Block until the launcher exits, then hang this process up.
+
+    A lifeline that cannot be read (or closed) hangs up too: the launcher can no longer
+    be heard, and a run nobody can stop must not go on.
+    """
+    with suppress(OSError):
+        # The launcher never writes; the read returns only at end-of-file.
+        while os.read(lifeline, 1):
+            pass
+    with suppress(OSError):
+        os.close(lifeline)
+    os.kill(os.getpid(), signal.SIGHUP)
 
 
 async def run_foreground(

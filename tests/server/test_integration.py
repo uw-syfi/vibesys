@@ -18,6 +18,7 @@ from tests.server.support import (
 )
 
 from server.api.protocol import ChatQuery, ChatThreadCreateQuery
+from server.chat.manager import ChatAnswer, TerminalChatResource
 from server.diagnostics import DiagnosticScope, DiagnosticSeverity
 from server.events import (
     EventStatus,
@@ -25,7 +26,7 @@ from server.events import (
     RunStartedData,
     RunStatusChangedData,
 )
-from server.host_api import RunStatus
+from server.host_api import HarnessChoice, RunStatus
 from server.integration import (
     _CORE_FAILURE_CONTEXTS,
     _EVENT_DATA_ADAPTER,
@@ -43,6 +44,9 @@ from vibesys.events import (
     FrameworkWarningData,
     GateFinishedData,
     GateKind,
+    InputMeasurementFailedData,
+    InputMeasurementFailureKind,
+    IntentStateData,
     InvocationFinishedData,
     PhaseData,
     QuotaPausedData,
@@ -55,6 +59,8 @@ from vibesys.events import (
 from vibesys.events import RunStartedData as CoreRunStartedData
 from vs_project.api import Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
+from vs_runtime.api.infrastructure import AgentReply
+from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -160,6 +166,7 @@ def _attach_test_run(
         cast("RunSession", _FakeRunSession(auxiliary)),
         RunReady(
             record=run_record(project, run_id),
+            project_root=project.root,
             log_directory=log_dir,
             frontend_state_directory=project.state.local_namespace(
                 run_id, "server"
@@ -226,6 +233,41 @@ def test_a_rate_limit_report_reaches_the_wire_journal_under_the_active_execution
     assert update.data.exhausted is True
 
 
+@pytest.mark.parametrize(
+    ("event_type", "note", "line"),
+    [
+        (CoreEventType.STEER_CONSUMED, "", "/steer"),
+        (
+            CoreEventType.STEER_CONSUMED,
+            "interrupt steer 1 reached the next turn: no running turn kept it",
+            "/steer: interrupt steer 1 reached the next turn: no running turn kept it",
+        ),
+        (CoreEventType.STEER_DELIVERED_MID_TURN, "", "/steer --interrupt"),
+    ],
+)
+def test_where_a_steer_reached_a_turn_reaches_the_wire_journal_with_its_reason(
+    tmp_path: Path, event_type: CoreEventType, note: str, line: str
+) -> None:
+    """The operator reads in the journal why an interrupt-mode steer reached the next turn."""
+    parts = build_server_parts(tmp_path)
+    execution_id = _emit_execution_started(
+        parts, "round-1", _execution_started_data("implementer", "work")
+    )
+
+    parts.core_events.emit(
+        event_type,
+        note,
+        agent_kind="implementer",
+        round_label="round-1",
+        execution_id=execution_id,
+    )
+
+    [control] = [e for e in parts.journal.read() if e.type is EventType.CONTROL]
+    assert control.text == line
+    assert control.status is EventStatus.CONSUMED
+    assert control.execution_id == execution_id
+
+
 def test_a_quota_pause_reaches_the_wire_journal_under_the_active_execution(
     tmp_path: Path,
 ) -> None:
@@ -241,6 +283,19 @@ def test_a_quota_pause_reaches_the_wire_journal_under_the_active_execution(
     assert paused.agent_kind == "implementer"
     assert paused.data is not None
     assert paused.data.kind == "quota_paused"
+
+
+def test_native_intent_outcomes_do_not_enter_the_legacy_wire_journal(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path)
+    before = parts.journal.read()
+    parts.core_events.emit(
+        CoreEventType.INTENT_STATE,
+        data=IntentStateData(
+            state_json='{"controlId":"pause-a","action":"INTENT_ACTION_PAUSE","step":"INTENT_STEP_APPLIED"}'
+        ),
+    )
+    assert parts.journal.read() == before
+    parts.integration.close()
 
 
 def test_framework_events_bypass_execution_stamping_and_lift_warnings(tmp_path: Path) -> None:
@@ -284,6 +339,41 @@ def test_framework_events_bypass_execution_stamping_and_lift_warnings(tmp_path: 
     assert warning.diagnostic.summary == "profiler failed"
     assert warning.diagnostic.detail == "boom"
     assert warning.diagnostic.source == "loop"
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(("attempts", "compared"), [(1, False), (2, True)])
+def test_a_failed_input_measurement_projects_with_a_run_diagnostic(
+    tmp_path: Path, attempts: int, *, compared: bool
+) -> None:
+    """S173: the operator's clients see the input's failure as a run-scoped error diagnostic."""
+    parts = build_server_parts(tmp_path)
+
+    parts.core_events.emit(
+        CoreEventType.INPUT_MEASUREMENT_FAILED,
+        status=CoreEventStatus.FAILED,
+        data=InputMeasurementFailedData(
+            failure=InputMeasurementFailureKind.ACCURACY_FAILED,
+            stage="correctness",
+            summary="accuracy stage exceeded its 1200 s limit",
+            attempts=attempts,
+            compared=compared,
+        ),
+    )
+
+    failed = next(e for e in parts.journal.read() if e.type is EventType.INPUT_MEASUREMENT_FAILED)
+    diagnostic = failed.diagnostic
+    assert diagnostic is not None
+    assert diagnostic.code == "input_measurement_failed"
+    assert diagnostic.scope is DiagnosticScope.RUN
+    assert diagnostic.severity is DiagnosticSeverity.ERROR
+    assert diagnostic.source == "loop"
+    assert diagnostic.summary.startswith(
+        "The input's trusted measurement failed (accuracy-failed, stage correctness"
+    )
+    assert ("measured twice" in diagnostic.summary) is (attempts == 2)
+    assert ("without an input comparison" in diagnostic.summary) is not compared
+    assert diagnostic.detail == "accuracy stage exceeded its 1200 s limit"
 
 
 def test_failed_core_events_project_with_synthesized_diagnostics(tmp_path: Path) -> None:
@@ -523,7 +613,8 @@ def test_chat_thread_rejects_an_unsupported_provider(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="is not supported"):
         parts.api.execute(
             ChatThreadCreateQuery(
-                timestamp=REQUEST_TIME, provider="not-a-provider", model="gpt-test"
+                timestamp=REQUEST_TIME,
+                harness=HarnessChoice(provider="not-a-provider", model="gpt-test"),
             )
         )
     parts.integration.close()
@@ -560,8 +651,7 @@ def test_chat_thread_uses_snapshotted_provider_support_and_free_text_model(
     response = parts.api.execute(
         ChatThreadCreateQuery(
             timestamp=REQUEST_TIME,
-            provider="claude",
-            model="future-free-text-model",
+            harness=HarnessChoice(provider="claude", model="future-free-text-model"),
         )
     )
 
@@ -797,6 +887,91 @@ def test_close_is_idempotent(tmp_path: Path) -> None:
     parts.integration.close()
 
 
+def test_partially_started_chat_cleanup_survives_a_diagnostic_write_failure(
+    tmp_path: Path,
+) -> None:
+    """A failed startup report cannot orphan the factory's acquired resources."""
+    project, run_id = _project_run(tmp_path / "project")
+    log_dir = project.state.log_directory(run_id)
+    chat_state_dir = project.state.local_namespace(run_id, "server").external_directory("chat")
+    agent_close_calls = 0
+    terminal_close_calls = 0
+    close_order: list[str] = []
+
+    class FlakyClosingAgent:
+        def turn(self, message: str, *, invocation_id: str | None = None) -> str:
+            del message, invocation_id
+            return "answer"
+
+        def close(self) -> None:
+            nonlocal agent_close_calls
+            agent_close_calls += 1
+            close_order.append("factory")
+            if agent_close_calls == 1:
+                message = "factory cleanup was killed"
+                raise RuntimeError(message)
+
+    class TrackingAuxiliaryAgents(_FakeAuxiliaryAgents):
+        def close(self) -> None:
+            close_order.append("auxiliary")
+            super().close()
+
+    def build_agent(_request: ChatAgentBuildRequest) -> FlakyClosingAgent:
+        events_path = log_dir / "run-events.jsonl"
+        events_path.unlink()
+        events_path.mkdir()
+        return FlakyClosingAgent()
+
+    def close_terminal() -> None:
+        nonlocal terminal_close_calls
+        terminal_close_calls += 1
+        close_order.append("terminal")
+
+    parts = build_server_parts(
+        chat_agent_builder=build_agent,
+        threads=SimThreads(),
+    )
+    parts.chat.enable_terminal_retention()
+    parts.chat.retain_terminal_resource(
+        TerminalChatResource(
+            handler=lambda _message: ChatAnswer(text="retained", invocation_id="retained"),
+            close=close_terminal,
+        )
+    )
+    auxiliary = TrackingAuxiliaryAgents()
+    ready = RunReady(
+        record=run_record(project, run_id),
+        project_root=project.root,
+        log_directory=log_dir,
+        frontend_state_directory=project.state.local_namespace(
+            run_id, "server"
+        ).external_directory(),
+        agent_provider="codex",
+        agent_model="gpt-test",
+        agent_providers=auxiliary_agent_providers(),
+    )
+
+    with pytest.raises(IsADirectoryError):
+        parts.integration.handle_run_ready(cast("RunSession", _FakeRunSession(auxiliary)), ready)
+
+    assert chat_state_dir.is_dir()
+    with pytest.raises(RuntimeError, match="factory cleanup was killed"):
+        parts.integration.close()
+    assert auxiliary.closed
+    assert auxiliary.close_calls == 1
+    assert terminal_close_calls == 1
+    assert agent_close_calls == 1
+    assert close_order == ["factory", "terminal", "auxiliary"]
+
+    parts.integration.close()
+    parts.integration.close()
+
+    assert agent_close_calls == 2
+    assert close_order == ["factory", "terminal", "auxiliary", "factory"]
+    with pytest.raises(RuntimeError, match="threads are not available"):
+        parts.chat.create_thread()
+
+
 @pytest.mark.parametrize("failures", [1, 2])
 def test_a_scope_whose_close_failed_is_closed_again_on_the_next_close(
     tmp_path: Path, failures: int
@@ -868,3 +1043,40 @@ def test_a_run_is_starting_until_its_session_reports_it_ready(tmp_path: Path) ->
     ]
     assert statuses == [(RunStatus.STARTING, RunStatus.RUNNING)]
     parts.integration.close()
+
+
+def test_a_turns_typed_reply_is_data_on_the_executions_finish_event(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path)
+    execution_id = _emit_execution_started(
+        parts, "round-1", _execution_started_data("judge", "review")
+    )
+    reply = AgentReply(
+        kind="JudgeResponse",
+        json_schema={"type": "object", "properties": {"verdict": {"enum": ["pass", "fail"]}}},
+        value={"analysis": "checked", "feedback": "", "verdict": "pass", "skills_used": []},
+    )
+
+    parts.core_events.emit(
+        CoreEventType.AGENT_EXECUTION_FINISHED,
+        status=CoreEventStatus.COMPLETED,
+        agent_kind="judge",
+        round_label="round-1",
+        execution_id=execution_id,
+        data=AgentExecutionFinishedData(result="{}", reply=reply),
+    )
+
+    finished = [
+        event.data
+        for event in parts.journal.read()
+        if event.type is EventType.AGENT_EXECUTION_FINISHED
+    ]
+    assert [getattr(data, "reply", None) for data in finished] == [reply]
+
+
+def test_pause_drain_events_use_legacy_control_bookkeeping(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path)
+    parts.controller.ready()
+    parts.core_events.emit(CoreEventType.PARK_REQUESTED)
+    parts.core_events.emit(CoreEventType.PARKED)
+    assert parts.api.snapshot().status.value == "stopped"
+    assert any(event.type is EventType.CONTROL for event in parts.journal.read())

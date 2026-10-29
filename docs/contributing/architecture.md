@@ -69,6 +69,11 @@ for durable intent, recovery, and tests.
 Execution environments, command runners, and agent confinement have separate
 owners; see [Sandboxing and confinement](sandboxing.md).
 
+Long-running work writes its output to `vs_logs`, which keeps each stream under a typed
+owner for humans to read. `vs_logs` sits in the tach layer `logs`, above every library, so
+no library imports it; only the product writes logs and only `server.host_helper` reads
+them (`vs_logs.read`). See [Log streams](logs.md).
+
 The TypeScript clients under `clients/` have their own package graph, layers, and
 build model; see [Clients architecture](clients-architecture.md).
 
@@ -135,11 +140,15 @@ graph TD
     entrypoints --> vs_decode
     entrypoints --> vs_github
     entrypoints --> vs_issue_tracker
+    entrypoints --> vs_logs
     entrypoints --> vs_mcp
     entrypoints --> vs_project
+    entrypoints --> vs_proto
+    entrypoints --> vs_runlog
     entrypoints --> vs_runtime
     entrypoints --> vs_sandbox
     entrypoints --> vs_sim
+    entrypoints --> vs_slurm
     headless --> vibesys
     launch --> vibesys
     launch --> vs_agent
@@ -152,11 +161,17 @@ graph TD
     launch --> vs_sim
     launch --> vs_slurm
     server --> vibesys
+    server --> vs_agent
     server --> vs_async_ops
     server --> vs_decode
+    server --> vs_logs
     server --> vs_project
     server --> vs_prompts
+    server --> vs_proto
+    server --> vs_redaction
+    server --> vs_runlog
     server --> vs_sim
+    server --> vs_slurm
     vibesys --> vs_agent
     vibesys --> vs_core
     vibesys --> vs_decode
@@ -164,9 +179,13 @@ graph TD
     vibesys --> vs_evaluator_protocol
     vibesys --> vs_github
     vibesys --> vs_issue_tracker
+    vibesys --> vs_logs
     vibesys --> vs_mcp
     vibesys --> vs_project
     vibesys --> vs_prompts
+    vibesys --> vs_proto
+    vibesys --> vs_redaction
+    vibesys --> vs_runlog
     vibesys --> vs_runtime
     vibesys --> vs_sandbox
     vibesys --> vs_sim
@@ -178,6 +197,9 @@ graph TD
     vs_agent --> vs_prompts
     vs_agent --> vs_sandbox
     vs_agent --> vs_sim
+    vs_async_ops --> vs_sim
+    vs_core --> vs_proto
+    vs_core --> vs_runlog
     vs_dst --> vs_core
     vs_dst --> vs_project
     vs_dst --> vs_runtime
@@ -196,8 +218,13 @@ graph TD
     vs_issue_tracker --> vs_decode
     vs_issue_tracker --> vs_github
     vs_issue_tracker --> vs_sim
+    vs_logs --> vs_decode
+    vs_logs --> vs_sim
     vs_project --> vs_decode
+    vs_project --> vs_proto
     vs_project --> vs_sim
+    vs_runlog --> vs_proto
+    vs_runlog --> vs_sim
     vs_runtime --> vs_agent
     vs_runtime --> vs_async_ops
     vs_runtime --> vs_core
@@ -209,12 +236,16 @@ graph TD
     vs_runtime --> vs_mcp
     vs_runtime --> vs_project
     vs_runtime --> vs_prompts
+    vs_runtime --> vs_proto
+    vs_runtime --> vs_redaction
+    vs_runtime --> vs_runlog
     vs_runtime --> vs_sandbox
     vs_runtime --> vs_sim
     vs_runtime --> vs_slurm
     vs_sandbox --> vs_decode
     vs_sandbox --> vs_evaluation
     vs_sandbox --> vs_project
+    vs_sandbox --> vs_redaction
     vs_sandbox --> vs_sim
     vs_sandbox --> vs_slurm
     vs_slurm --> vs_decode

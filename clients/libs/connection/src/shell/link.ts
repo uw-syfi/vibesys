@@ -20,7 +20,7 @@
 import {spawn} from 'node:child_process';
 import {homedir} from 'node:os';
 import type {ScheduleTimeout} from '@vibesys/transport';
-import {bootstrapUv, localBootstrap, remoteBootstrap} from './bootstrap.js';
+import {bootstrapUv, localBootstrap, remoteBootstrap, remoteCommand} from './bootstrap.js';
 import {ConnectionError} from './helper-channel.js';
 import {
   fromChild,
@@ -143,6 +143,17 @@ const SSH_FAILED = 255;
 const AUTH_FAILURE =
   /Permission denied|Too many authentication failures|Authentication failed|Host key verification failed/;
 
+/**
+ * The host refused a new channel because this app's other channels to it already spent its session
+ * ceiling (sshd's `MaxSessions`, default 10: one control channel plus up to three per attached run,
+ * `docs/contributing/desktop-connection.md`). `mux_client_request_session: ... Session open refused
+ * by peer` is the OpenSSH mux client's own wording for exactly this refusal over the shared
+ * `ControlMaster`; `administratively prohibited` is the server-side channel-open-failure reason the
+ * same refusal can surface as. Neither is a link problem a retry fixes: the link and the host are
+ * both fine, only this app's own channel count against this one host is not.
+ */
+const SESSION_CAPACITY_REFUSED = /session request failed|administratively prohibited/i;
+
 interface EstablishWaiter {
   readonly interactive: boolean;
 }
@@ -264,6 +275,14 @@ export class SshLink implements Link {
     return this.#ssh(
       ['-T', '-o', 'ControlMaster=no', '-o', 'BatchMode=yes', '--', this.#options.alias],
       remoteBootstrap(checkout, this.#uv),
+    );
+  }
+
+  /** A binary channel over this link's existing SSH master and host configuration. */
+  spawnCommand(command: string): SpawnedProcess {
+    return this.#ssh(
+      ['-T', '-o', 'ControlMaster=no', '-o', 'BatchMode=yes', '--', this.#options.alias],
+      remoteCommand(command),
     );
   }
 
@@ -471,6 +490,10 @@ export class SshLink implements Link {
         'ControlPersist=30m',
         '-o',
         'ConnectTimeout=20',
+        // Every helper channel is a session on this master, so this compresses all of them. A
+        // run's journal is text that shrinks 8-20x; an 8 MB history reads in less than half the time.
+        '-o',
+        'Compression=yes',
         '--',
         this.#options.alias,
         'true',
@@ -603,9 +626,18 @@ export class SshLink implements Link {
     return {code: await process.exit, stderr};
   }
 
-  /** An ssh status 255: the host refused the user or an untrusted host key (`auth`), or `link`. */
+  /**
+   * An ssh status 255: the host refused the user or an untrusted host key (`auth`), this app's own
+   * channel count against the host spent its session ceiling (`capacity`), or `link`.
+   */
   #sshError(stderr: string): ConnectionError {
     const alias = this.#options.alias;
+    if (SESSION_CAPACITY_REFUSED.test(stderr)) {
+      return new ConnectionError(
+        'capacity',
+        `too many runs are already open against ${alias}; close one or wait, then retry (${lastLine(stderr)})`,
+      );
+    }
     if (AUTH_FAILURE.test(stderr))
       return new ConnectionError('auth', `ssh ${alias}: ${lastLine(stderr)}`);
     return new ConnectionError('link', `the connection to ${alias} is down: ${lastLine(stderr)}`);

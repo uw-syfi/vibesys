@@ -93,8 +93,9 @@ kind = "local"
 shell_command = ["bash", "-c"]
 
 [vibesys.agent_gpu]
-# Preference order. With windows_command set, the first partition whose window
-# starts the job now is used; otherwise the first whose time limit fits.
+# Preference order. A partition is used only if its time limit (read from
+# `sinfo`) fits the request. With windows_command set, the first such partition
+# whose window starts the job now is used; otherwise the first such partition.
 partitions = ["main", "priority"]
 max_gpus = 8
 max_time_minutes = 120
@@ -104,7 +105,20 @@ srun_arguments = []         # extra site arguments, for example ["--account=lab"
 # Host paths the agent's GPU jobs may read besides the workspace and the system
 # directories, for example the Python environment with torch. Read-only always.
 read_only_paths = ["/home/operator/venvs/torch"]
+# At most this many of the run's GPU jobs, across all of its agents, are submitted
+# to Slurm at once. Omit it for no cap.
+max_concurrent_jobs = 2
 ```
+
+`max_concurrent_jobs` keeps one run from monopolizing a shared partition: without
+it, several agents can keep jobs queued or running back to back, and on a shared
+node that steady stream can keep other users' whole-node jobs from ever starting.
+A command past the cap waits on the submit host, first come, first served, and is
+submitted when one of the run's jobs ends. While it waits, the agent sees one line
+such as `[vibesys-gpu] waiting: 2 of this run's GPU jobs are active (cap 2), 1
+queued ahead; ...`. Its `--time` limit starts when it is submitted, not while it
+waits, and an agent that stops the command while it waits leaves the line without
+a job ever being submitted. The value must be a positive integer.
 
 `read_only_paths` entries must be absolute, normalized paths (no `..`, `.`,
 repeated or trailing slashes, and not `/`), must exist on the submit host when
@@ -140,8 +154,11 @@ the one place that says how. The file is parsed once when the run starts, and th
 run keeps its own rendering of it in `logs/slurm-operator.toml`.
 
 Every job carries `--partition`, `--gres=gpu:N`, `--time`, and a
-`vibesys-gpu-*` job name. A misconfigured or missing `windows_command` falls
-back to the first configured partition.
+`vibesys-gpu-*` job name. A misconfigured or missing `windows_command` only
+drops the "starts now" preference: the first partition whose `sinfo` time limit
+fits is used. A request that no configured partition's limit fits (or whose
+limits `sinfo` did not report) is rejected before `srun`, with the reason on the
+job's output and exit status 2.
 
 ## Profiling
 
@@ -151,6 +168,23 @@ plan a remote ROCprof capture. Without it, the `slurm` environment keeps its
 remote ROCprof capture over the SSH transport. With the local transport and no
 agent GPU commands there is no transport for the capture, so the run offers no
 profiler (`--profiler none` is the only choice).
+
+The `profile-guided` loop's framework-owned `[profile_guided].command` uses the
+same attribution route. With local transport and `[vibesys.agent_gpu]`, it runs
+as a confined one-GPU Slurm job in the isolated candidate workspace, through
+the same run-scoped launcher, partition policy, job-name prefix, concurrency
+cap, host environment filter, and `read_only_paths` as `vibesys-gpu`. The
+configured seconds timeout remains exact: the scheduler allocation is rounded
+up to minutes, and VibeSys cancels it at the requested second. Without the
+capability, attribution falls back to the editor command runner. Local
+validation remains in the editor in both cases.
+
+Before submission, VibeSys durably records the capture's stable Slurm job name.
+Cancellation waits for the job to settle before removing the runtime-owned output
+file or discarding the candidate. If the launcher cannot prove the named job left
+the queue, the capture fails as unresolved and those resources remain retained
+across host cleanup and restart. A resumed host cancels and queries the recorded
+name, and sweeps the candidate only after the scheduler confirms the job is absent.
 
 ## Launch
 

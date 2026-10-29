@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_agent.api import SessionStore
-    from vs_runtime.api.core import SessionResolver
+    from vs_runtime.api.core import SessionResolver, TurnYields
     from vs_sim.api import BlockingRunner
 
 CONTINUATION = ContinuationId(root="continuation-1")
@@ -125,17 +125,19 @@ def lifecycle_executor(
     store: ReceiptStore,
     sessions: FakeAgentSessions | None = None,
     blocking: BlockingRunner | None = None,
+    yields: TurnYields | None = None,
 ) -> SessionRequestRouter:
     """A SESSIONS executor over the host's durable pieces.
 
     By default a freshly started host, which forgets which turns it was running;
-    pass *sessions* to keep one process alive across calls, and *blocking* to run its
-    blocking calls somewhere other than worker threads (a simulation's threads).
+    pass *sessions* to keep one process alive across calls, *blocking* to run its
+    blocking calls somewhere other than worker threads (a simulation's threads), and *yields*
+    to give its agents a continuation source (a turn that waits for evaluations).
     """
     resolver: SessionResolver = host.resolver
     sessions = sessions or FakeAgentSessions(host.client, host.journal, threads=OsThreads())
     runner = blocking or ThreadBlockingRunner()
-    turns = RuntimeSessionRequests(sessions, resolver, store, blocking=runner)
+    turns = RuntimeSessionRequests(sessions, resolver, store, blocking=runner, yields=yields)
     return SessionRequestRouter(
         turns, SessionLifecycleRequests(sessions, turns, store, turns.settlement, runner)
     )

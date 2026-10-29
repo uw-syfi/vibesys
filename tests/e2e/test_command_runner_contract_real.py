@@ -47,6 +47,7 @@ from vs_sim.api import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
     from pathlib import Path
+from vs_sim.api import DISCARD
 
 #: Upper bound on a stopped process exiting; reached only when a stop failed.
 _EXIT_BOUND_SECONDS = 30.0
@@ -170,7 +171,7 @@ class TestDockerSandboxOnFakeDaemon(CommandRunnerContract):
             ),
             threads=OsThreads(),
         )
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         harness = _ShellHarness(sandbox, workspace)
         try:
             yield harness
@@ -193,7 +194,10 @@ class TestDockerSandboxOnRealDaemon(CommandRunnerContract):
         sandbox = DockerSandbox(
             host_workspace=str(workspace),
             image=agent_image(
-                _DOCKER_BASE_IMAGE, timeout=_DOCKER_BUILD_TIMEOUT_S, clock=MonotonicClock()
+                _DOCKER_BASE_IMAGE,
+                timeout=_DOCKER_BUILD_TIMEOUT_S,
+                clock=MonotonicClock(),
+                output=DISCARD,
             ),
             max_output_bytes=CAP,
             docker=SubprocessDockerCli(
@@ -201,7 +205,7 @@ class TestDockerSandboxOnRealDaemon(CommandRunnerContract):
             ),
             threads=OsThreads(),
         )
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         harness = _ShellHarness(sandbox, workspace)
         try:
             yield harness

@@ -7,11 +7,12 @@ name = "vs-project"
 version = "0.1.0"
 description = "The .vibesys filesystem contract for a repository-native project"
 requires-python = ">=3.12"
-dependencies = ["pydantic>=2", "pygit2>=1.18,<2", "vs-decode", "vs-sim"]
+dependencies = ["pydantic>=2", "pygit2>=1.18,<2", "vs-decode", "vs-sim", "vs-proto"]
 
 [tool.uv.sources]
 vs-decode = { workspace = true }
 vs-sim = { workspace = true }
+vs-proto = { workspace = true }
 
 [tool.setuptools.packages.find]
 where = ["src"]

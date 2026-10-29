@@ -19,12 +19,15 @@ from vibesys.events import (
     QuotaAbandonedData,
     QuotaPausedData,
     QuotaResumedData,
+    QuotaWaitCancelledData,
+    QuotaWaitingData,
     RateLimitUpdateData,
     TodoItemData,
     TodoUpdateData,
     ToolCallData,
     ToolResultData,
     ToolResultPayload,
+    TurnUsageData,
     UsageUpdateData,
     make_core_event,
 )
@@ -35,10 +38,12 @@ if TYPE_CHECKING:
     from vs_agent.api import (
         AgentQuotaError,
         AgentRateLimit,
+        AgentUsage,
         Attribution,
         ProviderSwitch,
         QuotaPlan,
         QuotaResumeReason,
+        QuotaWaitCancelReason,
     )
 
 EventSink = Callable[[CoreEvent], object]
@@ -90,10 +95,13 @@ class CoreAgentEventSink:
         | ToolResultData
         | TodoUpdateData
         | UsageUpdateData
+        | TurnUsageData
         | RateLimitUpdateData
         | QuotaPausedData
         | QuotaResumedData
         | QuotaAbandonedData
+        | QuotaWaitingData
+        | QuotaWaitCancelledData
         | ProviderSwitchedData,
         *,
         agent_kind: str | None,
@@ -222,6 +230,31 @@ class CoreAgentEventSink:
             invocation_id=invocation_id,
         )
 
+    def turn_usage_recorded(
+        self,
+        usage: AgentUsage,
+        *,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        """Emit settled token and cost accounting for one finished turn."""
+        self._emit(
+            CoreEventType.TURN_USAGE_RECORDED,
+            TurnUsageData(
+                input_tokens=usage.input_tokens,
+                cache_creation_input_tokens=usage.cache_creation_input_tokens,
+                cache_read_input_tokens=usage.cache_read_input_tokens,
+                output_tokens=usage.output_tokens,
+                reasoning_output_tokens=usage.reasoning_output_tokens,
+                total_cost_usd=usage.total_cost_usd,
+                duration_ms=usage.duration_ms,
+            ),
+            agent_kind=agent_kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
+        )
+
     def rate_limit_update(
         self,
         rate_limit: AgentRateLimit,
@@ -266,13 +299,30 @@ class CoreAgentEventSink:
             where,
         )
 
-    def quota_resumed(self, provider: str, reason: QuotaResumeReason, where: Attribution) -> None:
-        """Emit that the paused turn is being sent again on the same provider."""
+    def quota_resumed(
+        self,
+        error: AgentQuotaError,
+        reason: QuotaResumeReason,
+        waited_seconds: float,
+        where: Attribution,
+    ) -> None:
+        """Emit that the stopped turn is being sent again on the same provider."""
         self._attributed(
-            CoreEventType.QUOTA_RESUMED, QuotaResumedData(provider=provider, reason=reason), where
+            CoreEventType.QUOTA_RESUMED,
+            QuotaResumedData.model_validate(
+                {
+                    "provider": error.provider,
+                    "condition": error.condition.value,
+                    "reason": reason,
+                    "waited_seconds": waited_seconds,
+                }
+            ),
+            where,
         )
 
-    def quota_abandoned(self, error: AgentQuotaError, reason: str, where: Attribution) -> None:
+    def quota_abandoned(
+        self, error: AgentQuotaError, reason: str, waited_seconds: float, where: Attribution
+    ) -> None:
         """Emit that the turn ended with the quota error."""
         self._attributed(
             CoreEventType.QUOTA_ABANDONED,
@@ -281,7 +331,26 @@ class CoreAgentEventSink:
                 condition=error.condition.value,
                 detail=error.detail,
                 reason=reason,
+                waited_seconds=waited_seconds,
             ),
+            where,
+        )
+
+    def quota_waiting(self, provider: str, resumes_at: float | None, where: Attribution) -> None:
+        """Emit that the paused run resumes when capacity returns, at the operator's request."""
+        self._attributed(
+            CoreEventType.QUOTA_WAITING,
+            QuotaWaitingData(provider=provider, resumes_at=resumes_at),
+            where,
+        )
+
+    def quota_wait_cancelled(
+        self, provider: str, reason: QuotaWaitCancelReason, where: Attribution
+    ) -> None:
+        """Emit that the operator ended a wait for capacity."""
+        self._attributed(
+            CoreEventType.QUOTA_WAIT_CANCELLED,
+            QuotaWaitCancelledData(provider=provider, reason=reason),
             where,
         )
 
@@ -302,7 +371,12 @@ class CoreAgentEventSink:
     def _attributed(
         self,
         event_type: CoreEventType,
-        data: QuotaPausedData | QuotaResumedData | QuotaAbandonedData | ProviderSwitchedData,
+        data: QuotaPausedData
+        | QuotaResumedData
+        | QuotaAbandonedData
+        | QuotaWaitingData
+        | QuotaWaitCancelledData
+        | ProviderSwitchedData,
         where: Attribution,
     ) -> None:
         self._emit(

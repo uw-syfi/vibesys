@@ -68,9 +68,6 @@ ending the owner aborts the work.
 - Shutting down a stream composition closes both the stream and its transport
   even if one close fails: use `closeStreamAndTransport` from
   `@vibesys/transport`.
-- In the TUI, which has no machines, a latest-wins query goes through
-  the TUI's latest-query owner so a stale result never replaces a newer one.
-
 ## Bounded waits
 
 Every wait ends: it completes, fails, or hits a deadline. That covers

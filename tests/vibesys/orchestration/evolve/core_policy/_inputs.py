@@ -66,7 +66,7 @@ def launch_of(options: Mapping[str, object] | None = None) -> EvolveLaunch:
 def candidate_environment(**changes: object) -> RunEnvironmentView:
     """A run environment that opens a sandbox per candidate, with ``changes`` applied."""
     return replace(
-        RunEnvironmentView(paths=AgentPaths()),
+        RunEnvironmentView(paths=AgentPaths(), workspace_git_writable=True),
         **{"env_kind": "docker", "cli_sandboxed": True, "share_agent_session": False, **changes},
     )
 
@@ -82,6 +82,7 @@ def resolved(
     store = ArtifactStore(project.state.state_store_namespace("policy"))
     return ResolvedRun(
         facts=RunFacts(
+            agent_git_writable=True,
             domain_id="generic",
             objective="Make the queue faster.",
             accuracy_configured=True,
@@ -122,6 +123,8 @@ def context_of(
         queue_allowance_seconds=queue_allowance_seconds,
         observe_interval_seconds=observe[0],
         observe_backoff_cap_seconds=observe[1],
+        queue_wait_budget_seconds=43_200,
+        queue_notice_interval_seconds=600,
         request_retries=RequestRetries(limit=2, backoff=1.0, backoff_cap=8.0),
         max_run_seconds=max_run_seconds,
         cancellation_bound_seconds=60,

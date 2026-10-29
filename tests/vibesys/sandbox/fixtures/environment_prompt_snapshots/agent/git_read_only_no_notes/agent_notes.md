@@ -1,0 +1,1 @@
+`.git` is read-only; submit_evaluation snapshots your working tree, including new files; do not commit.

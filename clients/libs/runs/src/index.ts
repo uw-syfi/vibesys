@@ -4,10 +4,12 @@
  */
 export {isInstanceId, isRunId, isTaskName} from './ids.js';
 export {
+  knownProjects,
   type RecentRun,
   type RecentStatus,
   recentRunKey,
   recentStatus,
+  type SkippedRecent,
   suggestProjects,
 } from './recent-status.js';
 export {
@@ -19,14 +21,13 @@ export {
   resumeArguments,
   resumeDecision,
 } from './resume-run.js';
+export {parseRunRef, type RunRef, runRefKey, sameRun} from './run-ref.js';
 export {
-  confirmText,
-  STOP_IDLE,
-  type StopEvent,
-  type StopState,
-  type StopStep,
-  type StopView,
-  stopKey,
-  stopStep,
-  stopView,
-} from './stop-run.js';
+  type HarnessPick,
+  type MeasureTarget,
+  parseRunStart,
+  parseStoredRunStart,
+  type RoleOption,
+  type RunOptions,
+  type RunStart,
+} from './run-start.js';

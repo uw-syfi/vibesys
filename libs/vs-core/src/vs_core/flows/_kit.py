@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from vs_core.types.search import Event, RunView
 
     from ._defs import _Task
+    from ._labels import Label
     from ._run import _Run
     from ._sources import Signal, Timer
 
@@ -49,7 +50,7 @@ class Kit:
         """Raise a pending stop before anything is issued, awaited or acquired (unless shielded)."""
         task = self.task
         if task.stop_pending and task.shield == 0:
-            task.stop_pending, task.stopped = False, True
+            self.run.land_stop(task)
             raise Stopped
 
     @contextmanager
@@ -63,15 +64,19 @@ class Kit:
 
     # requests and waiting
 
-    def start(self, request: Work, until: Within) -> Pending:
-        """Start ``request`` now, bounded by ``until``; its outcome is the ``Pending``'s value."""
+    def start(self, request: Work, until: Within, label: Label | None = None) -> Pending:
+        """Start ``request`` now, bounded by ``until``; its outcome is the ``Pending``'s value.
+
+        ``label`` labels the request's span.
+        """
         self.stop_point()
         stamped = self.run.stamp(self.task, request)
-        return self.run.issue(self.task, Pending(stamped), Wait(request=stamped, until=until))
+        wait = Wait(request=stamped, until=until)
+        return self.run.issue(self.task, Pending(stamped), wait, label)
 
-    async def wait(self, request: Work, until: Within) -> Event:
+    async def wait(self, request: Work, until: Within, label: Label | None = None) -> Event:
         """Start ``request`` and return its outcome: the result event, or ``Failed``."""
-        return await self.settle(self.start(request, until))
+        return await self.settle(self.start(request, until, label))
 
     async def settle(self, pending: Pending) -> Event:
         """The outcome of a started request; a stop abandons it (a late outcome is dropped)."""
@@ -84,6 +89,7 @@ class Kit:
     async def finish(self, finish: Finish) -> Failed:
         """End the run. Returns only if core refuses the ``Finish``; otherwise never resumes."""
         stamped = self.run.stamp(self.task, finish)
+        self.run.concluded = True
         refused = await self.run.issue(self.task, Pending(stamped), stamped)
         if not isinstance(refused, Failed):
             raise ContractError(("finish",), "a finish is answered only by a failure")

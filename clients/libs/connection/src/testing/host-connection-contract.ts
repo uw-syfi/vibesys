@@ -9,23 +9,13 @@ import type {InstanceList} from '@vibesys/contracts/host-helper';
 import {ConnectionError, HelperRequestError} from '../shell/helper-channel.js';
 import type {HostConnection} from '../shell/host-connection.js';
 
+export {phaseReached} from './phase-reached.js';
+
 export interface ContractHost {
   /** A connection to a host with a working checkout and an empty registry. */
   working(): HostConnection;
   /** A connection whose checkout is not a VibeSys checkout. */
   broken(): HostConnection;
-}
-
-/** Resolve once `connection` reaches a phase of `kind` (now or later). */
-export function phaseReached(connection: HostConnection, kind: string): Promise<void> {
-  if (connection.phase.kind === kind) return Promise.resolve();
-  return new Promise(resolve => {
-    const stop = connection.onPhase(phase => {
-      if (phase.kind !== kind) return;
-      stop();
-      resolve();
-    });
-  });
 }
 
 async function rejection(promise: Promise<unknown>): Promise<Error> {

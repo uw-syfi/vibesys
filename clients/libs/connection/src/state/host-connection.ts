@@ -42,7 +42,14 @@ export type Cause =
   /** The run is no longer there (`run_gone`). */
   | 'run-gone'
   /** The run is there but this user may not connect to it (`connect_denied`). */
-  | 'denied';
+  | 'denied'
+  /**
+   * The host refused a new channel: its session ceiling (sshd `MaxSessions`, or an equivalent local
+   * limit) is already spent by this app's other channels to the same host. The host itself is fine;
+   * retrying the same dial now would only repeat the refusal, so this is the caller's fact to show,
+   * never a reason to back off and retry the link.
+   */
+  | 'capacity';
 
 const CAUSES: ReadonlySet<string> = new Set<Cause>([
   'link',
@@ -50,7 +57,16 @@ const CAUSES: ReadonlySet<string> = new Set<Cause>([
   'incompatible',
   'run-gone',
   'denied',
+  'capacity',
 ]);
+
+/**
+ * Which checkout problem made a host `incompatible`, from the bootstrap's own report: `missing` (no
+ * VibeSys checkout at the path) or `too-old` (one that predates the helper).
+ */
+export type CheckoutProblem = 'missing' | 'too-old';
+
+const CHECKOUT_PROBLEMS: ReadonlySet<string> = new Set<CheckoutProblem>(['missing', 'too-old']);
 
 /** What a check proves: the control channel answers, or a run channel to `instanceId` connects. */
 export type CheckTarget =
@@ -68,7 +84,12 @@ export type Phase =
   | {readonly kind: 'reconnecting'; readonly attempt: number; readonly target: CheckTarget}
   | {readonly kind: 'offline'; readonly detail: string; readonly target: CheckTarget}
   | {readonly kind: 'auth-needed'; readonly detail: string}
-  | {readonly kind: 'incompatible'; readonly detail: string}
+  | {
+      readonly kind: 'incompatible';
+      readonly detail: string;
+      /** The checkout problem the bootstrap reported, or null for another incompatibility. */
+      readonly checkout: CheckoutProblem | null;
+    }
   | {readonly kind: 'closed'};
 
 export interface ConnectionConfig {
@@ -97,6 +118,8 @@ export interface ConnectionContext {
   /** Why the last attempt or channel failed. */
   readonly cause: Cause;
   readonly detail: string;
+  /** The checkout problem the last failure reported, if any. */
+  readonly checkout: CheckoutProblem | null;
 }
 
 export type ConnectionEvent =
@@ -126,17 +149,29 @@ export interface RunUnreachable {
 /** A control channel an operation opened, opaque to the machine; null when the existing one held. */
 export type Opened = object | null;
 
-/** A failed operation's cause and detail, from what it rejected with. */
-function failureOf(error: unknown): {cause: Cause; detail: string} {
+/** A failed operation's cause, detail and checkout problem, from what it rejected with. */
+function failureOf(error: unknown): {
+  cause: Cause;
+  detail: string;
+  checkout: CheckoutProblem | null;
+} {
   if (typeof error === 'object' && error !== null) {
-    const {reason, message} = error as {reason?: unknown; message?: unknown};
+    const {reason, message, checkout} = error as {
+      reason?: unknown;
+      message?: unknown;
+      checkout?: unknown;
+    };
     const detail = typeof message === 'string' ? message : String(error);
     return {
       cause: typeof reason === 'string' && CAUSES.has(reason) ? (reason as Cause) : 'link',
       detail,
+      checkout:
+        typeof checkout === 'string' && CHECKOUT_PROBLEMS.has(checkout)
+          ? (checkout as CheckoutProblem)
+          : null,
     };
   }
-  return {cause: 'link', detail: String(error)};
+  return {cause: 'link', detail: String(error), checkout: null};
 }
 
 const TIMEOUT_DETAIL = 'the host did not answer in time';
@@ -174,8 +209,8 @@ export const connectionMachine = setup({
     /** Shell hook: an outcome the machine did not accept hands back what it opened. */
     discard: (_, _params: {opened: Opened}) => {},
     recordError: assign(({event}) => failureOf((event as {error?: unknown}).error)),
-    recordTimeout: assign({cause: 'link' as Cause, detail: TIMEOUT_DETAIL}),
-    recordStale: assign({cause: 'link' as Cause, detail: STALE_DETAIL}),
+    recordTimeout: assign({cause: 'link' as Cause, detail: TIMEOUT_DETAIL, checkout: null}),
+    recordStale: assign({cause: 'link' as Cause, detail: STALE_DETAIL, checkout: null}),
     startRecovery: assign(FIRST_ATTEMPT),
     resetAttempts: assign({attempt: 0}),
   },
@@ -206,6 +241,7 @@ export const connectionMachine = setup({
     interactive: false,
     cause: 'link',
     detail: '',
+    checkout: null,
   }),
   initial: 'idle',
   on: {close: '.closed'},
@@ -260,16 +296,21 @@ export const connectionMachine = setup({
             target: CONTROL,
             cause: ({event}) => event.cause,
             detail: ({event}) => event.detail,
+            checkout: null,
           }),
         },
         'run-ended': {
-          // The run going away, or refusing this user, is the run's fact, not the link's.
-          guard: ({event}) => event.cause !== 'run-gone' && event.cause !== 'denied',
+          // The run going away, refusing this user, or a spent channel ceiling is the dial's own
+          // fact, not the link's: none of them says the host is unreachable, so none should start a
+          // reconnect that would only repeat the same dial and the same refusal.
+          guard: ({event}) =>
+            event.cause !== 'run-gone' && event.cause !== 'denied' && event.cause !== 'capacity',
           target: 'lost',
           actions: assign({
             target: ({event}) => ({kind: 'run', instanceId: event.instanceId}) as const,
             cause: ({event}) => event.cause,
             detail: ({event}) => event.detail,
+            checkout: null,
           }),
         },
       },
@@ -426,7 +467,7 @@ export function phaseOf({value, context}: SnapshotView): Phase {
     case 'authNeeded':
       return {kind: 'auth-needed', detail: context.detail};
     case 'incompatible':
-      return {kind: 'incompatible', detail: context.detail};
+      return {kind: 'incompatible', detail: context.detail, checkout: context.checkout};
     default:
       throw new Error(`the connection machine has no phase for state ${top}`);
   }

@@ -187,6 +187,10 @@ class FaultyAgentClient:
             return self._inner.steer(text, on_rejected=on_rejected)
         return SteerOutcome.UNSUPPORTED
 
+    def steer_session(self, key: AgentSessionKey, text: str, *, steer_id: str) -> SteerOutcome:
+        """Forward a keyed mid-turn message; steering is not a fault boundary."""
+        return self._inner.steer_session(key, text, steer_id=steer_id)
+
     def cancel(self) -> None:
         """Forward cancellation."""
         self._inner.cancel()

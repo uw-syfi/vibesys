@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Literal
 from vs_project.api import RunEnvironmentRecord, RunResourceRequest
 from vs_runtime._run_environment import (
     DockerEnvironment,
+    DockerEnvironmentConfig,
     HostEnvironment,
     ModalEnvironment,
     RunEnvironment,
@@ -22,6 +23,7 @@ from vs_runtime._run_environment import (
     SkyPilotEnvironment,
 )
 from vs_runtime._slurm_environment import SlurmEnvironment
+from vs_runtime._task_image_policy import TaskImageError, editor_image_plan
 from vs_sandbox.api import backend_is_host_only
 
 if TYPE_CHECKING:
@@ -44,6 +46,7 @@ def resolve_run_environment_spec(
     spec: RunEnvironmentSpec,
     backend: ComputeBackend,
     *,
+    task_dockerfile: Path | None,
     platform: str,
     log: Callable[[str], None],
 ) -> RunEnvironmentSpec:
@@ -53,14 +56,40 @@ def resolve_run_environment_spec(
     declares itself host-only and ``platform`` (a ``sys.platform`` value) is
     macOS, where Seatbelt can confine it.  The choice follows from the backend
     alone, never from a flag, and every other spec is returned unchanged.
+
+    ``task_dockerfile`` is the Dockerfile the run's task declares. A spec not
+    built from it raises :class:`TaskImageError`, so no caller can open a run
+    that silently ignores the task image; nor can the host environment, which
+    has no container to build it into.
     """
-    if spec.name != "docker" or platform != "darwin" or not backend_is_host_only(backend):
+    if task_dockerfile is not None and spec.task_dockerfile != task_dockerfile:
+        raise TaskImageError.not_built(spec.name, task_dockerfile)
+    derived = derived_environment_name(spec.name, backend, platform=platform)
+    if task_dockerfile is not None:
+        # The same decision every environment makes refuses the task image in
+        # an environment without an agent container, selected or derived.
+        editor_image_plan(
+            derived, task_dockerfile=task_dockerfile, image=None, launch="fresh", facts=None
+        )
+    if derived == spec.name:
         return spec
     log(
         f"[environment] the {backend.value} backend cannot be reached from Docker; "
         "running the agent on the host under Seatbelt"
     )
-    return replace(spec, name="host", options={})
+    return replace(spec, name="host", options={}, image_id=None)
+
+
+def derived_environment_name(name: str, backend: ComputeBackend, *, platform: str) -> str:
+    """Return the environment a *name* selection runs in on *platform* with *backend*.
+
+    ``docker`` becomes ``host`` for a host-only backend on macOS; every other
+    selection is itself. :func:`resolve_run_environment_spec` applies it; an
+    entry point asks it before building a task image the host would refuse.
+    """
+    if name == "docker" and platform == "darwin" and backend_is_host_only(backend):
+        return "host"
+    return name
 
 
 def run_environment_deprecation(environment: RunEnvironment) -> str | None:
@@ -113,20 +142,25 @@ def build_run_environment(spec: RunEnvironmentSpec) -> RunEnvironment:
             "(use the docker run environment)"
         )
         raise ValueError(message)
+    # The environment runs the image's pinned ID when the launch resolved one.
+    options = spec.options if spec.image_id is None else {**spec.options, "image": spec.image_id}
     if spec.name == "docker":
-        return DockerEnvironment.from_options(spec.options)
+        return DockerEnvironment.from_options(options)
     if spec.name == "host":
-        return HostEnvironment.from_options(spec.options)
+        return HostEnvironment.from_options(options)
     if spec.name == "modal":
-        return ModalEnvironment.from_options(spec.options)
+        return ModalEnvironment.from_options(options)
     if spec.name == "skypilot":
-        return SkyPilotEnvironment.from_options(spec.options, spec.resources)
+        return SkyPilotEnvironment.from_options(options, spec.resources)
     if spec.name == "slurm":
-        return SlurmEnvironment.from_options(spec.options)
+        return SlurmEnvironment.from_options(options)
     if spec.name == "slurm-gpu":
         # Deprecated alias: the old file, translated, opens the slurm environment.
+        image = options.get("image")
         return SlurmEnvironment.from_slurm_gpu(
-            Path(str(spec.options["config_path"])), spec.resources
+            Path(str(options["config_path"])),
+            spec.resources,
+            docker=DockerEnvironmentConfig(image=str(image) if image else None),
         )
     message = f"unknown run environment: {spec.name!r}"
     raise ValueError(message)

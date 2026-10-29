@@ -1,4 +1,5 @@
 version = 1
+backends = ["cuda"]
 
 [agent]
 domain = "llm-serving"
@@ -24,3 +25,15 @@ result_protocol = 2
 [evaluator]
 name = "vibesys-evaluator-request-factory"
 version = "0.1.0"
+
+[catalogue]
+domain = "llm-serving"
+
+[catalogue.hardware]
+accelerator = "NVIDIA B200"
+count = 8
+vendor = "nvidia"
+
+[catalogue.model]
+name = "DeepSeek V3.2"
+maker = "deepseek"

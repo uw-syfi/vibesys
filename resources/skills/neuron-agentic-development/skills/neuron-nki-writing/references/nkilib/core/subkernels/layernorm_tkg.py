@@ -14,6 +14,8 @@
 
 """LayerNorm subkernel optimized for token generation (TKG) inference with LNC sharding support."""
 
+from typing import Optional
+
 import nki.isa as nisa
 import nki.language as nl
 
@@ -34,10 +36,10 @@ def layernorm_tkg(
     input: nl.ndarray,
     gamma: nl.ndarray,
     output: nl.ndarray,
-    beta: nl.ndarray | None = None,
+    beta: Optional[nl.ndarray] = None,
     eps: float = 1e-6,
     use_heap_memory: bool = False,
-    sbm: SbufManager | None = None,
+    sbm: Optional[SbufManager] = None,
 ):
     """
     LayerNorm implementation optimized for inference token generation (decoding) phase.
@@ -113,9 +115,7 @@ def layernorm_tkg(
     if not sbm:
         # Calculate required SBUF size: 16*BxS*H1 for intermediates + H0 for constants
         # Factor of 4 accounts for float32 byte size
-        sbm = SbufManager(
-            0, (16 * BxS * H1 + H0) * 4, get_logger("layernorm_tkg"), use_auto_alloc=True
-        )
+        sbm = SbufManager(0, (16 * BxS * H1 + H0) * 4, get_logger("layernorm_tkg"), use_auto_alloc=True)
 
     # Open SBUF memory scope - lv0
     sbm.open_scope(name="layernorm_tkg")
@@ -198,7 +198,7 @@ def layernorm_tkg(
 def layernorm_tkg_llama_impl(
     input: nl.ndarray,
     gamma: nl.ndarray,
-    beta: nl.ndarray | None,
+    beta: Optional[nl.ndarray],
     result: nl.ndarray,
     bs_lb: int,
     bs_count: int,
@@ -277,6 +277,7 @@ def layernorm_tkg_llama_impl(
         H = _H0 * H1
     else:
         B, S, H = input.shape
+        full_BxS = B * S
         kernel_assert(H % H0 == 0, f"inp tensor H dimension must be divisible by {H0}, got {H}")
         H1 = H // H0
 
@@ -293,7 +294,7 @@ def layernorm_tkg_llama_impl(
     )
 
     # Beta check
-    is_beta = beta is not None
+    is_beta = beta != None
 
     # Check if the kernel uses auto or manual allocation
     is_auto_alloc = sbm.is_auto_alloc()
@@ -338,9 +339,7 @@ def layernorm_tkg_llama_impl(
         )
         # input_sb (H0,BxS,H1) -> (H0,BxS,lnc,H2)
         input_load_view = (
-            TensorView(input_sb)
-            .reshape_dim(dim=2, shape=[lnc, H2])
-            .slice(dim=1, start=bs_lb, end=bs_lb + BxS)
+            TensorView(input_sb).reshape_dim(dim=2, shape=[lnc, H2]).slice(dim=1, start=bs_lb, end=bs_lb + BxS)
         )
         nisa.dma_copy(
             dst=input_load_view.get_view(),
@@ -392,18 +391,14 @@ def layernorm_tkg_llama_impl(
 
     # Reduce squares along H1 dimension to compute mean(x^2)
     reduced_input_squared_sb = alloc_tensor((H0, BxS), dtype=inter_dtype, buffer=nl.sbuf)
-    nisa.tensor_reduce(
-        dst=reduced_input_squared_sb[...], op=nl.add, data=input_squared_sb[...], axis=1
-    )
+    nisa.tensor_reduce(dst=reduced_input_squared_sb[...], op=nl.add, data=input_squared_sb[...], axis=1)
     num_allocated_tensor += 1
 
     # Complete mean(x^2) calculation using matrix multiplication with 1/H constant
     if is_auto_alloc:
         input_squared_mean = nl.ndarray((H0, BxS), dtype=inter_dtype, buffer=nl.psum)
     else:  # Manual allocation: use PSUM bank 0
-        input_squared_mean = nl.ndarray(
-            (H0, BxS), dtype=inter_dtype, buffer=nl.psum, address=(0, 0)
-        )
+        input_squared_mean = nl.ndarray((H0, BxS), dtype=inter_dtype, buffer=nl.psum, address=(0, 0))
     nisa.nc_matmul(
         dst=input_squared_mean,
         stationary=reduction_const,
@@ -420,9 +415,7 @@ def layernorm_tkg_llama_impl(
     if is_auto_alloc:
         input_mean = nl.ndarray((H0, BxS), dtype=inter_dtype, buffer=nl.psum)
     else:  # Manual allocation: use PSUM bank 1
-        input_mean = nl.ndarray(
-            (H0, BxS), dtype=inter_dtype, buffer=nl.psum, address=(0, 1 * 512 * 4)
-        )
+        input_mean = nl.ndarray((H0, BxS), dtype=inter_dtype, buffer=nl.psum, address=(0, 1 * 512 * 4))
     nisa.nc_matmul(dst=input_mean, stationary=reduction_const, moving=reduced_input_sb)
 
     # Cleanup intermediate tensors if using heap allocation
@@ -496,9 +489,7 @@ def layernorm_tkg_llama_impl(
 
     # Copy final result to output buffer
     if input_in_sbuf:
-        nisa.tensor_copy(
-            dst=result[0:H0, nl.ds(bs_lb, bs_count), 0:H1], src=input_sb_view.get_view()
-        )
+        nisa.tensor_copy(dst=result[0:H0, nl.ds(bs_lb, bs_count), 0:H1], src=input_sb_view.get_view())
 
     # Cleanup: deallocate heap memory if used
     if use_heap_memory:

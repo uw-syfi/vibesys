@@ -2,10 +2,7 @@
 include setup.py
 include packaging/packaging_support.py
 include packaging/resources_packaging.py
-include packaging/tui_packaging.py
 include packaging/release_versions.py
-include packaging/wheel_targets.py
-include third_party/bun/LICENSE
 
 # Include the Python package roots owned by the root distribution.
 graft src
@@ -33,6 +30,7 @@ prune libs/*/src/*.egg-info
 graft resources/evaluators
 graft resources/profilers
 graft resources/skills
+graft resources/chat-skills
 prune resources/evaluators/*/native_runner/target
 prune resources/skills/serving-systems/repos
 

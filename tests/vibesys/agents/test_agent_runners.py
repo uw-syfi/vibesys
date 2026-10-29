@@ -46,12 +46,18 @@ def _build_client(
     model_name: str | None = "m",
     **kwargs: Unpack[_BuildClientOptions],
 ) -> AgentClient:
-    """Resolve an :class:`AgentSpec` the way application config does, then build."""
+    """Resolve an :class:`AgentSpec` the way application config does, then build.
+
+    These tests follow a model name through client construction, so they opt
+    out of the vetted list; ``libs/vs-agent/tests/test_vetted_harnesses.py``
+    covers the list itself.
+    """
     spec = agent_spec_from_config(
         config,
         backend=agent_backend,
         provider=cli_provider,
         model=model_name,
+        allow_unvetted_model=True,
     )
     return cast(
         "AgentClient",
@@ -235,6 +241,7 @@ class TestBuildAgentClient:
             },
         )
         config.thinking.level = "high"
+        config.model.name = "gpt-5.5"
         roles = (
             AgentRole(id="orchestrator", system_prompt="plan"),
             AgentRole(id="implementer", system_prompt="implement"),
@@ -245,7 +252,7 @@ class TestBuildAgentClient:
         assert tuple(specs) == ("orchestrator", "implementer")
         assert specs["orchestrator"].model == "gpt-5.6-sol"
         assert specs["orchestrator"].reasoning_effort == "xhigh"
-        assert specs["implementer"].model == "m"
+        assert specs["implementer"].model == "gpt-5.5"
         assert specs["implementer"].reasoning_effort == "high"
 
     def test_role_configuration_rejects_roles_outside_selected_plugin(self) -> None:

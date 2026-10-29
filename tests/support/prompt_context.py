@@ -6,7 +6,7 @@ A prompt test renders a template the way production does: the context's fields p
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from tests.vibesys.reply_variables import context_variables, profiler_reply
 
@@ -19,15 +19,21 @@ from vibesys.orchestration.single.search.api import single
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-__all__ = ["context_variables", "profiler_reply", "registered_reply_models"]
+    from vs_core.api import SearchDef
+
+__all__ = [
+    "context_variables",
+    "profiler_reply",
+    "registered_reply_models",
+    "registered_searches",
+]
+
+
+def registered_searches() -> tuple[SearchDef[Any], ...]:
+    """Every search a built-in orchestration runs."""
+    return (dynamic, evolve, issue_queue, multi, single)
 
 
 def registered_reply_models() -> list[type[BaseModel]]:
     """Every reply model a strategy registers, under each capability variant a run can have."""
-    return [
-        *dynamic.reply_schemas.values(),
-        *evolve.reply_schemas.values(),
-        *issue_queue.reply_schemas.values(),
-        *multi.reply_schemas.values(),
-        *single.reply_schemas.values(),
-    ]
+    return [model for search in registered_searches() for model in search.reply_schemas.values()]
