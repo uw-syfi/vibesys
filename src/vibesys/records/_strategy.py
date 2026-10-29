@@ -216,11 +216,18 @@ def gate(projection: Projection) -> None:
     identity = ":".join(
         ("gate", projection.event.execution_id or "input", data.gate, data.recipe or "default")
     )
-    known = data.span_id is not None and data.span_id in projection.spans
-    span = labelled(projection, "gate", data.span_id or identity)
+    # An execution identifies one sample, while the owning operation may later
+    # publish a mean of several samples. They cannot share an immutable reading.
+    sample = data.span_id is not None and projection.event.execution_id is not None
+    known = not sample and data.span_id is not None and data.span_id in projection.spans
+    span = labelled(projection, "gate", identity if sample else data.span_id or identity)
+    if sample:
+        span.parent = data.span_id
     attrs = p.GateAttrs(
         stage=enum_value(p.GateStage, data.gate),
-        subject=subject(projection, span.parent) if known else _spanless_subject(projection),
+        subject=subject(projection, span.parent)
+        if known or sample
+        else _spanless_subject(projection),
         recipe=data.recipe,
         source=enum_value(p.FrameworkSource, data.source),
         source_label=data.source_label,
@@ -232,7 +239,9 @@ def gate(projection: Projection) -> None:
         projection.span(span)
         return
     attrs.reused = data.reused
-    repeated = not known and _legacy_round_benchmark_repeat(projection, span.id, data.metric)
+    repeated = not (known or sample) and _legacy_round_benchmark_repeat(
+        projection, span.id, data.metric
+    )
     if data.value is not None and data.metric is not None and not repeated:
         if known and not span.has_field("ended_at") and not projection.final:
             projection.pending.append(projection.event.model_dump_json().encode())
@@ -245,9 +254,9 @@ def gate(projection: Projection) -> None:
                     clock=span.ended_at if span.has_field("ended_at") else projection.clock,
                 ),
                 unit=data.unit or "",
-                input_gate=attrs.subject == p.GateSubject.INPUT,
+                input_gate=not sample and attrs.subject == p.GateSubject.INPUT,
             )
-    if data.span_id is not None:
+    if data.span_id is not None and not sample:
         update_label(projection, span, "gate", attrs)
         projection.span(span)
     else:
