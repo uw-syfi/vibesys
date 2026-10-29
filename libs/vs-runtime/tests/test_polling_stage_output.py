@@ -31,6 +31,8 @@ from vs_runtime.api import (
     AccuracyEvaluation,
     BenchmarkEvaluation,
     BenchmarkFailureKind,
+    BenchmarkObjective,
+    MetricDirection,
     PollingEvaluationExecutor,
 )
 from vs_runtime.api.core import StageRun
@@ -281,3 +283,40 @@ async def test_pause_drain_lets_every_stage_of_an_executing_job_finish() -> None
     assert (await ended).state is EvaluationState.SUCCEEDED
     assert len(evaluation.accuracy_calls) == len(evaluation.benchmark_calls) == 1
     await executor.close()
+
+
+@pytest.mark.parametrize("direction", [MetricDirection.MAXIMIZE, MetricDirection.MINIMIZE])
+async def test_polling_preserves_selected_objective_before_alphabetical_metrics(
+    direction: MetricDirection,
+) -> None:
+    objectives = (BenchmarkObjective(name="z_target", direction=direction),)
+    evaluation = FakeEvaluation(
+        default_accuracy=AccuracyEvaluation(executed=True),
+        default_benchmark=BenchmarkEvaluation(
+            executed=True,
+            metric_name="z_target",
+            metric_value=42.0,
+            metric_direction=direction,
+            metric_unit="req/s",
+            row={"a_diagnostic": 0.4, "z_target": 42.0},
+        ),
+    )
+    workspaces = FakeWorkspaces(
+        FakeWorkspace(path=Path("/workspace")), supports_parallel_candidates=True
+    )
+    executor = PollingEvaluationExecutor(
+        evaluation, workspaces, clock=ManualClock(), objectives=objectives
+    )
+    try:
+        snapshot = await workspaces.root.snapshot("candidate")
+        await executor.submit(_request(snapshot), handle_id=_HANDLE)
+        observed = await _terminal(executor)
+        evidence = TrustedEvidence.model_validate(observed.stage_results[-1].result)
+        assert evaluation.benchmark_calls[0].objectives == objectives
+        assert [metric.name for metric in evidence.metrics] == ["z_target", "a_diagnostic"]
+        assert evidence.metrics[0].direction == direction.value
+        assert evidence.metrics[0].unit == "req/s"
+        assert evidence.metrics[0].value == 42.0
+        assert evidence.metrics[1].value == 0.4
+    finally:
+        await executor.close()
