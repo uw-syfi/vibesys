@@ -497,6 +497,8 @@ def test_runner_uses_builtin_ssh_and_rsync_transport(tmp_path: Path) -> None:
             "ssh",
             "-F",
             "/operator/ssh-config",
+            "-o",
+            "BatchMode=yes",
             "--",
             "cluster.example",
             "mkdir -p /operator/campaign/runs/test-cluster/ssh_01 "
@@ -512,7 +514,7 @@ def test_runner_uses_builtin_ssh_and_rsync_transport(tmp_path: Path) -> None:
         "--delete",
         "--exclude=.git/",
         "-e",
-        "ssh -F /operator/ssh-config",
+        "ssh -F /operator/ssh-config -o BatchMode=yes",
         "--",
     )
     assert ".tmp.ssh_01.workspace/payload/" in sync_argv[-1]

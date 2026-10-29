@@ -453,6 +453,8 @@ def test_an_agent_image_build_that_never_finishes_is_stopped_with_its_output() -
     def start(request: PipedStart) -> _FakePipedProcess:
         if request.argv[1] == "build":
             return stalled
+        if request.argv[-1].startswith("vibesys-agent-build:"):
+            return _FakePipedProcess(wait_results=(1,))  # not built yet, so the build runs
         return _FakePipedProcess(stdout=_IMAGE_ID)
 
     threads = SimThreads()

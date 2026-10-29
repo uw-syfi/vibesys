@@ -76,6 +76,20 @@ def _stop_params() -> list[object]:
     return [pytest.param(variant, at, id=f"{variant}-stop-at-{at}") for variant, at in _stops(2)]
 
 
+def _adoption_stops() -> list[object]:
+    """Every request of the run's adoption, as a point the stop lands on."""
+    points = []
+    for variant, chosen in VARIANTS.items():
+        probe = Faulted(chosen)
+        drive_shell(launch(), probe, harness(), launch().search.reply_schemas)
+        points += [
+            pytest.param(variant, at, id=f"{variant}-stop-during-{kind}-{at}")
+            for at, kind in enumerate(probe.kinds)
+            if kind in ("adopt_revision", "verify_adoption")
+        ]
+    return points
+
+
 GRACES: tuple[float | None, ...] = (None, 0.0, 5.0, 60.0)
 
 
@@ -207,3 +221,86 @@ def test_a_stop_at_any_request_drains_to_a_terminal_record_and_cancels_every_job
     assert all(job.released for job in _jobs(core)), [
         (job.resource_id, job.status) for job in _jobs(core) if not job.released
     ]
+
+
+def _resumed_until_it_ends_itself(world: Faulted) -> list[CoreState]:
+    """Resume the run after each stop that ends it, until a host reaches an end that is its own.
+
+    Each host opens the run the way a resume does (its controls lift the stop the record holds),
+    over the store the one before left. Returns the core state each host left.
+    """
+    hosting = harness(deadline_at=DEADLINE)
+    store = FakeStateStore()
+    delivery = FakePublicationDelivery()
+    schemas = launch().search.reply_schemas
+    left: list[CoreState] = []
+    clock_at = 1.0
+    for hosts in range(MAX_HOSTS):
+        host = scripted_host(
+            launch(),
+            world,
+            hosting,
+            schemas,
+            HostOptions(attach=world.attach, resumed=hosts > 0),
+            store=store,
+            delivery=delivery,
+            clock_at=clock_at,
+        )
+        start_core(host.host, host.config)
+        run_virtual(host.clock, drive_core(host.host, host.config))
+        core = host.shell.record.envelope.core
+        left.append(core)
+        assert core.run.status is RunStatus.TERMINAL
+        assert core.run.result is not None
+        if core.run.result.outcome != "cancelled":
+            return left
+        assert core.run.status == RunStatus.TERMINAL
+        clock_at = host.clock.now() + LEASE + 1
+    pytest.fail(f"the run was still stopping after {MAX_HOSTS} hosts")
+
+
+@pytest.mark.parametrize(("variant", "stop_at"), [*_stop_params(), *_adoption_stops()])
+def test_a_run_stopped_at_any_request_is_resumable_and_goes_on_to_its_own_end(
+    variant: str, stop_at: int
+) -> None:
+    """Whichever request the operator's stop finds in flight, the run is not over for good.
+
+    Regression: a stop that raced the run's adoption (or any request) ended the run, cancelled or
+    failed, with no way back, so a run with hours of rounds in it could only be abandoned. The
+    stop's ending cleans up and keeps the result, and the resume that opens the run reopens it:
+    it goes on from what it held and reaches an end of its own (no stop ends it a second time).
+    """
+    world = Faulted(VARIANTS[variant], stop_at=stop_at)
+    left = _resumed_until_it_ends_itself(world)
+    assert world.stopped
+    resumed = left[-1]
+    assert resumed.run.result is not None
+    assert resumed.run.result.outcome != "cancelled" or len(left) == 1
+    assert final_state(resumed, End.TERMINAL) == []
+    assert all(job.released for job in _jobs(resumed))
+
+
+def _stop_pairs() -> list[object]:
+    """Two stops of one run: the second finds the run after a resume, with what the first adopted."""
+    points = [at for variant, at in _stops(3) if variant == "plain"]
+    return [
+        pytest.param(first, later, id=f"stops-at-{first}-and-{later}")
+        for first in points
+        for later in points
+        if first < later
+    ]
+
+
+@pytest.mark.parametrize(("first", "later"), _stop_pairs())
+def test_a_run_stopped_again_after_a_resume_is_resumable_again(first: int, later: int) -> None:
+    """A second stop finds the run reopened by a resume: nothing it holds ends it for good.
+
+    The first stop's adoption answered that stop, so the second adopts afresh; the core-level
+    story of it is ``test_a_lifted_stop_takes_back_the_adoption_it_completed``.
+    """
+    world = Faulted(VARIANTS["plain"], stop_at=(first, later))
+    left = _resumed_until_it_ends_itself(world)
+    results = [state.run.result for state in left]
+    assert all(result is not None for result in results)
+    assert not any("adoption-failed" in (result.reason if result else "") for result in results)
+    assert final_state(left[-1], End.TERMINAL) == []

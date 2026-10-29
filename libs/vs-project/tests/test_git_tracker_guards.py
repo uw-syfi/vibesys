@@ -508,6 +508,66 @@ def test_isolation_reports_exactly_what_the_agent_wrote_including_below_vibesys(
     assert tracker.pending_changes() == expected
 
 
+_EARLIER_RUN = ".vibesys/state/runs/earlier-run"
+_LEFTOVERS = tuple(
+    f"{_EARLIER_RUN}/{name}"
+    for name in ("core-store/store.json", "core-store/store.lock", "artifacts/objects/ab12")
+)
+
+
+@settings(
+    max_examples=examples(pr=5, nightly=40),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(
+    left=st.dictionaries(st.sampled_from(_LEFTOVERS), st.sampled_from([b"", b"state"])),
+    writes=st.lists(
+        st.tuples(
+            st.sampled_from((*_LEFTOVERS, f"{_EARLIER_RUN}/stray.txt")),
+            st.sampled_from([None, b"state", b"agent"]),
+        ),
+        max_size=4,
+    ),
+)
+def test_run_state_an_earlier_process_left_is_not_the_agents(
+    tmp_path_factory: pytest.TempPathFactory,
+    left: dict[str, bytes],
+    writes: list[tuple[str, bytes | None]],
+) -> None:
+    """Regression: a second run stalled on its first orchestrator turn.
+
+    Every run leaves its store and artifacts untracked in the checkout. The next run's
+    isolation check reported them as the read-only agent's writes, could not restore them
+    and never settled the turn. What an earlier process left is the framework's while it
+    keeps its bytes; whatever the agent then creates or rewrites there is still reported.
+    """
+    root = tmp_path_factory.mktemp("project")
+    _committed_repository(root)
+    for path, content in left.items():
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_bytes(content)
+    tracker = _tracker(root)
+    tracker.init(existing=False)
+    assert tracker.pending_changes() == []
+
+    final: dict[str, bytes | None] = dict(left)
+    for path, content in writes:
+        target = root / path
+        if content is None:
+            target.unlink(missing_ok=True)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+        final[path] = content
+
+    expected = sorted(
+        path
+        for path, content in final.items()
+        if content is not None and (path not in left or content != left[path])
+    )
+    assert tracker.pending_changes() == expected
+
+
 def test_an_agent_overwrite_of_a_framework_file_is_reported(tmp_path: Path) -> None:
     tracker = _initialized_tracker(tmp_path)
     project = _project(tmp_path, tracker)
@@ -639,3 +699,35 @@ def test_replacing_framework_state_never_follows_a_link_planted_after_the_check(
         tracker.snapshot_framework_state("replace", snapshot)
 
     assert sorted(path.name for path in outside.iterdir()) == ["keep.txt"]
+
+
+def test_a_control_another_process_posts_is_not_the_agents_write(tmp_path: Path) -> None:
+    """Regression: an operator's ``vibesys control`` failed the next read-only turn.
+
+    The operator posts from another process, so the run never wrote the file itself; in the
+    project's checkout the isolation check would report it as the agent's write.
+    """
+    tracker = _initialized_tracker(tmp_path)
+    project = _project(tmp_path, tracker)
+    project.state.control_inbox(tracker.run_id).post("first", b"{}", ended=lambda: None)
+    local = project.state.local_namespace(tracker.run_id, "control").external_directory()
+    inbox = next(path for root in (tmp_path, local) for path in root.rglob("first.json")).parent
+    assert tracker.pending_changes() == []
+
+    (inbox / "second.json").write_bytes(b"{}")  # as the operator's process writes it
+
+    assert tracker.pending_changes() == []
+
+
+def test_a_file_the_framework_did_not_create_stays_the_agents(tmp_path: Path) -> None:
+    """Regression: a create that found the file already there recorded it as the framework's."""
+    tracker = _initialized_tracker(tmp_path)
+    project = _project(tmp_path, tracker)
+    namespace = project.state.portable_namespace(tracker.run_id, "probe")
+    assert namespace.create_bytes("first.json", b"{}")
+    planted = next(tmp_path.rglob("first.json")).parent / "second.json"
+    planted.write_bytes(b"{}")  # as an agent writes it, with the bytes the framework would
+
+    assert not namespace.create_bytes("second.json", b"{}")
+
+    assert planted.relative_to(tmp_path).as_posix() in tracker.pending_changes()

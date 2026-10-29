@@ -34,7 +34,9 @@
   "dependencies": {
     "@vibesys/hosts": "workspace:*",
     "@vibesys/runs": "workspace:*",
-    "@vibesys/ui": "workspace:*"
+    "@vibesys/ui": "workspace:*",
+    "@vibesys/proto": "workspace:*",
+    "@bufbuild/protobuf": "2.16.0"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",

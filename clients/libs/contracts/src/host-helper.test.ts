@@ -143,6 +143,27 @@ describe('parseHelperMessage', () => {
     expect(helperFeaturesForRequest(unset)).toEqual([]);
     expect(helperFeaturesForRequest(chosen)).toEqual(['harnesses']);
     expect(helperFeaturesForRequest({type: 'harnesses.list'})).toEqual(['harnesses']);
+    const generations = {type: 'harnesses.list', with_generations: true};
+    expect(helperFeaturesForRequest(generations)).toEqual(['harnesses', 'harness_generations']);
+    const agents = {'multi-judge': {provider: 'codex', model: 'gpt-a'}};
+    const withAgents = {...start, agents};
+    const withNone = {...start, agents: null};
+    expect(helperFeaturesForRequest(withAgents)).toEqual(['run_role_agents']);
+    expect(helperFeaturesForRequest(withNone)).toEqual([]);
+    const preflight = {type: 'run.preflight', project: '/p', harness: chosen.harness, agents};
+    expect(helperFeaturesForRequest(preflight)).toEqual([
+      'preflight',
+      'harnesses',
+      'run_role_agents',
+    ]);
+    const measured = {...start, measure_on: {kind: 'slurm', cluster: 'lab'}};
+    expect(helperFeaturesForRequest(measured)).toEqual(['measurement_target']);
+    const unmeasured = {...start, measure_on: null};
+    expect(helperFeaturesForRequest(unmeasured)).toEqual([]);
+    expect(helperFeaturesForRequest({type: 'compute.list'})).toEqual(['machine_compute']);
+    expect(helperFeaturesForRequest({type: 'compute.remove_cluster'})).toEqual(['machine_compute']);
+    expect(helperFeaturesForRequest({type: 'agent_logins.list'})).toEqual(['agent_logins']);
+    expect(helperFeaturesForRequest({type: 'agent_logins.start'})).toEqual(['agent_logins']);
     expect(helperFeaturesForRequest({type: 'ping'})).toEqual([]);
   });
 

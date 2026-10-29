@@ -1,4 +1,5 @@
 version = 1
+backends = ["metal"]
 
 [agent]
 domain = "llm-serving"
@@ -10,3 +11,15 @@ timeout_seconds = 120
 [benchmark]
 command = ["uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/benchmark.py"]
 timeout_seconds = 300
+
+[catalogue]
+domain = "llm-serving"
+
+[catalogue.hardware]
+accelerator = "Apple Silicon"
+count = 1
+vendor = "apple"
+
+[catalogue.model]
+name = "Llama 3.1 8B Instruct"
+maker = "meta"

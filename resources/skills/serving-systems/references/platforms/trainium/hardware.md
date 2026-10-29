@@ -2,7 +2,7 @@
 
 Hardware spec reference for **Trainium2 (Trn2)** — the only Trainium generation
 this note covers. For how PyTorch maps onto this hardware see
-[`platforms/trainium/neuron-pytorch.md`](neuron-pytorch.md); for writing
+[`neuron-pytorch.md`](neuron-pytorch.md); for writing
 custom kernels, the vendored **`neuron-nki-*`** skills.
 
 > Ignore Inf1/Trn1 and NeuronCore-v1/v2 material in older AWS docs — it does not
@@ -64,19 +64,32 @@ This is why `neuron-ls` on a `trn2.3xlarge` reports **1 device / 4 cores /
 | `trn2.48xlarge` | 16 | 64 | 1.5 TiB |
 | `trn2u.48xlarge` (UltraServer building block) | 16 | 64 | 1.5 TiB |
 
-A single `trn2.3xlarge` (one chip, 4 logical cores, 96 GiB) comfortably holds an
-8B model in BF16 (~16 GiB weights) with room for KV cache.
+A single `trn2.3xlarge` is one chip: 4 logical cores, 96 GiB. **Each logical
+core sees ~24 GiB** (`torch.neuron.get_device_properties(0).total_memory`), so
+"fits on the chip" and "fits on a core" are different questions. An 8B model in
+BF16 (~16 GiB weights) fits on one core with ~8 GiB left for KV cache and
+activations; a 27B model in BF16 (~54 GiB) needs TP=4, and even its FP8
+checkpoint (~31 GB) needs at least TP=2.
 
 ## Serving implications
 
-- **Compiled, static-shape graphs.** NeuronCores run graphs compiled ahead of
-  time by `neuronx-cc`; dynamic shapes trigger recompiles (minutes each). Bucket
-  prompt/decode lengths. See [`platforms/trainium/neuron-pytorch.md`](neuron-pytorch.md).
-- **BF16 baseline, FP8 for throughput.** The tensor engine does ~2× FP8 vs BF16.
-- **KV cache lives in HBM**; 96 GiB is generous for a single 8B model — favor
-  large batch / long context before sharding.
-- **Multi-core** via tensor/sequence parallelism across the logical cores is an
-  optimization, not a requirement for an 8B model on one chip.
+- **Compiled, static-shape graphs.** The hot path runs as
+  `torch.compile(backend="neuron")` regions compiled by `neuronx-cc`; a new
+  shape is a new compile (seconds to minutes). Bucket prompt/decode lengths and
+  batch width. See [`neuron-pytorch.md`](neuron-pytorch.md).
+- **BF16 on trn2.** The tensor engine has FP8 hardware (~2× BF16), but
+  TorchNeuron runs FP8/MXFP8 only on Trainium3. On trn2, dequantize FP8
+  checkpoints to BF16 at load, or write an FP8 path in NKI.
+- **KV cache lives in HBM**, in the same ~24 GiB per core as the weights. Budget
+  weights + cache + activation peak per core before choosing batch and context.
+- **Host RAM bounds compilation.** A `trn2.3xlarge` has 128 GiB of host memory
+  for the server, its compiles and everything else. A large graph's
+  `neuronx-cc` compile takes tens of GiB, so parallel compiles (one per rank)
+  can exceed it; see [`tensor-parallel.md`](tensor-parallel.md).
+- **Multi-core** (tensor parallelism across logical cores, one process per core)
+  is required once weights + cache exceed one core; see
+  [`tensor-parallel.md`](tensor-parallel.md). For a model that fits on one core,
+  compare TP against one replica per core.
 
 Sources: [Trainium2 Architecture](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/about-neuron/arch/neuron-hardware/trainium2.html),
 [NeuronCore-v3](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/about-neuron/arch/neuron-hardware/neuron-core-v3.html).

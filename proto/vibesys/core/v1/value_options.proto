@@ -1,0 +1,70 @@
+syntax = "proto3";
+package vibesys.core.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1";
+
+// Representation metadata only. Validation belongs to buf.validate rules.
+message ValueMessageOptions {
+  // A wrapper of one required oneof becomes a union of its message members.
+  bool union = 1;
+  // The existing JSON discriminator of union members, if any.
+  string discriminator = 2;
+  // Pure behavior, independent of schema validation, supplied by the owning module.
+  string mixin = 3;
+  // A generated base value for an existing nominal hierarchy.
+  string base = 4;
+  // Export a named numeric bound from a CEL rule for existing callers.
+  repeated ValueRuleConstant constants = 5;
+  // Rebuild a subclass as this base when a field promises the base representation.
+  bool narrow_subclasses = 6;
+  // An empty wire marker represented as Python None inside a scalar union.
+  bool null = 7;
+}
+message ValueRuleConstant {
+  string name = 1;
+  string rule = 2;
+}
+message ValueFieldOptions {
+  // Require an explicit constructor argument even when protobuf has an implicit default.
+  bool explicit = 1;
+  // Arbitrary precision integer stored as a canonical decimal string. Existing core
+  // counters were unbounded Python ints; int64 would reject previously valid envelopes.
+  bool integer = 2;
+  // Export one scalar rule value, such as an identity pattern, without duplicating it.
+  string constant_name = 3;
+  string constant_rule = 4;
+  // An explicit legacy constructor default, encoded as JSON and validated by the field.
+  optional string default_json = 5;
+  // Preserve omission of absent optional fields in the persisted JSON envelope.
+  bool omit_unset = 6;
+  // Export scalar aliases from this field's authoritative validation.
+  repeated string aliases = 7;
+  // Immutable set semantics, including canonical JSON and wire ordering.
+  bool frozen_set = 8;
+}
+message ValueEnumOptions {
+  // Preserve a string-literal API instead of introducing an enum at call sites.
+  bool literal = 1;
+  // Keep the literal inline in the legacy JSON Schema instead of emitting a named reference.
+  bool inline = 2;
+  // Pure enum behavior, with no schema or validation rules.
+  string mixin = 3;
+}
+message ValueEnumMemberOptions {
+  // Persisted spelling when it differs from the lower-case unprefixed enum name.
+  string spelling = 1;
+}
+extend google.protobuf.MessageOptions {
+  ValueMessageOptions core_value = 51000;
+}
+extend google.protobuf.FieldOptions {
+  ValueFieldOptions core_field = 51001;
+}
+extend google.protobuf.EnumOptions {
+  ValueEnumOptions core_enum = 51002;
+}
+extend google.protobuf.EnumValueOptions {
+  ValueEnumMemberOptions core_member = 51003;
+}

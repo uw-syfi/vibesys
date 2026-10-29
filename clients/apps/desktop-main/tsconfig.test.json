@@ -11,17 +11,18 @@
       "node"
     ],
     "noEmit": true,
-    "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo"
+    "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo",
+    "allowJs": true
   },
   "include": [
-    "src/**/*.test.ts"
+    "src/**/*.test.ts",
+    "e2e/gateway-app.mjs",
+    "e2e/first-load.mjs",
+    "e2e/pin-performance-global.mjs"
   ],
   "references": [
     {
       "path": "./tsconfig.lib.json"
-    },
-    {
-      "path": "./tsconfig.preload-run.json"
     },
     {
       "path": "./tsconfig.preload-welcome.json"
@@ -31,6 +32,9 @@
     },
     {
       "path": "../../libs/hosts/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-history/tsconfig.lib.json"
     },
     {
       "path": "../../libs/runs/tsconfig.lib.json"
@@ -45,9 +49,6 @@
       "path": "../../libs/connection/tsconfig.lib.json"
     },
     {
-      "path": "../../features/start-run/tsconfig.state.json"
-    },
-    {
       "path": "../../features/app-shell/tsconfig.main.json"
     },
     {
@@ -55,6 +56,12 @@
     },
     {
       "path": "../../features/new-run/tsconfig.main.json"
+    },
+    {
+      "path": "../../libs/run-history/tsconfig.testing.json"
+    },
+    {
+      "path": "../../libs/proto/tsconfig.lib.json"
     }
   ]
 }

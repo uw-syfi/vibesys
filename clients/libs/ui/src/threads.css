@@ -1,0 +1,424 @@
+/* Threads, scrubbers, charts and the theme swatch. Imported by components.css. */
+
+/* --- collapsible, message, tool call, thread ---------------------------------------------------- */
+
+.vs-collapsible {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.vs-collapsible-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-2) 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--text-body-strong-family);
+  font-size: var(--text-body-strong-size);
+  line-height: var(--text-body-strong-line);
+  font-weight: var(--text-body-strong-weight);
+  text-align: left;
+  cursor: pointer;
+}
+.vs-collapsible-head:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-collapsible-label {
+  flex: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-collapsible-label[data-mono] {
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+}
+.vs-collapsible-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  font-weight: var(--text-small-weight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-collapsible-meta {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted);
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+  font-weight: var(--text-code-weight);
+  white-space: nowrap;
+}
+.vs-collapsible-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding-left: var(--space-6);
+}
+
+.vs-message-text {
+  color: var(--text);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.vs-message-text[data-markdown="true"] {
+  white-space: normal;
+}
+.vs-message[data-variant="reasoning"] .vs-message-text {
+  color: var(--muted);
+  font-style: italic;
+}
+.vs-message[data-variant="prompt"] .vs-message-text,
+.vs-message[data-variant="note"] .vs-message-text {
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+}
+.vs-message[data-tone="err"] .vs-message-text {
+  color: var(--err);
+}
+
+.vs-reply-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.vs-reply-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.vs-reply-field[data-inline] {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.vs-code-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.vs-code-block-body {
+  box-sizing: border-box;
+  max-height: var(--log-sm);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  overflow: auto;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--log-bg);
+  color: var(--log-text);
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.vs-code-block-body:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-tool-call[data-state="failed"] .vs-code-block-body {
+  color: var(--log-err);
+}
+
+.vs-thread {
+  position: relative;
+  min-width: 0;
+}
+.vs-thread-pane {
+  box-sizing: border-box;
+  height: var(--thread);
+  margin: 0;
+  padding: 0 var(--space-4);
+  list-style: none;
+  overflow: auto;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+.vs-thread-pane:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-thread-row {
+  padding: var(--space-2) 0;
+  border-top: var(--hairline) solid var(--line);
+}
+.vs-thread[data-plain] > .vs-thread-pane {
+  /* A hairline and a gap at the top edge: a message scrolled partly out of view is cut at a visible
+     edge below the header, not flush against the header's own text. */
+  padding: var(--space-2) 0 0;
+  border: 0;
+  border-top: var(--hairline) solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+.vs-thread[data-plain] .vs-thread-row {
+  padding: var(--space-2) 0;
+  border-top: 0;
+}
+.vs-thread-gap {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.vs-thread-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-3) 0 var(--space-1);
+}
+.vs-thread-jump {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
+}
+
+/* --- scrubber ---------------------------------------------------------------------------------- */
+
+.vs-scrubber {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.vs-scrubber-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--control-sm);
+}
+.vs-scrubber-label {
+  flex: 1;
+  min-width: 0;
+}
+.vs-scrubber-range {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.vs-scrubber-ticks {
+  position: relative;
+  height: var(--text-section-line);
+  margin: 0 var(--space-2);
+}
+.vs-scrubber-tick {
+  position: absolute;
+  left: var(--tick-at);
+  transform: translateX(-50%);
+  color: var(--muted);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+  line-height: var(--text-section-line);
+  white-space: nowrap;
+}
+.vs-scrubber-tick:first-child {
+  transform: none;
+}
+.vs-scrubber-tick:last-child {
+  transform: translateX(-100%);
+}
+/* A measured track places each label itself, inside the track and clear of its neighbours. */
+.vs-scrubber-tick[data-placed] {
+  left: var(--tick-left);
+  transform: none;
+}
+
+/* --- chart: drawn in pixels, as wide as its box ------------------------------------------------------- */
+
+.vs-chart-box {
+  min-width: 0;
+}
+.vs-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.vs-chart-grid,
+.vs-chart-axis {
+  stroke: var(--grid);
+}
+.vs-chart-label {
+  fill: var(--muted);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+}
+.vs-chart-reference {
+  stroke: var(--muted);
+  stroke-width: 1.2;
+  stroke-dasharray: 5 5;
+}
+.vs-chart-step {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.vs-chart-point {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.vs-chart-point[data-filled] {
+  fill: var(--accent);
+}
+.vs-chart-point[data-tone=muted] {
+  stroke: var(--muted);
+}
+.vs-chart-point[data-tone=muted][data-filled] {
+  fill: var(--muted);
+}
+.vs-chart-point[data-tone=err] {
+  stroke: var(--err);
+}
+.vs-chart-point[data-tone=err][data-filled] {
+  fill: var(--err);
+}
+.vs-chart-playhead {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+
+/* --- theme swatch ------------------------------------------------------------------------------ */
+
+.vs-swatch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-3);
+  border: var(--focus-ring) solid transparent;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.vs-swatch:hover {
+  background: var(--panel-2);
+}
+.vs-swatch[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+.vs-swatch:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-swatch-preview {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  height: calc(var(--control) * 2);
+  padding: var(--space-3);
+  border: var(--hairline) solid var(--swatch-line);
+  border-radius: var(--radius);
+  background: var(--swatch-bg);
+}
+.vs-swatch-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.vs-swatch-accent {
+  flex: none;
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: var(--radius-full);
+  background: var(--swatch-accent);
+}
+.vs-swatch-bar {
+  display: block;
+  height: calc(var(--dot) - var(--space-1));
+  border-radius: var(--radius-sm);
+}
+.vs-swatch-bar[data-tone="text"] {
+  background: var(--swatch-text);
+}
+.vs-swatch-bar[data-tone="muted"] {
+  background: var(--swatch-muted);
+}
+.vs-swatch-bar[data-tone="panel"] {
+  height: var(--dot);
+  background: var(--swatch-panel);
+}
+.vs-swatch-bar[data-width="wide"] {
+  width: 60%;
+}
+.vs-swatch-bar[data-width="most"] {
+  width: 80%;
+}
+.vs-swatch-bar[data-width="half"] {
+  width: 45%;
+}
+.vs-swatch-bar[data-width="full"] {
+  width: 100%;
+}
+
+.vs-dock {
+  position: relative;
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  container-type: inline-size;
+}
+.vs-dock-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.vs-dock-side {
+  flex: 0 0 var(--pane-outline);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border-left: var(--hairline) solid var(--line);
+  background: var(--panel);
+}
+/* Too narrow for the screen and the panel side by side: the panel lies over the screen's right
+   edge, which keeps all its content and its width. */
+@container (max-width: 760px) {
+  .vs-dock-side {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(100%, var(--pane-outline));
+    box-shadow: var(--elevation-overlay);
+  }
+  /* What it covers is put away, not drawn under it: it keeps its place and its state. */
+  .vs-dock:has(> .vs-dock-side) > .vs-dock-main {
+    visibility: hidden;
+  }
+}

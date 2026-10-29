@@ -99,6 +99,28 @@ def _review(record: FinishedAttempt) -> tuple[AssessmentProposal, ...]:
     )
 
 
+_GATES = (EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK)
+
+
+def turned_down(record: FinishedAttempt, *, unsettled: frozenset[HypothesisOutcome]) -> bool:
+    """Whether the attempt's own checks turned its work down, whatever its workspace keeps.
+
+    Its review rejected it, its implementer reported an outcome in ``unsettled`` (it could not
+    implement the idea, or was blocked), or a trusted gate rejected its candidate. A strategy may
+    still keep the code as work in progress a later attempt builds on (retention is about reuse);
+    the attempt itself did not succeed, so its workstream is rejected. A recorded failure is not
+    the attempt's own verdict (the machinery may have failed it), so it is not one of these.
+    """
+    return (
+        record.review_passed is False
+        or record.outcome in unsettled
+        or any(
+            reading is not None and not reading.passed
+            for reading in (reading_of(record.readings, kind) for kind in _GATES)
+        )
+    )
+
+
 def outcome_of(record: FinishedAttempt) -> Literal["succeeded", "failed", "cancelled", "blocked"]:
     """The settlement outcome the record's scientific result maps to."""
     if record.failure == STOPPED:

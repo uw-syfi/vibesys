@@ -5,6 +5,7 @@ import {
   responseError,
   streamFailure,
 } from '@vibesys/contracts';
+import {newRequestId} from '@vibesys/request-identity';
 import {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
 import {
   type AbortSignalLike,
@@ -485,10 +486,7 @@ export class ControlChannel {
    * the command applied invisibly seconds later. An idempotent request waits
    * either way, because repeating it is free.
    *
-   * Note for readers tracing coverage: the refusal branch is unreachable from
-   * `clients/apps/web`, which issues only `query.snapshot` and so takes the
-   * idempotent default on every call. `websocket.test.ts` and
-   * `node/client.test.ts` reach it directly.
+   * `websocket.test.ts` and `node/client.test.ts` reach the refusal branch directly.
    */
   #enqueue(entry: ControlRequest): void {
     const phase = this.#phase;
@@ -986,10 +984,6 @@ export class ControlChannel {
       this.#observerFailure ??= {reason};
     }
   }
-}
-
-function newRequestId(): string {
-  return globalThis.crypto.randomUUID();
 }
 
 /**

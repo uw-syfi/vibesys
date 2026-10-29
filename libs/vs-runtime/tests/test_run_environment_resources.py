@@ -60,6 +60,10 @@ class _Session:
     events: list[str]
     close_error: BaseException | None = None
 
+    @property
+    def capture_commands(self) -> CommandRunner:
+        return self.sandbox
+
     def __enter__(self) -> _Session:
         self.events.append("session:enter")
         return self
@@ -93,7 +97,7 @@ def _request(tmp_path: Path, backend: _Backend) -> RunEnvironmentRequest:
 def _session(events: list[str]) -> _Session:
     return _Session(
         FakeCommandRunner(),
-        RunEnvironmentView(paths=AgentPaths()),
+        RunEnvironmentView(paths=AgentPaths(), workspace_git_writable=True),
         events,
     )
 

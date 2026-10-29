@@ -1,9 +1,18 @@
 import AxeBuilder from '@axe-core/playwright';
+import {create, toBinary} from '@bufbuild/protobuf';
 import {expect, type Page, test} from '@playwright/test';
-import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
-import {installFakeRun} from './fake-run.js';
-import {prototypeRun} from './fake-run-data.js';
-import {type FakeServerSeed, installFakeServer} from './fake-server.js';
+import {IntentAction, RunLiveness, WatchRunsResponseSchema} from '@vibesys/proto';
+import {Controls} from './chat-controls.js';
+import {
+  type FakeBridgeSeed,
+  installFakeBridge,
+  installFakeMachines,
+  installFakeProjectRuns,
+} from './fake-bridge.js';
+import {addInitScripts, initScript} from './init-scripts.js';
+import {journeyFixture, journeyHead, journeyScript, transitionJourney} from './journey-world.js';
+import {installGatewayOnly} from './retired-run-bridge.js';
+import {STARTED_AT} from './started-at.js';
 
 /**
  * The Run screen's live connection against the Fake bridge and a fake run server: selecting a live
@@ -29,13 +38,13 @@ function server(phase: string, paused: string | null = null): Record<string, unk
     phase,
     paused,
     end: null,
-    startedAt: 1,
+    startedAt: STARTED_AT,
     reason: null,
   };
 }
 
 function listed(live: unknown[]): Record<string, unknown> {
-  return {kind: 'listed', host: 'ssh:chelan4', live, ended: [], unreadable: [], unverified: []};
+  return {kind: 'listed', host: 'ssh:host-b', live, ended: [], unreadable: [], unverified: []};
 }
 
 const SEED: FakeBridgeSeed = {
@@ -45,8 +54,8 @@ const SEED: FakeBridgeSeed = {
   listings: [listed([server('running')])],
   recent: [
     {
-      host: 'ssh:chelan4',
-      hostLabel: 'chelan4',
+      host: 'ssh:host-b',
+      hostLabel: 'host-b',
       project: PROJECT,
       task: 'mpmc',
       runId: RUN_ID,
@@ -54,18 +63,6 @@ const SEED: FakeBridgeSeed = {
       attachedAt: 3,
     },
   ],
-};
-
-const SERVER: FakeServerSeed = {
-  runId: RUN_ID,
-  batch: {
-    type: 'event_batch',
-    events: [{timestamp: '2026-10-15T16:30:51Z', type: 'server_ready', sequence: 1}],
-    through_sequence: 1,
-    store_id: 'store-1',
-    history_after_sequence: 0,
-  },
-  snapshot: {run_id: RUN_ID, sequence: 1, status: 'running'},
 };
 
 const shots = process.env['RUN_PAGE_SHOTS'];
@@ -83,60 +80,116 @@ async function push(page: Page, listing: unknown): Promise<void> {
 
 test.use({colorScheme: 'dark'});
 
-test('a live run folds its trace and overview into the Overview and Work tabs', async ({page}) => {
-  await page.addInitScript(installFakeBridge, SEED);
-  await page.addInitScript(installFakeMachines, SEED);
-  await page.addInitScript(installFakeRun, {streams: [], text: {}});
-  await page.addInitScript(installFakeServer, prototypeRun(RUN_ID));
-  await page.goto('./shell.html');
-  await page
-    .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: /^\S+ queue-rs · mpmc/})
-    .click();
-
-  const objective = page.getByRole('region', {name: 'Objective'});
-  await expect(objective.getByText(/Maximize trusted end-to-end throughput/)).toBeVisible();
-  await expect(page.getByRole('region', {name: 'Performance'})).toBeVisible();
-  expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
-  if (shots !== undefined)
-    await page.screenshot({path: `${shots}/ink-live-overview.png`, fullPage: true});
-
-  await page.getByRole('tab', {name: 'Work'}).click();
-  const rows = page.getByRole('table', {name: 'Workstreams'});
-  for (const id of ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7']) {
-    await expect(rows.getByRole('cell', {name: id, exact: true}).first()).toBeVisible();
-  }
-  expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
-  if (shots !== undefined)
-    await page.screenshot({path: `${shots}/ink-live-work.png`, fullPage: true});
-});
-
-test('a live run pauses and resumes from the header over its session, and is let go', async ({
+test('a live run folds its trace into the ideas, the failed listed and hideable', async ({
   page,
 }) => {
-  await page.addInitScript(installFakeBridge, SEED);
-  await page.addInitScript(installFakeMachines, SEED);
-  await page.addInitScript(installFakeRun, {streams: [], text: {}});
-  await page.addInitScript(installFakeServer, SERVER);
+  await addInitScripts(page, [
+    initScript(installFakeBridge, SEED),
+    initScript(installFakeProjectRuns, SEED),
+    initScript(installFakeMachines, SEED),
+    initScript(installGatewayOnly, undefined),
+    journeyScript('prototype'),
+  ]);
+  await page.goto('./shell.html');
+  await page
+    .getByRole('main')
+    .getByRole('button', {name: /^queue-rs · mpmc/})
+    .click();
+
+  const ideas = page.getByRole('listbox', {name: 'Ideas'});
+  await expect(ideas.getByRole('option').first()).toBeVisible();
+  expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
+  if (shots !== undefined)
+    await page.getByRole('main').screenshot({path: `${shots}/ink-live-ideas.png`});
+  const shown = await ideas.getByRole('option').count();
+  await expect(page.getByRole('button', {name: /^\+ \d+ failed$/})).toHaveCount(0);
+  // A status chip narrows the list to its group and shows every idea again when pressed twice.
+  await page.locator('button.vs-dotlegend-item', {hasText: /\d+ failed/}).click();
+  await expect.poll(() => ideas.getByRole('option').count()).toBeLessThan(shown);
+  await page.locator('button.vs-dotlegend-item', {hasText: /\d+ failed/}).click();
+  await expect.poll(() => ideas.getByRole('option').count()).toBe(shown);
+  expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
+});
+
+test('a run that has tried no idea yet says what will appear, not a guess', async ({page}) => {
+  await addInitScripts(page, [
+    initScript(installFakeBridge, SEED),
+    initScript(installFakeProjectRuns, SEED),
+    initScript(installFakeMachines, SEED),
+    initScript(installGatewayOnly, undefined),
+    journeyScript('empty'),
+  ]);
+  await page.goto('./shell.html');
+  await page
+    .getByRole('main')
+    .getByRole('button', {name: /^queue-rs · mpmc/})
+    .click();
+  await expect(page.getByText('No ideas yet')).toBeVisible();
+  await expect(page.getByText('nothing measured yet')).toBeVisible();
+});
+
+test('a live run drains from the header over its session, and is let go', async ({page}) => {
+  const controls = new Controls(page, journeyFixture('empty'));
+  await controls.attach();
+  await addInitScripts(page, [
+    initScript(installFakeBridge, SEED),
+    initScript(installFakeProjectRuns, SEED),
+    initScript(installFakeMachines, SEED),
+    initScript(installGatewayOnly, undefined),
+    journeyScript('empty'),
+  ]);
   await page.goto('./shell.html');
   const nav = page.getByRole('navigation', {name: 'VibeSys'});
-  await nav.getByRole('button', {name: /^\S+ queue-rs · mpmc/}).click();
+  await page
+    .getByRole('main')
+    .getByRole('button', {name: /^queue-rs · mpmc/})
+    .click();
 
-  const pause = page.getByRole('button', {name: 'Pause'});
+  const pause = page.getByRole('button', {name: 'Pause', exact: true});
   await expect(pause).toBeEnabled();
-  await expect.poll(() => commands(page)).toEqual([`attach ${INSTANCE}`]);
+  expect(await commands(page)).toEqual([]);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (window as unknown as {fakeGateway: {active(): number}}).fakeGateway.active(),
+      ),
+    )
+    .toBeGreaterThan(0);
   await pause.click();
-  await expect.poll(() => commands(page)).toContain('command.pause');
+  await expect.poll(() => controls.posted.map(request => request.intent.case)).toEqual(['pause']);
 
   await push(page, listed([server('paused', 'user')]));
-  await expect(page.getByRole('main').getByText('Paused by you')).toBeVisible();
-  const resume = page.getByRole('button', {name: 'Resume'});
-  await expect(resume).toBeEnabled();
+  await transitionJourney(page, 'empty', 'parked');
+  await controls.settle(IntentAction.PAUSE, journeyHead('parked'));
+  // The drained writer has left: the host reports the writer ended, so Resume is admissible.
+  await page.evaluate(
+    bytes =>
+      (window as unknown as {fakeGateway: {observe(b: number[]): void}}).fakeGateway.observe(bytes),
+    [
+      ...toBinary(
+        WatchRunsResponseSchema,
+        create(WatchRunsResponseSchema, {
+          runId: RUN_ID,
+          liveness: RunLiveness.PARKED,
+          head: {epoch: 1},
+        }),
+      ),
+    ],
+  );
+  // A drained pause is parked: the run says Paused, offers Resume, and has nothing left to cut short.
+  await expect(page.getByRole('main').getByText('Paused', {exact: true}).first()).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Resume', exact: true})).toBeEnabled();
+  await expect(page.getByRole('button', {name: 'Pause now', exact: true})).toHaveCount(0);
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   if (shots !== undefined) await page.screenshot({path: `${shots}/ink-live-paused.png`});
-  await resume.click();
-  await expect.poll(() => commands(page)).toContain('command.resume');
 
   await nav.getByRole('button', {name: 'Settings'}).click();
-  await expect.poll(() => commands(page)).toContain('release');
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (window as unknown as {fakeGateway: {active(): number}}).fakeGateway.active(),
+      ),
+    )
+    .toBe(0);
+  expect(await commands(page)).toEqual([]);
 });

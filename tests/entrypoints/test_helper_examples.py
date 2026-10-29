@@ -11,8 +11,13 @@ from tests.support.example_materializer import FakeExampleMaterializer
 
 from entrypoints.examples import HelperExampleProjects
 from server.host_api import HelperErrorCode
-from server.host_examples import CreatedProject, ExampleList, ExampleSummary
-from server.host_helper_requests import ProjectLookupError
+from server.host_examples import (
+    CreatedProject,
+    ExampleDestination,
+    ExampleList,
+    ExampleSummary,
+    ProjectLookupError,
+)
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -196,3 +201,73 @@ def test_copying_out_any_tree_reproduces_it(
         if path.is_file()
     }
     assert copied == written
+
+
+def _destination_cases(tmp_path: Path) -> dict[str, Path]:
+    """One destination per kind of thing that can be there, for the checkout's example `stack`."""
+    base = tmp_path / "work"
+    base.mkdir()
+    (base / "empty").mkdir()
+    own = base / "own"
+    own.mkdir()
+    (own / "src.txt").write_text("candidate\n", encoding="utf-8")
+    _task(own, "spsc")
+    other = base / "other"
+    other.mkdir()
+    _task(other, "different")
+    (base / "junk").mkdir()
+    (base / "junk" / "notes.txt").write_text("x", encoding="utf-8")
+    (base / "file").write_text("x", encoding="utf-8")
+    return {name: base / name for name in ("absent", "empty", "own", "other", "junk", "file")}
+
+
+@pytest.mark.parametrize(
+    ("name", "state"),
+    [
+        ("absent", ExampleDestination.ABSENT),
+        ("empty", ExampleDestination.EMPTY),
+        ("own", ExampleDestination.EXAMPLE_PROJECT),
+        ("other", ExampleDestination.OCCUPIED),
+        ("junk", ExampleDestination.OCCUPIED),
+        ("file", ExampleDestination.OCCUPIED),
+    ],
+)
+def test_a_destination_is_what_creating_there_would_find(
+    tmp_path: Path, name: str, state: ExampleDestination
+) -> None:
+    checkout = _checkout(tmp_path / "vibesys")
+    destination = _destination_cases(tmp_path)[name]
+
+    found, project = _projects(checkout).destination("stack", destination)
+
+    expected = str(destination.resolve()) if state is ExampleDestination.EXAMPLE_PROJECT else None
+    assert (found, project) == (state, expected)
+
+
+def test_creating_succeeds_exactly_where_the_destination_is_absent_or_empty(
+    tmp_path: Path,
+) -> None:
+    checkout = _checkout(tmp_path / "vibesys")
+
+    for name, destination in _destination_cases(tmp_path).items():
+        state, _ = _projects(checkout).destination("stack", destination)
+        creatable = state in {ExampleDestination.ABSENT, ExampleDestination.EMPTY}
+        if creatable:
+            _projects(checkout).create("stack", destination)
+            continue
+        with pytest.raises(ProjectLookupError) as refused:
+            _projects(checkout).create("stack", destination)
+        assert refused.value.code is HelperErrorCode.DESTINATION_EXISTS, name
+
+
+def test_a_destination_for_an_unknown_example_or_without_a_checkout_is_refused(
+    tmp_path: Path,
+) -> None:
+    checkout = _checkout(tmp_path / "vibesys")
+    with pytest.raises(ProjectLookupError) as unknown:
+        _projects(checkout).destination("nope", tmp_path / "x")
+    with pytest.raises(ProjectLookupError) as unavailable:
+        _projects(None).destination("stack", tmp_path / "x")
+
+    assert unknown.value.code is HelperErrorCode.UNKNOWN_EXAMPLE
+    assert unavailable.value.code is HelperErrorCode.EXAMPLES_UNAVAILABLE

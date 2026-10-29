@@ -1,6 +1,13 @@
 import {describe, expect, test} from 'bun:test';
 import type {InstanceList} from '@vibesys/contracts/host-helper';
-import {type HostRun, hostListing, instanceObservation, instancePhaseText} from './listing.js';
+import {
+  type HostListing,
+  type HostRun,
+  hostListing,
+  hostsComeUp,
+  instanceObservation,
+  instancePhaseText,
+} from './listing.js';
 
 describe('instancePhaseText', () => {
   test('a starting run reads as its stage and progress, so a long image build is visible', () => {
@@ -19,6 +26,19 @@ describe('instancePhaseText', () => {
       }),
     ).toBe('Building image 3/?');
     expect(instancePhaseText({status: 'starting', stage: 'resolving'})).toBe('Resolving');
+  });
+
+  test('every startup stage has its own words', () => {
+    const stages = [
+      'resolving',
+      'probing_workspace',
+      'building_image',
+      'building_tools',
+      'starting_container',
+    ] as const;
+    const words = stages.map(stage => instancePhaseText({status: 'starting', stage}));
+    expect(new Set(words).size).toBe(stages.length);
+    expect(words).not.toContain(undefined);
   });
 
   test('any other phase reads as its status', () => {
@@ -155,5 +175,28 @@ describe('instanceObservation', () => {
       unreadable: ['unreadable'],
     };
     expect(instanceObservation(listing, TARGET)).toEqual({kind: 'absent'});
+  });
+});
+
+describe('hostsComeUp', () => {
+  const listed = (host: string): HostListing => ({
+    kind: 'listed',
+    host,
+    live: [],
+    ended: [],
+    unreadable: [],
+    unverified: [],
+  });
+  const down = (host: string): HostListing => ({
+    kind: 'unavailable',
+    host,
+    connection: {kind: 'offline', detail: 'unreachable'},
+  });
+
+  test('a host that answers now and did not before has come up; one that always did has not', () => {
+    expect(hostsComeUp([down('a'), listed('b')], [listed('a'), listed('b')])).toEqual(['a']);
+    expect(hostsComeUp([], [listed('a')])).toEqual(['a']);
+    expect(hostsComeUp([listed('a')], [listed('a')])).toEqual([]);
+    expect(hostsComeUp([listed('a')], [down('a')])).toEqual([]);
   });
 });

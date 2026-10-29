@@ -11,7 +11,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -55,6 +55,7 @@ class Outcome(core.Value):
     ended: str
     """The type of what the session gave: ``TurnFinished`` or ``Failed``."""
     reason: str | None = None
+    refusal: str | None = None
     checkpoint: bool = False
 
 
@@ -62,6 +63,7 @@ def role_of(**changes: object) -> core.Role:
     """A read-only worker role with these settings changed."""
     fields: dict[str, Any] = {
         "name": "worker",
+        "title": "Worker",
         "prompt": "worker.j2",
         "reply": Plan,
         "workspace": None,
@@ -78,7 +80,11 @@ def role_of(**changes: object) -> core.Role:
 def outcome_of(result: core.TurnFinished | core.Failed) -> Outcome:
     """The record a story reads."""
     if isinstance(result, core.Failed):
-        return Outcome(ended="Failed", reason=result.reason.value)
+        return Outcome(
+            ended="Failed",
+            reason=result.reason.value,
+            refusal=result.refusal.value if result.refusal is not None else None,
+        )
     return Outcome(ended="TurnFinished", checkpoint=result.checkpoint is not None)
 
 
@@ -311,12 +317,20 @@ def test_a_lost_turn_is_asked_again_as_often_and_after_as_long_as_the_role_says(
 
 
 @_SETTINGS
+@example(lost_turns=1)  # the dynamic implementer and judge (review of #3283, weak spot 1)
 @given(lost_turns=st.integers(0, core.MAX_LOST_TURNS))
 @_RESTARTING
-def test_a_lost_resume_is_never_asked_again_whatever_the_roles_lost_turns(
+def test_a_lost_resume_is_asked_again_once_if_the_role_asks_lost_turns_again(
     *, restarting: bool, lost_turns: int
 ) -> None:
-    role = role_of(may_wait_for_evaluations=True, lost_turns=lost_turns)
+    """A resumed turn the transport lost is asked again once, as a correction, then reported.
+
+    Before (review of #3283, weak spot 1), it was never asked again, so an outage that began
+    in a resumed turn's last minutes, too late for the capacity gate to hold it, lost the
+    whole workstream.
+    """
+    backoff = core.Backoff(first=5.0, cap=120.0)
+    role = role_of(may_wait_for_evaluations=True, lost_turns=lost_turns, lost_turn_backoff=backoff)
     run = start(role, restarting=restarting, view=SUSPENDING)
     run.advance_to(0.0)
 
@@ -326,8 +340,38 @@ def test_a_lost_resume_is_never_asked_again_whatever_the_roles_lost_turns(
     assert asked.template == EXCHANGES.resume
 
     run.lose(asked)
+    if lost_turns > 0:
+        assert min(run.sleeping_until) == backoff.delay(0)  # the others are the deadline
+        run.advance_to(backoff.delay(0))
+        again = turn(run)
+        assert again.template == asked.template
+        assert again.context == asked.context
+        assert spec_of(again).charge_class == "correction"
+        assert spec_of(again).predecessor == invocation_of(asked)
+        run.lose(again)
     assert published(run) == Outcome(ended="Failed", reason="lost")
     assert min(run.sleeping_until, default=1000.0) >= 1000.0  # no backoff: only the deadline
+
+
+@_RESTARTING
+def test_a_wait_core_will_never_resume_ends_the_ask_with_a_typed_refusal(
+    *, restarting: bool
+) -> None:
+    """Core refuses a resume its own dispatch check would refuse, instead of halting the run.
+
+    The search hears a typed refusal and decides what follows; no resume turn is asked.
+    """
+    run = start(role_of(may_wait_for_evaluations=True), restarting=restarting, view=SUSPENDING)
+    run.advance_to(0.0)
+
+    run.resume_refused(run.suspend(turn(run)), core.ResumeRefusal.HISTORY_UNAVAILABLE)
+
+    assert published(run) == Outcome(
+        ended="Failed",
+        reason=core.FailureReason.WAIT_REFUSED.value,
+        refusal=core.WaitRefusal.NOT_RESUMABLE.value,
+    )
+    assert not [asked for asked in run.open if isinstance(asked.request, core.RequestTurn)]
 
 
 # -- the checkpoint --------------------------------------------------------------------------------------
@@ -504,3 +548,25 @@ def test_a_role_asked_of_another_roles_agent_is_that_agents_id_and_model(
     assert asked.decision.root.startswith("router")
     with pytest.raises(core.UnknownRoleError):
         definition.with_models({"router": model})
+
+
+@pytest.mark.regression
+@example(interruptions=3)
+@given(interruptions=st.integers(1, 12))
+@_RESTARTING
+def test_epoch_interruption_never_spends_a_roles_correction_or_lost_turn(
+    *, restarting: bool, interruptions: int
+) -> None:
+    run = start(role_of(lost_turns=0, corrections=0), restarting=restarting)
+    asked = turn(run)
+    for _ in range(interruptions):
+        run.fail_turn(asked, core.TurnFailureKind.EPOCH_INTERRUPTED)
+        again = turn(run)
+        assert again.template == asked.template
+        assert again.context == asked.context
+        assert spec_of(again).charge_class == "correction"
+        assert spec_of(again).predecessor == invocation_of(asked)
+        assert run.sleeping_until == ()
+        asked = again
+    run.lose(asked)
+    assert published(run) == Outcome(ended="Failed", reason="lost")

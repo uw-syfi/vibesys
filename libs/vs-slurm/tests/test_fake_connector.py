@@ -253,7 +253,7 @@ def test_workspace_root_probe_recovers_rejection_published_before_local_commit(
         _probe(runner, state, run_id)
     assert connector.submitted_job_ids() == ()
 
-    with pytest.raises(SlurmWorkspaceRootProbeError, match="infrastructure error"):
+    with pytest.raises(SlurmWorkspaceRootProbeError, match="probe submission was rejected"):
         _probe(runner, state, run_id)
     _probe(runner, state, run_id)
 
@@ -293,7 +293,7 @@ def test_workspace_root_probe_replays_rejection_publication_interrupted_before_e
         _probe(runner, state, run_id)
     assert connector.submitted_job_ids() == ()
 
-    with pytest.raises(SlurmWorkspaceRootProbeError, match="infrastructure error"):
+    with pytest.raises(SlurmWorkspaceRootProbeError, match="probe submission was rejected"):
         _probe(runner, state, run_id)
     _probe(runner, state, run_id)
 

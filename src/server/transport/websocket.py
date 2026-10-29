@@ -96,11 +96,8 @@ _HOST_CHARACTERS = frozenset(ascii_lowercase + digits + "-.")
 # what the built bundle uses: its own script and stylesheet, and the WebSocket
 # of the origin it was loaded from. This mapping is the one representation of
 # the policy that the gateway serves; `_content_security_policy` is its only
-# serializer. Two tests restate it as independent cross-checks
-# (`_expected_policy` in `tests/server/test_websocket_transport.py` and
-# `expectedPolicy` in `clients/apps/web/e2e/gateway-hygiene.spec.ts`); neither
-# imports this module, so neither is tautological, and both fail when they
-# disagree with it.
+# serializer. `_expected_policy` in `tests/server/test_websocket_transport.py`
+# checks the complete policy independently.
 _POLICY_DIRECTIVES: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
         "default-src": ("'none'",),

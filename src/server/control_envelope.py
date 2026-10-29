@@ -9,7 +9,7 @@ published JSON Schema are unchanged. It imports only Pydantic, the standard
 library, and light ``server`` modules; ``tests/architecture/test_light_entrypoints.py``
 keeps it that way.
 
-Public surface: ``ProtocolModel``, ``Request``, ``StopCommand``, ``CommandAck``,
+Public surface: ``ProtocolModel``, ``Request``, ``StopCommand``, ``CommandAckEnvelope``,
 ``ResponseEnvelope``, and ``ResponseEnvelopeReader``.
 """
 
@@ -46,16 +46,21 @@ class Request(ProtocolModel):
 
 
 class StopCommand(Request):
-    """Request stopping after the active agent call."""
+    """Internal detached-host shutdown at its cooperative boundary."""
 
     type: Literal["command.stop"] = "command.stop"
     mode: Literal["after_current_agent_call"] = "after_current_agent_call"
 
 
-class CommandAck(ProtocolModel):
-    """Acknowledgment of a requested run command."""
+class CommandAckEnvelope(ProtocolModel):
+    """Acknowledgment of a requested run command, as a light client reads it.
 
-    action: Literal["pause", "resume", "steer", "stop"]
+    ``server.api.protocol.CommandAck`` narrows ``action`` to the control actions
+    (``vibesys.api.ControlAction``), which this light module cannot import; the full
+    ``Response`` declares that one, so the published schema names every action.
+    """
+
+    action: str
     status: Literal["pending", "consumed"]
 
 
@@ -73,7 +78,7 @@ class ResponseEnvelope(ProtocolModel):
     ok: bool = True
     error: str | None = None
     diagnostic: Diagnostic | None = None
-    ack: CommandAck | None = None
+    ack: CommandAckEnvelope | None = None
 
 
 class ResponseEnvelopeReader(ResponseEnvelope):
@@ -89,8 +94,6 @@ class ResponseEnvelopeReader(ResponseEnvelope):
 
     chat: JsonValue = None
     chat_thread: JsonValue = None
-    chat_options: JsonValue = None
-    tui_defaults: JsonValue = None
     snapshot: JsonValue = None
     events: JsonValue = None
     performance: JsonValue = None

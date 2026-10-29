@@ -1,0 +1,84 @@
+name: Set up runner apt packages
+description: Install missing runner packages from an exact-image archive cache
+inputs:
+  packages:
+    description: Space-separated Debian package names
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Identify missing packages and the runner image
+      id: packages
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+      run: |
+        set -euo pipefail
+        : "${ImageOS:?Runner ImageOS is required}" "${ImageVersion:?Runner ImageVersion is required}"
+        [[ "$PACKAGES" != *$'\n'* ]] || { echo "packages must be one line" >&2; exit 1; }
+        read -r -a packages <<< "$PACKAGES"
+        test "${#packages[@]}" -gt 0 || { echo "packages must contain at least one Debian package name" >&2; exit 1; }
+        missing=()
+        for package in "${packages[@]}"; do
+          [[ "$package" =~ ^[a-z0-9][a-z0-9+.-]*$ ]] || { echo "Invalid package: $package" >&2; exit 1; }
+          if [[ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)" != 'install ok installed' ]]; then
+            missing+=("$package")
+          fi
+        done
+        if (( ${#missing[@]} == 0 )); then
+          echo 'needed=false' >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        package_hash=$(printf '%s\n' "${packages[@]}" | sort -u | sha256sum | cut -d' ' -f1)
+        echo 'needed=true' >> "$GITHUB_OUTPUT"
+        echo "key=runner-apt-v1-${ImageOS}-${ImageVersion}-$(dpkg --print-architecture)-${package_hash}" >> "$GITHUB_OUTPUT"
+        echo "archives=${RUNNER_TEMP}/runner-apt-${package_hash}" >> "$GITHUB_OUTPUT"
+        echo "missing=${missing[*]}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore exact-image package archives
+      if: steps.packages.outputs.needed == 'true'
+      id: cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.packages.outputs.archives }}/*.deb
+        key: ${{ steps.packages.outputs.key }}
+
+    - name: Install cached archives without network access
+      if: steps.packages.outputs.needed == 'true' && steps.cache.outputs.cache-hit == 'true'
+      id: cached
+      continue-on-error: true
+      shell: bash
+      env:
+        ARCHIVES: ${{ steps.packages.outputs.archives }}
+      run: |
+        set -euo pipefail
+        sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s dpkg --force-confold --install "$ARCHIVES"/*.deb
+
+    - name: Download archives on a cache miss or a failed cached install
+      if: steps.packages.outputs.needed == 'true' && (steps.cache.outputs.cache-hit != 'true' || steps.cached.outcome == 'failure')
+      shell: bash
+      env:
+        ARCHIVES: ${{ steps.packages.outputs.archives }}
+        MISSING: ${{ steps.packages.outputs.missing }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$ARCHIVES/partial"
+        read -r -a packages <<< "$MISSING"
+        sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=10 update -o APT::Update::Error-Mode=any
+        sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=10 -o "Dir::Cache::archives=$ARCHIVES" install --download-only --no-install-recommends -y "${packages[@]}"
+
+    - name: Install downloaded archives
+      if: steps.packages.outputs.needed == 'true' && (steps.cache.outputs.cache-hit != 'true' || steps.cached.outcome == 'failure')
+      shell: bash
+      env:
+        ARCHIVES: ${{ steps.packages.outputs.archives }}
+      run: |
+        set -euo pipefail
+        sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s dpkg --force-confold --install "$ARCHIVES"/*.deb
+
+    - name: Save verified package archives
+      if: steps.packages.outputs.needed == 'true' && steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.packages.outputs.archives }}/*.deb
+        key: ${{ steps.packages.outputs.key }}

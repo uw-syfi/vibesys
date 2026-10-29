@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from tests.server.support import REQUEST_TIME, build_server_parts
+from tests.server.support import CONTROL_KEY, REQUEST_TIME, build_server_parts
 
 from server.api.protocol import IterationQuery, SubscribeRequest
 from server.events import EventType, RunEvent, RunStartedData
@@ -41,6 +41,7 @@ def _subscribed(
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(HANG_GUARD_S)
         client.connect(str(socket_path))
+        client.sendall(CONTROL_KEY.hello())
         with client.makefile("rwb") as stream:
             stream.write(
                 SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0)
@@ -56,6 +57,7 @@ def _request(socket_path: Path, request: IterationQuery) -> dict[str, object]:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(HANG_GUARD_S)
         client.connect(str(socket_path))
+        client.sendall(CONTROL_KEY.hello())
         with client.makefile("rwb") as stream:
             stream.write(request.model_dump_json().encode() + b"\n")
             stream.flush()
@@ -70,7 +72,12 @@ def test_iteration_query_follows_the_subscribed_store_across_control_sockets(
 
     with (
         UnixJsonlServer(
-            socket_path, parts.api, subscriptions=None, threads=OsThreads(), network=UnixNetwork()
+            socket_path,
+            parts.api,
+            subscriptions=None,
+            threads=OsThreads(),
+            network=UnixNetwork(),
+            key=CONTROL_KEY,
         ),
         _subscribed(socket_path) as read,
     ):

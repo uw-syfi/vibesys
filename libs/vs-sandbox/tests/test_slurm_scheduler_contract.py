@@ -106,9 +106,15 @@ class _ObservedCluster:
     def inspect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterInspectOutcome:
         return self._inner.inspect(target, by_job_id=by_job_id)
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
         self.scancels += 1
-        return self._inner.cancel(target, by_job_id=by_job_id)
+        return self._inner.cancel(target, by_job_id=by_job_id, observed=observed)
 
     def collect(
         self,

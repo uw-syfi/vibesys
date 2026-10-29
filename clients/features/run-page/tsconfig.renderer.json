@@ -53,6 +53,24 @@
     },
     {
       "path": "../../libs/ui/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.skeleton.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.reader.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.cache.json"
+    },
+    {
+      "path": "../../libs/request-identity/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.records.json"
     }
   ]
 }

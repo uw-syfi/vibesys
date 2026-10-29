@@ -4,8 +4,9 @@
  * selectors over the run trace's spans. Trajectories and counts are queries over spans: there is
  * no second record of the run's work.
  *
- * The selectors read the dynamic search's span kinds (`workstream`, `gate`); a run whose search
- * labels no spans yields empty trajectories and zero counts.
+ * The selectors read the span kinds every hypothesis search labels (`workstream`, `gate`,
+ * `adoption`; the vocabulary is `vibesys.search_spans`); a run whose search labels no spans yields
+ * empty trajectories and zero counts.
  */
 import type {RunEvent, RunOverview, RunSnapshot, Span} from '@vibesys/contracts';
 
@@ -47,42 +48,34 @@ export function gateTrajectory(spans: readonly Span[]): GateReading[] {
   return spans.filter(span => span.label?.kind === 'gate').map(gateReading);
 }
 
-/** The best measured candidate that passed its gate, by the objective's direction. */
-export function bestVsBaseline(
-  spans: readonly Span[],
-  direction: 'max' | 'min' | null | undefined,
-): GateReading | null {
-  const better =
-    direction === 'min' ? (a: number, b: number) => a < b : (a: number, b: number) => a > b;
-  let best: GateReading | null = null;
-  for (const reading of gateTrajectory(spans)) {
-    if (reading.verdict !== 'passed' || reading.metricValue === null) continue;
-    if (best === null || better(reading.metricValue, best.metricValue ?? reading.metricValue)) {
-      best = reading;
-    }
-  }
-  return best;
+/**
+ * What the run adopted: the search's own account of its winner, the `adoption` span (the
+ * operation that adopts it) with its verdict.
+ */
+export interface Adoption {
+  readonly span: string;
+  /** The adopted revision; null when the input itself stands (no candidate beat it). */
+  readonly candidate: string | null;
+  readonly metricValue: number | null;
+  /** The adopted candidate's value divided by the input's. */
+  readonly vsBaseline: number | null;
+  /** `adopted` or `not_adopted` once core has answered; null while it is adopting. */
+  readonly verdict: string | null;
 }
 
-/**
- * The best-so-far steps of the trajectory: each `passed` gate with a value that beats every passed
- * gate before it, by the objective's direction, in the order the measurements started. The last
- * step is `bestVsBaseline`'s reading (the first of equals, as there); a gate that fails, is slower
- * or has no value never moves the line.
- */
-export function runningBest(
-  spans: readonly Span[],
-  direction: 'max' | 'min' | null | undefined,
-): GateReading[] {
-  const better =
-    direction === 'min' ? (a: number, b: number) => a < b : (a: number, b: number) => a > b;
-  const steps: GateReading[] = [];
-  for (const reading of gateTrajectory(spans)) {
-    if (reading.verdict !== 'passed' || reading.metricValue === null) continue;
-    const best = steps.at(-1)?.metricValue ?? null;
-    if (best === null || better(reading.metricValue, best)) steps.push(reading);
-  }
-  return steps;
+/** The run's latest adoption, or null when none has begun (the run is still searching). */
+export function adoption(spans: readonly Span[]): Adoption | null {
+  const found = spans.filter(span => span.label?.kind === 'adoption').at(-1);
+  if (found === undefined) return null;
+  const attrs = attributes(found);
+  const candidate = attrs['candidate'];
+  return {
+    span: found.id,
+    candidate: typeof candidate === 'string' && candidate !== '' ? candidate : null,
+    metricValue: numberOrNull(attrs['metric_value']),
+    vsBaseline: numberOrNull(attrs['vs_baseline']),
+    verdict: found.label?.verdict ?? null,
+  };
 }
 
 /** How many workstreams the run has, by where each stands. */
@@ -92,26 +85,26 @@ export interface WorkstreamCounts {
   readonly live: number;
   /** Waiting on time, a latch or the stop (a slot, the input's measurement). */
   readonly waiting: number;
-  readonly accepted: number;
-  readonly rejected: number;
+  readonly passed: number;
+  readonly failed: number;
 }
 
-/** The workstreams of the run, counted by status and verdict. */
+/** The workstreams of the run, counted by status and verdict (passed or failed). */
 export function workstreamCounts(spans: readonly Span[]): WorkstreamCounts {
   let total = 0;
   let live = 0;
   let waiting = 0;
-  let accepted = 0;
-  let rejected = 0;
+  let passed = 0;
+  let failed = 0;
   for (const span of spans) {
     if (span.label?.kind !== 'workstream') continue;
     total += 1;
     if (span.status === 'running') live += 1;
     if (span.status === 'waiting' || span.status === 'pending') waiting += 1;
-    if (span.label.verdict === 'accepted') accepted += 1;
-    if (span.label.verdict === 'rejected') rejected += 1;
+    if (span.label.verdict === 'passed') passed += 1;
+    if (span.label.verdict === 'failed') failed += 1;
   }
-  return {total, live, waiting, accepted, rejected};
+  return {total, live, waiting, passed, failed};
 }
 
 function gateReading(span: Span): GateReading {

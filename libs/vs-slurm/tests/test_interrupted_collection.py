@@ -180,7 +180,7 @@ def _world(base: Path) -> _World:
     submitted = cluster.submit(request, operation_id=_OPERATION)
     assert isinstance(submitted, ClusterSubmitted)
     assert isinstance(submitted.handle, SlurmBatchHandle)
-    ledger = FakeEvaluationLedger(project=PROJECT)
+    ledger = FakeEvaluationLedger(project=PROJECT, clock=ManualClock())
     ledger.claim(
         LedgerRecord(
             key=_KEY,

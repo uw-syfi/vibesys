@@ -38,8 +38,9 @@ from vibesys.orchestration.dynamic.search.api import (
     ReviewPrompt,
     dynamic,
 )
-from vibesys.prompts import CORE_PROTOCOL_DIR, CoreProtocolTemplate
+from vibesys.prompts import CORE_PROTOCOL_DIR, CoreProtocolTemplate, core_protocol_variables
 from vs_core.api import (
+    ComparisonPolicy,
     EvidenceId,
     EvidenceKind,
     InvocationId,
@@ -120,6 +121,29 @@ METRIC = st.builds(
     unit=st.none() | tokens("u"),
 )
 METRICS = st.lists(METRIC, max_size=2).map(tuple)
+PARTS = st.lists(
+    st.builds(
+        dict,
+        hypothesis_id=tokens("part"),
+        revision=REVISIONS,
+        built_on=REVISIONS,
+        metric=st.none() | METRIC,
+    ),
+    min_size=2,
+    max_size=3,
+).map(tuple)
+"""The parts of a combine, each with the revision its own change starts from."""
+COMPOSITES = st.builds(
+    dict,
+    parts=PARTS,
+    verdict=st.sampled_from(("better", "within_noise", "worse", "unknown")),
+    best_part=st.none() | tokens("part"),
+    relative_noise=st.sampled_from((0.0, 0.03, 0.125)),
+    cancelled=st.booleans(),
+    unapplied=st.lists(
+        st.builds(dict, hypothesis_id=tokens("part"), part=tokens("hunk"), why=TEXT), max_size=2
+    ).map(tuple),
+)
 
 
 @st.composite
@@ -136,6 +160,7 @@ def _history(draw: st.DrawFn) -> list[dict[str, object]]:
             "candidate": draw(st.none() | REVISIONS),
             "metrics": draw(METRICS),
             "failure_tail": draw(st.just("") | TEXT),
+            "composite": draw(st.none() | COMPOSITES),
         }
         for index in range(draw(st.integers(0, 3)))
     ]
@@ -174,14 +199,19 @@ def _buildable(draw: st.DrawFn) -> list[dict[str, object]]:
 
 INPUT_FAILURES = (
     st.none()
-    | st.just({"kind": "benchmark-failed", "output": "bench-output"})
+    | st.just({"kind": "benchmark-failed", "stage": "benchmark", "output": "bench-output"})
+    | st.just({"kind": "accuracy-failed", "stage": "correctness", "output": "hung past 1200 s"})
     | st.just({"kind": "readings-undecodable"})
 )
-"""Why the input is unmeasurable, or None: one kind with the evaluator's output, one without."""
+"""Why the input is unmeasurable, or None: kinds that name a failed stage and its output, and
+one that names neither."""
 
 
 SOURCES = st.lists(
-    st.builds(dict, hypothesis_id=tokens("hid"), revision=REVISIONS), max_size=2
+    st.builds(
+        dict, hypothesis_id=tokens("hid"), revision=REVISIONS, built_on=st.none() | REVISIONS
+    ),
+    max_size=2,
 ).map(tuple)
 MAIN_MEASUREMENTS = st.builds(
     dict,
@@ -300,6 +330,15 @@ IMPLEMENT_PROMPTS = st.builds(
     baseline_pending=st.booleans(),
     input_failure=INPUT_FAILURES,
     rebase_onto=st.none() | REVISIONS,
+    rebase_from=st.none() | REVISIONS,
+    reply_rejected=st.lists(
+        st.builds(dict, index=st.integers(0, 3), hypothesis_id=tokens("stray")), max_size=2
+    ).map(tuple),
+    combine=st.just(()) | PARTS,
+    combine_missing=st.lists(
+        st.builds(dict, hypothesis_id=tokens("gone"), revision=tokens("rev")), max_size=1
+    ).map(tuple),
+    watch_for=st.just("") | tokens("watch"),
 )
 MERGE_PROMPTS = st.builds(
     lambda **fields: MergePrompt.model_validate(fields, strict=False),
@@ -395,15 +434,27 @@ CONTEXTS: dict[Template, st.SearchStrategy[BaseModel]] = {
 
 
 def variables(
-    context: BaseModel, *, agent_evaluation: bool = False, notes: str = ""
+    context: BaseModel,
+    *,
+    agent_evaluation: bool = False,
+    notes: str = "",
+    agent_git_writable: bool = True,
+    noise_declared: bool = False,
 ) -> dict[str, object]:
-    """What the render owner passes the template: run-level variables, then the context's own."""
+    """What the render owner passes the template: run-level variables, then the context's own.
+
+    ``noise_declared`` is whether the run's task declares its per-run noise, which the core
+    protocol's comparison rule reads.
+    """
+    policy = ComparisonPolicy(noise_floor=0.02 if noise_declared else 0.0)
     return {
+        **core_protocol_variables(policy),
         **run_prompt_variables(
             domain_sections=EMPTY_DOMAIN_SECTIONS,
             objective=OBJECTIVE,
             environment_notes=notes,
             agent_evaluation=agent_evaluation,
+            agent_git_writable=agent_git_writable,
         ),
         **context_variables(context),
     }

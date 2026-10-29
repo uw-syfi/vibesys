@@ -27,14 +27,19 @@ from urllib.request import urlopen
 import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
-from tests.server.support import DEADLOCK_GUARD_S, REQUEST_TIME, ServerParts, build_server_parts
+from tests.server.support import (
+    CONTROL_KEY,
+    DEADLOCK_GUARD_S,
+    REQUEST_TIME,
+    ServerParts,
+    build_server_parts,
+)
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK, InvalidStatus
 from websockets.protocol import State
 from websockets.server import ServerProtocol
 
-from entrypoints import web as web_entrypoint
 from entrypoints.production import production_web_discovery
 from server.api.protocol import (
     ChatQuery,
@@ -2007,6 +2012,7 @@ def test_a_half_open_subscriber_is_reaped_by_the_keepalive_and_lets_the_run_fini
                 tracker,
                 threads=OsThreads(),
                 network=UnixNetwork(),
+                key=CONTROL_KEY,
             ) as unix,
             WebSocketGateway(
                 parts.api,
@@ -2077,6 +2083,7 @@ def test_a_subscriber_that_stops_draining_is_abandoned_at_the_write_deadline(
                 tracker,
                 threads=OsThreads(),
                 network=UnixNetwork(),
+                key=CONTROL_KEY,
             ) as unix,
             WebSocketGateway(
                 parts.api,
@@ -2727,9 +2734,7 @@ def test_gateway_publishes_and_cleans_project_instance_record(tmp_path: Path) ->
     assert not instance_path.exists()
 
 
-def test_browser_session_survives_launch_capability_rotation(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_browser_session_survives_launch_capability_rotation(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path / "logs")
     assets = tmp_path / "web"
     assets.mkdir()
@@ -2762,7 +2767,17 @@ def test_browser_session_survives_launch_capability_rotation(
         async def rotate_with_an_attached_socket() -> None:
             origin = cast("Origin", page_origin)
             async with connect(gateway.websocket_url, origin=origin) as attached:
-                assert web_entrypoint.main(["rotate", "--instance", str(instance_path)]) == 0
+                record = WebInstanceRecord.read(instance_path)
+                assert record is not None
+                endpoint = urlsplit(record.capability_rotation_url)
+                assert (
+                    _fetch(
+                        gateway.bound_port,
+                        f"{endpoint.path}?{endpoint.query}",
+                        {CAPABILITY_ROTATION_HEADER: "1"},
+                    )[0]
+                    == HTTPStatus.OK
+                )
                 await attached.send(SnapshotQuery(timestamp=REQUEST_TIME).model_dump_json())
                 assert json.loads(await attached.recv())["ok"] is True
                 await _assert_rejected(
@@ -2791,7 +2806,6 @@ def test_browser_session_survives_launch_capability_rotation(
         assert replacement.token == gateway.token
         assert replacement.token != old_token
         assert replacement.started_at == 1_000.0
-        assert replacement.url in capsys.readouterr().out
         assert _fetch(gateway.bound_port, "/")[0] == 403
         assert _fetch(gateway.bound_port, "/", {"Cookie": cookie})[0] == 200
         assert (

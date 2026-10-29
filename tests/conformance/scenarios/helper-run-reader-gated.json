@@ -1,0 +1,53 @@
+{
+  "id": "helper-run-reader-gated",
+  "protocol": "host-helper",
+  "title": "The run.reader message needs the chat_ended_runs feature",
+  "description": "After a hello that negotiated no features, run.reader is answered feature_not_negotiated, so a client that did not ask never has a read-only server started for it.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": []
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "run.reader",
+        "request_id": "u0",
+        "deadline_ms": 30000,
+        "project": "/p",
+        "run_id": "20261010-120000-11111111-dynamic"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "u0",
+        "code": "feature_not_negotiated"
+      }
+    }
+  ]
+}

@@ -37,7 +37,7 @@ export function ThemeSwatch(props: {
         <span className="vs-swatch-bar" data-tone="panel" data-width="full" />
         <span className="vs-swatch-bar" data-tone="muted" data-width="half" />
       </span>
-      <Text variant="body-strong">{props.label}</Text>
+      <Text variant="item">{props.label}</Text>
     </button>
   );
 }

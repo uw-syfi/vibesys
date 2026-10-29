@@ -25,8 +25,7 @@ anything else in another package is an error.
 - **Layering and runtimes.** Each package declares its layer and its entries'
   runtimes in `package.json` (`"vibesys"`); `check_package_graph` is the one
   home of the rules between packages (layer direction, declared and exported
-  imports, runtime reachability, third-party confinement such as no
-  `@opentui/*` outside an app).
+  imports, runtime reachability, third-party confinement).
 - **No deep imports.** `imports-use-exports` in the package-graph checker rejects
   a specifier its target does not export; `workspace-packages-use-public-exports`
   in the dependency-cruiser configuration rejects a relative path into another
@@ -75,7 +74,7 @@ Named by package.
 | --- | --- |
 | 1, 2 | `@vibesys/run-state` (small `exports`, logic behind it) |
 | 4 | The layering rules in the dependency-cruiser configuration |
-| 6 | The runtime-neutral `@vibesys/transport` versus the Node-only `@vibesys/transport-node` |
+| 6 | The runtime-neutral `@vibesys/transport` versus the Node-only `@vibesys/connection` |
 | 8 | `@vibesys/contracts` generated protocol types |
 
 ## Commands

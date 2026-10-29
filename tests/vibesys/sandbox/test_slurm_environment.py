@@ -11,7 +11,7 @@ import shutil
 import sys
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast
 
 import pytest
 from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
@@ -30,8 +30,10 @@ from vs_runtime.api.infrastructure import (
     RunEnvironment,
     RunEnvironmentRequest,
     RunEnvironmentSessionRole,
+    RunEnvironmentSpec,
     SlurmEnvironment,
     TrustedEvaluatorRequirements,
+    build_run_environment,
     evaluator_go_module_ready_path,
     run_environment_deprecation,
 )
@@ -41,14 +43,26 @@ from vs_runtime.api.testing import (
     daemon_engine,
     idle_environment_system,
 )
-from vs_sandbox.api import ComputeBackendImpl, DockerSandbox, SandboxKind
+from vs_sandbox.api import (
+    CaptureExecutionIdentity,
+    CaptureExecutionKind,
+    ComputeBackendImpl,
+    DockerSandbox,
+    SandboxKind,
+)
 from vs_sandbox.api.slurm import (
     AgentGpuConfig,
     SlurmPolicyError,
     load_slurm_operator_settings,
 )
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher, SubprocessProbe, UnixNetwork
+from vs_sim.api import (
+    OsThreads,
+    ProcessSpec,
+    SubprocessPipedProcessLauncher,
+    SubprocessProbe,
+    UnixNetwork,
+)
 from vs_sim.api.testing import (
     NO_PROCESSES,
     FakeProcesses,
@@ -56,13 +70,26 @@ from vs_sim.api.testing import (
     ProcessScript,
     SimThreads,
 )
-from vs_slurm.api import FakeConnector, SlurmWorkspaceRootProbeError
+from vs_slurm.api import (
+    FakeConnector,
+    WorkspaceRootProbeFailed,
+    WorkspaceRootProbeProven,
+    WorkspaceRootProbeQueued,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from vs_runtime.api.infrastructure import RunEnvironmentSession
+    from vs_sim.api import Threads
+    from vs_slurm.api import WorkspaceRootProbeReport
 from vs_sim.api import DISCARD
+
+
+class _RecoverableCaptureSession(Protocol):
+    @property
+    def capture_execution(self) -> CaptureExecutionIdentity | None: ...
+
 
 _SLURM_CONFIG = """[slurm]
 name = "test-cluster"
@@ -137,6 +164,19 @@ class _PassThroughConfinement:
     def wrap(self, workspace: Path, argv: Sequence[str]) -> list[str]:
         del workspace
         return list(argv)
+
+
+class _ImmediateSleepThreads:
+    """Keep this real-confinement tier concurrent without waiting on scheduler observation gaps."""
+
+    def __init__(self, delegate: Threads) -> None:
+        self._delegate = delegate
+
+    def sleep(self, seconds: float) -> None:
+        del seconds
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._delegate, name)
 
 
 def _write_agent_gpu_slurm_config(tmp_path: Path, srun_log: Path) -> Path:
@@ -246,6 +286,17 @@ def test_the_agent_never_runs_on_the_host_for_either_slurm_environment(
         # Only an agent that may run GPU commands reaches a broker at all.
         has_broker = any(token.startswith("VIBESYS_COMMAND_BROKER_TOKEN=") for token in run)
         assert has_broker is (name not in ("slurm", "slurm-local"))
+        # Profile attribution has its own role: agent_gpu routes it through the
+        # shared Slurm launcher, while every other mode keeps the editor runner.
+        assert (session.capture_commands is not session.sandbox) is has_broker
+        if has_broker:
+            identity = cast("_RecoverableCaptureSession", session).capture_execution
+            assert identity is not None
+            assert session.capture_commands.id == identity.execution_id
+            assert identity.kind is CaptureExecutionKind.SLURM_GPU
+        else:
+            identity = cast("_RecoverableCaptureSession", session).capture_execution
+            assert identity is None
     finally:
         session.close()
 
@@ -425,6 +476,7 @@ def test_local_slurm_root_prepares_once_without_run_owned_roots_and_children_nev
 ) -> None:
     connector = FakeConnector(tmp_path / "cluster")
     threads = SimThreads()
+    reports: list[WorkspaceRootProbeReport] = []
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     request = RunEnvironmentRequest(
@@ -438,11 +490,9 @@ def test_local_slurm_root_prepares_once_without_run_owned_roots_and_children_nev
         framework_root=tmp_path,
         clock=ManualClock(),
         system=replace(idle_environment_system(), threads=threads, slurm_processes=connector),
+        workspace_root_probe=reports.append,
     )
     environment = _local_probe_environment(tmp_path, kind, monkeypatch)
-
-    environment.prepare(request)
-    environment.prepare(request)
 
     def outage_after_root_start(
         _request: dict[str, object],
@@ -450,17 +500,33 @@ def test_local_slurm_root_prepares_once_without_run_owned_roots_and_children_nev
     ) -> dict[str, object]:
         raise OSError
 
-    connector.intercept(outage_after_root_start)
-    for index in range(3):
-        environment.prepare(
-            replace(
-                request,
-                log_dir=tmp_path / f"child-{index}-logs",
-                session_role=RunEnvironmentSessionRole.CHILD,
+    def start_the_run() -> None:
+        environment.prepare(request)
+        environment.prepare(request)
+        _until_the_probe_settles(threads, reports)
+        connector.intercept(outage_after_root_start)
+        for index in range(3):
+            environment.prepare(
+                replace(
+                    request,
+                    log_dir=tmp_path / f"child-{index}-logs",
+                    session_role=RunEnvironmentSessionRole.CHILD,
+                )
             )
-        )
+
+    try:
+        threads.run(start_the_run)
+    finally:
+        threads.close()
 
     assert connector.submitted_job_ids() == ("5000",)
+    assert reports[-1] == WorkspaceRootProbeProven()
+
+
+def _until_the_probe_settles(threads: SimThreads, reports: list[WorkspaceRootProbeReport]) -> None:
+    """Wait, in virtual time, for the root's probe to report how it ended."""
+    while not reports or isinstance(reports[-1], WorkspaceRootProbeQueued):
+        threads.sleep(1.0)
 
 
 def test_local_slurm_root_probe_diagnostic_is_closed_and_bounded(tmp_path: Path) -> None:
@@ -475,6 +541,7 @@ def test_local_slurm_root_probe_diagnostic_is_closed_and_bounded(tmp_path: Path)
 
     connector.intercept(fail_with_untrusted_detail)
     threads = SimThreads()
+    reports: list[WorkspaceRootProbeReport] = []
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     config = tmp_path / "slurm.toml"
@@ -501,13 +568,23 @@ rsync_command = ["fake-connector", "rsync"]
         framework_root=tmp_path,
         clock=ManualClock(),
         system=replace(idle_environment_system(), threads=threads, slurm_processes=connector),
+        workspace_root_probe=reports.append,
     )
 
-    with pytest.raises(SlurmWorkspaceRootProbeError) as failure:
+    def start_the_run() -> None:
         SlurmEnvironment(load_slurm_operator_settings(config)).prepare(request)
+        _until_the_probe_settles(threads, reports)
 
-    assert marker not in str(failure.value)
-    assert len(str(failure.value)) < 200
+    try:
+        threads.run(start_the_run)
+    finally:
+        threads.close()
+
+    # The run started; the probe's failure reaches the operator, closed and bounded.
+    (failed,) = reports
+    assert isinstance(failed, WorkspaceRootProbeFailed)
+    assert marker not in failed.failure
+    assert len(failed.failure) < 200
 
 
 def test_connector_transport_offers_the_remote_profiler_capability(tmp_path: Path) -> None:
@@ -617,7 +694,34 @@ def test_a_gpu_job_reads_an_operator_declared_path_outside_the_workspace_and_nev
     backend = DaemonBackend(
         daemon_engine(tmp_path, launcher=SubprocessPipedProcessLauncher()), threads=OsThreads()
     )
-    request = _request(tmp_path, backend)
+    scheduler_actions: list[str] = []
+
+    def settled_scheduler(spec: ProcessSpec) -> ProcessScript:
+        shell_command = spec.argv[-1]
+        if shell_command == "sinfo" or shell_command.startswith("sinfo "):
+            return ProcessScript(stdout=b"main* 2:00:00\n")
+        action = next(
+            (
+                name
+                for name in ("scancel", "squeue")
+                if shell_command == name or shell_command.startswith(f"{name} ")
+            ),
+            None,
+        )
+        assert action is not None, spec.argv
+        scheduler_actions.append(action)
+        return ProcessScript()
+
+    scheduler = FakeProcesses(settled_scheduler, lambda _seconds: None)
+    base_request = _request(tmp_path, backend)
+    request = replace(
+        base_request,
+        system=replace(
+            base_request.system,
+            threads=cast("Threads", _ImmediateSleepThreads(base_request.system.threads)),
+            slurm_processes=scheduler,
+        ),
+    )
     environment = _real_confinement_environment(tmp_path, backend, [tools] if exposed else [])
     session = open_run_environment(environment, request)
     try:
@@ -632,6 +736,8 @@ def test_a_gpu_job_reads_an_operator_declared_path_outside_the_workspace_and_nev
         assert ("operator interpreter" in read.output) is exposed
         assert write.exit_code != 0
         assert not (tools / "written.txt").exists()
+        failed_commands = 1 if exposed else 2
+        assert scheduler_actions == ["scancel", *("squeue",) * 6] * failed_commands
     finally:
         session.close()
 
@@ -823,3 +929,38 @@ def test_closing_the_session_removes_every_host_socket(tmp_path: Path, name: str
     session.close()
 
     assert not any(socket.exists() for socket in sockets)
+
+
+def test_the_slurm_agent_container_is_built_from_the_task_image_id(tmp_path: Path) -> None:
+    """Regression: the Slurm editor built its agent container on the backend's default image.
+
+    The run selection's task image reaches the backend the run opens with, and
+    the agent layer is built ``FROM`` it: from the immutable ID resolved at
+    launch, never the tag, so a later launch of the same task that prunes the
+    tag cannot break this run's next agent container build.
+    """
+    task_image = "vibesys-task-build:0123456789abcdef-" + "0" * 32
+    image_id = "sha256:" + "d" * 64
+    config = tmp_path / "slurm-local.toml"
+    config.write_text(_SLURM_LOCAL_CONFIG, encoding="utf-8")
+    runner = FakeDockerBuildRunner()
+    environment = build_run_environment(
+        RunEnvironmentSpec(
+            name="slurm",
+            options={"config_path": str(config), "image": task_image, "build_runner": runner},
+            image_id=image_id,
+        )
+    )
+    # As the run's resources do: the backend opens on the environment's backend image.
+    backend = FakeComputeBackend(threads=SimThreads(), image=environment.backend_image)
+    request = replace(_request(tmp_path, backend), system=idle_environment_system())
+
+    session = open_run_environment(environment, request)
+    session.close()
+
+    (agent_build,) = [argv for argv, _, _ in runner.calls if argv[1] == "build"]
+    assert f"BASE_IMAGE=vibesys-base:{image_id.removeprefix('sha256:')}" in agent_build
+    assert ("docker", "tag", image_id, f"vibesys-base:{'d' * 64}") in [
+        argv for argv, _, _ in runner.calls
+    ]
+    assert not any(task_image in " ".join(argv) for argv, _, _ in runner.calls)

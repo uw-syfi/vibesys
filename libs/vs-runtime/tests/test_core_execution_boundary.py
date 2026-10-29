@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import typing
 from enum import StrEnum
 from types import UnionType
-from typing import TYPE_CHECKING, Annotated, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Any, get_args, get_origin
 
 import pytest
-from hypothesis import assume, given
+from hypothesis import assume, example, given
 from hypothesis import strategies as st
 
 from vs_core.api import (
@@ -60,9 +61,11 @@ from vs_runtime.api.core import (
     RequestExecutors,
     RuntimeCommitError,
     RuntimeExecutionError,
+    RuntimeRecord,
 )
 from vs_runtime.api.core_shell_fixtures import CounterConfig, ShellTraceTransitions, counter
 from vs_runtime.api.testing import FakePublicationDelivery, FakeRequestExecution
+from vs_sim.api.testing import HANG_GUARD_S, Gate
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -442,6 +445,124 @@ async def test_failing_publication_does_not_block_dispatch_and_is_reported_when_
     assert len(sessions.inner.executions) == 1
     assert delivery.attempts == 1
     assert shell.record.pending_publications
+
+
+@pytest.mark.regression
+@example(requests=3, slots=1)
+@given(requests=st.integers(1, 8), slots=st.integers(1, 4))
+async def test_suspended_publication_allows_every_request_to_commit(
+    requests: int, slots: int
+) -> None:
+    """Publication stays held until all observations commit, including queued successors."""
+
+    class HeldDelivery(FakePublicationDelivery):
+        def __init__(self) -> None:
+            super().__init__()
+            self.observed = Gate()
+
+        def committed(
+            self, previous: RuntimeRecord[Any] | None, current: RuntimeRecord[Any]
+        ) -> None:
+            del previous
+            records = current.envelope.core.records.records
+            if sum(record.observation is not None for record in records) == requests:
+                self.observed.open()
+
+        async def publish(
+            self, publication: Publication, context: PublicationContext
+        ) -> PublicationAcknowledgement:
+            await self.observed.wait()
+            return await super().publish(publication, context)
+
+    delivery = HeldDelivery()
+    executor = FakeRequestExecution(ExecutorRole.SESSIONS)
+    shell = CoreRuntime(
+        FakeStateStore(),
+        counter.driver(CounterConfig()),
+        declared(),
+        config=CounterConfig(),
+        bindings=CoreRuntimeBindings(
+            transitions=ShellTraceTransitions(with_requests=True),
+            executors=RequestExecutors(sessions=executor),
+            commits=delivery,
+        ),
+    )
+    shell.start("host", now_at=0, lease_duration=100)
+    for instant in range(1, requests + 1):
+        shell.submit(ClockAdvanced(now_at=instant), now_at=instant)
+    async with asyncio.timeout(HANG_GUARD_S):
+        assert await shell.run_until_idle(delivery, now_at=requests, max_concurrent=slots) is None
+    assert len(executor.executions) == requests
+    assert all(
+        record.observation is not None for record in shell.record.envelope.core.records.records
+    )
+    assert not shell.record.pending_publications
+    assert [publication.sequence for publication in delivery.read()] == list(
+        range(1, shell.record.delivery_cursor + 1)
+    )
+
+
+async def test_immediate_publications_preserve_the_order_before_executor_callbacks() -> None:
+    effects: list[str] = []
+
+    class ImmediateDelivery(FakePublicationDelivery):
+        async def publish(
+            self, publication: Publication, context: PublicationContext
+        ) -> PublicationAcknowledgement:
+            effects.append("publication")
+            return await super().publish(publication, context)
+
+    async def execute(
+        request: Request, context: ExecutionContext, result: ExecutionResult
+    ) -> ExecutionOutcome:
+        del request, context
+        effects.append("execution")
+        return result
+
+    store = FakeStateStore()
+    shell = make_shell(store, ScriptedExecution(execute))
+    await prepared(shell, store)
+    pending = len(shell.record.pending_publications)
+    assert await shell.run_until_idle(ImmediateDelivery(), now_at=1) is None
+    assert effects[:pending] == ["publication"] * pending
+    assert effects[pending] == "execution"
+
+
+async def test_a_failed_request_cancels_and_joins_its_suspended_publication() -> None:
+    class HeldDelivery(FakePublicationDelivery):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started, self.released, self.hold = Gate(), Gate(), Gate()
+
+        async def publish(
+            self, publication: Publication, context: PublicationContext
+        ) -> PublicationAcknowledgement:
+            self.started.open()
+            try:
+                await self.hold.wait()
+                return await super().publish(publication, context)
+            finally:
+                self.released.open()
+
+    delivery = HeldDelivery()
+
+    async def fail(
+        request: Request, context: ExecutionContext, result: ExecutionResult
+    ) -> ExecutionOutcome:
+        del request, context, result
+        await delivery.started.wait()
+        message = "executor failed during publication"
+        raise RuntimeError(message)
+
+    store = FakeStateStore()
+    shell = make_shell(store, ScriptedExecution(fail))
+    await prepared(shell, store)
+    async with asyncio.timeout(HANG_GUARD_S):
+        with pytest.raises(RuntimeError, match="executor failed during publication"):
+            await shell.run_until_idle(delivery, now_at=1)
+    assert delivery.released.is_open
+    assert shell.record.pending_publications
+    assert shell.in_flight == ()
 
 
 @pytest.mark.asyncio

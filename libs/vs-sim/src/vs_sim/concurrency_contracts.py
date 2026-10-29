@@ -12,6 +12,7 @@ asserts outcomes, never durations. Implementation probes are exported only throu
 from __future__ import annotations
 
 import asyncio
+import errno
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -689,6 +690,39 @@ class NetworkContract:
             return accept_timed_out, recv_timed_out, closed_refuses
 
         assert subject.threads.run(program) == (True, True, True)
+
+    def test_timed_io_on_a_locally_closed_connection_raises_os_error(self) -> None:
+        """Bounded sends and receives report a local close through the public contract."""
+        subject = self.network_under_test(0)
+
+        def program() -> tuple[Exception | None, Exception | None]:
+            address = subject.address("closed")
+            listener = subject.network.listen(address)
+            client = subject.network.connect(address, HANG_GUARD_S)
+            server_side = listener.accept(HANG_GUARD_S)
+            client.close()
+            errors: list[Exception | None] = []
+            try:
+                for operation in (
+                    lambda: client.send(b"x", subject.threads.tick),
+                    lambda: client.recv(1, subject.threads.tick),
+                ):
+                    try:
+                        operation()
+                    except (OSError, ValueError) as error:
+                        errors.append(error)
+                    else:
+                        errors.append(None)
+            finally:
+                server_side.close()
+                listener.close()
+            return errors[0], errors[1]
+
+        send_error, recv_error = subject.threads.run(program)
+        assert isinstance(send_error, OSError)
+        assert isinstance(recv_error, OSError)
+        assert (send_error.errno, send_error.strerror) == (errno.EBADF, "connection closed")
+        assert (recv_error.errno, recv_error.strerror) == (errno.EBADF, "connection closed")
 
     def test_a_recv_timeout_bounds_only_that_recv(self) -> None:
         """A ``send`` after a timed-out ``recv`` waits for a slow reader instead of timing out.

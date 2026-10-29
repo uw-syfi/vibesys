@@ -68,6 +68,7 @@ export function PathInput(props: {
         type="text"
         role="combobox"
         data-mono
+        data-mono-id
         value={props.value}
         placeholder={props.placeholder}
         spellCheck={false}

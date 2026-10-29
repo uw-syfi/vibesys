@@ -35,12 +35,17 @@ from vs_slurm.api import (
     slurm_transport_broker_policy,
 )
 
+# Stands in for ssh: prints the arguments it was given.
+_ECHO_ARGUMENTS = (sys.executable, "-c", "import sys; print(' '.join(sys.argv[1:]), end='')")
+# What every SSH transport call runs: the configured command with every prompt off.
+_SSH = (*_ECHO_ARGUMENTS, "-o", "BatchMode=yes")
+
 
 def _config() -> SlurmConfig:
     return SlurmConfig(
         name="cluster",
         remote_workspace_root="/remote/vibesys",
-        transport=SlurmSshTransport(host="cluster", ssh_command=("/usr/bin/printf",)),
+        transport=SlurmSshTransport(host="cluster", ssh_command=_ECHO_ARGUMENTS),
         transport_timeout_seconds=5,
     )
 
@@ -101,14 +106,17 @@ def test_broker_executes_only_the_configured_destination(tmp_path: Path) -> None
     )
     broker.start()
     try:
-        result = _brokered(broker, ("/usr/bin/printf", "--", "cluster", "hostname"))
+        result = _brokered(broker, (*_SSH, "--", "cluster", "hostname"))
         with pytest.raises(PermissionError, match="unauthorized destination"):
-            _brokered(broker, ("/usr/bin/printf", "--", "other-cluster", "hostname"))
+            _brokered(broker, (*_SSH, "--", "other-cluster", "hostname"))
+        with pytest.raises(PermissionError, match="not authorized"):
+            # An ssh call that could prompt (no BatchMode) is not the configured transport.
+            _brokered(broker, (*_ECHO_ARGUMENTS, "--", "cluster", "hostname"))
     finally:
         broker.close()
 
     assert result.returncode == 0
-    assert result.stdout == b"cluster"
+    assert result.stdout == b"-o BatchMode=yes -- cluster hostname"
     assert not broker.socket_path.exists()
 
 
@@ -136,7 +144,7 @@ def test_broker_rejects_rsync_paths_outside_run_roots(tmp_path: Path) -> None:
                     "rsync",
                     "-a",
                     "-e",
-                    "ssh",
+                    "ssh -o BatchMode=yes",
                     "--",
                     "/etc/passwd",
                     "cluster:/remote/vibesys/cluster/workspace/passwd",
@@ -149,10 +157,11 @@ def test_broker_rejects_rsync_paths_outside_run_roots(tmp_path: Path) -> None:
 def test_a_brokered_process_is_outside_the_callers_process_group(tmp_path: Path) -> None:
     """r14: Ctrl-C to the run's process group killed brokered transport calls."""
     report = "import os; print(os.getpgid(0), os.getpid())"
+    transport = SlurmSshTransport(host="cluster", ssh_command=(sys.executable, "-c", report))
     config = SlurmConfig(
         name="cluster",
         remote_workspace_root="/remote/vibesys",
-        transport=SlurmSshTransport(host="cluster", ssh_command=(sys.executable, "-c", report)),
+        transport=transport,
         transport_timeout_seconds=30,
     )
     broker = SlurmProcessBroker(
@@ -162,9 +171,7 @@ def test_a_brokered_process_is_outside_the_callers_process_group(tmp_path: Path)
     )
     broker.start()
     try:
-        result = _brokered(
-            broker, (sys.executable, "-c", report, "--", "cluster", "scancel 1"), timeout=30
-        )
+        result = _brokered(broker, (*transport.ssh_argv, "--", "cluster", "scancel 1"), timeout=30)
     finally:
         broker.close()
 
@@ -187,14 +194,14 @@ def test_a_broker_timeout_is_refused_after_the_transport_timeout(tmp_path: Path)
     broker.start()
     try:
         with pytest.raises(PermissionError, match=r"timed out after 5 seconds"):
-            _brokered(broker, ("/usr/bin/printf", "--", "cluster", "hostname"), b"transport input")
+            _brokered(broker, (*_SSH, "--", "cluster", "hostname"), b"transport input")
     finally:
         broker.close()
 
     assert clock.now() == 5
     assert processes.ran == [
         ProcessSpec(
-            ("/usr/bin/printf", "--", "cluster", "hostname"),
+            (*_SSH, "--", "cluster", "hostname"),
             input=b"transport input",
             max_output_bytes=MAX_TRANSPORT_STREAM_BYTES,
         )
@@ -309,7 +316,7 @@ def test_ssh_policy_uses_the_same_private_snapshot_for_rsync(tmp_path: Path) -> 
                 "rsync",
                 "-a",
                 "-e",
-                "ssh",
+                "ssh -o BatchMode=yes",
                 "--",
                 str(source),
                 "cluster:/remote/vibesys/cluster/input",

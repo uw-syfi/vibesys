@@ -1,4 +1,12 @@
-import {type FocusEvent, type JSX, type KeyboardEvent, useId, useRef, useState} from 'react';
+import {
+  type FocusEvent,
+  type JSX,
+  type KeyboardEvent,
+  type ReactNode,
+  useId,
+  useRef,
+  useState,
+} from 'react';
 import type {ButtonFace, ButtonVariant} from './button.js';
 import {Icon} from './icon.js';
 import {rovingStep} from './roving.js';
@@ -12,6 +20,14 @@ export type MenuItem = {
   | {readonly press: () => void; readonly href?: never}
   | {readonly href: string; readonly press?: never}
 );
+
+/**
+ * A box whose `Menu`s open under it, no wider than it: for a menu in a narrow panel, where the
+ * list would otherwise grow past the panel's edge. The menus sit in the box's `Row`s.
+ */
+export function MenuBounds(props: {readonly children: ReactNode}): JSX.Element {
+  return <div className="vs-menu-bounds">{props.children}</div>;
+}
 
 const ITEM = '[role="menuitem"]';
 
@@ -124,8 +140,8 @@ function MenuEntry(props: {readonly item: MenuItem; readonly done: () => void}):
   } as const;
   if (item.href !== undefined) {
     return (
-      <a {...shared} href={item.href} onClick={props.done}>
-        {item.label}
+      <a {...shared} href={item.href} title={item.label} onClick={props.done}>
+        <span>{item.label}</span>
       </a>
     );
   }
@@ -133,12 +149,13 @@ function MenuEntry(props: {readonly item: MenuItem; readonly done: () => void}):
     <button
       {...shared}
       type="button"
+      title={item.label}
       onClick={() => {
         props.done();
         item.press?.();
       }}
     >
-      {item.label}
+      <span>{item.label}</span>
     </button>
   );
 }

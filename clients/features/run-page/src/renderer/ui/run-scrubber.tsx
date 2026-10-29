@@ -1,4 +1,4 @@
-import {Card, Scrubber} from '@vibesys/ui';
+import {Scrubber} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {type RunView, scrubberView, type TraceLog, viewAtPosition} from '../../state/index.js';
 
@@ -10,26 +10,28 @@ export function RunScrubber(props: {
   readonly log: TraceLog;
   readonly view: RunView;
   readonly ended: boolean;
+  /** The host's wall time now (see `runWallNow`); null when the run has no live clock. */
+  readonly wall: number | null;
+  readonly position?: string | undefined;
   readonly change: (view: RunView) => void;
 }): JSX.Element | null {
   const {log, view, ended, change} = props;
-  const shown = scrubberView(log, view, ended);
+  const shown = scrubberView(log, view, ended, props.wall);
   if (shown === null) return null;
   return (
-    <Card>
-      <Scrubber
-        label="Run position"
-        value={shown.value}
-        last={shown.last}
-        live={shown.latest}
-        pastLabel="Replay"
-        latestLabel={shown.latestLabel}
-        backLabel={shown.backLabel}
-        position={shown.position}
-        ticks={shown.ticks}
-        change={index => change(viewAtPosition(log, index))}
-        backToLive={() => change({at: 'live'})}
-      />
-    </Card>
+    <Scrubber
+      label="Run position"
+      value={shown.value}
+      last={shown.last}
+      live={shown.latest}
+      pastLabel="Replay"
+      latestLabel={shown.latestLabel}
+      backLabel={shown.backLabel}
+      position={props.position ?? shown.position}
+      ticks={shown.ticks}
+      tickWord="Call"
+      change={index => change(viewAtPosition(log, index))}
+      backToLive={() => change({at: 'live'})}
+    />
   );
 }

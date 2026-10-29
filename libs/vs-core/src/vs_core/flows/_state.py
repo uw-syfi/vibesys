@@ -19,6 +19,7 @@ from vs_core.types.common import (
     WorkspaceMode,
 )
 from vs_core.types.kinds import EventKind
+from vs_core.types.measurement import ComparisonSettled
 from vs_core.types.search import (
     AdoptionFinished,
     CheckpointKnown,
@@ -28,7 +29,9 @@ from vs_core.types.search import (
     MessageDelivered,
     MessageDropped,
     OperationFinished,
+    ResumeFailed,
     ResumeReady,
+    StopLifted,
     StopRequested,
     TimeReached,
     TurnEnded,
@@ -48,7 +51,7 @@ from vs_core.types.strategy import (
 )
 from vs_core.types.until import Failed
 
-from ._spans import RunTrace
+from ._spans import RunTrace, SpanLabel
 
 if TYPE_CHECKING:
     from vs_core._registry import OperationRegistry
@@ -74,6 +77,7 @@ type JournaledEvent = Annotated[
     | MeasurementFinished
     | AdoptionFinished
     | StopRequested
+    | StopLifted
     | TimeReached
     | MessageDelivered
     | MessageDropped
@@ -82,7 +86,9 @@ type JournaledEvent = Annotated[
     | TurnYielded
     | YieldFailed
     | ResumeReady
+    | ResumeFailed
     | CheckpointKnown
+    | ComparisonSettled
     | Failed,
     Field(discriminator="kind"),
 ]
@@ -228,6 +234,8 @@ class LiveFlows(Value):
     """The flow's published record as JSON (``ctx.publish``), kept beside the journal."""
     choice: Selection | None = None
     """The winner named so far (``ctx.choose``): restarted flows keep it."""
+    choice_label: SpanLabel | None = None
+    """The label ``ctx.choose`` gave the choice: what the span that adopts it is labelled."""
     in_flight: tuple[InFlight, ...] = ()
     """The measurements the flows wait for: a restart gives each to the resumed flow that asks
     for it again, instead of measuring twice."""

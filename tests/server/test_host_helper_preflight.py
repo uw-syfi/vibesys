@@ -25,14 +25,14 @@ from server.host_api import (
     REPO_FLAG,
     ROLE_MODEL_FLAG,
     ROLE_REASONING_EFFORT_FLAG,
-    DockerReachable,
-    DockerUnreachable,
     HarnessChoice,
     HelperError,
     HelperErrorCode,
+    HelperFeature,
     RunPreflightReply,
     RunPreflightRequest,
     RunStartRequest,
+    request_features,
 )
 from server.host_helper_machine import DOCKER_VERSION_COMMAND
 from server.host_helper_preflight import (
@@ -43,12 +43,19 @@ from server.host_helper_preflight import (
     repeated_option,
 )
 from server.host_helper_requests import answer, launch_arguments
+from server.host_machine_facts import (
+    DockerReachable,
+    DockerUnreachable,
+)
 from server.host_preflight import (
+    Backend,
+    BackendUnavailable,
     Check,
     CheckId,
     CheckState,
     CopyOut,
     PreflightReport,
+    ProjectDirty,
     ReasoningEffort,
     RoleOption,
     RunOptions,
@@ -147,6 +154,10 @@ def test_run_start_launches_with_the_typed_options_before_its_args() -> None:
     )
 
 
+_UNASKED_CHECKS = [check for check in CheckId if check is not CheckId.MEASUREMENT_TARGET]
+"""The checks every reply holds in order; ``measurement_target`` only comes with ``measure_on``."""
+
+
 def _project(root: Path) -> Path:
     task = root / ".vibesys" / "tasks" / "spsc"
     task.mkdir(parents=True)
@@ -155,9 +166,11 @@ def _project(root: Path) -> Path:
     return root
 
 
-def _preflight(project: Path, **fields: object) -> tuple[object, FakeRunPreflight]:
+def _preflight(
+    project: Path, *, report: PreflightReport | None = None, **fields: object
+) -> tuple[object, FakeRunPreflight]:
     threads = SimThreads()
-    preflight = FakeRunPreflight()
+    preflight = FakeRunPreflight() if report is None else FakeRunPreflight(report_=report)
     host = replace(fake_host(threads, SimNetwork(threads)), preflight=preflight)
     request = RunPreflightRequest.model_validate(
         {"request_id": "p", "deadline_ms": 5000, "project": str(project), **fields}
@@ -179,7 +192,10 @@ def test_preflight_runs_the_run_check_with_the_arguments_run_start_would_launch(
     )
 
     assert isinstance(reply, RunPreflightReply)
-    assert [check.id for check in reply.checks] == list(CheckId)
+    # Without `with_project_clean` the reply is the one a client that predates that check expects.
+    assert [check.id for check in reply.checks] == [
+        check_id for check_id in _UNASKED_CHECKS if check_id is not CheckId.PROJECT_CLEAN
+    ]
     assert preflight.calls == [
         (
             project.resolve(),
@@ -197,6 +213,40 @@ def test_preflight_runs_the_run_check_with_the_arguments_run_start_would_launch(
             ),
         )
     ]
+
+
+_ROLE_NAMES = st.lists(
+    st.from_regex(r"[a-z0-9][a-z0-9._-]{0,20}", fullmatch=True), max_size=6, unique=True
+).map(tuple)
+
+
+@given(roles=_ROLE_NAMES, asked=st.sampled_from([None, True]))
+def test_the_reply_names_the_orchestrations_roles_exactly_when_they_were_asked_for(
+    tmp_path_factory: pytest.TempPathFactory, roles: tuple[str, ...], *, asked: bool | None
+) -> None:
+    """The roles are the run's own report; a client that did not ask never sees the field."""
+    report = PreflightReport(
+        settings=SettingsValid(),
+        uses_docker=False,
+        agent_image=Check(id=CheckId.AGENT_IMAGE, state=CheckState.OK, detail="cached"),
+        evaluator=Check(id=CheckId.EVALUATOR_AVAILABLE, state=CheckState.OK, detail="benchmark"),
+        roles=roles,
+    )
+    project = _project(tmp_path_factory.mktemp("proj"))
+
+    reply, _ = _preflight(project, report=report, with_roles=asked)
+
+    assert isinstance(reply, RunPreflightReply)
+    assert reply.roles == (roles if asked else None)
+    assert ('"roles"' in reply.model_dump_json()) is bool(asked)
+
+
+def test_asking_for_roles_needs_the_run_roles_feature() -> None:
+    request = RunPreflightRequest.model_validate(
+        {"request_id": "p", "deadline_ms": 5000, "project": "/p", "with_roles": True}
+    )
+
+    assert request_features(request) == (HelperFeature.PREFLIGHT, HelperFeature.RUN_ROLES)
 
 
 def test_preflight_refuses_args_that_repeat_a_typed_option_naming_it(tmp_path: Path) -> None:
@@ -348,4 +398,106 @@ def test_docker_fails_exactly_when_the_run_may_need_it_and_it_is_unreachable(
     (check,) = [check for check in checks if check.id is CheckId.DOCKER_REACHABLE]
     unreachable = isinstance(docker, DockerUnreachable)
     assert (check.state is CheckState.FAIL) == (uses_docker is not False and unreachable)
-    assert [each.id for each in checks] == list(CheckId)
+    assert [each.id for each in checks] == _UNASKED_CHECKS
+
+
+_UNAVAILABLE = BackendUnavailable(task="mpmc", backend=Backend.CUDA, declared=(Backend.CUDA,))
+
+
+def _failing_backend_report() -> PreflightReport:
+    return PreflightReport(
+        settings=SettingsInvalid(
+            code="accelerator_unavailable",
+            stage="compute_backend",
+            message="CLI wording: --backend may only name a backend the task declares",
+            cause=_UNAVAILABLE,
+        ),
+        uses_docker=True,
+        agent_image=Check(id=CheckId.AGENT_IMAGE, state=CheckState.WARN, detail="not checked"),
+        evaluator=Check(
+            id=CheckId.EVALUATOR_AVAILABLE, state=CheckState.WARN, detail="not checked"
+        ),
+        backend=Backend.CUDA,
+    )
+
+
+@pytest.mark.parametrize("asked", [None, True])
+def test_a_backend_failure_carries_its_typed_cause_and_the_backend_only_when_asked_for(
+    tmp_path: Path, *, asked: bool | None
+) -> None:
+    reply, _ = _preflight(
+        _project(tmp_path / "proj"), report=_failing_backend_report(), with_backend=asked
+    )
+
+    assert isinstance(reply, RunPreflightReply)
+    settings = next(check for check in reply.checks if check.id is CheckId.SETTINGS_VALID)
+    assert settings.state is CheckState.FAIL
+    assert settings.cause == (_UNAVAILABLE if asked else None)
+    assert reply.backend == (Backend.CUDA if asked else None)
+    assert ('"cause"' in reply.model_dump_json()) is bool(asked)
+    assert ('"backend"' in reply.model_dump_json()) is bool(asked)
+
+
+def test_a_backend_failures_detail_names_the_task_and_never_a_flag_or_setting(
+    tmp_path: Path,
+) -> None:
+    reply, _ = _preflight(_project(tmp_path / "proj"), report=_failing_backend_report())
+
+    assert isinstance(reply, RunPreflightReply)
+    settings = next(check for check in reply.checks if check.id is CheckId.SETTINGS_VALID)
+    assert "mpmc" in settings.detail
+    assert "--" not in settings.detail
+
+
+def test_asking_for_the_backend_needs_the_run_backend_feature() -> None:
+    request = RunPreflightRequest.model_validate(
+        {"request_id": "p", "deadline_ms": 5000, "project": "/p", "with_backend": True}
+    )
+
+    assert request_features(request) == (HelperFeature.PREFLIGHT, HelperFeature.RUN_BACKEND)
+
+
+def _report_with_changes(changes: tuple[str, ...]) -> PreflightReport:
+    return _failing_backend_report().model_copy(
+        update={"settings": SettingsValid(), "project_changes": changes}
+    )
+
+
+@given(changes=st.lists(st.from_regex(r"[a-z][a-z0-9_./]{0,20}", fullmatch=True), max_size=5))
+def test_a_dirty_project_fails_project_clean_naming_the_project_and_every_path(
+    tmp_path_factory: pytest.TempPathFactory, changes: list[str]
+) -> None:
+    """Regression: Ready to start was green and Start failed on ``must be clean``."""
+    project = _project(tmp_path_factory.mktemp("proj"))
+
+    reply, _ = _preflight(
+        project, report=_report_with_changes(tuple(changes)), with_project_clean=True
+    )
+
+    assert isinstance(reply, RunPreflightReply)
+    clean = next(check for check in reply.checks if check.id is CheckId.PROJECT_CLEAN)
+    if changes:
+        assert clean.state is CheckState.FAIL
+        assert clean.cause == ProjectDirty(project=str(project.resolve()), paths=tuple(changes))
+    else:
+        assert (clean.state, clean.cause) == (CheckState.OK, None)
+
+
+def test_the_clean_check_is_listed_in_check_order_only_when_asked_for(tmp_path: Path) -> None:
+    project = _project(tmp_path / "proj")
+
+    asked, _ = _preflight(project, with_project_clean=True)
+    unasked, _ = _preflight(project)
+
+    assert isinstance(asked, RunPreflightReply)
+    assert isinstance(unasked, RunPreflightReply)
+    assert [check.id for check in asked.checks] == _UNASKED_CHECKS
+    assert CheckId.PROJECT_CLEAN not in [check.id for check in unasked.checks]
+
+
+def test_asking_for_the_clean_check_needs_the_project_clean_feature() -> None:
+    request = RunPreflightRequest.model_validate(
+        {"request_id": "p", "deadline_ms": 5000, "project": "/p", "with_project_clean": True}
+    )
+
+    assert request_features(request) == (HelperFeature.PREFLIGHT, HelperFeature.PROJECT_CLEAN)

@@ -15,7 +15,9 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
 from ._registry import ContractError
+from ._run_park import drain_bound
 from ._search_events import run_view, translate
+from ._validation import takes_command
 from .types.common import THIS_RUN, RunStatus, Scope
 from .types.kernel import ProposalSubmitted
 from .types.records import RecoveryPhase
@@ -33,6 +35,24 @@ if TYPE_CHECKING:
 
 type CoreStep = Callable[[CoreState, CoreEvent], Transition]
 """The core step the shell uses (production or a fake of it)."""
+
+
+def deferred(core: CoreState, decision: Decision) -> bool:
+    """Whether core cannot take ``decision`` yet but will later, so the shell holds it.
+
+    Until recovery is ready core takes no decision. While the operator has the run paused it
+    takes only what a paused run accepts (``takes_command``): the rest waits for the resume
+    instead of reaching the search as a refusal, which would end the search's work.
+    """
+    if isinstance(decision, WakeAt):
+        return False  # the shell waits on a wake; it is never submitted
+    if core.records.recovery.phase != RecoveryPhase.READY:
+        return True
+    command = decision.request if isinstance(decision, Wait) else decision
+    return (
+        core.run.status in (RunStatus.DRAINING, RunStatus.PARKED)
+        and drain_bound(core, command) is None
+    ) or (core.run.status == RunStatus.PAUSED and not takes_command(core.run, command))
 
 
 def check_decisions(decisions: object) -> tuple[Decision, ...]:
@@ -101,6 +121,8 @@ class SearchDriver[S: StrategyState, C](Protocol):
 class Inbox:
     """What waits for the search: events to deliver, and decisions core could not take yet.
 
+    A held decision is one core could not take when the search made it (``deferred``).
+
     ``discarded`` are events core already kept from the search (see ``translate``); they
     are passed on in ``Advanced.discarded`` so the shell logs everything in one place.
     """
@@ -114,8 +136,9 @@ class Inbox:
 class Advanced[S: StrategyState]:
     """What one call changed: the search state, core, the events core published, the wakes.
 
-    ``held`` are decisions the search made while core could not take them (recovery is not
-    ready); the shell keeps them and passes them back in the next ``Inbox``.
+    ``held`` are decisions the search made while core could not take them (``deferred``:
+    recovery is not ready, or the run is paused); the shell keeps them and passes them back
+    in the next ``Inbox``.
     """
 
     state: S
@@ -148,13 +171,14 @@ class _Pass:
     discarded: list[Discarded] = field(default_factory=list)
 
     def submit(self, decisions: tuple[Decision, ...], core: CoreState) -> CoreState:
-        """Send the decisions to core, or hold them until recovery is ready."""
+        """Send the decisions to core, holding those core cannot take yet (``deferred``)."""
         self.wakes.extend(d.time for d in decisions if isinstance(d, WakeAt))
         work = tuple(d for d in decisions if isinstance(d, Wait | Finish))
         if not work or core.run.status == RunStatus.TERMINAL:
             return core
-        if core.records.recovery.phase != RecoveryPhase.READY:
-            self.held.extend(work)
+        self.held.extend(d for d in work if deferred(core, d))
+        work = tuple(d for d in work if not deferred(core, d))
+        if not work:
             return core
         own = Scope(owner=core.run.run_id, generation=core.run.generation)
         submissions = tuple(self.host.registry.validate_submission(_in_scope(d, own)) for d in work)

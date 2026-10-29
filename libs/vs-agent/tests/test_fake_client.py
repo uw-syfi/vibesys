@@ -15,20 +15,20 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack, override
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
-from vs_agent.api import AgentOutputSchemaError
+from vs_agent.api import AgentOutputSchemaError, AgentQuotaError, QuotaCondition
 from vs_agent.contracts import AgentCapabilities, AgentUsage
 from vs_agent.fake_client import FakeAgentClient, FakeInvocation
 from vs_agent.session_key import AgentSessionKey, SessionScope
 from vs_agent.sink import AgentEventSink
 from vs_mcp.api import StdioServerDescriptor
-from vs_sim.api.testing import SimThreads
+from vs_sim.api.testing import SimThreads, VirtualClock
 
 if TYPE_CHECKING:
-    from vs_agent.api import AgentProgress
+    from vs_agent.api import AgentProgress, AgentTurnRequest, CapacityStops
     from vs_agent.events import AgentOutputChannel, AgentStatusData, TodoItemData, ToolResultPayload
     from vs_mcp.api import ToolServerDescriptor
 
@@ -544,3 +544,103 @@ def test_a_client_without_a_log_dir_writes_no_usage_row(tmp_path: Path) -> None:
     )
 
     assert list(tmp_path.iterdir()) == []
+
+
+class _RecordingGate:
+    """A capacity gate that notes whether each turn it is handed was already cancelled."""
+
+    def __init__(self) -> None:
+        self.handed_cancelled: list[bool] = []
+
+    def wait_for_capacity(
+        self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str, stops: CapacityStops
+    ) -> None:
+        del error, turn, role
+        self.handed_cancelled.append(stops.cancelled)
+        stops.park(_GATE_WAIT_S)
+
+    def turn_served(self, provider: str, model: str | None) -> None:
+        del provider, model
+
+
+_GATE_WAIT_S = 10.0
+"""How long the recording gate holds a turn before it is sent again."""
+
+
+_TURNS = 20
+"""Turns per schedule: each has its own window between registration and its failing send."""
+
+
+@example(seed=0)  # a schedule that lands a cancel in the window (review of #3283, mutation M6)
+@given(seed=st.integers(min_value=0, max_value=2**32 - 1))
+def test_a_turn_cancelled_before_its_capacity_stop_is_never_handed_to_the_gate(seed: int) -> None:
+    """As the real client: a turn cancelled by the time its send fails is not waited for.
+
+    A canceller cancels the session again and again while the provider refuses every turn, and
+    the schedule seed interleaves it with the turns, so a cancel can land between a turn's
+    registration and its failing send. Such a turn must end with the quota error without
+    reaching the gate; a turn the gate holds ends when the cancel ends its wait.
+    """
+    threads = SimThreads(VirtualClock(0.0, limit=3600.0), schedule_seed=seed)
+    client = FakeAgentClient(threads=threads, provider="claude")
+    client.fail("implementer", AgentQuotaError("claude", QuotaCondition.UNAVAILABLE, "503"))
+    gate = _RecordingGate()
+    client.set_capacity_gate(gate)
+    key = AgentSessionKey(SessionScope.ROLE, "implementer")
+    ended: list[str] = []
+
+    def cancel_until_they_end() -> None:
+        while len(ended) < _TURNS:
+            client.cancel_session(key)
+            threads.sleep(0.0)  # a switch point: the seed may run a turn before the next
+
+    def main() -> None:
+        threads.spawn(cancel_until_they_end, name="canceller", daemon=True)
+        for _ in range(_TURNS):
+            with pytest.raises(AgentQuotaError):
+                client.invoke_text(
+                    kind="implementer",
+                    workspace=Path(),
+                    system_prompt="sys",
+                    user_prompt="go",
+                    round_label="r1",
+                    session_key=key,
+                )
+            ended.append("quota")
+
+    threads.run(main)
+
+    assert len(ended) == _TURNS
+    assert True not in gate.handed_cancelled
+
+
+@given(condition=st.sampled_from(QuotaCondition), times=st.sampled_from((1, 2, None)))
+def test_with_no_gate_the_fake_resends_one_transient_stop_as_the_real_client(
+    condition: QuotaCondition, times: int | None
+) -> None:
+    """As the real client's own gate: one resend of a transient stop after 30 s, then it raises.
+
+    ``times`` is how many sends fail (``None``: every one). An exhausted quota is never resent.
+    """
+    threads = SimThreads()
+    client = FakeAgentClient(threads=threads, provider="claude")
+    client.fail("implementer", AgentQuotaError("claude", condition, "stop"), times=times)
+    resent = condition is not QuotaCondition.QUOTA_EXHAUSTED
+
+    def main() -> tuple[bool, float]:
+        try:
+            client.invoke_text(
+                kind="implementer",
+                workspace=Path(),
+                system_prompt="sys",
+                user_prompt="go",
+                round_label="r1",
+            )
+        except AgentQuotaError:
+            return False, threads.clock.now()
+        return True, threads.clock.now()
+
+    answered, waited = threads.run(main)
+
+    assert answered == (resent and times == 1)
+    assert (waited >= 30.0) == resent  # each scripted send also takes a little virtual time

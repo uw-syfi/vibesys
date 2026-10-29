@@ -44,6 +44,7 @@ from .types.evaluation import (
     JobTerminationRequested,
     JobWaitLapsed,
     MeasurementRequested,
+    MeasurementSubmissionEnded,
     MeasurementSubmissionObserved,
     ObservationsDue,
     RegisteredJobObserved,
@@ -55,6 +56,7 @@ from .types.kernel import (
     CoreEvent,
     DecisionCompleted,
     DecisionSubmitted,
+    EpochResumed,
     ProposalSubmitted,
     RunControlEvent,
     Signal,
@@ -73,6 +75,7 @@ from .types.records import (
     RequestPrepared,
     RequestUndispatchable,
     RetryDue,
+    TurnHeld,
 )
 from .types.scheduling import (
     AdmissionControl,
@@ -83,6 +86,7 @@ from .types.scheduling import (
     AttemptRequested,
     ClockAdvanced,
     CloseAdmission,
+    ParallelLimitChanged,
     QueueEntryRetired,
     RegisterAttempt,
     RunDrained,
@@ -93,8 +97,12 @@ from .types.sessions import (
     AcquisitionStalled,
     CheckpointStalled,
     InputAcceptanceObserved,
+    InputMidTurnReleased,
+    InputOfferedMidTurn,
     InputReservationReleased,
     InputReservationRequested,
+    InputTakenMidTurn,
+    InputWithdrawRequested,
     InterruptRequested,
     InvocationCancellationRequested,
     InvocationChargeRefunded,
@@ -147,6 +155,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | ClockAdvanced()
             | AdmissionControl()
             | AdoptionFenceLifted()
+            | ParallelLimitChanged()
             | AdmitAttempt()
             | CloseAdmission()
             | RunDrained()
@@ -195,6 +204,10 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | SessionWaitLapsed()
             | InvocationCheckpointPending()
             | SessionInputReceived()
+            | InputWithdrawRequested()
+            | InputOfferedMidTurn()
+            | InputTakenMidTurn()
+            | InputMidTurnReleased()
             | InputReservationRequested()
             | InputAcceptanceObserved()
             | InputReservationReleased()
@@ -212,6 +225,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | JobsDrainRequested()
             | RunJobsCancelRequested()
             | MeasurementSubmissionObserved()
+            | MeasurementSubmissionEnded()
             | ContinuationJobsChanged()
             | ContinuationRetireRequested()
             | ContinuationReopenRequested()
@@ -246,12 +260,13 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | BlockedRecordStalled()
             | ReconciliationCommandLapsed()
             | HostRenewed()
+            | TurnHeld()
             | RecoveryCheckWaitLapsed()
             | OperationRetireRequested()
             | DecisionCompleted()
         ):
             return Area.RECORDS
-        case DecisionSubmitted() | ProposalSubmitted() | RunControlEvent():
+        case DecisionSubmitted() | ProposalSubmitted() | RunControlEvent() | EpochResumed():
             raise ContractError(("event",), "kernel event requires translation")
         case _:
             assert_never(event)

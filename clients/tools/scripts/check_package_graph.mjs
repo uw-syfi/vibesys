@@ -11,8 +11,8 @@
  * From those declarations, the manifests, the tsconfig projects, and the source on disk, the gate
  * reports one message per violation, prefixed with the rule it breaks (`RULES` lists them):
  *
- * - `declarations`: the `vibesys` block exists, names a known layer and known runtimes, may carry
- *   the closed `design` marker (`strict`), and has no other keys.
+ * - `declarations`: the `vibesys` block exists, names a known layer and known runtimes, and has no
+ *   other keys.
  * - `entries-match-exports`: the `vibesys.entries` keys are exactly the `exports` keys (`.` alone
  *   when a package publishes no exports).
  * - `exports-name-source`: each export lists the `@vibesys/source` condition first, naming a source
@@ -54,21 +54,10 @@
  * - `layer-matches-folder`: a package's folder agrees with the layer its manifest declares, so the
  *   manifest stays the one source of truth and the folder tree only mirrors it (`LAYER_FOLDERS`):
  *   `libs/*` declares foundation, core, domain, or service; `features/*` declares feature; and
- *   `apps/*` declares app. A package outside those folders fails, except a deprecated package on
- *   `DEPRECATED_OUTSIDE_FOLDERS` (`tui`), which stays where it is until it is deleted.
+ *   `apps/*` declares app. A package outside those folders fails.
  *
- * Three rules hold the desktop design system (docs/contributing/clients-architecture.md, "Design
- * system enforcement") for packages marked `"design": "strict"`; each message names its rule id
- * (S2, S5, S6) and the fix:
- *
- * - `strict-no-stylesheets`: a strict package exports no stylesheet and holds no style file.
- * - `strict-imports`: a strict package imports UI only from `@vibesys/ui`'s `.` and `./tokens`,
- *   workspace code only from `STRICT_WORKSPACE_IMPORTS` and other strict packages (a strict app
- *   composes strict features' screens), and third-party code only from
- *   `STRICT_THIRD_PARTY`.
- * - `strict-lint-coverage`: the `includes` of `biome.json`'s strict override (the one loading the
- *   strict Grit rules) are exactly the strict packages' sources, so a strict package cannot escape
- *   the element and value rules and no other package is held to them by accident.
+ * Two rules hold the desktop design system for every feature and app package:
+ * `strict-no-stylesheets` and `strict-imports`. Biome applies the strict Grit rules to their source.
  *
  * An export whose source is a stylesheet (`./tokens.css`) is a `dom` asset, not a compiled entry:
  * it has no tsconfig project, and bundlers resolve it through the same source condition.
@@ -109,7 +98,6 @@ export const RULES = [
   'layer-matches-folder',
   'strict-no-stylesheets',
   'strict-imports',
-  'strict-lint-coverage',
 ];
 
 /**
@@ -126,17 +114,8 @@ export const LAYER_FOLDERS = {
   app: 'apps',
 };
 
-/**
- * Packages allowed to sit outside the layer folders, by directory. `clients/tui` is deprecated: it
- * is not migrated into the folder layout and is deleted when the desktop app replaces it. Nothing
- * else belongs here, and this list only shrinks.
- */
-export const DEPRECATED_OUTSIDE_FOLDERS = new Set(['tui']);
-
 /** The keys of a package's `vibesys` block. */
-const DECLARED_KEYS = new Set(['layer', 'entries', 'design']);
-/** The closed values of `vibesys.design`: `strict` opts a package into the design-system rules. */
-const DESIGN_MODES = new Set(['strict']);
+const DECLARED_KEYS = new Set(['layer', 'entries']);
 
 /** Layer ranks. A package may depend only on a strictly lower rank. */
 export const LAYERS = {foundation: 0, core: 1, domain: 2, service: 3, feature: 4, app: 5};
@@ -172,6 +151,7 @@ export const MACHINE_PACKAGES = [
   '@vibesys/connection',
   '@vibesys/run-session',
   '@vibesys/logs',
+  '@vibesys/run-skeleton',
 ];
 const ALL_RUNTIMES = Object.keys(RUNTIMES);
 
@@ -186,7 +166,6 @@ const ALL_RUNTIMES = Object.keys(RUNTIMES);
 export const EXTERNAL_DEPENDENCIES = [
   {packages: ['react', 'react-dom'], runtimes: ['dom']},
   {packages: ['electron'], runtimes: ['node', 'preload'], layers: ['feature', 'app']},
-  {packages: ['@opentui/core'], runtimes: ['node'], layers: ['app']},
   {
     packages: ['xstate'],
     runtimes: ALL_RUNTIMES,
@@ -205,9 +184,7 @@ const PRELOAD_MODULES = new Set(['electron']);
  * three) cannot apply to their single tsconfig per package. Every other rule applies. This table
  * only shrinks.
  */
-export const LEGACY_EXEMPTIONS = {
-  '@vibesys/tui': new Set(['entry-projects']),
-};
+export const LEGACY_EXEMPTIONS = {};
 
 /**
  * Packages whose production source must stay free of the product's domain, and the words that
@@ -298,11 +275,10 @@ export function packageGraphErrors(root) {
       errors.push(...domainWordErrors(root, workspacePackage));
     }
     errors.push(...bucketNameErrors(workspacePackage));
-    if (workspacePackage.manifest.vibesys.design === 'strict') {
+    if (isDesignPackage(workspacePackage)) {
       errors.push(...strictErrors(root, workspacePackage, byName));
     }
   }
-  errors.push(...lintCoverageErrors(root, packages));
   return errors;
 }
 
@@ -339,16 +315,6 @@ function declarationErrors(root, {name, directory, manifest}) {
     if (!DECLARED_KEYS.has(key)) {
       errors.push(violation('declarations', where, `unknown key vibesys.${key}`));
     }
-  }
-  if (metadata.design !== undefined && !DESIGN_MODES.has(metadata.design)) {
-    const modes = [...DESIGN_MODES].join(', ');
-    errors.push(
-      violation(
-        'declarations',
-        where,
-        `vibesys.design must be ${modes} (or absent), not ${JSON.stringify(metadata.design)}`,
-      ),
-    );
   }
   if (!Object.hasOwn(LAYERS, metadata.layer)) {
     const layers = Object.keys(LAYERS).join(', ');
@@ -448,7 +414,6 @@ function featureEntryErrors(where, entries) {
 // --- folders ----------------------------------------------------------------------------------
 
 function folderErrors({name, directory, manifest}) {
-  if (DEPRECATED_OUTSIDE_FOLDERS.has(directory)) return [];
   const where = `${directory}/package.json`;
   const layer = manifest.vibesys.layer;
   const expected = LAYER_FOLDERS[layer];
@@ -937,20 +902,23 @@ function bucketNameErrors({name, directory, manifest}) {
   ];
 }
 
-// --- strict design packages -------------------------------------------------------------------
+// --- design rules for feature and app packages ------------------------------------------------
 
 /**
- * The workspace packages a strict package imports, with the entries it may import (`null`: any
+ * The workspace packages a feature or app imports, with the entries it may import (`null`: any
  * entry the package publishes). UI comes only from `@vibesys/ui`'s `.` and `./tokens`; the rest are
- * the non-UI libraries a screen composes. No old feature package is on the list.
+ * the non-UI libraries a screen composes.
  */
 export const STRICT_WORKSPACE_IMPORTS = {
   '@vibesys/ui': ['.', './tokens'],
   '@vibesys/contracts': null,
   '@vibesys/store': null,
   '@vibesys/machine': null,
+  '@vibesys/request-identity': ['.'],
   '@vibesys/run-state': null,
+  '@vibesys/run-skeleton': null,
   '@vibesys/run-session': null,
+  '@vibesys/run-history': null,
   '@vibesys/transport': null,
   '@vibesys/hosts': null,
   '@vibesys/runs': null,
@@ -960,10 +928,10 @@ export const STRICT_WORKSPACE_IMPORTS = {
   // Its entries are node-only, so `runtime-reachability` already keeps it in `./main` entries.
   '@vibesys/settings': null,
 };
-/** A strict app imports the stylesheets of `@vibesys/ui` once, in its entry wiring. */
+/** An app imports the stylesheets of `@vibesys/ui` once, in its entry wiring. */
 const STRICT_APP_STYLESHEETS = ['./tokens.css', './fonts.css', './components.css'];
 /**
- * The third-party packages a strict package imports and declares: no component kit, utility CSS or
+ * The third-party packages a feature or app imports and declares: no component kit, utility CSS or
  * icon package. Electron and Node builtins stay confined by `external-dependencies`.
  */
 export const STRICT_THIRD_PARTY = ['react', 'react-dom', 'xstate'];
@@ -971,30 +939,22 @@ const STRICT_STYLE_FILE = /\.(?:css|scss|sass|less|styl|pcss)$/;
 const STRICT_FIX =
   'build the UI from @vibesys/ui (add the missing component there) and drop the dependency';
 
-/** The Biome plugins every strict package runs; the override loading them is the strict override. */
+/** The Biome plugins every feature and app source runs. */
 export const STRICT_LINT_PLUGINS = [
   './tools/lint-rules/strict-no-raw-elements.grit',
   './tools/lint-rules/strict-no-raw-values.grit',
 ];
-const STRICT_TEST_EXCLUDES = ['!**/*.test.ts', '!**/*.test.tsx'];
-
-/** The `includes` of the strict Biome override for the packages in `directories`; none for none. */
-export function strictOverrideIncludes(directories) {
-  if (directories.length === 0) return [];
-  return [
-    ...[...directories]
-      .sort()
-      .flatMap(directory => [`${directory}/src/**/*.ts`, `${directory}/src/**/*.tsx`]),
-    ...STRICT_TEST_EXCLUDES,
-  ];
-}
-
 function strictErrors(root, workspacePackage, byName) {
   return [
     ...stylesheetErrors(root, workspacePackage),
     ...strictManifestErrors(workspacePackage, byName),
     ...strictImportErrors(root, workspacePackage, byName),
   ];
+}
+
+/** The design rules cover every feature and app package. */
+function isDesignPackage({directory}) {
+  return directory.startsWith('features/') || directory.startsWith('apps/');
 }
 
 function stylesheetErrors(root, {name, directory, manifest}) {
@@ -1024,9 +984,10 @@ function stylesheetErrors(root, {name, directory, manifest}) {
   return errors;
 }
 
-/** Whether `name` is a workspace package marked strict: one strict package may compose another. */
+/** Whether `name` is a feature or app package: an app may compose feature screens. */
 function isStrictPackage(name, byName) {
-  return byName.get(name)?.manifest.vibesys?.design === 'strict';
+  const target = byName.get(name);
+  return target !== undefined && isDesignPackage(target);
 }
 
 function strictManifestErrors({name, directory, manifest}, byName) {
@@ -1098,61 +1059,6 @@ function strictThirdPartyMessage(specifier) {
   const base = first.startsWith('@') ? `${first}/${second}` : first;
   if (STRICT_THIRD_PARTY.includes(base) || base === 'electron') return undefined;
   return `imports ${specifier} (S6), outside ${STRICT_THIRD_PARTY.join(', ')}; ${STRICT_FIX}`;
-}
-
-// --- strict lint coverage ---------------------------------------------------------------------
-
-function strictOverride(root) {
-  const path = join(root, 'biome.json');
-  if (!existsSync(path)) return {error: 'is missing; it holds the strict override', missing: true};
-  const overrides = JSON.parse(readFileSync(path, 'utf8')).overrides ?? [];
-  const override = overrides.find(({plugins = []}) => plugins.includes(STRICT_LINT_PLUGINS[0]));
-  if (override === undefined) {
-    return {error: `has no override loading ${STRICT_LINT_PLUGINS[0]}; add the strict override`};
-  }
-  return {override};
-}
-
-function lintCoverageErrors(root, packages) {
-  const strict = packages
-    .filter(({manifest}) => manifest.vibesys?.design === 'strict')
-    .map(({directory}) => directory);
-  const found = strictOverride(root);
-  // A workspace with no Biome configuration at all (a scaffolded one) has nothing to cover.
-  if (found.missing && strict.length === 0) return [];
-  if (found.error !== undefined) {
-    return [violation('strict-lint-coverage', 'biome.json', found.error)];
-  }
-  const {includes = [], plugins = []} = found.override;
-  const expected = strictOverrideIncludes(strict);
-  const errors = STRICT_LINT_PLUGINS.filter(plugin => !plugins.includes(plugin)).map(plugin =>
-    violation(
-      'strict-lint-coverage',
-      'biome.json',
-      `the strict override does not load ${plugin} (S3, S4); add it to its plugins`,
-    ),
-  );
-  for (const glob of expected.filter(each => !includes.includes(each))) {
-    errors.push(
-      violation(
-        'strict-lint-coverage',
-        'biome.json',
-        `the strict override's includes lack "${glob}" (S5), so a strict package escapes S3 and ` +
-          'S4 or its tests are held to them; add it, or drop "design": "strict" from the package',
-      ),
-    );
-  }
-  for (const glob of includes.filter(each => !expected.includes(each))) {
-    errors.push(
-      violation(
-        'strict-lint-coverage',
-        'biome.json',
-        `the strict override's includes list "${glob}" (S5), which no strict package accounts ` +
-          'for; remove it, or mark the package "design": "strict" in its vibesys block',
-      ),
-    );
-  }
-  return errors;
 }
 
 function main() {

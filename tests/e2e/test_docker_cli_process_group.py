@@ -70,7 +70,7 @@ def test_slurm_broker_preserves_stdin_environment_cwd_and_complete_streams(
     try:
         result = BrokeredProcesses(broker.socket_path, broker.token, network=UnixNetwork()).run(
             ProcessSpec(
-                (*transport.ssh_command, "--", "cluster", "hostname"), input=b"complete stdin"
+                (*transport.ssh_argv, "--", "cluster", "hostname"), input=b"complete stdin"
             ),
             timeout=30,
             output=DISCARD,

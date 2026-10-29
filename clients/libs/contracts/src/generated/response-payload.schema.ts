@@ -174,73 +174,6 @@ const responsePayloadSchema: Record<string, unknown> = {
       "title": "CandidateDisposition",
       "type": "string"
     },
-    "ChatModelOption": {
-      "additionalProperties": false,
-      "description": "One offered chat model and the source of its suggestion.",
-      "properties": {
-        "model": {
-          "title": "Model",
-          "type": "string"
-        },
-        "source": {
-          "enum": [
-            "run",
-            "role",
-            "suggested"
-          ],
-          "title": "Source",
-          "type": "string"
-        },
-        "default": {
-          "type": "boolean",
-          "default": false,
-          "title": "Default"
-        }
-      },
-      "required": [
-        "model",
-        "source"
-      ],
-      "title": "ChatModelOption",
-      "type": "object"
-    },
-    "ChatOptions": {
-      "additionalProperties": false,
-      "description": "All offered chat selections grouped by provider.",
-      "properties": {
-        "providers": {
-          "items": {
-            "$ref": "#/$defs/ChatProviderOptions"
-          },
-          "title": "Providers",
-          "type": "array"
-        }
-      },
-      "title": "ChatOptions",
-      "type": "object"
-    },
-    "ChatProviderOptions": {
-      "additionalProperties": false,
-      "description": "One supported chat provider and its suggested models.",
-      "properties": {
-        "provider": {
-          "title": "Provider",
-          "type": "string"
-        },
-        "models": {
-          "items": {
-            "$ref": "#/$defs/ChatModelOption"
-          },
-          "title": "Models",
-          "type": "array"
-        }
-      },
-      "required": [
-        "provider"
-      ],
-      "title": "ChatProviderOptions",
-      "type": "object"
-    },
     "ChatResult": {
       "additionalProperties": false,
       "description": "Answer and thread identity returned by experiment chat.",
@@ -315,17 +248,10 @@ const responsePayloadSchema: Record<string, unknown> = {
     },
     "CommandAck": {
       "additionalProperties": false,
-      "description": "Acknowledgment of a requested run command.",
+      "description": "Acknowledgment of a requested run command; ``action`` is the control's tag.",
       "properties": {
         "action": {
-          "enum": [
-            "pause",
-            "resume",
-            "steer",
-            "stop"
-          ],
-          "title": "Action",
-          "type": "string"
+          "$ref": "#/$defs/ControlAction"
         },
         "status": {
           "enum": [
@@ -342,6 +268,21 @@ const responsePayloadSchema: Record<string, unknown> = {
       ],
       "title": "CommandAck",
       "type": "object"
+    },
+    "ControlAction": {
+      "description": "What a control request asks for; the tag of the ``ControlRequest`` union.",
+      "enum": [
+        "steer",
+        "pause",
+        "pause_now",
+        "resume",
+        "withdraw",
+        "cancel_attempt",
+        "cancel_item",
+        "set_max_parallel"
+      ],
+      "title": "ControlAction",
+      "type": "string"
     },
     "DesignFileChange": {
       "additionalProperties": false,
@@ -774,7 +715,7 @@ const responsePayloadSchema: Record<string, unknown> = {
           ],
           "default": null
         },
-        "kept": {
+        "best": {
           "anyOf": [
             {
               "type": "boolean"
@@ -784,7 +725,7 @@ const responsePayloadSchema: Record<string, unknown> = {
             }
           ],
           "default": null,
-          "title": "Kept"
+          "title": "Best"
         },
         "strategy_disposition": {
           "anyOf": [
@@ -976,56 +917,6 @@ const responsePayloadSchema: Record<string, unknown> = {
         "reviewed"
       ],
       "title": "HypothesisRound",
-      "type": "object"
-    },
-    "InteractiveSetupDefaults": {
-      "additionalProperties": false,
-      "description": "JSON contract passed to the interactive launch form.",
-      "properties": {
-        "runs_dir": {
-          "title": "Runs Dir",
-          "type": "string"
-        },
-        "input_path": {
-          "title": "Input Path",
-          "type": "string"
-        },
-        "experiment_name": {
-          "title": "Experiment Name",
-          "type": "string"
-        },
-        "repository_owner": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Repository Owner"
-        },
-        "repository_name": {
-          "title": "Repository Name",
-          "type": "string"
-        },
-        "visibility": {
-          "$ref": "#/$defs/RepositoryVisibility"
-        },
-        "theme": {
-          "$ref": "#/$defs/TuiTheme"
-        }
-      },
-      "required": [
-        "runs_dir",
-        "input_path",
-        "experiment_name",
-        "repository_owner",
-        "repository_name",
-        "visibility",
-        "theme"
-      ],
-      "title": "InteractiveSetupDefaults",
       "type": "object"
     },
     "IterationKind": {
@@ -1263,6 +1154,18 @@ const responsePayloadSchema: Record<string, unknown> = {
         },
         "reason": {
           "$ref": "#/$defs/IterationUnavailableReason"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
         }
       },
       "required": [
@@ -1276,6 +1179,7 @@ const responsePayloadSchema: Record<string, unknown> = {
       "enum": [
         "external_state_unavailable",
         "policy_not_mapped",
+        "projection_invalid",
         "state_unavailable"
       ],
       "title": "IterationUnavailableReason",
@@ -1328,6 +1232,14 @@ const responsePayloadSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Direction"
+        },
+        "objectives": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TaskObjective"
+          },
+          "title": "Objectives",
+          "type": "array"
         },
         "correctness_check": {
           "default": [],
@@ -1485,16 +1397,6 @@ const responsePayloadSchema: Record<string, unknown> = {
       "title": "PerformanceRound",
       "type": "object"
     },
-    "RepositoryVisibility": {
-      "description": "Supported GitHub repository visibility values.",
-      "enum": [
-        "private",
-        "public",
-        "internal"
-      ],
-      "title": "RepositoryVisibility",
-      "type": "string"
-    },
     "RunOverview": {
       "additionalProperties": false,
       "description": "The run's objective and what measures it: the Overview's header facts.\n\nOne definition for the core event and the wire: the run's ``run_started`` event carries it,\nand the server's snapshot carries it with the unit and direction its measurements add.",
@@ -1588,6 +1490,17 @@ const responsePayloadSchema: Record<string, unknown> = {
           },
           "title": "Chat Threads",
           "type": "array"
+        },
+        "last_chat_thread_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChatThreadId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "spans": {
           "items": {
@@ -1972,20 +1885,30 @@ const responsePayloadSchema: Record<string, unknown> = {
       "title": "SpanWaitKind",
       "type": "string"
     },
-    "TuiTheme": {
-      "description": "Selectable terminal UI themes.",
-      "enum": [
-        "dark",
-        "light",
-        "solarized-dark",
-        "solarized-light",
-        "catppuccin-mocha",
-        "catppuccin-latte",
-        "high-contrast-dark",
-        "high-contrast-light"
+    "TaskObjective": {
+      "additionalProperties": false,
+      "description": "One axis the task compares candidates on, and which way is better.",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "max",
+            "min"
+          ],
+          "title": "Direction",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "direction"
       ],
-      "title": "TuiTheme",
-      "type": "string"
+      "title": "TaskObjective",
+      "type": "object"
     },
     "WaitingOn": {
       "additionalProperties": false,
@@ -2042,28 +1965,6 @@ const responsePayloadSchema: Record<string, unknown> = {
       "anyOf": [
         {
           "$ref": "#/$defs/ChatThreadInfo"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
-    },
-    "chat_options": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/ChatOptions"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
-    },
-    "tui_defaults": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/InteractiveSetupDefaults"
         },
         {
           "type": "null"

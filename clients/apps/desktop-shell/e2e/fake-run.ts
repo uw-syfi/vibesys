@@ -3,8 +3,12 @@
  * streams its instance lists and their text, answered as the main process answers the welcome
  * view's logs requests, and the run commands the page sends, recorded in order on
  * `window.fakeHost.calls`. `installFakeRun` runs in the page after `installFakeBridge`
- * (`page.addInitScript`, in that order), so it is self-contained and adds to that bridge.
+ * (one ordered `addInitScripts` call), so it is self-contained and adds to that bridge.
  */
+import type {FakeProvides} from './fake-bridge.js';
+
+/** What `installFakeRun` provides: the log streams and the run commands. */
+type RunMethods = 'logs' | 'releaseLogs' | 'resume';
 
 export interface FakeRunSeed {
   readonly streams: readonly unknown[];
@@ -41,8 +45,7 @@ export function installFakeRun(seed: FakeRunSeed): void {
   Object.assign(target.vibesysWelcome, {
     logs,
     releaseLogs: () => ok(null),
-    stopConfirmed: record('stopConfirmed'),
     resume: record('resume'),
-  });
+  } satisfies FakeProvides<RunMethods>);
   Object.assign(target.fakeHost, {calls});
 }

@@ -66,11 +66,15 @@ from vs_core.api import (
     RequestId,
     RequestTurn,
     ResumeAuthorized,
+    ResumeFailed,
     ResumeReady,
+    ResumeRefusal,
+    ResumeRefused,
     Scope,
     Settlement,
     SettlementId,
     StartAttempt,
+    StopLifted,
     StopRequested,
     StrategyOperations,
     TimeReached,
@@ -111,6 +115,7 @@ if TYPE_CHECKING:
         SearchDef,
         Seconds,
         SpanKind,
+        Uncompared,
         Within,
     )
     from vs_core.flows._define import Root
@@ -178,7 +183,7 @@ def code_changed[C](definition: SearchDef[C]) -> SearchDef[C]:
     """
     root = definition.root
 
-    async def changed(ctx: Flow, start: C) -> NoWinner | None:
+    async def changed(ctx: Flow, start: C) -> NoWinner | Uncompared | None:
         ctx.clock.now()
         return await root(ctx, start)
 
@@ -417,6 +422,16 @@ class FlowRun[C]:
         )
         self.send(ResumeReady(authorization=authorization))
 
+    def resume_refused(self, continuation: Continuation, reason: ResumeRefusal) -> None:
+        """Core will never resume a suspended turn: the history its evaluations left is unusable."""
+        self._timeline.append("resume-refused")
+        refusal = ResumeRefused(
+            continuation_id=continuation.continuation_id,
+            invocation=continuation.invocation,
+            reason=reason,
+        )
+        self.send(ResumeFailed(refusal=refusal))
+
     def reply_raw(self, asked: Asked, output_json: str) -> None:
         """The agent answered with text that may not be its reply model (a correction follows)."""
         self._close(asked)
@@ -549,6 +564,17 @@ class FlowRun[C]:
         self.send(
             StopRequested(
                 control=ControlInput(control_id=ControlId(root=control), action="stop", mode=mode)
+            )
+        )
+
+    def lift_stop(self, control: str = "resume") -> None:
+        """The operator resumes the run, which lifts the stop that stood."""
+        self._timeline.append(control)
+        self.send(
+            StopLifted(
+                control=ControlInput(
+                    control_id=ControlId(root=control), action="resume", when="now"
+                )
             )
         )
 

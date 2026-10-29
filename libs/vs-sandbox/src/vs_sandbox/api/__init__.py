@@ -25,14 +25,21 @@ if TYPE_CHECKING:
         Device,
         SandboxKind,
         accelerator_unavailable,
+        backend_default_image,
         backend_is_host_only,
+        backend_provided,
         create_compute_backend,
         register_compute_backend,
+    )
+    from vs_sandbox.container_memory import (
+        MIN_CONTAINER_MEMORY_RESERVE_BYTES,
+        container_memory_limit,
     )
     from vs_sandbox.container_runtime import (
         ContainerRuntimeUnavailableError,
         NestedDaemonError,
         require_sysbox_runtime,
+        sysbox_unavailable,
         workspace_container_root,
     )
     from vs_sandbox.cuda_backend import CudaAcceleratorUnavailableError, CudaBackend
@@ -50,7 +57,15 @@ if TYPE_CHECKING:
         observe_removal,
         released,
     )
-    from vs_sandbox.execution import CommandResult, CommandRunner, CommandStopUnconfirmedError
+    from vs_sandbox.execution import (
+        CaptureCommandRunner,
+        CaptureExecutionIdentity,
+        CaptureExecutionKind,
+        CommandExecutionSettledError,
+        CommandResult,
+        CommandRunner,
+        CommandStopUnconfirmedError,
+    )
     from vs_sandbox.feature_dockerfile import (
         BuildPlan,
         FeatureInstall,
@@ -115,6 +130,7 @@ if TYPE_CHECKING:
     from vs_sandbox.local_compute_backend import LocalBackend
     from vs_sandbox.local_shell import LocalShellRunner
     from vs_sandbox.modal_model_setup import ensure_model_volume
+    from vs_sandbox.operator_root import exposed_grant, operator_root
     from vs_sandbox.rocm_backend import RocmBackend
     from vs_sandbox.toolchain_features import (
         CONTAINER_RUNTIME_TOOLCHAIN,
@@ -143,6 +159,7 @@ __all__ = [
     "KIND_VERSION",
     "KNOWN_TOOLCHAINS",
     "KUBECTL_VERSION",
+    "MIN_CONTAINER_MEMORY_RESERVE_BYTES",
     "RUN_ID_LABEL",
     "RUST_TOOLCHAIN",
     "RUST_TOOLCHAIN_VERSION",
@@ -153,6 +170,10 @@ __all__ = [
     "AcceleratorInventory",
     "BeforeReadyContext",
     "BuildPlan",
+    "CaptureCommandRunner",
+    "CaptureExecutionIdentity",
+    "CaptureExecutionKind",
+    "CommandExecutionSettledError",
     "CommandOutcome",
     "CommandResult",
     "CommandRunner",
@@ -212,18 +233,23 @@ __all__ = [
     "TrainiumBackend",
     "WorkspaceSandbox",
     "accelerator_unavailable",
+    "backend_default_image",
     "backend_is_host_only",
+    "backend_provided",
     "build_feature_image",
     "build_host_sandbox",
+    "container_memory_limit",
     "create_compute_backend",
     "declare_resources",
     "deduplicate_host_resources",
     "ensure_model_volume",
     "execute_as_root",
+    "exposed_grant",
     "feature_project_problems",
     "host_resource_for_mount",
     "linked_worktree_git_paths",
     "observe_removal",
+    "operator_root",
     "option_env_name",
     "parse_feature_metadata",
     "parse_gpu_info_output",
@@ -235,6 +261,7 @@ __all__ = [
     "require_sysbox_runtime",
     "start_sandbox",
     "stop_sandbox",
+    "sysbox_unavailable",
     "toolchain_features",
     "workspace_container_root",
 ]
@@ -280,15 +307,23 @@ _LAZY_EXPORTS = {
     "Device": ("compute_backends", "Device"),
     "SandboxKind": ("compute_backends", "SandboxKind"),
     "accelerator_unavailable": ("compute_backends", "accelerator_unavailable"),
+    "backend_default_image": ("compute_backends", "backend_default_image"),
     "backend_is_host_only": ("compute_backends", "backend_is_host_only"),
+    "backend_provided": ("compute_backends", "backend_provided"),
     "create_compute_backend": ("compute_backends", "create_compute_backend"),
     "register_compute_backend": ("compute_backends", "register_compute_backend"),
+    "MIN_CONTAINER_MEMORY_RESERVE_BYTES": (
+        "container_memory",
+        "MIN_CONTAINER_MEMORY_RESERVE_BYTES",
+    ),
+    "container_memory_limit": ("container_memory", "container_memory_limit"),
     "ContainerRuntimeUnavailableError": (
         "container_runtime",
         "ContainerRuntimeUnavailableError",
     ),
     "NestedDaemonError": ("container_runtime", "NestedDaemonError"),
     "require_sysbox_runtime": ("container_runtime", "require_sysbox_runtime"),
+    "sysbox_unavailable": ("container_runtime", "sysbox_unavailable"),
     "workspace_container_root": ("container_runtime", "workspace_container_root"),
     "CudaAcceleratorUnavailableError": ("cuda_backend", "CudaAcceleratorUnavailableError"),
     "CudaBackend": ("cuda_backend", "CudaBackend"),
@@ -318,6 +353,10 @@ _LAZY_EXPORTS = {
     "observe_removal": ("docker_states", "observe_removal"),
     "released": ("docker_states", "released"),
     "CommandRunner": ("execution", "CommandRunner"),
+    "CaptureCommandRunner": ("execution", "CaptureCommandRunner"),
+    "CaptureExecutionIdentity": ("execution", "CaptureExecutionIdentity"),
+    "CaptureExecutionKind": ("execution", "CaptureExecutionKind"),
+    "CommandExecutionSettledError": ("execution", "CommandExecutionSettledError"),
     "CommandResult": ("execution", "CommandResult"),
     "CommandStopUnconfirmedError": ("execution", "CommandStopUnconfirmedError"),
     "EnvironmentBindMount": ("host_resources", "EnvironmentBindMount"),
@@ -346,6 +385,8 @@ _LAZY_EXPORTS = {
     "start_sandbox": ("lifecycle", "start_sandbox"),
     "stop_sandbox": ("lifecycle", "stop_sandbox"),
     "linked_worktree_git_paths": ("linked_worktree", "linked_worktree_git_paths"),
+    "exposed_grant": ("operator_root", "exposed_grant"),
+    "operator_root": ("operator_root", "operator_root"),
     "LocalShellRunner": ("local_shell", "LocalShellRunner"),
     "ensure_model_volume": ("modal_model_setup", "ensure_model_volume"),
 }

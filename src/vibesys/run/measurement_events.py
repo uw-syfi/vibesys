@@ -20,15 +20,24 @@ from vibesys.events import (
     GateStartedData,
     SubprocessOutputData,
 )
+from vs_core.api import DecisionId, SpanId, operation_span
 from vs_redaction.api import redact_diagnostic_tail
 
 if TYPE_CHECKING:
-    from vs_runtime.api.core import StageSettled, StageStarted
+    from vs_runtime.api.core import MeasurementDecisions, StageSettled, StageStarted
 
 GATE_TAIL_CHARS = 1000
 _LOCAL_VALIDATION = "local-validation"
-_GATES = {"accuracy": GateKind.ACCURACY, "benchmark": GateKind.BENCHMARK}
-_PROCESS_KINDS = {GateKind.ACCURACY: "accuracy_checker", GateKind.BENCHMARK: "benchmark"}
+_GATES = {
+    "build": GateKind.BUILD,
+    "accuracy": GateKind.ACCURACY,
+    "benchmark": GateKind.BENCHMARK,
+}
+_PROCESS_KINDS = {
+    GateKind.BUILD: "candidate_build",
+    GateKind.ACCURACY: "accuracy_checker",
+    GateKind.BENCHMARK: "benchmark",
+}
 
 
 def gate_of(purpose: str | None, stage_id: str) -> GateKind | None:
@@ -46,9 +55,14 @@ def gate_of(purpose: str | None, stage_id: str) -> GateKind | None:
 class CoreMeasurementEvents:
     """A ``MeasurementObserver`` that writes gate events to one run's event stream."""
 
-    def __init__(self, events: CoreEventWriter) -> None:
+    def __init__(self, events: CoreEventWriter, decisions: MeasurementDecisions) -> None:
         """Write every translated event to *events*."""
         self._events = events
+        self._decisions = decisions
+
+    def _span(self, handle_id: str) -> SpanId | None:
+        decision = self._decisions.decision(handle_id)
+        return None if decision is None else operation_span(DecisionId(root=decision))
 
     def stage_started(self, event: StageStarted) -> None:
         """One ``GATE_STARTED`` for a gate stage."""
@@ -57,7 +71,7 @@ class CoreMeasurementEvents:
             return
         self._events.emit(
             CoreEventType.GATE_STARTED,
-            data=GateStartedData(gate=gate),
+            data=GateStartedData(gate=gate, span_id=self._span(event.handle_id)),
             status=EventStatus.ACTIVE,
             execution_id=event.handle_id,
         )
@@ -75,6 +89,8 @@ class CoreMeasurementEvents:
             CoreEventType.GATE_FINISHED,
             data=GateFinishedData(
                 gate=gate,
+                span_id=self._span(event.handle_id),
+                reused=event.reused,
                 metric=None if metric is None or gate is not GateKind.BENCHMARK else metric.name,
                 value=None if metric is None or gate is not GateKind.BENCHMARK else metric.value,
                 unit=None
@@ -99,6 +115,7 @@ class CoreMeasurementEvents:
                     data=SubprocessOutputData(
                         process_id=f"{event.handle_id}-{event.stage_id}",
                         process_kind=kind,
+                        span_id=self._span(event.handle_id),
                         stream=stream,
                         content=content,
                     ),

@@ -1,5 +1,13 @@
 import {expect, test} from 'bun:test';
-import {remember, SettingsStore} from './index.js';
+import {
+  decodePreferences,
+  decodeRecent,
+  decodeSettings,
+  remember,
+  SettingsStore,
+  settingsBinaryPath,
+} from './index.js';
+import {recentDocument} from './recent.js';
 import {FakeSettingsFilesystem} from './testing/index.js';
 
 function run(index: number) {
@@ -36,8 +44,8 @@ test('synchronous listener and diagnostic failures cannot change a durable recen
 
   await settings.updateRecent(current => remember(current, run(1)));
 
-  expect(JSON.parse(filesystem.text('/settings/recent.json'))).toEqual({
-    version: 3,
+  expect(written(filesystem, '/settings/recent.json')).toEqual({
+    version: 4,
     runs: [run(1)],
   });
   expect(heard).toEqual([1]);
@@ -66,8 +74,8 @@ test('rejected listener and diagnostic promises are terminally contained after c
   await settings.updateRecent(current => remember(current, run(1)));
   await Promise.resolve();
 
-  expect(JSON.parse(filesystem.text('/settings/recent.json'))).toEqual({
-    version: 3,
+  expect(written(filesystem, '/settings/recent.json')).toEqual({
+    version: 4,
     runs: [run(1)],
   });
   expect(heard).toEqual([1]);
@@ -111,3 +119,49 @@ test('recent delivery snapshots registration for the current event', async () =>
 
   expect(heard).toEqual(['self:1', 'later:1', 'self:2']);
 });
+
+test('host settings notify every window only after a committed atomic write', async () => {
+  const filesystem = new FakeSettingsFilesystem();
+  const settings = new SettingsStore({
+    settingsPath: '/settings/hosts.json',
+    recentPath: '/settings/recent.json',
+    preferencesPath: '/settings/preferences.json',
+    filesystem,
+    log: () => {},
+  });
+  const first: string[] = [];
+  const second: string[] = [];
+  const stopFirst = settings.onHostsChanged(file => {
+    expect(written(filesystem, '/settings/hosts.json')).toEqual(file);
+    first.push(file.hosts['local']?.checkout ?? '');
+  });
+  const stopSecond = settings.onHostsChanged(file =>
+    second.push(file.hosts['local']?.checkout ?? ''),
+  );
+  for (const checkout of ['/src/a', '/src/b', '/src/c']) {
+    const next = {
+      version: 2 as const,
+      hosts: {local: {checkout}},
+    };
+    expect(
+      await settings.updateHosts(
+        () => next,
+        () => false,
+      ),
+    ).toBe('cancelled');
+    expect(await settings.updateHosts(() => next)).toBe('committed');
+  }
+  stopFirst();
+  stopSecond();
+  await settings.updateHosts(() => ({version: 2, hosts: {}}));
+  expect(first).toEqual(['/src/a', '/src/b', '/src/c']);
+  expect(second).toEqual(first);
+});
+
+function written(filesystem: FakeSettingsFilesystem, path: string): unknown {
+  const bytes = filesystem.bytes(settingsBinaryPath(path));
+  if (path.endsWith('hosts.json')) return decodeSettings(bytes);
+  if (path.endsWith('preferences.json')) return decodePreferences(bytes);
+  const recent = decodeRecent(bytes);
+  return recentDocument(recent.file, recent.invalid);
+}

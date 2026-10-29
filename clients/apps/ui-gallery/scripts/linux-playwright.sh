@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs the gallery's Playwright suite in the Linux image Playwright publishes for the version the
-# workspace pins, on x86-64: the browser and OS the `tui_e2e` CI job uses (Chromium on
+# workspace pins, on x86-64: the browser and OS the `clients_e2e` CI job uses (Chromium on
 # ubuntu-latest). The screenshot baselines (e2e/__screenshots__) are written here, never on macOS,
 # whose font rasterization differs. Needs Docker. Arguments go to `playwright test`; with
 # `--update-snapshots` the old baselines are removed first, so a removed entry leaves none behind.

@@ -11,6 +11,7 @@ from vibesys.inputs._manifest import (
     AgentInput,
     BenchmarkCommand,
     BenchmarkResult,
+    BuildCommand,
     EnvironmentInput,
     EvaluatorInput,
     InputBundle,
@@ -19,6 +20,8 @@ from vibesys.inputs._manifest import (
     InputManifestParseError,
     ModalEnvironmentInput,
     ProfileGuidedInput,
+    StageDeclaration,
+    StageKind,
     WorkspaceInput,
     WorkspaceSource,
     benchmark_output_argument,
@@ -28,13 +31,6 @@ from vibesys.inputs._manifest import (
     render_input_manifest,
 )
 from vibesys.inputs._objective import with_operator_constraints
-from vibesys.inputs._objectives import (
-    OBJECTIVES_NAME,
-    ObjectiveAxisInput,
-    ObjectivesInput,
-    ParetoInput,
-    load_objectives,
-)
 from vibesys.inputs._plan import (
     MAX_STEPS,
     DeviationPolicy,
@@ -49,6 +45,13 @@ from vibesys.inputs._synthesis import (
     SynthesizedInputSpec,
     synthesize_input_bundle,
 )
+from vs_project.api import (
+    OBJECTIVES_NAME,
+    ObjectiveAxisInput,
+    ObjectivesInput,
+    ParetoInput,
+    load_objectives,
+)
 
 __all__ = [
     "EVALUATOR_SRC_DIRNAME",
@@ -59,6 +62,7 @@ __all__ = [
     "AgentInput",
     "BenchmarkCommand",
     "BenchmarkResult",
+    "BuildCommand",
     "DeviationPolicy",
     "EnvironmentInput",
     "EvaluatorInput",
@@ -73,6 +77,8 @@ __all__ = [
     "ParetoInput",
     "PlanStep",
     "ProfileGuidedInput",
+    "StageDeclaration",
+    "StageKind",
     "StepEvaluation",
     "SynthesizedInputSpec",
     "TaskPlan",

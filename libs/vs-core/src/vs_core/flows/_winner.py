@@ -11,8 +11,11 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final, Literal
 
+from pydantic import Field
+
 from vs_core._registry import ContractError
-from vs_core.types.common import THIS_RUN, DecisionId, ObservationStatus, RevisionRef, Value
+from vs_core._run_pause import DEADLINE_STOP, ENVIRONMENT_STOP
+from vs_core.types.common import THIS_RUN, DecisionId, ObservationStatus, RevisionRef, Value, unset
 from vs_core.types.search import AdoptionFinished
 from vs_core.types.settlement import (
     AdoptionFailed,
@@ -28,6 +31,8 @@ from vs_core.types.strategy import Finish, ProposeWinner
 from vs_core.types.until import Failed, FailureReason
 
 if TYPE_CHECKING:
+    from vs_core.types.search import Event
+
     from ._kit import Kit
 
 
@@ -42,6 +47,11 @@ class Input:
 INPUT: Final = Input()
 """``ctx.choose(INPUT)``: no candidate beat the input."""
 
+ADOPTED: Final = "adopted"
+"""The verdict of the span that adopted the chosen winner, when core adopted it."""
+NOT_ADOPTED: Final = "not_adopted"
+"""The verdict of that span when core would not (its reason says why)."""
+
 
 class NoWinner(Value):
     """What a root flow returns when the run ends without a winner, and why.
@@ -53,6 +63,17 @@ class NoWinner(Value):
 
     reason: str
     keep_choice: bool = False
+
+
+class Uncompared(Value):
+    """What a root flow returns when its chosen candidate was never compared with the input.
+
+    The input has no reading to compare with (its own measurement failed), so the candidate was
+    judged on the task's gates alone. The framework adopts the last choice as usual, and the
+    result of a run that adopts a candidate says it was never compared
+    (``RunResultProposal.uncompared``), however the run ended (its root returning, a stop or
+    the deadline); a run whose choice is still the input ends as it would have.
+    """
 
 
 class Kept(Value):
@@ -91,6 +112,9 @@ class EndReason(StrEnum):
     """The operator stopped the run (the result is cancelled)."""
     DEADLINE = "deadline"
     """The run deadline passed (the result is cancelled)."""
+    FAILED = "failed"
+    """The run environment could run none of the run's work and the host stopped the run: the
+    result is a failure, and no resume reopens it (``ENVIRONMENT_STOP``)."""
     FINISH_REFUSED = "finish-refused"
     """Core refused the result; the run ended with the plain failure."""
 
@@ -99,6 +123,7 @@ class Adopted(Value):
     """The adoption of the chosen winner succeeded."""
 
     selection: Selection
+    checkout_status: str | None = Field(default=None, exclude_if=unset)
 
 
 class NotAdopted(Value):
@@ -114,15 +139,30 @@ def reason_text(ending: EndReason, detail: str = "") -> str:
 
 
 async def adopt(kit: Kit, selection: Selection) -> Adopted | NotAdopted:
-    """Ask core to adopt ``selection`` and report how it went."""
+    """Ask core to adopt ``selection`` and report how it went.
+
+    The span of the request carries the label ``ctx.choose`` gave the choice, with the verdict
+    ``ADOPTED`` or ``NOT_ADOPTED`` once core has answered.
+    """
     request = ProposeWinner(
         decision_id=DecisionId(root="adopt"), scope=THIS_RUN, selection=selection
     )
-    event = await kit.wait(request, kit.cleanup_within())
+    pending = kit.start(request, kit.cleanup_within())
+    kit.run.adopting(pending, None, None)
+    outcome = _adoption_of(selection, await kit.settle(pending))
+    if isinstance(outcome, Adopted):
+        kit.run.adopting(pending, ADOPTED, outcome.checkout_status)
+    else:
+        kit.run.adopting(pending, NOT_ADOPTED, outcome.reason.value)
+    return outcome
+
+
+def _adoption_of(selection: Selection, event: Event) -> Adopted | NotAdopted:
     match event:
-        case AdoptionFinished(result=AdoptionResult(observation=seen)):
+        case AdoptionFinished(result=AdoptionResult(observation=seen, checkout=checkout)):
             if seen.status is ObservationStatus.SUCCEEDED:
-                return Adopted(selection=selection)
+                recorded = None if checkout is None else checkout.status.value
+                return Adopted(selection=selection, checkout_status=recorded)
             return NotAdopted(selection=selection, reason=AdoptionFailureReason.VERIFY_FAILED)
         case AdoptionFinished(result=AdoptionFailed(reason=reason)):
             return NotAdopted(selection=selection, reason=reason)
@@ -134,11 +174,34 @@ async def adopt(kit: Kit, selection: Selection) -> Adopted | NotAdopted:
 
 
 def _stop_ending(kit: Kit) -> EndReason | None:
-    """How the run was stopped, if it was: the operator, or the host's deadline control."""
+    """How the run was stopped, if it was: the operator, or one of the host's own stops.
+
+    Every stop the host itself delivers has its own reason; only the rest are the operator's.
+    """
     stop = kit.run.stop
     if stop is None:
         return None
-    return EndReason.DEADLINE if stop.control.control_id.root == "deadline" else EndReason.STOPPED
+    return _HOST_STOP_ENDINGS.get(stop.control.control_id.root.partition(":")[0], EndReason.STOPPED)
+
+
+_HOST_STOP_ENDINGS = {DEADLINE_STOP: EndReason.DEADLINE, ENVIRONMENT_STOP: EndReason.FAILED}
+"""The current epoch result produced by each host shutdown cause."""
+
+
+def _stop_since(kit: Kit, stopped: EndReason | None) -> EndReason | None:
+    """How the run was stopped once its adoption returned, given how when its ending began.
+
+    The operator's stop is a pause, so one of the host's own stops that arrived while the ending
+    adopted names the ending instead (``_run._overrides``): the run environment failing as the
+    run winds down fails it. Any other ending stays as it began: a run that ended by itself
+    adopted what it chose, whatever stop arrived since.
+    """
+    return _stop_ending(kit) if stopped is EndReason.STOPPED else stopped
+
+
+def _stopped_outcome(stopped: EndReason) -> Literal["cancelled", "failure"]:
+    """The outcome a stop ends the run with: the environment's failure fails it."""
+    return "failure" if stopped is EndReason.FAILED else "cancelled"
 
 
 def _finish_mode(kit: Kit) -> Literal["drain", "cancel"]:
@@ -155,14 +218,16 @@ def _selection_name(selection: Selection) -> str:
     return "the input"
 
 
-async def conclude(kit: Kit, returned: NoWinner | None) -> None:
+async def conclude(kit: Kit, returned: NoWinner | Uncompared | None) -> None:
     """End the run: adopt the last choice (unless there is no winner), then finish.
 
     A stop or a deadline makes the result ``cancelled`` (a proposal core refuses because the run
-    is closing included); a failed adoption or a ``NoWinner`` is a ``failure`` with a typed reason.
+    is closing included); a failed adoption or a ``NoWinner`` is a ``failure`` with a typed reason,
+    unless the operator stopped the run: a stop is a pause the operator can lift, so its ending
+    is ``cancelled`` whatever the adoption did, and a resume reopens the run.
+    An ``Uncompared`` return marks an adopted candidate's result as never compared with the input.
     """
-    stopped = _stop_ending(kit)
-    result = await _result(kit, returned, stopped)
+    result = await _result(kit, returned, _stop_ending(kit))
     mode = _finish_mode(kit)
     refused = await kit.finish(
         Finish(decision_id=DecisionId(root="finish"), scope=THIS_RUN, mode=mode, result=result)
@@ -180,35 +245,60 @@ async def conclude(kit: Kit, returned: NoWinner | None) -> None:
 
 
 async def _no_winner(kit: Kit, returned: NoWinner, stopped: EndReason | None) -> RunResultProposal:
-    outcome: Literal["cancelled", "failure"] = "cancelled" if stopped else "failure"
+    if returned.keep_choice and kit.run.choice is not None:
+        adopted = await adopt(kit, kit.run.choice)
+        stopped = _stop_since(kit, stopped)
+    else:
+        adopted = None
+    outcome = "failure" if stopped is None else _stopped_outcome(stopped)
     reason = reason_text(stopped or EndReason.NO_WINNER, returned.reason)
-    if not returned.keep_choice or kit.run.choice is None:
+    if adopted is None:
         return RunResultProposal(outcome=outcome, reason=reason)
-    adopted = await adopt(kit, kit.run.choice)
     if isinstance(adopted, NotAdopted):
         failed = reason_text(EndReason.ADOPTION_FAILED, adopted.reason.value)
         return RunResultProposal(outcome=outcome, reason=f"{reason}; {failed}")
     return RunResultProposal(outcome=outcome, reason=reason, selection=adopted.selection)
 
 
+def _not_adopted(adopted: NotAdopted, stopped: EndReason | None) -> RunResultProposal:
+    """The result of a run whose last adoption failed, as the stop that ended it (if any) says."""
+    detail = reason_text(EndReason.ADOPTION_FAILED, adopted.reason.value)
+    if stopped is EndReason.STOPPED:
+        # The operator's stop is a pause, so what the adoption did is no verdict on the run:
+        # core may refuse the proposal because the stop races it, or the restore may fail.
+        # The result says so, and a successor epoch may resume: its next
+        # ending adopts again.
+        return RunResultProposal(outcome="cancelled", reason=reason_text(stopped, detail))
+    if stopped is EndReason.FAILED:
+        # The environment's failure ended the run; the adoption only adds to why.
+        return RunResultProposal(outcome="failure", reason=reason_text(stopped, detail))
+    if stopped is not None and adopted.reason is FailureReason.REFUSED:
+        # The deadline closed the run to decisions: it ended and nothing failed.
+        return RunResultProposal(outcome="cancelled", reason=reason_text(stopped, detail))
+    return RunResultProposal(outcome="failure", reason=detail)
+
+
 async def _result(
-    kit: Kit, returned: NoWinner | None, stopped: EndReason | None
+    kit: Kit, returned: NoWinner | Uncompared | None, stopped: EndReason | None
 ) -> RunResultProposal:
     if isinstance(returned, NoWinner):
         return await _no_winner(kit, returned, stopped)
     selection = kit.run.choice or TrustedBaseline(revision=kit.run.facts.baseline)
     adopted = await adopt(kit, selection)
+    stopped = _stop_since(kit, stopped)
     if isinstance(adopted, NotAdopted):
-        # Core may refuse the proposal because the stop closed the run to decisions: the operator
-        # ended it and nothing failed. An adoption that was tried and failed still fails the run.
-        detail = reason_text(EndReason.ADOPTION_FAILED, adopted.reason.value)
-        if stopped is not None and adopted.reason is FailureReason.REFUSED:
-            return RunResultProposal(outcome="cancelled", reason=reason_text(stopped, detail))
-        return RunResultProposal(outcome="failure", reason=detail)
+        return _not_adopted(adopted, stopped)
     kind = EndReason.KEPT_INPUT if isinstance(selection, TrustedBaseline) else EndReason.ADOPTED
     detail = reason_text(kind, _selection_name(selection))
+    # Keeping the input needs no comparison; a candidate the root never compared says so.
+    uncompared = isinstance(returned, Uncompared) and isinstance(selection, RetainedCandidate)
     if stopped is not None:
         return RunResultProposal(
-            outcome="cancelled", reason=reason_text(stopped, detail), selection=selection
+            outcome=_stopped_outcome(stopped),
+            reason=reason_text(stopped, detail),
+            selection=selection,
+            uncompared=uncompared,
         )
-    return RunResultProposal(outcome="success", reason=detail, selection=selection)
+    return RunResultProposal(
+        outcome="success", reason=detail, selection=selection, uncompared=uncompared
+    )

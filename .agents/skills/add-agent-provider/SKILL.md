@@ -16,9 +16,10 @@ canned stub runner, and providers exist only under `cli`.
 VibeSys never talks to a CLI directly. **agentshim**, a separate library pinned
 in `pyproject.toml`, owns provider knowledge (argv, stream parsing, MCP config
 formats, schema dialects, state directories, auth variables, skill
-directories, resume flags), published per provider as a `ProviderProfile`.
-VibeSys owns **driver policy**: which providers it ships, the CLI versions in
-its container image, budgets, confinement and quota handling. See
+directories, resume flags, each CLI's models and their context windows),
+published per provider as a `ProviderProfile`. VibeSys owns **driver
+policy**: which providers it ships, the CLI versions in its container image,
+budgets, confinement and quota handling. See
 "Where agentshim lives" in
 [agent-drivers.md](../../../docs/contributing/agent-drivers.md), which also
 shows the temporary override for an unreleased agentshim commit.
@@ -47,8 +48,7 @@ shows the temporary override for an unreleased agentshim commit.
    judgment; ask "is this true because of how the CLI behaves?".
 2. **Import agentshim only inside vs-agent.** Everything else uses
    `vs_agent.api`, and tests use `vs_agent.api.testing`. Ruff's banned-api rule
-   `TID251` enforces it; export from `vs_agent.api` instead of adding an
-   exemption.
+   `TID251` enforces it; export from `vs_agent.api` instead of an exemption.
 3. **Read provider facts through vs-agent's profile accessor at call time.**
    Host grants, auth, skill and MCP config locations derive from the profile,
    so they need no per-provider edit. Keep provider-name literals inside the
@@ -78,8 +78,11 @@ shows the temporary override for an unreleased agentshim commit.
 6. **Upgrade agentshim:** raise the range, relock, read its changelog for
    renamed profile fields and new CLI minimums, and run the vs-agent tests.
    `test_the_container_codex_cli_is_not_older_than_agentshims_protocol` fails
-   when agentshim's generated Codex app-server protocol needs a newer CLI than
-   the pinned one.
+   when its generated Codex protocol needs a newer CLI than the pinned one.
+   A relock also changes the models VibeSys admits and the context windows it
+   shows (agentshim's facts; `test_no_model_knowledge_in_product_code`): diff
+   each `ProviderProfile.models` and the context table across versions, and list
+   added and removed models in the PR. Unenforced: no check compares releases.
 7. **Bump a CLI pin** in the provider policy and the Feature option default
    together (Codex has its own pin constant, which the pin test above reads).
    `test_option_defaults_mirror_provider_policy` fails if they diverge.

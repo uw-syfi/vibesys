@@ -38,3 +38,12 @@ class SessionPersistenceError(RuntimeError):
     def because(cls, detail: str) -> SessionPersistenceError:
         """Preserve the failed persistence operation."""
         return cls(detail)
+
+
+class AgentExecutionCancelledError(Exception):
+    """An execution boundary cancelled preparation before the provider was invoked.
+
+    This is positive evidence that no execution began, not an ambiguous provider
+    failure. The durable session releases this explicit interruption before the
+    owning request publishes its cancellation.
+    """

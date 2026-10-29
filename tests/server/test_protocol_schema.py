@@ -14,6 +14,7 @@ from jsonschema import Draft202012Validator
 from pydantic import TypeAdapter, ValidationError
 
 from entrypoints.protocol_schema import built_in_span_attributes
+from launch import built_in_orchestrations
 from server.api.protocol import (
     MAX_ACTIVE_EXECUTIONS_CHUNKS,
     ProtocolRequest,
@@ -90,12 +91,52 @@ def test_committed_protocol_schema_matches_python_contract() -> None:
     assert _committed_schema() == protocol_json_schema(built_in_span_attributes())
 
 
-def test_the_protocol_exports_each_declared_span_kinds_attribute_schema() -> None:
-    defs = protocol_json_schema(built_in_span_attributes())["$defs"]
-    dynamic = defs["DynamicSpanAttributes"]["properties"]
-    assert set(dynamic) == {"planning_call", "workstream", "agent_turn", "gate"}
-    assert set(defs["WorkstreamAttrs"]["properties"]) == {"hypothesis_id", "parent_revision"}
-    assert set(defs["GateAttrs"]["properties"]) == {"stage", "metric_value", "vs_baseline"}
+def test_the_protocol_exports_the_span_kinds_attribute_schema_of_every_built_in_search() -> None:
+    registered = {r.plugin.id for r in built_in_orchestrations().registrations()}
+    assert registered == {
+        "dynamic",
+        "single-agent",
+        "profile-guided-single-agent",
+        "multi-agent",
+        "profile-guided-multi-agent",
+        "evolve",
+        "plain",
+    }, "a new built-in search labels its spans and is added here"
+    exported = built_in_span_attributes()
+    defs = protocol_json_schema(exported)["$defs"]
+    assert set(exported) == registered
+    for search in registered:
+        kinds = {kind: model.__name__ for kind, model in exported[search].items()}
+        assert set(kinds) == {"planning_call", "workstream", "agent_turn", "gate", "adoption"}
+        listed = defs["SpanAttributes"]["properties"][search]
+        assert listed["anyOf"][0]["$ref"].startswith("#/$defs/"), search
+    workstream = defs["WorkstreamAttrs"]["properties"]
+    assert set(workstream) == {
+        "hypothesis_id",
+        "parent_revision",
+        "base_round",
+        "round",
+        "idea",
+        "revision",
+        "outcome",
+        "summary",
+        "probe",
+        "sequence",
+    }
+    gate = set(defs["GateAttrs"]["properties"])
+    assert gate == {
+        "stage",
+        "metric_value",
+        "vs_baseline",
+        "input_metrics",
+        "metrics",
+        "failed",
+    }
+    assert set(defs["MetricRow"]["properties"]) == {"name", "value", "direction", "unit"}
+    assert set(defs["FailedCheck"]["properties"]) == {"check", "completed", "required", "unit"}
+    assert set(defs["AdoptionAttrs"]["properties"]) == {"candidate", "metric_value", "vs_baseline"}
+    turn = set(defs["AgentTurnAttrs"]["properties"])
+    assert turn == {"agent", "role", "model", "started_by"}
 
 
 @given(
@@ -167,12 +208,25 @@ def test_host_helper_schema_exports_the_authoritative_request_feature_gates() ->
         "logs.cancel": "logs_cancel",
         "harnesses.list": "harnesses",
         "runs.read_events": "run_history",
+        "runs.events_for_span": "run_span_events",
+        "runs.read_tail": "run_tail",
+        "runs.summary": "run_trace",
         "machine.describe": "machine_describe",
         "checkout.inspect": "checkout_inspect",
         "run.preflight": "preflight",
         "examples.list": "examples",
         "project.create_from_example": "examples",
         "project.copy_out": "examples",
+        "examples.destination": "example_destination",
+        "compute.list": "machine_compute",
+        "compute.test_cluster": "machine_compute",
+        "compute.add_cluster": "machine_compute",
+        "compute.remove_cluster": "machine_compute",
+        "agent_logins.list": "agent_logins",
+        "agent_logins.start": "agent_logins",
+        "project.task_goal": "project_goal",
+        "usage.window": "usage_window",
+        "run.reader": "chat_ended_runs",
     }
     request_tags = document["properties"]["request"]["discriminator"]["mapping"]
     assert gates.keys() <= request_tags.keys()
@@ -183,14 +237,44 @@ def test_host_helper_schema_exports_the_authoritative_request_feature_gates() ->
     assert set(gates.values()) | field_gates == {feature.value for feature in HelperFeature}
 
 
+def test_host_helper_schema_exports_the_event_types_each_kind_selects() -> None:
+    document = host_helper_json_schema()
+
+    assert document["x-vibesys-event-types-by-kinds"] == {
+        "trace": ["span_started", "span_updated", "span_ended", "run_started", "gate_finished"]
+    }
+    kinds = document["$defs"]["RunEventKinds"]["enum"]
+    assert kinds == list(document["x-vibesys-event-types-by-kinds"])
+
+
 def test_host_helper_schema_exports_the_authoritative_field_feature_gates() -> None:
     document = host_helper_json_schema()
     gates = document["x-vibesys-feature-by-field"]
 
     assert gates == {
-        "run.start": {"harness": "harnesses", "options": "run_options"},
-        "run.preflight": {"harness": "harnesses", "options": "run_options"},
+        "run.start": {
+            "harness": "harnesses",
+            "options": "run_options",
+            "agents": "run_role_agents",
+            "measure_on": "measurement_target",
+        },
+        "run.preflight": {
+            "harness": "harnesses",
+            "options": "run_options",
+            "agents": "run_role_agents",
+            "measure_on": "measurement_target",
+            "with_roles": "run_roles",
+            "with_backend": "run_backend",
+            "with_causes": "run_causes",
+            "with_project_clean": "project_clean",
+        },
+        "harnesses.list": {"with_generations": "harness_generations"},
         "logs.list": {"span_id": "logs_by_span"},
+        "runs.read_events": {"with_totals": "run_history_pages", "kinds": "run_trace_events"},
+        "runs.summary": {"offset": "run_summary", "with_ending": "run_ending"},
+        "runs.list": {"digest_runs": "run_digest", "with_dashboard": "run_dashboard"},
+        "examples.list": {"with_catalogue": "example_catalogue"},
+        "run.reader": {"with_chat": "chat_ended_run_questions"},
     }
     request_refs = document["properties"]["request"]["discriminator"]["mapping"]
     for tag, fields in gates.items():
@@ -678,16 +762,24 @@ def test_gate_kind_has_one_definition_on_both_wire_contracts() -> None:
     assert ServerGateKind is GateKind
 
 
-def test_thread_creation_request_no_longer_accepts_a_driver() -> None:
-    """The wire request names provider and model only; ``driver`` is an unknown key."""
+def test_thread_creation_request_names_a_harness_and_no_driver() -> None:
+    """The wire request names a harness choice; ``driver`` and loose provider keys are unknown."""
     request = TypeAdapter(ProtocolRequest)
     request.validate_python(
         {
             "type": "query.chat_thread_create",
             "timestamp": "2026-01-01T00:00:00Z",
-            "provider": "codex",
+            "harness": {"provider": "codex", "model": "gpt-test"},
         }
     )
+    with pytest.raises(ValidationError, match="provider"):
+        request.validate_python(
+            {
+                "type": "query.chat_thread_create",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "provider": "codex",
+            }
+        )
     with pytest.raises(ValidationError, match="driver"):
         request.validate_python(
             {

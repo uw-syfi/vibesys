@@ -105,7 +105,7 @@ One directory per compute backend, each with `floor.md`, `hardware.md`, and `pro
 
 - [`references/frameworks/triton.md`](references/frameworks/triton.md) — Triton as a framework-level decision — when a custom Triton kernel pays off vs reusing an existing kernel library.
 
-Platform-specific frameworks (MLX, torch-neuronx, NxD) live under that platform's directory.
+Platform-specific frameworks (MLX, native TorchNeuron) live under that platform's directory.
 
 ### Engine source maps
 

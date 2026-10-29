@@ -24,6 +24,7 @@
     "src/**/*.test.tsx"
   ],
   "references": [
+    {"path":"../../libs/request-identity/tsconfig.lib.json"},
     {
       "path": "../../features/app-shell/tsconfig.renderer.json"
     },
@@ -37,10 +38,22 @@
       "path": "../../features/new-run/tsconfig.state.json"
     },
     {
+      "path": "../../features/usage/tsconfig.renderer.json"
+    },
+    {
+      "path": "../../features/usage/tsconfig.state.json"
+    },
+    {
       "path": "../../features/run-page/tsconfig.renderer.json"
     },
     {
       "path": "../../features/run-page/tsconfig.state.json"
+    },
+    {
+      "path": "../../features/runs-dashboard/tsconfig.renderer.json"
+    },
+    {
+      "path": "../../features/runs-dashboard/tsconfig.state.json"
     },
     {
       "path": "../../features/settings/tsconfig.renderer.json"
@@ -52,22 +65,49 @@
       "path": "../../libs/hosts/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/runs/tsconfig.lib.json"
+      "path": "../../libs/ipc/tsconfig.lib.json"
     },
     {
       "path": "../../libs/run-session/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/transport/tsconfig.websocket.json"
-    },
-    {
-      "path": "../../libs/ipc/tsconfig.lib.json"
+      "path": "../../libs/runs/tsconfig.lib.json"
     },
     {
       "path": "../../libs/store/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/transport/tsconfig.websocket.json"
+    },
+    {
       "path": "../../libs/ui/tsconfig.lib.json"
+    },
+    {
+      "path": "../../features/run-chat/tsconfig.renderer.json"
+    },
+    {
+      "path": "../../features/run-chat/tsconfig.state.json"
+    },
+    {
+      "path": "../../libs/machine/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.reader.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.cache.json"
+    },
+    {
+      "path": "../../features/run-intents/tsconfig.renderer.json"
+    },
+    {
+      "path": "../../features/run-sessions/tsconfig.renderer.json"
     }
   ]
 }

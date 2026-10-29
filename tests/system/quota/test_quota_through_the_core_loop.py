@@ -39,7 +39,6 @@ from vs_prompts.api import TemplateRenderer
 from vs_runtime.api.core import CoreRunHost, RunControlBridge, RunLoopConfig, drive_core
 from vs_runtime.api.infrastructure import (
     CapacityHandling,
-    ProviderFallback,
     QuotaAction,
     QuotaPolicy,
     RunControlTransition,
@@ -66,12 +65,16 @@ class _Sink(NullAgentEventSink):
         del error, plan, where
         self.events.append("paused")
 
-    def quota_resumed(self, provider: str, reason: str, where: Attribution) -> None:
-        del provider, where
+    def quota_resumed(
+        self, error: AgentQuotaError, reason: str, waited_seconds: float, where: Attribution
+    ) -> None:
+        del error, waited_seconds, where
         self.events.append(f"resumed:{reason}")
 
-    def quota_abandoned(self, error: AgentQuotaError, reason: str, where: Attribution) -> None:
-        del error, reason, where
+    def quota_abandoned(
+        self, error: AgentQuotaError, reason: str, waited_seconds: float, where: Attribution
+    ) -> None:
+        del error, reason, waited_seconds, where
         self.events.append("abandoned")
 
 
@@ -119,7 +122,7 @@ async def _play(
             client,
             control=channel,
             events=played.sink,
-            handling=CapacityHandling(policy, ProviderFallback(None, OsThreads()), played.timer),
+            handling=CapacityHandling.for_policy(policy, OsThreads(), played.timer),
             clock=ManualClock(),
         )
         resolver = CandidateResolver(

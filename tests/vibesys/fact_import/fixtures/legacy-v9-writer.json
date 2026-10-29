@@ -1,0 +1,123 @@
+{
+ "schema_version": 9,
+ "lifecycle": {
+  "intents": {},
+  "continuations": {},
+  "stopped": false
+ },
+ "agent": null,
+ "experiment_revision": 0,
+ "next_planning_call": 1,
+ "search": {
+  "schema_version": 1,
+  "experiment_revision": 0,
+  "active_hypothesis_id": null,
+  "metrics": {
+   "objectives": [],
+   "relative_noise": 0.0
+  },
+  "hypotheses": [],
+  "profile_guidance": null
+ },
+ "workstreams": [
+  {
+   "hypothesis_id": "kept",
+   "sequence": 1,
+   "planning_call": 1,
+   "plan": {
+    "kind": "implement",
+    "hypothesis_id": "kept",
+    "title": "Investigate kept",
+    "hypothesis": "Mechanism kept limits the objective.",
+    "task": "Implement and verify kept.",
+    "pass_criteria": "The change is correct and measurably improves the objective.",
+    "continue_hypothesis": false,
+    "evidence": [],
+    "parent_hypothesis_id": null
+   },
+   "parent_revision": "fake-revision-1",
+   "phase": "evaluated",
+   "budget": {
+    "spent": 1,
+    "refunded": 0
+   },
+   "invocation_sequence": 0,
+   "candidate_revision": "candidate-1-revision-3",
+   "implementation": {
+    "summary": "Implemented kept.",
+    "outcome": "nominated",
+    "evidence": [],
+    "next_step": ""
+   },
+   "review": {
+    "passed": true,
+    "analysis": "Candidate is correct.",
+    "feedback": ""
+   },
+   "evaluation": {
+    "revision": "candidate-1-revision-3",
+    "local_validation_passed": null,
+    "local_validation_feedback": null,
+    "accuracy_passed": null,
+    "accuracy_feedback": null,
+    "benchmark_passed": true,
+    "benchmark_feedback": null,
+    "metric_name": "throughput",
+    "metric_value": 2.0,
+    "metric_direction": "max",
+    "metric_unit": null,
+    "metrics": {
+     "throughput": 2.0,
+     "latency_ms": 7.5
+    },
+    "partial_measurement": null
+   },
+   "prior_attempt": "",
+   "prior_revision": null,
+   "feedback": null,
+   "last_error": null,
+   "setup_failure": false,
+   "implementer_started": false,
+   "verified": null
+  },
+  {
+   "hypothesis_id": "dropped",
+   "sequence": 2,
+   "planning_call": 1,
+   "plan": {
+    "kind": "implement",
+    "hypothesis_id": "dropped",
+    "title": "Investigate dropped",
+    "hypothesis": "Mechanism dropped limits the objective.",
+    "task": "Implement and verify dropped.",
+    "pass_criteria": "The change is correct and measurably improves the objective.",
+    "continue_hypothesis": false,
+    "evidence": [],
+    "parent_hypothesis_id": null
+   },
+   "parent_revision": "fake-revision-1",
+   "phase": "failed",
+   "budget": {
+    "spent": 3,
+    "refunded": 1
+   },
+   "invocation_sequence": 0,
+   "candidate_revision": null,
+   "implementation": null,
+   "review": null,
+   "evaluation": null,
+   "prior_attempt": "",
+   "prior_revision": null,
+   "feedback": null,
+   "last_error": null,
+   "setup_failure": false,
+   "implementer_started": false,
+   "verified": null
+  }
+ ],
+ "profiles": [],
+ "baseline": null,
+ "input_measurement": null,
+ "winner_revision": "candidate-1-revision-3",
+ "adoption_pending": false
+}

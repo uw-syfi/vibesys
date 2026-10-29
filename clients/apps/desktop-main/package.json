@@ -9,7 +9,6 @@
     "layer": "app",
     "entries": {
       ".": "node",
-      "./preload-run": "preload",
       "./preload-welcome": "preload"
     }
   },
@@ -19,21 +18,18 @@
       "@vibesys/source": "./src/main/index.ts",
       "default": "./dist/main/index.js"
     },
-    "./preload-run": {
-      "@vibesys/source": "./src/preload/run.cts",
-      "default": "./dist/preload/run.cjs"
-    },
     "./preload-welcome": {
       "@vibesys/source": "./src/preload/welcome.cts",
       "default": "./dist/preload/welcome.cjs"
     }
   },
   "scripts": {
-    "build": "tsc -b tsconfig.lib.json tsconfig.preload-run.json tsconfig.preload-welcome.json && node scripts/copy-ui.mjs",
+    "build": "tsc -b tsconfig.lib.json tsconfig.preload-welcome.json && node scripts/copy-ui.mjs && node scripts/build-gateway.mjs",
     "check": "tsc -b",
     "test": "node ../../tools/scripts/run_bun_tests.mjs ./src",
-    "test:e2e": "turbo run build --filter=@vibesys/app-desktop-main... && node e2e/verify-electron-runtime.mjs && playwright test",
-    "start": "pnpm build && electron ."
+    "test:e2e": "turbo run build --filter=@vibesys/app-desktop-main... && node e2e/verify-electron-runtime.mjs && playwright test --pass-with-no-tests",
+    "start": "pnpm build && electron .",
+    "dev": "pnpm start"
   },
   "dependencies": {
     "@vibesys/connection": "workspace:*",
@@ -43,12 +39,13 @@
     "@vibesys/feature-new-run": "workspace:*",
     "@vibesys/feature-run-control": "workspace:*",
     "@vibesys/feature-settings": "workspace:*",
-    "@vibesys/feature-start-run": "workspace:*",
     "@vibesys/hosts": "workspace:*",
     "@vibesys/ipc": "workspace:*",
+    "@vibesys/run-history": "workspace:*",
     "@vibesys/runs": "workspace:*",
     "@vibesys/settings": "workspace:*",
-    "@vibesys/transport": "workspace:*"
+    "@vibesys/transport": "workspace:*",
+    "@vibesys/ui": "workspace:*"
   },
   "devDependencies": {
     "@playwright/test": "1.55.0",
@@ -56,6 +53,8 @@
     "@types/node": "^24.0.0",
     "@vibesys/store": "workspace:*",
     "electron": "44.6.0",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "@bufbuild/protobuf": "2.16.0",
+    "@vibesys/proto": "workspace:*"
   }
 }

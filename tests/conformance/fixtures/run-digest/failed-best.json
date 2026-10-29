@@ -1,0 +1,797 @@
+{
+  "description": "Two ideas and a probe: ring (two attempts, passes, adopted at 1.4x) and spin (fails after a measure of 2.37x). A digest counts an idea once however many attempts it took, counts no probe, and headlines the adopted 1.4x, never the failed idea's 2.37x.",
+  "digest": {
+    "ideas": 2,
+    "adopted_ratio": 1.4
+  },
+  "events": [
+    {
+      "protocol_version": 1,
+      "sequence": 1,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:01Z",
+      "type": "run_started",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "kind": "run_started",
+        "outer_loop": "dynamic",
+        "input": "queue",
+        "max_rounds": null,
+        "expected_roles": [],
+        "overview": {
+          "overview_version": 1,
+          "objective": {
+            "text": "Make the queue faster.",
+            "metric": "ops_per_s",
+            "unit": "ops/s",
+            "direction": "max",
+            "correctness_check": []
+          },
+          "benchmarks": {
+            "evaluator": null
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 2,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:02Z",
+      "type": "span_started",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "span": {
+          "id": "flow:#1",
+          "parent": null,
+          "type": "flow",
+          "name": "search",
+          "status": "running",
+          "waiting_on": [],
+          "attempts": [],
+          "started_at": 1792205000.0,
+          "ended_at": null,
+          "failure": null,
+          "stop": null,
+          "invocation": null,
+          "label": null
+        },
+        "kind": "span_started"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 3,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:03Z",
+      "type": "span_started",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "span": {
+          "id": "flow:000001/#1",
+          "parent": "flow:#1",
+          "type": "flow",
+          "name": "play_round",
+          "status": "running",
+          "waiting_on": [],
+          "attempts": [],
+          "started_at": 1792205010.0,
+          "ended_at": null,
+          "failure": null,
+          "stop": null,
+          "invocation": null,
+          "label": {
+            "kind": "workstream",
+            "title": "Ring buffer",
+            "links": [],
+            "attrs_json": "{\"hypothesis_id\":\"ring\",\"idea\":\"Ring buffer\",\"round\":1,\"probe\":false}",
+            "verdict": null,
+            "reason": null
+          }
+        },
+        "kind": "span_started"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 4,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:04Z",
+      "type": "span_started",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "span": {
+          "id": "op:000001/gate.1",
+          "parent": "flow:000001/#1",
+          "type": "operation",
+          "name": "gate",
+          "status": "running",
+          "waiting_on": [],
+          "attempts": [],
+          "started_at": 1792205011.0,
+          "ended_at": null,
+          "failure": null,
+          "stop": null,
+          "invocation": null,
+          "label": {
+            "kind": "gate",
+            "title": "measure",
+            "links": [],
+            "attrs_json": "{\"metric_value\":140.0,\"vs_baseline\":1.4}",
+            "verdict": null,
+            "reason": null
+          }
+        },
+        "kind": "span_started"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 5,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:05Z",
+      "type": "span_ended",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "span": {
+          "id": "op:000001/gate.1",
+          "parent": "flow:000001/#1",
+          "type": "operation",
+          "name": "gate",
+          "status": "done",
+          "waiting_on": [],
+          "attempts": [],
+          "started_at": 1792205011.0,
+          "ended_at": 1792205012.0,
+          "failure": null,
+          "stop": null,
+          "invocation": null,
+          "label": {
+            "kind": "gate",
+            "title": "measure",
+            "links": [],
+            "attrs_json": "{\"metric_value\":140.0,\"vs_baseline\":1.4}",
+            "verdict": "passed",
+            "reason": null
+          }
+        },
+        "kind": "span_ended"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 6,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:06Z",
+      "type": "span_ended",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "span": {
+          "id": "flow:000001/#1",
+          "parent": "flow:#1",
+          "type": "flow",
+          "name": "play_round",
+          "status": "done",
+          "waiting_on": [],
+          "attempts": [],
+          "started_at": 1792205010.0,
+          "ended_at": 1792205015.0,
+          "failure": null,
+          "stop": null,
+          "invocation": null,
+          "label": {
+            "kind": "workstream",
+            "title": "Ring buffer",
+            "links": [],
+            "attrs_json": "{\"hypothesis_id\":\"ring\",\"idea\":\"Ring buffer\",\"round\":1,\"probe\":false,\"revision\":\"rev-a\"}",
+            "verdict": "passed",
+            "reason": null
+          }
+        },
+        "kind": "span_ended"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 7,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:07Z",
+      "type": "span_started",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "span": {
+          "id": "flow:000002/#1",
+          "parent": "flow:#1",
+          "type": "flow",
+          "name": "play_round",
+          "status": "running",
+          "waiting_on": [],
+          "attempts": [],
+          "started_at": 1792205020.0,
+          "ended_at": null,
+          "failure": null,
+          "stop": null,
+          "invocation": null,
+          "label": {
+            "kind": "workstream",
+            "title": "Spin first",
+            "links": [],
+            "attrs_json": "{\"hypothesis_id\":\"spin\",\"idea\":\"Spin first\",\"round\":2,\"probe\":false}",
+            "verdict": null,
+            "reason": null
+          }
+        },
+        "kind": "span_started"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 8,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:08Z",
+      "type": "span_started",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "span": {
+          "id": "op:000002/gate.1",
+          "parent": "flow:000002/#1",
+          "type": "operation",
+          "name": "gate",
+          "status": "running",
+          "waiting_on": [],
+          "attempts": [],
+          "started_at": 1792205021.0,
+          "ended_at": null,
+          "failure": null,
+          "stop": null,
+          "invocation": null,
+          "label": {
+            "kind": "gate",
+            "title": "measure",
+            "links": [],
+            "attrs_json": "{\"metric_value\":237.0,\"vs_baseline\":2.37}",
+            "verdict": null,
+            "reason": null
+          }
+        },
+        "kind": "span_started"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 9,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:09Z",
+      "type": "span_ended",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "span": {
+          "id": "op:000002/gate.1",
+          "parent": "flow:000002/#1",
+          "type": "operation",
+          "name": "gate",
+          "status": "done",
+          "waiting_on": [],
+          "attempts": [],
+          "started_at": 1792205021.0,
+          "ended_at": 1792205022.0,
+          "failure": null,
+          "stop": null,
+          "invocation": null,
+          "label": {
+            "kind": "gate",
+            "title": "measure",
+            "links": [],
+            "attrs_json": "{\"metric_value\":237.0,\"vs_baseline\":2.37}",
+            "verdict": "passed",
+            "reason": null
+          }
+        },
+        "kind": "span_ended"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 10,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:10Z",
+      "type": "span_ended",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "span": {
+          "id": "flow:000002/#1",
+          "parent": "flow:#1",
+          "type": "flow",
+          "name": "play_round",
+          "status": "done",
+          "waiting_on": [],
+          "attempts": [],
+          "started_at": 1792205020.0,
+          "ended_at": 1792205025.0,
+          "failure": null,
+          "stop": null,
+          "invocation": null,
+          "label": {
+            "kind": "workstream",
+            "title": "Spin first",
+            "links": [],
+            "attrs_json": "{\"hypothesis_id\":\"spin\",\"idea\":\"Spin first\",\"round\":2,\"probe\":false}",
+            "verdict": "failed",
+            "reason": "failed_check"
+          }
+        },
+        "kind": "span_ended"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 11,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:11Z",
+      "type": "span_started",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "span": {
+          "id": "flow:000003/#1",
+          "parent": "flow:#1",
+          "type": "flow",
+          "name": "play_round",
+          "status": "running",
+          "waiting_on": [],
+          "attempts": [],
+          "started_at": 1792205030.0,
+          "ended_at": null,
+          "failure": null,
+          "stop": null,
+          "invocation": null,
+          "label": {
+            "kind": "workstream",
+            "title": "Ring buffer again",
+            "links": [],
+            "attrs_json": "{\"hypothesis_id\":\"ring\",\"idea\":\"Ring buffer again\",\"round\":3,\"probe\":false}",
+            "verdict": null,
+            "reason": null
+          }
+        },
+        "kind": "span_started"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 12,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:12Z",
+      "type": "span_started",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "span": {
+          "id": "op:000003/gate.1",
+          "parent": "flow:000003/#1",
+          "type": "operation",
+          "name": "gate",
+          "status": "running",
+          "waiting_on": [],
+          "attempts": [],
+          "started_at": 1792205031.0,
+          "ended_at": null,
+          "failure": null,
+          "stop": null,
+          "invocation": null,
+          "label": {
+            "kind": "gate",
+            "title": "measure",
+            "links": [],
+            "attrs_json": "{\"metric_value\":140.0,\"vs_baseline\":1.4}",
+            "verdict": null,
+            "reason": null
+          }
+        },
+        "kind": "span_started"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 13,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:13Z",
+      "type": "span_ended",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "span": {
+          "id": "op:000003/gate.1",
+          "parent": "flow:000003/#1",
+          "type": "operation",
+          "name": "gate",
+          "status": "done",
+          "waiting_on": [],
+          "attempts": [],
+          "started_at": 1792205031.0,
+          "ended_at": 1792205032.0,
+          "failure": null,
+          "stop": null,
+          "invocation": null,
+          "label": {
+            "kind": "gate",
+            "title": "measure",
+            "links": [],
+            "attrs_json": "{\"metric_value\":140.0,\"vs_baseline\":1.4}",
+            "verdict": "passed",
+            "reason": null
+          }
+        },
+        "kind": "span_ended"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 14,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:14Z",
+      "type": "span_ended",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "span": {
+          "id": "flow:000003/#1",
+          "parent": "flow:#1",
+          "type": "flow",
+          "name": "play_round",
+          "status": "done",
+          "waiting_on": [],
+          "attempts": [],
+          "started_at": 1792205030.0,
+          "ended_at": 1792205035.0,
+          "failure": null,
+          "stop": null,
+          "invocation": null,
+          "label": {
+            "kind": "workstream",
+            "title": "Ring buffer again",
+            "links": [],
+            "attrs_json": "{\"hypothesis_id\":\"ring\",\"idea\":\"Ring buffer again\",\"round\":3,\"probe\":false,\"revision\":\"rev-a\"}",
+            "verdict": "passed",
+            "reason": null
+          }
+        },
+        "kind": "span_ended"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 15,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:15Z",
+      "type": "span_started",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "span": {
+          "id": "flow:000004/#1",
+          "parent": "flow:#1",
+          "type": "flow",
+          "name": "play_round",
+          "status": "running",
+          "waiting_on": [],
+          "attempts": [],
+          "started_at": 1792205040.0,
+          "ended_at": null,
+          "failure": null,
+          "stop": null,
+          "invocation": null,
+          "label": {
+            "kind": "workstream",
+            "title": "Probe the clock",
+            "links": [],
+            "attrs_json": "{\"idea\":\"Probe the clock\",\"round\":4,\"probe\":true}",
+            "verdict": null,
+            "reason": null
+          }
+        },
+        "kind": "span_started"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 16,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:16Z",
+      "type": "span_started",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "span": {
+          "id": "op:000004/gate.1",
+          "parent": "flow:000004/#1",
+          "type": "operation",
+          "name": "gate",
+          "status": "running",
+          "waiting_on": [],
+          "attempts": [],
+          "started_at": 1792205041.0,
+          "ended_at": null,
+          "failure": null,
+          "stop": null,
+          "invocation": null,
+          "label": {
+            "kind": "gate",
+            "title": "measure",
+            "links": [],
+            "attrs_json": "{\"metric_value\":90.0,\"vs_baseline\":0.9}",
+            "verdict": null,
+            "reason": null
+          }
+        },
+        "kind": "span_started"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 17,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:17Z",
+      "type": "span_ended",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "span": {
+          "id": "op:000004/gate.1",
+          "parent": "flow:000004/#1",
+          "type": "operation",
+          "name": "gate",
+          "status": "done",
+          "waiting_on": [],
+          "attempts": [],
+          "started_at": 1792205041.0,
+          "ended_at": 1792205042.0,
+          "failure": null,
+          "stop": null,
+          "invocation": null,
+          "label": {
+            "kind": "gate",
+            "title": "measure",
+            "links": [],
+            "attrs_json": "{\"metric_value\":90.0,\"vs_baseline\":0.9}",
+            "verdict": "passed",
+            "reason": null
+          }
+        },
+        "kind": "span_ended"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 18,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:18Z",
+      "type": "span_ended",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "span": {
+          "id": "flow:000004/#1",
+          "parent": "flow:#1",
+          "type": "flow",
+          "name": "play_round",
+          "status": "done",
+          "waiting_on": [],
+          "attempts": [],
+          "started_at": 1792205040.0,
+          "ended_at": 1792205045.0,
+          "failure": null,
+          "stop": null,
+          "invocation": null,
+          "label": {
+            "kind": "workstream",
+            "title": "Probe the clock",
+            "links": [],
+            "attrs_json": "{\"idea\":\"Probe the clock\",\"round\":4,\"probe\":true}",
+            "verdict": "passed",
+            "reason": null
+          }
+        },
+        "kind": "span_ended"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 19,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:19Z",
+      "type": "span_started",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "span": {
+          "id": "op:adopt.1",
+          "parent": "flow:#1",
+          "type": "operation",
+          "name": "adopt",
+          "status": "running",
+          "waiting_on": [],
+          "attempts": [],
+          "started_at": 1792205100.0,
+          "ended_at": null,
+          "failure": null,
+          "stop": null,
+          "invocation": null,
+          "label": {
+            "kind": "adoption",
+            "title": "adoption",
+            "links": [],
+            "attrs_json": "{\"candidate\":\"rev-a\",\"metric_value\":140.0,\"vs_baseline\":1.4}",
+            "verdict": null,
+            "reason": null
+          }
+        },
+        "kind": "span_started"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 20,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:20Z",
+      "type": "span_ended",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "span": {
+          "id": "op:adopt.1",
+          "parent": "flow:#1",
+          "type": "operation",
+          "name": "adopt",
+          "status": "done",
+          "waiting_on": [],
+          "attempts": [],
+          "started_at": 1792205100.0,
+          "ended_at": 1792205105.0,
+          "failure": null,
+          "stop": null,
+          "invocation": null,
+          "label": {
+            "kind": "adoption",
+            "title": "adoption",
+            "links": [],
+            "attrs_json": "{\"candidate\":\"rev-a\",\"metric_value\":140.0,\"vs_baseline\":1.4}",
+            "verdict": "adopted",
+            "reason": null
+          }
+        },
+        "kind": "span_ended"
+      }
+    }
+  ]
+}

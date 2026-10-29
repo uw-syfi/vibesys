@@ -1,4 +1,5 @@
 version = 1
+backends = ["cpu"]
 
 [agent]
 domain = "microservices"
@@ -75,3 +76,11 @@ name = "deathstarbench"
 repo = "https://github.com/vibesys-playground/DeathStarBench.git"
 commit = "867806e575e1f7fb24437ae969910ddb17a76121"
 dest = "deathstarbench"
+
+[catalogue]
+domain = "microservices"
+
+[catalogue.hardware]
+accelerator = "CPU"
+count = 1
+vendor = "cpu"

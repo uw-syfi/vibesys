@@ -58,11 +58,13 @@ from vs_agent.api import (
     AgentEvent,
     AgentEventKind,
     AgentOutputSchemaError,
+    AgentQuotaError,
     AgentSessionKey,
     AgentTurnResult,
     AgentTurnTimeoutError,
     AgentUsage,
     MCPServerSpec,
+    QuotaCondition,
     SessionResumeError,
     SessionScope,
     container_import_roots,
@@ -1255,9 +1257,10 @@ def test_a_fresh_turn_that_fails_is_not_retried(
     del sandbox_builds
     session, fake = _session(tmp_path, provider, FakeRun(returncode=1, stderr=["boom\n"]))
 
-    with pytest.raises(agentshim.CliExitError):
+    with pytest.raises(agentshim.CliExitError) as excinfo:
         session.run_turn(AgentTurnRequest(message="one"))
 
+    assert not isinstance(excinfo.value, AgentQuotaError)
     assert len(fake.requests) == 1
 
 
@@ -1339,10 +1342,13 @@ def test_a_transient_error_that_outlasts_every_delay_propagates(
         transient_retry_delays=delays,
     )
 
-    with pytest.raises(agentshim.CliExitError) as excinfo:
+    with pytest.raises(AgentQuotaError) as excinfo:
         session.run_turn(AgentTurnRequest(message="one"))
 
-    assert excinfo.value.kind is _TRANSIENT
+    # It reaches the caller as an outage, for the run's capacity gate to wait out.
+    assert excinfo.value.condition is QuotaCondition.UNAVAILABLE
+    assert isinstance(excinfo.value.__cause__, agentshim.CliExitError)
+    assert excinfo.value.__cause__.kind is _TRANSIENT
     # The first attempt and one retry per delay.
     assert len(fake.requests) == 1 + len(delays)
 
@@ -1393,7 +1399,7 @@ def test_a_resumed_turn_that_exhausts_its_retries_keeps_the_conversation(
         transient_retry_delays=(),
     )
     session.run_turn(AgentTurnRequest(message="one"))
-    with pytest.raises(agentshim.CliExitError):
+    with pytest.raises(AgentQuotaError):
         session.run_turn(AgentTurnRequest(message="two"))
 
     result = session.run_turn(AgentTurnRequest(message="three"))
@@ -1402,13 +1408,47 @@ def test_a_resumed_turn_that_exhausts_its_retries_keeps_the_conversation(
     assert "s-1" in fake.requests[2].argv
 
 
+@pytest.mark.regression
+@pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)
+def test_a_sustained_outage_reaches_the_caller_after_one_attempt(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """The production schedule hides no retry of a send from the capacity gate.
+
+    Before (S179), five retries hid about fifteen minutes of every send, which the gate could
+    neither see nor keep off the turn's limit; one 30 s retry still hid a second CLI attempt
+    (review of #3283, weak spot 1).
+    """
+    del sandbox_builds
+    session, fake = _session(
+        tmp_path,
+        provider,
+        lambda _request: scripted_failure(provider, _TRANSIENT),
+        transient_retry_delays=subject.TRANSIENT_RETRY_DELAYS_S,
+    )
+
+    with pytest.raises(AgentQuotaError) as excinfo:
+        session.run_turn(AgentTurnRequest(message="one"))
+
+    assert excinfo.value.condition is QuotaCondition.UNAVAILABLE
+    assert len(fake.requests) == 1
+    assert subject.TRANSIENT_RETRY_DELAYS_S == ()
+
+
 @pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)
 def test_cancel_stops_a_turn_waiting_out_a_transient_error(
     sandbox_builds: list[dict[str, Any]],
     tmp_path: Path,
     provider: str,
 ) -> None:
-    """A cancelled turn raises the provider error instead of retrying it."""
+    """A cancelled turn ends instead of retrying, with the capacity type of its failure.
+
+    Before (S179), a cancel made the failure a plain provider error, so a turn that core
+    cancelled while its provider was down was reported lost by its transport. The client
+    never sends a cancelled turn to its gate, so nothing waits for a turn nobody wants.
+    """
     del sandbox_builds
     sessions: list[LaunchedSession] = []
 
@@ -1427,9 +1467,10 @@ def test_cancel_stops_a_turn_waiting_out_a_transient_error(
     )
     sessions.append(session)
 
-    with pytest.raises(agentshim.CliExitError):
+    with pytest.raises(AgentQuotaError) as excinfo:
         session.run_turn(AgentTurnRequest(message="one"))
 
+    assert excinfo.value.condition is QuotaCondition.UNAVAILABLE
     assert len(fake.requests) == 1
 
 

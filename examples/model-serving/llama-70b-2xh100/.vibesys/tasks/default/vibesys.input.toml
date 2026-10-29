@@ -1,4 +1,5 @@
 version = 1
+backends = ["cuda"]
 
 [agent]
 domain = "llm-serving"
@@ -24,3 +25,15 @@ args = [
 ]
 timeout_seconds = 600
 result_protocol = 2
+
+[catalogue]
+domain = "llm-serving"
+
+[catalogue.hardware]
+accelerator = "NVIDIA H100"
+count = 2
+vendor = "nvidia"
+
+[catalogue.model]
+name = "Llama 3.3 70B Instruct"
+maker = "meta"

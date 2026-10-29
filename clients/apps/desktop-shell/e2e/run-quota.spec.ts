@@ -1,17 +1,18 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
-import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
-import {installFakeRun} from './fake-run.js';
-import {type FakeServerSeed, installFakeServer} from './fake-server.js';
+import {Controls} from './chat-controls.js';
+import {
+  type FakeBridgeSeed,
+  installFakeBridge,
+  installFakeMachines,
+  installFakeProjectRuns,
+} from './fake-bridge.js';
+import {addInitScripts, initScript} from './init-scripts.js';
+import {journeyFixture, journeyScript} from './journey-world.js';
+import {installGatewayOnly} from './retired-run-bridge.js';
+import {STARTED_AT} from './started-at.js';
 
-/**
- * The quota banner against the Fake bridge and a fake run paused on a usage limit: it names the
- * provider and its reset time, "Wait and resume when quota is back" sends Resume when capacity
- * returns and shows the expected time once the run reports `quota_waiting`, "Stop waiting" sends
- * Pause and the banner returns on `quota_wait_cancelled`, and "Resume now" sends Resume now. Times
- * are formatted in UTC here so the journey reads the same everywhere. Checked in the Ink theme;
- * `QUOTA_SHOTS` names a directory to save the screens in.
- */
+/** Quota holds stay internal; Pause now remains available to close the epoch. */
 
 interface FakeHostWindow extends Window {
   fakeHost: {commands: string[]};
@@ -20,10 +21,6 @@ interface FakeHostWindow extends Window {
 const PROJECT = '/home/me/vibesys-projects/queue-rs';
 const RUN_ID = '20261015-163047';
 const INSTANCE = '00000000000a';
-/** 2025-10-16 02:00 and 02:02 UTC. */
-const RESETS_AT = 1_760_580_000;
-const RESUMES_AT = 1_760_580_120;
-
 const LIVE = {
   id: INSTANCE,
   projectRoot: PROJECT,
@@ -32,7 +29,7 @@ const LIVE = {
   phase: 'paused',
   paused: 'quota',
   end: null,
-  startedAt: 1,
+  startedAt: STARTED_AT,
   reason: null,
 };
 
@@ -41,12 +38,12 @@ const SEED: FakeBridgeSeed = {
   chromeInset: {width: 84, height: 40},
   appearance: {mode: 'dark', light: 'paper', dark: 'ink'},
   listings: [
-    {kind: 'listed', host: 'ssh:chelan4', live: [LIVE], ended: [], unreadable: [], unverified: []},
+    {kind: 'listed', host: 'ssh:host-b', live: [LIVE], ended: [], unreadable: [], unverified: []},
   ],
   recent: [
     {
-      host: 'ssh:chelan4',
-      hostLabel: 'chelan4',
+      host: 'ssh:host-b',
+      hostLabel: 'host-b',
       project: PROJECT,
       task: 'mpmc',
       runId: RUN_ID,
@@ -54,32 +51,6 @@ const SEED: FakeBridgeSeed = {
       attachedAt: 3,
     },
   ],
-};
-
-const SERVER: FakeServerSeed = {
-  runId: RUN_ID,
-  batch: {
-    type: 'event_batch',
-    events: [
-      {
-        timestamp: '2026-10-15T16:30:51Z',
-        type: 'quota_paused',
-        sequence: 1,
-        data: {
-          kind: 'quota_paused',
-          provider: 'claude',
-          condition: 'quota_exhausted',
-          detail: 'Claude usage limit reached',
-          resets_at: RESETS_AT,
-        },
-      },
-    ],
-    through_sequence: 1,
-    store_id: 'store-1',
-    history_after_sequence: 0,
-  },
-  snapshot: {run_id: RUN_ID, sequence: 0, status: 'paused'},
-  quota: {provider: 'claude', resumesAt: RESUMES_AT},
 };
 
 const shots = process.env['QUOTA_SHOTS'];
@@ -94,39 +65,37 @@ async function shoot(page: Page, name: string): Promise<void> {
 
 test.use({colorScheme: 'dark', timezoneId: 'UTC', locale: 'en-US'});
 
-test('a run paused by its usage limit waits for quota, stops waiting, and resumes now', async ({
-  page,
-}) => {
-  await page.addInitScript(installFakeBridge, SEED);
-  await page.addInitScript(installFakeMachines, SEED);
-  await page.addInitScript(installFakeRun, {streams: [], text: {}});
-  await page.addInitScript(installFakeServer, SERVER);
+test('a quota hold stays internal while the operator can cancel the epoch', async ({page}) => {
+  const controls = new Controls(page, journeyFixture('quota'));
+  await controls.attach();
+  await addInitScripts(page, [
+    initScript(installFakeBridge, SEED),
+    initScript(installFakeProjectRuns, SEED),
+    initScript(installFakeMachines, SEED),
+    initScript(installGatewayOnly, undefined),
+    journeyScript('quota'),
+  ]);
   await page.goto('./shell.html');
   await page
-    .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: /^\S+ queue-rs · mpmc/})
+    .getByRole('main')
+    .getByRole('button', {name: /^queue-rs · mpmc/})
     .click();
 
   const main = page.getByRole('main');
-  await expect(main.getByText('Paused: Claude hit its usage limit')).toBeVisible();
-  await expect(main.getByText(/Claude expects capacity back at Thu 02:00/)).toBeVisible();
-  const wait = page.getByRole('button', {name: 'Wait and resume when quota is back'});
-  await expect(wait).toBeEnabled();
+  // Capacity waits are native child spans; they do not park the epoch.
+  await expect(main.getByText('Running', {exact: true}).first()).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Wait and resume when quota is back'})).toHaveCount(
+    0,
+  );
+  await expect(page.getByRole('button', {name: 'Stop waiting'})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Resume now'})).toHaveCount(0);
+  await page.getByRole('button', {name: 'Pause now', exact: true}).click();
+  await expect(
+    page.getByText('Unfinished work may need repeating and may still incur charges.'),
+  ).toBeVisible();
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
-  await shoot(page, 'ink-quota-paused');
-
-  await wait.click();
-  await expect.poll(() => commands(page)).toContain('command.resume:capacity_returns');
-  await expect(main.getByText("Waiting for Claude's quota")).toBeVisible();
-  await expect(main.getByText(/resumes by itself at about Thu 02:02/)).toBeVisible();
-  await expect(wait).toHaveCount(0);
-  await shoot(page, 'ink-quota-waiting');
-
-  await page.getByRole('button', {name: 'Stop waiting'}).click();
-  await expect.poll(() => commands(page)).toContain('command.pause');
-  await expect(main.getByText('Paused: Claude hit its usage limit')).toBeVisible();
-  await expect(wait).toBeEnabled();
-
-  await page.getByRole('button', {name: 'Resume now'}).click();
-  await expect.poll(() => commands(page)).toContain('command.resume');
+  await shoot(page, 'ink-quota-held');
+  expect((await commands(page)).filter(command => command.startsWith('command.'))).toEqual([]);
+  // The warning stands beside the controls and Pause now is admitted at once: no dialog precedes it.
+  expect(controls.posted.map(request => request.intent.case)).toEqual(['pauseNow']);
 });

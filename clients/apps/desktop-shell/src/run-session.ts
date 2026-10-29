@@ -6,8 +6,7 @@
  * transport's types only). The page keeps no redial timer: the main process's connection manager is
  * the one retry loop per host, and its wake redials.
  *
- * The bridge-to-socket adapter repeats the one `apps/web`'s desktop entry uses; that app is frozen
- * and leaves with the old run page, so this copy is the one that stays.
+ * The bridge-to-socket adapter connects the desktop shell to a run through the main process.
  */
 import type {DesktopBridge, DesktopSocket} from '@vibesys/ipc';
 import {

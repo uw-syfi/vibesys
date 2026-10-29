@@ -53,7 +53,7 @@ def test_ephemeral_setup_sandbox_is_not_restarted_on_reselection(
         tmp_path,
         clock=ManualClock(),
         threads=SimThreads(),
-        docker=ScriptedDockerCli(),
+        docker=recording_docker_cli(),
         launcher=FakePipedProcessLauncher(),
         probe=ScriptedProbe(lambda _argv: None),
     )

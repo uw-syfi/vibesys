@@ -21,7 +21,6 @@ from vs_agent.api.testing import FakeAgentClient
 from vs_runtime.api.infrastructure import (
     RESET_MARGIN_SECONDS,
     CapacityHandling,
-    ProviderFallback,
     QuotaPolicy,
     RunControlChannel,
     RunControlTransition,
@@ -54,8 +53,10 @@ class _Sink(NullAgentEventSink):
         del provider, where
         self.events.append(("cancelled", reason))
 
-    def quota_resumed(self, provider: str, reason: str, where: Attribution) -> None:
-        del provider, where
+    def quota_resumed(
+        self, error: AgentQuotaError, reason: str, waited_seconds: float, where: Attribution
+    ) -> None:
+        del error, waited_seconds, where
         self.events.append(("resumed", reason))
 
 
@@ -124,7 +125,7 @@ class _Run:
             client,
             control=control,
             events=self.sink,
-            handling=CapacityHandling(self.policy, ProviderFallback(None, threads), self.timer),
+            handling=CapacityHandling.for_policy(self.policy, threads, self.timer),
             clock=ManualClock(START),
         )
         threads.run(

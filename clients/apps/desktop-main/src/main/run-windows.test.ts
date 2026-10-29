@@ -38,7 +38,7 @@ function subject() {
   return {windows, made};
 }
 
-const ALPHA = {host: 'ssh:chelan4', runId: 'run-alpha'};
+const ALPHA = {host: 'ssh:host-b', runId: 'run-alpha'};
 const BRAVO = {host: 'local', runId: 'run-bravo'};
 
 test('each run has at most one window, which a second open focuses', () => {
@@ -49,7 +49,7 @@ test('each run has at most one window, which a second open focuses', () => {
   expect(again.created).toBe(false);
   expect(again.window).toBe(made[0] as FakeWindow);
   expect(made.map(window => [window.url, window.focused])).toEqual([
-    ['app://vibesys/shell.html?host=ssh%3Achelan4&run=run-alpha', 1],
+    ['app://vibesys/shell.html?host=ssh%3Ahost-b&run=run-alpha', 1],
     ['app://vibesys/shell.html?host=local&run=run-bravo', 0],
   ]);
 });

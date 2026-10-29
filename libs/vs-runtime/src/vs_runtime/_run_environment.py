@@ -32,7 +32,7 @@ import sys
 
 # lint-waiver: LW-007062 [TC003]; Pydantic resolves this dataclass field annotation at runtime
 from collections.abc import Mapping  # noqa: TC003
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import partial
@@ -41,9 +41,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from vs_agent.api import (
-    CONTAINER_FRAMEWORK_ROOT,
-    AgentBackend,
-    auth_bind_mounts,
     auth_copy_paths,
     reap_orphaned_agents,
 )
@@ -51,9 +48,21 @@ from vs_agent.api import (
 # lint-waiver: LW-014514 [TC001]; Pydantic resolves this dataclass field annotation at runtime
 from vs_project.api import RunResourceRequest  # noqa: TC001
 from vs_runtime import _boot_trace as boot_trace
+from vs_runtime._agent_tool_caches import agent_tool_cache_env
 from vs_runtime._cli_container_env import cli_container_env, cli_provider_env_and_auth_files
+from vs_runtime._command_environment_session import command_environment_session
+from vs_runtime._container_mount_plan import (
+    CANDIDATE_GIT_LAYOUT,
+    container_mount_plan,
+    git_metadata_mounts,
+    git_metadata_writable,
+    materialize_effective_objective,
+    reference_container_path,
+    sandbox_workspace_root,
+)
 from vs_runtime._container_runtime_policy import (
     DOCKER_IN_DOCKER_NOTICE,
+    RefusesDockerInDocker,
     attaches_accelerator,
     reject_docker_in_docker,
 )
@@ -67,10 +76,15 @@ from vs_runtime._environment_startup import (
     EnvironmentStartupStage,
     StartupOutputOpener,
     ToolBuildOutputOpener,
+    WorkspaceRootProbeSink,
+    startup_stage,
 )
 from vs_runtime._image_features import image_features
 from vs_runtime._model_artifacts import read_model_metadata
-from vs_runtime._objective_document import materialize_objective_document
+from vs_runtime._objective_document import (
+    outside_objective,
+)
+from vs_runtime._project_run import CaptureRecoverySource, NoCaptureRecovery
 from vs_runtime._run_environment_facts import (
     ClusterEvaluationFacts,
     DockerEnvironmentFacts,
@@ -96,12 +110,15 @@ from vs_runtime._trusted_evaluation_preparation import (
     required_evaluator_tools_root,
 )
 from vs_runtime._workspace_files import write_for_agent
+from vs_runtime._writer_reconciliation import (
+    UnsupportedWriterReconciler,
+    docker_writer_reconciler,
+)
 from vs_sandbox.api import (
     CONTAINER_RUNTIME_TOOLCHAIN,
     DeviceLease,
     EnvironmentBindMount,
     HostResource,
-    HostResourceAccess,
     ProjectPathPolicy,
     SandboxKind,
     SandboxLifecycleHooks,
@@ -111,15 +128,12 @@ from vs_sandbox.api import (
     deduplicate_host_resources,
     evaluator_helpers,
     host_resource_for_mount,
-    linked_worktree_git_paths,
     require_sysbox_runtime,
     start_sandbox,
     stop_sandbox,
-    workspace_container_root,
 )
 from vs_sandbox.api.docker_workspace import (
     DockerWorkspaceRepairError,
-    docker_project_path_resources,
     remove_docker_workspace_child,
     repair_docker_workspace,
 )
@@ -137,32 +151,22 @@ from vs_sandbox.api.skypilot import (
     stable_cluster_name,
 )
 from vs_sandbox.api.symlink_mounts import (
-    SymlinkMountScope,
-    collect_symlink_mounts,
-    find_mount_root,
     symlink_lifecycle_hooks,
 )
 from vs_sim.api import DISCARD, CloseOnce, ReleaseStack
 
-_RUNTIME_OBJECTIVE_CONTAINER_PATH = "/opt/vibesys-runtime/objective.md"
 _RUNTIME_DOCUMENT_NAME = "runtime-environment.md"
-"""The runtime resource declaration's ``agent_path`` for the effective objective.
-
-Used in exactly one place: the ``HostResource`` :func:`_container_mount_plan`
-declares for the materialized objective document. Every environment's
-:class:`AgentPaths` instead asks the started sandbox's own
-:meth:`~vs_sandbox.docker_sandbox.DockerSandbox.agent_path` for that document's
-container path, so this constant and the resource declaration are the single
-source of truth an environment consults."""
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
     from contextlib import AbstractContextManager
 
     from vs_agent.api.images import BuildProgressSink, DockerBuildRunner, ImageBuildProgress
     from vs_evaluation.api import ProfileField
     from vs_project.api import StateNamespace
+    from vs_proto.api import replay as writer_pb
     from vs_runtime._environment_system import EnvironmentSystem
     from vs_sandbox.api import (
+        CaptureCommandRunner,
         CommandRunner,
         ComputeBackendImpl,
         DockerCli,
@@ -183,6 +187,14 @@ class RunEnvironmentSpec:
     name: str = "docker"
     options: Mapping[str, object] = field(default_factory=dict)
     resources: RunResourceRequest | None = None
+    #: The task Dockerfile the ``image`` option was built from, or ``None``
+    #: when the image is the operator's or the backend's. Not recorded: the
+    #: run record holds the task image's reference.
+    task_dockerfile: Path | None = None
+    #: The immutable ID the task image resolved to at launch. Not recorded;
+    #: when set, the environment runs it in place of the ``image`` option, so
+    #: a later launch pruning the task image's tag cannot change this run.
+    image_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -218,6 +230,9 @@ class RunEnvironmentView:
     """Run-environment-neutral facts consumed by loops and agent construction."""
 
     paths: AgentPaths
+    #: Whether the agent can write the Git metadata of the workspace this session mounts,
+    #: as that session's mount plan bound it. Required: a missing fact must not read as true.
+    workspace_git_writable: bool
     prompt_notes: str = ""
     isolated: bool = False
     cli_sandboxed: bool = False
@@ -243,6 +258,7 @@ class RunEnvironmentView:
     framework_setup_timeout_seconds: int = 0
     profiler_mcp_env: tuple[tuple[str, str], ...] = ()
     profiler_mcp_resources: tuple[HostResource, ...] = ()
+    agent_host_resources: tuple[HostResource, ...] = ()
     # Set when trusted evaluation runs as Slurm jobs; ``None`` otherwise.
     cluster_evaluation: ClusterEvaluationFacts | None = None
 
@@ -250,6 +266,18 @@ class RunEnvironmentView:
     def captures_profile(self) -> bool:
         """Whether the run can capture a profile: the one fact every profile offer reads."""
         return self.cluster_evaluation is not None and self.cluster_evaluation.captures_profile
+
+    @property
+    def dedicated_measurement_resources(self) -> bool:
+        """Whether the trusted executor runs each measurement on hosts it holds alone.
+
+        Only a cluster that submits every evaluation job exclusively declares it; an executor
+        that evaluates beside the agent (the local one) never does.
+        """
+        return (
+            self.cluster_evaluation is not None
+            and self.cluster_evaluation.dedicated_measurement_resources
+        )
 
     @property
     def supported_profile_fields(self) -> tuple[ProfileField, ...]:
@@ -278,6 +306,19 @@ class RunEnvironmentView:
     def supports_parallel_candidate_evaluation(self) -> bool:
         """Whether each candidate can get its own worktree and container session."""
         return self.parallel_candidate_obstacle is None
+
+    @property
+    def agent_git_writable(self) -> bool:
+        """Whether agents can commit where they write candidates: the fact prompts state.
+
+        A session that opens a session per candidate has its agents write in those
+        candidates, linked worktrees bound by the same rule as this session's mounts.
+        Otherwise they write in this session's own workspace. Prompts are rendered for
+        the run, not for one session, so they read this and never the root's own fact.
+        """
+        if self.supports_parallel_candidate_evaluation:
+            return git_metadata_writable(CANDIDATE_GIT_LAYOUT)
+        return self.workspace_git_writable
 
 
 @dataclass(frozen=True)
@@ -357,6 +398,9 @@ class RunEnvironmentRequest:
     #: declared tools) writes its raw output to, closed when the build ends;
     #: ``None`` discards the output.
     tool_build_output: ToolBuildOutputOpener | None = None
+    #: Where a local Slurm root's probe, which runs beside the run, reports that its
+    #: job waits in the queue and how it ended; ``None`` reports nothing.
+    workspace_root_probe: WorkspaceRootProbeSink | None = None
 
 
 class _AgentPathSandbox(Protocol):
@@ -376,6 +420,11 @@ class RunEnvironmentSession(Protocol):
 
     sandbox: CommandRunner
     view: RunEnvironmentView
+
+    @property
+    def capture_commands(self) -> CaptureCommandRunner:
+        """Runner for profile-attribution capture; usually the editor runner."""
+        ...
 
     def __enter__(self) -> RunEnvironmentSession:
         """Enter the session and return its context-managed handle."""
@@ -500,7 +549,7 @@ class _PreparedRunEnvironment:
         return self._open(presentation)
 
 
-class RunEnvironment(Protocol):
+class RunEnvironment(CaptureRecoverySource, Protocol):
     """Environment policy for run execution and candidate evaluation."""
 
     # Read-only members: an environment may fix them or derive them from its
@@ -553,6 +602,10 @@ class RunEnvironment(Protocol):
         """
         ...
 
+    def requires_sysbox_runtime(self, *, docker_in_docker: bool) -> bool:
+        """Whether a run here needs the host's Docker daemon to register Sysbox."""
+        ...
+
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve environment facts without starting owned resources."""
         ...
@@ -569,6 +622,16 @@ class RunEnvironment(Protocol):
         """Remove a workspace-relative child and report whether it is absent."""
         ...
 
+    def reconcile_writers(
+        self,
+        manifest: writer_pb.WriterManifest,
+        *,
+        system: EnvironmentSystem,
+        log: Callable[[str], None],
+    ) -> writer_pb.WriterReconciliation:
+        """Return environment-issued death proof, or explicit Pending/Unknown/Unsupported."""
+        ...
+
     def reap_orphans(
         self, run_id: str, *, system: EnvironmentSystem, log: Callable[[str], None]
     ) -> None:
@@ -581,7 +644,18 @@ class RunEnvironment(Protocol):
         ...
 
 
-class _NoopWorkspaceRecovery:
+class _NoopWorkspaceRecovery(NoCaptureRecovery):
+    def reconcile_writers(
+        self,
+        manifest: writer_pb.WriterManifest,
+        *,
+        system: EnvironmentSystem,
+        log: Callable[[str], None],
+    ) -> writer_pb.WriterReconciliation:
+        del system, log
+        name = manifest.backing.environment if manifest.backing is not None else "unknown"
+        return UnsupportedWriterReconciler(name).reconcile_writers(manifest)
+
     def reap_orphans(
         self, run_id: str, *, system: EnvironmentSystem, log: Callable[[str], None]
     ) -> None:
@@ -607,7 +681,7 @@ class _NoopWorkspaceRecovery:
         return False
 
 
-class HostEnvironment(_NoopWorkspaceRecovery):
+class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
     """Run the agent on the host, refusing to start unless it is confined.
 
     Selected for backends whose accelerator no container can reach (Metal on
@@ -667,23 +741,24 @@ class HostEnvironment(_NoopWorkspaceRecovery):
     ) -> RunEnvironmentSession:
         """Create a host sandbox and its agent path view."""
         del presentation
-        objective_document = _materialize_effective_objective(request)
-        sandbox = _make_host_sandbox(request)
+        materialize_effective_objective(request)
+        document, grants = outside_objective(request.objective, request.log_dir)
         evaluation = _host_evaluation_plan(request)
-        return SandboxSession.borrowed(
-            sandbox=sandbox,
-            view=RunEnvironmentView(
-                paths=AgentPaths(
-                    objective=(
-                        str(objective_document)
-                        if objective_document is not None
-                        else "OBJECTIVE.md"
+        return command_environment_session(
+            SandboxSession.borrowed(
+                sandbox=_make_host_sandbox(request),
+                view=RunEnvironmentView(
+                    paths=AgentPaths(
+                        objective=(str(document) if document is not None else "OBJECTIVE.md"),
+                        accuracy_command=evaluation.accuracy_command,
+                        benchmark_command=evaluation.benchmark_command,
+                        profiler_support=request.profiler_support_path,
                     ),
-                    accuracy_command=evaluation.accuracy_command,
-                    benchmark_command=evaluation.benchmark_command,
-                    profiler_support=request.profiler_support_path,
+                    # The host sandbox binds a linked worktree's metadata read-only too.
+                    workspace_git_writable=git_metadata_mounts(request.workspace).agent_writable,
+                    agent_host_resources=grants,
                 ),
-            ),
+            )
         )
 
 
@@ -703,6 +778,7 @@ def _make_host_sandbox(request: RunEnvironmentRequest, *, ephemeral: bool = Fals
             EvaluatorToolLifecycleHooks(
                 requirements.tools,
                 required_evaluator_tools_root(requirements, request.workspace),
+                search_path=request.system.host_tool_search_path(),
             )
         )
     return request.backend.make_sandbox(
@@ -753,8 +829,7 @@ def _report_startup(
 
 
 def _image_build_progress(request: RunEnvironmentRequest) -> BuildProgressSink | None:
-    """Report that the image build begins, and where its progress goes."""
-    _report_startup(request, EnvironmentStartupStage.BUILDING_IMAGE)
+    """Where the image build's step observations go: the request's startup sink, when it has one."""
     if request.startup is None:
         return None
     return partial(_report_startup, request, EnvironmentStartupStage.BUILDING_IMAGE)
@@ -778,12 +853,59 @@ def _startup_output(
     return request.startup_output(stage, command)
 
 
-def _starting_container(request: RunEnvironmentRequest) -> AbstractContextManager[OutputSink]:
-    """Report that the container starts, and open the stream its ``docker run`` writes to."""
-    _report_startup(request, EnvironmentStartupStage.STARTING_CONTAINER)
-    return _startup_output(
-        request, EnvironmentStartupStage.STARTING_CONTAINER, _CONTAINER_START_COMMAND
+def _building_image(request: RunEnvironmentRequest) -> AbstractContextManager[None]:
+    """Report the image build as a stage: running for the block, finished after it."""
+    return startup_stage(
+        request.startup, EnvironmentStartupStage.BUILDING_IMAGE, clock=request.clock
     )
+
+
+class _Identified(Protocol):
+    @property
+    def id(self) -> str: ...
+
+
+@contextmanager
+def _starting_container(
+    request: RunEnvironmentRequest, sandbox: _Identified
+) -> Iterator[OutputSink]:
+    """Report the container start as a stage, and open the stream its ``docker run`` writes to.
+
+    Once the container is up, one narration line names it (the sandbox's id) and
+    the session's role, so two container starts of one run never read as one
+    event repeated: every container of a run starts exactly once and is told once.
+    """
+    stage = EnvironmentStartupStage.STARTING_CONTAINER
+    with (
+        startup_stage(request.startup, stage, clock=request.clock),
+        _startup_output(request, stage, _CONTAINER_START_COMMAND) as output,
+    ):
+        yield output
+    if request.log is not None:
+        request.log(f"[docker] container {sandbox.id} started ({request.session_role})")
+
+
+def _reporting_tool_builds(request: RunEnvironmentRequest) -> ToolBuildOutputOpener | None:
+    """The request's tool-build opener, each build it opens reported as a startup stage.
+
+    The opener is entered once per build that runs and never for a cache hit, so
+    the stage is reported exactly when a build ran.
+    """
+    if request.startup is None:
+        return request.tool_build_output
+    opener = request.tool_build_output
+
+    @contextmanager
+    def open_build(tools: tuple[str, ...]) -> Iterator[OutputSink]:
+        stage = EnvironmentStartupStage.BUILDING_TOOLS
+        with startup_stage(request.startup, stage, clock=request.clock):
+            if opener is None:
+                yield DISCARD
+            else:
+                with opener(tools) as output:
+                    yield output
+
+    return open_build
 
 
 class _OrphanReaper(Protocol):
@@ -814,6 +936,10 @@ class DockerEnvironmentConfig:
     limit, such as a test tier, sets it below that limit so a stalled build
     ends in an error carrying the build output instead of in the caller's
     timeout.
+
+    ``image_cache_from`` supplies Docker images with inline build-cache metadata
+    to the image builder. It is explicit build configuration, independent of
+    the installed image's identity and the caller's process environment.
     """
 
     image: str | None = None
@@ -821,6 +947,7 @@ class DockerEnvironmentConfig:
     build_runner: DockerBuildRunner | None = None
     orphan_reaper: _OrphanReaper | None = None
     image_build_timeout_seconds: float | None = None
+    image_cache_from: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -840,7 +967,16 @@ class EditorExtras:
     attach_accelerator: bool = True
 
 
-class DockerEnvironment:
+@dataclass(frozen=True)
+class BuiltEditor:
+    """The built, unstarted editor command runner and the Git fact its mount plan implies."""
+
+    runner: CommandRunner
+    #: From the same plan that mounted the workspace's Git metadata.
+    agent_git_writable: bool
+
+
+class DockerEnvironment(NoCaptureRecovery):
     """Run agents and evaluator commands in a Docker sandbox."""
 
     isolated = True
@@ -887,7 +1023,8 @@ class DockerEnvironment:
         self, request: RunEnvironmentRequest, presentation: RunEnvironmentPresentation
     ) -> RunEnvironmentSession:
         """Start the Docker sandbox and resolve candidate-facing paths."""
-        sandbox = self.build_editor(request)
+        editor = self.build_editor(request)
+        sandbox = editor.runner
         view = RunEnvironmentView(
             paths=_isolated_paths(
                 request,
@@ -898,19 +1035,26 @@ class DockerEnvironment:
             isolated=True,
             cli_sandboxed=True,
             env_kind="docker",
+            workspace_git_writable=editor.agent_git_writable,
         )
-        with _starting_container(request) as output:
-            return SandboxSession.start(sandbox=sandbox, view=view, output=output)
+        with _starting_container(request, sandbox) as output:
+            return command_environment_session(
+                SandboxSession.start(sandbox=sandbox, view=view, output=output)
+            )
 
     def attaches_backend_accelerator(self, *, docker_in_docker: bool) -> bool:
         """The editor container gets the accelerator, unless Docker-in-Docker forbids it."""
         return attaches_accelerator(docker_in_docker=docker_in_docker)
 
+    def requires_sysbox_runtime(self, *, docker_in_docker: bool) -> bool:
+        """A docker-in-docker sandbox runs under the host daemon's Sysbox."""
+        return docker_in_docker
+
     def build_editor(
         self,
         request: RunEnvironmentRequest,
         extras: EditorExtras | None = None,
-    ) -> CommandRunner:
+    ) -> BuiltEditor:
         """Build, without starting, the Docker sandbox the agent edits in.
 
         Every environment whose agent runs in Docker opens its editor here, so
@@ -941,13 +1085,19 @@ class DockerEnvironment:
         # agent layer is applied on top of it.
         base_image = _docker_backend_image(request)
         on_progress = _image_build_progress(request)
-        with _startup_output(
-            request, EnvironmentStartupStage.BUILDING_IMAGE, _agent_image_build_command(base_image)
-        ) as output:
+        with (
+            _building_image(request),
+            _startup_output(
+                request,
+                EnvironmentStartupStage.BUILDING_IMAGE,
+                _agent_image_build_command(base_image),
+            ) as output,
+        ):
             container_image = image_helpers.agent_image(
                 base_image,
                 features=image_features(toolchains),
                 command_runner=self.config.build_runner,
+                cache_from=self.config.image_cache_from,
                 timeout=(
                     image_helpers.DEFAULT_IMAGE_BUILD_TIMEOUT_SECONDS
                     if self.config.image_build_timeout_seconds is None
@@ -957,11 +1107,9 @@ class DockerEnvironment:
                 output=output,
                 clock=request.clock,
             )
-        workspace_root = _workspace_root(request, same_path=extras.same_path_workspace)
-        resources, docker_symlinks = _container_mount_plan(
-            request, same_path=extras.same_path_workspace
-        )
-        resources += list(extras.resources)
+        plan = container_mount_plan(request, same_path=extras.same_path_workspace)
+        docker_symlinks = plan.symlinks
+        resources = [*plan.resources, *extras.resources]
         resources += list(
             prepare_docker_evaluator_resources(
                 requirements,
@@ -970,7 +1118,7 @@ class DockerEnvironment:
                     backend=request.backend,
                     log_dir=request.log_dir,
                     image=container_image,
-                    output=request.tool_build_output,
+                    output=_reporting_tool_builds(request),
                 ),
             )
         )
@@ -980,16 +1128,13 @@ class DockerEnvironment:
         if resolved_cli is not None:
             provider, cli_provider_env = resolved_cli
             auth_files = auth_copy_paths(provider)
-        cli_provider_env.setdefault("UV_CACHE_DIR", f"{workspace_root}/.cache/uv")
         # The agent image's baked toolchain root is read-only (the vibesys-rust
         # Feature chmods /opt/cargo a+rX, deliberately: an agent cannot apt/cargo
-        # install mid-round). A Cargo invocation that needs a crate the image
-        # did not prebuild -- an evaluator's own trusted-runner build, most
-        # commonly -- still has to create its registry cache somewhere, so
-        # CARGO_HOME is redirected onto the writable, bind-mounted workspace.
-        # This is unrelated to which crates a candidate build needs: one with
-        # no external dependencies never touches the registry at all.
-        cli_provider_env.setdefault("CARGO_HOME", f"{workspace_root}/.cache/cargo")
+        # install mid-round), so a Cargo invocation that needs a crate the image
+        # did not prebuild still has to create its registry cache somewhere
+        # writable. That and uv's cache are the agent home's, never the workspace's.
+        for name, value in agent_tool_cache_env().items():
+            cli_provider_env.setdefault(name, value)
         if request.git_history_root is not None:
             cli_provider_env.setdefault("VIBESYS_GIT_HISTORY", "/opt/vibesys-history")
         cli_provider_env.update(extras.env)
@@ -1011,8 +1156,17 @@ class DockerEnvironment:
             attach_accelerator=attach_accelerator,
             run_id=request.run_id,
         )
-        log(f"[docker] starting container with image {container_image}")
-        return sandbox
+        return BuiltEditor(sandbox, agent_git_writable=plan.agent_git_writable)
+
+    def reconcile_writers(
+        self,
+        manifest: writer_pb.WriterManifest,
+        *,
+        system: EnvironmentSystem,
+        log: Callable[[str], None],
+    ) -> writer_pb.WriterReconciliation:
+        """Reap recorded domains and verify death without opening writable resources."""
+        return docker_writer_reconciler(self._docker(system), log).reconcile_writers(manifest)
 
     def reap_orphans(
         self, run_id: str, *, system: EnvironmentSystem, log: Callable[[str], None]
@@ -1090,6 +1244,11 @@ class _SkyPilotRunEnvironmentSession:
         self._steps.callback(self.bridge.close)
         self._steps.callback(stop_sandbox, self.sandbox)
 
+    @property
+    def capture_commands(self) -> CaptureCommandRunner:
+        """Run capture in the editor for environments without a separate role."""
+        return self.sandbox
+
     def __enter__(self) -> _SkyPilotRunEnvironmentSession:
         return self
 
@@ -1101,7 +1260,7 @@ class _SkyPilotRunEnvironmentSession:
         self._close.run(self._steps.close)
 
 
-class SkyPilotEnvironment(DockerEnvironment):
+class SkyPilotEnvironment(RefusesDockerInDocker, DockerEnvironment):
     """CPU-only Docker editor with host-mediated SkyPilot evaluation."""
 
     config: SkyPilotEnvironmentConfig
@@ -1109,6 +1268,18 @@ class SkyPilotEnvironment(DockerEnvironment):
     materialize_local_model_weights = False
     default_profiler_id = "none"
     supported_profiler_ids: frozenset[str] | None = frozenset({"auto", "none"})
+
+    def reconcile_writers(
+        self,
+        manifest: writer_pb.WriterManifest,
+        *,
+        system: EnvironmentSystem,
+        log: Callable[[str], None],
+    ) -> writer_pb.WriterReconciliation:
+        del system, log
+        return UnsupportedWriterReconciler("skypilot: remote writer jobs").reconcile_writers(
+            manifest
+        )
 
     def __init__(self, config: SkyPilotEnvironmentConfig) -> None:
         """Create an environment from operator-owned settings."""
@@ -1245,9 +1416,11 @@ class SkyPilotEnvironment(DockerEnvironment):
                 backend_label="SkyPilot",
             )
 
-            resources, docker_symlinks = _container_mount_plan(request)
+            plan = container_mount_plan(request)
+            resources, docker_symlinks = plan.resources, plan.symlinks
             cli_provider_env, auth_files = _cli_provider_env_and_auth_files(request)
-            cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
+            for name, value in agent_tool_cache_env().items():
+                cli_provider_env.setdefault(name, value)
             helper_source = evaluator_helpers.SKYPILOT_EVALUATOR_HELPER
             helper_path = "/opt/vibesys-skypilot-evaluator.py"
             socket_path = "/opt/vibesys-skypilot/bridge.sock"
@@ -1280,14 +1453,14 @@ class SkyPilotEnvironment(DockerEnvironment):
                 attach_accelerator=False,
                 run_id=request.run_id,
             )
-            with _starting_container(request) as output:
+            with _starting_container(request, sandbox) as output:
                 start_sandbox(sandbox, output=output)
         except Exception:
             bridge.close()
             raise
 
         agent_path_sandbox = cast("_AgentPathSandbox", sandbox)
-        objective_document = _materialize_effective_objective(request)
+        objective_document = materialize_effective_objective(request)
         prefix = f"python {helper_path} --socket {socket_path}"
         return _SkyPilotRunEnvironmentSession(
             sandbox=sandbox,
@@ -1310,11 +1483,12 @@ class SkyPilotEnvironment(DockerEnvironment):
                 host_device_reselect=False,
                 env_kind="skypilot",
                 profile_execution="remote",
+                workspace_git_writable=plan.agent_git_writable,
             ),
         )
 
 
-class ModalEnvironment(_NoopWorkspaceRecovery):
+class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
     """Run candidate evaluations as Modal deployments."""
 
     isolated = True
@@ -1362,7 +1536,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         facts = ModalEnvironmentFacts(
             gpu=self.config.gpu,
             app_name=app_name,
-            reference_path=_reference_container_path(request).removeprefix("/workspace/"),
+            reference_path=reference_container_path(request).removeprefix("/workspace/"),
         )
         return _PreparedRunEnvironment(
             facts,
@@ -1419,9 +1593,11 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
             backend_label="Modal",
         )
 
-        resources, docker_symlinks = _container_mount_plan(request)
+        plan = container_mount_plan(request)
+        resources, docker_symlinks = plan.resources, plan.symlinks
         cli_provider_env, auth_files = _cli_provider_env_and_auth_files(request)
-        cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
+        for name, value in agent_tool_cache_env().items():
+            cli_provider_env.setdefault(name, value)
         if request.git_history_root is not None:
             cli_provider_env.setdefault("VIBESYS_GIT_HISTORY", "/opt/vibesys-history")
         cli_provider_env["VIBESYS_MODAL_APP_NAME"] = app_name
@@ -1495,7 +1671,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
             )
         evaluator_prefix = f"{shlex.join(evaluator_arguments)} --"
         agent_path_sandbox = cast("_AgentPathSandbox", sandbox)
-        objective_document = _materialize_effective_objective(request)
+        objective_document = materialize_effective_objective(request)
         evaluation = _prepare_evaluation_plan(
             request,
             requirements,
@@ -1514,38 +1690,43 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
                 ),
             ),
         )
-        with _starting_container(request) as output:
-            return SandboxSession.start(
-                sandbox=sandbox,
-                output=output,
-                view=RunEnvironmentView(
-                    paths=AgentPaths(
-                        objective=(
-                            agent_path_sandbox.agent_path(objective_document)
-                            if objective_document is not None
-                            else "OBJECTIVE.md"
+        with _starting_container(request, sandbox) as output:
+            return command_environment_session(
+                SandboxSession.start(
+                    sandbox=sandbox,
+                    output=output,
+                    view=RunEnvironmentView(
+                        paths=AgentPaths(
+                            objective=(
+                                agent_path_sandbox.agent_path(objective_document)
+                                if objective_document is not None
+                                else "OBJECTIVE.md"
+                            ),
+                            accuracy_command=_prefix_command(
+                                evaluator_prefix,
+                                evaluation.accuracy_command,
+                            ),
+                            benchmark_command=_prefix_command(
+                                evaluator_prefix,
+                                evaluation.benchmark_command,
+                            ),
+                            profiler_support=(
+                                request.profiler_support_name
+                                if request.profiler_support_path
+                                else None
+                            ),
                         ),
-                        accuracy_command=_prefix_command(
-                            evaluator_prefix,
-                            evaluation.accuracy_command,
-                        ),
-                        benchmark_command=_prefix_command(
-                            evaluator_prefix,
-                            evaluation.benchmark_command,
-                        ),
-                        profiler_support=(
-                            request.profiler_support_name if request.profiler_support_path else None
-                        ),
+                        prompt_notes=presentation.prompt_notes,
+                        isolated=True,
+                        cli_sandboxed=True,
+                        host_device_reselect=False,
+                        env_kind="modal",
+                        profile_execution="remote",
+                        workspace_git_writable=plan.agent_git_writable,
+                        deployment_release_env_var="VIBESYS_RELEASE_MODAL_DEPLOYMENT",
+                        framework_setup_timeout_seconds=setup_timeout_seconds,
                     ),
-                    prompt_notes=presentation.prompt_notes,
-                    isolated=True,
-                    cli_sandboxed=True,
-                    host_device_reselect=False,
-                    env_kind="modal",
-                    profile_execution="remote",
-                    deployment_release_env_var="VIBESYS_RELEASE_MODAL_DEPLOYMENT",
-                    framework_setup_timeout_seconds=setup_timeout_seconds,
-                ),
+                )
             )
 
     def _ensure_model_volume(self, request: RunEnvironmentRequest) -> None:
@@ -1622,23 +1803,6 @@ def _modal_app_name(run_id: str, fallback: str) -> str:
     return name[:63].rstrip("-") or "vibesys"
 
 
-def _materialize_effective_objective(request: RunEnvironmentRequest) -> Path | None:
-    """Select and materialize the effective objective for this run.
-
-    Operator constraints are composed at the CLI boundary. VibeSys decides
-    whether an objective exists and which authored document it represents;
-    runtime infrastructure validates or writes the selected document.
-    """
-    if request.objective is None:
-        return None
-    return materialize_objective_document(
-        request.objective,
-        workspace=request.git_history_root or request.workspace,
-        authored_document=request.objective_document,
-        destination=request.log_dir / "effective-objective.md",
-    )
-
-
 def _isolated_paths(
     request: RunEnvironmentRequest,
     sandbox: _AgentPathSandbox,
@@ -1650,16 +1814,16 @@ def _isolated_paths(
     Every path the agent is told about is asked of *sandbox* rather than
     hardcoded: :meth:`~vs_sandbox.docker_sandbox.DockerSandbox.agent_path`
     is the one table mapping a host path to where the container sees it,
-    built from the same resource list :func:`_container_mount_plan` declared.
+    built from the same resource list :func:`container_mount_plan` declared.
     """
-    objective_document = _materialize_effective_objective(request)
+    objective_document = materialize_effective_objective(request)
     requirements = request.evaluator_requirements
     evaluation = _prepare_evaluation_plan(
         request,
         requirements,
         TrustedEvaluationCommandPaths(
             source_project_root=request.workspace,
-            runtime_project_root=_workspace_root(request),
+            runtime_project_root=sandbox_workspace_root(request),
             python_executable="python3",
             runtime_package_root=(
                 sandbox.agent_path(requirements.package_root)
@@ -1728,158 +1892,6 @@ def _prepare_evaluation_plan(
     )
 
 
-def _container_mount_plan(
-    request: RunEnvironmentRequest,
-    *,
-    include_cli_provider_mounts: bool = True,
-    same_path: bool = False,
-) -> tuple[list[HostResource], list[tuple[str, str]]]:
-    """Build the host resources + setup symlinks for a sandbox.
-
-    Returns the resource list the sandbox enforces and exposes through
-    :meth:`~vs_sandbox.docker_sandbox.DockerSandbox.agent_path` (workspace
-    read-write mapping aside, which the sandbox itself always provides),
-    and the setup symlinks a lifecycle hook must create once the container is
-    up.
-
-    ``include_cli_provider_mounts`` controls whether CLI auth state and the
-    full project tree are added under ``/opt/vibesys-auth`` and
-    ``/opt/vibesys``. Defaults to True; both supported environments (local
-    Docker and the Modal-via-Docker mode) bind-mount these read-only and copy
-    auth state into the container's writable layer during setup.
-    """
-    bind_mounts: list[tuple[str, str, bool]] = []
-    symlinks: list[tuple[str, str]] = []
-    ref_dir = request.ref_dir
-    root = _workspace_root(request, same_path=same_path)
-
-    mount_scope = SymlinkMountScope(
-        workspace_root=root,
-        skip=frozenset(mount.host_path.name for mount in request.environment_bind_mounts),
-    )
-
-    if ref_dir is not None:
-        reference_container_path = _reference_container_path(request, same_path=same_path)
-        collect_symlink_mounts(
-            ref_dir,
-            reference_container_path,
-            bind_mounts=bind_mounts,
-            symlinks=symlinks,
-            scope=mount_scope,
-        )
-        if ref_dir.parent != ref_dir:
-            collect_symlink_mounts(
-                ref_dir.parent,
-                str(Path(reference_container_path).parent),
-                bind_mounts=bind_mounts,
-                symlinks=symlinks,
-                scope=mount_scope,
-            )
-
-    objective_document = _materialize_effective_objective(request)
-    if objective_document is not None:
-        bind_mounts.append((str(objective_document), _RUNTIME_OBJECTIVE_CONTAINER_PATH, True))
-    if request.git_history_root is not None:
-        bind_mounts.append((str(request.git_history_root), "/opt/vibesys-history", True))
-    for mount in request.environment_bind_mounts:
-        resolved = mount.host_path.resolve()
-        host_path = find_mount_root(resolved)
-        if host_path == resolved:
-            bind_mounts.append((str(host_path), mount.container_path, mount.read_only))
-        else:
-            rel = resolved.relative_to(host_path)
-            mount_name = mount.container_path.strip("/").replace("/", "_") or "environment_mount"
-            ancestor_mount = f"{root}/_mounts/{mount_name}"
-            bind_mounts.append((str(host_path), ancestor_mount, mount.read_only))
-            symlinks.append((mount.container_path, f"{ancestor_mount}/{rel}"))
-
-    if request.profiler_support_path and request.profiler_support_name:
-        bind_mounts.append(
-            (
-                request.profiler_support_path,
-                f"{root}/{request.profiler_support_name}",
-                True,
-            )
-        )
-        bind_mounts.extend(
-            (extra_path, f"{root}/{extra_name}", True)
-            for extra_path, extra_name in request.profiler_support_extra
-        )
-
-    if request.evaluator_requirements.package_root is not None:
-        bind_mounts.append(
-            (
-                str(request.evaluator_requirements.package_root),
-                "/opt/vibesys-evaluator-package",
-                True,
-            )
-        )
-
-    resources = [
-        host_resource_for_mount(host, container, read_only=read_only)
-        for host, container, read_only in bind_mounts
-    ]
-    resources.extend(
-        docker_project_path_resources(
-            request.project_path_policy,
-            request.workspace,
-            mask_root=request.log_dir / "sandbox-hidden",
-            container_root=root,
-        )
-    )
-
-    # A candidate workspace is a linked Git worktree whose ``.git`` file names its
-    # metadata by host path. Mounted at that same path, read-only, ``git status``
-    # and ``git diff`` work in the container while history and other candidates'
-    # refs and worktrees stay unwritable.
-    resources.extend(
-        HostResource(path, HostResourceAccess.READ_ONLY, "linked worktree Git metadata")
-        for path in linked_worktree_git_paths(request.workspace)
-    )
-
-    if (
-        include_cli_provider_mounts
-        and (request.agent_backend or AgentBackend.CLI) == AgentBackend.CLI
-        and request.cli_provider
-    ):
-        resources.extend(
-            host_resource_for_mount(host, container, read_only=read_only)
-            for host, container, read_only in auth_bind_mounts(request.cli_provider)
-        )
-        resources.append(
-            host_resource_for_mount(
-                str(request.framework_root), CONTAINER_FRAMEWORK_ROOT, read_only=True
-            )
-        )
-
-    return resources, symlinks
-
-
-def _workspace_root(request: RunEnvironmentRequest, *, same_path: bool = False) -> str:
-    """Return where the request's Docker sandbox mounts the workspace."""
-    return workspace_container_root(
-        str(request.workspace), same_path=request.docker_in_docker or same_path
-    )
-
-
-def _reference_container_path(request: RunEnvironmentRequest, *, same_path: bool = False) -> str:
-    """Return the reference path inside an isolated workspace.
-
-    Normal project references retain their repository-relative location. An
-    external reference directory uses the legacy ``reference`` location under
-    the workspace root while its external symlink targets are mounted
-    separately.
-    """
-    root = _workspace_root(request, same_path=same_path)
-    if request.ref_dir is None:
-        return f"{root}/reference"
-    try:
-        relative = request.ref_dir.resolve().relative_to(request.workspace.resolve())
-    except ValueError:
-        return f"{root}/reference"
-    return f"{root}/{relative.as_posix()}"
-
-
 def _cli_container_env(request: RunEnvironmentRequest) -> tuple[str, dict[str, str]] | None:
     """Return ``(provider, container env)`` when a CLI provider needs a container."""
     return cli_container_env(request.agent_backend, request.cli_provider)
@@ -1904,20 +1916,21 @@ def _build_and_push_agent_image(
     base_image = _docker_backend_image(request)
     on_progress = _image_build_progress(request)
     building = EnvironmentStartupStage.BUILDING_IMAGE
-    with _startup_output(request, building, _agent_image_build_command(base_image)) as output:
-        image_id = image_helpers.agent_image(
-            base_image,
-            features=features,
-            on_progress=on_progress,
-            output=output,
-            clock=request.clock,
-        )
-    with _startup_output(request, building, _AGENT_IMAGE_PUSH_COMMAND) as output:
-        return _ensure_pushed_for_remote_backend(
-            image_id,
-            ensure_pushed=partial(image_helpers.ensure_pushed, output=output),
-            backend_label=backend_label,
-        )
+    with _building_image(request):
+        with _startup_output(request, building, _agent_image_build_command(base_image)) as output:
+            image_id = image_helpers.agent_image(
+                base_image,
+                features=features,
+                on_progress=on_progress,
+                output=output,
+                clock=request.clock,
+            )
+        with _startup_output(request, building, _AGENT_IMAGE_PUSH_COMMAND) as output:
+            return _ensure_pushed_for_remote_backend(
+                image_id,
+                ensure_pushed=partial(image_helpers.ensure_pushed, output=output),
+                backend_label=backend_label,
+            )
 
 
 def _ensure_pushed_for_remote_backend(

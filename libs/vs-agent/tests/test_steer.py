@@ -32,11 +32,14 @@ from vs_agent.api import (
     AgentEvent,
     AgentEventKind,
     AgentExecutionPolicy,
+    AgentSessionKey,
     AgentSessionSpec,
     AgentTurnRequest,
     NullAgentEventSink,
+    SessionScope,
     SteerOutcome,
 )
+from vs_agent.api.testing import FakeAgentClient
 
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent.client import AgentDiagnosticLog
@@ -174,6 +177,45 @@ def test_a_steer_reaches_the_running_turn_through_the_client(tmp_path: Path, hom
     assert len(script.requests("turn/steer")) == 1
 
 
+def test_a_keyed_steer_reaches_only_the_conversation_it_names(tmp_path: Path, home: Path) -> None:
+    script = CodexScript().turn(RunCommand("sleep 20"), AwaitSteer(then=(Say("STEERED"),)))
+    launcher = _launcher(
+        "codex", FakeExecutor([], peers=script.peer), home, agentshim.TransportKind.STREAM
+    )
+    key = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
+    other = AgentSessionKey(SessionScope.HYPOTHESIS, "H-02")
+    elsewhere: list[SteerOutcome] = []
+
+    def offer() -> SteerOutcome:
+        elsewhere.append(client.steer_session(other, TEXT, steer_id="s1"))
+        return client.steer_session(key, TEXT, steer_id="s1")
+
+    steerer = _SteerWhenRunning(offer)
+
+    class _Sink(NullAgentEventSink):
+        """Offers the steer at each callback of the running turn, on the turn's thread."""
+
+        def agent_output(self, *_args: object, **_kwargs: object) -> None:
+            steerer.on_event(AgentEvent(kind=AgentEventKind.THINKING))
+
+        def tool_call(self, *_args: object, **_kwargs: object) -> None:
+            steerer.on_event(AgentEvent(kind=AgentEventKind.THINKING))
+
+    client = AgentClient(
+        launcher, provider="codex", event_sink=_Sink(), clock=ManualClock(), threads=SimThreads()
+    )
+
+    result = client.run(
+        session_spec=_spec(tmp_path), turn=AgentTurnRequest(message="go"), session_key=key
+    )
+
+    assert _delivered(steerer.outcomes)
+    assert result.text == "STEERED"
+    assert set(elsewhere) == {SteerOutcome.NO_RUNNING_TURN}
+    assert len(script.requests("turn/steer")) == 1
+    assert client.steer_session(key, TEXT, steer_id="s1") is (SteerOutcome.NO_RUNNING_TURN)
+
+
 def test_a_steer_is_delivered_once_and_reported_on_the_diagnostic_channel(
     tmp_path: Path, home: Path
 ) -> None:
@@ -275,3 +317,30 @@ def test_a_client_with_no_turn_in_flight_reports_none_running(home: Path) -> Non
     )
 
     assert client.steer(TEXT, on_rejected=lambda: None) is SteerOutcome.NO_RUNNING_TURN
+
+
+@pytest.mark.parametrize("refuses", [False, True], ids=["kept", "refused"])
+def test_the_fake_client_steers_only_the_conversation_it_names(
+    tmp_path: Path, *, refuses: bool
+) -> None:
+    """Like the real client, the fake reaches only the keyed turn in flight, and names a
+    message it refuses in that turn's result."""
+    key = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
+    other = AgentSessionKey(SessionScope.HYPOTHESIS, "H-02")
+    client = FakeAgentClient(threads=SimThreads()).set_steering(
+        SteerOutcome.DELIVERED, refuses_after_accepting=refuses
+    )
+    seen: dict[str, SteerOutcome] = {}
+
+    def offer(_invocation: object) -> None:
+        seen["other"] = client.steer_session(other, TEXT, steer_id="elsewhere")
+        seen["named"] = client.steer_session(key, TEXT, steer_id="s1")
+
+    client.on_invoke(offer)
+    result = client.run(
+        session_spec=_spec(tmp_path), turn=AgentTurnRequest(message="go"), session_key=key
+    )
+
+    assert seen == {"other": SteerOutcome.NO_RUNNING_TURN, "named": SteerOutcome.DELIVERED}
+    assert result.refused_steers == (("s1",) if refuses else ())
+    assert client.steer_session(key, TEXT, steer_id="s2") is SteerOutcome.NO_RUNNING_TURN

@@ -53,7 +53,12 @@ from vibesys.orchestration.dynamic.search._queue import (
     SlotVerdict,
     Submission,
 )
-from vibesys.orchestration.dynamic.search._reports import InputOverdue
+from vibesys.orchestration.dynamic.search._reports import (
+    InputOverdue,
+    Opened,
+    Resuming,
+    Suspended,
+)
 from vibesys.orchestration.dynamic.search._steps import (
     DONE,
     StepState,
@@ -63,9 +68,12 @@ from vibesys.orchestration.dynamic.search._steps import (
     step_states,
 )
 from vibesys.orchestration.dynamic.search._values import (
+    COMBINE_MIN_PARTS,
+    CombineSource,
     FinishedWork,
     HypothesisRecord,
     MainMeasurement,
+    MergeOutcome,
     MergeRecord,
     MergeSource,
     PlanProblem,
@@ -74,7 +82,18 @@ from vibesys.orchestration.dynamic.search._values import (
     WorkKind,
     WorkPlan,
 )
-from vs_core.api.search import INPUT, Input, Kept, NoWinner, RevisionRef, TaskTerms, Value
+from vibesys.search_spans.api import adoption_label
+from vs_core.api.search import (
+    INPUT,
+    Input,
+    Kept,
+    Label,
+    NoWinner,
+    RevisionRef,
+    TaskTerms,
+    Uncompared,
+    Value,
+)
 
 _DROPPED_SHOWN = 8
 """The most recent dropped evaluations the orchestrator is shown."""
@@ -91,6 +110,8 @@ class Scheduled:
     blind: bool = False
     handoff: HandoffWritten | None = None
     """The call's handoff file and every one the owner holds; None when its write failed."""
+    planner: str | None = None
+    """The planner agent whose reply this plan is: it starts the workstreams the plan schedules."""
 
 
 @dataclass(frozen=True)
@@ -111,6 +132,8 @@ class Outlined:
     """The outline call ended with the steps of the plan the run follows."""
 
     steps: tuple[Step, ...]
+    outliner: str | None = None
+    """The outliner agent whose reply the steps are: it starts the steps' workstreams."""
 
 
 type PlanOutcome = Scheduled | NoPlan | Outlined
@@ -192,6 +215,14 @@ class RecordState(Value):
     submitted: tuple[Submission, ...]
     evaluations: QueueState
     input_overdue: InputOverdue | None
+    planned_by: tuple[tuple[str, str], ...] = ()
+    """The agent that planned each queued or started plan, by work id."""
+    waits: tuple[str, ...] | None = None
+    """`RunRecord.waits`; None in a checkpoint from before turns parked: the submitted, in order."""
+    suspended: tuple[tuple[str, int], ...] = ()
+    resuming: tuple[tuple[str, int], ...] = ()
+    unseated: tuple[str, ...] = ()
+    """`RunRecord.unseated`; empty in a checkpoint from before: every running workstream seated."""
 
 
 class DynamicResume(Value):
@@ -247,6 +278,25 @@ class RunRecord:
     submitted: dict[str, Submission] = field(default_factory=dict)
     """Running workstreams that submitted their candidate for its trusted measurement, by key:
     their agents are done, so they no longer hold an agent slot."""
+    waits: dict[str, None] = field(default_factory=dict)
+    """Running workstreams that wait without an agent at work, in the order they began to: on
+    their trusted measurement (`submitted`), or in a turn core suspended on its evaluations
+    (`suspended`, `resuming`). The earliest, up to the run's backlog, are `parked`."""
+    suspended: dict[str, int] = field(default_factory=dict)
+    """Running workstreams whose agent turn core suspended on its evaluations: the turn's wait
+    number, by key (`Suspended`)."""
+    resuming: dict[str, int] = field(default_factory=dict)
+    """Suspended turns core authorized to resume, each held until it has an agent slot
+    (`resumes`): the wait number, by key."""
+    unseated: dict[str, None] = field(default_factory=dict)
+    """Started workstreams not yet lent their first agent slot, in the order they started. Each
+    takes a place among the slots (`working`), so the starts stay bounded, but no agent works in
+    it (`at_work`): its attempt may still queue for core's admission. Once its workspace opened
+    (`Opened`) it waits for a slot like a resumed turn (wait 0, `resumes`), so new work queued
+    for admission never holds the slot a parked turn needs to resume and close its attempt."""
+    planned_by: dict[str, str] = field(default_factory=dict)
+    """The agent whose reply planned each plan, by work id: the planner, or the outliner for a
+    step it outlined; it starts the plan's workstreams (`WorkstreamStart.started_by`)."""
     evaluations: EvaluationQueue = field(init=False)
     """The submissions waiting for an evaluation slot, and the measurements holding one."""
     input_overdue: InputOverdue | None = None
@@ -293,6 +343,11 @@ class RunRecord:
             submitted=tuple(self.submitted.values()),
             evaluations=self.evaluations.state(),
             input_overdue=self.input_overdue,
+            planned_by=tuple(self.planned_by.items()),
+            waits=tuple(self.waits),
+            suspended=tuple(self.suspended.items()),
+            resuming=tuple(self.resuming.items()),
+            unseated=tuple(self.unseated),
         )
 
     @classmethod
@@ -324,11 +379,27 @@ class RunRecord:
             main_seen=dict(state.main_seen),
             submitted={item.key: item for item in state.submitted},
             input_overdue=state.input_overdue,
+            planned_by=dict(state.planned_by),
+            waits=dict.fromkeys(
+                state.waits if state.waits is not None else (s.key for s in state.submitted)
+            ),
+            suspended=dict(state.suspended),
+            resuming=dict(state.resuming),
+            unseated=dict.fromkeys(state.unseated),
         )
         record.main = MainLine.resumed(state.baseline, state.main)
         record.outline = state.outline
         record.evaluations = EvaluationQueue.resumed(config.slots, config.pick, state.evaluations)
         return record
+
+    def held_over(self) -> None:
+        """After a code change, hold every workstream that waited in a suspended turn.
+
+        Its flow restarts from its checkpoint and asks its agent again, so it waits for an agent
+        slot first, as a resume does (wait 0, `RESUMES`). The others go on at once.
+        """
+        self.resuming |= dict.fromkeys(self.suspended, 0) | dict.fromkeys(self.resuming, 0)
+        self.suspended.clear()
 
     def decided_verdicts(self) -> list[tuple[str, SlotVerdict]]:
         """The verdict already decided for each running workstream that submitted.
@@ -391,20 +462,29 @@ class RunRecord:
 
     @property
     def parked(self) -> frozenset[str]:
-        """Running workstreams that wait on their trusted measurement without an agent slot.
+        """Running workstreams that wait without an agent slot, measured or in a suspended turn.
 
-        These are the earliest submitted, up to the run's backlog; any later one keeps its slot.
+        These are the earliest to wait, up to the run's backlog; any later one keeps its slot.
         """
-        return frozenset(list(self.submitted)[: self.config.max_backlog])
+        return frozenset(list(self.waits)[: self.config.backlog])
 
     @property
     def working(self) -> tuple[WorkstreamStart, ...]:
-        """Running workstreams that hold an agent slot: not parked on their measurement."""
+        """Running workstreams that hold an agent slot: not parked while they wait."""
         parked = self.parked
         return tuple(start for key, start in self.running.items() if key not in parked)
 
+    @property
+    def at_work(self) -> tuple[WorkstreamStart, ...]:
+        """Running workstreams whose agents hold a slot: working, and lent their first slot."""
+        return tuple(start for start in self.working if start.key not in self.unseated)
+
     def free_agents(self) -> int:
-        """Agent slots no workstream works in."""
+        """Agent slots no agent works in: what the resuming turns may be lent (`resumes`)."""
+        return max(self.config.max_in_flight - len(self.at_work), 0)
+
+    def room(self) -> int:
+        """Slots no workstream takes a place in: how many accepted plans may start now."""
         return max(self.config.max_in_flight - len(self.working), 0)
 
     def capacity(self) -> int:
@@ -484,8 +564,51 @@ class RunRecord:
             raise RuntimeError(msg)
         self.submitted[submission.key] = submission
         self.evaluations.submit(submission)
-        if submission.key in self.parked:
-            self.gate.blocked_at_done = None  # its agent slot is free: planning may fill it
+        self._wait(submission.key)
+
+    def _wait(self, key: str) -> None:
+        """``key`` waits without an agent at work: parked, its agent slot is free."""
+        self.waits.setdefault(key)
+        if key in self.parked:
+            self.gate.blocked_at_done = None  # planning may fill the slot
+
+    def suspend(self, report: Suspended) -> None:
+        """Core suspended an agent turn of a running workstream on the turn's evaluations.
+
+        A workstream held for a slot (`resuming`) asks no agent, so it suspends nothing.
+        """
+        if report.key in self.running and report.key not in self.resuming:
+            self.suspended[report.key] = report.wait
+            self._wait(report.key)
+
+    def resume(self, report: Resuming) -> None:
+        """Core authorized the resume of a suspended turn: it waits for an agent slot."""
+        if self.suspended.get(report.key) == report.wait:
+            del self.suspended[report.key]
+            self.resuming[report.key] = report.wait
+
+    def opened(self, report: Opened) -> None:
+        """A started workstream's workspace opened: it waits for its first agent slot (wait 0)."""
+        if report.key in self.unseated and report.key not in self.resuming:
+            self.resuming[report.key] = 0
+
+    def resumes(self) -> list[tuple[str, int]]:
+        """Lend agent slots to the resuming turns, first authorized first: the keys and waits.
+
+        A parked turn, or new work's first turn, takes a free slot; one that kept its slot goes
+        on at once. So agents at work never outnumber ``max_in_flight``, however many turns wait.
+        A slot is lent only to a workstream whose attempt core admitted, and an agent at work
+        waits for no admission, so every lent slot frees again: no admission limit can stall it.
+        """
+        granted: list[tuple[str, int]] = []
+        for key, wait in list(self.resuming.items()):
+            if (key in self.parked or key in self.unseated) and not self.free_agents():
+                continue
+            del self.resuming[key]
+            self.waits.pop(key, None)
+            self.unseated.pop(key, None)
+            granted.append((key, wait))
+        return granted
 
     def released(self, key: str) -> None:
         """The trusted measurement of ``key`` no longer holds its slot."""
@@ -538,6 +661,7 @@ class RunRecord:
             parked=self.parked,
             evaluations=self._queue_view(now),
             input_overdue=self._overdue_view(now),
+            space=candidates.space_of(self.terms),
         )
 
     def _queue_view(self, now: float | None) -> EvaluationQueueView | None:
@@ -603,24 +727,31 @@ class RunRecord:
                 if handoff is not None:
                     self.handoffs = handoff.listed
                 self.gate.blocked_at_done = None
-            case Outlined(steps=steps):
+            case Outlined(steps=steps, outliner=outliner):
                 self.outline = steps
                 self.gate.last_error = None
-            case Scheduled(check=check, handoff=handoff):
-                if handoff is not None:
-                    self.handoffs = handoff.listed
-                for change in check.updates:
-                    known = self.hypotheses[change.hypothesis_id]
-                    self.hypotheses[change.hypothesis_id] = _hypotheses.with_disposition(
-                        known, change
-                    )
-                self.gate.last_error = None
-                self.gate.blocked_at_done = None
-                self.accepted.extend(self._as_steps(check.accepted))
-                if check.ranking is not None:
-                    self.evaluations.rank(check.ranking)
+                if outliner is not None:
+                    self.planned_by.update((step.id, outliner) for step in steps)
+            case Scheduled() as scheduled:
+                self._scheduled(scheduled)
             case NoPlan(problem=problem, stuck=stuck, blocked_at_done=at_done):
                 self.gate = PlannerGate(failed=stuck, blocked_at_done=at_done, last_error=problem)
+
+    def _scheduled(self, scheduled: Scheduled) -> None:
+        """Fold a planning call that scheduled a plan: queue what it accepted, and who planned it."""
+        check = scheduled.check
+        if scheduled.handoff is not None:
+            self.handoffs = scheduled.handoff.listed
+        if scheduled.planner is not None:
+            self.planned_by.update((plan.work_id, scheduled.planner) for plan in check.accepted)
+        for change in check.updates:
+            known = self.hypotheses[change.hypothesis_id]
+            self.hypotheses[change.hypothesis_id] = _hypotheses.with_disposition(known, change)
+        self.gate.last_error = None
+        self.gate.blocked_at_done = None
+        self.accepted.extend(self._as_steps(check.accepted))
+        if check.ranking is not None:
+            self.evaluations.rank(check.ranking)
 
     def _as_steps(self, plans: tuple[WorkPlan, ...]) -> list[WorkPlan]:
         """The planner's plans, each repair of a plan step carrying the step it repairs."""
@@ -686,9 +817,14 @@ class RunRecord:
             parent, lineage = self.parent_of(plan)
             record = self.hypotheses.get(plan.work_id)
             prior = record.rounds[-1] if record is not None and record.rounds else None
-            rebase = self._rebase_onto(plan)
+            parent_main = self.main_base_at(parent)
+            rebase = self._rebase_onto(plan, parent_main)
+            parts = self._parts(plan)
+            if plan.combine and len(parts) < COMBINE_MIN_PARTS:
+                self.hypotheses[plan.work_id] = _hypotheses.cancelled(plan, sequence, parts)
+                continue
             if plan.kind is WorkKind.IMPLEMENT:
-                self.hypotheses[plan.work_id] = _hypotheses.scheduled(record, plan, sequence)
+                self.hypotheses[plan.work_id] = _hypotheses.scheduled(record, plan, sequence, parts)
                 self.main_seen[plan.work_id] = self.main.generation
             start = WorkstreamStart(
                 key=workstream_key(sequence, plan.work_id),
@@ -700,26 +836,141 @@ class RunRecord:
                 config=self.config,
                 baseline=self.baseline,
                 merge=self._sources(plan),
+                combine=parts,
                 rebase_onto=rebase,
+                parent_main=parent_main,
+                started_by=_started_by(self.planned_by.get(plan.work_id)),
             )
             self.running[start.key] = start
+            self.unseated[start.key] = None
             starts.append(start)
         return starts
 
-    def _rebase_onto(self, plan: WorkPlan) -> RevisionRef | None:
-        """Main, when a hypothesis that goes on last started before main moved; else None."""
+    def _rebase_onto(self, plan: WorkPlan, parent_main: RevisionRef) -> RevisionRef | None:
+        """Main, when a hypothesis that goes on last started before main moved; else None.
+
+        A tree whose own change starts at main now (``parent_main``) has nothing to catch up with.
+        """
         if self._own_last_round(plan) is None:
             return None
         seen = self.main_seen.get(plan.work_id, 0)
-        return self.main.revision if self.main.generation > seen else None
+        at_main = parent_main.revision_id.root == self.main.revision.revision_id.root
+        moved = self.main.generation > seen and not at_main
+        return self.main.revision if moved else None
 
     def _sources(self, plan: WorkPlan) -> tuple[MergeSource, ...]:
         """A merge's candidates as the exact revisions offered now, in the planner's order."""
         found = (resolve(self.parents, item, None) for item in plan.candidates)
         return tuple(
-            MergeSource(hypothesis_id=item, revision=option.revision)
+            MergeSource(
+                hypothesis_id=item,
+                revision=option.revision,
+                built_on=self.main_base_at(option.revision),
+            )
             for item, option in zip(plan.candidates, found, strict=True)
             if option is not None
+        )
+
+    def _parts(self, plan: WorkPlan) -> tuple[CombineSource, ...]:
+        """A combine's parts as the exact revisions offered now, each with its own change.
+
+        A part whose revision is no longer offered (its verification failed since) is left out,
+        and the implementer is told so. A part's change starts at the main revision its tree
+        includes (`main_base_at`).
+        """
+        offered = {
+            (item.snapshot.hypothesis_id, item.snapshot.revision.revision_id.root): item.snapshot
+            for item in self.offered()
+        }
+        parts: list[CombineSource] = []
+        for pick in plan.combine:
+            found = offered.get((pick.hypothesis_id, pick.revision))
+            if found is None:
+                continue
+            parts.append(
+                CombineSource(
+                    hypothesis_id=pick.hypothesis_id,
+                    revision=found.revision,
+                    built_on=self.main_base_at(found.revision),
+                    metric=None if found.benchmark is None else found.benchmark.headline(),
+                )
+            )
+        return tuple(parts)
+
+    def main_base_at(self, revision: RevisionRef) -> RevisionRef:
+        """Where ``revision``'s own change against main starts: a revision its tree wholly holds.
+
+        A revision main has been starts at itself. A candidate starts where its workstream's tree
+        did (`FinishedWork.main_base`: the main it caught up with, else its parent's start), then
+        at the latest candidate of its lineage a merge has since put into main
+        (`MainLine.start_of`). Main holds that candidate and everything else the merge brought,
+        the merger's own edits included, so a diff from it neither repeats nor removes any of
+        them. Git ancestry cannot tell it: a catch-up under read-only git applies main's change
+        to the tree without recording main as an ancestor. A revision the run did not make is
+        taken as built on the input.
+        """
+        root = revision.revision_id.root
+        mains = {self.base.revision_id.root} | {
+            item.revision.revision_id.root
+            for item in self.main.merges
+            if item.outcome is MergeOutcome.MERGED and item.revision is not None
+        }
+        if root in mains:
+            return revision
+        work = self._made(root)
+        if work is None:
+            return self.base
+        if work.main_base is not None:
+            recorded = work.main_base
+        elif work.parent != revision:
+            # A record an older build kept: the workstream's parent, as if it never caught up.
+            recorded = self.main_base_at(work.parent)
+        else:
+            recorded = self.base
+        lineage = {item: self._lineage(item) for item in self._lineage(root)}
+        return self.main.start_of(recorded, lineage)
+
+    def _made(self, root: str) -> FinishedWork | None:
+        """The finished workstream whose round made the candidate ``root``; None if none did."""
+        made = {
+            item.sequence
+            for record in self.hypotheses.values()
+            for item in record.rounds
+            if item.candidate is not None and item.candidate.revision_id.root == root
+        }
+        return next((item for item in self.finished_work if item.sequence in made), None)
+
+    def _lineage(self, root: str) -> frozenset[str]:
+        """``root`` and every revision its tree wholly holds, through the work that made them.
+
+        A workstream's tree holds its parent's, and a combine's the parts it applied: each part
+        it did not name as left out (`RoundRecord.unapplied`). A combine whose implementer wrote
+        entries naming no part (`RoundRecord.unattributed`) holds none of its parts for certain.
+        """
+        held: set[str] = set()
+        waiting = [root]
+        while waiting:
+            current = waiting.pop()
+            if current in held:
+                continue
+            held.add(current)
+            work = self._made(current)
+            if work is not None:
+                waiting.append(work.parent.revision_id.root)
+                waiting.extend(part.revision_id.root for part in self._applied_parts(work))
+        return frozenset(held)
+
+    def _applied_parts(self, work: FinishedWork) -> tuple[RevisionRef, ...]:
+        """The parts a combine workstream applied to its tree; empty for any other workstream."""
+        record = self.hypotheses.get(work.plan.work_id)
+        if record is None or not record.combined_from or record.first_sequence != work.sequence:
+            return ()
+        made = next((item for item in record.rounds if item.sequence == work.sequence), None)
+        if made is None or made.unattributed:
+            return ()
+        left_out = {item.hypothesis_id for item in made.unapplied}
+        return tuple(
+            part.revision for part in record.combined_from if part.hypothesis_id not in left_out
         )
 
     def finished(self, done: WorkstreamDone) -> None:
@@ -727,6 +978,10 @@ class RunRecord:
         start = done.start
         del self.running[start.key]
         self.submitted.pop(start.key, None)
+        self.waits.pop(start.key, None)
+        self.suspended.pop(start.key, None)
+        self.resuming.pop(start.key, None)
+        self.unseated.pop(start.key, None)
         self.evaluations.forget(start.key)
         profile = start.plan.kind is WorkKind.PROFILE
         self.finished_work.append(
@@ -738,6 +993,7 @@ class RunRecord:
                 failure=done.failure,
                 readings=done.evidence.readings if profile else (),
                 proof=done.evidence.proof if profile else None,
+                main_base=start.main_base or self.main_base_at(start.parent),
             )
         )
         self.refunded += int(done.refunded)
@@ -818,14 +1074,27 @@ class RunRecord:
 
     def leader(self) -> Kept | Input:
         """The candidate that leads now, else the input: what the run would adopt if it ended."""
-        winner = self.winner()
-        if winner.settlement is None:
-            return INPUT
-        return self.kept.get(winner.settlement.root, INPUT)
+        return self.leading()[0]
 
-    def ending(self) -> NoWinner | None:
-        """None when the run ends with a winner or with the input standing; else why it has none."""
-        if self.eligible_rounds() or self.baseline is None:
+    def leading(self) -> tuple[Kept | Input, Label]:
+        """The leader, with the label of the span that adopts it (``ctx.choose``'s arguments)."""
+        winner = self.winner()
+        base = candidates.input_value(self.baseline)
+        found = None if winner.settlement is None else self.kept.get(winner.settlement.root)
+        if found is None:
+            return INPUT, adoption_label(INPUT, base, base)
+        return found, adoption_label(found, winner.value, base)
+
+    def ending(self) -> NoWinner | Uncompared | None:
+        """None when the run ends with a winner or with the input standing; else why it has none.
+
+        A winner that was never compared with the input, because the input failed its
+        measurement and left no bar (`candidates.uncompared`), is ``Uncompared``: the run adopts
+        it, and its result says it was adopted without an input comparison.
+        """
+        if self.eligible_rounds():
+            return Uncompared() if candidates.uncompared(self.baseline) else None
+        if self.baseline is None:
             return None  # a stop before the input was measured leaves the input standing
         trusted = candidates.trusted(self.baseline)
         if self.gate.failed:
@@ -866,3 +1135,8 @@ class RunRecord:
             evaluations=self.evaluations.snapshot(),
             input_overdue=self.input_overdue,
         )
+
+
+def _started_by(planner: str | None) -> tuple[str, ...]:
+    """The agents that start a plan's workstream: the one that planned it, when known."""
+    return () if planner is None else (planner,)

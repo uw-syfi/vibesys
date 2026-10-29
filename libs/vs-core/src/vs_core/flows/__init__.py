@@ -21,26 +21,30 @@ the role declaration; ``_run`` drives the coroutines; ``_sources`` is what a flo
 search's span kinds and labels.
 """
 
-from ._agents import Agents, Session
+from ._agents import Agents, Parking, Session
 from ._define import FlowDriver, SearchDef, search
 from ._defs import flow
 from ._errors import Deadlock, FlowCodeChanged, Stopped, TaskStopped, TimeUp
-from ._evaluation import CaptureSpec, Evaluation
+from ._evaluation import CaptureSpec, Compared, Evaluation
 from ._flow import Clock, Flow, Group, RunTask
 from ._labels import Label, LabelFields, SpanKind
 from ._owners import Owners
 from ._resource import resource
 from ._retry import Again, GaveUp, RetryPolicy, Tries
 from ._roles import (
+    MARKDOWN_PROSE_CONVENTION,
     MAX_CORRECTIONS,
     MAX_LOST_TURNS,
     MAX_RENDER_SECONDS,
     MAX_TURN_SECONDS,
+    PLAIN_LINE_CONVENTION,
     RevisionReply,
     Role,
     UnknownRoleError,
     hours,
+    markdown_prose,
     minutes,
+    plain_line,
     reply_errors,
 )
 from ._sources import (
@@ -82,15 +86,19 @@ from ._state import (
     Waiting,
 )
 from ._trace import operation_span
-from ._winner import INPUT, EndReason, Input, Kept, NoWinner
+from ._winner import ADOPTED, INPUT, NOT_ADOPTED, EndReason, Input, Kept, NoWinner, Uncompared
 from ._workspaces import Assessment, NotOpened, NotReopened, Workspace, Workspaces
 
 __all__ = [
+    "ADOPTED",
     "INPUT",
+    "MARKDOWN_PROSE_CONVENTION",
     "MAX_CORRECTIONS",
     "MAX_LOST_TURNS",
     "MAX_RENDER_SECONDS",
     "MAX_TURN_SECONDS",
+    "NOT_ADOPTED",
+    "PLAIN_LINE_CONVENTION",
     "Again",
     "Agents",
     "Assessment",
@@ -99,6 +107,7 @@ __all__ = [
     "Channel",
     "ChannelKey",
     "Clock",
+    "Compared",
     "Deadlock",
     "Dropped",
     "EndReason",
@@ -121,6 +130,7 @@ __all__ = [
     "NotOpened",
     "NotReopened",
     "Owners",
+    "Parking",
     "Pending",
     "RestartSettleReason",
     "RestartSettled",
@@ -151,6 +161,7 @@ __all__ = [
     "TimeUp",
     "Timer",
     "Tries",
+    "Uncompared",
     "UnknownRoleError",
     "Waiting",
     "WaitingOn",
@@ -159,8 +170,10 @@ __all__ = [
     "Workspaces",
     "flow",
     "hours",
+    "markdown_prose",
     "minutes",
     "operation_span",
+    "plain_line",
     "reply_errors",
     "resource",
     "search",

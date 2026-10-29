@@ -71,8 +71,10 @@ Rules every Feature follows:
   metadata, not a line in a shared file.
 - Every network step is bounded and retried at most five times. The script
   carries a helper block (`retry`, `fetch`, `apt_install`, `npm_install_global`,
-  `pip_install`) that sets connect, stall, and request timeouts; Features cannot
-  share files, so the block is duplicated and
+  `pip_install`) that sets connect, stall, and request timeouts. `apt-get update`
+  first drops NVIDIA and ROCm source lists, because those indexes keep sending
+  bytes and never trip the per-request timeout, and the update itself stops
+  after 60 seconds. Features cannot share files, so the block is duplicated and
   `tests/quality/test_feature_network_steps.py` keeps the copies identical and
   rejects a bare `curl`, `apt-get`, `npm install`, `pip install`, or `uv` fetch
   outside them. The whole image build also has one budget
@@ -138,6 +140,11 @@ often ahead of the agent layer) does not apply.
    No container is started and no host path is mounted. The base is a build
    argument, so the Dockerfile text does not depend on it.
 3. Resolves the tag to its immutable image ID, as the old Dockerfile build did.
+
+The tag is derived from the build inputs, so when the daemon already has it
+steps 2 and 3 reduce to the inspection: nothing is built or exported. A base
+named by a mutable registry tag is an input known by name only, so callers pin
+it.
 
 The image ID is content-addressed: rebuilding the same selection on the same
 base resolves to the same ID from the layer cache, even though the temporary
@@ -209,7 +216,7 @@ Equivalence checks, run on both images of each base (the same script,
 
 - Image config: user `agent`, working directory `/workspace`, `PATH`,
   `RUSTUP_HOME`, `CARGO_HOME`, `PIP_BREAK_SYSTEM_PACKAGES`.
-- Run with no flags: uid 1000 and `pwd` of `/workspace`; `claude` 2.1.268,
+- Run with no flags: uid 1000 and `pwd` of `/workspace`; `claude` 2.1.304,
   `codex` 0.160.0, `gemini` 0.59.0, `opencode` 1.18.30; Node 24.21.0; VibeSys's
   Python imports `mcp`; `cargo` and `rustc` 1.92.0; Go 1.23.12; `uv`; `cargo` and
   `go` found by a login shell.

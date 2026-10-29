@@ -24,8 +24,12 @@ export type ButtonProps = ButtonFace &
     readonly full?: boolean;
     /** Disables the button and says why, as help text under it that the button is described by. */
     readonly disabledReason?: string;
+    /** Keep the reason for assistive technology only, with no caption drawn. */
+    readonly quietReason?: boolean;
     /** For a button that shows and hides a region: whether that region is shown. */
     readonly expanded?: boolean;
+    /** A hover tooltip: what the control does, and its keyboard shortcut. */
+    readonly hint?: string;
   };
 
 function Face(props: ButtonFace): JSX.Element {
@@ -50,6 +54,7 @@ export function Button(props: ButtonProps): JSX.Element {
     'data-size': props.size ?? 'md',
     'data-full': props.full === true || undefined,
     'aria-label': props.label,
+    title: props.hint,
   };
   if (props.href !== undefined && !disabled) {
     return (
@@ -78,7 +83,7 @@ export function Button(props: ButtonProps): JSX.Element {
   return (
     <span className="vs-button-disabled" data-full={props.full === true || undefined}>
       {button}
-      <span className="vs-help" id={reasonId}>
+      <span className="vs-help" id={reasonId} data-quiet={props.quietReason || undefined}>
         {props.disabledReason}
       </span>
     </span>

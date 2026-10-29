@@ -72,6 +72,20 @@ host = "my-cluster"
 commands on `PATH`. Every transport process has the hard deadline configured by
 `transport_timeout_seconds`.
 
+`dedicated_measurement_resources` (default `false`) declares that each
+measurement job gets its GPUs and CPU cores to itself through the scheduler,
+though it may share the host with other jobs. Set it for a shared GPU node
+where `sbatch_arguments` allocate whole GPUs and cores (for example
+`--gres=gpu:4 -c 64`) but cannot pass `--exclusive` without taking the whole
+node from other users. A bare `--exclusive` as the last node-sharing option in
+`sbatch_arguments` implies it (`--exclusive=user`, `--exclusive=mcs`,
+`--exclusive=topo`, `--oversubscribe`, `--share` and `-s` share nodes, so they
+do not count). When it holds, an official measurement of a task that opts in
+may reuse the agent's own run of the identical input instead of queuing a
+second job; leave it `false` unless the declaration is
+true, because it is the only evidence that the two runs faced the same
+conditions.
+
 Every job is submitted with `--no-requeue`, after the operator's
 `sbatch_arguments`, and `--requeue` there is rejected: VibeSys retries a failed
 job itself, and a scheduler requeue would rerun stages that already finished.
@@ -112,7 +126,11 @@ interrupts the script, and Slurm kills it KillWait (30 s by default) later.
 Slurm's own SIGTERM, at a cancel or the time limit, runs the same teardown, and
 the grace keeps the script's SIGKILL 10 s ahead of Slurm's default KillWait.
 A setup script is sourced into the job script itself, so a background process
-it starts is not part of either session and is left to Slurm.
+it starts is not part of either session and is left to Slurm. What the setup
+script exports reaches the service and every stage, including a stage that is a
+`bash -c`: the job script unsets `SSH_CLIENT` and `SSH2_CLIENT` first, because a
+`bash` built for sshd that sees them re-reads the login rc files and re-exports
+the login values over the setup's.
 
 The local machine needs OpenSSH and rsync. The login host needs rsync and the
 Slurm commands named by the configuration, and `remote_workspace_root` must be

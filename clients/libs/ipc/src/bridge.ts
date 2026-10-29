@@ -1,6 +1,5 @@
 /**
- * The run page's bridge: what the run preload exposes to the page (`window.vibesysDesktop`), and
- * the messages the preload and the main process exchange over one connection's MessagePort.
+ * The messages a page and the main process exchange over one run connection's MessagePort.
  *
  * One port is one protocol connection, with WebSocket's shape: the main process reports `open`
  * once the host stream is up, then one `message` per protocol frame (the server's line without its
@@ -10,13 +9,6 @@
  * cannot import values (it is sandboxed), so the channel names are repeated there; these types keep
  * both sides honest.
  */
-
-import type {RunLogsRequest} from './run-logs.js';
-
-/** The platforms the desktop shell reports (`process.platform` values it supports). */
-export const DESKTOP_PLATFORMS = ['darwin', 'win32', 'linux'] as const;
-
-export type DesktopPlatform = (typeof DESKTOP_PLATFORMS)[number];
 
 /** What the page hears about one connection. Each callback runs on the page's event loop. */
 export interface DesktopSocketHandlers {
@@ -35,30 +27,17 @@ export interface DesktopSocket {
   close(): void;
 }
 
-/** The connection half of the bridge. */
+/** The connection half of the bridge: what a session needs to open run connections. */
 export interface DesktopBridge {
   connect(handlers: DesktopSocketHandlers): DesktopSocket;
   onWake(listener: () => void): void;
-}
-
-/**
- * The run page's logs half: one request about the logs of the run the page is bound to
- * (`run-logs.ts`). It resolves with the request's `RunLogsReply`, which carries expected failures,
- * and rejects only when the main process refused the request.
- */
-export interface DesktopLogs {
-  logs(request: RunLogsRequest): Promise<unknown>;
-}
-
-/** What the run preload exposes on `window.vibesysDesktop`. */
-export interface DesktopPreload extends DesktopBridge, DesktopLogs {
-  readonly platform: string;
 }
 
 /** IPC channel on which the preload hands the main process a new connection's port. */
 export const CONNECT_CHANNEL = 'vibesys:connect';
 /** IPC channel on which the main process tells the page that the machine woke from sleep. */
 export const WAKE_CHANNEL = 'vibesys:wake';
+export const OPEN_SETTINGS_CHANNEL = 'vibesys:open-settings';
 
 /**
  * Bytes either side may have in flight across one bridge connection.

@@ -492,7 +492,8 @@ def test_every_example_task_declares_its_overview(
         assert overview.objective.text == bundle.objective
         assert overview.objective.correctness_check == bundle.accuracy_command
         result = manifest.benchmark.result
-        assert overview.objective.metric == (None if result is None else result.metric)
+        declared = manifest.metric or (None if result is None else result.metric)
+        assert overview.objective.metric == declared
         package = None if manifest.evaluator is None else manifest.evaluator.package_requirement
         evaluator = overview.benchmarks.evaluator
         assert (evaluator is None) == (package is None)

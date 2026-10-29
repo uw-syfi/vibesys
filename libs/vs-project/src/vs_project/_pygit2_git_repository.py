@@ -319,6 +319,9 @@ class Pygit2GitRepository:
         except _LIBGIT2_ERRORS:
             return None
 
+    def has_ref_pointing_at(self, commit: str, prefix: str) -> bool:
+        return self._cli.has_ref_pointing_at(commit, prefix)
+
     def has_ref_containing(self, commit: str, prefix: str) -> bool:
         if not prefix or _REF_WILDCARDS & set(prefix):
             return self._cli.has_ref_containing(commit, prefix)
@@ -334,6 +337,12 @@ class Pygit2GitRepository:
             )
         except _LIBGIT2_ERRORS:
             return False
+
+    def branches(self, prefix: str) -> tuple[str, ...]:
+        return self._cli.branches(prefix)
+
+    def tree_files(self, revision: Revision, directory: str) -> tuple[str, ...]:
+        return self._cli.tree_files(revision, directory)
 
     def _reaches(self, repository: pygit2.Repository, name: str, wanted: pygit2.Oid) -> bool:
         """Whether the ref ``name`` ends at a commit that is, or descends from, ``wanted``."""
@@ -366,6 +375,42 @@ class Pygit2GitRepository:
             repository.references.create(ref, target.id, force=True)
         except _LIBGIT2_ERRORS as error:
             self._fail(f"update-ref {ref} {commit}", error)
+
+    def create_ref(self, ref: str, commit: str) -> str:
+        return self._cli.create_ref(ref, commit)
+
+    def create_commit(
+        self,
+        revision: Revision,
+        parents: Sequence[str],
+        message: str,
+        *,
+        preserve_from: Revision,
+        preserve_paths: Sequence[str] = (),
+    ) -> str:
+        return self._cli.create_commit(
+            revision,
+            parents,
+            message,
+            preserve_from=preserve_from,
+            preserve_paths=preserve_paths,
+        )
+
+    def advance_branch(self, branch: str, commit: str) -> bool:
+        return self._cli.advance_branch(branch, commit)
+
+    def fast_forward_checkout(
+        self,
+        branch: str,
+        commit: str,
+        *,
+        untracked_exclusions: Sequence[str] = (),
+    ) -> bool:
+        return self._cli.fast_forward_checkout(
+            branch,
+            commit,
+            untracked_exclusions=untracked_exclusions,
+        )
 
     def switch_branch(self, branch: str, *, create: bool = False) -> None:
         self._cli.switch_branch(branch, create=create)

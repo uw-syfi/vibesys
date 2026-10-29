@@ -14,10 +14,11 @@ from vs_sandbox.api.slurm import (
     AgentGpuRequestError,
     SlurmPolicyError,
     agent_gpu_capability,
+    load_slurm_operator_settings,
     load_slurm_policy,
 )
 from vs_sim.api.testing import examples
-from vs_slurm.api import load_slurm_config
+from vs_slurm.api import LedgerPolicy, load_slurm_config
 
 _SERVICE = (
     "[vibesys.service]\n"
@@ -143,3 +144,70 @@ def test_without_an_agent_gpu_table_no_transport_offers_the_capability(tmp_path:
     for transport in _TRANSPORTS:
         path = _agent_gpu_file(tmp_path, None, transport)
         assert agent_gpu_capability(load_slurm_config(path), load_slurm_policy(path)) is None
+
+
+def _ledger_file(
+    tmp_path: Path, transport_timeout_seconds: int, ledger: dict[str, float] | None
+) -> Path:
+    """An operator file with this transport timeout and, unless None, this ``[vibesys.ledger]``."""
+    table = (
+        ""
+        if ledger is None
+        else "[vibesys.ledger]\n" + "".join(f"{key} = {value}\n" for key, value in ledger.items())
+    )
+    path = tmp_path / "slurm.toml"
+    path.write_text(
+        '[slurm]\nname = "cluster"\nremote_workspace_root = "/shared/vibesys"\n'
+        f"transport_timeout_seconds = {transport_timeout_seconds}\n"
+        f"[slurm.transport]\n{_TRANSPORTS['ssh']}\n[vibesys]\n{table}",
+        encoding="utf-8",
+    )
+    return path
+
+
+@given(
+    transport_timeout_seconds=st.integers(min_value=1, max_value=400),
+    claim_seconds=st.one_of(st.none(), st.floats(min_value=1.0, max_value=5000.0)),
+)
+@settings(max_examples=examples(pr=40, nightly=400), deadline=None)
+def test_a_ledger_whose_withdrawal_window_exceeds_the_longest_mark_is_rejected_naming_the_key(
+    transport_timeout_seconds: int, claim_seconds: float | None
+) -> None:
+    """A withdrawal's mark holds ``7 x transport_timeout_seconds + 60`` s.
+
+    A reader that cannot decode a mark holds it for the longest window any
+    build may write (900 s). A window longer than that would let a reader undo
+    a mark whose writer is still about to cancel the job; the claim window,
+    whatever it is, changes nothing.
+    """
+    window = 7 * transport_timeout_seconds + 60
+    ledger = {} if claim_seconds is None else {"claim_seconds": claim_seconds}
+    policy = LedgerPolicy() if claim_seconds is None else LedgerPolicy(claim_seconds=claim_seconds)
+    with tempfile.TemporaryDirectory() as directory:
+        path = _ledger_file(Path(directory), transport_timeout_seconds, ledger)
+        if window <= 900.0:
+            assert load_slurm_operator_settings(path).policy.ledger == policy
+            return
+        with pytest.raises(SlurmPolicyError, match=r"slurm\.transport_timeout_seconds"):
+            load_slurm_operator_settings(path)
+
+
+def test_without_a_ledger_any_transport_timeout_loads(tmp_path: Path) -> None:
+    """The window bounds only matter to the ledger."""
+    assert load_slurm_operator_settings(_ledger_file(tmp_path, 400, None)).policy.ledger is None
+
+
+@pytest.mark.parametrize("claim_seconds", [60.0, 300.0, 829.0])
+def test_a_claim_window_shorter_than_the_mark_window_loads(
+    tmp_path: Path, claim_seconds: float
+) -> None:
+    """No rule needs a claim to outlast a withdrawal mark (830 s at the default timeout).
+
+    A mark this build cannot read holds at least ``MAX_WITHDRAWAL_WINDOW_SECONDS``
+    whatever the claim window, so the operator may set a short claim window.
+    """
+    path = _ledger_file(tmp_path, 110, {"claim_seconds": claim_seconds})
+
+    assert load_slurm_operator_settings(path).policy.ledger == LedgerPolicy(
+        claim_seconds=claim_seconds
+    )

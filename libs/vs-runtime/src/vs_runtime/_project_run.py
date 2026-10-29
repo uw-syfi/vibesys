@@ -6,7 +6,9 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, TextIO
+from typing import TYPE_CHECKING, Protocol, TextIO
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from vs_project.api import (
     GitTracker,
@@ -17,6 +19,7 @@ from vs_project.api import (
     RunEnvironmentRecord,
     RunExecutionRecord,
     RunLogger,
+    StateNamespace,
 )
 from vs_runtime import _boot_trace as boot_trace
 from vs_runtime._objective_document import materialize_objective_document
@@ -24,16 +27,55 @@ from vs_runtime._project_materialization import copy_support_directories
 from vs_runtime._recorded_environment import migrate_recorded_run_environment
 from vs_runtime._run_state import RunState
 from vs_runtime.contracts import OrchestrationResumeDecision
+from vs_sandbox.api import CaptureExecutionIdentity
 from vs_sim.api import CloseOnce, ReleaseStack, utc_datetime
 
 if TYPE_CHECKING:
     from vs_project.api import GitRepositoryFactory, StateStoreFactory
+    from vs_runtime._environment_system import EnvironmentSystem
     from vs_runtime._project_materialization import ProjectMaterializer
     from vs_sim.api import Clock
 
 type LogEmitter = Callable[[str, TextIO], None]
 type LogReady = Callable[[Path], None]
 type ResumeResolver = Callable[[OrchestrationRunManifest], OrchestrationResumeDecision]
+_UNSETTLED_CANDIDATES = "unsettled-candidates"
+_ROOT_CAPTURE_WORKSPACE = "root"
+
+
+class CaptureExecutionRecovery(Protocol):
+    """Run-scoped owner that reconciles one exact workspace execution identity."""
+
+    def reconcile(self, workspace: Path, execution: CaptureExecutionIdentity) -> bool:
+        """Return true only after *execution* is validated and confirmed settled."""
+        ...
+
+
+class CaptureRecoverySource(Protocol):
+    """Environment role that provides restart recovery without opening a session."""
+
+    def capture_recovery(
+        self, run_id: str, *, system: EnvironmentSystem
+    ) -> CaptureExecutionRecovery | None: ...
+
+
+class NoCaptureRecovery:
+    """Default environment role for captures with no independently recoverable owner."""
+
+    def capture_recovery(
+        self, run_id: str, *, system: EnvironmentSystem
+    ) -> CaptureExecutionRecovery | None:
+        del run_id, system
+        return None
+
+
+class CaptureIntent(BaseModel):
+    """Durable identity of a capture that may have reached its run environment."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    workspace_id: str = Field(min_length=1)
+    execution: CaptureExecutionIdentity
 
 
 class ProjectRunMismatchKind(StrEnum):
@@ -46,6 +88,16 @@ class ProjectRunMismatchKind(StrEnum):
 
 class ProjectRunError(RuntimeError):
     """Base class for rejected project-run resource construction."""
+
+
+class ProjectRunUnsettledCandidateError(ProjectRunError):
+    """A prior host could not prove a command stopped using this candidate."""
+
+    def __init__(self, workspace_id: str) -> None:
+        super().__init__(
+            f"candidate workspace {workspace_id!r} is retained because its command stop "
+            "could not be confirmed"
+        )
 
 
 class ProjectRunBaselineMissingError(ProjectRunError):
@@ -136,6 +188,8 @@ class ProjectRunEffects:
     """Opens each run's ``StateStore``; ``None`` uses the project's crash-atomic local one."""
     resume_recovery: Callable[[], None] | None = None
     """Recover product resources after taking the run-host lock, before Git or state recovery."""
+    capture_recovery: CaptureExecutionRecovery | None = None
+    """Reconcile retained capture identities without opening a replacement workspace session."""
 
 
 @dataclass(slots=True)
@@ -156,7 +210,13 @@ class ProjectRunResources:
     _request: ProjectRunRequest
     _effects: ProjectRunEffects
     _provisional_ownership: ReleaseStack
+    root_edits_on_resume: tuple[str, ...] = ()
     _close: CloseOnce = field(init=False, default_factory=CloseOnce)
+
+    @property
+    def resuming(self) -> bool:
+        """Whether the operator reopened this run, rather than recovering its writer."""
+        return self._request.existing
 
     def mark_ready(self) -> None:
         """Preserve a provisioned project after all run resources are ready."""
@@ -168,12 +228,14 @@ class ProjectRunResources:
         A leftover directory from a stopped process is replaced by a fresh
         worktree of *revision*.
         """
+        self._require_settled_candidate(workspace_id)
         return self._open_candidate(workspace_id, revision, reattach=False)
 
     def reattach_candidate(
         self, workspace_id: str, revision: str
     ) -> _ProjectWorkspaceResources | None:
         """Reopen an existing candidate worktree with its content, or return ``None``."""
+        self._require_settled_candidate(workspace_id)
         workspace = self.project.state.candidate_worktree_directory(
             self._request.run_id, workspace_id
         )
@@ -190,8 +252,49 @@ class ProjectRunResources:
             sorted(entry.name for entry in worktrees.iterdir() if (entry / "workspace").exists())
         )
 
+    def record_capture_intent(self, workspace_id: str, execution: CaptureExecutionIdentity) -> None:
+        """Durably record the external identity before a capture may be submitted."""
+        namespace = self.state.local("runtime")
+        relative = f"{_UNSETTLED_CANDIDATES}/{workspace_id}"
+        if namespace.load_optional(relative, CaptureIntent) is not None:
+            raise ProjectRunUnsettledCandidateError(workspace_id)
+        namespace.save(
+            relative,
+            CaptureIntent(workspace_id=workspace_id, execution=execution),
+        )
+
+    def clear_capture_intent(self, workspace_id: str) -> None:
+        """Remove a capture intent only after its execution is confirmed settled."""
+        self.state.local("runtime").delete(f"{_UNSETTLED_CANDIDATES}/{workspace_id}")
+
+    def capture_intents(self) -> tuple[CaptureIntent, ...]:
+        """Load all capture intents, rejecting malformed durable state."""
+        return _load_capture_intents(self.state.local("runtime"))
+
+    def reconcile_capture_intents(self) -> frozenset[str]:
+        """Settle this run's durable captures through its startup recovery owner."""
+        return _reconcile_capture_intents(
+            self.project,
+            self._request.run_id,
+            self.state.local("runtime"),
+            self._effects.capture_recovery,
+        )
+
+    def unsettled_candidates(self) -> frozenset[str]:
+        """Return candidates whose remote command may still be using their files."""
+        return frozenset(
+            intent.workspace_id
+            for intent in self.capture_intents()
+            if intent.workspace_id != _ROOT_CAPTURE_WORKSPACE
+        )
+
+    def _require_settled_candidate(self, workspace_id: str) -> None:
+        if workspace_id in self.unsettled_candidates():
+            raise ProjectRunUnsettledCandidateError(workspace_id)
+
     def remove_leftover(self, workspace_id: str) -> None:
         """Unregister and delete a candidate worktree that no live resource owns."""
+        self._require_settled_candidate(workspace_id)
         self.git.remove_worktree(
             self.project.state.candidate_worktree_directory(self._request.run_id, workspace_id)
         )
@@ -346,6 +449,13 @@ def _assemble_project_run_resources(
         teardown_stack.enter_context(project_state.exclusive_run_host(request.run_id))
         if request.existing and effects.resume_recovery is not None:
             effects.resume_recovery()
+        if request.existing:
+            _reconcile_capture_intents(
+                project,
+                request.run_id,
+                project_state.local_namespace(request.run_id, "runtime"),
+                effects.capture_recovery,
+            )
         log_dir = project_state.log_directory(request.run_id)
         log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -415,7 +525,45 @@ def _assemble_project_run_resources(
         request,
         effects,
         provisional_ownership,
+        root_edits_on_resume=tuple(git.pending_changes()) if request.existing else (),
     )
+
+
+def _load_capture_intents(namespace: StateNamespace) -> tuple[CaptureIntent, ...]:
+    """Load the strictly typed intent set from one runtime state namespace."""
+    intents: list[CaptureIntent] = []
+    for entry in namespace.entries(_UNSETTLED_CANDIDATES):
+        intent = namespace.load(f"{_UNSETTLED_CANDIDATES}/{entry}", CaptureIntent)
+        if intent.workspace_id != entry:
+            message = f"capture intent entry {entry!r} names workspace {intent.workspace_id!r}"
+            raise ProjectRunError(message)
+        intents.append(intent)
+    return tuple(intents)
+
+
+def _reconcile_capture_intents(
+    project: Project,
+    run_id: str,
+    namespace: StateNamespace,
+    recovery: CaptureExecutionRecovery | None,
+) -> frozenset[str]:
+    """Reconcile durable ownership, retaining every unvalidated or unknown identity."""
+    unresolved: set[str] = set()
+    for intent in _load_capture_intents(namespace):
+        workspace = (
+            project.root
+            if intent.workspace_id == _ROOT_CAPTURE_WORKSPACE
+            else project.state.candidate_worktree_directory(run_id, intent.workspace_id)
+        )
+        try:
+            settled = recovery is not None and recovery.reconcile(workspace, intent.execution)
+        except BaseException:  # noqa: BLE001  # lint-waiver: LW-213425 [BLE001]; startup recovery must preserve durable ownership after any external-boundary or host-cancellation failure.
+            settled = False
+        if settled is True:
+            namespace.delete(f"{_UNSETTLED_CANDIDATES}/{intent.workspace_id}")
+        else:
+            unresolved.add(intent.workspace_id)
+    return frozenset(unresolved)
 
 
 def _record_effective_objective(

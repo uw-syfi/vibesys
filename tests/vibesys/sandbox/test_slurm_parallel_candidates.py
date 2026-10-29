@@ -166,16 +166,23 @@ def _in(workspaces: RuntimeWorkspaces, path: Path, command: str) -> CommandResul
 
 
 def test_a_candidates_gpu_command_runs_in_its_own_worktree(tmp_path: Path) -> None:
+    sessions: list[RunEnvironmentSession] = []
+
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         first = await workspaces.create_candidate()
         second = await workspaces.create_candidate()
 
-        for candidate in (first, second):
+        for candidate, session in zip((first, second), sessions[1:], strict=True):
             ran = _in(workspaces, candidate.path, f"{_LAUNCH}pwd")
             assert ran.exit_code == 0, ran.output
             assert str(candidate.path) in ran.output.splitlines()
+            captured = session.capture_commands.execute("pwd", timeout=10, output=DISCARD)
+            assert captured.exit_code == 0, captured.output
+            assert str(candidate.path) in captured.output.splitlines()
 
-    _run(tmp_path, exercise)
+        assert sessions[1].capture_commands.id != sessions[2].capture_commands.id
+
+    _run(tmp_path, exercise, opened=sessions)
 
 
 def test_a_candidates_gpu_command_is_refused_in_another_candidates_worktree(
@@ -240,7 +247,8 @@ def test_a_candidates_transport_broker_stages_only_its_own_worktree(tmp_path: Pa
             "/bin/true",
             "-a",
             "-e",
-            "/usr/bin/true",
+            # The configured ssh_command with every prompt off (SlurmSshTransport.ssh_argv).
+            "/usr/bin/true -o BatchMode=yes",
             "--",
             f"{local}/",
             "test-cluster:/remote/vibesys/test-cluster/job/",

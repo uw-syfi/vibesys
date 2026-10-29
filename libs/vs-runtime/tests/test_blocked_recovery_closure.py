@@ -221,5 +221,5 @@ def test_a_check_blocked_after_its_last_answer_stops_the_run_despite_unrelated_t
     core = shell.record.envelope.core
     assert core.run.result is not None
     assert core.run.result.outcome == "blocked"
-    assert core.run.result.reason == "recovery blocked: outcome unknown"
+    assert core.run.result.reason == "recovery blocked: outcome unknown for submission"
     assert clock.now() < unrelated

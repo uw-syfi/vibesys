@@ -11,7 +11,7 @@ The planner's role has core's own corrections and re-asks off: every ask carries
 from the run at that moment, and every correction names the problem as typed data.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from pydantic import BaseModel
 
@@ -27,17 +27,13 @@ from vibesys.orchestration.dynamic.search._run_state import (
     RunRecord,
     Scheduled,
 )
-from vibesys.orchestration.dynamic.search._spans import (
-    PLANNING_CALL,
-    PlanningAttrs,
-    turn_label,
-)
 from vibesys.orchestration.dynamic.search._values import (
     MergeRecord,
     PlanProblem,
     ProblemKind,
     WorkKind,
 )
+from vibesys.search_spans.api import PLANNING_CALL, PlanningAttrs, turn_label
 from vs_core.api.search import (
     Again,
     Failed,
@@ -118,7 +114,11 @@ async def plan(ctx: Flow, run: RunRecord) -> PlanOutcome:
                 return outcome
             case Reply() as reply:
                 if (outcome := _judge(call, reply)) is not None:
-                    return await _handed_off(ctx, call.number, outcome, run.world().merges)
+                    handed = await _handed_off(ctx, call.number, outcome, run.world().merges)
+                    # the plans this call scheduled are the planner's: its work starts them
+                    if isinstance(handed, Scheduled):
+                        return replace(handed, planner=planner.agent)
+                    return handed
 
 
 async def _handed_off(

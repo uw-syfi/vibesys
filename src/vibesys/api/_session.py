@@ -12,12 +12,24 @@ from vibesys.api.auxiliary import (
 from vibesys.api.contracts import RunResult, RunStatus
 from vibesys.api.store import open_run_store
 from vibesys.composition import resolve_agent_specs
-from vibesys.events import CoreEventType, EventStatus, RunFailedData, RunStartedData
-from vibesys.orchestration.agent_options import attribution_command_of
+from vibesys.events import (
+    INTERRUPTS,
+    CoreEventType,
+    EventStatus,
+    RunFailedData,
+    RunStartedData,
+)
+from vibesys.orchestration.agent_options import attribution_command_of, objective_axes_of
 from vibesys.plugin_catalog import project_run
-from vibesys.run.core_run import RunEnd, drive_core_run, ensure_not_legacy_resume
+from vibesys.run.core_run import (
+    OperatorPaused,
+    OperatorStopped,
+    RunEnd,
+    drive_core_run,
+    ensure_resumable,
+)
 from vibesys.run.host import open_product_core_host
-from vibesys.run.integration import LocalRunIntegration, RunResources
+from vibesys.run.integration import AuxiliaryResources, LocalRunIntegration, RunResources
 from vibesys.run.overview import overview_of
 from vibesys.run.profilers import (
     ProfilerPreflight,
@@ -54,6 +66,8 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import (
         AgentExecutionEnvironment,
+        ControlAck,
+        ControlRequest,
         RunState,
         ScopedAgentEnvironment,
         StopTimer,
@@ -104,7 +118,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
     built from the run's resources.
     """
     if request.resume is not None:
-        ensure_not_legacy_resume(request.project_root, request.resume.run_id)
+        ensure_resumable(request.project_root, request.resume.run_id)
     async with open_product_core_host(
         request,
         integration,
@@ -126,12 +140,19 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
         return await drive_core_run(core_host, integration)
 
 
+def unwinding(exc: BaseException) -> tuple[CoreEventType, str, EventStatus]:
+    """How a run that left by an exception ends: an interrupt or a cancellation is a stop, anything else a failure."""
+    if isinstance(exc, INTERRUPTS):
+        return CoreEventType.STOPPED, "Run stopped by interrupt", EventStatus.INTERRUPTED
+    return CoreEventType.RUN_FAILED, f"{type(exc).__name__}: {exc}", EventStatus.FAILED
+
+
 class _LocalRunSession:
     """`RunSession` that awaits one selected policy in-process.
 
-    `RunControl` methods write to `self._integration.control`, the same
-    `vs_runtime.api.infrastructure.RunControlChannel` consumed by runtime run
-    boundaries and agent turns.
+    `RunControl` methods go through one `ChannelRunControl` over
+    `self._integration.control`, the same `RunControlChannel` consumed by runtime
+    run boundaries and agent turns.
     """
 
     def __init__(
@@ -167,6 +188,8 @@ class _LocalRunSession:
             threads=implementations.timing.threads,
             system=implementations.system,
         )
+        self._control = self._integration.run_control
+        self._integration.events.checkout = implementations.checkout
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
         self._committed_view_listener: Callable[[RunView, tuple[str, ...] | None], None] | None = (
@@ -212,7 +235,25 @@ class _LocalRunSession:
     def _handle_resources(self, resources: RunResources) -> None:
         self._resources = resources
         if self._ready_listener is not None:
-            self._ready_listener(_run_ready(resources, self._registry, self._implementations))
+            self._ready_listener(
+                run_ready(resources.auxiliary(), self._registry, self._implementations)
+            )
+
+        request = self._request
+        project_max_rounds = self._registration.project_max_rounds
+        self._integration.events.emit(
+            CoreEventType.RUN_STARTED,
+            status=EventStatus.ACTIVE,
+            data=RunStartedData(
+                outer_loop=request.orchestration.id,
+                input=str(request.input_bundle.root),
+                max_rounds=project_max_rounds(self._plugin_options)
+                if project_max_rounds is not None
+                else None,
+                expected_roles=tuple(role.id for role in self._registration.plugin.agents),
+                overview=overview_of(request.input_bundle, objective_axes_of(self._plugin_options)),
+            ),
+        )
 
     def _run_id(self) -> str:
         """Use the provisioned ID once a custom runtime has created its run."""
@@ -233,7 +274,7 @@ class _LocalRunSession:
             message = "the run is not ready to create agents"
             raise RuntimeError(message)
         return self._implementations.agents.open_environment(
-            resources,
+            resources.auxiliary(),
             mounts=mounts,
             agent_backend=agent_backend,
             cli_provider=cli_provider,
@@ -271,7 +312,7 @@ class _LocalRunSession:
 
     def _new_auxiliary_scope(self, resources: RunResources) -> InProcessAuxiliaryAgents:
         return InProcessAuxiliaryAgents(
-            resources,
+            resources.auxiliary(),
             self._implementations.agents,
             self._integration.agent_events,
             self._threads,
@@ -289,20 +330,7 @@ class _LocalRunSession:
         request = self._request
         plugin = self._registration.plugin
         options = self._plugin_options
-        project_max_rounds = self._registration.project_max_rounds
-        max_rounds = project_max_rounds(options) if project_max_rounds is not None else None
         try:
-            self._integration.events.emit(
-                CoreEventType.RUN_STARTED,
-                status=EventStatus.ACTIVE,
-                data=RunStartedData(
-                    outer_loop=request.orchestration.id,
-                    input=str(request.input_bundle.root),
-                    max_rounds=max_rounds,
-                    expected_roles=tuple(role.id for role in plugin.agents),
-                    overview=overview_of(request.input_bundle),
-                ),
-            )
             outcome = await run_plugin(
                 request,
                 self._integration,
@@ -322,7 +350,16 @@ class _LocalRunSession:
                 invocation_store_factory=self._implementations.invocation_store_factory,
             )
             succeeded = outcome.status.value == "succeeded"
-        except RunStopped:
+        except OperatorPaused:
+            self._status = RunStatus.PARKED
+            self._integration.events.emit(CoreEventType.PARKED, "Run paused")
+            return RunResult(
+                run_id=self._run_id(),
+                loop=request.orchestration.id,
+                succeeded=False,
+                status=RunStatus.PARKED,
+            )
+        except RunStopped as stop:
             self._status = RunStatus.STOPPED
             self._integration.events.emit(
                 CoreEventType.STOPPED, "Run stopped by request", status=EventStatus.INTERRUPTED
@@ -332,14 +369,19 @@ class _LocalRunSession:
                 loop=request.orchestration.id,
                 succeeded=False,
                 status=RunStatus.STOPPED,
+                stop_reason=str(stop) or None,
+                uncompared=isinstance(stop, OperatorStopped) and stop.uncompared,
             )
         except BaseException as exc:
-            self._status = RunStatus.FAILED
-            self._integration.events.emit(
-                CoreEventType.RUN_FAILED,
-                f"{type(exc).__name__}: {exc}",
-                status=EventStatus.FAILED,
+            kind, reason, status = unwinding(exc)
+            self._status = RunStatus.STOPPED if kind is CoreEventType.STOPPED else RunStatus.FAILED
+            startup_recorded = (
+                kind is CoreEventType.RUN_FAILED
+                and self._resources is None
+                and self._integration.events.fail_open_epoch(reason)
             )
+            if not startup_recorded:
+                self._integration.events.emit(kind, reason, status=status)
             raise
         else:
             self._status = RunStatus.COMPLETED if succeeded else RunStatus.FAILED
@@ -360,6 +402,7 @@ class _LocalRunSession:
                 loop=request.orchestration.id,
                 succeeded=succeeded,
                 failure=failure,
+                uncompared=outcome.uncompared,
             )
         finally:
             if self._unsubscribe is not None:
@@ -382,32 +425,36 @@ class _LocalRunSession:
             loop=self._request.orchestration.id,
         )
 
+    def submit(self, request: ControlRequest) -> ControlAck:
+        """Apply one operator control request; every control ingress calls this."""
+        return self._control.submit(request)
+
     def steer(self, text: str) -> None:
         """Send free-text steering input to the active run."""
-        self._integration.control.queue_steer(text)
+        self._control.steer(text)
 
     def pause(self) -> None:
         """Request the run reach its next safe boundary and release the write lease."""
-        self._integration.control.request_pause()
+        self._control.pause()
 
     def resume(self) -> None:
         """Request the run acquire the write lease and continue from checkpoint."""
-        self._integration.control.resume()
+        self._control.resume()
 
-    def resume_with_fallback(self) -> None:
-        """Resume the run and switch a quota-paused run to its configured fallback."""
-        self._integration.control.resume_with_fallback()
+    def resume_with_fallback(self) -> bool:
+        """Resume a quota-paused run on its configured fallback; False when it is not quota-paused."""
+        return self._control.resume_with_fallback()
 
     def resume_when_capacity_returns(self) -> bool:
         """Resume a quota-paused run once capacity returns; False when it is not quota-paused."""
-        return self._integration.control.resume_when_capacity_returns()
+        return self._control.resume_when_capacity_returns()
 
     def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
         """Request the run terminate; the operator chooses to drain or cancel work in flight.
 
         Draining is the default at this edge; core and the runtime take the mode explicitly.
         """
-        self._integration.control.request_stop(mode)
+        self._control.stop(mode)
 
     def close(self) -> None:
         """Close the run-owned auxiliary scope, preserving transferred scopes.
@@ -429,7 +476,7 @@ class InProcessAuxiliaryAgents:
 
     def __init__(
         self,
-        resources: RunResources,
+        resources: AuxiliaryResources,
         agents: SessionAgents,
         events: AgentEventSink,
         threads: Threads,
@@ -460,25 +507,24 @@ class InProcessAuxiliaryAgents:
             self._close.run(self._conversations.close)
 
 
-def _run_ready(
-    resources: RunResources,
+def run_ready(
+    resources: AuxiliaryResources,
     registry: OrchestrationRegistry,
     implementations: SessionImplementations,
 ) -> RunReady:
     """Project private resource facts to the narrow frontend contract."""
-    project = resources.project_resources
-    environment = resources.environment_resources
     store = open_run_store(
-        project.project,
+        resources.project,
         registry=registry,
         git=implementations.git,
         threads=implementations.timing.threads,
     )
     return RunReady(
-        record=store.get_record(project.state.run_id),
-        log_directory=environment.request.log_dir,
-        frontend_state_directory=project.project.state.local_namespace(
-            project.state.run_id, "server"
+        record=store.get_record(resources.run_id),
+        project_root=resources.project.root,
+        log_directory=resources.environment_request.log_dir,
+        frontend_state_directory=resources.project.state.local_namespace(
+            resources.run_id, "server"
         ).external_directory(),
         agent_provider=resources.provider,
         agent_model=resources.model,

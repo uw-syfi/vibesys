@@ -82,6 +82,10 @@ EXPECTED_TARGET = {
                 "steer_received",
                 "interrupt_requested",
                 "session_input_received",
+                "input_withdraw_requested",
+                "input_offered_mid_turn",
+                "input_mid_turn_released",
+                "input_taken_mid_turn",
                 "input_reservation_requested",
                 "input_acceptance_observed",
                 "input_reservation_released",
@@ -104,6 +108,7 @@ EXPECTED_TARGET = {
                 "measurement_submission_observed",
             ),
         ),
+        ("vs_core._measurements.submission_ended", ("measurement_submission_ended",)),
         (
             "vs_core._continuations.advance",
             (
@@ -129,6 +134,7 @@ EXPECTED_TARGET = {
         ("vs_core._session_checkpoints.advance", ("invocation_checkpoint_pending",)),
         ("vs_core.records._observation", ("request_observed",)),
         ("vs_core._host_epochs.renewed", ("host_renewed",)),
+        ("vs_core._turn_holds.held", ("turn_held",)),
         (
             "vs_core._settlement.advance",
             (
@@ -171,6 +177,7 @@ EXPECTED_TARGET = {
                 "clock_advanced",
                 "admission_control",
                 "adoption_fence_lifted",
+                "parallel_limit_changed",
             ),
         ),
     )

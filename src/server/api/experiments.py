@@ -91,7 +91,7 @@ def _to_hypothesis_entry(hypothesis: HypothesisView) -> HypothesisEntry:
         perf_baseline_round=hypothesis.perf_baseline_round,
         perf_baseline_commit=hypothesis.perf_baseline_commit,
         perf_delta_reason=hypothesis.perf_delta_reason,
-        kept=hypothesis.kept,
+        best=hypothesis.best,
         strategy_disposition=_strategy_disposition(hypothesis.strategy_disposition),
         strategy_reason=hypothesis.strategy_reason,
         active=hypothesis.active,

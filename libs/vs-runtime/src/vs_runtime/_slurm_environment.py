@@ -15,7 +15,8 @@ from vs_runtime._agent_gpu_commands import (
     agent_gpu_launcher,
 )
 from vs_runtime._brokered_session import BrokeredRunEnvironmentSession, HostBroker
-from vs_runtime._container_runtime_policy import reject_docker_in_docker
+from vs_runtime._command_environment_session import command_environment_session
+from vs_runtime._container_runtime_policy import RefusesDockerInDocker, reject_docker_in_docker
 from vs_runtime._host_command_bridge import (
     agent_paths,
     bridge_editor_extras,
@@ -35,7 +36,6 @@ from vs_runtime._run_environment import (
     _command_argv,
     _make_host_sandbox,
     _NoopWorkspaceRecovery,
-    _prepare_evaluation_plan,
     _PreparedRunEnvironment,
     _starting_container,
 )
@@ -45,17 +45,23 @@ from vs_runtime._run_environment_facts import (
     SlurmEnvironmentFacts,
 )
 from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
+from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
 from vs_runtime._trusted_evaluation_preparation import (
     REMOTE_EVALUATOR_GO_MODULES_ROOT,
     REMOTE_EVALUATOR_TOOLS_ROOT,
     TrustedEvaluationCommandPaths,
+    TrustedEvaluatorRequirements,
+    prepare_trusted_evaluation_plan,
 )
 from vs_sandbox.api import HostResource, HostResourceAccess, SandboxSession
 from vs_sandbox.api.slurm import (
     AgentGpuConfig,
     BrokerTransport,
+    GpuCaptureRecovery,
+    GpuCommandRunner,
     GpuCommands,
     HostCommandBroker,
+    RootGatedGpuLauncher,
     RunRoots,
     SlurmCapturePlan,
     SlurmEvaluationPlan,
@@ -73,7 +79,7 @@ from vs_slurm.api import (
     SlurmConfig,
     SlurmJobRunner,
     SlurmLocalTransport,
-    probe_workspace_root,
+    WorkspaceRootProof,
     slurm_transport_broker_available,
     slurm_transport_broker_policy,
 )
@@ -145,9 +151,18 @@ class _Mode(Protocol):
         ...
 
     def gpu_commands(
-        self, request: RunEnvironmentRequest, confinement: JobConfinement | None
+        self,
+        request: RunEnvironmentRequest,
+        confinement: JobConfinement | None,
+        root_proof: WorkspaceRootProof | None,
     ) -> GpuCommands | None:
-        """What the host command broker offers as GPU commands, if anything."""
+        """What the host command broker offers as GPU commands, held for *root_proof*."""
+        ...
+
+    def capture_recovery(
+        self, run_id: str, *, system: EnvironmentSystem
+    ) -> GpuCaptureRecovery | None:
+        """Return a run owner that reconciles captures without opening an editor."""
         ...
 
     def editor_env(self, launcher: Path) -> dict[str, str] | None:
@@ -187,9 +202,15 @@ class _ClusterOnly:
         return assumed_tool(executable)
 
     def gpu_commands(
-        self, request: RunEnvironmentRequest, confinement: JobConfinement | None
+        self,
+        request: RunEnvironmentRequest,
+        confinement: JobConfinement | None,
+        root_proof: WorkspaceRootProof | None,
     ) -> None:
-        del request, confinement
+        del request, confinement, root_proof
+
+    def capture_recovery(self, run_id: str, *, system: EnvironmentSystem) -> None:
+        del run_id, system
 
     def editor_env(self, launcher: Path) -> None:
         del launcher
@@ -249,30 +270,40 @@ class _AgentGpuMode:
         return ToolLocation.found(command)
 
     def gpu_commands(
-        self, request: RunEnvironmentRequest, confinement: JobConfinement | None
+        self,
+        request: RunEnvironmentRequest,
+        confinement: JobConfinement | None,
+        root_proof: WorkspaceRootProof | None,
     ) -> GpuCommands:
         # The launcher names each job, so it takes the run's configuration too: the
         # queue status tells this run's jobs apart by the run's job name prefix.
         config = self.config.for_run(request.run_id)
+        launcher = self._launcher(config, request.run_id, request.system)
         return agent_gpu_commands(
             config,
             workspace=request.workspace,
             project_path_policy=request.project_path_policy,
-            launcher=self._launcher(config, request),
+            launcher=launcher if root_proof is None else RootGatedGpuLauncher(launcher, root_proof),
             confinement=confinement,
         )
+
+    def capture_recovery(self, run_id: str, *, system: EnvironmentSystem) -> GpuCaptureRecovery:
+        """Build the scheduler owner before any replacement workspace session exists."""
+        config = self.config.for_run(run_id)
+        return GpuCaptureRecovery(config, self._launcher(config, run_id, system))
 
     def editor_env(self, launcher: Path) -> dict[str, str]:
         return agent_gpu_env(launcher)
 
-    def _launcher(self, config: AgentGpuConfig, request: RunEnvironmentRequest) -> GpuLauncher:
+    def _launcher(
+        self, config: AgentGpuConfig, run_id: str, system: EnvironmentSystem
+    ) -> GpuLauncher:
         # Sessions may open concurrently: ``setdefault`` is one atomic dictionary
         # operation, so every session gets the same launcher even if two built one.
         # *config* is the run's (its job name prefix carries the run), so the key
         # carries the run too: two runs never share a launcher, nor a cap.
-        system = request.system
         built = (system, agent_gpu_launcher(config, self.shell_command, system))
-        return self.launchers.setdefault((request.run_id, id(system)), built)[1]
+        return self.launchers.setdefault((run_id, id(system)), built)[1]
 
 
 #: The profilers whose directories the agent is told when a job's PATH lacks them.
@@ -301,7 +332,7 @@ class _ClusterPlans:
     support_paths: Mapping[str, Path]
 
 
-class SlurmEnvironment(_NoopWorkspaceRecovery):
+class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
     """Edit in a local Docker container while trusted evaluation and ROCprof run through Slurm.
 
     The agent never runs on the host. Trusted accuracy and benchmark work is not
@@ -318,7 +349,6 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
 
     isolated = False
     uses_docker = True
-    backend_image: str | None = None
 
     def attaches_backend_accelerator(self, *, docker_in_docker: bool) -> bool:
         """The local editor holds no accelerator; the cluster does the GPU work."""
@@ -345,6 +375,14 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         self._docker = DockerEnvironment(docker or DockerEnvironmentConfig())
         self._job_confinement = job_confinement
         self._deprecation = deprecation
+        # Each run's workspace-root probe, by run id: started by the run's root session,
+        # owned (closed) by it, and waited for by every session's Slurm work.
+        self._root_proofs: dict[str, WorkspaceRootProof] = {}
+
+    @property
+    def backend_image(self) -> str | None:
+        """The editor container's image: the task image when the task has a Dockerfile."""
+        return self._docker.backend_image
 
     @property
     def deprecation(self) -> str | None:
@@ -355,6 +393,12 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         run and reports it once, not logged by every open.
         """
         return self._deprecation
+
+    def capture_recovery(
+        self, run_id: str, *, system: EnvironmentSystem
+    ) -> GpuCaptureRecovery | None:
+        """Return the run's scheduler owner without opening a root editor session."""
+        return self._mode.capture_recovery(run_id, system=system)
 
     # What the run consults before it prepares the environment. The profiler
     # follows the mode: the agent's own GPU commands run where the agent's
@@ -396,14 +440,18 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
     def from_options(cls, options: Mapping[str, object]) -> SlurmEnvironment:
         """Parse the operator file named by the options, once.
 
-        ``build_runner``, ``docker`` and ``orphan_reaper`` are unrecorded injection
-        seams for the agent image build, the Docker CLI and recovery.
+        ``image`` is the editor's base image (the task image, when the task has
+        a Dockerfile), recorded with the run. ``build_runner``, ``docker`` and
+        ``orphan_reaper`` are unrecorded injection seams for the agent image
+        build, the Docker CLI and recovery.
         """
         value = options.get("config_path", "~/.config/vibesys/slurm.toml")
         build_runner = options.get("build_runner")
+        image = options.get("image")
         return cls(
             load_slurm_operator_settings(Path(str(value))),
             docker=DockerEnvironmentConfig(
+                image=str(image) if image else None,
                 docker=cast("DockerCli | None", options.get("docker")),
                 build_runner=cast("DockerBuildRunner | None", build_runner),
                 orphan_reaper=cast("_OrphanReaper | None", options.get("orphan_reaper")),
@@ -448,23 +496,15 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         )
 
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
-        """Validate external policy before opening the editor container."""
+        """Validate external policy, and start a local root's probe, before opening the editor.
+
+        The probe runs beside the run: preparing never waits for it. Only the run's
+        Slurm submissions (trusted evaluations, the agent's GPU jobs) wait for it to
+        prove the root, and a failed probe refuses each of them with its error.
+        """
         reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="slurm")
-        if request.session_role is RunEnvironmentSessionRole.ROOT and isinstance(
-            self._settings.config.transport, SlurmLocalTransport
-        ):
-            runner = SlurmJobRunner(
-                self._settings.config,
-                processes=request.system.slurm_processes,
-                clock=request.clock,
-                scratch_root=request.log_dir / "slurm-workspace-root-probe",
-            )
-            probe_workspace_root(
-                runner,
-                state_root=request.log_dir / "slurm-workspace-root-probe",
-                run_id=request.run_id,
-                pause=request.system.threads.sleep,
-            )
+        if request.session_role is RunEnvironmentSessionRole.ROOT:
+            self._start_root_proof(request)
         return _PreparedRunEnvironment(
             SlurmEnvironmentFacts(
                 service_command=_slurm_service_command(self._settings.policy),
@@ -474,10 +514,61 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
             partial(self._open, request),
         )
 
+    def _start_root_proof(self, request: RunEnvironmentRequest) -> None:
+        """Start the run's workspace-root probe on a local Slurm root, once per run.
+
+        Only a local transport needs one: the submit host itself writes the root the
+        compute nodes read. Over SSH or a connector the files are staged to the cluster.
+        """
+        if not isinstance(self._settings.config.transport, SlurmLocalTransport):
+            return
+        running = self._root_proofs.get(request.run_id)
+        if running is not None and not running.closed:
+            return
+        # A closed proof (its root session ended) proves nothing: a new root session of the
+        # run starts a new probe, which resumes the closed one's durable record. Children
+        # opening meanwhile still see the closed proof and refuse, failing closed.
+        state_root = request.log_dir / "slurm-workspace-root-probe"
+        proof = WorkspaceRootProof(
+            SlurmJobRunner(
+                self._settings.config,
+                processes=request.system.slurm_processes,
+                clock=request.clock,
+                scratch_root=state_root,
+            ),
+            state_root=state_root,
+            run_id=request.run_id,
+            threads=request.system.threads,
+            report=request.workspace_root_probe,
+        )
+        self._root_proofs[request.run_id] = proof
+        proof.start()
+
     def _open(
         self,
         request: RunEnvironmentRequest,
         presentation: RunEnvironmentPresentation,
+    ) -> RunEnvironmentSession:
+        # Every session's Slurm work waits on the run's probe; the root session owns it,
+        # and closes it last, after the editor and every broker whose jobs wait on it.
+        root_proof = self._root_proofs.get(request.run_id)
+        if root_proof is None or request.session_role is not RunEnvironmentSessionRole.ROOT:
+            return self._open_session(request, presentation, root_proof, owned=())
+        try:
+            return self._open_session(request, presentation, root_proof, owned=(root_proof,))
+        except BaseException:
+            root_proof.close()
+            # A stopped probe proves nothing: a later root session starts a new one.
+            self._root_proofs.pop(request.run_id, None)
+            raise
+
+    def _open_session(
+        self,
+        request: RunEnvironmentRequest,
+        presentation: RunEnvironmentPresentation,
+        root_proof: WorkspaceRootProof | None,
+        *,
+        owned: tuple[HostBroker, ...],
     ) -> RunEnvironmentSession:
         config, policy, mode = self._settings.config, self._settings.policy, self._mode
         remote_profiling = mode.remote_capture
@@ -499,8 +590,8 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         plans = self._write_plans(
             request, config, policy, profiler_tree, remote_profiling=remote_profiling
         )
-        gpu = mode.gpu_commands(request, self._job_confinement)
-        brokers: list[HostBroker] = []
+        gpu = mode.gpu_commands(request, self._job_confinement, root_proof)
+        brokers: list[HostBroker] = list(owned)
         try:
             transport_env, transport_resources = _start_transport_broker(
                 config, request, plans, brokers
@@ -513,7 +604,8 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                 brokers.append(commands)
                 launcher = write_client_launcher(request.log_dir / "slurm-gpu", mode.gpu_client)
                 extras = bridge_editor_extras(commands, launcher, env=mode.editor_env(launcher))
-            sandbox = self._docker.build_editor(request, extras)
+            editor = self._docker.build_editor(request, extras)
+            sandbox = editor.runner
             profiler_mcp = _remote_profiler_mcp(plans, transport_env, transport_resources)
             view = RunEnvironmentView(
                 paths=agent_paths(sandbox, request),
@@ -522,20 +614,30 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                 cli_sandboxed=True,
                 host_device_reselect=False,
                 env_kind="slurm",
+                workspace_git_writable=editor.agent_git_writable,
                 profile_execution="remote" if remote_profiling else "local",
                 editor_has_gpu=False,
                 framework_setup_timeout_seconds=config.job_timeout_seconds,
                 profiler_mcp_env=profiler_mcp[0],
                 profiler_mcp_resources=profiler_mcp[1],
-                cluster_evaluation=ClusterEvaluationFacts(self._settings, plans.plan),
+                cluster_evaluation=ClusterEvaluationFacts(
+                    self._settings, plans.plan, root_proof=root_proof
+                ),
             )
-            with _starting_container(request) as output:
-                session = SandboxSession.start(sandbox, view, output=output)
+            with _starting_container(request, sandbox) as output:
+                session = command_environment_session(
+                    SandboxSession.start(sandbox, view, output=output)
+                )
         except BaseException:
             for broker in reversed(brokers):
                 broker.close()
             raise
-        return BrokeredRunEnvironmentSession(session, tuple(brokers))
+        capture = (
+            None
+            if gpu is None
+            else GpuCommandRunner(gpu, request.workspace, threads=request.system.threads)
+        )
+        return BrokeredRunEnvironmentSession(session, tuple(brokers), capture_override=capture)
 
     def _write_plans(
         self,
@@ -547,48 +649,23 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         remote_profiling: bool,
     ) -> _ClusterPlans:
         requirements = request.evaluator_requirements
-        remote = _prepare_evaluation_plan(
-            request,
+        remote = remote_evaluation(
+            policy,
             requirements,
-            TrustedEvaluationCommandPaths(
-                source_project_root=request.workspace,
-                runtime_project_root=".",
-                python_executable=policy.remote_python,
-                runtime_package_root=(
-                    ".vibesys-evaluator-package" if requirements.package_root is not None else None
-                ),
-                runtime_tools_root=REMOTE_EVALUATOR_TOOLS_ROOT,
-                runtime_go_module_cache_root=(
-                    str(REMOTE_EVALUATOR_GO_MODULES_ROOT)
-                    if requirements.go_module is not None
-                    else None
-                ),
+            workspace=request.workspace,
+            accuracy_command=request.accuracy_command,
+            benchmark_command=request.benchmark_command,
+            profile_command=request.profile_command,
+            profiler_support=(
+                (
+                    (request.profiler_support_name, request.profiler_support_path),
+                    *((name, path) for path, name in request.profiler_support_extra),
+                )
+                if remote_profiling
+                else ()
             ),
         )
-        support_paths = {
-            name: Path(path)
-            for name, path in (
-                (".vibesys-evaluator-package", requirements.package_root),
-                (".vibesys-evaluator-tools", requirements.tools_root),
-                (
-                    str(REMOTE_EVALUATOR_GO_MODULES_ROOT),
-                    (
-                        requirements.go_module.cache_root
-                        if requirements.go_module is not None
-                        else None
-                    ),
-                ),
-                *(
-                    (
-                        (request.profiler_support_name, request.profiler_support_path),
-                        *((name, path) for path, name in request.profiler_support_extra),
-                    )
-                    if remote_profiling
-                    else ()
-                ),
-            )
-            if name is not None and path is not None
-        }
+        support_paths = remote.support_paths
         state_root = request.log_dir / "slurm-cluster"
         state_root.mkdir(parents=True, exist_ok=True)
         config_path = request.log_dir / "slurm-operator.toml"
@@ -596,12 +673,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         capture_plan_path = (
             request.log_dir / "slurm-capture-plan.json" if remote_profiling else None
         )
-        raw_accuracy = _command_argv(remote.accuracy_command)
-        raw_benchmark = _command_argv(remote.benchmark_command)
-        raw_profile = _command_argv(remote.profile_command)
-        profile = policy.remote_argv(raw_profile) if raw_profile is not None else None
-        accuracy = policy.remote_argv(raw_accuracy) if raw_accuracy is not None else None
-        benchmark = policy.remote_argv(raw_benchmark) if raw_benchmark is not None else None
+        accuracy, benchmark, profile = remote.accuracy, remote.benchmark, remote.profile
         evaluation_plan = SlurmEvaluationPlan(
             config_path=config_path,
             cluster_state_root=state_root,
@@ -653,6 +725,113 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         )
         broker.start()
         return broker
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteEvaluation:
+    """The trusted commands bound to a cluster job's layout, and the trees the job needs."""
+
+    accuracy: tuple[str, ...] | None
+    benchmark: tuple[str, ...] | None
+    profile: tuple[str, ...] | None
+    support_paths: dict[str, Path]
+    """Immutable local trees staged beside the workspace, by their name in it."""
+
+
+def remote_evaluation(  # noqa: PLR0913  # lint-waiver: LW-930094 [PLR0913]; the commands, the tools and the workspace are independent facts of one binding
+    policy: SlurmExecutionPolicy,
+    requirements: TrustedEvaluatorRequirements,
+    *,
+    workspace: Path,
+    accuracy_command: str | None,
+    benchmark_command: str | None,
+    profile_command: str | None,
+    profiler_support: tuple[tuple[str | None, str | Path | None], ...] = (),
+) -> RemoteEvaluation:
+    """Bind authored commands to the layout of a Slurm job, as every cluster evaluation does."""
+    bound = prepare_trusted_evaluation_plan(
+        TrustedEvaluationPlan(
+            accuracy_command=accuracy_command,
+            benchmark_command=benchmark_command,
+            profile_command=profile_command,
+        ),
+        requirements,
+        TrustedEvaluationCommandPaths(
+            source_project_root=workspace,
+            runtime_project_root=".",
+            python_executable=policy.remote_python,
+            runtime_package_root=(
+                ".vibesys-evaluator-package" if requirements.package_root is not None else None
+            ),
+            runtime_tools_root=REMOTE_EVALUATOR_TOOLS_ROOT,
+            runtime_go_module_cache_root=(
+                str(REMOTE_EVALUATOR_GO_MODULES_ROOT)
+                if requirements.go_module is not None
+                else None
+            ),
+        ),
+    )
+
+    def remote(command: str | None) -> tuple[str, ...] | None:
+        argv = _command_argv(command)
+        return policy.remote_argv(argv) if argv is not None else None
+
+    support_paths = {
+        name: Path(path)
+        for name, path in (
+            (".vibesys-evaluator-package", requirements.package_root),
+            (".vibesys-evaluator-tools", requirements.tools_root),
+            (
+                str(REMOTE_EVALUATOR_GO_MODULES_ROOT),
+                requirements.go_module.cache_root if requirements.go_module is not None else None,
+            ),
+            *profiler_support,
+        )
+        if name is not None and path is not None
+    }
+    return RemoteEvaluation(
+        accuracy=remote(bound.accuracy_command),
+        benchmark=remote(bound.benchmark_command),
+        profile=remote(bound.profile_command),
+        support_paths=support_paths,
+    )
+
+
+def slurm_evaluation_plan(  # noqa: PLR0913  # lint-waiver: LW-930095 [PLR0913]; the settings, commands, tools and state directory are independent facts of one plan
+    settings: SlurmOperatorSettings,
+    requirements: TrustedEvaluatorRequirements,
+    *,
+    workspace: Path,
+    accuracy_command: str | None,
+    benchmark_command: str | None,
+    benchmark_output_argument: str | None,
+    state_directory: Path,
+) -> SlurmEvaluationPlan:
+    """A cluster evaluation plan without profiling, for work that belongs to no run.
+
+    The plan's cluster records and the copy of the operator file it stages live below
+    *state_directory*, which the caller owns.
+    """
+    remote = remote_evaluation(
+        settings.policy,
+        requirements,
+        workspace=workspace,
+        accuracy_command=accuracy_command,
+        benchmark_command=benchmark_command,
+        profile_command=None,
+    )
+    state_root = state_directory / "slurm-cluster"
+    state_root.mkdir(parents=True, exist_ok=True)
+    config_path = state_directory / "slurm-operator.toml"
+    write_slurm_operator_toml(settings, config_path)
+    return SlurmEvaluationPlan(
+        config_path=config_path,
+        cluster_state_root=state_root,
+        accuracy_command=remote.accuracy,
+        benchmark_command=remote.benchmark,
+        benchmark_output_argument=benchmark_output_argument,
+        support_paths=remote.support_paths,
+    )
 
 
 def _start_transport_broker(

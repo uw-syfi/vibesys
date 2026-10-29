@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
@@ -25,6 +26,8 @@ from vs_sandbox.api.slurm import (
 )
 from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
+    ClusterCall,
+    ClusterCancelRequested,
     ClusterObservation,
     ClusterSubmitted,
     FakeCluster,
@@ -39,11 +42,14 @@ from vs_slurm.api import (
     SlurmBatchStage,
     SlurmBatchStageResult,
     SlurmConfig,
+    SlurmError,
     SlurmFileArtifact,
     SlurmJobStatus,
     SlurmSshTransport,
     SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
+    WithdrawalTiming,
+    Withdrawer,
     job_of_handle,
     ledger_operation_id,
     transitioned,
@@ -68,7 +74,7 @@ class _World:
         self.root = root
         self.clock = ManualClock(1000.0)
         self.cluster = FakeCluster(clock=self.clock)
-        self.ledger = FakeEvaluationLedger(project=PROJECT)
+        self.ledger = FakeEvaluationLedger(project=PROJECT, clock=ManualClock())
 
     def attachment(self, holder: str) -> SlurmLedgerAttachment:
         return SlurmLedgerAttachment(
@@ -368,7 +374,18 @@ def test_an_operator_removal_racing_a_submitter_is_never_overwritten(remove_at: 
         operation = ledger_operation_id(key, 0)
 
         def remove() -> None:
-            withdraw(world.ledger, world.cluster, key, reason="removed by operator")
+            withdraw(
+                world.ledger,
+                world.cluster,
+                key,
+                Withdrawer(
+                    by="vibesys-evals",
+                    reason="removed by operator",
+                    timing=WithdrawalTiming(
+                        clock=world.clock, call_seconds=CONFIG.transport_timeout_seconds
+                    ),
+                ),
+            )
 
         if remove_at == "before_sbatch":
             world.cluster.script(operation, queue_wait_s=math.inf, on_dispatch=remove)
@@ -510,3 +527,78 @@ def test_a_waiter_never_cancels_a_job_its_submitter_recorded_during_the_takeover
     assert asked.operation_id == operation
     assert world.state(key) is LedgerState.SUBMITTED
     assert _active(world, operation)
+
+
+@dataclass
+class _Transport:
+    """The Fake cluster's transport: every inspect and cancel call fails while ``failing``."""
+
+    failing: bool = False
+
+    def __call__(self, _call: ClusterCall) -> None:
+        if self.failing:
+            raise SlurmError.transport_timed_out("exec")
+
+
+@pytest.mark.parametrize(
+    "submitter",
+    [pytest.param("run-a", id="another-run"), pytest.param("run-b", id="this-run-earlier-process")],
+)
+def test_a_failed_inspect_of_a_lapsed_claim_never_starts_a_second_live_job(
+    tmp_path: Path, submitter: str
+) -> None:
+    """A dead submitter's job runs, unrecorded; the next asker's inspect and cancel both fail.
+
+    The asker must leave the attempt as it was, rather than end it and start the
+    next attempt's job beside the first: a transport failure is not "no job".
+    """
+    world = _World(tmp_path)
+    transport = _Transport()
+    world.cluster = FakeCluster(clock=world.clock, on_call=transport)
+    request = world.request(submitter)
+    key = world.attachment(submitter).key(request)
+    first = ledger_operation_id(key, 0)
+    world.claim(submitter, key)
+    world.cluster.script(first, queue_wait_s=math.inf)
+    assert isinstance(world.cluster.submit(request, operation_id=first), ClusterSubmitted)
+    world.clock.advance(LedgerPolicy().claim_seconds + 1)
+    second = ledger_operation_id(key, 1)
+    world.cluster.script(second, queue_wait_s=math.inf)
+
+    transport.failing = True
+    asked = world.attachment("run-b").attach(
+        world.cluster, world.request("run-b"), labels=LedgerLabels()
+    )
+    transport.failing = False
+
+    live = [operation for operation in (first, second) if _active(world, operation)]
+    assert len(live) <= 1, f"live jobs of attempts {live}"
+    assert isinstance(asked, AttachPending)
+    assert world.state(key) is LedgerState.SUBMITTING
+
+
+def test_a_claim_whose_owner_died_between_its_cancel_and_its_swap_is_taken_over(
+    tmp_path: Path,
+) -> None:
+    """r3223 LOW-2: run-a cancelled its own lapsed claim's name, then died before its swap.
+
+    Its lost submission never published an intent, so only the cancel's tombstone is
+    left, and no job can start under the name. Another run must take the claim over;
+    reading the tombstone as "a job may run" left the request pending forever.
+    """
+    world = _World(tmp_path)
+    key = world.attachment("run-a").key(world.request("run-a"))
+    first, second = ledger_operation_id(key, 0), ledger_operation_id(key, 1)
+    world.claim("run-a", key)
+    # ``_take_over_own``'s first step; the swap that should follow never runs.
+    assert isinstance(world.cluster.cancel(first), ClusterCancelRequested)
+    world.clock.advance(LedgerPolicy().claim_seconds + 1)
+    world.cluster.script(second, queue_wait_s=math.inf)
+
+    asked = world.attachment("run-b").attach(
+        world.cluster, world.request("run-b"), labels=LedgerLabels()
+    )
+
+    assert isinstance(asked, Attached)
+    assert asked.operation_id == second
+    assert _active(world, second)

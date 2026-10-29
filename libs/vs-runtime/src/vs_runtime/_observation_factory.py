@@ -82,6 +82,8 @@ class ObservationFacts:
     diagnostic: str = ""
     revision: RevisionRef | None = None
     """The revision a snapshot or retain produced; a derived event may carry only this one."""
+    measured_input: str | None = None
+    """The digest of what an evaluation of ``revision`` reads (``Observation.measured_input``)."""
     _vouch: InitVar[object] = field(default=None, kw_only=True)
     """Init-only, so ``dataclasses.replace`` does not carry it over: a copy that holds nothing raises."""
 
@@ -219,6 +221,7 @@ class ObservationFactory:
                 children_complete=facts.children_complete,
                 diagnostic=facts.diagnostic,
                 revision=facts.revision,
+                measured_input=facts.measured_input,
             )
 
         def decide(latest: Observation | None) -> tuple[Observation | None, Observation]:

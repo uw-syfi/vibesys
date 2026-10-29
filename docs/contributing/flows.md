@@ -31,7 +31,13 @@ role data). A search whose flows act on a system another library owns (an issue 
 `owned=` (the codecs of that library's operations); `ctx.owners.perform` sends one and returns the
 typed outcome or a `Failed`, and the declaration requires the host to provide an owner for each.
 A search that labels its spans passes `spans=` (its `SpanKind` declarations; see "Span labels").
-The dynamic search is the worked example (`src/vibesys/orchestration/dynamic/search/_spans.py`).
+The hypothesis searches share one vocabulary, `SPANS` in `vibesys.search_spans` (planning calls,
+workstreams, agent turns, gates, the adoption), which the run page reads; each maps its own steps
+onto it: the dynamic search in `src/vibesys/orchestration/dynamic/search/_spans.py`, the serial
+searches (single, multi; each round is a workstream) in `src/vibesys/serial_search/_spans.py`,
+evolve (each child is a workstream) in `src/vibesys/orchestration/evolve/search/_spans.py` and the
+issue queue (each job is a workstream) in
+`src/vibesys/orchestration/issue_queue/search/_spans.py`.
 The id scheme derives from the search name.
 
 The root flow starts with the config and returns `None` or `NoWinner(reason)`. **A flow never
@@ -73,13 +79,14 @@ outside world is an aspect.
 | `ctx.timer(at)` | A source that fires at a run-clock time |
 | `ctx.stopped`, `ctx.stop_requested` | The operator's stop, as a source and as a flag |
 | `ctx.checkpoint(snapshot)` | Where a code change may resume this flow |
-| `ctx.choose(kept_or_INPUT)` | Name the current winner |
+| `ctx.choose(kept_or_INPUT, label=...)` | Name the current winner, and label the span that adopts it |
+| `ctx.fall_back_to_input(label=...)` | Name the input the winner unless a candidate is already chosen |
 | `ctx.publish(record)` | Make a typed record of the flow's progress visible outside |
 | `ctx.label(kind, title=..., links=..., attrs=..., verdict=..., reason=...)`, `ctx.span` | Label this flow's span; the span's id, for another span's link |
 | `ctx.facts`, `ctx.task`, `ctx.capabilities`, `ctx.clock.now()` | The run's facts and view (journaled reads); `ctx.task.run_id` keeps two runs' shared writes apart |
 | `ctx.agents.session(role, ...)` | A conversation with an agent; `await session.turn(prompt, within=s)` |
 | `ctx.workspaces.open(...)` | A workspace as a resource; `keep`, `verify`, `kept` |
-| `ctx.evaluation.measure(...)` | Measure a revision; `readings`, `taken` |
+| `ctx.evaluation.measure(...)` | Measure a revision; `readings`, `taken`, `last_evaluated` |
 | `ctx.owners.perform(request, within=s)` | Ask an owner of an `owned=` operation (an issue board, say) |
 | `async with my_resource(ctx, ...) as r` | Acquire and always release (`@resource`) |
 
@@ -143,7 +150,8 @@ role keeps the mode its `Role` declares.
 `await ctx.evaluation.measure(plan, workspace=ws, within=s)` returns the `MeasurementResult` or
 the `Failed`; `readings(refs, ...)` asks the evidence owner what it decoded; `taken(ws,
 revision)` lists the trusted evaluations the agents took of a revision themselves, in the order
-they happened.
+they happened; `last_evaluated(ws)` names the revision of the newest of them, which is where the
+agents' own measuring left off.
 
 ### Sources and `first`
 
@@ -154,7 +162,7 @@ A **source** is anything a flow can wait on for a value:
 | `Task[T]` (from `group.start`) | the task's result, once |
 | `Group[T]` | each finished task's result (or `TaskStopped(key)`), once each, in finishing order |
 | `ctx.timer(at)` | `TimeUp(at)`, once |
-| `ctx.stopped` | `StopRequested`, once |
+| `ctx.stopped` | `StopRequested`, once (a lift, `StopLifted`, makes it available again for a later stop) |
 | `ctx.latch(key)` | the value some flow `set` on the run-wide latch `key` (once per run), once per handle |
 | `ctx.channel(key)` | each value any flow `send`s on the run-wide channel `key`, in the order sent, once; one flow reads it |
 
@@ -323,7 +331,7 @@ labels at registration, as it declares roles:
 
 ```python
 WORKSTREAM = SpanKind(
-    "workstream", attrs=WorkstreamAttrs, verdicts=("accepted", "rejected"), links=("builds_on",)
+    "workstream", attrs=WorkstreamAttrs, verdicts=("passed", "failed"), links=("builds_on",)
 )
 AGENT_TURN = SpanKind("agent_turn", attrs=AgentTurnAttrs)
 
@@ -387,7 +395,16 @@ async def worker(ctx: Flow, job: Job) -> Done:
 
 The root may declare its own snapshot (`search(..., snapshot=S)`); it then takes `config | S`
 and resumes from its latest `ctx.checkpoint(S(...))`, holding what it had learned (the dynamic
-search's `DynamicResume`: its record and the input's measurement once it landed). A root without
+search's `DynamicResume`: its record and the input's measurement once it landed). The serial
+searches do the same (`MultiResume`, `SingleResume`: the config and a `SerialState`, which the
+root checkpoints before each wait): after a code change the search resumes at the round after the
+last it finished, with its ledger, best and input measurement, and plays no round again. A run
+saved before its root checkpointed that state has only its config as a snapshot; its root then
+rebuilds the state from what the run recorded (`vibesys.serial_search.rebuilt`: the ledger it
+published, `ctx.published`; the settlements core recorded, `ctx.settlements`; the spans of the
+rounds, `ctx.spans`). The previous round's profile summary and the noise its comparison stated are
+not in that record, so the next design turn goes without them, and a kept candidate that was not
+eligible reads as not passed. A root without
 one resumes from its config. A snapshot type may be a union of versions (`snapshot=V1 | V2`):
 give each model a `version` literal, and a checkpoint that decodes as none of them raises
 `FlowCodeChanged` as any other unresumable change does. The restart resolves each flow
@@ -418,8 +435,12 @@ measurement of the same plan, a settlement of the same workspace, or the opening
 workspace is attached to the request already in flight (`LiveFlows.in_flight`) and gets its
 answer. An opening or a settlement core answers before the resumed flow asks again is kept for
 the flow at that path (`InFlight.answer`), so the workspace still opens once; a measurement
-answered first is dropped, and measured again if asked. A workspace whose settlement was in flight
-is left to it (`ws.settling` on reopen, reason `settling`); a workspace that opens with no flow
+answered first is dropped, and asked again if the flow asks. Core answers a repeat of the run's
+input measurement from the run that took it, to the decision that asked, so the input is never
+measured twice. A measurement core accepted and neither started a request for nor answered (a
+run saved before core addressed such answers) is answered when the resumed host's recovery is
+ready. A workspace whose settlement was in flight is left to it (`ws.settling` on reopen,
+reason `settling`); a workspace that opens with no flow
 left to claim it, or whose kept opening its flow ends without taking, is settled as `unclaimed`.
 
 ## The winner
@@ -431,7 +452,14 @@ ctx.choose(kept)        # a Kept candidate a closed workspace retained
 ctx.choose(INPUT)       # nothing beat the input
 ```
 
-`ctx.choose` may be called at any time, from any flow; the last choice stands. When the root
+`ctx.choose` may be called at any time, from any flow; the last choice stands. It takes the
+`Label` of the span that adopts it (`ctx.choose(kept, adoption_label(...))`): the adoption is one
+operation (the `ProposeWinner`), the framework labels its span with the last choice's label when
+it is issued, and sets the verdict `ADOPTED` or `NOT_ADOPTED` (with the typed reason) once core has
+answered, so the kind must declare both verdicts. A choice without a label adopts unlabelled,
+and so does a run that chose nothing (the input stands): a search that labels its adoption starts
+with `ctx.fall_back_to_input(label)`, and calls it again as it learns more about the input; it
+never replaces a candidate already chosen. When the root
 returns, or the operator stops the run, or the deadline passes, the framework ends the run by one
 path:
 
@@ -440,7 +468,10 @@ path:
    fails the run the same way but adopts the last choice first and carries it as the selection
    (a search that ran out of budget after building something worth keeping).
 2. Otherwise core adopts the last choice (nothing chosen: the input, as it stands).
-3. If adoption fails, the run fails with `adoption-failed: <typed reason>`.
+3. If adoption fails, the run fails with `adoption-failed: <typed reason>`, except under the
+   operator's stop: a stop is a pause, so what the adoption did is no verdict on the run, and
+   the result is the stop's (`cancelled`, reason `stopped: adoption-failed: <typed reason>`), which
+   a resume reopens.
 4. If it succeeds, the run succeeds with the selection; a run that was stopped or timed out is
    `cancelled` (reasons `stopped: ...` / `deadline: ...`) and still carries the selection.
 5. The framework finishes the run. If core refuses the result, one plain failure is proposed.
@@ -509,6 +540,18 @@ workspaces, adoption) a toy search runs through the real core with scripted exec
   journaled, so they replay to the same value.
 - `Group.free` is a large constant when the group has no limit. `ctx.stopped` yields the
   `StopRequested` event itself. A stopped `Task` yields `TaskStopped(key)`.
+- Pause closes new admission while admitted logical turns finish their corrections,
+  evaluation waits, and continuations within the original deadline. Pause now withdraws
+  completion authority, cancels active invocations and releases evaluation interests with
+  bounded cleanup. Interrupted work stays unfinished without spending a role's correction
+  or lost-turn allowance.
+- Resume opens a new epoch after every ending. `StopLifted(new_epoch=True)` restarts flows
+  from their retained checkpoints with the old shutdown cleared. The duration is fresh;
+  lifetime usage and accepted results remain recorded. The original input baseline is fixed,
+  and resumed adoption is guarded until project-edit protection can prove it safe. Root
+  restores are guarded, and snapshots refuse edits present at Resume. Ordinary writer recovery
+  preserves its deadline and publication authority; it does not imply operator Resume. A search
+  keeps no copy of an epoch's shutdown in its own checkpoint.
 - Awaiting inside a `finally` while the run itself is being discarded is not supported; use
   `except Stopped` (or `@resource`) for cleanup that awaits.
 - A suspended turn's waits are bounded by the run deadline, so a turn that never resumes cannot

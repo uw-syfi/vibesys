@@ -259,10 +259,7 @@ function world(
       pages.opened += 1;
       return {wake: () => (pages.woken += 1), close: () => (pages.closed += 1)};
     },
-    confirm: async () => {
-      pages.confirms += 1;
-      return true;
-    },
+
     remember: (run, current) => recents.remember(run, current),
     changed: () => {
       calls.changes += 1;
@@ -1059,7 +1056,6 @@ describe('RunControl over the FakeHelper', () => {
     const runs = new RunControl({
       connection: async () => firstLease,
       openPage: () => ({wake: () => {}, close: () => {}}),
-      confirm: async () => true,
       remember: (run, current) => recents.remember(run, current),
       changed: () => {},
       log: () => {},
@@ -1081,101 +1077,102 @@ describe('RunControl over the FakeHelper', () => {
   });
 });
 
-describe('RunControl logs', () => {
-  test("serves a page's logs from its binding's instance over one logs channel", async () => {
+describe('RunControl.attachReader over the FakeHelper', () => {
+  const ENDED = {
+    run_id: 'run-a',
+    task: 'spsc',
+    display_name: 'run',
+    created_at: '2026-10-17T03:00:00Z',
+    phase: null,
+    instance_id: null,
+  } as const;
+
+  function endedWorld() {
     const w = world();
-    w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
-    const store = w.link.helper.logStore;
-    store.open(RUN_A, '000001', {kind: 'startup_step', stage: 'building_image'}, 'docker build');
-    store.write(RUN_A, '000001', new TextEncoder().encode('building image 7/8: WORKDIR\n'));
-    await w.runs.attach(HOST, RUN_A);
-    const spawned = w.link.helper.spawned;
+    w.link.helper.host.runHistory.set('/p', [ENDED]);
+    return w;
+  }
 
-    const listed = await w.runs.logs(runRef('run-a'), {kind: 'list'});
-    expect(listed).toMatchObject({ok: true, instanceId: RUN_A, streams: [{id: '000001'}]});
-    const read = await w.runs.logs(runRef('run-a'), {
-      kind: 'read',
-      token: 'r1',
-      read: {
-        instance_id: RUN_A,
-        stream_id: '000001',
-        start: {tail_bytes: 4096},
-        max_bytes: 4096,
-        wait_ms: 0,
-      },
-    });
-    expect(read).toMatchObject({ok: true, chunk: {data: 'building image 7/8: WORKDIR\n'}});
-    expect(w.link.helper.spawned).toBe(spawned + 1);
+  async function opened(read: () => number, count: number): Promise<void> {
+    for (let turn = 0; turn < 200 && read() < count; turn += 1) {
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    expect(read()).toBe(count);
+  }
 
-    const logsChannel = w.link.helper.channels.at(-1);
-    w.runs.detach(runRef('run-a'));
-    await logsChannel?.process.exit;
-    expect(logsChannel?.process.running).toBe(false);
+  test('a run that ended is read through one read-only server, bound under the run id', async () => {
+    const w = endedWorld();
+
+    expect(await w.runs.attachReader(HOST, '/p', 'run-a')).toEqual({kind: 'attached'});
+
+    const [reader] = [...w.link.helper.host.readers.values()];
+    expect(w.link.helper.host.readerStarts).toEqual(['run-a']);
+    expect(w.runs.attached()).toMatchObject({instanceId: reader, runId: 'run-a', project: '/p'});
+    expect(w.pages.opened).toBe(1);
     await w.connection[Symbol.asyncDispose]();
   });
 
-  test('refuses a read that names another instance, and a page with no run', async () => {
-    const w = world();
-    w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
-    await w.runs.attach(HOST, RUN_A);
-    const read = {
-      instance_id: RUN_B,
-      stream_id: '000001',
-      start: {offset: 0},
-      max_bytes: 4096,
-      wait_ms: 0,
+  test('the window connections of a bound reader reach the read-only server', async () => {
+    const w = endedWorld();
+    let connections = 0;
+    w.link.helper.host.readerServer = () => {
+      connections += 1;
     };
+    await w.runs.attachReader(HOST, '/p', 'run-a');
 
-    expect(await w.runs.logs(runRef('run-a'), {kind: 'read', token: 'r1', read})).toMatchObject({
-      ok: false,
-      failure: {code: 'unknown_instance'},
-    });
-    expect(await w.runs.logs(runRef('run-z'), {kind: 'list'})).toMatchObject({
-      ok: false,
-      failure: {code: 'unknown_instance'},
-    });
+    w.runs.connect(new FakeRelayPort(), runRef('run-a'));
+    w.runs.connect(new FakeRelayPort(), runRef('run-a'));
+
+    await opened(() => connections, 2);
+    expect(w.link.helper.host.readerStarts).toEqual(['run-a']);
     await w.connection[Symbol.asyncDispose]();
   });
 
-  test("a withdraw aborts the page's read with that token, and withdraws its long poll", async () => {
-    const w = world();
-    w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
-    w.link.helper.logStore.open(
-      RUN_A,
-      '000001',
-      {kind: 'startup_step', stage: 'building_image'},
-      'build',
-    );
-    await w.runs.attach(HOST, RUN_A);
-    const read = {
-      instance_id: RUN_A,
-      stream_id: '000001',
-      start: {offset: 0},
-      max_bytes: 4096,
-      wait_ms: 25_000,
-    };
-    const heldFirst = w.link.helper.deferNext('logs.read');
-    const heldSecond = w.link.helper.deferNext('logs.read');
-    const first = w.runs.logs(runRef('run-a'), {kind: 'read', token: 'r1', read});
-    const second = w.runs.logs(runRef('run-a'), {kind: 'read', token: 'r2', read});
-    await heldFirst.received;
-    await heldSecond.received;
+  test('attaching again while the reader lives shares it, and a reader that ended is replaced', async () => {
+    const w = endedWorld();
 
-    expect(await w.runs.logs(runRef('run-a'), {kind: 'withdraw', token: 'unknown'})).toBeNull();
-    expect(await w.runs.logs(runRef('run-a'), {kind: 'withdraw', token: 'r1'})).toBeNull();
-    expect(await first).toMatchObject({ok: false, failure: {code: 'transport'}});
-    heldSecond.release();
-    expect(await second).toMatchObject({ok: true});
-    expect(await w.runs.logs(runRef('run-a'), {kind: 'withdraw', token: 'r2'})).toBeNull();
-    expect(await w.runs.logs(runRef('run-z'), {kind: 'withdraw', token: 'r1'})).toBeNull();
-
-    // The logs channel keeps order: a withdrawal written before this listing reached the helper.
-    expect(await w.runs.logs(runRef('run-a'), {kind: 'list'})).toMatchObject({ok: true});
-    const [firstRead] = w.link.helper.requests.filter(request => request.type === 'logs.read');
-    const cancels = w.link.helper.requests.filter(request => request.type === 'logs.cancel');
-    expect(cancels).toMatchObject([{read_id: firstRead?.request_id}]);
-    heldFirst.release();
+    await w.runs.attachReader(HOST, '/p', 'run-a');
     w.runs.detach(runRef('run-a'));
+    await w.runs.attachReader(HOST, '/p', 'run-a');
+    expect(w.link.helper.host.readerStarts).toEqual(['run-a']);
+
+    w.runs.detach(runRef('run-a'));
+    w.link.helper.endReader('run-a');
+    await w.runs.attachReader(HOST, '/p', 'run-a');
+    expect(w.link.helper.host.readerStarts).toEqual(['run-a', 'run-a']);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('a run with a live server is bound to it and starts no reader', async () => {
+    const w = endedWorld();
+    w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
+
+    await w.runs.attachReader(HOST, '/p', 'run-a');
+
+    expect(w.runs.attached()).toMatchObject({instanceId: RUN_A, runId: 'run-a'});
+    expect(w.link.helper.host.readerStarts).toEqual([]);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('a helper that does not offer chat on ended runs is asked nothing and binds nothing', async () => {
+    const w = endedWorld();
+    w.link.helper.features.delete('chat_ended_runs');
+
+    expect(await w.runs.attachReader(HOST, '/p', 'run-a')).toEqual({kind: 'unsupported'});
+
+    expect(w.link.helper.requests.some(request => request.type === 'run.reader')).toBe(false);
+    expect(w.runs.attached()).toBeNull();
+    expect(w.pages.opened).toBe(0);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('a run the project does not have is refused and binds nothing', async () => {
+    const w = endedWorld();
+
+    await expect(w.runs.attachReader(HOST, '/p', 'run-z')).rejects.toThrow('no run run-z');
+
+    expect(w.runs.attached()).toBeNull();
+    expect(w.link.helper.host.readerStarts).toEqual([]);
     await w.connection[Symbol.asyncDispose]();
   });
 });

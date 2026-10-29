@@ -216,7 +216,7 @@ dim_info = TiledDimInfo.build(seq_len, tile_size)
 for tile_idx in range(dim_info.tile_count):
     bound = dim_info.get_tile_bound(tile_idx)
     idx = dim_info.get_tile_indices(tile_idx, bound)
-    data = nl.ndarray((nl.par_dim(128), bound), dtype=input_tensor.dtype, buffer=nl.sbuf)
+    data = nl.ndarray((128, bound), dtype=input_tensor.dtype, buffer=nl.sbuf)
     nisa.dma_copy(dst=data, src=input_tensor[partition_idx, idx])
 ```
 
@@ -234,7 +234,7 @@ for tile_idx in range(dim_info.tile_count):
     for subtile_idx in range(num_subtiles):
         bound = dim_info.get_subtile_bound(tile_idx, subtile_idx)
         idx = dim_info.get_subtile_indices(tile_idx, subtile_idx, bound)
-        data = nl.ndarray((nl.par_dim(128), bound), dtype=input_tensor.dtype, buffer=nl.sbuf)
+        data = nl.ndarray((128, bound), dtype=input_tensor.dtype, buffer=nl.sbuf)
         nisa.dma_copy(dst=data, src=input_tensor[partition_idx, idx])
 ```
 
@@ -249,7 +249,7 @@ dim_info = TiledDimInfo.build_with_subtiling(1024, 256, 64)
 for tile_idx in range(dim_info.tile_count):
     # Load the full tile into SBUF
     tile_bound = dim_info.get_tile_bound(tile_idx)
-    tile_data = nl.ndarray((nl.par_dim(128), tile_bound), dtype=input_tensor.dtype, buffer=nl.sbuf)
+    tile_data = nl.ndarray((128, tile_bound), dtype=input_tensor.dtype, buffer=nl.sbuf)
     nisa.dma_copy(dst=tile_data, src=input_tensor[partition_idx, dim_info.get_tile_indices(tile_idx, tile_bound)])
 
     # Process subtiles within the loaded tile

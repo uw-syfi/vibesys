@@ -62,17 +62,35 @@ ALLOWED_FIRST_PARTY = (
     "server.control_envelope",
     "server.diagnostics",
     "server.host_api",
+    "server.host_compatibility_generated",
     "server.host_helper",
     "server.host_helper_logs",
     "server.host_helper_machine",
+    "server.host_compute_runtime",
+    "server.host_compute",
+    "server.host_agent_logins",
     "server.host_examples",
+    "server.host_harness",
     "server.host_helper_preflight",
+    "server.host_machine_facts",
     "server.host_preflight",
     "server.host_helper_os",
     "server.host_helper_requests",
+    "server.host_run_events",
+    "server.host_run_reader",
+    "server.host_run_reads",
+    "server.host_helper_readers",
+    "server.host_envelope",
+    "server.host_operation_types_generated",
+    "server.host_run_dashboard",
+    "server.host_run_summary",
+    "server.run_summary",
+    "server.run_summary_cache",
     "server.instances",
     "server.registry",
     "server.relay",
+    "server.run_digest",
+    "server.span_index",
     "vs_sim",
     "vs_project",
     "vs_decode",
@@ -209,6 +227,14 @@ def violations(root: str, roots: tuple[Path, ...] = SOURCE_ROOTS) -> list[str]:
 def test_light_entrypoint_imports_only_light_modules(entrypoint: str) -> None:
     assert _module_file(entrypoint) is not None, f"{entrypoint} has moved; update this guard"
     assert violations(entrypoint) == []
+
+
+@pytest.mark.regression
+def test_native_host_admission_does_not_load_server_adapters() -> None:
+    closure = import_closure("entrypoints.host")
+    assert not {
+        name: chain for name, chain in closure.items() if name.partition(".")[0] == "server"
+    }
 
 
 # --- the guard's own behavior ----------------------------------------------------

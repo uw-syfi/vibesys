@@ -7,15 +7,17 @@ from typing import TYPE_CHECKING
 from vibesys.orchestration.dynamic.models import ImplementPortfolioPlan
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
 
-def run_prompt_variables(
+def run_prompt_variables(  # noqa: PLR0913  # LW-930099 [PLR0913]; the variables are independent facts of the run that no one record holds.
     *,
     objective: str,
     environment_notes: str,
     agent_evaluation: bool,
+    agent_git_writable: bool,
     domain_sections: Mapping[str, str],
+    comparisons: Sequence[Mapping[str, object]] = (),
 ) -> dict[str, object]:
     """The run-level variables every dynamic template reads, besides its own context's fields.
 
@@ -26,7 +28,9 @@ def run_prompt_variables(
         "objective": objective,
         "environment_notes": environment_notes,
         "agent_evaluation": agent_evaluation,
+        "agent_git_writable": agent_git_writable,
         "domain_sections": domain_sections,
+        "comparisons": comparisons,
         "plan_example": planner_reply_example(),
     }
 

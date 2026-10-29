@@ -27,6 +27,7 @@ from tests.server.host_helper_support import (
     ChannelClient,
     FakeDirectories,
     FakeRunLauncher,
+    accept_operator,
     fake_host,
     record,
     serve_on,
@@ -92,15 +93,14 @@ from server.host_helper import (
 )
 from server.host_helper_requests import (
     PathHints,
-    ProjectRun,
     ScannedEntry,
     answer,
     launch_arguments,
     negotiate,
-    run_summaries,
     select_completions,
     split_prefix,
 )
+from server.host_run_reads import ProjectRun, run_summaries
 from server.registry import FakeInstanceStore, FakeStopIntents, LiveRegistry, StopEffects
 from server.relay import EXIT_STATUS
 from vs_decode.api import Unreadable
@@ -1339,7 +1339,7 @@ def test_relay_handoff_waits_for_late_start_compensation(seed: int, tmp_path: Pa
     project = _project(tmp_path / f"p{seed}")
     threads = SimThreads(schedule_seed=seed)
     network = SimNetwork(threads)
-    listener = network.listen("run.sock")
+    listener = network.listen("/run.sock")
     store = FakeInstanceStore()
     launch_permit = threads.event()
     stop_entered = threads.event()
@@ -1371,7 +1371,7 @@ def test_relay_handoff_waits_for_late_start_compensation(seed: int, tmp_path: Pa
     )
 
     def serve_run() -> None:
-        connection = listener.accept(HANG_GUARD_S)
+        connection = accept_operator(listener)
         assert connection.recv(1, HANG_GUARD_S) == b"x"
         server_received.set()
         connection.close()
@@ -1513,7 +1513,7 @@ def test_run_connect_relays_bytes_both_ways_including_ones_sent_early(
     seen: dict[str, bytes] = {}
 
     def serve(listener: Listener) -> None:
-        connection = listener.accept(HANG_GUARD_S)
+        connection = accept_operator(listener)
         received = bytearray()
         while len(received) < len(upstream):
             chunk = connection.recv(len(upstream) - len(received), HANG_GUARD_S)
@@ -1524,7 +1524,7 @@ def test_run_connect_relays_bytes_both_ways_including_ones_sent_early(
         connection.close()
 
     def main() -> tuple[dict[str, Any], int | None, bytes, bytes]:
-        listener = network.listen("run.sock")
+        listener = network.listen("/run.sock")
         server = threads.spawn(lambda: serve(listener), name="server")
         client = ChannelClient(threads)
         errors = ByteBuffer()
@@ -1565,11 +1565,11 @@ def test_relay_worker_refusal_returns_one_typed_channel_end() -> None:
     server_received: list[bytes] = []
 
     def serve(listener: Listener) -> None:
-        connection = listener.accept(HANG_GUARD_S)
+        connection = accept_operator(listener)
         server_received.append(connection.recv(1, HANG_GUARD_S))
 
     def main() -> tuple[dict[str, Any], int | None]:
-        listener = network.listen("run.sock")
+        listener = network.listen("/run.sock")
         server = threads.spawn(lambda: serve(listener), name="server")
         client = ChannelClient(threads)
 
@@ -1634,11 +1634,11 @@ def test_dispatcher_bootstrap_refusal_returns_one_typed_channel_end_without_comm
     server_received: list[bytes] = []
 
     def serve(listener: Listener) -> None:
-        connection = listener.accept(HANG_GUARD_S)
+        connection = accept_operator(listener)
         server_received.append(connection.recv(1, HANG_GUARD_S))
 
     def main() -> tuple[dict[str, Any], int | None]:
-        listener = network.listen("run.sock")
+        listener = network.listen("/run.sock")
         server = threads.spawn(lambda: serve(listener), name="server")
         client = ChannelClient(threads)
 

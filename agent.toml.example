@@ -19,6 +19,8 @@
 # cli_provider = "codex"      # used when backend = "cli";
 # one of: claude, gemini, codex, opencode
 # cli_timeout = 1800          # per-invocation timeout in seconds
+# backend = "scripted"        # agent-less runs: the real backend, scripted agents, no model
+# scripted_seed = 0           # the scripted agents' seed; read only with backend = "scripted"
 
 # [agent.quota]
 # What the run does when a provider runs out of quota or is rate limited for
@@ -65,17 +67,6 @@
 # authenticated with `gh auth login`.
 # owner = "your-github-user"
 visibility = "private"  # private, public, or internal
-
-# [tui]
-# Theme for the interactive client, as light/dark pairs:
-#   "dark" (default) / "light"                            — the baseline palette
-#   "solarized-dark" / "solarized-light"                  — low-glare terminal palette
-#   "catppuccin-mocha" / "catppuccin-latte"               — softer, more expressive
-#   "high-contrast-dark" / "high-contrast-light"          — accessibility-focused
-#
-# The --theme flag overrides this value, and /theme switches for the current
-# session without changing the file. Ignored in headless mode.
-# theme = "dark"
 
 # [backend]
 # Hardware/runtime backend to target. Supported values are "cuda", "metal",

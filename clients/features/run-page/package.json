@@ -5,7 +5,6 @@
   "type": "module",
   "vibesys": {
     "layer": "feature",
-    "design": "strict",
     "entries": {
       "./state": "neutral",
       "./renderer": "dom"
@@ -44,12 +43,22 @@
     "@vibesys/store": "workspace:*",
     "@vibesys/transport": "workspace:*",
     "@vibesys/ui": "workspace:*",
-    "react": "19.1.1"
+    "react": "19.1.1",
+    "xstate": "5.33.2",
+    "@vibesys/run-skeleton": "workspace:*",
+    "@vibesys/request-identity": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
     "@types/node": "^24.0.0",
     "@types/react": "19.1.13",
-    "typescript": "^5.8.3"
+    "@types/react-dom": "19.1.9",
+    "@vibesys/run-fixtures": "workspace:*",
+    "happy-dom": "20.14.5",
+    "react-dom": "19.1.1",
+    "typescript": "^5.8.3",
+    "@vibesys/proto": "workspace:*",
+    "@bufbuild/protobuf": "2.16.0",
+    "fast-check": "4.10.2"
   }
 }

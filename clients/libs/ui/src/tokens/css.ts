@@ -1,9 +1,11 @@
-import {LOG_ERR_MIX} from './contrast.js';
+import {CHIP_FILL_MIX, LOG_ERR_MIX} from './contrast.js';
 import {
   ELEVATION,
   FONT_STACKS,
   MOTION,
+  PROSE_MEASURE_CH,
   RADIUS,
+  SERIES,
   SIZE,
   SPACE,
   type TextStyle,
@@ -31,7 +33,7 @@ export const LEGACY_ALIASES: Readonly<Record<string, string>> = {
 
 const TONES = ['accent', 'ok', 'warn', 'err'] as const;
 /** How much of a role is mixed into its surface: selection, chip fill, chip border, banner fill. */
-const MIX = {selection: 14, fill: 12, border: 35, banner: 8};
+const MIX = {selection: 14, fill: CHIP_FILL_MIX.share, border: 35, banner: 8};
 
 const HEADER = `/*
  * GENERATED, do not edit. Change the tables in src/tokens/ (or the primitives' styles in
@@ -71,6 +73,7 @@ function scaleDeclarations(): string[] {
     ...(Object.keys(TYPE) as TextStyle[]).flatMap(textDeclarations),
     ...Object.entries(SPACE).map(([token, px]) => `--${token}: ${px}px;`),
     ...Object.entries(SIZE).map(([token, px]) => `--${token}: ${px}px;`),
+    `--measure: ${PROSE_MEASURE_CH}ch;`,
     ...Object.entries(RADIUS).map(([token, px]) => `--${token}: ${px}px;`),
     ...Object.entries(ELEVATION).flatMap(([level, {shadow, scrim}]) => [
       `--elevation-${level}: ${shadow};`,
@@ -78,6 +81,7 @@ function scaleDeclarations(): string[] {
     ]),
     ...Object.entries(MOTION.duration).map(([token, ms]) => `--duration-${token}: ${ms}ms;`),
     `--easing: ${MOTION.easing};`,
+    ...SERIES.map((color, slot) => `--series-${slot}: ${color};`),
   ];
 }
 
@@ -86,7 +90,7 @@ function derivedDeclarations(): string[] {
     `--selection: ${mix('accent', MIX.selection, 'bg')};`,
     `--log-err: ${mix(LOG_ERR_MIX.role, LOG_ERR_MIX.share, LOG_ERR_MIX.into)};`,
     ...TONES.flatMap(tone => [
-      `--chip-${tone}-bg: ${mix(tone, MIX.fill, 'panel')};`,
+      `--chip-${tone}-bg: ${mix(tone, MIX.fill, CHIP_FILL_MIX.into)};`,
       `--chip-${tone}-border: ${mix(tone, MIX.border, 'panel')};`,
       `--banner-${tone}-bg: ${mix(tone, MIX.banner, 'bg')};`,
     ]),

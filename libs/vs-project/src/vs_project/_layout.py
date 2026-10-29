@@ -10,19 +10,23 @@ contents remain outside this package.
 
 from __future__ import annotations
 
+import hashlib
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
 
 import vs_project._paths as project_paths
-from vs_project.errors import ProjectError
+from vs_project._manifests import _IDENTIFIER_PATTERN
+from vs_project.errors import ProjectError, ProjectStateError
 
 _CONFIGURATION_DIRECTORY_NAME = project_paths.CONFIGURATION_DIRECTORY_NAME
 _TASKS_DIRECTORY_NAME = project_paths.TASKS_DIRECTORY_NAME
 _OBJECTIVE_FILE_NAME = project_paths.OBJECTIVE_FILE_NAME
 _MANIFEST_FILE_NAME = project_paths.MANIFEST_FILE_NAME
 _DOCKERFILE_NAME = "Dockerfile"
+STATE_HOME_ENV = "VIBESYS_STATE_HOME"
 _TASK_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 
 
@@ -52,6 +56,16 @@ class ProjectRootNotFoundError(ProjectLayoutError):
     def not_directory(cls, path: Path) -> Self:
         """Describe a project root that resolves to a non-directory."""
         return cls(f"Project root is not a directory: {path}")
+
+    @classmethod
+    def missing_field(cls, text: str) -> Self:
+        """A user-supplied ``project_root`` that is not an existing path."""
+        return cls(f"project_root does not exist: {text}")
+
+    @classmethod
+    def not_directory_field(cls, text: str) -> Self:
+        """A user-supplied ``project_root`` that is not a directory."""
+        return cls(f"project_root is not a directory: {text}")
 
     @classmethod
     def discovery_path_missing(cls, path: Path) -> Self:
@@ -234,6 +248,43 @@ class TaskDirectory:
         )
 
 
+def canonical_project_root(raw: str | Path, *, base: Path, home: Path) -> Path:
+    """The one absolute directory `raw` names.
+
+    ``~`` and ``~/...`` expand under `home`. A relative path resolves from
+    `base`. The result is absolute, symlink-free, and an existing directory.
+    A missing path or a non-directory raises :class:`ProjectRootNotFoundError`
+    naming the field ``project_root``.
+    """
+    text = raw if isinstance(raw, str) else str(raw)
+    if text == "~" or text.startswith("~/"):
+        expanded = home if text == "~" else home / text[2:]
+    elif text.startswith("~"):
+        raise ProjectRootNotFoundError.missing_field(text)
+    else:
+        expanded = Path(text)
+    if not expanded.is_absolute():
+        expanded = base / expanded
+    try:
+        resolved = expanded.resolve(strict=True)
+    except OSError as exc:
+        raise ProjectRootNotFoundError.missing_field(text) from exc
+    if not resolved.is_dir():
+        raise ProjectRootNotFoundError.not_directory_field(text)
+    return resolved
+
+
+def resume_directory(recorded: str | None, requested: str, *, base: Path, home: Path) -> Path:
+    """The directory a resume runs in.
+
+    A recorded root wins over the spelling the caller sent. With none recorded,
+    the request is canonicalized the same way a new run records it.
+    """
+    if recorded:
+        return canonical_project_root(recorded, base=base, home=home)
+    return canonical_project_root(requested, base=base, home=home)
+
+
 class ProjectLayout:
     """Discover and validate one project's repository-native VibeSys layout."""
 
@@ -244,13 +295,7 @@ class ProjectLayout:
     @classmethod
     def open(cls, project_root: Path | str) -> Self:
         """Bind to an existing project directory without requiring initialization."""
-        lexical_root = Path(project_root).expanduser()
-        try:
-            resolved_root = lexical_root.resolve(strict=True)
-        except OSError as exc:
-            raise ProjectRootNotFoundError.missing(lexical_root) from exc
-        if not resolved_root.is_dir():
-            raise ProjectRootNotFoundError.not_directory(resolved_root)
+        resolved_root = canonical_project_root(project_root, base=Path.cwd(), home=Path.home())
         return cls(ProjectRoot(resolved_root))
 
     @classmethod
@@ -442,3 +487,50 @@ def _require_contained(path: Path, root: Path, description: str) -> None:
 
 def _format_task_names(names: tuple[TaskName, ...]) -> str:
     return ", ".join(name.value for name in names) if names else "none"
+
+
+def external_project_state_directory(state_home: Path, project_root: Path) -> Path:
+    """Return a collision-resistant local directory for one canonical project path."""
+    normalized = unicodedata.normalize("NFKD", project_root.name).encode("ascii", "ignore").decode()
+    slug = re.sub(r"[^a-z0-9]+", "-", normalized.lower()).strip("-") or "project"
+    slug = slug[:64].rstrip("-") or "project"
+    digest = hashlib.sha256(project_root.as_posix().encode("utf-8")).hexdigest()[:12]
+    destination = state_home / "projects" / f"{slug}-{digest}"
+    if destination.resolve().is_relative_to(project_root.resolve()):
+        raise ProjectStateError.state_home_inside_project(STATE_HOME_ENV, state_home)
+    return destination
+
+
+def validate_run_id(run_id: str, *, source: Path | None = None) -> str:
+    """Validate a path-safe run identity before project I/O."""
+    if re.fullmatch(_IDENTIFIER_PATTERN, run_id) is None:
+        raise ProjectStateError.invalid_run_id(run_id, source)
+    return run_id
+
+
+def project_root_for_log_directory(
+    directory: Path | str, *, recorded_root: Path | str | None = None
+) -> Path | None:
+    """Validate both retained local and current externally keyed run layouts."""
+    path = Path(directory).resolve()
+    if (
+        not path.is_dir()
+        or len(path.parents)
+        < len((*project_paths.STATE_DIRECTORY_PATH.parts, "local", "runs", "run", "logs"))
+        or path.name != "logs"
+    ):
+        return None
+    try:
+        run_id = validate_run_id(path.parent.name)
+    except ProjectStateError:
+        return None
+    local_tail = project_paths.STATE_DIRECTORY_PATH / "local" / "runs" / run_id / "logs"
+    if path == path.parents[5] / local_tail:
+        return path.parents[5]
+    if recorded_root is None or not Path(recorded_root).is_absolute():
+        return None
+    root = Path(recorded_root).resolve()
+    if not root.is_dir() or path.parents[3].name != "projects" or path.is_relative_to(root):
+        return None
+    expected = external_project_state_directory(path.parents[4], root) / "runs" / run_id / "logs"
+    return root if path == expected else None

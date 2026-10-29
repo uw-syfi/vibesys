@@ -12,5 +12,9 @@
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"],
-  "references": [{"path": "../../libs/ui/tsconfig.lib.json"}]
+  "references": [
+    {"path": "../../libs/ui/tsconfig.lib.json"},
+    {"path": "../../features/new-run/tsconfig.renderer.json"},
+    {"path": "../../features/new-run/tsconfig.state.json"}
+  ]
 }

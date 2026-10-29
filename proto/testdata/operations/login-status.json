@@ -1,0 +1,52 @@
+[
+  {
+    "name": "account",
+    "protobufHex": "0a076167656e742d6112074167656e742041180120012a0b0a090a076163636f756e74",
+    "valid": true
+  },
+  {
+    "name": "API key variable",
+    "protobufHex": "0a076167656e742d6112074167656e742041180120012a1a12180a076170695f6b6579120d4147454e545f4150495f4b4559",
+    "valid": true
+  },
+  {
+    "name": "missing harness",
+    "protobufHex": "0a076167656e742d6112074167656e7420412003",
+    "valid": true
+  },
+  {
+    "name": "signed out",
+    "protobufHex": "0a076167656e742d6112074167656e74204118012002",
+    "valid": true
+  },
+  {
+    "name": "missing provider",
+    "protobufHex": "12074167656e74204118012001",
+    "valid": false
+  },
+  {
+    "name": "unspecified state",
+    "protobufHex": "0a076167656e742d6112074167656e7420411801",
+    "valid": false
+  },
+  {
+    "name": "unknown state",
+    "protobufHex": "0a076167656e742d6112074167656e742041180120e707",
+    "valid": false
+  },
+  {
+    "name": "missing harness cannot be signed in",
+    "protobufHex": "0a076167656e742d6112074167656e7420412001",
+    "valid": false
+  },
+  {
+    "name": "signed out cannot name credentials",
+    "protobufHex": "0a076167656e742d6112074167656e742041180120022a0b0a090a076163636f756e74",
+    "valid": false
+  },
+  {
+    "name": "API key has one source",
+    "protobufHex": "0a076167656e742d6112074167656e742041180120012a2712250a076170695f6b6579120d4147454e545f4150495f4b45591a0b63726564656e7469616c73",
+    "valid": false
+  }
+]

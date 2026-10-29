@@ -64,6 +64,7 @@ class _RecordingBuildRunner:
     def __init__(self) -> None:
         self.argvs: list[tuple[str, ...]] = []
         self.selected_features: list[str] = []
+        self.built: set[str] = set()
 
     def run(
         self,
@@ -75,15 +76,19 @@ class _RecordingBuildRunner:
     ) -> subprocess.CompletedProcess[str]:
         del cwd, timeout, output
         self.argvs.append(tuple(argv))
+        result_tag = argv[-1].startswith("vibesys-agent-build:")
+        unbuilt = tuple(argv[1:3]) == ("image", "inspect") and result_tag
+        unbuilt = unbuilt and argv[-1] not in self.built
         if argv[1] == "build":
+            self.built.add(argv[list(argv).index("--tag") + 1])
             dockerfile = Path(argv[list(argv).index("--file") + 1]).read_text()
             self.selected_features = [
                 line.split()[1].rsplit("/", 1)[-1]
                 for line in dockerfile.splitlines()
                 if line.startswith("COPY ")
             ]
-        stdout = _IMAGE_ID if argv[1] == "image" else ""
-        return subprocess.CompletedProcess(tuple(argv), 0, stdout, "")
+        stdout = _IMAGE_ID if argv[1] == "image" and not unbuilt else ""
+        return subprocess.CompletedProcess(tuple(argv), 1 if unbuilt else 0, stdout, "")
 
 
 class _DaemonBackend:
@@ -193,6 +198,27 @@ def test_a_docker_in_docker_task_gets_the_runtime_layer_and_a_same_path_workspac
         assert not any("docker.sock" in token for token in run)
         assert backend.creations == [True]
         assert session.view.paths.benchmark_command == f"python {request.workspace}/bench.py"
+    finally:
+        session.close()
+
+
+@pytest.mark.parametrize("docker_in_docker", [False, True])
+def test_the_notes_offer_reproducing_failures_exactly_when_the_editor_has_the_hardware(
+    tmp_path: Path, *, docker_in_docker: bool
+) -> None:
+    # Trusted evaluation runs on the same Docker host. An agent told that its editor
+    # says nothing about the target never reproduces a failing case on hardware it
+    # holds; one told it can, where it cannot, wastes its turn on a missing device.
+    runtimes = ("runc", "sysbox-runc") if docker_in_docker else ("runc",)
+    engine = _engine(tmp_path, runtimes)
+    backend = _DaemonBackend(engine)
+    request = _request(tmp_path, backend, docker_in_docker=docker_in_docker)
+
+    session = open_run_environment(_environment(engine, _RecordingBuildRunner()), request)
+    try:
+        offers = "reproduce the failing case" in session.view.prompt_notes
+        assert backend.accelerator_requests == [not docker_in_docker]
+        assert offers == backend.accelerator_requests[0]
     finally:
         session.close()
 

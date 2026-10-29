@@ -199,12 +199,28 @@ func (g *graph) add(c component) error {
 			return err
 		}
 	}
+	if err := unique(c.LocalIgnoreRoots, c.ID+".local_ignore_roots"); err != nil {
+		return err
+	}
+	for _, root := range c.LocalIgnoreRoots {
+		if !validPath(root) {
+			return fmt.Errorf("%s has unsafe local_ignore_roots entry %q", c.ID, root)
+		}
+		if !contains(c.Roots, root) {
+			return fmt.Errorf("%s local_ignore_roots entry %q is not one of its roots", c.ID, root)
+		}
+	}
 	if c.Job != "" {
 		c.Jobs = append(c.Jobs, c.Job)
 	}
 	for _, job := range c.Jobs {
 		if !contains(g.Jobs, job) {
 			return fmt.Errorf("%s has unknown job %q", c.ID, job)
+		}
+	}
+	for _, job := range c.LocalJobs {
+		if !contains(g.Jobs, job) {
+			return fmt.Errorf("%s has unknown local job %q", c.ID, job)
 		}
 	}
 	g.Components[c.ID] = c

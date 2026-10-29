@@ -47,10 +47,7 @@ const HAND_ROLLED = {
   'globalThis.setTimeout': 'export const later = () => globalThis.setTimeout(() => 0, 1);\n',
 };
 
-for (const directory of [
-  'features/run-control/src/state',
-  'features/start-run/src/renderer/effects',
-]) {
+for (const directory of ['features/run-page/src/state', 'features/run-page/src/renderer/effects']) {
   for (const [name, source] of Object.entries(HAND_ROLLED)) {
     test(`${directory} forbids ${name}`, async t => {
       assert.equal((await lintFixture(t, directory, source)).length, 1);
@@ -61,7 +58,7 @@ for (const directory of [
 test("a feature's state tests may use timers", async t => {
   const source = HAND_ROLLED['a setTimeout call'];
   assert.deepEqual(
-    await lintFixture(t, 'features/run-control/src/state', source, 'sample.test.ts'),
+    await lintFixture(t, 'features/run-page/src/state', source, 'sample.test.ts'),
     [],
   );
 });
@@ -81,11 +78,7 @@ const KERNEL = {
     "import {createStore} from '@vibesys/store';\nexport const make = createStore;\n",
 };
 
-for (const directory of [
-  'features/run-control/src/state',
-  'features/run-control/src/renderer/effects',
-  'libs/run-session/src',
-]) {
+for (const directory of ['features/run-control/src/main', 'libs/run-session/src']) {
   for (const [name, source] of Object.entries(KERNEL)) {
     test(`${directory} forbids ${name}`, async t => {
       assert.equal((await lintFixture(t, directory, source)).length, 1);
@@ -102,7 +95,7 @@ test("a control-state package's fold module may run its fold on the reducer kern
 
 test('a feature still on the reducer kernel is not held to the control-state rule', async t => {
   assert.deepEqual(
-    await lintFixture(t, 'features/start-run/src/renderer/effects', KERNEL['a createStore call']),
+    await lintFixture(t, 'features/app-shell/src/renderer/effects', KERNEL['a createStore call']),
     [],
   );
 });

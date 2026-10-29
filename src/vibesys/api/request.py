@@ -8,9 +8,10 @@ Catalog validation here requires an explicit registry.
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.composition import resolve_agent_specs
+from vibesys.composition import require_one_login_per_container, resolve_agent_specs
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.inputs import (
     InputBundle,
@@ -30,27 +31,46 @@ from vibesys.repository import (
     validate_experiment_name,
 )
 from vibesys.run.contracts import ProfilerKind, RunRequest
-from vibesys.run.core_run import ensure_not_legacy_resume
+from vibesys.run.core_run import ensure_resumable
 from vibesys.run.experiment_repo import origin_matches
 from vibesys.run.profilers import validate_run_request as validate_execution_request
 from vibesys.run.skill_sources import resolve_skill_source_dirs
-from vs_agent.api.images import build_task_image
+from vs_agent.api.images import (
+    DockerBuildRunner,
+    build_task_image,
+    is_task_image_reference,
+    local_image_id,
+    task_image_inputs,
+    task_image_reference,
+)
 from vs_project.api import GitRemoteRepository
 from vs_runtime.api.infrastructure import (
+    EditorImagePlan,
     RunEnvironmentSpec,
+    TaskImageError,
+    TaskImageFacts,
     build_run_environment,
+    derived_environment_name,
+    editor_image_plan,
     make_run_environment_spec,
     migrate_recorded_run_environment,
     resolve_run_environment_spec,
     run_environment_record,
 )
-from vs_sandbox.api import accelerator_unavailable
+from vs_sandbox.api import (
+    accelerator_unavailable,
+    backend_default_image,
+    backend_provided,
+    sysbox_unavailable,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.plugin_catalog import OrchestrationRegistry
     from vs_project.api import Git, OrchestrationDescriptor
+    from vs_runtime.api.infrastructure import RunEnvironment
+    from vs_sandbox.api import ComputeBackend
     from vs_sim.api import CommandProbe
 
 
@@ -60,6 +80,22 @@ def default_skill_roots() -> tuple[Path, ...]:
     return () if skills is None else (skills,)
 
 
+def checkout_identity(root: Path, git: Git) -> tuple[str, bool]:
+    """Identify the host checkout's committed tree and any local modifications.
+
+    Unlike the host inventory's commit id, the epoch names the tree. Failed
+    probes refuse launch rather than recording invented provenance.
+    """
+    tree = git.run_text(("rev-parse", "HEAD^{tree}"), cwd=root, timeout=2)
+    status = git.run_text(
+        ("status", "--porcelain", "--untracked-files=normal"), cwd=root, timeout=2
+    )
+    if tree.returncode or status.returncode or not tree.stdout.strip():
+        message = "cannot identify the host checkout tree and dirty state"
+        raise RuntimeError(message)
+    return tree.stdout.strip(), bool(status.stdout.strip())
+
+
 def load_objective(bundle: InputBundle) -> str:
     """Return one input bundle's objective text."""
     return bundle.objective
@@ -67,28 +103,42 @@ def load_objective(bundle: InputBundle) -> str:
 
 __all__ = [
     "REPOSITORY_SLUG",
+    "DockerBuildRunner",
+    "EditorImagePlan",
+    "HostShortfall",
     "InputBundle",
     "InputSynthesisError",
     "RunEnvironmentSpec",
     "SynthesizedInputSpec",
+    "TaskImageError",
+    "TaskImageFacts",
+    "backend_default_image",
     "build_task_image",
+    "checkout_identity",
     "default_skill_roots",
+    "derived_environment_name",
+    "editor_image_plan",
+    "ensure_resumable",
     "experiment_origin_matches",
     "generate_experiment_name",
+    "is_task_image_reference",
     "load_objective",
     "load_objectives",
     "load_project_task",
     "load_task",
+    "local_image_id",
     "make_run_environment_spec",
     "migrate_recorded_run_environment",
     "repository_name_from_experiment",
     "resolve_run_environment_spec",
     "resolve_skill_source_dirs",
-    "run_accelerator_unavailable",
     "run_environment_record",
     "run_environment_uses_docker",
+    "run_host_shortfall",
     "supported_profilers",
     "synthesize_input_bundle",
+    "task_image_inputs",
+    "task_image_reference",
     "validate_descriptor",
     "validate_experiment_name",
     "validate_run_request",
@@ -103,22 +153,27 @@ def validate_descriptor(
     registry.resolve(descriptor.id).parse_options(descriptor)
 
 
-def validate_run_request(request: RunRequest, *, registry: OrchestrationRegistry, git: Git) -> None:
+def validate_run_request(
+    request: RunRequest, *, registry: OrchestrationRegistry, git: Git, read_only: bool = False
+) -> None:
     """Reject invalid execution settings and policy role keys before host probes."""
     registration = registry.resolve(request.orchestration.id)
     options = registration.parse_options(request.orchestration)
     validate_execution_request(
         request, git=git, attribution_command=attribution_command_of(options)
     )
-    resolve_agent_specs(
+    specs = resolve_agent_specs(
         request.config,
         registration.plugin.agents,
         backend=request.agent_backend,
         provider=request.cli_provider,
         allow_unvetted_model=request.allow_unvetted_model,
     )
-    if request.resume is not None and registration.plugin.core is not None:
-        ensure_not_legacy_resume(request.project_root, request.resume.run_id)
+    require_one_login_per_container(
+        specs, containerized=run_environment_uses_docker(request.run_environment)
+    )
+    if not read_only and request.resume is not None and registration.plugin.core is not None:
+        ensure_resumable(request.project_root, request.resume.run_id)
 
 
 def run_environment_uses_docker(spec: RunEnvironmentSpec | None) -> bool:
@@ -131,25 +186,53 @@ def run_environment_uses_docker(spec: RunEnvironmentSpec | None) -> bool:
     return build_run_environment(spec or make_run_environment_spec()).uses_docker
 
 
-def run_accelerator_unavailable(request: RunRequest, probe: CommandProbe) -> str | None:
-    """Why this host cannot give `request`'s run the accelerator it needs, or `None`.
+@dataclass(frozen=True)
+class HostShortfall:
+    """What this host lacks for a run, before its image build."""
 
-    A run whose environment hands its agent the compute backend's accelerator here checks
-    that accelerator before its image build and stops when it is missing; this asks the
-    same question through `probe`, so a run that passes it does not stop on it at launch.
+    reason: str
+    """One line saying what is missing, with no advice about flags or settings."""
+    backend: ComputeBackend | None
+    """The run's compute backend when that is what the host lacks, else ``None``."""
+
+
+def run_host_shortfall(request: RunRequest, probe: CommandProbe) -> HostShortfall | None:
+    """What this host cannot give `request`'s run before its image build, or `None`.
+
+    A run stops before its image build when its environment would hand the agent the
+    compute backend's accelerator and this host lacks it, or when its task needs
+    docker-in-docker and this host's Docker daemon registers no Sysbox. This asks both
+    questions through `probe`, with the run's own decisions, so a run that passes it does
+    not stop on either at launch. A backend the host lacks is reported with the backend,
+    so a caller can say which one; the reason names what is missing, never a flag.
     """
+    environment = _run_environment_of(request)
+    docker_in_docker = request.input_bundle.docker_in_docker
+    backend = request.backend
+    if environment.attaches_backend_accelerator(
+        docker_in_docker=docker_in_docker
+    ) and not backend_provided(backend, probe):
+        reason = accelerator_unavailable(backend, probe)
+        return HostShortfall(
+            reason=reason or f"the '{backend}' backend needs hardware this host does not report",
+            backend=backend,
+        )
+    if environment.requires_sysbox_runtime(docker_in_docker=docker_in_docker):
+        reason = sysbox_unavailable(probe)
+        return None if reason is None else HostShortfall(reason=reason, backend=None)
+    return None
+
+
+def _run_environment_of(request: RunRequest) -> RunEnvironment:
+    """The environment `request`'s run resolves to, as the run resolves it."""
     spec = resolve_run_environment_spec(
         request.run_environment or make_run_environment_spec(),
         request.backend,
+        task_dockerfile=request.input_bundle.dockerfile_path,
         platform=sys.platform,
         log=lambda _line: None,
     )
-    environment = build_run_environment(spec)
-    if not environment.attaches_backend_accelerator(
-        docker_in_docker=request.input_bundle.docker_in_docker
-    ):
-        return None
-    return accelerator_unavailable(request.backend, probe)
+    return build_run_environment(spec)
 
 
 def supported_profilers(spec: RunEnvironmentSpec) -> frozenset[ProfilerKind] | None:

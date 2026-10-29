@@ -8,6 +8,7 @@ import {
   tokensCssDrift,
 } from './css.js';
 import {
+  CHIP_FILL_MIX,
   COLOR_ROLES,
   CONTRAST_PAIRS,
   contrastRatio,
@@ -95,6 +96,18 @@ describe('contrast floors', () => {
             ];
       }),
     );
+    expect(failures).toEqual([]);
+  });
+
+  test('a chip reads on its own fill, not only on the panel, in every theme', () => {
+    const {share, into} = CHIP_FILL_MIX;
+    const failures = THEME_NAMES.flatMap(name => {
+      const {colors} = THEMES[name];
+      return (['accent', 'ok', 'warn', 'err'] as const).flatMap(tone => {
+        const ratio = contrastRatio(colors[tone], mixHex(colors[tone], share, colors[into]));
+        return ratio >= TEXT_FLOOR ? [] : [`${name}: ${tone} chip text is ${ratio.toFixed(2)}:1`];
+      });
+    });
     expect(failures).toEqual([]);
   });
 

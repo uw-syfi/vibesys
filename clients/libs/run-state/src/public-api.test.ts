@@ -11,6 +11,9 @@ import * as transcript from './transcript/index.js';
 describe('published run-state surface', () => {
   it('exports only the fold, its read helpers, and each projection from its own entry', () => {
     expect(Object.keys(fold).sort()).toEqual([
+      'EMPTY_LEDGER',
+      'NO_TOKENS',
+      'addTokens',
       'executionStatusFor',
       'foldEventBatch',
       'foldEventRebootstrap',
@@ -32,6 +35,7 @@ describe('published run-state surface', () => {
       'reduceResponseEvents',
       'reduceSnapshot',
       'rehydrateCoreState',
+      'totalTokens',
     ]);
     expect(Object.keys(rounds).sort()).toEqual([
       'activeRunFocus',
@@ -55,7 +59,14 @@ describe('published run-state surface', () => {
       'projectPerformance',
       'recordsBenchmark',
     ]);
-    expect(Object.keys(transcript).sort()).toEqual(['DEFAULT_CHAT_THREAD_ID']);
+    expect(Object.keys(transcript).sort()).toEqual([
+      'DEFAULT_CHAT_THREAD_ID',
+      'appendNativeTranscript',
+      'emptyNativeTranscript',
+      'nativeTranscriptEntries',
+      'nativeTranscriptHashes',
+      'transcriptBySpan',
+    ]);
   });
 
   it('rejects writes throughout a development projection without corrupting another snapshot', () => {

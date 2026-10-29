@@ -342,4 +342,4 @@ Skip it and the first request pays JIT compile + autotune latency (seconds), CUD
 - [`algorithms/batched-sampling/`](../algorithms/batched-sampling.md) — another sync source to eliminate on the critical path
 - [`algorithms/parallelism/`](../algorithms/parallelism.md) — distributed setup
 - [`tooling/profiler/`](../tooling/profiler.md) — the only way to verify your overlap actually overlapped
-- [`platforms/`](../platforms/) — the selected backend's framework notes (MLX on `metal`, torch-neuronx / NxD on `trainium`)
+- [`platforms/`](../platforms/) — the selected backend's framework notes (MLX on `metal`, native TorchNeuron on `trainium`)

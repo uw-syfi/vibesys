@@ -1,17 +1,17 @@
 /**
  * The window's title-bar chrome, as pure data.
  *
- * The web UI draws its own top strip (`--page-background`, `--desktop-titlebar-height` in
- * `clients/apps/web/src/styles.css`), so the native title bar is hidden and only the window controls
- * remain, floating over that strip. The web UI has a single dark theme, so the colors do not vary
- * with the operating system's appearance; keep them equal to the web tokens.
+ * The desktop shell draws its own top strip, so the native title bar is hidden and only the window
+ * controls remain, floating over that strip.
  */
 
-/** `--page-background` in `clients/apps/web/src/styles.css`. */
-const PAGE_BACKGROUND = '#0c1018';
-/** The web UI's `color` on `:root`; used for the Windows/Linux control glyphs. */
-const PAGE_FOREGROUND = '#e9edf5';
-/** `--desktop-titlebar-height` in `clients/apps/web/src/styles.css`. */
+import {DEFAULT_THEMES, THEMES} from '@vibesys/ui/tokens';
+
+/** Match the shell's default dark theme while its document loads. */
+const PAGE_BACKGROUND = THEMES[DEFAULT_THEMES.dark].colors.bg;
+/** Foreground for the Windows/Linux control glyphs. */
+const PAGE_FOREGROUND = THEMES[DEFAULT_THEMES.dark].colors.text;
+/** Height of the shell's title bar. */
 export const TITLEBAR_HEIGHT = 40;
 
 /** macOS traffic lights are three 12px discs 8px apart; this centers them vertically in the strip. */

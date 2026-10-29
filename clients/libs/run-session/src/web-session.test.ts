@@ -79,14 +79,15 @@ class PendingHandleConnection implements RunConnection {
     return 'current';
   }
   redialControls(): void {}
+  createChatThread(): Promise<never> {
+    return Promise.reject(new Error('unused'));
+  }
+
   ask(): Promise<never> {
     return Promise.reject(new Error('Chat is not used in this lifecycle scenario'));
   }
   command(): Promise<RunCommandOutcome> {
     return Promise.resolve({kind: 'rejected', message: null});
-  }
-  tuiDefaults(): Promise<null> {
-    return Promise.resolve(null);
   }
   close(): Promise<void> {
     return Promise.resolve();
@@ -138,14 +139,15 @@ class FaultBeforeSnapshotConnection implements RunConnection {
     return 'transitioning';
   }
   redialControls(): void {}
+  createChatThread(): Promise<never> {
+    return Promise.reject(new Error('unused'));
+  }
+
   ask(): Promise<never> {
     return Promise.reject(new Error('Chat is not used in this lifecycle scenario'));
   }
   command(): Promise<RunCommandOutcome> {
     return Promise.resolve({kind: 'rejected', message: null});
-  }
-  tuiDefaults(): Promise<null> {
-    return Promise.resolve(null);
   }
   close(): Promise<void> {
     return Promise.resolve();
@@ -216,14 +218,15 @@ class FailingRecoveryConnection implements RunConnection {
     const failure = this.redialFailures.shift();
     if (failure !== undefined) throw failure;
   }
+  createChatThread(): Promise<never> {
+    return Promise.reject(new Error('unused'));
+  }
+
   ask(): Promise<never> {
     return Promise.reject(new Error('Chat is not used in this lifecycle scenario'));
   }
   command(): Promise<RunCommandOutcome> {
     return Promise.resolve({kind: 'rejected', message: null});
-  }
-  tuiDefaults(): Promise<null> {
-    return Promise.resolve(null);
   }
   close(): Promise<void> {
     this.closeCalls += 1;
@@ -510,6 +513,29 @@ describe('WebSession', () => {
     await expect(session.command({type: 'command.stop'})).resolves.toEqual({
       kind: 'rejected',
       message: 'run is read only',
+      code: null,
+    });
+    await session.close();
+  });
+
+  test('a refused command carries the server typed reason', async () => {
+    const {session, transport} = sessionWith(new FakeLifecycle());
+    transport.snapshots.push({
+      request_id: 'request-stop',
+      timestamp: '2026-01-01T00:00:00Z',
+      ok: false,
+      error: 'This finished run is read-only',
+      diagnostic: {
+        code: 'run_read_only',
+        summary: 'This finished run is read-only',
+        scope: 'request',
+      },
+    });
+
+    await expect(session.command({type: 'command.stop'})).resolves.toEqual({
+      kind: 'rejected',
+      message: 'This finished run is read-only',
+      code: 'run_read_only',
     });
     await session.close();
   });
@@ -909,15 +935,6 @@ describe('WebSession', () => {
       1,
     );
     expect(session.getState()).toEqual(healthy());
-    await session.close();
-  });
-
-  test('reads presentation defaults through the same session-owned control connection', async () => {
-    const {session, transport} = sessionWith(new FakeLifecycle());
-
-    await session.tuiDefaults();
-
-    expect(transport.requests).toEqual([{type: 'query.tui_defaults'}]);
     await session.close();
   });
 

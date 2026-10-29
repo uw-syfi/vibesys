@@ -9,6 +9,10 @@ export const PROTOCOL_VERSION = 1;
 export type ProtocolRequest = ProtocolDocument['request'];
 export type ProtocolResponse = ProtocolDocument['response'];
 export type RunEvent = ProtocolDocument['event'];
+/** Structured reply retained by an agent turn, using the producer's declared schema. */
+export type AgentReply = NonNullable<
+  Extract<NonNullable<RunEvent['data']>, {kind: 'agent_execution_finished'}>['reply']
+>;
 /** Structured status carried by streamed agent output and tool calls. */
 export type AgentStatusData = NonNullable<
   Extract<NonNullable<RunEvent['data']>, {channel: unknown}>['status']
@@ -45,10 +49,6 @@ export type HypothesisRound = NonNullable<HypothesisEntry['rounds']>[number];
 export type DesignRound = NonNullable<ProtocolResponse['design']>[number];
 export type DesignFileChange = NonNullable<DesignRound['files']>[number];
 export type DesignPatch = NonNullable<ProtocolResponse['design_patch']>;
-export type ChatOptions = NonNullable<ProtocolResponse['chat_options']>;
-export type ChatProviderOptions = NonNullable<ChatOptions['providers']>[number];
-export type ChatModelOption = NonNullable<ChatProviderOptions['models']>[number];
-export type TuiDefaults = NonNullable<ProtocolResponse['tui_defaults']>;
 export type IterationResult = NonNullable<ProtocolResponse['iterations']>;
 export type IterationPage = Extract<IterationResult, {kind?: 'page'}>;
 export type IterationUnavailable = Extract<IterationResult, {kind?: 'unavailable'}>;

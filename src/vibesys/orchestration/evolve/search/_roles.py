@@ -33,6 +33,7 @@ EXCHANGES = Exchanges(
 
 MUTATOR = Role(
     name="mutator",
+    title="Mutator",
     prompt="mutate.j2",
     reply=MutatorResponse,
     workspace=WorkspaceMode.ISOLATED_CHILD,
@@ -49,6 +50,7 @@ MUTATOR = Role(
 
 JUDGE = Role(
     name="judge",
+    title="Judge",
     prompt="judge.j2",
     reply=JudgeResponse,
     workspace=WorkspaceMode.READ_ONLY_REVISION,
@@ -65,6 +67,7 @@ JUDGE = Role(
 
 PROFILER = Role(
     name="profiler",
+    title="Profiler",
     prompt="profiler.j2",
     reply=ProfilerSummary,
     workspace=WorkspaceMode.READ_ONLY_REVISION,

@@ -26,7 +26,6 @@ __all__ = [
     "NewHypothesis",
     "NextRoundDecision",
     "PlanningContext",
-    "RollbackTarget",
     "StartedHypothesis",
 ]
 
@@ -39,14 +38,12 @@ class PlanningContext:
     records: tuple[RoundRecord, ...]
     carry: CarryOver
     plateau_warning: str | None
-    provisional_candidates: int
 
 
 @dataclass(frozen=True, slots=True)
 class NewHypothesis:
     """No hypothesis is active: the strategy must plan a new one."""
 
-    default_parent_round: int | None
     context: PlanningContext
 
 
@@ -85,29 +82,11 @@ class AttemptBudget:
 
 
 @dataclass(frozen=True, slots=True)
-class RollbackTarget:
-    """The workspace commit a requested ``revert_to_round`` resolves to.
-
-    ``commit`` is the tree orchestration should actually check out: usually
-    the named round's own commit, but a later failed child hypothesis of that
-    round is rolled back to its own pre-hypothesis parent instead, so a
-    validated independent repair on top of it is not erased along with the
-    failed implementation. ``resolved`` is ``False`` when the named round has
-    no recorded commit to roll back to at all.
-    """
-
-    commit: str | None
-    failed_child_round: int | None
-    resolved: bool
-
-
-@dataclass(frozen=True, slots=True)
 class StartedHypothesis:
-    """A freshly started hypothesis and its resolved rollback target."""
+    """A freshly started hypothesis and the state it started in."""
 
     state: HypothesisState
     hypothesis: Hypothesis
-    rollback: RollbackTarget | None
 
 
 @dataclass(frozen=True, slots=True)

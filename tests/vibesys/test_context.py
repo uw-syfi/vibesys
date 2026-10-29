@@ -170,7 +170,6 @@ def _options(max_rounds: int = 1) -> AgentOrchestrationOptions:
         max_rounds=max_rounds,
         max_retries_per_round=1,
         judge_every=1,
-        official_eval_every=1,
     )
 
 
@@ -218,17 +217,20 @@ def _create_context(
     plugin = registration.plugin
     agent_roles = options.get("agent_roles", plugin.agents)
     ownership = ReleaseStack()
+    integration = options.get("integration")
+    if integration is None:
+        integration = LocalRunIntegration(
+            clock=ManualClock(),
+            git=REAL_GIT,
+            github=NO_GITHUB,
+            threads=SimThreads(),
+            system=idle_environment_system(),
+        )
+    ownership.callback(integration.close)
     try:
         prepared = open_run_resources(
             request,
-            options.get("integration")
-            or LocalRunIntegration(
-                clock=ManualClock(),
-                git=REAL_GIT,
-                github=NO_GITHUB,
-                threads=SimThreads(),
-                system=idle_environment_system(),
-            ),
+            integration,
             ownership=ownership,
             agent_specs=resolve_agent_specs(
                 request.config,
@@ -306,7 +308,7 @@ def test_direct_run_uses_one_project_root_and_canonical_state(tmp_path: Path) ->
         policy = environment.request.project_path_policy
         state_paths = project_resources.project.state.sandbox_paths()
         assert state_paths.read_only_path in policy.read_only_paths
-        assert state_paths.hidden_path in policy.hidden_paths
+        assert set(state_paths.hidden_paths) <= set(policy.hidden_paths)
         assert project_resources.project.state.candidate_worktrees_directory(run_id).is_dir()
 
     manifest = Project.open(project).state.load_run(run_id)
@@ -561,7 +563,7 @@ def test_context_assembly_logs_stage_timings(tmp_path: Path) -> None:
     """Every assembly span up to and past the experiments gate reaches the run log.
 
     This is a regression guard for the diagnostic used to find where
-    ``open_run_resources`` spends time before the TUI's hypothesis screen
+    ``open_run_resources`` spends time before the client's hypothesis screen
     can leave "loading experiments..." (the gate flips when the second
     ``LocalRunIntegration.attach`` records ``EXPERIMENTS_CHANGED``).
     """
@@ -594,7 +596,7 @@ def test_dispatch_preamble_spans_reach_run_log(tmp_path: Path) -> None:
 
     ``_dispatch`` and ``_run_agent`` (main.py) do substantial work before a
     ``RunLogger`` exists and record ``boot_trace`` spans as they go.
-    ``_assemble_run_resources`` must drain that buffer at entry, so the
+    ``open_run_resources`` must drain that buffer at entry, so the
     preamble's spans reach the persistent run log ahead of assembly's own.
     """
     project = tmp_path / "queue"

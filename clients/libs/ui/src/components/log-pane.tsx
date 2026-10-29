@@ -1,5 +1,7 @@
-import {type JSX, type UIEvent, useRef, useState} from 'react';
-import {Button} from './button.js';
+import type {JSX} from 'react';
+import {TYPE} from '../tokens/index.js';
+import {NewBelow} from './new-below.js';
+import {useWindowed} from './windowing.js';
 
 /** One line of output; `err` lines (standard error) are drawn in `err`. */
 export interface LogLine {
@@ -7,69 +9,61 @@ export interface LogLine {
   readonly stream?: 'out' | 'err';
 }
 
-/** Whether the pane shows its last line, allowing for a subpixel scroll offset. */
-function atBottom(element: HTMLElement): boolean {
-  return element.scrollHeight - element.scrollTop - element.clientHeight < 2;
-}
-
 /**
- * Monospace output on the log background in every theme. While scrolled to the bottom it follows
- * the tail as lines arrive; scrolling up stops following and offers "Jump to latest". Lines are
- * text, never HTML.
- *
- * The ref callback is a new function on every render, so React calls it after every commit: the
- * pane scrolls to the new tail without an effect hook.
+ * Monospace output on the log background in every theme. Only the lines near the visible part are
+ * drawn, between spacers as tall as the rest, so a log of any length costs a screenful of lines;
+ * a line's height is one code line until it has been drawn (a wrapped line is measured). While
+ * scrolled to the bottom it follows the tail as lines arrive; scrolling up stops following and
+ * shows a "New below" pill that jumps to the tail. Lines are text, never HTML.
  */
 export function LogPane(props: {
   readonly label: string;
   readonly lines: readonly LogLine[];
-  readonly size?: 'sm' | 'md';
+  /** `fill` takes the height of its container (a pane body); the others have fixed heights. */
+  readonly size?: 'sm' | 'md' | 'fill';
+  /**
+   * Where it opens: `tail` (the default) follows the end as lines arrive; `top` opens at the first
+   * line and does not follow, for a log that is finished.
+   */
+  readonly start?: 'tail' | 'top';
 }): JSX.Element {
-  const following = useRef(true);
-  const pane = useRef<HTMLPreElement | null>(null);
-  const [behind, setBehind] = useState(false);
-  const follow = (element: HTMLPreElement | null): void => {
-    pane.current = element;
-    if (element !== null && following.current) element.scrollTop = element.scrollHeight;
-  };
-  const scrolled = (event: UIEvent<HTMLPreElement>): void => {
-    following.current = atBottom(event.currentTarget);
-    if (behind === following.current) setBehind(!following.current);
-  };
-  const jump = (): void => {
-    following.current = true;
-    setBehind(false);
-    if (pane.current !== null) pane.current.scrollTop = pane.current.scrollHeight;
-  };
+  const {lines} = props;
+  const win = useWindowed({
+    count: lines.length,
+    // Lines only append, so a line's index is its identity.
+    keyOf: index => String(index),
+    estimate: TYPE.code.line,
+    follow: props.start !== 'top',
+  });
   return (
-    <div className="vs-log">
+    <div className="vs-log" data-size={props.size ?? 'md'}>
       <pre
-        ref={follow}
+        ref={win.scroller}
         className="vs-log-pane"
         data-size={props.size ?? 'md'}
         role="log"
         aria-label={props.label}
         // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling box must take the focus so a keyboard can scroll it (WCAG 2.1.1, axe scrollable-region-focusable); no interactive element scrolls text.
         tabIndex={0}
-        onScroll={scrolled}
+        onScroll={win.scrolled}
       >
-        {props.lines.map((line, index) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: lines only append, so a line's index is its identity.
-          <span key={index} className="vs-log-line" data-stream={line.stream ?? 'out'}>
+        <span className="vs-log-gap" style={{height: win.before}} />
+        {lines.slice(win.first, win.last).map((line, offset) => (
+          <span
+            // biome-ignore lint/suspicious/noArrayIndexKey: lines only append, so a line's index is its identity.
+            key={win.first + offset}
+            ref={win.slotOf(win.first + offset).measure}
+            className="vs-log-line"
+            data-stream={line.stream ?? 'out'}
+          >
             {line.text}
-            {'\n'}
           </span>
         ))}
+        <span className="vs-log-gap" style={{height: win.after}} />
       </pre>
-      {behind ? (
+      {win.behind ? (
         <span className="vs-log-jump">
-          <Button
-            size="sm"
-            variant="primary"
-            icon="chevron-down"
-            text="Jump to latest"
-            press={jump}
-          />
+          <NewBelow text="New below" press={win.jump} />
         </span>
       ) : null}
     </div>

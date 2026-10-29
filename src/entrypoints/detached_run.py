@@ -53,6 +53,8 @@ from server.host_api import (
     one_line,
 )
 from server.registry import (
+    INSTANCES_DIRECTORY,
+    READERS_DIRECTORY,
     FileInstanceMetadataStore,
     FileInstanceStore,
     InstanceHold,
@@ -70,7 +72,7 @@ from vs_sim.api import OsThreads, SystemClock
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from vibesys.api import Runs
+    from vibesys.api import RunReaders, Runs
     from vs_sim.api import Clock, Threads
 
 SERVER_EXITED = FailureReason(
@@ -105,10 +107,6 @@ _PLAIN_REASONS: dict[RunEndOutcome, str] = {
 """The reason an end record gives when nothing more specific was reported."""
 
 
-_STOPS = frozenset({RunEndOutcome.STOPPED, RunEndOutcome.FORCE_STOPPED})
-"""Outcomes of an operator's stop, which ends a run for good: a resume only finishes the drain."""
-
-
 def pause_cause_after(
     pending: PauseCause | None, before: RunStatus, after: RunStatus
 ) -> PauseCause | None:
@@ -134,10 +132,8 @@ def end_record(
 ) -> EndRecord | None:
     """The tombstone's ``end`` for a run that ended in ``phase``; ``None`` when nothing names it.
 
-    A terminated server's run was force stopped; otherwise core's end reason names the
-    outcome, else the ended phase does. A run with no durable record that ``ending``
-    vouched for is not resumable, nor is a stopped one, however it stopped (Pause is how
-    a run continues later). A completed run that reported no ending has no end.
+    The end preserves the previous epoch's outcome and reason. Every ending can be
+    resumed; the launcher independently validates retained storage and writer exclusion.
     """
     outcome = _outcome(phase, ending, terminated=terminated)
     if outcome is None:
@@ -145,12 +141,13 @@ def end_record(
     reported = ending.summary if ending is not None and ending.outcome is outcome else ""
     failure = "" if phase.reason is None else phase.reason.message
     reason = one_line(reported) or one_line(failure) or _PLAIN_REASONS[outcome]
-    resumable = ending is not None and ending.resumable and outcome not in _STOPS
+    resumable = True
     return EndRecord(
         outcome=outcome,
         reason=reason,
         resumable=resumable,
         resume_from_round=ending.rounds_finished + 1 if ending is not None and resumable else None,
+        uncompared=ending is not None and ending.outcome is outcome and ending.uncompared,
     )
 
 
@@ -210,15 +207,15 @@ class RecordPublisher:
         hold.publish(record)
 
     def resolved(self, *, project_root: Path, task: str) -> None:
-        """Retain the immutable identity after the invocation selected its project and task."""
-        resolved_root = str(project_root.resolve())
+        """Retain the opened project's root. Callers pass ``Project.root``; this stores it."""
+        published = str(project_root)
         with self._lock:
-            self._publish(project_root=resolved_root)
+            self._publish(project_root=published)
             record = self._record
         self._metadata.publish(
             InstanceInspectionMetadata(
                 id=record.id,
-                project_root=resolved_root,
+                project_root=published,
                 run_id=record.run_id,
                 task=task,
                 pid=record.pid,
@@ -332,6 +329,7 @@ def _identity(arguments: list[str]) -> argparse.Namespace:
     parser.add_argument("--instance-id", type=parse_instance_id, required=True)
     parser.add_argument("--run-id", type=_run_id, required=True)
     parser.add_argument("--control-socket", type=Path, required=True)
+    parser.add_argument("--reopen", type=Path, default=None)
     identity, _ = parser.parse_known_args(arguments)
     return identity
 
@@ -386,18 +384,26 @@ def narration_installed() -> Iterator[NarrationHandler]:
         root.setLevel(level)
 
 
-def main(argv: list[str] | None = None, *, runs: Runs | None = None) -> None:
+def main(
+    argv: list[str] | None = None,
+    *,
+    runs: Runs | None = None,
+    run_readers: RunReaders | None = None,
+) -> None:
     """Hold this server's registry id for its lifetime and serve its run."""
     with narration_installed():
-        _serve(argv, runs)
+        _serve(argv, runs, run_readers)
 
 
-def _serve(argv: list[str] | None, runs: Runs | None) -> None:
+def _serve(argv: list[str] | None, runs: Runs | None, run_readers: RunReaders | None) -> None:
     arguments = sys.argv[1:] if argv is None else argv
     identity = _identity(arguments)
     root = instance_root(os.environ, os.getuid())
     clock = SystemClock()
-    with LiveRegistry(FileInstanceStore(root), clock).register(identity.instance_id) as hold:
+    # A read-only server (``--reopen``) is a reader: it registers apart from the runs.
+    directory = INSTANCES_DIRECTORY if identity.reopen is None else READERS_DIRECTORY
+    registry = LiveRegistry(FileInstanceStore(root, directory=directory), clock)
+    with registry.register(identity.instance_id) as hold:
         publisher = RecordPublisher(
             hold,
             _starting_record(identity, root, clock),
@@ -406,7 +412,9 @@ def _serve(argv: list[str] | None, runs: Runs | None) -> None:
             threads=OsThreads(),
         )
         try:
-            import_module("entrypoints.server").main(arguments, observer=publisher, runs=runs)
+            import_module("entrypoints.server").main(
+                arguments, observer=publisher, runs=runs, run_readers=run_readers
+            )
         finally:
             publisher.end()
 

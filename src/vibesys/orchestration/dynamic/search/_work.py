@@ -22,9 +22,9 @@ from vibesys.orchestration.dynamic.search._outcomes import (
     WorkstreamStart,
     ended_by,
 )
+from vibesys.orchestration.dynamic.search._reports import WorkstreamParking
 from vibesys.orchestration.dynamic.search._resume import ResumeStage, WorkstreamResume, mark
 from vibesys.orchestration.dynamic.search._roles import IMPLEMENTER, JUDGE, MERGER, PROFILER
-from vibesys.orchestration.dynamic.search._spans import turn_label
 from vibesys.orchestration.dynamic.search._values import (
     AgentName,
     Failure,
@@ -32,6 +32,7 @@ from vibesys.orchestration.dynamic.search._values import (
     MergeOutcome,
     WorkKind,
 )
+from vibesys.search_spans.api import turn_label
 from vs_core.api.search import Declined, Failed, Flow, RevisionRef, TurnFinished, Workspace
 
 _IMPLEMENTING = (ResumeStage.WORKING, ResumeStage.IMPLEMENTED)
@@ -60,10 +61,13 @@ async def implement_and_measure(
     """
     if at is None or at.at(*_IMPLEMENTING):
         latest = None if work.carried is None else work.carried.candidate.revision
-        sessions = Conversation(
-            implementer=ctx.agents.session(IMPLEMENTER, workspace=ws, revision=latest or w.parent),
-            judge=ctx.agents.session(JUDGE, workspace=ws),
+        implementer = ctx.agents.session(
+            IMPLEMENTER, workspace=ws, revision=latest or w.parent, started_by=w.started_by
         )
+        # the implementer's candidate is what the judge reviews: its work started the judge
+        judge = ctx.agents.session(JUDGE, workspace=ws, started_by=(implementer.agent,))
+        parking = WorkstreamParking(ctx, w.key)
+        sessions = Conversation(implementer=implementer, judge=judge, parking=parking)
         result = await implement_until_measurable(ctx, w, ws, work, sessions, at)
         mark(ctx, w, work, ResumeStage.READY, result=result)
     elif at.result is not None:
@@ -92,7 +96,9 @@ async def profile(
     What the profiler reports is never read; only what the trusted capture measures is.
     """
     if at is None or at.at(*_IMPLEMENTING):
-        profiler = ctx.agents.session(PROFILER, workspace=ws, revision=w.parent)
+        profiler = ctx.agents.session(
+            PROFILER, workspace=ws, revision=w.parent, started_by=w.started_by
+        )
         asked = profile_prompt(w.plan, w.parent)
         if isinstance(failed := await profiler.turn(asked, label=turn_label(profiler)), Failed):
             raise ended_by(failed, AgentName.PROFILER, plan=w.plan)
@@ -111,7 +117,9 @@ async def merge(
     merger committed measures that commit without merging again.
     """
     if at is None or at.at(*_IMPLEMENTING):
-        merger = ctx.agents.session(MERGER, workspace=ws, revision=w.parent)
+        merger = ctx.agents.session(
+            MERGER, workspace=ws, revision=w.parent, started_by=w.started_by
+        )
         asked = merge_prompt(w.plan, w.parent, w.merge)
         match await merger.turn(asked, label=turn_label(merger)):
             case TurnFinished(reply=MergeResult() as reply, checkpoint=checkpoint):

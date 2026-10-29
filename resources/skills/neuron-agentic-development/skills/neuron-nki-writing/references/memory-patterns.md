@@ -6,8 +6,8 @@ This reference covers DMA patterns and tiling strategies for NKI kernels.
 
 | Buffer | Syntax | Max P | Max F | Use Case |
 |--------|--------|-------|-------|----------|
-| SBUF | `buffer=nl.sbuf` | 128 | 32767 | General compute storage |
-| PSUM | `buffer=nl.psum` | 128 | 512 (gen2/3) / 4096 (gen4) | MatMul accumulation |
+| SBUF | `buffer=nl.sbuf` | 128 | per-partition byte capacity (`nl.tile_size.sbuf_fmax`) | General compute storage |
+| PSUM | `buffer=nl.psum` | 128 | 512 (gen2/3); gen4: 4096 fp32 / 8192 bf16 | MatMul accumulation |
 | HBM | `buffer=nl.shared_hbm` | - | - | Input/output tensors |
 
 ## Basic Contiguous DMA
@@ -93,7 +93,7 @@ for p_tile in TiledRange(outer_dim, P_MAX):
     # p_tile.size: number of rows in this tile (may be < P_MAX for last tile)
 
     # Loop over free dimension tiles
-    for f_tile_idx in nl.sequential_range(num_f_tiles):
+    for f_tile_idx in range(num_f_tiles):
         f_start = f_tile_idx * F_TILE_SIZE
         f_end = min(f_start + F_TILE_SIZE, last_dim)
         f_size = f_end - f_start
@@ -114,11 +114,11 @@ For tensors with multiple large dimensions.
 ```python
 # Process 3D tensor: (batch, seq, hidden)
 for b_tile in TiledRange(batch_size, P_MAX):
-    for s_tile_idx in nl.affine_range(num_seq_tiles):
+    for s_tile_idx in range(num_seq_tiles):
         s_start = s_tile_idx * seq_tile_size
         s_end = min(s_start + seq_tile_size, seq_len)
 
-        for h_tile_idx in nl.affine_range(num_hidden_tiles):
+        for h_tile_idx in range(num_hidden_tiles):
             h_start = h_tile_idx * hidden_tile_size
             h_end = min(h_start + hidden_tile_size, hidden_dim)
 
@@ -162,7 +162,9 @@ return y  # Return with original shape
 For matrix multiply results that need further processing.
 
 ```python
-# MatMul accumulates in PSUM
+# Single MatMul result in PSUM (one K tile). For a K-tile accumulation loop,
+# pass accumulate=(k_idx > 0) to nc_matmul so the first tile overwrites (initializes)
+# PSUM and later tiles accumulate — no nisa.memset of the PSUM tile is required.
 psum_result = nl.ndarray((P, F), dtype=nl.float32, buffer=nl.psum)
 nisa.nc_matmul(dst=psum_result, stationary=a_tile, moving=b_tile)
 

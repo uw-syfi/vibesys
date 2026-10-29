@@ -11,5 +11,15 @@ ids as a resume would: do not wait for it. A successful call returns a handle. T
 result, call `validate_evaluation_wait` with every handle you need, then finish the
 turn with only `{"reply":{"kind":"waiting_for_evaluation","handles":["<handle>"]}}`. Do not
 poll: the host resumes this same session once every listed measurement is terminal.
-A waiting turn uses no new attempt.
+A waiting turn uses no new attempt, and a resumed turn may evaluate again and wait again.
+
+The framework also measures the revision your workspace started from (its base) with the
+same gates, and compares your candidate with it. It measures the base when a candidate is
+first compared with it, and again when the base's runs go stale or a comparison is too close
+to call. A finished evaluation's reply carries `comparison`: both values, their ratio, the
+noise, the framework's verdict (`better`, `within_noise`, `worse` or `inconclusive`) and the base commit.
+The resume of a wait states the same. A `comparison` that is absent on a finished
+evaluation means no fresh run of the base has ended yet. A comparison describes the runs
+held when it is given; once a candidate's official measurement is stored, the value stored
+then is the one it is ranked by, and later runs move the comparison, not that value.
 {% endif %}

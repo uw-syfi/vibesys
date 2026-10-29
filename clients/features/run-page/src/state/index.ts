@@ -1,107 +1,187 @@
 /**
- * The Run screen's pure state: its store (`runPageStep`, a reducer with request tokens) and the
- * selectors the screen renders: header, stop and ended banners, startup timeline, logs, the
- * Overview and Work tabs over the folded run at the view (`RunAtView`), and the Map (`mapRows`,
- * `mapDetail`) and the scrubber (`scrubberView`) over the trace at the view (`traceAt`).
+ * The Run screen's pure state: its store (`runPageStep`, a reducer with request tokens), the run
+ * at the view (`createRunReader`), the zoom (`zoomMachine` over a `Route`), and the selectors the
+ * screen renders: header, pause and ended banners, the startup timeline, the run level's
+ * hero, chart, ideas and Now, the logs, and the scrubber (`scrubberView`) over the trace log.
  */
 
+export type {UsageRecord} from '@vibesys/contracts/host-helper';
+export {ideaOfAttempt} from './attempt-ideas.js';
+export {type BaselineColumns, baselineColumns} from './baselines.js';
 export {
-  EMPTY_RUN_FOLD,
+  type GatewayEvent,
+  type GatewayInput,
+  type GatewayLogInput,
+  type GatewayRunContext,
+  type GatewayTranscriptInput,
+  gatewayRunMachine,
+} from './gateway-machine.js';
+export {type HistoryLoadingView, historyLoadingView} from './history-words.js';
+export {type IdeaBase, type IdeaBases, ideaBases} from './idea-bases.js';
+export {effectWords, type IdeaEffect, type IdeaEffects, ideaEffects} from './idea-effects.js';
+export {type IdeaFocusView, ideaFocusView, ideaOutcomeLine, openIdeaId} from './idea-focus.js';
+export {
+  type ImplementerOutcome,
+  type ImplementerOutcomes,
+  implementerOutcomes,
+} from './idea-outcomes.js';
+export {outcomeWords} from './idea-words.js';
+export {
+  type BestLine,
+  bestLine,
+  defaultLayout,
+  type IdeasLayout,
+  type IdeaTree,
+  type IdeaTreeEntry,
+  ideaAncestry,
+  ideaTree,
+} from './ideas-tree.js';
+export {
+  ageWords,
+  chipPressed,
+  type IdeaRow,
+  type IdeasFilter,
+  ideasView,
+  noIdeasWords,
+  pressChip,
+} from './ideas-view.js';
+export type {GateFailure} from './input-gates.js';
+export {
   EMPTY_TRACE_LOG,
-  overviewAt,
+  isTraceEventType,
   type RunData,
-  type RunFold,
-  type RunLink,
   type SessionView,
   type TraceLog,
-  traceAt,
-  traceStep,
 } from './live.js';
+export {type LoadView, loadView, paintedSkeleton} from './load-view.js';
+export {type ModelNames, modelNamesOf, NO_MODEL_NAMES} from './model-names.js';
+export {roleLabel, stepKicker, stepLabel, stepTitle} from './names.js';
 export {
-  type MapDetail,
-  type MapFact,
-  type MapNode,
-  type MapRow,
-  mapDetail,
-  mapForest,
-  mapRows,
-  selectedSpan,
-  spanLogs,
-} from './map-view.js';
-export {type ObjectiveBlock, objectiveBlocks} from './objective-text.js';
-export {
-  type ChartPointView,
-  type ChartView,
-  type CurrentWorkItem,
-  formatValue,
-  type KeyNumber,
-  type ObjectiveView,
-  type OverviewView,
-  overviewView,
-} from './overview-view.js';
+  objectivesOf,
+  type ParetoAxisView,
+  type ParetoPointView,
+  type ParetoView,
+  paretoView,
+} from './pareto-view.js';
+export {predatesTraceWords, roundsBeforeTrace} from './predates-trace.js';
+export {pauseWords, workedWords} from './quota-pauses.js';
+export {type ReaderReply, readerHeld} from './reader.js';
 export {runRecord, sameRecord} from './record.js';
-export {NOTHING_FOLDED, type RunAtView} from './run-at-view.js';
+export {roleSeries} from './role-series.js';
+export {createFactsReader} from './run-facts.js';
 export {
-  commandable,
-  FORCE_STOP_BOUND_MS,
-  HISTORY_PAGE_EVENTS,
+  clockAt,
+  clockStart,
+  type HeroView,
+  heroView,
+  logStreamToFollow,
+  type MetricTileView,
+  type NowItem,
+  nowView,
+  type ResolvedZoom,
+  resolveZoom,
+  stripChartView,
+} from './run-level.js';
+export {createRunReader, type RunModel} from './run-model.js';
+export {
+  type HistoryProgress,
   type HistoryReply,
-  MAP_FILTERS,
-  type MapFilter,
-  type MapState,
-  quotaPause,
-  type ResumeWhen,
-  RUN_TABS,
-  type RunCapability,
-  type RunHistory,
-  type RunLogs,
   type RunPageAction,
   type RunPageRequest,
   type RunPageSeed,
   type RunPageState,
-  type RunPageStep,
-  type RunPhase,
   type RunRecord,
-  type RunTab,
   type RunView,
+  runHasEnded,
+  runNow,
   runPageInitial,
-  runPageInvariants,
   runPageStep,
   runPhase,
-  type StopFlow,
-  type Unavailable,
-  waitingForQuota,
+  runWallNow,
+  type SpanDetailReply,
 } from './run-page.js';
+export {type SummaryReply, summaryFacts, type WireSummary} from './run-summary.js';
+export {scrubberView, viewAtPosition} from './scrub.js';
 export {
-  type ScrubberView,
-  scrubberView,
-  scrubPositions,
-  viewAtPosition,
-} from './scrub.js';
+  projectSkeleton,
+  recordedRunRoot,
+  skeletonPositions,
+  skeletonScreenState,
+} from './skeleton-projection.js';
+export {adoptionTitles} from './span-words.js';
+export {spendOf, tokensByAgent, turnTokens} from './token-usage.js';
 export {
-  type EndedView,
+  type TokensCell,
+  type TokensCells,
+  type TokensReading,
+  type TurnSpend,
+  tokensCells,
+  tokensColumn,
+  tokensLine,
+  tokensReading,
+  tokensTitle,
+} from './token-words.js';
+export {
+  followed,
+  groupedBy,
+  groupedWithin,
+  roleAgents,
+  TOKEN_KINDS,
+  type TokenKind,
+  USAGE_CHARTS,
+  USAGE_CONTROLS_DEFAULT,
+  USAGE_GROUPS,
+  USAGE_METRICS,
+  type UsageChart,
+  type UsageContext,
+  type UsageControls,
+  type UsageGroupBy,
+  type UsageLabel,
+  type UsageMetric,
+  type UsageRowView,
+  type UsageSlice,
+  type UsageTile,
+  type UsageView,
+  unfolded,
+  usageContext,
+  usageView,
+  withKind,
+} from './usage-view.js';
+export {
+  agentWho,
+  type Who,
+  type WhoBySpan,
+  whoBySpan,
+  whoShort,
+  whoWords,
+} from './usage-who.js';
+export {
   endedView,
   followedStreams,
-  type HeaderView,
   headerView,
-  type LogGroup,
-  type LogGroupName,
-  type LogLineView,
-  type LogStreamItem,
-  logGroups,
-  logsNotice,
+  historyLoading,
+  historyProblem,
+  machineBlockWords,
   type Offer,
-  type QuotaBannerView,
-  quotaBannerView,
-  type StageView,
-  type StopBannerView,
-  shownStream,
-  stopBannerView,
+  pauseNowBannerView,
+  runEnding,
+  runGoneWords,
   streamLines,
-  type Tone,
+  type TraceArrival,
   timelineView,
-  type ViewedRun,
+  traceArrival,
+  transcriptLoading,
+  unplacedRun,
+  usageRecords,
   viewedRun,
 } from './views.js';
-export {WORK_FILTER_ALL, WORK_OUTCOMES, type WorkFilter, type WorkOutcome} from './work-filter.js';
-export {type RowOutcome, rowMatches, type WorkRow, type WorkView, workView} from './work-view.js';
+export {
+  type Route,
+  RUN_ROUTE,
+  type RunMode,
+  routeFromQuery,
+  routeLevel,
+  routeQuery,
+  type ZoomEvent,
+  zoomMachine,
+} from './zoom.js';

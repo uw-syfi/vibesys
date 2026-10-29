@@ -41,6 +41,8 @@
     "@vibesys/hosts": "workspace:*",
     "@vibesys/logs": "workspace:*",
     "@vibesys/runs": "workspace:*",
-    "@vibesys/ui": "workspace:*"
+    "@vibesys/ui": "workspace:*",
+    "@vibesys/proto": "workspace:*",
+    "@bufbuild/protobuf": "2.16.0"
   }
 }

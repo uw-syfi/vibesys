@@ -9,8 +9,11 @@ export {connectRun, type RunConnectionOptions} from './connect.js';
 export type {WebSessionState, WebSessionStatus} from './connection.js';
 export type {
   BrowserLifecycle,
+  ChatHarness,
   ChatResponse,
   ChatResult,
+  ChatThreadResponse,
+  ChatThreadResult,
   IterationLoad,
   PageVisibility,
   RunCommand,

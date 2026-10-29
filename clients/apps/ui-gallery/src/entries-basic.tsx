@@ -1,10 +1,15 @@
+import {VIBESYS_WORDMARK} from '@vibesys/feature-new-run/renderer';
 import {
+  ActionPanel,
   Banner,
+  BRAND_MARK_NAMES,
+  BrandMark,
   Button,
   type ButtonVariant,
   Card,
   Checkbox,
   Chip,
+  ChoiceTiles,
   type Completion,
   Field,
   Grid,
@@ -12,8 +17,10 @@ import {
   Icon,
   PathInput,
   Row,
+  SectionLayout,
   SegmentedControl,
   Select,
+  Slider,
   Split,
   Stack,
   StatusDot,
@@ -27,11 +34,11 @@ import {
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import type {ComponentName, GalleryEntry} from './gallery-entry.js';
-import {WORDMARK} from './wordmark.js';
 
 const STYLES: readonly TextStyle[] = [
   'title',
   'heading',
+  'item',
   'body',
   'body-strong',
   'small',
@@ -71,6 +78,56 @@ function Segments(props: {readonly size: 'sm' | 'md'}): JSX.Element {
         {value: 'folder', label: 'Folder'},
         {value: 'example', label: 'Example'},
       ]}
+    />
+  );
+}
+
+function Tiles(): JSX.Element {
+  const [value, setValue] = useState<'claude' | 'codex' | 'other'>('claude');
+  return (
+    <ChoiceTiles
+      label="Agent"
+      value={value}
+      change={setValue}
+      options={[
+        {value: 'claude', label: 'Claude Code', leading: <BrandMark mark="claudecode" />},
+        {value: 'codex', label: 'Codex', leading: <BrandMark mark={null} />},
+        {value: 'other', label: 'OpenCode', leading: <BrandMark mark="opencode" />},
+      ]}
+    />
+  );
+}
+
+function ActionPanelDemo(props: {readonly open: boolean; readonly failing: boolean}): JSX.Element {
+  const [open, setOpen] = useState(props.open);
+  return (
+    <ActionPanel
+      label={props.failing ? 'Needs attention' : 'Ready'}
+      status={
+        props.failing
+          ? {state: 'fail', text: '1 check needs attention'}
+          : {state: 'ok', text: 'Ready · 7 checks passed'}
+      }
+      open={open}
+      toggle={setOpen}
+      summary="queue-rs · mpmc · This Mac · Claude Opus 5.5 · rounds as configured"
+      details={
+        <Text tone="muted">
+          {props.failing ? 'Docker is not reachable.' : 'Every check passed.'}
+        </Text>
+      }
+      action={
+        props.failing ? (
+          <Button
+            variant="primary"
+            text="Start run"
+            disabledReason="Fix the check above."
+            press={() => undefined}
+          />
+        ) : (
+          <Button variant="primary" text="Start run" press={() => undefined} />
+        )
+      }
     />
   );
 }
@@ -120,6 +177,16 @@ function Toggles(props: {readonly kind: 'checkbox' | 'switch'}): JSX.Element {
         disabledReason="Not available on this system."
       />
     </Stack>
+  );
+}
+
+function SliderDemo(): JSX.Element {
+  const tiers = ['Luna', 'Sol', 'Astra'];
+  const [index, setIndex] = useState(1);
+  return (
+    <Field label="Tier" help="Drag, or use the arrow keys, to pick a tier.">
+      <Slider options={tiers} value={index} change={setIndex} />
+    </Field>
   );
 }
 
@@ -175,6 +242,22 @@ export const BASIC_ENTRIES = {
       </Stack>
     ),
   },
+  SectionLayout: {
+    render: () => (
+      <SectionLayout
+        label="Example sections"
+        sections={
+          <Stack gap="space-1">
+            <Text>Appearance</Text>
+            <Text>Machines</Text>
+            <Text>Notifications</Text>
+          </Stack>
+        }
+      >
+        <Box label="Selected section" />
+      </SectionLayout>
+    ),
+  },
   Grid: {
     render: () => (
       <Stack>
@@ -209,8 +292,9 @@ export const BASIC_ENTRIES = {
   Wordmark: {
     render: () => (
       <Stack>
-        <Wordmark art={WORDMARK} label="VibeSys" align="center" tone="accent" />
-        <Wordmark art={WORDMARK} label="VibeSys, as a gradient" tone="gradient" />
+        <Wordmark art={VIBESYS_WORDMARK} label="VibeSys" align="center" tone="accent" />
+        <Wordmark art={VIBESYS_WORDMARK} label="VibeSys, as a gradient" tone="gradient" />
+        <Wordmark art={VIBESYS_WORDMARK} size="compact" />
       </Stack>
     ),
   },
@@ -266,6 +350,25 @@ export const BASIC_ENTRIES = {
       </Stack>
     ),
   },
+  ActionPanel: {
+    render: () => (
+      <Stack>
+        <ActionPanelDemo open={false} failing={false} />
+        <ActionPanelDemo open failing />
+      </Stack>
+    ),
+  },
+  ChoiceTiles: {render: () => <Tiles />},
+  BrandMark: {
+    render: () => (
+      <Row gap="space-5">
+        {BRAND_MARK_NAMES.map(mark => (
+          <BrandMark key={mark} mark={mark} />
+        ))}
+        <BrandMark mark={null} />
+      </Row>
+    ),
+  },
   Select: {
     render: () => (
       <Grid min="field">
@@ -302,10 +405,18 @@ export const BASIC_ENTRIES = {
         <Field label="Read only">
           <TextInput value="~/work/queue" mono readOnly />
         </Field>
+        <Field label="Several lines">
+          <TextInput
+            value={'Keep the weights in bf16.\nCheck the scale first.'}
+            rows={3}
+            change={() => undefined}
+          />
+        </Field>
       </Grid>
     ),
   },
   PathInput: {render: () => <PathDemo />},
+  Slider: {render: () => <SliderDemo />},
   Checkbox: {render: () => <Toggles kind="checkbox" />},
   Switch: {render: () => <Toggles kind="switch" />},
   Chip: {

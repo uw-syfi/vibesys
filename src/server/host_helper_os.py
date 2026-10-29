@@ -9,17 +9,22 @@ is light (``tests/architecture/test_light_entrypoints.py``).
 Public surface: ``FileProjects``, ``ProjectStopIntents``, ``OsDirectories``,
 ``SubprocessRunLauncher``,
 ``SubprocessRunPreflight``,
-``GitCheckoutProbe``, and ``StoreLogReader`` with ``run_streams_directory``.
+``read_task_goal``,
+``GitCheckoutProbe`` and ``StoreLogReader`` with ``run_streams_directory``.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+from contextlib import suppress
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
+from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, BinaryIO
 
-from pydantic import TypeAdapter
+from pydantic import JsonValue, TypeAdapter
 
 from server.host_api import (
     RUN_EVENTS_FILE,
@@ -36,8 +41,16 @@ from server.host_api import (
     LogStream,
     LogStreamOutcome,
     LogTail,
+    RunDigest,
+    RunDigestUnreadable,
+)
+from server.host_examples import (
+    ExampleObjective,
+    ProjectLookupError,
+    TaskGoal,
     TaskList,
     TaskSummary,
+    bounded_goal,
 )
 from server.host_helper_logs import (
     LogStoreCorruptError,
@@ -51,30 +64,201 @@ from server.host_helper_preflight import preflight_unavailable
 from server.host_helper_requests import (
     EventPage,
     PathHints,
-    ProjectLookupError,
-    ProjectRun,
     Scan,
     ScannedEntry,
+    SpanEventPage,
+    TailPage,
     event_page,
 )
 from server.host_preflight import PreflightReport
+from server.host_run_events import EVENT_TYPES_BY_KINDS, RunEventKinds
+from server.run_digest import digest_journal
+from server.span_index import (
+    Entry,
+    JournalIndex,
+    StaleIndexError,
+    kind_page,
+    load_journal_index,
+    read_documents,
+    span_page,
+)
 from vs_decode.api import Unreadable, decode_json
-from vs_project.api import Project, ProjectError
+from vs_project.api import (
+    GitRunHistory,
+    NullGitTrackerEvents,
+    Project,
+    ProjectError,
+    load_objectives,
+)
 from vs_sim.api import ProcessSpec
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from server.host_run_reads import ProjectRun
+    from server.run_summary import Summarized
+    from server.run_summary_cache import SummaryReader
     from vs_logs.read import LogReader as StoreReader
-    from vs_sim.api import CommandProbe, ProcessLauncher
+    from vs_project.api import GitRepositoryFactory, TaskDirectory
+    from vs_proto.api import host_payloads as pb
+    from vs_sim.api import (
+        CommandProbe,
+        ProcessLauncher,
+        SleepingClock,
+        Threads,
+    )
 
 _PYPROJECT_LIMIT_BYTES = 1 << 20
 _LAUNCH_OUTPUT_TAIL = 2000
 _LAUNCH_RECORD_LIMIT = 1 << 20
+_KEPT_INDEXES = 4
+
+
+_TALLY_CHUNK_BYTES = 1 << 20
+_EVENT: TypeAdapter[dict[str, JsonValue]] = TypeAdapter(dict[str, JsonValue])
+
+
+def _run_began(project_root: Path, run_id: str) -> datetime:
+    """Use the native creation epoch; read the legacy journal only for a legacy run."""
+    path = Project.run_log_path_for(project_root, run_id)
+    if not path.is_file():
+        return _journal_began(Project.log_directory_for(project_root, run_id))
+    try:
+        with import_module("vs_runlog.api").open_run_log(path) as records:
+            first = next(iter(records), None)
+    except OSError:
+        return datetime.fromtimestamp(0, UTC)
+    if (
+        first is not None
+        and first.body is not None
+        and first.body.field == "epoch_started"
+        and first.at is not None
+    ):
+        return datetime.fromtimestamp(first.at.to_seconds(), UTC)
+    return datetime.fromtimestamp(0, UTC)
+
+
+def _journal_began(log_directory: Path) -> datetime:
+    """When the run's journal says it started: its first event's time, else the file's.
+
+    A run with no manifest has no recorded creation time; the journal's first event is
+    the nearest thing, and an unreadable first line leaves the file's modification time.
+    """
+    journal = log_directory / RUN_EVENTS_FILE
+    try:
+        with journal.open("rb") as lines:
+            first = lines.readline(_LAUNCH_RECORD_LIMIT)
+        stamp = journal.stat().st_mtime
+    except OSError:
+        return datetime.fromtimestamp(0, UTC)
+    decoded = decode_json(first, _EVENT, source="journal line", max_bytes=_LAUNCH_RECORD_LIMIT)
+    began = decoded.get("timestamp") if not isinstance(decoded, Unreadable) else None
+    with suppress(ValueError):
+        if isinstance(began, str):
+            parsed = datetime.fromisoformat(began)
+            # A stamp with no offset is UTC, as the journal writes it; a naive time would make
+            # sorting it against the manifests' aware times raise TypeError.
+            return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+    return datetime.fromtimestamp(stamp, UTC)
+
+
+@dataclass(frozen=True)
+class JournalTally:
+    """The complete lines of a journal's first ``size`` bytes."""
+
+    size: int
+    lines: int
+
+
+def tally_journal(stream: BinaryIO, previous: JournalTally) -> JournalTally:
+    """``previous`` extended over what ``stream`` now holds past it, counting whole lines only.
+
+    A journal that is shorter than ``previous`` is counted from its start. A last line
+    still being written has no newline yet and is not counted: the tally ends before it.
+    """
+    stream.seek(0, os.SEEK_END)
+    if stream.tell() < previous.size:
+        previous = JournalTally(0, 0)
+    stream.seek(previous.size)
+    size, lines = previous.size, previous.lines
+    while True:
+        start = stream.tell()
+        chunk = stream.read(_TALLY_CHUNK_BYTES)
+        if not chunk:
+            break
+        newlines = chunk.count(b"\n")
+        if newlines:
+            lines += newlines
+            size = start + chunk.rindex(b"\n") + 1
+    return JournalTally(size, lines)
+
+
+def read_task_goal(task: TaskDirectory) -> TaskGoal:
+    """What ``task`` is for: its ``OBJECTIVE.md`` (cut to ``GOAL_MAX_CHARS``) and its axes.
+
+    Raises ``OSError`` for a file that cannot be read and ``ValueError`` (naming the file) for
+    ``objectives.toml`` that is invalid or a goal that is not UTF-8 text.
+    """
+    objectives = load_objectives(task.path).objective
+    try:
+        text = task.objective_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        message = f"{task.objective_path} is not UTF-8 text: {exc}"
+        raise ValueError(message) from exc
+    goal, truncated = bounded_goal(text)
+    return TaskGoal(
+        task=task.name.value,
+        objectives=tuple(
+            ExampleObjective(metric=axis.name, direction=axis.direction) for axis in objectives
+        ),
+        goal=goal,
+        goal_truncated=truncated,
+    )
 
 
 class FileProjects:
-    """Projects read through ``vs_project``'s ``Project`` on this filesystem."""
+    """Projects read through ``vs_project``'s ``Project`` on this filesystem.
+
+    Runs are read through ``vs_project``'s ``RunHistory`` over the repository
+    ``repositories`` opens at the project root, so every run lists whichever branch the
+    project has checked out.
+    """
+
+    def __init__(
+        self,
+        repositories: GitRepositoryFactory,
+        threads: Threads,
+        *,
+        clock: SleepingClock | None = None,
+    ) -> None:
+        """Read run branches through the repositories ``repositories`` opens."""
+        self._clock = clock
+        self._repositories = repositories
+        self._threads = threads
+        self._journals: dict[tuple[Path, str], Path] = {}
+        self._tallies: dict[Path, JournalTally] = {}
+        self._digests: dict[Path, tuple[tuple[int, int], RunDigest]] = {}
+        self._native_digests: dict[Path, tuple[bytes, RunDigest]] = {}
+        self._indexes: dict[Path, JournalIndex] = {}
+        self._summary_reader: SummaryReader | None = None
+
+    def saved_runs(self, request: pb.ListSavedRunsRequest) -> pb.ListSavedRunsResponse:
+        """Read catalog metadata and bounded history availability observations."""
+        wire = import_module("vs_proto.api")
+        pb = wire.host_payloads
+
+        root, runs = self.runs(Path(request.project))
+        entries = [
+            pb.SavedRun(
+                run_id=run.run_id,
+                task=run.task,
+                display_name=run.display_name,
+                created_at=wire.Timestamp.from_datetime(run.created_at),
+                imported=pb.SavedRunImport.AVAILABLE,
+            )
+            for run in runs
+        ]
+        return import_module("server.host_saved_runs").page_saved_runs(request, root, entries)
 
     def tasks(self, project: Path) -> TaskList:
         """The project's tasks, ordered by name."""
@@ -90,41 +274,256 @@ class FileProjects:
             tasks=tuple(TaskSummary(name=task.name.value) for task in tasks),
         )
 
+    def task_goal(self, project: Path, task: str) -> TaskGoal:
+        """The goal and axes of the project's task ``task``."""
+        opened = self._initialized(project)
+        try:
+            return read_task_goal(opened.select_task(task))
+        except (ProjectError, OSError, ValueError) as exc:
+            raise ProjectLookupError(
+                HelperErrorCode.TASK_INVALID, str(opened.root), str(exc)
+            ) from exc
+
     def runs(self, project: Path) -> tuple[Path, tuple[ProjectRun, ...]]:
-        """The project's root and its runs, oldest first; runs this VibeSys cannot read are left out."""
+        """The project's root and its runs, oldest first; runs this VibeSys cannot read are left out.
+
+        A run is its identity, not only its portable record: a run with a journal in this
+        machine's log store is listed even when its manifest was never committed or its
+        branch is gone (a run that stopped at start-up), under its id with no task.
+        """
         opened = self._open(project)
         try:
-            manifests = opened.state.list_runs()
+            history = GitRunHistory(opened, self._repositories(opened.root, NullGitTrackerEvents()))
+            manifests = history.recorded().runs
+            logged = Project.logged_run_ids_for(opened.root)
         except ProjectError as exc:
             raise ProjectLookupError(
                 HelperErrorCode.TASK_INVALID, str(opened.root), str(exc)
             ) from exc
-        return opened.root, tuple(
-            ProjectRun(
+        project_run = import_module("server.host_run_reads").ProjectRun
+        recorded = [
+            project_run(
                 run_id=manifest.run_id,
                 task=manifest.task_name,
                 display_name=manifest.display_name,
                 created_at=manifest.created_at,
             )
             for manifest in manifests
-        )
+        ]
+        known = {run.run_id for run in recorded}
+        journaled = [
+            project_run(
+                run_id=run_id,
+                task=None,
+                display_name=run_id,
+                created_at=_run_began(opened.root, run_id),
+            )
+            for run_id in logged
+            if run_id not in known
+            and (
+                (Project.log_directory_for(opened.root, run_id) / RUN_EVENTS_FILE).is_file()
+                or Project.run_log_path_for(opened.root, run_id).is_file()
+            )
+        ]
+        runs = sorted([*recorded, *journaled], key=lambda run: (run.created_at, run.run_id))
+        return opened.root, tuple(runs)
+
+    def run_digest(self, project_root: Path, run_id: str) -> RunDigest | RunDigestUnreadable | None:
+        """Committed store facts, or the journal of a run never converted to the store.
+
+        Native projections are cached by head bytes, never by a separate journal's age.
+        """
+        native = Project.run_log_path_for(project_root, run_id)
+        if native.exists() or native.with_name("run.head").exists():
+            return self._native_digest(native)
+        journal = Project.log_directory_for(project_root, run_id) / RUN_EVENTS_FILE
+        try:
+            with journal.open("rb") as lines:
+                stamp = os.fstat(lines.fileno())
+                version = (stamp.st_size, stamp.st_mtime_ns)
+                kept = self._digests.get(journal)
+                if kept is not None and kept[0] == version:
+                    return kept[1]
+                digest = digest_journal(lines)
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            return RunDigestUnreadable(
+                message=f"the run's journal could not be read: {exc.strerror}"
+            )
+        if digest.ending is not None or digest.closing is not None:
+            self._digests[journal] = (version, digest)
+        return digest
+
+    def _native_digest(self, path: Path) -> RunDigest | RunDigestUnreadable:
+        try:
+            version = path.with_name("run.head").read_bytes()
+            cached = self._native_digests.get(path)
+            if cached is not None and cached[0] == version:
+                return cached[1]
+            digest = import_module("server.run_digest_store").read_digest(path)
+        except (OSError, ValueError) as exc:
+            return RunDigestUnreadable(
+                message="the run's committed store could not be read: "
+                + str(exc).replace("\n", " ")[:150]
+            )
+        else:
+            self._native_digests[path] = (version, digest)
+            return digest
 
     def require_initialized(self, project: Path) -> Path:
         """The project's root, once it is known to define tasks."""
         return self._initialized(project).root
 
-    def run_events(self, project: Path, run_id: str, from_sequence: int, limit: int) -> EventPage:
+    def run_events(
+        self, project: Path, run_id: str, from_sequence: int, limit: int, *, with_totals: bool
+    ) -> EventPage:
         """A page of run ``run_id``'s journal, once the project is known to have the run."""
-        root, runs = self.runs(project)
-        if all(run.run_id != run_id for run in runs):
-            message = f"{root} has no run {run_id!r}"
-            raise ProjectLookupError(HelperErrorCode.UNKNOWN_RUN, str(root), message)
-        journal = Project.log_directory_for(root, run_id) / RUN_EVENTS_FILE
+        journal = self._journal(project, run_id)
         try:
             with journal.open("rb") as lines:
-                return event_page(lines, from_sequence, limit, RUN_EVENTS_READ_MAX_BYTES)
+                page = event_page(lines, from_sequence, limit, RUN_EVENTS_READ_MAX_BYTES)
+                if not with_totals:
+                    return page
+                tally = self._tally(journal, lines)
         except FileNotFoundError:
-            return EventPage((), from_sequence, complete=True)
+            nothing = EventPage((), from_sequence, complete=True)
+            return replace(nothing, total_events=0, total_bytes=0) if with_totals else nothing
+        return replace(page, total_events=tally.lines, total_bytes=tally.size)
+
+    def run_kind_events(
+        self, project: Path, run_id: str, kinds: RunEventKinds, from_sequence: int, limit: int
+    ) -> EventPage:
+        """A page of the events ``kinds`` selects, from the journal's span index (``kind_page``).
+
+        The events carry the cursor the index gives them, as the span and tail reads' do, so they
+        are the same whether the index came from its sidecar or from a scan of the journal.
+        """
+
+        def ask(index: JournalIndex) -> tuple[list[Entry], tuple[int, int, int, bool]]:
+            entries, events, size, complete, next_sequence = kind_page(
+                index, EVENT_TYPES_BY_KINDS[kinds], from_sequence, limit, RUN_EVENTS_READ_MAX_BYTES
+            )
+            return entries, (next_sequence, events, size, complete)
+
+        (next_sequence, events, size, complete), documents = self._indexed_read(
+            self._journal(project, run_id), ask
+        )
+        return EventPage(
+            tuple(documents),
+            next_sequence,
+            complete=complete,
+            total_events=events,
+            total_bytes=size,
+        )
+
+    def _journal(self, project: Path, run_id: str) -> Path:
+        """The journal of ``run_id``, found through the project's run history once per channel.
+
+        Every page of one run's history used to list the project's runs through git again.
+        The helper serves one channel, so a run it found stays found. The cache is a dict
+        of immutable paths that workers only ever add to: two workers racing to resolve
+        the same run store the same value, so it needs no lock.
+
+        A run the project records but whose journal this machine does not hold (it is in another
+        project's log store, or its checkout predates the journal) is refused as ``unknown_run``
+        by every read, the summary's way: an empty page would call it a run with no events.
+        """
+        key = (project, run_id)
+        journal = self._journals.get(key)
+        if journal is None:
+            root, runs = self.runs(project)
+            if all(run.run_id != run_id for run in runs):
+                message = f"{root} has no run {run_id!r}"
+                raise ProjectLookupError(HelperErrorCode.UNKNOWN_RUN, str(root), message)
+            journal = Project.log_directory_for(root, run_id) / RUN_EVENTS_FILE
+            self._journals[key] = journal
+        if not journal.is_file():
+            message = f"{project} holds no journal of run {run_id!r}"
+            raise ProjectLookupError(HelperErrorCode.UNKNOWN_RUN, str(project), message)
+        return journal
+
+    def run_journal(self, project: Path, run_id: str) -> Path:
+        """The journal file of run ``run_id``, once the project is known to have the run."""
+        return self._journal(project, run_id)
+
+    def _tally(self, journal: Path, stream: BinaryIO) -> JournalTally:
+        """The journal's complete lines, counted from where the last count stopped.
+
+        A journal is append-only, so the count of its first ``size`` bytes never changes;
+        a shorter file than the last count read is a different journal and counts afresh.
+        Each worker stores a whole ``JournalTally`` (never a half-updated one), so a race
+        leaves a correct, if older, tally.
+        """
+        last = self._tallies.get(journal)
+        tally = tally_journal(stream, last if last is not None else JournalTally(0, 0))
+        self._tallies[journal] = tally
+        return tally
+
+    def run_span_events(
+        self, project: Path, run_id: str, span_id: str, from_sequence: int, limit: int
+    ) -> SpanEventPage:
+        """A page of the journal events of ``span_id`` and the spans beneath it, from the span index."""
+
+        def ask(index: JournalIndex) -> tuple[list[Entry], tuple[int, int, bool]]:
+            entries, total, complete = span_page(
+                index, span_id, from_sequence, limit, RUN_EVENTS_READ_MAX_BYTES
+            )
+            next_sequence = entries[-1].sequence + 1 if entries else from_sequence
+            return entries, (next_sequence, total, complete)
+
+        (next_sequence, total, complete), documents = self._indexed_read(
+            self._journal(project, run_id), ask
+        )
+        return SpanEventPage(tuple(documents), next_sequence, complete=complete, total=total)
+
+    def run_tail(
+        self, project: Path, run_id: str, before_sequence: int | None, limit: int
+    ) -> TailPage:
+        """The newest events before ``before_sequence`` that one page carries, from the span index."""
+
+        def ask(index: JournalIndex) -> tuple[list[Entry], tuple[int, bool]]:
+            entries, older = index.tail(before_sequence, limit, RUN_EVENTS_READ_MAX_BYTES)
+            return entries, (index.last_sequence, older)
+
+        (last_sequence, older), documents = self._indexed_read(self._journal(project, run_id), ask)
+        return TailPage(tuple(documents), complete=not older, last_sequence=last_sequence)
+
+    def run_summary(self, project: Path, run_id: str) -> Summarized:
+        """The fold of run ``run_id``'s journal, from the cache beside it and what it gained since."""
+        # lint-waiver: LW-640283 [PLC0415]; the summary fold costs the helper nothing until asked.
+        # > At module level every channel would load the fold and its cache before `hello`, which
+        # > the helper's start-up ceiling forbids; the import stays visible to tach.
+        from server.run_summary_cache import SummaryReader  # noqa: PLC0415
+
+        if self._summary_reader is None:
+            self._summary_reader = SummaryReader(self._threads.lock())
+        return self._summary_reader.summarize(self._journal(project, run_id))
+
+    def _indexed_read[Facts](
+        self, journal: Path, ask: Callable[[JournalIndex], tuple[list[Entry], Facts]]
+    ) -> tuple[Facts, list[dict[str, JsonValue]]]:
+        """What ``ask`` says of ``journal``'s span index, with the events of the entries it picks.
+
+        The index of each recently read journal is kept, and checked against the journal on
+        every use (``load_journal_index``), so an answer never depends on what was kept. A
+        journal rewritten between reading the index and its events (``StaleIndexError``) is
+        read again from a fresh index; a second change in a row is the caller's failure.
+        """
+        index = self._index_of(journal, self._indexes.get(journal))
+        entries, facts = ask(index)
+        try:
+            return facts, read_documents(journal, entries)
+        except StaleIndexError:
+            entries, facts = ask(self._index_of(journal, None))
+            return facts, read_documents(journal, entries)
+
+    def _index_of(self, journal: Path, previous: JournalIndex | None) -> JournalIndex:
+        index = load_journal_index(journal, previous)
+        self._indexes[journal] = index
+        for forgotten in list(self._indexes)[:-_KEPT_INDEXES]:
+            self._indexes.pop(forgotten, None)
+        return index
 
     def _open(self, project: Path) -> Project:
         try:

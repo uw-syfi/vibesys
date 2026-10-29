@@ -7,7 +7,9 @@
 #
 # The tests build through plain `docker build` against the daemon's own
 # builder, which cannot import or export buildx cache flags, so the cache has
-# to live in the daemon's storage. Only CI calls this script.
+# to live in the daemon's storage. Use the classic image store explicitly:
+# containerd's image store lives outside data-root and would not be snapshotted.
+# Only CI calls this script.
 set -euo pipefail
 
 readonly DATA_ROOT=/mnt/docker-data
@@ -32,7 +34,7 @@ attach() {
     if [[ -f ${DAEMON_JSON} ]]; then
         current=$(sudo cat "${DAEMON_JSON}")
     fi
-    jq --arg root "${DATA_ROOT}" '. + {"data-root": $root}' <<<"${current}" |
+    jq --arg root "${DATA_ROOT}" '. + {"data-root": $root} | .features = ((.features // {}) + {"containerd-snapshotter": false})' <<<"${current}" |
         sudo tee "${DAEMON_JSON}" >/dev/null
     start_docker
     docker info --format 'docker root: {{.DockerRootDir}}'
@@ -41,12 +43,9 @@ attach() {
 
 snapshot() {
     local tarball=$1
-    # Keep layers and the build cache; drop what this run created. Tagged
-    # test images would otherwise inflate the cache and are rebuilt from it.
+    # Keep tagged results and BuildKit metadata. Removing generated tags discards
+    # the input-addressed agent images and their inline cache before the snapshot.
     docker ps -aq | xargs -r docker rm -f >/dev/null
-    docker images --format '{{.Repository}}:{{.Tag}}' | { grep '^vibesys-' || true; } |
-        xargs -r docker rmi -f >/dev/null
-    docker image prune -f >/dev/null
     stop_docker
     sudo tar --use-compress-program='zstd -T0 -3' -cf "${tarball}" -C "${DATA_ROOT}" .
     sudo chown "$(id -u):$(id -g)" "${tarball}"

@@ -1,21 +1,23 @@
 /**
- * The app shell's entry: the redesigned window, over the welcome preload's bridge
- * (`window.vibesysWelcome`), shown under `VIBESYS_DESKTOP_SHELL=next`.
+ * The app shell's entry: the window, over the preload's bridge (`window.vibesysWelcome`).
  */
 import '@vibesys/ui/tokens.css';
 import '@vibesys/ui/fonts.css';
 import '@vibesys/ui/components.css';
+import {browserDraftMemory, browserMoreOptionsMemory} from '@vibesys/feature-new-run/renderer';
 import {pageAppearance} from '@vibesys/feature-settings/renderer';
 import {runOfWindow, type WelcomeBridge} from '@vibesys/ipc';
-import {Card, EmptyState, Page} from '@vibesys/ui';
+import {Card, EmptyState, LinkOpener, Page} from '@vibesys/ui';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
+import {windowAddress} from './address.js';
 import {shellSessionOptions} from './run-session.js';
 import {createShellStores, RunWindow, Shell} from './shell.js';
 
 declare global {
   interface Window {
     vibesysWelcome?: WelcomeBridge;
+    vibesysGateway?: import('@vibesys/ipc').GatewayPortBridge;
   }
 }
 
@@ -45,18 +47,34 @@ if (bridge === undefined) {
     schedule,
     {
       messages: window,
+      address: windowAddress(window),
+      now: () => Date.now(),
       session: run => shellSessionOptions(run, {document, window, navigator}),
+    },
+    {
+      moreOptions: browserMoreOptionsMemory(() => window.localStorage),
+      // A window's own storage: another window starts its own New run.
+      draft: browserDraftMemory(() => window.sessionStorage),
     },
   );
   // A run window's page names its run in its query; the main window's has none.
   const run = runOfWindow(window.location.search);
+  if (run === null) {
+    bridge.onOpenSettings(() =>
+      stores.sidebar.store.dispatch({type: 'select', screen: {kind: 'settings'}}),
+    );
+  }
+  // A link in written text opens in the user's own browser or mail app, never in this window.
+  const openExternal = (url: string): void => void bridge.openExternal(url);
   createRoot(root).render(
     <StrictMode>
-      {run === null ? (
-        <Shell stores={stores} version={String(import.meta.env['VITE_APP_VERSION'])} />
-      ) : (
-        <RunWindow stores={stores} run={run} />
-      )}
+      <LinkOpener open={openExternal}>
+        {run === null ? (
+          <Shell stores={stores} version={String(import.meta.env['VITE_APP_VERSION'])} />
+        ) : (
+          <RunWindow stores={stores} run={run} />
+        )}
+      </LinkOpener>
     </StrictMode>,
   );
 }

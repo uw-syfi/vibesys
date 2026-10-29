@@ -28,6 +28,22 @@ The selected run environment expands it to the candidate repository root before
 running the resolved command. This is necessary for tools such as `go -C`,
 which change cwd.
 
+## Candidate outputs
+
+A package whose evaluator loads a file the candidate builds names it:
+
+```toml
+candidate_outputs = ["queue-candidate.so"]
+```
+
+Each entry is a normalized workspace-relative file path outside `.git/` and
+`.vibesys/`. A task using the package must declare a `[build]` that produces
+every entry; `vibesys preflight` and the example registry's `candidate-build`
+check refuse one that does not. After the confined build, VibeSys verifies each
+output (a regular file, not a symlink), records it outside the workspace, places
+it at its path in the checkout where each trusted command runs, and passes the
+paths, `:`-joined, in `VIBESYS_CANDIDATE_OUTPUTS`.
+
 The local collection is the initial package source. Published packages can
 later provide the same metadata and entry-point names through a registry-backed
 resolver. Repository-specific checks and workloads belong with their task, not
@@ -95,7 +111,13 @@ The revision must be a full lowercase commit SHA. VibeSys always passes
 occupy one complete entrypoint argument and may reference only a binary from
 the corresponding declaration.
 
-VibeSys installs tools in the environment that executes the evaluator. Local
+VibeSys installs tools in the environment that executes the evaluator. A
+host install looks for `cargo` only when a tool is not already installed and
+verified, first on the `PATH` of the user's login shell (the lookup that finds
+provider CLIs), then on the process's own, so a run started over a plain `ssh`
+command or by the desktop helper finds `~/.cargo/bin` as a terminal run does.
+When none has `cargo`, the install fails naming the tool, the `PATH` it searched
+and the fix (install Rust for the user, or source `~/.cargo/env` from `~/.profile`). Local
 runs use an operator-owned cache outside the candidate workspace. Docker uses
 a short-lived sandbox with the target image to build and verify tools, then
 mounts only the selected installation roots read-only into the agent sandbox.

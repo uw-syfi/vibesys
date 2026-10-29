@@ -250,9 +250,9 @@ def planner_after_a_profile(*, restarting: bool, profiler_fails: bool) -> Planne
     view = FakeView(
         changes={"capabilities": Capabilities(lifecycle=frozenset({"profile-capture"}))}
     )
-    host = begin(
-        config(max_rounds=3, max_in_flight=1, profiling=True), restarting=restarting, view=view
-    )
+    # no backlog: h1 keeps its agent slot while measured, so the profile is the next work
+    cfg = config(max_rounds=3, max_in_flight=1, max_backlog=0, profiling=True)
+    host = begin(cfg, restarting=restarting, view=view)
     host.drain_until_turn(PLANNER_LABEL)
     host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(implement("A")))
     host.answer(host.run.expect(StartAttempt, label="start"))

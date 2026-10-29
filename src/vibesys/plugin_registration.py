@@ -7,10 +7,19 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Protocol
 
-from vibesys.run.contracts import IterationSupport, PluginProjection, RunStatus, RunView
+from vibesys.run.contracts import (
+    IterationSupport,
+    IterationTree,
+    IterationUnavailable,
+    IterationUnavailableReason,
+    PluginProjection,
+    RunStatus,
+    RunView,
+)
 from vs_core.api import ContractError, OperationRegistration
 from vs_project.api import StoredEnvelope
 from vs_runtime.api.core import OperationRole, RuntimeRecord
+from vs_runtime.api.infrastructure import known_steer_targets
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -20,6 +29,7 @@ if TYPE_CHECKING:
     from vs_core.api import OperationRegistry, StrategyState
     from vs_project.api import OrchestrationDescriptor, Project
     from vs_runtime.api import CorePolicy, OrchestrationPlugin, OrchestrationResumeDecision
+    from vs_runtime.api.infrastructure import SteerTargets
 
 
 class OrchestrationProjector(Protocol):
@@ -31,6 +41,10 @@ class OrchestrationProjector(Protocol):
 
     def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
         """Project a state just committed by the host."""
+        ...
+
+    def steer_targets(self, project: Project, run_id: str) -> SteerTargets | None:
+        """What a steer may name in the run's last committed state; None before it has one."""
         ...
 
 
@@ -62,24 +76,27 @@ def _plugin_run_view(
         iterations=projection.iterations,
         rounds=projection.rounds,
         experiment_revision=projection.experiment_revision,
+        input_failure=projection.input_failure,
     )
 
 
 @dataclass(frozen=True, slots=True)
-class RuntimeRecordProjector[S: StrategyState]:
+class RuntimeRecordProjector[S: StrategyState, P: BaseModel]:
     """Project the strategy state of a core-driven run from its committed runtime record.
 
     A run on the core keeps its state in the run's state store as a runtime record
-    whose strategy state is `state_type`, held as `record_type`. `project` is a pure function of that
-    state and the record's revision. `operations` decodes the record, so it must
-    hold the operations the strategy recorded.
+    whose strategy state is `state_type`, held as `record_type`. `operations` decodes the
+    record, so it must hold the operations the strategy recorded. `published` reads the record
+    the strategy published from that state (None before it published one), and `project` is a
+    pure function of that record and the runtime record's revision.
     """
 
     plugin_id: str
     state_type: type[S]
     record_type: type[RuntimeRecord[S]]
     operations: OperationRegistry
-    project: Callable[[S, int], PluginProjection]
+    published: Callable[[S], P | None]
+    project: Callable[[P, int], PluginProjection]
 
     def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
         """Project the last committed record, or identity and status when none exists."""
@@ -91,6 +108,19 @@ class RuntimeRecordProjector[S: StrategyState]:
         record = self.record_type.decode(stored, self.operations)
         return self._view(record, run_id=run_id, status=status)
 
+    def steer_targets(self, project: Project, run_id: str) -> SteerTargets | None:
+        """The roles, attempts and items a steer may name, from the last committed record.
+
+        The record is the one the run itself resolves a steer against, so a steer valid here is
+        valid for the run as of that commit. None when the run has committed no record yet.
+        """
+        stored = project.stored_record(run_id)
+        if stored is None:
+            return None
+        if not isinstance(stored, StoredEnvelope):
+            raise ContractError(("runtime",), "a run without a readable record has no targets")
+        return known_steer_targets(self.record_type.decode(stored, self.operations).envelope.core)
+
     def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
         """Project a runtime record the host just committed under this plugin's namespace."""
         if namespace != self.plugin_id or not isinstance(state, RuntimeRecord):
@@ -100,10 +130,44 @@ class RuntimeRecordProjector[S: StrategyState]:
         return self._view(state, run_id=run_id, status=RunStatus.ACTIVE)
 
     def _view(self, record: RuntimeRecord[S], *, run_id: str, status: RunStatus) -> RunView:
-        projection = _require_plugin_projection(
-            self.project(record.envelope.strategy, record.envelope.revision)
+        """The record's view; a projection that fails validation is a view that says so.
+
+        Every reader goes through here: the live commit observer, the iteration and experiment
+        queries, and the run listing. Decoding the published record is reading durable state,
+        so a corrupt or incompatible record fails loudly. Building the view from it is derived
+        work: a bug there must not fail the reader (or a listing of every run), so it becomes
+        `IterationUnavailableReason.PROJECTION_INVALID` with the error as its detail and no
+        payload, and the commit observer reports it.
+        """
+        revision = record.envelope.revision
+        published = self.published(record.envelope.strategy)
+        if published is None:
+            return _plugin_run_view(self.plugin_id, run_id, status, _NOTHING_PUBLISHED)
+        try:
+            projection = self.project(published, revision)
+        except ValueError as error:
+            projection = PluginProjection(
+                payload=None,
+                iterations=IterationUnavailable(
+                    reason=IterationUnavailableReason.PROJECTION_INVALID, detail=str(error)
+                ),
+                experiment_revision=revision,
+            )
+        return _plugin_run_view(
+            self.plugin_id, run_id, status, _require_plugin_projection(projection)
         )
-        return _plugin_run_view(self.plugin_id, run_id, status, projection)
+
+
+def project_steer_targets(
+    registration: OrchestrationRegistration | None, project: Project, *, run_id: str
+) -> SteerTargets | None:
+    """The targets a steer may name in a run, or None for a policy with no projector or record."""
+    projector = registration.projector if registration is not None else None
+    return None if projector is None else projector.steer_targets(project, run_id)
+
+
+_NOTHING_PUBLISHED = PluginProjection(payload={}, iterations=IterationTree.from_nodes(()))
+"""The view of a run whose strategy has not published a record yet."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,4 +280,5 @@ __all__ = [
     "OrchestrationRegistration",
     "RuntimeRecordProjector",
     "project_run",
+    "project_steer_targets",
 ]

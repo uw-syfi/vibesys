@@ -6,7 +6,6 @@
   "type": "module",
   "vibesys": {
     "layer": "app",
-    "design": "strict",
     "entries": {
       ".": "dom"
     }
@@ -15,13 +14,21 @@
     "build": "vite build",
     "check": "tsc -b",
     "test": "node ../../tools/scripts/run_bun_tests.mjs ./src",
-    "test:e2e": "pnpm build && playwright test"
+    "test:e2e": "pnpm build && pnpm e2e",
+    "fixtures": "bun --conditions=@vibesys/source e2e/tools/regenerate-fixtures.ts",
+    "e2e:linux": "bash scripts/linux-e2e.sh",
+    "e2e": "node --conditions=@vibesys/source ../../node_modules/@playwright/test/cli.js test --pass-with-no-tests",
+    "dev:fixture": "bun --conditions=@vibesys/source e2e/tools/dev-fixture.ts",
+    "record": "bun --conditions=@vibesys/source e2e/tools/record-run-fixture.ts"
   },
   "dependencies": {
     "@vibesys/feature-app-shell": "workspace:*",
     "@vibesys/feature-machines": "workspace:*",
     "@vibesys/feature-new-run": "workspace:*",
+    "@vibesys/feature-usage": "workspace:*",
+    "@vibesys/feature-run-chat": "workspace:*",
     "@vibesys/feature-run-page": "workspace:*",
+    "@vibesys/feature-runs-dashboard": "workspace:*",
     "@vibesys/feature-settings": "workspace:*",
     "@vibesys/hosts": "workspace:*",
     "@vibesys/ipc": "workspace:*",
@@ -31,7 +38,13 @@
     "@vibesys/transport": "workspace:*",
     "@vibesys/ui": "workspace:*",
     "react": "19.1.1",
-    "react-dom": "19.1.1"
+    "react-dom": "19.1.1",
+    "@vibesys/machine": "workspace:*",
+    "@vibesys/run-skeleton": "workspace:*",
+    "@vibesys/feature-run-intents": "workspace:*",
+    "@vibesys/feature-run-sessions": "workspace:*",
+    "@vibesys/request-identity": "workspace:*",
+    "@vibesys/run-state": "workspace:*"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.10.2",
@@ -40,7 +53,15 @@
     "@types/node": "^24.0.0",
     "@types/react": "19.1.13",
     "@types/react-dom": "19.1.9",
+    "@vibesys/contracts": "workspace:*",
+    "@vibesys/run-fixtures": "workspace:*",
     "@vitejs/plugin-react": "5.0.4",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "@vibesys/proto": "workspace:*",
+    "@bufbuild/protobuf": "2.16.0",
+    "esbuild": "0.25.12",
+    "fast-check": "4.10.2",
+    "happy-dom": "20.14.5",
+    "fake-indexeddb": "6.2.6"
   }
 }

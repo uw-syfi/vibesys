@@ -34,8 +34,7 @@ from entrypoints.example_catalog import (
     load_registry,
 )
 from server.host_api import HelperErrorCode
-from server.host_examples import CreatedProject
-from server.host_helper_requests import ProjectLookupError
+from server.host_examples import CreatedProject, ExampleDestination, ProjectLookupError
 from vs_project.api import Git
 from vs_sim.api import OsProcesses
 
@@ -219,6 +218,33 @@ def new_example(
     return NewProject(example=entry.name, destination=target, tasks=tasks)
 
 
+def example_destination(
+    checkout: Path, name: str, destination: Path
+) -> tuple[ExampleDestination, Path | None]:
+    """What :func:`new_example` would find at ``destination``, and the project there if it is one.
+
+    A project is the example's when its tasks are the example's; an example whose source is
+    another repository that is not fetched has none to compare, so nothing is its project.
+    """
+    root = checkout.expanduser().resolve()
+    entry = find_example(load_registry(root), name)
+    target = destination.expanduser().resolve()
+    if not target.exists() and not target.is_symlink():
+        return ExampleDestination.ABSENT, None
+    if not target.is_dir():
+        return ExampleDestination.OCCUPIED, None
+    if not any(target.iterdir()):
+        return ExampleDestination.EMPTY, None
+    wanted = example_tasks(root / entry.path)
+    try:
+        found = example_tasks(target)
+    except CatalogError:
+        found = ()
+    if wanted and found == wanted:
+        return ExampleDestination.EXAMPLE_PROJECT, target
+    return ExampleDestination.OCCUPIED, None
+
+
 def copy_out(source: Path, destination: Path, materializer: ExampleMaterializer) -> NewProject:
     """Copy ``source``'s tracked files into their own new Git repository at ``destination``.
 
@@ -277,11 +303,11 @@ class HelperExampleProjects:
     checkout: Path | None
     materializer: ExampleMaterializer
 
-    def list(self) -> ExampleList:
-        """Every catalogued example with its tasks."""
+    def list(self, *, with_catalogue: bool = False) -> ExampleList:
+        """Every catalogued example with its tasks, and with their catalogue facts if asked."""
         root = self._catalog()
         try:
-            return list_examples(root)
+            return list_examples(root, with_task_details=with_catalogue)
         except CatalogError as exc:
             raise ProjectLookupError(
                 HelperErrorCode.EXAMPLES_UNAVAILABLE, str(root), str(exc)
@@ -303,6 +329,15 @@ class HelperExampleProjects:
         except (DestinationError, ExampleMaterializationError) as exc:
             raise _lookup_error(exc, destination) from exc
         return CreatedProject(project=str(project.destination), tasks=project.tasks)
+
+    def destination(self, example: str, destination: Path) -> tuple[ExampleDestination, str | None]:
+        """What :meth:`create` would find at ``destination``, and the project there if it is one."""
+        root = self._catalog()
+        try:
+            state, project = example_destination(root, example, destination)
+        except CatalogError as exc:
+            raise ProjectLookupError(HelperErrorCode.UNKNOWN_EXAMPLE, str(root), str(exc)) from exc
+        return state, None if project is None else str(project)
 
     def copy_out(self, source: Path, destination: Path) -> CreatedProject:
         """Copy ``source``'s tracked files into their own new Git repository at ``destination``."""

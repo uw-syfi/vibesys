@@ -32,7 +32,7 @@ export interface RequestPolicy {
 }
 
 /**
- * A read, or any request not named below. Reads are idempotent: re-issuing a
+ * The policy of a read. Reads are idempotent: re-issuing a
  * `query.snapshot` returns the current snapshot with no side effect, so a read
  * outstanding at a drop is safe to resend on the recovered channel.
  */
@@ -41,19 +41,35 @@ export const DEFAULT_REQUEST_POLICY: RequestPolicy = {
   dedicatedConnection: false,
 };
 
+const READ = DEFAULT_REQUEST_POLICY;
+
 /**
- * The requests whose policy differs from the read default. Mutations that
- * create or append (`query.chat`, `query.chat_thread_create`, `command.steer`)
- * are not idempotent, so a resend would double the effect; `command.pause` and
- * `command.resume` set a bit and are safe to repeat. `query.chat` also runs on
- * its own connection (see `RequestPolicy.dedicatedConnection`).
+ * Every request type's policy, keyed by the protocol's own request types, so a new
+ * request type does not compile until it is classified here. Mutations that create
+ * or append (`query.chat`, `query.chat_thread_create`, `command.steer`) are not
+ * idempotent, so a resend would double the effect; `command.pause` and
+ * `command.resume` set a bit and are safe to repeat. `command.control` carries a
+ * client-chosen `control_id`, but until the server keeps answered ids across
+ * reconnects a resend is not proven safe, so it is not idempotent. `query.chat`
+ * also runs on its own connection (see `RequestPolicy.dedicatedConnection`).
  */
-export const REQUEST_POLICIES: Readonly<Record<string, RequestPolicy>> = {
+export const REQUEST_POLICIES: Readonly<Record<RequestInput['type'], RequestPolicy>> = {
   'query.chat': {idempotent: false, dedicatedConnection: true},
   'query.chat_thread_create': {idempotent: false, dedicatedConnection: false},
   'command.steer': {idempotent: false, dedicatedConnection: false},
+  'command.control': {idempotent: false, dedicatedConnection: false},
+  'command.stop': {idempotent: true, dedicatedConnection: false},
   'command.pause': {idempotent: true, dedicatedConnection: false},
   'command.resume': {idempotent: true, dedicatedConnection: false},
+  'query.design': READ,
+  'query.design_patch': READ,
+  'query.events': READ,
+  'query.experiments': READ,
+  'query.history': READ,
+  'query.iterations': READ,
+  'query.performance': READ,
+  'query.snapshot': READ,
+  subscribe: READ,
 };
 
 /**
@@ -187,7 +203,7 @@ export function resolveRequestPolicy(
   type: RequestInput['type'],
   options: RequestOptions = {},
 ): RequestPolicy {
-  const base = REQUEST_POLICIES[type] ?? DEFAULT_REQUEST_POLICY;
+  const base = REQUEST_POLICIES[type];
   const timeoutMs = options.timeoutMs ?? base.timeoutMs;
   return {
     idempotent: base.idempotent,

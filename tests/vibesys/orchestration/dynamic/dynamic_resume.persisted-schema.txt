@@ -1,0 +1,494 @@
+# The persisted shape DynamicResume, one line per class and field. Generated: rerun its test
+# with UPDATE_GOLDEN=1. scripts/check_persisted_schema_compat.py checks a change keeps
+# every saved document, or raises the version.
+shape DynamicResume
+version 1
+$root {"additionalProperties":false,"type":"object"}
+$root.config required {"$ref":"#/$defs/DynamicConfig"}
+$root.kind optional {"const":"dynamic-resume","default":"dynamic-resume","type":"string"}
+$root.record required {"$ref":"#/$defs/RecordState"}
+$root.version optional {"const":1,"default":1,"type":"integer"}
+AcceptedReading {"additionalProperties":false,"type":"object"}
+AcceptedReading.evidence_id required {"$ref":"#/$defs/EvidenceId"}
+AcceptedReading.feedback optional {"default":"","type":"string"}
+AcceptedReading.kind required {"$ref":"#/$defs/EvidenceKind"}
+AcceptedReading.metrics optional {"default":[],"items":{"$ref":"#/$defs/MetricRow"},"type":"array"}
+AcceptedReading.partial optional {"anyOf":[{"$ref":"#/$defs/PartialRow"},{"type":"null"}],"default":null}
+AcceptedReading.passed required {"type":"boolean"}
+AcceptedReading.protocol optional {"default":1,"minimum":1,"type":"integer"}
+AcceptedReading.source_request required {"$ref":"#/$defs/RequestId"}
+AcceptedReading.stage required {"minLength":1,"type":"string"}
+AcceptedReading.unmet_requirement optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
+AgentName {"enum":["orchestrator","implementer","judge","profiler","outliner","merger"],"type":"string"}
+Alternative {"additionalProperties":false,"type":"object"}
+Alternative.hypothesis_id required {"type":"string"}
+Alternative.revision required {"type":"string"}
+ArtifactId {"additionalProperties":false,"type":"object"}
+ArtifactId.kind optional {"const":"artifact","default":"artifact","type":"string"}
+ArtifactId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
+ArtifactRef {"additionalProperties":false,"type":"object"}
+ArtifactRef.artifact_id required {"$ref":"#/$defs/ArtifactId"}
+ArtifactRef.digest required {"minLength":1,"type":"string"}
+ArtifactRef.schema_ref optional {"anyOf":[{"$ref":"#/$defs/SchemaRef"},{"type":"null"}],"default":null}
+AssessmentKind {"enum":["correctness","benchmark","profiling","local-validation"],"type":"string"}
+AssessmentProposal {"additionalProperties":false,"type":"object"}
+AssessmentProposal.candidate required {"anyOf":[{"$ref":"#/$defs/RevisionRef"},{"type":"null"}]}
+AssessmentProposal.kind required {"$ref":"#/$defs/AssessmentKind"}
+AssessmentProposal.schema_version required {"minimum":1,"type":"integer"}
+AssessmentProposal.sources required {"items":{"anyOf":[{"$ref":"#/$defs/InvocationRef"},{"$ref":"#/$defs/EvidenceKey"},{"$ref":"#/$defs/EvidenceId"}]},"type":"array"}
+AssessmentProposal.verdict required {"enum":["satisfied","rejected","deferred"],"type":"string"}
+AttemptId {"additionalProperties":false,"type":"object"}
+AttemptId.kind optional {"const":"attempt","default":"attempt","type":"string"}
+AttemptId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
+AttemptRef {"additionalProperties":false,"type":"object"}
+AttemptRef.attempt_id required {"$ref":"#/$defs/AttemptId"}
+AttemptRef.generation required {"$ref":"#/$defs/Generation"}
+Baseline {"oneOf":[{"$ref":"#/$defs/Measured"},{"$ref":"#/$defs/Unmeasurable"},{"$ref":"#/$defs/NotConfigured"},{"$ref":"#/$defs/_MeasuredBeforeS173"}]}
+Blocker {"additionalProperties":false,"type":"object"}
+Blocker.digest optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
+Blocker.ended optional {"anyOf":[{"$ref":"#/$defs/FailureReason"},{"type":"null"}],"default":null}
+Blocker.kind required {"$ref":"#/$defs/BlockerKind"}
+Blocker.next_step optional {"default":"","type":"string"}
+Blocker.revision optional {"anyOf":[{"$ref":"#/$defs/RevisionRef"},{"type":"null"}],"default":null}
+Blocker.stray optional {"default":[],"items":{"$ref":"#/$defs/StrayUnapplied"},"type":"array"}
+Blocker.summary optional {"default":"","type":"string"}
+Blocker.turn_failure optional {"anyOf":[{"$ref":"#/$defs/TurnFailureKind"},{"type":"null"}],"default":null}
+BlockerKind {"enum":["failed","rejected","no_reply","reply_rejected"],"type":"string"}
+CheckpointDecline {"enum":["writer_active","unauthorized","uncharged","not_active","snapshot_failed"],"type":"string"}
+ChildManifest {"additionalProperties":false,"type":"object"}
+ChildManifest.basis required {"enum":["enumerated","lifecycle-closed"],"type":"string"}
+ChildManifest.members optional {"default":[],"items":{"$ref":"#/$defs/ResourceId"},"type":"array"}
+CombinePick {"additionalProperties":false,"type":"object"}
+CombinePick.hypothesis_id required {"type":"string"}
+CombinePick.revision required {"type":"string"}
+CombineSource {"additionalProperties":false,"type":"object"}
+CombineSource.built_on required {"$ref":"#/$defs/RevisionRef"}
+CombineSource.hypothesis_id required {"type":"string"}
+CombineSource.metric optional {"anyOf":[{"$ref":"#/$defs/MetricRow"},{"type":"null"}],"default":null}
+CombineSource.revision required {"$ref":"#/$defs/RevisionRef"}
+Count {"minimum":0,"type":"integer"}
+DecisionId {"additionalProperties":false,"type":"object"}
+DecisionId.kind optional {"const":"decision","default":"decision","type":"string"}
+DecisionId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
+Direction {"enum":["max","min"],"type":"string"}
+DropReason {"enum":["superseded","stopped","restarted"],"type":"string"}
+Dropped {"additionalProperties":false,"type":"object"}
+Dropped.by optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
+Dropped.kind optional {"const":"dropped","default":"dropped","type":"string"}
+Dropped.reason required {"$ref":"#/$defs/DropReason"}
+DynamicConfig {"additionalProperties":false,"type":"object"}
+DynamicConfig.evaluation_slots optional {"anyOf":[{"$ref":"#/$defs/Width"},{"type":"null"}],"default":null}
+DynamicConfig.input_wait_seconds optional {"anyOf":[{"$ref":"#/$defs/Wait"},{"type":"null"}],"default":3600.0}
+DynamicConfig.judge_every optional {"$ref":"#/$defs/Positive","default":1}
+DynamicConfig.max_backlog optional {"anyOf":[{"maximum":32,"minimum":0,"type":"integer"},{"type":"null"}],"default":null}
+DynamicConfig.max_continuation_rounds optional {"$ref":"#/$defs/NonNegative","default":2}
+DynamicConfig.max_in_flight optional {"$ref":"#/$defs/Width","default":2}
+DynamicConfig.max_rounds required {"$ref":"#/$defs/Positive"}
+DynamicConfig.max_unmeasured_turns optional {"$ref":"#/$defs/Width","default":2}
+DynamicConfig.mode optional {"$ref":"#/$defs/PlanMode","default":"explore"}
+DynamicConfig.pick optional {"$ref":"#/$defs/PickPolicy","default":"newest"}
+DynamicConfig.plan optional {"anyOf":[{"$ref":"#/$defs/Outline"},{"type":"null"}],"default":null}
+DynamicConfig.profiling optional {"default":false,"type":"boolean"}
+EligibleRound {"type":"object"}
+EligibleRound.candidate required {"$ref":"#/$defs/RevisionRef"}
+EligibleRound.hypothesis_id required {"type":"string"}
+EligibleRound.metrics required {"items":{"$ref":"#/$defs/MetricRow"},"type":"array"}
+EligibleRound.sequence required {"type":"integer"}
+EligibleRound.settlement required {"$ref":"#/$defs/SettlementId"}
+EventId {"additionalProperties":false,"type":"object"}
+EventId.kind optional {"const":"event","default":"event","type":"string"}
+EventId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
+EvidenceAcceptanceReceipt {"additionalProperties":false,"type":"object"}
+EvidenceAcceptanceReceipt.observation required {"$ref":"#/$defs/Observation"}
+EvidenceId {"additionalProperties":false,"type":"object"}
+EvidenceId.kind optional {"const":"evidence","default":"evidence","type":"string"}
+EvidenceId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
+EvidenceKey {"additionalProperties":false,"type":"object"}
+EvidenceKey.evidence_id required {"$ref":"#/$defs/EvidenceId"}
+EvidenceKey.kind optional {"const":"evidence_key","default":"evidence_key","type":"string"}
+EvidenceKey.source_request required {"$ref":"#/$defs/RequestId"}
+EvidenceKind {"enum":["correctness","benchmark","profiling"],"type":"string"}
+EvidenceRef {"additionalProperties":false,"type":"object"}
+EvidenceRef.acceptance_receipt optional {"anyOf":[{"$ref":"#/$defs/EvidenceAcceptanceReceipt"},{"type":"null"}],"default":null}
+EvidenceRef.artifacts optional {"default":[],"items":{"$ref":"#/$defs/ArtifactRef"},"type":"array"}
+EvidenceRef.candidate required {"$ref":"#/$defs/RevisionRef"}
+EvidenceRef.environment_digest required {"type":"string"}
+EvidenceRef.evaluator_digest required {"type":"string"}
+EvidenceRef.evidence_id required {"$ref":"#/$defs/EvidenceId"}
+EvidenceRef.kind required {"$ref":"#/$defs/EvidenceKind"}
+EvidenceRef.observation_sequence required {"$ref":"#/$defs/Count"}
+EvidenceRef.provenance required {"enum":["trusted","self-report"],"type":"string"}
+EvidenceRef.purpose required {"enum":["baseline","local-validation","official","profile"],"type":"string"}
+EvidenceRef.reading optional {"anyOf":[{"$ref":"#/$defs/Reading"},{"type":"null"}],"default":null}
+EvidenceRef.reused_from optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
+EvidenceRef.scope required {"$ref":"#/$defs/Scope"}
+EvidenceRef.source_request required {"$ref":"#/$defs/RequestId"}
+EvidenceRef.status required {"$ref":"#/$defs/ObservationStatus"}
+EvidenceRef.unmet_requirement optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
+EvidenceRef.workload_digest required {"type":"string"}
+Failure {"additionalProperties":false,"type":"object"}
+Failure.blocker optional {"anyOf":[{"$ref":"#/$defs/Blocker"},{"type":"null"}],"default":null}
+Failure.cause optional {"anyOf":[{"$ref":"#/$defs/RejectionCode"},{"type":"null"}],"default":null}
+Failure.declined optional {"anyOf":[{"$ref":"#/$defs/CheckpointDecline"},{"type":"null"}],"default":null}
+Failure.dropped optional {"anyOf":[{"$ref":"#/$defs/DropReason"},{"type":"null"}],"default":null}
+Failure.ended optional {"anyOf":[{"$ref":"#/$defs/FailureReason"},{"type":"null"}],"default":null}
+Failure.kind required {"$ref":"#/$defs/FailureKind"}
+Failure.limit optional {"anyOf":[{"type":"integer"},{"type":"null"}],"default":null}
+Failure.operator_output optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
+Failure.output optional {"default":"","type":"string"}
+Failure.refusal optional {"anyOf":[{"$ref":"#/$defs/WaitRefusal"},{"type":"null"}],"default":null}
+Failure.revision optional {"anyOf":[{"$ref":"#/$defs/RevisionRef"},{"type":"null"}],"default":null}
+Failure.role optional {"anyOf":[{"$ref":"#/$defs/AgentName"},{"type":"null"}],"default":null}
+Failure.status optional {"anyOf":[{"$ref":"#/$defs/ObservationStatus"},{"type":"null"}],"default":null}
+Failure.superseded_by optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
+Failure.turn_failure optional {"anyOf":[{"$ref":"#/$defs/TurnFailureKind"},{"type":"null"}],"default":null}
+Failure.turns optional {"anyOf":[{"type":"integer"},{"type":"null"}],"default":null}
+FailureKind {"enum":["stopped","parent-unverified","refused","ended","out-of-budget","turn-failed","invalid-reply","render-failed","wait-refused","checkpoint-declined","no-changed-candidate","implementation-failed","review-rejected","no-trusted-evidence","evidence-refused","evidence-undecodable","profile-capture-unavailable","turn-limit","repeated-turn","not-measured","merge-refused","merge-unsound","merge-regressed"],"type":"string"}
+FailureReason {"enum":["timed-out","workspace-closed","owner-gone","refused","lost","invalid-reply","render-failed","turn-failed","wait-refused","queue-budget-spent","out-of-budget","measurement-untrusted"],"type":"string"}
+FinishedWork {"additionalProperties":false,"type":"object"}
+FinishedWork.failure optional {"anyOf":[{"$ref":"#/$defs/Failure"},{"type":"null"}],"default":null}
+FinishedWork.main_base optional {"anyOf":[{"$ref":"#/$defs/RevisionRef"},{"type":"null"}],"default":null}
+FinishedWork.parent required {"$ref":"#/$defs/RevisionRef"}
+FinishedWork.parent_hypothesis_id optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
+FinishedWork.plan required {"$ref":"#/$defs/WorkPlan"}
+FinishedWork.proof optional {"anyOf":[{"$ref":"#/$defs/Proof"},{"type":"null"}],"default":null}
+FinishedWork.readings optional {"default":[],"items":{"$ref":"#/$defs/AcceptedReading"},"type":"array"}
+FinishedWork.sequence required {"exclusiveMinimum":0,"type":"integer"}
+Finite {"type":"number"}
+Generation {"minimum":0,"type":"integer"}
+HypothesisOutcome {"enum":["continue","supported","nominated","disproven","implementation_failed","inconclusive","blocked"],"type":"string"}
+HypothesisRecord {"additionalProperties":false,"type":"object"}
+HypothesisRecord.combined_from optional {"default":[],"items":{"$ref":"#/$defs/CombineSource"},"type":"array"}
+HypothesisRecord.continuation_rounds optional {"default":0,"minimum":0,"type":"integer"}
+HypothesisRecord.first_sequence required {"exclusiveMinimum":0,"type":"integer"}
+HypothesisRecord.hypothesis required {"type":"string"}
+HypothesisRecord.hypothesis_id required {"minLength":1,"type":"string"}
+HypothesisRecord.last_task optional {"default":"","type":"string"}
+HypothesisRecord.lineage_parent_id optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
+HypothesisRecord.reason optional {"default":"","type":"string"}
+HypothesisRecord.reason_kind optional {"anyOf":[{"$ref":"#/$defs/StrategyReason"},{"type":"null"}],"default":null}
+HypothesisRecord.rounds optional {"default":[],"items":{"$ref":"#/$defs/RoundRecord"},"type":"array"}
+HypothesisRecord.strategy optional {"$ref":"#/$defs/HypothesisStrategy","default":"available"}
+HypothesisRecord.title required {"type":"string"}
+HypothesisStrategy {"enum":["available","parked","abandoned"],"type":"string"}
+InputFailure {"additionalProperties":false,"type":"object"}
+InputFailure.blamed optional {"anyOf":[{"$ref":"#/$defs/MeasurementFailure"},{"type":"null"}],"default":null}
+InputFailure.cause optional {"anyOf":[{"$ref":"#/$defs/RejectionCode"},{"type":"null"}],"default":null}
+InputFailure.ended optional {"anyOf":[{"$ref":"#/$defs/FailureReason"},{"type":"null"}],"default":null}
+InputFailure.kind required {"$ref":"#/$defs/InputFailureKind"}
+InputFailure.output optional {"default":"","type":"string"}
+InputFailure.stage optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
+InputFailure.status optional {"anyOf":[{"$ref":"#/$defs/ObservationStatus"},{"type":"null"}],"default":null}
+InputFailureKind {"enum":["no-evidence","readings-refused","readings-undecodable","accuracy-failed","benchmark-failed","wait-ended"],"type":"string"}
+InputOverdue {"additionalProperties":false,"type":"object"}
+InputOverdue.key required {"type":"string"}
+InputOverdue.limit required {"type":"number"}
+InputOverdue.since required {"type":"number"}
+InputReading {"additionalProperties":false,"type":"object"}
+InputReading.accuracy_passed optional {"anyOf":[{"type":"boolean"},{"type":"null"}],"default":null}
+InputReading.benchmark_passed optional {"anyOf":[{"type":"boolean"},{"type":"null"}],"default":null}
+InputReading.metrics optional {"default":[],"items":{"$ref":"#/$defs/MetricRow"},"type":"array"}
+InputReading.partial optional {"anyOf":[{"$ref":"#/$defs/PartialRow"},{"type":"null"}],"default":null}
+InvocationId {"additionalProperties":false,"type":"object"}
+InvocationId.kind optional {"const":"invocation","default":"invocation","type":"string"}
+InvocationId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
+InvocationRef {"additionalProperties":false,"type":"object"}
+InvocationRef.generation required {"minimum":0,"type":"integer"}
+InvocationRef.invocation_id required {"$ref":"#/$defs/InvocationId"}
+InvocationRef.session_id required {"$ref":"#/$defs/SessionId"}
+Kept {"additionalProperties":false,"type":"object"}
+Kept.settlement required {"$ref":"#/$defs/Settlement"}
+MainMeasurement {"additionalProperties":false,"type":"object"}
+MainMeasurement.accuracy_passed optional {"anyOf":[{"type":"boolean"},{"type":"null"}],"default":null}
+MainMeasurement.benchmark_passed optional {"anyOf":[{"type":"boolean"},{"type":"null"}],"default":null}
+MainMeasurement.merge_id required {"type":"string"}
+MainMeasurement.metrics optional {"default":[],"items":{"$ref":"#/$defs/MetricRow"},"type":"array"}
+MainMeasurement.previous optional {"default":[],"items":{"$ref":"#/$defs/MetricRow"},"type":"array"}
+MainMeasurement.revision required {"$ref":"#/$defs/RevisionRef"}
+MainState {"additionalProperties":false,"type":"object"}
+MainState.generation required {"type":"integer"}
+MainState.measurement required {"anyOf":[{"$ref":"#/$defs/MainMeasurement"},{"type":"null"}]}
+MainState.merged required {"items":{"maxItems":2,"minItems":2,"prefixItems":[{"type":"string"},{"type":"string"}],"type":"array"},"type":"array"}
+MainState.merges required {"items":{"$ref":"#/$defs/MergeRecord"},"type":"array"}
+MainState.revision required {"$ref":"#/$defs/RevisionRef"}
+MainState.rounds required {"items":{"$ref":"#/$defs/EligibleRound"},"type":"array"}
+Measured {"additionalProperties":false,"type":"object"}
+Measured.first_attempt optional {"anyOf":[{"$ref":"#/$defs/InputFailure"},{"type":"null"}],"default":null}
+Measured.kind optional {"const":"measured","default":"measured","type":"string"}
+Measured.reading required {"$ref":"#/$defs/InputReading"}
+MeasurementFailure {"enum":["workload","infrastructure","ambiguous","unknown","run_environment_unavailable"],"type":"string"}
+MergeOutcome {"enum":["merged","refused","failed"],"type":"string"}
+MergeRecord {"additionalProperties":false,"type":"object"}
+MergeRecord.accuracy_passed optional {"anyOf":[{"type":"boolean"},{"type":"null"}],"default":null}
+MergeRecord.base required {"$ref":"#/$defs/RevisionRef"}
+MergeRecord.benchmark_passed optional {"anyOf":[{"type":"boolean"},{"type":"null"}],"default":null}
+MergeRecord.candidates required {"items":{"$ref":"#/$defs/MergeSource"},"type":"array"}
+MergeRecord.failure optional {"anyOf":[{"$ref":"#/$defs/Failure"},{"type":"null"}],"default":null}
+MergeRecord.main_benchmark_passed optional {"anyOf":[{"type":"boolean"},{"type":"null"}],"default":null}
+MergeRecord.main_metrics optional {"default":[],"items":{"$ref":"#/$defs/MetricRow"},"type":"array"}
+MergeRecord.merge_id required {"type":"string"}
+MergeRecord.metrics optional {"default":[],"items":{"$ref":"#/$defs/MetricRow"},"type":"array"}
+MergeRecord.outcome required {"$ref":"#/$defs/MergeOutcome"}
+MergeRecord.reason optional {"default":"","type":"string"}
+MergeRecord.revision optional {"anyOf":[{"$ref":"#/$defs/RevisionRef"},{"type":"null"}],"default":null}
+MergeRecord.sequence required {"exclusiveMinimum":0,"type":"integer"}
+MergeRecord.summary optional {"default":"","type":"string"}
+MergeSource {"additionalProperties":false,"type":"object"}
+MergeSource.built_on optional {"anyOf":[{"$ref":"#/$defs/RevisionRef"},{"type":"null"}],"default":null}
+MergeSource.hypothesis_id required {"type":"string"}
+MergeSource.revision required {"$ref":"#/$defs/RevisionRef"}
+MetricRow {"additionalProperties":false,"type":"object"}
+MetricRow.direction required {"$ref":"#/$defs/Direction"}
+MetricRow.name required {"minLength":1,"type":"string"}
+MetricRow.unit optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
+MetricRow.value required {"$ref":"#/$defs/Finite"}
+NonNegative {"maximum":1000,"minimum":0,"type":"integer"}
+NotConfigured {"additionalProperties":false,"type":"object"}
+NotConfigured.kind optional {"const":"not_configured","default":"not_configured","type":"string"}
+Observation {"additionalProperties":false,"type":"object"}
+Observation.accepted optional {"default":false,"type":"boolean"}
+Observation.admission_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
+Observation.child_manifest optional {"anyOf":[{"$ref":"#/$defs/ChildManifest"},{"type":"null"}],"default":null}
+Observation.children optional {"default":[],"items":{"$ref":"#/$defs/ResourceId"},"type":"array"}
+Observation.children_complete optional {"default":false,"type":"boolean"}
+Observation.diagnostic optional {"default":"","type":"string"}
+Observation.event_id required {"$ref":"#/$defs/EventId"}
+Observation.measured_input optional {"anyOf":[{"minLength":1,"type":"string"},{"type":"null"}],"default":null}
+Observation.observed_at required {"$ref":"#/$defs/Seconds"}
+Observation.released optional {"default":false,"type":"boolean"}
+Observation.request_id required {"$ref":"#/$defs/RequestId"}
+Observation.resource_id optional {"anyOf":[{"$ref":"#/$defs/ResourceId"},{"type":"null"}],"default":null}
+Observation.revision optional {"anyOf":[{"$ref":"#/$defs/RevisionRef"},{"type":"null"}],"default":null}
+Observation.scope required {"$ref":"#/$defs/Scope"}
+Observation.sequence required {"$ref":"#/$defs/Count"}
+Observation.status required {"$ref":"#/$defs/ObservationStatus"}
+Observation.terminal optional {"default":false,"type":"boolean"}
+ObservationStatus {"enum":["succeeded","pending","cancelled","rejected","failed","unknown"],"type":"string"}
+Outline {"additionalProperties":false,"type":"object"}
+Outline.deviations optional {"default":"record","enum":["record","forbid"],"type":"string"}
+Outline.documents required {"items":{"type":"string"},"minItems":1,"type":"array"}
+Outline.steps optional {"default":[],"items":{"$ref":"#/$defs/Step"},"type":"array"}
+ParentSnapshot {"additionalProperties":false,"type":"object"}
+ParentSnapshot.accuracy required {"$ref":"#/$defs/AcceptedReading"}
+ParentSnapshot.benchmark optional {"anyOf":[{"$ref":"#/$defs/AcceptedReading"},{"type":"null"}],"default":null}
+ParentSnapshot.change_summary optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
+ParentSnapshot.generation optional {"default":0,"type":"integer"}
+ParentSnapshot.hypothesis_id required {"type":"string"}
+ParentSnapshot.proof optional {"default":[],"items":{"$ref":"#/$defs/EvidenceRef"},"type":"array"}
+ParentSnapshot.revision required {"$ref":"#/$defs/RevisionRef"}
+ParentSnapshot.submission_index optional {"default":0,"type":"integer"}
+PartialRow {"additionalProperties":false,"type":"object"}
+PartialRow.completed optional {"anyOf":[{"minimum":0,"type":"integer"},{"type":"null"}],"default":null}
+PartialRow.direction required {"$ref":"#/$defs/Direction"}
+PartialRow.name required {"minLength":1,"type":"string"}
+PartialRow.progress_unit optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
+PartialRow.required optional {"anyOf":[{"exclusiveMinimum":0,"type":"integer"},{"type":"null"}],"default":null}
+PartialRow.target optional {"anyOf":[{"$ref":"#/$defs/Finite"},{"type":"null"}],"default":null}
+PartialRow.unit optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
+PartialRow.value required {"$ref":"#/$defs/Finite"}
+PickPolicy {"enum":["newest","ranked"],"type":"string"}
+PlanMode {"enum":["explore","follow_plan"],"type":"string"}
+PlanProblem {"additionalProperties":false,"type":"object"}
+PlanProblem.ended optional {"anyOf":[{"$ref":"#/$defs/FailureReason"},{"type":"null"}],"default":null}
+PlanProblem.errors optional {"default":[],"items":{"$ref":"#/$defs/ReplyError"},"type":"array"}
+PlanProblem.kind required {"$ref":"#/$defs/ProblemKind"}
+PlanProblem.scheduled optional {"default":0,"minimum":0,"type":"integer"}
+PlanProblem.turn_failure optional {"anyOf":[{"$ref":"#/$defs/TurnFailureKind"},{"type":"null"}],"default":null}
+PlanProblem.violations optional {"default":[],"items":{"$ref":"#/$defs/PlanViolation"},"type":"array"}
+PlanProblem.wanted optional {"default":0,"minimum":0,"type":"integer"}
+PlanViolation {"additionalProperties":false,"type":"object"}
+PlanViolation.capacity optional {"anyOf":[{"type":"integer"},{"type":"null"}],"default":null}
+PlanViolation.code required {"$ref":"#/$defs/ViolationCode"}
+PlanViolation.fields optional {"default":[],"items":{"type":"string"},"type":"array"}
+PlanViolation.path required {"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array"}
+PlanViolation.requested optional {"anyOf":[{"type":"integer"},{"type":"null"}],"default":null}
+PlanViolation.revision optional {"default":"","type":"string"}
+PlanViolation.subject optional {"default":"","type":"string"}
+PlanViolation.supplied optional {"default":[],"items":{"type":"string"},"type":"array"}
+PlanViolation.usable optional {"default":[],"items":{"$ref":"#/$defs/Alternative"},"type":"array"}
+Positive {"exclusiveMinimum":0,"maximum":1000,"type":"integer"}
+ProblemKind {"enum":["unparseable","violations","underfilled","no-reply"],"type":"string"}
+Proof {"additionalProperties":false,"type":"object"}
+Proof.refs required {"items":{"$ref":"#/$defs/EvidenceRef"},"type":"array"}
+QueueState {"additionalProperties":false,"type":"object"}
+QueueState.built_on required {"items":{"maxItems":2,"minItems":2,"prefixItems":[{"$ref":"#/$defs/RevisionRef"},{"$ref":"#/$defs/RevisionRef"}],"type":"array"},"type":"array"}
+QueueState.dropped required {"items":{"maxItems":2,"minItems":2,"prefixItems":[{"$ref":"#/$defs/Queued"},{"$ref":"#/$defs/Dropped"}],"type":"array"},"type":"array"}
+QueueState.holding required {"items":{"type":"string"},"type":"array"}
+QueueState.last_bound required {"anyOf":[{"$ref":"#/$defs/Queued"},{"type":"null"}]}
+QueueState.overtaken required {"items":{"maxItems":2,"minItems":2,"prefixItems":[{"type":"string"},{"type":"integer"}],"type":"array"},"type":"array"}
+QueueState.pending required {"items":{"$ref":"#/$defs/Queued"},"type":"array"}
+QueueState.ranking required {"items":{"type":"string"},"type":"array"}
+QueueState.received required {"type":"integer"}
+Queued {"additionalProperties":false,"type":"object"}
+Queued.order required {"exclusiveMinimum":0,"type":"integer"}
+Queued.submission required {"$ref":"#/$defs/Submission"}
+Reading {"additionalProperties":false,"type":"object"}
+Reading.direction optional {"anyOf":[{"enum":["max","min"],"type":"string"},{"type":"null"}],"default":null}
+Reading.metric required {"minLength":1,"type":"string"}
+Reading.repetitions optional {"default":1,"minimum":1,"type":"integer"}
+Reading.unit optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
+Reading.value required {"type":"number"}
+RecordState {"additionalProperties":false,"type":"object"}
+RecordState.accepted required {"items":{"$ref":"#/$defs/WorkPlan"},"type":"array"}
+RecordState.baseline required {"anyOf":[{"$ref":"#/$defs/Baseline"},{"type":"null"}]}
+RecordState.calls required {"type":"integer"}
+RecordState.evaluations required {"$ref":"#/$defs/QueueState"}
+RecordState.finished_work required {"items":{"$ref":"#/$defs/FinishedWork"},"type":"array"}
+RecordState.gate_blocked_at_done required {"anyOf":[{"type":"integer"},{"type":"null"}]}
+RecordState.gate_failed required {"type":"boolean"}
+RecordState.gate_last_error required {"anyOf":[{"$ref":"#/$defs/PlanProblem"},{"type":"null"}]}
+RecordState.handoffs required {"items":{"type":"string"},"type":"array"}
+RecordState.hypotheses required {"items":{"maxItems":2,"minItems":2,"prefixItems":[{"type":"string"},{"$ref":"#/$defs/HypothesisRecord"}],"type":"array"},"type":"array"}
+RecordState.input_overdue required {"anyOf":[{"$ref":"#/$defs/InputOverdue"},{"type":"null"}]}
+RecordState.kept required {"items":{"maxItems":2,"minItems":2,"prefixItems":[{"type":"string"},{"$ref":"#/$defs/Kept"}],"type":"array"},"type":"array"}
+RecordState.main required {"$ref":"#/$defs/MainState"}
+RecordState.main_seen required {"items":{"maxItems":2,"minItems":2,"prefixItems":[{"type":"string"},{"type":"integer"}],"type":"array"},"type":"array"}
+RecordState.outline required {"anyOf":[{"items":{"$ref":"#/$defs/Step"},"type":"array"},{"type":"null"}]}
+RecordState.parents required {"items":{"$ref":"#/$defs/ParentSnapshot"},"type":"array"}
+RecordState.planned_by optional {"default":[],"items":{"maxItems":2,"minItems":2,"prefixItems":[{"type":"string"},{"type":"string"}],"type":"array"},"type":"array"}
+RecordState.refunded required {"type":"integer"}
+RecordState.resuming optional {"default":[],"items":{"maxItems":2,"minItems":2,"prefixItems":[{"type":"string"},{"type":"integer"}],"type":"array"},"type":"array"}
+RecordState.running required {"items":{"$ref":"#/$defs/WorkstreamStart"},"type":"array"}
+RecordState.submitted required {"items":{"$ref":"#/$defs/Submission"},"type":"array"}
+RecordState.suspended optional {"default":[],"items":{"maxItems":2,"minItems":2,"prefixItems":[{"type":"string"},{"type":"integer"}],"type":"array"},"type":"array"}
+RecordState.unreachable required {"items":{"$ref":"#/$defs/Unreachable"},"type":"array"}
+RecordState.unseated optional {"default":[],"items":{"type":"string"},"type":"array"}
+RecordState.waits optional {"anyOf":[{"items":{"type":"string"},"type":"array"},{"type":"null"}],"default":null}
+RecordState.withheld required {"items":{"type":"string"},"type":"array"}
+RejectionCode {"enum":["stale-view","identity-conflict","unknown-kind","unknown-schema","undeclared-operation","capability","ownership","generation","closed-scope","budget","dependency","evidence","already-settled","not-implemented-in-kernel"],"type":"string"}
+ReplyError {"additionalProperties":false,"type":"object"}
+ReplyError.code required {"$ref":"#/$defs/ReplyErrorCode"}
+ReplyError.message optional {"default":"","maxLength":500,"type":"string"}
+ReplyError.path required {"items":{"$ref":"#/$defs/ReplyPathPart"},"type":"array"}
+ReplyErrorCode {"enum":["missing","unexpected","wrong-type","invalid-value","not-json"],"type":"string"}
+ReplyPathPart {"anyOf":[{"type":"string"},{"type":"integer"}]}
+RequestId {"additionalProperties":false,"type":"object"}
+RequestId.kind optional {"const":"request","default":"request","type":"string"}
+RequestId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
+ResourceId {"additionalProperties":false,"type":"object"}
+ResourceId.kind optional {"const":"resource","default":"resource","type":"string"}
+ResourceId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
+RevisionId {"additionalProperties":false,"type":"object"}
+RevisionId.kind optional {"const":"revision","default":"revision","type":"string"}
+RevisionId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
+RevisionRef {"additionalProperties":false,"type":"object"}
+RevisionRef.digest required {"minLength":1,"type":"string"}
+RevisionRef.revision_id required {"$ref":"#/$defs/RevisionId"}
+RoundRecord {"additionalProperties":false,"type":"object"}
+RoundRecord.accuracy_passed optional {"anyOf":[{"type":"boolean"},{"type":"null"}],"default":null}
+RoundRecord.attempt required {"$ref":"#/$defs/AttemptId"}
+RoundRecord.benchmark_passed optional {"anyOf":[{"type":"boolean"},{"type":"null"}],"default":null}
+RoundRecord.candidate optional {"anyOf":[{"$ref":"#/$defs/RevisionRef"},{"type":"null"}],"default":null}
+RoundRecord.eligible optional {"default":false,"type":"boolean"}
+RoundRecord.failure optional {"anyOf":[{"$ref":"#/$defs/Failure"},{"type":"null"}],"default":null}
+RoundRecord.failure_tail optional {"default":"","type":"string"}
+RoundRecord.kept_active optional {"default":false,"type":"boolean"}
+RoundRecord.metrics optional {"default":[],"items":{"$ref":"#/$defs/MetricRow"},"type":"array"}
+RoundRecord.outcome optional {"anyOf":[{"$ref":"#/$defs/HypothesisOutcome"},{"type":"null"}],"default":null}
+RoundRecord.partial optional {"anyOf":[{"$ref":"#/$defs/PartialRow"},{"type":"null"}],"default":null}
+RoundRecord.review_passed optional {"anyOf":[{"type":"boolean"},{"type":"null"}],"default":null}
+RoundRecord.sequence required {"exclusiveMinimum":0,"type":"integer"}
+RoundRecord.settlement optional {"anyOf":[{"$ref":"#/$defs/SettlementId"},{"type":"null"}],"default":null}
+RoundRecord.summary optional {"default":"","type":"string"}
+RoundRecord.unapplied optional {"default":[],"items":{"$ref":"#/$defs/UnappliedPart"},"type":"array"}
+RoundRecord.unattributed optional {"default":[],"items":{"$ref":"#/$defs/UnappliedPart"},"type":"array"}
+RunId {"additionalProperties":false,"type":"object"}
+RunId.kind optional {"const":"run","default":"run","type":"string"}
+RunId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
+SchemaRef {"additionalProperties":false,"type":"object"}
+SchemaRef.name required {"minLength":1,"type":"string"}
+SchemaRef.version required {"minimum":1,"type":"integer"}
+Scope {"additionalProperties":false,"type":"object"}
+Scope.generation required {"minimum":0,"type":"integer"}
+Scope.owner required {"$ref":"#/$defs/ScopeOwner"}
+ScopeOwner {"discriminator":{"mapping":{"attempt":"#/$defs/AttemptId","run":"#/$defs/RunId"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/RunId"},{"$ref":"#/$defs/AttemptId"}]}
+Seconds {"minimum":0,"type":"number"}
+SessionId {"additionalProperties":false,"type":"object"}
+SessionId.kind optional {"const":"session","default":"session","type":"string"}
+SessionId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
+Settlement {"additionalProperties":false,"type":"object"}
+Settlement.assessments required {"items":{"$ref":"#/$defs/AssessmentProposal"},"type":"array"}
+Settlement.attempt required {"$ref":"#/$defs/AttemptRef"}
+Settlement.candidate required {"anyOf":[{"$ref":"#/$defs/RevisionRef"},{"type":"null"}]}
+Settlement.eligible required {"type":"boolean"}
+Settlement.outcome required {"enum":["succeeded","failed","cancelled","blocked"],"type":"string"}
+Settlement.retention required {"enum":["discard","wip","candidate"],"type":"string"}
+Settlement.settlement_id required {"$ref":"#/$defs/SettlementId"}
+SettlementId {"additionalProperties":false,"type":"object"}
+SettlementId.kind optional {"const":"settlement","default":"settlement","type":"string"}
+SettlementId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
+Step {"additionalProperties":false,"type":"object"}
+Step.depends_on optional {"default":[],"items":{"$ref":"#/$defs/StepId"},"type":"array"}
+Step.documents optional {"default":[],"items":{"type":"string"},"type":"array"}
+Step.done_when required {"maxLength":2000,"minLength":1,"type":"string"}
+Step.evaluate required {"enum":["none","trusted"],"type":"string"}
+Step.id required {"$ref":"#/$defs/StepId"}
+Step.title required {"maxLength":200,"minLength":1,"type":"string"}
+StepId {"pattern":"^[a-z0-9][a-z0-9_-]{0,39}$","type":"string"}
+StrategyReason {"enum":["infeasible","falsified","blocked","superseded","lower_priority"],"type":"string"}
+StrayUnapplied {"additionalProperties":false,"type":"object"}
+StrayUnapplied.hypothesis_id required {"type":"string"}
+StrayUnapplied.index required {"minimum":0,"type":"integer"}
+Submission {"additionalProperties":false,"type":"object"}
+Submission.at required {"minimum":0,"type":"number"}
+Submission.candidate required {"$ref":"#/$defs/RevisionRef"}
+Submission.key required {"type":"string"}
+Submission.kind required {"$ref":"#/$defs/WorkKind"}
+Submission.parent required {"$ref":"#/$defs/RevisionRef"}
+Submission.work_id required {"type":"string"}
+TurnFailureKind {"enum":["provider_failed","transport_lost","cancelled","epoch_interrupted","provider_unavailable"],"type":"string"}
+UnappliedPart {"additionalProperties":false,"type":"object"}
+UnappliedPart.hypothesis_id required {"minLength":1,"type":"string"}
+UnappliedPart.part required {"minLength":1,"type":"string"}
+UnappliedPart.why required {"minLength":1,"type":"string"}
+Unmeasurable {"additionalProperties":false,"type":"object"}
+Unmeasurable.failure required {"$ref":"#/$defs/InputFailure"}
+Unmeasurable.first_attempt optional {"anyOf":[{"$ref":"#/$defs/InputFailure"},{"type":"null"}],"default":null}
+Unmeasurable.kind optional {"const":"unmeasurable","default":"unmeasurable","type":"string"}
+Unmeasurable.reading optional {"anyOf":[{"$ref":"#/$defs/InputReading"},{"type":"null"}],"default":null}
+Unreachable {"additionalProperties":false,"type":"object"}
+Unreachable.reason required {"$ref":"#/$defs/UnreachableReason"}
+Unreachable.subject required {"type":"string"}
+UnreachableReason {"enum":["profile-capability-not-offered","resume-capability-not-offered"],"type":"string"}
+ViolationCode {"enum":["over-capacity","duplicate-id","hypothesis-id-used","hypothesis-abandoned","hypothesis-in-flight","hypothesis-unknown","hypothesis-terminal","hypothesis-blocked","revision-without-parent","continuation-has-parent","revision-not-offered","parent-not-buildable","profile-not-offered","profile-fields-unsupported","profile-id-used","update-running","update-duplicate","update-unknown","update-incomplete","outside-plan","expectation-unknown","ranking-unknown","ranking-duplicate","merge-id-used","merge-in-flight","merge-candidate-repeated","merge-candidate-is-main","merge-candidate-merged","merge-candidate-not-better","merge-baseline-pending","merge-uncheckable","combine-parent-repeated"],"type":"string"}
+Wait {"exclusiveMinimum":0,"maximum":604800,"type":"number"}
+WaitRefusal {"enum":["not-offered","not-recorded","not-published","not-resumable"],"type":"string"}
+Width {"exclusiveMinimum":0,"maximum":32,"type":"integer"}
+WorkKind {"enum":["implement","profile","merge"],"type":"string"}
+WorkPlan {"additionalProperties":false,"type":"object"}
+WorkPlan.candidates optional {"default":[],"items":{"type":"string"},"type":"array"}
+WorkPlan.combine optional {"default":[],"items":{"$ref":"#/$defs/CombinePick"},"type":"array"}
+WorkPlan.continue_hypothesis optional {"default":false,"type":"boolean"}
+WorkPlan.decision_impact optional {"default":"","type":"string"}
+WorkPlan.evidence optional {"default":[],"items":{"type":"string"},"type":"array"}
+WorkPlan.hypothesis optional {"default":"","type":"string"}
+WorkPlan.instructions optional {"default":"","type":"string"}
+WorkPlan.kind required {"$ref":"#/$defs/WorkKind"}
+WorkPlan.parent_hypothesis_id optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
+WorkPlan.parent_revision optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
+WorkPlan.pass_criteria optional {"default":"","type":"string"}
+WorkPlan.question optional {"default":"","type":"string"}
+WorkPlan.required_fields optional {"default":[],"items":{"type":"string"},"type":"array"}
+WorkPlan.step optional {"anyOf":[{"$ref":"#/$defs/Step"},{"type":"null"}],"default":null}
+WorkPlan.task optional {"default":"","type":"string"}
+WorkPlan.title optional {"default":"","type":"string"}
+WorkPlan.watch_for optional {"default":"","type":"string"}
+WorkPlan.work_id required {"minLength":1,"type":"string"}
+WorkstreamStart {"additionalProperties":false,"type":"object"}
+WorkstreamStart.baseline required {"anyOf":[{"$ref":"#/$defs/Baseline"},{"type":"null"}]}
+WorkstreamStart.combine optional {"default":[],"items":{"$ref":"#/$defs/CombineSource"},"type":"array"}
+WorkstreamStart.config required {"$ref":"#/$defs/DynamicConfig"}
+WorkstreamStart.key required {"type":"string"}
+WorkstreamStart.merge optional {"default":[],"items":{"$ref":"#/$defs/MergeSource"},"type":"array"}
+WorkstreamStart.parent required {"$ref":"#/$defs/RevisionRef"}
+WorkstreamStart.parent_hypothesis_id required {"anyOf":[{"type":"string"},{"type":"null"}]}
+WorkstreamStart.parent_main optional {"anyOf":[{"$ref":"#/$defs/RevisionRef"},{"type":"null"}],"default":null}
+WorkstreamStart.plan required {"$ref":"#/$defs/WorkPlan"}
+WorkstreamStart.prior required {"anyOf":[{"$ref":"#/$defs/RoundRecord"},{"type":"null"}]}
+WorkstreamStart.rebase_onto optional {"anyOf":[{"$ref":"#/$defs/RevisionRef"},{"type":"null"}],"default":null}
+WorkstreamStart.sequence required {"type":"integer"}
+WorkstreamStart.started_by optional {"default":[],"items":{"type":"string"},"type":"array"}
+_MeasuredBeforeS173 {"additionalProperties":false,"type":"object"}
+_MeasuredBeforeS173.first_attempt optional {"anyOf":[{"$ref":"#/$defs/InputFailure"},{"type":"null"}],"default":null}
+_MeasuredBeforeS173.kind optional {"const":"measured","default":"measured","type":"string"}
+_MeasuredBeforeS173.reading required {"$ref":"#/$defs/InputReading"}

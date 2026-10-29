@@ -9,5 +9,11 @@
     "noEmit": true,
     "tsBuildInfoFile": ".tsbuild/node.tsbuildinfo"
   },
-  "include": ["vite.config.ts", "playwright.config.ts", "../../tools/e2e/free-port.mts", "e2e/**/*.ts"]
+  "include": ["vite.config.ts", "playwright.config.ts", "../../tools/e2e/free-port.mts", "../../tools/e2e/shard.mts", "e2e/**/*.ts", "src/testing/gateway-wire.ts"],
+  "references": [
+    {"path": "../../libs/contracts/tsconfig.lib.json"},
+    {"path": "../../libs/ipc/tsconfig.lib.json"},
+    {"path": "../../libs/run-fixtures/tsconfig.lib.json"},
+    {"path": "../../features/new-run/tsconfig.state.json"}
+  ]
 }

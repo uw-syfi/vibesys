@@ -1,0 +1,44 @@
+{
+  "format": 1,
+  "name": "lineage10",
+  "description": "Native journey scenario: lineage10.",
+  "runId": "20261017-120000",
+  "state": "live",
+  "objective": {
+    "text": "Maximize trusted end-to-end throughput of the MPMC queue.",
+    "metric": "total_ops_per_sec",
+    "unit": "ops/s",
+    "direction": "max"
+  },
+  "events": [
+    {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "run_started",
+      "data": {
+        "kind": "run_started",
+        "overview": {
+          "objective": {
+            "text": "Maximize trusted end-to-end throughput of the MPMC queue.",
+            "metric": "total_ops_per_sec",
+            "unit": "ops/s",
+            "direction": "max",
+            "correctness_check": []
+          }
+        },
+        "outer_loop": "dynamic",
+        "input": "objective.md",
+        "expected_roles": [
+          "orchestrator",
+          "implementer",
+          "judge"
+        ]
+      },
+      "sequence": 1
+    }
+  ],
+  "lineage": {
+    "count": 10,
+    "chain": 4,
+    "days": 1
+  }
+}

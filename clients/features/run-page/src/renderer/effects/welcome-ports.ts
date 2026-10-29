@@ -7,41 +7,60 @@
  * window (`attach`, the same run control a run page uses) and its session runs over the window's
  * relay (`run-connection.ts`); Pause and Resume are commands on that session.
  */
-import {validateRunEvent} from '@vibesys/contracts';
+import {type RunStatus, validateRunEvent} from '@vibesys/contracts';
+import {recordedProjectRoot} from '@vibesys/hosts';
 import {
   type DesktopBridge,
   type RunHistoryPage,
+  type RunSpanPage,
+  type RunSummaryResult,
   settled,
   type WelcomeBridge,
   type WelcomeResult,
 } from '@vibesys/ipc';
 import type {LogListOutcome, LogReadInput, LogReadOutcome, LogTransport} from '@vibesys/logs';
+import {newRequestId} from '@vibesys/request-identity';
 import {WebSession, type WebSessionOptions} from '@vibesys/run-session';
 import {exactResumeRunId, type RunRef} from '@vibesys/runs';
 import type {AbortSignalLike} from '@vibesys/transport';
-import type {HistoryReply} from '../../state/index.js';
+import {
+  type HistoryReply,
+  type SpanDetailReply,
+  type SummaryReply,
+  summaryFacts,
+} from '../../state/index.js';
 import type {LiveSession, SessionObserver} from './live-session.js';
 import {type PortMessages, welcomeRunBridge} from './run-connection.js';
 import type {RunPagePorts} from './store.js';
+import {sharedTracePages, type TracePageCache, traceReader} from './trace-pages.js';
+import type {RunPageAddress} from './use-zoom.js';
 
 /** The welcome bridge's calls the Run screen makes. */
 export type RunPageBridge = Pick<
   WelcomeBridge,
-  | 'stopConfirmed'
   | 'resume'
   | 'archive'
   | 'logs'
   | 'releaseLogs'
   | 'attach'
+  | 'attachReader'
   | 'releaseRun'
   | 'connectRun'
   | 'onWake'
   | 'readEvents'
+  | 'readTrace'
+  | 'readSummary'
+  | 'readSpan'
+  | 'harnesses'
 >;
 
 /** The page the session runs in: where the preload's ports arrive, and the app's session wiring. */
 export interface RunPagePage {
   readonly messages: PortMessages;
+  /** The window's address and keys, where the screen keeps its zoom. */
+  readonly address: RunPageAddress;
+  /** The window's clock, in epoch milliseconds. */
+  now(): number;
   /** The session's transport and lifecycle over the run's bridge (the app builds transports). */
   session(bridge: DesktopBridge): Omit<WebSessionOptions, 'onTracePublication'>;
 }
@@ -49,7 +68,8 @@ export interface RunPagePage {
 /** What the screen's run is, beyond its identity, at the moment a command is sent. */
 export interface RunPageTarget {
   readonly run: RunRef;
-  readonly project: string;
+  /** The recorded project root at the moment of the call, or '' when the run has none. */
+  project(): string;
   /** The server instance driving or last driving the run; null before the record is known. */
   instance(): string | null;
 }
@@ -64,12 +84,41 @@ export interface RunPageNavigation {
 function historyReply(page: RunHistoryPage): HistoryReply {
   if (page.kind === 'unsupported') return page;
   try {
-    return {...page, events: page.events.map(validateRunEvent)};
+    // The page's size as decoded: the loading screen's "read so far" (the wire carries no count).
+    const bytes = JSON.stringify(page.events).length;
+    return {...page, bytes, events: page.events.map(validateRunEvent)};
   } catch (error) {
     return {
       kind: 'failed',
       message: `the run's history holds an unreadable event: ${String(error)}`,
     };
+  }
+}
+
+function spanReply(page: RunSpanPage): SpanDetailReply {
+  if (page.kind === 'unsupported') return page;
+  try {
+    return {...page, events: page.events.map(validateRunEvent)};
+  } catch (error) {
+    return {kind: 'failed', message: `the span holds an unreadable event: ${String(error)}`};
+  }
+}
+
+/**
+ * A summary read as the screen takes it: validated into its snapshot and seed events. A summary
+ * that is not a valid one fails the read, as a history with an unreadable event does.
+ */
+function summaryReply(
+  result: WelcomeResult<RunSummaryResult>,
+  runId: string,
+  status: RunStatus,
+): SummaryReply {
+  if (!result.ok) return {kind: 'failed', message: result.error};
+  if (result.value.kind !== 'summary') return result.value;
+  try {
+    return {kind: 'summary', ...summaryFacts(result.value.summary, runId, status)};
+  } catch (error) {
+    return {kind: 'failed', message: `the run’s summary is not readable: ${String(error)}`};
   }
 }
 
@@ -96,13 +145,43 @@ function openWebSession(
   reportSession();
   session.store.subscribe(() => observer.core(session.store.getState()));
   void session.start();
+  const failure = (error: unknown): {readonly ok: false; readonly message: string} => ({
+    ok: false,
+    message: error instanceof Error ? error.message : String(error),
+  });
   return {
+    chat: {
+      ask: async (input, signal) => {
+        try {
+          await session.ask(input.text, {threadId: input.threadId, signal});
+          return {ok: true};
+        } catch (error) {
+          return failure(error);
+        }
+      },
+      createThread: async (harness, signal) => {
+        try {
+          const thread = await session.createChatThread(harness, {signal});
+          return {ok: true, threadId: thread.thread_id};
+        } catch (error) {
+          return failure(error);
+        }
+      },
+      control: async request => {
+        const outcome = await session.command({type: 'command.control', control: request});
+        return outcome.kind === 'acknowledged'
+          ? {kind: 'acknowledged'}
+          : {kind: 'rejected', message: outcome.message, code: outcome.code ?? null};
+      },
+    },
     command: async command => {
-      const outcome = await session.command(
-        command.kind === 'pause'
-          ? {type: 'command.pause'}
-          : {type: 'command.resume', when: command.when},
-      );
+      const outcome = await session.command({
+        type: 'command.control',
+        control: {
+          control_id: newRequestId(),
+          action: command.kind === 'pause-now' ? 'pause_now' : 'pause',
+        },
+      });
       return outcome.kind === 'acknowledged'
         ? null
         : (outcome.message ?? `the run refused ${command.kind}`);
@@ -161,29 +240,51 @@ export function welcomeRunPorts(
   target: RunPageTarget,
   navigation: RunPageNavigation,
   page: RunPagePage,
+  traces: TracePageCache = sharedTracePages,
 ): RunPagePorts & {releaseLogs(): void} {
   const {host} = target.run;
   return {
-    stop: async force => {
-      const instance = target.instance();
-      if (instance === null) return false;
-      return (await settled(bridge.stopConfirmed(host, instance, force))).ok;
-    },
     attach: async instance => {
       const result = await settled(bridge.attach(host, instance));
       return result.ok ? null : result.error;
     },
     release: () => void settled(bridge.releaseRun()),
+    attachReader: async () => {
+      const result = await settled(bridge.attachReader(host, target.project(), target.run.runId));
+      return result.ok ? result.value : {kind: 'failed', message: result.error};
+    },
     openSession: observer => openWebSession(bridge, page, observer),
     readHistory: async (from, max) => {
       const result = await settled(
-        bridge.readEvents(host, target.project, target.run.runId, from, max),
+        bridge.readEvents(host, target.project(), target.run.runId, from, max),
       );
       return result.ok ? historyReply(result.value) : {kind: 'failed', message: result.error};
     },
-    resumeEnded: () =>
-      void settled(bridge.resume(host, target.project, exactResumeRunId(target.run.runId))),
+    readTrace: traceReader(
+      () => [host, target.project(), target.run.runId, target.instance() ?? ''].join('\0'),
+      traces,
+      (from, max) => settled(bridge.readTrace(host, target.project(), target.run.runId, from, max)),
+    ),
+    readSummary: async status => {
+      const result = await settled(bridge.readSummary(host, target.project(), target.run.runId));
+      return summaryReply(result, target.run.runId, status);
+    },
+    readSpan: async (spanId, from, max) => {
+      const result = await settled(
+        bridge.readSpan(host, target.project(), target.run.runId, spanId, from, max),
+      );
+      return result.ok ? spanReply(result.value) : {kind: 'failed', message: result.error};
+    },
+    resumeEnded: async () => {
+      const project = recordedProjectRoot(target.project());
+      if (project === undefined) throw new Error('The run has no recorded project root.');
+      const result = await settled(
+        bridge.resume(host, project, exactResumeRunId(target.run.runId)),
+      );
+      if (!result.ok) throw new Error(result.error);
+    },
     openWindow: () => navigation.openWindow(),
+    now: () => page.now(),
     archive: () => void settled(bridge.archive(target.run, true)),
     runAgain: () => navigation.runAgain(),
     logs: {

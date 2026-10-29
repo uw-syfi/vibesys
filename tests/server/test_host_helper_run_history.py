@@ -2,26 +2,34 @@
 
 from __future__ import annotations
 
+import io
+import itertools
 import json
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.server.host_helper_support import fake_host
-from tests.support.task_project import write_task
+from tests.server.host_helper_support import fake_host, project_with_run
 
 from server.host_api import (
     RUN_EVENTS_FILE,
     HelperError,
     HelperErrorCode,
+    HelperFeature,
+    HelperRequest,
+    RunsEventsForSpanRequest,
     RunsReadEventsReply,
     RunsReadEventsRequest,
+    RunsReadTailRequest,
+    request_features,
 )
+from server.host_examples import ProjectLookupError
+from server.host_helper_os import FileProjects, JournalTally, tally_journal
 from server.host_helper_requests import answer, event_page
-from vibesys.orchestration.dynamic.launch import DynamicLaunch
-from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
-from vs_project.api.testing import run_execution_record
+from server.host_run_summary import RUN_SUMMARY_FILE, RunsSummaryRequest
+from vs_project.api import GitFaultSink, GitRepository, Project
+from vs_project.api.testing import FakeGitRepositories
 from vs_sim.api.testing import SimNetwork, SimThreads
 
 if TYPE_CHECKING:
@@ -93,32 +101,6 @@ def test_an_unfinished_last_line_ends_the_journal_before_it() -> None:
     assert (page.next_sequence, page.complete) == (3, True)
 
 
-def _project_with_run(root: Path) -> Path:
-    root.mkdir()
-    write_task(root, 'version = 1\n[agent]\ndomain = "generic"\n', objective="Faster.\n")
-    project = Project.open(root)
-    project.state.create_project(root.name, now=datetime(2026, 1, 1, tzinfo=UTC))
-    manifest = project.state.new_run_manifest(
-        root.name,
-        run_id=_RUN_ID,
-        branch=f"vibesys-runs/{_RUN_ID}",
-        vibesys_version="0.2.0-test",
-        run_environment=RunEnvironmentRecord(name="docker"),
-        execution=run_execution_record(),
-        orchestration=OrchestrationDescriptor(
-            id="dynamic",
-            config_version=1,
-            options=DynamicLaunch(interface="service", max_rounds=2, judge_every=2).model_dump(
-                mode="json", exclude={"profiling"}
-            ),
-        ),
-        trusted_input_baseline="0" * 40,
-        now=datetime(2026, 10, 10, 12, tzinfo=UTC),
-    )
-    project.state.create_run(manifest, make_current=True)
-    return root
-
-
 def _read(project: Path, run_id: str, from_sequence: int, limit: int) -> object:
     threads = SimThreads()
     host = fake_host(threads, SimNetwork(threads))
@@ -134,7 +116,7 @@ def _read(project: Path, run_id: str, from_sequence: int, limit: int) -> object:
 
 
 def test_an_ended_runs_journal_is_read_through_the_helper(tmp_path: Path) -> None:
-    project = _project_with_run(tmp_path / "proj")
+    project = project_with_run(tmp_path / "proj", _RUN_ID)
     journal = Project.log_directory_for(project.resolve(), _RUN_ID) / RUN_EVENTS_FILE
     journal.parent.mkdir(parents=True, exist_ok=True)
     journal.write_bytes(b"".join(_lines([_event(1), _event(2), _event(3)])))
@@ -150,19 +132,168 @@ def test_an_ended_runs_journal_is_read_through_the_helper(tmp_path: Path) -> Non
     )
 
 
-def test_a_run_that_journaled_nothing_has_no_events(tmp_path: Path) -> None:
-    project = _project_with_run(tmp_path / "proj")
+def _history_requests(project: Path, run_id: str) -> list[HelperRequest]:
+    return [
+        RunsReadEventsRequest(
+            request_id="h",
+            deadline_ms=5000,
+            project=str(project),
+            run_id=run_id,
+            from_sequence=1,
+            max=5,
+        ),
+        RunsReadTailRequest(
+            request_id="h", deadline_ms=5000, project=str(project), run_id=run_id, tail=5
+        ),
+        RunsEventsForSpanRequest(
+            request_id="h",
+            deadline_ms=5000,
+            project=str(project),
+            run_id=run_id,
+            span_id="flow:a",
+            from_sequence=1,
+            max=5,
+        ),
+        RunsSummaryRequest(request_id="h", deadline_ms=5000, project=str(project), run_id=run_id),
+    ]
 
-    assert _read(project, _RUN_ID, 1, 5) == RunsReadEventsReply(
-        request_id="h", events=(), next_sequence=1, complete=True
-    )
+
+@pytest.mark.parametrize(
+    ("recorded", "journaled", "cached"), list(itertools.product([True, False], repeat=3))
+)
+def test_every_history_read_of_a_run_missing_any_piece_is_typed_never_empty_or_silent(
+    tmp_path: Path, *, recorded: bool, journaled: bool, cached: bool
+) -> None:
+    """A run is readable only with its record and its journal; otherwise every read says why.
+
+    Every combination of the pieces a read needs (the run's record, its journal, the summary cache
+    beside it). Regression: a run its project records but whose journal this machine does not hold
+    answered an empty, complete page to events, tail and span reads (a run with no events), while
+    its summary refused it, so a client without summaries opened it as an empty run.
+    """
+    project = project_with_run(tmp_path / "proj", _RUN_ID)
+    directory = Project.log_directory_for(project.resolve(), _RUN_ID)
+    if journaled:
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / RUN_EVENTS_FILE).write_bytes(b"".join(_lines([_event(1), _event(2)])))
+        if cached:
+            (directory / RUN_SUMMARY_FILE).write_text("not a cache")
+    run_id = _RUN_ID if recorded else "20261010-120000-22222222-other"
+    for request in _history_requests(project, run_id):
+        threads = SimThreads()
+        reply = answer(request, fake_host(threads, SimNetwork(threads)), threads.event())
+        if recorded and journaled:
+            assert not isinstance(reply, HelperError), reply
+        else:
+            assert isinstance(reply, HelperError), (request.type, reply)
+            assert reply.code is HelperErrorCode.UNKNOWN_RUN
+            assert run_id in reply.message
 
 
 def test_an_unknown_run_is_refused_naming_it(tmp_path: Path) -> None:
-    project = _project_with_run(tmp_path / "proj")
+    project = project_with_run(tmp_path / "proj", _RUN_ID)
 
     reply = _read(project, "20261010-120000-22222222-other", 1, 5)
 
     assert isinstance(reply, HelperError)
     assert reply.code is HelperErrorCode.UNKNOWN_RUN
     assert "20261010-120000-22222222-other" in reply.message
+
+
+class _CountingRepositories:
+    """A ``GitRepositoryFactory`` over the Fake that counts the repositories opened."""
+
+    def __init__(self) -> None:
+        self.opened = 0
+        self._fake = FakeGitRepositories()
+
+    def __call__(self, root: Path, faults: GitFaultSink) -> GitRepository:
+        self.opened += 1
+        return self._fake.repository(root, faults)
+
+
+def test_one_channel_looks_a_run_up_once_however_many_pages_it_reads(tmp_path: Path) -> None:
+    project = project_with_run(tmp_path / "proj", _RUN_ID)
+    journal = Project.log_directory_for(project.resolve(), _RUN_ID) / RUN_EVENTS_FILE
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_bytes(b"".join(_lines([_event(n) for n in range(1, 8)])))
+    repositories = _CountingRepositories()
+    projects = FileProjects(repositories, SimThreads())
+
+    for from_sequence in (1, 3, 5, 7):
+        projects.run_events(project, _RUN_ID, from_sequence, 2, with_totals=True)
+
+    assert repositories.opened == 1
+
+
+def test_a_run_not_found_is_looked_up_again_so_one_that_starts_later_is_found(
+    tmp_path: Path,
+) -> None:
+    project = project_with_run(tmp_path / "proj", _RUN_ID)
+    repositories = _CountingRepositories()
+    projects = FileProjects(repositories, SimThreads())
+    other = "20261010-120000-22222222-other"
+
+    for _attempt in range(2):
+        with pytest.raises(ProjectLookupError) as refused:
+            projects.run_events(project, other, 1, 2, with_totals=False)
+        assert refused.value.code is HelperErrorCode.UNKNOWN_RUN
+
+    assert repositories.opened == 2
+
+
+def test_totals_are_named_only_for_a_request_that_asked_for_them(tmp_path: Path) -> None:
+    project = project_with_run(tmp_path / "proj", _RUN_ID)
+    journal = Project.log_directory_for(project.resolve(), _RUN_ID) / RUN_EVENTS_FILE
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    body = b"".join(_lines([_event(1), _event(2), _event(3)]))
+    journal.write_bytes(body)
+    projects = FileProjects(FakeGitRepositories().repository, SimThreads())
+
+    plain = projects.run_events(project, _RUN_ID, 1, 2, with_totals=False)
+    totals = projects.run_events(project, _RUN_ID, 1, 2, with_totals=True)
+
+    assert (plain.total_events, plain.total_bytes) == (None, None)
+    assert (totals.total_events, totals.total_bytes) == (3, len(body))
+    reply = RunsReadEventsReply(
+        request_id="h", events=(), next_sequence=1, complete=True,
+        total_events=plain.total_events, total_bytes=plain.total_bytes,
+    )  # fmt: skip
+    # An older desktop validates replies strictly, so an unasked-for total is absent, not null.
+    assert "total_" not in reply.model_dump_json()
+
+
+def test_asking_for_totals_needs_the_page_feature() -> None:
+    request = RunsReadEventsRequest(
+        request_id="h", deadline_ms=5000, project="p", run_id=_RUN_ID,
+        from_sequence=1, max=2, with_totals=True,
+    )  # fmt: skip
+    bare = request.model_copy(update={"with_totals": None})
+
+    assert HelperFeature.RUN_HISTORY_PAGES in request_features(request)
+    assert HelperFeature.RUN_HISTORY_PAGES not in request_features(bare)
+
+
+@given(
+    appended=st.lists(st.binary(max_size=60), max_size=12),
+)
+def test_a_tally_taken_as_a_journal_grows_equals_a_count_of_the_whole(
+    appended: list[bytes],
+) -> None:
+    content = b""
+    tally = JournalTally(0, 0)
+    for chunk in appended:
+        content += chunk
+        tally = tally_journal(io.BytesIO(content), tally)
+        complete = content[: content.rfind(b"\n") + 1]
+        assert tally == JournalTally(len(complete), complete.count(b"\n"))
+    assert tally == tally_journal(io.BytesIO(content), JournalTally(0, 0))
+
+
+@given(content=st.binary(max_size=80), stale=st.integers(0, 200), lines=st.integers(0, 50))
+def test_a_tally_for_a_longer_journal_than_the_file_counts_afresh(
+    content: bytes, stale: int, lines: int
+) -> None:
+    fresh = tally_journal(io.BytesIO(content), JournalTally(0, 0))
+    if stale > len(content):
+        assert tally_journal(io.BytesIO(content), JournalTally(stale, lines)) == fresh

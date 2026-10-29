@@ -838,3 +838,73 @@ async def test_a_turn_refused_for_a_lost_writer_is_retried_after_that_writer_is_
     assert status(cancelled) is ObservationStatus.CANCELLED
     retried = await world.route(dispatch_request("req-1", "inv-1"))
     assert status(retried) is ObservationStatus.SUCCEEDED
+
+
+# The revert never touches the framework's state directory, so a read-only turn that
+# writes there leaves writes a complete revert cannot undo (the shape of a run that sat
+# at its turn limit when another run's leftover state was taken for the agent's writes).
+@pytest.mark.parametrize(
+    "stray",
+    [".vibesys/state/runs/other-run/store.json", ".vibesys/state/runs/other-run/a/b.lock"],
+)
+@pytest.mark.asyncio
+async def test_a_turn_whose_writes_cannot_be_undone_fails_and_later_turns_are_refused(
+    world: AccessWorld, stray: str
+) -> None:
+    world.writes = {stray: "{}\n"}
+    await world.execute(ensure_request())
+    result = await world.execute(dispatch_request())
+    observed = result.observation.observation
+    # Not left unknown until the turn's limit: the turn fails now, saying why.
+    assert observed.status is ObservationStatus.FAILED
+    assert observed.terminal
+    assert observed.accepted
+    assert result.observation.outcome_json is None
+    assert "could not be restored" in observed.diagnostic
+    assert stray in observed.diagnostic
+
+    world.writes = {}
+    for restarted in (False, True):
+        if restarted:
+            world.restart()
+        later = await world.execute(
+            dispatch_request(f"req-later-{restarted}", invocation=f"inv-later-{restarted}")
+        )
+        refused = later.observation.observation
+        assert refused.status is ObservationStatus.REJECTED
+        assert refused.terminal
+        assert stray in refused.diagnostic
+
+
+# A tool cache holds Git checkouts (uv's source-distribution cache, Cargo's registry), so
+# an agent that points one into its workspace leaves a nested repository that host Git
+# refuses to read. That refusal used to escape the turn and end the whole run.
+@pytest.mark.parametrize(
+    "access", [Access.READ_ONLY, Access.WRITE_ARTIFACTS, Access.WRITE_CANDIDATE]
+)
+@pytest.mark.parametrize(
+    "nested",
+    [".cache/uv/sdists-v10/.git/HEAD", ".cache/cargo/git/checkouts/crate-1/abc/.git/HEAD"],
+)
+@pytest.mark.asyncio
+async def test_a_turn_that_leaves_a_nested_repository_fails_alone_and_the_host_survives(
+    world: AccessWorld, access: Access, nested: str
+) -> None:
+    world.host.resolver.access = access
+    world.writes = {nested: "ref: refs/heads/main\n"}
+    await world.execute(ensure_request())
+
+    result = await world.execute(dispatch_request())
+
+    observed = result.observation.observation
+    assert observed.status is ObservationStatus.FAILED
+    assert observed.terminal
+    assert observed.accepted
+    assert result.observation.outcome_json is None
+    assert nested.removesuffix("/HEAD") in observed.diagnostic
+
+    world.writes = {}
+    later = await world.execute(dispatch_request("req-later", invocation="inv-later"))
+    refused = later.observation.observation
+    assert refused.status is ObservationStatus.REJECTED
+    assert nested.removesuffix("/HEAD") in refused.diagnostic

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import partial
 from typing import TYPE_CHECKING
 
 from server.api.design import DesignLog
@@ -18,11 +20,12 @@ from server.api.performance import (
     summarize_objective,
 )
 from server.api.protocol import (
-    ChatOptionsQuery,
     ChatQuery,
     ChatResult,
     ChatThreadCreateQuery,
     ChatThreadInfo,
+    CommandAck,
+    ControlCommand,
     DesignPatch,
     DesignPatchQuery,
     DesignQuery,
@@ -43,14 +46,23 @@ from server.api.protocol import (
     SnapshotQuery,
     SteerCommand,
     StopCommand,
-    TuiDefaultsQuery,
     decode_request,
     failure_response,
 )
-from server.chat.options import ChatOptions, build_chat_options
-from server.control_envelope import CommandAck
 from server.events import EventType, RunEvent, RunOverview, RunStartedData
-from vibesys.api import IterationUnavailable, RunRecordReadError
+from vibesys.api import (
+    REFUSAL_TEXT,
+    ControlAction,
+    ControlStatus,
+    IterationUnavailable,
+    PauseNowRequest,
+    PauseRequest,
+    RefusalReason,
+    ResumeRequest,
+    RunRecordReadError,
+    SteerRequest,
+    StopMode,
+)
 from vibesys.api.hypothesis import agent_projection
 from vs_sim.api import utc_datetime
 
@@ -63,8 +75,7 @@ if TYPE_CHECKING:
     from server.execution import ActiveAgentExecution, ExecutionTracker
     from server.integration import RunIntegrationAdapter
     from server.journal import WireJournal
-    from server.settings import InteractiveSetupDefaults
-    from vibesys.api import RunControl, RunRecord, RunView, WorkspaceChange
+    from vibesys.api import ControlRequest, RunControl, RunRecord, RunView, WorkspaceChange
     from vs_sim.api import Clock, Condition, Threads
 
 
@@ -144,13 +155,128 @@ class RunControlUnavailableError(RuntimeError):
 
 
 class CapacityWaitUnavailableError(RuntimeError):
-    """``command.resume {when: capacity_returns}`` for a run not paused on a capacity limit."""
+    """``command.resume`` waiting for capacity or with ``fallback``, for a run not so paused."""
 
     diagnostic_code = "capacity_wait_unavailable"
 
     def __init__(self) -> None:
-        """Say why the run cannot wait for capacity."""
+        """Say why the run cannot wait for capacity or switch to its fallback."""
         super().__init__("The run is not paused on a provider capacity limit")
+
+
+class RunStoppingError(RuntimeError):
+    """``command.resume`` waiting for capacity or with ``fallback``, for a run that is stopping."""
+
+    diagnostic_code = "run_stopping"
+
+    def __init__(self) -> None:
+        """Say why the run cannot wait for capacity or switch to its fallback."""
+        super().__init__("The run is stopping")
+
+
+class SteerTargetUnknownError(RuntimeError):
+    """A steer to a role the search does not declare."""
+
+    diagnostic_code = "steer_target_unknown"
+
+    def __init__(self) -> None:
+        """Say why no turn could take the steer."""
+        super().__init__("The run has no such steer target")
+
+
+class SteerTargetEndedError(RuntimeError):
+    """A steer to an attempt that has ended."""
+
+    diagnostic_code = "steer_target_ended"
+
+    def __init__(self) -> None:
+        """Say why no turn could take the steer."""
+        super().__init__("The steer's target can no longer take a message")
+
+
+class WithdrawNotStandingError(RuntimeError):
+    """A withdrawal of a steer that is not, or is no longer, standing guidance."""
+
+    diagnostic_code = "withdraw_not_standing"
+
+    def __init__(self) -> None:
+        """Say why nothing could be withdrawn."""
+        super().__init__("The withdrawal names no standing guidance in force")
+
+
+class ActionAttemptEndedError(RuntimeError):
+    """A cancel of an attempt that has ended."""
+
+    diagnostic_code = "action_attempt_ended"
+
+    def __init__(self) -> None:
+        """Say why nothing could be cancelled."""
+        super().__init__(REFUSAL_TEXT[RefusalReason.ATTEMPT_ENDED])
+
+
+class ActionAlreadyCancelledError(RuntimeError):
+    """A cancel of a work item the run already cancelled."""
+
+    diagnostic_code = "action_already_cancelled"
+
+    def __init__(self) -> None:
+        """Say why nothing could be cancelled."""
+        super().__init__(REFUSAL_TEXT[RefusalReason.ALREADY_CANCELLED])
+
+
+class ActionAboveLaunchLimitError(RuntimeError):
+    """A parallel limit above the one the run was launched with."""
+
+    diagnostic_code = "action_above_launch_limit"
+
+    def __init__(self) -> None:
+        """Say why the limit cannot be set."""
+        super().__init__(REFUSAL_TEXT[RefusalReason.ABOVE_LAUNCH_LIMIT])
+
+
+class ControlIdConflictError(RuntimeError):
+    """A control whose ``control_id`` already named a different control."""
+
+    diagnostic_code = "control_id_conflict"
+
+    def __init__(self, control_id: str) -> None:
+        """Name the reused id."""
+        super().__init__(f"Control id {control_id!r} already named a different control")
+
+
+_REFUSALS: dict[RefusalReason, Callable[[], Exception]] = {
+    RefusalReason.NOT_PAUSED_ON_CAPACITY: CapacityWaitUnavailableError,
+    RefusalReason.STOPPING: RunStoppingError,
+    RefusalReason.UNKNOWN_TARGET: SteerTargetUnknownError,
+    RefusalReason.ENDED_TARGET: SteerTargetEndedError,
+    RefusalReason.NOT_STANDING: WithdrawNotStandingError,
+    # The run ended before its session did: the same answer as a control after the session.
+    RefusalReason.RUN_ENDED: partial(RunControlUnavailableError, _RunControlState.ENDED),
+    RefusalReason.ATTEMPT_ENDED: ActionAttemptEndedError,
+    RefusalReason.ALREADY_CANCELLED: ActionAlreadyCancelledError,
+    RefusalReason.ABOVE_LAUNCH_LIMIT: ActionAboveLaunchLimitError,
+}
+"""The protocol error each refusal answers with."""
+
+
+type ControlProtocolCommand = PauseCommand | ResumeCommand | SteerCommand | ControlCommand
+"""Every protocol request that controls the run."""
+
+
+def control_request(command: ControlProtocolCommand) -> ControlRequest:
+    """The operator control a protocol command carries, in the schema every ingress shares.
+
+    A single-action command has no control id of its own; its envelope's ``request_id``
+    names it, so resending the same request is one control.
+    """
+    if isinstance(command, ControlCommand):
+        return command.control
+    control_id = f"wire-{hashlib.sha256(command.request_id.encode()).hexdigest()[:32]}"
+    if isinstance(command, PauseCommand):
+        return PauseRequest(control_id=control_id)
+    if isinstance(command, ResumeCommand):
+        return ResumeRequest(control_id=control_id, fallback=command.fallback, when=command.when)
+    return SteerRequest(control_id=control_id, text=command.text)
 
 
 class RunControlSlot:
@@ -158,7 +284,8 @@ class RunControlSlot:
 
     Stop is the only command whose pre-session semantics are unambiguous: it
     means that the eventual session must stop. The slot retains that intent
-    until installation and delivers it once. Other mutating commands require
+    until installation and delivers it once; of several, it retains the
+    strongest (``escalate_stop``), since a stop only escalates. Other mutating commands require
     an active session, so rejecting them is safer than acknowledging and
     discarding them or guessing their ordering against startup.
     """
@@ -168,7 +295,8 @@ class RunControlSlot:
         self._condition = condition
         self._state = _RunControlState.AWAITING_SESSION
         self._control: RunControl | None = None
-        self._stop_pending = False
+        self._stop_pending: PauseNowRequest | None = None
+        self._shutdown_pending = False
 
     def install(self, control: RunControl) -> None:
         """Install the session and deliver one retained stop intent, if any."""
@@ -176,12 +304,15 @@ class RunControlSlot:
             if self._state is not _RunControlState.AWAITING_SESSION:
                 message = f"cannot install run control while slot is {self._state.value}"
                 raise RuntimeError(message)
-            if self._stop_pending:
+            if self._stop_pending is not None:
                 # Control methods are synchronous messages to the process-local
                 # session. Deliver under the shared re-entrant condition so a
                 # concurrent command cannot overtake this retained intent.
-                control.stop()
-                self._stop_pending = False
+                control.submit(self._stop_pending)
+                self._stop_pending = None
+            if self._shutdown_pending:
+                control.stop(StopMode.DRAIN)
+                self._shutdown_pending = False
             self._control = control
             self._state = _RunControlState.ACTIVE
 
@@ -194,45 +325,55 @@ class RunControlSlot:
             self._control = None
             self._state = _RunControlState.ENDED
 
-    def execute(
-        self, request: PauseCommand | ResumeCommand | SteerCommand | StopCommand
-    ) -> CommandAck:
+    def stop(self, mode: StopMode) -> bool:
+        """Stop the installed run in ``mode``; False, changing nothing, when none is installed.
+
+        The run's control keeps the strongest stop asked for, so a repeat changes nothing
+        and a cancel after a drain escalates it.
+        """
+        with self._condition:
+            if self._control is None:
+                return False
+            self._control.stop(mode)
+            return True
+
+    def execute(self, command: ControlProtocolCommand | StopCommand) -> CommandAck:
         """Apply one command or retain the sole command safe before startup."""
+        if isinstance(command, StopCommand):
+            return self._shutdown()
+        request = control_request(command)
         with self._condition:
             control = self._control
             if control is None:
                 if self._state is _RunControlState.AWAITING_SESSION and isinstance(
-                    request, StopCommand
+                    request, PauseNowRequest
                 ):
-                    self._stop_pending = True
-                    return CommandAck(action="stop", status="pending")
+                    self._stop_pending = request
+                    return CommandAck(action=request.action, status="pending")
                 raise RunControlUnavailableError(self._state)
-            return self._execute_active(control, request)
+            # Delivered while the slot prevents session release.
+            ack = control.submit(request)
+        match ack.status, ack.reason:
+            case ControlStatus.REFUSED, RefusalReason() as reason:
+                refusal = _REFUSALS[reason]()
+                raise refusal
+            case ControlStatus.CONFLICT, _:
+                raise ControlIdConflictError(request.control_id)
+            case ControlStatus.PENDING, _:
+                return CommandAck(action=ack.action, status="pending")
+            case _:
+                return CommandAck(action=ack.action, status="consumed")
 
-    @staticmethod
-    def _execute_active(
-        control: RunControl,
-        request: PauseCommand | ResumeCommand | SteerCommand | StopCommand,
-    ) -> CommandAck:
-        """Deliver one command while the slot prevents session release."""
-        if isinstance(request, PauseCommand):
-            control.pause()
-            return CommandAck(action="pause", status="pending")
-        if isinstance(request, ResumeCommand):
-            if request.when == "capacity_returns":
-                if not control.resume_when_capacity_returns():
-                    raise CapacityWaitUnavailableError
-                return CommandAck(action="resume", status="pending")
-            if request.fallback:
-                control.resume_with_fallback()
+    def _shutdown(self) -> CommandAck:
+        """The registry's process shutdown also reaches hosts without a core control poll."""
+        with self._condition:
+            if self._control is not None:
+                self._control.stop(StopMode.DRAIN)
+            elif self._state is _RunControlState.AWAITING_SESSION:
+                self._shutdown_pending = True
             else:
-                control.resume()
-            return CommandAck(action="resume", status="consumed")
-        if isinstance(request, StopCommand):
-            control.stop()
-            return CommandAck(action="stop", status="pending")
-        control.steer(request.text)
-        return CommandAck(action="steer", status="pending")
+                raise RunControlUnavailableError(self._state)
+        return CommandAck(action=ControlAction.PAUSE_NOW, status="pending")
 
 
 @dataclass(frozen=True)
@@ -284,7 +425,6 @@ class RunApi:
         controls: RunControlSlot,
         clock: Clock,
         project_scope: str | None = None,
-        tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
         threads: Threads,
     ) -> None:
         """Initialize the API with the components that own each request surface."""
@@ -297,9 +437,6 @@ class RunApi:
         self._controls = controls
         self._clock = clock
         self._project_scope = project_scope
-        self._tui_defaults_provider = tui_defaults
-        self._tui_defaults: InteractiveSetupDefaults | None = None
-        self._tui_defaults_lock = threads.lock()
         # Keyed by the attached run so the projection's diff cache survives
         # across requests but never outlives the run it was built for.
         self._design: tuple[str, DesignLog] | None = None
@@ -331,27 +468,17 @@ class RunApi:
         """Execute a request and reflect the issuing client on its response."""
         return self._execute(request).model_copy(update={"client_id": request.client_id})
 
-    # lint-waiver: LW-009027 [C901, PLR0911, PLR0912]; exhaustive protocol dispatch keeps each request variant routed to its owning handler.
-    def _execute(self, request: ProtocolRequest) -> Response:  # noqa: C901, PLR0911, PLR0912
+    # lint-waiver: LW-009027 [C901, PLR0911]; exhaustive protocol dispatch keeps each request variant routed to its owning handler.
+    def _execute(self, request: ProtocolRequest) -> Response:  # noqa: C901, PLR0911
         """Route one typed request to its owning service."""
-        if isinstance(request, (PauseCommand, ResumeCommand, SteerCommand, StopCommand)):
+        if isinstance(
+            request, (PauseCommand, ResumeCommand, SteerCommand, StopCommand, ControlCommand)
+        ):
             return self._execute_command(request)
         if isinstance(request, ChatQuery):
             return self._execute_chat(request)
         if isinstance(request, ChatThreadCreateQuery):
             return self._execute_chat_thread_create(request)
-        if isinstance(request, ChatOptionsQuery):
-            return Response(
-                request_id=request.request_id,
-                timestamp=self._now(),
-                chat_options=self.chat_options(),
-            )
-        if isinstance(request, TuiDefaultsQuery):
-            return Response(
-                request_id=request.request_id,
-                timestamp=self._now(),
-                tui_defaults=self.tui_defaults(),
-            )
         if isinstance(request, HistoryQuery):
             self._journal.record(EventType.STATUS_QUERY, "/history")
             return Response(
@@ -436,9 +563,7 @@ class RunApi:
         message = f"Unsupported protocol request: {type(request).__name__}"
         raise TypeError(message)
 
-    def _execute_command(
-        self, request: PauseCommand | ResumeCommand | SteerCommand | StopCommand
-    ) -> Response:
+    def _execute_command(self, request: ControlProtocolCommand | StopCommand) -> Response:
         """Send a command through the runtime's synchronized control slot."""
         if self._controller.is_read_only():
             raise RunReadOnlyError
@@ -455,12 +580,9 @@ class RunApi:
         )
 
     def _execute_chat_thread_create(self, request: ChatThreadCreateQuery) -> Response:
-        if self._controller.is_read_only():
-            raise RunReadOnlyError
         sequence = self._journal.latest_sequence
         spec = self._chat.create_thread(
-            provider=request.provider,
-            model=request.model,
+            harness=request.harness,
             title=request.title,
         )
         return Response(
@@ -474,20 +596,6 @@ class RunApi:
             ),
             events=self._journal.read(sequence),
         )
-
-    def chat_options(self) -> ChatOptions | None:
-        """Return the agent choices available for experiment chat."""
-        settings = self._chat.run_settings
-        return None if settings is None else build_chat_options(settings)
-
-    def tui_defaults(self) -> InteractiveSetupDefaults | None:
-        """Load and cache defaults for the interactive setup form."""
-        if self._tui_defaults_provider is None:
-            return None
-        with self._tui_defaults_lock:
-            if self._tui_defaults is None:
-                self._tui_defaults = self._tui_defaults_provider()
-            return self._tui_defaults
 
     def snapshot(self, *, expected_store_id: str | None = None) -> RunSnapshot:
         """Return state from the expected store, or fail if that sequence space is gone."""
@@ -515,6 +623,7 @@ class RunApi:
                     )
                     for spec in self._chat.threads_locked()
                 ],
+                last_chat_thread_id=self._chat.last_thread_id_locked(),
                 spans=self._integration.trace.spans(),
                 overview=self._current_overview(),
             )

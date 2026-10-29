@@ -108,12 +108,18 @@ def _facts(tmp_path: Path, plugin: OrchestrationPlugin) -> RunFacts:
     remote.mkdir()
     config = tmp_path / "slurm.toml"
     config.write_text(_SLURM_LOCAL.format(remote_workspace_root=remote), encoding="utf-8")
+    threads = OsThreads()
     integration = LocalRunIntegration(
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
-        threads=OsThreads(),
-        system=idle_environment_system(slurm_processes=FakeConnector(tmp_path / "cluster")),
+        threads=threads,
+        # The root session starts its workspace-root probe on a thread of the run's host:
+        # the host's prepare runs off the loop, so the probe's thread is a real one too.
+        system=replace(
+            idle_environment_system(slurm_processes=FakeConnector(tmp_path / "cluster")),
+            threads=threads,
+        ),
     )
 
     async def exercise() -> RunFacts:

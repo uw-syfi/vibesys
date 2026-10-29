@@ -14,6 +14,12 @@ from pydantic import Field
 from vibesys.hypothesis import PlanningContext, RoundRecord, rounds
 from vs_core.api import Value
 
+# lint-waiver: LW-295701 [TC001]; Pydantic resolves this value field annotation at runtime.
+# > Ruff cannot see that `vs_core.api.Value` is the configured runtime-evaluated base, because it
+# > is a re-export. Dropping the future import would force quoting every other annotation here;
+# > a runtime alias only to satisfy the rule would hide why the import is needed.
+from vs_issue_tracker.api import RoadmapItem  # noqa: TC001
+
 if TYPE_CHECKING:
     from vibesys.hypothesis import HypothesisConfig
     from vibesys.profile_focus import FocusView
@@ -36,6 +42,20 @@ class RoundRow(Value):
     delta_pct: float | None = None
     retained: bool | None = None
     commit: str | None = None
+
+
+class PassedIdea(Value):
+    """An idea that passed, as the designer is shown the bases it may choose.
+
+    ``value`` is what the trusted gates measured of its code; ``best`` marks the best passed
+    idea so far, which a plan that names no base starts from.
+    """
+
+    round_number: int = Field(gt=0)
+    idea: str
+    value: float | None = None
+    unit: str | None = None
+    best: bool = False
 
 
 class FrontierRow(Value):
@@ -74,8 +94,23 @@ class LastProfile(Value):
     suggestions: str = ""
     perf_metric: float | None = None
     perf_unit: str | None = None
-    # Where the profiler wrote its bounded evidence files, when it did.
-    evidence_directory: str | None = None
+
+
+class MeasurementNoise(Value):
+    """How far a candidate's ratio to its base wanders by chance, from the latest comparison.
+
+    The designer sets the bar an idea must clear (``minimum_ratio``). The framework calls the
+    idea supported or disproven only when the measured ratio is more than the ``resolution`` away
+    from that bar (`vs_core.api.effect_resolution`) and ``within_noise`` inside it, so a bar set
+    without this figure can sit inside the noise and the idea ends inconclusive however it fares.
+    """
+
+    noise: float = Field(ge=0)
+    """One standard error of the candidate's ratio to the base, in ratio units."""
+    resolution: float = Field(ge=0)
+    """How far the ratio must clear a bar for the framework to call the effect, in ratio units."""
+    candidate_samples: int = Field(ge=1)
+    base_samples: int = Field(ge=1)
 
 
 class PlanEvidence(Value):
@@ -84,9 +119,12 @@ class PlanEvidence(Value):
     round_number: int = Field(gt=0)
     max_rounds: int = Field(gt=0)
     plateau_warning: str | None = None
-    provisional_candidates: int = Field(default=0, ge=0)
-    official_eval_every: int = Field(default=1, gt=0)
-    official_cadence_due: bool = False
+    passed: tuple[PassedIdea, ...] = ()
+    """The ideas that passed, oldest first: each is a base a plan may name."""
+    input_value: float | None = None
+    """What the trusted gates measured of the input; None when it was not measured."""
+    measurement_noise: MeasurementNoise | None = None
+    """The noise the latest comparison of a candidate with its base states; None while none has."""
     benchmark_enabled: bool = True
     history: tuple[RoundRow, ...] = ()
     older_rounds: int = Field(default=0, ge=0)
@@ -99,6 +137,8 @@ class PlanEvidence(Value):
     exhaustion_round: int | None = None
     active_component: str | None = None
     ranked_bottlenecks: tuple[Bottleneck, ...] = ()
+    roadmap: tuple[RoadmapItem, ...] = ()
+    """The run's roadmap items, in the order each was first put."""
 
 
 def _row(record: RoundRecord) -> RoundRow:
@@ -126,8 +166,8 @@ def plan_evidence(
 ) -> PlanEvidence:
     """The evidence for planning ``planning.round_number``: history, frontier, notices, focus.
 
-    ``benchmark_enabled`` and ``last_profile`` are facts of the run and of the strategy's last
-    round, so the strategy sets them on the result.
+    ``benchmark_enabled``, ``last_profile`` and ``roadmap`` are facts of the run, of the
+    strategy's last round and of the roadmap's owner, so the strategy sets them on the result.
     """
     records = ledger.records
     archive = rounds.archive_view(config, ledger)
@@ -138,9 +178,6 @@ def plan_evidence(
         round_number=planning.round_number,
         max_rounds=config.max_rounds,
         plateau_warning=planning.plateau_warning,
-        provisional_candidates=planning.provisional_candidates,
-        official_eval_every=config.official_eval_every,
-        official_cadence_due=planning.provisional_candidates + 1 >= config.official_eval_every,
         history=tuple(_row(item) for item in records[-_HISTORY_ROWS:]),
         older_rounds=max(len(records) - _HISTORY_ROWS, 0),
         frontier=tuple(

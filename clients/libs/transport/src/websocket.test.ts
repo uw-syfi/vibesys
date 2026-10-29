@@ -231,18 +231,6 @@ const okResponse = (requestId: string, body: Record<string, unknown> = {}) => ({
 
 const response = okResponse;
 
-function tuiDefaults(): Record<string, unknown> {
-  return {
-    runs_dir: 'runs',
-    input_path: 'input.py',
-    experiment_name: 'experiment',
-    repository_owner: null,
-    repository_name: 'repository',
-    visibility: 'private',
-    theme: 'dark',
-  };
-}
-
 function responsePayloadFixture(): string {
   return readFileSync('../contracts/src/generated/response-payload.fixture.json', 'utf8');
 }
@@ -260,7 +248,7 @@ describe('WebSocketTransport', () => {
       },
     });
 
-    const pending = transport.request({type: 'query.tui_defaults'});
+    const pending = transport.request({type: 'query.history'});
     await tick();
     const frame = JSON.parse(sockets[0]?.sent[0] ?? '{}') as {
       request_id?: string;
@@ -268,7 +256,7 @@ describe('WebSocketTransport', () => {
     };
     expect(sockets[0]?.sent[0]?.endsWith('\n')).toBe(false);
     expect(frame.client_id).toBe('browser-client');
-    sockets[0]?.respond(response(frame.request_id ?? '', {tui_defaults: tuiDefaults()}));
+    sockets[0]?.respond(response(frame.request_id ?? '', {events: []}));
     await expect(pending).resolves.toMatchObject({ok: true});
     await transport.close();
   });
@@ -577,17 +565,17 @@ describe('WebSocketTransport', () => {
         return socket;
       },
     });
-    const first = transport.request({type: 'query.tui_defaults'});
+    const first = transport.request({type: 'query.history'});
     await tick();
 
     sockets[0]?.receive('{');
     await expect(first).rejects.toMatchObject({kind: 'parse'});
     expect(sockets[0]?.closeCalls).toBe(1);
 
-    const second = transport.request({type: 'query.tui_defaults'});
+    const second = transport.request({type: 'query.history'});
     await tick();
     const frame = JSON.parse(sockets[1]?.sent[0] ?? '{}') as {request_id?: string};
-    sockets[1]?.respond(response(frame.request_id ?? '', {tui_defaults: tuiDefaults()}));
+    sockets[1]?.respond(response(frame.request_id ?? '', {events: []}));
     await expect(second).resolves.toMatchObject({ok: true});
     await transport.close();
   });
@@ -597,7 +585,7 @@ describe('WebSocketTransport', () => {
     const transport = new WebSocketTransport(URL, {
       webSocket: () => socket,
     });
-    const pending = transport.request({type: 'query.tui_defaults'});
+    const pending = transport.request({type: 'query.history'});
 
     await transport.close();
 
@@ -1654,7 +1642,7 @@ describe('WebSocketTransport', () => {
     const abandoned = rejection(
       transport.request({type: 'query.snapshot'}, {signal: controller.signal}),
     );
-    const kept = transport.request({type: 'query.tui_defaults'});
+    const kept = transport.request({type: 'query.history'});
     gateway.socket(0).drop();
     await tick();
     controller.abort();
@@ -1666,7 +1654,7 @@ describe('WebSocketTransport', () => {
     // queue must not be written to the fresh connection, or the caller gets a
     // command they explicitly abandoned.
     const resent = gateway.socket(1).frames();
-    expect(resent.map(frame => frame['type'])).toEqual(['query.tui_defaults']);
+    expect(resent.map(frame => frame['type'])).toEqual(['query.history']);
     gateway.socket(1).answerAll();
     await expect(kept).resolves.toMatchObject({ok: true});
     await transport.close();
@@ -1889,7 +1877,7 @@ describe('WebSocketTransport', () => {
 
     const first = transport.request({type: 'command.pause'});
     const second = transport.request({type: 'query.snapshot'});
-    const third = transport.request({type: 'query.tui_defaults'});
+    const third = transport.request({type: 'query.history'});
     await tick();
     expect(gateway.socket(0).frames()).toHaveLength(3);
 
@@ -1913,7 +1901,7 @@ describe('WebSocketTransport', () => {
         .frames()
         .map(frame => frame['type'])
         .sort(),
-    ).toEqual(['command.pause', 'query.snapshot', 'query.tui_defaults']);
+    ).toEqual(['command.pause', 'query.history', 'query.snapshot']);
 
     gateway.socket(2).answerAll();
     await expect(Promise.all([first, second, third])).resolves.toHaveLength(3);
@@ -1977,7 +1965,7 @@ describe('WebSocketTransport', () => {
       onConnectionState: state => {
         if (state.status !== 'connected' || reported) return;
         reported = true;
-        void transport.request({type: 'query.tui_defaults'}).catch(() => undefined);
+        void transport.request({type: 'query.history'}).catch(() => undefined);
       },
     });
 
@@ -1991,7 +1979,7 @@ describe('WebSocketTransport', () => {
         .socket(0)
         .frames()
         .map(frame => frame['type']),
-    ).toEqual(['command.pause', 'query.tui_defaults']);
+    ).toEqual(['command.pause', 'query.history']);
     gateway.socket(0).answerAll();
     await expect(held).resolves.toMatchObject({ok: true});
     await transport.close();
@@ -2143,7 +2131,7 @@ describe('wire payload validation', () => {
     await tick();
     const requestId = String(socket.frames()[0]?.['request_id']);
     socket.receive(
-      `{"protocol_version":1,"request_id":"${requestId}","client_id":"","timestamp":"2026-09-30T20:08:01.112867Z","ok":true,"error":null,"diagnostic":null,"ack":null,"chat":null,"chat_thread":null,"chat_options":null,"tui_defaults":null,"snapshot":null,"events":[],"performance":[],"performance_context":null,"experiments":[],"experiment_update":null,"experiments_ready":null,"design":[],"design_ready":null,"design_patch":null}`,
+      `{"protocol_version":1,"request_id":"${requestId}","client_id":"","timestamp":"2026-09-30T20:08:01.112867Z","ok":true,"error":null,"diagnostic":null,"ack":null,"chat":null,"chat_thread":null,"snapshot":null,"events":[],"performance":[],"performance_context":null,"experiments":[],"experiment_update":null,"experiments_ready":null,"design":[],"design_ready":null,"design_patch":null}`,
     );
 
     await expect(pending).resolves.toMatchObject({ok: true, request_id: requestId});
@@ -2169,8 +2157,6 @@ describe('wire payload validation', () => {
       'ack',
       'chat',
       'chat_thread',
-      'chat_options',
-      'tui_defaults',
       'snapshot',
       'performance',
       'performance_context',
@@ -2590,7 +2576,7 @@ function noop(): void {}
 
 const IDEMPOTENT_TYPES = [
   'query.snapshot',
-  'query.tui_defaults',
+  'query.history',
   'command.pause',
   'command.resume',
 ] as const;

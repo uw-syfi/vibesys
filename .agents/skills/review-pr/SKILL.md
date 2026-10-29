@@ -100,11 +100,8 @@ repository's contracts, architecture, tests, and affected callers.
      never mutated; remove it when done.
    - Choose the narrowest deterministic reproduction: run the PR's own new
      tests against the base source (they must fail there and pass at the
-     head), write a throwaway test or script from the issue's steps, or for
-     TUI rendering fixes render the affected view at a fixed width with the
-     terminal UI client's test harness. Drive the live TUI through the
-     `hunt-client-bugs` harness only when no cheaper reproduction exists and the
-     cost is justified.
+     head), write a throwaway test or script from the issue's steps, or use the
+     `verify-desktop-ui` harness for a screen defect when needed.
    - Report the reproduction as evidence: the command, the observed failure
      at the base, and the observed result at the head. If a reproduction was
      not possible, say why and treat the fix as unverified rather than

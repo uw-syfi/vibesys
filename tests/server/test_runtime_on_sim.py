@@ -13,21 +13,23 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
-from tests.server.support import REQUEST_TIME, sim_platform
+from tests.server.support import CONTROL_KEY, REQUEST_TIME, operator_dialer, sim_platform
 from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from entrypoints.production import production_runs
-from server.api.protocol import StopCommand, SubscribeRequest
+from server.api.protocol import SubscribeRequest
+from server.events import RunInterruptedData
 from server.runtime import ServerRuntime
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import CoreEventType, EventStatus
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
+from vs_runtime.api.infrastructure import ChannelRunControl
 from vs_runtime.api.testing import idle_environment_system
-from vs_sim.api import OsThreads
+from vs_sim.api import OsThreads, Signals
 from vs_sim.api.testing import (
     HANG_GUARD_S,
     ManualClock,
@@ -40,7 +42,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from vs_runtime.api.infrastructure import RunControlChannel
     from vs_sim.api import Connection
 
 _CONFIGURATION = ConfigurationError(
@@ -145,13 +146,14 @@ def test_a_subscriber_reads_the_event_that_ends_the_run_before_the_server_closes
             socket_path=socket_path,
             detach=ending.detach,
             platform=sim_platform(threads, network=network),
+            control_key=CONTROL_KEY,
         )
         seen: list[list[str]] = []
         read = threads.event()
 
         def subscriber() -> None:
             assert runtime.transport_listening.wait(HANG_GUARD_S)
-            client = network.connect(str(socket_path))
+            client = operator_dialer(network).connect(str(socket_path))
             client.send(
                 SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0)
                 .model_dump_json()
@@ -184,7 +186,7 @@ class _Subscription:
     """One client's event stream, read a message at a time on ``SimNetwork``."""
 
     def __init__(self, network: SimNetwork, socket_path: Path) -> None:
-        self._connection = network.connect(str(socket_path), HANG_GUARD_S)
+        self._connection = operator_dialer(network).connect(str(socket_path), HANG_GUARD_S)
         self._connection.send(
             SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0).model_dump_json().encode()
             + b"\n"
@@ -239,6 +241,7 @@ def _runtime(socket_path: Path, threads: SimThreads, network: SimNetwork) -> Ser
         runs=production_runs(),
         socket_path=socket_path,
         platform=sim_platform(threads, network=network),
+        control_key=CONTROL_KEY,
     )
 
 
@@ -323,31 +326,6 @@ def test_runtime_waits_for_reconnected_subscriber_before_teardown(
     _on_sim(seed, body)
 
 
-class _SessionControlStub:
-    """The stop half of ``vibesys.api.RunControl`` over a ``RunControlChannel``."""
-
-    def __init__(self, control: RunControlChannel) -> None:
-        self._control = control
-
-    def steer(self, text: str) -> None:
-        self._control.queue_steer(text)
-
-    def pause(self) -> None:
-        self._control.request_pause()
-
-    def resume(self) -> None:
-        self._control.resume()
-
-    def resume_with_fallback(self) -> None:
-        self._control.resume_with_fallback()
-
-    def resume_when_capacity_returns(self) -> bool:
-        return self._control.resume_when_capacity_returns()
-
-    def stop(self) -> None:
-        self._control.request_stop(StopMode.DRAIN)
-
-
 @_SEEDS
 @given(seed=st.integers(0, 2**32))
 def test_runtime_returns_cleanly_after_an_operator_stop(
@@ -384,10 +362,10 @@ def test_runtime_returns_cleanly_after_an_operator_stop(
         integration.events.subscribe(runtime.integration.project_event)
 
         def run() -> str:
-            control = _SessionControlStub(integration.control)
+            control = ChannelRunControl(integration.control, threads)
             runtime.controls.install(control)
             try:
-                runtime.api.execute(StopCommand(timestamp=REQUEST_TIME))
+                runtime.controls.stop(StopMode.DRAIN)
                 integration.control.raise_if_stopped()
                 return "unreachable"
             finally:
@@ -414,32 +392,48 @@ def test_runtime_returns_cleanly_after_an_operator_stop(
     _on_sim(seed, body)
 
 
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "error", [None, RuntimeError("failed"), _CONFIGURATION, KeyboardInterrupt()]
+)
+@example(seed=0)
 @_SEEDS
 @given(seed=st.integers(0, 2**32))
 def test_runtime_does_not_duplicate_core_terminal_event(
-    tmp_path_factory: pytest.TempPathFactory, seed: int
+    tmp_path_factory: pytest.TempPathFactory, seed: int, error: BaseException | None
 ) -> None:
     socket_path = tmp_path_factory.mktemp("run") / "control.sock"
+    terminal = "run_finished" if error is None else "run_failed"
 
     def body(threads: SimThreads, network: SimNetwork) -> None:
         runtime = _runtime(socket_path, threads, network)
         received: list[dict[str, Any]] = []
         subscriber = threads.spawn(
-            lambda: _collect_until(runtime, network, socket_path, _has("run_finished"), received),
+            lambda: _collect_until(runtime, network, socket_path, _has(terminal), received),
             name="subscriber",
             daemon=False,
         )
-        core_events = CoreEventJournal(clock=ManualClock(), threads=OsThreads())
+        core_events = CoreEventJournal(clock=ManualClock(), threads=threads)
         core_events.subscribe(runtime.integration.project_event)
 
-        runtime.run(
-            lambda: core_events.emit(CoreEventType.RUN_FINISHED, status=EventStatus.COMPLETED)
-        )
+        def run() -> None:
+            core_events.emit(
+                CoreEventType.RUN_FINISHED if error is None else CoreEventType.RUN_FAILED,
+                status=EventStatus.COMPLETED if error is None else EventStatus.FAILED,
+            )
+            if error is not None:
+                raise error
+
+        with nullcontext() if error is None else pytest.raises(type(error)):
+            runtime.run(run)
 
         subscriber.join(HANG_GUARD_S)
         assert not subscriber.is_alive()
-        assert sum(event["type"] == "run_finished" for event in received) == 1
-        assert sum(event.type.value == "run_finished" for event in runtime.journal.read()) == 1
+        terminals = {"run_finished", "run_failed", "run_interrupted", "configuration_failed"}
+        assert [event["type"] for event in received if event["type"] in terminals] == [terminal]
+        assert [
+            event.type.value for event in runtime.journal.read() if event.type.value in terminals
+        ] == [terminal]
 
     _on_sim(seed, body)
 
@@ -484,5 +478,60 @@ def test_runtime_streams_configuration_failure_without_run_failure(
         assert event["data"]["message"] == "unknown token=[REDACTED] option --bad"
         assert event["data"]["usage"] == "usage: vibesys --token=[REDACTED]"
         assert not any(event["type"] == "run_failed" for event in received)
+
+    _on_sim(seed, body)
+
+
+_TERMINATING = (Signals.SIGTERM, Signals.SIGHUP)
+
+
+@pytest.mark.regression
+@example(signals=[Signals.SIGINT, Signals.SIGTERM], seed=0)
+@_SEEDS
+@given(
+    signals=st.lists(st.sampled_from([Signals.SIGINT, *_TERMINATING]), min_size=1, max_size=3),
+    seed=st.integers(0, 2**32),
+)
+def test_an_interrupted_run_is_journaled_by_the_signal_that_ended_it(
+    tmp_path_factory: pytest.TempPathFactory, signals: list[Signals], seed: int
+) -> None:
+    """PR #3209 LOW-3: a second Ctrl-C (the launcher's SIGTERM) was journaled as the first SIGINT.
+
+    A Ctrl-C asks the run to stop; a SIGTERM or SIGHUP ends it. The journal names the first
+    signal that ended the run, and a Ctrl-C only when nothing stronger arrived.
+    """
+    socket_path = tmp_path_factory.mktemp("run") / "control.sock"
+    ending = next((number for number in signals if number in _TERMINATING), signals[0])
+
+    def body(threads: SimThreads, network: SimNetwork) -> None:
+        runtime = _runtime(socket_path, threads, network)
+        received: list[dict[str, Any]] = []
+        subscriber = threads.spawn(
+            lambda: _collect_until(
+                runtime, network, socket_path, _has("run_interrupted"), received
+            ),
+            name="subscriber",
+            daemon=False,
+        )
+
+        def run() -> None:
+            for number in signals:
+                runtime.shutdown(number)
+            raise KeyboardInterrupt
+
+        with pytest.raises(KeyboardInterrupt):
+            runtime.run(run)
+
+        subscriber.join(HANG_GUARD_S)
+        assert not subscriber.is_alive()
+        interruptions = [
+            event.data
+            for event in runtime.journal.read()
+            if isinstance(event.data, RunInterruptedData)
+        ]
+        assert len(interruptions) == 1
+        assert interruptions[0].signal == ending.name
+        reason = "launcher_terminated" if ending in _TERMINATING else "interrupted"
+        assert interruptions[0].reason == reason
 
     _on_sim(seed, body)

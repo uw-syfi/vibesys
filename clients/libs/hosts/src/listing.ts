@@ -45,6 +45,10 @@ export type HostListing =
       readonly ended: readonly HostRun[];
       /** Records this app cannot read (another VibeSys version), by id. */
       readonly unreadable: readonly string[];
+      /** Runs whose project cannot be resolved; liveness may also be unknown. */
+      readonly unknownProject?: readonly (Omit<HostRun, 'projectRoot'> & {
+        readonly alive?: boolean;
+      })[];
       /** Ids whose lock could not be read: neither known live nor known ended, by id. */
       readonly unverified: readonly string[];
     }
@@ -55,6 +59,18 @@ export type HostListing =
     };
 
 type ListedHost = Extract<HostListing, {readonly kind: 'listed'}>;
+
+/**
+ * The hosts that answer in `after` and did not in `before` (absent counts as not answering): a
+ * read that failed because such a host was unreachable may now succeed.
+ */
+export function hostsComeUp(
+  before: readonly HostListing[],
+  after: readonly HostListing[],
+): readonly HostKey[] {
+  const was = new Set(before.flatMap(each => (each.kind === 'listed' ? [each.host] : [])));
+  return after.flatMap(each => (each.kind === 'listed' && !was.has(each.host) ? [each.host] : []));
+}
 
 /** What one coherent registry listing proves about an instance. */
 export type InstanceObservation<Record, Unreadable = string> =
@@ -69,7 +85,9 @@ export type InstanceObservation<Record, Unreadable = string> =
 
 const STAGES: Readonly<Record<NonNullable<RunPhase['stage']>, string>> = {
   resolving: 'Resolving',
+  probing_workspace: 'Probing workspace',
   building_image: 'Building image',
+  building_tools: 'Building tools',
   starting_container: 'Starting container',
 };
 
@@ -101,6 +119,37 @@ function hostRun(record: LiveInstanceRecord): HostRun {
     startedAt: record.started_at,
     reason: phase.reason == null ? null : phase.reason.message,
   };
+}
+
+/**
+ * Whether the directory the app remembers a run in names the registry's `root` for it. The app keeps
+ * what the user typed (`~/x`, a trailing slash) and the registry the resolved absolute path.
+ */
+function sameProject(remembered: string, root: string): boolean {
+  const trimmed = (path: string): string => path.replace(/\/+$/, '');
+  const [want, have] = [trimmed(remembered), trimmed(root)];
+  return want === have || (want.startsWith('~/') && have.endsWith(want.slice(1)));
+}
+
+/**
+ * The newest of `servers` (a host's live or ended records) that drives or drove run `runId` in
+ * `project`: a run resumed many times has one record per server, and the latest speaks for it.
+ */
+export function newestServerOf(
+  servers: readonly HostRun[],
+  runId: string,
+  project?: string,
+): HostRun | undefined {
+  return servers
+    .filter(
+      server =>
+        server.runId === runId &&
+        (project === undefined || sameProject(project, server.projectRoot)),
+    )
+    .reduce<HostRun | undefined>(
+      (best, server) => (best === undefined || best.startedAt < server.startedAt ? server : best),
+      undefined,
+    );
 }
 
 /** `listing` from `host`'s registry, as the views list it. */

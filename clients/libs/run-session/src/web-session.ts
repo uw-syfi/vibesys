@@ -14,7 +14,7 @@
  * identity latched between the operation settling and the machine taking its output) and a
  * rejected stream batch are reported as `projection-rejected`.
  */
-import type {RunSnapshot, TuiDefaults} from '@vibesys/contracts';
+import type {RunSnapshot} from '@vibesys/contracts';
 import {
   foldSnapshot,
   hasRunEnded,
@@ -31,7 +31,9 @@ import {
 } from './connection.js';
 import type {
   BrowserLifecycle,
+  ChatHarness,
   ChatResult,
+  ChatThreadResult,
   IterationLoad,
   RunCommand,
   RunCommandOutcome,
@@ -190,11 +192,22 @@ export class WebSession {
     return response.chat;
   }
 
+  /** Create a chat thread, folding its creation event the way an answer's events are folded. */
+  async createChatThread(
+    harness: ChatHarness | null,
+    options: {readonly signal?: AbortSignalLike} = {},
+  ): Promise<ChatThreadResult> {
+    const response = await this.#connection.createChatThread(harness, options);
+    if (this.#closed === null && !options.signal?.aborted) {
+      const outcome = this.#dispatchRun({type: 'response-events', events: response.events});
+      this.#publishTrace(outcome);
+      this.#reportRunIdentityRejection(outcome);
+    }
+    return response.thread;
+  }
+
   /** Send one operator command without letting presentation code own the transport. */
   command = (input: RunCommand): Promise<RunCommandOutcome> => this.#connection.command(input);
-
-  /** Read the server-selected presentation defaults through the session-owned connection. */
-  tuiDefaults = (): Promise<TuiDefaults | null> => this.#connection.tuiDefaults();
 
   #reach(): Reachability {
     return {visible: this.#lifecycle.visibilityState !== 'hidden', online: this.#lifecycle.online};

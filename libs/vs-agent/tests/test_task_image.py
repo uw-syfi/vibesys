@@ -15,6 +15,10 @@ from vs_agent.api.images import (
     DockerCommandResult,
     TaskImageBuildError,
     build_task_image,
+    is_task_image_reference,
+    local_image_id,
+    task_image_inputs,
+    task_image_reference,
 )
 from vs_agent.api.testing import (
     DockerBuildResult,
@@ -103,10 +107,24 @@ def test_build_reuses_the_existing_tag_and_image_for_an_unchanged_task(tmp_path:
         dockerfile, command_runner=store, clock=ManualClock(), output=DISCARD
     )
 
-    assert store.builds[0] == store.builds[1]
+    assert len(store.builds) == 1
     assert first_id == second_id
     assert len(store.tags) == 1
     assert store.removed == []
+
+
+@given(first=st.sampled_from(["a", "b", "c"]), second=st.sampled_from(["a", "b", "c"]))
+def test_a_task_is_built_again_exactly_when_its_inputs_changed(first: str, second: str) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        task_root = Path(directory)
+        dockerfile = task_root / "Dockerfile"
+        dockerfile.write_text("FROM scratch\n", encoding="utf-8")
+        store = _FakeDockerImageStore()
+        for payload in (first, second):
+            (task_root / "payload.txt").write_text(payload, encoding="utf-8")
+            build_task_image(dockerfile, command_runner=store, clock=ManualClock(), output=DISCARD)
+
+    assert len(store.builds) == (1 if first == second else 2)
 
 
 def test_build_tags_a_changed_task_differently_and_prunes_the_old_tag(tmp_path: Path) -> None:
@@ -169,7 +187,7 @@ def test_build_tag_is_unchanged_when_the_context_is_rebuilt_unchanged(content: s
             task_root / "Dockerfile", command_runner=store, clock=ManualClock(), output=DISCARD
         )
 
-    assert store.builds[0] == store.builds[1]
+    assert len(store.builds) == 1
 
 
 @given(
@@ -209,7 +227,7 @@ def test_build_uses_task_context_and_returns_runnable_image_id(tmp_path: Path) -
         == _IMAGE_ID
     )
 
-    build_argv, cwd, timeout = runner.calls[0]
+    build_argv, cwd, timeout = runner.calls[1]
     tag = build_argv[4]
     assert tag.startswith("vibesys-task-build:")
     assert build_argv == (
@@ -224,7 +242,7 @@ def test_build_uses_task_context_and_returns_runnable_image_id(tmp_path: Path) -
     )
     assert cwd == task_root
     assert 0 < timeout <= 42
-    inspect_argv, inspect_cwd, inspect_timeout = runner.calls[1]
+    inspect_argv, inspect_cwd, inspect_timeout = runner.calls[2]
     assert (inspect_argv, inspect_cwd) == (
         (
             "docker",
@@ -250,7 +268,7 @@ def test_build_passes_base_image_as_build_arg(tmp_path: Path) -> None:
         output=DISCARD,
     )
 
-    build_argv, _cwd, _timeout = runner.calls[0]
+    build_argv, _cwd, _timeout = runner.calls[1]
     tag = build_argv[4]
     assert tag.startswith("vibesys-task-build:")
     assert build_argv == (
@@ -291,7 +309,7 @@ def test_build_translates_process_failures(
             output=DISCARD,
         )
 
-    assert len(runner.calls) == 1
+    assert len(runner.calls) == 2
 
 
 def test_build_reports_bounded_truncated_docker_failure(tmp_path: Path) -> None:
@@ -380,7 +398,7 @@ def test_build_rejects_malformed_runnable_image_id(
             output=DISCARD,
         )
 
-    assert len(runner.calls) == 2
+    assert len(runner.calls) == 3
 
 
 @pytest.mark.parametrize(
@@ -413,7 +431,7 @@ def test_build_translates_inspect_failures(
             output=DISCARD,
         )
 
-    assert len(runner.calls) == 2
+    assert len(runner.calls) == 3
 
 
 def test_build_validates_dockerfile_before_running_docker(tmp_path: Path) -> None:
@@ -450,3 +468,107 @@ def test_build_rejects_dockerfile_symlink_without_widening_context(tmp_path: Pat
         build_task_image(dockerfile, command_runner=runner, clock=ManualClock(), output=DISCARD)
 
     assert runner.calls == []
+
+
+def test_a_build_never_prunes_another_tasks_tag(tmp_path: Path) -> None:
+    """Regression: a build pruned every task's tag on the daemon, so concurrent runs
+    (other tasks, other checkouts, other users of a shared host) lost their images."""
+    store = _FakeDockerImageStore()
+    first = tmp_path / "one" / "Dockerfile"
+    second = tmp_path / "two" / "Dockerfile"
+    for dockerfile in (first, second):
+        dockerfile.parent.mkdir()
+        dockerfile.write_text("FROM scratch\n", encoding="utf-8")
+
+    build_task_image(first, command_runner=store, clock=ManualClock(), output=DISCARD)
+    build_task_image(second, command_runner=store, clock=ManualClock(), output=DISCARD)
+    second.write_text("FROM scratch\nRUN echo changed\n", encoding="utf-8")
+    build_task_image(second, command_runner=store, clock=ManualClock(), output=DISCARD)
+
+    assert store.builds[0] in store.tags
+    assert store.removed == [store.builds[1]]
+
+
+@given(base=st.one_of(st.none(), st.text(min_size=1, max_size=30)))
+def test_the_reference_is_the_tag_the_build_produces(base: str | None) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        dockerfile = Path(directory) / "Dockerfile"
+        dockerfile.write_text("FROM scratch\n", encoding="utf-8")
+        store = _FakeDockerImageStore()
+        reference = task_image_reference(dockerfile, base_image=base)
+
+        assert (
+            local_image_id(reference, command_runner=store, output=DISCARD, clock=ManualClock())
+            is None
+        )
+        build_task_image(
+            dockerfile, base_image=base, command_runner=store, clock=ManualClock(), output=DISCARD
+        )
+
+        assert store.builds == [reference]
+        assert is_task_image_reference(reference)
+        assert (
+            local_image_id(reference, command_runner=store, output=DISCARD, clock=ManualClock())
+            == store.tags[reference]
+        )
+
+
+@given(content=st.text(max_size=200), base=st.one_of(st.none(), st.just("python:3")))
+def test_identical_inputs_at_two_locations_have_the_same_inputs_digest(
+    content: str, base: str | None
+) -> None:
+    """Regression: a copied project (``--runs-dir``) counted as changed task inputs."""
+    with tempfile.TemporaryDirectory() as directory:
+        references = []
+        for location in ("a", "b"):
+            task = Path(directory) / location / "t"
+            task.mkdir(parents=True)
+            (task / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+            (task / "payload.txt").write_text(content, encoding="utf-8")
+            references.append(task_image_reference(task / "Dockerfile", base_image=base))
+
+    first, second = references
+    assert first != second  # the owner, which scopes pruning, differs
+    assert task_image_inputs(first) == task_image_inputs(second) is not None
+
+
+def test_a_non_task_image_has_no_inputs_digest() -> None:
+    assert task_image_inputs(_IMAGE_ID) is None
+    assert task_image_inputs("python:3.12-bookworm") is None
+
+
+_IGNORE_CASES = [
+    # (.dockerignore, edited file, whether the edit is a build input)
+    ("README.md\n", "README.md", False),
+    ("*.md\n", "docs/notes.md", True),  # ``*`` stays within one segment
+    ("**/*.md\n", "docs/notes.md", False),
+    ("docs\n", "docs/notes.md", False),  # a directory pattern covers its contents
+    ("docs\n!docs/keep.md\n", "docs/keep.md", True),
+    ("# comment\n/README.md\n", "README.md", False),
+    ("*\n!Dockerfile\n", "README.md", False),
+    ("*\n", "Dockerfile", True),  # the Dockerfile is always an input
+    ("*\n", ".dockerignore", True),
+    ("bench?.py\n", "bench1.py", False),
+    ("bench[0-9].py\n", "benchx.py", True),
+    ("", "README.md", True),
+]
+
+
+@pytest.mark.parametrize(("dockerignore", "edited", "is_input"), _IGNORE_CASES)
+def test_the_inputs_digest_honors_dockerignore(
+    dockerignore: str, edited: str, *, is_input: bool, tmp_path: Path
+) -> None:
+    """Regression: editing a file the build never sees (a README) changed the task's inputs."""
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text("FROM scratch\n", encoding="utf-8")
+    (tmp_path / ".dockerignore").write_text(dockerignore, encoding="utf-8")
+    target = tmp_path / edited
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.exists():
+        target.write_text("before\n", encoding="utf-8")
+    before = task_image_reference(dockerfile, base_image=None)
+
+    with target.open("a", encoding="utf-8") as file:
+        file.write("# edited\n")
+
+    assert (task_image_reference(dockerfile, base_image=None) != before) is is_input

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from tests.server.support import REQUEST_TIME, RecordingObserver, sim_platform
+from tests.server.support import CONTROL_KEY, REQUEST_TIME, RecordingObserver, sim_platform
 from tests.support.real_git import NO_GITHUB, REAL_GIT
 from websockets.sync.client import connect
 
@@ -38,8 +38,9 @@ from server.journal import WireJournal
 from server.runtime import ServerRuntime
 from server.transport.discovery import WebInstanceClaim, WebInstanceRecord
 from vibesys.run.integration import LocalRunIntegration
-from vs_core.api import StopMode
-from vs_runtime.api.infrastructure import RunControlChannel
+from vs_runtime.api.infrastructure import (
+    ChannelRunControl,
+)
 from vs_runtime.api.testing import idle_environment_system
 from vs_sim.api import OsThreads, Platform
 from vs_sim.api.testing import ManualClock, SimThreads
@@ -63,39 +64,6 @@ _INDEX_HTML = "<!doctype html><title>composed bundle</title>"
 _DEADLOCK_GUARD_SECONDS = 30.0
 
 
-class _SessionControlStub:
-    """Adapt a `RunControlChannel` to the `vibesys.api.RunControl` shape.
-
-    Mirrors what `vibesys.api._session._LocalRunSession`'s `steer`/`pause`/
-    `resume`/`stop` methods do in production, so a bare `runtime.run(...)`
-    callback (which never goes through `ServerRuntime.drive`) can install the
-    same control role that a live session provides.
-    """
-
-    def __init__(self, control: RunControlChannel) -> None:
-        self._control = control
-        self.stop_calls = 0
-
-    def steer(self, text: str) -> None:
-        self._control.queue_steer(text)
-
-    def pause(self) -> None:
-        self._control.request_pause()
-
-    def resume(self) -> None:
-        self._control.resume()
-
-    def resume_with_fallback(self) -> None:
-        self._control.resume_with_fallback()
-
-    def resume_when_capacity_returns(self) -> bool:
-        return self._control.resume_when_capacity_returns()
-
-    def stop(self) -> None:
-        self.stop_calls += 1
-        self._control.request_stop(StopMode.DRAIN)
-
-
 def _await_socket(runtime: ServerRuntime) -> None:
     assert runtime.transport_listening.wait(timeout=_DEADLOCK_GUARD_SECONDS)
 
@@ -105,6 +73,7 @@ def _subscription(socket_path: Path) -> Generator[Callable[[], dict]]:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(_DEADLOCK_GUARD_SECONDS)
         client.connect(str(socket_path))
+        client.sendall(CONTROL_KEY.hello())
         with client.makefile("rwb") as stream:
             stream.write(
                 SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0)
@@ -235,6 +204,7 @@ def test_runtime_explicitly_composes_server_components(tmp_path: Path) -> None:
         runs=production_runs(),
         socket_path=tmp_path / "control.sock",
         platform=sim_platform(SimThreads()),
+        control_key=CONTROL_KEY,
     )
 
     assert isinstance(runtime.journal, WireJournal)
@@ -256,6 +226,7 @@ def test_runtime_snapshots_namespace_client_state_by_project(tmp_path: Path) -> 
         runs=production_runs(),
         socket_path=tmp_path / "control.sock",
         platform=sim_platform(SimThreads()),
+        control_key=CONTROL_KEY,
     )
 
     response = runtime.api.execute(SnapshotQuery(timestamp=REQUEST_TIME))
@@ -274,13 +245,13 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
         threads=OsThreads(),
         system=idle_environment_system(),
     )
-    control = _SessionControlStub(integration.control)
+    control = ChannelRunControl(integration.control, integration.threads)
 
     class Observer(RecordingObserver):
         def listening(self) -> None:
             response = runtime.api.execute(StopCommand(timestamp=REQUEST_TIME))
             assert response.ack is not None
-            assert (response.ack.action, response.ack.status) == ("stop", "pending")
+            assert (response.ack.action, response.ack.status) == ("pause_now", "pending")
 
     runtime = ServerRuntime(
         run_id="run-1",
@@ -289,6 +260,7 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
         detach=True,
         observer=Observer(),
         platform=Platform.real(),
+        control_key=CONTROL_KEY,
     )
 
     def run() -> bool:
@@ -304,7 +276,6 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
         integration.close()
 
     assert stop_reached_session is True
-    assert control.stop_calls == 1
     with pytest.raises(RunControlUnavailableError, match="after the run session ends"):
         runtime.api.execute(StopCommand(timestamp=REQUEST_TIME))
 
@@ -342,6 +313,7 @@ def test_startup_rejects_commands_that_require_an_active_session(
         detach=True,
         observer=observer,
         platform=Platform.real(),
+        control_key=CONTROL_KEY,
     )
 
     assert runtime.run(lambda: "ran") == "ran"
@@ -375,6 +347,7 @@ def test_a_web_only_subscriber_decides_a_web_runs_whole_lifetime(tmp_path: Path)
         web=True,
         instance_path=instance_path,
         platform=Platform.real(),
+        control_key=CONTROL_KEY,
     )
     printed = _PrintedLines()
     received: list[dict] = []
@@ -438,6 +411,7 @@ def test_the_web_gateway_receives_its_assets_origins_and_instance_path(tmp_path:
         instance_path=instance_path,
         detach=True,
         platform=Platform.real(),
+        control_key=CONTROL_KEY,
     )
     printed = _PrintedLines()
     observed: dict[str, Any] = {}
@@ -502,6 +476,7 @@ def test_the_runtime_composes_no_web_gateway_unless_web_is_requested(tmp_path: P
         instance_path=instance_path,
         detach=True,
         platform=Platform.real(),
+        control_key=CONTROL_KEY,
     )
     printed = _PrintedLines()
     observed: dict[str, Any] = {}
@@ -554,6 +529,7 @@ def test_the_web_gateway_binds_the_configured_port(tmp_path: Path) -> None:
             instance_path=instance_path,
             detach=True,
             platform=Platform.real(),
+            control_key=CONTROL_KEY,
         )
         with redirect_stdout(printed), pytest.raises(RuntimeError) as raised:
             # The callback is unreachable while the launch fails, and requests

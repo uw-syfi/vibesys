@@ -1,0 +1,53 @@
+{
+  "id": "helper-examples-destination-gated",
+  "protocol": "host-helper",
+  "title": "The examples.destination message needs the example_destination feature",
+  "description": "After a hello that negotiated no features, examples.destination is answered feature_not_negotiated, so a client that did not ask never reads what is at a destination.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": []
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "examples.destination",
+        "request_id": "d",
+        "deadline_ms": 10000,
+        "example": "data-structures/stack",
+        "destination": "~/vibesys-projects/stack"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "d",
+        "code": "feature_not_negotiated"
+      }
+    }
+  ]
+}

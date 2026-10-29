@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from vs_decode.api import Unreadable, read_json
 
 WEB_BUILD_MANIFEST = ".vibesys-web-build.json"
-WEB_BUILD_COMMAND = "pnpm --dir clients/apps/web build"
+WEB_BUILD_COMMAND = "rebuild the supplied --web-assets bundle"
 
 _SHA256_PREFIX = "sha256:"
 _SHA256_HEX_LENGTH = 64
@@ -40,49 +40,48 @@ class _WebAssetError(ValueError):
     @classmethod
     def missing_manifest(cls, bundle: Path) -> Self:
         return cls(
-            f"web assets {bundle} have no {WEB_BUILD_MANIFEST}; run `{WEB_BUILD_COMMAND}` and retry"
+            f"web assets {bundle} have no {WEB_BUILD_MANIFEST}; {WEB_BUILD_COMMAND} and retry"
         )
 
     @classmethod
     def workspace_mismatch(cls, manifest: Path) -> Self:
         return cls(
             f"web build manifest {manifest} names a workspace that does not contain the bundle; "
-            f"run `{WEB_BUILD_COMMAND}` and retry"
+            f"{WEB_BUILD_COMMAND} and retry"
         )
 
     @classmethod
     def repeated_source(cls, manifest: Path, source: str) -> Self:
         return cls(
             f"web build manifest {manifest} repeats source {source!r}; "
-            f"run `{WEB_BUILD_COMMAND}` and retry"
+            f"{WEB_BUILD_COMMAND} and retry"
         )
 
     @classmethod
     def source_outside_workspace(cls, manifest: Path) -> Self:
         return cls(
             f"web build manifest {manifest} names source outside its workspace; "
-            f"run `{WEB_BUILD_COMMAND}` and retry"
+            f"{WEB_BUILD_COMMAND} and retry"
         )
 
     @classmethod
     def stale(cls, bundle: Path, source: Path, build_id: str) -> Self:
         return cls(
             f"web assets {bundle} are stale: source {source} differs from build {build_id}; "
-            f"run `{WEB_BUILD_COMMAND}` and retry"
+            f"{WEB_BUILD_COMMAND} and retry"
         )
 
     @classmethod
     def changed_asset(cls, bundle: Path, asset: Path, build_id: str) -> Self:
         return cls(
             f"web assets {bundle} do not match build {build_id}: asset {asset} differs; "
-            f"run `{WEB_BUILD_COMMAND}` and retry"
+            f"{WEB_BUILD_COMMAND} and retry"
         )
 
     @classmethod
     def invalid_manifest(cls, manifest: Path, error: BaseException) -> Self:
         return cls(
-            f"web build manifest {manifest} is invalid ({error}); "
-            f"run `{WEB_BUILD_COMMAND}` and retry"
+            f"web build manifest {manifest} is invalid ({error}); {WEB_BUILD_COMMAND} and retry"
         )
 
 

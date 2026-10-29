@@ -8,7 +8,20 @@
       "helper-incompatible",
       "helper-invalid-request",
       "helper-feature-gated",
-      "helper-harnesses"
+      "helper-preflight-roles-gated",
+      "helper-examples-catalogue-gated",
+      "helper-preflight-backend-gated",
+      "helper-preflight-causes-gated",
+      "helper-harnesses",
+      "helper-run-summary-gated",
+      "helper-run-summary-trace-gated",
+      "helper-run-summary-ending-gated",
+      "helper-run-events-kinds-gated",
+      "helper-compute-gated",
+      "helper-agent-logins-gated",
+      "helper-usage-window-gated",
+      "helper-run-reader-gated",
+      "helper-examples-destination-gated"
     ],
     "registry": [
       "helper-instances-empty",
@@ -21,10 +34,13 @@
       "helper-project-missing",
       "helper-paths-missing",
       "helper-machine",
-      "helper-preflight-project-missing"
+      "helper-preflight-project-missing",
+      "helper-run-summary-project-missing",
+      "helper-run-history-skips"
     ],
     "examples": [
-      "helper-examples-unavailable"
+      "helper-examples-unavailable",
+      "helper-examples-destination-unavailable"
     ],
     "logs": [
       "helper-logs-list",

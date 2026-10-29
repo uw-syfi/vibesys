@@ -42,9 +42,8 @@ from vibesys.plugin_registration import (
     OrchestrationRegistration,
     RuntimeRecordProjector,
 )
-from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR
-from vibesys.run.contracts import IterationTree, PluginProjection
-from vs_core.api import FlowDriver, FlowState, MeasurementRecipe, RevisionRef
+from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR, core_protocol_variables
+from vs_core.api import FlowDriver, FlowState, MeasurementRecipe, RevisionRef, policy_of
 from vs_core.api import RunFacts as CoreRunFacts
 from vs_runtime.api import (
     CoreOperation,
@@ -63,6 +62,7 @@ from vs_runtime.api.core import (
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from vibesys.run.contracts import PluginProjection
     from vs_core.api import TaskTerms
     from vs_runtime.api import CoreRunContext
 
@@ -77,13 +77,13 @@ def evolve_operation_catalog(ports: OperationPorts) -> OperationCatalog:
     return operation_catalog(OPERATIONS, ports)
 
 
-def evolve_projector() -> RuntimeRecordProjector[FlowState]:
+def evolve_projector() -> RuntimeRecordProjector[FlowState, EvolveSnapshot]:
     """Read an evolve run's published record from its committed runtime record."""
 
-    def project(state: FlowState, revision: int) -> PluginProjection:
-        record = FlowDriver.published(state, EvolveSnapshot)
-        if record is None:
-            return PluginProjection(payload={}, iterations=IterationTree.from_nodes(()), rounds=())
+    def published(state: FlowState) -> EvolveSnapshot | None:
+        return FlowDriver.published(state, EvolveSnapshot)
+
+    def project(record: EvolveSnapshot, revision: int) -> PluginProjection:
         return project_snapshot(record, experiment_revision=revision)
 
     return RuntimeRecordProjector(
@@ -91,6 +91,7 @@ def evolve_projector() -> RuntimeRecordProjector[FlowState]:
         state_type=FlowState,
         record_type=RuntimeRecord[FlowState],
         operations=OPERATIONS.registry(),
+        published=published,
         project=project,
     )
 
@@ -105,11 +106,13 @@ def _task_terms(
         launch.metric_space,
         Measuring(
             stage_seconds={
+                "build": evaluation.build_seconds,
                 "accuracy": evaluation.accuracy_seconds,
                 "benchmark": evaluation.benchmark_seconds,
             },
             queue_allowance=float(context.queue_allowance_seconds),
             benchmark_needs_accuracy=evaluation.benchmark_needs_accuracy,
+            builds=evaluation.builds,
         ),
     )
 
@@ -137,6 +140,7 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
         evaluator_digest=evaluation.evaluator_digest,
         workload_digest=evaluation.workload_digest,
         environment_digest=evaluation.environment_digest,
+        dedicated_measurement_resources=evaluation.dedicated_measurement_resources,
         task=terms,
     )
     # The operator chooses how wide and how long to search; whether a passing child is profiled
@@ -156,7 +160,8 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
         facts=facts,
         limits=limits_for(budget(config), context),
         deadline_seconds=run_deadline_at(context.max_run_seconds),
-        prompt_variables=run_prompt_variables(
+        prompt_variables=core_protocol_variables(policy_of(facts))
+        | run_prompt_variables(
             objective=facts.objective,
             environment_notes=context.facts.environment_notes,
             agent_evaluation=True,
@@ -200,6 +205,7 @@ def evolve_core_policy() -> CorePolicy:
         retention_label=RETENTION_LABEL,
         prompt_templates=Path(prompts.__file__).parent,
         prompt_fallback_roots=(CORE_PROTOCOL_DIR, PROMPTS_DIR / "shared"),
+        span_kinds=evolve.spans,
     )
 
 

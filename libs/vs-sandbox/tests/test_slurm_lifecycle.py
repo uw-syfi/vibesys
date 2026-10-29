@@ -35,6 +35,7 @@ from vs_sim.api import Sleeper, yield_now
 from vs_sim.api.testing import HostCrashedError, ManualClock, examples, yield_until
 from vs_slurm.api import (
     ClusterCancelOutcome,
+    ClusterObservation,
     ClusterSubmitOutcome,
     ClusterTarget,
     FakeCluster,
@@ -130,9 +131,15 @@ class _ScheduledCluster(FakeCluster):
         self.accepted.set()
         return outcome
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
         self.scancels += 1
-        return super().cancel(target, by_job_id=by_job_id)
+        return super().cancel(target, by_job_id=by_job_id, observed=observed)
 
 
 def _config() -> SlurmConfig:

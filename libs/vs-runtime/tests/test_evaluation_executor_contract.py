@@ -33,7 +33,7 @@ from vs_evaluation.api import (
     TrustedEvidence,
 )
 from vs_evaluation.api import (
-    PollingEvaluationExecutor as PollingExecutorPort,
+    RecoverableEvaluationExecutor as PollingExecutorPort,
 )
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_runtime.api import (
@@ -45,6 +45,7 @@ from vs_runtime.api import (
 from vs_runtime.api.core import StageOutputOpener, StageRun
 from vs_runtime.api.slurm_evaluation_stack import BENCHMARK_OUTPUT, ScenarioCluster, build_stack
 from vs_runtime.api.testing import FakeEvaluation, FakeWorkspace, FakeWorkspaces
+from vs_sandbox.api.slurm import SlurmExecutionPolicy
 from vs_sim.api import Capture, OutputStream
 from vs_sim.api.testing import ManualClock, yield_until
 from vs_slurm.api import SlurmJobStatus
@@ -72,6 +73,7 @@ class _World:
     snapshot: str
     stage_running: Callable[[], Awaitable[None]]
     submission_visible: Callable[[str], Awaitable[None]]
+    workspaces: FakeWorkspaces
     printed: dict[str, bytes] = field(default_factory=dict)
     """What each stage's command printed to stdout, as the executor's Fake scripts it."""
 
@@ -122,6 +124,7 @@ async def _local(root: Path, script: _Script, stage_output: StageOutputOpener | 
         snapshot,
         running,
         visible,
+        workspaces,
         dict(_LOCAL_PRINTED),
     )
 
@@ -142,7 +145,7 @@ async def _slurm(root: Path, script: _Script, stage_output: StageOutputOpener | 
         await wait_until_executor_started(cluster.accepted, stack.executor, handle_id)
 
     printed = {"accuracy": b"ok", "benchmark": BENCHMARK_OUTPUT.encode()}
-    return _World(stack.executor, stack.snapshot, running, visible, printed)
+    return _World(stack.executor, stack.snapshot, running, visible, stack.workspaces, printed)
 
 
 BUILDERS = [pytest.param(_local, id="polling"), pytest.param(_slurm, id="semantic-slurm")]
@@ -250,6 +253,42 @@ async def test_semantic_slurm_failure_keeps_raw_evidence_and_safe_operator_summa
     assert len(evidence.semantic_summary) <= MAX_EVIDENCE_SUMMARY_CHARS
     assert benchmark.operator_summary is not None
     assert "slurm-secret" not in benchmark.operator_summary
+    await stack.executor.close()
+
+
+_PRIVATE_PYTHON = "/cluster/work/u/venv/bin/python"
+_PRIVATE_SETUP = "/cluster/work/u/campaign/setup.sh"
+_PRIVATE_ERROR = (
+    f"{_PRIVATE_PYTHON}: Error while finding module specification for 'engine.server' "
+    "(ModuleNotFoundError: No module named 'engine')\n"
+    '  File "/cluster/work/u/venv/lib/python3.10/site-packages/x.py", line 1, in main\n'
+    f"sourced {_PRIVATE_SETUP}\n"
+)
+
+
+@pytest.mark.parametrize("never_ready", [False, True])
+async def test_a_failed_slurm_evaluation_names_none_of_the_operators_paths(
+    *, never_ready: bool, tmp_path: Path
+) -> None:
+    cluster = ScenarioCluster()
+    if never_ready:
+        cluster.job_exit_code = 70
+        cluster.benchmark_output = _PRIVATE_ERROR
+    else:
+        cluster.accuracy_exit = 1
+        cluster.accuracy_output = _PRIVATE_ERROR
+        cluster.service_log_tail = _PRIVATE_ERROR
+    policy = SlurmExecutionPolicy(remote_python=_PRIVATE_PYTHON, setup_script=_PRIVATE_SETUP)
+    stack = await build_stack(tmp_path, cluster, policy=policy)
+
+    await stack.executor.submit(_request(stack.snapshot), handle_id=_HANDLE)
+    observed = await _terminal(stack.executor)
+
+    reported = observed.model_dump_json()
+    assert observed.state is EvaluationState.FAILED
+    assert "No module named" in reported
+    for private in (_PRIVATE_PYTHON, _PRIVATE_SETUP, "/cluster/work/u"):
+        assert private not in reported
     await stack.executor.close()
 
 
@@ -370,3 +409,49 @@ async def test_each_stage_output_reaches_one_stream_named_by_its_run(
     assert {
         run.stage_id: streams.output[run].kept(OutputStream.STDOUT) for run in runs
     } == world.printed
+
+
+@pytest.mark.parametrize("build", BUILDERS)
+async def test_every_candidate_an_executor_evaluates_is_opened_as_its_measured_input(
+    build: _Build, tmp_path: Path
+) -> None:
+    """The evaluated tree is the measured input's: the task's unread paths are withheld.
+
+    So an official measurement that reuses an earlier run of the same measured input reads
+    the very tree that run read (``Workspaces.create_measured_candidate``).
+    """
+    world = await build(tmp_path, _Script.SUCCEED, None)
+
+    await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
+    await _terminal(world.executor)
+
+    assert world.workspaces.candidates
+    assert world.workspaces.measured_candidates == world.workspaces.candidates
+    await world.executor.close()
+
+
+@pytest.mark.parametrize("build", BUILDERS)
+async def test_recovery_inspection_reads_owner_knowledge_without_new_work(
+    build: _Build, tmp_path: Path
+) -> None:
+    world = await build(tmp_path, _Script.SUCCEED, None)
+    try:
+        # Main callers poll. An unseen job is unsubmitted. recover is a separate
+        # question: a fresh local process cannot prove the delivery never began,
+        # while the durable Slurm owner answers with the same poll.
+        assert (await world.executor.poll(_HANDLE)).phase is PollPhase.UNSUBMITTED
+        unseen = await world.executor.recover(_HANDLE)
+        if isinstance(world.executor, PollingEvaluationExecutor):
+            assert unseen.phase is PollPhase.UNKNOWN
+        else:
+            assert unseen.phase is PollPhase.UNSUBMITTED
+        assert not world.workspaces.candidates
+        await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
+        terminal = await _terminal(world.executor)
+        candidates = world.workspaces.candidates
+        observed = await world.executor.recover(_HANDLE)
+        assert observed.phase is PollPhase.ENDED
+        assert observed.terminal == terminal
+        assert world.workspaces.candidates == candidates
+    finally:
+        await world.executor.close()

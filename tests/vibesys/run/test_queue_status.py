@@ -64,7 +64,7 @@ def test_a_run_without_a_cluster_gets_its_environments_reader(
     tmp_path: Path, env_kind: str, queue: QueueKind
 ) -> None:
     reader = queue_status_reader(
-        RunEnvironmentView(paths=AgentPaths(), env_kind=env_kind),
+        RunEnvironmentView(paths=AgentPaths(), workspace_git_writable=True, env_kind=env_kind),
         run_id="run-1",
         handle_root=tmp_path,
         processes=NO_PROCESSES,
@@ -100,6 +100,7 @@ def test_a_slurm_run_reads_its_clusters_queue_in_its_partition(tmp_path: Path) -
     connector.intercept(answer)
     view = RunEnvironmentView(
         paths=AgentPaths(),
+        workspace_git_writable=True,
         env_kind="slurm",
         cluster_evaluation=ClusterEvaluationFacts(settings, SlurmEvaluationPlan(config_path=path)),
     )

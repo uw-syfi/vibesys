@@ -131,10 +131,15 @@ class _Session:
     view: RunEnvironmentView = field(
         default_factory=lambda: RunEnvironmentView(
             paths=AgentPaths(accuracy_command=_ACCURACY, benchmark_command=_BENCHMARK),
+            workspace_git_writable=True,
             cli_sandboxed=True,
             env_kind="modal",
         )
     )
+
+    @property
+    def capture_commands(self) -> CommandRunner:
+        return self.sandbox
 
     def __enter__(self) -> _Session:
         return self
@@ -295,7 +300,7 @@ def _measure_with_lost_command(
             )
             runtime = create_workspace_runtime(
                 workspace_resources=factory,
-                blocking=BlockingOperations(runner=InlineBlockingRunner()),
+                blocking=BlockingOperations(runner=InlineBlockingRunner(), threads=SimThreads()),
                 validation_passes=MemoryValidationPasses(),
             )
             evaluation = create_evaluation(

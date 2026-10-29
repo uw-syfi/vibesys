@@ -1,0 +1,92 @@
+/* Generated from the Python display names (vibesys.api.display_catalog). Do not edit. */
+
+export const DISPLAY_NAMES = {
+  "roles": {
+    "orchestrator": "Planner",
+    "single-orchestrator": "Planner",
+    "implementer": "Implementer",
+    "single-implementer": "Implementer",
+    "dynamic-orchestrator": "Planner",
+    "dynamic-implementer": "Implementer",
+    "judge": "Judge",
+    "dynamic-judge": "Judge",
+    "profiler": "Profiler",
+    "dynamic-profiler": "Profiler",
+    "merger": "Merger",
+    "dynamic-merger": "Merger",
+    "outliner": "Outliner",
+    "dynamic-outliner": "Outliner",
+    "multi-orchestrator": "Planner",
+    "router": "Router",
+    "multi-router": "Router",
+    "multi-profiler": "Profiler",
+    "multi-implementer": "Implementer",
+    "multi-judge": "Judge",
+    "mutator": "Mutator",
+    "evolve-mutator": "Mutator",
+    "evolve-judge": "Judge",
+    "evolve-profiler": "Profiler",
+    "plain-implementer": "Implementer",
+    "plain-judge": "Judge",
+    "perf-evaluator": "Perf evaluator",
+    "plain-perf-evaluator": "Perf evaluator"
+  }
+} as const;
+
+export const CODE_IDS = {
+  "harnesses": [
+    "claude",
+    "codex",
+    "gemini",
+    "opencode"
+  ],
+  "models": [
+    "claude-opus-5",
+    "claude-opus-5-5",
+    "claude-fable-5-1",
+    "claude-fable-5",
+    "claude-sonnet-5-5",
+    "claude-sonnet-5",
+    "claude-haiku-5-5",
+    "claude-haiku-4-5",
+    "gpt-5.6-sol",
+    "gpt-5.6-luna",
+    "gpt-5.6-terra",
+    "gpt-5.5",
+    "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6-luna",
+    "gpt-6.1-sol",
+    "google-vertex/gemini-3-pro-preview"
+  ],
+  "roles": [
+    "orchestrator",
+    "single-orchestrator",
+    "implementer",
+    "single-implementer",
+    "dynamic-orchestrator",
+    "dynamic-implementer",
+    "judge",
+    "dynamic-judge",
+    "profiler",
+    "dynamic-profiler",
+    "merger",
+    "dynamic-merger",
+    "outliner",
+    "dynamic-outliner",
+    "multi-orchestrator",
+    "router",
+    "multi-router",
+    "multi-profiler",
+    "multi-implementer",
+    "multi-judge",
+    "mutator",
+    "evolve-mutator",
+    "evolve-judge",
+    "evolve-profiler",
+    "plain-implementer",
+    "plain-judge",
+    "perf-evaluator",
+    "plain-perf-evaluator"
+  ]
+} as const;

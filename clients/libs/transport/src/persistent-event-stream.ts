@@ -10,9 +10,9 @@ import {defaultScheduleTimeout, type ScheduleTimeout} from './control-channel.js
 import type {EventSubscription, SubscribeOptions} from './transport.js';
 
 /**
- * The slice of `ServerClient` a persistent stream drives. Both the production
- * client and any transport the caller wraps around it (a tui `ServerTransport`,
- * a test fake) satisfy this structurally, so the abstraction lives here in
+ * The slice of a server transport a persistent stream drives. The production
+ * transport and any the caller wraps around it (a test fake) satisfy this
+ * structurally, so the abstraction lives here in
  * `@vibesys/transport` without depending on anything above it.
  */
 export interface StreamTransport {
@@ -141,7 +141,7 @@ function isProtocolFault(error: Error): boolean {
 }
 
 /**
- * Owns the dial/redial loop for a `ServerClient` subscription: it bootstraps
+ * Owns the dial/redial loop for a server transport subscription: it bootstraps
  * once, watches for the socket to drop, and resubscribes from the caller's
  * cursor on a finite backoff. The caller supplies where to resume from, whether
  * a drop is worth reconnecting, and where messages and connection changes go;

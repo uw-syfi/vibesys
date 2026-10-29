@@ -88,6 +88,10 @@ class MeasurementDecisions:
         """Remember that the measurement ``handle_id`` answers ``decision_id``."""
         self._decisions[handle_id] = decision_id
 
+    def decision(self, handle_id: str) -> str | None:
+        """Return the core decision that submitted a handle, or explicit unknown."""
+        return self._decisions.get(handle_id)
+
     def stage_output(self, opener: StageOutputOpener) -> StageOutputOpener:
         """``opener``, called with each stage's run naming the decision its measurement answers."""
 
@@ -114,6 +118,7 @@ class StageSettled:
     ``passed`` is true when the stage ran to completion and its evidence did not fail.
     ``cancelled`` is true when the executor cancelled the stage instead. ``stdout`` and
     ``stderr`` are the tails of what the stage's command printed, when the executor kept them.
+    ``reused`` is true when the job ran nothing and re-read an earlier run's stage instead.
     """
 
     handle_id: str
@@ -126,6 +131,7 @@ class StageSettled:
     failure: str | None
     stdout: str | None = None
     stderr: str | None = None
+    reused: bool = False
 
 
 class MeasurementObserver(Protocol):
@@ -161,8 +167,13 @@ class MeasurementProgress:
         self._started: set[tuple[str, str]] = set()
         self._settled: set[tuple[str, str]] = set()
 
-    def report(self, handle_id: str, purpose: str, polled: ExecutorPoll) -> None:
-        """Report the stages this poll shows that no earlier poll showed."""
+    def report(
+        self, handle_id: str, purpose: str, polled: ExecutorPoll, *, reused: bool = False
+    ) -> None:
+        """Report the stages this poll shows that no earlier poll showed.
+
+        *reused*: the job ran nothing and the poll is of the earlier run it reuses.
+        """
         if polled.phase is PollPhase.RUNNING and polled.current_stage is not None:
             self._start(handle_id, purpose, polled.current_stage)
         terminal = polled.terminal
@@ -203,6 +214,7 @@ class MeasurementProgress:
                     ),
                     stdout=step.stdout_tail,
                     stderr=step.stderr_tail,
+                    reused=reused,
                 )
             )
 

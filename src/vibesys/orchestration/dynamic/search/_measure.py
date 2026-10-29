@@ -7,7 +7,15 @@ work meanwhile. Which waiting candidate a free slot measures is the queue's choi
 
 from typing import Literal
 
-from vibesys.candidates.api import Baseline, decode_input, input_measurement
+from vibesys.candidates.api import (
+    Baseline,
+    InputFailure,
+    again_after,
+    decode_input,
+    failure,
+    input_measurement,
+    with_first_attempt,
+)
 from vibesys.metrics import AcceptedReading, accept_readings
 from vibesys.orchestration.dynamic.search._ids import INPUT_MEASURED
 from vibesys.orchestration.dynamic.search._operations import EvidenceReadings
@@ -25,7 +33,6 @@ from vibesys.orchestration.dynamic.search._reports import (
     InputOverdue,
     Released,
 )
-from vibesys.orchestration.dynamic.search._spans import GATE, GateAttrs
 from vibesys.orchestration.dynamic.search._values import (
     DropReason,
     Failure,
@@ -33,6 +40,7 @@ from vibesys.orchestration.dynamic.search._values import (
     Proof,
     WorkKind,
 )
+from vibesys.search_spans.api import GATE, GateAttrs
 from vs_core.api.search import (
     Failed,
     Flow,
@@ -57,6 +65,8 @@ class InputPending(Value):
     """The input's measurement is still to be taken (or in flight)."""
 
     kind: Literal["input-pending"] = "input-pending"
+    first_attempt: InputFailure | None = None
+    """Why the first measurement failed, when this is the second (`again_after`)."""
 
 
 class InputTaken(Value):
@@ -64,23 +74,39 @@ class InputTaken(Value):
 
     kind: Literal["input-taken"] = "input-taken"
     result: MeasurementResult
+    first_attempt: InputFailure | None = None
+    """Why the first measurement failed, when this is the second (`again_after`)."""
 
 
 @flow(snapshot=InputPending | InputTaken, name="measure-input")
 async def measure_the_input(ctx: Flow, at: InputPending | InputTaken) -> Baseline:
-    """Measure the input once per run, even across a restart after a code change.
+    """Measure the input once per run, or twice when the first failure shows no fault of it.
 
-    It checkpoints the measurement as soon as it is in, so a restart while its evidence is
-    decoded decodes it again instead of measuring again; a restart while it is measured waits
-    for the same measurement (core re-attaches the request).
+    A failure with no evidence against the input (`again_after`: no evidence, a wait core ended
+    on its time, a stage the backend did not blame on the input or that printed nothing) is
+    measured once more, and the second result stands with the first's failure kept
+    (``first_attempt``). It checkpoints each measurement as soon as it is in, so a restart while
+    its evidence is decoded decodes it again instead of measuring again; a restart while it is
+    measured waits for the same measurement (core re-attaches the request), and a restart
+    during the second measurement does not take a third.
     """
     ctx.checkpoint(at)
+    while True:
+        found = await _measured_once(ctx, at)
+        why = failure(found)
+        if at.first_attempt is not None or why is None or not again_after(why):
+            return with_first_attempt(found, at.first_attempt)
+        at = InputPending(first_attempt=why)
+        ctx.checkpoint(at)
+
+
+async def _measured_once(ctx: Flow, at: InputPending | InputTaken) -> Baseline:
     if isinstance(at, InputTaken):
         return await decode_input(ctx, at.result)
     measured = await input_measurement(ctx)
     if not isinstance(measured, MeasurementResult):
         return measured
-    ctx.checkpoint(InputTaken(result=measured))
+    ctx.checkpoint(InputTaken(result=measured, first_attempt=at.first_attempt))
     return await decode_input(ctx, measured)
 
 

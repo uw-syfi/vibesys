@@ -10,6 +10,8 @@ requires-python = ">=3.12"
 dependencies = [
     "jinja2>=3.1",
     "pydantic>=2",
+    "protobuf-py==0.6.0",
+    "vs-proto",
     "pyyaml>=6",
     "vs-agent",
     "vs-async-ops",
@@ -23,6 +25,7 @@ dependencies = [
     "vs-project",
     "vs-prompts",
     "vs-redaction",
+    "vs-runlog",
     "vs-sandbox",
     "vs-sim",
     "vs-slurm",
@@ -45,8 +48,10 @@ vs-github = { workspace = true }
 vs-issue-tracker = { workspace = true }
 vs-mcp = { workspace = true }
 vs-project = { workspace = true }
+vs-proto = { workspace = true }
 vs-prompts = { workspace = true }
 vs-redaction = { workspace = true }
+vs-runlog = { workspace = true }
 vs-sandbox = { workspace = true }
 vs-sim = { workspace = true }
 vs-slurm = { workspace = true }

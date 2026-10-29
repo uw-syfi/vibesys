@@ -11,8 +11,8 @@ from vibesys.orchestration.dynamic.models import PlanOutline
 from vibesys.orchestration.dynamic.search._prompts import OutlinePrompt
 from vibesys.orchestration.dynamic.search._roles import OUTLINER
 from vibesys.orchestration.dynamic.search._run_state import NoPlan, Outlined, RunRecord
-from vibesys.orchestration.dynamic.search._spans import turn_label
 from vibesys.orchestration.dynamic.search._values import PlanProblem, ProblemKind, Step
+from vibesys.search_spans.api import turn_label
 from vs_core.api.search import Failed, FailureReason, Flow, TurnFinished
 
 
@@ -27,7 +27,7 @@ async def outline(ctx: Flow, run: RunRecord) -> Outlined | NoPlan:
     match await outliner.turn(prompt, label=turn_label(outliner)):
         case TurnFinished(reply=PlanOutline() as given):
             steps = tuple(Step.model_validate(item.model_dump()) for item in given.steps)
-            return Outlined(steps=steps)
+            return Outlined(steps=steps, outliner=outliner.agent)
         case Failed(reason=FailureReason.INVALID_REPLY, errors=errors):
             problem = PlanProblem(kind=ProblemKind.UNPARSEABLE, errors=errors)
         case Failed() as failed:

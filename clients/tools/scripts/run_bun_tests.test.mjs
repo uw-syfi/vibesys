@@ -6,7 +6,13 @@ import {dirname, join, resolve} from 'node:path';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
 import {promisify} from 'node:util';
-import {collectedFileNames, collectionErrors, testFileNames} from './run_bun_tests.mjs';
+import {
+  bunVersionError,
+  collectedFileNames,
+  collectionErrors,
+  pinnedBunVersion,
+  testFileNames,
+} from './run_bun_tests.mjs';
 
 const RUNNER = resolve(dirname(fileURLToPath(import.meta.url)), 'run_bun_tests.mjs');
 const run = promisify(execFile);
@@ -171,6 +177,21 @@ test('a report attribute keeps the path its entities encode', () => {
     collectedFileNames('<testsuite name="s" file="src/a &amp;&lt;b&gt;.test.ts" tests="1" />'),
     new Set(['src/a &<b>.test.ts']),
   );
+});
+
+test('a bun other than the pinned one is rejected with the pin and how to install it', () => {
+  assert.equal(bunVersionError('1.4.2', '1.4.2'), undefined);
+  for (const actual of ['1.3.9', '1.4.1', '1.4.3', '2.0.0']) {
+    const message = bunVersionError(actual, '1.4.2');
+    assert.match(message, new RegExp(`bun ${actual.replaceAll('.', '\\.')} is on PATH`));
+    assert.match(message, /need bun 1\.4\.2/);
+    assert.match(message, /fetch_bun\.py/);
+  }
+});
+
+test('the pin is read from the line that packaging and CI install from', () => {
+  assert.equal(pinnedBunVersion('X = 1\nBUN_VERSION = "1.4.2"\nY = 2\n'), '1.4.2');
+  assert.throws(() => pinnedBunVersion('BUN = "1.4.2"\n'), /no BUN_VERSION/);
 });
 
 /** A throwaway package directory holding `files`, removed when the test that asked for it ends. */

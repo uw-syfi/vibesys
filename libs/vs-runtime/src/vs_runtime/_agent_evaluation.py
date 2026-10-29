@@ -69,7 +69,7 @@ import hashlib
 import hmac
 import os
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
@@ -81,6 +81,7 @@ from vs_core.api import (
     AgentMeasurementRequested,
     AgentRejection,
     ArtifactRef,
+    Comparison,
     Continuation,
     ContinuationId,
     ContinuationPhase,
@@ -102,12 +103,16 @@ from vs_core.api import (
     SuspensionRefusal,
     Transition,
     Within,
+    comparison_settling,
+    latest_comparisons,
+    moment_of,
     suspension_refusal,
 )
 from vs_decode.api import Unreadable, decode_json
 from vs_evaluation.api import (
     RECEIPT_LINE,
     AgentEvaluationCall,
+    EvaluationComparison,
     EvaluationStageOutcome,
     RunStoppingReply,
     SocketFailure,
@@ -259,6 +264,44 @@ def _outcome(core: CoreState, request_id: RequestId) -> str | None:
     return None
 
 
+def _comparison_of(
+    core: CoreState, scope: Scope, request_id: RequestId
+) -> EvaluationComparison | None:
+    """The framework's comparison of a finished candidate with its base, or None while it has none.
+
+    Read from core's log of comparisons for the input the submission measured, so the agent is
+    told exactly what core recorded and replays on resume, and only while its base's samples
+    are still fresh on the run clock. It is marked settling as a resume marks it
+    (`comparison_settling`).
+    """
+    job = next((j for j in core.evaluation.jobs if j.submission_id == request_id), None)
+    measured = None if job is None else job.plan.measured_input
+    if measured is None:
+        return None
+    found = latest_comparisons(core.evaluation, scope, [measured], moment_of(core.run))
+    if not found:
+        return None
+    return agent_comparison(found[-1], settling=comparison_settling(core.evaluation, found[-1]))
+
+
+def agent_comparison(comparison: Comparison, *, settling: bool) -> EvaluationComparison:
+    """One core comparison as the wire contract the agent reads (the one projection)."""
+    return EvaluationComparison(
+        metric=comparison.metric,
+        unit=comparison.unit,
+        direction=comparison.direction,
+        candidate_value=comparison.candidate_value,
+        base_value=comparison.base_value,
+        ratio=comparison.ratio,
+        noise=comparison.noise,
+        verdict=comparison.verdict.value,
+        base_commit=comparison.base.revision_id.root,
+        candidate_samples=comparison.candidate_samples,
+        base_samples=comparison.base_samples,
+        settling=settling,
+    )
+
+
 def _read_frame(connection: Connection) -> bytes | None:
     """One line with its newline, or what came before the peer closed.
 
@@ -293,6 +336,8 @@ class AgentEvaluationPolicy:
     accuracy_stage: str | None
     accuracy_gated: tuple[EvidenceKind, ...]
     """Evidence kinds that count only if the accuracy stage passed: the task's trust rule."""
+    dedicated_measurement_resources: bool = False
+    """The run's executor gives each job its resources alone (``MeasurementRecipe``)."""
     purpose: Literal["baseline", "local-validation", "official", "profile"] = "local-validation"
 
     @classmethod
@@ -314,6 +359,7 @@ class AgentEvaluationPolicy:
             queue_allowance=recipe.queue_allowance,
             accuracy_stage=recipe.accuracy_stage,
             accuracy_gated=recipe.accuracy_gated,
+            dedicated_measurement_resources=recipe.dedicated_measurement_resources,
             purpose=purpose,
         )
 
@@ -331,11 +377,15 @@ class AgentEvaluationPolicy:
             queue_allowance=self.queue_allowance,
             accuracy_stage=self.accuracy_stage,
             accuracy_gated=self.accuracy_gated,
+            dedicated_measurement_resources=self.dedicated_measurement_resources,
         )
 
-    def plan(self, candidate: RevisionRef, *, now_at: float) -> MeasurementPlan:
+    def plan(
+        self, candidate: RevisionRef, *, measured_input: str, now_at: float
+    ) -> MeasurementPlan:
         """The ordered plan over the declared stages for this candidate, submitted now."""
-        return self.measurement.plan(candidate, purpose=self.purpose, now_at=now_at)
+        planned = self.measurement.plan(candidate, purpose=self.purpose, now_at=now_at)
+        return planned.model_copy(update={"measured_input": measured_input})
 
 
 class SnapshotWorkspace(Protocol):
@@ -347,6 +397,10 @@ class SnapshotWorkspace(Protocol):
 
     async def matches_revision(self, revision: str) -> bool:
         """Whether the workspace's content is exactly ``revision``."""
+        ...
+
+    async def measured_input(self, revision: str) -> str:
+        """The digest of what the task's evaluation of ``revision`` reads."""
         ...
 
 
@@ -382,7 +436,7 @@ class _Record(Protocol):
 
 
 class AdmissionShell(Protocol):
-    """The shell as the bridge sees it: ask core, and queue the event for commit."""
+    """The shell as the bridge sees it: commit an input before exposing its answer."""
 
     @property
     def record(self) -> _Record:
@@ -391,11 +445,11 @@ class AdmissionShell(Protocol):
 
     @property
     def admitted_core(self) -> CoreState:
-        """Core's state including the admitted inputs not yet committed."""
+        """The committed core, including every successful admission."""
         ...
 
     def admit(self, event: CoreEvent, *, now_at: float) -> Transition:
-        """Run core's step on the event and queue it; ``ContractError`` queues nothing."""
+        """Commit core's step before return; ``ContractError`` commits nothing."""
         ...
 
 
@@ -440,6 +494,13 @@ class AgentEvaluationRecords:
     evidence: EvidenceLookup
 
 
+def _policy_digest(policy: AgentEvaluationPolicy) -> str:
+    """What an owed submission is keyed by: the policy a call was made under."""
+    return hashlib.sha256(
+        f"{policy.purpose}\n{policy.measurement.model_dump_json()}".encode()
+    ).hexdigest()
+
+
 class AgentEvaluationBridge:
     """The unix-socket service, token minting and yield producer of one run.
 
@@ -472,9 +533,6 @@ class AgentEvaluationBridge:
         self._workspaces = workspaces
         self._owed = records.owed
         self._evidence = records.evidence
-        self._policy_digest = hashlib.sha256(
-            f"{policy.purpose}\n{policy.measurement.model_dump_json()}".encode()
-        ).hexdigest()
         self._diagnostics = diagnostics
         self._secret = os.urandom(32)
         self._shell: AdmissionShell | None = None
@@ -493,6 +551,23 @@ class AgentEvaluationBridge:
         """Bind the run's shell and clock, once the shell exists."""
         self._shell = shell
         self._clock = clock
+
+    def _pinned(self, shell: AdmissionShell) -> AgentEvaluationPolicy:
+        """The policy with the evaluator, workload and environment identities of the run's facts.
+
+        A process that resumes a run computes those identities afresh (the environment's holds
+        a per-process broker socket and token), while the run, and the strategy's official
+        measurements, keep the ones it began with. Measured under another, an agent's runs and
+        the base's would be another measurement than the official run's, and never samples of
+        it. The facts are the run's one definition, so the plan takes them from there.
+        """
+        facts = shell.record.envelope.core.run.facts
+        return replace(
+            self._policy,
+            evaluator_digest=facts.evaluator_digest,
+            workload_digest=facts.workload_digest,
+            environment_digest=facts.environment_digest,
+        )
 
     # tool offer
 
@@ -514,7 +589,10 @@ class AgentEvaluationBridge:
             message = "unknown evaluation token"
             raise PermissionError(message)
         scope = decode_json(
-            base64.urlsafe_b64decode(body), Scope, source="evaluation token", max_bytes=_FRAME_LIMIT
+            base64.urlsafe_b64decode(body),
+            TypeAdapter(Scope),
+            source="evaluation token",
+            max_bytes=_FRAME_LIMIT,
         )
         if isinstance(scope, Unreadable):
             raise PermissionError(str(scope))
@@ -777,7 +855,9 @@ class AgentEvaluationBridge:
                 raise ToolRefusedError(ToolRefusal.WORKSPACE_GONE)
             scoped = self._scoped(scope)
             revision = await self._revision(workspace, scoped)
-            key = OwedKey(scope=scope, revision=revision, policy=self._policy_digest)
+            measured_input = await workspace.measured_input(revision)
+            policy = self._pinned(shell)
+            key = OwedKey(scope=scope, revision=revision, policy=_policy_digest(policy))
             owed = self._owed.find(key)
             charged = None if owed is None else self._charge_of(shell, owed)
             if owed is not None and charged is not None:
@@ -788,22 +868,20 @@ class AgentEvaluationBridge:
             # RequestRecord first: if the host dies after the charge commits, the entry names it.
             owed = OwedSubmission(key=key, call_id=f"agent:{uuid.uuid4().hex}", submitted_at=now)
             self._owed.record(owed)
-            try:
-                event = AgentMeasurementRequested(
-                    scope=scope,
-                    plan=self._policy.plan(revision_ref(revision), now_at=now),
-                    within=Within(limit=self._policy.measurement.budget()),
-                    call_id=owed.call_id,
-                )
-                transition = self._admit(shell, event, now)
-                call = self._call_of(transition.state, owed.call_id)
-                if call.request_id is None:
-                    reply = self._refusal(call)
-                    self._owed.clear(key, owed.call_id)
-                    return reply, _nothing
-            except BaseException:
+            event = AgentMeasurementRequested(
+                scope=scope,
+                plan=policy.plan(revision_ref(revision), measured_input=measured_input, now_at=now),
+                within=Within(limit=policy.measurement.budget()),
+                call_id=owed.call_id,
+            )
+            # A failed admission may have committed its charge before losing the
+            # acknowledgement. Only a conclusive refusal can clear the owed receipt.
+            transition = self._admit(shell, event, now)
+            call = self._call_of(transition.state, owed.call_id)
+            if call.request_id is None:
+                reply = self._refusal(call)
                 self._owed.clear(key, owed.call_id)
-                raise
+                return reply, _nothing
             return self._answer(shell, scoped, call), self._acknowledger(owed)
 
     def _answer(self, shell: AdmissionShell, scoped: _Scoped, call: AgentCall) -> SubmittedReply:
@@ -825,6 +903,9 @@ class AgentEvaluationBridge:
                 EvaluationStageOutcome.of(self._recorded(call.request_id, item.evidence_id))
                 for item in own
             ),
+            comparison=None
+            if outcome is None
+            else _comparison_of(shell.admitted_core, call.scope, call.request_id),
         )
 
     def _recorded(self, request_id: RequestId, evidence_id: EvidenceId) -> TrustedEvidence:

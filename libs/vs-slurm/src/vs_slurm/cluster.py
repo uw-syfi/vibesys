@@ -16,6 +16,7 @@ from vs_sim.api import ProcessTimeoutError
 
 from .cluster_store import OperationStore
 from .cluster_types import (
+    ANOTHER_JOB,
     ClusterCancelOutcome,
     ClusterCancelRequested,
     ClusterCollected,
@@ -30,6 +31,8 @@ from .cluster_types import (
     ClusterTarget,
     ClusterUnknown,
     collection_problem,
+    live_observation,
+    observation_names,
     validate_operation_id,
 )
 from .errors import SlurmError, SlurmSubmissionRejectedError
@@ -433,14 +436,52 @@ class SlurmCluster:
                 ) as exc:
                     return ClusterUnknown(operation_id=None, job_id=target, reason=str(exc))
                 return self._observation(None, target, reading, None)
-            return ClusterUnknown(
-                operation_id=target if isinstance(target, str) else None,
-                reason="operation not found",
-            )
+            if not isinstance(target, str):  # a handle's record is proved or raises
+                return ClusterUnknown(operation_id=None, reason="operation not found")
+            # Neither this host's store nor the cluster showed the operation's intent,
+            # which every submission publishes before its sbatch. A missing intent
+            # cannot be told from one whose stat failed (ESTALE, EACCES, EIO), so the
+            # scheduler's name lookup decides.
+            return self._absent_unless_named(target, "operation not found")
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
-        """Record cancellation intent, leaving confirmation to inspect."""
+    def _absent_unless_named(self, operation_id: str, reason: str) -> ClusterUnknown:
+        """No job is known for the operation: absent only if no scheduler job has its name.
+
+        Raises ``SlurmError`` when the name lookup fails or finds two jobs, which
+        proves nothing either way.
+        """
+        if self._runner.find_operation(operation_id) is not None:
+            return ClusterUnknown(
+                operation_id=operation_id,
+                reason="a scheduler job has the operation's name, but no record of it was read",
+            )
+        return ClusterUnknown(operation_id=operation_id, reason=reason, job_absent=True)
+
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
+        """Record cancellation intent, leaving confirmation to inspect.
+
+        Given ``observed`` showing the job live, the scancel goes out first, by
+        the job id it names, before any other read or write and before the
+        operation store's lock, which other threads of the run hold across
+        slow scheduler reads: nothing the caller has not budgeted delays it. A
+        scancel that fails is Unknown at once. The cancel then goes on as
+        without it, and its own scheduler read may send a second scancel to
+        the same job, which changes nothing.
+        """
+        operation_id = target if isinstance(target, str) and not by_job_id else None
+        if observed is not None and not observation_names(target, observed, by_job_id=by_job_id):
+            return ClusterUnknown(operation_id=operation_id, reason=ANOTHER_JOB)
         try:
+            live = live_observation(observed)
+            if live is not None:
+                # It reads and writes no local state, so it needs no lock.
+                self._runner.cancel_job(live.job_id)
             return self._cancel(target, by_job_id=by_job_id)
         except (
             SlurmError,
@@ -450,7 +491,6 @@ class SlurmCluster:
             UnicodeError,
             ProcessTimeoutError,
         ) as exc:
-            operation_id = target if isinstance(target, str) and not by_job_id else None
             return ClusterUnknown(operation_id=operation_id, reason=str(exc))
 
     def _cancel(self, target: ClusterTarget, *, by_job_id: bool) -> ClusterCancelOutcome:
@@ -690,13 +730,37 @@ class SlurmCluster:
         record: Operation,
         evidence: RemoteOperationEvidence | None = None,
     ) -> ClusterInspectOutcome:
+        if record.handle is None or not record.dispatched:
+            return self._never_dispatched(record, evidence)
         observed = self._reconcile_record(record, evidence)
         if isinstance(observed, _SubmissionAbsent):
             return ClusterUnknown(
                 operation_id=observed.operation_id,
                 reason="submission acceptance unresolved",
+                job_absent=True,
             )
         return observed
+
+    def _never_dispatched(
+        self, record: Operation, evidence: RemoteOperationEvidence | None
+    ) -> ClusterUnknown:
+        """An operation this host never dispatched: cancelled first, or known by its tombstone.
+
+        Only an intent another host published stands for a job then. Without one,
+        none starts later either: a submitter that publishes its intent after the
+        tombstone sees it and rejects itself, and one that published before left an
+        intent. So the scheduler's name lookup decides, as for an unknown operation.
+        """
+        remote = (
+            evidence
+            if evidence is not None
+            else self._runner.inspect_operation(record.operation_id)
+        )
+        if remote.intent is not None:
+            return ClusterUnknown(
+                operation_id=record.operation_id, reason="operation has no accepted scheduler job"
+            )
+        return self._absent_unless_named(record.operation_id, "operation started no scheduler job")
 
     def _reconcile_record(
         self,

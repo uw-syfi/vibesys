@@ -1,0 +1,61 @@
+{
+  "id": "helper-run-summary-project-missing",
+  "protocol": "host-helper",
+  "title": "runs.summary on a missing directory",
+  "description": "With run_summary and run_trace negotiated, runs.summary naming a directory that does not exist is answered project_missing with the path.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "run_summary",
+          "run_trace"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "run_summary",
+          "run_trace"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "runs.summary",
+        "request_id": "m",
+        "deadline_ms": 10000,
+        "project": "/nonexistent-vibesys-conformance/project",
+        "run_id": "20261010-120000-11111111-run",
+        "offset": 0
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "m",
+        "code": "project_missing",
+        "path": "/nonexistent-vibesys-conformance/project"
+      }
+    }
+  ]
+}

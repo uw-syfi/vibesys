@@ -1,3 +1,6 @@
 examples/** -linguist-documentation
 # Golden text fixtures preserve exact agent-visible trailing newlines.
 tests/vibesys/golden/snapshots/** whitespace=-blank-at-eof
+# Store fixtures are protobuf bytes even when a small message has no NUL byte.
+proto/testdata/**/*.pb binary
+proto/testdata/**/run.log binary

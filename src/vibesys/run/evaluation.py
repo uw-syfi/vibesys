@@ -24,6 +24,7 @@ from vs_runtime.api import (
     BenchmarkEvaluation,
     BenchmarkFailureKind,
     BenchmarkObjective,
+    BuildEvaluation,
     Evaluation,
     LocalValidationEvaluation,
     MetricDirection,
@@ -39,6 +40,7 @@ from vs_runtime.api.infrastructure import (
     TrustedAccuracyResult,
     TrustedBenchmarkContract,
     TrustedBenchmarkResult,
+    TrustedBuild,
     TrustedEvaluationPlan,
     ValidationRecipe,
 )
@@ -50,7 +52,6 @@ if TYPE_CHECKING:
     from vibesys.run.contracts import RunRequest
     from vs_runtime.api import Workspace
     from vs_runtime.api.infrastructure import (
-        RunEnvironmentSession,
         WorkspaceRuntime,
     )
     from vs_sim.api import OutputSink
@@ -62,13 +63,16 @@ GATE_FEEDBACK_TAIL_CHARS = 4000
 
 def trusted_evaluation_plan(
     bundle: InputBundle,
-    session: RunEnvironmentSession,
     *,
+    accuracy_command: str | None,
+    benchmark_command: str | None,
+    framework_setup_timeout_seconds: int,
     candidate_startup_causes: tuple[str, ...],
 ) -> TrustedEvaluationPlan:
     """Lower task and environment configuration into runtime execution facts.
 
-    ``candidate_startup_causes`` are the run's domain's log patterns for a candidate that
+    The commands and the setup bound are the run environment's (``session.view``) or, for work
+    outside a run, the ones its own layout gives. ``candidate_startup_causes`` are the run's domain's log patterns for a candidate that
     broke its own server; the wiring passes them in, so this module names no domain.
     """
     scalar = bundle.benchmark_result
@@ -80,12 +84,22 @@ def trusted_evaluation_plan(
         if scalar is not None
         else (ProtocolBenchmarkContract() if bundle.benchmark_result_protocol is not None else None)
     )
+    build = bundle.manifest.build
     return TrustedEvaluationPlan(
-        accuracy_command=session.view.paths.accuracy_command,
+        build=(
+            None
+            if build is None
+            else TrustedBuild(
+                command=shlex.join(build.command),
+                timeout_seconds=build.timeout_seconds,
+                outputs=bundle.candidate_outputs,
+            )
+        ),
+        accuracy_command=accuracy_command,
         accuracy_timeout_seconds=bundle.manifest.accuracy.timeout_seconds,
-        benchmark_command=session.view.paths.benchmark_command,
+        benchmark_command=benchmark_command,
         benchmark_timeout_seconds=bundle.manifest.benchmark.timeout_seconds,
-        framework_setup_timeout_seconds=session.view.framework_setup_timeout_seconds,
+        framework_setup_timeout_seconds=framework_setup_timeout_seconds,
         profile_command=(
             shlex.join(bundle.profile_command) if bundle.profile_command is not None else None
         ),
@@ -94,6 +108,7 @@ def trusted_evaluation_plan(
         ),
         benchmark_contract=contract,
         candidate_startup_causes=candidate_startup_causes,
+        unread_paths=() if bundle.manifest.workspace is None else bundle.manifest.workspace.unread,
         accuracy_gated=(
             (EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK)
             if bundle.manifest.benchmark.requires_accuracy
@@ -259,6 +274,40 @@ class _EvaluationAdapter:
     def _live_workspace(self, workspace: Workspace) -> Workspace:
         self._runtime_evaluation.spec(workspace)
         return workspace
+
+    async def build(self, workspace: Workspace, *, output: OutputSink) -> BuildEvaluation:
+        """Build the candidate's commit confined, or reuse its verified build.
+
+        Its gate events come from the measurement's stage events, as every stage's do.
+        """
+        live = self._live_workspace(workspace)
+        if self._request.agent_backend == "stub":
+            return BuildEvaluation(executed=False)
+        run = await self._runtime_evaluation.build(live, output=output)
+        result = run.result
+        if run.passed:
+            return BuildEvaluation(
+                executed=result is not None and result.executed, reused=run.reused
+            )
+        if run.missing_output is not None:
+            feedback = f"Candidate build failed: {run.missing_output}."
+            return BuildEvaluation(
+                executed=True,
+                feedback=feedback,
+                operator_feedback=redact_diagnostic_tail(
+                    feedback, max_chars=GATE_FEEDBACK_TAIL_CHARS
+                ),
+                failure_kind=BenchmarkFailureKind.WORKLOAD,
+            )
+        if result is None or result.failure_kind is None:
+            message = "runtime build reported a failure without a build result"
+            raise RuntimeContractError(message)
+        return BuildEvaluation(
+            executed=result.executed,
+            feedback=(result.failure or "")[-GATE_FEEDBACK_TAIL_CHARS:],
+            operator_feedback=(result.operator_failure or "")[-GATE_FEEDBACK_TAIL_CHARS:],
+            failure_kind=result.failure_kind,
+        )
 
     async def accuracy(
         self,
@@ -525,6 +574,7 @@ class _EvaluationAdapter:
                 operator_feedback=operator_feedback,
                 failure_kind=result.failure_kind,
                 partial_measurement=result.partial_measurement,
+                unmet_requirement=result.unmet_requirement,
             )
         if result.row is None:
             return BenchmarkEvaluation(executed=result.executed)

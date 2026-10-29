@@ -1,0 +1,232 @@
+/* Pickers and the pinned action panel: choice tiles, brand marks, the slider, and the action panel.
+   Imported by components.css. */
+
+/* --- choice tiles ------------------------------------------------------------------------------ */
+
+.vs-choice-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.vs-choice-tile {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--control);
+  margin: 0;
+  padding: var(--space-3) var(--space-5) var(--space-3) var(--space-4);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--muted);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  font-weight: var(--text-body-weight);
+  white-space: nowrap;
+  cursor: pointer;
+}
+/* The native radio covers its tile, unseen: it takes the presses, the focus and the arrow keys. */
+.vs-choice-tile-input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+.vs-choice-tile:hover {
+  color: var(--text);
+}
+.vs-choice-tile:has(:checked) {
+  border-color: var(--text);
+  color: var(--text);
+  font-weight: var(--text-body-strong-weight);
+}
+.vs-choice-tile:has(:focus-visible) {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-choice-tile-leading {
+  display: flex;
+  flex: none;
+}
+.vs-choice-tile-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+/* Cards: roomier tiles in a wrapping grid; what a tile says under its name wraps, never clips. */
+.vs-choice-tiles[data-layout='cards'] {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--column-field)), 1fr));
+  align-items: stretch;
+}
+.vs-choice-tiles[data-layout='cards'] .vs-choice-tile {
+  align-items: flex-start;
+  padding: var(--space-4) var(--space-5);
+  color: var(--text);
+  white-space: normal;
+}
+.vs-choice-tiles[data-layout='cards'] .vs-choice-tile-label {
+  font-family: var(--text-item-family);
+  font-size: var(--text-item-size);
+  line-height: var(--text-item-line);
+  font-weight: var(--text-item-weight);
+  overflow-wrap: anywhere;
+}
+.vs-choice-tiles[data-layout='cards'] .vs-choice-tile-label[data-mono] {
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  font-weight: var(--text-body-strong-weight);
+}
+.vs-choice-tile-note,
+.vs-choice-tile-meta {
+  color: var(--muted);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  font-weight: var(--text-small-weight);
+  overflow-wrap: anywhere;
+}
+.vs-choice-tile-meta {
+  margin-top: var(--space-2);
+}
+.vs-choice-tile[data-unavailable] {
+  background: transparent;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+.vs-choice-tiles[data-layout='cards'] .vs-choice-tile[data-unavailable] {
+  color: var(--muted);
+}
+.vs-choice-tiles[data-layout='cards'] .vs-choice-tile:has(:checked) {
+  background: var(--selection);
+}
+
+/* --- model tiers ------------------------------------------------------------------------------- */
+
+.vs-slider input[type='range'] {
+  width: 100%;
+  margin: var(--space-2) 0;
+  accent-color: var(--accent);
+}
+.vs-slider-labels {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--text-small-size);
+}
+
+/* --- brand mark -------------------------------------------------------------------------------- */
+
+.vs-brand-mark {
+  display: block;
+  flex: none;
+  width: calc(var(--space-5) + var(--space-2));
+  height: calc(var(--space-5) + var(--space-2));
+  fill: currentColor;
+}
+.vs-brand-mark[data-generic] {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* --- action panel ------------------------------------------------------------------------------ */
+
+.vs-action-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--elevation-raised);
+  color: var(--text);
+}
+.vs-action-panel-details {
+  /* Tall details scroll here, so the bar and its action never leave the window. */
+  max-height: 32dvh;
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-5);
+  border-bottom: var(--hairline) solid var(--line);
+}
+.vs-action-panel-details .vs-check:first-child {
+  border-top: 0;
+}
+.vs-action-panel-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-5);
+  padding: var(--space-4) var(--space-5);
+}
+.vs-action-panel-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-family: var(--text-body-strong-family);
+  font-size: var(--text-body-strong-size);
+  line-height: var(--text-body-strong-line);
+  font-weight: var(--text-body-strong-weight);
+  cursor: pointer;
+}
+.vs-action-panel-status:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+  border-radius: var(--radius);
+}
+.vs-action-panel-icon {
+  display: flex;
+}
+.vs-action-panel-status[data-state="ok"] .vs-action-panel-icon {
+  color: var(--ok);
+}
+.vs-action-panel-status[data-state="warn"] .vs-action-panel-icon {
+  color: var(--warn);
+}
+.vs-action-panel-status[data-state="fail"] .vs-action-panel-icon {
+  color: var(--err);
+}
+.vs-action-panel-status[data-state="pending"] .vs-action-panel-icon {
+  color: var(--muted);
+}
+.vs-action-panel-chevron {
+  display: flex;
+  color: var(--muted);
+  transition: transform var(--duration-fast) var(--easing);
+}
+.vs-action-panel-chevron[data-open] {
+  transform: rotate(180deg);
+}
+.vs-action-panel-summary {
+  flex: 1 1 calc(var(--column-aside) * 0.6);
+  min-width: 0;
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  font-weight: var(--text-small-weight);
+  overflow-wrap: anywhere;
+}
+.vs-action-panel-action {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.vs-action-panel-action .vs-button-disabled {
+  align-items: flex-end;
+  text-align: right;
+}
+

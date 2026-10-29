@@ -20,6 +20,7 @@ from vs_runtime.api.infrastructure import (
     ScalarBenchmarkContract,
     TrustedAccuracyResult,
     TrustedBenchmarkResult,
+    TrustedBuild,
     TrustedEvaluationExecutor,
     TrustedEvaluationPlan,
     create_model_request_reconciler,
@@ -294,8 +295,9 @@ class _TruncatingRunner(FakeCommandRunner):
         super().execute(command, timeout=timeout, output=output)
         if command.startswith("rm -f -- ") and "--output-json" in command:
             head = "evaluator log line\n" * 10
+            combined = head + "\n\n... Output truncated at 100000 characters."
             return CommandResult(
-                output=head + "\n\n... Output truncated at 100000 characters.",
+                output=combined,
                 exit_code=0,
                 truncated=True,
                 stdout=head,
@@ -736,3 +738,70 @@ def test_a_trusted_result_names_whose_fault_a_failure_is_exactly_when_it_failed(
         model(executed=True, passed=False)
     with pytest.raises(ValidationError, match="failure kind"):
         model(executed=True, passed=True, failure_kind=BenchmarkFailureKind.INFRASTRUCTURE)
+
+
+_BUILD_PLAN = TrustedEvaluationPlan(
+    build=TrustedBuild(command="make lib.so", timeout_seconds=60, outputs=("lib.so",)),
+    accuracy_command="check",
+)
+
+
+def test_a_build_runs_under_the_confinement_never_the_trusted_runner(tmp_path: Path) -> None:
+    trusted = FakeCommandRunner()
+    confinement = FakeCommandRunner(default_result=CommandResult(output="built\n", exit_code=0))
+    executor = _executor(tmp_path, _BUILD_PLAN, trusted)
+
+    result = asyncio.run(executor.build(confinement=confinement, output=DISCARD))
+
+    assert (result.passed, result.executed) == (True, True)
+    assert [(call.command, call.timeout) for call in confinement.calls] == [("make lib.so", 60)]
+    assert trusted.calls == []
+
+
+def test_a_build_with_no_confinement_fails_closed_and_runs_nothing(tmp_path: Path) -> None:
+    trusted = FakeCommandRunner()
+    executor = _executor(tmp_path, _BUILD_PLAN, trusted)
+
+    result = asyncio.run(executor.build(confinement=None, output=DISCARD))
+
+    assert (result.passed, result.executed) == (False, False)
+    assert result.failure is not None
+    assert "no agent confinement" in result.failure
+    assert trusted.calls == []
+
+
+@pytest.mark.parametrize(
+    ("changes", "executed"),
+    [
+        ((["task/vibesys.input.toml"],), False),
+        (([], ["task/vibesys.input.toml"]), True),
+    ],
+    ids=["before", "during"],
+)
+def test_a_build_that_touches_evaluator_owned_files_fails(
+    tmp_path: Path, changes: tuple[list[str], ...], *, executed: bool
+) -> None:
+    confinement = FakeCommandRunner(default_result=CommandResult(output="", exit_code=0))
+    executor = _executor(tmp_path, _BUILD_PLAN, FakeCommandRunner(), git=_Git(*changes))
+
+    result = asyncio.run(executor.build(confinement=confinement, output=DISCARD))
+
+    assert (result.passed, result.executed) == (False, executed)
+    assert result.failure is not None
+    assert "task/vibesys.input.toml" in result.failure
+    assert len(confinement.calls) == int(executed)
+
+
+@pytest.mark.parametrize(("exit_code", "status"), [(2, "exited with 2"), (124, "timed out")])
+def test_a_failed_build_says_how_it_ended(tmp_path: Path, exit_code: int, status: str) -> None:
+    confinement = FakeCommandRunner(
+        default_result=CommandResult(output="error: linker\n", exit_code=exit_code)
+    )
+    executor = _executor(tmp_path, _BUILD_PLAN, FakeCommandRunner())
+
+    result = asyncio.run(executor.build(confinement=confinement, output=DISCARD))
+
+    assert not result.passed
+    assert result.failure is not None
+    assert result.failure.startswith(f"Candidate build {status}.")
+    assert "error: linker" in result.failure

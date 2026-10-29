@@ -15,10 +15,10 @@ import shutil
 import tempfile
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pytest
-from tests.server.support import REQUEST_TIME
+from tests.server.support import CONTROL_KEY, REQUEST_TIME, operator_dialer
 from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from entrypoints.production import production_runs
@@ -45,7 +45,7 @@ from server.registry import (
 from server.runtime import ServerRuntime
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
-from vs_runtime.api.infrastructure import EnvironmentSystem
+from vs_runtime.api.infrastructure import ChannelRunControl, EnvironmentSystem
 from vs_sim.api import (
     OsProcesses,
     OsThreads,
@@ -60,7 +60,6 @@ from vs_sim.api.testing import HANG_GUARD_S, NO_PROCESSES
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-    from vibesys.api import RunControl
     from vs_runtime.api.infrastructure import RunControlChannel
 
 
@@ -73,16 +72,6 @@ class _NoSignal:
     def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
         del pid, current
         raise NotImplementedError
-
-
-class _Session:
-    """The ``RunControl`` slice of a session, over the run's control channel."""
-
-    def __init__(self, control: RunControlChannel) -> None:
-        self._control = control
-
-    def stop(self) -> None:
-        self._control.request_stop(StopMode.DRAIN)
 
 
 def _wait_for_stop(control: RunControlChannel, threads: OsThreads) -> None:
@@ -112,7 +101,7 @@ class _Subscriber:
     """A client's event stream, read until the run's terminal status."""
 
     def __init__(self, socket_path: Path) -> None:
-        self.connection = UnixNetwork().connect(str(socket_path), HANG_GUARD_S)
+        self.connection = operator_dialer(UnixNetwork()).connect(str(socket_path), HANG_GUARD_S)
         self.seen: list[str] = []
         self.subscribed = threading.Event()
         self.stopped = threading.Event()
@@ -167,6 +156,7 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
         run_id="run-1",
         runs=production_runs(),
         socket_path=socket_path,
+        control_key=CONTROL_KEY,
         detach=True,
         platform=Platform.real(),
     )
@@ -182,12 +172,12 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
     outcome: list[object] = []
 
     def run() -> None:
-        control = _Session(integration.control)
-        runtime.controls.install(cast("RunControl", control))
+        control = ChannelRunControl(integration.control, threads)
+        runtime.controls.install(control)
         try:
             _wait_for_stop(integration.control, threads)
         finally:
-            runtime.controls.release(cast("RunControl", control))
+            runtime.controls.release(control)
 
     def serve() -> None:
         hostname, version = host_facts()
@@ -221,7 +211,9 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
             instance_id,
             StopEffects(
                 ControlSocketStopRequester(
-                    UnixNetwork(), clock=SystemClock(), deadline_clock=threads
+                    operator_dialer(UnixNetwork()),
+                    clock=SystemClock(),
+                    deadline_clock=threads,
                 ),
                 _NoSignal(),
                 threads,

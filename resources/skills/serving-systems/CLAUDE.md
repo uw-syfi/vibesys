@@ -153,7 +153,7 @@ Files under the `algorithms` tier include a compatibility matrix near the end:
 |:--|:--|:--|:--|
 | FlashInfer paged KV attention | SGLang, vLLM | flashinfer | `cuda` (sm_80+) |
 | FA3 variable-length | vLLM v1 | flashattention | `cuda` (Hopper+) |
-| Resident aliased KV buffers | — | NxD | `trainium` — **N/A**, not paged; see `nxd-kv-cache.md` |
+| Resident in-place KV buffers | — | `torch.compile` | `trainium` — **N/A**, not paged; see `static-kv-cache.md` |
 ```
 
 The hardware column uses exact `ComputeBackend` values so the mapping is greppable. **Include N/A rows** — "this does not apply here, use X instead" is as useful as a positive entry, and its absence is what lets a backend silently inherit another's guidance.

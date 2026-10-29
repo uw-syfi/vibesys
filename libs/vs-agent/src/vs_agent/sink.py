@@ -125,12 +125,27 @@ class AgentEventSink(Protocol):
         """Publish that a turn stopped on a provider capacity limit and the run paused."""
         ...
 
-    def quota_resumed(self, provider: str, reason: QuotaResumeReason, where: Attribution) -> None:
-        """Publish that the paused turn is being sent again on the same provider."""
+    def quota_resumed(
+        self,
+        error: AgentQuotaError,
+        reason: QuotaResumeReason,
+        waited_seconds: float,
+        where: Attribution,
+    ) -> None:
+        """Publish that the turn stopped by ``error`` is being sent again on the same provider.
+
+        ``waited_seconds`` is how long this stop held the turn.
+        """
         ...
 
-    def quota_abandoned(self, error: AgentQuotaError, reason: str, where: Attribution) -> None:
-        """Publish that the turn ended with the quota error instead of waiting or resuming."""
+    def quota_abandoned(
+        self, error: AgentQuotaError, reason: str, waited_seconds: float, where: Attribution
+    ) -> None:
+        """Publish that the turn ended with the quota error instead of waiting or resuming.
+
+        ``waited_seconds`` is how long this stop held the turn before it ended (zero when
+        it ended without waiting), so a wait that ends the turn is counted too.
+        """
         ...
 
     def quota_waiting(self, provider: str, resumes_at: float | None, where: Attribution) -> None:
@@ -253,13 +268,21 @@ class NullAgentEventSink:
         """Ignore quota pauses when no event sink was injected."""
         del error, plan, where
 
-    def quota_resumed(self, provider: str, reason: QuotaResumeReason, where: Attribution) -> None:
+    def quota_resumed(
+        self,
+        error: AgentQuotaError,
+        reason: QuotaResumeReason,
+        waited_seconds: float,
+        where: Attribution,
+    ) -> None:
         """Ignore quota resumes when no event sink was injected."""
-        del provider, reason, where
+        del error, reason, waited_seconds, where
 
-    def quota_abandoned(self, error: AgentQuotaError, reason: str, where: Attribution) -> None:
+    def quota_abandoned(
+        self, error: AgentQuotaError, reason: str, waited_seconds: float, where: Attribution
+    ) -> None:
         """Ignore quota abandonment when no event sink was injected."""
-        del error, reason, where
+        del error, reason, waited_seconds, where
 
     def quota_waiting(self, provider: str, resumes_at: float | None, where: Attribution) -> None:
         """Ignore capacity waits when no event sink was injected."""

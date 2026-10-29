@@ -63,6 +63,15 @@ def _print(
 # PATH inside a fresh container shell.
 _NEURON_BIN_DIRS = ("/opt/aws/neuron/bin",)
 
+# Device-profile mode for ``inspect``. The runtime's default ("model") captures
+# only synchronous executions, and native TorchNeuron executes asynchronously,
+# so it writes no NTFF; "session" records all device activity per core. Session
+# capture reserves about 4.75 GiB of HBM per logical core on trn2 (measured:
+# 23.5 GiB allocatable without it, 18.75 GiB with it), so a workload that needs
+# more than that captures a system profile only ("0"), which reserves none.
+_DEVICE_PROFILE_MODE = "session"
+_SYSTEM_ONLY_MODE = "0"
+
 
 def _explorer() -> str:
     """Resolve the ``neuron-explorer`` executable, preferring PATH."""
@@ -82,6 +91,7 @@ def run_command(
     *,
     timeout: int = 1800,
     cwd: str | None = None,
+    env: dict[str, str] | None = None,
     runner: capture_runtime.CommandRunner = subprocess.run,
 ) -> int:
     """Run *cmd*, streaming combined output to stdout. Returns exit code."""
@@ -94,6 +104,7 @@ def run_command(
             text=True,
             timeout=timeout,
             cwd=cwd,
+            env=env,
             check=False,
         )
     except OSError as exc:
@@ -116,9 +127,16 @@ def _find_one(directory: Path, suffix: str) -> Path | None:
 
 
 def _session_dir(report: str) -> Path:
+    """The directory holding the profile: the device trace's own session dir.
+
+    A capture out-dir nests each session under ``<instance>_pid_<pid>/<id>/``
+    and may hold NEFFs elsewhere (``neffs/``); ``view`` resolves NEFFs from the
+    session dir, so it must be pointed at the NTFF's directory, not the root.
+    """
     p = Path(report)
     if p.is_dir():
-        return p
+        ntff = _find_one(p, ".ntff")
+        return ntff.parent if ntff else p
     if p.is_file():
         return p.parent
     diagnostic = f"session path does not exist: {report}"
@@ -133,11 +151,15 @@ def _session_dir(report: str) -> Path:
 def cmd_capture(ns: argparse.Namespace) -> None:
     """Capture a system + device profile around a workload command.
 
-    Runs ``neuron-explorer inspect -o <out_dir> <workload>``. The workload
-    should *launch and exercise* a Neuron model (so a NEFF is compiled and
-    executed) — e.g. a benchmark driver hitting an already-running server,
-    or a script that runs a few compiled forwards.
+    Runs ``neuron-explorer inspect -o <out_dir> <workload>`` with session
+    device profiling, or with a system profile only when ``device_profile`` is
+    false (no HBM reserved; see ``_DEVICE_PROFILE_MODE``). The workload must
+    itself *load and run* the Neuron model (the runtime records the profile in
+    that process) — e.g. a script that runs a few compiled forwards. A benchmark
+    client hitting a separately started server records nothing: profile the
+    server process instead.
     """
+    device_profile = getattr(ns, "device_profile", True)
     out_dir = Path(ns.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     workload = ns.workload
@@ -160,28 +182,34 @@ def cmd_capture(ns: argparse.Namespace) -> None:
     # of -o. If that's the git-tracked /workspace, those root-owned, mode-600
     # files break the host-side per-round `git add -A`. Keeping cwd in the
     # out-dir (under /tmp) contains them.
-    rc = run_command(cmd, timeout=ns.timeout, cwd=str(out_dir))
+    mode = _DEVICE_PROFILE_MODE if device_profile else _SYSTEM_ONLY_MODE
+    env = {**os.environ, "NEURON_RT_INSPECT_DEVICE_PROFILE": mode}
+    rc = run_command(cmd, timeout=ns.timeout, cwd=str(out_dir), env=env)
     ntff = _find_one(out_dir, ".ntff")
     neff = _find_one(out_dir, ".neff")
+    trace = _find_one(out_dir, "ntrace.pb")
     _print("\n--- capture artifacts ---")
     _print(f"output dir : {out_dir}")
-    _print(f"NTFF       : {ntff or '(none found — was the model executed on a NeuronCore?)'}")
+    if device_profile:
+        _print(f"NTFF       : {ntff or '(none found — was the model executed on a NeuronCore?)'}")
+    else:
+        _print("NTFF       : (system profile only: no device trace requested)")
     _print(f"NEFF       : {neff or '(none found — did the model compile + run on device?)'}")
-    if rc == 0 and ntff is None:
+    _print(f"ntrace.pb  : {trace or '(none found — did the runtime start?)'}")
+    if rc == 0 and device_profile and ntff is None:
         diagnostic = "inspect produced no NTFF profile"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
+    if rc == 0 and not device_profile and trace is None:
+        diagnostic = "inspect produced no system profile"
         raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
 
 
 def _view(session: Path, output_format: str, extra: list[str] | None = None) -> None:
+    # Only the session dir: neuron-explorer matches each NTFF to its NEFF by UID.
+    # Naming one NEFF (the old ``-n``) mismatches when a session holds several,
+    # as every TorchNeuron session does.
     cmd = [_explorer(), "view", "--disable-ui", "--output-format", output_format]
-    neff = _find_one(session, ".neff")
-    ntff = _find_one(session, ".ntff")
-    if session.is_dir():
-        cmd += ["-d", str(session)]
-    if neff:
-        cmd += ["-n", str(neff)]
-    if ntff:
-        cmd += ["-s", str(ntff)]
+    cmd += ["-d", str(session)]
     cmd += extra or []
     run_command(cmd)
 
@@ -287,6 +315,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--workload", required=True, help="Shell command that drives the model.")
     p.add_argument("--timeout", type=int, default=1800)
+    p.add_argument(
+        "--system-only",
+        dest="device_profile",
+        action="store_false",
+        help="Capture the system profile only: reserves no HBM (session device profiling "
+        "reserves ~4.75 GiB per trn2 logical core).",
+    )
     p.set_defaults(func=cmd_capture)
 
     p = sub.add_parser("summary", help="summary-text report over a captured session.")

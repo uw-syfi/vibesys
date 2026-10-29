@@ -112,9 +112,22 @@ Critical limits to remember when answering questions:
 | Constraint | Limit | Notes |
 |------------|-------|-------|
 | Partition dimension (P) | ≤ 128 | First axis of on-chip tensors |
-| PSUM free dimension (F) | ≤ 512 (gen2/3) / ≤ 4096 (gen4) | Second axis in PSUM buffer |
-| SBUF free dimension (F) | ≤ 32767 | Second axis in SBUF buffer |
-| MatMul K dimension | ≤ 2048 | Contraction dimension per tile |
+| PSUM free dimension (F) | 512 (gen2/3); gen4: 4096 fp32 / 8192 bf16 | Second axis in PSUM buffer |
+
+> The PSUM free-dimension limit is generation- and dtype-gated: 512 on gen2/gen3
+> (one PSUM bank), and on gen4 up to 4096 for a `float32` `dst` or 8192 for a
+> `bfloat16` `dst` (the entire PSUM). It is **not** a queryable `tile_size` field
+> (`psum_bank_fmax` is a fixed 512). Authoritative source: the `nc_matmul` /
+> `nc_matmul_mx` API blocks in `programming/api/`.
+>
+> The per-instruction MatMul **K (contraction)** limit is the partition
+> dimension: **K ≤ 128** (the systolic array is 128×128). `double_row` (FP8,
+> gen3/gen4) and Quad-MX (gen4) pack the contraction across the partition dim and
+> a small free dim, giving an effective K of 256 / 512 respectively. Authoritative
+> source: the `nc_matmul` tile-size block in
+> `programming/api/api-nki-isa-tensor.md`. The SBUF free-dimension capacity is a
+> per-partition **byte** limit (`nl.tile_size.sbuf_fmax` / `sbuf_fmax_bytes`,
+> generation- and dtype-dependent), not a fixed element count.
 
 ### Hardware Generations
 

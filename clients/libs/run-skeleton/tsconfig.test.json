@@ -1,0 +1,42 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    "types": [
+      "bun"
+    ],
+    "noEmit": true,
+    "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ]
+  },
+  "include": [
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx"
+  ],
+  "references": [
+    {
+      "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.cache.json"
+    },
+    {
+      "path": "../store/tsconfig.testing.json"
+    },
+    {
+      "path": "../transport/tsconfig.testing.json"
+    },
+    {
+      "path": "../machine/tsconfig.testing.json"
+    },
+    {
+      "path": "./tsconfig.reader.json"
+    },
+    {
+      "path": "./tsconfig.testing.json"
+    }
+  ]
+}

@@ -15,8 +15,7 @@
 import ast
 import inspect
 import textwrap
-from collections.abc import Callable
-from typing import Generic, TypeAlias, TypeVar
+from typing import Callable, Generic, TypeAlias, TypeVar
 
 from .kernel_assert import kernel_assert
 
@@ -25,22 +24,18 @@ TorchRefProtocolType: TypeAlias = type[TorchRefProtocolT]
 
 
 class LncSubscriptable(Generic[TorchRefProtocolT]):
-    def __init__(
-        self,
-        func: Callable[..., TorchRefProtocolT],
-        protocol: TorchRefProtocolType,
-    ):
+    def __init__(self, func: Callable, protocol: TorchRefProtocolType):
         self._func = func
         self._lnc: int = 0
         self._shard_id: int = 0
         _verify_protocol_sync(func, protocol)
 
-    def __getitem__(self, lnc: int) -> Callable[..., TorchRefProtocolT]:
-        def wrapper(*args, **kwargs) -> TorchRefProtocolT:
+    def __getitem__(self, lnc: int) -> TorchRefProtocolT:
+        def wrapper(*args, **kwargs):
             self._lnc = lnc
             return self._func(*args, **kwargs)
 
-        return wrapper
+        return wrapper  # type: ignore[return-value]
 
     def __call__(self, *args, **kwargs):
         raise TypeError(
@@ -76,10 +71,8 @@ def _verify_protocol_sync(func: Callable, protocol: TorchRefProtocolType):
         f"Parameter count mismatch: function has {len(func_params)}, Protocol has {len(protocol_params)}",
     )
 
-    for (fn, fp), (pn, pp) in zip(func_params, protocol_params, strict=True):
-        kernel_assert(
-            fn == pn, f"Parameter name mismatch: function has '{fn}', Protocol has '{pn}'"
-        )
+    for (fn, fp), (pn, pp) in zip(func_params, protocol_params):
+        kernel_assert(fn == pn, f"Parameter name mismatch: function has '{fn}', Protocol has '{pn}'")
         kernel_assert(
             fp.annotation == pp.annotation,
             f"Parameter '{fn}' annotation mismatch: function has {fp.annotation}, Protocol has {pp.annotation}",
@@ -136,9 +129,7 @@ def _extract_var_docstring(source: str, var_name: str) -> str | None:
             if node.target.id == var_name:
                 if i + 1 < len(tree.body):
                     next_node = tree.body[i + 1]
-                    if isinstance(next_node, ast.Expr) and isinstance(
-                        next_node.value, ast.Constant
-                    ):
+                    if isinstance(next_node, ast.Expr) and isinstance(next_node.value, ast.Constant):
                         if isinstance(next_node.value.value, str):
                             return next_node.value.value
     return None

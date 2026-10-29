@@ -5,10 +5,11 @@ Trainium (Trn1/Trn2) is neither CUDA nor Metal:
 * The accelerator is exposed to userspace as ``/dev/neuron*`` character
   devices, forwarded into the container with ``docker --device`` rather
   than the NVIDIA-only ``--gpus`` flag.
-* The runtime/compiler ship in the AWS Neuron Deep Learning Container
-  (``public.ecr.aws/neuron/pytorch-inference-neuronx``), which carries
-  ``torch-neuronx`` / ``torch_xla`` / ``neuronx-cc`` so the agent can
-  write explicit layers and compile them for NeuronCores.
+* The runtime/compiler ship in the AWS TorchNeuron Deep Learning Container
+  (``public.ecr.aws/neuron/torch-neuronx``), which carries native
+  TorchNeuron (``torch-neuronx`` 2.14: the ``neuron`` PyTorch device, eager
+  mode, and ``torch.compile(backend="neuron")``), ``nki`` and ``neuronx-cc``
+  so the agent can write explicit layers and compile them for NeuronCores.
 * Profiling uses ``neuron-explorer`` (NEFF/NTFF), surfaced through the
   ``neuron`` profiler kind — nsys does not apply.
 
@@ -32,6 +33,7 @@ from vs_sandbox.compute_backends import (
     SandboxKind,
     make_local_shell_sandbox,
 )
+from vs_sandbox.container_memory import ContainerMemoryCap
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -43,13 +45,14 @@ if TYPE_CHECKING:
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
     from vs_sim.api import Clock, PipedProcessLauncher, Threads
 
-# AWS Neuron DLC.  Tag chosen to match the host's Neuron tools (2.30):
-# PyTorch 2.9 / Python 3.12 / Neuron SDK 2.30 on Ubuntu 24.04.  Carries
-# torch-neuronx, torch_xla, and the neuronx-cc compiler.  Override with
-# ``--docker-image`` if the host SDK differs.
-_DEFAULT_IMAGE = (
-    "public.ecr.aws/neuron/pytorch-inference-neuronx:2.9.0-neuronx-py312-sdk2.30.0-ubuntu24.04"
-)
+# AWS TorchNeuron DLC: native PyTorch 2.14 / Python 3.14 / Neuron SDK 2.33 on
+# Ubuntu 26.04. Carries torch-neuronx (native backend, not the retired
+# torch_xla lineage), nki, neuronx-cc and neuron-explorer. Override with
+# ``--docker-image`` if the host needs a different SDK. The image installs
+# TorchNeuron in editable mode from /workspace, which the project mount hides;
+# trainium tasks carry a task Dockerfile that relocates it (see the
+# Llama-3-8B-trn2 example).
+DEFAULT_IMAGE = "public.ecr.aws/neuron/torch-neuronx:2.14.0-neuronx-py314-sdk2.33.0-ubuntu26.04"
 
 # Docker's default /dev/shm is 64 MB; neuronx-cc and the Neuron runtime use
 # shared memory and exhaust it ("No space left on device") when compiling a
@@ -57,10 +60,10 @@ _DEFAULT_IMAGE = (
 # container a generous shm.
 _DEFAULT_SHM_SIZE = "16g"
 
-# Persistent neuronx-cc compile cache, bind-mounted from the host so
-# compiles (minutes each) survive container restarts and carry across
-# rounds. Kept outside the container's /workspace project mount so the
-# Git-tracked project does not balloon with multi-MB NEFFs.
+# Persistent TorchNeuron compile caches (NEFFs, lowered HLO, NKI kernels),
+# bind-mounted from the host so compiles (minutes each) survive container
+# restarts and carry across rounds. Kept outside the container's /workspace
+# project mount so the Git-tracked project does not balloon with multi-MB NEFFs.
 _CACHE_CONTAINER_PATH = "/opt/neuron-compile-cache"
 # neuronx-cc temp/workdir (TMPDIR), host-mounted so intermediates stay off the
 # container overlay.
@@ -93,8 +96,9 @@ class TrainiumBackend:
         del events  # Trainium contention monitoring is not implemented yet
         self.log_dir = Path(log_dir)
         self._lprint = log or print
-        self.image = image or _DEFAULT_IMAGE
+        self.image = image or DEFAULT_IMAGE
         self._docker = docker
+        self._memory = ContainerMemoryCap(docker)
         self._threads = threads
         self._launcher = launcher
         # No per-device selection; kept for protocol parity (read by
@@ -154,11 +158,7 @@ class TrainiumBackend:
             host_tmp = self.log_dir / "neuron-tmp"
             host_cache.mkdir(parents=True, exist_ok=True)
             host_tmp.mkdir(parents=True, exist_ok=True)
-            local_env = {
-                **env,
-                "NEURON_COMPILE_CACHE_URL": str(host_cache),
-                "TMPDIR": str(host_tmp),
-            }
+            local_env = {**env, **_cache_env(cache_root=host_cache, tmp_root=host_tmp)}
             local_env.update(extra_env)
             return make_local_shell_sandbox(
                 host_workspace=host_workspace,
@@ -184,6 +184,8 @@ class TrainiumBackend:
             bind_mounts.append((str(host_tmp), _TMP_CONTAINER_PATH, False))
 
             return docker_sandbox(
+                # A runaway process dies inside its container, not the host.
+                memory_limit=self._memory.limit(),
                 host_workspace=host_workspace,
                 image=container_image or self.image,
                 gpus=None,  # Neuron uses --device, not --gpus
@@ -236,12 +238,27 @@ class TrainiumBackend:
 
     def _build_env(self, extra: dict[str, str]) -> dict[str, str]:
         """Neuron runtime env, with caller extras taking precedence."""
-        env: dict[str, str] = {
-            # Persistent neuronx-cc cache so repeated compiles are cheap.
-            "NEURON_COMPILE_CACHE_URL": _CACHE_CONTAINER_PATH,
-            # Keep neuronx-cc's large temp/workdir on the host mount, not the
-            # container overlay.
-            "TMPDIR": _TMP_CONTAINER_PATH,
-        }
+        env = _cache_env(cache_root=Path(_CACHE_CONTAINER_PATH), tmp_root=Path(_TMP_CONTAINER_PATH))
         env.update(extra)
         return env
+
+
+def _cache_env(*, cache_root: Path, tmp_root: Path) -> dict[str, str]:
+    """TorchNeuron cache and temp locations under the persistent cache and temp roots.
+
+    Every TorchNeuron cache defaults to ``/tmp``, which dies with the container,
+    so each is pointed under ``cache_root``. File locks stay under ``tmp_root``:
+    TorchNeuron requires a local POSIX filesystem for them.
+    """
+    return {
+        # Compiled NEFFs, keyed by lowered HLO + compiler config + version.
+        "TORCH_NEURONX_NEFF_CACHE_DIR": str(cache_root / "neff"),
+        # Lowered StableHLO, shared by eager mode and torch.compile.
+        "TORCH_NEURONX_HLO_CACHE_DIR": str(cache_root / "hlo"),
+        # Compiled NKI kernels.
+        "NKI_TRACE_CACHE_URL": str(cache_root / "nki"),
+        "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": str(tmp_root / "neff-locks"),
+        # Keep neuronx-cc's large temp/workdir on the host mount, not the
+        # container overlay.
+        "TMPDIR": str(tmp_root),
+    }

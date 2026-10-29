@@ -488,6 +488,26 @@ describe('core state projection', () => {
     ]);
   });
 
+  it('names the last chat thread from a snapshot, even a stale one, and keeps it when a later one names none', () => {
+    const current = reduceEvent(initialCoreState(), outputEvent(5, 'current'));
+    const named = reduceSnapshot(current, {
+      run_id: 'run',
+      status: 'running',
+      sequence: 4,
+      chat_threads: [{thread_id: 'thread-a', title: '', provider: 'codex', model: 'gpt-5'}],
+      last_chat_thread_id: 'thread-a',
+    } satisfies RunSnapshot);
+    expect(named.lastChatThreadId).toBe('thread-a');
+
+    const later = reduceSnapshot(named, {
+      run_id: 'run',
+      status: 'running',
+      sequence: 9,
+    } satisfies RunSnapshot);
+    expect(later.lastChatThreadId).toBe('thread-a');
+    expect(initialCoreState().lastChatThreadId).toBeNull();
+  });
+
   it('leaves a stale snapshot that projects no chat threads identity-preserving', () => {
     const current = reduceEvent(initialCoreState(), {...outputEvent(5, 'current'), run_id: 'run'});
     const stale = {run_id: 'run', status: 'running', sequence: 4} satisfies RunSnapshot;
@@ -1139,6 +1159,72 @@ describe('core state projection', () => {
       ]);
       expect(state.chatTranscript.every(item => item.turnId === undefined)).toBe(true);
     }
+  });
+
+  it('keeps each thread its questions and its proposed steers, once each', () => {
+    const asked = (sequence: number, threadId: string, text: string): RunEvent => ({
+      ...chatTitledEvent(sequence, threadId, ''),
+      text,
+    });
+    const proposed = (sequence: number, threadId: string, id: string): RunEvent => ({
+      ...baseEvent(sequence, 'steer_proposed'),
+      chat_thread_id: threadId,
+      data: {
+        kind: 'steer_proposed',
+        proposal_id: id,
+        proposal: {text: 'keep bf16', target: {kind: 'role', id: 'implementer'}, mode: 'standing'},
+      },
+    });
+    const events = [
+      asked(1, 'thread-a', 'what is best?'),
+      proposed(2, 'thread-a', 'p-1'),
+      proposed(3, 'thread-a', 'p-1'),
+      proposed(4, 'thread-b', 'p-2'),
+      asked(5, 'thread-a', 'why?'),
+    ];
+    let state = initialCoreState();
+    for (const item of [...events, events[1] as RunEvent]) state = reduceEvent(state, item);
+
+    expect(state.chatQuestions['thread-a']).toEqual([
+      {id: '1', text: 'what is best?'},
+      {id: '5', text: 'why?'},
+    ]);
+    expect(state.chatProposals['thread-a']).toEqual([
+      {
+        id: 'p-1',
+        sequence: 2,
+        text: 'keep bf16',
+        target: {kind: 'role', id: 'implementer'},
+        mode: 'standing',
+      },
+    ]);
+    expect(state.chatProposals['thread-b']?.map(proposal => proposal.id)).toEqual(['p-2']);
+    // A proposal is not an answer: it adds nothing to any transcript.
+    expect(state.chatTranscripts['thread-a']?.length).toBe(2);
+  });
+
+  it('keeps the steps of a steer the server reports by control id, once each', () => {
+    const step = (sequence: number, delivery: Record<string, unknown>): RunEvent =>
+      ({
+        ...baseEvent(sequence, 'steer_delivery' as RunEvent['type']),
+        data: {kind: 'steer_delivery', delivery},
+      }) as unknown as RunEvent;
+    const events = [
+      step(1, {state: 'queued', control_id: 'c-1', action: 'steer', mode: 'standing'}),
+      step(2, {state: 'in_force', control_id: 'c-1', role: 'implementer', attempt_id: 'a-3'}),
+      step(2, {state: 'in_force', control_id: 'c-1'}),
+      step(3, {state: 'refused', control_id: 'c-2', reason: 'no such role'}),
+    ];
+    let state = initialCoreState();
+    for (const item of events) state = reduceEvent(state, item);
+
+    expect(state.steerDeliveries.map(fact => [fact.step, fact.controlId])).toEqual([
+      ['queued', 'c-1'],
+      ['in_force', 'c-1'],
+      ['refused', 'c-2'],
+    ]);
+    expect(state.steerDeliveries[1]).toMatchObject({role: 'implementer', attemptId: 'a-3'});
+    expect(state.steerDeliveries[2]?.reason).toBe('no such role');
   });
 
   it('replays the thread list from creation events after the implicit default', () => {
@@ -2047,8 +2133,7 @@ describe('chunk gluing per channel', () => {
 });
 
 describe('the framework-validation gate command adapter', () => {
-  // Legacy adapter for the shape recorded at
-  // clients/tui/dev/fixtures/bad-cpp-round1.jsonl:388, produced by loop.py's
+  // Legacy adapter for the shape recorded by loop.py's
   // `ctx.lprint(f"[framework-validation] running {recipe.name}: {recipe.command}")`
   // on the diagnostic channel. See #692 / PR #697.
   const GATE_LINE =
@@ -3155,6 +3240,174 @@ describe('winner selection state', () => {
   });
 });
 
+describe('measurement comparison state', () => {
+  const compared = (
+    sequence: number,
+    commit: string,
+    verdict: 'better' | 'within_noise' | 'worse',
+  ) =>
+    fixtureEvent(sequence, 'measurement_compared', {
+      data: {
+        kind: 'measurement_compared',
+        metric: 'total_ops_per_sec',
+        unit: 'ops/s',
+        direction: 'max',
+        candidate_commit: commit,
+        base_commit: 'base-rev',
+        candidate_value: 120,
+        base_value: 100,
+        ratio: 1.2,
+        noise: 0.03,
+        verdict,
+        candidate_samples: 5,
+        base_samples: 5,
+      },
+    });
+
+  it('starts with none', () => {
+    expect(initialCoreState().comparisons).toEqual({});
+  });
+
+  it('keeps the latest verdict of each candidate commit', () => {
+    const state = [
+      compared(1, 'abc', 'within_noise'),
+      compared(2, 'def', 'worse'),
+      compared(3, 'abc', 'better'),
+    ].reduce(reduceEvent, initialCoreState());
+    expect(state.comparisons).toEqual({
+      abc: {
+        verdict: 'better',
+        ratio: 1.2,
+        metric: 'total_ops_per_sec',
+        candidateValue: 120,
+        baseValue: 100,
+        baseCommit: 'base-rev',
+        candidateSamples: 5,
+        baseSamples: 5,
+      },
+      def: {
+        verdict: 'worse',
+        ratio: 1.2,
+        metric: 'total_ops_per_sec',
+        candidateValue: 120,
+        baseValue: 100,
+        baseCommit: 'base-rev',
+        candidateSamples: 5,
+        baseSamples: 5,
+      },
+    });
+  });
+});
+
+describe('quota stops', () => {
+  const resumed = (sequence: number, waited: number, timestamp: string): RunEvent => ({
+    ...fixtureEvent(sequence, 'quota_resumed', {
+      data: {
+        kind: 'quota_resumed',
+        provider: 'claude',
+        condition: 'rate_limited',
+        reason: 'wait_elapsed',
+        waited_seconds: waited,
+      },
+    }),
+    timestamp,
+  });
+
+  it('starts with none', () => {
+    expect(initialCoreState().quotaStops).toEqual([]);
+  });
+
+  it('records each stop that held a turn, with when it ended and how long it held it', () => {
+    const state = [
+      resumed(1, 2220, '2026-10-18T14:32:00Z'),
+      resumed(2, 0, '2026-10-18T15:00:00Z'),
+      fixtureEvent(3, 'quota_abandoned', {
+        data: {
+          kind: 'quota_abandoned',
+          provider: 'claude',
+          condition: 'unavailable',
+          detail: 'outage',
+          reason: 'budget',
+          waited_seconds: 60,
+        },
+      }),
+    ].reduce(reduceEvent, initialCoreState());
+    expect(state.quotaStops.map(stop => [stop.sequence, stop.outcome, stop.waitedSeconds])).toEqual(
+      [
+        [1, 'resumed', 2220],
+        [3, 'abandoned', 60],
+      ],
+    );
+    expect(state.quotaStops[0]?.endedAt).toBe('2026-10-18T14:32:00Z');
+  });
+});
+
+describe('quota stops and the run paused around them', () => {
+  const at = (
+    sequence: number,
+    clock: string,
+    type: RunEvent['type'],
+    data: NonNullable<RunEvent['data']>,
+  ) =>
+    ({
+      ...fixtureEvent(sequence, type, {data}),
+      timestamp: `2026-10-19T${clock}Z`,
+    }) as RunEvent;
+  const paused = at(1, '13:55:34', 'quota_paused', {
+    kind: 'quota_paused',
+    provider: 'claude',
+    condition: 'quota_exhausted',
+    detail: 'limit',
+  });
+  const parked = at(2, '13:55:34', 'run_status_changed', {
+    kind: 'run_status_changed',
+    status: 'paused',
+    previous: 'running',
+  });
+  const abandoned = at(3, '14:09:51', 'quota_abandoned', {
+    kind: 'quota_abandoned',
+    provider: 'claude',
+    condition: 'quota_exhausted',
+    detail: 'limit',
+    reason: 'budget',
+    waited_seconds: 857,
+  });
+  const running = at(4, '14:32:58', 'run_status_changed', {
+    kind: 'run_status_changed',
+    status: 'running',
+    previous: 'paused',
+  });
+
+  it('keeps a stop open while the run stays paused, and closes it when the run resumes', () => {
+    const waiting = [paused, parked, abandoned].reduce(reduceEvent, initialCoreState());
+    expect(waiting.quotaStops.map(stop => [stop.pausedAt, stop.resumedAt])).toEqual([
+      ['2026-10-19T13:55:34Z', null],
+    ]);
+    const resumed = reduceEvent(waiting, running);
+    expect(resumed.quotaStops.map(stop => [stop.pausedAt, stop.resumedAt])).toEqual([
+      ['2026-10-19T13:55:34Z', '2026-10-19T14:32:58Z'],
+    ]);
+  });
+
+  it('closes a stop at once when the run was already moving as the stop ended', () => {
+    const moving = [paused, abandoned].reduce(reduceEvent, initialCoreState());
+    expect(moving.quotaStops.map(stop => stop.resumedAt)).toEqual(['2026-10-19T14:09:51Z']);
+  });
+
+  it('gives a stop that never paused the run no pause of its own', () => {
+    const outage = at(1, '14:00:00', 'quota_abandoned', {
+      kind: 'quota_abandoned',
+      provider: 'claude',
+      condition: 'unavailable',
+      detail: 'outage',
+      reason: 'budget',
+      waited_seconds: 60,
+    });
+    const state = reduceEvent(initialCoreState(), outage);
+    expect(state.quotaStops.map(stop => [stop.pausedAt, stop.resumedAt])).toEqual([[null, null]]);
+  });
+});
+
 describe('workstream telemetry state', () => {
   it('starts with no workstreams', () => {
     expect(initialCoreState().workstreams).toEqual({});
@@ -3329,8 +3582,16 @@ describe('run startup progress state', () => {
   const progressEvent = (
     sequence: number,
     data: {
-      stage: 'resolving' | 'building_image' | 'starting_container';
+      stage:
+        | 'resolving'
+        | 'probing_workspace'
+        | 'building_image'
+        | 'building_tools'
+        | 'starting_container';
       progress?: {done: number; total?: number | null; label?: string};
+      state?: 'running' | 'waiting' | 'finished';
+      condition?: 'queued' | 'running' | null;
+      elapsed_seconds?: number | null;
     },
   ): RunEvent =>
     fixtureEvent(sequence, 'run_startup_progress', {data: {kind: 'run_startup_progress', ...data}});
@@ -3344,6 +3605,9 @@ describe('run startup progress state', () => {
     expect(state.startup).toEqual({
       stage: 'resolving',
       progress: null,
+      state: 'running',
+      condition: null,
+      elapsedSeconds: null,
       stageSince: timestamp(1),
       lastActivityAt: timestamp(1),
     });
@@ -3360,6 +3624,9 @@ describe('run startup progress state', () => {
     expect(state.startup).toEqual({
       stage: 'building_image',
       progress: {done: 12, total: 30, label: 'RUN pip install'},
+      state: 'running',
+      condition: null,
+      elapsedSeconds: null,
       stageSince: timestamp(1),
       lastActivityAt: timestamp(1),
     });
@@ -3373,6 +3640,9 @@ describe('run startup progress state', () => {
     expect(state.startup).toEqual({
       stage: 'starting_container',
       progress: {done: 0, total: null, label: ''},
+      state: 'running',
+      condition: null,
+      elapsedSeconds: null,
       stageSince: timestamp(1),
       lastActivityAt: timestamp(1),
     });
@@ -3397,6 +3667,9 @@ describe('run startup progress state', () => {
     expect(state.startup).toEqual({
       stage: 'building_image',
       progress: {done: 2, total: 10, label: 'RUN build'},
+      state: 'running',
+      condition: null,
+      elapsedSeconds: null,
       stageSince: timestamp(2),
       lastActivityAt: timestamp(3),
     });
@@ -3417,6 +3690,67 @@ describe('run startup progress state', () => {
     ]);
   });
 
+  it('folds a wait with its condition and elapsed time, keeping the stage clock and last step', () => {
+    let state = reduceEvent(
+      initialCoreState(),
+      progressEvent(1, {stage: 'probing_workspace', progress: {done: 1, total: 3, label: 'step'}}),
+    );
+    state = reduceEvent(
+      state,
+      progressEvent(2, {
+        stage: 'probing_workspace',
+        state: 'waiting',
+        condition: 'queued',
+        elapsed_seconds: 40,
+      }),
+    );
+    expect(state.startup).toEqual({
+      stage: 'probing_workspace',
+      state: 'waiting',
+      condition: 'queued',
+      elapsedSeconds: 40,
+      progress: {done: 1, total: 3, label: 'step'},
+      stageSince: timestamp(1),
+      lastActivityAt: timestamp(2),
+    });
+  });
+
+  it('folds a finished stage with how long it took, and the next stage starts running', () => {
+    let state = reduceEvent(initialCoreState(), progressEvent(1, {stage: 'building_image'}));
+    state = reduceEvent(
+      state,
+      progressEvent(2, {stage: 'building_image', state: 'finished', elapsed_seconds: 12.5}),
+    );
+    expect(state.startup).toMatchObject({
+      stage: 'building_image',
+      state: 'finished',
+      condition: null,
+      elapsedSeconds: 12.5,
+    });
+    state = reduceEvent(state, progressEvent(3, {stage: 'building_tools'}));
+    expect(state.startup).toMatchObject({
+      stage: 'building_tools',
+      state: 'running',
+      elapsedSeconds: null,
+      stageSince: timestamp(3),
+    });
+  });
+
+  it('keeps how long every stage took, summed over the times it finished, as the stages move on', () => {
+    const events = [
+      progressEvent(1, {stage: 'building_image'}),
+      progressEvent(2, {stage: 'building_image', state: 'finished', elapsed_seconds: 12.5}),
+      progressEvent(3, {stage: 'starting_container'}),
+      progressEvent(4, {stage: 'starting_container', state: 'waiting', elapsed_seconds: 3}),
+      progressEvent(5, {stage: 'starting_container', state: 'finished', elapsed_seconds: 4}),
+      progressEvent(6, {stage: 'starting_container', state: 'finished', elapsed_seconds: 6}),
+    ];
+    const state = events.reduce(reduceEvent, initialCoreState());
+    // A wait is not a finish, and a stage that never finished is absent.
+    expect(state.startupTook).toEqual({building_image: 12.5, starting_container: 10});
+    expect(initialCoreState().startupTook).toEqual({});
+  });
+
   it('resets again when an earlier stage recurs, and a replay yields the same fact', () => {
     const events = [
       progressEvent(1, {stage: 'building_image'}),
@@ -3426,5 +3760,99 @@ describe('run startup progress state', () => {
     const fold = (): CoreState => events.reduce(reduceEvent, initialCoreState());
     expect(fold().startup?.stageSince).toBe(timestamp(3));
     expect(fold().startup).toEqual(fold().startup);
+  });
+});
+
+describe('comparison baseline state', () => {
+  type Row = Extract<
+    NonNullable<RunEvent['data']>,
+    {kind: 'comparisons_read'}
+  >['comparisons'][number];
+  const read = (sequence: number, comparisons: Row[]) =>
+    fixtureEvent(sequence, 'comparisons_read', {data: {kind: 'comparisons_read', comparisons}});
+  const measured: Row = {
+    name: 'vllm',
+    label: 'vLLM',
+    status: 'measured',
+    metric: 'tokens_per_sec',
+    unit: 'tok/s',
+    direction: 'max',
+    value: 66.2,
+    spread: 0.02,
+    samples: 3,
+    hosts: ['host-a'],
+  };
+  const statuses: Row['status'][] = ['measured', 'failed', 'not_configured', 'not_measured'];
+
+  it('starts with none', () => {
+    expect(initialCoreState().baselines).toEqual([]);
+  });
+
+  it('holds every row as the event states it, absent fields as null', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      read(1, [
+        measured,
+        {name: 'sglang', label: 'SGLang', status: 'not_measured'},
+        {name: 'x', label: 'X', status: 'failed', reason: 'engine exited'},
+      ]),
+    );
+    expect(state.baselines.map(row => [row.label, row.status])).toEqual([
+      ['vLLM', 'measured'],
+      ['SGLang', 'not_measured'],
+      ['X', 'failed'],
+    ]);
+    expect(state.baselines[0]).toEqual({
+      name: 'vllm',
+      label: 'vLLM',
+      status: 'measured',
+      metric: 'tokens_per_sec',
+      unit: 'tok/s',
+      direction: 'max',
+      value: 66.2,
+      spread: 0.02,
+      samples: 3,
+      hosts: ['host-a'],
+      reason: null,
+    });
+    expect(state.baselines[1]).toEqual({
+      name: 'sglang',
+      label: 'SGLang',
+      status: 'not_measured',
+      metric: null,
+      unit: null,
+      direction: null,
+      value: null,
+      spread: null,
+      samples: null,
+      hosts: [],
+      reason: null,
+    });
+    expect(state.baselines[2]?.reason).toBe('engine exited');
+  });
+
+  it('the newest event replaces the earlier ones, whatever they held', () => {
+    for (const first of statuses) {
+      for (const second of statuses) {
+        const state = [
+          read(1, [{name: 'a', label: 'A', status: first}, measured]),
+          read(2, [{name: 'b', label: 'B', status: second}]),
+        ].reduce(reduceEvent, initialCoreState());
+        expect(state.baselines.map(row => row.name)).toEqual(['b']);
+        expect(state.baselines[0]?.status).toBe(second);
+      }
+    }
+  });
+
+  it('an empty reading clears the baselines', () => {
+    const state = [read(1, [measured]), read(2, [])].reduce(reduceEvent, initialCoreState());
+    expect(state.baselines).toEqual([]);
+  });
+
+  it('batching the events gives the same baselines as folding them one by one', () => {
+    const events = [read(1, [measured]), read(2, [{name: 'b', label: 'B', status: 'failed'}])];
+    expect(reduceEventBatch(initialCoreState(), events).baselines).toEqual(
+      events.reduce(reduceEvent, initialCoreState()).baselines,
+    );
   });
 });

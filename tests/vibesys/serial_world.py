@@ -9,7 +9,7 @@ multi search's designer and router share a role. Every designer reply names a ne
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from tests.support.dynamic_script import FACTS, TERMS, Executors, lease
@@ -20,6 +20,7 @@ from vibesys.orchestration.multi.core_policy.api import requirements_for as mult
 from vibesys.orchestration.multi.search import api as multi_api
 from vibesys.orchestration.single.core_policy.api import requirements_for as single_requirements
 from vibesys.orchestration.single.search import api as single_api
+from vibesys.serial_roadmap import RoadmapOwner
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
@@ -38,6 +39,7 @@ from vs_core.api import (
 from vs_core.testing.builders import sample_retries
 from vs_core.testing.drive import Answer, Harness, Succeeded
 from vs_dst.api import RunSetup
+from vs_issue_tracker.api import FakeRoadmap, PutRoadmapItems, ReadRoadmap
 from vs_runtime.api.testing import Launch
 
 if TYPE_CHECKING:
@@ -48,6 +50,7 @@ if TYPE_CHECKING:
     from vs_core.api import (
         CoreState,
         EvidenceRequirements,
+        OperationRegistry,
         Request,
         SearchDef,
         StrategyOperations,
@@ -86,7 +89,7 @@ _REPLIES: dict[Search, dict[str, str]] = {
         ),
     },
     "multi": {
-        "agent.implementer.reply": json.dumps({**_IMPLEMENTED, "hypothesis_outcome": "nominated"}),
+        "agent.implementer.reply": json.dumps({**_IMPLEMENTED, "status": "implemented"}),
         "agent.judge.reply": json.dumps({"analysis": "checked", "feedback": "", "verdict": "pass"}),
         "agent.router.reply": json.dumps(
             {"need_profile": False, "profile_focus": "", "reasoning": "because"}
@@ -105,6 +108,8 @@ class SerialExecutors(Executors):
 
     search: Search = "single"
     designs: int = 0
+    roadmap: FakeRoadmap = field(default_factory=FakeRoadmap)
+    """The run's roadmap, kept outside the run like its store, so it outlives a crash."""
 
     def _turn(self, request: DispatchTurn | ResumeSessionTurn) -> Answer:
         schema = request.turn.output_schema.name
@@ -116,9 +121,11 @@ class SerialExecutors(Executors):
         return Succeeded(output_json=reply, resource_id=lease(request.turn.session.session_id))
 
     def _operation(self, request: ExecuteRegisteredOperation) -> Answer:
-        typed = _SEARCHES[self.search].operations.registry().decode(request.operation)
+        typed = _SEARCHES[self.search].registry().decode(request.operation)
         outcome: BaseModel
-        if isinstance(typed, RenderRoleArtifactsBase):
+        if isinstance(typed, ReadRoadmap | PutRoadmapItems):
+            outcome = RoadmapOwner(self.roadmap).perform(typed)
+        elif isinstance(typed, RenderRoleArtifactsBase):
             prompt = ArtifactRef(
                 artifact_id=ArtifactId(root=f"prompt:{request.operation_id.root}"), digest="prompt"
             )
@@ -150,6 +157,12 @@ class _Kind:
     operations: StrategyOperations
     budget: Callable[[Any], RunBudget]
     requirements: Callable[[TaskTerms], EvidenceRequirements]
+
+    def registry(self) -> OperationRegistry:
+        """The codec of every operation the search records: its kit's and the roadmap's."""
+        registry = self.definition.registry()
+        assert registry is not None
+        return registry
 
 
 _SEARCHES: dict[Search, _Kind] = {
@@ -191,7 +204,7 @@ class SerialWorld:
         self.setup = RunSetup(
             new_launch=lambda: Launch(kind.definition, selected),
             harness=Harness(
-                registry=kind.operations.registry(),
+                registry=kind.registry(),
                 facts=FACTS,
                 limits=limits_for(kind.budget(selected), _Bounds()),
                 envelope_type=RunEnvelope[FlowState],

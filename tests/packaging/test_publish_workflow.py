@@ -46,15 +46,16 @@ def test_publish_workflow_pins_every_setup_uv_binary_version() -> None:
     assert {step.get("with", {}).get("version") for step in setup_uv_steps} == {"0.9.24"}
 
 
-def test_publish_workflow_runs_pinned_auditwheel_on_linux_release_wheels() -> None:
+def test_publish_workflow_builds_one_universal_wheel() -> None:
     workflow_text = (REPO_ROOT / ".github" / "workflows" / "publish.yml").read_text()
 
-    assert "uv run auditwheel show" in workflow_text
-    assert "uv run --with auditwheel" not in workflow_text
+    assert "uv build --wheel --out-dir dist/release" in workflow_text
+    assert "packaging/check_release_version.py --wheel-dir dist/release" in workflow_text
+    assert "Require exactly one wheel and no sdist" in workflow_text
 
 
 def test_installed_wheel_check_uses_distinct_clean_install_and_runtime_homes() -> None:
-    script = _workflow_step_script("Verify the installed wheel with a sanitized PATH")
+    script = _workflow_step_script("Verify wheel in a clean installation")
 
     assert 'install_home="$runtime_root/install-home"' in script
     assert 'verify_home="$runtime_root/verify-home"' in script
@@ -64,23 +65,4 @@ def test_installed_wheel_check_uses_distinct_clean_install_and_runtime_homes() -
     assert script.count('HOME="$verify_home"') == 1
     assert script.index('find "$install_home"') < script.index('HOME="$install_home"')
     assert script.index('find "$verify_home"') < script.index('HOME="$verify_home"')
-
-
-def test_docker_check_keeps_runtime_home_clean_during_installation() -> None:
-    dockerfile = (REPO_ROOT / "packaging" / "release-wheel.Dockerfile").read_text()
-
-    assert "HOME=/tmp/verify-home" in dockerfile
-    assert "INSTALL_HOME=/tmp/install-home" in dockerfile
-    assert 'test -z "$(find "$INSTALL_HOME" -mindepth 1 -print -quit)"' in dockerfile
-    assert 'HOME="$INSTALL_HOME" uv tool install' in dockerfile
-    assert 'test -z "$(find "$HOME" -mindepth 1 -print -quit)"' in dockerfile
-    assert dockerfile.index('find "$INSTALL_HOME"') < dockerfile.index(
-        'HOME="$INSTALL_HOME" uv tool install'
-    )
-
-
-def test_docker_check_provides_the_git_runtime_prerequisite() -> None:
-    dockerfile = (REPO_ROOT / "packaging" / "release-wheel.Dockerfile").read_text()
-
-    assert "apt-get install --yes --no-install-recommends git" in dockerfile
-    assert "rm -rf /var/lib/apt/lists/*" in dockerfile
+    assert '--constraints "$RUNNER_TEMP/release-verify-constraints.txt"' in script

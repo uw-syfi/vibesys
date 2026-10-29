@@ -20,8 +20,8 @@ from vibesys.orchestration.dynamic.search._outcomes import (
     ended_by,
 )
 from vibesys.orchestration.dynamic.search._progress import refusal
+from vibesys.orchestration.dynamic.search._reports import WorkstreamParking
 from vibesys.orchestration.dynamic.search._resume import ResumeStage, WorkstreamResume, mark
-from vibesys.orchestration.dynamic.search._spans import turn_label
 from vibesys.orchestration.dynamic.search._values import (
     AgentName,
     Blocker,
@@ -29,6 +29,7 @@ from vibesys.orchestration.dynamic.search._values import (
     Failure,
     FailureKind,
 )
+from vibesys.search_spans.api import turn_label
 from vs_core.api.search import (
     Again,
     Declined,
@@ -80,12 +81,17 @@ async def implement_until_measurable(  # noqa: PLR0913  # lint-waiver: LW-271018
 
 
 class Conversation:
-    """The two agents of one workstream: each is one conversation for the whole workstream."""
+    """The two agents of one workstream: each is one conversation for the whole workstream.
 
-    def __init__(self, implementer: Session, judge: Session) -> None:
-        """Hold the implementer's and the judge's sessions."""
+    A turn of either that core suspends on its evaluations parks the workstream's agent slot
+    (``parking``).
+    """
+
+    def __init__(self, implementer: Session, judge: Session, parking: WorkstreamParking) -> None:
+        """Hold the implementer's and the judge's sessions, and what parks their turns."""
         self.implementer = implementer
         self.judge = judge
+        self.parking = parking
 
 
 async def take_turn(  # noqa: PLR0913  # LW-220431 [PLR0913]; each argument is a distinct fact of the turn (the flow, what it works on, what it carries and who it asks); bundling them in a throwaway record only renames the parameters.
@@ -106,13 +112,13 @@ async def take_turn(  # noqa: PLR0913  # LW-220431 [PLR0913]; each argument is a
     turn: Result | Unmeasured
     if made is None:
         baseline = input_so_far(ctx, w)
-        turn = await implementer_turn(sessions.implementer, w, work, earlier, baseline=baseline)
+        turn = await implementer_turn(sessions, w, work, earlier, baseline=baseline)
         if isinstance(turn, Result) and _review_due(w, turn):
             mark(ctx, w, work, ResumeStage.IMPLEMENTED, blockers=earlier, result=turn)
     else:
         turn = made
     if isinstance(turn, Result) and _review_due(w, turn):
-        turn = await review(ctx, w, ws, work, sessions.judge, turn)
+        turn = await review(ctx, w, ws, work, sessions, turn)
     if isinstance(turn, Result):
         return turn
     work.carried = turn.result
@@ -124,7 +130,7 @@ async def take_turn(  # noqa: PLR0913  # LW-220431 [PLR0913]; each argument is a
 
 
 async def implementer_turn(
-    implementer: Session,
+    sessions: Conversation,
     w: WorkstreamStart,
     work: Work,
     blockers: tuple[Blocker, ...],
@@ -137,7 +143,9 @@ async def implementer_turn(
     not landed); the prompt says it is pending, or why it failed.
     """
     prompt = implement_prompt(w, blockers, baseline=baseline)
-    match await implementer.turn(prompt, label=turn_label(implementer)):
+    implementer = sessions.implementer
+    await sessions.parking.unparked()
+    match await implementer.turn(prompt, label=turn_label(implementer), parking=sessions.parking):
         case TurnFinished(reply=ImplementerResult() as reply, checkpoint=checkpoint):
             return _candidate_of(w, work, reply, checkpoint)
         case Failed(reason=FailureReason.TIMED_OUT | FailureReason.TURN_FAILED) as failed:
@@ -173,12 +181,15 @@ def _candidate_of(
                 Failure(kind=FailureKind.CHECKPOINT_DECLINED, declined=checkpoint.reason)
             )
         revision = getattr(checkpoint, "revision", None)
+    parts = {item.hypothesis_id for item in w.combine}
     result = Result(
         candidate=Candidate(
             outcome=reply.outcome,
             summary=reply.summary,
             next_step=reply.next_step,
             revision=revision,
+            unapplied=tuple(item for item in reply.unapplied if item.hypothesis_id in parts),
+            unattributed=tuple(item for item in reply.unapplied if item.hypothesis_id not in parts),
         )
     )
     work.carried = result
@@ -215,7 +226,7 @@ async def review(  # noqa: PLR0913  # LW-220432 [PLR0913]; each argument is a di
     w: WorkstreamStart,
     ws: Workspace,
     work: Work,
-    judge: Session,
+    sessions: Conversation,
     result: Result,
 ) -> Result | Unmeasured:
     """Have the judge grade the candidate, showing it what the author's own evaluations said."""
@@ -228,7 +239,11 @@ async def review(  # noqa: PLR0913  # LW-220432 [PLR0913]; each argument is a di
     prompt = review_prompt(
         w.plan, revision, result.candidate.summary, review_evaluations(refs, readings)
     )
-    match await judge.turn(prompt, revision=revision, label=turn_label(judge)):
+    judge = sessions.judge
+    await sessions.parking.unparked()
+    match await judge.turn(
+        prompt, revision=revision, label=turn_label(judge), parking=sessions.parking
+    ):
         case TurnFinished(reply=ReviewResult() as reply, invocation=invocation):
             graded = result.model_copy(
                 update={"verdict": Verdict(passed=reply.passed, invocation=invocation)}

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, cast
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from vs_redaction.api import redact_diagnostic_text
 
@@ -12,6 +15,30 @@ if TYPE_CHECKING:
 
 _TRUNCATION_MARKER = "\n...[truncated]...\n"
 _MISSING_DIAGNOSTIC = cast("str", object())
+
+
+class CaptureExecutionKind(StrEnum):
+    """Closed kinds of external execution a captured command can leave behind."""
+
+    SLURM_GPU = "slurm_gpu"
+
+
+class CaptureExecutionIdentity(BaseModel):
+    """Validated durable identity used to reconcile one captured command.
+
+    The identifier is deliberately restricted to the scheduler/container-safe
+    alphabet used by the implementations.  Durable state therefore cannot turn
+    an arbitrary string into a controller query after restart.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    kind: CaptureExecutionKind
+    execution_id: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+    )
 
 
 @dataclass
@@ -64,13 +91,40 @@ class CommandResult:
         return redact_diagnostic_text(raw)
 
 
+class CommandExecutionSettledError(RuntimeError):
+    """A local command-runner failure after external termination was confirmed.
+
+    This typed proof lets lifecycle owners surface the local failure while still
+    clearing durable capture intent. It must only be constructed at the boundary
+    that observed a settled external outcome.
+    """
+
+    def __init__(self, cause: BaseException) -> None:
+        """Retain the local cleanup failure without weakening its traceback."""
+        self.cause = cause
+        super().__init__(f"settled command cleanup failed: {type(cause).__name__}: {cause}")
+
+
+@dataclass(frozen=True, slots=True)
+class DiagnosticStreams:
+    """Credential-safe streams whose redaction preceded every retention bound.
+
+    A streaming runner may already have retained a safe prefix/tail; the
+    important proof is that no earlier cap could split a credential before it
+    was recognized and redacted.
+    """
+
+    stdout: str
+    stderr: str
+
+
 class CommandStopUnconfirmedError(RuntimeError):
     """A stopped command's processes could not be shown to have ended where they run.
 
-    Killing a ``docker exec`` client does not stop the command in the container, so a
-    stop is confirmed there. When that check finds survivors after ``SIGKILL``, or cannot
-    be made, the command may still be running and writing; ``result`` is what the stop
-    would otherwise have returned.
+    Killing a local client does not necessarily stop the command where it runs.
+    When a container process check finds survivors, a Slurm queue check still
+    lists the named job, or the check cannot be made, the command may still be
+    running and writing; ``result`` is what the stop would otherwise have returned.
     """
 
     def __init__(self, result: CommandResult, survivors: int | None) -> None:
@@ -126,12 +180,50 @@ class CommandRunner(Protocol):
         ...
 
 
+class CaptureCommandRunner(Protocol):
+    """Execute a trusted capture command through its attribution environment.
+
+    This is deliberately narrower than :class:`CommandRunner`: Slurm exposes
+    one merged diagnostic stream, so it cannot promise reconstructed stdout
+    and stderr.  Every raw byte still reaches *output* as ``STDOUT``.  A
+    successful result retains the bounded merged stream in ``stdout``; a
+    failed, timed-out, or cancelled result retains it in ``stderr`` so the
+    shared failure-tail policy keeps the newest diagnostic.  Runner-generated
+    stop notices are returned but are not written to *output*.
+
+    A preset or later *cancel* stops the command before returning.  If the
+    remote allocation cannot be proved gone, the call raises
+    :class:`CommandStopUnconfirmedError` with the otherwise returned result.
+    A local cleanup fault after proven external settlement raises
+    :class:`CommandExecutionSettledError` without weakening that proof.
+    Ordinary :class:`CommandRunner` implementations also satisfy this role;
+    they may preserve their stronger native stream attribution.
+    """
+
+    @property
+    def id(self) -> str:
+        """Return a stable identifier for this runner instance."""
+        ...
+
+    def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        cancel: Event | None = None,
+        output: OutputSink,
+    ) -> CommandResult:
+        """Run one capture command and return its bounded diagnostics."""
+        ...
+
+
 def bounded_execution_result(
     *,
     stdout: str,
     stderr: str,
     exit_code: int | None,
     max_output_chars: int,
+    diagnostics: DiagnosticStreams | None = None,
 ) -> CommandResult:
     """Return a compatible result whose combined output fits the character cap.
 
@@ -149,9 +241,11 @@ def bounded_execution_result(
         exit_code=exit_code,
         limit=limit,
     )
-    diagnostic_stdout, diagnostic_stderr, _ = _bounded_streams(
-        stdout=redact_diagnostic_text(stdout),
-        stderr=redact_diagnostic_text(stderr),
+    safe_stdout = redact_diagnostic_text(stdout) if diagnostics is None else diagnostics.stdout
+    safe_stderr = redact_diagnostic_text(stderr) if diagnostics is None else diagnostics.stderr
+    bounded_diagnostic_stdout, bounded_diagnostic_stderr, _ = _bounded_streams(
+        stdout=safe_stdout,
+        stderr=safe_stderr,
         exit_code=exit_code,
         limit=limit,
     )
@@ -161,9 +255,9 @@ def bounded_execution_result(
         truncated=truncated,
         stdout=bounded_stdout,
         stderr=bounded_stderr,
-        diagnostic_output=diagnostic_stdout + diagnostic_stderr,
-        diagnostic_stdout=diagnostic_stdout,
-        diagnostic_stderr=diagnostic_stderr,
+        diagnostic_output=bounded_diagnostic_stdout + bounded_diagnostic_stderr,
+        diagnostic_stdout=bounded_diagnostic_stdout,
+        diagnostic_stderr=bounded_diagnostic_stderr,
     )
 
 

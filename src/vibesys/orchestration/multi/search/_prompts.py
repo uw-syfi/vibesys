@@ -47,14 +47,13 @@ class PreRoundPrompt(RolePromptContext):
 
 
 class ProfilerPrompt(RolePromptContext):
-    """One advisory profiling turn: where to look and where to write bounded evidence."""
+    """One advisory profiling turn: where to look."""
 
     reply_schema: ClassVar[SchemaRef | None] = PROFILER.reply_schema
 
     template: Literal[PromptTemplate.PROFILER] = PromptTemplate.PROFILER
     round_number: int = Field(gt=0)
     profile_focus: str
-    evidence_directory: str
 
 
 class Claim(Value):
@@ -69,7 +68,7 @@ class ImplementerClaims(Value):
 
     summary: str
     expected_behavior: str
-    hypothesis_outcome: str
+    status: str
     evidence: str = ""
     next_step: str = ""
     perf_metric: float | None = None
@@ -125,7 +124,7 @@ class HypothesisPlan(Value):
     invariants: str = ""
     activation_evidence: str = ""
     falsification_criteria: str = ""
-    minimum_acceptance_criteria: str = ""
+    minimum_ratio: float = 1.0
 
 
 class GateFacts(Value):
@@ -160,8 +159,6 @@ class ImplementPrompt(RolePromptContext):
     validation_failure: ValidationFailure | None = None
     no_valid_reply: str | None = None
     pareto_archive_conflict: ArchiveConflictView | None = None
-    official_due: bool = False
-    official_reason: str | None = None
     benchmark_enabled: bool = True
     active_component: str | None = None
 
@@ -181,8 +178,6 @@ class JudgePrompt(RolePromptContext):
     claims: ImplementerClaims
     framework: GateFacts
     pareto_archive_conflict: ArchiveConflictView | None = None
-    official_due: bool = False
-    official_reason: str | None = None
     benchmark_enabled: bool = True
     # The trusted evaluations the candidate was measured by, stated at render time.
     cited_evidence: tuple[EvidenceRef, ...] = ()

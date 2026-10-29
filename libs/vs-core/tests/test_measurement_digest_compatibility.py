@@ -43,12 +43,14 @@ def test_stages_that_require_nothing_keep_the_digests_stored_by_main() -> None:
     identity = core.MeasurementIdentity.from_plan(plan, _CANDIDATE)
     scope = core.Scope(owner=core.initial_state().run.run_id, generation=0)
     decision = core.Measure(decision_id=core.DecisionId(root="d"), scope=scope, plan=plan)
-    request = core.MeasurementRequested(scope=scope, plan=plan)
+    request = core.MeasurementRequested(decision_id=decision.decision_id, scope=scope, plan=plan)
     assert digest(recipe) == "508ccb3ff4dfe8a94b18c9584ca1e14bade087e56e45e9562f549da48f8edf4a"
     assert digest(plan) == "075c507fffa830d744b1cc5b937c275ab2a86d0022fd75d66bd8d085a2204b88"
     assert digest(identity) == "7ebd450cf7c5c10f8192b234b561e1acafe7afbd6cb50fcdf30858ea156bbeea"
     assert digest(identity)[:24] == "7ebd450cf7c5c10f8192b234"  # the submission budget key
-    assert digest(request) == "6a527dd89174808ce79325f7db627d3f0576ac60f4791e45578294345a40046c"
+    # The signal names the decision it answers (an answer core gives at once is addressed to it);
+    # no run stores the signal, so its digest was re-pinned with the field.
+    assert digest(request) == "63e655bccb6378345dacc4c4d32c310c65c92c218ac936ec0110a302d1b5e831"
     # A decision's own digest is not pinned: decisions no longer carry deadlines or
     # dependencies, so envelopes stored by main are refused rather than resumed (version 4).
     assert "required_outputs" not in decision.model_dump_json()

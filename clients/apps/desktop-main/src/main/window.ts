@@ -1,36 +1,33 @@
 /**
- * The bundled app's one window: the welcome view (trusted, the welcome preload) and, once a run is
- * attached, the run page (the web UI, the run preload) under the welcome view's title strip.
+ * One native window: its trusted surface, the app shell (`shell.html`, under the welcome preload),
+ * filling it. A run is shown by the shell's own document, so a window binds at most one run to its
+ * surface at a time; the app has a main window and one more per run opened in a window of its own.
  *
- * The window lays the views out, switches between them, and carries messages to them; it decides
- * nothing about runs or hosts. The run page names no host, path, or command: each `connect()` of its
- * preload hands this process a MessagePort, which the window passes on only when it comes from the
- * current run page.
+ * The window lays the surface out and carries messages to it; it decides nothing about runs or
+ * hosts. The surface names no host, path, or command: each `connectRun` of its preload hands this
+ * process a MessagePort, which the registry (`run-ipc.ts`) admits only when it comes from the
+ * document of a window that has a run bound.
  */
 
 import type {RelayPort} from '@vibesys/feature-run-control/main';
 import {
-  type ChromeState,
   CONNECT_CHANNEL,
-  LOGS_CHANNEL,
-  type RunLogsReply,
-  type RunLogsRequest,
+  OPEN_SETTINGS_CHANNEL,
   WAKE_CHANNEL,
   type WelcomeEvent,
 } from '@vibesys/ipc';
 import {type RunRef, sameRun} from '@vibesys/runs';
-import {BaseWindow, dialog, ipcMain, type MessagePortMain, type WebContentsView} from 'electron';
-import {APP_ENTRY_URL, isSameAppPage, SHELL_URL} from './app-assets.js';
+import {BaseWindow, ipcMain, type MessagePortMain, type WebContentsView} from 'electron';
+import {SHELL_URL} from './app-assets.js';
 import {sandboxedView} from './app-security.js';
 import {type PendingRunPort, RunIpcRegistry} from './run-ipc.js';
-import {observeRunPage, RunPageLifecycle} from './run-page-lifecycle.js';
 import type {WelcomeDocument} from './welcome-ipc.js';
 import {
   observeWelcomePage,
   WelcomePageLifecycle,
   type WelcomePageLoss,
 } from './welcome-page-lifecycle.js';
-import {TITLEBAR_HEIGHT, windowChrome} from './window-chrome.js';
+import {windowChrome} from './window-chrome.js';
 
 /**
  * The one process-wide run-connect registry every window competes through.
@@ -52,17 +49,8 @@ function runIpcRegistry(log: (message: string) => void): RunIpcRegistry {
           });
         });
       },
-      onLogs: listener => {
-        ipcMain.handle(LOGS_CHANNEL, (event, request: unknown) =>
-          listener({
-            request,
-            senderId: event.sender.id,
-            senderUrl: event.senderFrame?.url ?? null,
-          }),
-        );
-      },
     },
-    [APP_ENTRY_URL, SHELL_URL],
+    SHELL_URL,
     log,
   );
   return sharedRunIpc;
@@ -70,17 +58,15 @@ function runIpcRegistry(log: (message: string) => void): RunIpcRegistry {
 
 export interface AppWindowDeps {
   readonly log: (message: string) => void;
-  /** The page the trusted surface loads: the welcome view or the app shell (`surfaceUrl`). */
+  /** The page the surface loads: the app shell, with a run's query in a run window. */
   readonly surfaceUrl: string;
-  /** The run page opened one connection, for the run bound to it (`openRunPage`'s `run`). */
+  /** The surface opened one connection, for the run bound to the window (`bindRun`'s `run`). */
   readonly connect: (port: RelayPort, run: RunRef) => void;
-  /** The run page asked about its run's logs (`openRunPage`'s `run`). */
-  readonly logs: (run: RunRef, request: RunLogsRequest) => Promise<RunLogsReply<RunLogsRequest>>;
-  /** The native window or its current run page disappeared: detach the run bound to it. */
+  /** The native window or its surface document disappeared: detach the run bound to it. */
   readonly closed: (run: RunRef) => void;
-  /** The welcome surface exhausted its bounded recovery; enter fatal app shutdown. */
+  /** The surface exhausted its bounded recovery; enter fatal app shutdown. */
   readonly fatal: (error: Error) => void;
-  /** The native window's title before any run page names one; `VibeSys` by default. */
+  /** The native window's title; `VibeSys` by default. */
   readonly title?: string;
   /** The native window closed. */
   readonly windowClosed?: () => void;
@@ -99,27 +85,18 @@ function pendingRunPort(port: MessagePortMain): PendingRunPort {
 export class AppWindow {
   readonly #deps: AppWindowDeps;
   readonly #window: BaseWindow;
-  readonly #runPages: RunPageLifecycle<WebContentsView>;
-  readonly #welcomePages: WelcomePageLifecycle<WebContentsView>;
-  readonly #welcomeNewDocuments = new Set<(generation: string | null) => void>();
-  readonly #welcomeDestroyed = new Set<() => void>();
-  /** Stable welcome-document authority across the one allowed WebContentsView recreation. */
+  readonly #pages: WelcomePageLifecycle<WebContentsView>;
+  readonly #newDocuments = new Set<(generation: string | null) => void>();
+  readonly #destroyed = new Set<() => void>();
+  /** Stable surface-document authority across the one allowed WebContentsView recreation. */
   readonly welcome: WelcomeDocument;
-  #mode: ChromeState['mode'] = 'welcome';
-  /**
-   * Whether the trusted surface shows runs itself (the app shell, `SHELL_URL`): then a bound run
-   * gets no run page; its connections come from the surface's own document.
-   */
-  readonly #runsInSurface: boolean;
-  /** The run bound to the current run page, if any; null before one ever opened. */
+  /** The run bound to the surface, if any; null before one ever bound. */
   #currentRun: RunRef | null = null;
   /** Withdraws this window's admission claim from the shared run-connect registry. */
   readonly #unregisterRunIpc: () => void;
 
   constructor(deps: AppWindowDeps) {
     this.#deps = deps;
-    // The app shell's page, with or without a run window's query, shows runs in its own document.
-    this.#runsInSurface = isSameAppPage(deps.surfaceUrl, SHELL_URL);
     this.#window = new BaseWindow({
       width: 1440,
       height: 900,
@@ -128,42 +105,37 @@ export class AppWindow {
       title: deps.title ?? 'VibeSys',
       ...windowChrome(process.platform),
     });
-    this.#runPages = new RunPageLifecycle({
-      retire: view => this.#retireRunPage(view),
-      showWelcome: () => this.#showWelcome(),
-      currentPageLost: () => this.#detachCurrentRun(),
-    });
-    this.#welcomePages = new WelcomePageLifecycle({
+    this.#pages = new WelcomePageLifecycle({
       recreate: () => sandboxedView('welcome.cjs'),
-      activate: (view, lost) => this.#activateWelcomePage(view, lost),
-      retire: view => this.#retireWelcomePage(view),
+      activate: (view, lost) => this.#activate(view, lost),
+      retire: view => this.#retire(view),
       documentRetired: () => {
-        for (const listener of [...this.#welcomeNewDocuments]) listener(null);
+        for (const listener of [...this.#newDocuments]) listener(null);
       },
-      recovering: reason => deps.log(`recovering the welcome view after ${reason}`),
-      fatal: reason => deps.fatal(new Error(`could not recover the welcome view after ${reason}`)),
+      recovering: reason => deps.log(`recovering the shell after ${reason}`),
+      fatal: reason => deps.fatal(new Error(`could not recover the shell after ${reason}`)),
     });
     this.welcome = {
-      currentId: () => this.#welcomePages.current?.webContents.id ?? null,
-      onNewDocument: listener => this.#welcomeNewDocuments.add(listener),
-      onDestroyed: listener => this.#welcomeDestroyed.add(listener),
+      currentId: () => this.#pages.current?.webContents.id ?? null,
+      onNewDocument: listener => this.#newDocuments.add(listener),
+      onDestroyed: listener => this.#destroyed.add(listener),
     };
     this.#window.on('resize', () => this.#layout());
     this.#window.on('closed', () => {
-      this.#runPages.abandon();
-      this.#welcomePages.abandon();
-      for (const listener of [...this.#welcomeDestroyed]) listener();
+      this.#pages.abandon();
+      for (const listener of [...this.#destroyed]) listener();
       this.#detachCurrentRun();
       this.#unregisterRunIpc();
       deps.windowClosed?.();
     });
     // A new surface document has not attached the run the old one showed: let that run go.
-    if (this.#runsInSurface) this.#welcomeNewDocuments.add(() => this.#detachCurrentRun());
-    this.#welcomePages.start(sandboxedView('welcome.cjs'));
+    this.#newDocuments.add(() => this.#detachCurrentRun());
+    this.#pages.start(sandboxedView('welcome.cjs'));
     this.#unregisterRunIpc = runIpcRegistry(deps.log).register({
-      currentSenderId: () => this.#runSenderId(),
-      // The registry only admits a port whose sender is this window's current run page, so
-      // `#currentRun` names the same run this port's connection is for.
+      currentSenderId: () =>
+        this.#currentRun === null ? null : (this.#pages.current?.webContents.id ?? null),
+      // The registry only admits a port whose sender is this window's surface while a run is
+      // bound, so `#currentRun` names the same run this port's connection is for.
       connect: port => {
         const run = this.#currentRun;
         if (run === null) {
@@ -172,82 +144,20 @@ export class AppWindow {
         }
         this.#deps.connect(port, run);
       },
-      logs: request => {
-        const run = this.#currentRun;
-        if (run === null) return Promise.reject(new Error('this window shows no run'));
-        return this.#deps.logs(run, request);
-      },
     });
   }
 
-  get mode(): ChromeState['mode'] {
-    return this.#mode;
-  }
-
-  /** Show `mode`'s view; without a run page, always the welcome view. */
-  setMode(mode: ChromeState['mode']): void {
-    this.#mode = this.#runPages.current === null ? 'welcome' : mode;
-    this.#layout();
-  }
-
   /**
-   * Replace the run page with a new one for `run`, and show it.
-   *
-   * This app shows one run page at a time: opening a second run's page here always replaces the
-   * first, the same way it always has. `run` lets this window tell IPC admission and the
-   * `closed`/`connect` callbacks which run its one page is for, so run-control's binding for a run
-   * that is not the one currently shown is never reached by this window's events.
+   * Bind `run` to the surface: the shell shows the run in its own document, so the layout stays.
+   * A different run bound before is detached first. The returned handle wakes the surface's session
+   * and unbinds the run.
    */
-  openRunPage(
-    run: RunRef,
-    title: {readonly hostLabel: string; readonly task: string | null},
-  ): {
-    wake(): void;
-    close(): void;
-  } {
-    if (this.#runsInSurface) return this.#bindSurfaceRun(run);
-    const view = sandboxedView('run.cjs');
-    this.#runPages.replace(view);
-    this.#currentRun = run;
-    this.#window.contentView.addChildView(view);
-    this.#window.setTitle(`VibeSys · ${title.hostLabel}`);
-    void observeRunPage(
-      view.webContents,
-      APP_ENTRY_URL,
-      () => this.#runPages.lost(view),
-      () => this.#deps.log('could not load the run view'),
-    );
-    this.setMode('run');
-    return {
-      wake: () => {
-        if (!view.webContents.isDestroyed()) view.webContents.send(WAKE_CHANNEL);
-      },
-      close: () => {
-        if (this.#currentRun !== null && sameRun(this.#currentRun, run)) this.#currentRun = null;
-        this.#runPages.close(view);
-      },
-    };
-  }
-
-  /**
-   * The app shell asked to let its run go (it shows another screen): detach the run bound to the
-   * surface. Does nothing when the surface binds no run, or when runs have their own page.
-   */
-  releaseSurfaceRun(): void {
-    if (this.#runsInSurface) this.#detachCurrentRun();
-  }
-
-  /**
-   * Bind `run` to the surface itself: the app shell shows the run in its own document, so no run
-   * page opens and the layout stays. A different run bound before is detached first, as replacing a
-   * run page detaches its run.
-   */
-  #bindSurfaceRun(run: RunRef): {wake(): void; close(): void} {
+  bindRun(run: RunRef): {wake(): void; close(): void} {
     if (this.#currentRun === null || !sameRun(this.#currentRun, run)) this.#detachCurrentRun();
     this.#currentRun = run;
     return {
       wake: () => {
-        const surface = this.#welcomePages.current;
+        const surface = this.#pages.current;
         if (surface !== null && !surface.webContents.isDestroyed()) {
           surface.webContents.send(WAKE_CHANNEL);
         }
@@ -258,30 +168,25 @@ export class AppWindow {
     };
   }
 
-  /** The web contents whose run connections this window admits: its run page, or the surface. */
-  #runSenderId(): number | null {
-    if (!this.#runsInSurface) return this.#runPages.current?.webContents.id ?? null;
-    return this.#currentRun === null ? null : (this.#welcomePages.current?.webContents.id ?? null);
+  /** The shell asked to let its run go (it shows another screen): detach the bound run, if any. */
+  releaseSurfaceRun(): void {
+    this.#detachCurrentRun();
   }
 
-  /** Send one ordered `event` to the welcome view on `channel`. */
+  /** Send one ordered `event` to the surface on `channel`. */
   sendWelcome<T>(channel: string, event: WelcomeEvent<T>): void {
-    const welcome = this.#welcomePages.current;
-    if (welcome !== null && !welcome.webContents.isDestroyed()) {
-      welcome.webContents.send(channel, event);
+    const surface = this.#pages.current;
+    if (surface !== null && !surface.webContents.isDestroyed()) {
+      surface.webContents.send(channel, event);
     }
   }
 
-  /** Ask the user a stop question; resolves true on "Stop". */
-  async confirmStop(text: string): Promise<boolean> {
-    const {response} = await dialog.showMessageBox(this.#window, {
-      type: 'warning',
-      message: text,
-      buttons: ['Cancel', 'Stop'],
-      defaultId: 0,
-      cancelId: 0,
-    });
-    return response === 1;
+  /** Tell the main shell to show Settings, including requests from a run window. */
+  openSettings(): void {
+    const surface = this.#pages.current;
+    if (surface !== null && !surface.webContents.isDestroyed()) {
+      surface.webContents.send(OPEN_SETTINGS_CHANNEL);
+    }
   }
 
   /** Bring the window to the front (a second launch of the app asked for it). */
@@ -297,31 +202,26 @@ export class AppWindow {
     if (!this.#window.isDestroyed()) this.#window.close();
   }
 
-  #retireRunPage(view: WebContentsView): void {
-    if (!this.#window.isDestroyed()) this.#window.contentView.removeChildView(view);
-    if (!view.webContents.isDestroyed()) view.webContents.close();
-  }
-
-  #activateWelcomePage(view: WebContentsView, lost: (reason: WelcomePageLoss) => void): void {
+  #activate(view: WebContentsView, lost: (reason: WelcomePageLoss) => void): void {
     this.#window.contentView.addChildView(view);
     view.webContents.on('did-start-navigation', event => {
-      if (this.#welcomePages.current === view && event.isMainFrame && !event.isSameDocument) {
+      if (this.#pages.current === view && event.isMainFrame && !event.isSameDocument) {
         // Electron reports the frame that is beginning the new document here. Its routing
         // identity may already be the successor's, so it must not be named as the generation
         // being retired. The document owner already tracks every active predecessor generation.
-        for (const listener of [...this.#welcomeNewDocuments]) listener(null);
+        for (const listener of [...this.#newDocuments]) listener(null);
       }
     });
     this.#layout();
     observeWelcomePage(view.webContents, this.#deps.surfaceUrl, lost);
   }
 
-  #retireWelcomePage(view: WebContentsView): void {
+  #retire(view: WebContentsView): void {
     if (!this.#window.isDestroyed()) this.#window.contentView.removeChildView(view);
     if (!view.webContents.isDestroyed()) view.webContents.close();
   }
 
-  /** Report the current run page's loss, if it has one; safe before any run page ever opened. */
+  /** Report the bound run's loss, if it has one; safe before any run ever bound. */
   #detachCurrentRun(): void {
     const run = this.#currentRun;
     if (run === null) return;
@@ -329,26 +229,12 @@ export class AppWindow {
     this.#deps.closed(run);
   }
 
-  #showWelcome(): void {
-    if (!this.#window.isDestroyed()) this.#window.setTitle('VibeSys');
-    this.setMode('welcome');
-  }
-
-  /** Lay the views out: the filling view, and the welcome view's strip over a run. */
+  /** The surface fills the window. */
   #layout(): void {
     if (this.#window.isDestroyed()) return;
+    const surface = this.#pages.current;
+    if (surface === null) return;
     const {width, height} = this.#window.getContentBounds();
-    const full = {x: 0, y: 0, width, height};
-    const run = this.#runPages.current;
-    if (run !== null) {
-      run.setBounds(full);
-      run.setVisible(this.#mode === 'run');
-    }
-    const welcome = this.#welcomePages.current;
-    if (welcome !== null) {
-      welcome.setBounds(this.#mode === 'run' ? {...full, height: TITLEBAR_HEIGHT} : full);
-      // Re-adding moves the welcome view (the title strip) above the run view.
-      this.#window.contentView.addChildView(welcome);
-    }
+    surface.setBounds({x: 0, y: 0, width, height});
   }
 }

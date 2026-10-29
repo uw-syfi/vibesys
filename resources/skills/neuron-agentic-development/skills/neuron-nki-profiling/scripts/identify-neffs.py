@@ -18,14 +18,7 @@ Examples:
 Note: Requires compile workdirs in /tmp/$USER/neuroncc_compile_workdir/ to still exist.
       Run this promptly after kernel execution, before temp cleanup.
 """
-
-import base64
-import glob
-import json
-import os
-import re
-import subprocess
-import sys
+import subprocess, os, re, base64, json, glob, sys
 
 
 def identify_neff(neff_path):

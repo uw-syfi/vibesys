@@ -11,7 +11,6 @@ import type {
   RequestInput,
   RunEvent,
   RunSnapshot,
-  TuiDefaults,
 } from '@vibesys/contracts';
 import type {
   AbortSignalLike,
@@ -54,7 +53,12 @@ export type RunCommandOutcome =
       readonly action: NonNullable<ProtocolResponse['ack']>['action'];
       readonly status: NonNullable<ProtocolResponse['ack']>['status'];
     }
-  | {readonly kind: 'rejected'; readonly message: string | null};
+  | {
+      readonly kind: 'rejected';
+      readonly message: string | null;
+      /** The server's typed reason (a diagnostic code such as `run_read_only`), when it gave one. */
+      readonly code?: string | null;
+    };
 
 /** Optional thread selection and caller-owned cancellation for one experiment-chat turn. */
 export interface WebChatOptions {
@@ -63,6 +67,20 @@ export interface WebChatOptions {
 }
 
 export type ChatResult = NonNullable<ProtocolResponse['chat']>;
+
+/** The provider and model a new chat thread runs, a pair from the host's harness catalogue. */
+export interface ChatHarness {
+  readonly provider: string;
+  readonly model: string;
+}
+
+export type ChatThreadResult = NonNullable<ProtocolResponse['chat_thread']>;
+
+/** The created thread and its authoritative response events, before the session folds them. */
+export interface ChatThreadResponse {
+  readonly thread: ChatThreadResult;
+  readonly events: readonly RunEvent[];
+}
 
 /** The answer and its authoritative response events, before the session folds them. */
 export interface ChatResponse {
@@ -85,10 +103,13 @@ export interface RunConnection {
   ): Promise<IterationLoad>;
   /** Ask the run's experiment-chat agent, retaining events for the session fold. */
   ask(text: string, options?: WebChatOptions): Promise<ChatResponse>;
+  /** Create a chat thread; `harness` null runs the run's own provider and model. */
+  createChatThread(
+    harness: ChatHarness | null,
+    options?: {readonly signal?: AbortSignalLike},
+  ): Promise<ChatThreadResponse>;
   /** Deliver one lifecycle command and resolve its wire response to a semantic outcome. */
   command(input: RunCommand): Promise<RunCommandOutcome>;
-  /** Read the server's presentation defaults without making UI code name the transport. */
-  tuiDefaults(): Promise<TuiDefaults | null>;
   /** Subscribe once; settles when the first subscription does. */
   subscribe(handlers: RunStreamHandlers): Promise<void>;
   /** Resume the stream where it was. */

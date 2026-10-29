@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from vs_core.api import AdoptionPublication, CheckoutStatus, CheckoutUpdate
+from vs_project.api import GitError, PublicationError, PublishedRevision
 from vs_project.api.workspace_tree import EntryKind
 from vs_runtime._agent_execution import (
     AgentExecutionConfiguration,
@@ -19,7 +21,13 @@ from vs_runtime._trusted_evaluation import (
 from vs_runtime._workspace_files import entry_kind, file_fingerprint
 from vs_runtime._workspace_receipts import BaselineEntry, BaselineEntryKind, RootBaselineDrift
 from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
-from vs_sandbox.api import HostResource, HostResourceAccess
+from vs_runtime.contracts import CaptureStopUnconfirmedError, RuntimeContractError
+from vs_sandbox.api import (
+    CaptureExecutionIdentity,
+    CommandStopUnconfirmedError,
+    HostResource,
+    HostResourceAccess,
+)
 from vs_sim.api import CloseOnce, ReleaseStack
 
 if TYPE_CHECKING:
@@ -34,10 +42,11 @@ if TYPE_CHECKING:
     from vs_runtime._trusted_evaluation import (
         TrustedAccuracyResult,
         TrustedBenchmarkResult,
+        TrustedBuildResult,
         TrustedEvaluationExecutor,
     )
     from vs_sandbox.api import CommandRunner
-    from vs_sim.api import BlockingRunner, OutputSink, Threads
+    from vs_sim.api import BlockingRunner, Event, OutputSink, Threads
 from vs_sim.api import DISCARD
 
 
@@ -72,6 +81,12 @@ class ModelRequestReconciler(Protocol):
         *,
         log: Callable[[str], object] = print,
     ) -> tuple[str, ...]: ...
+
+
+@runtime_checkable
+class _CaptureExecutionProvider(Protocol):
+    @property
+    def capture_execution(self) -> CaptureExecutionIdentity | None: ...
 
 
 class WorkspaceResourceFactory:
@@ -132,6 +147,22 @@ class WorkspaceResourceFactory:
     def leftover_candidates(self) -> tuple[str, ...]:
         """The workspace IDs of the run's candidate worktrees on disk."""
         return self._project.leftover_candidates()
+
+    def unsettled_candidates(self) -> frozenset[str]:
+        """Candidate IDs retained after an unconfirmed command stop."""
+        return self._project.unsettled_candidates()
+
+    def record_capture_intent(self, workspace_id: str, execution: CaptureExecutionIdentity) -> None:
+        """Durably protect a candidate before external submission."""
+        self._project.record_capture_intent(workspace_id, execution)
+
+    def clear_capture_intent(self, workspace_id: str) -> None:
+        """Clear a settled candidate capture intent."""
+        self._project.clear_capture_intent(workspace_id)
+
+    def reconcile_capture_intents(self) -> frozenset[str]:
+        """Retry the run-scoped recovery owner; never use this root session as a proxy."""
+        return self._project.reconcile_capture_intents()
 
     def remove_leftover(self, workspace_id: str) -> None:
         """Remove a candidate worktree no live handle owns; its sandbox closed with its host."""
@@ -201,7 +232,7 @@ class WorkspaceResourceFactory:
             threads=self._threads,
             blocking=self._blocking,
         )
-        host_resources = self._host_resources
+        host_resources = (*self._host_resources, *environment.view.agent_host_resources)
         if environment.request.objective is not None:
             objective_path = (
                 environment.request.objective_document
@@ -301,7 +332,33 @@ class RuntimeWorkspaceResource:
     def trusted_input_baseline(self) -> str | None:
         return self._project.git.trusted_input_baseline
 
+    def publish(self, revision: str, message: str) -> AdoptionPublication:
+        try:
+            published = self._root_project.git.publish_revision(
+                revision,
+                message,
+                preserve_paths=self._memory_paths,
+            )
+        except (GitError, PublicationError, ValueError) as error:
+            raise RuntimeContractError(str(error)) from error
+        return AdoptionPublication(
+            revision=published.revision,
+            commit=published.commit,
+            branch=published.branch,
+        )
+
+    def update_checkout(self, publication: AdoptionPublication) -> CheckoutUpdate:
+        outcome = self._root_project.git.update_checkout(
+            PublishedRevision(
+                revision=publication.revision,
+                commit=publication.commit,
+                branch=publication.branch,
+            )
+        )
+        return CheckoutUpdate(status=CheckoutStatus(outcome.value))
+
     def snapshot(self, label: str) -> str:
+        self._require_root_write()
         self._project.git.snapshot(label)
         revision = self._project.git.current_sha()
         if revision is None:
@@ -321,6 +378,7 @@ class RuntimeWorkspaceResource:
         preserve_memory: bool = True,
         exact_keeping: tuple[str, ...] | None = None,
     ) -> bool:
+        self._require_root_write(restoring=True)
         if preserve_memory:
             preserve_paths = tuple(dict.fromkeys((*preserve_paths, *self._memory_paths)))
         restored = self._project.git.checkout_tree(
@@ -333,6 +391,13 @@ class RuntimeWorkspaceResource:
         if restored and self._id is not None:
             self._revision = revision
         return restored
+
+    def _require_root_write(self, *, restoring: bool = False) -> None:
+        if self._id is None and (
+            self._root_project.root_edits_on_resume or (restoring and self._root_project.resuming)
+        ):
+            message = "project content retained; resumed root work requires project-edit protection"
+            raise RuntimeContractError(message)
 
     def try_restore(self, revision: str, *, clean: bool) -> bool:
         restored = self.restore(revision, clean=clean)
@@ -419,6 +484,12 @@ class RuntimeWorkspaceResource:
     def candidate_patch(self, revision: str) -> str:
         return self._project.git.candidate_patch(revision)
 
+    def measured_input(self, revision: str) -> str:
+        return self._project.git.measured_input(revision, self._evaluation_plan.unread_paths)
+
+    def withhold_unread(self) -> None:
+        self._project.git.withhold_unread(self._evaluation_plan.unread_paths)
+
     def is_retained(self, revision: str) -> bool:
         return self._root_project.git.is_retained(revision)
 
@@ -432,6 +503,28 @@ class RuntimeWorkspaceResource:
         return self._environment.session.sandbox.execute(
             command, timeout=timeout_seconds, output=DISCARD
         )
+
+    def execute_capture(
+        self,
+        command: str,
+        timeout_seconds: int | None,
+        cancel: Event,
+    ) -> CommandExecutionResult:
+        """Execute through the environment's role-specific capture runner."""
+        try:
+            return self._environment.session.capture_commands.execute(
+                command, timeout=timeout_seconds, cancel=cancel, output=DISCARD
+            )
+        except CommandStopUnconfirmedError as cause:
+            raise CaptureStopUnconfirmedError from cause
+
+    @property
+    def capture_execution(self) -> CaptureExecutionIdentity | None:
+        """Stable external identity when capture can be recovered after restart."""
+        session = self._environment.session
+        if not isinstance(session, _CaptureExecutionProvider):
+            return None
+        return session.capture_execution
 
     def agent_sandbox(self) -> CommandRunner | None:
         environment = self._environment
@@ -479,11 +572,15 @@ class RuntimeWorkspaceResource:
     def evaluation_spec(self) -> WorkspaceEvaluationSpec:
         view = self._environment.view
         return WorkspaceEvaluationSpec(
+            build=self._evaluation_plan.build,
             accuracy_command=self._evaluation_plan.accuracy_command,
             benchmark_command=self._evaluation_plan.benchmark_command,
             benchmark_contract=self._evaluation_plan.benchmark_contract,
             deployment_release_env_var=view.deployment_release_env_var,
         )
+
+    async def candidate_build(self, output: OutputSink) -> TrustedBuildResult:
+        return await self._evaluation.build(confinement=self.agent_sandbox(), output=output)
 
     async def trusted_accuracy(
         self, command_override: str | None, output: OutputSink

@@ -3,9 +3,9 @@
  * since the listing before it. The first listing of a host only sets the baseline, so opening the
  * app never notifies about history.
  */
-import {type HostListing, type HostRun, hostFromKey, hostLabel} from '@vibesys/hosts';
+import {type HostListing, hostFromKey, hostLabel} from '@vibesys/hosts';
 import type {RunRef} from '@vibesys/runs';
-import {endedStatus, endReason} from './run-status.js';
+import {endedRuns, endedStatus, endReason, liveRuns, type StatusRun} from './run-status.js';
 
 export type NoticeKind = 'finished' | 'failed' | 'paused';
 
@@ -22,8 +22,11 @@ const TITLES: Readonly<Record<NoticeKind, string>> = {
   paused: 'Run paused',
 };
 
-function notice(kind: NoticeKind, listing: HostListing, server: HostRun): RunNotice {
-  const project = server.projectRoot.split('/').filter(Boolean).at(-1) ?? server.projectRoot;
+function notice(kind: NoticeKind, listing: HostListing, server: StatusRun): RunNotice {
+  const project =
+    server.projectRoot === undefined
+      ? 'Unknown project'
+      : (server.projectRoot.split('/').filter(Boolean).at(-1) ?? server.projectRoot);
   const why = endReason(server);
   const reason = kind === 'failed' && why !== null ? `: ${why}` : '';
   return {
@@ -34,7 +37,7 @@ function notice(kind: NoticeKind, listing: HostListing, server: HostRun): RunNot
   };
 }
 
-function endedKind(server: HostRun): NoticeKind | null {
+function endedKind(server: StatusRun): NoticeKind | null {
   const status = endedStatus(server);
   return status === 'finished' || status === 'failed' ? status : null;
 }
@@ -42,15 +45,15 @@ function endedKind(server: HostRun): NoticeKind | null {
 /** The notices `after` calls for, given the host's listing `before` it (none for a first one). */
 export function runNotices(before: HostListing | undefined, after: HostListing): RunNotice[] {
   if (before?.kind !== 'listed' || after.kind !== 'listed' || before.host !== after.host) return [];
-  const wasLive = new Map(before.live.map(server => [server.id, server]));
-  const wasEnded = new Set(before.ended.map(server => server.id));
-  const ended = after.ended.flatMap(server => {
+  const wasLive = new Map(liveRuns(before).map(server => [server.id, server]));
+  const wasEnded = new Set(endedRuns(before).map(server => server.id));
+  const ended = endedRuns(after).flatMap(server => {
     const kind = endedKind(server);
     return kind !== null && wasLive.has(server.id) && !wasEnded.has(server.id)
       ? [notice(kind, after, server)]
       : [];
   });
-  const paused = after.live.flatMap(server => {
+  const paused = liveRuns(after).flatMap(server => {
     const previous = wasLive.get(server.id);
     return server.paused !== null && previous !== undefined && previous.paused === null
       ? [notice('paused', after, server)]

@@ -18,6 +18,7 @@ from vs_sandbox.api.slurm import (
     CANCELLED_BEFORE_SUBMISSION,
     CappedGpuLauncher,
     GpuCommand,
+    GpuJobOutcome,
     GpuJobRequest,
 )
 from vs_sim.api.testing import HANG_GUARD_S, SimThreads, examples
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
 
 _REQUEST = GpuJobRequest(gpus=4, time_minutes=30)
 _EXIT = 7
+_EARLY_REPLACEMENT = "a replacement was submitted while the prior job remained alive"
 
 
 class _HoldingLauncher:
@@ -48,7 +50,7 @@ class _HoldingLauncher:
         *,
         write: Callable[[bytes], None],
         cancel: Event,
-    ) -> int:
+    ) -> GpuJobOutcome:
         del request
         (name,) = command.argv
         with self._lock:
@@ -61,11 +63,47 @@ class _HoldingLauncher:
         finally:
             with self._lock:
                 self.active -= 1
-        return _EXIT
+        return GpuJobOutcome(_EXIT)
 
 
-def _command(name: str) -> GpuCommand:
-    return GpuCommand(argv=(name,), cwd=Path("workspace"), env={})
+def _command(name: str, *, job_name: str | None = None) -> GpuCommand:
+    return GpuCommand(argv=(name,), cwd=Path("workspace"), env={}, job_name=job_name)
+
+
+class _UnconfirmedThenSettledLauncher:
+    """Keep the first scheduler job alive until its stable identity is reconciled."""
+
+    def __init__(self) -> None:
+        self.submitted: list[str] = []
+        self.reconciled: list[str] = []
+        self.remote_active = False
+
+    def run(
+        self,
+        request: GpuJobRequest,
+        command: GpuCommand,
+        *,
+        write: Callable[[bytes], None],
+        cancel: Event,
+    ) -> GpuJobOutcome:
+        del request, write, cancel
+        (name,) = command.argv
+        if self.remote_active:
+            raise AssertionError(_EARLY_REPLACEMENT)
+        self.submitted.append(name)
+        if len(self.submitted) == 1:
+            self.remote_active = True
+            return GpuJobOutcome(
+                255,
+                termination_confirmed=False,
+                job_name=command.job_name,
+            )
+        return GpuJobOutcome(0, job_name=command.job_name)
+
+    def reconcile(self, job_name: str) -> bool:
+        self.reconciled.append(job_name)
+        self.remote_active = False
+        return True
 
 
 @dataclass(frozen=True)
@@ -127,7 +165,9 @@ def test_at_most_cap_jobs_are_ever_submitted_and_every_request_is_submitted_or_c
         def write(chunk: bytes) -> None:
             outcome.output += chunk
 
-        outcome.status = launcher.run(_REQUEST, _command(name), write=write, cancel=cancel)
+        outcome.status = launcher.run(
+            _REQUEST, _command(name), write=write, cancel=cancel
+        ).exit_code
 
     def kill(cancel: Event, at: float) -> None:
         threads.sleep(at)
@@ -189,7 +229,7 @@ def test_a_request_cancelled_while_it_waits_is_never_submitted_and_frees_its_pla
                 "first",
                 launcher.run(
                     _REQUEST, _command("first"), write=lambda _c: None, cancel=first_cancel
-                ),
+                ).exit_code,
             ),
             name="first",
         )
@@ -199,7 +239,7 @@ def test_a_request_cancelled_while_it_waits_is_never_submitted_and_frees_its_pla
                 "second",
                 launcher.run(
                     _REQUEST, _command("second"), write=second_write, cancel=second_cancel
-                ),
+                ).exit_code,
             ),
             name="second",
         )
@@ -214,7 +254,7 @@ def test_a_request_cancelled_while_it_waits_is_never_submitted_and_frees_its_pla
         # The cancelled request left no claim behind: the next one is submitted at once.
         statuses["third"] = launcher.run(
             _REQUEST, _command("third"), write=lambda _c: None, cancel=threads.event()
-        )
+        ).exit_code
 
     threads.run(program)
 
@@ -224,3 +264,46 @@ def test_a_request_cancelled_while_it_waits_is_never_submitted_and_frees_its_pla
         "[vibesys-gpu] waiting: 1 of this run's GPU jobs are active (cap 1), 0 queued ahead; "
         "the job is submitted, and its --time starts, when a slot frees\n"
     )
+
+
+def test_an_unconfirmed_job_keeps_its_slot_until_identity_reconciliation() -> None:
+    """At cap one, a lost wrapper cannot admit a replacement stable-name job."""
+    threads = SimThreads()
+    inner = _UnconfirmedThenSettledLauncher()
+    launcher = CappedGpuLauncher(inner, 1, threads)
+    waiting = threads.event()
+    outcomes: list[GpuJobOutcome] = []
+    job_name = "vibesys-stable-capture"
+
+    def replacement() -> None:
+        outcomes.append(
+            launcher.run(
+                _REQUEST,
+                _command("replacement", job_name=job_name),
+                write=lambda _chunk: waiting.set(),
+                cancel=threads.event(),
+            )
+        )
+
+    def program() -> None:
+        first = launcher.run(
+            _REQUEST,
+            _command("first", job_name=job_name),
+            write=lambda _chunk: None,
+            cancel=threads.event(),
+        )
+        assert not first.termination_confirmed
+        assert first.job_name == job_name
+        worker = threads.spawn(replacement, name="replacement")
+        assert waiting.wait(HANG_GUARD_S), "the replacement did not wait for reconciliation"
+        assert inner.submitted == ["first"]
+        assert launcher.reconcile(job_name)
+        worker.join(HANG_GUARD_S)
+        assert not worker.is_alive(), "the reconciled slot did not admit its waiter"
+
+    threads.run(program)
+
+    assert inner.reconciled == [job_name]
+    assert inner.submitted == ["first", "replacement"]
+    assert len(outcomes) == 1
+    assert outcomes[0].termination_confirmed

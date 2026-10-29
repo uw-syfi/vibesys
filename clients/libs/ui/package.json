@@ -49,6 +49,17 @@
     "src/tokens.css",
     "src/fonts.css",
     "src/components.css",
+    "src/frame.css",
+    "src/controls.css",
+    "src/navigation.css",
+    "src/rail.css",
+    "src/overview-tiles.css",
+    "src/chat.css",
+    "src/base.css",
+    "src/inputs.css",
+    "src/surfaces.css",
+    "src/documents.css",
+    "src/threads.css",
     "src/fonts"
   ],
   "scripts": {
@@ -59,7 +70,18 @@
     "test": "node ../../tools/scripts/run_bun_tests.mjs ./src"
   },
   "dependencies": {
-    "react": "19.1.1"
+    "react": "19.1.1",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
+    "simple-icons": "16.35.0"
+  },
+  "peerDependencies": {
+    "@types/react": "19.1.13"
+  },
+  "peerDependenciesMeta": {
+    "@types/react": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/bun": "1.4.2",

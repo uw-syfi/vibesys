@@ -27,6 +27,9 @@
     },
     {
       "path": "../ui/tsconfig.tokens.json"
+    },
+    {
+      "path": "../proto/tsconfig.lib.json"
     }
   ]
 }

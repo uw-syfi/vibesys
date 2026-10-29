@@ -1,0 +1,38 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2022"
+    ],
+    "types": [],
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.skeleton.tsbuildinfo"
+  },
+  "include": [
+    "src/skeleton/**/*.ts"
+  ],
+  "references": [
+    {
+      "path": "../contracts/tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "../proto/tsconfig.lib.json"
+    },
+    {
+      "path": "../contracts/tsconfig.host-helper.json"
+    },
+    {
+      "path": "./tsconfig.transcript.json"
+    },
+    {
+      "path": "./tsconfig.candidates.json"
+    }
+  ],
+  "exclude": [
+    "src/skeleton/**/*.test.ts"
+  ]
+}

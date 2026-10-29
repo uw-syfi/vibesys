@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     from vs_runtime._local_validation import LocalValidationEvents
     from vs_runtime._operation_catalog import OperationOwner
     from vs_runtime._validation_passes import ValidationPasses
-    from vs_runtime.contracts import Commands, RevisionLedger, Workspaces
+    from vs_runtime.contracts import CaptureCommands, Commands, RevisionLedger, Workspaces
     from vs_sim.api import Threads
 
 
@@ -137,16 +137,21 @@ class OperationPorts:
     validation_passes: ValidationPasses
     variables: Mapping[str, object] = field(default_factory=dict)
     commands: Commands | None = None
+    capture_commands: CaptureCommands | None = None
     replies: Mapping[SchemaRef, type[BaseModel]] = field(default_factory=dict)
     local_validation_events: LocalValidationEvents | None = None
 
 
 def _command_owner(role: OperationRole, ports: OperationPorts) -> OperationOwner | None:
     """The owner of a role that runs commands, or None when the run cannot offer it."""
+    if role is OperationRole.CAPTURE_COMMAND:
+        if ports.capture_commands is None:
+            return None
+        return CaptureCommandOwner(
+            ports.workspaces, ports.capture_commands, ports.ledger, ports.commit_of
+        )
     if ports.commands is None:
         return None
-    if role is OperationRole.CAPTURE_COMMAND:
-        return CaptureCommandOwner(ports.workspaces, ports.commands, ports.ledger, ports.commit_of)
     if not ports.workspaces.supports_parallel_candidates:
         return None
     return ValidateLocalOwner(

@@ -1,0 +1,62 @@
+[
+  {
+    "name": "unary",
+    "schema": "request",
+    "valid": true,
+    "protobufHex": "080112056c6f63616c1a202f766962657379732e6170692e76312e486f7374536572766963652f5461696c2203010203"
+  },
+  {
+    "name": "stream",
+    "schema": "request",
+    "valid": true,
+    "protobufHex": "0802120a7373683a686f73742d611a202f766962657379732e6170692e76312e486f7374536572766963652f5461696c2203010203"
+  },
+  {
+    "name": "missing host",
+    "schema": "request",
+    "valid": false,
+    "protobufHex": "08011a212f766962657379732e6170692e76312e486f7374536572766963652f48656c6c6f"
+  },
+  {
+    "name": "unknown kind",
+    "schema": "request",
+    "valid": false,
+    "protobufHex": "086312056c6f63616c1a212f766962657379732e6170692e76312e486f7374536572766963652f48656c6c6f"
+  },
+  {
+    "name": "invalid method",
+    "schema": "request",
+    "valid": false,
+    "protobufHex": "080112056c6f63616c1a0548656c6c6f"
+  },
+  {
+    "name": "data",
+    "schema": "reply",
+    "valid": true,
+    "protobufHex": "0a020304"
+  },
+  {
+    "name": "empty data",
+    "schema": "reply",
+    "valid": true,
+    "protobufHex": "0a00"
+  },
+  {
+    "name": "end",
+    "schema": "reply",
+    "valid": true,
+    "protobufHex": "1200"
+  },
+  {
+    "name": "failure",
+    "schema": "reply",
+    "valid": true,
+    "protobufHex": "12100a0e676174657761792064656e696564"
+  },
+  {
+    "name": "missing body",
+    "schema": "reply",
+    "valid": false,
+    "protobufHex": ""
+  }
+]

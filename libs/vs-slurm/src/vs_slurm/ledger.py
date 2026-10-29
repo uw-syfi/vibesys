@@ -21,8 +21,36 @@ Layout under ``<remote_workspace_root>/<config.name>/ledger/<project>/<key>/``:
   revision of the highest attempt is the current record. Only the transitions
   in ``check_transition`` are written; a withdrawn or failed attempt is final,
   and the next ask for the request claims attempt ``n + 1``.
+- ``withdrawal-<n>.<w>.json``: revision ``w`` of the withdrawal marks of
+  attempt ``n``, created the same create-only way: a withdrawal under way
+  (``WithdrawalMark``), or the undoing of the one before it
+  (``WithdrawalUndone``). The highest revision of the current attempt says
+  whether a withdrawal is under way on it: until it ends, no run attaches to
+  the attempt, so a run that leases the request between the withdrawer's
+  decision and its cancel keeps the job (``vs_slurm.ledger_actions.withdraw``).
+  The marks live beside the record, not in it: a build before #3173 reads every
+  ``attempt-*.json`` revision in format 1 and fails the request on one it
+  cannot decode, and it never lists these files. A withdrawal revision this
+  build cannot decode (a newer format, a damaged file) never fails the read:
+  as its attempt's newest revision it counts as a withdrawal under way for one
+  claim window after its file was written (``read_withdrawal_revision``).
 - ``leases/<holder>.json``: one lease per attached run, written only by that
   run, so renewals never contend.
+
+Mixed versions. A build before #3173 never reads the withdrawal marks, so a
+withdrawal protects an old run only through its lease, which the withdrawer
+reads after writing its mark. An old build writes its first lease late: at its
+first renewal, a third of a lease period after it attaches, or, when the attach
+is quick, at its first heartbeat, one poll interval later. So an old run whose
+attach read came up to about one poll interval before a new build's mark, and
+that held no lease on the request within the grace period, is not seen, and
+the new build cancels the job it attached to. The old run does not submit
+again: its evaluation ends CANCELED, a loud failure of that one evaluation,
+never a duplicate or leaked job. The exposure needs a new-build run to
+relinquish (stop, or cancel) a request whose content an old run is attaching
+to for the first time, within about one poll interval plus the withdrawal's
+duration; until every run of a project is on a build with #3173, do not stop a
+new-build run that shares its project and content with an old-build run.
 
 Phase 2 (slot jobs, #2757) adds states and a second job kind to this record;
 ``job.kind`` and ``format_version`` keep that addition from breaking a reader.
@@ -30,8 +58,10 @@ Phase 2 (slot jobs, #2757) adds states and a second job kind to this record;
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
+import math
 import os
 import re
 import stat
@@ -58,13 +88,28 @@ from .runner import (
 from .scheduler_states import SlurmJobStatus
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from pathlib import Path
+
+    from vs_sim.api import Clock
 
     from .cluster_types import ClusterCollectOutcome
     from .config import SlurmConfig
 
 LEDGER_FORMAT_VERSION = 1
-"""The version of every ledger document this build writes."""
+"""The version of every ledger document this build writes.
+
+Records and leases are exactly the format 1 that builds before #3173 read, so
+those builds can still read every request this build touches.
+
+A reader fails the request on a record it cannot decode, never guesses; it
+counts a lease it cannot decode as a holder renewed when its file was written,
+and a withdrawal revision it cannot decode as a withdrawal under way for one
+claim window after its file was written. So a later format of a lease or a
+withdrawal revision keeps this build waiting rather than failing, provided a
+later build keeps its withdrawal windows within the claim window; a later
+record format needs new file names.
+"""
 
 BATCH_RESULT_LAYOUT = 1
 """The layout of the result files a batch job writes, which collection reads.
@@ -324,8 +369,10 @@ class LedgerState(StrEnum):
     it; ``failed`` means the job ended any other way, its results could not be
     collected, a stage timed out or was killed, or the submission never
     produced a job, so the next ask starts a new attempt; ``withdrawn`` means an
-    operator removed it or no run leased it for its grace period. ``failed`` and
-    ``withdrawn`` are final. Phase 2 adds the slot states.
+    operator removed it, its last run stopped wanting it, or no run leased it
+    for its grace period. ``failed`` and ``withdrawn`` are final. A withdrawal
+    under way is no state of the record (``WithdrawalMark``). Phase 2 adds the
+    slot states.
     """
 
     SUBMITTING = "submitting"
@@ -427,6 +474,47 @@ class LedgerLease(_Document):
         return self
 
 
+class WithdrawalMark(_Document):
+    """A withdrawal under way on one attempt: who decided it, until when it holds, and why.
+
+    ``by`` names the withdrawer (a run's holder, or the operator's command),
+    and ``writer`` the one withdrawer process that wrote it, so a withdrawer
+    whose write's answer was lost still knows the mark for its own. It holds from ``since`` until ``until``, in epoch seconds; one still under
+    way after ``until`` is taken to have died, and anyone may undo it
+    (``vs_slurm.ledger_actions.undo_expired_withdrawal``). ``reason`` is what
+    the withdrawn record will say.
+    """
+
+    format_version: Literal[1] = 1
+    kind: Literal["mark"] = "mark"
+    attempt: int = Field(ge=0)
+    by: str
+    writer: Annotated[str, Field(min_length=1, max_length=64)]
+    since: float
+    until: float
+    reason: str
+
+    @model_validator(mode="after")
+    def _consistent(self) -> WithdrawalMark:
+        validate_holder(self.by)
+        if self.until < self.since:
+            message = "a withdrawal holds until after it started"
+            raise ValueError(message)
+        return self
+
+
+class WithdrawalUndone(_Document):
+    """The withdrawal before this revision ended without withdrawing the attempt."""
+
+    format_version: Literal[1] = 1
+    kind: Literal["undone"] = "undone"
+    attempt: int = Field(ge=0)
+
+
+WithdrawalDocument = Annotated[WithdrawalMark | WithdrawalUndone, Field(discriminator="kind")]
+_WITHDRAWAL = TypeAdapter[WithdrawalMark | WithdrawalUndone](WithdrawalDocument)
+
+
 @dataclass(frozen=True, slots=True)
 class UnreadableLease:
     """A lease this build cannot decode: its holder and when its file was last written.
@@ -441,6 +529,67 @@ class UnreadableLease:
 
 
 @dataclass(frozen=True, slots=True)
+class UnreadableWithdrawal:
+    """A withdrawal revision this build cannot decode, and when it was written, at the latest.
+
+    ``written_at`` is the file's modification time on the ledger's filesystem,
+    in epoch seconds: a revision is created once and never changed, so that is
+    when it was written. When that time cannot be read, it is when this reader
+    first read the revision, by its own clock (``FirstReads``), which is later.
+    """
+
+    written_at: float
+
+    def __post_init__(self) -> None:
+        """Refuse a time that is not one: the revision would hold for ever, or not at all."""
+        if not math.isfinite(self.written_at):
+            message = "an unreadable withdrawal revision needs a finite time it was written by"
+            raise ValueError(message)
+
+
+WithdrawalRevision = WithdrawalMark | WithdrawalUndone | UnreadableWithdrawal
+"""One withdrawal revision as read: a document this build decodes, or one it cannot."""
+
+MAX_WITHDRAWAL_WINDOW_SECONDS = 900.0
+"""The longest any build's withdrawal mark may hold, from its stamp.
+
+A withdrawer refuses a timing whose mark would hold longer
+(``WithdrawalTiming``), so a mark this build cannot read is never undone while
+its writer may still cancel (``_unreadable_withdrawal_mark``).
+"""
+
+UNREADABLE_WITHDRAWER = "unreadable-withdrawal"
+"""The withdrawer, and writer, of the mark that stands for a withdrawal revision this build cannot read."""
+
+
+def _unreadable_withdrawal_mark(
+    record: LedgerRecord, revision: UnreadableWithdrawal
+) -> WithdrawalMark:
+    """The withdrawal under way that an unreadable newest withdrawal revision of ``record`` counts as. Pure.
+
+    It may be a newer build's mark of a withdrawal still cancelling the job, so
+    no run attaches while it may hold: it holds after it was written
+    (``UnreadableWithdrawal.written_at``, its file's time, or this reader's
+    first read of it when that is unknown) for the attempt's claim window, as
+    an unreadable lease does, and at least ``MAX_WITHDRAWAL_WINDOW_SECONDS``,
+    the longest any withdrawer's mark holds; then anyone may undo it as an
+    expired mark. Ignoring it instead could attach a run to a job that newer
+    build is about to cancel, and would hand the next withdrawal revision's
+    number to a file that already exists.
+    """
+    since = revision.written_at
+    window = max(record.claim_expires_at - record.created_at, MAX_WITHDRAWAL_WINDOW_SECONDS)
+    return WithdrawalMark(
+        attempt=record.attempt,
+        by=UNREADABLE_WITHDRAWER,
+        writer=UNREADABLE_WITHDRAWER,
+        since=since,
+        until=since + window,
+        reason="a withdrawal revision this build cannot read",
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class LedgerEntry:
     """The current attempt of a request, the revision it was read at, and every lease on it.
 
@@ -452,6 +601,10 @@ class LedgerEntry:
     claim window after its last write (``lease_verdict``, ``claim_expired``).
     ``earlier`` holds the current record of every earlier attempt, oldest first;
     each is final, since a new attempt is claimed only after the last one ended.
+    ``withdrawal`` is the withdrawal under way on the current attempt, if its
+    newest withdrawal revision is a mark; ``withdrawal_revision`` is that
+    newest revision, which a withdrawal swap (``EvaluationLedger.write_withdrawal``)
+    is against, -1 when there is none.
     """
 
     record: LedgerRecord
@@ -459,6 +612,8 @@ class LedgerEntry:
     revision: int = 0
     unreadable_leases: tuple[UnreadableLease, ...] = ()
     earlier: tuple[LedgerRecord, ...] = ()
+    withdrawal: WithdrawalMark | None = None
+    withdrawal_revision: int = -1
 
     @property
     def claim_window(self) -> float:
@@ -498,6 +653,68 @@ def transitioned(
     after = LedgerRecord.model_validate(after.model_dump())
     check_transition(record, after)
     return after
+
+
+def entry_of(
+    records: Iterable[tuple[int, int, LedgerRecord]],
+    withdrawals: Iterable[tuple[int, int, WithdrawalRevision]],
+    leases: Iterable[LedgerLease],
+    unreadable_leases: Iterable[UnreadableLease],
+) -> LedgerEntry | None:
+    """The request's entry from every document read under its key; None when it has no record. Pure.
+
+    ``records`` and ``withdrawals`` are ``(attempt, revision, document)``, as
+    their file names say. The current record is the highest revision of the
+    highest attempt; the withdrawal is the highest revision of that attempt's
+    withdrawal documents, when it is a mark, or when this build cannot read it
+    (``_unreadable_withdrawal_mark``).
+    """
+    latest: dict[int, tuple[int, LedgerRecord]] = {}
+    for attempt, revision, record in records:
+        if attempt not in latest or revision > latest[attempt][0]:
+            latest[attempt] = (revision, record)
+    if not latest:
+        return None
+    *earlier, (revision, current) = (latest[attempt] for attempt in sorted(latest))
+    newest: tuple[int, WithdrawalRevision] | None = None
+    for attempt, sequence, document in withdrawals:
+        if attempt == current.attempt and (newest is None or sequence > newest[0]):
+            newest = (sequence, document)
+    withdrawal_revision, document = newest if newest is not None else (-1, None)
+    if isinstance(document, UnreadableWithdrawal):
+        document = _unreadable_withdrawal_mark(current, document)
+    return LedgerEntry(
+        current,
+        tuple(sorted(leases, key=lambda lease: lease.holder)),
+        revision,
+        tuple(sorted(unreadable_leases, key=lambda lease: lease.holder)),
+        tuple(record for _, record in earlier),
+        withdrawal=document if isinstance(document, WithdrawalMark) else None,
+        withdrawal_revision=withdrawal_revision,
+    )
+
+
+def check_withdrawal(current: LedgerEntry, document: WithdrawalMark | WithdrawalUndone) -> None:
+    """Refuse a withdrawal revision that does not follow ``current``. Pure.
+
+    A mark goes only on the current attempt, while it is live and no other
+    withdrawal is under way on it; an undoing only follows a mark.
+    """
+    record = current.record
+    if document.attempt != record.attempt:
+        raise LedgerError.illegal_transition(record, record, "a withdrawal names another attempt")
+    if isinstance(document, WithdrawalMark):
+        if record.state.final:
+            raise LedgerError.illegal_transition(record, record, "only a live attempt is withdrawn")
+        if current.withdrawal is not None:
+            raise LedgerError.illegal_transition(record, record, "a withdrawal is under way")
+    elif current.withdrawal is None:
+        raise LedgerError.illegal_transition(record, record, "no withdrawal is under way")
+
+
+def withdrawal_expired(mark: WithdrawalMark, *, now: float) -> bool:
+    """Whether a withdrawal under way outlived its window, so its withdrawer died. Pure."""
+    return now > mark.until
 
 
 # A stage stopped from outside rather than by its own command: by its time limit
@@ -589,26 +806,74 @@ def decode_lease(text: str, *, path: str) -> LedgerLease:
     return _decode(text, path=path, model=LedgerLease)
 
 
+def decode_withdrawal(text: str, *, path: str) -> WithdrawalMark | WithdrawalUndone:
+    """Read a withdrawal revision of any format this build knows."""
+    return _decode(text, path=path, model=_WITHDRAWAL)
+
+
+def read_withdrawal_revision(
+    text: str, *, path: str, attempt: int, file_time: float, first_reads: FirstReads
+) -> WithdrawalRevision:
+    """The withdrawal revision stored for ``attempt``; one this build cannot decode is never an error.
+
+    A newer format, a damaged file, or a document naming another attempt than
+    its file is ``UnreadableWithdrawal``, written at its file's modification
+    time ``file_time``, or, when that is unknown (not finite), when this reader
+    first read it (``first_reads``); the entry counts it as a withdrawal under
+    way (``_unreadable_withdrawal_mark``). Records stay strict (``decode_record``).
+    """
+    try:
+        document = decode_withdrawal(text, path=path)
+    except LedgerError:
+        document = None
+    if document is not None and document.attempt == attempt:
+        return document
+    return UnreadableWithdrawal(first_reads.written_at(path, file_time))
+
+
+@dataclass
+class FirstReads:
+    """When one reader of a ledger first read each withdrawal revision whose file time it cannot read.
+
+    A file time can be unknown: the cluster's ``stat`` and ``date`` could not
+    read it. That revision still came into being before this reader first
+    read it, so holding it from that read, on the reader's own ``clock``, is
+    never too early, and it ends, so the request is not blocked for ever
+    (``_unreadable_withdrawal_mark``). Each ledger object keeps one; another
+    process's ledger has its own.
+    """
+
+    clock: Clock
+    _first: dict[str, float] = dataclasses.field(default_factory=dict)
+
+    def written_at(self, path: str, file_time: float) -> float:
+        """``file_time`` when it is known; otherwise when this reader first read ``path``."""
+        if math.isfinite(file_time):
+            return file_time
+        return self._first.setdefault(path, self.clock.now())
+
+
 # A record or lease is a few hundred bytes; anything near this bound is not one.
 _MAX_DOCUMENT_BYTES = 1 << 20
 _DOCUMENT = TypeAdapter(dict[str, object])
 
 
-def _decode[T: BaseModel](text: str, *, path: str, model: type[T]) -> T:
+def _decode[T](text: str, *, path: str, model: type[T] | TypeAdapter[T]) -> T:
     document = decode_json(text, _DOCUMENT, source=path, max_bytes=_MAX_DOCUMENT_BYTES)
     if isinstance(document, Unreadable):
         raise LedgerError.unreadable(path, f"not a JSON object ({document.kind.value})")
     version = document.get("format_version")
     if version != LEDGER_FORMAT_VERSION:
         raise LedgerError.unsupported_version(path, version)
+    adapter = model if isinstance(model, TypeAdapter) else TypeAdapter(model)
     try:
-        return model.model_validate(document, strict=False)
+        return adapter.validate_python(document, strict=False)
     except ValidationError as error:
         fields = sorted({".".join(str(part) for part in item["loc"]) for item in error.errors()})
         raise LedgerError.unreadable(path, f"invalid fields {', '.join(fields)}") from error
 
 
-def encode(document: LedgerRecord | LedgerLease) -> str:
+def encode(document: LedgerRecord | LedgerLease | WithdrawalMark | WithdrawalUndone) -> str:
     """The stored form of a ledger document: one line of JSON."""
     return document.model_dump_json() + "\n"
 
@@ -690,7 +955,8 @@ class LedgerPolicy(_Document):
     """Operator policy for the ledger: how long a lease lasts and how long an unleased job lives.
 
     A run renews its lease about every third of ``lease_seconds``. A job whose
-    newest lease expired more than ``grace_seconds`` ago is cancelled.
+    newest lease expired more than ``grace_seconds`` ago is cancelled, and so is
+    one whose last run stopped wanting it, unless ``keep_jobs_on_stop`` is set.
     """
 
     lease_seconds: Annotated[float, Field(gt=0)] = 300.0
@@ -700,10 +966,18 @@ class LedgerPolicy(_Document):
     # the next asker, so a submitter that died before sbatch blocks no one longer.
     claim_seconds: Annotated[float, Field(gt=0)] = 900.0
     # Whether submitted evaluations keep running while no VibeSys process is attached.
-    # Submit-bound jobs (Phase 1) always do: a stop or a crash cancels nothing, and the
-    # grace period bounds how long an unleased job lives. Phase 2 slot jobs read it: a
-    # slot that starts while no run holds a live lease exits without claiming when false.
+    # Submit-bound jobs (Phase 1) keep running only after a crash, or after a stop when
+    # ``keep_jobs_on_stop`` is set: the grace period then bounds how long an unleased
+    # job lives. Phase 2 slot jobs read it: a slot that starts while no run holds a
+    # live lease exits without claiming when false.
     run_while_detached: bool = True
+    # Whether a run that stops, or cancels an evaluation, leaves the job for a later
+    # resume to reattach to. False: it drops its lease and withdraws, cancelling its
+    # job, every request no other run has leased within the grace period
+    # (``relinquish``), so no job outlives the runs that want it; only a crash leaves
+    # jobs behind, for the grace sweep. True: it only drops its lease (a stop leaves
+    # even that to lapse), and the grace sweep cancels the job.
+    keep_jobs_on_stop: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -740,6 +1014,31 @@ def lease_verdict(entry: LedgerEntry, *, now: float, grace_seconds: float) -> Le
     )
     until = expired_at + grace_seconds
     return Leased(until) if now <= until else Unleased(expired_at)
+
+
+def held_by_others(entry: LedgerEntry, *, holder: str, since: float) -> bool:
+    """Whether a run other than ``holder`` has wanted the request at any time since ``since``. Pure.
+
+    ``since`` is now less the grace period: another run wants the request
+    while its lease holds, and for the grace period after it lapsed, since it
+    may resume and reattach. Another run's claim still being submitted counts
+    until it expires, so a submitter that has not written its lease yet counts
+    too; a run that released its lease (it relinquished the request) does not.
+    A lease this build cannot read counts as another run's unless it names
+    ``holder``, and expires one claim window after its file was last written.
+    """
+    record = entry.record
+    expiries = [
+        *(lease.expires_at for lease in entry.leases if lease.holder != holder),
+        *(
+            lease.written_at + entry.claim_window
+            for lease in entry.unreadable_leases
+            if lease.holder != holder
+        ),
+    ]
+    if record.owner != holder and record.state is LedgerState.SUBMITTING:
+        expiries.append(record.claim_expires_at)
+    return any(expiry >= since for expiry in expiries)
 
 
 @dataclass(frozen=True, slots=True)
@@ -803,24 +1102,44 @@ def claim_expired(entry: LedgerEntry, *, now: float) -> bool:
 
 
 @dataclass(frozen=True, slots=True)
+class AwaitWithdrawal:
+    """A withdrawal is cancelling the attempt's job: wait for it to end or be undone.
+
+    The asker's lease, written before it read the request, makes a withdrawal
+    that has not cancelled yet undo its mark (``ledger_actions.withdraw``); one
+    that did ends ``withdrawn``, and the next read claims a new attempt. A new
+    attempt is never claimed while the old one may still be kept, which would
+    leave two live jobs for one request. Once the withdrawal outlived its
+    window (``expired``), its withdrawer died: the asker undoes it
+    (``ledger_actions.undo_expired_withdrawal``) and reads again.
+    """
+
+    entry: LedgerEntry
+    expired: bool
+
+
+@dataclass(frozen=True, slots=True)
 class ClaimAttempt:
     """No usable attempt exists: claim attempt ``attempt``, then submit it."""
 
     attempt: int
 
 
-SubmitStep = AttachJob | CheckJob | ResolveSubmission | ClaimAttempt
+SubmitStep = AttachJob | CheckJob | ResolveSubmission | AwaitWithdrawal | ClaimAttempt
 
 
 def submit_step(entry: LedgerEntry | None, *, now: float) -> SubmitStep:
     """What a submission of a request does, given its ledger entry, at ``now``. Pure.
 
     Only an absent request, or one whose current attempt failed or was
-    withdrawn, is submitted; every other state attaches or waits.
+    withdrawn, is submitted; every other state attaches or waits, and so does
+    every attempt a withdrawal is under way on.
     """
     if entry is None:
         return ClaimAttempt(0)
     record = entry.record
+    if entry.withdrawal is not None and not record.state.final:
+        return AwaitWithdrawal(entry, expired=withdrawal_expired(entry.withdrawal, now=now))
     match record.state:
         case LedgerState.COMPLETED:
             return AttachJob(record)
@@ -837,7 +1156,10 @@ def submit_step(entry: LedgerEntry | None, *, now: float) -> SubmitStep:
 __all__ = [
     "BATCH_RESULT_LAYOUT",
     "LEDGER_FORMAT_VERSION",
+    "MAX_WITHDRAWAL_WINDOW_SECONDS",
+    "UNREADABLE_WITHDRAWER",
     "AttachJob",
+    "AwaitWithdrawal",
     "CheckJob",
     "ClaimAttempt",
     "LeaseVerdict",
@@ -857,21 +1179,31 @@ __all__ = [
     "SubmitStep",
     "Unleased",
     "UnreadableLease",
+    "UnreadableWithdrawal",
+    "WithdrawalDocument",
+    "WithdrawalMark",
+    "WithdrawalRevision",
+    "WithdrawalUndone",
     "check_transition",
+    "check_withdrawal",
     "claim_expired",
     "content_digest",
     "decode_lease",
     "decode_record",
+    "decode_withdrawal",
     "encode",
+    "entry_of",
     "evaluation_key",
     "handle_of_job",
     "job_of_handle",
     "lease_verdict",
     "ledger_operation_id",
+    "read_withdrawal_revision",
     "settlement",
     "submit_step",
     "transitioned",
     "validate_holder",
     "validate_key",
     "validate_project",
+    "withdrawal_expired",
 ]

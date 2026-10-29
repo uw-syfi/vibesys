@@ -72,7 +72,8 @@ nisa.tensor_reduce(dst=result, data=x, op=nl.add, axis=1)
 
 ```python
 # PyTorch: c = a @ b  where a: (M, K), b: (K, N)
-# Constraint: K <= 2048, result free dim <= 512 (gen2/3) or 4096 (gen4)
+# Constraint: K (contraction = partition dim) <= 128 (effective 256/512 with double_row / Quad-MX);
+#             result free dim (N): 512 (gen2/3); gen4: 4096 fp32 / 8192 bf16
 
 # NKI:
 psum_result = nl.ndarray((M, N), dtype=nl.float32, buffer=nl.psum)

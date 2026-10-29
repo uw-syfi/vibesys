@@ -16,10 +16,19 @@ export function Chip(props: {
   readonly label: string;
   readonly tone?: StatusTone;
   readonly dot?: boolean;
+  /** The label is an identifier a person may copy (a model id), set in the code face. */
+  readonly mono?: boolean;
+  /** The longer account behind a short label, for the pointer. */
+  readonly hint?: string;
 }): JSX.Element {
   const tone = props.tone ?? 'neutral';
   return (
-    <span className="vs-chip" data-tone={tone}>
+    <span
+      className="vs-chip"
+      data-tone={tone}
+      data-mono-id={props.mono === true || undefined}
+      title={props.hint}
+    >
       {props.dot === true ? <span className="vs-dot" data-tone={tone} aria-hidden="true" /> : null}
       {props.label}
     </span>

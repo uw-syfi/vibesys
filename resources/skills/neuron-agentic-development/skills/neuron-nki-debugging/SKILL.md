@@ -8,6 +8,8 @@ description: |
 argument-hint: "[kernel file]"
 ---
 
+> **VibeSys note (native TorchNeuron):** the harness snippets below use the retired `torch_xla` device (`xm.xla_device()`). In this container call `@nki.jit` kernels directly on `torch.device("neuron")` tensors (no `torch_xla`), or wrap them with `torch_neuronx.nki_op`; see the serving-systems `neuron-pytorch` reference. The compiler-error workflow is unchanged.
+
 # Debugging NKI on Neuron Hardware
 
 This skill provides a workflow for debugging NKI kernel compilation and execution on Trainium/Inferentia hardware.

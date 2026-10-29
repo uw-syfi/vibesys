@@ -1,20 +1,19 @@
 /**
- * Admission for the run page's privileged protocol connection.
+ * Admission for a shell document's privileged protocol connection to its run.
  *
  * Electron wiring translates an incoming MessagePort into `PendingRunPort`; this module owns the
- * decision to start and expose that port, or close it without handing it to a run page.
+ * decision to start and expose that port, or close it without handing it to a window.
  *
  * `ipcMain` is one process-wide channel, shared by every open window: a connect Electron delivers
- * to it is not scoped to the window whose run page actually sent it. Admission is therefore one
+ * to it is not scoped to the window whose document actually sent it. Admission is therefore one
  * registry of competing windows, not one independent listener per window — a second window's
  * listener would otherwise see the first window's rightfully admitted connect, fail its own
  * sender-id check, and close the port out from under the window that just started it.
  */
 import type {RelayPort} from '@vibesys/feature-run-control/main';
-import {parseRunLogsRequest, type RunLogsReply, type RunLogsRequest} from '@vibesys/ipc';
 import {isSameAppPage} from './app-assets.js';
 
-/** A renderer port that has not crossed the run-page authority boundary yet. */
+/** A renderer port that has not crossed the run authority boundary yet. */
 export interface PendingRunPort extends RelayPort {
   start(): void;
 }
@@ -26,28 +25,17 @@ export interface RunConnectEvent {
   readonly senderUrl: string | null;
 }
 
-/** The sender facts Electron supplies for one logs request, and what the page sent. */
-export interface RunLogsEvent {
-  readonly request: unknown;
-  readonly senderId: number;
-  readonly senderUrl: string | null;
-}
-
 /** The narrow IPC boundary needed by the run connection binder. */
 export interface RunIpc {
   onConnect(listener: (event: RunConnectEvent) => void): void;
-  /** Answer every logs request with the listener's promise (an `invoke` handler). */
-  onLogs(listener: (event: RunLogsEvent) => Promise<unknown>): void;
 }
 
-/** One window's admission claim: its current run page, and where it hands off an admitted port. */
+/** One window's admission claim: its run-showing document, and where it hands off an admitted port. */
 export interface RunPageAdmission {
-  /** This window's current run-page webContents id, or null while it shows none. */
+  /** This window's run-showing webContents id, or null while its surface binds no run. */
   currentSenderId(): number | null;
   /** Hand an admitted port to this window's run. */
   connect(port: RelayPort): void;
-  /** Answer an admitted logs request for this window's run. */
-  logs(request: RunLogsRequest): Promise<RunLogsReply<RunLogsRequest>>;
 }
 
 interface AdoptedRunPort {
@@ -114,30 +102,29 @@ function describe(error: unknown): string {
 
 /**
  * The one `ipcMain` listener this process installs for the connect channel of the pages that show
- * runs (`expectedUrls`: the run page, and the app shell, which shows a run in its own document).
+ * runs (`expectedUrl`: the app shell, which shows a run in its own document).
  *
  * Every open window registers its admission for as long as it exists; `register`'s return value
  * withdraws it, which every registrant must call exactly once. A connect is admitted by whichever
- * registered window's current run page sent it; a port no registered window claims is refused and
+ * registered window's run-showing document sent it; a port no registered window claims is refused and
  * closed here, never handed to more than one window and never silently dropped. `connect` is called
  * with the admitted port's feature-owned side, with its message and close listeners already
  * installed synchronously; only then does this boundary start Electron's queued delivery.
  */
 export class RunIpcRegistry {
-  readonly #expectedUrls: readonly string[];
+  readonly #expectedUrl: string;
   readonly #log: (message: string) => void;
   readonly #pages = new Set<RunPageAdmission>();
 
-  constructor(ipc: RunIpc, expectedUrls: readonly string[], log: (message: string) => void) {
-    this.#expectedUrls = expectedUrls;
+  constructor(ipc: RunIpc, expectedUrl: string, log: (message: string) => void) {
+    this.#expectedUrl = expectedUrl;
     this.#log = log;
     ipc.onConnect(event => this.#admit(event));
-    ipc.onLogs(event => this.#logs(event));
   }
 
   /** Compete `page`'s admission for every future connect; its return value withdraws it. */
   #expected(senderUrl: string | null): boolean {
-    return this.#expectedUrls.some(url => isSameAppPage(senderUrl, url));
+    return isSameAppPage(senderUrl, this.#expectedUrl);
   }
 
   register(page: RunPageAdmission): () => void {
@@ -159,22 +146,6 @@ export class RunIpcRegistry {
     port.close();
   }
 
-  /**
-   * A logs request is admitted like a connect: only from the current run page of a registered
-   * window, and only in the shape `parseRunLogsRequest` accepts. A refused request rejects, which
-   * the page reads as a transport failure.
-   */
-  #logs(event: RunLogsEvent): Promise<unknown> {
-    const request = parseRunLogsRequest(event.request);
-    if (request !== null && this.#expected(event.senderUrl)) {
-      for (const page of this.#pages) {
-        if (page.currentSenderId() === event.senderId) return page.logs(request);
-      }
-    }
-    this.#log('refused a logs request from a view that is not bound to a run');
-    return Promise.reject(new Error('this view is not bound to a run'));
-  }
-
   #activate(port: PendingRunPort, page: RunPageAdmission): void {
     let adopted: AdoptedRunPort | null = null;
     try {
@@ -184,7 +155,7 @@ export class RunIpcRegistry {
     } catch (error) {
       if (adopted === null) port.close();
       else adopted.dispose();
-      this.#log(`could not activate the run page connection: ${describe(error)}`);
+      this.#log(`could not activate the run connection: ${describe(error)}`);
     }
   }
 }

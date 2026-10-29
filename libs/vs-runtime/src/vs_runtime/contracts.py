@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Protocol, TypeVar
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
-from vs_core.api import EvidenceRequirements, SpanKind
+from vs_core.api import AdoptionPublication, CheckoutUpdate, EvidenceRequirements, SpanKind
 from vs_evaluation.api import EvidenceFailureKind
 from vs_evaluator_protocol.api import PartialMeasurement
 from vs_redaction.api import redact_diagnostic_text
@@ -60,6 +60,21 @@ def _is_concrete_model_class(value: object) -> bool:
 
 class RuntimeContractError(RuntimeError):
     """Base class for typed runtime operation failures."""
+
+
+class CaptureStopUnconfirmedError(RuntimeContractError):
+    """A capture lifecycle cannot be proved safe for candidate cleanup.
+
+    The command may still be running, or persistence of its durable intent or
+    settlement may have failed. The runtime retains both the candidate and its
+    temporary output when this is raised rather than guessing that cleanup is safe.
+    """
+
+    def __init__(self) -> None:
+        """Describe the unresolved stop without backend-specific text."""
+        super().__init__(
+            "captured command settlement could not be confirmed; its candidate and output remain retained"
+        )
 
 
 class SessionTransportUnavailableError(RuntimeContractError):
@@ -253,6 +268,13 @@ class Workspace(Protocol):
         """Return the revision a snapshot with this exact label created, if any."""
         ...
 
+    async def measured_input(self, revision: str) -> str:
+        """The digest of what the task's evaluation of *revision* reads.
+
+        Two revisions that differ only in paths the task declares unread share it.
+        """
+        ...
+
     async def pending_changes(self) -> list[str]:
         """List uncommitted workspace-relative paths."""
         ...
@@ -293,6 +315,49 @@ class AgentRole(BaseModel):
     required_capabilities: frozenset[AgentCapability] = frozenset()
 
 
+class Checkout(Protocol):
+    """A directory holding one revision's files, which its owner discards."""
+
+    @property
+    def path(self) -> Path:
+        """Return the checkout's host path."""
+        ...
+
+    async def discard(self) -> None:
+        """Release the checkout; safe to call more than once."""
+        ...
+
+
+class CheckoutRoot(Protocol):
+    """The repository a revision is checked out from."""
+
+    @property
+    def path(self) -> Path:
+        """Return the repository's host path."""
+        ...
+
+    async def has_revision(self, revision: str) -> bool:
+        """Return whether the repository holds *revision*."""
+        ...
+
+
+class MeasuredCheckouts(Protocol):
+    """What a trusted executor needs to measure a revision: a fresh checkout of it.
+
+    ``Workspaces`` satisfies it; a measurement that belongs to no run (a comparison
+    baseline's) supplies its own.
+    """
+
+    @property
+    def root(self) -> CheckoutRoot:
+        """Return the repository the revisions live in."""
+        ...
+
+    async def create_measured_candidate(self, revision: str) -> Checkout:
+        """Return a fresh checkout of *revision*, holding what its evaluation reads."""
+        ...
+
+
 class Workspaces(Protocol):
     """Run-owned access to the root and isolated candidate workspaces."""
 
@@ -328,8 +393,31 @@ class Workspaces(Protocol):
         """
         ...
 
-    async def adopt(self, revision: str) -> None:
-        """Materialize a retained candidate revision in the root workspace."""
+    async def create_measured_candidate(self, revision: str) -> CandidateWorkspace:
+        """Create an isolated candidate of *revision* to evaluate, as its measured input reads it.
+
+        It holds *revision*'s files less the paths the task declares unread, so its files are
+        exactly what ``Workspace.measured_input`` digests: an evaluation reads nothing the
+        digest does not cover. Errors as :meth:`create_candidate`.
+        """
+        ...
+
+    async def adopt(
+        self, revision: str, *, message: str = "vibesys: adopt revision"
+    ) -> AdoptionPublication:
+        """Idempotently publish a retained revision on the run's publication branch.
+
+        Never changes a checkout or its index. The returned commit stays reachable
+        across resumes. Raises RuntimeContractError when publication is refused.
+        """
+        ...
+
+    async def update_checkout(self, publication: AdoptionPublication) -> CheckoutUpdate:
+        """Optionally fast-forward the run's own clean checked-out branch.
+
+        Another branch, dirty tree, divergence or Git's overwrite refusal is a typed
+        skip, and never invalidates the published adoption.
+        """
         ...
 
     async def export_patch(self, revision: str) -> str:
@@ -380,18 +468,8 @@ class CommandResult(BaseModel):
         return {**value, "diagnostic_output": redact_diagnostic_text(output)}
 
 
-class Commands(Protocol):
-    """Sandboxed process execution scoped to a live run workspace."""
-
-    async def run(
-        self,
-        argv: tuple[str, ...],
-        *,
-        workspace: Workspace,
-        timeout_seconds: int | None = None,
-    ) -> CommandResult:
-        """Run one argv without policy-authored shell composition."""
-        ...
+class CaptureCommands(Protocol):
+    """Runtime-owned output capture scoped to a live run workspace."""
 
     async def capture_output(
         self,
@@ -404,12 +482,29 @@ class Commands(Protocol):
         """Run argv with a runtime-owned output file and return its bounded contents.
 
         The runtime appends ``output_argument`` and the temporary path, reads
-        the file after a successful command, and attempts to remove it on every
+        the file after a successful command, and removes it after every settled
         path. A failed command returns its ordinary diagnostic output and exit
-        status. Failure to remove the artifact raises ``RuntimeContractError``
+        status. An unconfirmed remote stop raises
+        :class:`CaptureStopUnconfirmedError` and retains the candidate and
+        artifact across host cleanup and restart. Failure to remove the artifact raises
+        ``RuntimeContractError``
         unless another exception is already propagating, in which case the
         cleanup failure is attached as an exception note.
         """
+        ...
+
+
+class Commands(Protocol):
+    """Ordinary sandboxed process execution scoped to a live run workspace."""
+
+    async def run(
+        self,
+        argv: tuple[str, ...],
+        *,
+        workspace: Workspace,
+        timeout_seconds: int | None = None,
+    ) -> CommandResult:
+        """Run one argv without policy-authored shell composition."""
         ...
 
     async def run_trusted_shell(
@@ -512,6 +607,11 @@ class RunFacts(BaseModel):
     domain_id: str = Field(min_length=1)
     objective: str = Field(min_length=1)
     environment_notes: str = ""
+    agent_git_writable: bool
+    """Whether agents can commit where they write candidates; false when that Git metadata is read-only.
+
+    Required: a run that forgot to resolve it must fail, not tell agents to commit.
+    """
     profile_execution: ProfileExecution = ProfileExecution.LOCAL
     objective_location: str = Field(default="OBJECTIVE.md", min_length=1)
     reference_location: str = Field(default=".", min_length=1)
@@ -554,6 +654,36 @@ class AccuracyReceipt(BaseModel):
 # Whether a benchmark failure describes its workload or execution infrastructure. It is
 # the evidence's own failure kind, so the executor's claim reaches the evidence unconverted.
 BenchmarkFailureKind = EvidenceFailureKind
+
+
+class BuildEvaluation(BaseModel):
+    """Semantic outcome of the candidate's confined build and the check of its outputs."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    executed: bool
+    reused: bool = False
+    """The commit's earlier verified build was reused instead of building again."""
+    feedback: str | None = None
+    operator_feedback: str | None = None
+    """Credential-safe feedback for operator-facing projections, never agent evidence."""
+    # Whose fault the failure is: present exactly when the build failed, with no default.
+    failure_kind: BenchmarkFailureKind | None = None
+
+    @model_validator(mode="after")
+    def _failure_kind_exactly_when_failed(self) -> BuildEvaluation:
+        if (self.feedback is None) != (self.failure_kind is None):
+            message = "a build outcome carries a failure kind exactly when it failed"
+            raise ValueError(message)
+        if (self.feedback is None) != (self.operator_feedback is None):
+            message = "a build failure requires a separate operator-safe feedback"
+            raise ValueError(message)
+        return self
+
+    @property
+    def passed(self) -> bool:
+        """Return whether the build produced every required output."""
+        return self.feedback is None
 
 
 class AccuracyEvaluation(BaseModel):
@@ -604,6 +734,8 @@ class BenchmarkEvaluation(BaseModel):
     # What a failed benchmark measured before it stopped, as its evaluator
     # reported it; absent when the evaluator reported nothing.
     partial_measurement: PartialMeasurement | None = None
+    # The capability the evaluator named as unmet on a failed benchmark, when it did.
+    unmet_requirement: str | None = None
 
     @model_validator(mode="after")
     def _failure_facts_only_when_failed(self) -> BenchmarkEvaluation:
@@ -612,6 +744,9 @@ class BenchmarkEvaluation(BaseModel):
             raise ValueError(message)
         if (self.feedback is None) != (self.failure_kind is None):
             message = "a benchmark carries a failure kind exactly when it failed"
+            raise ValueError(message)
+        if self.unmet_requirement is not None and self.feedback is None:
+            message = "only a failed benchmark names an unmet requirement"
             raise ValueError(message)
         if (self.feedback is None) != (self.operator_feedback is None):
             message = "a benchmark failure requires a separate operator-safe feedback"
@@ -654,6 +789,14 @@ class LocalValidationEvaluation(BaseModel):
 
 class Evaluation(Protocol):
     """Trusted candidate evaluation effects a local run measures through."""
+
+    async def build(self, workspace: Workspace, *, output: OutputSink) -> BuildEvaluation:
+        """Build the workspace's commit confined, once, and verify its required outputs.
+
+        A commit already built and verified reuses that build. The build command's raw output
+        is written to *output* while it runs.
+        """
+        ...
 
     async def accuracy(
         self,
@@ -749,6 +892,12 @@ class CoreRunContext:
     """The longest core waits to learn what became of a request it could not read."""
     role_models: Mapping[str, str] = field(default_factory=dict)
     """The model the operator chose for a role (by role id) where it differs from the run's."""
+    prompt_variables: Mapping[str, object] = field(default_factory=dict)
+    """Data the host adds to the prompts of this run, by template variable name.
+
+    Data only: the policy's templates own the wording, and a policy ignores a variable none of
+    its templates reads.
+    """
 
 
 @dataclass(frozen=True, slots=True)

@@ -37,11 +37,18 @@ _WRITES_THEN_EXITS = (
     "sys.exit(int(sys.argv[3]))\n"
 )
 _BLOCKS = _HANG_GUARD + "signal.pause()\n"
+# The descendant writes ``ready`` only once the leader has exited, so a group signal
+# sent after reading it cannot reach the leader. The leader's end of ``exited`` closes
+# when the leader exits, after its exit status is fixed, so the descendant's read of
+# the other end returns end of file at that point and no earlier.
 _DESCENDANT_HOLDS_OUTPUT = (
     "import os\n"
+    "exited, leader_alive = os.pipe()\n"
     "if os.fork() == 0:\n"
     + "".join(f"    {line}\n" for line in _HANG_GUARD.splitlines())
-    + "    sys.stdout.write('ready\\n'); sys.stdout.flush()\n"
+    + "    os.close(leader_alive)\n"
+    "    os.read(exited, 1)\n"
+    "    sys.stdout.write('ready\\n'); sys.stdout.flush()\n"
     "    signal.pause()\n"
     "    os._exit(1)\n"
     "os._exit(0)\n"

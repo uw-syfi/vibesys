@@ -2,9 +2,15 @@
 
 The search asks for a `WriteHandoff` when a planning call schedules a plan. This owner renders
 the request's data with the dynamic templates (`handoff/call.j2`) and writes the file into the
-run's portable state, opened through `Project`, so it is kept with the run and survives a
+run's agent-visible state, opened through `Project`, so it is kept with the run and survives a
 restart or a resume. It answers with the file's path relative to the project, which is where
-the planner's workspace (the run's project checkout) sees it.
+the planner's workspace (the run's project checkout) sees it. The run's own record
+(`.vibesys/state/runs/`) is hidden from agent confinement, so these files live beside it,
+in the one state directory the confinement leaves readable and read-only.
+
+Runs that began before the files moved kept them in the run's record. The owner copies
+those into the agent-visible state the first time it is used, so a resumed run lists them
+where its planner can read them; the earlier copies stay, unread, in the hidden record.
 
 The planner itself never writes: its role reads only (see docs/contributing/sandboxing.md), and
 its reply is the one source of what the file says. Writing the same request again writes the
@@ -30,7 +36,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import ExecutionContext
 
 HANDOFF_NAMESPACE = "orchestrator-handoff"
-"""The run-state namespace that holds the handoff files."""
+"""The agent-visible state namespace that holds the handoff files."""
 
 _RENDERER = TemplateRenderer(Path(prompts.__file__).parent)
 
@@ -87,9 +93,12 @@ def render_handoff(request: WriteHandoff) -> str:
 class HandoffOwner:
     """Perform and inspect the handoff write over one run's documents."""
 
-    def __init__(self, documents: HandoffDocuments) -> None:
-        """Bind the run-state namespace the files are written to."""
+    def __init__(
+        self, documents: HandoffDocuments, *, earlier: HandoffDocuments | None = None
+    ) -> None:
+        """Bind the namespace the files are written to, and where an older run kept them."""
         self._documents = documents
+        self._earlier = earlier
 
     async def execute(self, request: OperationRequest, context: ExecutionContext) -> BaseModel:
         """Write the file; a failed write propagates as an unknown effect."""
@@ -103,6 +112,7 @@ class HandoffOwner:
 
     def observe(self, request: WriteHandoff) -> Inspection:
         """Whether the file holds what ``request`` renders now: the body of `inspect`."""
+        self._adopt_earlier_files()
         name = handoff_filename(request.call)
         if self._documents.read_bytes(name) == render_handoff(request).encode("utf-8"):
             return Applied(self._written(name))
@@ -110,9 +120,22 @@ class HandoffOwner:
 
     def perform(self, request: WriteHandoff) -> HandoffWritten:
         """Write one handoff file now and say where it is."""
+        self._adopt_earlier_files()
         name = handoff_filename(request.call)
         self._documents.write_bytes(name, render_handoff(request).encode("utf-8"))
         return self._written(name)
+
+    def _adopt_earlier_files(self) -> None:
+        """Copy the files an older run kept in its record to where the planner reads them."""
+        if self._earlier is None:
+            return
+        held = set(self._documents.entries(_DIRECTORY))
+        for item in self._earlier.entries(_DIRECTORY):
+            if not _FILENAME.fullmatch(item) or item in held:
+                continue
+            contents = self._earlier.read_bytes(f"{_DIRECTORY}/{item}")
+            if contents is not None:
+                self._documents.write_bytes(f"{_DIRECTORY}/{item}", contents)
 
     def _written(self, name: str) -> HandoffWritten:
         """The file just written, with every handoff file the namespace holds, oldest first."""
@@ -130,8 +153,10 @@ class HandoffOwner:
 
 def handoff_entries(resources: OwnedOperationResources) -> tuple[OperationEntry, ...]:
     """The handoff write, owned by an owner over the run's handoff namespace."""
-    namespace = resources.project.state.portable_namespace(resources.run_id, HANDOFF_NAMESPACE)
-    return (OperationEntry.owned(HANDOFF, HandoffOwner(namespace)),)
+    state = resources.project.state
+    namespace = state.agent_visible_namespace(resources.run_id, HANDOFF_NAMESPACE)
+    earlier = state.portable_namespace(resources.run_id, HANDOFF_NAMESPACE)
+    return (OperationEntry.owned(HANDOFF, HandoffOwner(namespace, earlier=earlier)),)
 
 
 __all__ = [

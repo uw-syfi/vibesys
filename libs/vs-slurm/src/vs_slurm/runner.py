@@ -34,17 +34,23 @@ from .config import (
     SlurmConfig,
     SlurmConfigError,
     SlurmConnectorTransport,
+    SlurmJobResources,
     SlurmLocalTransport,
     SlurmService,
     SlurmSshTransport,
+    minimal_job,
     shell_join_with_port,
 )
 from .errors import (
     SlurmError,
+    SlurmSbatchFailedError,
     SlurmSubmissionRejectedError,
     SlurmTransferInterruptedError,
+    SlurmTransportFailedError,
 )
 from .job_teardown import start_in_own_session, teardown_shell
+from .login_environment import login_environment
+from .phase_files import NODE_NAME, SERVICE_LOG_TAIL, distinct_tail, read_node
 from .queue_view import QueueSnapshot, parse_queue_snapshot, queue_snapshot_command
 from .remote_file import SlurmFileSource
 from .remote_operations import (
@@ -56,6 +62,8 @@ from .remote_operations import (
 from .scheduler_read import framed, unframed
 from .scheduler_states import (
     INITIAL_LIFE,
+    Ended,
+    EndOutcome,
     JobLife,
     NotInQueue,
     QueueRow,
@@ -87,11 +95,7 @@ SERVICE_NOT_READY_EXIT_CODE = 70
 STAGE_TIMEOUT_EXIT_CODES = frozenset({124, 137})
 _MAX_PROCESS_EXIT_CODE = 255
 _BATCH_RESULT_ROOT = ".vibesys-slurm-results"
-_SERVICE_LOG_TAIL = "service-log-tail.txt"
 _SERVICE_LOG_TAIL_LINES = 400
-_SERVICE_LOG_REPORTED_LINES = 40
-_SERVICE_LOG_LINE_CHARS = 400
-_SERVICE_LOG_TAIL_CHARS = 8_000
 _CONTENT_CACHE_ROOT = ".vibesys-content-cache"
 _STAGE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}")
 
@@ -136,6 +140,7 @@ class SlurmJobRequest:
     file_artifacts: tuple[SlurmFileArtifact, ...] = ()
     tree_artifacts: tuple[SlurmTreeArtifact, ...] = ()
     cancel_event: Event | None = None
+    resources: SlurmJobResources = SlurmJobResources.CONFIGURED
 
 
 @dataclass(frozen=True)
@@ -362,6 +367,8 @@ class SlurmBatchResult:
     service_log_tail: str = ""
     """Last distinct lines of the shared service's log, empty without a service."""
     collection_failure: str | None = None
+    node: str | None = None
+    """The compute node the allocation ran on, when the job recorded it."""
 
 
 @dataclass(frozen=True)
@@ -385,6 +392,10 @@ class SlurmJobWaitResult(BaseModel):
     handle: SlurmJobHandle
     status: SlurmJobStatus
     timed_out: bool
+    waited_seconds: float
+    """How long this observation lasted, on the runner's clock."""
+    ended: EndOutcome | None = None
+    """How the job ended, when the last reading saw it end; ``status`` folds several into one."""
 
     @property
     def terminal(self) -> bool:
@@ -435,6 +446,11 @@ class SlurmJobRunner:
         self._operations = RemoteOperations(self._transport, config, scratch_root)
         self._clock = clock
         self._invocation_id = invocation_id
+
+    @property
+    def config(self) -> SlurmConfig:
+        """The cluster settings this runner submits with."""
+        return self._config
 
     def run(self, request: SlurmJobRequest, *, pause: Callable[[float], None]) -> SlurmJobResult:
         """Stage, submit, wait, and collect as a blocking compatibility API.
@@ -563,7 +579,7 @@ class SlurmJobRunner:
             )
             self._transport.put(local_script, remote_script)
             boundary.started = True
-            job_id = self._submit(base, remote_script, remote_log)
+            job_id = self._submit(base, remote_script, remote_log, request.resources)
         artifacts = (
             *(
                 SlurmArtifactTarget(
@@ -693,6 +709,7 @@ class SlurmJobRunner:
         }
         collection_failure = job_result.collection_failure
         service_log_tail = ""
+        node: str | None = None
         with tempfile.TemporaryDirectory(
             prefix="vs-slurm-batch-", dir=self._scratch_root
         ) as temporary:
@@ -723,7 +740,8 @@ class SlurmJobRunner:
                 except SlurmError as exc:
                     if job_result.exit_code == 0:
                         collection_failure = collection_failure or str(exc)
-            service_log_tail = _distinct_tail(phase_root / _SERVICE_LOG_TAIL)
+            service_log_tail = distinct_tail(phase_root / SERVICE_LOG_TAIL)
+            node = read_node(phase_root / NODE_NAME)
         timings["collection"] = max(0.0, self._clock.now() - collection_started)
         return SlurmBatchResult(
             job_id=job_result.job_id,
@@ -734,6 +752,7 @@ class SlurmJobRunner:
             content_cache_hits=handle.job.content_cache_hits,
             service_log_tail=service_log_tail,
             collection_failure=collection_failure,
+            node=node,
         )
 
     def _collect_stage(
@@ -879,24 +898,55 @@ class SlurmJobRunner:
             self._cancel_abandoned(handle, failure)
             raise
 
+    def wait_until_started(
+        self,
+        handle: SlurmJobHandle,
+        *,
+        pause: Callable[[float], None],
+        timeout_seconds: float,
+        cancel_event: Event | None = None,
+        queued: Callable[[SchedulerReading, float], None] | None = None,
+    ) -> SlurmJobWaitResult:
+        """Observe until the job runs or ends; ``timed_out``: still queued. Never cancels.
+
+        A set ``cancel_event`` raises, leaving the job; ``queued`` hears each pending reading.
+        """
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise SlurmError.invalid_wait_timeout()
+        return self._observe(
+            handle, timeout_seconds, cancel_event, pause, queued=queued or _ignore_reading
+        )
+
     def _observe(
         self,
         handle: SlurmJobHandle,
         timeout: float,
         cancel_event: Event | None,
         pause: Callable[[float], None],
+        *,
+        queued: Callable[[SchedulerReading, float], None] | None = None,
     ) -> SlurmJobWaitResult:
-        """Poll until terminal or *timeout*; a set *cancel_event* raises, uncancelled."""
-        deadline = self._clock.now() + timeout
+        """Poll until terminal (or started, given *queued*) or *timeout*; *cancel_event* raises."""
+        started = self._clock.now()
+        deadline = started + timeout
         while True:
             if cancel_event is not None and cancel_event.is_set():
                 raise SlurmError.cancelled(handle.job_id)
-            status = self.poll(handle)
-            if status.terminal:
-                return SlurmJobWaitResult(handle=handle, status=status, timed_out=False)
+            self._validate_handle(handle)
+            status = (reading := self.inspect_job(handle.job_id)).status
+            if queued is not None and status == SlurmJobStatus.PENDING:
+                queued(reading, self._clock.now() - started)
+            done = status.terminal or (queued is not None and status != SlurmJobStatus.PENDING)
             remaining = deadline - self._clock.now()
-            if remaining <= 0:
-                return SlurmJobWaitResult(handle=handle, status=status, timed_out=True)
+            if done or remaining <= 0:
+                waited = self._clock.now() - started
+                return SlurmJobWaitResult(
+                    handle=handle,
+                    status=status,
+                    timed_out=not done,
+                    waited_seconds=waited,
+                    ended=reading.life.outcome if isinstance(reading.life, Ended) else None,
+                )
             seconds = min(self._config.poll_interval_seconds, remaining)
             # Bounded by *seconds*; the event's setter is the cancel path of the
             # caller that owns the wait, so no pause here is unbounded.
@@ -1257,10 +1307,17 @@ class SlurmJobRunner:
         encoded = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
-    def _submit(self, base: PurePosixPath, script: PurePosixPath, output: PurePosixPath) -> str:
+    def _submit(
+        self,
+        base: PurePosixPath,
+        script: PurePosixPath,
+        output: PurePosixPath,
+        resources: SlurmJobResources,
+    ) -> str:
+        minimal = resources is SlurmJobResources.MINIMAL
         argv = (
             *self._config.sbatch_command,
-            *self._config.sbatch_arguments,
+            *(minimal_job(self._config).arguments if minimal else self._config.sbatch_arguments),
             f"--job-name={operation_job_name(self._config, base.name)}",
             f"--output={output.as_posix()}",
             f"--error={output.as_posix()}",
@@ -1269,11 +1326,21 @@ class SlurmJobRunner:
             "--no-requeue",
             script.as_posix(),
         )
-        result = self._transport.exec(f"cd {shlex.quote(base.as_posix())} && {shlex.join(argv)}")
+        try:
+            result = self._transport.exec(
+                f"cd {shlex.quote(base.as_posix())} && {shlex.join(argv)}"
+            )
+        except SlurmTransportFailedError as error:
+            raise SlurmSbatchFailedError.from_transport(error) from error
         match = _JOB_ID.search(result.stdout)
         if match is None:
             raise SlurmError.missing_job_id()
         return match.group(1)
+
+
+def _ignore_reading(reading: SchedulerReading, waited_seconds: float) -> None:
+    """Hear a pending reading and do nothing: the caller only waits for the start."""
+    del reading, waited_seconds
 
 
 class _Transport(Protocol):
@@ -1294,6 +1361,9 @@ class _Transport(Protocol):
 
 
 class _ProcessTransport:
+    # Describes a program that exited nonzero; a transport may refine it.
+    _failed = staticmethod(SlurmError.transport_failed)
+
     def __init__(self, processes: Processes, timeout: float) -> None:
         self._processes = processes
         self._timeout = timeout
@@ -1321,8 +1391,8 @@ class _ProcessTransport:
         match run:
             case ProcessOutcome(returncode=0, stdout=stdout, stderr=stderr):
                 return _TransportResponse(stdout=stdout.decode(), stderr=stderr.decode())
-            case ProcessOutcome(returncode=returncode):
-                raise SlurmError.transport_failed(operation, returncode)
+            case ProcessOutcome(returncode=returncode, stderr=stderr):
+                raise self._failed(operation, returncode, stderr.decode(errors="replace"))
             case ProcessTimedOut():
                 raise SlurmError.transport_timed_out(operation)
             case ProcessGroupUnreaped(detail=detail):
@@ -1391,6 +1461,8 @@ class _RsyncTransport(_ProcessTransport):
 
 
 class _SshTransport(_RsyncTransport):
+    _failed = staticmethod(SlurmError.ssh_transport_failed)
+
     def __init__(
         self,
         config: SlurmSshTransport,
@@ -1400,7 +1472,7 @@ class _SshTransport(_RsyncTransport):
     ) -> None:
         super().__init__(
             config.rsync_command,
-            remote_shell=("-e", shlex.join(config.ssh_command)),
+            remote_shell=("-e", shlex.join(config.ssh_argv)),
             destination=f"{config.host}:",
             processes=processes,
             timeout=timeout,
@@ -1409,37 +1481,9 @@ class _SshTransport(_RsyncTransport):
 
     def exec(self, command: str) -> _TransportResponse:
         return self._run(
-            (*self._config.ssh_command, "--", self._config.host, command),
+            (*self._config.ssh_argv, "--", self._config.host, command),
             operation="exec",
         )
-
-
-_LOGIN_ENVIRONMENT_NAMES = frozenset(
-    {"HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "TZ", "TMPDIR"}
-)
-_LOGIN_ENVIRONMENT_PREFIX = "LC_"
-
-
-def login_environment(host: Mapping[str, str]) -> dict[str, str]:
-    """Return the part of *host* that a login session would also have.
-
-    The local transport runs its programs in this environment and nothing else,
-    which is what the SSH transport gets from sshd: a fresh one. A host process
-    can hold credentials, and inside a Slurm allocation or batch job it holds
-    ``SLURM_*`` variables that would redirect the gate's own ``sbatch`` to the
-    wrong job. The names kept are the identity and locale ones a login sets
-    (``HOME USER LOGNAME SHELL PATH LANG LC_* TZ``) and ``TMPDIR``; every other
-    name, ``SLURM_*``, ``SBATCH_*``, ``SALLOC_*`` and ``SRUN_*`` included, is dropped.
-    """
-    return {
-        name: value
-        for name, value in host.items()
-        if name in _LOGIN_ENVIRONMENT_NAMES
-        or (
-            name.startswith(_LOGIN_ENVIRONMENT_PREFIX)
-            and len(name) > len(_LOGIN_ENVIRONMENT_PREFIX)
-        )
-    }
 
 
 class _LocalTransport(_RsyncTransport):
@@ -1544,7 +1588,7 @@ class _ConnectorTransport(_ProcessTransport):
         if isinstance(response, Unreadable):
             raise SlurmError.invalid_connector_response(operation)
         if response.returncode != 0:
-            raise SlurmError.transport_failed(operation, response.returncode)
+            raise SlurmError.transport_failed(operation, response.returncode, response.stderr)
         return _TransportResponse(stdout=response.stdout, stderr=response.stderr)
 
 
@@ -1786,8 +1830,13 @@ def _job_script(request: _JobScriptRequest) -> str:
     service = request.service
     phase_timing_root = request.phase_timing_root
     lines = ["#!/usr/bin/env bash", "set -uo pipefail", f"cd {shlex.quote(workspace.as_posix())}"]
+    # A sshd-built bash that sees these re-reads the login rc over the setup's exports (README).
+    lines.append("unset SSH_CLIENT SSH2_CLIENT")
     if phase_timing_root is not None:
         lines.append(f"mkdir -p {shlex.quote((workspace / phase_timing_root).as_posix())}")
+        # The node the job ran on, for whoever reads the result (best effort: never fails the job).
+        node_path = workspace / phase_timing_root / NODE_NAME
+        lines.append(f"hostname -s > {shlex.quote(node_path.as_posix())} 2>/dev/null || true")
     if setup_script:
         if phase_timing_root is not None:
             lines.append("setup_started=$SECONDS")
@@ -1834,7 +1883,7 @@ def _job_script(request: _JobScriptRequest) -> str:
         ]
     )
     if service is not None and phase_timing_root is not None:
-        tail_path = workspace / phase_timing_root / _SERVICE_LOG_TAIL
+        tail_path = workspace / phase_timing_root / SERVICE_LOG_TAIL
         lines.append(
             f"tail -n {_SERVICE_LOG_TAIL_LINES} .vs-slurm-service.log"
             f" > {shlex.quote(tail_path.as_posix())} 2>/dev/null"
@@ -1886,36 +1935,6 @@ def _service_script(
         f" job_status={SERVICE_NOT_READY_EXIT_CODE}; else"
     )
     return lines
-
-
-def _distinct_tail(path: Path) -> str:
-    """Return the service log's last lines, keeping only the latest copy of a repeated line.
-
-    Servers often repeat one warning hundreds of times; without this the tail
-    would show only that warning and hide the server's own progress lines.
-    """
-    if not path.is_file():
-        return ""
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    seen: set[str] = set()
-    kept: list[str] = []
-    size = 0
-    for raw_line in reversed(lines):
-        line = (
-            raw_line
-            if len(raw_line) <= _SERVICE_LOG_LINE_CHARS
-            else raw_line[:_SERVICE_LOG_LINE_CHARS] + " [line truncated]"
-        )
-        if line in seen:
-            continue
-        size += len(line) + 1
-        if size > _SERVICE_LOG_TAIL_CHARS:
-            break
-        seen.add(line)
-        kept.append(line)
-        if len(kept) == _SERVICE_LOG_REPORTED_LINES:
-            break
-    return "\n".join(reversed(kept))
 
 
 def _queue_reading(life: JobLife, queue: QueueRow | NotInQueue) -> SchedulerReading:

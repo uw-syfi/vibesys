@@ -1,0 +1,217 @@
+syntax = "proto3";
+
+package vibesys.store.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/descriptor.proto";
+import "vibesys/store/v1/common.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
+
+// Runtime-owned startup vocabulary, independent of the strategy.
+enum StartupStage {
+  STARTUP_STAGE_UNSPECIFIED = 0;
+  STARTUP_STAGE_PROBING_WORKSPACE = 1;
+  STARTUP_STAGE_BUILDING_IMAGE = 2;
+  STARTUP_STAGE_BUILDING_TOOLS = 3;
+  STARTUP_STAGE_STARTING_CONTAINER = 4;
+}
+
+enum WaitCondition {
+  WAIT_CONDITION_UNSPECIFIED = 0;
+  WAIT_CONDITION_QUEUED = 1;
+  WAIT_CONDITION_RUNNING = 2;
+}
+
+enum StageState {
+  STAGE_STATE_UNSPECIFIED = 0;
+  STAGE_STATE_RUNNING = 1;
+  STAGE_STATE_WAITING = 2;
+  STAGE_STATE_FINISHED = 3;
+}
+
+enum DrainGoal {
+  DRAIN_GOAL_UNSPECIFIED = 0;
+  DRAIN_GOAL_PARK = 1;
+  DRAIN_GOAL_STOP = 2;
+}
+
+enum Outcome {
+  OUTCOME_UNSPECIFIED = 0;
+  OUTCOME_FINISHED = 1 [(outcome_presentation) = {
+    status: "completed"
+    word: "Finished"
+  }];
+  OUTCOME_FAILED = 2 [(outcome_presentation) = {
+    status: "failed"
+    word: "Failed"
+  }];
+  OUTCOME_STOPPED = 3 [(outcome_presentation) = {
+    status: "stopped"
+    word: "Stopped"
+  }];
+  OUTCOME_INTERRUPTED = 4 [(outcome_presentation) = {
+    status: "stopped"
+    word: "Stopped"
+  }];
+}
+
+enum RunFailureKind {
+  RUN_FAILURE_KIND_UNSPECIFIED = 0;
+  RUN_FAILURE_KIND_BUDGET_EXHAUSTED = 1;
+  RUN_FAILURE_KIND_DEADLINE = 2;
+  RUN_FAILURE_KIND_NO_RESULT = 3;
+  RUN_FAILURE_KIND_ENVIRONMENT_UNAVAILABLE = 4;
+  RUN_FAILURE_KIND_CONFIGURATION = 5;
+}
+
+// Starting, running with an optional hold, draining, parked, or ended.
+message Lifecycle {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+    Starting starting = 1;
+    Running running = 2;
+    Draining draining = 3;
+    Parked parked = 4;
+    Ended ended = 5;
+  }
+}
+
+message Starting {
+  option (buf.validate.message).cel = {
+    id: "starting.condition"
+    message: "condition is present exactly when state is waiting"
+    expression: "has(this.condition) == (this.state == 2)"
+  };
+  option (buf.validate.message).cel = {
+    id: "starting.elapsed_seconds"
+    message: "elapsed_seconds is absent exactly when state is running"
+    expression: "has(this.elapsed_seconds) == (this.state != 1)"
+  };
+  option (buf.validate.message).cel = {
+    id: "starting.progress"
+    message: "progress is present only when state is running"
+    expression: "!has(this.progress) || this.state == 1"
+  };
+  StartupStage stage = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  StageState state = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional Progress progress = 3;
+  optional WaitCondition condition = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional double elapsed_seconds = 5 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+}
+
+message Running {
+  optional Hold hold = 1;
+}
+
+message Hold {
+  oneof reason {
+    option (buf.validate.oneof).required = true;
+    OperatorHold operator = 1;
+    string capacity_span = 2 [(buf.validate.field).string = {
+      min_len: 1
+      max_bytes: 65536
+    }];
+  }
+}
+message OperatorHold {}
+message Parked {}
+
+message Draining {
+  DrainGoal goal = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message Ended {
+  option (buf.validate.message).cel = {
+    id: "ended.failure"
+    message: "failure is present exactly when outcome is failed"
+    expression: "has(this.failure) == (this.outcome == 2)"
+  };
+  option (buf.validate.message).cel = {
+    id: "ended.signal"
+    message: "signal is positive and only present for interrupted"
+    expression: "!has(this.signal) || (this.outcome == 4 && this.signal > 0)"
+  };
+  option (buf.validate.message).cel = {
+    id: "ended.interruption_reason"
+    message: "interruption_reason is only present for interrupted"
+    expression: "!has(this.interruption_reason) || this.outcome == 4"
+  };
+  Outcome outcome = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  reserved 2, 5;
+  reserved "reason", "uncompared";
+  string summary = 3 [(buf.validate.field).string.max_bytes = 65536];
+  bool resumable = 4;
+  optional RunFailure failure = 6;
+  // POSIX signal number when the process caught its interruption.
+  optional int32 signal = 7;
+  optional string interruption_reason = 8 [(buf.validate.field).string.max_bytes = 65536];
+  // Strategy ending data, described by EpochStarted.descriptors.
+  optional google.protobuf.Any detail = 9;
+  // Core-owned presentation shared by the card, sidebar and run page.
+  RunOutcomePresentation presentation = 10;
+}
+
+message RunFailure {
+  RunFailureKind kind = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string reason = 2 [(buf.validate.field).string.max_bytes = 65536];
+  reserved 3 to 6;
+  reserved "workstreams_started", "workstream_budget", "candidates_kept", "adopted_candidate";
+  optional string code = 7 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional string stage = 8 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional string message = 9 [(buf.validate.field).string.max_bytes = 65536];
+  optional int32 exit_code = 10;
+  // Failure-specific strategy data, described by EpochStarted.descriptors.
+  optional google.protobuf.Any detail = 11;
+}
+
+message RunOutcomePresentation {
+  string status = 1 [(buf.validate.field).string = {
+    max_bytes: 65536
+    in: [
+      "completed",
+      "failed",
+      "stopped"
+    ]
+  }];
+  string word = 2 [(buf.validate.field).string = {
+    max_bytes: 65536
+    in: [
+      "Finished",
+      "Failed",
+      "Stopped"
+    ]
+  }];
+}
+
+extend google.protobuf.EnumValueOptions {
+  RunOutcomePresentation outcome_presentation = 50001;
+}

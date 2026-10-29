@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import io
 import json
 import math
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from hypothesis import given
@@ -17,6 +18,7 @@ from vs_sandbox.api.slurm import (
     AgentGpuLauncher,
     AgentGpuRequestError,
     GpuCommand,
+    GpuJobOutcome,
     GpuJobRequest,
     choose_partition,
     parse_partition_limits,
@@ -24,13 +26,16 @@ from vs_sandbox.api.slurm import (
 from vs_sim.api import ProbeResult
 from vs_sim.api.testing import (
     FakePipedProcessLauncher,
+    RefusingThreads,
     ScriptedPipedProcess,
     ScriptedProbe,
     SimThreads,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
+
+    from vs_sim.api import Event, Threads, Worker
 
 # Recorded `slurm-windows --json` output: 1-4 GPUs start now on main for up
 # to 57 minutes; 5-8 GPUs wait on both main and priority.
@@ -74,11 +79,188 @@ WINDOWS: Mapping[str, object] = {
         },
     ],
 }
+_RELAY_FAILURE = "srun output relay failed"
+
+
+class _ReadFailurePipe(io.TextIOBase):
+    def read(self, size: int | None = -1, /) -> str:
+        del size
+        raise OSError(_RELAY_FAILURE)
+
+
+class _ReadFailureProcess(ScriptedPipedProcess):
+    """A submitted process whose local output relay fails before it settles."""
+
+    @property
+    def stdout(self) -> io.TextIOBase:
+        return _ReadFailurePipe()
+
+
+class _WaitFailureEvent:
+    """Cancellation signal whose wait boundary fails inside the watcher."""
+
+    def is_set(self) -> bool:
+        return False
+
+    def set(self) -> None:
+        pass
+
+    def clear(self) -> None:
+        pass
+
+    def wait(self, timeout: float | None = None) -> bool:
+        del timeout
+        raise OSError
+
+
+class _SetFailureEvent:
+    """An event whose bookkeeping fails after the watcher already failed."""
+
+    def __init__(self, delegate: Event) -> None:
+        self._delegate = delegate
+
+    def is_set(self) -> bool:
+        return self._delegate.is_set()
+
+    def set(self) -> None:
+        raise _RecordCancellationError
+
+    def clear(self) -> None:
+        self._delegate.clear()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        return self._delegate.wait(timeout)
+
+
+class _EventSetFailureThreads:
+    """Delegate scheduling while faulting one launcher event and observing its watcher."""
+
+    def __init__(self, delegate: SimThreads, *, failing_event: int) -> None:
+        self._delegate = delegate
+        self._failing_event = failing_event
+        self._events = 0
+        self._watcher: Worker | None = None
+
+    def event(self) -> Event:
+        self._events += 1
+        event = self._delegate.event()
+        return _SetFailureEvent(event) if self._events == self._failing_event else event
+
+    def spawn(self, target: Callable[[], object], *, name: str, daemon: bool = True) -> Worker:
+        worker = self._delegate.spawn(target, name=name, daemon=daemon)
+        if name == "vibesys-gpu-cancel":
+            self._watcher = worker
+        return worker
+
+    @property
+    def watcher_alive(self) -> bool:
+        """Whether the launcher's cancellation watcher still owns a live thread."""
+        return self._watcher is not None and self._watcher.is_alive()
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._delegate, name)
+
+
+class _WatcherJoinError(OSError):
+    """Injected loss of the cancellation worker's settlement acknowledgement."""
+
+
+class _DelayedWatcherError(OSError):
+    """Injected failure from an old watcher after a replacement has started."""
+
+
+class _UnjoinedWatcher:
+    """A worker whose owner cannot join or prove that it stopped."""
+
+    def __init__(self, delegate: Worker, fault: str) -> None:
+        self._delegate = delegate
+        self._fault = fault
+
+    @property
+    def name(self) -> str:
+        return self._delegate.name
+
+    def is_alive(self) -> bool:
+        return True
+
+    def join(self, timeout: float | None = None) -> None:
+        del timeout
+        if self._fault == "join":
+            raise _WatcherJoinError
+
+
+class _WatcherJoinFailureThreads:
+    def __init__(self, delegate: SimThreads, fault: str) -> None:
+        self._delegate = delegate
+        self._fault = fault
+
+    def spawn(self, target: Callable[[], object], *, name: str, daemon: bool = True) -> Worker:
+        worker = self._delegate.spawn(target, name=name, daemon=daemon)
+        return (
+            cast("Worker", _UnjoinedWatcher(worker, self._fault))
+            if name == "vibesys-gpu-cancel"
+            else worker
+        )
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._delegate, name)
+
+
+class _FirstWatcherJoinFailureThreads(_WatcherJoinFailureThreads):
+    """Lose ownership proof only for the first stable-name job's watcher."""
+
+    def __init__(self, delegate: SimThreads, fault: str) -> None:
+        super().__init__(delegate, fault)
+        self._watchers = 0
+
+    def spawn(self, target: Callable[[], object], *, name: str, daemon: bool = True) -> Worker:
+        worker = self._delegate.spawn(target, name=name, daemon=daemon)
+        if name != "vibesys-gpu-cancel":
+            return worker
+        self._watchers += 1
+        return (
+            cast("Worker", _UnjoinedWatcher(worker, self._fault)) if self._watchers == 1 else worker
+        )
+
+
+class _DelayedWaitFailureEvent:
+    """Fail one old watcher only after a replacement job has started."""
+
+    def __init__(self, threads: SimThreads) -> None:
+        self.entered = threads.event()
+        self.release = threads.event()
+
+    def is_set(self) -> bool:
+        return False
+
+    def set(self) -> None:
+        pass
+
+    def clear(self) -> None:
+        pass
+
+    def wait(self, timeout: float | None = None) -> bool:
+        del timeout
+        self.entered.set()
+        assert self.release.wait(100), "the test never released the old cancellation watcher"
+        raise _DelayedWatcherError
+
+
+class _RecordCancellationError(RuntimeError):
+    """Injected failure while recording a watcher-requested stop."""
 
 
 # Recorded `sinfo --noheader --format="%P %l"`: main is the default partition.
 SINFO = "main* 2:00:00\npriority 30:00\n"
 LIMITS = parse_partition_limits(SINFO)
+
+
+def _scheduler_answer(argv: tuple[str, ...], *, queued: str = "") -> ProbeResult:
+    """Answer partition discovery and optionally report the launched job queued."""
+    command = argv[-1]
+    if command.startswith("sinfo"):
+        return ProbeResult(0, SINFO)
+    return ProbeResult(0, queued if "squeue" in command else "")
 
 
 def _config(**updates: object) -> AgentGpuConfig:
@@ -92,7 +274,7 @@ def _config(**updates: object) -> AgentGpuConfig:
 
 
 def _simulated(
-    threads: SimThreads, process: ScriptedPipedProcess
+    threads: Threads, process: ScriptedPipedProcess
 ) -> tuple[AgentGpuLauncher, FakePipedProcessLauncher, ScriptedProbe]:
     """A launcher whose ``srun`` is *process* and whose ``scancel`` and ``squeue`` succeed."""
     processes = FakePipedProcessLauncher(lambda _start: process)
@@ -243,7 +425,7 @@ class TestLauncher:
         launcher, processes, _probe = _simulated(threads, process)
         output = bytearray()
 
-        status = threads.run(
+        outcome = threads.run(
             lambda: launcher.run(
                 GpuJobRequest(gpus=2, time_minutes=7),
                 GpuCommand(argv=("work",), cwd=Path("workspace"), env={}),
@@ -252,7 +434,8 @@ class TestLauncher:
             )
         )
 
-        assert status == 3
+        assert outcome.exit_code == 3
+        assert outcome.termination_confirmed
         assert output.endswith(b"from-job\n")
         (start,) = processes.started
         assert start.argv[0] == "slurm-shell"
@@ -279,7 +462,7 @@ class TestLauncher:
             threads=threads,
         )
 
-        status = threads.run(
+        outcome = threads.run(
             lambda: launcher.run(
                 GpuJobRequest(gpus=1, time_minutes=minutes),
                 GpuCommand(argv=("work",), cwd=Path("workspace"), env={}),
@@ -288,7 +471,9 @@ class TestLauncher:
             )
         )
 
-        assert status == 0
+        assert outcome.exit_code == 0
+        assert outcome.termination_confirmed
+        assert outcome.failure is None
         (start,) = processes.started
         assert "--partition=main" in start.argv[-1]
 
@@ -298,7 +483,7 @@ class TestLauncher:
         launcher, processes, _probe = _simulated(threads, process)
         output = bytearray()
 
-        status = threads.run(
+        outcome = threads.run(
             lambda: launcher.run(
                 GpuJobRequest(gpus=1, time_minutes=121),
                 GpuCommand(argv=("work",), cwd=Path("workspace"), env={}),
@@ -307,10 +492,287 @@ class TestLauncher:
             )
         )
 
-        assert status == 2
+        assert outcome.exit_code == 2
+        assert outcome.termination_confirmed
+        assert outcome.failure is None
         assert processes.started == []
         assert b"rejected before srun" in output
         assert b"--time 121" in output
+
+    def test_a_refused_cancellation_watcher_start_settles_and_confirms_the_job(self) -> None:
+        simulator = SimThreads()
+        threads = RefusingThreads(simulator, {"vibesys-gpu-cancel": 1})
+        process = ScriptedPipedProcess(simulator, merge_stderr=True)
+        launcher, _processes, probe = _simulated(threads, process)
+
+        outcome = simulator.run(
+            lambda: launcher.run(
+                GpuJobRequest(gpus=1, time_minutes=5),
+                GpuCommand(argv=("work",), cwd=Path("workspace"), env={}),
+                write=bytearray().extend,
+                cancel=threads.event(),
+            )
+        )
+
+        assert outcome.termination_confirmed
+        assert outcome.failure is not None
+        assert process.signals == ["terminate", "kill"]
+        commands = [argv[-1] for argv, _timeout in probe.calls]
+        assert any(command.startswith("scancel") for command in commands)
+        assert any(command.startswith("squeue") for command in commands)
+
+    def test_a_cancellation_watcher_boundary_failure_interrupts_and_settles(self) -> None:
+        threads = SimThreads()
+        process = ScriptedPipedProcess(threads, merge_stderr=True)
+        launcher, _processes, probe = _simulated(threads, process)
+
+        outcome = threads.run(
+            lambda: launcher.run(
+                GpuJobRequest(gpus=1, time_minutes=5),
+                GpuCommand(argv=("work",), cwd=Path("workspace"), env={}),
+                write=bytearray().extend,
+                cancel=_WaitFailureEvent(),
+            )
+        )
+
+        assert outcome.termination_confirmed
+        assert isinstance(outcome.failure, OSError)
+        assert "terminate" in process.signals
+        assert "kill" in process.signals
+        commands = [argv[-1] for argv, _timeout in probe.calls]
+        assert any(command.startswith("scancel") for command in commands)
+        assert any(command.startswith("squeue") for command in commands)
+
+    def test_a_second_event_fault_cannot_hide_the_watcher_failure_or_deadlock(self) -> None:
+        """Regression: ``cancelled.set`` raised before the relay was interrupted."""
+        simulator = SimThreads()
+        faulting = _EventSetFailureThreads(simulator, failing_event=2)
+        process = ScriptedPipedProcess(simulator, merge_stderr=True)
+        launcher, _processes, probe = _simulated(cast("Threads", faulting), process)
+
+        outcome = simulator.run(
+            lambda: launcher.run(
+                GpuJobRequest(gpus=1, time_minutes=5),
+                GpuCommand(argv=("work",), cwd=Path("workspace"), env={}),
+                write=bytearray().extend,
+                cancel=_WaitFailureEvent(),
+            )
+        )
+
+        assert outcome.termination_confirmed
+        assert isinstance(outcome.failure, OSError)
+        assert "terminate" in process.signals
+        assert "kill" in process.signals
+        commands = [argv[-1] for argv, _timeout in probe.calls]
+        assert any(command.startswith("scancel") for command in commands)
+        assert any(command.startswith("squeue") for command in commands)
+
+    def test_finished_publication_failure_still_joins_the_watcher_before_return(self) -> None:
+        """A failed wakeup cannot leave the cancellation worker behind after settlement."""
+        simulator = SimThreads()
+        faulting = _EventSetFailureThreads(simulator, failing_event=1)
+        process = ScriptedPipedProcess(simulator, merge_stderr=True)
+        process.exit(0)
+        launcher, _processes, probe = _simulated(cast("Threads", faulting), process)
+
+        outcome, watcher_alive_at_return = simulator.run(
+            lambda: (
+                launcher.run(
+                    GpuJobRequest(gpus=1, time_minutes=5),
+                    GpuCommand(argv=("work",), cwd=Path("workspace"), env={}),
+                    write=bytearray().extend,
+                    cancel=simulator.event(),
+                ),
+                faulting.watcher_alive,
+            )
+        )
+
+        assert outcome.termination_confirmed
+        assert isinstance(outcome.failure, _RecordCancellationError)
+        assert not watcher_alive_at_return
+        commands = [argv[-1] for argv, _timeout in probe.calls]
+        assert any(command.startswith("scancel") for command in commands)
+        assert any(command.startswith("squeue") for command in commands)
+
+    @pytest.mark.parametrize("queued", ["", "possibly-submitted\n"])
+    def test_process_start_failure_retains_identity_until_recovery_fences_absence(
+        self, queued: str
+    ) -> None:
+        """The live start path stays unknown; explicit recovery applies the queue fence."""
+        simulator = SimThreads()
+        reached_start: list[bool] = []
+
+        def fail_after_start_effect(_request: object) -> ScriptedPipedProcess:
+            reached_start.append(True)
+            raise OSError
+
+        probe = ScriptedProbe(lambda argv: _scheduler_answer(argv, queued=queued))
+        launcher = AgentGpuLauncher(
+            _config(),
+            ("slurm-shell",),
+            probe=probe,
+            processes=FakePipedProcessLauncher(fail_after_start_effect),
+            threads=simulator,
+        )
+        job_name = "vibesys-test-capture"
+
+        outcome = simulator.run(
+            lambda: launcher.run(
+                GpuJobRequest(gpus=1, time_minutes=5),
+                GpuCommand(
+                    argv=("work",),
+                    cwd=Path("workspace"),
+                    env={},
+                    job_name=job_name,
+                ),
+                write=bytearray().extend,
+                cancel=simulator.event(),
+            )
+        )
+
+        assert reached_start == [True]
+        assert isinstance(outcome.failure, OSError)
+        assert not outcome.termination_confirmed
+        commands = [argv[-1] for argv, _timeout in probe.calls]
+        assert f"scancel --name={job_name} --me" in commands
+        assert not any(command.startswith("squeue") for command in commands)
+
+        assert simulator.run(lambda: launcher.reconcile(job_name)) is (not queued)
+
+    def test_empty_queue_before_delayed_submission_does_not_confirm_ambiguous_start(
+        self,
+    ) -> None:
+        """One empty squeue reply is not a fence against a child that submits later."""
+        simulator = SimThreads()
+        observations = iter(("", "late-job\n"))
+
+        def answer(argv: tuple[str, ...]) -> ProbeResult:
+            if argv[-1].startswith("sinfo"):
+                return ProbeResult(0, SINFO)
+            if "squeue" not in argv[-1]:
+                return ProbeResult(0, "")
+            return ProbeResult(0, next(observations, "late-job\n"))
+
+        launcher = AgentGpuLauncher(
+            _config(),
+            ("slurm-shell",),
+            probe=ScriptedProbe(answer),
+            processes=FakePipedProcessLauncher(lambda _request: (_ for _ in ()).throw(OSError())),
+            threads=simulator,
+        )
+
+        outcome = simulator.run(
+            lambda: launcher.run(
+                GpuJobRequest(gpus=1, time_minutes=5),
+                GpuCommand(
+                    argv=("work",),
+                    cwd=Path("workspace"),
+                    env={},
+                    job_name="vibesys-test-capture",
+                ),
+                write=bytearray().extend,
+                cancel=simulator.event(),
+            )
+        )
+
+        assert not outcome.termination_confirmed
+        assert not simulator.run(lambda: launcher.reconcile("vibesys-test-capture"))
+
+    @pytest.mark.parametrize("fault", ["join", "still-alive"])
+    def test_unjoined_cancellation_watcher_keeps_the_stable_job_identity_unconfirmed(
+        self, fault: str
+    ) -> None:
+        simulator = SimThreads()
+        threads = cast("Threads", _WatcherJoinFailureThreads(simulator, fault))
+        process = ScriptedPipedProcess(simulator, merge_stderr=True)
+        process.exit(0)
+        launcher, _processes, _probe = _simulated(threads, process)
+
+        outcome = simulator.run(
+            lambda: launcher.run(
+                GpuJobRequest(gpus=1, time_minutes=5),
+                GpuCommand(
+                    argv=("work",),
+                    cwd=Path("workspace"),
+                    env={},
+                    job_name="vibesys-test-capture",
+                ),
+                write=bytearray().extend,
+                cancel=simulator.event(),
+            )
+        )
+
+        assert not outcome.termination_confirmed
+        assert outcome.failure is not None
+        if fault == "join":
+            assert isinstance(outcome.failure, _WatcherJoinError)
+
+    @pytest.mark.parametrize("fault", ["join", "still-alive"])
+    def test_unjoined_old_watcher_cannot_cancel_a_later_stable_name_job(self, fault: str) -> None:
+        simulator = SimThreads()
+        threads = cast("Threads", _FirstWatcherJoinFailureThreads(simulator, fault))
+        first = ScriptedPipedProcess(simulator, merge_stderr=True)
+        replacement = ScriptedPipedProcess(simulator, merge_stderr=True)
+        started_replacement = simulator.event()
+        processes_to_start = [first, replacement]
+
+        def start(_request: object) -> ScriptedPipedProcess:
+            process = processes_to_start.pop(0)
+            if process is replacement:
+                started_replacement.set()
+            return process
+
+        processes = FakePipedProcessLauncher(start)
+        probe = ScriptedProbe(_scheduler_answer)
+        launcher = AgentGpuLauncher(
+            _config(), ("slurm-shell",), probe=probe, processes=processes, threads=threads
+        )
+        delayed_failure = _DelayedWaitFailureEvent(simulator)
+        job_name = "vibesys-test-capture"
+
+        def run_job(cancel: Event) -> GpuJobOutcome:
+            return launcher.run(
+                GpuJobRequest(gpus=1, time_minutes=5),
+                GpuCommand(argv=("work",), cwd=Path("workspace"), env={}, job_name=job_name),
+                write=bytearray().extend,
+                cancel=cancel,
+            )
+
+        def scenario() -> tuple[GpuJobOutcome, int, int, GpuJobOutcome]:
+            def end_first_after_watcher_waits() -> None:
+                assert delayed_failure.entered.wait(100), "the old watcher did not start"
+                first.exit(0)
+
+            finisher = threads.spawn(
+                end_first_after_watcher_waits,
+                name="finish-old-capture",
+                daemon=False,
+            )
+            old = run_job(cast("Event", delayed_failure))
+            finisher.join(100)
+            assert not finisher.is_alive()
+            assert delayed_failure.entered.is_set()
+            before = sum("scancel" in argv[-1] for argv, _timeout in probe.calls)
+            replacement_outcome: list[GpuJobOutcome] = []
+            replacement_worker = threads.spawn(
+                lambda: replacement_outcome.append(run_job(simulator.event())),
+                name="replacement-capture",
+                daemon=False,
+            )
+            assert started_replacement.wait(100), "the replacement capture did not start"
+            delayed_failure.release.set()
+            simulator.sleep(1)
+            after = sum("scancel" in argv[-1] for argv, _timeout in probe.calls)
+            replacement.exit(0)
+            replacement_worker.join(100)
+            assert not replacement_worker.is_alive()
+            return old, before, after, replacement_outcome[0]
+
+        old, before, after, later = simulator.run(scenario)
+
+        assert not old.termination_confirmed
+        assert before == after
+        assert later.termination_confirmed
 
     def test_cancel_scancels_the_job_by_its_unique_name(self) -> None:
         threads = SimThreads()
@@ -335,11 +797,135 @@ class TestLauncher:
         commands = [argv[-1] for argv, _timeout in probe.calls]
         scancels = [line for line in commands if line.startswith("scancel")]
         assert scancels == [f"scancel --name={job_name} --me"]
-        assert [line for line in commands if line.startswith("squeue")] == [
+        assert {line for line in commands if line.startswith("squeue")} == {
             f"squeue --name={job_name} --me --noheader --format=%i"
-        ]
+        }
         assert process.signals[0] == "terminate"
         assert b"cancel unconfirmed" not in output
+
+    def test_cancel_reports_when_the_named_job_cannot_be_proved_gone(self) -> None:
+        threads = SimThreads()
+        process = ScriptedPipedProcess(threads, merge_stderr=True)
+        probe = ScriptedProbe(lambda argv: _scheduler_answer(argv, queued="still-running\n"))
+        launcher = AgentGpuLauncher(
+            _config(),
+            ("slurm-shell",),
+            probe=probe,
+            processes=FakePipedProcessLauncher(lambda _start: process),
+            threads=threads,
+        )
+        cancel = threads.event()
+        cancel.set()
+        output = bytearray()
+
+        outcome = threads.run(
+            lambda: launcher.run(
+                GpuJobRequest(gpus=1, time_minutes=5),
+                GpuCommand(argv=("work",), cwd=Path("workspace"), env={}),
+                write=output.extend,
+                cancel=cancel,
+            )
+        )
+
+        assert not outcome.termination_confirmed
+        assert b"cancel unconfirmed" in output
+
+    def test_abnormal_wrapper_exit_is_unconfirmed_while_the_named_job_remains(self) -> None:
+        threads = SimThreads()
+        process = ScriptedPipedProcess(threads, merge_stderr=True)
+        process.exit(255)
+        probe = ScriptedProbe(lambda argv: _scheduler_answer(argv, queued="still-running\n"))
+        launcher = AgentGpuLauncher(
+            _config(),
+            ("slurm-shell",),
+            probe=probe,
+            processes=FakePipedProcessLauncher(lambda _start: process),
+            threads=threads,
+        )
+
+        outcome = threads.run(
+            lambda: launcher.run(
+                GpuJobRequest(gpus=1, time_minutes=5),
+                GpuCommand(argv=("work",), cwd=Path("workspace"), env={}),
+                write=bytearray().extend,
+                cancel=threads.event(),
+            )
+        )
+
+        assert outcome.exit_code == 255
+        assert not outcome.termination_confirmed
+        assert outcome.failure is None
+        controller = [
+            argv[-1] for argv, _timeout in probe.calls if argv[-1].startswith(("scancel", "squeue"))
+        ]
+        assert controller[0].startswith("scancel")
+        assert all(command.startswith("squeue") for command in controller[1:])
+
+    def test_workload_failure_is_settled_after_scheduler_absence_proof(self) -> None:
+        threads = SimThreads()
+        process = ScriptedPipedProcess(threads, merge_stderr=True)
+        process.exit(7)
+        probe = ScriptedProbe(_scheduler_answer)
+        launcher = AgentGpuLauncher(
+            _config(),
+            ("slurm-shell",),
+            probe=probe,
+            processes=FakePipedProcessLauncher(lambda _start: process),
+            threads=threads,
+        )
+
+        outcome = threads.run(
+            lambda: launcher.run(
+                GpuJobRequest(gpus=1, time_minutes=5),
+                GpuCommand(argv=("work",), cwd=Path("workspace"), env={}),
+                write=bytearray().extend,
+                cancel=threads.event(),
+            )
+        )
+
+        controller = [
+            argv[-1] for argv, _timeout in probe.calls if argv[-1].startswith(("scancel", "squeue"))
+        ]
+        assert outcome.exit_code == 7
+        assert outcome.termination_confirmed
+        assert outcome.failure is None
+        assert controller[0].startswith("scancel")
+        assert len(controller) == 7
+        assert all(command.startswith("squeue") for command in controller[1:])
+
+    @pytest.mark.parametrize("queued", ["", "still-running\n"])
+    def test_a_post_submission_relay_failure_stops_and_confirms_the_named_job(
+        self, queued: str
+    ) -> None:
+        confirmed = not queued
+        threads = SimThreads()
+        process = _ReadFailureProcess(threads, merge_stderr=True)
+        probe = ScriptedProbe(lambda argv: _scheduler_answer(argv, queued=queued))
+        launcher = AgentGpuLauncher(
+            _config(),
+            ("slurm-shell",),
+            probe=probe,
+            processes=FakePipedProcessLauncher(lambda _start: process),
+            threads=threads,
+        )
+        output = bytearray()
+
+        outcome = threads.run(
+            lambda: launcher.run(
+                GpuJobRequest(gpus=1, time_minutes=5),
+                GpuCommand(argv=("work",), cwd=Path("workspace"), env={}),
+                write=output.extend,
+                cancel=threads.event(),
+            )
+        )
+
+        assert isinstance(outcome.failure, OSError)
+        assert outcome.termination_confirmed is confirmed
+        assert process.signals == ["terminate", "kill"]
+        commands = [argv[-1] for argv, _timeout in probe.calls]
+        assert sum(command.startswith("scancel") for command in commands) == 1
+        assert sum(command.startswith("squeue") for command in commands) >= 1
+        assert (b"cancel unconfirmed" in output) is (not confirmed)
 
 
 _LIMITS = {"partitions": ["main"], "max_gpus": 2, "max_time_minutes": 30}

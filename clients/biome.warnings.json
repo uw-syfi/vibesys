@@ -10,7 +10,8 @@
       "!**/*.test.ts",
       "!**/*.test.tsx",
       "!**/dist",
-      "!libs/contracts/src/generated"
+      "!libs/contracts/src/generated",
+      "!libs/proto/src/generated"
     ]
   },
   "linter": {

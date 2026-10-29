@@ -5,9 +5,11 @@ from __future__ import annotations
 from collections import deque
 from typing import TYPE_CHECKING, Any, Self, Unpack, overload
 
+from pydantic import TypeAdapter
+
 from vs_core._registry import ContractError
 from vs_core.types.common import Capabilities, Limits, RevisionRef, Seconds, TaskTerms, Value
-from vs_core.types.settlement import RetainedCandidate, TrustedBaseline
+from vs_core.types.settlement import RetainedCandidate, Settlement, TrustedBaseline
 
 from ._agents import Agents
 from ._defs import UNBOUNDED, _Task
@@ -27,7 +29,7 @@ from ._sources import (
     Task,
     Timer,
 )
-from ._spans import AttemptOutcome
+from ._spans import AttemptOutcome, RunTrace
 from ._winner import INPUT, Input, Kept
 from ._workspaces import Workspaces
 
@@ -36,9 +38,14 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from ._labels import LabelFields, SpanKind
+    from vs_core.types.settlement import Selection
+
+    from ._labels import Label, LabelFields, SpanKind
     from ._run import _Run
     from ._spans import SpanId
+
+
+_SETTLEMENTS = TypeAdapter(tuple[Settlement, ...])
 
 
 class Clock:
@@ -230,25 +237,58 @@ class Flow:
 
     # the run
 
-    def choose(self, candidate: Kept | Input) -> None:
+    def choose(self, candidate: Kept | Input, label: Label | None = None) -> None:
         """Name the current winner: a kept candidate, or ``INPUT``. The last choice stands.
 
-        The framework adopts the last choice when the run ends, however it ends.
+        The framework adopts the last choice when the run ends, however it ends. ``label`` says
+        what the span that adopts it means to the search: its kind declares the verdicts
+        ``ADOPTED`` and ``NOT_ADOPTED``, which the framework sets once core has answered. The
+        label is the last choice's own, so a later choice without one adopts unlabelled.
         """
         if candidate is INPUT:
-            self._run.choice = TrustedBaseline(revision=self.facts.baseline)
+            chosen: Selection = TrustedBaseline(revision=self.facts.baseline)
         elif isinstance(candidate, Kept):
-            self._run.choice = RetainedCandidate(
+            chosen = RetainedCandidate(
                 settlement_id=candidate.settlement.settlement_id, revision=candidate.revision
             )
         else:
             raise ContractError(("choose",), "choose a kept candidate or INPUT")
+        self._run.chose(chosen, label)
+
+    def fall_back_to_input(self, label: Label | None = None) -> None:
+        """Name the input the winner, unless a candidate is already chosen (a restart keeps it).
+
+        A search that labels its adoption starts with this, and again when it learns more about
+        the input, so that a run that ends before any candidate led (a stop, a deadline) adopts
+        the input through a labelled span too. Nothing chosen already meant the input.
+        """
+        if not isinstance(self._run.choice, RetainedCandidate):
+            self._run.chose(TrustedBaseline(revision=self.facts.baseline), label)
 
     def publish(self, record: BaseModel) -> None:
         """Replace the flow's published record: what status views and tests read of a run."""
         self._run.published = record.model_dump_json()
 
+    def published[M: BaseModel](self, model: type[M]) -> M | None:
+        """What the run last published (`publish`), as ``model``; None before any publish.
+
+        A restart keeps it, so a root that resumes on changed code reads there what the run had
+        published before. It is not a journaled read: the published record is part of the
+        replayed state.
+        """
+        return self._run.published_as(model)
+
+    @property
+    def spans(self) -> RunTrace:
+        """The run's spans so far (not a journaled read: the trace is replayed state)."""
+        return self._run.trace.snapshot()
+
     # journaled reads
+
+    @property
+    def settlements(self) -> tuple[Settlement, ...]:
+        """Every settlement core recorded for the run, oldest first (a journaled read)."""
+        return self._kit.read(lambda view: view.settlements, _SETTLEMENTS)
 
     @property
     def capabilities(self) -> Capabilities:

@@ -362,8 +362,7 @@ describe('StreamReconciler batch dispositions', () => {
    * `src/server/transport/unix_jsonl.py:190`), because nothing was withheld.
    * The swap is a whole-log replay from zero (`src/server/api/service.py:372`),
    * so 0 is the truth about it, but every later tail dial then declares more
-   * than 0 and re-bootstraps again with the store unchanged. TUI-identical
-   * (`session-controller.ts:1436`), and pinned because
+   * than 0 and re-bootstraps again with the store unchanged. This is pinned because
    * `#highestDeclaredFloor`'s doc comment claims it.
    */
   it('records the floor a resumed store swap declared, so the next tail dial re-bootstraps', () => {
@@ -478,7 +477,7 @@ describe('StreamReconciler store identity', () => {
   });
 
   /**
-   * Pinned as the TUI's current behavior, not as a property worth having.
+   * Pinned as the current behavior, not as a property worth having.
    *
    * The resumed path suppresses store-change detection when either side is
    * empty; the fresh path does not. So a server that stops reporting identity
@@ -1447,7 +1446,7 @@ describe('StreamReconciler properties', () => {
 
     /**
      * With nothing in flight. A round trip outstanding across the re-bootstrap
-     * deliberately survives it (the TUI's `#historyFetch` does too), so the
+     * deliberately survives it (the in-flight history fetch does too), so the
      * prefix is drained first: at most one is outstanding, and failing one that
      * is not there is a no-op.
      */
@@ -1551,238 +1550,4 @@ describe('StreamReconciler properties', () => {
       expect(expected.filter(decision => decision.kind === 'rebootstrap')).not.toEqual([]);
     });
   }
-});
-
-/**
- * The TUI controller's reconciliation, transcribed from
- * `clients/tui/src/session-controller.ts` at merge base 667a08f8.
- *
- * Kept in the controller's own shape rather than the reconciler's: a resumed
- * and a fresh batch method, the floor and spine helpers, the `#historyFetch`
- * promise released by a `finally`, and the floor read back out of the state the
- * controller wrote. It is a transliteration, not an independent derivation, so
- * it does not confirm the extraction is right. It is regression protection for
- * the legacy behavior phase (a) extracted and both clients now consume. The
- * equivalence argument is the hand re-derivation recorded in that PR body.
- *
- * Line references in that file:
- *
- * - fields: 286 `#historyFetch`, 299 `#foldedBelowFloor`, 301 `#historyFloor`,
- *   310 `#declaredFloor`, 319 `#storeId`, 328 `#rebootstrapGeneration`
- * - `storeId` subscription callback: 381
- * - `loadOlderHistory`: 425-433, `#requestOlderHistory`: 435-465
- * - `#reconcileBatch`: 1419-1425, `#reconcileResumedBatch`: 1427-1460,
- *   `#reconcileFreshBatch`: 1462-1483
- * - `#lowerHistoryFloor`: 1493-1496, `#resetHistoryFloor`: 1509-1514,
- *   `#recordSpine`: 1517-1525
- *
- * Two things are deliberately not transcribed, because they are where this
- * phase differs from the controller rather than drift:
- *
- * - the declared-floor validation, which is new: the controller has no such
- *   check, so transcribing one would be inventing a behavior to compare
- *   against. The generator only produces floors a conforming server can send,
- *   so it would never fire in a differential run anyway.
- * - the `catch` at 459-464, which turns a failed request into a state report
- *   and a `false`. Whether a failure is worth showing is the caller's decision,
- *   so the reconciler lets the rejection through and the oracle does the same.
- * - the declared-floor clamp, which is #1036's fix. The controller's
- *   `#declaredFloor` at 1469 is assigned unclamped, so it holds the last
- *   declared floor; the reconciler keeps the highest. The two differ only on a
- *   fresh batch declaring less than the stream already declared for an
- *   unchanged store, which the generator cannot produce (a bootstrap dial
- *   floors at `latest - tail` for one log, and `logTop` only grows, so any
- *   descent comes with a log swap and is taken literally by both sides) and
- *   which the identity matrix below cannot observe (its probe declares 5_000,
- *   above every payload floor, so both readings re-bootstrap there). Pinning
- *   that case is the directed and generated pair above, not this oracle.
- */
-class ControllerOracle implements Reconciling {
-  readonly #backfillChunk: number;
-  readonly #foldedBelowFloor = new Set<number>();
-  #historyFloor = Number.POSITIVE_INFINITY;
-  #declaredFloor: number | null = null;
-  #storeId: string | null = null;
-  #rebootstrapGeneration = 0;
-  /** `#historyFetch`, the single-flight guard, released by the `finally` at 428-430. */
-  #historyFetch: Promise<BackfillOutcome> | null = null;
-  /**
-   * `this.#state.core.historyAfterSequence`. The controller reads the floor
-   * back out of the state it wrote (426 and 436 read it, 457, 1437, 1452 and
-   * 1474 write it); the reconciler keeps its own field instead. Nothing in the
-   * harness feeds a floor to either side, because neither `reconcileBatch` nor
-   * `backfill` takes one, so the two floors are maintained independently from
-   * the same commands and comparing the traces is what checks they agree at
-   * every step.
-   */
-  #stateFloor = 0;
-
-  constructor(backfillChunk: number) {
-    this.#backfillChunk = backfillChunk;
-  }
-
-  // Line 381.
-  storeId(): string {
-    return this.#storeId ?? '';
-  }
-
-  // Lines 1419-1425.
-  reconcileBatch(message: EventBatchMessage, context: BatchContext): BatchReconciliation {
-    const decision = context.resumed
-      ? this.#reconcileResumedBatch(message, this.#stateFloor)
-      : this.#reconcileFreshBatch(message);
-    this.#stateFloor = decision.historyFloor;
-    return decision;
-  }
-
-  // Lines 1427-1460.
-  #reconcileResumedBatch(message: EventBatchMessage, stateFloor: number): BatchReconciliation {
-    const store = message.store_id ?? '';
-    const knownStoreChanged = Boolean(this.#storeId && store && store !== this.#storeId);
-    if (knownStoreChanged) {
-      const declared = message.history_after_sequence ?? 0;
-      this.#storeId = store;
-      this.#declaredFloor = declared;
-      const floor = this.#resetHistoryFloor(declared);
-      this.#recordSpine(message.events, declared);
-      return {kind: 'rebootstrap', historyFloor: floor};
-    }
-    if (store) this.#storeId = store;
-    return {kind: 'extend', historyFloor: stateFloor};
-  }
-
-  // Lines 1462-1483.
-  #reconcileFreshBatch(message: EventBatchMessage): BatchReconciliation {
-    const declared = message.history_after_sequence ?? 0;
-    const store = message.store_id ?? '';
-    const rebootstrap =
-      (this.#storeId !== null && store !== this.#storeId) ||
-      (this.#declaredFloor !== null && declared > this.#declaredFloor);
-    this.#storeId = store;
-    this.#declaredFloor = declared;
-    const floor = rebootstrap
-      ? this.#resetHistoryFloor(declared)
-      : this.#lowerHistoryFloor(declared);
-    this.#recordSpine(message.events, declared);
-    return {kind: rebootstrap ? 'rebootstrap' : 'extend', historyFloor: floor};
-  }
-
-  // Lines 425-433.
-  backfill(fetch: BackfillFetch): Promise<BackfillOutcome> {
-    if (this.#stateFloor === 0) return Promise.resolve({kind: 'complete'});
-    if (this.#historyFetch !== null) return this.#historyFetch;
-    const running = this.#requestOlderHistory(fetch).finally(() => {
-      this.#historyFetch = null;
-    });
-    this.#historyFetch = running;
-    return running;
-  }
-
-  // Lines 435-458.
-  async #requestOlderHistory(fetch: BackfillFetch): Promise<BackfillOutcome> {
-    const floor = this.#stateFloor;
-    const nextFloor = Math.max(0, floor - this.#backfillChunk);
-    const generation = this.#rebootstrapGeneration;
-    const storeId = this.#storeId;
-    const result = await fetch({
-      ...(storeId === null || storeId === '' ? {} : {expectedStoreId: storeId}),
-      afterSequence: nextFloor,
-      beforeSequence: floor + 1,
-    });
-    if (this.#rebootstrapGeneration !== generation) return {kind: 'superseded'};
-    if (result.kind === 'store-replaced') return {kind: 'superseded'};
-    const {events} = result;
-    const filtered = events.filter(
-      item => item.sequence === undefined || !this.#foldedBelowFloor.has(item.sequence),
-    );
-    const historyFloor = Math.min(this.#stateFloor, nextFloor);
-    return {
-      kind: 'prepend',
-      events: filtered,
-      historyFloor,
-      accept: () => {
-        if (this.#rebootstrapGeneration !== generation) return false;
-        this.#stateFloor = this.#lowerHistoryFloor(historyFloor);
-        return true;
-      },
-    };
-  }
-
-  // Lines 1493-1496.
-  #lowerHistoryFloor(floor: number): number {
-    this.#historyFloor = Math.min(this.#historyFloor, floor);
-    return this.#historyFloor;
-  }
-
-  // Lines 1509-1514.
-  #resetHistoryFloor(floor: number): number {
-    this.#rebootstrapGeneration += 1;
-    this.#historyFloor = floor;
-    this.#foldedBelowFloor.clear();
-    return floor;
-  }
-
-  // Lines 1517-1525.
-  #recordSpine(events: readonly RunEvent[], historyAfterSequence: number): void {
-    if (historyAfterSequence === 0) return;
-    for (const {sequence} of events) {
-      if (sequence !== undefined && sequence <= historyAfterSequence) {
-        this.#foldedBelowFloor.add(sequence);
-      }
-    }
-  }
-}
-
-describe('StreamReconciler against the TUI controller', () => {
-  for (const seed of SEEDS) {
-    it(`decides every command exactly as the controller does (seed ${seed})`, async () => {
-      const commands = generateCommands(new Rng(seed), 150);
-      expect(await drive(new StreamReconciler({backfillChunk: CHUNK}), commands)).toEqual(
-        await drive(new ControllerOracle(CHUNK), commands),
-      );
-    });
-  }
-
-  it('agrees across the whole store identity and floor matrix', async () => {
-    const payloads: readonly EventBatchMessage[] = [
-      batch({storeId: 'log', declaredFloor: 100, sequences: [50, 100, 101]}),
-      batch({storeId: '', declaredFloor: 100, sequences: [102]}),
-      batch({declaredFloor: 100, sequences: [103]}),
-      batch({sequences: [104]}),
-      batch({storeId: 'log', declaredFloor: 0, sequences: [1]}),
-      batch({storeId: 'log', declaredFloor: 40, sequences: [20, 40, 41]}),
-      batch({storeId: 'other', declaredFloor: 100, sequences: [50, 100]}),
-      batch({storeId: 'other', declaredFloor: 900, sequences: [900, 901]}),
-    ];
-    // Probes the state the pair left behind: the store known and the floor last
-    // declared, neither of which the dispositions above report directly.
-    const probe: Command = {
-      op: 'batch',
-      resumed: false,
-      message: batch({storeId: 'log', declaredFloor: 5_000}),
-    };
-    for (const resumed of [false, true]) {
-      for (const first of payloads) {
-        for (const second of payloads) {
-          const commands: readonly Command[] = [
-            {op: 'batch', resumed: false, message: first},
-            {op: 'begin', id: 0},
-            {op: 'batch', resumed, message: second},
-            {op: 'settle', id: 0, seed: 17},
-            {op: 'begin', id: 1},
-            {op: 'fail', id: 1},
-            {op: 'begin', id: 2},
-            {op: 'settle', id: 2, seed: 23},
-            probe,
-            {op: 'begin', id: 3},
-            {op: 'begin', id: 4},
-            {op: 'settle', id: 3, seed: 29},
-          ];
-          expect(await drive(new StreamReconciler({backfillChunk: 60}), commands)).toEqual(
-            await drive(new ControllerOracle(60), commands),
-          );
-        }
-      }
-    }
-  });
 });

@@ -13,16 +13,20 @@ from pydantic import Field
 
 from vibesys.candidates.api import InputFailure, ReviewEvaluation
 from vibesys.metrics import MetricRow, PartialRow
+from vibesys.orchestration.dynamic.models import UnappliedPart
 from vibesys.orchestration.dynamic.search import _roles as roles
 from vibesys.orchestration.dynamic.search._queue import PickPolicy
 from vibesys.orchestration.dynamic.search._values import (
     Blocker,
+    CombinePick,
+    CombineSource,
     DropReason,
     Failure,
     MainMeasurement,
     MergeRecord,
     MergeSource,
     PlanProblem,
+    StrayUnapplied,
     WorkKind,
 )
 from vs_core.api.search import (
@@ -78,6 +82,38 @@ class MergeableRow(Value):
     metric: MetricRow | None = None
 
 
+class PartsVerdict(StrEnum):
+    """How a composite measured against the best of its parts. Informational: it adopts nothing."""
+
+    BETTER = "better"
+    WITHIN_NOISE = "within_noise"
+    WORSE = "worse"
+    UNKNOWN = "unknown"
+    """The composite, or every part, has no trusted headline to compare, or they are on
+    different metrics."""
+
+
+class CompositeRow(Value):
+    """A combine's candidate beside its parts.
+
+    Each part carries its trusted headline; the verdict compares the composite's with the best.
+    """
+
+    parts: tuple[CombineSource, ...]
+    verdict: PartsVerdict
+    best_part: str | None = None
+    """The hypothesis of the part with the strongest headline by raw value, the one compared."""
+    relative_noise: float = 0.0
+    """The task's declared relative noise the comparison allowed; 0 is a strict comparison."""
+    cancelled: bool = False
+    """The combine never started: fewer than two of its parts were still buildable."""
+    unapplied: tuple[UnappliedPart, ...] = ()
+    """What the implementer said it could not apply."""
+    unattributed: tuple[UnappliedPart, ...] = ()
+    """What the implementer said it could not apply, naming no part (`RoundRecord.unattributed`):
+    shown so a dropped part it misnamed is not hidden from the planner."""
+
+
 class HistoryRow(Value):
     """Compact history of one hypothesis shown to the planner."""
 
@@ -99,6 +135,8 @@ class HistoryRow(Value):
     """Why the workstream ended, unless a trusted check's output already says it."""
     failure_fence: str = "```"
     """The Markdown fence that holds the tail: longer than any backtick run inside it."""
+    composite: CompositeRow | None = None
+    """For a hypothesis a combine started: its parts and how it compares with them."""
 
 
 class ProfileHistoryStatus(StrEnum):
@@ -207,7 +245,14 @@ class _Planning(RolePromptContext):
     history: tuple[WorkstreamHistoryRow, ...] = ()
     older_ids: tuple[str, ...] = ()
     baseline: tuple[MetricRow, ...] = ()
+    """The bar a candidate must beat (`input_metrics`); empty when there is none."""
     input_failure: InputFailure | None = None
+    input_first_attempt: InputFailure | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    """Why the input's first measurement failed, when it was measured again."""
+    input_at_fault: bool = Field(default=False, exclude_if=lambda value: not value)
+    """The input's failure shows a fault of its own code, so fixing it is worth planning."""
     baseline_pending: bool = False
     """The input is still being measured: what is scheduled now starts when its reading lands."""
     profiling: bool = False
@@ -264,8 +309,26 @@ class ImplementPrompt(RolePromptContext):
     """The input's own measurement had not landed when the turn was asked."""
     input_failure: InputFailure | None = None
     """Why the input's own measurement failed, when it had when the turn was asked."""
+    input_at_fault: bool = Field(default=False, exclude_if=lambda value: not value)
+    """The input's failure shows a fault of its own code (see the planner's field)."""
+    input_compared: bool = Field(default=False, exclude_if=lambda value: not value)
+    """The input failed yet still has a bar the candidate must beat (its benchmark passed)."""
     rebase_onto: RevisionRef | None = None
     """The run's main, when it advanced past this hypothesis's work: rebase onto it first."""
+    reply_rejected: tuple[StrayUnapplied, ...] = ()
+    """The ``unapplied`` entries of the last reply that named no part of the combine, when an
+    older build refused that reply (`BlockerKind.REPLY_REJECTED`) and the workstream resumed
+    here: the implementer submits again. This build keeps such entries on the round instead."""
+    rebase_from: RevisionRef | None = None
+    """With ``rebase_onto``: the revision the work's tree and main both hold (a main, or a merged
+    candidate the work was built on), so the catch-up applies only what main has beyond it. None
+    for a workstream an older build scheduled."""
+    combine: tuple[CombineSource, ...] = ()
+    """For a combine: the parts to apply onto ``parent_revision`` (main), in order."""
+    combine_missing: tuple[CombinePick, ...] = ()
+    """For a combine: the parts the planner named that are no longer buildable, left out."""
+    watch_for: str = ""
+    """For a combine: what the planner said to check or be careful of."""
 
 
 class ReviewPrompt(RolePromptContext):

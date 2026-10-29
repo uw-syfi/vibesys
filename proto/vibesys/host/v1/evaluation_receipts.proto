@@ -1,0 +1,250 @@
+syntax = "proto3";
+package vibesys.host.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/host/v1/operation_options.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1";
+
+enum LocalEvaluationState {
+  LOCAL_EVALUATION_STATE_UNSPECIFIED = 0;
+  LOCAL_EVALUATION_STATE_QUEUED = 1 [(vibesys.host.v1.adapter_spelling) = "queued"];
+  LOCAL_EVALUATION_STATE_RUNNING = 2 [(vibesys.host.v1.adapter_spelling) = "running"];
+  LOCAL_EVALUATION_STATE_SUCCEEDED = 3 [(vibesys.host.v1.adapter_spelling) = "succeeded"];
+  LOCAL_EVALUATION_STATE_FAILED = 4 [(vibesys.host.v1.adapter_spelling) = "failed"];
+  LOCAL_EVALUATION_STATE_CANCELED = 5 [(vibesys.host.v1.adapter_spelling) = "canceled"];
+}
+
+enum LocalStageState {
+  LOCAL_STAGE_STATE_UNSPECIFIED = 0;
+  LOCAL_STAGE_STATE_SUCCEEDED = 1 [(vibesys.host.v1.adapter_spelling) = "succeeded"];
+  LOCAL_STAGE_STATE_FAILED = 2 [(vibesys.host.v1.adapter_spelling) = "failed"];
+  LOCAL_STAGE_STATE_SKIPPED = 3 [(vibesys.host.v1.adapter_spelling) = "skipped"];
+}
+
+enum LocalStageFailureKind {
+  LOCAL_STAGE_FAILURE_KIND_UNSPECIFIED = 0;
+  LOCAL_STAGE_FAILURE_KIND_EXECUTION = 1 [(vibesys.host.v1.adapter_spelling) = "execution"];
+  LOCAL_STAGE_FAILURE_KIND_COLLECTION = 2 [(vibesys.host.v1.adapter_spelling) = "collection"];
+}
+
+enum LocalEvidenceKind {
+  LOCAL_EVIDENCE_KIND_UNSPECIFIED = 0;
+  LOCAL_EVIDENCE_KIND_BUILD = 1 [(vibesys.host.v1.adapter_spelling) = "build"];
+  LOCAL_EVIDENCE_KIND_ACCURACY = 2 [(vibesys.host.v1.adapter_spelling) = "accuracy"];
+  LOCAL_EVIDENCE_KIND_BENCHMARK = 3 [(vibesys.host.v1.adapter_spelling) = "benchmark"];
+  LOCAL_EVIDENCE_KIND_PROFILE = 4 [(vibesys.host.v1.adapter_spelling) = "profile"];
+}
+
+enum LocalEvidenceOutcome {
+  LOCAL_EVIDENCE_OUTCOME_UNSPECIFIED = 0;
+  LOCAL_EVIDENCE_OUTCOME_PASSED = 1 [(vibesys.host.v1.adapter_spelling) = "passed"];
+  LOCAL_EVIDENCE_OUTCOME_FAILED = 2 [(vibesys.host.v1.adapter_spelling) = "failed"];
+  LOCAL_EVIDENCE_OUTCOME_OBSERVED = 3 [(vibesys.host.v1.adapter_spelling) = "observed"];
+}
+
+enum LocalEvidenceFailureKind {
+  LOCAL_EVIDENCE_FAILURE_KIND_UNSPECIFIED = 0;
+  LOCAL_EVIDENCE_FAILURE_KIND_WORKLOAD = 1 [(vibesys.host.v1.adapter_spelling) = "workload"];
+  LOCAL_EVIDENCE_FAILURE_KIND_INFRASTRUCTURE = 2 [(vibesys.host.v1.adapter_spelling) = "infrastructure"];
+  LOCAL_EVIDENCE_FAILURE_KIND_AMBIGUOUS = 3 [(vibesys.host.v1.adapter_spelling) = "ambiguous"];
+}
+
+enum LocalMetricDirection {
+  LOCAL_METRIC_DIRECTION_UNSPECIFIED = 0;
+  LOCAL_METRIC_DIRECTION_MAX = 1 [(vibesys.host.v1.adapter_spelling) = "max"];
+  LOCAL_METRIC_DIRECTION_MIN = 2 [(vibesys.host.v1.adapter_spelling) = "min"];
+}
+
+message LocalContentDigest {
+  string algorithm = 1 [(buf.validate.field).string.const = "sha256"];
+  string value = 2 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+}
+message LocalEvidenceFingerprints {
+  LocalContentDigest candidate = 1 [(buf.validate.field).required = true];
+  LocalContentDigest evaluator = 2 [(buf.validate.field).required = true];
+  LocalContentDigest workload = 3 [(buf.validate.field).required = true];
+  LocalContentDigest environment = 4 [(buf.validate.field).required = true];
+}
+message LocalEvidenceMetric {
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  double value = 2 [(buf.validate.field).double.finite = true];
+  optional LocalMetricDirection direction = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string unit = 4;
+}
+message LocalMeasurementProgress {
+  uint64 completed = 1;
+  uint64 required = 2 [(buf.validate.field).uint64.gt = 0];
+  string unit = 3 [(buf.validate.field).string.min_len = 1];
+}
+message LocalPartialMeasurement {
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  double value = 2 [(buf.validate.field).double.finite = true];
+  LocalMetricDirection direction = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string unit = 4 [(buf.validate.field).string.min_len = 1];
+  optional double target = 5 [(buf.validate.field).double.finite = true];
+  LocalMeasurementProgress progress = 6;
+}
+message LocalArtifactDigest {
+  string path = 1 [(buf.validate.field).string.min_len = 1];
+  LocalContentDigest digest = 2 [(buf.validate.field).required = true];
+}
+message LocalTrustedEvidence {
+  option (buf.validate.message).cel = {
+    id: "local_evidence.failure"
+    message: "only failed evidence may carry a failure kind or unmet requirement"
+    expression: "this.outcome == 2 || (!has(this.failure_kind) && !has(this.unmet_requirement))"
+  };
+  string evidence_id = 1 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  string evaluation_id = 2 [(buf.validate.field).string.min_len = 1];
+  string stage_name = 3 [(buf.validate.field).string.min_len = 1];
+  uint32 result_protocol = 4 [(buf.validate.field).uint32.const = 1];
+  LocalEvidenceKind kind = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  LocalEvidenceFingerprints fingerprints = 6 [(buf.validate.field).required = true];
+  LocalContentDigest trusted_inputs = 7 [(buf.validate.field).required = true];
+  LocalEvidenceOutcome outcome = 8 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string semantic_summary = 9 [(buf.validate.field).string.max_len = 16384];
+  repeated LocalEvidenceMetric metrics = 10;
+  LocalPartialMeasurement partial_measurement = 11;
+  optional LocalEvidenceFailureKind failure_kind = 12 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string unmet_requirement = 13 [(buf.validate.field).string.min_len = 1];
+  repeated LocalArtifactDigest artifacts = 14;
+  uint64 accepted_round = 15;
+}
+message LocalEvaluationStepResult {
+  option (buf.validate.message).cel = {
+    id: "local_stage.failure"
+    message: "a failed stage requires a failure; other stages cannot carry failures"
+    expression: "this.state == 2 ? (has(this.failure) && this.failure != '') : (!has(this.failure) && !has(this.operator_failure) && !has(this.failure_kind) && !has(this.service_log_tail))"
+  };
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  LocalStageState state = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  LocalTrustedEvidence result = 3;
+  optional string failure = 4;
+  optional string operator_failure = 5;
+  optional string operator_summary = 6;
+  optional LocalStageFailureKind failure_kind = 7 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional double duration_s = 8 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+  optional string stdout_tail = 9 [(buf.validate.field).string.max_len = 4000];
+  optional string stderr_tail = 10 [(buf.validate.field).string.max_len = 4000];
+  optional string service_log_tail = 11 [(buf.validate.field).string.max_len = 4000];
+  optional string host = 12 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+}
+message LocalEvaluationObservation {
+  option (buf.validate.message).cel = {
+    id: "local_observation.failure"
+    message: "failed observations require a failure; other observations cannot carry failures"
+    expression: "this.state == 4 ? (has(this.failure) && this.failure != '') : (!has(this.failure) && !has(this.operator_failure) && !this.run_environment_unavailable)"
+  };
+  option (buf.validate.message).cel = {
+    id: "local_observation.terminal"
+    message: "terminal observations cannot have a current stage"
+    expression: "this.state in [3, 4, 5] ? !has(this.current_stage) : true"
+  };
+  LocalEvaluationState state = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string current_stage = 2 [(buf.validate.field).string.min_len = 1];
+  repeated LocalEvaluationStepResult stage_results = 3;
+  optional string failure = 4;
+  optional string operator_failure = 5;
+  bool run_environment_unavailable = 6;
+}
+
+// Evidence and obligations only. This receipt never authorizes replay dispatch.
+message LocalEvaluationReceipt {
+  option (buf.validate.message).cel = {
+    id: "local_receipt.cleanup"
+    message: "an acquired workspace retains a cleanup obligation until confirmed cleanup"
+    expression: "this.workspace == '' || this.cleanup_required"
+  };
+  option (buf.validate.message).cel = {
+    id: "local_receipt.cleaned"
+    message: "cleanup confirmation requires a terminal observation"
+    expression: "!this.cleaned || (has(this.observation) && this.observation.state in [3, 4, 5])"
+  };
+  option (buf.validate.message).cel = {
+    id: "local_receipt.stages"
+    message: "stage starts and results must belong to the declared plan; success requires every result"
+    expression: "this.started_stages.all(s, s in this.stages) && this.observation.stage_results.map(s, s.name).unique() && this.observation.stage_results.all(s, s.name in this.stages && (s.state == 3 || s.name in this.started_stages)) && (this.observation.state != 3 || this.observation.stage_results.map(s, s.name) == this.stages)"
+  };
+  option (buf.validate.message).cel = {
+    id: "local_receipt.cleanup_started"
+    message: "cleanup starts only after a terminal observation and is confirmed only after its intent"
+    expression: "(!this.cleanup_started || this.observation.state in [3, 4, 5]) && (!this.cleaned || !this.cleanup_required || this.cleanup_started)"
+  };
+  string handle = 1 [(buf.validate.field).string.min_len = 1];
+  string request_digest = 2 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  string snapshot = 3 [(buf.validate.field).string.min_len = 1];
+  repeated string started_stages = 4 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
+  LocalEvaluationObservation observation = 5 [(buf.validate.field).required = true];
+  bool cleanup_required = 6;
+  string workspace = 7;
+  bool cleaned = 8;
+  bool cleanup_started = 9;
+  string backing = 11 [(buf.validate.field).string.min_len = 1];
+  repeated string stages = 10 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
+}
+
+message EvaluationRecoveryBlock {
+  string environment = 1 [(buf.validate.field).string.min_len = 1];
+  string backing = 2 [(buf.validate.field).string.min_len = 1];
+  repeated string outstanding = 3 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
+  string prerequisite = 4 [(buf.validate.field).string.min_len = 1];
+}
+
+// Retained acquisition intents survive new handles and fresh owner instances.
+// Live-process caches and terminal job receipts cannot erase this writer manifest.
+message EvaluationWorkspaceAcquisitions {
+  repeated string handles = 1 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
+}

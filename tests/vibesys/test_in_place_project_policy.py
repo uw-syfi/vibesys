@@ -28,7 +28,7 @@ def test_uninitialized_project_policy_protects_no_authored_inputs(tmp_path: Path
     state_paths = store.sandbox_paths()
 
     assert set(policy.read_only_paths) == {Path(".git"), state_paths.read_only_path}
-    assert state_paths.hidden_path is None
+    assert state_paths.hidden_paths == ()
     assert set(policy.hidden_paths) == {Path(".env.local"), Path("agent.toml")}
 
 

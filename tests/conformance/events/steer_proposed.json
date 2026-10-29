@@ -1,0 +1,18 @@
+{
+  "protocol_version": 1,
+  "type": "steer_proposed",
+  "sequence": 34,
+  "run_id": "run-conformance",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "execution_id": "exec-1",
+  "chat_thread_id": "thread-1",
+  "data": {
+    "kind": "steer_proposed",
+    "proposal_id": "exec-1.call-1",
+    "proposal": {
+      "text": "keep the weights in bf16",
+      "target": { "kind": "role", "id": "dynamic-implementer" },
+      "mode": "standing"
+    }
+  }
+}

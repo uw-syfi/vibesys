@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, cast
@@ -146,6 +147,7 @@ def test_agent_turn_timeout_error_preserves_the_policy_budget() -> None:
 
 def test_run_facts_are_strict_and_immutable() -> None:
     facts = RunFacts(
+        agent_git_writable=True,
         domain_id="llm_serving",
         objective="Increase serving throughput.",
         environment_notes="Run the service through its public endpoint.",
@@ -161,7 +163,12 @@ def test_run_facts_are_strict_and_immutable() -> None:
     with pytest.raises(ValidationError):
         facts.workspace_sources[0].__setattr__("dest", "other")
     with pytest.raises(ValidationError):
-        RunFacts(domain_id="generic", objective="Improve the candidate.", objective_location="")
+        RunFacts(
+            agent_git_writable=True,
+            domain_id="generic",
+            objective="Improve the candidate.",
+            objective_location="",
+        )
 
 
 @pytest.mark.parametrize(
@@ -526,3 +533,12 @@ def test_fake_evaluation_rejects_duplicate_objective_names() -> None:
         assert run.evaluation.benchmark_calls == []
 
     asyncio.run(scenario())
+
+
+def test_the_runtime_facade_resolves_and_caches_every_declared_export() -> None:
+    facade = importlib.import_module("vs_runtime.api")
+    assert set(dir(facade)) == set(facade.__all__)
+    for name in facade.__all__:
+        assert getattr(facade, name) is getattr(facade, name)
+    with pytest.raises(AttributeError):
+        _ = facade.not_a_public_export

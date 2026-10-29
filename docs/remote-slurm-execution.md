@@ -70,6 +70,16 @@ agent cannot run a GPU job in another candidate's files.
 - `~/.sky/config.yaml` and SSH configuration own accounts, partitions, proxies,
   certificates, keys, and site-specific Slurm translation.
 
+A run never prompts on its terminal: the commands it starts have no terminal to
+prompt on. The SSH transport runs `ssh` (and `rsync`'s remote shell) with
+`-o BatchMode=yes`, so an `ssh` that would ask for a password, passphrase,
+host-key confirmation or second factor fails at once, without sending an empty
+answer to the server or opening an askpass window. The run then reports that ssh
+could not connect or log in (ssh exit code 255). Make SSH access non-interactive
+before the run, for example with keys in `ssh-agent`, known host keys, and a
+`ControlMaster` connection opened beforehand; `ssh -o BatchMode=yes HOST true`
+succeeds when it is.
+
 Do not put credentials or account names in a task manifest or repository profile.
 Install the validated external dependency separately:
 

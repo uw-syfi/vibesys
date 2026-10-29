@@ -166,4 +166,64 @@ describe('run trace fold', () => {
     expect(folded.spans.size).toBe(0);
     expect(folded.sequence).toBe(1);
   });
+
+  it('gives the same trace folding one event at a time as folding them all at once', () => {
+    for (let seed = 1; seed <= 100; seed += 1) {
+      const events = journal(new Seeded(seed));
+      let one = EMPTY_TRACE;
+      for (const event of events) one = foldTrace(one, [event]);
+      same(one, snapshotAt(events, events.at(-1)?.sequence ?? 0));
+    }
+  });
+
+  it('keeps every trace as it was when others are folded from it', () => {
+    for (let seed = 1; seed <= 100; seed += 1) {
+      const events = journal(new Seeded(seed));
+      const traces = [EMPTY_TRACE];
+      for (const event of events) traces.push(foldTrace(traces.at(-1) as RunTrace, [event]));
+      // Branch from the middle after the run was followed to its end.
+      const cut = new Seeded(seed * 13).int(events.length + 1);
+      foldTrace(traces[cut] as RunTrace, events.slice(cut));
+      traces.forEach((trace, index) => {
+        same(trace, snapshotAt(events, events.slice(0, index).at(-1)?.sequence ?? 0));
+      });
+    }
+  });
+
+  it('does work per event that does not grow with the run: a long run of many spans', () => {
+    const spanCount = 5_000;
+    const eventCount = 100_000;
+    const random = new Seeded(7);
+    let work = 0;
+    let worst = 0;
+    let trace: RunTrace = EMPTY_TRACE;
+    for (let sequence = 1; sequence <= eventCount; sequence += 1) {
+      // The first events start the spans; the rest change a span, as a followed run does.
+      const index = sequence <= spanCount ? sequence - 1 : random.int(spanCount);
+      const started = sequence <= spanCount;
+      const event = spanEvent(sequence, span(`flow:s${index}`, null, sequence, !started));
+      let step = 0;
+      trace = foldTrace(trace, [event], units => {
+        step += units;
+      });
+      work += step;
+      worst = Math.max(worst, step);
+    }
+    expect(trace.spans.size).toBe(spanCount);
+    expect(trace.sequence).toBe(eventCount);
+    // One unit per event: the bound is constant, where copying the spans each fold is thousands.
+    expect(worst).toBeLessThanOrEqual(1);
+    expect(work).toBeLessThanOrEqual(eventCount);
+  });
 });
+
+function spanEvent(sequence: number, changed: Span): RunEvent {
+  return {
+    protocol_version: 1,
+    run_id: RUN_ID,
+    sequence,
+    timestamp: '2026-01-01T00:00:00Z',
+    type: 'span_updated',
+    data: {kind: 'span_updated', span: changed},
+  } as RunEvent;
+}

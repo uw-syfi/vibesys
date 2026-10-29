@@ -1,3 +1,4 @@
+import {getOption} from '@bufbuild/protobuf';
 /**
  * Which hosts the app offers and how it runs VibeSys on each, as pure, validated data.
  *
@@ -14,6 +15,7 @@ import {
   SSH_ALIAS,
   validHostPath,
 } from '@vibesys/hosts';
+import {RetainedDesktopHostSettingsSchema, retained_json_key} from '@vibesys/proto';
 import {object, onlyKeys, SettingsError} from './parse.js';
 import {sshHostPatternsMatch} from './ssh-pattern.js';
 
@@ -74,6 +76,25 @@ export function parseSettings(value: unknown): SettingsFile {
   return {version: 2, hosts: parsed};
 }
 
+/** Read-only JSON import: drop the retired selection, rejecting every other unknown key. */
+export function decodeRetainedSettings(value: unknown): SettingsFile {
+  const record = object(value, 'hosts.json');
+  if (record['version'] !== 2) return parseSettings(value);
+  const hosts = object(record['hosts'], 'hosts.json: hosts');
+  return parseSettings({
+    ...record,
+    hosts: Object.fromEntries(
+      Object.entries(hosts).map(([key, value]) => {
+        const current = {...object(value, `hosts.json: hosts.${key}`)};
+        delete current[
+          getOption(RetainedDesktopHostSettingsSchema.field.discardedSelection, retained_json_key)
+        ];
+        return [key, current];
+      }),
+    ),
+  });
+}
+
 export function settingsFor(file: SettingsFile, id: HostId): HostSettings | null {
   return file.hosts[hostKey(id)] ?? null;
 }
@@ -87,7 +108,7 @@ export function withHostSettings(
     version: 2,
     hosts: {
       ...file.hosts,
-      [hostKey(id)]: {checkout: validHostPath(settings.checkout, 'the checkout')},
+      [hostKey(id)]: parseHostSettings(settings, 'the host'),
     },
   };
 }

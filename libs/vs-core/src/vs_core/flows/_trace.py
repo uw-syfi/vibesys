@@ -218,6 +218,16 @@ class Trace:
             if span.type is SpanType.FLOW and not span.ended:
                 self._update(span.id, stop=SpanStop(requested_at=self.at))
 
+    def stop_lifted(self) -> None:
+        """The stop was lifted: a flow it had not interrupted is no longer told of it.
+
+        A flow the stop already interrupted keeps its record of it.
+        """
+        self._stop_at = None
+        for span in tuple(self._spans.values()):
+            if span.type is SpanType.FLOW and span.stop is not None and not span.stop.landed:
+                self._update(span.id, stop=None)
+
     def stop_landed(self, span_id: SpanId) -> None:
         """The stop interrupted the flow (``Stopped`` was raised at its await)."""
         self._update(span_id, stop=SpanStop(requested_at=self._stop_time(), landed=True))

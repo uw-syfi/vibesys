@@ -1,23 +1,41 @@
 /** The components' behavior in a browser DOM, through the `.` entry only. */
 
 import {afterAll, beforeAll, describe, expect, test} from 'bun:test';
+import {readFileSync} from 'node:fs';
 import {Window} from 'happy-dom';
 import {act, type ReactNode, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {
+  ActionPanel,
+  AppFrame,
+  BrandMark,
   Button,
+  Chart,
+  type ChartPoint,
   Checkbox,
   type ChoiceOption,
+  ChoiceTiles,
   type Completion,
+  Fact,
+  FactLine,
   Field,
+  type ParetoAxis,
+  ParetoChart,
+  type ParetoPoint,
   PathInput,
   Scrubber,
   SegmentedControl,
   Select,
+  StackedArea,
+  StackedBars,
   StatusDot,
   type StatusTone,
+  Table,
+  Text,
   TextInput,
+  type TextStyle,
 } from './index.js';
+import {TYPE} from './tokens/index.js';
 
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
@@ -182,6 +200,63 @@ describe('Button', () => {
   });
 });
 
+describe('AppFrame', () => {
+  const frame = (hidden: boolean) => (
+    <AppFrame
+      label="Side"
+      nav={<Button text="New run" press={() => undefined} />}
+      navHidden={hidden}
+      control={
+        <Button
+          icon="sidebar"
+          label="Show sidebar"
+          hint="Show sidebar (Cmd+K)"
+          press={() => undefined}
+        />
+      }
+    >
+      <main>Main</main>
+    </AppFrame>
+  );
+
+  test('shown or hidden, the main area is only the page, with no strip pushing it down; hidden, the navigation is inert, out of the accessibility tree, and the reveal control is in the title-bar row', async () => {
+    const container = await mount(frame(false));
+    const nav = one(container, 'nav');
+    expect(nav.hasAttribute('inert')).toBe(false);
+    expect(nav.hasAttribute('aria-hidden')).toBe(false);
+    expect(container.querySelector('.vs-app-strip')).toBeNull();
+    expect(one(container, '.vs-app-titlebar-control button').getAttribute('aria-label')).toBe(
+      'Show sidebar',
+    );
+
+    const hidden = await mount(frame(true));
+    const hiddenNav = one(hidden, 'nav');
+    expect(hiddenNav.hasAttribute('inert')).toBe(true);
+    expect(hiddenNav.getAttribute('aria-hidden')).toBe('true');
+    expect(hidden.querySelector('.vs-app-strip')).toBeNull();
+    const reveal = one(hidden, '.vs-app-titlebar-control button');
+    expect(reveal.getAttribute('aria-label')).toBe('Show sidebar');
+    expect(reveal.textContent).toBe('');
+    expect(one(hidden, 'main').textContent).toBe('Main');
+  });
+});
+
+describe('Button hint', () => {
+  test('a hint is the hover tooltip, beside the accessible name', async () => {
+    const container = await mount(
+      <Button
+        icon="sidebar"
+        label="Hide sidebar"
+        hint="Hide sidebar (Ctrl+K)"
+        press={() => undefined}
+      />,
+    );
+    const button = one(container, 'button');
+    expect(button.getAttribute('title')).toBe('Hide sidebar (Ctrl+K)');
+    expect(button.getAttribute('aria-label')).toBe('Hide sidebar');
+  });
+});
+
 describe('Field', () => {
   test('labels its control and describes it by help and error', async () => {
     const container = await mount(
@@ -196,6 +271,24 @@ describe('Field', () => {
       .split(' ')
       .map(id => one(container, `[id="${id}"]`).textContent);
     expect(described).toEqual(['Shown in the list', 'Too long']);
+  });
+
+  test('a hidden label still names its control and is marked for the stylesheet to hide', async () => {
+    const container = await mount(
+      <Field label="Sort ideas" hideLabel>
+        <Select
+          size="sm"
+          value="a"
+          change={() => undefined}
+          options={[{value: 'a', label: 'Newest'}]}
+        />
+      </Field>,
+    );
+    const label = one(container, 'label');
+    expect(label.getAttribute('for')).toBe(one(container, 'select').id);
+    expect(label.textContent).toBe('Sort ideas');
+    expect(label.hasAttribute('data-hidden')).toBe(true);
+    expect(one(container, '.vs-select').getAttribute('data-size')).toBe('sm');
   });
 
   test('a control outside a Field refuses to render', async () => {
@@ -228,6 +321,40 @@ describe('Select', () => {
     expect(large.disabled).toBe(true);
     expect(large.textContent).toBe('Large (needs more memory)');
     expect(chosen).toEqual([]);
+  });
+
+  test('options of one group sit under its heading and each still reports its own value', async () => {
+    const chosen: string[] = [];
+    const container = await mount(
+      <Field label="Model">
+        <Select
+          value="a"
+          change={value => chosen.push(value)}
+          options={[
+            {value: 'none', label: 'Same as the run'},
+            {value: 'a', label: 'A', group: 'Maker X'},
+            {value: 'b', label: 'B', group: 'Maker X'},
+            {value: 'c', label: 'C', group: 'Maker Y'},
+          ]}
+        />
+      </Field>,
+    );
+    const groups = [...container.querySelectorAll('optgroup')].map(group => [
+      group.label,
+      [...group.querySelectorAll('option')].map(option => option.value),
+    ]);
+    expect(groups).toEqual([
+      ['Maker X', ['a', 'b']],
+      ['Maker Y', ['c']],
+    ]);
+    expect(container.querySelectorAll('select > option')).toHaveLength(1);
+    const select = one(container, 'select') as HTMLSelectElement;
+    await act(async () => {
+      select.value = 'c';
+      // happy-dom's own Event class: the page's typings name another, which it does not accept.
+      select.dispatchEvent(new window.Event('change', {bubbles: true}) as unknown as Event);
+    });
+    expect(chosen).toEqual(['c']);
   });
 });
 
@@ -290,5 +417,478 @@ describe('Scrubber', () => {
     expect(backs).toBe(1);
     const range = past.querySelector('input[type="range"]');
     expect(range?.getAttribute('aria-valuetext')).toBe('16:39:12');
+  });
+});
+
+describe('Scrubber with one position', () => {
+  const range = async (last: number, value: number) => {
+    const container = await mount(
+      <Scrubber
+        label="Run position"
+        value={value}
+        last={last}
+        live
+        pastLabel="Replay"
+        latestLabel="End"
+        position="07:32:14"
+        change={() => undefined}
+        backToLive={() => undefined}
+      />,
+    );
+    return container.querySelector('input[type="range"]') as HTMLInputElement;
+  };
+
+  test('regression: a run with only its end to stand at shows a whole track, the playhead at its end', async () => {
+    const only = await range(0, 0);
+    expect([only.min, only.max, only.value]).toEqual(['0', '1', '1']);
+    expect(only.disabled).toBe(true);
+  });
+
+  test('with more positions the track is the positions and the playhead stays where it is put', async () => {
+    const some = await range(4, 2);
+    expect([some.min, some.max, some.value]).toEqual(['0', '4', '2']);
+    expect(some.disabled).toBe(false);
+  });
+});
+
+describe('Chart emphasis and spans', () => {
+  const points: ChartPoint[] = [
+    {id: 'a', x: 1, y: 10, filled: true},
+    {id: 'b', x: 2, y: 20, filled: true},
+    {id: 'c', x: 3, y: 15, filled: false},
+  ];
+  const frame = (container: HTMLElement) =>
+    [...container.querySelectorAll('.vs-chart-pick')].map(pick => [
+      pick.getAttribute('aria-label'),
+      pick.querySelector('circle.vs-chart-point')?.getAttribute('cx'),
+    ]);
+
+  test('emphasis marks dots and the ring follows the focus, with every dot still drawn', async () => {
+    const container = await mount(
+      <Chart
+        label="c"
+        points={points.map(point => ({
+          ...point,
+          emphasis:
+            point.id === 'b'
+              ? ('focus' as const)
+              : point.id === 'a'
+                ? ('related' as const)
+                : ('dim' as const),
+        }))}
+        pick={() => undefined}
+      />,
+    );
+    const kinds = [...container.querySelectorAll('.vs-chart-pick')].map(each =>
+      each.getAttribute('data-emphasis'),
+    );
+    expect(kinds).toEqual(['related', 'focus', 'dim']);
+    expect(container.querySelectorAll('.vs-chart-ring')).toHaveLength(1);
+    expect(container.querySelectorAll('.vs-chart-related')).toHaveLength(1);
+    expect(
+      container
+        .querySelector('.vs-chart-pick[data-emphasis="focus"]')
+        ?.getAttribute('aria-pressed'),
+    ).toBe('true');
+  });
+
+  test('neither emphasis nor spans move a dot or the axes', async () => {
+    const xTicks = [
+      {value: 0, label: '0'},
+      {value: 4, label: '4'},
+    ];
+    const plain = await mount(
+      <Chart label="c" points={points} xTicks={xTicks} pick={() => undefined} />,
+    );
+    const marked = await mount(
+      <Chart
+        label="c"
+        points={points.map(point => ({...point, emphasis: 'dim' as const}))}
+        spans={[{from: -50, to: 2, label: 'an idea'}]}
+        xTicks={xTicks}
+        pick={() => undefined}
+      />,
+    );
+    expect(frame(marked)).toEqual(frame(plain));
+    expect(marked.querySelectorAll('.vs-chart-span')).toHaveLength(1);
+    // The band is clipped to the plot: it starts at the axis, not at x = -50.
+    const band = marked.querySelector('.vs-chart-span-band');
+    const axis = marked.querySelector('line.vs-chart-axis');
+    expect(band?.getAttribute('x')).toBe(axis?.getAttribute('x1'));
+  });
+});
+
+describe('Chart x labels', () => {
+  test('a label at the plot’s end stays inside the drawing instead of being cut by it', async () => {
+    const container = await mount(
+      <Chart
+        label="c"
+        points={[{x: 0, y: 1, filled: true}]}
+        xTicks={[
+          {value: 0, label: '0s'},
+          {value: 1_200_000, label: '333h 20m'},
+        ]}
+        pick={() => undefined}
+      />,
+    );
+    const view = container.querySelector('svg.vs-chart')?.getAttribute('viewBox')?.split(' ') ?? [];
+    const width = Number(view[2]);
+    const [first, last] = [...container.querySelectorAll('text.vs-chart-label')].filter(each =>
+      /^\d+[hs]/.test(each.textContent ?? ''),
+    );
+    expect(last?.getAttribute('text-anchor')).toBe('end');
+    expect(Number(last?.getAttribute('x'))).toBeLessThanOrEqual(width);
+    expect(first?.getAttribute('text-anchor')).not.toBe('end');
+  });
+});
+
+describe('FactLine', () => {
+  test('lays its facts out in order, a shrinking one marked', async () => {
+    const container = await mount(
+      <FactLine wrap={false}>
+        <Fact>one</Fact>
+        <Fact shrink title="a long name">
+          a long name
+        </Fact>
+      </FactLine>,
+    );
+    const facts = [...container.querySelectorAll('.vs-fact')];
+    expect(facts.map(fact => fact.textContent)).toEqual(['one', 'a long name']);
+    expect(facts.map(fact => fact.hasAttribute('data-shrink'))).toEqual([false, true]);
+    expect(container.querySelector('.vs-factline')?.hasAttribute('data-wrap')).toBe(false);
+  });
+});
+
+describe('ParetoChart', () => {
+  const x: ParetoAxis = {name: 'Throughput', unit: 'ops/s', direction: 'higher'};
+  const y: ParetoAxis = {name: 'Latency', unit: 'ms', direction: 'lower'};
+  const points: ParetoPoint[] = [
+    {id: 'input', label: 'Input', x: 100, y: 50, time: 0, state: 'input'},
+    {id: 'a', label: 'Ring buffer', x: 140, y: 45, time: 1, state: 'passed'},
+    {id: 'b', label: 'Batching', x: 120, y: 60, time: 2, state: 'passed'},
+    {id: 'c', label: 'Padding', x: 130, y: 30, time: 3, state: 'passed'},
+    {id: 'd', label: 'Unsafe', x: 300, y: 10, time: 4, state: 'failed'},
+  ];
+  const roles = (root: HTMLElement): Record<string, string> =>
+    Object.fromEntries(
+      [...root.querySelectorAll('.vs-chart .vs-pareto-point')].map(point => [
+        point.querySelector('title')?.textContent?.split(' · ')[0] ?? '',
+        point.getAttribute('data-role') ?? '',
+      ]),
+    );
+
+  test('marks the input, the frontier, the dominated and the failed', async () => {
+    const root = await mount(<ParetoChart label="Trade-off" points={points} x={x} y={y} />);
+    expect(roles(root)).toEqual({
+      Input: 'input',
+      'Ring buffer': 'frontier',
+      Batching: 'dominated',
+      Padding: 'frontier',
+      Unsafe: 'failed',
+    });
+    expect([...root.querySelectorAll('li')].map(li => li.textContent)).toEqual([
+      'Input',
+      'On the frontier',
+      'Dominated',
+      'Failed',
+    ]);
+    expect(root.querySelector('svg')?.textContent).toContain('lower is better');
+  });
+
+  test('draws only the points measured by the cursor, and the frontier of those', async () => {
+    const root = await mount(
+      <ParetoChart label="Trade-off" points={points} x={x} y={y} cursor={2} />,
+    );
+    expect(roles(root)).toEqual({
+      Input: 'input',
+      'Ring buffer': 'frontier',
+      Batching: 'dominated',
+    });
+  });
+
+  test('hovering a point names it with its values; leaving removes the name', async () => {
+    const root = await mount(<ParetoChart label="Trade-off" points={points} x={x} y={y} />);
+    const point = [...root.querySelectorAll('.vs-pareto-point')].find(p =>
+      p.querySelector('title')?.textContent?.startsWith('Padding'),
+    );
+    await act(async () => {
+      point?.dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));
+    });
+    expect(root.querySelector('.vs-pareto-hover-text')?.textContent).toBe(
+      'Padding · 130 ops/s · 30 ms',
+    );
+    await act(async () => {
+      point?.dispatchEvent(new MouseEvent('mouseout', {bubbles: true}));
+    });
+    expect(root.querySelector('.vs-pareto-hover')).toBeNull();
+  });
+
+  test('rings the highlighted points', async () => {
+    const root = await mount(
+      <ParetoChart label="Trade-off" points={points} x={x} y={y} highlighted={['b']} />,
+    );
+    expect(root.querySelectorAll('.vs-chart-ring')).toHaveLength(1);
+  });
+});
+
+describe('ParetoChart picking', () => {
+  const x: ParetoAxis = {name: 'Throughput', unit: 'ops/s', direction: 'higher'};
+  const y: ParetoAxis = {name: 'Latency', unit: 'ms', direction: 'lower'};
+  const points: ParetoPoint[] = [
+    {id: 'a', label: 'Ring buffer', x: 140, y: 45, time: 1, state: 'passed'},
+    {id: 'b', label: 'Batching', x: 120, y: 60, time: 2, state: 'passed'},
+    {id: 'c', label: 'Padding', x: 130, y: 30, time: 3, state: 'passed'},
+  ];
+
+  test('points are buttons with one tab stop; a press or Enter picks; hover is reported', async () => {
+    const picked: string[] = [];
+    const hovered: (string | null)[] = [];
+    const root = await mount(
+      <ParetoChart
+        label="Trade-off"
+        points={points}
+        x={x}
+        y={y}
+        highlighted={['b']}
+        pick={id => picked.push(id)}
+        hover={id => hovered.push(id)}
+      />,
+    );
+    const buttons = [...root.querySelectorAll('[role="button"]')];
+    expect(buttons).toHaveLength(3);
+    expect(buttons.filter(b => b.getAttribute('tabindex') === '0')).toHaveLength(1);
+    expect(root.querySelector('[tabindex="0"]')?.getAttribute('aria-label')).toContain('Batching');
+    const named = (id: string) =>
+      buttons.find(b => b.getAttribute('aria-label')?.startsWith(id)) as Element;
+    await act(async () => {
+      named('Ring buffer').dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    });
+    await press(named('Padding') as unknown as HTMLElement, 'Enter');
+    expect(picked).toEqual(['a', 'c']);
+    hovered.length = 0;
+    await act(async () => {
+      named('Ring buffer').dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));
+      named('Ring buffer').dispatchEvent(new MouseEvent('mouseout', {bubbles: true}));
+    });
+    expect(hovered).toEqual(['a', null]);
+  });
+
+  test('without pick the chart is one image and nothing is a button', async () => {
+    const root = await mount(<ParetoChart label="Trade-off" points={points} x={x} y={y} />);
+    expect(root.querySelector('[role="button"]')).toBeNull();
+    expect(root.querySelector('svg')?.getAttribute('role')).toBe('img');
+  });
+});
+
+describe('ParetoChart values', () => {
+  test('a hover writes a value exactly, never rounded to hundreds, with a unit', async () => {
+    const x: ParetoAxis = {name: 'Throughput', unit: 'ops/s', direction: 'higher'};
+    const y: ParetoAxis = {name: 'Latency', unit: '', direction: 'lower'};
+    const points: ParetoPoint[] = [
+      {id: 'a', label: 'Big', x: 6_054_154, y: 0.512, time: 1, state: 'passed'},
+      {id: 'b', label: 'Small', x: 12.34, y: 47.25, time: 2, state: 'passed'},
+    ];
+    const root = await mount(<ParetoChart label="Trade-off" points={points} x={x} y={y} />);
+    const titles = [...root.querySelectorAll('.vs-pareto-point title')].map(t => t.textContent);
+    expect(titles).toEqual(['Big · 6,054,154 ops/s · 0.512', 'Small · 12.3 ops/s · 47.3']);
+  });
+});
+
+function ControlledTiles() {
+  const [value, setValue] = useState('a');
+  return (
+    <ChoiceTiles
+      label="Agent"
+      value={value}
+      change={setValue}
+      options={[
+        {value: 'a', label: 'Alpha', leading: <BrandMark mark="claudecode" />},
+        {value: 'b', label: 'Beta', leading: <BrandMark mark={null} />},
+      ]}
+    />
+  );
+}
+
+describe('ChoiceTiles', () => {
+  test('is one named radio group; a press chooses exactly one tile, each with its mark and name', async () => {
+    const container = await mount(<ControlledTiles />);
+    expect(one(container, '[role="radiogroup"]').getAttribute('aria-label')).toBe('Agent');
+    const radios = [...container.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+    expect(new Set(radios.map(radio => radio.name)).size).toBe(1);
+    await click(radios[1] as HTMLInputElement);
+    expect(radios.map(radio => radio.checked)).toEqual([false, true]);
+    const tiles = [...container.querySelectorAll('.vs-choice-tile')];
+    expect(tiles.map(tile => tile.textContent)).toEqual(['Alpha', 'Beta']);
+    // A mark is decoration beside its name: hidden from assistive technology.
+    expect(tiles.every(tile => tile.querySelector('svg[aria-hidden="true"]') !== null)).toBe(true);
+  });
+});
+
+function ControlledPanel(props: {readonly startOpen: boolean}) {
+  const [open, setOpen] = useState(props.startOpen);
+  return (
+    <ActionPanel
+      label="Ready to start"
+      status={{state: 'ok', text: 'Ready · 3 checks passed'}}
+      open={open}
+      toggle={setOpen}
+      summary="queue-rs · mpmc"
+      details={<p>Every check passed.</p>}
+      action={<Button variant="primary" text="Start run" press={() => undefined} />}
+    />
+  );
+}
+
+describe('ActionPanel', () => {
+  test('is a named region whose status opens and closes its details, with the action always there', async () => {
+    const container = await mount(<ControlledPanel startOpen={false} />);
+    expect(one(container, 'section').getAttribute('aria-label')).toBe('Ready to start');
+    const status = one(container, '.vs-action-panel-status');
+    expect(status.getAttribute('aria-expanded')).toBe('false');
+    expect(container.textContent).not.toContain('Every check passed.');
+    expect(container.textContent).toContain('Start run');
+    await click(status);
+    expect(status.getAttribute('aria-expanded')).toBe('true');
+    expect(container.textContent).toContain('Every check passed.');
+    expect(container.textContent).toContain('Start run');
+    await click(status);
+    expect(container.textContent).not.toContain('Every check passed.');
+  });
+});
+
+describe('Text', () => {
+  test('draws every role of the type scale from custom properties tokens.css declares', async () => {
+    const css = readFileSync(new URL('./tokens.css', import.meta.url), 'utf8');
+    const roles = Object.keys(TYPE) as TextStyle[];
+    const container = await mount(
+      roles.map(role => (
+        <Text key={role} variant={role}>
+          {role}
+        </Text>
+      )),
+    );
+    const drawn = [...container.querySelectorAll<HTMLElement>('.vs-text')];
+    expect(drawn).toHaveLength(roles.length);
+    roles.forEach((role, index) => {
+      const style = (drawn[index] as HTMLElement).getAttribute('style') ?? '';
+      for (const part of ['family', 'size', 'line', 'weight', 'tracking', 'transform']) {
+        expect(style).toContain(`var(--text-${role}-${part})`);
+        expect(css).toContain(`--text-${role}-${part}:`);
+      }
+    });
+  });
+});
+
+describe('StackedBars', () => {
+  const bar = (id: string, parts: readonly number[]) => ({
+    id,
+    title: `${id}: ${parts.join('+')}`,
+    total: parts.reduce((sum, part) => sum + part, 0),
+    segments: parts.map((value, index) => ({key: `${id}-${index}`, series: index, value})),
+  });
+
+  test('draws every bar to the tallest total, each segment its share of it', async () => {
+    const container = await mount(
+      <StackedBars
+        label="Usage over time"
+        unit="tokens"
+        bars={[bar('a', [30, 10]), bar('b', [20])]}
+        from="Oct 1"
+        to="Oct 2"
+      />,
+    );
+    const heights = [...container.querySelectorAll<HTMLElement>('.vs-bars-bar')].map(each =>
+      [...each.querySelectorAll<HTMLElement>('.vs-bars-segment')].map(
+        segment => segment.style.height,
+      ),
+    );
+    expect(heights).toEqual([['75%', '25%'], ['50%']]);
+    expect(container.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe(
+      'Usage over time, in tokens',
+    );
+    expect(container.textContent).toContain('Oct 1');
+    expect(container.textContent).toContain('Oct 2');
+  });
+
+  test('draws nothing tall when nothing was spent', async () => {
+    const container = await mount(
+      <StackedBars label="Usage" unit="tokens" bars={[bar('a', [0])]} />,
+    );
+    expect(container.querySelector<HTMLElement>('.vs-bars-segment')?.style.height).toBe('0%');
+  });
+});
+
+describe('StackedArea', () => {
+  test('stacks the layers over the slices and names each slice for the pointer', async () => {
+    const container = await mount(
+      <StackedArea
+        label="Running total"
+        unit="tokens"
+        titles={['first', 'second']}
+        layers={[
+          {key: 'a', series: 1, values: [10, 20]},
+          {key: 'b', series: 2, values: [5, 5], dim: true},
+        ]}
+      />,
+    );
+    expect(container.querySelectorAll('.vs-area-layer')).toHaveLength(2);
+    expect(container.querySelectorAll('.vs-area-layer[data-dim]')).toHaveLength(1);
+    expect(
+      [...container.querySelectorAll('.vs-area-slice title')].map(each => each.textContent),
+    ).toEqual(['first', 'second']);
+  });
+});
+
+describe('Table folds and kinds', () => {
+  test('a folding row has a named chevron, a sub row and the total cannot be selected', async () => {
+    const picked: string[] = [];
+    let folded = 0;
+    const rows = [
+      {id: 'a', kind: undefined},
+      {id: 'b', kind: 'sub' as const},
+      {id: 'c', kind: 'total' as const},
+    ];
+    const container = await mount(
+      <Table
+        label="Rows"
+        columns={[{key: 'id', header: 'id', cell: row => row.id}]}
+        rows={rows}
+        rowKey={row => row.id}
+        rowKind={row => row.kind}
+        select={key => picked.push(key)}
+        fold={row =>
+          row.id === 'a' ? {open: false, toggle: () => (folded += 1), label: 'Expand a'} : 'none'
+        }
+      />,
+    );
+    const trs = [...container.querySelectorAll<HTMLElement>('tbody tr')];
+    await act(async () =>
+      container.querySelector<HTMLElement>('button[aria-label="Expand a"]')?.click(),
+    );
+    for (const row of trs) await act(async () => row.click());
+    expect(folded).toBe(1);
+    expect(picked).toEqual(['a']);
+  });
+});
+
+describe('Table control column', () => {
+  test('keeps its header as the accessible name in a hidden span and marks its cells', async () => {
+    const container = await mount(
+      <Table
+        label="Rows"
+        columns={[
+          {key: 'id', header: 'id', cell: row => row.id},
+          {key: 'go', header: 'Go', control: true, cell: () => <button type="button">Go</button>},
+        ]}
+        rows={[{id: 'a'}]}
+        rowKey={row => row.id}
+      />,
+    );
+    const headers = [...container.querySelectorAll('th')];
+    expect(headers.map(th => th.textContent)).toEqual(['id', 'Go']);
+    expect(headers[1]?.querySelector('.vs-table-hidden-header')?.textContent).toBe('Go');
+    expect(headers[0]?.querySelector('.vs-table-hidden-header')).toBeNull();
+    expect(container.querySelector('td[data-control]')?.textContent).toBe('Go');
+    expect(container.querySelectorAll('td[data-control]')).toHaveLength(1);
   });
 });

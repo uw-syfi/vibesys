@@ -1,4 +1,11 @@
-import {createContext, type JSX, type ReactNode, useContext, useId} from 'react';
+import {
+  createContext,
+  type JSX,
+  type KeyboardEvent,
+  type ReactNode,
+  useContext,
+  useId,
+} from 'react';
 
 /** What a `Field` gives the one control inside it: its id, what describes it, and its validity. */
 export interface FieldWiring {
@@ -27,7 +34,13 @@ export function useFieldWiring(control: string): FieldWiring {
 export function Field(props: {
   readonly label: string;
   readonly help?: string;
+  /** What the field needs explained, shown as the label's tooltip instead of a line of help. */
+  readonly hint?: string;
   readonly error?: string;
+  /** The longer account behind a short `error` (a status word), shown on the pointer. */
+  readonly errorHint?: string;
+  /** Names the control to assistive technology and no one else, for a control in a toolbar row. */
+  readonly hideLabel?: boolean;
   readonly children: ReactNode;
 }): JSX.Element {
   const id = useId();
@@ -38,7 +51,13 @@ export function Field(props: {
   const wiring: FieldWiring = {id, labelId, describedBy, invalid: errorId !== undefined};
   return (
     <div className="vs-field">
-      <label className="vs-field-label" id={labelId} htmlFor={id}>
+      <label
+        className="vs-field-label"
+        id={labelId}
+        htmlFor={id}
+        title={props.hint}
+        data-hidden={props.hideLabel === true || undefined}
+      >
         {props.label}
       </label>
       <FieldContext.Provider value={wiring}>{props.children}</FieldContext.Provider>
@@ -48,7 +67,7 @@ export function Field(props: {
         </p>
       )}
       {errorId === undefined ? null : (
-        <p className="vs-help" data-tone="err" id={errorId}>
+        <p className="vs-help" data-tone="err" id={errorId} title={props.errorHint}>
           {props.error}
         </p>
       )}
@@ -56,28 +75,59 @@ export function Field(props: {
   );
 }
 
-/** A one-line text input; `mono` for paths and identifiers, `readOnly` for a value shown as set. */
+/**
+ * A text input; `mono` for paths and identifiers, `readOnly` for a value shown as set. With
+ * `rows` above one it is a multi-line box of that height. `submit` is called on Enter; in a multi-line
+ * box Shift+Enter still starts a new line.
+ */
 export function TextInput(props: {
   readonly value: string;
   readonly change?: (value: string) => void;
   readonly placeholder?: string;
   readonly mono?: boolean;
   readonly readOnly?: boolean;
+  readonly rows?: number;
+  readonly submit?: () => void;
 }): JSX.Element {
   const wiring = useFieldWiring('TextInput');
+  const shared = {
+    className: 'vs-input',
+    id: wiring.id,
+    value: props.value,
+    placeholder: props.placeholder,
+    readOnly: props.readOnly,
+    spellCheck: false,
+    autoComplete: 'off',
+    'data-mono': props.mono === true || undefined,
+    'data-mono-id': props.mono === true || undefined,
+    'aria-describedby': wiring.describedBy,
+    'aria-invalid': wiring.invalid || undefined,
+  } as const;
+  const {submit} = props;
+  const onEnter =
+    submit === undefined
+      ? undefined
+      : (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>): void => {
+          if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+          event.preventDefault();
+          submit();
+        };
+  if (props.rows !== undefined && props.rows > 1) {
+    return (
+      <textarea
+        {...shared}
+        rows={props.rows}
+        data-multiline
+        onKeyDown={onEnter}
+        onChange={event => props.change?.(event.target.value)}
+      />
+    );
+  }
   return (
     <input
-      className="vs-input"
-      id={wiring.id}
+      {...shared}
       type="text"
-      value={props.value}
-      placeholder={props.placeholder}
-      readOnly={props.readOnly}
-      spellCheck={false}
-      autoComplete="off"
-      data-mono={props.mono === true || undefined}
-      aria-describedby={wiring.describedBy}
-      aria-invalid={wiring.invalid || undefined}
+      onKeyDown={onEnter}
       onChange={event => props.change?.(event.target.value)}
     />
   );

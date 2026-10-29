@@ -34,12 +34,20 @@ from vs_runtime.api import (
     PollingEvaluationExecutor,
 )
 from vs_runtime.api.core import StageRun
-from vs_runtime.api.testing import FakeEvaluation, FakeWorkspace, FakeWorkspaces
+from vs_runtime.api.infrastructure import create_run_control_channel
+from vs_runtime.api.testing import (
+    FakeEvaluation,
+    FakeRunControlEventSink,
+    FakeWorkspace,
+    FakeWorkspaces,
+)
 from vs_sim.api import Capture
-from vs_sim.api.testing import ManualClock, arrival, yield_until
+from vs_sim.api.testing import Gate, ManualClock, SimThreads, arrival, yield_until
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+    from vs_runtime.api import CandidateWorkspace
 
 pytestmark = pytest.mark.asyncio
 
@@ -47,7 +55,7 @@ _HANDLE = "handle-1"
 _TERMINAL = frozenset({EvaluationState.SUCCEEDED, EvaluationState.FAILED, EvaluationState.CANCELED})
 _ACCURACY = StageRun(_HANDLE, "accuracy")
 _BENCHMARK = StageRun(_HANDLE, "benchmark")
-_PRINTED: dict[Literal["accuracy", "benchmark"], tuple[bytes, bytes]] = {
+_PRINTED: dict[Literal["build", "accuracy", "benchmark"], tuple[bytes, bytes]] = {
     "accuracy": (b"checking 1/3\nchecking 2/3\n", b"warning: slow\n"),
     "benchmark": (b"warmup\nrps=41\n", b""),
 }
@@ -218,4 +226,58 @@ async def test_a_stage_that_ends_early_closes_its_stream_with_what_it_wrote(
     assert observed.state is not EvaluationState.SUCCEEDED
     assert streams.opened == streams.closed == [_ACCURACY]
     assert streams.written(_ACCURACY) == _PRINTED["accuracy"]
+    await executor.close()
+
+
+class _PreparingWorkspaces(FakeWorkspaces):
+    """Hold the actual candidate preparation, retaining Fake workspace behavior."""
+
+    def __init__(self) -> None:
+        super().__init__(FakeWorkspace(path=Path("/workspace")), supports_parallel_candidates=True)
+        self.preparing = Gate()
+        self.release = Gate()
+
+    async def create_measured_candidate(self, revision: str) -> CandidateWorkspace:
+        self.preparing.open()
+        await self.release.wait()
+        return await super().create_measured_candidate(revision)
+
+
+async def test_pause_drain_cancels_a_job_still_preparing_its_workspace() -> None:
+    control = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    workspaces = _PreparingWorkspaces()
+    evaluation = FakeEvaluation(default_accuracy=AccuracyEvaluation(executed=True))
+    executor = PollingEvaluationExecutor(
+        evaluation, workspaces, clock=ManualClock(), control=control
+    )
+    snapshot = await workspaces.root.snapshot("candidate")
+    await executor.submit(_request(snapshot), handle_id=_HANDLE)
+    ended = asyncio.create_task(_terminal(executor))
+    await workspaces.preparing.wait(ended)
+    control.land_park()
+    workspaces.release.open()
+    assert (await ended).state is EvaluationState.CANCELED
+    assert evaluation.accuracy_calls == []
+    assert evaluation.benchmark_calls == []
+    await executor.close()
+
+
+async def test_pause_drain_lets_every_stage_of_an_executing_job_finish() -> None:
+    control = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    workspaces = FakeWorkspaces(
+        FakeWorkspace(path=Path("/workspace")), supports_parallel_candidates=True
+    )
+    evaluation = FakeEvaluation(default_accuracy=AccuracyEvaluation(executed=True))
+    gate = evaluation.gate("accuracy", 0)
+    executor = PollingEvaluationExecutor(
+        evaluation, workspaces, clock=ManualClock(), control=control
+    )
+    snapshot = await workspaces.root.snapshot("candidate")
+    await executor.submit(_request(snapshot), handle_id=_HANDLE)
+    ended = asyncio.create_task(_terminal(executor))
+    await arrival(gate.entered.wait(), ended)
+    control.land_park()
+    gate.release()
+    assert (await ended).state is EvaluationState.SUCCEEDED
+    assert len(evaluation.accuracy_calls) == len(evaluation.benchmark_calls) == 1
     await executor.close()

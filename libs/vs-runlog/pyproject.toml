@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=70.1", "wheel>=0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vs-runlog"
+version = "0.1.0"
+description = "Framed append-only run logs"
+requires-python = ">=3.12"
+dependencies = ["google-crc32c>=1.7,<2", "vs-proto", "vs-sim"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vs_runlog = ["py.typed"]
+
+[tool.uv.sources]
+vs-proto = { workspace = true }
+vs-sim = { workspace = true }

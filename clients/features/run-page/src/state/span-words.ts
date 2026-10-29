@@ -1,12 +1,11 @@
 /**
- * How one span reads on the Map: its kind's name, title, subtitle, state and facts, in words. The
- * kinds the dynamic search declares (planning call, workstream, agent turn, gate) get their own
- * words; any other kind, or a span with no label, reads plainly from its name, title, status,
- * attributes and links. Nothing is guessed from a span's name.
+ * How a span reads in words: its title, state and verdict, and what it waits on. The kinds the
+ * dynamic search declares (planning call, workstream, agent turn, gate, adoption) get their own
+ * titles; any other kind, or a span with no label, reads plainly from its name and title. Nothing
+ * is guessed from a span's name.
  */
-import type {Span} from '@vibesys/contracts';
-import type {MapFilter} from './run-page.js';
-import {duration, numberAttr, ratio, stringAttr, words} from './span-reading.js';
+import {roleName, type Span} from '@vibesys/contracts';
+import {stepName, stringAttr, words} from './span-reading.js';
 import type {Tone} from './views.js';
 
 type Status = Span['status'];
@@ -26,12 +25,29 @@ export function statusWords(status: Status): {readonly label: string; readonly t
 }
 
 const VERDICTS: Readonly<Record<string, {readonly label: string; readonly tone: Tone}>> = {
-  accepted: {label: 'Accepted', tone: 'ok'},
-  rejected: {label: 'Rejected', tone: 'neutral'},
   passed: {label: 'Passed', tone: 'ok'},
+  failed: {label: 'Failed', tone: 'err'},
   slower: {label: 'Slower than the input', tone: 'warn'},
   failed_check: {label: 'Failed a check', tone: 'err'},
+  adopted: {label: 'Adopted', tone: 'ok'},
+  not_adopted: {label: 'Not adopted', tone: 'warn'},
 };
+
+/** A recorded agent client, or null when the turn did not name one. */
+function clientWord(value: string | null): 'scripted' | 'provider' | null {
+  if (value === null) return null;
+  const word = value.replace(/^AGENT_CLIENT_/, '').toLowerCase();
+  if (word === 'scripted' || word === 'provider') return word;
+  return null;
+}
+
+/** The checkout skip the adoption recorded, as a status word. */
+function checkoutWords(value: string | null): string | null {
+  if (value === null) return null;
+  const word = value.replace(/^CHECKOUT_STATUS_/, '').toLowerCase();
+  if (word === '' || word === 'unspecified') return null;
+  return plain(word);
+}
 
 /** A word from the wire (`failed_check`) as text (`Failed check`). */
 export function plain(word: string): string {
@@ -46,55 +62,26 @@ export function verdictWords(span: Span): {readonly label: string; readonly tone
   return VERDICTS[verdict] ?? {label: plain(verdict), tone: 'neutral'};
 }
 
-/** Which filter shows a span: pending counts as waiting, stopped as finished. */
-export function bucket(status: Status): Exclude<MapFilter, 'all'> {
-  switch (status) {
-    case 'running':
-      return 'running';
-    case 'pending':
-    case 'waiting':
-      return 'waiting';
-    case 'failed':
-      return 'failed';
-    case 'done':
-    case 'stopped':
-      return 'finished';
-  }
-}
-
 /** Whether the span has ended (it will not change state again). */
 export function ended(span: Span): boolean {
   return span.status === 'done' || span.status === 'failed' || span.status === 'stopped';
 }
 
-const KINDS: Readonly<Record<string, string>> = {
-  planning_call: 'Planning call',
-  workstream: 'Workstream',
-  agent_turn: 'Agent turn',
-  gate: 'Gate',
-};
+/** How a gate's stages read in its title: a task's build stage is the candidate build. */
+const GATE_STAGE_WORDS: Readonly<Record<string, string>> = {build: 'candidate build'};
 
-/** What kind of step the span is, in words. */
-export function kindWords(span: Span): string {
-  if (span.parent === null) return 'Run';
-  const kind = span.label?.kind;
-  if (kind === undefined) return span.type === 'operation' ? 'Operation' : 'Step';
-  return KINDS[kind] ?? plain(kind);
-}
-
-/** The span's short name, as a link to it reads: a workstream's hypothesis, else its title. */
-export function shortName(span: Span): string {
-  if (span.label?.kind === 'workstream') {
-    const hypothesis = stringAttr(span, 'hypothesis_id');
-    if (hypothesis !== null) return hypothesis;
-  }
-  return span.label?.title ?? span.name;
+/** A gate's title (its stages joined by ` + `, as the search labels it) in words. */
+function gateTitle(title: string): string {
+  return title
+    .split(' + ')
+    .map(stage => GATE_STAGE_WORDS[stage] ?? stage)
+    .join(' + ');
 }
 
 /** The span's title on its row. */
 export function titleOf(span: Span): string {
   const label = span.label;
-  const title = label?.title ?? span.name;
+  const title = label?.title ?? stepName(span.name) ?? span.name;
   if (span.parent === null) return `Run · ${title}`;
   switch (label?.kind) {
     case 'planning_call':
@@ -104,100 +91,45 @@ export function titleOf(span: Span): string {
       return hypothesis === null || hypothesis === title ? title : `${hypothesis} · ${title}`;
     }
     case 'agent_turn': {
+      const role = roleName(title);
+      if (clientWord(stringAttr(span, 'client')) === 'scripted') return role;
       const model = stringAttr(span, 'model');
-      return model === null ? title : `${title} · ${model}`;
+      return model === null ? role : `${role} · ${model}`;
     }
     case 'gate':
-      return `Gate · ${title}`;
+      return `Gate · ${gateTitle(title)}`;
+    case 'adoption': {
+      const candidate = stringAttr(span, 'candidate');
+      const base =
+        candidate === null ? 'Adopt the input' : `Adopt candidate ${candidate.slice(0, 7)}`;
+      const skip = checkoutWords(stringAttr(span, 'checkout_status'));
+      return skip === null ? base : `${base} · ${skip}`;
+    }
     default:
       return title;
   }
 }
 
-/** One source the span waits on, in words; an operation reads as its span's title when known. */
-export function waitingWords(wait: Waiting, spans: ReadonlyMap<string, Span>): string {
-  switch (wait.kind) {
-    case 'operation': {
-      const target = spans.get(wait.ref);
-      return target === undefined ? 'An operation' : titleOf(target);
-    }
-    case 'slot':
-      return 'A free slot';
-    case 'time':
-      return 'A timer';
-    case 'stop':
-      return 'The stop to land';
+/** Adoption span id to the headline the records name, including a checkout skip. */
+export function adoptionTitles(
+  spans: ReadonlyMap<string, Span> | undefined,
+): ReadonlyMap<string, string> {
+  const titles = new Map<string, string>();
+  if (spans === undefined) return titles;
+  for (const span of spans.values()) {
+    if (span.label?.kind !== 'adoption') continue;
+    titles.set(span.id, titleOf(span));
   }
-}
-
-/** How a try of the span's retry went, in words: `again: build failed`, or `running`. */
-export function attemptWords(attempt: NonNullable<Span['attempts']>[number]): string {
-  const outcome =
-    attempt.outcome === null || attempt.outcome === undefined
-      ? 'running'
-      : plain(attempt.outcome).toLowerCase();
-  const reason =
-    attempt.reason === null || attempt.reason === undefined ? '' : `: ${attempt.reason}`;
-  return `${outcome}${reason}`;
-}
-
-/** A gate's measurement, in words: `41.2 · 1.18× the input`. */
-function measured(span: Span): string | null {
-  const value = numberAttr(span, 'metric_value');
-  if (value === null) return null;
-  const vs = numberAttr(span, 'vs_baseline');
-  return vs === null ? `${value}` : `${value} · ${ratio(vs)} the input`;
-}
-
-/** The subtitle a labelled kind gives itself, or null to use the generic one. */
-function kindSubtitle(span: Span, children: number): string | null {
-  switch (span.label?.kind) {
-    case 'planning_call':
-      return `${children} workstream${children === 1 ? '' : 's'} planned`;
-    case 'gate':
-      return measured(span);
-    case 'workstream':
-      return span.label?.reason == null ? null : plain(span.label.reason);
-    default:
-      return null;
-  }
-}
-
-/** How many workstreams the run has started, and how many of them are running. */
-function workstreams(spans: ReadonlyMap<string, Span>): string | null {
-  const all = [...spans.values()].filter(span => span.label?.kind === 'workstream');
-  if (all.length === 0) return null;
-  const running = all.filter(span => span.status === 'running').length;
-  return `${all.length} workstream${all.length === 1 ? '' : 's'} · ${running} running`;
-}
-
-/** When the span ran, relative to the run's start (`start`): how long it took, or when it began. */
-function timing(span: Span, start: number): string {
-  const end = span.ended_at;
-  return end === null || end === undefined
-    ? `Started ${duration(span.started_at - start)} into the run`
-    : `Took ${duration(end - span.started_at)}`;
+  return titles;
 }
 
 /**
- * The span's subtitle: what it waits on, its kind's own words, its try, its failure, an unknown
- * kind's name, or when it ran. `start` is the run's start on the run clock.
+ * What the span waits on that is worth saying. Every live flow also awaits the operator's stop, so
+ * the run records a `stop` wait on each from the start; it is something the flow waits on only
+ * once a stop was requested.
  */
-export function subtitleOf(
-  span: Span,
-  spans: ReadonlyMap<string, Span>,
-  children: number,
-  start: number,
-): string {
-  const waiting = span.waiting_on ?? [];
-  if (waiting.length > 0 && !ended(span)) {
-    return `Waiting on ${waiting.map(wait => waitingWords(wait, spans).toLowerCase()).join(', ')}`;
-  }
-  const own = span.parent === null ? workstreams(spans) : kindSubtitle(span, children);
-  if (own !== null) return own;
-  const attempt = (span.attempts ?? []).at(-1);
-  if (attempt !== undefined && attempt.of > 1) return `Attempt ${attempt.n} of ${attempt.of}`;
-  if (span.failure !== null && span.failure !== undefined) return span.failure.message;
-  const kind = span.label?.kind;
-  return kind === undefined || kind in KINDS ? timing(span, start) : plain(kind);
+export function openWaits(span: Span): readonly Waiting[] {
+  if (ended(span)) return [];
+  const requested = span.stop !== null && span.stop !== undefined;
+  return (span.waiting_on ?? []).filter(wait => wait.kind !== 'stop' || requested);
 }

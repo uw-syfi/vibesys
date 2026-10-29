@@ -1,0 +1,57 @@
+{
+  "id": "helper-preflight-backend-gated",
+  "protocol": "host-helper",
+  "title": "Asking a preflight for roles needs the run_backend feature",
+  "description": "After a hello that negotiated preflight but not run_backend, run.preflight with with_backend set is answered feature_not_negotiated, before any project is read.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "preflight"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "preflight"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "run.preflight",
+        "request_id": "p",
+        "deadline_ms": 30000,
+        "project": "/nonexistent-vibesys-conformance/project",
+        "with_backend": true
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "p",
+        "code": "feature_not_negotiated"
+      }
+    }
+  ]
+}

@@ -4,6 +4,7 @@
  */
 import type {RunEvent} from '@vibesys/contracts';
 import {benchmarkRecordFromEvent} from './benchmark.js';
+import {applyChatProposal} from './chat.js';
 import {
   applyAgentExecutionActivityData,
   applyAgentExecutionFinishedData,
@@ -22,10 +23,15 @@ import {
   endedRunStatus,
   hasRunEnded,
   type MutableCoreState,
+  type QuotaPause,
   type QuotaState,
+  type QuotaStop,
 } from './state.js';
+import {applySteerDelivery} from './steer-delivery.js';
+import {ledgerWith} from './token-usage.js';
 import {appendTranscript, eventToTranscriptEntry, RUN_TRANSCRIPT} from './transcript-fold.js';
 import type {TranscriptFolder} from './transcript-folder.js';
+import {recordOf} from './usage-records.js';
 import {workstreamsWithFinish, workstreamsWithUsage} from './workstream.js';
 
 type RunEventData = NonNullable<RunEvent['data']>;
@@ -107,6 +113,8 @@ const EVENT_DATA_HANDLERS = {
   server_ready: ignoredEventData,
   run_started: ignoredEventData,
   run_startup_progress: runEventData(applyRunStartupProgressData),
+  // The Slurm workspace-root probe is a notice to read, not run state to fold.
+  workspace_root_probe: ignoredEventData,
   run_failed: runEventData(applyTerminalExecutionStatus),
   run_interrupted: runEventData(applyTerminalExecutionStatus),
   run_status_changed: runEventData(
@@ -123,6 +131,9 @@ const EVENT_DATA_HANDLERS = {
   round_finished: ignoredEventData,
   tool_call: runEventData(composeEventDataHandlers(applyAgentStatusData, applyTypedToolData)),
   tool_result: runEventData(applyTypedToolData),
+  // A steer proposal belongs to a chat thread, not the run's core state. The chat fold reads it
+  steer_proposed: executionEventData(applyChatProposal),
+  steer_delivery: executionEventData(applySteerDelivery),
   todo_update: runEventData(applyTodoData),
   usage_update: runEventData(applyUsageData),
   rate_limit_update: ignoredEventData,
@@ -137,7 +148,10 @@ const EVENT_DATA_HANDLERS = {
   workspace_snapshot: ignoredEventData,
   run_configured: ignoredEventData,
   framework_warning: ignoredEventData,
+  measurement_compared: runEventData(applyMeasurementComparedData),
+  comparisons_read: runEventData(applyComparisonsReadData),
   winner_selected: runEventData(applyWinnerSelectedData),
+  input_measurement_failed: runEventData(applyInputMeasurementFailedData),
   workstream_finished: runEventData(applyWorkstreamFinishedData),
   turn_usage_recorded: runEventData(applyTurnUsageData),
   // The run trace is its own fold (`@vibesys/run-state/trace`), not part of the run's core state.
@@ -178,7 +192,61 @@ function applyUsageData(state: CoreState, event: RunEvent): CoreState {
 
 function applyQuotaData(state: CoreState, event: RunEvent, sequence: number): CoreState {
   const quota = quotaFromEvent(state.quota, event, sequence);
-  return quota === state.quota ? state : cloneCoreStateWith(state, {quota});
+  const quotaPausedAt = quotaPausedAtFrom(state.quotaPausedAt, event);
+  // A stop that ends while the run is still parked stays open until the run resumes.
+  const stop = quotaStopFromEvent(event, sequence, state.quotaPausedAt, !isParked(state.status));
+  if (quota === state.quota && stop === null && quotaPausedAt === state.quotaPausedAt) return state;
+  return cloneCoreStateWith(state, {
+    quota,
+    quotaPausedAt,
+    ...(stop === null ? {} : {quotaStops: [...state.quotaStops, stop]}),
+  });
+}
+
+function isParked(status: CoreRunStatus): boolean {
+  return status === 'paused' || status === 'pausing';
+}
+
+/** When the run's open pause began after `event`: the first `quota_paused` opens it, a settled stop closes it. */
+function quotaPausedAtFrom(open: string | null, event: RunEvent): string | null {
+  const data = event.data;
+  switch (data?.kind) {
+    case 'quota_paused':
+      return data.condition === 'unavailable' ? open : (open ?? event.timestamp);
+    case 'quota_resumed':
+    case 'quota_abandoned':
+      return data.condition === 'unavailable' ? open : null;
+    case 'provider_switched':
+      return null;
+    default:
+      return open;
+  }
+}
+
+/** The stop a `quota_resumed` or `quota_abandoned` event ends, when it held a turn for some time. */
+function quotaStopFromEvent(
+  event: RunEvent,
+  sequence: number,
+  pausedAt: string | null,
+  runIsMoving: boolean,
+): QuotaStop | null {
+  const data = event.data;
+  if (data?.kind !== 'quota_resumed' && data?.kind !== 'quota_abandoned') return null;
+  const waitedSeconds = data.waited_seconds ?? 0;
+  if (!(waitedSeconds > 0)) return null;
+  return {
+    sequence,
+    provider: data.provider,
+    condition: data.condition ?? null,
+    outcome: data.kind === 'quota_resumed' ? 'resumed' : 'abandoned',
+    waitedSeconds,
+    endedAt: event.timestamp,
+    pausedAt: data.condition === 'unavailable' ? null : pausedAt,
+    resumedAt:
+      data.condition === 'unavailable' || pausedAt === null || !runIsMoving
+        ? null
+        : event.timestamp,
+  };
 }
 
 function applyBenchmarkData(state: CoreState, event: RunEvent, sequence: number): CoreState {
@@ -200,6 +268,61 @@ function applyWinnerSelectedData(state: CoreState, event: RunEvent): CoreState {
   });
 }
 
+function applyInputMeasurementFailedData(state: CoreState, event: RunEvent): CoreState {
+  const data = event.data;
+  if (data?.kind !== 'input_measurement_failed') return state;
+  return cloneCoreStateWith(state, {
+    inputFailure: {
+      failure: data.failure,
+      stage: data.stage ?? null,
+      summary: data.summary ?? '',
+      attempts: data.attempts ?? 1,
+      compared: data.compared ?? false,
+    },
+  });
+}
+
+function applyMeasurementComparedData(state: CoreState, event: RunEvent): CoreState {
+  const data = event.data;
+  if (data?.kind !== 'measurement_compared') return state;
+  return cloneCoreStateWith(state, {
+    comparisons: {
+      ...state.comparisons,
+      [data.candidate_commit]: {
+        verdict: data.verdict,
+        ratio: data.ratio,
+        metric: data.metric,
+        candidateValue: data.candidate_value,
+        baseValue: data.base_value,
+        baseCommit: data.base_commit,
+        candidateSamples: data.candidate_samples,
+        baseSamples: data.base_samples,
+      },
+    },
+  });
+}
+
+/** The newest `comparisons_read` replaces the baselines the run held. */
+function applyComparisonsReadData(state: CoreState, event: RunEvent): CoreState {
+  const data = event.data;
+  if (data?.kind !== 'comparisons_read') return state;
+  return cloneCoreStateWith(state, {
+    baselines: data.comparisons.map(row => ({
+      name: row.name,
+      label: row.label,
+      status: row.status,
+      metric: row.metric ?? null,
+      unit: row.unit ?? null,
+      direction: row.direction ?? null,
+      value: row.value ?? null,
+      spread: row.spread ?? null,
+      samples: row.samples ?? null,
+      hosts: row.hosts ?? [],
+      reason: row.reason ?? null,
+    })),
+  });
+}
+
 function applyWorkstreamFinishedData(
   state: CoreState,
   event: RunEvent,
@@ -214,8 +337,12 @@ function applyWorkstreamFinishedData(
 function applyTurnUsageData(state: CoreState, event: RunEvent): CoreState {
   const data = event.data;
   if (data?.kind !== 'turn_usage_recorded') return state;
-  const workstreams = workstreamsWithUsage(state.workstreams, event, data);
-  return workstreams === state.workstreams ? state : cloneCoreStateWith(state, {workstreams});
+  const record = recordOf(state.executionStarts, event);
+  return cloneCoreStateWith(state, {
+    workstreams: workstreamsWithUsage(state.workstreams, event, data),
+    tokens: ledgerWith(state.tokens, data),
+    ...(record === null ? {} : {usageRecords: [...state.usageRecords, record]}),
+  });
 }
 
 function applyExperimentsChangedData(
@@ -231,16 +358,31 @@ function applyRunStartupProgressData(state: CoreState, event: RunEvent): CoreSta
   if (data?.kind !== 'run_startup_progress') return state;
   const progress = data.progress;
   const previous = state.startup;
+  const sameStage = previous !== null && previous.stage === data.stage;
+  const stepState = data.state ?? 'running';
+  const took =
+    stepState === 'finished' && data.elapsed_seconds != null
+      ? {
+          ...state.startupTook,
+          [data.stage]: (state.startupTook[data.stage] ?? 0) + data.elapsed_seconds,
+        }
+      : state.startupTook;
   return cloneCoreStateWith(state, {
+    startupTook: took,
     startup: {
       stage: data.stage,
-      stageSince:
-        previous !== null && previous.stage === data.stage ? previous.stageSince : event.timestamp,
+      state: stepState,
+      condition: data.condition ?? null,
+      elapsedSeconds: data.elapsed_seconds ?? null,
+      stageSince: sameStage ? previous.stageSince : event.timestamp,
       lastActivityAt: event.timestamp,
+      // A wait or a finish carries no step of its own: the stage's last step stays the latest.
       progress:
-        progress == null
-          ? null
-          : {done: progress.done, total: progress.total ?? null, label: progress.label ?? ''},
+        progress != null
+          ? {done: progress.done, total: progress.total ?? null, label: progress.label ?? ''}
+          : stepState !== 'running' && sameStage
+            ? previous.progress
+            : null,
     },
   });
 }
@@ -250,35 +392,53 @@ function applyRunStatusData(state: CoreState, event: RunEvent): CoreState {
   if (data?.kind !== 'run_status_changed') return state;
   // The backend owns the run's lifecycle and publishes every move through it,
   // so the projection folds the status it is told rather than inferring one.
-  return applyRunStatus(state, data.status);
+  return withResumedPauses(applyRunStatus(state, data.status), event.timestamp);
+}
+
+/** Closes the paused stretch of each stop still open once the run is no longer parked. */
+function withResumedPauses(state: CoreState, timestamp: string): CoreState {
+  if (isParked(state.status)) return state;
+  const open = (stop: QuotaStop): boolean => stop.pausedAt !== null && stop.resumedAt === null;
+  if (!state.quotaStops.some(open)) return state;
+  return cloneCoreStateWith(state, {
+    quotaStops: state.quotaStops.map(stop => (open(stop) ? {...stop, resumedAt: timestamp} : stop)),
+  });
+}
+
+/** The pause a `quota_paused` event on a named limit (`condition`) sets, waiting on nothing yet. */
+function pauseFromEvent(
+  data: Extract<RunEventData, {kind: 'quota_paused'}>,
+  condition: QuotaPause['condition'],
+): QuotaPause {
+  return {
+    provider: data.provider,
+    condition,
+    detail: data.detail,
+    resetsAt: data.resets_at ?? null,
+    resumesAt: data.resumes_at ?? null,
+    policy: data.policy ?? null,
+    fallback:
+      data.fallback_provider == null
+        ? null
+        : {provider: data.fallback_provider, model: data.fallback_model ?? null},
+    waiting: null,
+  };
 }
 
 /**
  * The quota state after `event`: a pause sets it, any event that settles the stop clears it.
  * `provider_switched` additionally records what it switched, in `lastSwitch`: that fact is
  * sticky, so every branch carries the previous one forward rather than dropping it.
+ *
+ * An outage (`unavailable`) never pauses the run: only the stopped turn waits, while other
+ * turns go on and may hold a real pause. So its events neither set nor settle the pause.
  */
 function quotaFromEvent(quota: QuotaState, event: RunEvent, sequence: number): QuotaState {
   const data = event.data;
   switch (data?.kind) {
     case 'quota_paused':
-      return {
-        ...quota,
-        sequence,
-        pause: {
-          provider: data.provider,
-          condition: data.condition,
-          detail: data.detail,
-          resetsAt: data.resets_at ?? null,
-          resumesAt: data.resumes_at ?? null,
-          policy: data.policy ?? null,
-          fallback:
-            data.fallback_provider == null
-              ? null
-              : {provider: data.fallback_provider, model: data.fallback_model ?? null},
-          waiting: null,
-        },
-      };
+      if (data.condition === 'unavailable') return quota;
+      return {...quota, sequence, pause: pauseFromEvent(data, data.condition)};
     case 'quota_waiting':
       // A wait belongs to the pause it waits out; one with no pause folded has nothing to show.
       return quota.pause === null
@@ -294,6 +454,7 @@ function quotaFromEvent(quota: QuotaState, event: RunEvent, sequence: number): Q
         : {...quota, sequence, pause: {...quota.pause, waiting: null}};
     case 'quota_resumed':
     case 'quota_abandoned':
+      if (data.condition === 'unavailable') return quota;
       return {...quota, sequence, pause: null};
     case 'provider_switched':
       return {

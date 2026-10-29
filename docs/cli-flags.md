@@ -10,9 +10,8 @@ is the exhaustive flag reference.
 
 ## Entry Point
 
-Use the installed `vibesys` command. It launches the interactive TUI by default
-and runs headless with `--headless`, `--help`, `validate`, or when not attached
-to a TTY. Examples below use this command.
+Use the installed `vibesys` command for command-line and headless operation.
+The desktop app provides the interactive interface. Examples below use the CLI.
 
 ### Agent configuration
 
@@ -38,13 +37,37 @@ reasoning_effort = "xhigh"
 ```
 
 Every model must be a vetted model of the CLI provider: VibeSys runs only the
-provider and model pairs in `vs_agent.provider_policy.HARNESSES`. Without
-`[model].name` or `--model`, a run uses its provider's default model (the
-provider's first vetted model). An unvetted model in `[model].name`, `--model`,
+provider and model pairs `vs_agent.provider_policy.harnesses()` returns: the
+models agentshim lists for each shipped provider (`ProviderProfile.models`).
+Without `[model].name` or `--model`, a run uses its provider's default model
+(the first one agentshim lists). An unvetted model in `[model].name`, `--model`,
 a role entry, or `[agent.quota].fallback_model` is rejected before the run
 builds anything, with the key and the vetted models. At a terminal,
 `--allow-unvetted-model` runs it anyway; runs started from the desktop app
 cannot opt out. A resume keeps the pair its run was started with.
+
+A host can narrow that list for every live run started on it, from the
+command line or the desktop app, including Resume and Relaunch. Write the
+model ids in `~/.config/vibesys/host.toml`:
+
+```toml
+allowed_models = ["model-a"]
+```
+
+A missing file, or an empty `allowed_models` list, adds no restriction. A
+model outside the list is refused before the run starts. The refusal names
+`allowed_models`, the role, the model, and the list. `--allow-unvetted-model`
+and a resume do not bypass it. Scripted runs are not checked. An unknown key
+in the file is an error that names the key.
+
+A role entry may also name a `provider` (`--role-provider ROLE=PROVIDER`, with
+`--role-model ROLE=MODEL`). A role on a provider other than the run's and with no
+model runs that provider's default model, never the run's model. Each provider a
+run uses gets its own agent client, and every role runs on its own. A run
+environment that starts containers carries the login of the run's provider only,
+so roles on more than one provider are rejected there, naming the providers, until
+containers carry every provider's login; the host run environment has no such
+limit.
 
 Unknown role IDs are rejected against the selected orchestration before run
 resources open. The run manifest records the total resolved role map. Resume
@@ -59,7 +82,15 @@ once. `--max-rounds N` supplies `N` admissions per slot, so the dynamic search
 may admit at most `N * M` workstreams whose workspaces open. A workstream that
 fails parent verification or workspace admission is refunded and does not
 consume that budget; an operator stop before the workspace opens is not
-refunded.
+refunded. A workstream whose candidate waits for its trusted measurement, or
+whose agent's turn waits for its own evaluations, parks and gives its agent
+slot to new work, so planning and implementing go on while measurements queue.
+A parked turn resumes only once an agent slot is free, and a new workstream's
+agents start only once its workspace opened and an agent slot is free, so a
+workstream waiting for admission never holds the slot a parked turn needs.
+`--max-backlog K` caps how many workstreams park at once (default: every
+waiting one, up to 32); `--max-backlog 0` keeps each agent slot held until its
+workstream ends.
 
 A dynamic **round** is the durable result of an implementation workstream
 recorded under a hypothesis. Profile and merge workstreams still appear in the
@@ -156,8 +187,8 @@ every `retry_seconds` when it reported none, and fails the turn with the quota
 error once `wait_seconds` is spent or the reset lies beyond it. `fail` does not
 pause.
 
-A run drives every role through one agent client on one provider, so it cannot
-switch to a fallback provider on a quota stop. `fallback_provider`,
+A run fixes each role's provider when it starts (one agent client per provider),
+so it cannot switch to a fallback provider on a quota stop. `fallback_provider`,
 `fallback_model` and `policy = "fallback"` are accepted by the config schema but
 refused when a run starts, naming the key; use `pause`, `wait` or `fail`. A
 misspelled key, an unknown policy, or `wait_seconds` with `pause` or `fail` is
@@ -184,7 +215,8 @@ Several flags look independent, but they combine into one execution contract:
 | --- | --- | --- |
 | Search loop | `--outer-loop` | Which outer-loop policy runs: `agent`, `profile-guided`, `plain`, or `evolve`. |
 | Evaluation interface | `--interface` | Agent loop only. Whether evaluator-owned code invokes the candidate directly or communicates with a service. |
-| Compute backend | `--backend` | Hardware/runtime target: `cuda`, `metal`, `trainium`, `rocm`, or `cpu`. |
+| Compute backend | `backends` in `vibesys.input.toml` | Hardware/runtime target the task declares: `cuda`, `metal`, `trainium`, `rocm`, or `cpu`. The task decides; `--backend` only overrides it with another backend the task declares (see [Compute backend](running-vibesys.md#compute-backend)). |
+| Agents | `--agent-backend`, `[agent].scripted_seed` | `cli` (the default) drives a coding-agent CLI. `scripted` is the agent-less mode: the real backend with scripted agents and no model (see [Agent-less runs](contributing/development.md#agent-less-runs)). |
 | Agent environment | none (always Docker) | Where the agent runs: a local Docker container, for every run. `--docker` was removed and is rejected. |
 | Evaluation environment | `--run-environment`, `--modal`, `--skypilot`, `--slurm-config` | Where evaluation runs: the local container (default), Modal, SkyPilot, or Slurm. These never move the agent out of its local container. |
 | Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `rocprof`, `torch`, `neuron`, `otel`, `macos_cpu`, `linux_cpu`, or `auto`. |
@@ -195,7 +227,6 @@ Several flags look independent, but they combine into one execution contract:
 | Task | `--task NAME` | Task below `.vibesys/tasks`; optional when exactly one exists. |
 | Project provisioning | `--runs-dir PATH` | Copy a repository-shaped example nested below another Git root, or a project synthesized from `--input-*` flags. Standalone repository-native projects run in place. |
 | Project repository | `--repo`, `--repo-visibility`, `--local`, `--resume` | Fresh copied projects use GitHub by default. Resume also accepts local project paths or GitHub repositories. |
-| Client theme | `--theme` | Presentation only. Which semantic theme the interactive client renders with. |
 
 Do not treat these as simple toggles. Some combinations imply a startup
 contract, profiler, or sandbox capability. Language and artifact requirements
@@ -254,8 +285,8 @@ rejected when a root `.env*` file or `agent.toml` is recoverable from Git refs
 or reflogs.
 
 A task whose candidate is a container topology (`docker compose`, kind)
-declares `[environment] docker_in_docker = true`. Like a task `Dockerfile`, the
-key selects the local Docker evaluation environment; `--modal`, `--skypilot`,
+declares `[environment] docker_in_docker = true`. The key selects the local
+Docker evaluation environment; `--modal`, `--skypilot`,
 Slurm, and `--docker-image` conflict with it and the error names the key. The sandbox runs
 under Sysbox with a Docker daemon of its own and never mounts the host socket;
 a host without `sysbox-runc` fails early. See
@@ -285,7 +316,14 @@ extra host paths granted to the agent read-only. See
 [Sandboxing and confinement](contributing/sandboxing.md).
 
 VibeSys initializes Git when needed and creates one `vibesys-runs/<run-id>` branch
-per run. Agent-authored source stays at its normal project paths. Portable state
+per run, cut from the branch checked out when the run starts (its home branch).
+A run that adopts a winner commits it on its own branch, with a message naming
+the candidate and its measurements, and never writes to the home branch.
+The run's branch stays checked out after it ends; the next run checks the home
+branch out before cutting its own, and a resume checks out the run's branch. Every
+run stays listed and resumable from any branch, because run history is read from
+the run branches. Agent-authored source stays at its
+normal project paths. Portable state
 remains in the project, while machine-local state defaults to `~/.vibesys`:
 
 ```text
@@ -299,6 +337,7 @@ remains in the project, while machine-local state defaults to `~/.vibesys`:
     │   ├── plain/                          # plain-loop portable cursor
     │   ├── evolve/                         # evolve population and policy state
     │   └── runtime/effective-objective.md  # objective plus run constraints
+    ├── agent-visible/<run-id>/            # documents agents read by path, e.g. planner handoff notes
     └── local/runs/<run-id>/worktrees/     # ignored temporary evolve worktrees
 
 ~/.vibesys/projects/<project-key>/
@@ -344,10 +383,12 @@ worktree must be clean before VibeSys switches to the saved
 
 | Flag | Default | Behavior |
 | --- | ---: | --- |
-| `--judge-every N` | `3` | Run an independent judge every Nth round. A candidate explicitly nominated by the implementer and the final round are always reviewed immediately. Canonical accuracy and benchmark commands run only after a judge PASS. The `dynamic` orchestration uses an implementation workstream's global schedule sequence for this cadence: it always reviews a nominated or supported candidate, and reviews another terminal outcome when that sequence is every Nth workstream. Its admission budget is `--max-rounds` times `--max-in-flight`, and a continued hypothesis uses another admission. |
-| `--official-eval-every N` | `3` | Run configured framework-owned accuracy and benchmark gates every N accepted candidate checkpoints. Intermediate checkpoints remain provisional; orchestrator requests and the final round force immediate official evaluation. Retries, continuing hypotheses, and profiler-only rounds do not advance this cadence. Modal gates reuse one healthy deployment for the exact candidate commit, explicitly stop it after the final gate, and rely on zero minimum-warm replicas plus a short finite scaledown window as the crash backstop. Unchanged retries reuse a prior accuracy PASS when only a later gate failed. The `dynamic` orchestration ignores this cadence: its workstreams are parallel branches, so it evaluates every review-passed candidate. |
-| `--memory-layout` | `files` | `files` keeps `roadmap.md` and `progress.md`. `directories` uses `roadmap/index.md` and one `progress/round-NNNN.md` audit file per round; fresh orchestrators receive a bounded recent window and can inspect older files on demand. Existing runs retain their current layout when resumed. |
+| `--judge-every N` | `3` | Run an independent judge every Nth round. A candidate the implementer reports as `implemented` and the final round are always reviewed immediately. Canonical accuracy and benchmark commands run only after a judge PASS: every idea that passes review is measured with the configured framework-owned accuracy and benchmark gates, and the framework, not the agent, measures the exact commit it retains, serially (an agent's own evaluation is advice and never the measurement an idea rests on). An idea no gate measured, such as one whose review was deferred, has no trusted measurement, so it cannot pass or be the best. Retries, continuing hypotheses, and profiler-only rounds are not measured again. Modal gates reuse one healthy deployment for the exact candidate commit, explicitly stop it after the final gate, and rely on zero minimum-warm replicas plus a short finite scaledown window as the crash backstop. Unchanged retries reuse a prior accuracy PASS when only a later gate failed. The `dynamic` orchestration uses an implementation workstream's global schedule sequence for this cadence: it always reviews a nominated or supported candidate, and reviews another terminal outcome when that sequence is every Nth workstream. Its admission budget is `--max-rounds` times `--max-in-flight`, and a continued hypothesis uses another admission. |
 | `--constraint TEXT` | none | Add an operator-supplied workload invariant to every agent's objective without changing the input bundle. The framework commits the effective objective under the run's portable `.vibesys/state/` and mounts it read-only in isolated environments, so candidate edits cannot erase it. Repeat for multiple constraints and repeat the same flags when resuming. |
+
+The designer's roadmap (its directions, their blockers and their statuses) is
+kept by VibeSys in the run's state, not in the project: the designer sees it in
+its prompt and changes it through its reply, and a resumed run keeps it.
 
 Designer and judge invocations start with clean model sessions. The implementer
 session is keyed by the designer's stable `hypothesis_id`, so targeted
@@ -498,7 +539,7 @@ Validation does not execute the checker or benchmark. A project with a root
 
 ## Interface
 
-`--interface` applies to the agent loop.
+`--interface` applies to the agent loop. Without the flag, the input's `[agent].interface` applies (`inprocess` or `service`), and `inprocess` when it declares none.
 
 | Value | Process boundary | Contract ownership |
 | --- | --- | --- |
@@ -520,7 +561,7 @@ prompts and input-owned candidate-contract documentation.
 | `cuda` | NVIDIA GPU serving systems and kernel-writing tasks. | Docker, Modal. | Selects/reselects a GPU and can monitor contention. | Serving uses `nsys` in Docker and `torch` on Modal; kernel-writing uses `ncu` where supported by the run environment. |
 | `rocm` | AMD GPU serving systems. | Docker, SkyPilot, Slurm. | Selects a visible ROCm device locally; a SkyPilot profile declares remote capacity. | Docker uses `rocprof`; SkyPilot uses `none` (only `auto`/`none` are supported there). |
 | `metal` | Apple Silicon / MPS targets. | None: Docker on macOS cannot expose Metal/MPS, and agents no longer run on the host. A Metal run fails when the container is created, before agent work starts. | No device selection or monitor. | n/a |
-| `trainium` | AWS Trainium / NeuronCore targets. | Docker; Modal unsupported. | Forwards `/dev/neuron*` in Docker; no per-device selection. | `auto` resolves to `neuron`. |
+| `trainium` | AWS Trainium / NeuronCore targets. Default image: the native TorchNeuron DLC (`torch-neuronx` 2.14, Neuron SDK 2.33), which installs TorchNeuron in editable mode under `/workspace`; a task needs the relocating task Dockerfile from `examples/model-serving/Llama-3-8B-trn2` or `import torch` fails under the project mount. | Docker; Modal unsupported. | Forwards `/dev/neuron*` in Docker; no per-device selection. | `auto` resolves to `neuron`. |
 | `cpu` | CPU-only service/data-structure targets. | Docker. | No device selection or monitor. | Generic workloads on Linux select `linux_cpu`; macOS selects `macos_cpu`; other systems select no profiler. |
 
 When a backend rejects a runtime environment, it should fail before agent work
@@ -545,13 +586,21 @@ recorded with the local environment before their removal continues in Docker whe
 resumed: the run log says so and the run record is rewritten to `docker`.
 
 A repository-native task may provide
-`.vibesys/tasks/<task>/Dockerfile`. Its presence (or `docker_in_docker = true`,
-below) automatically selects the
-Docker environment, builds with the task directory as its complete context,
-and uses the resulting immutable image ID. No manifest field or pre-build step
-is required. Explicit alternative environments and `--docker-image` conflict
-with this convention. A root Dockerfile is a candidate file and is not
-auto-detected.
+`.vibesys/tasks/<task>/Dockerfile`. Every environment whose agent runs in a
+local container (Docker, and the agent container of `--modal`, `--skypilot`
+and `--run-environment slurm`) builds it with the task directory as its
+complete context and the backend's default image as `BASE_IMAGE`, and runs the
+agent in the resulting image's ID. The run records a tag keyed to the task
+directory and a digest of every build input (honoring `.dockerignore`). No
+manifest field or pre-build step is required. `--docker-image` conflicts with
+this convention, and the `host` environment refuses it. Resume reuses the
+recorded image while it is in the local daemon (with a notice if the inputs
+changed), rebuilds it when it is gone and the inputs are unchanged, and
+refuses changed inputs once the image is gone, or a Dockerfile the record has
+no image for. `docker_in_docker = true` (below) still selects Docker only. A root
+Dockerfile is a candidate file and is not auto-detected. See
+[Running VibeSys](running-vibesys.md) for why a task image's `ENV` leaks into
+Slurm GPU jobs.
 
 `--docker-image` overrides the backend's default agent container image, including
 the local CPU editor image for Modal and SkyPilot.
@@ -579,6 +628,8 @@ supported by this CLI.
 | `auto` | Let the runtime/backend pick the default profiler. |
 | `nsys` | NVIDIA Nsight Systems. Requires a CUDA/NVIDIA profiling environment. |
 | `ncu` | NVIDIA Nsight Compute for CUDA kernel-writing tasks. Selected by `auto` when the run environment supports it; use `none` to disable it. |
+| `flashinfer` | Per-block intra-kernel timelines recorded with FlashInfer's profiler macros, for CUDA kernel-writing tasks. Opt-in; `auto` does not select it. |
+| `ncu_flashinfer` | Both `ncu` and `flashinfer` in one profiler session: the NCU tools under their own names and the timeline tools with a `timeline_` prefix. CUDA kernel-writing only; opt-in. |
 | `rocprof` | AMD rocprofv3 / rocprof-compute toolkit. Requires a ROCm profiling environment. Selected by `auto` for ROCm LLM-serving and kernel-writing tasks when the run environment supports it. |
 | `torch` | PyTorch profiler. Used for in-process Python profiling and Modal GPU dispatch. |
 | `neuron` | AWS Neuron profiler for Trainium. |
@@ -627,12 +678,25 @@ Each component has `name`, nonnegative `cost`, `share` between zero and one, and
 an optional `evidence` string list. This configuration is task capability, not
 a modality. Other loops ignore it.
 
-The command runs in the run's own command environment: under `--run-environment
-slurm` that is the editor container, not a Slurm job, so a Python environment that
-exists only on the host (or is exposed to GPU jobs through `read_only_paths`) is not
-there. Make the command self-contained in the workspace. When it fails, the run stops
-at the first capture and the error names the command, where it ran, and the output tail
-(exit code 127 means a program it calls was not found).
+The command runs in the candidate workspace through the run's capture-command
+environment. Under `--run-environment slurm` with local transport and
+`[vibesys.agent_gpu]`, that means a confined Slurm GPU job with the same partition,
+job-name prefix, concurrency cap, `read_only_paths`, host environment policy, and
+run-scoped launcher as `vibesys-gpu`. Its seconds timeout is rounded up for Slurm's
+minute allocation while VibeSys still cancels at the exact requested second. Without
+`[vibesys.agent_gpu]`, and in every other run environment, capture keeps using the
+editor command runner. Local validation commands always use the editor runner; enabling
+agent GPU jobs does not move validation to Slurm.
+
+Make the command and its dependencies visible in the environment selected above. When
+it fails, the run stops at the first capture and the error names the command, where it
+ran, and the bounded diagnostic tail (exit code 127 means a program it calls was not
+found). Before submission, VibeSys durably records the capture's stable Slurm job
+name. Cancellation drains the capture before its temporary output and candidate are
+removed. If Slurm cannot confirm the named job is gone, VibeSys reports an unresolved
+stop and retains those resources rather than deleting files a live job may still use.
+A resumed host cancels and queries the recorded name; it removes the candidate only
+after the scheduler confirms that job is absent.
 
 `[agent].domain` in `vibesys.input.toml` supplies cross-cutting problem-space
 context for the agent and evolve loops. Registered domains include:
@@ -655,48 +719,6 @@ realtime audio); its text lives in that domain's pack. Other domains declare non
 the flag; an example's own wire contract belongs in its `OBJECTIVE.md`. Domains and modalities may define language, toolchain, and
 artifact requirements. Interface-specific prose should describe only the
 direct-call or service boundary.
-
-## Client Theme
-
-`--theme` selects the semantic theme the interactive client renders with. It is
-presentation only: it never reaches the agents, the project, or the recorded
-run state, and it is ignored in headless mode.
-
-| Theme | Appearance | Use for |
-| --- | --- | --- |
-| `dark` | dark | Default dark palette. |
-| `light` | light | The baseline palette inverted for light terminals. |
-| `solarized-dark` | dark | Low-glare Solarized palette. |
-| `solarized-light` | light | Low-glare Solarized palette. |
-| `catppuccin-mocha` | dark | Softer, more expressive palette. |
-| `catppuccin-latte` | light | Softer, more expressive palette. |
-| `high-contrast-dark` | dark | Accessibility-focused; every foreground clears a 7:1 contrast ratio. |
-| `high-contrast-light` | light | Accessibility-focused; every foreground clears a 7:1 contrast ratio. |
-
-Resolution order, highest first:
-
-1. `--theme <name>` on the command line.
-2. `[tui].theme` in `agent.toml`.
-3. `dark`.
-
-An unknown name is rejected before any process starts. Inside a running
-session, `/theme` opens the theme list as a keyboard selection (Up/Down to
-move, Enter to apply, Escape to close without switching) and `/theme <name>`
-switches immediately; that switch applies to the session only and does not edit
-`agent.toml`.
-
-Themes define semantic roles — surfaces, text emphasis levels, borders,
-accents, status colors, conversation roles, and Markdown/code colors — rather
-than per-component colors, and every derived foreground is checked against its
-own background at build time. Status is never carried by color alone: agent
-phases show a marker glyph and the spelled-out status, todo items show a
-per-status marker, and the running round is the only one with an elapsed-time
-suffix.
-
-```bash
-vibesys --runs-dir /work/vibesys-runs --local \
-  --input examples/model-serving/Llama-3-8B --theme solarized-light
-```
 
 ## Skills
 

@@ -7,7 +7,7 @@ import {FakeClock} from '@vibesys/transport/testing';
 import type {Cause, CheckoutProblem, ConnectionConfig} from '../state/host-connection.js';
 import {ECHO_SERVER, FakeHelper, FakeLink, record} from '../testing/fake-helper.js';
 import {FakeLogStore, type LogStoreFixture} from '../testing/fake-log-store.js';
-import {deferredKillProcess, fakeProcess} from '../testing/fake-process.js';
+import {deferredKillProcess, fakeProcess, pipeHeldProcess} from '../testing/fake-process.js';
 import {hostConnectionContract, phaseReached} from '../testing/host-connection-contract.js';
 import {ConnectionManager} from './connection-manager.js';
 import {ConnectionError, HelperRequestError} from './helper-channel.js';
@@ -107,6 +107,7 @@ class UnretiringHelperLink implements Link {
         return process.running;
       },
       exit: process.exit,
+      terminated: process.terminated,
       kill(signal) {
         signals.push(signal);
       },
@@ -676,6 +677,50 @@ describe('HostConnection over the FakeHelper', () => {
     expect(await ready).toBeInstanceOf(ConnectionError);
 
     helper.end(null);
+  });
+
+  test('closing confirms a dead helper whose descendant still holds its pipes', async () => {
+    const clock = new FakeClock();
+    const helper = pipeHeldProcess();
+    helper.stdout.resume();
+    helper.stderr.resume();
+    let announceSpawn = (): void => {};
+    const spawned = new Promise<void>(resolve => {
+      announceSpawn = resolve;
+    });
+    const logged: string[] = [];
+    const link: Link = {
+      host: 'fake',
+      async establish() {},
+      networkChanged() {},
+      spawnHelper: () => {
+        announceSpawn();
+        return helper.process;
+      },
+      heard() {},
+      explain: () => new ConnectionError('link', 'the helper ended'),
+      async release() {},
+    };
+    const connection = new HostConnection({
+      link,
+      checkout: '/src/vibesys',
+      appVersion: 'test',
+      config: CONFIG,
+      scheduleTimeout: clock.scheduleTimeout,
+      log: message => logged.push(message),
+    });
+    const ready = rejection(connection.ready());
+    await spawned;
+
+    const closing = connection[Symbol.asyncDispose]();
+    await helper.process.terminated;
+    clock.advanceBy(2_000);
+
+    // The helper process is gone; only its pipes are held. That is not a failed retirement.
+    await closing;
+    expect(logged.filter(line => line.includes('could not confirm'))).toEqual([]);
+    expect(await ready).toBeInstanceOf(ConnectionError);
+    helper.releasePipes();
   });
 
   test('an aborted opened control joins one retirement and closes on unconfirmed termination', async () => {

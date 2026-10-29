@@ -35,6 +35,7 @@ from vs_agent.host_resource_declarations import (
     prepare_provider_state,
 )
 from vs_agent.provider_policy import SHIPPED_PROVIDERS
+from vs_agent.provider_profiles import launch_shell_environment
 from vs_agent.session_environment import (
     dropped_launcher_names,
     session_environment,
@@ -82,18 +83,26 @@ of seconds to attach, and a false negative here ends the run (see
 the host one.
 """
 
-TRANSIENT_RETRY_DELAYS_S: tuple[float, ...] = (30.0, 60.0, 120.0, 240.0, 480.0)
-LAUNCH_SHELL_ENVIRONMENT: Callable[[], Mapping[str, str]] = agentshim.interactive_env
-"""The interactive login shell's environment, which agentshim reads once per process."""
+TRANSIENT_RETRY_DELAYS_S: tuple[float, ...] = ()
 """Waits in seconds before each retry of a turn that failed on a transient provider error.
 
 agentshim classifies the failure (``agentshim.FailureKind.TRANSIENT``: an
 overload, a rate limit, or a server error) and its ``Session`` waits these
-delays (``agentshim.RetryPolicy``). The provider CLI has already retried inside
-the turn before it exits, so by then the outage has lasted minutes; these waits
-add about fifteen more before the error reaches the run, which otherwise ends
-on the first one.
+delays (``agentshim.RetryPolicy``). None: the provider CLI has already retried
+inside the turn before it exits, and the failure then reaches the client as a
+capacity limit (``QuotaCondition.UNAVAILABLE`` or ``RATE_LIMITED``) after that one
+attempt. The run's capacity gate waits out an outage with its own backoff, whose
+first wait (60 s) replaces the retry here. Only the gate's waits are reported to
+core and kept off the turn's limit, so every retry here hides a whole CLI attempt
+(3 to 4 min on S179) from it, and a turn whose outage starts with less own time
+left than that is cut before the gate can hold it (S179: five retries hid about
+fifteen minutes of every send; one 30 s retry still hid two attempts). A client no
+run holds resends a transient stop once at the client instead, through its own gate
+(:mod:`vs_agent.ungated_retry`), which a run's gate replaces.
 """
+
+LAUNCH_SHELL_ENVIRONMENT: Callable[[], Mapping[str, str]] = launch_shell_environment
+"""The interactive login shell's environment, which agentshim reads once per process."""
 
 
 def supported_providers() -> list[str]:

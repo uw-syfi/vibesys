@@ -13,20 +13,28 @@
     "src/testing/**/*.ts"
   ],
   "exclude": [
-    "src/testing/**/*.test.ts"
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/testing/**"
   ],
   "references": [
     {
-      "path": "./tsconfig.lib.json"
+      "path": "../hosts/tsconfig.lib.json"
     },
     {
-      "path": "../hosts/tsconfig.lib.json"
+      "path": "../logs/tsconfig.lib.json"
     },
     {
       "path": "../runs/tsconfig.lib.json"
     },
     {
-      "path": "../store/tsconfig.testing.json"
+      "path": "../ui/tsconfig.tokens.json"
+    },
+    {
+      "path": "../contracts/tsconfig.host-helper.json"
+    },
+    {
+      "path": "./tsconfig.lib.json"
     }
   ]
 }

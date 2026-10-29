@@ -10,6 +10,7 @@ export {
   type ScheduleTimeout,
   sameControlChannelState,
 } from './control-channel.js';
+export {GrpcCode, GrpcError, grpcCode, isNotFound} from './grpc-status.js';
 export {NewlineFramer} from './newline-framer.js';
 export {
   PersistentEventStream,

@@ -3,14 +3,10 @@
   "extends": ["//"],
   "tasks": {
     "build": {
-      // The main process serves the page bundles from `dist/ui` (`scripts/copy-ui.mjs`); it
-      // consumes the renderer apps only as built files, never as an import.
-      "dependsOn": [
-        "^build",
-        "@vibesys/app-web#build:desktop",
-        "@vibesys/app-desktop-renderer#build",
-        "@vibesys/app-desktop-shell#build"
-      ],
+      // The main process serves the shell's bundle from `dist/ui` (`scripts/copy-ui.mjs`); it
+      // consumes the renderer app only as built files, never as an import.
+      "dependsOn": ["^build", "@vibesys/app-desktop-shell#build"],
+      "inputs": ["$TURBO_DEFAULT$", "../../../gateway/**"],
       "outputs": ["dist/**"]
     }
   }

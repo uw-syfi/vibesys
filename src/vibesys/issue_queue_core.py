@@ -57,9 +57,15 @@ from vibesys.plugin_registration import (
     OrchestrationRegistration,
     RuntimeRecordProjector,
 )
-from vibesys.prompts import CORE_PROTOCOL_DIR
-from vibesys.run.contracts import IterationTree, PluginProjection
-from vs_core.api import FlowDriver, FlowState, MeasurementRecipe, OperationRegistry, RevisionRef
+from vibesys.prompts import CORE_PROTOCOL_DIR, core_protocol_variables
+from vs_core.api import (
+    FlowDriver,
+    FlowState,
+    MeasurementRecipe,
+    OperationRegistry,
+    RevisionRef,
+    policy_of,
+)
 from vs_core.api import RunFacts as CoreRunFacts
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import (
@@ -84,6 +90,7 @@ from vs_runtime.api.core import (
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from vibesys.run.contracts import PluginProjection
     from vs_core.api import TaskTerms
     from vs_core.api.search import Role
     from vs_runtime.api import CoreRunContext
@@ -138,13 +145,13 @@ def issue_queue_operation_catalog(
     return OperationCatalog(_registry(), (*catalog.entries, *board))
 
 
-def issue_queue_projector() -> RuntimeRecordProjector[FlowState]:
+def issue_queue_projector() -> RuntimeRecordProjector[FlowState, QueueSnapshot]:
     """Read an issue-queue run's published record from its committed runtime record."""
 
-    def project(state: FlowState, revision: int) -> PluginProjection:
-        record = FlowDriver.published(state, QueueSnapshot)
-        if record is None:
-            return PluginProjection(payload={}, iterations=IterationTree.from_nodes(()), rounds=())
+    def published(state: FlowState) -> QueueSnapshot | None:
+        return FlowDriver.published(state, QueueSnapshot)
+
+    def project(record: QueueSnapshot, revision: int) -> PluginProjection:
         return project_run_snapshot(record, experiment_revision=revision)
 
     return RuntimeRecordProjector(
@@ -152,6 +159,7 @@ def issue_queue_projector() -> RuntimeRecordProjector[FlowState]:
         state_type=FlowState,
         record_type=RuntimeRecord[FlowState],
         operations=_registry(),
+        published=published,
         project=project,
     )
 
@@ -164,12 +172,14 @@ def _task_terms(evaluation: EvaluationInputs, context: CoreRunContext) -> TaskTe
         MetricSpace(),
         Measuring(
             stage_seconds={
+                "build": evaluation.build_seconds,
                 "accuracy": evaluation.accuracy_seconds,
                 "benchmark": evaluation.benchmark_seconds,
                 "profile": evaluation.profile_seconds,
             },
             queue_allowance=float(context.queue_allowance_seconds),
             benchmark_needs_accuracy=evaluation.benchmark_needs_accuracy,
+            builds=evaluation.builds,
         ),
     )
 
@@ -198,6 +208,7 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
         evaluator_digest=evaluation.evaluator_digest,
         workload_digest=evaluation.workload_digest,
         environment_digest=evaluation.environment_digest,
+        dedicated_measurement_resources=evaluation.dedicated_measurement_resources,
         task=terms,
     )
     config = launch.search_config()
@@ -209,7 +220,8 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
         facts=facts,
         limits=limits_for(budget(config), context),
         deadline_seconds=run_deadline_at(context.max_run_seconds),
-        prompt_variables={
+        prompt_variables=core_protocol_variables(policy_of(facts))
+        | {
             "facts": context.facts,
             "objective": facts.objective,
             "agent_evaluation": True,
@@ -245,6 +257,7 @@ def issue_queue_core_policy() -> CorePolicy:
         prompt_templates=Path(prompts.__file__).parent,
         prompt_fallback_roots=(CORE_PROTOCOL_DIR,),
         owned_operations=board_entries,
+        span_kinds=issue_queue.spans,
     )
 
 

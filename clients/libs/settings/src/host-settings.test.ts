@@ -236,7 +236,7 @@ describe('host settings', () => {
     const ids = [
       {kind: 'local'},
       {kind: 'ssh', alias: 'gpu-box'},
-      {kind: 'ssh', alias: 'chelan4'},
+      {kind: 'ssh', alias: 'host-b'},
     ] as const;
     for (const removed of ids) {
       for (let mask = 0; mask < 1 << ids.length; mask++) {

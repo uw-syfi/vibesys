@@ -11,6 +11,7 @@ landed (nothing is mergeable and main cannot move), no headline when main and th
 headline metric (any verified candidate beats it), or main's headline metric.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from vibesys.candidates import api as candidates
@@ -202,6 +203,35 @@ class MainLine:
                 )
             )
         return MergeOptions(checkable=True, rows=tuple(rows), barred=tuple(barred))
+
+    def start_of(self, start: RevisionRef, lineage: Mapping[str, frozenset[str]]) -> RevisionRef:
+        """Where a tree's own change against main starts, given where it started (``start``).
+
+        ``lineage`` maps each revision the tree holds to the revisions that one holds. A merge
+        that brought in a candidate the tree holds, whose own change started at ``start``, put
+        that candidate wholly into main, so the tree's own change starts there instead: from it,
+        the tree holds only its own change, and main holds the candidate. Of several such
+        candidates, the one holding all the others. The merge commit is never a start: the
+        merger may edit beyond its sources (a fix-up), and a diff from it would remove the edit.
+        """
+        for merge in self.merges:
+            if merge.outcome is not MergeOutcome.MERGED or merge.revision is None:
+                continue
+            took = [
+                item.revision
+                for item in merge.candidates
+                if item.revision.revision_id.root in lineage
+                and item.built_on is not None
+                and item.built_on.revision_id.root == start.revision_id.root
+            ]
+            latest = [
+                found
+                for found in took
+                if all(item.revision_id.root in lineage[found.revision_id.root] for item in took)
+            ]
+            if latest:
+                start = latest[0]
+        return start
 
     def finished(self, done: WorkstreamDone, terms: TaskTerms) -> MergeRecord:
         """Fold a finished merge workstream: move main when its commit is sound, record it.

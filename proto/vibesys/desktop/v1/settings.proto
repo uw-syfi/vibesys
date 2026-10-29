@@ -1,0 +1,154 @@
+syntax = "proto3";
+
+package vibesys.desktop.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/descriptor.proto";
+import "vibesys/host/v1/operations.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1";
+
+// An import-only alias from a retained JSON format. It is never a writer key.
+extend google.protobuf.FieldOptions {
+  string retained_json_key = 50120;
+}
+
+// Desktop-owned data. The original JSON files are read-only import sources.
+message DesktopHostSettings {
+  string checkout = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 1024
+    pattern: "^(~$|/|~/)[^\\x00\\r\\n]*$"
+  }];
+  reserved 2;
+  reserved "run_transport_v2";
+}
+
+message DesktopHosts {
+  uint32 version = 1 [(buf.validate.field).uint32.const = 1];
+  map<string, DesktopHostSettings> hosts = 2 [(buf.validate.field).map = {
+    max_pairs: 10000
+    keys: {
+      string: {pattern: "^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$"}
+    }
+  }];
+}
+
+// Read-only decoder for the settings written before the single-transport cutover.
+message RetainedDesktopHostSettings {
+  string checkout = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 1024
+    pattern: "^(~$|/|~/)[^\\x00\\r\\n]*$"
+  }];
+  // Read-only historical field; projections discard it and writers never emit it.
+  optional bool discarded_selection = 2 [(retained_json_key) = "runTransportV2"];
+}
+
+message RetainedDesktopHosts {
+  uint32 version = 1 [(buf.validate.field).uint32.const = 1];
+  map<string, RetainedDesktopHostSettings> hosts = 2 [(buf.validate.field).map = {
+    max_pairs: 10000
+    keys: {
+      string: {pattern: "^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$"}
+    }
+  }];
+}
+
+enum DesktopAppearanceMode {
+  DESKTOP_APPEARANCE_MODE_UNSPECIFIED = 0;
+  DESKTOP_APPEARANCE_MODE_SYSTEM = 1;
+  DESKTOP_APPEARANCE_MODE_LIGHT = 2;
+  DESKTOP_APPEARANCE_MODE_DARK = 3;
+}
+
+enum DesktopTheme {
+  DESKTOP_THEME_UNSPECIFIED = 0;
+  DESKTOP_THEME_PAPER = 1;
+  DESKTOP_THEME_MIST = 2;
+  DESKTOP_THEME_SAND = 3;
+  DESKTOP_THEME_INK = 4;
+  DESKTOP_THEME_MIDNIGHT = 5;
+  DESKTOP_THEME_TERMINAL = 6;
+}
+
+message DesktopAppearance {
+  DesktopAppearanceMode mode = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  DesktopTheme light = 2 [(buf.validate.field).enum = {
+    in: [
+      1,
+      2,
+      3
+    ]
+  }];
+  DesktopTheme dark = 3 [(buf.validate.field).enum = {
+    in: [
+      4,
+      5,
+      6
+    ]
+  }];
+}
+
+message DesktopRunRef {
+  string host = 1 [(buf.validate.field).string.pattern = "^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$"];
+  string run_id = 2 [(buf.validate.field).string.pattern = "^[a-z0-9][a-z0-9._-]{0,127}$"];
+}
+
+message DesktopPreferences {
+  uint32 version = 1 [(buf.validate.field).uint32.const = 1];
+  DesktopAppearance appearance = 2 [(buf.validate.field).required = true];
+  optional bool notifications_enabled = 3 [(buf.validate.field).required = true];
+  repeated DesktopRunRef archived = 4 [(buf.validate.field).repeated.max_items = 100000];
+}
+
+message DesktopRunStart {
+  vibesys.host.v1.StartRunHarness harness = 1;
+  vibesys.host.v1.StartRunOptions options = 2 [(buf.validate.field).required = true];
+  repeated vibesys.host.v1.StartRunAgent agents = 3 [(buf.validate.field).repeated.max_items = 32];
+  vibesys.host.v1.StartRunMeasure measure_on = 4 [(buf.validate.field).required = true];
+  repeated string args = 5 [(buf.validate.field).repeated = {
+    max_items: 256
+    items: {
+      string: {
+        max_bytes: 4096
+        pattern: "^[^\\r\\n\\x00]*$"
+      }
+    }
+  }];
+}
+
+message DesktopRecentRun {
+  DesktopRunRef run = 1 [(buf.validate.field).required = true];
+  string project = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 1024
+    pattern: "^(~$|/|~/)[^\\x00\\r\\n]*$"
+  }];
+  optional string task = 3 [(buf.validate.field).string.pattern = "^[a-z0-9][a-z0-9._-]{0,127}$"];
+  optional string instance_id = 4 [(buf.validate.field).string.pattern = "^[0-9a-f]{12}$"];
+  double attached_at = 5 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+  DesktopRunStart start = 6;
+}
+
+// Unreadable historical entries are retained as evidence, never interpreted as
+// current settings. Their original source file also remains unchanged.
+message DesktopRetainedRecentEntry {
+  uint32 after = 1;
+  bytes original_json = 2 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 1048576
+  }];
+}
+
+message DesktopRecent {
+  uint32 version = 1 [(buf.validate.field).uint32.const = 1];
+  repeated DesktopRecentRun runs = 2 [(buf.validate.field).repeated.max_items = 100000];
+  repeated DesktopRetainedRecentEntry retained = 3 [(buf.validate.field).repeated.max_items = 100000];
+}

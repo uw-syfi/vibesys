@@ -31,6 +31,14 @@ Input baseline (the root before any change, trusted benchmark):
 {% endfor %}
 A candidate must beat it on the objectives to be adopted.
 {% endif %}
+{% if comparisons %}
+
+Comparison references (mature engines measured once with this same benchmark; none is a candidate and none can be adopted):
+{% for c in comparisons %}
+- {{ c.label }}: {{ c.value }}{% if c.unit %} {{ c.unit }}{% endif %}{% if c.direction %} (better: {{ c.direction }}){% endif %}
+
+{% endfor %}
+{% endif %}
 {% if baseline_pending %}
 
 Input baseline: still being measured (the trusted evaluation may wait in a queue). Plan
@@ -65,9 +73,26 @@ A hypothesis whose candidate is waiting or measured is still in flight: continue
 {% if input_failure %}
 
 Input not measurable: {{ input_failure_text(input_failure) }}
-The input itself fails the trusted benchmark, so there is no input baseline: any
-candidate with a passing trusted benchmark can be adopted. Plan the first candidate
-to satisfy what the benchmark requires.
+{% if input_first_attempt %}
+The input was measured twice; the first measurement failed too: {{ input_failure_text(input_first_attempt) }}
+{% endif %}
+{% if baseline %}
+Its benchmark passed, so its numbers above stay the bar: a candidate must pass every
+trusted gate and beat them to be adopted.
+{% else %}
+There is no input value to compare a candidate with. One that passes every trusted gate
+can still be adopted, but the run then ends "adopted without an input comparison", not as
+a plain success: nothing shows it beats the input.
+{% endif %}
+{% if input_at_fault %}
+Plan the next work to fix what made the input fail (the stage and output above), or build
+on a revision the run has measured, and make the first candidate satisfy what that stage
+requires.
+{% else %}
+Nothing shows a fault in the input's code: its measurement ended without evidence against
+it (a time limit, the evaluation machinery, or no output). Do not plan work only to fix the
+input for this; plan as usual, building on a revision the run has measured where you can.
+{% endif %}
 {% endif %}
 {% if buildable %}
 
@@ -102,6 +127,12 @@ trusted evaluation, then say what follows. An architecture-scale hypothesis is s
 that its first step already produces a measurement. A workstream whose implementer turns
 end without a candidate settles as failed, and its history row says why: do not assign the
 same task again, narrow it to a first step that fits one turn.
+{% if not agent_git_writable %}
+
+An implementer's `.git` is read-only: it cannot commit. It submits its working tree for
+evaluation, which snapshots the tree including new files. Never end a {{ reply.task }} with a
+commit step, and never tell an implementer to commit.
+{% endif %}
 
 Fill every free slot: a slot left free idles until a running workstream finishes.
 
@@ -145,6 +176,23 @@ Merges so far, oldest first:
 {% endif %}
 {% endfor %}
 {% endif %}
+{% if buildable | length >= 2 %}
+
+To build one new candidate out of several buildable candidates, choose a combine workstream:
+{{ reply.kind }} "combine", a new {{ reply.hypothesis_id }}, {{ reply.title }}, {{ reply.hypothesis }} (why the parts work
+better together than alone), {{ reply.parents }} (the parts in the order to apply them, each an
+exact offered pair of {{ reply.hypothesis_id }} and {{ reply.revision }} from the buildable list, each a different
+hypothesis), {{ reply.instructions }} (how to combine them, and which side wins a conflict),
+{{ reply.watch_for }} and {{ reply.pass_criteria }}. A new implementer applies each part's own change on a
+checkout of main, runs the tests and submits. The composite is a candidate of the new
+hypothesis, measured and judged like any other; it does not move main. Its history row shows
+its trusted result beside each part's, with a verdict against the best part, and a composite
+that beats main can then be merged.
+A part need not beat main or the input. Combine when parts were designed to work together and
+each lost or tied alone, when several candidates each measured within noise of the bar, or when
+a part's benefit depends on another (a design document naming parts that need each other).
+Each combine takes a slot: combine parts for such a reason, not every pair.
+{% endif %}
 {% if profiling %}
 For measurement-only work, choose a profile workstream: {{ reply.kind }} "profile", a new
 {{ reply.profile_id }}, {{ reply.target_hypothesis_id }} (a listed buildable candidate, or null for the base
@@ -158,7 +206,8 @@ capture supplies only {{ profile_fields | join(', ') }}: list nothing else.
 This run's capture supplies no named measurement field: leave {{ reply.required_fields }} empty.
 {% endif %}
 {% endif %}
-Choose workstreams that investigate distinct mechanisms or competing hypotheses. Do not
+Choose workstreams that investigate distinct mechanisms, competing hypotheses, or
+combinations of existing candidates. Do not
 split one implementation into parallel fragments and do not assign duplicate
 hypothesis IDs. New IDs must not occur in the history. A continued workstream must
 reuse its existing ID and set {{ reply.continue_hypothesis }}. Use {{ reply.hypothesis_updates }} to park
@@ -166,7 +215,7 @@ or abandon completed directions when evidence makes that decision clear; every u
 needs {{ reply.reason_kind }} and a nonempty {{ reply.reason }}.
 
 The framework provides isolated candidate workspaces, runs independent reviews, and
-owns trusted evaluation and winner adoption. Only evaluated, accepted candidates can
+owns trusted evaluation and winner adoption. Only evaluated, passed candidates can
 be adopted or offered as a parent.
 
 ## Compact workstream history
@@ -206,6 +255,17 @@ be adopted or offered as a parent.
 
 {% else %}
 - `{{ row.hypothesis_id }}` #{{ row.sequence }} "{{ row.title }}": {{ row.status }}, strategy {{ row.strategy }}{% if row.outcome %}, outcome {{ row.outcome }}{% endif %}{% if row.candidate %}, candidate `{{ rev(row.candidate) }}`{% endif %}{% if row.review_passed is not none %}, review passed: {{ row.review_passed }}{% endif %}{% if row.accuracy_passed is not none %}, accuracy passed: {{ row.accuracy_passed }}{% endif %}{% if row.benchmark_passed is not none %}, benchmark passed: {{ row.benchmark_passed }}{% endif %}{% for m in row.metrics %}; {{ metric(m) }}{% endfor %}{% if row.partial %}; partial {{ partial(row.partial) }}{% endif %}{% if row.summary %}: {{ row.summary }}{% endif %}
+{% if row.composite and row.composite.cancelled %}
+  This combine never started: when it was to start, {% if row.composite.parts %}only {% for part in row.composite.parts %}`{{ part.hypothesis_id }}` at `{{ rev(part.revision) }}`{% endfor %} of its parts was{% else %}none of its parts were{% endif %} still buildable, and a combine needs two. Its slot was not spent.
+{% elif row.composite %}
+  This candidate was combined from {% for part in row.composite.parts %}`{{ part.hypothesis_id }}` at `{{ rev(part.revision) }}` ({% if part.metric %}{{ metric(part.metric) }}{% else %}no trusted headline{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}; {% if row.composite.verdict.value == 'unknown' %}it is not comparable with its parts yet: a trusted headline is missing, or they measured different metrics{% else %}against the strongest part, `{{ row.composite.best_part }}`, it is {% if row.composite.relative_noise %}{% if row.composite.verdict.value == 'better' %}better beyond{% elif row.composite.verdict.value == 'worse' %}worse beyond{% else %}within{% endif %} the task's declared noise of {{ '%g' | format(row.composite.relative_noise * 100) }}%{% else %}{% if row.composite.verdict.value == 'better' %}better{% elif row.composite.verdict.value == 'worse' %}worse{% else %}equal{% endif %} in a strict comparison: the task declares no noise, so a small difference may be noise{% endif %}{% endif %}.
+{% for item in row.composite.unapplied %}
+  Not applied from `{{ item.hypothesis_id }}`: {{ item.part }} ({{ item.why }})
+{% endfor %}
+{% for item in row.composite.unattributed %}
+  Not attributed to a part: `{{ item.hypothesis_id }}`: {{ item.part }} ({{ item.why }})
+{% endfor %}
+{% endif %}
 {% if row.failure %}
   Why it ended: {{ failure_text(row.failure) }}
 {% endif %}

@@ -2,7 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import {lstat, mkdtemp, readdir, readFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {SettingsStore} from './index.js';
+import {decodeRecent, decodeSettings, SettingsStore, settingsBinaryPath} from './index.js';
 import {type DirectorySyncCapability, fileError, NodeSettingsFilesystem} from './testing/index.js';
 
 function store(directory: string, directorySync: DirectorySyncCapability): SettingsStore {
@@ -29,15 +29,18 @@ describe('NodeSettingsFilesystem platform durability', () => {
           hosts: {...current.hosts, local: {checkout: '/project'}},
         })),
       ).resolves.toBe('committed');
-      await expect(settings.updateRecent(() => ({version: 3, runs: []}))).resolves.toBeUndefined();
+      await expect(settings.updateRecent(() => ({version: 4, runs: []}))).resolves.toBeUndefined();
 
-      expect(JSON.parse(await readFile(hostsPath, 'utf8'))).toEqual({
+      expect(decodeSettings(await readFile(settingsBinaryPath(hostsPath)))).toEqual({
         version: 2,
         hosts: {local: {checkout: '/project'}},
       });
-      expect(JSON.parse(await readFile(recentPath, 'utf8'))).toEqual({version: 3, runs: []});
-      expect((await lstat(hostsPath)).mode & 0o777).toBe(0o600);
-      expect((await lstat(recentPath)).mode & 0o777).toBe(0o600);
+      expect(decodeRecent(await readFile(settingsBinaryPath(recentPath))).file).toEqual({
+        version: 4,
+        runs: [],
+      });
+      expect((await lstat(settingsBinaryPath(hostsPath))).mode & 0o777).toBe(0o600);
+      expect((await lstat(settingsBinaryPath(recentPath))).mode & 0o777).toBe(0o600);
       expect((await readdir(directory)).some(name => name.endsWith('.tmp'))).toBeFalse();
     } finally {
       await rm(directory, {recursive: true, force: true});
@@ -66,7 +69,7 @@ describe('NodeSettingsFilesystem platform durability', () => {
       ).rejects.toBe(failure);
 
       expect(synced).toEqual([directory]);
-      expect(JSON.parse(await readFile(hostsPath, 'utf8'))).toEqual({
+      expect(decodeSettings(await readFile(settingsBinaryPath(hostsPath)))).toEqual({
         version: 2,
         hosts: {local: {checkout: '/visible-but-ambiguous'}},
       });

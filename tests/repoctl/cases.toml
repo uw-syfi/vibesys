@@ -3,16 +3,16 @@
 [[cases]]
 name = "server event changes reach the client"
 paths = ["src/server/events.py"]
-jobs = ["python", "tui"]
+jobs = ["python", "clients"]
 [cases.collections]
 native_languages = []
 native_targets = []
 pnpm_packages = []
 
 [[cases]]
-name = "gateway transport changes reach the browser e2e suite"
+name = "gateway transport changes reach the desktop e2e suite"
 paths = ["src/server/transport/websocket.py"]
-jobs = ["python", "tui"]
+jobs = ["python", "clients"]
 [cases.collections]
 native_languages = []
 native_targets = []
@@ -21,11 +21,11 @@ pnpm_packages = []
 [[cases]]
 name = "run fold changes reach downstream TypeScript packages"
 paths = ["clients/libs/run-state/src/reduce.test.ts"]
-jobs = ["tui"]
+jobs = ["clients"]
 [cases.collections]
 native_languages = []
 native_targets = []
-pnpm_packages = ["@vibesys/app-desktop-shell", "@vibesys/app-web", "@vibesys/feature-campaign", "@vibesys/feature-conversation", "@vibesys/feature-run-page", "@vibesys/feature-run-view", "@vibesys/run-session", "@vibesys/run-state", "@vibesys/tui"]
+pnpm_packages = { dependents_of = "pnpm:@vibesys/run-state" }
 
 [[cases]]
 name = "evaluator SDK changes reach consumers"
@@ -38,35 +38,26 @@ pnpm_packages = []
 
 [[cases]]
 name = "repoctl code and policy changes select all checks"
-paths = ["support/repoctl/main.go", ".repoctl/components.toml", ".repoctl/checks.toml"]
-jobs = ["agent_image", "evaluators", "examples", "impact", "python", "real_tiers", "tui"]
+paths = ["support/repoctl/main.go", ".repoctl/components.toml", ".repoctl/checks.toml", ".github/actions/setup-runner-apt/action.yml"]
+jobs = ["agent_image", "evaluators", "examples", "impact", "python", "real_tiers", "stitch", "clients", "proto", "gateway"]
 [cases.collections]
-native_languages = ["go", "rust"]
-native_targets = [
-  "examples/data-structures/ordered-map",
-  "examples/data-structures/prioqueue",
-  "examples/data-structures/repositories/queue-rs",
-  "examples/data-structures/stack",
-  "examples/data-structures/unordered-map",
-  "resources/evaluators/microservice",
-  "resources/evaluators/ordered-map",
-  "resources/evaluators/ordered-map/native_runner",
-  "resources/evaluators/priority-queue",
-  "resources/evaluators/priority-queue/native_runner",
-  "resources/evaluators/queue",
-  "resources/evaluators/queue/native_runner",
-  "resources/evaluators/stack",
-  "resources/evaluators/stack/native_runner",
-  "resources/evaluators/unordered-map",
-  "resources/evaluators/unordered-map/native_runner",
-  "sdk/vs-evaluator/vseval",
-]
-pnpm_packages = ["@vibesys/app-desktop-main", "@vibesys/app-desktop-renderer", "@vibesys/app-desktop-shell", "@vibesys/app-ui-gallery", "@vibesys/app-web", "@vibesys/connection", "@vibesys/contracts", "@vibesys/feature-app-shell", "@vibesys/feature-campaign", "@vibesys/feature-conversation", "@vibesys/feature-gateway-connect", "@vibesys/feature-hosts", "@vibesys/feature-machines", "@vibesys/feature-new-run", "@vibesys/feature-recent-runs", "@vibesys/feature-replay", "@vibesys/feature-run-control", "@vibesys/feature-run-page", "@vibesys/feature-run-view", "@vibesys/feature-settings", "@vibesys/feature-start-run", "@vibesys/feature-web-theme", "@vibesys/hosts", "@vibesys/ipc", "@vibesys/logs", "@vibesys/machine", "@vibesys/run-session", "@vibesys/run-state", "@vibesys/runs", "@vibesys/settings", "@vibesys/store", "@vibesys/transport", "@vibesys/transport-node", "@vibesys/tui", "@vibesys/ui"]
+native_languages = "all"
+native_targets = "all"
+pnpm_packages = "all"
+
+[[cases]]
+name = "Stitch plugin changes run the Stitch workspace checks"
+paths = ["experimental/stitch/plugins/profilers/dial9/src/lib.rs"]
+jobs = ["stitch"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
 
 [[cases]]
 name = "test isolation policy changes reach Python and TypeScript checks"
 paths = ["scripts/check_test_isolation.py"]
-jobs = ["python", "tui"]
+jobs = ["python", "clients"]
 [cases.collections]
 native_languages = []
 native_targets = []
@@ -112,6 +103,340 @@ pnpm_packages = []
 name = "native evaluator tests select the examples job"
 paths = ["tests/e2e/test_kvstore_default_gate_e2e.py"]
 jobs = ["examples", "python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "proto sources select the fast contract check"
+paths = ["proto/vibesys/store/v1/record.proto"]
+jobs = ["proto"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "generated Go bindings select contract and gateway checks"
+paths = ["gateway/gen/vibesys/api/v1/host.pb.go"]
+jobs = ["proto", "gateway"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "generated Python bindings select Python and the contract check"
+paths = ["libs/vs-proto/src/vs_proto/_generated/vibesys/store/v1/record_pb.py", "libs/vs-proto/src/vs_proto/_validation.py"]
+jobs = ["python", "proto"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "generated TypeScript bindings select clients and the contract check"
+paths = ["clients/libs/proto/src/generated/vibesys/api/v1/host_pb.ts"]
+jobs = ["clients", "proto"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = { dependents_of = "pnpm:@vibesys/proto" }
+
+[[cases]]
+name = "Go gateway changes select the gateway checks"
+paths = ["gateway/internal/server/host.go"]
+jobs = ["gateway"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "typed journal projection selects Python checks"
+paths = ["src/vibesys/records/api.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "typed journal tee selects Python checks"
+paths = ["src/vibesys/run/runlog_tee.py"]
+jobs = ["python", "real_tiers"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "saved run conversion selects Python checks"
+paths = ["src/vibesys/run/runlog_conversion.py"]
+jobs = ["python", "real_tiers"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "intent control changes select their mountable feature"
+paths = ["clients/features/run-intents/src/state/machine.ts"]
+jobs = ["clients"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = { dependents_of = "pnpm:@vibesys/feature-run-intents" }
+
+[[cases]]
+name = "core value compiler and generated values select regeneration and Python checks"
+paths = ["scripts/corevalue/_emit.py", "libs/vs-core/src/vs_core/api/values.py", "libs/vs-core/src/vs_core/_revision_ref.py", "libs/vs-core/src/vs_core/_generated/vibesys/core/v1/vocabulary_cv.py", "libs/vs-core/src/vs_core/_generated/vibesys/core/v1/control_cv.py", "libs/vs-runtime/src/vs_runtime/_core_values/vibesys/core/v1/control_boundary.py"]
+jobs = ["proto", "python", "real_tiers"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "chat session feature changes select its Run screen composition"
+paths = ["clients/features/run-sessions/src/state/machine.ts"]
+jobs = ["clients"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = ["@vibesys/app-desktop-shell", "@vibesys/feature-run-sessions"]
+
+[[cases]]
+name = "session process changes select Python checks"
+paths = ["src/vibesys/chat/_session.py", "src/vibesys/api/chat.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "host relaunch admission selects Python checks"
+paths = ["src/vibesys/api/host_relaunch.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "a Python-only change selects the Python quality groups"
+paths = ["src/vibesys/records/api.py"]
+jobs = ["python"]
+local_groups = ["always_on", "python_architecture", "python_guards", "python_quality", "python_tests", "python_types"]
+checks_groups = ["always_on", "python_architecture", "python_guards", "python_quality", "python_types"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "a clients change selects the client quality groups"
+paths = ["clients/features/run-intents/src/state/machine.ts"]
+jobs = ["clients"]
+local_groups = ["always_on", "clients_build", "clients_quality", "clients_tests"]
+checks_groups = ["always_on", "clients_build", "clients_quality"]
+skipped_groups = ["clients_e2e"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = { dependents_of = "pnpm:@vibesys/feature-run-intents" }
+
+[[cases]]
+name = "a proto change selects the contract check"
+paths = ["proto/vibesys/store/v1/record.proto"]
+jobs = ["proto"]
+local_groups = ["always_on", "proto"]
+checks_groups = ["always_on", "proto"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "a docs-only change selects only the always-on scripts"
+paths = ["docs/contributing/development.md"]
+jobs = ["examples"]
+local_groups = ["always_on"]
+checks_groups = ["always_on"]
+skipped_groups = []
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "control admission facade selects Python and real process checks"
+paths = ["libs/vs-runtime/src/vs_runtime/api/control.py"]
+jobs = ["python", "real_tiers"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "static pure facade loaders select Python checks"
+paths = ["libs/vs-core/src/vs_core/api/_exports.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "keyed replay core selects Python verification"
+paths = ["libs/vs-core/src/vs_core/api/replay.py", "libs/vs-core/src/vs_core/flows/_replay_identity.py", "libs/vs-core/src/vs_core/flows/_replay_history.py", "libs/vs-core/src/vs_core/flows/_replay_run.py", "libs/vs-core/src/vs_core/flows/_replay_sources.py", "libs/vs-core/src/vs_core/flows/_replay_causality.py", "libs/vs-core/src/vs_core/flows/_replay_schema.py", "libs/vs-core/src/vs_core/flows/_replay_archive.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "keyed replay contracts select proto verification"
+paths = ["proto/vibesys/store/v1/replay.proto", "proto/vibesys/search/v1/serial_effects.proto", "proto/vibesys/core/v1/replay_workspace.proto", "proto/vibesys/core/v1/replay_agent.proto", "proto/vibesys/core/v1/replay_evaluation.proto"]
+jobs = ["proto"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "replay context fixtures and ownership guard select generation and Python checks"
+paths = ["libs/vs-core/tests/proto/vibesys/replay/testing/v1/context.proto", "libs/vs-core/tests/generated/vibesys/replay/testing/v1/context_pb.py", "libs/vs-core/tests/buf.gen.yaml", "scripts/check_proto_layers.py"]
+jobs = ["proto", "python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "keyed live driver selects Python and real-tier verification"
+paths = ["libs/vs-runtime/src/vs_runtime/api/replay.py", "libs/vs-runtime/src/vs_runtime/_replay_runtime.py", "libs/vs-runtime/src/vs_runtime/_replay_run.py", "libs/vs-runtime/src/vs_runtime/_replay_fake.py", "libs/vs-runtime/src/vs_runtime/_replay_operations.py", "libs/vs-runtime/src/vs_runtime/_replay_workspaces.py", "libs/vs-runtime/src/vs_runtime/_replay_owner.py", "libs/vs-runtime/src/vs_runtime/_replay_sessions.py", "libs/vs-runtime/src/vs_runtime/_replay_evaluation.py", "libs/vs-runtime/src/vs_runtime/_replay_evaluation_jobs.py", "libs/vs-runtime/src/vs_runtime/_replay_executors.py", "libs/vs-runtime/src/vs_runtime/_replay_wiring.py", "libs/vs-runtime/src/vs_runtime/_replay_evidence.py", "src/vibesys/serial_replay.py", "libs/vs-runtime/tests/test_replay_schema_recovery.py"]
+jobs = ["python", "real_tiers"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "runtime replay schema fixtures select generation and runtime verification"
+paths = ["libs/vs-runtime/tests/proto/vibesys/runtime/testing/v1/prompt.proto", "libs/vs-runtime/tests/proto_prior/vibesys/runtime/testing/v1/schema_recovery.proto", "libs/vs-runtime/tests/generated/prior/vibesys/runtime/testing/v1/schema_recovery_pb.py", "libs/vs-runtime/tests/generated/vibesys/runtime/testing/v1/prompt_pb.py", "libs/vs-runtime/tests/buf.gen.yaml", "libs/vs-runtime/tests/buf.prior.gen.yaml"]
+jobs = ["proto", "python", "real_tiers"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "host registry generator selects contract and Python checks"
+paths = ["scripts/host_operations/api.py"]
+jobs = ["proto", "python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "shared image cache changes exercise every builder consumer"
+paths = ["scripts/ci_image_cache.py", "scripts/ci_registry_image_cache.sh", ".github/actions/docker-image-cache/action.yml"]
+jobs = ["agent_image", "python", "real_tiers"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "proto compatibility entry and regression select contract verification"
+paths = ["scripts/check_proto_breaking.sh", "scripts/tests/test_proto_breaking.sh"]
+jobs = ["proto", "python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "generated checkout compatibility remains a light Python module"
+paths = ["src/server/host_compatibility_generated.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "native saved-run metadata selects its consumers"
+paths = ["src/server/host_saved_runs.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "request identity changes reach every client request producer"
+paths = ["clients/libs/request-identity/src/index.ts"]
+jobs = ["clients"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = { dependents_of = "pnpm:@vibesys/request-identity" }
+
+[[cases]]
+name = "Pause-now escalation selects its Python owners"
+paths = ["src/vibesys/api/host_terminate.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "native host read adapter selects its Python consumers"
+paths = ["src/server/host_operation_reads.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "protobuf gateway browser fixture selects its client consumers"
+paths = ["clients/apps/desktop-shell/e2e/gateway-preload.ts"]
+jobs = ["clients"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = { dependents_of = "pnpm:@vibesys/app-desktop-shell" }
+
+[[cases]]
+name = "native compute runtime selects its Python consumers"
+paths = ["src/server/host_compute_runtime.py", "src/server/host_slurm.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "facts importer selects Python verification"
+paths = ["src/vibesys/fact_import/api.py", "src/vibesys/fact_import/_accepted.py", "src/vibesys/api/importing.py", "libs/vs-project/src/vs_project/api/retained.py", "libs/vs-runtime/src/vs_runtime/api/retained.py"]
+jobs = ["python", "real_tiers"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "shared imported facts select proto verification"
+paths = ["proto/vibesys/core/v1/imported_facts.proto"]
+jobs = ["proto"]
 [cases.collections]
 native_languages = []
 native_targets = []

@@ -97,6 +97,8 @@ This index maps common user goals and tasks to the relevant NKI documentation. U
 | **Synchronize across cores** | [nki.isa.core_barrier](../programming/api/api-nki-isa-tensor.md#nki-isa-core_barrier) |
 | **Send/receive data between cores** | [nki.isa.sendrecv](../programming/api/api-nki-isa-tensor.md#nki-isa-sendrecv) |
 | **Get program/core ID** | [nki.language.program_id](../programming/api/nki.language.md), [nki.language.num_programs](../programming/api/nki.language.md) |
+| **Choose which ranks a collective runs on** | [ReplicaGroup](../programming/api/api-nki-collectives.md#nki-collectives-ReplicaGroup) |
+| **Partition ranks into replica groups** | [ReplicaGroup.from_partition_op](../programming/api/api-nki-collectives.md#nki-collectives-ReplicaGroup), [rg_partition_op](../programming/api/api-nki-collectives.md#nki-collectives-rg_partition_op) |
 
 ---
 
@@ -105,6 +107,7 @@ This index maps common user goals and tasks to the relevant NKI documentation. U
 | Task | Recommended Documentation |
 |------|--------------------------|
 | **Profile my NKI kernel** | [Profiling with Neuron Profile](../optimization/use-neuron-profile.md) |
+| **Annotate a region of my kernel in the profile** | [nl.profiler_region_open](../programming/api/api-nki-language-misc.md#nki-language-profiler_region_open), [nl.profiler_region_close](../programming/api/api-nki-language-misc.md#nki-language-profiler_region_close) |
 | **Optimize overall kernel performance** | [NKI Performance Guide](../optimization/nki_perf_guide.md) |
 | **Improve arithmetic intensity** | [Performance Guide - Arithmetic Intensity](../optimization/nki_perf_guide.md#improving-arithmetic-intensity) |
 | **Optimize compute efficiency** | [Performance Guide - Compute Efficiency](../optimization/nki_perf_guide.md#optimizing-compute-efficiency) |
@@ -160,6 +163,15 @@ This index maps common user goals and tasks to the relevant NKI documentation. U
 | **Understand partition vs free dimensions** | [Tiling Overview](../programming/tiling-overview.md), [Architecture Guide](../architecture/trainium_inferentia2_arch.md) |
 | **Handle tensors larger than tile limits** | [Matrix Multiplication Tutorial - Tiling](../programming/tutorials/matrix_multiplication.md) |
 | **Understand indexing** | [Indexing Overview](../programming/indexing-overview.md) |
+| **Navigate a tensor in tile coordinates** | [nl.tiles](../programming/api/api-nki-language-layout.md#nki-language-tiles), [NkiTileGrid](../programming/api/api-nki-language-layout.md#nki-language-NkiTileGrid) |
+| **Group tiles into a coarser transfer/reuse grain** | [nl.blocks](../programming/api/api-nki-language-layout.md#nki-language-blocks), [NkiBlockGrid](../programming/api/api-nki-language-layout.md#nki-language-NkiBlockGrid) |
+| **Allocate an on-chip tile or block grid** | [nl.alloc_tiles](../programming/api/api-nki-language-layout.md#nki-language-alloc_tiles), [nl.alloc_blocks](../programming/api/api-nki-language-layout.md#nki-language-alloc_blocks) |
+| **Allocate a tensor shaped like another** | [nl.empty_like](../programming/api/api-nki-language-layout.md#nki-language-empty_like) |
+| **Prepare a destination for a `dma_transpose` (transposed shape derived, not hand-written)** | [nl.empty_like](../programming/api/api-nki-language-layout.md#nki-language-empty_like) — the parameter is `transpose_axes=`, documented on the layout page only |
+| **Replace removed block dimensions (`nl.par_dim` block dims)** | [Tiled & Blocked Layouts](../programming/api/api-nki-language-layout.md), [Block Dimension Migration Guide](../reference/migration/nki_block_dimension_migration_guide.md) |
+| **Read one integer off a tile and compute with it (a device scalar)** | [nisa.scalar_load](../programming/api/api-nki-isa-misc.md#nki-isa-scalar_load), [nisa.scalar_store](../programming/api/api-nki-isa-misc.md#nki-isa-scalar_store) |
+| **Address an HBM tensor beyond 4 GB via `scalar_offset`** | [nisa.scalar_load](../programming/api/api-nki-isa-misc.md#nki-isa-scalar_load) — an `nl.int64` `NkiScalar` is the only offset reaching past 32 bits |
+| **Bound a dynamic loop or drive a `while` condition** | [nisa.register_alloc](../programming/api/api-nki-isa-misc.md#nki-isa-register_alloc), [nisa.register_load](../programming/api/api-nki-isa-misc.md#nki-isa-register_load) — registers, not device scalars |
 
 ---
 

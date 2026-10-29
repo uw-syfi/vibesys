@@ -12,10 +12,10 @@ from dataclasses import dataclass, field
 from vibesys.candidates.api import STOPPED as STOPPED_TEXT
 from vibesys.candidates.api import (
     Baseline,
-    Measured,
     assessment,
     gates_of,
     improves_on,
+    input_metrics,
     measurement,
     settle_for,
     space_of,
@@ -23,12 +23,14 @@ from vibesys.candidates.api import (
 from vibesys.hypothesis import HypothesisOutcome
 from vibesys.hypothesis.cadence import keeps_hypothesis_active
 from vibesys.metrics import AcceptedReading, MetricRow, reading_of
+from vibesys.orchestration.dynamic.models import UnappliedPart
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
 from vibesys.orchestration.dynamic.search._parents import ParentSnapshot
 from vibesys.orchestration.dynamic.search._values import (
     AgentName,
     Blocker,
     BlockerKind,
+    CombineSource,
     DropReason,
     Failure,
     FailureKind,
@@ -84,8 +86,22 @@ class WorkstreamStart(Value):
     """The input's measurement when the workstream started; None while it was still being measured."""
     merge: tuple[MergeSource, ...] = ()
     """For a merge: the candidates to merge into ``parent`` (main), in order."""
+    combine: tuple[CombineSource, ...] = ()
+    """For a combine: the parts to apply onto ``parent`` (main), in order, fixed at scheduling."""
     rebase_onto: RevisionRef | None = None
     """The run's main, when it advanced past the base of the hypothesis this continues."""
+    parent_main: RevisionRef | None = None
+    """Where ``parent``'s own change against main starts (`RunRecord.main_base_at`): a main, or a
+    merged candidate of its lineage. A catch-up applies main's change from it to ``rebase_onto``.
+    None in a start scheduled by an older build."""
+    started_by: tuple[str, ...] = ()
+    """The agents whose reply planned this workstream (the planner, or the outliner of a step):
+    they start its agents. Empty when no agent's reply is known to have planned it."""
+
+    @property
+    def main_base(self) -> RevisionRef | None:
+        """Where this workstream's own change starts: its catch-up main, else its parent's start."""
+        return self.rebase_onto or self.parent_main
 
     @property
     def attempt(self) -> AttemptId:
@@ -141,6 +157,10 @@ class Candidate(Value):
     next_step: str = ""
     revision: RevisionRef | None = None
     """The revision core retained for the turn; None when no checkpoint was awaited or none exists."""
+    unapplied: tuple[UnappliedPart, ...] = ()
+    """For a combine: what the implementer could not apply, naming only the combine's parts."""
+    unattributed: tuple[UnappliedPart, ...] = ()
+    """The reply's ``unapplied`` entries that named no part of the combine (`RoundRecord`)."""
 
 
 class Verdict(Value):
@@ -417,13 +437,18 @@ def headline(closing: Closing) -> MetricRow | None:
 
 
 def input_headline(baseline: Baseline | None) -> MetricRow | None:
-    """The input's headline value, when it was measured."""
-    seen = baseline.reading if isinstance(baseline, Measured) else None
-    return seen.metrics[0] if seen is not None and seen.metrics else None
+    """The input's headline value: the first number of the bar a candidate must beat, if any."""
+    bar = input_metrics(baseline)
+    return bar[0] if bar else None
 
 
 def beats_input(closing: Closing, terms: TaskTerms, baseline: Baseline | None) -> bool:
-    """Whether the candidate's headline improves on the input's (an unmeasured input is beaten)."""
+    """Whether the candidate's headline improves on the input's bar (no bar is beaten).
+
+    The bar is `input_metrics`: a measured input's benchmark, or that of one that failed only
+    its accuracy check. With no bar the candidate is judged on the task's gates alone, and a
+    run that adopts it says so (`RunRecord.ending`).
+    """
     return improves_on(
         measurement(headline(closing)),
         measurement(input_headline(baseline)),
@@ -549,6 +574,8 @@ def blocked_failure(blocker: Blocker) -> Failure:
             return Failure(kind=FailureKind.IMPLEMENTATION_FAILED)
         case BlockerKind.REJECTED:
             return Failure(kind=FailureKind.REVIEW_REJECTED)
+        case BlockerKind.REPLY_REJECTED:
+            return Failure(kind=FailureKind.INVALID_REPLY, role=AgentName.IMPLEMENTER)
         case BlockerKind.NO_REPLY:
             if blocker.turn_failure is not None:
                 return Failure(
@@ -611,6 +638,8 @@ def round_of(done: WorkstreamDone) -> RoundRecord:
         failure_tail=_failing_tail(done),
         settlement=None if settlement is None else settlement.settlement_id,
         kept_active=kept,
+        unapplied=() if result is None else result.candidate.unapplied,
+        unattributed=() if result is None else result.candidate.unattributed,
     )
 
 

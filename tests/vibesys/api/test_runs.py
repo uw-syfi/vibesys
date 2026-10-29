@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
@@ -26,6 +27,7 @@ from vibesys.api import (
     OrchestrationRegistry,
     ProfilerKind,
     ResumeRef,
+    RunEndingData,
     RunFailedData,
     RunFailureKind,
     RunRequest,
@@ -35,6 +37,7 @@ from vibesys.api import RunStatus as ProductRunStatus
 from vibesys.api.request import load_task
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeInvocation
+from vs_core.api import EndReason
 from vs_project.api import GitFaultSink, GitRepository, Project, ProjectStateError, validate_run_id
 from vs_project.api.testing import FakeGitRepositories
 from vs_runtime.api import AgentRole
@@ -54,6 +57,7 @@ from vs_sim.api.testing import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 
@@ -164,11 +168,10 @@ async def test_launch_allocates_identity_before_execution(request_template: RunR
     assert resumed.run_id == allocated
     assert runs.attach(allocated) is resumed
     assert runs.list_active() == (resumed,)
-    resumed_result = await resumed.result()
-    assert resumed_result.run_id == allocated
+    # Every ending permits a new epoch, even the failed first run.
+    assert (await resumed.result()).run_id == allocated
     resumed_events = [event async for event in resumed.events()]
-    assert resumed_events
-    assert {event.run_id for event in resumed_events} == {allocated}
+    assert {event.run_id for event in resumed_events} <= {allocated}
     assert runs.attach(allocated) is resumed
     assert runs.list_active() == ()
     assert await handle.result() == result
@@ -244,10 +247,27 @@ async def test_requested_stop_returns_typed_status_after_cleanup(
     assert all(event.type is not CoreEventType.RUN_FAILED for event in events)
 
 
-@pytest.mark.parametrize("schedule_seed", range(examples(pr=8, nightly=50)))
-def test_a_failed_public_run_reports_its_verified_adopted_candidate(
-    request_template: RunRequest, schedule_seed: int, sim: Sim
-) -> None:
+@dataclass(frozen=True)
+class _Ran:
+    """What a public run of a skeleton scenario that keeps one candidate left behind."""
+
+    result: RunResult
+    events: list[CoreEvent]
+    revisions: list[str]
+    """The candidate revisions its implementer committed."""
+    processes: int
+    """How many host processes it ran."""
+
+
+def _run_keeping_a_candidate(
+    request_template: RunRequest,
+    sim: Sim,
+    strategy: SkeletonStrategy,
+    schedule_seed: int,
+    *,
+    stop_after: tuple[CoreEventType, int] | None = None,
+) -> _Ran:
+    """Run ``strategy`` publicly over a task whose benchmark passes; its one turn commits."""
     write_task(
         request_template.project_root,
         'version = 1\n[agent]\ndomain = "generic"\n'
@@ -263,7 +283,7 @@ def test_a_failed_public_run_reports_its_verified_adopted_candidate(
         capability_plugin(
             "identity-test",
             agents=(AgentRole(id=IMPLEMENTER.root, system_prompt="Implement."),),
-            strategy=SkeletonStrategy.failing_after_choice(),
+            strategy=strategy,
         )
     )
     git = _ProductGit()
@@ -296,8 +316,14 @@ def test_a_failed_public_run_reports_its_verified_adopted_candidate(
     processes = FakeProcesses(no_origin, pass_time=threads.sleep)
     events: list[CoreEvent] = []
 
+    stops: list[Callable[[], None]] = []
+
     def record(event: CoreEvent) -> None:
         events.append(event)
+        if stop_after is not None and stops:
+            kind, count = stop_after
+            if sum(seen.type is kind for seen in events) == count:
+                stops.pop()()
 
     session = create_session(
         request,
@@ -318,6 +344,7 @@ def test_a_failed_public_run_reports_its_verified_adopted_candidate(
     )
 
     async def exercise() -> RunResult:
+        stops.append(session.stop)
         session.start()
         try:
             return await session.await_result()
@@ -325,8 +352,20 @@ def test_a_failed_public_run_reports_its_verified_adopted_candidate(
             session.close()
 
     result = sim.run(exercise(), threads=threads)
+    return _Ran(result, events, candidate_revisions, len(processes.ran))
 
-    assert len(processes.ran) == 1
+
+@pytest.mark.parametrize("schedule_seed", range(examples(pr=8, nightly=50)))
+def test_a_failed_public_run_reports_its_verified_adopted_candidate(
+    request_template: RunRequest, schedule_seed: int, sim: Sim
+) -> None:
+    ran = _run_keeping_a_candidate(
+        request_template, sim, SkeletonStrategy.failing_after_choice(), schedule_seed
+    )
+    result, events, candidate_revisions = ran.result, ran.events, ran.revisions
+    request = request_template
+
+    assert ran.processes == 1
     assert not result.succeeded
     assert result.failure is not None
     assert result.failure.kind is RunFailureKind.BUDGET_EXHAUSTED
@@ -340,6 +379,40 @@ def test_a_failed_public_run_reports_its_verified_adopted_candidate(
     assert len(failed) == 1
     assert isinstance(failed[0].data, RunFailedData)
     assert failed[0].data.failure.adopted_candidate == candidate_revisions[0]
+
+
+def test_a_public_run_that_adopts_an_uncompared_candidate_says_so_in_its_result_and_ending(
+    request_template: RunRequest, sim: Sim
+) -> None:
+    """H1: the search's ``Uncompared`` reaches the run's result and its ``run_ending`` event."""
+    ran = _run_keeping_a_candidate(
+        request_template, sim, SkeletonStrategy.uncompared_after_choice(), 0
+    )
+
+    assert ran.result.succeeded
+    assert ran.result.uncompared
+    endings = [event.data for event in ran.events if event.type is CoreEventType.RUN_ENDING]
+    assert len(endings) == 1
+    assert isinstance(endings[0], RunEndingData)
+    assert endings[0].reason is EndReason.ADOPTED
+    assert endings[0].uncompared
+
+
+def test_a_stopped_public_run_that_held_an_uncompared_choice_says_so(
+    request_template: RunRequest, sim: Sim
+) -> None:
+    """B1: the operator's stop keeps ``uncompared`` in the public result."""
+    ran = _run_keeping_a_candidate(
+        request_template,
+        sim,
+        SkeletonStrategy.uncompared_until_stopped(),
+        0,
+        # The fourth gate result is the candidate's last check, just before the search's choice.
+        stop_after=(CoreEventType.GATE_FINISHED, 4),
+    )
+
+    assert ran.result.status is ProductRunStatus.STOPPED
+    assert ran.result.uncompared
 
 
 @pytest.mark.parametrize(
@@ -375,3 +448,17 @@ def test_run_result_accepts_typed_stopped_outcome() -> None:
     )
     assert result.status is ProductRunStatus.STOPPED
     assert not result.succeeded
+
+
+@pytest.mark.regression
+def test_startup_completion_precedes_running_declaration(
+    request_template: RunRequest, sim: Sim
+) -> None:
+    ran = _run_keeping_a_candidate(
+        request_template, sim, SkeletonStrategy.uncompared_after_choice(), 0
+    )
+    kinds = [event.type for event in ran.events]
+    started = kinds.index(CoreEventType.RUN_STARTED)
+    startup = [i for i, kind in enumerate(kinds) if kind is CoreEventType.RUN_STARTUP_PROGRESS]
+    assert startup
+    assert max(startup) < started

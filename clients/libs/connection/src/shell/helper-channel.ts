@@ -58,6 +58,11 @@ export class ConnectionError extends Error {
     this.reason = reason;
     this.checkout = options?.checkout ?? null;
   }
+
+  /** The same failure (cause and checkout problem) in other words. */
+  reworded(message: string): ConnectionError {
+    return new ConnectionError(this.reason, message, {cause: this, checkout: this.checkout});
+  }
 }
 
 type InputCompletion = (error: ConnectionError | null) => void;
@@ -432,7 +437,8 @@ export class HelperChannel implements AsyncDisposable {
     this.#close();
     const outcome = await this.#retire().outcome;
     if (outcome.kind === 'unconfirmed') throw this.#unconfirmedTerminationError();
-    await this.ended;
+    // A dead helper whose pipes a descendant holds ends its output later; the process is gone.
+    if (!outcome.pipesHeld) await this.ended;
   }
 
   #close(): void {

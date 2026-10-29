@@ -8,19 +8,18 @@
     "lint:ts": "biome lint .",
     "check:ts": "biome check . && pnpm warn:ts-file-size",
     "warn:ts-file-size": "biome lint --config-path biome.warnings.json --only=style/noExcessiveLinesPerFile .",
-    "check:ts-architecture": "node tools/scripts/check_ts_architecture.mjs && node tools/scripts/check_package_graph.mjs",
-    "check:frozen-ui": "node tools/scripts/check_frozen_ui.mjs",
-    "test:ts-architecture": "node --test tools/scripts/check_ts_architecture.test.mjs tools/scripts/check_package_graph.test.mjs tools/scripts/new_package.test.mjs tools/scripts/check_biome_line_caps.test.mjs tools/scripts/check_ui_no_effects.test.mjs tools/scripts/check_web_fetch_confined.test.mjs tools/scripts/check_control_state_rules.test.mjs tools/scripts/check_raw_html_sinks.test.mjs tools/scripts/check_strict_design_lint.test.mjs tools/scripts/check_frozen_ui.test.mjs",
-    "test:bun-runner": "node --test tools/scripts/run_bun_tests.test.mjs",
-    "test:node-runner": "node --test tools/scripts/run_node_tests.test.mjs",
+    "check:ts-architecture": "node tools/scripts/check_ts_architecture.mjs && node tools/scripts/check_package_graph.mjs && node tools/scripts/check_test_runners.mjs",
+    "test:ts-architecture": "node tools/scripts/run_node_suite.mjs tools/scripts/check_ts_architecture.test.mjs tools/scripts/check_package_graph.test.mjs tools/scripts/new_package.test.mjs tools/scripts/check_biome_line_caps.test.mjs tools/scripts/check_ui_no_effects.test.mjs tools/scripts/check_control_state_rules.test.mjs tools/scripts/check_raw_html_sinks.test.mjs tools/scripts/check_strict_design_lint.test.mjs tools/scripts/e2e_shard.test.mjs tools/scripts/check_test_runners.test.mjs",
+    "test:bun-runner": "node tools/scripts/run_node_suite.mjs tools/scripts/run_bun_tests.test.mjs",
+    "test:node-runner": "node tools/scripts/run_node_suite.mjs tools/scripts/run_node_tests.test.mjs",
     "check:conformance": "node tools/scripts/check_conformance_corpus.mjs",
-    "check:web-browser-bundle": "pnpm --filter @vibesys/app-web build:browser && node tools/scripts/check_web_browser_bundle.mjs",
-    "test:conformance": "node --test tools/scripts/check_conformance_corpus.test.mjs",
+    "test:conformance": "node tools/scripts/run_node_suite.mjs tools/scripts/check_conformance_corpus.test.mjs",
     "check:knip": "knip --config tools/knip.config.ts",
     "new:package": "node tools/scripts/new_package.mjs",
     "build:clients": "turbo run build",
     "check:clients": "turbo run check",
-    "test:clients": "pnpm test:ts-architecture && pnpm test:conformance && pnpm test:bun-runner && pnpm test:node-runner && turbo run test"
+    "test:clients": "pnpm test:ts-architecture && pnpm test:conformance && pnpm test:bun-runner && pnpm test:node-runner && turbo run test",
+    "dev": "turbo run build --filter=@vibesys/app-desktop-main... && pnpm --filter @vibesys/app-desktop-main exec electron ."
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.3",
@@ -28,6 +27,7 @@
     "knip": "6.37.0",
     "turbo": "2.11.4",
     "typescript": "5.9.3",
-    "vite": "7.1.5"
+    "vite": "7.1.5",
+    "@bufbuild/protoc-gen-es": "2.16.0"
   }
 }

@@ -14,20 +14,48 @@ import type {
   HelperFeature,
   Message,
   Request,
+  RunEventKinds,
   RunStartCompensationFailure,
 } from './generated/host-helper.generated.js';
 import hostHelperSchema from './generated/host-helper.schema.js';
 import {type Schema, type SchemaWalk, validateSchema} from './schema-walker.js';
 
 export type {
+  AccountLogin,
+  AgentLogin,
+  AgentLoginsListReply,
+  AgentLoginsListRequest,
+  AgentLoginsStartReply,
+  AgentLoginsStartRequest,
+  ApiKeyLogin,
+  Backend,
   ChannelEnd,
   ChannelEndOutcome,
   Check,
   Checkout,
   CheckoutInspectReply,
+  ClusterHardware,
+  ClusterTestFailed,
+  ClusterTestPassed,
+  ComputeAddClusterReply,
+  ComputeAddClusterRequest,
+  ComputeListReply,
+  ComputeListRequest,
+  ComputeRemoveClusterReply,
+  ComputeRemoveClusterRequest,
+  ComputeSettings,
+  ComputeTestClusterReply,
+  ComputeTestClusterRequest,
   CreatedProject,
   DetachedLaunchFailure,
+  ExampleDestination,
+  ExampleHardware,
   ExampleList,
+  ExampleModel,
+  ExampleObjective,
+  ExampleSummary,
+  ExampleTask,
+  ExampleWorkload,
   FailureReason,
   HarnessChoice,
   HarnessesListReply,
@@ -36,14 +64,18 @@ export type {
   HelperError,
   HelperErrorCode,
   HelperFeature,
+  IdeaVerdict,
   InstanceInspection,
   InstanceInspectionMetadata,
   InstanceList,
   InstanceStatus,
   InstanceStopResult,
   InstancesChanged,
+  ListedCluster,
   LiveInstanceRecord,
   LogChunk,
+  LoginStarted,
+  LoginUnavailable,
   LogOffset,
   LogPipe,
   LogPipeSpan,
@@ -55,20 +87,44 @@ export type {
   LogTail,
   MachineDescription,
   Message as HelperMessage,
+  ModalStatus,
+  ModalTarget,
   PathEntry,
   PathsCompleteReply,
   Request as HelperRequest,
+  RunAttention,
+  RunClosing,
   RunConnectReply,
+  RunDigest,
+  RunDigestUnreadable,
+  RunEndingFact,
+  RunEventKinds,
   RunList,
+  RunOption,
   RunPhase,
+  RunPreflightReply,
+  RunPreflightRequest,
   RunRole,
   RunStartCompensationFailure,
   RunStartReply,
+  RunStartRequest,
   RunStatus,
   RunSummary,
+  RunsSummaryReply,
+  RunsSummaryRequest,
+  RunTerminal,
+  SameMachine,
+  SlurmClusterSettings,
+  SlurmTarget,
   StopOutcome,
+  TaskGoal,
   TaskList,
+  TokenTally,
+  TurnReply,
   UnreadableRecord,
+  UsageRecord,
+  UsageWindowReply,
+  UsageWindowRequest,
 } from './generated/host-helper.generated.js';
 
 const STRICT: SchemaWalk = {documents: [hostHelperSchema], strict: true};
@@ -117,6 +173,14 @@ export function helperFeaturesForRequest(request: {
   }
   return [...features];
 }
+
+/**
+ * The event `type`s each kind a `runs.read_events` can select holds (its `kinds`): the one
+ * definition, from Python's contract. A client keeps no second list of them.
+ */
+export const RUN_EVENT_TYPES_BY_KINDS = hostHelperSchema[
+  'x-vibesys-event-types-by-kinds'
+] as Readonly<Record<RunEventKinds, readonly string[]>>;
 
 const logsRead = definitions['LogsReadRequest'] as Schema;
 const logsReadProperties = logsRead['properties'] as Record<string, Schema>;

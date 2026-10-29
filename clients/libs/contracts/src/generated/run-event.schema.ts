@@ -72,6 +72,17 @@ const runEventSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Error"
+        },
+        "reply": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentReply"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "AgentExecutionFinishedData",
@@ -142,6 +153,46 @@ const runEventSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Model"
+        },
+        "reasoning_effort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoning Effort"
+        },
+        "harness_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Harness Version"
+        },
+        "client": {
+          "anyOf": [
+            {
+              "enum": [
+                "scripted",
+                "provider"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client"
         }
       },
       "required": [
@@ -195,6 +246,34 @@ const runEventSchema: Record<string, unknown> = {
         "content"
       ],
       "title": "AgentOutputChunkData",
+      "type": "object"
+    },
+    "AgentReply": {
+      "additionalProperties": false,
+      "description": "The typed reply a structured turn ended with, read through the role's own reply model.\n\n``kind`` is that model's name and ``json_schema`` its JSON Schema, so a reader learns which\nfields are text, choices or lists from the model and keeps no list of its own. ``value`` is\nthe validated reply as JSON.",
+      "properties": {
+        "kind": {
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "json_schema": {
+          "additionalProperties": true,
+          "title": "Json Schema",
+          "type": "object"
+        },
+        "value": {
+          "additionalProperties": true,
+          "title": "Value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind",
+        "json_schema",
+        "value"
+      ],
+      "title": "AgentReply",
       "type": "object"
     },
     "AgentStatusData": {
@@ -406,6 +485,19 @@ const runEventSchema: Record<string, unknown> = {
       "pattern": "^(?!(?:aux|con|nul|prn|com[1-9]|lpt[1-9])(?:\\.|$))(?!.*\\.$)[a-z0-9][a-z0-9._-]*$(?![\\s\\S])",
       "type": "string"
     },
+    "CheckoutStatus": {
+      "description": "Why the optional checkout update advanced or skipped the checkout.",
+      "enum": [
+        "fast_forwarded",
+        "other_branch",
+        "dirty_tree",
+        "diverged",
+        "git_refused",
+        "operator_changed_checkout"
+      ],
+      "title": "CheckoutStatus",
+      "type": "string"
+    },
     "CommandResultPayload": {
       "additionalProperties": false,
       "description": "Structured result of a command-style tool execution.",
@@ -455,6 +547,162 @@ const runEventSchema: Record<string, unknown> = {
         "stderr"
       ],
       "title": "CommandResultPayload",
+      "type": "object"
+    },
+    "ComparisonReadingData": {
+      "additionalProperties": false,
+      "description": "One comparison baseline as the run read it from the project's store.\n\n``value`` is the mean of ``samples`` runs of the task's benchmark against the engine, and\n``spread`` their relative standard deviation (absent for one run). ``reason`` explains a\nfailed or unconfigured comparison. A hidden-from-agents comparison is still shown here:\nthe operator sees it; only the planner's prompt omits it.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ComparisonStatus"
+        },
+        "metric": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metric"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "direction": {
+          "anyOf": [
+            {
+              "enum": [
+                "max",
+                "min"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direction"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        },
+        "spread": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Spread"
+        },
+        "samples": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Samples"
+        },
+        "hosts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Hosts",
+          "type": "array"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "name",
+        "label",
+        "status"
+      ],
+      "title": "ComparisonReadingData",
+      "type": "object"
+    },
+    "ComparisonStatus": {
+      "description": "What a run knows of one comparison baseline. Closed; mirrored by ``server.events``.",
+      "enum": [
+        "measured",
+        "failed",
+        "not_configured",
+        "not_measured"
+      ],
+      "title": "ComparisonStatus",
+      "type": "string"
+    },
+    "ComparisonsReadData": {
+      "additionalProperties": false,
+      "description": "The comparison baselines a run read when it started or resumed; the newest event wins.\n\nA run never measures a comparison: ``vibesys compare`` does, once, and stores the reading.",
+      "properties": {
+        "kind": {
+          "const": "comparisons_read",
+          "default": "comparisons_read",
+          "title": "Kind",
+          "type": "string"
+        },
+        "comparisons": {
+          "items": {
+            "$ref": "#/$defs/ComparisonReadingData"
+          },
+          "title": "Comparisons",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "comparisons"
+      ],
+      "title": "ComparisonsReadData",
       "type": "object"
     },
     "ConfigurationFailedData": {
@@ -671,6 +919,7 @@ const runEventSchema: Record<string, unknown> = {
         "adoption-failed",
         "stopped",
         "deadline",
+        "failed",
         "finish-refused"
       ],
       "title": "EndReason",
@@ -722,12 +971,15 @@ const runEventSchema: Record<string, unknown> = {
         "configuration_failed",
         "run_started",
         "run_startup_progress",
+        "workspace_root_probe",
         "experiments_changed",
         "iterations_changed",
         "run_interrupted",
         "run_status_changed",
         "chat",
         "chat_thread_created",
+        "steer_proposed",
+        "steer_delivery",
         "status_query",
         "control",
         "invocation_started",
@@ -763,6 +1015,9 @@ const runEventSchema: Record<string, unknown> = {
         "run_configured",
         "framework_warning",
         "winner_selected",
+        "input_measurement_failed",
+        "measurement_compared",
+        "comparisons_read",
         "workstream_finished",
         "turn_usage_recorded",
         "span_started",
@@ -894,6 +1149,17 @@ const runEventSchema: Record<string, unknown> = {
           "title": "Kind",
           "type": "string"
         },
+        "span_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpanId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "gate": {
           "$ref": "#/$defs/GateKind"
         },
@@ -1002,6 +1268,7 @@ const runEventSchema: Record<string, unknown> = {
       "description": "Closed set of framework-owned gates a candidate passes through.",
       "enum": [
         "validation",
+        "build",
         "accuracy",
         "benchmark"
       ],
@@ -1017,6 +1284,17 @@ const runEventSchema: Record<string, unknown> = {
           "default": "gate_started",
           "title": "Kind",
           "type": "string"
+        },
+        "span_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpanId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "gate": {
           "$ref": "#/$defs/GateKind"
@@ -1068,6 +1346,68 @@ const runEventSchema: Record<string, unknown> = {
       ],
       "title": "GateStartedData",
       "type": "object"
+    },
+    "InputMeasurementFailedData": {
+      "additionalProperties": false,
+      "description": "The run's input failed its trusted measurement, so the run has no trusted baseline.\n\nMirrors ``vibesys.events.InputMeasurementFailedData`` field for field.",
+      "properties": {
+        "kind": {
+          "const": "input_measurement_failed",
+          "default": "input_measurement_failed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "failure": {
+          "$ref": "#/$defs/InputMeasurementFailureKind"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stage"
+        },
+        "summary": {
+          "default": "",
+          "title": "Summary",
+          "type": "string"
+        },
+        "attempts": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Attempts",
+          "type": "integer"
+        },
+        "compared": {
+          "default": false,
+          "title": "Compared",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "failure"
+      ],
+      "title": "InputMeasurementFailedData",
+      "type": "object"
+    },
+    "InputMeasurementFailureKind": {
+      "description": "Why the run's input failed its own trusted measurement. Closed.\n\nSee ``vibesys.events.InputMeasurementFailureKind``, which this mirrors member-for-member.",
+      "enum": [
+        "no-evidence",
+        "readings-refused",
+        "readings-undecodable",
+        "accuracy-failed",
+        "benchmark-failed",
+        "wait-ended"
+      ],
+      "title": "InputMeasurementFailureKind",
+      "type": "string"
     },
     "InvocationFinishedData": {
       "additionalProperties": false,
@@ -1261,6 +1601,108 @@ const runEventSchema: Record<string, unknown> = {
       "title": "JudgeResultData",
       "type": "object"
     },
+    "MeasurementComparedData": {
+      "additionalProperties": false,
+      "description": "A candidate's measurement was compared with its base's. See ``vibesys.events``.",
+      "properties": {
+        "kind": {
+          "const": "measurement_compared",
+          "default": "measurement_compared",
+          "title": "Kind",
+          "type": "string"
+        },
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "direction": {
+          "enum": [
+            "max",
+            "min"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "candidate_commit": {
+          "title": "Candidate Commit",
+          "type": "string"
+        },
+        "base_commit": {
+          "title": "Base Commit",
+          "type": "string"
+        },
+        "candidate_value": {
+          "title": "Candidate Value",
+          "type": "number"
+        },
+        "base_value": {
+          "title": "Base Value",
+          "type": "number"
+        },
+        "ratio": {
+          "title": "Ratio",
+          "type": "number"
+        },
+        "noise": {
+          "title": "Noise",
+          "type": "number"
+        },
+        "verdict": {
+          "$ref": "#/$defs/MeasurementVerdict"
+        },
+        "candidate_samples": {
+          "title": "Candidate Samples",
+          "type": "integer"
+        },
+        "base_samples": {
+          "title": "Base Samples",
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/$defs/FrameworkSource",
+          "default": "gates"
+        }
+      },
+      "required": [
+        "kind",
+        "metric",
+        "direction",
+        "candidate_commit",
+        "base_commit",
+        "candidate_value",
+        "base_value",
+        "ratio",
+        "noise",
+        "verdict",
+        "candidate_samples",
+        "base_samples"
+      ],
+      "title": "MeasurementComparedData",
+      "type": "object"
+    },
+    "MeasurementVerdict": {
+      "description": "Which side of the noise a candidate falls on. Mirrors ``vs_core.api.ComparisonVerdict``.",
+      "enum": [
+        "better",
+        "within_noise",
+        "worse",
+        "inconclusive"
+      ],
+      "title": "MeasurementVerdict",
+      "type": "string"
+    },
     "ObjectiveOverview": {
       "additionalProperties": false,
       "description": "What the run optimizes: the task's objective and the metric it is judged on.\n\n``unit`` and ``direction`` come from the run's own measurements and objectives once it has\nthem; ``correctness_check`` is the argv of the check a candidate must pass (empty when the\ntask gates on none).",
@@ -1308,6 +1750,14 @@ const runEventSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Direction"
+        },
+        "objectives": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TaskObjective"
+          },
+          "title": "Objectives",
+          "type": "array"
         },
         "correctness_check": {
           "default": [],
@@ -1442,7 +1892,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "QuotaAbandonedData": {
       "additionalProperties": false,
-      "description": "The quota policy ended a turn with the quota error instead of pausing or waiting longer.",
+      "description": "The quota policy ended a turn with the quota error instead of pausing or waiting longer.\n\n``waited_seconds`` is how long this last stop held the turn before it ended (zero when\nit ended without waiting, and in events recorded before the field existed).",
       "properties": {
         "kind": {
           "const": "quota_abandoned",
@@ -1457,7 +1907,8 @@ const runEventSchema: Record<string, unknown> = {
         "condition": {
           "enum": [
             "quota_exhausted",
-            "rate_limited"
+            "rate_limited",
+            "unavailable"
           ],
           "title": "Condition",
           "type": "string"
@@ -1469,6 +1920,11 @@ const runEventSchema: Record<string, unknown> = {
         "reason": {
           "title": "Reason",
           "type": "string"
+        },
+        "waited_seconds": {
+          "default": 0.0,
+          "title": "Waited Seconds",
+          "type": "number"
         }
       },
       "required": [
@@ -1483,7 +1939,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "QuotaPausedData": {
       "additionalProperties": false,
-      "description": "A turn stopped on a provider capacity limit and the run paused for it.\n\n``condition`` is ``quota_exhausted`` (a usage, spend or billing limit) or\n``rate_limited`` (sustained rate limiting); ``detail`` is the provider's\ndiagnostic and ``resets_at`` the epoch second the provider said capacity\nreturns, when it said. The run stays paused until it resumes; ``resumes_at`` is the\nepoch second the run's quota policy resumes it by itself, ``None`` when only the\noperator can. ``policy`` is the unattended quota policy; the fallback fields name the\nprovider and model an operator may resume with, ``None`` when none is configured.",
+      "description": "A turn stopped on a provider capacity limit and the run paused for it.\n\n``condition`` is ``quota_exhausted`` (a usage, spend or billing limit),\n``rate_limited`` (sustained rate limiting) or ``unavailable`` (a provider outage:\nonly the stopped turn waits, under its outage budget, and the run is not paused);\n``detail`` is the provider's\ndiagnostic and ``resets_at`` the epoch second the provider said capacity\nreturns, when it said. The run stays paused until it resumes; ``resumes_at`` is the\nepoch second the run's quota policy resumes it by itself, ``None`` when only the\noperator can. ``policy`` is the unattended quota policy; the fallback fields name the\nprovider and model an operator may resume with, ``None`` when none is configured.",
       "properties": {
         "kind": {
           "const": "quota_paused",
@@ -1498,7 +1954,8 @@ const runEventSchema: Record<string, unknown> = {
         "condition": {
           "enum": [
             "quota_exhausted",
-            "rate_limited"
+            "rate_limited",
+            "unavailable"
           ],
           "title": "Condition",
           "type": "string"
@@ -1578,7 +2035,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "QuotaResumedData": {
       "additionalProperties": false,
-      "description": "A run paused on a capacity limit resumed on the same provider and sent the turn again.",
+      "description": "A turn stopped on a capacity limit is sent again on the same provider.\n\n``condition`` is the limit it stopped on, as in ``quota_paused`` (``None`` in events\nrecorded before the field existed). ``waited_seconds`` is how long that stop held the\nturn: for ``unavailable`` the turn's own backoff, during which the rest of the run went\non; otherwise the run's pause.",
       "properties": {
         "kind": {
           "const": "quota_resumed",
@@ -1590,6 +2047,23 @@ const runEventSchema: Record<string, unknown> = {
           "title": "Provider",
           "type": "string"
         },
+        "condition": {
+          "anyOf": [
+            {
+              "enum": [
+                "quota_exhausted",
+                "rate_limited",
+                "unavailable"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Condition"
+        },
         "reason": {
           "default": "operator",
           "enum": [
@@ -1598,6 +2072,11 @@ const runEventSchema: Record<string, unknown> = {
           ],
           "title": "Reason",
           "type": "string"
+        },
+        "waited_seconds": {
+          "default": 0.0,
+          "title": "Waited Seconds",
+          "type": "number"
         }
       },
       "required": [
@@ -1937,7 +2416,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "RunEndingData": {
       "additionalProperties": false,
-      "description": "How a core run's durable record stands as the run ends, emitted once just before its end.\n\n``reason`` is core's ``EndReason`` when the run recorded a result, ``None`` when it ended\nwithout one (an error, or a stop that left work unsettled). ``resumable`` is whether a\nresume continues it: its record is not terminal. ``rounds_finished`` counts its\nworkstreams (rounds) that reached their end. ``summary`` is core's account of the result.",
+      "description": "How a core run's durable record stands as the run ends, emitted once just before its end.\n\n``reason`` is core's ``EndReason`` when the run recorded a result, ``None`` when it ended\nwithout one (an error, or a stop that left work unsettled). ``resumable`` is whether a\nresume continues it: its record is not terminal. ``rounds_finished`` counts its\nworkstreams (rounds) that reached their end. ``summary`` is core's account of the result.\n``uncompared`` is whether the result adopted a candidate never compared with the input (it\nfailed its own measurement), however the run ended.",
       "properties": {
         "kind": {
           "const": "run_ending",
@@ -1968,6 +2447,11 @@ const runEventSchema: Record<string, unknown> = {
           "minimum": 0,
           "title": "Rounds Finished",
           "type": "integer"
+        },
+        "uncompared": {
+          "default": false,
+          "title": "Uncompared",
+          "type": "boolean"
         }
       },
       "required": [
@@ -2056,7 +2540,8 @@ const runEventSchema: Record<string, unknown> = {
       "enum": [
         "budget_exhausted",
         "deadline",
-        "no_result"
+        "no_result",
+        "run_environment_unavailable"
       ],
       "title": "RunFailureKind",
       "type": "string"
@@ -2181,7 +2666,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "RunStartupProgressData": {
       "additionalProperties": false,
-      "description": "A starting run reached ``stage``, or progressed within it.\n\nJournaled while the run acquires its resources, before it is ready. The\nstage only moves forward; ``progress`` is present when the stage reports\nit (an image build's steps done of total, and the step now running).",
+      "description": "A starting run's ``stage`` began, moved, waited, or finished.\n\nJournaled while the run acquires its resources, before it is ready. The\nrun's stage only moves forward. ``state`` is ``running`` when a stage begins\nand at each step of its ``progress`` (an image build's steps done of total,\nand the step now running), ``waiting`` while it is blocked on something\noutside the run host (``condition``, and the ``elapsed_seconds`` waited so\nfar), and ``finished`` with the ``elapsed_seconds`` the stage took. A stage\nthat fails journals no ``finished``; the run's failure says why it ended.",
       "properties": {
         "kind": {
           "const": "run_startup_progress",
@@ -2202,6 +2687,34 @@ const runEventSchema: Record<string, unknown> = {
             }
           ],
           "default": null
+        },
+        "state": {
+          "$ref": "#/$defs/StartupState",
+          "default": "running"
+        },
+        "condition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StartupWaitCondition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "elapsed_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Elapsed Seconds"
         }
       },
       "required": [
@@ -2716,10 +3229,276 @@ const runEventSchema: Record<string, unknown> = {
       "description": "Where a starting run is, in the order it gets there.\n\nDeclaration order is the order: a starting run only moves to a later stage.",
       "enum": [
         "resolving",
+        "probing_workspace",
         "building_image",
+        "building_tools",
         "starting_container"
       ],
       "title": "StartupStage",
+      "type": "string"
+    },
+    "StartupState": {
+      "description": "What a startup stage is doing at the moment of one observation.",
+      "enum": [
+        "running",
+        "waiting",
+        "finished"
+      ],
+      "title": "StartupState",
+      "type": "string"
+    },
+    "StartupWaitCondition": {
+      "description": "What a waiting startup stage waits on.",
+      "enum": [
+        "queued",
+        "running"
+      ],
+      "title": "StartupWaitCondition",
+      "type": "string"
+    },
+    "SteerDelivery": {
+      "additionalProperties": false,
+      "description": "One step in a steer's life: the facts a client needs to show it, by control id.\n\n``control_id`` is the id the operator sent the steer or withdrawal under, so a client\nmatches the step to its own send; None for a control sent without one. A step carries\nthe facts its state names and no other: ``mode`` when queued, ``withdraws`` for a queued\nwithdrawal, ``role`` when a turn took the steer, and ``reason`` when it ended unreached.",
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/SteerDeliveryState"
+        },
+        "control_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Control Id"
+        },
+        "action": {
+          "default": "steer",
+          "enum": [
+            "steer",
+            "withdraw"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SteerMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SteerTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "withdraws": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Withdraws"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "attempt_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attempt Id"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "SteerDelivery",
+      "type": "object"
+    },
+    "SteerDeliveryData": {
+      "additionalProperties": false,
+      "description": "One step in an operator steer's life, by the control id the operator sent it under.\n\nCarried by the steer-lifecycle run-control events (queued, reached a turn, in force,\ndropped, ended, withdrawal queued, refused); ``SteerDelivery`` is its one definition.",
+      "properties": {
+        "kind": {
+          "const": "steer_delivery",
+          "default": "steer_delivery",
+          "title": "Kind",
+          "type": "string"
+        },
+        "delivery": {
+          "$ref": "#/$defs/SteerDelivery"
+        }
+      },
+      "required": [
+        "kind",
+        "delivery"
+      ],
+      "title": "SteerDeliveryData",
+      "type": "object"
+    },
+    "SteerDeliveryState": {
+      "description": "Where one operator steer or withdrawal stands, as a client shows it.",
+      "enum": [
+        "queued",
+        "withdraw_queued",
+        "reached",
+        "reached_mid_turn",
+        "in_force",
+        "dropped",
+        "ended",
+        "refused"
+      ],
+      "title": "SteerDeliveryState",
+      "type": "string"
+    },
+    "SteerMode": {
+      "description": "How a steer reaches the turns of its target.",
+      "enum": [
+        "next_turn",
+        "standing",
+        "interrupt"
+      ],
+      "title": "SteerMode",
+      "type": "string"
+    },
+    "SteerProposal": {
+      "additionalProperties": false,
+      "description": "Guidance a chat agent suggests, in the fields of a ``SteerRequest``.\n\nIt carries no ``control_id`` and nothing in it reaches the run: only an operator's\n``command.control`` with a ``SteerRequest`` does. The tool that returns it is the\nagent's only steering tool, so the agent cannot send guidance.",
+      "properties": {
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/SteerTarget",
+          "default": {
+            "kind": "run",
+            "id": null
+          }
+        },
+        "mode": {
+          "$ref": "#/$defs/SteerMode",
+          "default": "next_turn"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "SteerProposal",
+      "type": "object"
+    },
+    "SteerProposedData": {
+      "additionalProperties": false,
+      "description": "A steer the chat agent suggests; the operator edits, sends or dismisses it.\n\nRecorded on the chat thread (the event header's ``chat_thread_id``) whose turn called\n``propose_steer``. It is a proposal only: nothing reaches the run until the operator sends\na ``command.control`` steer, which the proposal's fields prefill. ``proposal_id`` names it\nfor the client's card, and is unique within the run.",
+      "properties": {
+        "kind": {
+          "const": "steer_proposed",
+          "default": "steer_proposed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "proposal_id": {
+          "minLength": 1,
+          "title": "Proposal Id",
+          "type": "string"
+        },
+        "proposal": {
+          "$ref": "#/$defs/SteerProposal"
+        }
+      },
+      "required": [
+        "kind",
+        "proposal_id",
+        "proposal"
+      ],
+      "title": "SteerProposedData",
+      "type": "object"
+    },
+    "SteerTarget": {
+      "additionalProperties": false,
+      "description": "Whom a steer is for: the whole run, or one role, attempt or item, by id.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/SteerTargetKind",
+          "default": "run"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubjectId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "SteerTarget",
+      "type": "object"
+    },
+    "SteerTargetKind": {
+      "description": "What a steer is addressed to.",
+      "enum": [
+        "run",
+        "role",
+        "attempt",
+        "item"
+      ],
+      "title": "SteerTargetKind",
+      "type": "string"
+    },
+    "SubjectId": {
+      "maxLength": 256,
+      "minLength": 1,
+      "pattern": "^\\S+$",
       "type": "string"
     },
     "SubprocessOutputData": {
@@ -2731,6 +3510,17 @@ const runEventSchema: Record<string, unknown> = {
           "default": "subprocess_output",
           "title": "Kind",
           "type": "string"
+        },
+        "span_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpanId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "process_id": {
           "title": "Process Id",
@@ -2761,6 +3551,31 @@ const runEventSchema: Record<string, unknown> = {
         "content"
       ],
       "title": "SubprocessOutputData",
+      "type": "object"
+    },
+    "TaskObjective": {
+      "additionalProperties": false,
+      "description": "One axis the task compares candidates on, and which way is better.",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "max",
+            "min"
+          ],
+          "title": "Direction",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "direction"
+      ],
+      "title": "TaskObjective",
       "type": "object"
     },
     "TodoItemData": {
@@ -2985,6 +3800,18 @@ const runEventSchema: Record<string, unknown> = {
           "default": null,
           "title": "Output Tokens"
         },
+        "reasoning_output_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoning Output Tokens"
+        },
         "total_cost_usd": {
           "anyOf": [
             {
@@ -3129,6 +3956,17 @@ const runEventSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Settlement Id"
+        },
+        "checkout_status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckoutStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -3141,6 +3979,122 @@ const runEventSchema: Record<string, unknown> = {
     },
     "WireSpan": {
       "$ref": "#/$defs/Span"
+    },
+    "WorkspaceRootProbeData": {
+      "additionalProperties": false,
+      "description": "The run's probe of its local Slurm workspace root, which runs beside the run.\n\nThe probe is a small Slurm job that proves the compute nodes share the root the run\nstages into. The run starts without it; each Slurm submission (a trusted evaluation,\nan agent's GPU job) waits for it. ``queued``: the probe job ``job_id`` still waits in\nthe scheduler's queue, for the scheduler's ``pending_reason`` (None when it gave\nnone), after ``waited_seconds`` of at most ``queue_timeout_seconds``; it is reported\nat once, then on a bounded cadence or when the reason changes. ``retrying``: an\nattempt ended with ``failure`` without saying anything about the root (the queue\nnever scheduled it), and attempt number ``attempt`` follows in ``retry_in_seconds``;\nSlurm work keeps waiting. ``proven``: Slurm work goes ahead. ``failed``: every Slurm\nsubmission of the run is refused with ``failure``, and the run ends as failed.",
+      "properties": {
+        "kind": {
+          "const": "workspace_root_probe",
+          "default": "workspace_root_probe",
+          "title": "Kind",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "queued",
+            "retrying",
+            "proven",
+            "failed"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "job_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Job Id"
+        },
+        "pending_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pending Reason"
+        },
+        "waited_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Waited Seconds"
+        },
+        "queue_timeout_seconds": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Queue Timeout Seconds"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Failure"
+        },
+        "attempt": {
+          "anyOf": [
+            {
+              "minimum": 2,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attempt"
+        },
+        "retry_in_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retry In Seconds"
+        }
+      },
+      "required": [
+        "kind",
+        "state"
+      ],
+      "title": "WorkspaceRootProbeData",
+      "type": "object"
     },
     "WorkspaceSnapshotData": {
       "additionalProperties": false,
@@ -3439,6 +4393,18 @@ const runEventSchema: Record<string, unknown> = {
       ],
       "default": null
     },
+    "span_id": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SpanId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The agent-turn span of the run trace this event belongs to: the server stamps it on every event whose execution_id ran as a recorded agent-turn span (the turn's output, tool calls and results, activity and usage), so a client joins a transcript to the trace by id and never by invocation, name or time. Absent when the event is not part of a turn, or when it was recorded before its span was."
+    },
     "data": {
       "anyOf": [
         {
@@ -3451,15 +4417,18 @@ const runEventSchema: Record<string, unknown> = {
               "benchmark_result": "#/$defs/BenchmarkResultData",
               "chat": "#/$defs/ChatData",
               "chat_thread_created": "#/$defs/ChatThreadCreatedData",
+              "comparisons_read": "#/$defs/ComparisonsReadData",
               "configuration_failed": "#/$defs/ConfigurationFailedData",
               "experiments_changed": "#/$defs/ExperimentsChangedData",
               "framework_warning": "#/$defs/FrameworkWarningData",
               "gate_finished": "#/$defs/GateFinishedData",
               "gate_started": "#/$defs/GateStartedData",
+              "input_measurement_failed": "#/$defs/InputMeasurementFailedData",
               "invocation_finished": "#/$defs/InvocationFinishedData",
               "invocation_started": "#/$defs/InvocationStartedData",
               "iterations_changed": "#/$defs/IterationsChangedData",
               "judge_result": "#/$defs/JudgeResultData",
+              "measurement_compared": "#/$defs/MeasurementComparedData",
               "output": "#/$defs/OutputData",
               "phase": "#/$defs/PhaseData",
               "provider_switched": "#/$defs/ProviderSwitchedData",
@@ -3481,6 +4450,8 @@ const runEventSchema: Record<string, unknown> = {
               "span_ended": "#/$defs/SpanEndedData",
               "span_started": "#/$defs/SpanStartedData",
               "span_updated": "#/$defs/SpanUpdatedData",
+              "steer_delivery": "#/$defs/SteerDeliveryData",
+              "steer_proposed": "#/$defs/SteerProposedData",
               "subprocess_output": "#/$defs/SubprocessOutputData",
               "todo_update": "#/$defs/TodoUpdateData",
               "tool_call": "#/$defs/ToolCallData",
@@ -3488,6 +4459,7 @@ const runEventSchema: Record<string, unknown> = {
               "turn_usage_recorded": "#/$defs/TurnUsageData",
               "usage_update": "#/$defs/UsageUpdateData",
               "winner_selected": "#/$defs/WinnerSelectedData",
+              "workspace_root_probe": "#/$defs/WorkspaceRootProbeData",
               "workspace_snapshot": "#/$defs/WorkspaceSnapshotData",
               "workstream_finished": "#/$defs/WorkstreamFinishedData"
             },
@@ -3573,6 +4545,12 @@ const runEventSchema: Record<string, unknown> = {
               "$ref": "#/$defs/ToolResultData"
             },
             {
+              "$ref": "#/$defs/SteerProposedData"
+            },
+            {
+              "$ref": "#/$defs/SteerDeliveryData"
+            },
+            {
               "$ref": "#/$defs/TodoUpdateData"
             },
             {
@@ -3597,6 +4575,9 @@ const runEventSchema: Record<string, unknown> = {
               "$ref": "#/$defs/QuotaWaitCancelledData"
             },
             {
+              "$ref": "#/$defs/WorkspaceRootProbeData"
+            },
+            {
               "$ref": "#/$defs/ProviderSwitchedData"
             },
             {
@@ -3616,6 +4597,15 @@ const runEventSchema: Record<string, unknown> = {
             },
             {
               "$ref": "#/$defs/WinnerSelectedData"
+            },
+            {
+              "$ref": "#/$defs/InputMeasurementFailedData"
+            },
+            {
+              "$ref": "#/$defs/MeasurementComparedData"
+            },
+            {
+              "$ref": "#/$defs/ComparisonsReadData"
             },
             {
               "$ref": "#/$defs/WorkstreamFinishedData"

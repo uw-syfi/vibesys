@@ -51,6 +51,8 @@ function failure(error: unknown): WelcomeResult<never> {
     ok: false,
     error: error instanceof Error ? error.message : String(error),
     authNeeded: error instanceof ConnectionError && error.reason === 'auth',
+    // The connection's own cause, typed, so a screen words it and keeps the raw text for a tooltip.
+    ...(error instanceof ConnectionError ? {cause: error.reason} : {}),
   };
 }
 
@@ -61,8 +63,6 @@ export interface WelcomeBinding {
   /** The page that surface loads; a sender on another page is refused. */
   readonly url: string;
   readonly answer: (request: WelcomeRequest, rendererGeneration: string) => Promise<unknown>;
-  /** Synchronously remove a replaced document's authority. */
-  readonly revoke: (rendererGeneration: string) => void;
   /** Settle a replaced document's asynchronous cleanup; a rejection still counts as settled. */
   readonly retire: (rendererGeneration: string) => Promise<void>;
 }
@@ -133,7 +133,6 @@ class WindowAdmission {
     this.#activeGenerations = new Set();
     for (const generation of retiring) {
       this.#retiredGenerations.add(generation);
-      this.#binding.revoke(generation);
     }
     this.#retirement = this.#retirement.then(async () => {
       await Promise.allSettled(retiring.map(async generation => this.#binding.retire(generation)));
@@ -160,6 +159,11 @@ export class WelcomeRouter {
         return window.handle(channel, event, args);
       });
     }
+  }
+
+  /** Share the app's current-window admission with other IPC surfaces. */
+  admits(event: WelcomeInvokeEvent): boolean {
+    return [...this.#windows].some(window => window.admits(event));
   }
 
   /** Answer `binding`'s window from now until its native window closes. */

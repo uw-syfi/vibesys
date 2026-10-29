@@ -1,0 +1,49 @@
+{
+  "shapes": [
+    {
+      "ideas": 10,
+      "readings": 10,
+      "failed": 0,
+      "comparisons": 0
+    },
+    {
+      "ideas": 17,
+      "readings": 62,
+      "failed": 1,
+      "comparisons": 14
+    },
+    {
+      "ideas": 10,
+      "readings": 26,
+      "failed": 4,
+      "comparisons": 0
+    },
+    {
+      "ideas": 0,
+      "readings": 6,
+      "failed": 0,
+      "comparisons": 0
+    },
+    {
+      "ideas": 10,
+      "readings": 47,
+      "failed": 3,
+      "comparisons": 3
+    },
+    {
+      "ideas": 10,
+      "readings": 80,
+      "failed": 2,
+      "comparisons": 11
+    }
+  ],
+  "inputs": [
+    1093502.0,
+    1445770.0,
+    1581539.0,
+    1682996.0,
+    1718772.0,
+    2166547.0,
+    2191917.0
+  ]
+}

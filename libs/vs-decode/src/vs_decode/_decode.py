@@ -5,7 +5,7 @@ another process or an agent wrote, a CLI's output, a peer's frame. Each step bou
 what hostile input can cost:
 
 1. The input is capped at ``max_bytes`` (a file is read at most one byte past it).
-2. An iterative lexical pass rejects repeated object keys without recursive parsing.
+2. The native JSON parser preserves object members for a duplicate-key pass.
 3. pydantic's JSON parser parses it; it bounds nesting depth, so deep input is a
    validation error, not a ``RecursionError``, and bad UTF-8 is an error too.
 4. The parsed value is validated against a strict target: every model, dataclass and
@@ -17,6 +17,7 @@ failure and the key path, never echoing the input. Nothing here raises for bad i
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import stat
@@ -503,8 +504,57 @@ class _DuplicateKeyScanner:
         return self._text[self._position] if self._position < len(self._text) else None
 
 
+@dataclass(frozen=True, slots=True)
+class _ObjectPairs:
+    pairs: list[tuple[str, object]]
+
+
+_JSON_SYNTAX = TypeAdapter(object)
+
+
 def _duplicate_key_problem(data: bytes | str) -> Problem | None:
-    return _DuplicateKeyScanner(data).find()
+    # The lexical scanner also extracts correlation strings, but walking every
+    # token in Python makes observing a large run record dominate admission.
+    # Preserve all object members with the native parser, then visit keys in
+    # document order. The target parser remains authoritative for JSON syntax.
+    try:
+        parsed = json.loads(data, object_pairs_hook=_ObjectPairs)
+    except (ValueError, UnicodeError, RecursionError):
+        return None
+    duplicate = _first_duplicate(parsed)
+    if duplicate is not None:
+        try:
+            _JSON_SYNTAX.validate_json(data)
+        except ValidationError:
+            return None
+    return duplicate
+
+
+def _first_duplicate(parsed: object) -> Problem | None:
+    pending: list[tuple[object, _JsonPath]] = [(parsed, None)]
+    while pending:
+        value, path = pending.pop()
+        if isinstance(value, Problem):
+            return value
+        children: list[tuple[object, _JsonPath]] = []
+        if isinstance(value, _ObjectPairs):
+            seen: set[str] = set()
+            for key, member in value.pairs:
+                child = _PathNode(path, key)
+                if key in seen:
+                    problem = Problem(
+                        _path_location(child),
+                        "Object member appears more than once",
+                        "duplicate_key",
+                    )
+                    children.append((problem, child))
+                    break
+                seen.add(key)
+                children.append((member, child))
+        elif isinstance(value, list):
+            children = [(member, _PathNode(path, index)) for index, member in enumerate(value)]
+        pending.extend(reversed(children))
+    return None
 
 
 def _input_size(data: bytes | str) -> int:

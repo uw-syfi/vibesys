@@ -6,13 +6,20 @@ here, on the submit host, in arrival order, and is handed to the wrapped
 launcher when one of the run's jobs ends. Waiting happens before ``srun``, so a
 job's ``--time`` limit starts when it is submitted, never while it waits, and a
 request cancelled while it waits is never submitted.
+
+An outcome whose scheduler termination is unconfirmed retains its admission
+ticket under the outcome's stable job name. The ticket is released only when
+``reconcile`` proves that identity absent, so a lost local wrapper can never
+admit a replacement while its allocation may still be alive.
 """
 
 from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+from vs_sandbox.agent_gpu import GpuJobOutcome
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -27,6 +34,11 @@ CANCELLED_BEFORE_SUBMISSION = 143
 #: How often a waiting request looks at its cancel flag. The flag is the broker's
 #: event and cannot wake the queue's condition itself; a slot that frees wakes it.
 _CANCEL_POLL_SECONDS = 0.5
+
+
+@runtime_checkable
+class _GpuJobReconciler(Protocol):
+    def reconcile(self, job_name: str) -> bool: ...
 
 
 @dataclass(slots=True)
@@ -60,7 +72,9 @@ class CappedGpuLauncher:
     submitted through this instance. A request that must wait writes one notice
     line to its output, then waits until it is first in line and a slot is free,
     or until its *cancel* is set, whichever comes first; a cancelled request
-    leaves the line and returns :data:`CANCELLED_BEFORE_SUBMISSION`.
+    leaves the line and returns :data:`CANCELLED_BEFORE_SUBMISSION`. An
+    unconfirmed outcome exposes its stable ``job_name`` and retains its slot
+    until explicit successful reconciliation of that same identity.
     """
 
     def __init__(self, inner: GpuLauncher, cap: int, threads: Threads) -> None:
@@ -71,6 +85,7 @@ class CappedGpuLauncher:
         self._inner = inner
         self._condition = threads.condition(threads.lock())
         self._queue = _Queue(cap)
+        self._unsettled: dict[str, set[int]] = {}
         self._next_ticket = 0
 
     def run(
@@ -80,20 +95,47 @@ class CappedGpuLauncher:
         *,
         write: Callable[[bytes], None],
         cancel: Event,
-    ) -> int:
+    ) -> GpuJobOutcome:
         """Wait for a slot, then run *command* through the wrapped launcher."""
         with self._condition:
             ticket = self._next_ticket
             self._next_ticket += 1
             self._queue.waiting.append(ticket)
+        release_ticket = True
         try:
             if not self._wait_for_slot(ticket, write, cancel):
-                return CANCELLED_BEFORE_SUBMISSION
-            return self._inner.run(request, command, write=write, cancel=cancel)
+                return GpuJobOutcome(CANCELLED_BEFORE_SUBMISSION)
+            outcome = self._inner.run(request, command, write=write, cancel=cancel)
+            if not outcome.termination_confirmed:
+                job_name = outcome.job_name
+                if job_name is None:
+                    message = "an unconfirmed GPU job outcome has no scheduler identity"
+                    raise RuntimeError(message)
+                with self._condition:
+                    self._unsettled.setdefault(job_name, set()).add(ticket)
+                release_ticket = False
+            return outcome
         finally:
-            with self._condition:
+            if release_ticket:
+                self._release((ticket,))
+
+    def reconcile(self, job_name: str) -> bool:
+        """Reconcile a submitted job and release any slot retained for its lifetime."""
+        if not isinstance(self._inner, _GpuJobReconciler):
+            return False
+        if not self._inner.reconcile(job_name):
+            return False
+        with self._condition:
+            tickets = tuple(self._unsettled.pop(job_name, ()))
+        self._release(tickets)
+        return True
+
+    def _release(self, tickets: tuple[int, ...]) -> None:
+        """Release confirmed tickets and wake requests whose admission may now change."""
+        with self._condition:
+            for ticket in tickets:
                 self._queue.leave(ticket)
-                self._condition.notify_all()
+            self._condition.notify_all()
 
     def _wait_for_slot(self, ticket: int, write: Callable[[bytes], None], cancel: Event) -> bool:
         """Return once *ticket* holds a slot (``True``) or *cancel* is set first (``False``)."""

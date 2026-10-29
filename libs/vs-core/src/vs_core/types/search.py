@@ -30,15 +30,18 @@ from .common import (
     Scope,
     Seconds,
     Value,
+    unset,
 )
 from .evaluation import (
     Continuation,
     EvidenceRef,
     MeasurementResult,
     ResumeAuthorized,
+    ResumeRefused,
 )
 from .evaluation_history import AttemptEvaluationHistory, AttemptTerminalReason
 from .kinds import EventKind
+from .measurement import Comparison, ComparisonSettled, StatedComparison
 from .records import OperationResult
 from .session_inputs import InputDelivered, InputDropped
 from .sessions import InterruptCompleted, InterruptFailed, TurnResult, YieldPublicationFailed
@@ -107,6 +110,13 @@ class ResumeReady(Value):
     authorization: ResumeAuthorized
 
 
+class ResumeFailed(Value):
+    """Plumbing of the agent pipeline: core will never resume a suspended turn."""
+
+    kind: Literal["resume_failed"] = "resume_failed"
+    refusal: ResumeRefused
+
+
 class CheckpointKnown(Value):
     """Plumbing of the agent pipeline: core recorded or declined a turn's checkpoint."""
 
@@ -121,6 +131,11 @@ class MeasurementFinished(Value):
     kind: Literal["measurement_finished"] = "measurement_finished"
     decision: DecisionId | None
     result: MeasurementResult
+    comparison: Comparison | None = Field(default=None, exclude_if=unset)
+    """The measured candidate compared with its base over every sample held when it ended.
+
+    None when the candidate has no base's samples (a task without a benchmark stage, a base
+    that could not be measured, or a run no sample came of)."""
 
 
 class OperationFinished(Value):
@@ -144,6 +159,18 @@ class StopRequested(Value):
 
     kind: Literal["stop_requested"] = "stop_requested"
     control: ControlInput
+
+
+class StopLifted(Value):
+    """An explicit resume lifted the stop that stood: the run goes on, as if not stopped.
+
+    Work the stop already ended stays ended (a task that took ``Stopped`` has returned); a
+    task that had not taken it yet no longer will, and ``ctx.stop_requested`` is false again.
+    """
+
+    kind: Literal["stop_lifted"] = "stop_lifted"
+    control: ControlInput
+    new_epoch: bool = Field(default=False, exclude_if=lambda value: not value)
 
 
 class TimeReached(Value):
@@ -181,6 +208,7 @@ type Event = Annotated[
     | OperationFinished
     | AdoptionFinished
     | StopRequested
+    | StopLifted
     | TimeReached
     | MessageDelivered
     | MessageDropped
@@ -189,7 +217,9 @@ type Event = Annotated[
     | TurnYielded
     | YieldFailed
     | ResumeReady
+    | ResumeFailed
     | CheckpointKnown
+    | ComparisonSettled
     | Failed,
     Field(discriminator="kind"),
 ]
@@ -246,6 +276,9 @@ class RunView(Value):
     attempts: tuple[AttemptSummary, ...]
     measurements: tuple[EvidenceRef, ...]
     settlements: tuple[Settlement, ...]
+    comparisons: tuple[StatedComparison, ...] = ()
+    """Every candidate input's comparison with its base as it stands now, and whether it is
+    still settling; one per scope, candidate input and base input."""
 
 
 class DiscardReason(StrEnum):

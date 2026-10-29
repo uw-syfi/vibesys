@@ -80,7 +80,7 @@ def design(host: MultiHost, identifier: str = "h1") -> None:
     host.run.reply_raw(host.run.expect_turn(role=PLANNER), plan_reply(identifier))
 
 
-def implement(host: MultiHost, outcome: str = "nominated", candidate: str = "def456") -> None:
+def implement(host: MultiHost, outcome: str = "implemented", candidate: str = "def456") -> None:
     host.drain_until_turn(IMPLEMENTER)
     host.run.reply(
         host.run.expect_turn(role=IMPLEMENTER),
@@ -270,16 +270,14 @@ def test_an_implementer_that_asks_to_continue_is_given_its_own_next_step_without
 @given(
     judge_every=st.integers(1, 3),
     outcomes=st.lists(
-        st.sampled_from(["nominated", "disproven", "inconclusive"]), min_size=3, max_size=3
+        st.sampled_from(["implemented", "implementation_failed"]), min_size=3, max_size=3
     ),
 )
 def test_the_judge_is_asked_exactly_when_the_review_cadence_says(
     *, restarting: bool, judge_every: int, outcomes: list[str]
 ) -> None:
-    """A round is reviewed at the cadence, in the final round, or on a nominated candidate."""
-    host = start(
-        config(max_rounds=3, judge_every=judge_every, official_eval_every=9), restarting=restarting
-    )
+    """A round is reviewed at the cadence, in the final round, or on an implemented candidate."""
+    host = start(config(max_rounds=3, judge_every=judge_every), restarting=restarting)
     for number, outcome in enumerate(outcomes, start=1):
         design(host, f"h{number}")
         host.drain_until_turn(IMPLEMENTER)
@@ -295,7 +293,7 @@ def test_the_judge_is_asked_exactly_when_the_review_cadence_says(
     host.drain()
 
     expected = sum(
-        number == 3 or number % judge_every == 0 or outcome == "nominated"
+        number == 3 or number % judge_every == 0 or outcome == "implemented"
         for number, outcome in enumerate(outcomes, start=1)
     )
     assert len([item for item in host.run.decisions if _is_turn(item, "judge")]) == expected
@@ -303,12 +301,12 @@ def test_the_judge_is_asked_exactly_when_the_review_cadence_says(
 
 @MODES
 def test_a_round_whose_review_was_deferred_is_never_a_winner(*, restarting: bool) -> None:
-    host = start(config(max_rounds=2, judge_every=2, official_eval_every=9), restarting=restarting)
+    host = start(config(max_rounds=2, judge_every=2), restarting=restarting)
     design(host, "h1")
     host.drain_until_turn(IMPLEMENTER)
     host.run.reply(
         host.run.expect_turn(role=IMPLEMENTER),
-        implemented("disproven"),
+        implemented("implementation_failed"),
         checkpoint=Retained(revision=RevisionRef.of_git_commit("c1")),
     )
     host.drain_until_turn(PLANNER)

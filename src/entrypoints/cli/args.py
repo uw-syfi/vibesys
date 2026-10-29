@@ -16,6 +16,7 @@ from server.host_api import (
     PUBLISH_FLAG,
     REPO_FLAG,
     ROLE_MODEL_FLAG,
+    ROLE_PROVIDER_FLAG,
     ROLE_REASONING_EFFORT_FLAG,
     UNVETTED_MODEL_FLAG,
 )
@@ -303,6 +304,10 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
             "'none' to disable standalone profiling, "
             "'nsys' for NVIDIA Nsight Systems (needs /proc/driver/nvidia), "
             "'ncu' for NVIDIA Nsight Compute (CUDA kernel-writing only), "
+            "'flashinfer' for per-block intra-kernel timelines recorded with FlashInfer's "
+            "profiler macros (CUDA kernel-writing only, opt-in), "
+            "'ncu_flashinfer' for both in one profiler session "
+            "(CUDA kernel-writing only, opt-in), "
             "'rocprof' for AMD rocprofv3 / rocprof-compute (ROCm system trace, "
             "PMC counters, ATT, kernel-altitude counters), "
             "'torch' for torch.profiler (works under the Modal run environment), "
@@ -490,6 +495,18 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="Wall-clock budget for the run. Overrides [run].max_run_seconds in agent.toml.",
     )
     parser.add_argument(
+        ROLE_PROVIDER_FLAG,
+        type=_role_setting,
+        action="append",
+        default=[],
+        metavar="ROLE=PROVIDER",
+        help=(
+            "CLI provider for one agent role. Overrides agent.roles.ROLE.provider; repeatable. "
+            "A role that names a provider other than the run's and no model runs that "
+            "provider's default model."
+        ),
+    )
+    parser.add_argument(
         ROLE_MODEL_FLAG,
         type=_role_setting,
         action="append",
@@ -520,11 +537,13 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--agent-backend",
-        choices=["cli"],
+        choices=["cli", "scripted"],
         default=None,
         help=(
             "Which agent backend implementation to use. Overrides "
-            "[agent].backend in agent.toml. Defaults to 'cli'."
+            "[agent].backend in agent.toml. Defaults to 'cli'. 'scripted' runs the real "
+            "backend with scripted agents and no model (dynamic search only; the seed is "
+            "[agent].scripted_seed)."
         ),
     )
     parser.add_argument(
@@ -558,8 +577,10 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         choices=list(ComputeBackend),
         default=None,
         help=(
-            "Compute backend to target. Overrides [backend].name in "
-            f"agent.toml. Defaults to 'cuda'. Supported: {', '.join(KNOWN_COMPUTE_BACKENDS)}."
+            "Override the compute backend the task declares (`backends` in its "
+            "vibesys.input.toml); it must be one the task declares. For a task that "
+            "declares none, falls back to [backend].name in agent.toml (default 'cuda'). "
+            f"Supported: {', '.join(KNOWN_COMPUTE_BACKENDS)}."
         ),
     )
 
@@ -617,7 +638,7 @@ def _run_id(value: str) -> str:
         raise argparse.ArgumentTypeError(str(exc)) from None
 
 
-def _make_parser(prog: str, description: str) -> argparse.ArgumentParser:
+def _make_parser(prog: str, description: str) -> _RunArgumentParser:
     parser = _RunArgumentParser(prog=prog, description=description)
     _apply_common_args(parser)
     return parser
@@ -644,7 +665,7 @@ def _build_validate_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _build_agent_parser() -> argparse.ArgumentParser:
+def _build_agent_parser() -> _RunArgumentParser:
     parser = _make_parser(
         prog="vibesys --outer-loop agent",
         description="Run the autonomous orchestrator-driven build loop.",
@@ -707,12 +728,13 @@ def _build_agent_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-backlog",
         type=int,
-        default=0,
+        default=None,
         metavar="N",
         help=(
             "Dynamic loop: workstreams whose candidate waits for or holds a trusted evaluation "
             "without holding an agent slot, so new work starts meanwhile; 0 keeps each agent "
-            "slot until its workstream ends (default: 0)."
+            "slot until its workstream ends, so new work waits for measurements (default: every "
+            "waiting workstream, up to the largest value accepted)."
         ),
     )
     parser.add_argument(
@@ -774,24 +796,14 @@ def _build_agent_parser() -> argparse.ArgumentParser:
             "nominated candidates and the final round are always reviewed (default: 3)."
         ),
     )
-    parser.add_argument(
-        "--official-eval-every",
-        type=int,
-        default=3,
-        metavar="N",
-        help=(
-            "Run configured framework-owned accuracy/benchmark gates every N "
-            "accepted candidate checkpoints; orchestrator requests and the final "
-            "round run them immediately (default: 3)."
-        ),
-    )
     _add_modality_argument(parser)
     parser.add_argument(
         "--interface",
         choices=["inprocess", "service"],
-        default="inprocess",
+        default=None,
         help=(
-            "Process boundary used by the evaluator. 'inprocess' (default): "
+            "Process boundary used by the evaluator; defaults to the input's "
+            "[agent].interface, else 'inprocess'. 'inprocess': "
             "the evaluator invokes the candidate directly using the input-defined "
             "contract. 'service': the evaluator communicates with a running "
             "service over its network interface. Language, tooling, and artifact "
@@ -848,7 +860,7 @@ def _parse_cli_objective(spec: str) -> Objective:
     return Objective(name=name, direction=direction)
 
 
-def _build_evolve_parser() -> argparse.ArgumentParser:
+def _build_evolve_parser() -> _RunArgumentParser:
     parser = _make_parser(
         prog="vibesys --outer-loop evolve",
         description="Run the evolutionary-search build loop.",
@@ -942,7 +954,7 @@ def _build_evolve_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _build_plain_parser() -> argparse.ArgumentParser:
+def _build_plain_parser() -> _RunArgumentParser:
     parser = _make_parser(
         prog="vibesys --outer-loop plain",
         description=(

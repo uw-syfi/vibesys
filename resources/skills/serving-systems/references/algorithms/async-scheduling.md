@@ -37,7 +37,7 @@ Fixing (1) does not fix (2), and a profile that shows gaps *between* steps rathe
 |:--|:--|
 | `cuda` | Two streams + events; `wait_stream` ordering, non-blocking D2H, completion event before host read |
 | `rocm` | As cuda (HIP streams/events) |
-| `trainium` | Ahead-of-time compiled graphs; the runtime queues executions, so overlap is about keeping the queue fed rather than ordering streams |
+| `trainium` | TorchNeuron enqueues compiled regions asynchronously; overlap comes from feeding step N's device-side ids into step N+1 and copying step N's ids back non-blocking behind an event, so the host never waits on N+1 |
 | `metal` | MLX defers by default and auto-orders across streams, so overlap is controlled by *where* `mx.eval` / `mx.async_eval` are placed rather than by explicit stream/event choreography |
 
 `metal` is the case where a direct port of the CUDA design is actively wrong: constructing an explicit two-stream pipeline on top of a lazy graph forces materialization and removes the overlap it was meant to create.

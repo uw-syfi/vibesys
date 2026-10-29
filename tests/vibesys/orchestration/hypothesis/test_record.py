@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from tests.support.declared_reply import DeclaredImplementerResponse
+
 from vibesys.hypothesis import (
     AgentAttribution,
     CandidateDisposition,
@@ -24,7 +26,6 @@ from vibesys.hypothesis.readmodel import AgentRunProjection, project_hypothesis_
 from vibesys.hypothesis.record import RecordInput, build_round_record
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.metrics import FrameworkBenchmarkOutcome, MetricSpace, Objective
-from vibesys.orchestration.multi.models import ImplementerResponse
 from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
 
@@ -58,10 +59,10 @@ def _record_input() -> RecordInput:
     attempt = AttemptState(
         agent_run_state=state,
         feedback=None,
-        implementation=ImplementerResponse(
+        implementation=DeclaredImplementerResponse(
             summary="cache added",
             expected_behavior="higher throughput",
-            hypothesis_outcome=HypothesisOutcome.SUPPORTED,
+            declared=HypothesisOutcome.SUPPORTED.value,
             candidate_disposition=CandidateDisposition.PARETO_FRONTIER,
             candidate_metrics={"throughput": 12.0},
             candidate_evaluation_artifact="profile.json",
@@ -132,7 +133,7 @@ def test_gate_retry_carries_approved_candidate_when_agent_omits_it() -> None:
     data.hypothesis.gate_approved_candidate_disposition = CandidateDisposition.PARETO_FRONTIER.value
     data.hypothesis.gate_approved_candidate_metrics = {"throughput": 12.0}
     data.hypothesis.gate_approved_candidate_evaluation_artifact = "approved.json"
-    assert isinstance(data.attempt.implementation, ImplementerResponse)
+    assert isinstance(data.attempt.implementation, DeclaredImplementerResponse)
     data.attempt.implementation = data.attempt.implementation.model_copy(
         update={"candidate_disposition": CandidateDisposition.UNASSESSED}
     )
@@ -164,10 +165,10 @@ def _unmeasured_candidate_input(
     outcome: HypothesisOutcome = HypothesisOutcome.DISPROVEN,
 ) -> RecordInput:
     data = _record_input()
-    assert isinstance(data.attempt.implementation, ImplementerResponse)
+    assert isinstance(data.attempt.implementation, DeclaredImplementerResponse)
     data.attempt.implementation = data.attempt.implementation.model_copy(
         update={
-            "hypothesis_outcome": outcome,
+            "declared": outcome,
             "candidate_disposition": disposition,
             "candidate_metrics": {"throughput": 12.0},
             "candidate_evaluation_artifact": "agent-profile.json",
@@ -227,9 +228,9 @@ def test_deferred_frontier_claim_cannot_create_a_retention_decision() -> None:
 
 def test_trusted_frontier_measurement_can_retain_a_disproven_hypothesis_candidate() -> None:
     data = _record_input()
-    assert isinstance(data.attempt.implementation, ImplementerResponse)
+    assert isinstance(data.attempt.implementation, DeclaredImplementerResponse)
     data.attempt.implementation = data.attempt.implementation.model_copy(
-        update={"hypothesis_outcome": HypothesisOutcome.DISPROVEN}
+        update={"declared": HypothesisOutcome.DISPROVEN}
     )
 
     record = build_round_record(data)
@@ -251,7 +252,7 @@ def test_unmeasured_retention_stays_false_across_resume_and_read_model_projectio
     hypothesis = resumed.by_id(data.hypothesis.hypothesis_id)
     assert hypothesis is not None
     assert hypothesis.candidate_retained is False
-    assert projected.hypotheses[0].kept is False
+    assert projected.hypotheses[0].best is False
 
 
 def test_single_and_multi_replies_share_unmeasured_retention_policy() -> None:

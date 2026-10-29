@@ -7,12 +7,23 @@
 import {
   type ConnectionLease,
   type ConnectionManager,
-  connectionStatus,
   HelperRequestError,
-  type HostConnection,
+  hostListingFromRuns,
+  isHostUnsupported,
   type LogsLease,
+  type RegistryRunCatalog,
+  type RegistryRunReads,
+  type RegistrySavedRuns,
+  type RegistrySetup,
+  type RunWatch,
 } from '@vibesys/connection';
-import type {PathsCompleteReply} from '@vibesys/contracts/host-helper';
+import {
+  type HarnessesListReply,
+  type HelperMessage,
+  RUN_EVENT_TYPES_BY_KINDS,
+  type RunEventKinds,
+  type UsageRecord,
+} from '@vibesys/contracts/host-helper';
 import {
   type HostId,
   type HostKey,
@@ -21,16 +32,24 @@ import {
   hostFromKey,
   hostKey,
   hostLabel,
-  hostListing,
+  type InstanceInspection,
   inspectionReply,
+  type ListedRun,
+  type RunDigestsReply,
+  type UsageWindowOutcome,
+  usageWindowRefusal,
   validHostPath,
 } from '@vibesys/hosts';
 import type {
   HarnessListing,
+  HarnessOffer,
   PathCompletion,
   RunHistoryPage,
   RunLogsRequest,
-  WelcomeInspection,
+  RunSpanPage,
+  RunSummary,
+  RunSummaryResult,
+  SummaryTokens,
 } from '@vibesys/ipc';
 import type {LogListOutcome, LogReadOutcome} from '@vibesys/logs';
 import {
@@ -40,7 +59,24 @@ import {
   withHostSettings,
   withoutHost,
 } from '@vibesys/settings';
+import {checkHostVersion, type HostVersion, HostVersionGate} from './host-version.js';
 import {discoverSshConfigAliases, type SshConfigFilesystem} from './ssh-config.js';
+
+/** The most events a helper without `run_history_pages` serves in one `runs.read_events` page. */
+const LEGACY_HISTORY_PAGE_EVENTS = 500;
+
+/** The events of `events` whose `type` `kinds` selects (`RUN_EVENT_TYPES_BY_KINDS`), in their order. */
+function ofKinds(events: readonly unknown[], kinds: RunEventKinds): unknown[] {
+  const types = new Set(RUN_EVENT_TYPES_BY_KINDS[kinds]);
+  return events.filter(
+    event =>
+      typeof event === 'object' &&
+      event !== null &&
+      'type' in event &&
+      typeof event.type === 'string' &&
+      types.has(event.type),
+  );
+}
 
 export interface HostsDeps {
   readonly manager: ConnectionManager;
@@ -56,6 +92,95 @@ export interface HostsDeps {
   readonly push: (listing: HostListing) => void;
   /** Forget a host's retained listing when it leaves the desired set. */
   readonly retire: (host: HostKey) => void;
+  /** Required when using the gateway. Missing it throws; it does not fall back. */
+  readonly setup?: RegistrySetup;
+  /** Stop a host login when its checkout is replaced or the host is removed. */
+  readonly endLogin?: (id: HostId) => void;
+  /** The host's runs, from its gateway's WatchRuns while the host is shown. Cancel reaps the stream. */
+  readonly runs: Pick<RunWatch, 'observe' | 'cancel'>;
+  readonly savedRuns?: RegistrySavedRuns;
+  /** Digests and the usage window, read through the gateway. */
+  readonly runReads?: RegistryRunReads;
+  readonly catalog?: RegistryRunCatalog;
+}
+
+/** How many times a summary is read again when its pages disagree on where the run stood. */
+const SUMMARY_READ_ATTEMPTS = 3;
+
+type SummaryReply = Extract<HelperMessage, {type: 'runs.summary'}>;
+
+const tokens = (tally: SummaryReply['tokens']): SummaryTokens => ({
+  input: tally.input,
+  cacheRead: tally.cache_read,
+  cacheWrite: tally.cache_write,
+  output: tally.output,
+  reasoning: tally.reasoning,
+});
+
+/**
+ * Every page of one run's summary joined, or null when the pages disagree on the sequence the run
+ * stood at (it wrote between two of them): the caller reads again.
+ */
+async function readSummaryPages(
+  connection: {
+    request(body: {type: 'runs.summary'} & Record<string, unknown>): Promise<SummaryReply>;
+  },
+  project: string,
+  runId: string,
+  withEnding: boolean,
+): Promise<RunSummary | null> {
+  const spans: unknown[] = [];
+  const replies: SummaryReply['replies'][number][] = [];
+  const usage: SummaryReply['usage'][number][] = [];
+  const records: UsageRecord[] = [];
+  const schemas = new Map<string, unknown>();
+  let first: SummaryReply | null = null;
+  let offset: number | null = 0;
+  while (offset !== null) {
+    const page: SummaryReply = await connection.request({
+      type: 'runs.summary',
+      project,
+      run_id: runId,
+      offset,
+      // A helper without `run_ending` is not asked: its summary has no gates or terminal event.
+      ...(withEnding ? {with_ending: true} : {}),
+    });
+    if (first !== null && page.through_sequence !== first.through_sequence) return null;
+    first ??= page;
+    spans.push(...page.spans);
+    replies.push(...page.replies);
+    usage.push(...page.usage);
+    records.push(...page.records);
+    for (const [key, schema] of Object.entries(page.schemas)) schemas.set(key, schema);
+    offset = page.next_offset ?? null;
+  }
+  if (first === null) return null;
+  return {
+    throughSequence: first.through_sequence,
+    eventCount: first.event_count,
+    journalBytes: first.journal_bytes,
+    trace: first.trace,
+    roundsFinished: first.rounds_finished,
+    overview: first.overview,
+    spans,
+    replies: replies.map(reply => ({
+      spanId: reply.span_id,
+      kind: reply.kind,
+      jsonSchema: schemas.get(reply.schema_id) ?? null,
+      value: reply.value,
+    })),
+    tokens: tokens(first.tokens),
+    usage: usage.map(entry => ({spanId: entry.span_id, tokens: tokens(entry.tally)})),
+    records,
+    inputGates: (first.input_gates ?? []).map(gate => ({
+      sequence: gate.sequence,
+      gate: gate.gate,
+      recipe: gate.recipe,
+      passed: gate.passed,
+      outputTail: gate.output_tail,
+    })),
+    terminal: first.terminal ?? null,
+  };
 }
 
 /** One checkout change, unique across renderer-document lifetimes. */
@@ -76,9 +201,24 @@ interface InspectionLease {
   readonly active: boolean;
 }
 
+/** How a pair reads, as the app's own type: only the fields the helper set. */
+function harnessDisplay(
+  display: NonNullable<HarnessesListReply['harnesses'][number]['display']>,
+): NonNullable<HarnessOffer['display']> {
+  return {
+    providerName: display.provider_name,
+    ...(display.model_name == null ? {} : {modelName: display.model_name}),
+    ...(display.family == null ? {} : {family: display.family}),
+    ...(display.tier == null ? {} : {tier: display.tier}),
+    ...(display.tier_name == null ? {} : {tierName: display.tier_name}),
+    ...(display.maker == null ? {} : {maker: display.maker}),
+    ...(display.generation == null ? {} : {generation: display.generation}),
+  };
+}
+
 export class Hosts {
   readonly #deps: HostsDeps;
-  /** Hosts whose registry the view hears, each with the lease that keeps its resources alive. */
+  /** Hosts whose runs the view hears, each with the stop that releases its stream. */
   readonly #watched = new Map<HostKey, WatchedHost>();
   /** Checkout validations that still own permission to persist, by renderer-document operation. */
   readonly #checkoutChanges = new Map<string, CheckoutChange>();
@@ -96,6 +236,8 @@ export class Hosts {
   #visible: {readonly owner: string; readonly host: HostKey} | null = null;
   /** Hosts mentioned by the bounded recent-run file. */
   #recent = new Set<HostKey>();
+  /** Hosts the user configured (`hosts.json`): watched even when no recent run names them. */
+  #configured = new Set<HostKey>();
   /** The one replacement currently allowed to install for each host. */
   readonly #watchIntents = new Map<HostKey, WatchIntent>();
   /** Advances before desired-set changes, fencing reads against the desired-host union. */
@@ -170,6 +312,16 @@ export class Hosts {
     await this.#reconcile(this.#changed());
   }
 
+  /**
+   * Reconcile the hosts of `hosts.json` with the current ones: every configured machine is watched,
+   * so its live and recent runs list on a profile with no recent file.
+   */
+  async configured(): Promise<void> {
+    const {settings} = await this.#deps.settings.hosts();
+    this.#configured = new Set(Object.keys(settings.hosts).map(key => hostKey(hostFromKey(key))));
+    await this.#reconcile(this.#changed());
+  }
+
   /** Release the visible intent owned by a renderer document that went away. */
   async retireOwner(owner: string): Promise<void> {
     if (this.#visible?.owner !== owner) return;
@@ -187,19 +339,17 @@ export class Hosts {
     if (this.#removing.has(host)) throw new Error(`${hostLabel(id)} is being removed`);
     const key = checkoutChangeKey(change);
     if (this.#checkoutChanges.has(key)) throw new Error('the checkout change is already active');
-    const operation = new CheckoutChange(host, this.#deps.manager.candidate(id, checkout));
+    const operation = new CheckoutChange(host);
     this.#checkoutChanges.set(key, operation);
     try {
-      const candidate = await operation.ready();
-      const root = candidate.checkoutRoot;
-      await operation.closeCandidate();
-      operation.assertCurrent();
+      const root = await this.#inspectForCheckout(id, checkout, change.sequence, operation);
       const outcome = await this.#deps.settings.updateHosts(
-        current => withHostSettings(current, id, {checkout}),
+        current => withHostSettings(current, id, {...settingsFor(current, id), checkout}),
         operation.isCurrent,
       );
       if (outcome === 'cancelled') operation.assertCurrent();
       operation.committed();
+      this.#deps.endLogin?.(id);
       const revision = this.#commitCheckout(hostKey(id), checkout);
       if (this.#desired().has(hostKey(id))) await this.#refresh(id, revision);
       return root ?? checkout;
@@ -208,21 +358,17 @@ export class Hosts {
         throw new Error('the checkout change was cancelled', {cause: error});
       throw error;
     } finally {
-      try {
-        await operation.closeCandidate();
-      } finally {
-        operation.settle();
-        if (this.#checkoutChanges.get(key) === operation) this.#checkoutChanges.delete(key);
-      }
+      operation.settle();
+      if (this.#checkoutChanges.get(key) === operation) this.#checkoutChanges.delete(key);
     }
   }
 
   /** Revoke one renderer checkout change and stop its candidate connection. */
-  async cancelCheckout(change: CheckoutChangeId): Promise<void> {
+  cancelCheckout(change: CheckoutChangeId): Promise<void> {
     const operation = this.#checkoutChanges.get(checkoutChangeKey(change));
-    if (operation === undefined) return;
+    if (operation === undefined) return Promise.resolve();
     operation.cancel();
-    await operation.closeCandidate();
+    return Promise.resolve();
   }
 
   /** Revoke and settle every checkout change owned by a renderer document that went away. */
@@ -231,15 +377,7 @@ export class Hosts {
       .filter(([key]) => key.startsWith(`${owner}\0`))
       .map(([, operation]) => operation);
     for (const operation of operations) operation.cancel();
-    const cleanup = await Promise.allSettled(
-      operations.map(operation => operation.closeCandidate()),
-    );
     await Promise.all(operations.map(operation => operation.settled));
-    const failures = cleanup.flatMap(result =>
-      result.status === 'rejected' ? [result.reason] : [],
-    );
-    if (failures.length > 0)
-      throw new AggregateError(failures, 'could not cancel checkout changes');
   }
 
   /** Remove `id` after revoking every older checkout save that could recreate it. */
@@ -247,22 +385,12 @@ export class Hosts {
     const key = hostKey(id);
     if (this.#removing.has(key)) throw new Error(`${hostLabel(id)} is already being removed`);
     this.#removing.add(key);
+    this.#deps.endLogin?.(id);
     try {
       const operations = [...this.#checkoutChanges.values()].filter(
         operation => operation.host === key && operation.cancel(),
       );
-      const cleanup = await Promise.allSettled(
-        operations.map(operation => operation.closeCandidate()),
-      );
       await Promise.all(operations.map(operation => operation.settled));
-      for (const failure of cleanup) {
-        if (failure.status === 'rejected')
-          this.#deps.log(
-            `could not close ${hostLabel(id)} checkout validation: ${
-              failure.reason instanceof Error ? failure.reason.message : String(failure.reason)
-            }`,
-          );
-      }
       let persistenceFailure: {readonly error: unknown} | null = null;
       try {
         await this.#deps.settings.updateHosts(current => withoutHost(current, id));
@@ -274,6 +402,7 @@ export class Hosts {
       }
       this.#checkoutRevisions.set(key, {removed: true});
       this.#watchIntents.delete(key);
+      this.#changed();
       await this.#repairDesired(key);
       if (persistenceFailure !== null) throw persistenceFailure.error;
     } finally {
@@ -284,23 +413,28 @@ export class Hosts {
   /** Sign in to `id` now, prompting when the host asks (the user's own action). */
   async signIn(id: HostId): Promise<void> {
     await this.#deps.manager.signIn(id);
+    this.#watched.get(hostKey(id))?.recheck();
   }
 
   /** The tasks `project` defines on `id`. */
   async tasks(id: HostId, project: unknown): Promise<string[]> {
     const path = validHostPath(project, 'the project directory');
-    await using lease = await this.connection(id);
     try {
-      const reply = await lease.connection.request({type: 'tasks.list', project: path});
-      return reply.tasks.tasks.map(task => task.name);
+      return await this.#catalog().tasks(id, path, new AbortController().signal);
     } catch (error) {
-      throw plain(error, `Could not read the tasks of ${path}`);
+      throw plain(error, 'Could not read the tasks of the project');
     }
   }
 
   /**
    * One page of run `runId`'s recorded events in `project` on `id` (`runs.read_events`), from
    * `from`; `unsupported` when the host's VibeSys does not serve history (`run_history`).
+   *
+   * With `kinds` the page holds only the events of that kind, whichever helper serves it: a helper
+   * with `run_trace_events` selects them from the journal's index and sends only those; an older
+   * one sends every event of the page and they are selected here. Either way the page's `next` and
+   * `complete` are the helper's, so the pages of a read join to the same events. The totals of a
+   * page that an older helper selects here are the journal's, not the selection's.
    */
   async readEvents(
     id: HostId,
@@ -308,13 +442,60 @@ export class Hosts {
     runId: string,
     from: number,
     max: number,
+    kinds?: RunEventKinds,
   ): Promise<RunHistoryPage> {
     await using lease = await this.connection(id);
     try {
+      // A helper without `run_history_pages` refuses more events per page than it served before
+      // the feature, and does not name the journal's totals.
+      await lease.connection.ready();
+      const pages = lease.connection.features?.includes('run_history_pages') === true;
+      const selects = lease.connection.features?.includes('run_trace_events') === true;
       const reply = await lease.connection.request({
         type: 'runs.read_events',
         project,
         run_id: runId,
+        from_sequence: from,
+        max: pages ? max : Math.min(max, LEGACY_HISTORY_PAGE_EVENTS),
+        ...(pages ? {with_totals: true} : {}),
+        ...(kinds !== undefined && selects ? {kinds} : {}),
+      });
+      return {
+        kind: 'page',
+        events: kinds !== undefined && !selects ? ofKinds(reply.events, kinds) : reply.events,
+        next: reply.next_sequence,
+        complete: reply.complete,
+        ...(typeof reply.total_events === 'number' ? {totalEvents: reply.total_events} : {}),
+        ...(typeof reply.total_bytes === 'number' ? {totalBytes: reply.total_bytes} : {}),
+      };
+    } catch (error) {
+      if (isHostUnsupported(error)) {
+        return {kind: 'unsupported'};
+      }
+      throw plain(error, `Could not read the history of run ${runId}`);
+    }
+  }
+
+  /** One bounded page of an opened span's recorded events; older helpers may not serve it. */
+  async readSpan(
+    id: HostId,
+    project: string,
+    runId: string,
+    spanId: string,
+    from: number,
+    max: number,
+  ): Promise<RunSpanPage> {
+    await using lease = await this.connection(id);
+    try {
+      await lease.connection.ready();
+      if (lease.connection.features?.includes('run_span_events') !== true) {
+        return {kind: 'unsupported'};
+      }
+      const reply = await lease.connection.request({
+        type: 'runs.events_for_span',
+        project,
+        run_id: runId,
+        span_id: spanId,
         from_sequence: from,
         max,
       });
@@ -323,30 +504,114 @@ export class Hosts {
         events: reply.events,
         next: reply.next_sequence,
         complete: reply.complete,
+        total: reply.total,
       };
     } catch (error) {
-      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+      if (isHostUnsupported(error)) {
         return {kind: 'unsupported'};
       }
-      throw plain(error, `Could not read the history of run ${runId}`);
+      throw plain(error, `Could not read span ${spanId} of run ${runId}`);
     }
+  }
+
+  /**
+   * Run `runId`'s summary in `project` on `id` (`runs.summary`): what the run level shows, without
+   * the history it comes from, its pages joined. A run still writing can move between pages; every
+   * page names the sequence it was read at, and a read whose pages disagree starts again, a few
+   * times before it fails. `unsupported` when the host's VibeSys does not serve summaries, `gone` when it holds no
+   * record of the run.
+   */
+  async readSummary(id: HostId, project: string, runId: string): Promise<RunSummaryResult> {
+    await using lease = await this.connection(id);
+    try {
+      // A helper without the features `runs.summary` is gated by (`run_summary`, `run_trace`) is
+      // refused by the channel before it is asked: `unsupported` below.
+      await lease.connection.ready();
+      const withEnding = lease.connection.features?.includes('run_ending') === true;
+      for (let attempt = 0; attempt < SUMMARY_READ_ATTEMPTS; attempt += 1) {
+        const summary = await readSummaryPages(lease.connection, project, runId, withEnding);
+        if (summary !== null) return {kind: 'summary', summary};
+      }
+      throw new Error('the run kept changing while its summary was read');
+    } catch (error) {
+      if (isHostUnsupported(error)) {
+        return {kind: 'unsupported'};
+      }
+      if (error instanceof HelperRequestError && error.code === 'unknown_run') {
+        return {kind: 'gone'};
+      }
+      throw plain(error, `Could not read the summary of run ${runId}`);
+    }
+  }
+
+  /**
+   * What each of `runIds` in `project` on `id` says at a glance, with the tiles' data, as the host's
+   * registered read states it; `unsupported` when the host's VibeSys does not offer the read.
+   */
+  async runDigests(
+    id: HostId,
+    project: string,
+    runIds: readonly string[],
+  ): Promise<RunDigestsReply> {
+    try {
+      return await this.#runReads().digests(id, project, runIds, new AbortController().signal);
+    } catch (error) {
+      if (isHostUnsupported(error)) return {kind: 'unsupported'};
+      throw plain(error, 'Could not read the runs of the project');
+    }
+  }
+
+  /**
+   * What `runIds` of `project` on `id` spent in `[since, until)`, both in milliseconds;
+   * `unsupported` when the host's VibeSys does not offer it. `until` is "now" for the rate: the
+   * host reads no clock. A window or list the host would refuse (see `usageWindowRefusal`) is a
+   * mistake of the caller and throws before any request.
+   */
+  async usageWindow(
+    id: HostId,
+    project: string,
+    runIds: readonly string[],
+    since: number,
+    until: number,
+  ): Promise<UsageWindowOutcome> {
+    const refusal = usageWindowRefusal(runIds, since, until);
+    if (refusal !== null) throw new Error(refusal);
+    try {
+      return await this.#runReads().usageWindow(
+        id,
+        project,
+        runIds,
+        since,
+        until,
+        new AbortController().signal,
+      );
+    } catch (error) {
+      if (isHostUnsupported(error)) return {kind: 'unsupported'};
+      throw plain(error, 'Could not read what the runs of the project spent');
+    }
+  }
+
+  /** Every run of `project` on `id`, newest first (`runs.list`); a digest is asked for separately. */
+  async projectRuns(id: HostId, project: string): Promise<readonly ListedRun[]> {
+    if (!this.#deps.savedRuns) throw new Error('saved-run registry is missing');
+    return this.#deps.savedRuns.list(id, project, new AbortController().signal);
   }
 
   /** The vetted provider and model pairs runs on `id` may start with; `unsupported` on an older helper. */
   async harnesses(id: HostId): Promise<HarnessListing> {
-    await using lease = await this.connection(id);
     try {
-      const reply = await lease.connection.request({type: 'harnesses.list'});
+      const harnesses = await this.#catalog().harnesses(id, new AbortController().signal);
       return {
         kind: 'listed',
-        harnesses: reply.harnesses.map(({provider, model, default: isDefault}) => ({
+        harnesses: harnesses.map(({provider, model, default: isDefault, display}) => ({
           provider,
           model,
           default: isDefault,
+          ...(display == null ? {} : {display: harnessDisplay(display)}),
         })),
       };
     } catch (error) {
-      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+      if (isHostUnsupported(error)) {
         return {kind: 'unsupported'};
       }
       throw plain(error, `Could not read the vetted models of ${hostLabel(id)}`);
@@ -355,27 +620,18 @@ export class Hosts {
 
   /** The directories in `directory` (a path ending in `/`, or `~/`) on `id`. */
   async complete(id: HostId, directory: string): Promise<PathCompletion> {
-    await using lease = await this.connection(id);
-    let reply: PathsCompleteReply;
     try {
-      reply = await lease.connection.request({type: 'paths.complete', prefix: directory});
+      const listed = await this.#setup().completePaths(id, directory, new AbortController().signal);
+      return {
+        kind: 'listed',
+        directory: listed.directory,
+        entries: listed.entries,
+        truncated: listed.truncated,
+      };
     } catch (error) {
-      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
-        return {kind: 'unsupported'};
-      }
-      throw plain(error, `Could not list ${directory}`);
+      if (isHostUnsupported(error)) return {kind: 'unsupported'};
+      throw error;
     }
-    return {
-      kind: 'listed',
-      directory: reply.directory,
-      entries: reply.entries.map(entry => ({
-        name: entry.name,
-        path: entry.path,
-        checkout: entry.vibesys_checkout,
-        project: entry.vibesys_project,
-      })),
-      truncated: reply.truncated,
-    };
   }
 
   /** One coherent observation, persisting its locator only while this renderer intent is current. */
@@ -383,10 +639,10 @@ export class Hosts {
     id: HostId,
     instanceId: string,
     change: InspectionChangeId,
-  ): Promise<WelcomeInspection> {
+  ): Promise<InstanceInspection> {
     const current = this.#claimInspection(change);
     await using lease = await this.connection(id);
-    let inspection: WelcomeInspection;
+    let inspection: InstanceInspection;
     try {
       const reply = await lease.connection.request({
         type: 'instances.inspect',
@@ -394,7 +650,7 @@ export class Hosts {
       });
       inspection = inspectionReply(instanceId, reply.inspection);
     } catch (error) {
-      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+      if (isHostUnsupported(error)) {
         throw new Error(
           `Run inspection is unavailable on ${hostLabel(id)}. Update its VibeSys checkout.`,
         );
@@ -515,39 +771,60 @@ export class Hosts {
     };
   }
 
-  #install(key: HostKey, checkout: string, lease: ConnectionLease): void {
-    const connection = lease.connection;
-    // A host returning to the set must overwrite any renderer cache before its old listing could
-    // be drawn. A fresh listing, if already known, follows synchronously. `acquire` may hand back a
-    // connection another caller (`tasks`, `complete`, `inspect`) already settled, so the synthetic
-    // status mirrors its real current phase, exactly as the `onPhase` callback below does for every
-    // later change; a reused connection already ready skips it and waits for its real listing.
-    if (connection.phase.kind !== 'ready') {
-      this.#deps.push({
-        kind: 'unavailable',
-        host: key,
-        connection: connectionStatus(connection.phase),
-      });
-    }
+  /**
+   * Show `key`'s runs as its gateway's WatchRuns states them. The listing and the connection status
+   * are both that stream's: the host's helper is not asked, so a helper that cannot start does not
+   * hide a gateway that can list.
+   */
+  #install(key: HostKey, checkout: string): void {
     const push = this.#deps.push;
-    const stopListing = connection.watchInstances(listing => push(hostListing(key, listing)));
-    const stopPhase = connection.onPhase(phase => {
-      if (phase.kind !== 'ready') {
-        push({kind: 'unavailable', host: key, connection: connectionStatus(phase)});
+    let stopped = false;
+    const gate = new HostVersionGate({
+      host: key,
+      check: signal => this.#checkVersion(key, checkout, signal),
+      push,
+      log: reason =>
+        this.#deps.log(`could not check the VibeSys of ${hostLabel(hostFromKey(key))}: ${reason}`),
+    });
+    let live = false;
+    const stopRuns = this.#deps.runs.observe(hostFromKey(key), state => {
+      if (stopped) return;
+      const listing = hostListingFromRuns(key, state);
+      if (listing.kind === 'listed') {
+        gate.listing(listing);
+        if (!live) gate.recheck();
+      } else {
+        gate.invalidate();
+        push(listing);
       }
+      live = listing.kind === 'listed';
     });
     this.#watched.set(key, {
       checkout,
-      lease,
+      recheck: () => {
+        if (live) gate.recheck();
+      },
       stop: () => {
-        stopListing();
-        stopPhase();
+        stopped = true;
+        gate.invalidate();
+        stopRuns();
+        this.#deps.runs.cancel(hostFromKey(key));
       },
     });
   }
 
+  /** Whether a host's checkout can serve this app. */
+  async #checkVersion(key: HostKey, checkout: string, signal: AbortSignal): Promise<HostVersion> {
+    const id = hostFromKey(key);
+    return checkHostVersion(this.#setup(), id, checkout, signal);
+  }
+
   #desired(): Set<HostKey> {
     const desired = new Set(this.#recent);
+    for (const key of this.#configured) {
+      // A removal revokes the host before any stale read of `hosts.json` could name it again.
+      if (!('removed' in (this.#checkoutRevisions.get(key) ?? {}))) desired.add(key);
+    }
     if (this.#visible !== null) desired.add(this.#visible.host);
     return desired;
   }
@@ -582,19 +859,6 @@ export class Hosts {
     } catch (error) {
       this.#logRetirementFailure(key, error);
     }
-    this.#retireLease(key, watched.lease);
-  }
-
-  /** Observe cleanup without making a desired-set transition wait for connection resource I/O. */
-  #retireLease(key: HostKey, lease: ConnectionLease): void {
-    let retirement: PromiseLike<void>;
-    try {
-      retirement = lease[Symbol.asyncDispose]();
-    } catch (error) {
-      this.#logRetirementFailure(key, error);
-      return;
-    }
-    void Promise.resolve(retirement).catch(error => this.#logRetirementFailure(key, error));
   }
 
   #logRetirementFailure(key: HostKey, error: unknown): void {
@@ -661,13 +925,8 @@ export class Hosts {
     // A matching replacement is already converging this watcher. Reconciliation must not wait on
     // its retirement barrier: desired-set updates remain independent of per-host replacement I/O.
     if (pending?.checkout === checkout) return;
-    if (
-      pending === undefined &&
-      watched?.checkout === checkout &&
-      this.#deps.manager.existing(key) === watched.lease.connection
-    )
-      return;
-    await this.#replaceWatched(id, checkout, this.#claimWatch(key, checkout));
+    if (pending === undefined && watched?.checkout === checkout) return;
+    this.#replaceWatched(id, checkout, this.#claimWatch(key, checkout));
   }
 
   /** Repair one desired host without coupling its caller to unrelated connection I/O. */
@@ -706,7 +965,7 @@ export class Hosts {
   async #refresh(id: HostId, revision: WatchIntent): Promise<void> {
     const key = hostKey(id);
     this.#watchIntents.set(key, revision);
-    await this.#replaceWatched(id, revision.checkout, revision);
+    this.#replaceWatched(id, revision.checkout, revision);
     // An older desired-set pass may be waiting on this host before reaching later hosts. Start a
     // current pass without invalidating the older one; per-host intents coalesce their overlap.
     await this.#reconcile(this.#generation);
@@ -718,39 +977,59 @@ export class Hosts {
     return intent;
   }
 
-  async #replaceWatched(id: HostId, checkout: string, intent: WatchIntent): Promise<boolean> {
+  /** Watch `id` from `checkout` instead of whatever it was watched from, if `intent` still holds. */
+  #replaceWatched(id: HostId, checkout: string, intent: WatchIntent): void {
     const key = hostKey(id);
-    let lease: ConnectionLease;
     try {
-      lease = await this.#deps.manager.acquire(id, checkout);
-    } catch (error) {
-      if (this.#watchIntents.get(key) === intent) this.#watchIntents.delete(key);
-      throw error;
-    }
-    if (this.#watchIntents.get(key) !== intent || !this.#desired().has(key)) {
-      await lease[Symbol.asyncDispose]();
-      return false;
-    }
-    const previous = this.#watched.get(key);
-    previous?.stop();
-    this.#watched.delete(key);
-    try {
-      this.#install(key, checkout, lease);
-    } catch (error) {
-      try {
-        await lease[Symbol.asyncDispose]();
-        await previous?.lease[Symbol.asyncDispose]();
-      } finally {
-        if (this.#watchIntents.get(key) === intent) this.#watchIntents.delete(key);
-      }
-      throw error;
-    }
-    try {
-      await previous?.lease[Symbol.asyncDispose]();
+      if (this.#watchIntents.get(key) !== intent || !this.#desired().has(key)) return;
+      const previous = this.#watched.get(key);
+      previous?.stop();
+      this.#watched.delete(key);
+      this.#install(key, checkout);
     } finally {
       if (this.#watchIntents.get(key) === intent) this.#watchIntents.delete(key);
     }
-    return true;
+  }
+
+  #runReads(): RegistryRunReads {
+    const reads = this.#deps.runReads;
+    if (reads === undefined) throw new Error('run reads registry is missing');
+    return reads;
+  }
+
+  #catalog(): RegistryRunCatalog {
+    const catalog = this.#deps.catalog;
+    if (catalog === undefined) throw new Error('host catalog registry is missing');
+    return catalog;
+  }
+
+  /** The setup port. A missing one is a wiring error, not a reason to use the helper. */
+  #setup(): RegistrySetup {
+    const setup = this.#deps.setup;
+    if (setup === undefined) {
+      throw new Error('the registry setup is missing');
+    }
+    return setup;
+  }
+
+  async #inspectForCheckout(
+    id: HostId,
+    checkout: string,
+    sequence: number,
+    operation: CheckoutChange,
+  ): Promise<string> {
+    if (sequence <= 0) throw new Error('stale selection');
+    const inspected = await this.#setup().inspectCandidate(
+      id,
+      checkout,
+      BigInt(sequence),
+      operation.signal,
+    );
+    operation.assertCurrent();
+    if (inspected.state === 'not_found') throw new Error('the checkout was not found');
+    if (inspected.state === 'too_old') throw new Error('the checkout is too old');
+    if (!inspected.compatible) throw new Error('the checkout is incompatible');
+    return inspected.root;
   }
 }
 
@@ -825,7 +1104,8 @@ class InspectorLogs {
 interface WatchedHost {
   /** The configured checkout this watch represents, not the helper's normalized physical root. */
   readonly checkout: string;
-  readonly lease: ConnectionLease;
+  /** Ask the host's checkout again whether it can serve this app (the user's retry). */
+  readonly recheck: () => void;
   readonly stop: () => void;
 }
 
@@ -841,14 +1121,13 @@ type CheckoutRevision = WatchIntent | {readonly removed: true};
 class CheckoutChange {
   readonly host: HostKey;
   readonly settled: Promise<void>;
-  readonly #candidate: Promise<HostConnection>;
   #resolveSettled: () => void = () => undefined;
   #state: 'current' | 'cancelled' | 'committed' = 'current';
-  #closing: Promise<void> | null = null;
 
-  constructor(host: HostKey, candidate: Promise<HostConnection>) {
+  readonly #abort = new AbortController();
+
+  constructor(host: HostKey) {
     this.host = host;
-    this.#candidate = candidate;
     this.settled = new Promise(resolve => {
       this.#resolveSettled = resolve;
     });
@@ -856,9 +1135,14 @@ class CheckoutChange {
 
   readonly isCurrent = (): boolean => this.#state === 'current';
 
+  get signal(): AbortSignal {
+    return this.#abort.signal;
+  }
+
   cancel(): boolean {
     if (this.#state !== 'current') return false;
     this.#state = 'cancelled';
+    this.#abort.abort();
     return true;
   }
 
@@ -876,24 +1160,6 @@ class CheckoutChange {
 
   settle(): void {
     this.#resolveSettled();
-  }
-
-  async ready(): Promise<HostConnection> {
-    const candidate = await this.#candidate;
-    this.assertCurrent();
-    await candidate.ready();
-    this.assertCurrent();
-    return candidate;
-  }
-
-  closeCandidate(): Promise<void> {
-    // Acquisition itself may reject when the manager is closing. Cleanup must not replace the
-    // primary error from `ready`, but a candidate that was built always remains this operation's.
-    this.#closing ??= this.#candidate.then(
-      candidate => candidate[Symbol.asyncDispose](),
-      () => undefined,
-    );
-    return this.#closing;
   }
 }
 

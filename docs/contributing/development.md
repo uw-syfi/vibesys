@@ -2,7 +2,7 @@
 
 This page is the starting point for contributors extending VibeSys. It links
 to the focused guides for framework code, domains, skills, profilers, input
-bundles, and the TUI.
+bundles, and the desktop app.
 
 ## Before you change code
 
@@ -24,9 +24,7 @@ src/server/              Frontend-serving runtime and protocol
 src/entrypoints/         Process composition and command entrypoints
 clients/libs/contracts/      TypeScript server protocol types and validator
 clients/libs/transport/      Runtime-neutral transport and the WebSocket adapter
-clients/libs/transport-node/ Node transport: the Unix-socket client
 clients/libs/run-state/      Pure backend-event projection (the run fold)
-clients/tui/                 TypeScript terminal UI and launcher
 libs/                    Reusable standalone libraries
 examples/                Candidate repositories, tasks, and input bundles
 resources/evaluators/    Reusable versioned evaluator packages
@@ -85,19 +83,7 @@ uv run vibesys validate examples/data-structures/repositories/queue-rs --task sp
 uv run pytest
 ```
 
-To use the interactive TUI from a checkout, install Node.js 20+, Bun, and pnpm
-11 (or enable Corepack). The launcher installs frontend dependencies and builds
-the client when needed.
-
-For a headless installation directly from GitHub without a checkout:
-
-```bash
-python -m pip install "git+https://github.com/uw-syfi/vibesys.git"
-```
-
-GitHub source installs skip optional submodules and do not build the native TUI.
-Pass `--headless` to suppress the fallback notice. Use a supported PyPI wheel
-when you need the bundled TUI.
+For desktop development, see [Desktop app development](desktop-development.md).
 
 ### Tests and submodules
 
@@ -161,6 +147,39 @@ tokens, cost) to `smoke-summary.txt` under a fresh `vibesys-smoke-*` directory i
 of both scenarios takes about 5 minutes and about $0.60 of Haiku tokens. It is
 opt-in (`VIBESYS_E2E_AGENTS=1`) and not in PR CI, because real agents are
 nondeterministic.
+
+### Agent-less runs
+
+An agent-less run drives the real backend (workspaces, builds, trusted evaluations, run state, every
+event a frontend renders) with agents that are code, so it needs no model and costs no tokens. Use it
+to exercise the desktop and web apps against live data, and to check a backend change end to end,
+before spending a model on a real run. It supports the `dynamic` search only.
+
+```bash
+vibesys example new data-structures/repositories/queue-rs ~/queue-run
+cd ~/queue-run
+vibesys --task mpmc --outer-loop dynamic --agent-backend scripted --max-rounds 5 --max-in-flight 2
+```
+
+In the desktop app's New run form, open More options on the Review page and enter `--agent-backend scripted --max-rounds 5`
+(any model chosen above is ignored). `[agent].scripted_seed = N` in `agent.toml` sets the seed
+(default `0`): the same seed over the same project plans, edits and judges the same way, in any order
+and across a resume, because each choice is a function of the seed and the hypothesis id alone.
+
+The scripted planner schedules up to three ideas per turn, some built on an earlier candidate. Each idea
+names a recipe, a real edit of `src/lib.rs` in the queue example: ones that speed the queue up, a neutral
+one, one that slows it down, one that does not build and one that fails the trusted check. On top of that,
+a share of implementer turns fail the way real ones do (gives up, nominates nothing, replies against the
+schema, loses the turn, reports blocked) and a share of judged candidates are rejected. Five rounds take
+a few minutes: the candidate is the cheap CPU queue, and each measurement runs about half a minute.
+The decisions are pure and live in `src/vibesys/orchestration/dynamic/scripted/`; `src/launch/scripted_agents.py` reads and edits the workspace; the client is
+`vs_agent.api.ScriptedAgentClient`, the one fake agent client configured for the run (the `stub` backend
+only smoke-tests the interface and measures nothing).
+
+Tests: `tests/vibesys/orchestration/dynamic/test_scripted_agents.py` checks the replies against the real
+reply models without a process. `tests/e2e/test_scripted_run_e2e.py` is the real-tier check: it runs the
+queue example through the production launcher on the executing Fake Slurm cluster (needs `cargo` and
+`go`, skipped without them).
 
 ### Real-cluster tier
 
@@ -249,8 +268,7 @@ What it does not cover: GPU devices and drivers, profiler captures (only the ser
 starts), the accelerator-attached editor of the plain Docker environment on a GPU
 host, and the SkyPilot and Modal editors.
 
-The TypeScript client has its own workflow; see
-[`clients/tui/README.md`](https://github.com/uw-syfi/vibesys/blob/main/clients/tui/README.md). The short version is:
+The TypeScript client has its own workflow:
 
 ```bash
 cd clients
@@ -274,12 +292,9 @@ removes it.
 
 When Python protocol models change, regenerate the files under
 `clients/libs/contracts/src/generated/` and review the diff.
-See the [TUI architecture guide](tui-architecture.md) for package ownership and dependency rules.
-TUI-specific contributor docs are indexed in [`tui/README.md`](tui/README.md).
 
-The [web UI development guide](web-development.md) covers replay mode, live
-WebSocket smoke runs, detached gateway lifecycle, and SSH access from a local
-laptop to a remote VibeSys host.
+The [desktop development guide](desktop-development.md) covers local and SSH
+connections, the shell, and the Electron app.
 
 ## Extend VibeSys
 
@@ -324,25 +339,85 @@ command. The wrapper runs the repository's Go tool, so install Go 1.25 first:
 
 ```bash
 ./support/repoctl/repoctl test
+./support/repoctl/repoctl test --checks-only   # quality groups and always-on scripts
 ```
 
-This does not run every CI check. Browser end-to-end tests (`tui_e2e`) are
-CI-only by default: Playwright needs Chromium and its system libraries as well
-as the client and Python environments, so making the normal local command
-acquire or require them would make it unexpectedly heavyweight. Run that group
-explicitly when browser coverage is needed. Each Playwright run asks the OS for
-a free port for its own server, so parallel runs on one machine do not collide.
+`repoctl test` runs the groups whose `trigger_job` the change selects, both
+the test groups and the quality groups (`python_quality`, `python_guards`,
+`python_types`, `clients_quality`, `clients_build`), plus the scripts the
+changes job and the doc-checks job run on every pull request. `--checks-only`
+keeps the quality groups and those scripts and leaves the test groups.
+`--dry-run` lists either selection.
+
+This does not run every CI check. A group that cannot run locally sets
+`local_skip` and `--dry-run` prints the reason. Electron end-to-end tests
+(`clients_e2e`) need a display, Chromium, and its system libraries as well as
+the client and Python environments. The real-system tiers need Docker. Run
+`clients_e2e` explicitly when desktop coverage is needed. Each Playwright run
+asks the OS for a free port for its own server, so parallel runs on one machine
+do not collide. CI splits the group across runners with `VIBESYS_E2E_SHARD=i/N`
+(for example `2/5`), which each app's Playwright config reads; leave it unset
+to run every spec.
 
 ```bash
 uv sync --dev
 pnpm --dir clients install --frozen-lockfile
-(cd clients && pnpm --filter @vibesys/app-web exec playwright install --with-deps chromium)
-./support/repoctl/repoctl run-checks --group tui_e2e
+(cd clients && pnpm --filter @vibesys/app-desktop-main exec playwright install --with-deps chromium)
+./support/repoctl/repoctl run-checks --group clients_e2e
 ```
 
-The CI-only decision is specific to `tui_e2e`. It does not change the
-selection policy for the other check groups without local-selection keys; each
-has its own prerequisites and needs its own policy decision.
+`clients_e2e` and the real-tier groups are the `local_skip` entries. Other
+groups without `include_in_test` or `include_in_checks` are the CI form of a
+suite the local command already runs, or they need artifacts only CI has.
+
+### Client checks before a push
+
+A change under `clients/` fails CI on checks that a package's own tests do not run: biome's
+format check, knip, the TypeScript architecture checks, the frozen-UI check, and the gallery's
+screenshots. One command runs them, as the same repoctl check groups CI runs:
+
+```bash
+./scripts/check_clients.sh            # clients_quality, clients_tests, ui_gallery_linux
+./scripts/check_clients.sh --dry-run  # print the commands
+```
+
+The client tests need the Bun version pinned in `packaging/fetch_bun.py` (`BUN_VERSION`), the
+one CI installs. `clients/tools/scripts/run_bun_tests.mjs` fails at once, naming the pin and
+`packaging/fetch_bun.py`, when the Bun on `PATH` differs, because another version resolves
+imports differently (Bun 1.3.9 cannot find `./welcome.cjs` from its `welcome.cts` source).
+
+`ui_gallery_linux` compares the gallery's screenshots in the Linux image CI uses and checks
+that two baseline updates write identical images, so it needs Docker. The script leaves out the
+CI groups that need a display or build the client (`clients_build`, `clients_e2e`), each named
+with its reason in the script.
+`tests/quality/test_check_clients_matches_ci.py` fails when CI gains a client group the script
+neither runs nor lists, so the two cannot drift.
+
+To run it before every push that changes `clients/`, install the opt-in hook once per clone:
+
+```bash
+./scripts/install_pre_push_hook.sh            # install
+./scripts/install_pre_push_hook.sh --remove   # remove
+```
+
+Nothing installs the hook for you. Pushing with `--no-verify` skips it for one push. The hook
+runs the private-terms check below on every push, not only pushes that change `clients/`.
+Re-run the installer after pulling a change to the hook.
+
+### Private terms
+
+Server names, internal hostnames and personal paths do not belong in the repository; use generic
+placeholders such as `host-a` and `/data/vibesys`. `./scripts/check_private_terms.sh` fails when
+tracked files, staged changes, or commits and messages not yet on `origin/main` match a term from a
+private list. The list is a file of newline-separated, case-insensitive regular expressions (blank
+lines and `#` comments are ignored), read from `$VIBESYS_PRIVATE_TERMS` or, by default,
+`~/.config/vibesys/private-terms.txt`. Keep it outside every clone and never commit it. A missing
+list makes the check print one line and pass, so it costs nothing on a machine without one.
+
+The report lists `file:line` and never repeats the matched text, so its output is safe to paste.
+The check cannot run in CI, and no CI job checks for these terms: the terms are private by design,
+so a list CI could read would itself be the leak. It runs on your machine, from the hook above.
+`tests/quality/test_check_private_terms.py` covers the check with made-up terms.
 
 Use `./support/repoctl/repoctl plan` to inspect the selection without running checks.
 The workflow runs named check groups from `.repoctl/checks.toml`. Run

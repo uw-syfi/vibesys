@@ -9,15 +9,17 @@ context space and checked for the facts of its context.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import (
     CONTEXTS,
     OBJECTIVE,
     PLANNER_PROMPTS,
+    RENDERER,
     ROOT,
     TEMPLATE_FILES,
     render,
@@ -35,9 +37,19 @@ from vibesys.orchestration.dynamic.search.api import (
     PromptTemplate,
     ReviewPrompt,
 )
-from vibesys.prompts import CORE_PROTOCOL_DIR, CoreProtocolTemplate
-from vs_core.api import WaitEnd
+from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR, CoreProtocolTemplate, render_template
+from vibesys.run.environment import agent_environment_notes
+from vs_core.api import (
+    MIN_SAMPLES_WITHOUT_FLOOR,
+    AttemptId,
+    Comparison,
+    ComparisonVerdict,
+    RevisionRef,
+    Scope,
+    WaitEnd,
+)
 from vs_core.api.search import ReplyCorrection, ResumeFacts, WaitUnrecorded
+from vs_runtime.api.infrastructure import AgentPaths, RunEnvironmentView
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -83,6 +95,23 @@ def test_the_evaluation_tool_is_described_exactly_when_it_is_offered(
     assert ("validate_evaluation_wait" in text) is offered
 
 
+@pytest.mark.regression
+def test_the_evaluation_tool_says_when_the_base_is_measured_and_what_is_ranked() -> None:
+    """The base is measured again on staleness and close calls, not once for the run.
+
+    Before, the agent was told the base was measured "once for the run", while a close call
+    without a declared noise measures it up to three times per staleness window. The tool's
+    comparison also describes the runs held now, while a candidate is ranked by the value
+    stored at its official measurement; the agent is told so.
+    """
+    text = RENDERER.render_template("agent_evaluation.j2", agent_evaluation=True)
+    prose = " ".join(text.split())
+
+    assert "once for the run" not in prose
+    assert "again when the base's runs go stale or a comparison is too close to call" in prose
+    assert "the value stored then is the one it is ranked by" in prose
+
+
 # -- the planner ------------------------------------------------------------------------------
 
 
@@ -107,6 +136,10 @@ def test_the_planner_prompt_states_the_run_it_plans_for(context: PlannerPrompt) 
     for row in context.baseline:
         assert row.name in text
     assert ("Input not measurable" in text) is (context.input_failure is not None)
+    if context.input_failure is not None:
+        assert (f"stage `{context.input_failure.stage}`" in text) is bool(
+            context.input_failure.stage
+        )
     assert ("choose a profile workstream" in text) is context.profiling
     assert ("none yet" in text) is not bool(context.history)
     assert "Correction required" not in text
@@ -190,6 +223,8 @@ def test_the_implementer_is_given_its_hypothesis_and_what_the_last_turn_left(
     assert ("trusted measurement failed" in text) is (context.input_failure is not None)
     if context.input_failure is not None and context.input_failure.output:
         assert context.input_failure.output in text
+    if context.input_failure is not None and context.input_failure.stage:
+        assert f"stage `{context.input_failure.stage}`" in text
 
 
 @settings(max_examples=examples(pr=8, nightly=100))
@@ -361,6 +396,102 @@ def test_a_resumed_turn_says_whether_its_wait_timed_out_and_what_was_retained(
         assert context.retained.revision_id.root in text
 
 
+_COMPARISONS = st.builds(
+    Comparison,
+    scope=st.just(Scope(owner=AttemptId(root="attempt"), generation=0)),
+    metric=st.sampled_from(["throughput", "latency_ms"]),
+    unit=st.sampled_from([None, "tokens/s", "ms"]),
+    direction=st.sampled_from(["max", "min"]),
+    candidate=st.text("0123456789abcdef", min_size=7, max_size=12).map(RevisionRef.of_git_commit),
+    candidate_input=st.sampled_from(["sha256:one", "sha256:two", "sha256:three"]),
+    base=st.text("0123456789abcdef", min_size=7, max_size=12).map(RevisionRef.of_git_commit),
+    base_input=st.just("sha256:base"),
+    candidate_value=st.floats(0.5, 1e4, allow_nan=False).map(lambda x: round(x, 3)),
+    base_value=st.floats(0.5, 1e4, allow_nan=False).map(lambda x: round(x, 3)),
+    ratio=st.floats(0.1, 10.0, allow_nan=False).map(lambda x: round(x, 4)),
+    noise=st.floats(0.0, 1.0, allow_nan=False).map(lambda x: round(x, 4)),
+    verdict=st.sampled_from(ComparisonVerdict),
+    candidate_samples=st.integers(1, 6),
+    base_samples=st.integers(1, 6),
+)
+
+
+_PINNED_COMPARISON = Comparison(
+    scope=Scope(owner=AttemptId(root="attempt"), generation=0),
+    metric="throughput",
+    unit="tokens/s",
+    direction="max",
+    candidate=RevisionRef.of_git_commit("abcdef0"),
+    candidate_input="sha256:candidate",
+    base=RevisionRef.of_git_commit("0fedcba"),
+    base_input="sha256:base",
+    candidate_value=100.3,
+    base_value=100.0,
+    ratio=1.003,
+    noise=0.0,
+    verdict=ComparisonVerdict.WITHIN_NOISE,
+    candidate_samples=1,
+    base_samples=1,
+)
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(
+    context=CONTEXTS[CoreProtocolTemplate.RESUME],
+    comparisons=st.lists(_COMPARISONS, max_size=3, unique_by=lambda c: c.candidate_input),
+    settling=st.sets(st.sampled_from(["sha256:one", "sha256:two", "sha256:three"])),
+    noise_declared=st.booleans(),
+)
+@example(
+    context=ResumeFacts(agent="implementer", retained=None, ended_by=None),
+    comparisons=[_PINNED_COMPARISON],
+    settling=set(),
+    noise_declared=False,
+)
+@example(
+    context=ResumeFacts(agent="implementer", retained=None, ended_by=None),
+    comparisons=[_PINNED_COMPARISON],
+    settling={_PINNED_COMPARISON.candidate_input},
+    noise_declared=True,
+)
+def test_a_resumed_turn_states_each_comparison_the_framework_made_and_none_it_did_not(
+    context: BaseModel, comparisons: list[Comparison], settling: set[str], *, noise_declared: bool
+) -> None:
+    """Each comparison, and the rule its verdict was reached by, as core applies it.
+
+    Before, the resume said a verdict meant "two noises" for every task, although a task that
+    declares no per-run noise gets no verdict before ``MIN_SAMPLES_WITHOUT_FLOOR`` runs a side
+    and is then judged by Welch's t test. The rule now comes from the run's comparison policy.
+    A comparison core still runs is marked provisional, and the agent is told a repeat call
+    reads the comparison as held then (before, it was told only not to repeat the call, so it
+    never learned where a provisional comparison ended).
+    """
+    assert isinstance(context, ResumeFacts)
+    pending = tuple(c.candidate_input for c in comparisons if c.candidate_input in settling)
+    facts = ResumeFacts.model_validate(
+        context.model_dump() | {"comparisons": tuple(comparisons), "settling": pending}
+    )
+    text = render(CoreProtocolTemplate.RESUME, facts, noise_declared=noise_declared)
+
+    assert ("compared each measured candidate with its base" in text) is bool(comparisons)
+    prose = " ".join(text.split())
+    if comparisons:
+        assert ("exceeds 2 noises" in prose) is noise_declared
+        assert (f"at least {MIN_SAMPLES_WITHOUT_FLOOR} runs" in prose) is not noise_declared
+        assert "two noises" not in prose
+        assert "the value stored then is the one it is ranked by" in prose
+        assert "returns the evaluation already made with its comparison as held now" in prose
+        assert "Do not duplicate" not in prose
+    assert prose.count("(provisional:") == len(pending)
+    for item in comparisons:
+        assert f"**{item.verdict.value.replace('_', ' ')}**" in text
+        assert item.candidate.revision_id.root[:7] in text
+        assert item.base.revision_id.root[:7] in text
+        assert f"{item.ratio:.4f}" in text
+        assert f"{item.noise:.4f}" in text
+        assert f"{'higher' if item.direction == 'max' else 'lower'} is better" in text
+
+
 @settings(max_examples=examples(pr=8, nightly=100))
 @given(context=CONTEXTS[CoreProtocolTemplate.REPLY_CORRECTION])
 def test_a_reply_correction_names_the_role_and_every_problem(context: BaseModel) -> None:
@@ -387,3 +518,65 @@ def test_search_prompts_name_no_domain_command() -> None:
     # Domain commands live in the bundle's objective; the search's prompts stay generic.
     for template in sorted(ROOT.glob("*.j2")):
         assert "cpu_check" not in template.read_text(), template.name
+
+
+# -- an agent whose Git metadata is read-only ----------------------------------------------------
+
+_COMMIT_ADVICE = re.compile(
+    r"\b(git commit|(commit|committing) (your|the|it|and|then|any|changes?)\b)", re.IGNORECASE
+)
+_READ_ONLY_GIT_NOTE = (
+    "`.git` is read-only; submit_evaluation snapshots your working tree, including new files; "
+    "do not commit"
+)
+
+
+def _docker_notes(*, git_writable: bool) -> str:
+    """The notes every agent of a Docker run reads, rendered as the product renders them."""
+    docker = render_template(
+        "docker/prompt_notes.j2",
+        template_dir=PROMPTS_DIR / "environments",
+        history_root=None,
+        hardware_attached=False,
+    )
+    view = RunEnvironmentView(
+        paths=AgentPaths(), prompt_notes=str(docker), workspace_git_writable=git_writable
+    )
+    return agent_environment_notes(view)
+
+
+def test_the_docker_notes_say_not_to_commit_exactly_when_git_is_read_only() -> None:
+    assert _READ_ONLY_GIT_NOTE in _docker_notes(git_writable=False)
+    assert "commit" not in _docker_notes(git_writable=True)
+
+
+@pytest.mark.parametrize("template", [PromptTemplate.PORTFOLIO, PromptTemplate.IMPLEMENT])
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(data=st.data(), offered=st.booleans())
+def test_a_prompt_for_a_read_only_git_run_never_tells_an_agent_to_commit(
+    template: PromptTemplate, data: st.DataObject, *, offered: bool
+) -> None:
+    # live run: the planner told implementers "(d) Commit and submit." in a run whose `.git`
+    # the container mounts read-only, so each implementer burned a turn on a commit that failed.
+    context = data.draw(CONTEXTS[template])
+
+    text = render(
+        template,
+        context,
+        agent_evaluation=offered,
+        agent_git_writable=False,
+        notes=_docker_notes(git_writable=False),
+    )
+
+    assert _READ_ONLY_GIT_NOTE in text
+    assert _COMMIT_ADVICE.search(text) is None
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(context=PLANNER_PROMPTS, writable=st.booleans())
+def test_the_planner_is_told_implementers_cannot_commit_exactly_when_git_is_read_only(
+    context: PlannerPrompt, *, writable: bool
+) -> None:
+    text = " ".join(render(PromptTemplate.PORTFOLIO, context, agent_git_writable=writable).split())
+
+    assert ("never tell an implementer to commit" in text) is not writable

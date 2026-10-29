@@ -8,10 +8,14 @@ from vibesys.events import BenchmarkVersions, EvaluatorIdentity, ObjectiveOvervi
 
 if TYPE_CHECKING:
     from vibesys.inputs import InputBundle
+    from vs_core.api import TaskObjective
 
 
-def overview_of(bundle: InputBundle) -> RunOverview:
+def overview_of(bundle: InputBundle, objectives: tuple[TaskObjective, ...] = ()) -> RunOverview:
     """The objective text, the benchmark's metric, the correctness check and the pinned evaluator.
+
+    ``objectives`` are the axes the run ranks candidates on: the run's metric space, which the
+    operator may override, so the bundle alone cannot say them.
 
     The metric's unit and direction are not the bundle's facts: the run's measurements and
     objectives add them later (the server's snapshot does).
@@ -21,7 +25,9 @@ def overview_of(bundle: InputBundle) -> RunOverview:
     return RunOverview(
         objective=ObjectiveOverview(
             text=bundle.objective,
-            metric=manifest.benchmark.result.metric if manifest.benchmark.result else None,
+            metric=manifest.metric
+            or (manifest.benchmark.result.metric if manifest.benchmark.result else None),
+            objectives=objectives,
             correctness_check=bundle.accuracy_command,
         ),
         benchmarks=BenchmarkVersions(

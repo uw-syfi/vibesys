@@ -54,6 +54,7 @@ from vs_agent.faulty_transport import FaultyTransport
 from vs_agent.scripted_provider import (
     FakeProvider,
     FakeProviderError,
+    FakeSteering,
     FakeTurnScript,
     HandSession,
     assistant_text,
@@ -102,6 +103,7 @@ __all__ = [
     "FakeProvider",
     "FakeProviderError",
     "FakeRun",
+    "FakeSteering",
     "FakeTurnScript",
     "FaultingExecutor",
     "FaultingTransport",

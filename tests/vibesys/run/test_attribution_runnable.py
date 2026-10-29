@@ -97,7 +97,6 @@ def _request(root: Path, environment: str, loop: str, command: list[str]) -> Run
                 "max_retries_per_round": 1,
                 # Only the multi search has a judge to ask every so often.
                 **({"judge_every": 1} if "multi" in loop else {}),
-                "official_eval_every": 1,
                 "profile_guided": {"command": command},
             },
         ),

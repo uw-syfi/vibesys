@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package vibesys.store.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/any.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
+
+enum Severity {
+  SEVERITY_UNSPECIFIED = 0;
+  SEVERITY_WARNING = 1;
+  SEVERITY_ERROR = 2;
+  SEVERITY_FATAL = 3;
+}
+
+// Initial notice categories cover the inventory's run-level diagnostics.
+// New categories may be added without changing a recorded message.
+enum NoticeCode {
+  NOTICE_CODE_UNSPECIFIED = 0;
+  NOTICE_CODE_FRAMEWORK_WARNING = 1;
+  NOTICE_CODE_INPUT_MEASUREMENT_FAILED = 2;
+  NOTICE_CODE_ENVIRONMENT_UNAVAILABLE = 3;
+  NOTICE_CODE_CONFIGURATION = 4;
+  NOTICE_CODE_UNATTRIBUTED_EVENT = 5;
+}
+
+message Notice {
+  Severity severity = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  NoticeCode code = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string message = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional string span = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  // Descriptor-backed details, including historical observations with no owner.
+  optional google.protobuf.Any detail = 5;
+}

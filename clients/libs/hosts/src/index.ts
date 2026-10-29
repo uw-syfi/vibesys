@@ -10,6 +10,7 @@ export type {
   InstanceInspection,
   MachineDescription,
 } from '@vibesys/contracts/host-helper';
+export {acceleratorName} from './accelerator.js';
 export {
   COMPLETION_EMPTY,
   type CompletionAction,
@@ -40,9 +41,41 @@ export {
   type HostListing,
   type HostRun,
   hostListing,
+  hostsComeUp,
   type InstanceObservation,
   instanceObservation,
   instancePhaseText,
+  newestServerOf,
   type RunEnd,
   type RunPause,
 } from './listing.js';
+export {
+  connectionProblem,
+  MACHINE_PROBLEMS,
+  type MachineProblem,
+  type MachineStatus,
+  mostUrgentProblem,
+  problemWord,
+} from './machine-status.js';
+export {type RecordedProjectRoot, recordedProjectRoot} from './recorded-root.js';
+export {missingRequiredFeatures, REQUIRED_HELPER_FEATURES} from './required-features.js';
+export {
+  digestLook,
+  type IdeaPoint,
+  type ListedRun,
+  listedRuns,
+  RUN_GONE_WORDS,
+  type RunDashboardEntry,
+  type RunDigestEntry,
+  type RunDigestsReply,
+} from './run-digest.js';
+export {type EndKind, type EndLook, type EndTone, endedLook} from './run-look.js';
+export {
+  type AgentSpend,
+  type RunSpend,
+  USAGE_WINDOW_MAX_HOURS,
+  USAGE_WINDOW_MAX_RUNS,
+  type UsageWindowEntry,
+  type UsageWindowOutcome,
+  usageWindowRefusal,
+} from './usage-window.js';

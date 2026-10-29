@@ -1,42 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, test} from '@playwright/test';
-import {type FakeHostWindow, listed, open, SEED, server, sidebar} from './world.js';
-
-test('the sidebar lists live and recent runs, and a run that ends moves to Recent', async ({
-  page,
-}) => {
-  await open(page);
-  const live = sidebar(page).getByRole('region', {name: 'Live'});
-  const recent = sidebar(page).getByRole('region', {name: 'Recent'});
-  await expect(live.getByRole('button', {name: /^\S+ queue-rs · mpmc/})).toBeVisible();
-  await expect(recent.getByRole('button', {name: /^\S+ queue-rs · spsc/})).toContainText('failed');
-  await expect(recent.getByRole('button', {name: /^\S+ queue-rs · mpmc/})).toHaveCount(0);
-
-  await page.evaluate(
-    ([listing]) => (window as unknown as FakeHostWindow).fakeHost.listing(listing),
-    [
-      listed(
-        [],
-        [
-          server('00000000000a', '20261015-163047', 'completed'),
-          server('00000000000b', '20261014-090000', 'failed'),
-        ],
-      ),
-    ],
-  );
-  await expect(live).toHaveCount(0);
-  await expect(recent.getByRole('button', {name: /^\S+ queue-rs · mpmc/})).toContainText(
-    'finished',
-  );
-});
-
-test('Archive hides a run from Recent', async ({page}) => {
-  await open(page);
-  const recent = sidebar(page).getByRole('region', {name: 'Recent'});
-  await recent.getByRole('button', {name: 'More for queue-rs · spsc'}).click();
-  await page.getByRole('menuitem', {name: 'Archive'}).click();
-  await expect(recent.getByRole('button', {name: /^\S+ queue-rs · spsc/})).toHaveCount(0);
-});
+import {rawTextOf} from './checks/screen-check.js';
+import {open, SEED, sidebar} from './world.js';
 
 test('Settings changes the theme at once and keeps it', async ({page}) => {
   await open(page);
@@ -50,10 +15,22 @@ test('Settings changes the theme at once and keeps it', async ({page}) => {
     'aria-pressed',
     'true',
   );
+  await page
+    .getByRole('navigation', {name: 'Settings sections'})
+    .getByRole('button', {name: 'Notifications'})
+    .click();
   await page.getByRole('switch', {name: /Notify me/}).uncheck();
   await expect(page.getByRole('switch', {name: /Notify me/})).not.toBeChecked();
   const axe = await new AxeBuilder({page}).analyze();
   expect(axe.violations).toEqual([]);
+});
+
+test('the sidebar and Settings draw no code names', async ({page}) => {
+  await open(page);
+  expect(await rawTextOf(page)).toEqual([]);
+  await sidebar(page).getByRole('button', {name: 'Settings'}).click();
+  await expect(page.getByRole('heading', {name: 'Appearance'})).toBeVisible();
+  expect(await rawTextOf(page)).toEqual([]);
 });
 
 test('Match system follows the system appearance', async ({page}) => {

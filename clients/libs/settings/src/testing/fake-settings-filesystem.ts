@@ -59,9 +59,9 @@ class WriteGate implements DeferredSettingsWrite {
 }
 
 interface FakeFile {
-  readonly text: string;
+  readonly text: string | Uint8Array;
   /** Bytes saved by a successful file sync; null means a crash may lose the contents. */
-  readonly durableText: string | null;
+  readonly durableText: string | Uint8Array | null;
 }
 
 export class FakeSettingsFilesystem implements SettingsFilesystem {
@@ -134,6 +134,7 @@ export class FakeSettingsFilesystem implements SettingsFilesystem {
   text(path: string): string {
     const file = this.#files.get(path);
     if (file === undefined) throw fileError('ENOENT', path);
+    if (typeof file.text !== 'string') throw new Error(`not a text file: ${path}`);
     return file.text;
   }
 
@@ -145,7 +146,24 @@ export class FakeSettingsFilesystem implements SettingsFilesystem {
     return this.text(path);
   }
 
-  async stageDurablePrivateText(target: string, text: string): Promise<string> {
+  bytes(path: string): Uint8Array {
+    const file = this.#files.get(path);
+    if (file === undefined) throw fileError('ENOENT', path);
+    return typeof file.text === 'string' ? new TextEncoder().encode(file.text) : file.text.slice();
+  }
+
+  async readBytes(path: string): Promise<Uint8Array> {
+    this.operations.push({kind: 'read', path});
+    const failure = this.#readFailures.get(path)?.shift();
+    if (failure !== undefined) throw failure;
+    return this.bytes(path);
+  }
+
+  stageDurablePrivateBytes(target: string, bytes: Uint8Array): Promise<string> {
+    return this.#stage(target, bytes.slice());
+  }
+
+  async #stage(target: string, text: string | Uint8Array): Promise<string> {
     let path: string;
     do {
       path = `${target}.${this.#nextStaging}.tmp`;
@@ -173,6 +191,12 @@ export class FakeSettingsFilesystem implements SettingsFilesystem {
   /** Replace a file's bytes directly when arranging a test's external filesystem state. */
   setText(path: string, text: string): void {
     const file = {text, durableText: text};
+    this.#files.set(path, file);
+    this.#durableNamespace.set(path, file);
+  }
+
+  setBytes(path: string, bytes: Uint8Array): void {
+    const file = {text: bytes.slice(), durableText: bytes.slice()};
     this.#files.set(path, file);
     this.#durableNamespace.set(path, file);
   }

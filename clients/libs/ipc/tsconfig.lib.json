@@ -16,6 +16,7 @@
   "exclude": [
     "src/**/*.test.ts",
     "src/**/*.test.tsx",
+    "src/testing/**",
     "src/testing/**"
   ],
   "references": [
@@ -33,6 +34,9 @@
     },
     {
       "path": "../contracts/tsconfig.host-helper.json"
+    },
+    {
+      "path": "../proto/tsconfig.lib.json"
     }
   ]
 }

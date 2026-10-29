@@ -4,12 +4,21 @@
  * on and starts a fresh form, prefilled from the runs this user opened.
  */
 import type {CompletionAction, CompletionState, HostKey} from '@vibesys/hosts';
-import {settled, type WelcomeBridge, type WelcomeResult} from '@vibesys/ipc';
+import {attempt, type WelcomeBridge, type WelcomeResult} from '@vibesys/ipc';
 import {clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import {createListenerDelivery, type Store} from '@vibesys/store';
 import {type Actor, createActor, fromPromise} from 'xstate';
-import {type NewRunEvent, type NewRunSnapshot, newRunMachine} from '../../state/index.js';
+import {
+  type Draft,
+  draftOf,
+  type FixDone,
+  type NewRunEvent,
+  type NewRunSnapshot,
+  newRunMachine,
+  StepFailure,
+  storeDraft,
+} from '../../state/index.js';
 import {createFolderCompletion} from './completion.js';
 
 /** The bridge calls the New run screen makes. */
@@ -19,19 +28,25 @@ export type NewRunBridge = Pick<
   | 'harnesses'
   | 'examples'
   | 'tasks'
+  | 'taskGoal'
   | 'preflight'
   | 'createFromExample'
+  | 'exampleDestination'
   | 'copyOut'
   | 'startRun'
   | 'helperFeatures'
   | 'complete'
 >;
 
-/** What `call` answered, or a rejection with its error (a call that throws rejects too). */
+/**
+ * What `call` answered, or a `StepFailure`: with the main process's words when it reported one, with
+ * none when the call threw or rejected (a bridge method that is missing, the main process gone).
+ */
 async function value<T>(call: () => Promise<WelcomeResult<T>>): Promise<T> {
-  const result = await settled(call());
-  if (!result.ok) throw new Error(result.error);
-  return result.value;
+  const result = await attempt(call);
+  if (result.ok) return result.value;
+  if ('unexpected' in result) throw new StepFailure(null);
+  throw new StepFailure(result.error, result.cause ?? null);
 }
 
 /** The machine with every operation provided by `bridge`. */
@@ -46,14 +61,24 @@ export function newRunLogic(bridge: NewRunBridge) {
       }),
       examples: fromPromise(({input}) => value(() => bridge.examples(input.host))),
       tasks: fromPromise(({input}) => value(() => bridge.tasks(input.host, input.project))),
-      preflight: fromPromise(({input}) => value(() => bridge.preflight(input.host, input.inputs))),
-      fix: fromPromise(({input}) =>
-        value(() =>
-          input.fix.kind === 'copy_out'
-            ? bridge.copyOut(input.host, input.fix.source, input.fix.destination)
-            : bridge.createFromExample(input.host, input.fix.example, input.fix.destination),
-        ),
+      goal: fromPromise(({input}) =>
+        value(() => bridge.taskGoal(input.host, input.project, input.task)),
       ),
+      preflight: fromPromise(({input}) => value(() => bridge.preflight(input.host, input.inputs))),
+      destination: fromPromise(({input}) =>
+        value(() => bridge.exampleDestination(input.host, input.example, input.destination)),
+      ),
+      fix: fromPromise(async ({input}): Promise<FixDone> => {
+        const {fix} = input;
+        if (fix.kind === 'copy_out') {
+          const copy = await value(() => bridge.copyOut(input.host, fix.source, fix.destination));
+          return {fix, created: copy};
+        }
+        const made = await value(() =>
+          bridge.createFromExample(input.host, fix.example, fix.destination),
+        );
+        return {fix, created: made.kind === 'created' ? made.created : null};
+      }),
       start: fromPromise(({input}) => value(() => bridge.startRun(input.host, input.inputs))),
     },
   });
@@ -68,8 +93,28 @@ export function initialMachine(recent: readonly RecentRun[]): HostKey {
   return last?.host ?? 'local';
 }
 
+/** Where what the user chose for More options on each machine is kept between runs of the app. */
+export interface MoreOptionsMemory {
+  /** The stored choices by machine; none when nothing is stored or it cannot be read. */
+  read(): Readonly<Record<string, boolean>>;
+  /** Keep `choices`; a failure to store them is not an error, they just last this run. */
+  write(choices: Readonly<Record<string, boolean>>): void;
+}
+
+/** Where this window keeps an unfinished New run, so leaving and coming back finds it. */
+export interface DraftMemory {
+  /** The stored draft; none when nothing is stored or what is stored is not a draft. */
+  read(): Draft | null;
+  /** Keep `draft` (null: forget it); a failure to store it is not an error, it just lasts this run. */
+  write(draft: Draft | null): void;
+}
+
 export interface NewRunStoreOptions {
   readonly recent: readonly RecentRun[];
+  /** Keeps the unfinished form of this window; without one it lasts the store's life. */
+  readonly draft?: DraftMemory;
+  /** Remembers More options per machine; without one the choices last the store's life. */
+  readonly moreOptions?: MoreOptionsMemory;
   /** Where the machine's delays (the checks' debounce) are scheduled. */
   readonly schedule: ScheduleTimeout;
   /** Hears each run the screen started. */
@@ -96,25 +141,49 @@ export function createNewRunStore(
   // Until the user changes an input, the form follows the runs opened (the first of which may
   // arrive after the store was made), so it is prefilled from the last run, on its machine.
   let edited = false;
-  const spawn = (machine: HostKey): Actor<typeof logic> => {
-    const actor = createActor(logic, {input: {machine, recent}, clock});
+  let moreOpen = options.moreOptions?.read() ?? {};
+  const restored = options.draft?.read() ?? null;
+  // What is stored is what the store holds until the form changes it.
+  let kept = restored === null ? null : storeDraft(restored);
+  const keep = (snapshot: NewRunSnapshot): void => {
+    const {answers, at, form} = snapshot.context;
+    const draft = draftOf({answers, at, form});
+    const text = draft === null ? null : storeDraft(draft);
+    if (text === kept) return;
+    kept = text;
+    options.draft?.write(draft);
+  };
+  const spawn = (machine: HostKey, draft: Draft | null = null): Actor<typeof logic> => {
+    const actor = createActor(logic, {input: {machine, recent, moreOpen, draft}, clock});
     actor.subscribe(snapshot => {
       const run = snapshot.context.started;
       if (snapshot.status === 'done' && run !== null) {
         edited = false;
         current = spawn(snapshot.context.form.machine);
         options.started({host: snapshot.context.form.machine, runId: run.runId});
+      } else {
+        keep(snapshot);
       }
       delivery.notify();
     });
     actor.start();
     return actor;
   };
-  let current = spawn(initialMachine(recent));
+  // A window that kept a draft is past the first change: the form is the user's, not the last run's.
+  edited = restored !== null;
+  let current = spawn(restored?.machine ?? initialMachine(recent), restored);
   const store: Store<NewRunSnapshot, NewRunEvent> = {
     getState: () => current.getSnapshot(),
     subscribe: delivery.subscribe,
     dispatch: event => {
+      if (event.type === 'more_options') {
+        // A choice of the page, not an input of the run: it neither edits the form nor is lost
+        // when the form is replaced.
+        current.send(event);
+        moreOpen = current.getSnapshot().context.moreOpen;
+        options.moreOptions?.write(moreOpen);
+        return;
+      }
       if (event.type !== 'recent') {
         edited = true;
         current.send(event);

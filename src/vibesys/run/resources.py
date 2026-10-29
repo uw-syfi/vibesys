@@ -43,7 +43,7 @@ from vibesys.orchestration.skill_selection import (
     resolve_skill_source_paths,
 )
 from vibesys.run.contracts import RunRequest
-from vibesys.run.environment import open_run_environment
+from vibesys.run.environment import agent_environment_notes, open_run_environment
 from vibesys.run.evaluation import trusted_evaluation_plan
 from vibesys.run.evaluation_socket import evaluation_socket_mount, remove_evaluation_socket
 from vibesys.run.experiment_repo import ExperimentRepository
@@ -74,6 +74,7 @@ from vibesys.run.project_policy import (
     build_project_path_policy,
     trusted_project_input_paths,
 )
+from vibesys.run.slurm_probe_events import CoreWorkspaceRootProbeEvents
 from vibesys.run.workspace_policy import (
     AGENT_CONFIG_FILES,
     build_workspace_materialization_plan,
@@ -88,6 +89,8 @@ from vs_agent.api import (
 from vs_logs.api import installed_narration
 from vs_project.api import (
     AgentRoleExecutionRecord,
+    GitRunHistory,
+    NullGitTrackerEvents,
     OrchestrationDescriptor,
     OrchestrationRunManifest,
     Project,
@@ -121,6 +124,7 @@ from vs_runtime.api.infrastructure import (
     open_project_run_resources,
     open_run_environment_resources,
     prepare_trusted_evaluator,
+    require_built_task_image,
     resolve_run_environment_spec,
     run_environment_deprecation,
     run_environment_record,
@@ -158,7 +162,7 @@ def _coerce_dir_path(raw: str | None, label: str) -> str | None:
     return str(path) if path is not None else None
 
 
-def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; private run composition receives independent policy bindings and effect factories explicitly instead of hiding them in a service container.
+def open_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-waiver: LW-008204 [C901, PLR0912, PLR0913, PLR0915]; ordered product setup and ownership registration share mutable lifecycle state, which helper boundaries would obscure.
     request: RunRequest,
     integration: LocalRunIntegration,
     *,
@@ -182,30 +186,6 @@ def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; pr
     test injects ``vs_sandbox.api.testing.FakeComputeBackend`` here instead of
     monkeypatching the registry or a backend's internal sandbox constructor.
     """
-    return _assemble_run_resources(
-        ownership=ownership,
-        request=request,
-        integration=integration,
-        agent_specs=agent_specs,
-        resume_policy=resume_policy,
-        backend_factory=backend_factory,
-        profiler_preflight=profiler_preflight,
-    )
-
-
-def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-waiver: LW-008204 [C901, PLR0912, PLR0913, PLR0915]; ordered product setup and ownership registration share mutable lifecycle state, which helper boundaries would obscure.
-    *,
-    ownership: ReleaseStack,
-    request: RunRequest,
-    integration: LocalRunIntegration,
-    agent_specs: Mapping[str, AgentSpec],
-    resume_policy: (
-        Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
-        | None
-    ) = None,
-    backend_factory: Callable[..., ComputeBackendImpl],
-    profiler_preflight: ProfilerPreflight,
-) -> "_PreparedRun":
     validate_run_request(request, git=integration.git)
     bundle = request.input_bundle
     exp_name = request.exp_name or request.resolved_run_id
@@ -257,9 +237,11 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             run_environment_spec = resolve_run_environment_spec(
                 run_environment or make_run_environment_spec(),
                 backend,
+                task_dockerfile=bundle.dockerfile_path,
                 platform=sys.platform,
                 log=buffered_logs.append,
             )
+            require_built_task_image(run_environment_spec, bundle.dockerfile_path)
             environment = build_run_environment(run_environment_spec)
             # Reported once here: the environment is opened again for every candidate.
             if (deprecation := run_environment_deprecation(environment)) is not None:
@@ -304,7 +286,12 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     ) from exc
 
             if existing:
-                recorded_run = Project.open(project_root).state.load_run(run_id)
+                # Read before the run's branch is checked out: the project is on its
+                # home branch between runs, so the run's history is read from its branch.
+                recorded_run = GitRunHistory(
+                    Project.open(project_root),
+                    integration.git_repository(project_root, NullGitTrackerEvents()),
+                ).manifest(run_id)
                 validate_agent_role_catalog(recorded_run.execution.agent_roles, agent_specs)
 
         with boot_trace.span("profiler_preflight"):
@@ -348,6 +335,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 thinking_budget=config.thinking.budget,
                 agent_roles={
                     role_id: AgentRoleExecutionRecord(
+                        provider=(
+                            spec.provider if spec.provider != resolved_cli_provider else None
+                        ),
                         model=spec.model if spec.model is not None else model_name,
                         reasoning_effort=spec.reasoning_effort,
                     )
@@ -418,6 +408,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 orchestration_resume,
             )
 
+        capture_recovery = environment.capture_recovery(run_id, system=integration.system)
+
         def recover_existing_run() -> None:
             """Recover external resources while the project-run owner holds its host lock."""
             with boot_trace.span("reap_orphans"):
@@ -461,11 +453,14 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 effects=ProjectRunEffects(
                     git_events=CoreGitTrackerEvents(integration.events),
                     log_emit=run_log_emitter(integration.agent_events),
-                    on_log_ready=integration.attach,
+                    on_log_ready=lambda log_dir: integration.attach(
+                        log_dir, project=Project.open(project_root), run_id=run_id
+                    ),
                     clock=clock,
                     git_repository=integration.git_repository,
                     state_stores=integration.state_stores,
                     resume_recovery=recover_existing_run if existing else None,
+                    capture_recovery=capture_recovery,
                 ),
                 buffered_logs=buffered_logs,
                 resolve_resume=resolve_recorded_run,
@@ -504,7 +499,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         evaluator_tool_roots = prepared_evaluator.tool_roots
 
         with boot_trace.span("workspace_setup"):
-            integration.attach(log_dir, project=project, run_id=run_id)
             integration.events.emit(
                 CoreEventType.EXPERIMENTS_CHANGED,
                 data=ExperimentsChangedData(reason="project_attached"),
@@ -637,6 +631,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 state_namespace=project_state.local_namespace(run_id, "skypilot"),
                 docker_in_docker=bundle.docker_in_docker,
                 startup=startup.report,
+                workspace_root_probe=CoreWorkspaceRootProbeEvents(
+                    integration.events, integration.environment_failure
+                ).report,
             )
         environment_resources = open_run_environment_resources(
             run_environment_request,
@@ -672,7 +669,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             skill_source_paths=tuple(skill_source_paths),
             evaluation_plan=trusted_evaluation_plan(
                 bundle,
-                session,
+                accuracy_command=session.view.paths.accuracy_command,
+                benchmark_command=session.view.paths.benchmark_command,
+                framework_setup_timeout_seconds=session.view.framework_setup_timeout_seconds,
                 candidate_startup_causes=resolve_domain(bundle.domain).candidate_startup_causes,
             ),
             environment_resources=environment_resources,
@@ -688,10 +687,13 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 agent_backend=resolved_backend,
                 provider=resolved_cli_provider,
                 model=model_name,
+                # The run's own provider's models only: chat sessions run on that provider.
                 role_models=tuple(
                     spec.model
                     for spec in agent_specs.values()
-                    if spec.model is not None and spec.model != model_name
+                    if spec.model is not None
+                    and spec.model != model_name
+                    and spec.provider == resolved_cli_provider
                 ),
                 config=config,
                 allow_unvetted_model=request.allow_unvetted_model,
@@ -733,6 +735,9 @@ class _StartupReporter:
                 else StartupProgressData(
                     done=progress.done, total=progress.total, label=progress.label
                 ),
+                state=startup.state,
+                condition=startup.condition,
+                elapsed_seconds=startup.elapsed_seconds,
             ),
         )
 
@@ -759,7 +764,8 @@ def _run_facts(
     return RunFacts(
         domain_id=bundle.domain.value,
         objective=objective,
-        environment_notes=view.prompt_notes,
+        environment_notes=agent_environment_notes(view),
+        agent_git_writable=view.agent_git_writable,
         profile_execution=ProfileExecution(view.profile_execution),
         objective_location=view.paths.objective,
         reference_location=ref_name,

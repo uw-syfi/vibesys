@@ -83,6 +83,7 @@ if TYPE_CHECKING:
         ResourceRequirements,
     )
     from vs_project.api import StateNamespace
+    from vs_runtime.api.infrastructure import RunControlChannel
     from vs_sim.api import OutputSink
 
 # Each example builds real workspaces. A pull request draws a sample; the nightly depth
@@ -137,7 +138,10 @@ class World:
         self.cluster = cluster
         self.stack = stack
 
+    control: RunControlChannel | None = None
     observer: MeasurementObserver | None = None
+    executor: PollingEvaluationExecutor | None = None
+    """An executor over the stack's own, when a test watches what reaches it."""
 
     def requests(
         self, crash_at: int | None = None
@@ -153,7 +157,8 @@ class World:
             None if crash_at is None else 2 * crash_at,
         )
         store = ReceiptStore(cast("StateNamespace", faulting), threads=SimThreads())
-        return MeasurementRequests(self.stack.executor, store, self.observer), faulting
+        executor = self.stack.executor if self.executor is None else self.executor
+        return MeasurementRequests(executor, store, self.observer, control=self.control), faulting
 
 
 @asynccontextmanager
@@ -981,6 +986,18 @@ async def test_a_benchmark_without_a_result_record_is_ambiguous_and_keeps_its_ev
     # The failure text is kept, so a second failure can tell the agent what happened.
     assert target.evidence
     assert _CRASH_TAIL in target.observation.diagnostic
+
+
+async def test_a_failed_jobs_diagnostic_carries_the_service_log_beside_the_stage_output() -> None:
+    cluster = ScenarioCluster()
+    cluster.benchmark_exit = 1
+    cluster.benchmark_output = "benchmark stage output"
+    cluster.service_log_tail = "server traceback: CUDA out of memory"
+    target, _jobs = await _failed_target(cluster)
+    diagnostic = target.observation.diagnostic
+    assert "server traceback: CUDA out of memory" in diagnostic
+    # The stage's own output ends the text, where a reader that cuts it keeps the verdict.
+    assert diagnostic.endswith("benchmark stage output")
 
 
 @settings(

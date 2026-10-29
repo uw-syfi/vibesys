@@ -20,7 +20,22 @@
       "path": "./tsconfig.overview.json"
     },
     {
+      "path": "./tsconfig.candidates.json"
+    },
+    {
+      "path": "./tsconfig.agents.json"
+    },
+    {
+      "path": "./tsconfig.usage.json"
+    },
+    {
       "path": "./tsconfig.test.json"
+    },
+    {
+      "path": "./tsconfig.records.json"
+    },
+    {
+      "path": "./tsconfig.skeleton.json"
     }
   ]
 }

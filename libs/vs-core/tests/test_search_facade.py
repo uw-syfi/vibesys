@@ -69,3 +69,9 @@ def test_what_a_search_may_read_of_a_workspace_has_no_request_ids_or_receipts() 
         {"pending_records", "charges", "release_dependencies", "checkpoints", "admission_id"}
     )
     assert search_facade.RunView.model_fields["attempts"].annotation == tuple[AttemptSummary, ...]
+
+
+def test_every_core_export_loads_as_the_same_public_object() -> None:
+    for name in shell_facade.__all__:
+        assert getattr(shell_facade, name) is getattr(shell_facade, name)
+    assert dir(shell_facade) == sorted(shell_facade.__all__)

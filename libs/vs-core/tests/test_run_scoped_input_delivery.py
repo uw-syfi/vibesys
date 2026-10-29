@@ -65,9 +65,23 @@ def _fate_event(
     )
 
 
-@given(disposition=st.sampled_from(["park", "cancel", "settle"]))
-def test_a_closed_reserver_returns_a_run_input_to_pending(disposition: _Disposition) -> None:
-    result = release_after_closure(disposition, target=core.ScopeInputTarget(scope=scope()))
+@given(
+    disposition=st.sampled_from(["park", "cancel", "settle"]),
+    addressed_to=st.sampled_from(["run", "role"]),
+)
+def test_a_closed_reserver_returns_a_run_input_to_pending(
+    disposition: _Disposition, addressed_to: str
+) -> None:
+    """Regression: a role's steer was dropped when the attempt whose turn reserved it closed.
+
+    A role, like the run, outlives each of its attempts, so a later turn of the role takes it.
+    """
+    target: core.InputTarget = (
+        core.ScopeInputTarget(scope=scope())
+        if addressed_to == "run"
+        else core.RoleInputTarget(role_id=core.RoleId(root="dynamic-judge"))
+    )
+    result = release_after_closure(disposition, target=target)
     record = result.state.sessions.inputs[0]
     assert record.receipt is None
     assert record.reserved_to is None

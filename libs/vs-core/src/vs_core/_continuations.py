@@ -10,10 +10,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
+from ._comparison import comparisons_to_publish, moment_of
 from ._deadlines import bound_to_run, cleanup, limit_to, time_remains
 from ._evaluation_history import attempt_settled, produce_history
+from ._proofs import continues_admitted_work
 from ._registry import ContractError
 from ._session_scope import dispatching_request
+from ._submission_receipts import same_conclusion
 from ._wait_clock import Bound, wait_bounds
 from .types.attempts import (
     AttemptEvaluationHistoryUpdated,
@@ -45,12 +48,15 @@ from .types.evaluation import (
     InspectOwnedJob,
     JobTerminationRequested,
     ObserveOwnedJob,
+    OwnedJob,
     RegisteredOwnedJob,
     ResumeAuthorizationReceipt,
     ResumeAuthorized,
+    ResumeRefusal,
+    ResumeRefused,
     TurnSuspended,
 )
-from .types.evaluation_history import EvaluationHistoryAvailability
+from .types.evaluation_history import AttemptEvaluationHistory, EvaluationHistoryAvailability
 from .types.job_observations import JobTimeout, TimedOut, WaitEnd
 from .types.kernel import AreaChange, EvaluationContext
 from .types.records import InspectRequest, Outbound, RequestPhase, within
@@ -59,16 +65,18 @@ from .types.sessions import Access, DispatchTurn, InspectTurn, ResumeSessionTurn
 from .types.strategy import Accepted, Operation
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .types.attempts import AttemptsState, AttemptView
     from .types.common import EvidenceKey, InvocationRef, Observation, ResourceId
     from .types.evaluation import (
         EvaluationEvent,
         EvaluationState,
         EvidenceRef,
-        OwnedJob,
     )
-    from .types.evaluation_history import AttemptEvaluationHistory, EvaluationHistoryCursor
+    from .types.evaluation_history import EvaluationHistoryCursor
     from .types.kernel import RunState, SessionsContext, Signal, StrategyEvent
+    from .types.measurement import Comparison
     from .types.records import ChildLease, Request, RequestRecord
     from .types.sessions import Invocation, SessionsState
 
@@ -136,6 +144,58 @@ def paid_prefix_refusal(
     return None
 
 
+def resume_refusal(
+    history: AttemptEvaluationHistory, prefix: EvaluationHistoryCursor | None
+) -> ResumeRefusal | None:
+    """Why an attempt's turn that waited from ``prefix`` cannot resume on ``history``, or None.
+
+    The one rule for both ends of a resume: authorization asks it of the history it
+    publishes, and the resume's dispatch asks it of that same history as the attempt still
+    stores it (``published_history``), so core never authorizes a resume that its dispatch
+    would refuse.
+    """
+    if history.availability != EvaluationHistoryAvailability.COMPLETE:
+        return ResumeRefusal.HISTORY_UNAVAILABLE
+    if paid_prefix_refusal(history, prefix) is not None:
+        return ResumeRefusal.PREFIX_MISMATCH
+    return None
+
+
+def published_history(
+    history: AttemptEvaluationHistory, cursor: EvaluationHistoryCursor | None
+) -> AttemptEvaluationHistory:
+    """``history`` as it stood when core published ``cursor`` with a resume's authorization.
+
+    The scope may submit again between the authorization and the resume's dispatch, and that
+    submission leaves the whole stored history incomplete until it ends. (Core's own runs in
+    the scope are not the attempt's history, so they never do: ``_evaluation_history``.)
+    Coverage and records only grow, so the prefix through ``cursor`` is what authorization
+    proved. With nothing submitted since, that is the stored history itself; no cursor, or one
+    the stored coverage does not hold, is an unavailable history.
+    """
+    if (
+        cursor is None
+        or cursor.ordinal > len(history.covered_submissions)
+        or (
+            cursor.ordinal
+            and history.covered_submissions[cursor.ordinal - 1] != cursor.submission_id
+        )
+    ):
+        return AttemptEvaluationHistory()
+    if cursor.ordinal == len(history.covered_submissions):
+        return history
+    covered = history.covered_submissions[: cursor.ordinal]
+    records = tuple(record for record in history.records if record.ordinal <= cursor.ordinal)
+    complete = tuple(record.submission_id for record in records) == covered
+    return AttemptEvaluationHistory(
+        availability=EvaluationHistoryAvailability.COMPLETE
+        if complete
+        else EvaluationHistoryAvailability.UNAVAILABLE,
+        covered_submissions=covered,
+        records=records,
+    )
+
+
 def exhausted(attempts: AttemptsState, scope: Scope) -> bool:
     """Whether ``scope`` is an attempt that ended (a spent paid limit, for one).
 
@@ -193,17 +253,46 @@ def suspension_refusal_in(
     scope is refused while the first holds the claim. ``holder`` is the invocation asking:
     its own claim is not a reason to refuse it.
     """
-    if not _active(context, scope):
-        return SuspensionRefusal.SCOPE_NOT_ACTIVE
-    claimed = any(
+    return suspension_gate(
+        active=lambda: _active(context, scope),
+        claimed=lambda: _claimed(context, state, scope, holder),
+    )
+
+
+def _claimed(
+    context: EvaluationContext, state: EvaluationState, scope: Scope, holder: InvocationRef | None
+) -> bool:
+    return any(
         row.pending_suspension is not None and row.scope == scope and row.invocation != holder
         for row in context.sessions.invocations
-    )
-    if claimed or any(
+    ) or any(
         _open(context, row) and _invocation(context, row).scope == scope
         for row in state.continuations
-    ):
+    )
+
+
+def suspension_gate(
+    *,
+    active: Callable[[], bool],
+    claimed: Callable[[], bool],
+    owned: Callable[[], bool] | None = None,
+    remains: Callable[[], bool] | None = None,
+) -> SuspensionRefusal | None:
+    """The one ordering of suspension refusals, whichever state supplies the facts.
+
+    The positional core and the native replay log each answer the same questions: is the
+    scope active, does another wait already claim it, does it own every job it waits on,
+    and is time left before the wait's capped bound. Each is asked only if the earlier
+    ones pass. ``owned`` and ``remains`` are None when no continuation is checked yet.
+    """
+    if not active():
+        return SuspensionRefusal.SCOPE_NOT_ACTIVE
+    if claimed():
         return SuspensionRefusal.OPEN_CONTINUATION
+    if owned is not None and not owned():
+        return SuspensionRefusal.JOB_NOT_OWNED
+    if remains is not None and not remains():
+        return SuspensionRefusal.DEADLINE_EXCEEDED
     return None
 
 
@@ -220,18 +309,30 @@ def commit_refusal_in(
     malformed continuation. With ``wait`` it also checks the continuation's jobs and
     deadline.
     """
-    refusal = suspension_refusal_in(context, state, invocation.scope, holder=invocation.invocation)
-    if refusal is not None or wait is None:
-        return refusal
-    owned = (*state.jobs, *state.registered_jobs)
+    scope, jobs = invocation.scope, (*state.jobs, *state.registered_jobs)
+
+    def active() -> bool:
+        return _active(context, scope)
+
+    def claimed() -> bool:
+        return _claimed(context, state, scope, invocation.invocation)
+
+    if wait is None:
+        return suspension_gate(active=active, claimed=claimed)
+    checked: Continuation = wait
+
     # An empty or repeating job list is a malformed continuation, not a refusal: it halts.
-    for identity in wait.jobs:
-        matching = tuple(row for row in owned if row.resource_id == identity)
-        if len(matching) != 1 or matching[0].scope != invocation.scope:
-            return SuspensionRefusal.JOB_NOT_OWNED
-    if not time_remains(context.run, wait_deadline(state, context, wait).at):
-        return SuspensionRefusal.DEADLINE_EXCEEDED
-    return None
+    def owned() -> bool:
+        for identity in checked.jobs:
+            matching = tuple(row for row in jobs if row.resource_id == identity)
+            if len(matching) != 1 or matching[0].scope != scope:
+                return False
+        return True
+
+    def remains() -> bool:
+        return time_remains(context.run, wait_deadline(state, context, checked).at)
+
+    return suspension_gate(active=active, claimed=claimed, owned=owned, remains=remains)
 
 
 def _inspection(context: EvaluationContext, request: Request) -> Outbound:
@@ -350,7 +451,7 @@ def _attempt(context: EvaluationContext, scope: Scope) -> AttemptView | None:
 
 
 def _active(context: EvaluationContext, scope: Scope) -> bool:
-    if context.run.status != RunStatus.RUNNING:
+    if not continues_admitted_work(context.run):
         return False
     if scope.owner == context.run.run_id:
         return scope.generation == context.run.generation
@@ -604,16 +705,40 @@ def _authorize(
                 state, continuation.model_copy(update={"phase": ContinuationPhase.AUTHORIZED})
             )
         )
+    return _publish(state, context, continuation, invocation, evidence)
+
+
+def _publish(
+    state: EvaluationState,
+    context: EvaluationContext,
+    continuation: Continuation,
+    invocation: Invocation,
+    evidence: tuple[EvidenceRef, ...],
+) -> AreaChange[EvaluationState]:
+    """Authorize the settled wait's resume once, or refuse it for good (``resume_refusal``)."""
     owner = _attempt(context, invocation.scope)
     history = (
         produce_history(invocation.scope, state, context.records, owner, context.run)
         if owner
         else None
     )
-    cursor = (
-        history.cursor
-        if history is not None and history.availability == EvaluationHistoryAvailability.COMPLETE
-        else None
+    if history is not None:
+        # Every submission has ended (``attempt_settled``), so this history is final: a
+        # refusal now is a refusal forever, and the wait ends without a resume.
+        refusal = resume_refusal(history, invocation.evaluation_prefix)
+        if refusal is not None:
+            return _refuse(state, continuation, refusal, _history_update(owner, history))
+    cursor = history.cursor if history is not None else None
+    comparisons, settling = comparisons_to_publish(
+        state,
+        invocation.scope,
+        (
+            job.plan.measured_input
+            for job in _jobs(state, continuation)
+            if isinstance(job, OwnedJob) and job.plan.measured_input is not None
+        ),
+        _told(state, context, invocation.scope),
+        moment_of(context.run),
     )
     publication = ResumeAuthorizationReceipt(
         continuation_id=continuation.continuation_id,
@@ -621,6 +746,8 @@ def _authorize(
         evidence=evidence,
         timeout=continuation.timeout,
         history_cursor=cursor,
+        comparisons=comparisons,
+        settling=settling,
     )
     authorized = continuation.model_copy(
         update={
@@ -638,16 +765,66 @@ def _authorize(
                 evidence=authorized.evidence,
                 timeout=authorized.timeout,
                 history_cursor=publication.history_cursor,
+                comparisons=comparisons,
+                settling=settling,
             ),
         ),
-        signals=(
-            AttemptEvaluationHistoryUpdated(
-                attempt=AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
-                history=history,
+        signals=_history_update(owner, history),
+    )
+
+
+def _told(
+    state: EvaluationState, context: EvaluationContext, scope: Scope
+) -> tuple[tuple[Comparison, bool], ...]:
+    """Every comparison the scope's earlier resumes told of, oldest first, and if it was settling.
+
+    Read from each authorized continuation's receipt (``ResumeAuthorizationReceipt.settling``).
+    """
+    scopes = {row.invocation: row.scope for row in context.sessions.invocations}
+    return tuple(
+        (comparison, comparison.candidate_input in receipt.settling)
+        for row in state.continuations
+        if (receipt := row.authorization_receipt) is not None
+        and scopes.get(row.invocation) == scope
+        for comparison in receipt.comparisons
+    )
+
+
+def _history_update(
+    owner: AttemptView | None, history: AttemptEvaluationHistory | None
+) -> tuple[Signal, ...]:
+    """The signal storing the history a continuation's end published, when it has one.
+
+    The ends of the jobs a continuation awaits leave publishing the history to it.
+    """
+    if owner is None or history is None:
+        return ()
+    return (
+        AttemptEvaluationHistoryUpdated(
+            attempt=AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
+            history=history,
+        ),
+    )
+
+
+def _refuse(
+    state: EvaluationState,
+    continuation: Continuation,
+    reason: ResumeRefusal,
+    signals: tuple[Signal, ...],
+) -> AreaChange[EvaluationState]:
+    """End a wait whose resume core will never authorize: cancel it and say why."""
+    cancelled = continuation.model_copy(update={"phase": ContinuationPhase.CANCELLED})
+    return AreaChange(
+        state=_store(state, cancelled),
+        events=(
+            ResumeRefused(
+                continuation_id=continuation.continuation_id,
+                invocation=continuation.invocation,
+                reason=reason,
             ),
-        )
-        if owner is not None and history is not None
-        else (),
+        ),
+        signals=signals,
     )
 
 
@@ -973,9 +1150,11 @@ def _publication_history(
 ) -> _PublicationProof:
     owner = _attempt(context, invocation.scope)
     cursor = proof.cursor
+    # The history as published: the scope may have submitted again since (``published_history``).
     if (
         owner is None
-        or owner.evaluation_history.availability != EvaluationHistoryAvailability.COMPLETE
+        or published_history(owner.evaluation_history, cursor).availability
+        != EvaluationHistoryAvailability.COMPLETE
     ):
         return _PublicationMissing("history")
     covered = owner.evaluation_history.covered_submissions
@@ -1221,7 +1400,8 @@ def _changed(
         job = next(
             job for job in _jobs(state, continuation) if job.resource_id == event.resource_id
         )
-        if job.observation != event.observation:
+        # A wake may carry an earlier reading of the job's end than the job holds now.
+        if not same_conclusion(job.observation, event.observation):
             continue
         _job_ownership(state, context, continuation)
         _timeout_proof(continuation)
@@ -1312,7 +1492,18 @@ def _retire(
         for job in _jobs(state, continuation)
         if not _settled(job)
     )
-    return AreaChange(state=_store(state, retired), signals=signals)
+    # A cancel ends a wait whose resume core has not authorized: the suspended turn hears why,
+    # as it hears any wait core will never resume (S191), instead of waiting out the run.
+    events: tuple[ResumeRefused, ...] = ()
+    if phase == ContinuationPhase.CANCELLED and continuation.phase != ContinuationPhase.AUTHORIZED:
+        events = (
+            ResumeRefused(
+                continuation_id=continuation.continuation_id,
+                invocation=continuation.invocation,
+                reason=ResumeRefusal.ATTEMPT_CLOSED,
+            ),
+        )
+    return AreaChange(state=_store(state, retired), signals=signals, events=events)
 
 
 def _reopen_decision(

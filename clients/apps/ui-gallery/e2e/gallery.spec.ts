@@ -28,6 +28,34 @@ async function open(page: Page, theme: string): Promise<void> {
   expect(loaded, 'fonts that fell back instead of loading').toEqual([]);
 }
 
+/**
+ * Shows one entry and hides the rest while `shoot` runs. Entries stack in one page, and what
+ * Chromium draws for an entry depends on where it sits there: a change to the height of any entry
+ * above it shifted the antialiasing of a few shapes in later baselines, so a baseline update
+ * rewrote screens nobody changed. Alone, an entry always sits at the same place and its
+ * baseline depends on its own content only.
+ */
+async function alone(page: Page, name: string, shoot: () => Promise<void>): Promise<void> {
+  const setOthers = (display: string) =>
+    page.evaluate(
+      ([keep, value]) => {
+        for (const entry of Array.from(
+          document.querySelectorAll<HTMLElement>('[data-gallery-entry]'),
+        )) {
+          if (entry.dataset['galleryEntry'] !== keep) entry.style.display = value ?? '';
+        }
+        window.scrollTo(0, 0);
+      },
+      [name, display],
+    );
+  await setOthers('none');
+  try {
+    await shoot();
+  } finally {
+    await setOthers('');
+  }
+}
+
 async function entryNames(page: Page): Promise<string[]> {
   return page
     .locator('[data-gallery-entry]')
@@ -52,41 +80,64 @@ test('every component looks as agreed, and the page has no axe violation, in Ink
     await expect.soft(page).toHaveScreenshot(`${theme}-Page.png`);
     for (const name of await entryNames(page)) {
       if (name === 'Page') continue;
-      const entry = page.locator(`[data-gallery-entry="${name}"]`);
-      await expect.soft(entry).toHaveScreenshot(`${theme}-${name}.png`);
+      await alone(page, name, () =>
+        expect
+          .soft(page.locator(`[data-gallery-entry="${name}"]`))
+          .toHaveScreenshot(`${theme}-${name}.png`),
+      );
     }
     await page.getByRole('button', {name: 'primary', exact: true}).focus();
-    await expect
-      .soft(page.locator('[data-gallery-entry="Button"]'))
-      .toHaveScreenshot(`${theme}-focus-ring.png`);
+    await alone(page, 'Button', () =>
+      expect
+        .soft(page.locator('[data-gallery-entry="Button"]'))
+        .toHaveScreenshot(`${theme}-focus-ring.png`),
+    );
     await screenshotOverlays(page, theme);
+    await screenshotParetoHover(page, theme);
   }
 });
 
+/** Hovering a point of the Pareto chart names it and gives its values. */
+async function screenshotParetoHover(page: Page, theme: string): Promise<void> {
+  await alone(page, 'ParetoChart', async () => {
+    const chart = page.locator('[data-gallery-entry="ParetoChart"] .vs-pareto').first();
+    await chart.locator('.vs-pareto-point[data-role="frontier"]').nth(2).hover();
+    await expect(chart.locator('.vs-pareto-hover-text')).toBeVisible();
+    const box = await chart.boundingBox();
+    if (box === null) throw new Error('the Pareto chart is not shown');
+    await expect.soft(page).toHaveScreenshot(`${theme}-ParetoChart-hover.png`, {clip: box});
+    await page.mouse.move(0, 0);
+  });
+}
+
 /** The states that only show after a press: an open menu, and the modal dialog. */
 async function screenshotOverlays(page: Page, theme: string): Promise<void> {
-  await page
-    .locator('[data-gallery-entry="Menu"]')
-    .getByRole('button', {name: 'More actions'})
-    .click();
-  const entry = await page.locator('[data-gallery-entry="Menu"]').boundingBox();
-  const menu = await page.getByRole('menu').boundingBox();
-  if (entry === null || menu === null)
-    throw new Error('the menu entry or its open menu is not shown');
-  const bottom = Math.max(entry.y + entry.height, menu.y + menu.height);
-  await page.mouse.move(0, 0);
-  await expect.soft(page).toHaveScreenshot(`${theme}-Menu-open.png`, {
-    clip: {x: entry.x, y: entry.y, width: entry.width, height: bottom - entry.y},
+  await alone(page, 'Menu', async () => {
+    await page
+      .locator('[data-gallery-entry="Menu"]')
+      .getByRole('button', {name: 'More actions'})
+      .click();
+    const entry = await page.locator('[data-gallery-entry="Menu"]').boundingBox();
+    const menu = await page.getByRole('menu').boundingBox();
+    if (entry === null || menu === null)
+      throw new Error('the menu entry or its open menu is not shown');
+    const bottom = Math.max(entry.y + entry.height, menu.y + menu.height);
+    await page.mouse.move(0, 0);
+    await expect.soft(page).toHaveScreenshot(`${theme}-Menu-open.png`, {
+      clip: {x: entry.x, y: entry.y, width: entry.width, height: bottom - entry.y},
+    });
+    await page.keyboard.press('Escape');
   });
-  await page.keyboard.press('Escape');
-  await page.getByRole('button', {name: 'Open dialog'}).click();
-  const dialog = page.getByRole('dialog');
-  const axe = await new AxeBuilder({page}).include('dialog').analyze();
-  expect.soft(axe.violations, `axe violations in ${theme}'s dialog`).toEqual([]);
-  await page.mouse.move(0, 0);
-  await expect.soft(page).toHaveScreenshot(`${theme}-Dialog-open.png`);
-  await page.keyboard.press('Escape');
-  await expect(dialog).toBeHidden();
+  await alone(page, 'Dialog', async () => {
+    await page.getByRole('button', {name: 'Open dialog'}).click();
+    const dialog = page.getByRole('dialog');
+    const axe = await new AxeBuilder({page}).include('dialog').analyze();
+    expect.soft(axe.violations, `axe violations in ${theme}'s dialog`).toEqual([]);
+    await page.mouse.move(0, 0);
+    await expect.soft(page).toHaveScreenshot(`${theme}-Dialog-open.png`);
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+  });
 }
 
 test('a segmented control moves its one tab stop and its choice with the arrow keys', async ({
@@ -140,7 +191,7 @@ test('a menu opens from the keyboard, moves with the arrows, and closes on Esc',
   await expect(page.getByRole('menu')).toHaveCount(0);
   await expect(trigger).toBeFocused();
   await trigger.click();
-  await page.getByRole('heading', {name: 'Menu'}).click();
+  await page.getByRole('heading', {name: 'Menu', exact: true}).click();
   await expect(page.getByRole('menu')).toHaveCount(0);
 });
 
@@ -197,11 +248,31 @@ test('a log pane follows the tail until scrolled up, then offers to jump to it',
   await pane.evaluate(element => {
     element.scrollTop = 0;
   });
-  const jump = page.getByRole('button', {name: 'Jump to latest'});
+  const jump = page.getByRole('button', {name: 'New below'});
   await expect(jump).toBeVisible();
   await jump.click();
   await expect(jump).toHaveCount(0);
   expect(await atEnd()).toBe(true);
+});
+
+test('a thread follows its tail until scrolled up, and opens a block from the keyboard', async ({
+  page,
+}) => {
+  await page.goto('./');
+  const pane = page.getByRole('list', {name: 'Turn by turn', exact: true});
+  await expect(pane.getByText('The batch handoff is slower under contention')).toBeVisible();
+  await pane.evaluate(element => {
+    element.scrollTop = 0;
+  });
+  await expect(page.getByRole('button', {name: 'New below'})).toBeVisible();
+  const reasoning = pane.getByRole('button', {name: /Reasoning/});
+  await reasoning.focus();
+  await expect(reasoning).toHaveAttribute('aria-expanded', 'false');
+  await page.keyboard.press('Enter');
+  await expect(reasoning).toHaveAttribute('aria-expanded', 'true');
+  await expect(pane.getByText('Padding costs memory but removes the false sharing.')).toBeVisible();
+  await page.getByRole('button', {name: 'New below'}).click();
+  await expect(pane.getByText('The batch handoff is slower under contention')).toBeVisible();
 });
 
 test('a scrubber steps with the arrow keys and goes back to live', async ({page}) => {

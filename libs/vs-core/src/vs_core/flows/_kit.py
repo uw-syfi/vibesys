@@ -89,6 +89,7 @@ class Kit:
     async def finish(self, finish: Finish) -> Failed:
         """End the run. Returns only if core refuses the ``Finish``; otherwise never resumes."""
         stamped = self.run.stamp(self.task, finish)
+        self.run.concluded = True
         refused = await self.run.issue(self.task, Pending(stamped), stamped)
         if not isinstance(refused, Failed):
             raise ContractError(("finish",), "a finish is answered only by a failure")

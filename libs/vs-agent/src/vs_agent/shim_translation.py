@@ -20,6 +20,7 @@ import agentshim
 
 from vs_agent.container_python import containerize_server
 from vs_agent.contracts import (
+    AgentContextOverflowError,
     AgentEvent,
     AgentEventKind,
     AgentOutputSchemaError,
@@ -114,6 +115,7 @@ def usage_from(
         cache_creation_input_tokens=tokens.cache_write_input_tokens,
         cache_read_input_tokens=tokens.cache_read_input_tokens,
         output_tokens=tokens.output_tokens,
+        reasoning_output_tokens=tokens.reasoning_output_tokens,
         total_cost_usd=cost_usd if cost_usd is not None else usage.total_cost_usd,
         duration_ms=duration_ms,
     )
@@ -177,28 +179,35 @@ def failure_from(
     *,
     provider: str,
     exhausted: Sequence[agentshim.RateLimitStatus],
-) -> AgentOutputSchemaError | AgentQuotaError | None:
-    """Classify a failed turn as a schema rejection or a capacity limit.
+) -> AgentOutputSchemaError | AgentQuotaError | AgentContextOverflowError | None:
+    """Classify a failed turn as a schema rejection, a context overflow or a capacity limit.
 
     Returns ``None`` for any other failure, which the caller re-raises as it
     came.
 
     A provider that gave up matching the output schema
     (``FailureKind.SCHEMA``) is an :class:`AgentOutputSchemaError` carrying its
-    validation errors. agentshim classifies a usage or spend limit as
+    validation errors. A conversation that no longer fits the model's context window
+    (``FailureKind.CONTEXT_OVERFLOW``) is an :class:`AgentContextOverflowError`: the work did
+    not fail, and the same turn may run in a fresh conversation. agentshim classifies a usage
+    or spend limit as
     ``USAGE_LIMIT`` and has already waited out the transient failures it can. A
     ``TRANSIENT`` failure that outlasted those waits is sustained rate limiting
-    only when the provider also reported an exhausted window during the turn:
-    a server error or an overload names no capacity limit and stays a plain
-    failure. The reset time is the latest of the *exhausted* windows, since
-    capacity returns only when every one of them has reopened.
+    when the provider also reported an exhausted window during the turn, and a
+    provider outage (an overload, a server error) when it did not. Either way
+    the work did not fail and the same turn may be sent again, so both are
+    capacity limits the caller's gate waits out instead of failing the run. The
+    reset time is the latest of the *exhausted* windows, since capacity returns
+    only when every one of them has reopened.
     """
     if error.kind is agentshim.FailureKind.SCHEMA:
         return AgentOutputSchemaError(error.detail)
+    if error.kind is agentshim.FailureKind.CONTEXT_OVERFLOW:
+        return AgentContextOverflowError(provider, error.detail or str(error))
     if error.kind is agentshim.FailureKind.USAGE_LIMIT:
         condition = QuotaCondition.QUOTA_EXHAUSTED
-    elif error.kind is agentshim.FailureKind.TRANSIENT and exhausted:
-        condition = QuotaCondition.RATE_LIMITED
+    elif error.kind is agentshim.FailureKind.TRANSIENT:
+        condition = QuotaCondition.RATE_LIMITED if exhausted else QuotaCondition.UNAVAILABLE
     else:
         return None
     resets = [window.resets_at for window in exhausted if window.resets_at is not None]

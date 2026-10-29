@@ -161,8 +161,16 @@ def _row(entry: LedgerEntry, cluster: Cluster, *, now: float) -> LedgerRow:
         result_location=(
             None if job is None else PurePosixPath(job.remote_workspace).parent.as_posix()
         ),
-        detail=detail if detail is not None else record.reason,
+        detail=detail if detail is not None else _stated_reason(entry),
     )
+
+
+def _stated_reason(entry: LedgerEntry) -> str | None:
+    """Why the attempt ended, or the withdrawal under way on it."""
+    mark = entry.withdrawal
+    if mark is not None and not entry.record.state.final:
+        return f"being withdrawn by {mark.by}: {mark.reason}"
+    return entry.record.reason
 
 
 def _phase(

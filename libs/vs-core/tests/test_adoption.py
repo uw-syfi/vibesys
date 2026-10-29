@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -176,6 +176,7 @@ class Run:
         *,
         revision: core.RevisionRef | None = None,
         terminal: bool = True,
+        published: tuple[core.AdoptionPublication, core.CheckoutUpdate] | None = None,
     ) -> core.Transition:
         assert request.request_id is not None
         key = request.request_id.root
@@ -190,7 +191,12 @@ class Run:
             accepted=True,
             terminal=terminal,
         )
-        event = core.AdoptionObserved(observation=observation, revision=revision)
+        event = core.AdoptionObserved(
+            observation=observation,
+            revision=revision,
+            publication=None if published is None else published[0],
+            checkout=None if published is None else published[1],
+        )
         self.delivered.append(event)
         return self.feed(event)
 
@@ -258,10 +264,10 @@ def test_a_winner_completes_only_after_a_positive_verification() -> None:
 
 
 def test_a_candidate_with_an_agent_record_and_the_official_accuracy_record_is_adopted() -> None:
-    """The live path holds both: the agent's own evaluation (kind local-validation) and the official one."""
+    """The live path holds both: the agent's own evaluation and the official one, as samples."""
     agent = accuracy_proof("rev-a").model_copy(
         update={
-            "kind": core.EvidenceKind.LOCAL_VALIDATION,
+            "kind": core.EvidenceKind.CORRECTNESS,
             "purpose": "local-validation",
             "evidence_id": core.EvidenceId(root="agent-rev-a"),
         }
@@ -582,6 +588,82 @@ def test_another_winner_is_refused_while_in_flight_and_after_completion() -> Non
     assert len(run.results()) == 1
 
 
+def _adopted(run: Run, selection: core.Selection) -> None:
+    """Propose ``selection`` and answer its adoption until it is verified."""
+    (adopt,) = new_requests(run.propose(selection))
+    (verify,) = new_requests(
+        run.answer(adopt, core.ObservationStatus.SUCCEEDED, revision=selection.revision)
+    )
+    run.answer(verify, core.ObservationStatus.SUCCEEDED, revision=selection.revision)
+
+
+def _control(action: Literal["stop", "resume"], index: int) -> core.RunControlEvent:
+    identity = core.ControlId(root=f"op-{index}")
+    control = (
+        core.ControlInput(control_id=identity, action="stop", mode=core.StopMode.DRAIN)
+        if action == "stop"
+        else core.ControlInput(control_id=identity, action="resume", when="now")
+    )
+    return core.RunControlEvent(control=control, now_at=float(index))
+
+
+@given(first=st.sampled_from(GOOD), later=st.sampled_from(GOOD))
+@example(first=GOOD[0], later=GOOD[1])
+@settings(max_examples=len(GOOD) ** 2, derandomize=True)
+def test_a_lifted_stop_takes_back_the_adoption_it_completed(
+    first: core.Selection, later: core.Selection
+) -> None:
+    """Regression: the winner of a run's later ending was refused as already settled.
+
+    A stopped run adopted its best, a resume lifted the stop, and the run went on and found a
+    better one. Its next ending proposed that winner, and core still held the first adoption as
+    the run's answer, so it refused with ``already-settled`` and the run ended without adopting.
+    """
+    run = start()
+    run.feed(_control("stop", 0))
+    _adopted(run, first)
+    run.feed(_control("resume", 1))
+    assert run.state.settlement.adoption is None
+    (adopt,) = new_requests(run.propose(later))
+    assert adopt.selection == later
+    assert run.rejections() == []
+    (verify,) = new_requests(
+        run.answer(adopt, core.ObservationStatus.SUCCEEDED, revision=later.revision)
+    )
+    run.answer(verify, core.ObservationStatus.SUCCEEDED, revision=later.revision)
+    assert [result.selection for result in run.results()] == [first, later]
+
+
+@given(first=st.sampled_from(GOOD), other=st.sampled_from(GOOD))
+def test_an_adoption_no_lift_took_back_stays_the_runs_answer(
+    first: core.Selection, other: core.Selection
+) -> None:
+    """A stop that stands keeps its adoption: only the lift reopens it."""
+    run = start()
+    run.feed(_control("stop", 0))
+    _adopted(run, first)
+    again = run.propose(other)
+    assert new_requests(again) == []
+    assert (first == other) or [r.code for r in run.rejections()] == [
+        core.RejectionCode.ALREADY_SETTLED
+    ]
+    assert run.state.settlement.adoption is not None
+    assert run.state.settlement.adoption.selection == first
+
+
+def test_a_lift_leaves_an_adoption_underway_to_finish() -> None:
+    run = start()
+    run.feed(_control("stop", 0))
+    selection = GOOD[0]
+    (adopt,) = new_requests(run.propose(selection))
+    run.feed(_control("resume", 1))
+    (verify,) = new_requests(
+        run.answer(adopt, core.ObservationStatus.SUCCEEDED, revision=selection.revision)
+    )
+    run.answer(verify, core.ObservationStatus.SUCCEEDED, revision=selection.revision)
+    assert [result.selection for result in run.results()] == [selection]
+
+
 def test_a_winner_waits_while_an_attempt_still_holds_the_root() -> None:
     run = start()
     holder = core.AttemptView(
@@ -817,3 +899,112 @@ def test_the_winner_decision_completes_as_failed_when_its_adoption_fails() -> No
     _executor_answer(run, adopt, core.ObservationStatus.REJECTED)
     assert run.failures()
     assert _completion(run, decision) == core.CompletionStatus.FAILED
+
+
+_RECORD = st.tuples(
+    st.sampled_from(("rev-a", "rev-b")),
+    st.sampled_from(("baseline", "local-validation", "official", "profile")),
+    st.sampled_from((core.ObservationStatus.SUCCEEDED, core.ObservationStatus.FAILED)),
+    st.sampled_from(("trusted", "self-report")),
+)
+_KIND_OF = {
+    "baseline": core.EvidenceKind.BENCHMARK,
+    "local-validation": core.EvidenceKind.BENCHMARK,
+    "official": core.EvidenceKind.BENCHMARK,
+    "profile": core.EvidenceKind.PROFILING,
+}
+type _Record = tuple[
+    str,
+    Literal["baseline", "local-validation", "official", "profile"],
+    core.ObservationStatus,
+    Literal["trusted", "self-report"],
+]
+
+
+@settings(max_examples=examples(pr=30, nightly=300))
+@given(records=st.lists(_RECORD, max_size=6))
+def test_an_adoption_carries_exactly_the_winners_trusted_measurements(
+    records: list[_Record],
+) -> None:
+    """The executor names what the adopted revision measured, and nothing it did not."""
+    measured = tuple(
+        accuracy_proof(revision).model_copy(
+            update={
+                "evidence_id": core.EvidenceId(root=f"measured-{index}"),
+                "kind": _KIND_OF[purpose],
+                "purpose": purpose,
+                "status": status,
+                "provenance": provenance,
+                "acceptance_receipt": None,
+            }
+        )
+        for index, (revision, purpose, status, provenance) in enumerate(records)
+    )
+    state = world()
+    evaluation = core.EvaluationState(evidence=(*state.evaluation.evidence, *measured))
+    run = Run(state.model_copy(update={"evaluation": evaluation}))
+    (adopt,) = new_requests(run.propose(GOOD[0]))
+    assert isinstance(adopt, core.AdoptRevision)
+    assert adopt.evidence == tuple(
+        ref
+        for ref in evaluation.evidence
+        if ref.candidate == GOOD[0].revision
+        and ref.purpose in ("official", "baseline", "local-validation")
+        and ref.status is core.ObservationStatus.SUCCEEDED
+        and ref.provenance == "trusted"
+    )
+
+
+@pytest.mark.regression
+@given(status=st.sampled_from(tuple(core.CheckoutStatus)))
+@example(status=core.CheckoutStatus.DIRTY_TREE)
+def test_publication_adopts_without_root_verification_in_every_checkout_state(
+    status: core.CheckoutStatus,
+) -> None:
+    run = start()
+    selection = GOOD[0]
+    (request,) = new_requests(run.propose(selection))
+    publication = core.AdoptionPublication(
+        revision=selection.revision.revision_id.root,
+        commit="a" * 40,
+        branch="vibesys-adoptions/run",
+    )
+    checkout = core.CheckoutUpdate(status=status)
+    completed = run.answer(
+        request,
+        core.ObservationStatus.SUCCEEDED,
+        revision=selection.revision,
+        published=(publication, checkout),
+    )
+    assert new_requests(completed) == []
+    assert run.view().phase == "verified"
+    (result,) = run.results()
+    assert result.publication == publication
+    assert result.checkout == checkout
+    # Duplicate delivery and a persisted-state reload cannot publish another result.
+    run.state = reload(run.state)
+    run.feed(run.delivered[-1])
+    assert run.results() == [result]
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("phase", ["adopting", "legacy-verifying"])
+def test_a_publication_for_another_source_cannot_adopt_the_selection(phase: str) -> None:
+    run = start()
+    selection = GOOD[0]
+    (request,) = new_requests(run.propose(selection))
+    if phase == "legacy-verifying":
+        (request,) = new_requests(run.answer(request, core.ObservationStatus.SUCCEEDED))
+    publication = core.AdoptionPublication(
+        revision="foreign-source",
+        commit="a" * 40,
+        branch="vibesys-adoptions/run",
+    )
+    run.answer(
+        request,
+        core.ObservationStatus.SUCCEEDED,
+        revision=selection.revision,
+        published=(publication, core.CheckoutUpdate(status=core.CheckoutStatus.DIRTY_TREE)),
+    )
+    assert run.results() == []
+    assert run.failures()[-1].reason is core.AdoptionFailureReason.CONTENT_MISMATCH

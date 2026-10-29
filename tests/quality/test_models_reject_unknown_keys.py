@@ -49,7 +49,7 @@ def _product_modules() -> list[str]:
             parts = list(path.relative_to(root).with_suffix("").parts)
             if parts[-1] == "__init__":
                 parts.pop()
-            if parts[-1:] == ["__main__"] or {"tests", "_tui"} & set(parts):
+            if parts[-1:] == ["__main__"] or "tests" in parts:
                 continue
             if (root / parts[0] / "__init__.py").exists():
                 names.append(".".join(parts))

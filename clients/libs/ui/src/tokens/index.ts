@@ -13,6 +13,7 @@ export {
   themesOf,
 } from './appearance.js';
 export {
+  CHIP_FILL_MIX,
   CONTRAST_PAIRS,
   type ContrastPair,
   contrastRatio,

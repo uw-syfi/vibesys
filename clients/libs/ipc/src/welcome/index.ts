@@ -8,7 +8,7 @@
  * composes them: `WELCOME_CHANNELS` and `WelcomeBridge` are the union of the groups, and
  * `parseWelcomeRequest` sends a channel to its group's parser.
  */
-import type {HostKey, HostListing} from '@vibesys/hosts';
+import type {HostListing} from '@vibesys/hosts';
 import type {RecentRun} from '@vibesys/runs';
 import {
   HOSTS_CHANNELS,
@@ -16,6 +16,12 @@ import {
   type HostsWelcomeBridge,
   parseHostsRequest,
 } from './hosts.js';
+import {
+  MACHINE_SETTINGS_CHANNELS,
+  type MachineSettingsRequest,
+  type MachineSettingsWelcomeBridge,
+  parseMachineSettingsRequest,
+} from './machine-settings.js';
 import {
   MACHINES_CHANNELS,
   type MachinesRequest,
@@ -47,7 +53,7 @@ import {
   type StartRunRequest,
   type StartRunWelcomeBridge,
 } from './start-run.js';
-import type {ChromeState, WelcomeEvent, WelcomeOverview, WelcomeResult} from './types.js';
+import type {WelcomeEvent, WelcomeOverview, WelcomeResult} from './types.js';
 import {isChannelOf} from './values.js';
 import {
   parseWindowsRequest,
@@ -56,7 +62,7 @@ import {
   type WindowsWelcomeBridge,
 } from './windows.js';
 
-/** The app's own requests: the overview the welcome view loads first. */
+/** The app's own requests: the overview the shell loads first. */
 const APP_CHANNELS = {overview: 'vibesys:welcome:overview'} as const;
 
 export const WELCOME_CHANNELS = {
@@ -66,6 +72,7 @@ export const WELCOME_CHANNELS = {
   ...RUN_CONTROL_CHANNELS,
   ...SETTINGS_CHANNELS,
   ...MACHINES_CHANNELS,
+  ...MACHINE_SETTINGS_CHANNELS,
   ...NEW_RUN_CHANNELS,
   ...WINDOWS_CHANNELS,
 } as const;
@@ -75,29 +82,25 @@ type WelcomeChannel = (typeof WELCOME_CHANNELS)[keyof typeof WELCOME_CHANNELS];
 /** The complete positional shape of every welcome request at the renderer boundary. */
 const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.overview]: 0,
-  [WELCOME_CHANNELS.hosts]: 0,
-  [WELCOME_CHANNELS.host]: 1,
   [WELCOME_CHANNELS.setCheckout]: 3,
   [WELCOME_CHANNELS.cancelCheckout]: 1,
-  [WELCOME_CHANNELS.cancelInspection]: 1,
   [WELCOME_CHANNELS.signIn]: 1,
   [WELCOME_CHANNELS.complete]: 2,
-  [WELCOME_CHANNELS.inspect]: 3,
   [WELCOME_CHANNELS.logs]: 3,
   [WELCOME_CHANNELS.releaseLogs]: 0,
   [WELCOME_CHANNELS.tasks]: 2,
   [WELCOME_CHANNELS.harnesses]: 1,
-  [WELCOME_CHANNELS.start]: 6,
-  [WELCOME_CHANNELS.cancelStart]: 1,
   [WELCOME_CHANNELS.attach]: 2,
+  [WELCOME_CHANNELS.attachReader]: 3,
   [WELCOME_CHANNELS.resume]: 3,
-  [WELCOME_CHANNELS.showRun]: 0,
-  [WELCOME_CHANNELS.showWelcome]: 0,
-  [WELCOME_CHANNELS.retry]: 0,
-  [WELCOME_CHANNELS.stop]: 3,
-  [WELCOME_CHANNELS.stopConfirmed]: 3,
   [WELCOME_CHANNELS.releaseRun]: 0,
   [WELCOME_CHANNELS.readEvents]: 5,
+  [WELCOME_CHANNELS.readTrace]: 5,
+  [WELCOME_CHANNELS.readSummary]: 3,
+  [WELCOME_CHANNELS.readSpan]: 6,
+  [WELCOME_CHANNELS.runDigests]: 3,
+  [WELCOME_CHANNELS.projectRuns]: 2,
+  [WELCOME_CHANNELS.usageWindow]: 5,
   [WELCOME_CHANNELS.preferences]: 0,
   [WELCOME_CHANNELS.setAppearance]: 1,
   [WELCOME_CHANNELS.setNotifications]: 1,
@@ -106,6 +109,12 @@ const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.machine]: 1,
   [WELCOME_CHANNELS.inspectCheckout]: 2,
   [WELCOME_CHANNELS.removeMachine]: 1,
+  [WELCOME_CHANNELS.compute]: 1,
+  [WELCOME_CHANNELS.testCluster]: 2,
+  [WELCOME_CHANNELS.addCluster]: 2,
+  [WELCOME_CHANNELS.removeCluster]: 2,
+  [WELCOME_CHANNELS.agentLogins]: 1,
+  [WELCOME_CHANNELS.startLogin]: 2,
   [WELCOME_CHANNELS.describeMachine]: 1,
   [WELCOME_CHANNELS.preflight]: 2,
   [WELCOME_CHANNELS.examples]: 1,
@@ -113,8 +122,12 @@ const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.copyOut]: 3,
   [WELCOME_CHANNELS.startRun]: 2,
   [WELCOME_CHANNELS.helperFeatures]: 1,
+  [WELCOME_CHANNELS.taskGoal]: 3,
+  [WELCOME_CHANNELS.exampleDestination]: 3,
   [WELCOME_CHANNELS.openRunWindow]: 1,
   [WELCOME_CHANNELS.showMainWindow]: 0,
+  [WELCOME_CHANNELS.openSettings]: 0,
+  [WELCOME_CHANNELS.openExternal]: 1,
 } as const satisfies Readonly<Record<WelcomeChannel, number>>;
 
 /**
@@ -127,13 +140,12 @@ export interface WelcomeBridge
     RunControlWelcomeBridge,
     SettingsWelcomeBridge,
     MachinesWelcomeBridge,
+    MachineSettingsWelcomeBridge,
     NewRunWelcomeBridge,
     WindowsWelcomeBridge {
   readonly platform: string;
   overview(): Promise<WelcomeResult<WelcomeOverview>>;
-  onChrome(listener: (event: WelcomeEvent<ChromeState>) => void): void;
   onRecent(listener: (event: WelcomeEvent<readonly RecentRun[]>) => void): void;
-  onShowHost(listener: (event: WelcomeEvent<HostKey>) => void): void;
   onListing(listener: (event: WelcomeEvent<HostListing>) => void): void;
   onPreferences(listener: (event: WelcomeEvent<PreferencesView>) => void): void;
 }
@@ -146,6 +158,7 @@ export type WelcomeRequest =
   | RunControlRequest
   | SettingsRequest
   | MachinesRequest
+  | MachineSettingsRequest
   | NewRunRequest
   | WindowsRequest;
 
@@ -168,13 +181,24 @@ export function parseWelcomeRequest(channel: string, args: readonly unknown[]): 
   if (isChannelOf(RUN_CONTROL_CHANNELS, channel)) return parseRunControlRequest(channel, args);
   if (isChannelOf(SETTINGS_CHANNELS, channel)) return parseSettingsRequest(channel, args);
   if (isChannelOf(MACHINES_CHANNELS, channel)) return parseMachinesRequest(channel, args);
+  if (isChannelOf(MACHINE_SETTINGS_CHANNELS, channel)) {
+    return parseMachineSettingsRequest(channel, args);
+  }
   if (isChannelOf(NEW_RUN_CHANNELS, channel)) return parseNewRunRequest(channel, args);
   if (isChannelOf(WINDOWS_CHANNELS, channel)) return parseWindowsRequest(channel, args);
   // `WELCOME_ARGUMENT_COUNTS` is exhaustive over the same composed channel object.
   throw new Error(`${JSON.stringify(channel)} is not a welcome request`);
 }
 
-export type {HostsWelcomeBridge, WelcomeInspection} from './hosts.js';
+export type {HostsWelcomeBridge} from './hosts.js';
+export type {
+  AgentLogin,
+  ClusterTest,
+  ComputeSettings,
+  LoginStart,
+  MachineSettingsWelcomeBridge,
+  SlurmClusterSettings,
+} from './machine-settings.js';
 export type {
   CheckoutInspection,
   MachineEntry,
@@ -182,9 +206,13 @@ export type {
   MachinesWelcomeBridge,
 } from './machines.js';
 export type {
+  DestinationFound,
+  ExampleCreation,
   HarnessPick,
+  MeasureTarget,
   NewRunWelcomeBridge,
   Offered,
+  PreflightResult,
   RoleOption,
   RunInputs,
   RunOptions,
@@ -193,9 +221,14 @@ export type {
 
 export {
   HISTORY_PAGE_MAX,
+  type ReaderAttached,
   RUN_PORT_MESSAGE,
   type RunControlWelcomeBridge,
   type RunHistoryPage,
+  type RunSpanPage,
+  type RunSummary,
+  type RunSummaryResult,
+  type SummaryTokens,
 } from './run-control.js';
 export {
   FIRST_PAINT_CHANNEL,
@@ -210,10 +243,13 @@ export type {
   StartRunWelcomeBridge,
 } from './start-run.js';
 export {
-  type ChromeState,
+  attempt,
+  FAILURE_CAUSE_WORDS,
+  type FailureCause,
   type PathCompletion,
-  type StartOutcome,
   settled,
+  UNEXPECTED_FAILURE,
+  type UnexpectedFailure,
   WELCOME_EVENTS,
   type WelcomeEvent,
   type WelcomeOverview,

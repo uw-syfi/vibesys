@@ -237,7 +237,38 @@ def make_install_readable(root, spec):
     root.chmod(0o555)
 
 
-def install_tool(name, spec, target):
+def search_directories(login_path):
+    # The directories cargo is searched in: the login shell's PATH, then this process's.
+    directories = []
+    for path in (login_path, os.environ.get("PATH", "")):
+        for directory in path.split(os.pathsep):
+            if directory and directory not in directories:
+                directories.append(directory)
+    return directories
+
+
+def find_cargo(directories):
+    for directory in directories:
+        candidate = Path(directory) / "cargo"
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
+def cargo_missing_message(name, directories):
+    searched = os.pathsep.join(directories) or "(empty)"
+    return (
+        f"cannot install evaluator tool {name!r}: cargo was not found on the PATH searched "
+        f"({searched}). Install Rust for this user (rustup), or put cargo's directory on "
+        "the PATH of the user's login shell, for example by sourcing $HOME/.cargo/env from "
+        "~/.profile; VibeSys searches that PATH as well as its own."
+    )
+
+
+def install_tool(name, spec, target, directories):
+    cargo = find_cargo(directories)
+    if cargo is None:
+        raise InstallError(cargo_missing_message(name, directories))
     target.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{target.name}-", dir=target.parent))
     try:
@@ -247,7 +278,7 @@ def install_tool(name, spec, target):
             for argument in ("--bin", binary)
         ]
         arguments = [
-            "cargo",
+            cargo,
             "install",
             "--git",
             spec["git"],
@@ -272,6 +303,7 @@ def install_tool(name, spec, target):
                 and key not in {"GIT_DIR", "GIT_WORK_TREE"}
             }
             cargo_environment["CARGO_HOME"] = cargo_home
+            cargo_environment["PATH"] = os.pathsep.join(directories)
             if "RUSTUP_HOME" in os.environ:
                 cargo_environment["RUSTUP_HOME"] = os.environ["RUSTUP_HOME"]
             try:
@@ -285,9 +317,7 @@ def install_tool(name, spec, target):
                     timeout=CARGO_TIMEOUT,
                 )
             except FileNotFoundError as exc:
-                raise InstallError(
-                    f"cannot install evaluator tool {name!r}: cargo was not found"
-                ) from exc
+                raise InstallError(cargo_missing_message(name, directories)) from exc
             except subprocess.TimeoutExpired as exc:
                 raise InstallError(
                     f"cannot install evaluator tool {name!r}: cargo install timed out"
@@ -337,6 +367,7 @@ def main():
     if install_parent.is_symlink():
         raise InstallError(f"evaluator tool install root is a symlink: {install_parent}")
     install_parent.mkdir(parents=True, exist_ok=True)
+    directories = search_directories(sys.argv[3] if len(sys.argv) > 3 else "")
     for name, spec in document["tools"].items():
         if not isinstance(name, str) or TOOL_NAME_PATTERN.fullmatch(name) is None:
             raise InstallError(f"invalid evaluator tool name: {name!r}")
@@ -351,15 +382,16 @@ def main():
             raise InstallError(
                 f"evaluator tool installation failed receipt verification: {target}"
             )
-        install_tool(name, spec, target)
+        install_tool(name, spec, target, directories)
 
 
-try:
-    main()
-except Exception as exc:
-    detail = bounded_detail(str(exc) or type(exc).__name__)
-    print(detail, file=sys.stderr)
-    raise SystemExit(1) from None
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as exc:
+        detail = bounded_detail(str(exc) or type(exc).__name__)
+        print(detail, file=sys.stderr)
+        raise SystemExit(1) from None
 """.strip()
 
 
@@ -434,16 +466,24 @@ class EvaluatorToolLifecycleHooks(SandboxLifecycleHooks):
         self,
         tools: Mapping[str, CargoGitToolSpec],
         install_parent: Path,
+        *,
+        search_path: str = "",
     ) -> None:
-        """Snapshot immutable tool requirements and the target-native install root."""
+        """Snapshot immutable tool requirements and the target-native install root.
+
+        *search_path* is a ``PATH`` the target searches for ``cargo`` before its own
+        (the user's login shell's, for a host target); empty means the target's own.
+        """
         self._tools = dict(tools)
         self._install_parent = install_parent
+        self._search_path = search_path
 
     def before_ready(self, context: BeforeReadyContext) -> None:
         """Prepare verified tools before the sandbox is exposed to callers."""
         command = evaluator_tools_install_command(
             self._tools,
             self._install_parent,
+            search_path=self._search_path,
         )
         result = context.sandbox.execute(
             command,
@@ -466,8 +506,15 @@ class _EvaluatorToolReceipt(BaseModel):
 def evaluator_tools_install_command(
     tools: Mapping[str, CargoGitToolSpec],
     install_parent: str | Path,
+    *,
+    search_path: str = "",
 ) -> str:
     """Return a safely quoted command that prepares tools in an execution target.
+
+    The installer looks for ``cargo`` only when a tool is not already installed and
+    verified, first in *search_path* (when given) and then in the target's own
+    ``PATH``; when it finds none, it fails naming the tool, the directories searched
+    and the fix.
 
     The target needs only ``python3``, Cargo, and the standard library. The
     generated command verifies content-addressed cache hits, installs missing
@@ -490,7 +537,9 @@ def evaluator_tools_install_command(
         "tools": {name: spec.model_dump(mode="json") for name, spec in sorted(tools.items())},
     }
     payload = json.dumps(document, sort_keys=True, separators=(",", ":"))
-    return shlex.join(("python3", "-c", _TARGET_INSTALL_PROGRAM, payload, str(install_parent)))
+    return shlex.join(
+        ("python3", "-c", _TARGET_INSTALL_PROGRAM, payload, str(install_parent), search_path)
+    )
 
 
 def cargo_install_argv(spec: CargoGitToolSpec, install_root: Path) -> tuple[str, ...]:

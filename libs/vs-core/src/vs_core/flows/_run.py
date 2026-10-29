@@ -7,18 +7,22 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from vs_core._registry import ContractError
+from vs_core._run_pause import DEADLINE_STOP, ENVIRONMENT_STOP
 from vs_core.types.common import THIS_RUN, AttemptRef, DecisionId, InvocationRef, RunFacts, Seconds
 from vs_core.types.kinds import EventKind
+from vs_core.types.measurement import ComparisonSettled
 from vs_core.types.records import OperationResult
 from vs_core.types.search import (
     AdoptionFinished,
     CheckpointKnown,
     Event,
     OperationFinished,
+    ResumeFailed,
     ResumeReady,
+    StopLifted,
     StopRequested,
     TimeReached,
     TurnYielded,
@@ -59,7 +63,7 @@ from ._sources import (
     Task,
     Timer,
 )
-from ._spans import RunTrace
+from ._spans import RunTrace, SpanLabel
 from ._state import (
     Dropped,
     Held,
@@ -73,6 +77,7 @@ from ._state import (
     RestartSettleReason,
 )
 from ._trace import Trace, operation_span
+from ._winner import ADOPTED, NOT_ADOPTED
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
@@ -81,6 +86,7 @@ if TYPE_CHECKING:
     from vs_core._registry import OperationRegistration, OperationRegistry
     from vs_core._strategy_operations import StrategyOperations
     from vs_core.types.agents import Checkpoint
+    from vs_core.types.common import ControlInput
     from vs_core.types.search import RunView
     from vs_core.types.settlement import Selection
 
@@ -118,9 +124,12 @@ class _Run:
         self.facts = facts
         self.wiring = wiring
         self.stop: StopRequested | None = None
+        self.concluded = False
+        """Whether the root asked core to end the run (`Kit.finish`): no flow is left to run."""
         self.closed = False
         self.published: str | None = None
         self.choice: Selection | None = None
+        self.choice_label: SpanLabel | None = None
         self.out: list[Decision] = []
         self.dropped: list[Dropped] = []
         self.restart_settled: list[RestartSettled] = []
@@ -179,6 +188,7 @@ class _Run:
         self.trace = Trace(base.trace)
         self._begin(view, recorded, at)
         self.stop, self.published, self.choice = base.stop, base.published, base.choice
+        self.choice_label = base.choice_label
         self._issued = {(i.path, i.label): i.count for i in base.issued}
         self._in_flight = list(base.in_flight)
         self._restorable = {
@@ -283,6 +293,7 @@ class _Run:
             stop=self.stop,
             published=self.published,
             choice=self.choice,
+            choice_label=self.choice_label,
             in_flight=(*self._in_flight, *measuring),
             trace=self.trace.snapshot(),
         )
@@ -454,6 +465,32 @@ class _Run:
         current = self.trace.label_of(span_id)
         found = labeled(self.wiring.spans, current, kind, fields, self.trace.exists)
         self.trace.labeled(span_id, found)
+
+    def chose(self, selection: Selection, label: Label | None) -> None:
+        """The flow named ``selection`` its winner; ``label`` is how the span that adopts it reads.
+
+        The label is checked as it is given, so a flow that names one the search did not declare
+        fails where it chose, not at the end of the run.
+        """
+        self.choice = selection
+        if label is None:
+            self.choice_label = None
+            return
+        missing = {ADOPTED, NOT_ADOPTED} - set(label.kind.verdicts)
+        if missing:
+            message = f"the kind {label.kind.name!r} of an adoption must declare {sorted(missing)}"
+            raise ContractError(("choose", "label", "kind"), message)
+        self.choice_label = labeled(
+            self.wiring.spans, None, label.kind, label.fields(), self.trace.exists
+        )
+
+    def adopting(self, pending: Pending, verdict: str | None, reason: str | None) -> None:
+        """Label the span of the adoption ``pending`` with the label given to ``choose``, if any."""
+        chosen = self.choice_label
+        if chosen is None:
+            return
+        found = chosen.model_copy(update={"verdict": verdict, "reason": reason})
+        self.trace.labeled(operation_span(pending.decision), found)
 
     def forget(self, pending: Pending) -> None:
         """Abandon a request's outcome: if it arrives later it is dropped and recorded."""
@@ -649,13 +686,17 @@ class _Run:
                     if timer.at <= now:
                         timer.set(TimeUp(at=timer.at))
                 self._timers = [t for t in self._timers if not t.ready()]
-            case StopRequested(control=control):
-                if control.action == "stop" and self.stop is None:
-                    self._stop(item)
+            case StopRequested():
+                self._stop_requested(item)
+            case StopLifted():
+                if self.stop is not None:
+                    self._lift_stop()
             case CheckpointKnown(invocation=invocation, checkpoint=checkpoint):
                 self.checkpoints[invocation] = checkpoint
                 self._offer(item)
-            case TurnYielded() | YieldFailed() | ResumeReady():
+            case (
+                TurnYielded() | YieldFailed() | ResumeReady() | ResumeFailed() | ComparisonSettled()
+            ):
                 self._offer(item)
             case _:
                 self._answer(item)
@@ -744,6 +785,25 @@ class _Run:
             return OperationFinished(decision=item.decision, result=result)
         return item
 
+    def published_as[M: BaseModel](self, model: type[M]) -> M | None:
+        """What the run last published, as ``model``; None before any publish."""
+        text = self.published
+        return None if text is None else model.model_validate_json(text)
+
+    def _stop_requested(self, item: StopRequested) -> None:
+        """Take the run's first stop; a later one only names the ending (``_overrides``).
+
+        The flows already took the first stop, so a later one reaches none of them. Only one of
+        the host's own stops that follows an operator's replaces it, as the stop the ending
+        reads (``_winner._stop_ending``).
+        """
+        if item.control.action != "stop":
+            return
+        if self.stop is None:
+            self._stop(item)
+        elif _overrides(item.control, self.stop):
+            self.stop = item
+
     def _stop(self, item: StopRequested) -> None:
         self.stop = item
         self.trace.stop_requested()
@@ -751,6 +811,19 @@ class _Run:
             task.stop.set(item)
             if task.group is not None and task.group.stops and not task.stopped:
                 task.stop_pending = True
+
+    def _lift_stop(self) -> None:
+        """Take the stop back: flows it has not yet interrupted go on as if it never came.
+
+        Work the stop already ended stays ended (a task that took ``Stopped`` has returned),
+        and a flow that took the stop value off ``ctx.stopped`` has moved on. A later stop
+        reaches every flow again.
+        """
+        self.stop = None
+        self.trace.stop_lifted()
+        for task in self._tasks:
+            task.stop.lift()
+            task.stop_pending = False
 
     def _settle(self) -> None:
         """Resume flows that can move, in the order they started, until none can."""
@@ -774,6 +847,18 @@ class _Run:
             return False
         self._resume(task, ready.take(), None)
         return True
+
+
+def _overrides(control: ControlInput, taken: StopRequested) -> bool:
+    """Whether ``control``, a later stop, names the run's ending over the stop already taken.
+
+    A host deadline or environment failure overrides an earlier operator shutdown.
+    Between two host causes, the first determines this epoch's result.
+    """
+    return control.control_id.root.partition(":")[0] in {
+        DEADLINE_STOP,
+        ENVIRONMENT_STOP,
+    } and taken.control.control_id.root.partition(":")[0] not in {DEADLINE_STOP, ENVIRONMENT_STOP}
 
 
 def _same_plan(old: Measure, new: Measure) -> bool:

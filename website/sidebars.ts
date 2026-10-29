@@ -17,6 +17,7 @@ const sidebars: SidebarsConfig = {
         'contributing/development',
         'contributing/coding-best-practices',
         'contributing/architecture',
+        'contributing/run-transport',
         'contributing/agent-drivers',
         'contributing/domains',
         'contributing/extending-profilers',

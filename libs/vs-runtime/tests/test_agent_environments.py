@@ -37,6 +37,10 @@ class _Session:
     view: RunEnvironmentView
     close_count: int = 0
 
+    @property
+    def capture_commands(self) -> CommandRunner:
+        return self.sandbox
+
     def __enter__(self) -> _Session:
         return self
 
@@ -82,6 +86,7 @@ def _session(*, sandboxed: bool) -> _Session:
         _PathRunner(),
         RunEnvironmentView(
             paths=AgentPaths(),
+            workspace_git_writable=True,
             cli_sandboxed=sandboxed,
             share_agent_session=False,
         ),

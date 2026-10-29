@@ -109,10 +109,14 @@ by a fresh one.
 
 ## Vetted harnesses
 
-`vs_agent.provider_policy.HARNESSES` is the one list of the provider and model
-pairs VibeSys runs agents with; a provider's first entry is its default model.
-Which pairs are vetted is launch policy, so the list lives here; whether a CLI
-accepts a model is provider knowledge, and stays in agentshim.
+`vs_agent.provider_policy.harnesses()` is the one list of the provider and
+model pairs VibeSys runs agents with. It is derived at call time: for each
+shipped provider, the models agentshim's `ProviderProfile.models` lists, the
+provider's default first. Which models a CLI runs, its default model, and each
+model's context window (`agentshim.context_window`) are model knowledge, owned
+by agentshim; VibeSys's policy is only which providers it ships and the
+operator's opt-out. `test_no_model_knowledge_in_product_code` fails on a model
+id literal in product code.
 
 `AgentSpec` enforces it: constructing a CLI spec, or replacing its model (a
 role override, a quota fallback, a chat thread), raises
@@ -125,6 +129,15 @@ the same list. The host helper serves it to the desktop app's start sheet
 opt-out flag in a start's arguments, so a run started from the desktop app
 cannot leave the list
 ([desktop-connection.md](desktop-connection.md#methods)).
+
+The same construction also applies the host allow-list
+(`~/.config/vibesys/host.toml`, key `allowed_models`; see
+[cli-flags.md](../cli-flags.md)). A missing file or an empty list adds no
+restriction. A non-empty list refuses a CLI model outside it, including on
+resume, relaunch, and a chat thread, and `allow_unvetted_model` does not
+bypass it. The refusal is a configuration error whose message names the key,
+the role, the model, and the list, so the app shows it as a start or resume
+refusal. Scripted runs and any other non-CLI backend are not checked.
 
 ## Provider readiness
 
@@ -186,8 +199,8 @@ provider's reset time plus a margin, else `retry_seconds`, cut to what is left o
 spent or the reset lies beyond it, it publishes `quota_abandoned` and raises the
 quota error, so the turn fails as it did before. A stop request ends any wait.
 
-A run drives every role through one agent client bound to one provider, so it
-cannot open a session on another provider: the run host refuses a configured
+A run fixes each role's provider when it starts (one agent client per provider),
+so it cannot open a session on another provider: the run host refuses a configured
 `fallback_provider` at startup, naming the key, rather than accepting and ignoring it
 (`policy = "fallback"` needs one, so it is refused too). The gate and
 `ProviderFallback` still implement the switch for a host whose sessions can change
@@ -207,7 +220,8 @@ run starts reserves the input, renders it into that turn's prompt, and the run
 journals `steer_consumed` once the message has reached a turn. An input is
 delivered exactly once: a turn that is cancelled or rejected before the provider
 accepts it returns the input to pending, and a later turn receives it. A turn
-already running is never interrupted by a steer.
+already running is never interrupted by a default steer; an `--interrupt` steer is
+offered to it first, as [Running VibeSys](../running-vibesys.md) describes.
 
 ## Provider session resume
 
@@ -318,13 +332,15 @@ process. Fixing that belongs with the checkpoint, not the session.
 agentshim classifies every failed turn: `CliExitError.kind` is a
 `FailureKind`, read by the provider package from what its CLI reported. `vs_agent`
 never matches provider error text. A turn whose kind is `TRANSIENT`
-(an overload, a rate limit, or a server error) is retried in place after
-each delay in `TRANSIENT_RETRY_DELAYS_S`, about fifteen minutes in total,
-before the error propagates. The CLI has already retried inside the turn by
-then, and without this one overload ends a run that is hours long. The retry
-keeps the conversation, and `cancel()` ends a wait immediately. Every other
-kind propagates at once: a usage limit or a login problem outlasts any
-backoff here.
+(an overload, a rate limit, or a server error) is not retried in place:
+`TRANSIENT_RETRY_DELAYS_S` is empty, because the CLI has already retried inside
+the turn. The failure reaches the client as a capacity limit after one attempt,
+and the run's capacity gate waits out the outage. Only the gate's waits are kept
+off the turn's limit, so every retry here would charge a whole CLI attempt (3 to
+4 min) to it. A retry, when a caller configures one, keeps the conversation, and
+`cancel()` ends a wait immediately. A cancelled turn
+still ends with its classified capacity error. Every other kind propagates at
+once: a usage limit or a login problem outlasts any backoff here.
 
 ### Output that never matched its schema is a structured-response failure
 
@@ -395,9 +411,11 @@ A Docker run starts from two images, built by `vs_agent.api.images`:
 
 The agent layer sits on top so that a CLI version bump rebuilds only that top
 layer, and a task image stays pure enough to serve the evaluator on its own.
-Docker's layer cache is what makes a repeat build of either image cheap;
-`vs_agent.api.images` builds an image once per launch and resolves its
-immutable manifest ID rather than keeping a manifest of its own.
+Each image's local tag is keyed on its build inputs, so a daemon that already
+has the tag builds nothing (a build, even a fully cached one, re-exports the
+image, which takes minutes for a large base); a changed input gets a new tag
+and Docker's layer cache redoes only what changed. `vs_agent.api.images`
+resolves the immutable manifest ID rather than keeping a manifest of its own.
 
 How a run's Dockerfile is generated from its Features, why no devcontainer CLI
 or Docker socket is involved at run time, and how Features are tested on each
@@ -412,6 +430,13 @@ module). The Rust, Go, and container-runtime pins live with their Features in
 version bump is a one-line change in one module. Each Feature's option defaults
 repeat the pins so `devcontainer features test` can run unconfigured, and a test
 fails if they drift.
+
+The pinned Claude Code must also know every Claude model agentshim lists, or it
+bills an unknown model at a fallback rate. `CLAUDE_CLI_MIN_FOR_GENERATION` names
+the oldest release that knows each generation, and `test_claude_cli_pin` fails
+when agentshim lists a newer generation than the table, or the pin is older
+than an entry. Raise the pin in the same PR that bumps agentshim for a new
+generation.
 
 A task Dockerfile that needs the backend's base image declares `ARG
 BASE_IMAGE` and `FROM ${BASE_IMAGE}`; `agent_image` always passes

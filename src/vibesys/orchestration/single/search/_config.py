@@ -1,4 +1,4 @@
-"""The single search's own knobs: how long to search, how often to measure, when to give up.
+"""The single search's own knobs: how long to search, how many ideas to measure, when to give up.
 
 Everything else a run needs belongs to someone else. How candidates are measured and compared
 is the task's (`ctx.task`); how an agent is asked is its role's (`_roles`); how a backend
@@ -26,8 +26,6 @@ class SingleConfig(Value):
     """Rounds of agent work: each opens one candidate workspace."""
     max_retries_per_round: Positive = 1
     """Paid implementer turns of one round, which is also the workspace's paid-turn limit."""
-    official_eval_every: Positive = 1
-    """The trusted gates run after the implementer's self-review every this many rounds."""
     max_continuation_rounds: NonNegative = 2
     """Times one hypothesis may be continued after its first round."""
     exclusive_root: bool = False
@@ -44,7 +42,6 @@ class SingleConfig(Value):
         """
         return HypothesisConfig(
             max_rounds=self.max_rounds,
-            official_eval_every=self.official_eval_every,
             max_retries_per_round=self.max_retries_per_round,
             max_continuation_rounds=self.max_continuation_rounds,
         )

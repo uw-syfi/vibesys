@@ -13,12 +13,19 @@ from vs_sandbox.agent_gpu import (
     AgentGpuLauncher,
     AgentGpuRequestError,
     GpuCommand,
+    GpuJobOutcome,
     GpuJobRequest,
     GpuLauncher,
     choose_partition,
     parse_partition_limits,
 )
 from vs_sandbox.agent_gpu_cap import CANCELLED_BEFORE_SUBMISSION, CappedGpuLauncher
+from vs_sandbox.agent_gpu_root_gate import RootGatedGpuLauncher
+from vs_sandbox.gpu_command_runner import (
+    GpuCaptureRecovery,
+    GpuCommandRunner,
+    gpu_capture_execution_identity,
+)
 from vs_sandbox.host_command_broker import (
     BrokerTransport,
     GpuCommands,
@@ -39,6 +46,15 @@ from vs_sandbox.slurm_capture_plan import (
     SlurmEvaluationPlan,
     read_slurm_capture_plan,
     write_slurm_capture_plan,
+)
+from vs_sandbox.slurm_comparison import (
+    SERVE_PORT_PLACEHOLDER,
+    BaselineServer,
+    ComparisonMachine,
+    ComparisonNotConfiguredError,
+    comparison_policy,
+    serve_command,
+    serve_script,
 )
 from vs_sandbox.slurm_executor import (
     SharedSlurmAdmission,
@@ -63,6 +79,7 @@ from vs_sandbox.slurm_ledger import (
     SlurmLedgerAttachment,
     open_ledger_attachment,
 )
+from vs_sandbox.slurm_ledger_evaluations import CLOSE_RELEASE_BOUND_S
 from vs_sandbox.slurm_policy import (
     SlurmExecutionPolicy,
     SlurmOperatorSettings,
@@ -99,6 +116,7 @@ HOST_COMMAND_CLIENT = Path(host_command_client.__file__).resolve()
 
 __all__ = [
     "CANCELLED_BEFORE_SUBMISSION",
+    "CLOSE_RELEASE_BOUND_S",
     "COMMAND_BROKER_SOCKET_ENV",
     "COMMAND_BROKER_TOKEN_ENV",
     "GPU_ACTIVE_FRACTION_METRIC",
@@ -107,18 +125,25 @@ __all__ = [
     "PROFILE_END",
     "PROFILE_OUTPUT_ROOT",
     "PROFILE_STATS_PREFIX",
+    "SERVE_PORT_PLACEHOLDER",
     "AgentGpuConfig",
     "AgentGpuLauncher",
     "AgentGpuRequestError",
     "AttachOutcome",
     "AttachPending",
     "Attached",
+    "BaselineServer",
     "BrokerReplyError",
     "BrokerTransport",
     "BrokeredProcesses",
     "CappedGpuLauncher",
+    "ComparisonMachine",
+    "ComparisonNotConfiguredError",
+    "GpuCaptureRecovery",
     "GpuCommand",
+    "GpuCommandRunner",
     "GpuCommands",
+    "GpuJobOutcome",
     "GpuJobRequest",
     "GpuLauncher",
     "HipApiTime",
@@ -131,6 +156,7 @@ __all__ = [
     "ProfileCaptureDescriptor",
     "ProfileStats",
     "ReadOnlyPathLinkError",
+    "RootGatedGpuLauncher",
     "RunRoots",
     "SharedSlurmAdmission",
     "SlurmCapturePlan",
@@ -154,7 +180,9 @@ __all__ = [
     "agent_gpu_capability",
     "check_read_only_links",
     "choose_partition",
+    "comparison_policy",
     "configured_capture_lifecycle",
+    "gpu_capture_execution_identity",
     "load_slurm_gpu_alias_settings",
     "load_slurm_operator_settings",
     "load_slurm_policy",
@@ -166,6 +194,8 @@ __all__ = [
     "remote_job_prefix",
     "render_slurm_operator_toml",
     "require_profile_fields",
+    "serve_command",
+    "serve_script",
     "slurm_queue_status_reader",
     "split_profile_stats",
     "translate_slurm_gpu",

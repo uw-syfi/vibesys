@@ -3,9 +3,9 @@
  * system's appearance, observed from `prefers-color-scheme`.
  */
 import {
+  attempt,
   type PreferencesView,
   type SettingsWelcomeBridge,
-  settled,
   type WelcomeBridge,
   type WelcomeResult,
 } from '@vibesys/ipc';
@@ -57,13 +57,13 @@ function perform(
   request: SettingsRequest,
   dispatch: (action: SettingsAction) => void,
 ): void {
-  const call =
+  const call = () =>
     request.kind === 'load'
       ? bridge.preferences()
       : request.change.kind === 'appearance'
         ? bridge.setAppearance(request.change.appearance)
         : bridge.setNotifications(request.change.enabled);
-  void settled(call).then(result => dispatch(replied(request, result)));
+  void attempt(call).then(result => dispatch(replied(request, result)));
 }
 
 /**

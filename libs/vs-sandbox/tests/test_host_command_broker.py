@@ -30,6 +30,7 @@ from vs_sandbox.api.slurm import (
     CappedGpuLauncher,
     GpuCommand,
     GpuCommands,
+    GpuJobOutcome,
     GpuJobRequest,
     HostCommandBroker,
     RunRoots,
@@ -56,11 +57,14 @@ _FRAMEWORK_RESULT = "/tmp/vibesys-framework-benchmark-0123456789abcdef.json"  # 
 class _RecordingLauncher:
     """Fake launcher: records the job and optionally blocks until it is cancelled."""
 
-    def __init__(self, threads: Threads, *, block: bool = False) -> None:
+    def __init__(
+        self, threads: Threads, *, block: bool = False, termination_confirmed: bool = True
+    ) -> None:
         self.commands: list[GpuCommand] = []
         self.requests: list[GpuJobRequest] = []
         self.cancelled = threads.event()
         self._block = block
+        self._termination_confirmed = termination_confirmed
 
     def run(
         self,
@@ -69,13 +73,21 @@ class _RecordingLauncher:
         *,
         write: Callable[[bytes], None],
         cancel: Event,
-    ) -> int:
+    ) -> GpuJobOutcome:
         self.requests.append(request)
         self.commands.append(command)
         write(b"started\n")
         if self._block and cancel.wait(HANG_GUARD_S):
             self.cancelled.set()
-        return 5
+        return GpuJobOutcome(
+            5,
+            termination_confirmed=self._termination_confirmed,
+            job_name="recording-launcher-job",
+        )
+
+    def reconcile(self, job_name: str) -> bool:
+        del job_name
+        return True
 
 
 class _ReturnSignallingLauncher:
@@ -97,7 +109,7 @@ class _ReturnSignallingLauncher:
         *,
         write: Callable[[bytes], None],
         cancel: Event,
-    ) -> int:
+    ) -> GpuJobOutcome:
         try:
             return self._inner.run(request, command, write=write, cancel=cancel)
         finally:
@@ -286,6 +298,27 @@ class TestGpuOperation:
         assert command.env["KEEP_ME"] == "1"
         assert "CUDA_VISIBLE_DEVICES" not in command.env
 
+    def test_an_unconfirmed_stop_is_an_error_never_an_ordinary_exit(
+        self,
+        sim: Sim,
+        tmp_path: Path,
+        workspace: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsysbinary: pytest.CaptureFixture[bytes],
+    ) -> None:
+        monkeypatch.chdir(workspace)
+
+        def program(net: _Network) -> int:
+            launcher = _RecordingLauncher(net.threads, termination_confirmed=False)
+            with _serving(net, tmp_path, workspace, gpu=_gpu(launcher)) as broker:
+                _point_at(monkeypatch, broker)
+                return _run_client(net, ["true"])
+
+        assert _simulate(sim, program) == 2
+        captured = capsysbinary.readouterr()
+        assert captured.out == b"started\n"
+        assert b"termination could not be confirmed" in captured.err
+
     def test_a_sibling_directory_of_the_workspace_is_refused_by_name(
         self, sim: Sim, tmp_path: Path, workspace: Path
     ) -> None:
@@ -383,14 +416,14 @@ class TestGpuOperation:
                 *,
                 write: Callable[[bytes], None],
                 cancel: Event,
-            ) -> int:
+            ) -> GpuJobOutcome:
                 del request, command
                 for _ in range(1024):
                     if cancel.is_set():
                         self.cancelled.set()
                         break
                     write(b"x" * 4096)
-                return 0
+                return GpuJobOutcome(0)
 
         def program(net: _Network) -> bool:
             launcher = _Flooding(net.threads)

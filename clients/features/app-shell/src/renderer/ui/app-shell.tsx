@@ -1,153 +1,96 @@
-import {
-  AppFrame,
-  Button,
-  Row,
-  SidebarItem,
-  SidebarSection,
-  type StatusTone,
-  Text,
-} from '@vibesys/ui';
+import {RailFrame, RailItem} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
-import {
-  liveRows,
-  machineCounts,
-  type RunRow,
-  type RunRowStatus,
-  recentRows,
-  type Screen,
-  type ShellActions,
-  type SidebarAction,
-  type SidebarState,
-  statusWord,
-} from '../../state/index.js';
+import type {Screen, SidebarAction, SidebarState} from '../../state/index.js';
 
-const TONES: Readonly<Record<RunRowStatus, StatusTone>> = {
-  live: 'live',
-  paused: 'warn',
-  finished: 'ok',
-  failed: 'err',
-  stopped: 'neutral',
-  unknown: 'neutral',
-};
-
-function sameScreen(left: Screen, right: Screen): boolean {
-  if (left.kind !== 'run' || right.kind !== 'run') return left.kind === right.kind;
-  return left.run.host === right.run.host && left.run.runId === right.run.runId;
+/** What the rail says besides its destinations: the runs that need the user, and the machines' health. */
+export interface RailBadges {
+  /** How many runs need the user (failed or stalled); none shows no badge. */
+  readonly needsYou: number;
+  /** The status word of the machine problem to flag on Machines (`problemWord`), or null. */
+  readonly machineWarning: string | null;
 }
 
-function RunItem(props: {
-  readonly row: RunRow;
-  readonly state: SidebarState;
-  readonly dispatch: (action: SidebarAction) => void;
-  readonly actions: ShellActions;
-}): JSX.Element {
-  const {row, state, dispatch, actions} = props;
-  const screen: Screen = {kind: 'run', run: row.run};
-  return (
-    <SidebarItem
-      label={row.title}
-      detail={row.detail}
-      status={{tone: TONES[row.status], label: statusWord(row.status)}}
-      active={sameScreen(state.selection, screen)}
-      press={() => dispatch({type: 'select', screen})}
-      menu={[
-        {id: 'window', label: 'Open in new window', press: () => actions.openWindow(row.run)},
-        {id: 'archive', label: 'Archive', press: () => actions.archive(row.run)},
-      ]}
-    />
-  );
+/** Whether `selected` is `screen`, or a screen that belongs to it (a run belongs to Runs). */
+function within(selected: Screen, screen: Screen['kind']): boolean {
+  return selected.kind === screen || (screen === 'runs' && selected.kind === 'run');
 }
 
 /**
- * The app's one window: the sidebar (New run, Live, Recent with "Show all", Machines and
- * Settings) beside the selected screen, which `screen` renders.
+ * The app's one window: a narrow rail (the app's mark, New, Runs with a badge for the runs that need
+ * the user, Machines with a warning dot, Usage, and Settings at the bottom) beside the selected
+ * screen, which `screen` renders. The mark goes to `home`. Runs is in the rail only while the app
+ * knows of a run (`showRuns`).
  */
 export function AppShell(props: {
   readonly state: SidebarState;
   readonly dispatch: (action: SidebarAction) => void;
-  readonly actions: ShellActions;
+  readonly badges: RailBadges;
+  /** Whether the rail lists Runs: false while the app knows of no run. */
+  readonly showRuns: boolean;
+  /** The screen the mark goes to: the Runs dashboard, or New run when there is no run. */
+  readonly home: Screen;
+  /** The app's version, which the mark's tooltip shows. */
   readonly version: string;
   readonly screen: (screen: Screen) => ReactNode;
 }): JSX.Element {
-  const {state, dispatch, actions} = props;
-  const live = liveRows(state);
-  const recent = recentRows(state);
-  const machines = machineCounts(state);
-  const select = (screen: Screen) => () => dispatch({type: 'select', screen});
-  const item = (row: RunRow) => (
-    <RunItem
-      key={`${row.run.host} ${row.run.runId}`}
-      row={row}
-      state={state}
-      dispatch={dispatch}
-      actions={actions}
-    />
-  );
+  const {state, dispatch, badges} = props;
+  const selected = state.selection;
+  const go = (screen: Screen) => () => dispatch({type: 'select', screen});
   return (
-    <AppFrame
+    <RailFrame
       label="VibeSys"
-      nav={
+      top={
         <>
-          <Row justify="between">
-            <Text variant="section" tone="default">
-              VibeSys
-            </Text>
-            <Text variant="code" tone="muted">
-              {props.version}
-            </Text>
-          </Row>
-          <Button
-            variant="primary"
-            full
-            icon="plus"
-            text="New run"
-            press={select({kind: 'new-run'})}
+          <RailItem
+            icon="mark"
+            label="VibeSys"
+            hint={`VibeSys ${props.version}`}
+            hideLabel
+            press={go(props.home)}
           />
-          {live.length === 0 ? null : (
-            <SidebarSection title="Live">{live.map(item)}</SidebarSection>
-          )}
-          <SidebarSection
-            title="Recent"
-            showAll={{
-              label:
-                recent.more === 0 ? 'Show all' : `Show all (${recent.rows.length + recent.more})`,
-              press: select({kind: 'all-runs'}),
-            }}
-          >
-            {recent.rows.length === 0 ? (
-              <Text variant="small" tone="muted">
-                Runs you open show up here.
-              </Text>
-            ) : (
-              recent.rows.map(item)
-            )}
-          </SidebarSection>
+          <RailItem
+            icon="plus"
+            label="New"
+            hint="New run"
+            active={within(selected, 'new-run')}
+            press={go({kind: 'new-run'})}
+          />
+          {props.showRuns ? (
+            <RailItem
+              icon="grid"
+              label="Runs"
+              active={within(selected, 'runs')}
+              {...(badges.needsYou > 0
+                ? {badge: {count: badges.needsYou, label: `${badges.needsYou} need you`}}
+                : {})}
+              press={go({kind: 'runs'})}
+            />
+          ) : null}
+          <RailItem
+            icon="monitor"
+            label="Machines"
+            active={within(selected, 'machines')}
+            {...(badges.machineWarning === null ? {} : {warning: badges.machineWarning})}
+            press={go({kind: 'machines'})}
+          />
+          <RailItem
+            icon="usage"
+            label="Usage"
+            active={within(selected, 'usage')}
+            press={go({kind: 'usage'})}
+          />
         </>
       }
-      footer={
-        <>
-          <SidebarItem
-            label="Machines"
-            icon="monitor"
-            count={machines.count}
-            {...(machines.attention === 0
-              ? {}
-              : {
-                  detail: `${machines.attention} need${machines.attention === 1 ? 's' : ''} attention`,
-                })}
-            active={state.selection.kind === 'machines'}
-            press={select({kind: 'machines'})}
-          />
-          <SidebarItem
-            label="Settings"
-            icon="gear"
-            active={state.selection.kind === 'settings'}
-            press={select({kind: 'settings'})}
-          />
-        </>
+      bottom={
+        <RailItem
+          icon="gear"
+          label="Settings"
+          active={within(selected, 'settings')}
+          press={go({kind: 'settings'})}
+        />
       }
     >
-      {props.screen(state.selection)}
-    </AppFrame>
+      {props.screen(selected)}
+    </RailFrame>
   );
 }

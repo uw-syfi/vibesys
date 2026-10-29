@@ -1,23 +1,24 @@
 import AxeBuilder from '@axe-core/playwright';
+import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {expect, type Page, test} from '@playwright/test';
+import {HostCallRequestSchema, HostCallResponseSchema} from '@vibesys/proto';
+import {intentReplay} from '@vibesys/run-fixtures';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
   installFakeMachines,
   installFakeNewRun,
+  installFakeProjectRuns,
 } from './fake-bridge.js';
-import {type FakeRunSeed, installFakeRun} from './fake-run.js';
-import {type FakeServerSeed, installFakeServer} from './fake-server.js';
+import {addInitScripts, initScript} from './init-scripts.js';
+import {journeyScript, type NativeJourney, transitionJourney} from './journey-world.js';
+import {installGatewayOnly} from './retired-run-bridge.js';
+import {STARTED_AT} from './started-at.js';
 
-/**
- * The Run screen's journey against the Fake bridge and a fake run that reports its startup steps
- * and writes its logs: open it from the sidebar, watch it start, read its logs, stop it (with Force
- * stop offered only once stopping has taken two minutes on the page's clock), and see it end.
- * Screens are checked in the Ink theme; `RUN_PAGE_SHOTS` names a directory to save them in.
- */
+/** The Run screen starts, drains, cancels, and resumes through its shipping bridge. */
 
 interface FakeHostWindow extends Window {
-  fakeHost: {listing(listing: unknown): void; calls: unknown[][]};
+  fakeHost: {commands: string[]; listing(listing: unknown): void; calls: unknown[][]};
 }
 
 const PROJECT = '/home/me/vibesys-projects/queue-rs';
@@ -33,27 +34,14 @@ function server(phase: string, end: unknown = null): Record<string, unknown> {
     phase,
     paused: null,
     end,
-    startedAt: 1,
+    startedAt: STARTED_AT,
     reason: null,
   };
 }
 
 function listed(live: unknown[], ended: unknown[]): Record<string, unknown> {
-  return {kind: 'listed', host: 'ssh:chelan4', live, ended, unreadable: [], unverified: []};
+  return {kind: 'listed', host: 'ssh:host-b', live, ended, unreadable: [], unverified: []};
 }
-
-function stream(id: string, owner: Record<string, unknown>, outcome: string | null) {
-  return {id, owner, command: 'docker build .', retained_start: 0, size: 0, outcome};
-}
-
-const NARRATION = [
-  {at: '2026-10-15T16:30:51+00:00', message: 'run started (2 rounds)'},
-  {at: '2026-10-15T16:36:20+00:00', message: 'container ready'},
-]
-  .map(({at, message}) =>
-    JSON.stringify({at, level: 'INFO', logger: 'vibesys', thread: 'main', message}),
-  )
-  .join('\n');
 
 const SEED: FakeBridgeSeed = {
   theme: 'ink',
@@ -62,8 +50,8 @@ const SEED: FakeBridgeSeed = {
   listings: [listed([server('starting')], [])],
   recent: [
     {
-      host: 'ssh:chelan4',
-      hostLabel: 'chelan4',
+      host: 'ssh:host-b',
+      hostLabel: 'host-b',
       project: PROJECT,
       task: 'mpmc',
       runId: RUN_ID,
@@ -71,52 +59,36 @@ const SEED: FakeBridgeSeed = {
       attachedAt: 3,
     },
   ],
+  projectRuns: {[`ssh:host-b|${PROJECT}`]: [{runId: RUN_ID, task: 'mpmc', createdAt: 3}]},
 };
 
 /** The live run's server: a session that opens and answers, with no events to show yet. */
-const SERVER: FakeServerSeed = {
-  runId: RUN_ID,
-  batch: {
-    type: 'event_batch',
-    events: [{timestamp: '2026-10-15T16:30:51Z', type: 'server_ready', sequence: 1}],
-    through_sequence: 1,
-    store_id: 'store-1',
-    history_after_sequence: 0,
-  },
-  snapshot: {run_id: RUN_ID, sequence: 1, status: 'starting'},
-};
-
-const RUN: FakeRunSeed = {
-  streams: [
-    stream('s1', {kind: 'startup_step', stage: 'building_image'}, 'ended'),
-    stream('s2', {kind: 'startup_step', stage: 'starting_container'}, null),
-    stream('s3', {kind: 'gate_stage', execution_id: 'w5', gate: 'benchmark', attempt: 1}, null),
-    stream('s4', {kind: 'tool_build', name: 'perf'}, 'ended'),
-    stream('s5', {kind: 'run_narration'}, null),
-  ],
-  text: {
-    s1: '#8 [7/8] WORKDIR /workspace\n#8 DONE 0.0s\n#9 exporting to image\n',
-    s2: '[docker] starting container\n[readiness] claude: binary ok\n',
-    s3: 'vibesys-queue benchmark, 3 repetitions\nrepetition 1: 41.2 Mops/s\n',
-    s4: 'perf: cached\n',
-    s5: `${NARRATION}\n`,
-  },
-};
-
 async function open(page: Page, seed: FakeBridgeSeed): Promise<void> {
-  await page.addInitScript(installFakeBridge, seed);
-  await page.addInitScript(installFakeMachines, seed);
-  await page.addInitScript(installFakeNewRun, seed);
-  await page.addInitScript(installFakeRun, RUN);
-  await page.addInitScript(installFakeServer, SERVER);
+  await addInitScripts(page, [
+    initScript(installFakeBridge, seed),
+    initScript(installFakeMachines, seed),
+    initScript(installFakeNewRun, seed),
+    initScript(installFakeProjectRuns, seed),
+    initScript(installGatewayOnly, undefined),
+    journeyScript(
+      (seed.listings?.[0] as {ended?: unknown[]})?.ended?.length
+        ? 'stopped-empty'
+        : (seed.listings?.[0] as {live?: {phase: string}[]})?.live?.[0]?.phase === 'starting'
+          ? 'startup'
+          : 'empty',
+    ),
+  ]);
   await page.goto('./shell.html');
+  if ((seed.listings?.[0] as {live?: {phase: string}[]})?.live?.[0]?.phase === 'starting')
+    phases.set(page, 'startup');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'ink');
   await page
-    .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: /^\S+ queue-rs · mpmc/})
+    .getByRole('main')
+    .getByRole('button', {name: /^queue-rs · mpmc/})
     .click();
 }
 
+const phases = new WeakMap<Page, NativeJourney>();
 const shots = process.env['RUN_PAGE_SHOTS'];
 
 async function shot(page: Page, name: string): Promise<void> {
@@ -128,23 +100,58 @@ async function push(page: Page, listing: unknown): Promise<void> {
     ([value]) => (window as unknown as FakeHostWindow).fakeHost.listing(value),
     [listing],
   );
-}
-
-async function calls(page: Page): Promise<unknown[][]> {
-  return page.evaluate(() => (window as unknown as FakeHostWindow).fakeHost.calls);
+  const from = phases.get(page);
+  if (from) {
+    const value = listing as {live: {phase: string}[]; ended: unknown[]};
+    const phase = value.live[0]?.phase;
+    const to = value.ended.length
+      ? 'startup-ended'
+      : phase === 'running'
+        ? 'startup-running'
+        : phase === 'stopping'
+          ? 'startup-draining'
+          : undefined;
+    if (!to) throw new Error(`Unsupported startup fixture phase: ${phase}`);
+    await transitionJourney(page, from, to);
+    phases.set(page, to);
+  }
 }
 
 test.use({colorScheme: 'dark'});
 
-test('a run starts, writes its logs, stops with Force stop after the bound, and ends', async ({
+test('a run starts, writes its logs, permits cancellation during drain, and resumes after ending', async ({
   page,
 }) => {
   await page.clock.install();
+  // The host admits what the page posts: a pending intent, or the epoch a relaunch starts.
+  const posted: string[] = [];
+  await page.exposeFunction('postIntent', (_host: string, bytes: number[]) => {
+    const {method} = fromBinary(HostCallRequestSchema, new Uint8Array(bytes));
+    if (method.case === 'relaunch') {
+      posted.push('relaunch');
+      return [
+        ...toBinary(
+          HostCallResponseSchema,
+          create(HostCallResponseSchema, {
+            result: {case: 'relaunch', value: {outcome: {case: 'epoch', value: 2n}}},
+          }),
+        ),
+      ];
+    }
+    if (method.case !== 'postIntent') throw new Error('Expected PostIntent');
+    posted.push(method.value.intent.case ?? '');
+    return [
+      ...toBinary(
+        HostCallResponseSchema,
+        intentReplay('pending', method.value.requestId).admission,
+      ),
+    ];
+  });
   await open(page, SEED);
 
   // Starting: the header and the startup timeline, the active step showing its live log.
   await expect(page.getByRole('heading', {name: 'queue-rs · mpmc'})).toBeVisible();
-  await expect(page.getByText('chelan4 · 20261015-163047')).toBeVisible();
+  await expect(page.getByText('host-b · 20261015-163047')).toBeVisible();
   await expect(page.getByText('Starting', {exact: true}).first()).toBeVisible();
   const startup = page.getByRole('region', {name: 'Starting'});
   await expect(startup.getByText('Starting the agent container')).toBeVisible();
@@ -152,44 +159,35 @@ test('a run starts, writes its logs, stops with Force stop after the bound, and 
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   await shot(page, 'ink-starting');
 
-  // Running: the timeline goes; the Logs tab groups the streams by owner and follows one.
+  // Running: the timeline goes; the Logs face groups the streams by owner and follows one.
   await push(page, listed([server('running')], []));
   await expect(startup).toHaveCount(0);
-  await expect(page.getByRole('button', {name: 'Pause'})).toBeEnabled();
-  await page.getByRole('tab', {name: 'Logs'}).click();
-  const streams = page.getByRole('tree', {name: 'Log streams'});
+  await expect(page.getByRole('button', {name: 'Pause', exact: true})).toBeEnabled();
+  await page.getByRole('radiogroup', {name: 'Show'}).getByText('Logs').click();
+  const streams = page.getByRole('listbox', {name: 'Log streams'});
   for (const group of ['Startup', 'Gates', 'Tool builds', 'Run narration']) {
-    await expect(streams.getByRole('treeitem', {name: group, exact: true})).toBeVisible();
+    await expect(streams.getByRole('option', {name: group}).first()).toBeVisible();
   }
+  // A measurement's candidate build is its own gate stream, before the gates after it.
+  await streams.getByRole('option', {name: /candidate build · input · attempt 1/}).click();
+  await expect(page.getByRole('log').getByText('Finished release profile')).toBeVisible();
   await streams
-    .getByRole('treeitem', {name: /Run narration/})
+    .getByRole('option', {name: /Run narration/})
     .last()
     .click();
-  await expect(page.getByText('16:36:20 INFO container ready')).toBeVisible();
+  await expect(page.getByRole('log').getByText('16:36:20 INFO container ready')).toBeVisible();
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   await shot(page, 'ink-logs');
 
-  // Stop: the confirmation says what is lost; Force stop only after two minutes of stopping.
-  await page.getByRole('button', {name: 'Stop', exact: true}).click();
-  await expect(page.getByText('cannot be resumed')).toBeVisible();
-  await shot(page, 'ink-stop-confirm');
-  await page.getByRole('button', {name: 'Stop run'}).click();
-  await expect.poll(() => calls(page)).toEqual([['stopConfirmed', 'ssh:chelan4', INSTANCE, false]]);
+  // Pause now is immediately available while a graceful Pause drains, and is admitted at once.
   await push(page, listed([server('stopping')], []));
-  const force = page.getByRole('button', {name: 'Force stop'});
-  await page.clock.fastForward('01:59');
-  await expect(page.getByText('Stopping · waiting')).toBeVisible();
-  await expect(force).toHaveCount(0);
-  await page.clock.fastForward('00:02');
-  await expect(force).toBeVisible();
-  await shot(page, 'ink-force-stop');
-  await force.click();
-  await expect
-    .poll(() => calls(page))
-    .toEqual([
-      ['stopConfirmed', 'ssh:chelan4', INSTANCE, false],
-      ['stopConfirmed', 'ssh:chelan4', INSTANCE, true],
-    ]);
+  await expect(page.getByText('Pausing', {exact: true}).first()).toBeVisible();
+  await expect(
+    page.getByText('Unfinished work may need repeating and may still incur charges.'),
+  ).toBeVisible();
+  await shot(page, 'ink-pause-now');
+  await page.getByRole('button', {name: 'Pause now', exact: true}).click();
+  await expect.poll(() => posted).toEqual(['pauseNow']);
 
   // Ended: the banner reads the end record; Resume names the round, only when resumable.
   await push(
@@ -206,50 +204,34 @@ test('a run starts, writes its logs, stops with Force stop after the bound, and 
       ],
     ),
   );
-  await expect(page.getByText('W6’s benchmark timed out after 300 s.')).toBeVisible();
-  await expect(force).toHaveCount(0);
+  await expect(page.getByText('W6’s benchmark timed out after 300 s.').first()).toBeVisible();
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   await shot(page, 'ink-ended');
-  await page.getByRole('button', {name: 'Resume from round 2'}).click();
-  await expect
-    .poll(async () => (await calls(page)).at(-1))
-    .toEqual(['resume', 'ssh:chelan4', PROJECT, RUN_ID]);
+  await page.getByRole('button', {name: 'Resume', exact: true}).click();
+  await expect.poll(() => posted.at(-1)).toBe('relaunch');
 });
 
-test('the Overview and Work tabs read the folded run, and the Work filter is kept', async ({
+test('the run level says what will appear before anything is measured, and keeps the search', async ({
   page,
 }) => {
   await open(page, {...SEED, listings: [listed([server('running')], [])]});
 
-  // Overview: with nothing folded yet, each section says what will appear, not a guess.
-  const objective = page.getByRole('region', {name: 'Objective'});
-  await expect(objective.getByText('has not declared its objective yet')).toBeVisible();
-  for (const label of ['Best vs baseline', 'Round', 'Workstreams', 'Elapsed']) {
-    await expect(page.getByText(label, {exact: true})).toBeVisible();
-  }
-  await expect(page.getByRole('region', {name: 'Performance'})).toContainText(
-    'Nothing measured yet',
-  );
-  await expect(page.getByRole('region', {name: 'Current work'})).toContainText(
-    'Nothing is running',
-  );
+  // With nothing folded yet the hero and the ideas say what will appear, not a guess.
+  await expect(page.getByText('nothing measured yet')).toBeVisible();
+  await expect(page.getByText('No ideas yet')).toBeVisible();
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
-  await shot(page, 'ink-overview-empty');
+  await shot(page, 'ink-run-empty');
 
-  // Work: the search and the outcome filter live in the page state, so a tab switch keeps them.
-  await page.getByRole('tab', {name: 'Work'}).click();
-  await expect(page.getByText('No work yet')).toBeVisible();
-  await page.getByLabel('Search work').fill('ring');
-  await page.getByRole('radiogroup', {name: 'Show outcomes'}).getByText('Rejected').click();
-  await page.getByRole('tab', {name: 'Overview'}).click();
-  await page.getByRole('tab', {name: 'Work'}).click();
-  await expect(page.getByLabel('Search work')).toHaveValue('ring');
-  await expect(page.getByRole('radio', {name: 'Rejected'})).toBeChecked();
-  expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
-  await shot(page, 'ink-work-empty');
+  // The mode lives in the zoom, the filters in the page state: a switch away and back keeps both.
+  const show = page.getByRole('radiogroup', {name: 'Show'});
+  await show.getByText('Agents').click();
+  await expect(show.getByRole('radio', {name: 'Agents'})).toBeChecked();
+  await show.getByText('Ideas').click();
+  await expect(show.getByRole('radio', {name: 'Ideas'})).toBeChecked();
+  await expect(page.getByText('No ideas yet')).toBeVisible();
 });
 
-test('a cleanly stopped run offers no Resume', async ({page}) => {
+test('every ended run offers Resume', async ({page}) => {
   const stopped = server('stopped', {
     outcome: 'stopped',
     reason: 'Stopped by you.',
@@ -257,7 +239,9 @@ test('a cleanly stopped run offers no Resume', async ({page}) => {
   });
   await open(page, {...SEED, listings: [listed([], [stopped])]});
   await expect(page.getByText('Stopped by you.')).toBeVisible();
-  await expect(page.getByRole('button', {name: /^Resume/})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Resume', exact: true})).toBeVisible();
   await page.getByRole('button', {name: 'View logs'}).click();
-  await expect(page.getByRole('tab', {name: 'Logs'})).toHaveAttribute('aria-selected', 'true');
+  await expect(
+    page.getByRole('radiogroup', {name: 'Show'}).getByRole('radio', {name: 'Logs'}),
+  ).toBeChecked();
 });

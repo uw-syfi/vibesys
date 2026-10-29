@@ -232,6 +232,12 @@ def test_interrupted_verification_cleans_scratch_and_recovers_abandoned_work(
     go_log = tmp_path / "go-list-cache"
     go_term_log = tmp_path / "go-term-handled"
     go_descendant_ready = tmp_path / "go-descendant-ready"
+    go_descendant_hold = tmp_path / "go-descendant-hold"
+    # Named pipes make both waits block in the kernel instead of spinning:
+    # the descendant announces itself through one and is held by the other,
+    # which never gets a writer, until the verifier kills its process group.
+    os.mkfifo(go_descendant_ready)
+    os.mkfifo(go_descendant_hold)
     fake_go = fake_bin / "go"
     fake_go.write_text(
         """#!/bin/sh
@@ -241,12 +247,12 @@ case " $* " in
     if [ "${FAKE_GO_INTERRUPT:-}" = 1 ]; then
       (
         trap '' TERM
-        : > "$FAKE_GO_DESCENDANT_READY"
-        while :; do :; done
+        printf 'ready\\n' > "$FAKE_GO_DESCENDANT_READY"
+        IFS= read -r _held < "$FAKE_GO_HOLD"
       ) &
       descendant=$!
       trap 'printf "driver\\n" >> "$FAKE_GO_TERM_LOG"; exit 0' TERM
-      while [ ! -f "$FAKE_GO_DESCENDANT_READY" ]; do :; done
+      IFS= read -r _ready < "$FAKE_GO_DESCENDANT_READY"
       kill -TERM "$PPID"
       kill -HUP "$PPID"
       wait "$descendant"
@@ -268,6 +274,7 @@ exit 0
         "FAKE_GO_LOG": str(go_log),
         "FAKE_GO_TERM_LOG": str(go_term_log),
         "FAKE_GO_DESCENDANT_READY": str(go_descendant_ready),
+        "FAKE_GO_HOLD": str(go_descendant_hold),
         "PATH": f"{fake_bin}:{os.environ['PATH']}",
         "TMPDIR": str(runtime_scratch),
     }

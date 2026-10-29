@@ -60,9 +60,11 @@ if TYPE_CHECKING:
     from vs_sim.probes import CommandProbe, ProbeResult, ProcessesProbe, SubprocessProbe
     from vs_sim.processes import (
         DEFAULT_MAX_OUTPUT_BYTES,
+        LAUNCHER_LIFELINE_ENV,
         ForegroundChild,
         ForegroundLauncher,
         InheritedStdioLauncher,
+        LauncherLifelineError,
         OsProcesses,
         PipedProcess,
         PipedProcessLauncher,
@@ -78,6 +80,7 @@ if TYPE_CHECKING:
         RunningProcess,
         SubprocessLauncher,
         SubprocessPipedProcessLauncher,
+        follow_launcher,
         forward_output,
         run_foreground,
     )
@@ -103,6 +106,7 @@ if TYPE_CHECKING:
         ProcessSignaller,
         Signals,
         SignalSource,
+        WriterProcessSignaller,
     )
     from vs_sim.streaming import StreamingCommand, SubprocessStreamingCommand
     from vs_sim.sync import sync_descriptor
@@ -140,6 +144,9 @@ _MODULES: dict[str, str] = {
     "ForegroundChild": "vs_sim.processes",
     "ForegroundLauncher": "vs_sim.processes",
     "InheritedStdioLauncher": "vs_sim.processes",
+    "LAUNCHER_LIFELINE_ENV": "vs_sim.processes",
+    "LauncherLifelineError": "vs_sim.processes",
+    "follow_launcher": "vs_sim.processes",
     "Platform": "vs_sim.os_platform",
     "OsProcesses": "vs_sim.processes",
     "PipedProcess": "vs_sim.processes",
@@ -194,6 +201,7 @@ _MODULES: dict[str, str] = {
     "UrllibLoopbackHttp": "vs_sim.loopback_http",
     "PidfdProcessSignaller": "vs_sim.signals",
     "ProcessSignaller": "vs_sim.signals",
+    "WriterProcessSignaller": "vs_sim.signals",
     "SignalSource": "vs_sim.signals",
     "Signals": "vs_sim.signals",
     "StreamingCommand": "vs_sim.streaming",
@@ -223,6 +231,7 @@ __all__ = [
     "DEFAULT_MAX_LINE_BYTES",
     "DEFAULT_MAX_OUTPUT_BYTES",
     "DISCARD",
+    "LAUNCHER_LIFELINE_ENV",
     "AsyncCloseOnce",
     "BlockingRunner",
     "ByteSource",
@@ -239,6 +248,7 @@ __all__ = [
     "ForegroundLauncher",
     "HttpReply",
     "InheritedStdioLauncher",
+    "LauncherLifelineError",
     "LineCallback",
     "Lines",
     "Listener",
@@ -303,8 +313,10 @@ __all__ = [
     "WorkerReservation",
     "WorkerReservationStateError",
     "WorkerStartRefusedError",
+    "WriterProcessSignaller",
     "check_read",
     "derive_seed",
+    "follow_launcher",
     "forward_output",
     "run_foreground",
     "sync_descriptor",

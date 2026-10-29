@@ -16,7 +16,8 @@ export function SegmentedControl<T extends string>(props: {
   readonly options: readonly ChoiceOption<T>[];
   readonly value: T;
   readonly change: (value: T) => void;
-  readonly size?: 'sm' | 'md';
+  /** `xs` is `sm` with tighter gaps and padding, for a switch in a narrow pane. */
+  readonly size?: 'xs' | 'sm' | 'md';
 }): JSX.Element {
   const name = useId();
   return (
@@ -27,7 +28,7 @@ export function SegmentedControl<T extends string>(props: {
       data-size={props.size ?? 'md'}
     >
       {props.options.map(option => (
-        <label key={option.value} className="vs-segment">
+        <label key={option.value} className="vs-segment" data-label={option.label}>
           <input
             className="vs-segment-input"
             type="radio"

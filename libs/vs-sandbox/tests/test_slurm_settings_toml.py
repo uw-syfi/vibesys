@@ -77,6 +77,7 @@ _ledgers = st.builds(
     lease_seconds=st.floats(1, 3600, allow_nan=False),
     grace_seconds=st.floats(0, 86_400, allow_nan=False),
     run_while_detached=st.booleans(),
+    keep_jobs_on_stop=st.booleans(),
 )
 _policies = st.builds(
     SlurmExecutionPolicy,
@@ -114,6 +115,7 @@ def test_the_ledger_table_is_opt_in_and_rejects_unknown_keys(tmp_path: Path) -> 
     assert ledger is not None
     assert ledger.grace_seconds == 60
     assert ledger.run_while_detached
+    assert not ledger.keep_jobs_on_stop
     path.write_text(base + "[vibesys.ledger]\ngrace_second = 60\n", encoding="utf-8")
     with pytest.raises(SlurmPolicyError, match=r"ledger\.grace_second"):
         load_slurm_operator_settings(path)

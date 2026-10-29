@@ -15,7 +15,13 @@ from typing import TYPE_CHECKING, Any
 
 from hypothesis import assume, given
 from hypothesis import strategies as st
-from tests.server.host_helper_support import HARNESSES, FakeRunLauncher, fake_host, record
+from tests.server.host_helper_support import (
+    HARNESSES,
+    FakeRunLauncher,
+    fake_host,
+    quiet_machine,
+    record,
+)
 
 from server.host_api import (
     CLI_PROVIDER_FLAG,
@@ -87,6 +93,29 @@ def test_the_list_is_the_hosts_vetted_harnesses() -> None:
     host = fake_host(threads, SimNetwork(threads))
     reply = answer(HarnessesListRequest(request_id="l", deadline_ms=1), host, threads.event())
     assert reply == HarnessesListReply(request_id="l", harnesses=HARNESSES)
+
+
+@given(installed=st.sets(st.sampled_from(["codex", "claude"])))
+def test_providers_whose_cli_is_installed_are_listed_first_and_nothing_else_changes(
+    installed: set[str],
+) -> None:
+    """Regression: a machine without the first provider's CLI defaulted a run to it."""
+    threads = SimThreads()
+    host = replace(
+        fake_host(threads, SimNetwork(threads)),
+        machine=quiet_machine(installed=frozenset(installed)),
+    )
+
+    reply = answer(HarnessesListRequest(request_id="l", deadline_ms=1), host, threads.event())
+
+    assert isinstance(reply, HarnessesListReply)
+    providers = [option.provider for option in reply.harnesses]
+    first_missing = next((i for i, p in enumerate(providers) if p not in installed), len(providers))
+    assert all(p not in installed for p in providers[first_missing:])
+    assert sorted(reply.harnesses, key=repr) == sorted(HARNESSES, key=repr)
+    for provider in installed:
+        mine = [option for option in reply.harnesses if option.provider == provider]
+        assert mine == [option for option in HARNESSES if option.provider == provider]
 
 
 def _negotiated(features: list[str]) -> ChannelState:

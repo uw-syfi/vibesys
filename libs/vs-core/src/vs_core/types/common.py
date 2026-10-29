@@ -15,10 +15,187 @@ from pydantic import (
     model_validator,
 )
 
+from vs_core._corevalue import ContractValidationError
+from vs_core._generated.vibesys.core.v1.common_cv import (
+    IDENTITY_PATTERN,
+    ArtifactId,
+    ArtifactRef,
+    AttemptId,
+    ChargeId,
+    ContinuationId,
+    ControlAction,
+    ControlId,
+    DecisionId,
+    EventId,
+    EvidenceId,
+    HostId,
+    Identity,
+    InputId,
+    InputMode,
+    InvocationId,
+    InvocationRef,
+    ItemId,
+    OperationId,
+    PauseOwner,
+    PoolId,
+    RequestId,
+    ResourceId,
+    ResumeWhen,
+    RevisionId,
+    RoleId,
+    RunId,
+    RunStatus,
+    SchemaRef,
+    Scope,
+    SessionId,
+    SettlementId,
+    StopMode,
+    StrategyId,
+)
+from vs_core._generated.vibesys.core.v1.contracts_cv import PureOption
+from vs_core._generated.vibesys.core.v1.control_cv import (
+    MAX_REQUEST_RETRIES,
+    ControlInput,
+    InputTarget,
+    InvocationInputTarget,
+    ItemInputTarget,
+    Limits,
+    PoolCapacity,
+    RequestRetries,
+    RoleInputTarget,
+    RunPark,
+    RunPause,
+    ScopeInputTarget,
+)
+from vs_core._generated.vibesys.core.v1.leaves_cv import (
+    EvidenceKey,
+    RevisionRef,
+    TaskObjective,
+    TaskStage,
+)
+from vs_core._generated.vibesys.core.v1.vocabulary_cv import (
+    AssessmentKind,
+    ChargeKind,
+    DigestScheme,
+    EvidenceKind,
+    LifecycleClass,
+    ObservationStatus,
+)
 from vs_core._values import deeply_immutable, emit_fragment
 
 if TYPE_CHECKING:
     from pydantic import SerializationInfo
+
+
+__all__ = [
+    "IDENTITY_PATTERN",
+    "MAX_CORRECTIONS",
+    "MAX_LOST_TURNS",
+    "MAX_REASK_CHAIN",
+    "MAX_REQUEST_RETRIES",
+    "MAX_SUBMISSIONS_PER_MEASUREMENT",
+    "RETRYABLE_FAILURES",
+    "THIS_RUN",
+    "Area",
+    "ArtifactId",
+    "ArtifactRef",
+    "AssessmentKind",
+    "AttemptId",
+    "AttemptRef",
+    "Capabilities",
+    "ChargeId",
+    "ChargeKind",
+    "ChargeReceipt",
+    "CheckpointDecline",
+    "ChildManifest",
+    "CompletionStatus",
+    "ContinuationId",
+    "ContractValidationError",
+    "ControlAction",
+    "ControlId",
+    "ControlInput",
+    "Count",
+    "DecisionId",
+    "DependencyRef",
+    "DependencyStatus",
+    "DigestScheme",
+    "EventCursor",
+    "EventId",
+    "EvidenceId",
+    "EvidenceKey",
+    "EvidenceKind",
+    "ExecuteRegisteredOperation",
+    "Generation",
+    "HostFence",
+    "HostId",
+    "Identity",
+    "IdentityTypeError",
+    "InputId",
+    "InputMode",
+    "InputTarget",
+    "InvocationId",
+    "InvocationInputTarget",
+    "InvocationRef",
+    "ItemId",
+    "ItemInputTarget",
+    "KernelNotImplementedError",
+    "LifecycleCapability",
+    "LifecycleClass",
+    "Limits",
+    "Observation",
+    "ObservationStatus",
+    "OperationDescriptor",
+    "OperationDescriptorError",
+    "OperationId",
+    "OperationNormalizationKind",
+    "OperationRef",
+    "OperationSchemaRef",
+    "OperationWire",
+    "PauseOwner",
+    "PoolCapacity",
+    "PoolId",
+    "PureOption",
+    "RejectionCode",
+    "ReleaseDependency",
+    "RequestBase",
+    "RequestId",
+    "RequestRetries",
+    "ReservedInputOccurrence",
+    "ResourceId",
+    "ResumeWhen",
+    "RevisionAuthority",
+    "RevisionId",
+    "RevisionNumber",
+    "RevisionRef",
+    "RoleId",
+    "RoleInputTarget",
+    "RunFacts",
+    "RunId",
+    "RunPark",
+    "RunPause",
+    "RunStatus",
+    "SchemaRef",
+    "Scope",
+    "ScopeInputTarget",
+    "ScopeReopenNormalization",
+    "Seconds",
+    "SessionId",
+    "SettlementId",
+    "SetupFailureKind",
+    "SignalCycleError",
+    "StopMode",
+    "StrategyId",
+    "TaskObjective",
+    "TaskStage",
+    "TaskTerms",
+    "TurnFailureKind",
+    "Value",
+    "WorkspaceMode",
+    "WorkspaceRef",
+    "escalate_stop",
+    "unset",
+    "validate_setup_failure",
+]
 
 
 class CheckpointDecline(StrEnum):
@@ -54,6 +231,23 @@ class TurnFailureKind(StrEnum):
     """Acceptance stayed unknown after inspection, so core released the turn unfinished."""
     CANCELLED = "cancelled"
     """Core cancelled the turn (stop, interruption or cleanup), so no reply exists."""
+    EPOCH_INTERRUPTED = "epoch_interrupted"
+    """The previous epoch exited before this invocation had a conclusive result."""
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
+    """Core ended the turn while the run's capacity gate held it for its provider (an outage,
+    a spent quota): no reply exists, and the turn's own work never failed. A strategy asks it
+    again without counting it against the role's lost turns."""
+
+
+def unset(value: object) -> bool:
+    """Whether an optional field is unset (None) or a flag is off, so serialization leaves it out.
+
+    For ``Field(exclude_if=unset)`` on optional fields and flags: left out when unset, a value that sets
+    none of them serializes, and so digests, budget keys and request ids, exactly as before the
+    field existed. That keeps identities stable. Any new field changes the envelope's shape and
+    version, which needs its migration (``vs_core._envelope_migrations``).
+    """
+    return value is None or value is False or (isinstance(value, tuple) and not value)
 
 
 class Value(BaseModel):
@@ -106,228 +300,6 @@ type LifecycleCapability = Literal["park", "interrupt", "steer", "suspend", "pro
 """Host-offered lifecycle abilities. "profile-capture" admits profile measurements."""
 
 
-class Identity(Value):
-    """Canonical tagged identity; domains survive JSON union round trips."""
-
-    root: Annotated[str, Field(min_length=1, pattern=r"^\S+$")]
-
-    @model_validator(mode="before")
-    @classmethod
-    def distinct(cls, value: object) -> object:
-        """Reject a different identity type in Python and tagged JSON."""
-        if isinstance(value, Identity) and type(value) is not cls:
-            raise IdentityTypeError
-        return value
-
-
-class RunId(Identity):
-    """Distinct run identity."""
-
-    kind: Literal["run"] = "run"
-
-
-class AttemptId(Identity):
-    """Distinct attempt identity."""
-
-    kind: Literal["attempt"] = "attempt"
-
-
-class ItemId(Identity):
-    """Distinct item identity."""
-
-    kind: Literal["item"] = "item"
-
-
-class SessionId(Identity):
-    """Distinct session identity."""
-
-    kind: Literal["session"] = "session"
-
-
-class InvocationId(Identity):
-    """Distinct invocation identity."""
-
-    kind: Literal["invocation"] = "invocation"
-
-
-class ContinuationId(Identity):
-    """Distinct continuation identity."""
-
-    kind: Literal["continuation"] = "continuation"
-
-
-class InputId(Identity):
-    """Identity of one input occurrence, independent of content digest."""
-
-    kind: Literal["input"] = "input"
-
-
-class EvidenceId(Identity):
-    """Distinct evidence identity."""
-
-    kind: Literal["evidence"] = "evidence"
-
-
-class DecisionId(Identity):
-    """Distinct decision identity."""
-
-    kind: Literal["decision"] = "decision"
-
-
-class RequestId(Identity):
-    """Distinct request identity."""
-
-    kind: Literal["request"] = "request"
-
-
-class EvidenceKey(Value):
-    """Full identity of one evidence record: the request that produced it plus its ID.
-
-    EvidenceId alone is only unique within one source request, so two jobs can
-    report the same ID. Every ledger, settlement and continuation lookup keys on
-    this pair.
-    """
-
-    kind: Literal["evidence_key"] = "evidence_key"
-    source_request: RequestId
-    evidence_id: EvidenceId
-
-
-class EventId(Identity):
-    """Distinct event identity."""
-
-    kind: Literal["event"] = "event"
-
-
-class SettlementId(Identity):
-    """Distinct settlement identity."""
-
-    kind: Literal["settlement"] = "settlement"
-
-
-class StrategyId(Identity):
-    """Distinct strategy identity."""
-
-    kind: Literal["strategy"] = "strategy"
-
-
-class OperationId(Identity):
-    """Distinct operation identity."""
-
-    kind: Literal["operation"] = "operation"
-
-
-class ArtifactId(Identity):
-    """Distinct artifact identity."""
-
-    kind: Literal["artifact"] = "artifact"
-
-
-class ResourceId(Identity):
-    """Distinct lease episode, never a reusable raw physical backend identity.
-
-    The owning library's normalization episode-qualifies reused physical IDs;
-    conflicting scope or admission claims cannot reuse one core ResourceId.
-    """
-
-    kind: Literal["resource"] = "resource"
-
-
-class RevisionId(Identity):
-    """Distinct revision identity."""
-
-    kind: Literal["revision"] = "revision"
-
-
-class RoleId(Identity):
-    """Distinct role identity."""
-
-    kind: Literal["role"] = "role"
-
-
-class PoolId(Identity):
-    """Distinct pool identity."""
-
-    kind: Literal["pool"] = "pool"
-
-
-class ChargeId(Identity):
-    """Distinct charge identity."""
-
-    kind: Literal["charge"] = "charge"
-
-
-class ControlId(Identity):
-    """Distinct control identity."""
-
-    kind: Literal["control"] = "control"
-
-
-class HostId(Identity):
-    """Distinct host identity."""
-
-    kind: Literal["host"] = "host"
-
-
-class SchemaRef(Value):
-    """Schema ref lifecycle contract."""
-
-    name: str = Field(min_length=1)
-    version: int = Field(ge=1)
-
-
-class DigestScheme(StrEnum):
-    """Closed set of revision digest schemes; a digest is `<scheme>:<value>`."""
-
-    GIT_COMMIT = "git-commit"
-
-
-class RevisionRef(Value):
-    """Immutable revision identity.
-
-    Core compares digest as an opaque equality key. Producers that mint a ref from
-    a git commit use of_git_commit, which makes revision_id the commit and digest
-    `git-commit:<commit>`; consumers that must trust the scheme read git_commit,
-    which is None unless digest names the same commit as revision_id.
-    """
-
-    revision_id: RevisionId
-    digest: str = Field(min_length=1)
-
-    @classmethod
-    def of_git_commit(cls, commit: str) -> RevisionRef:
-        """Mint the canonical ref for one git commit."""
-        if not commit or commit != commit.strip() or ":" in commit:
-            raise ContractValidationError("commit", "must be a bare commit id")
-        return cls(
-            revision_id=RevisionId(root=commit), digest=f"{DigestScheme.GIT_COMMIT}:{commit}"
-        )
-
-    @property
-    def git_commit(self) -> str | None:
-        """The commit this ref names, or None when digest is not its git-commit digest."""
-        prefix = f"{DigestScheme.GIT_COMMIT}:"
-        if not self.digest.startswith(prefix):
-            return None
-        commit = self.digest.removeprefix(prefix)
-        return commit if commit and commit == self.revision_id.root else None
-
-
-class ArtifactRef(Value):
-    """Artifact ref lifecycle contract."""
-
-    artifact_id: ArtifactId
-    digest: str = Field(min_length=1)
-    schema_ref: SchemaRef | None = None
-
-
-class Scope(Value):
-    """Scope lifecycle contract."""
-
-    owner: Annotated[RunId | AttemptId, Field(discriminator="kind")]
-    generation: Generation
-
-
 THIS_RUN = Scope(owner=RunId(root="this-run"), generation=0)
 """The scope a search names for work the run itself owns. Core replaces it with the run's own."""
 
@@ -336,14 +308,6 @@ class AttemptRef(Value):
     """Attempt ref lifecycle contract."""
 
     attempt_id: AttemptId
-    generation: Generation
-
-
-class InvocationRef(Value):
-    """Invocation ref lifecycle contract."""
-
-    session_id: SessionId
-    invocation_id: InvocationId
     generation: Generation
 
 
@@ -361,58 +325,10 @@ class DependencyRef(Value):
     request_id: RequestId | None = None
 
 
-class LifecycleClass(StrEnum):
-    """Lifecycle class lifecycle contract."""
-
-    QUERY = "query"
-    IDEMPOTENT_WRITE = "idempotent_external_write"
-    OWNED_JOB = "owned_long_running_job"
-    SESSION_TURN = "session_turn"
-
-
-class EvidenceKind(StrEnum):
-    """Closed measurement kinds used for eligibility requirements."""
-
-    CORRECTNESS = "correctness"
-    BENCHMARK = "benchmark"
-    PROFILING = "profiling"
-    LOCAL_VALIDATION = "local-validation"
-
-
-class AssessmentKind(StrEnum):
-    """Closed semantic assessment kinds, distinct from evidence production."""
-
-    CORRECTNESS = "correctness"
-    BENCHMARK = "benchmark"
-    PROFILING = "profiling"
-    LOCAL_VALIDATION = "local-validation"
-
-
-class ObservationStatus(StrEnum):
-    """Observation status lifecycle contract."""
-
-    SUCCEEDED = "succeeded"
-    PENDING = "pending"
-    CANCELLED = "cancelled"
-    REJECTED = "rejected"
-    FAILED = "failed"
-    UNKNOWN = "unknown"
-
-
 RETRYABLE_FAILURES = frozenset(
     {ObservationStatus.FAILED, ObservationStatus.REJECTED, ObservationStatus.CANCELLED}
 )
 """Statuses that, on a non-terminal observation, say the executor did not run the request."""
-
-
-class RunStatus(StrEnum):
-    """Run status lifecycle contract."""
-
-    RUNNING = "running"
-    PAUSED = "paused"
-    CLOSING = "closing"
-    TERMINAL = "terminal"
-    BLOCKED = "blocked"
 
 
 class RejectionCode(StrEnum):
@@ -551,14 +467,6 @@ class OperationDescriptor(OperationSchemaRef):
         return self
 
 
-class ContractValidationError(ValueError):
-    """Invalid immutable value, identifying the exact field and violated contract."""
-
-    def __init__(self, path: str, detail: str) -> None:
-        """Name the offending field without masking a plausible default."""
-        super().__init__(f"{path}: {detail}")
-
-
 class OperationDescriptorError(ValueError):
     """Invalid operation ownership contract."""
 
@@ -581,124 +489,16 @@ class Capabilities(Value):
         return sorted(value)
 
 
-class PoolCapacity(Value):
-    """Scheduling-owned bound for one named capacity pool.
-
-    Unconfigured pools retain exclusive capacity one. Global max_parallel is
-    always an additional bound; a pool capacity never grants unbounded slots.
-    """
-
-    pool_id: PoolId
-    capacity: int = Field(ge=1)
-
-
-# Hard caps no declaration can lift. A backend declares its own bounds below these; core
-# refuses a declaration above them and enforces them whatever a declaration says.
-MAX_REQUEST_RETRIES = 10
 MAX_SUBMISSIONS_PER_MEASUREMENT = 5
 MAX_CORRECTIONS = 5
 """The most corrections of one reply any role may ask for."""
 MAX_LOST_TURNS = 5
 """The most times any role may have a lost turn asked again."""
 MAX_REASK_CHAIN = MAX_CORRECTIONS + MAX_LOST_TURNS
-"""The longest chain of corrections and re-asks any role's bounds allow; core refuses a longer one."""
+"""The longest chain of corrections and re-asks any role's bounds allow; core refuses a longer one.
 
-
-class RequestRetries(Value):
-    """How core re-sends a request its executor said it did not run. Declared by the backend.
-
-    ``limit`` re-sends follow the first attempt, the n-th after ``backoff * 2**(n-1)`` seconds
-    of core time, never more than ``backoff_cap``. Core holds no default for any field and
-    refuses a ``limit`` above ``MAX_REQUEST_RETRIES``.
-    """
-
-    limit: Count
-    backoff: Seconds = Field(gt=0)
-    backoff_cap: Seconds = Field(gt=0)
-
-    @model_validator(mode="after")
-    def within_hard_cap(self) -> RequestRetries:
-        """Reject a limit above the hard cap and a cap below the first wait."""
-        if self.limit > MAX_REQUEST_RETRIES:
-            raise ContractValidationError("limit", f"above the hard cap {MAX_REQUEST_RETRIES}")
-        if self.backoff_cap < self.backoff:
-            raise ContractValidationError("backoff_cap", "below backoff")
-        return self
-
-    def delay(self, retries: int) -> float:
-        """Core seconds to wait before attempt number ``retries + 1``: doubling, capped."""
-        return min(self.backoff * 2 ** max(retries - 1, 0), self.backoff_cap)
-
-
-class Limits(Value):
-    """Run bounds; every field is explicit, one field per meaning, no default.
-
-    Budget (the run's own): ``max_attempts``, ``max_turns``, ``max_parallel``,
-    ``pool_capacities``, ``max_refunds`` and ``max_adoption_rounds``. How often a reply is corrected or a lost turn
-    asked again is the role's (`Role.corrections`, `Role.lost_turns`); core keeps only
-    `MAX_REASK_CHAIN`.
-    Declared by the backend and applied by core: ``request_retries``. Core's own bounds on its
-    waits and cleanup: the remaining ``*_bound`` and ``observe_*`` fields.
-    """
-
-    max_attempts: Count
-    max_turns: Count
-    max_parallel: int = Field(ge=1)
-    pool_capacities: tuple[PoolCapacity, ...]
-    max_refunds: Count
-    max_adoption_rounds: int = Field(ge=1)
-    """AdoptRevision rounds per selection, the first included."""
-    request_retries: RequestRetries
-    cancellation_bound: Seconds
-    # The least time core gives its own cleanup and inspection requests, even once the run
-    # deadline has passed (see `cleanup` in `_deadlines`).
-    cleanup_bound: Seconds = Field(gt=0)
-    reconciliation_bound: Seconds
-    # Poll cadence for a submitted measurement job, and the cap of the doubling
-    # delay before re-polling a job whose last poll was unknown.
-    observe_interval: Seconds = Field(gt=0)
-    observe_backoff_cap: Seconds = Field(gt=0)
-    # How long one measurement's job may wait in its executor's queue before core ends the
-    # measurement with ``QUEUE_BUDGET_SPENT``, and how often core reports a job still
-    # queued (``JobQueued``). Queue time does not count against a measurement's own limit.
-    queue_wait_budget: Seconds = Field(gt=0)
-    queue_notice_interval: Seconds = Field(gt=0)
-
-    @model_validator(mode="after")
-    def observe_cap_covers_interval(self) -> Limits:
-        """A backoff cap below the base interval would shorten retries below the cadence."""
-        if self.observe_backoff_cap < self.observe_interval:
-            raise ContractValidationError("observe_backoff_cap", "below observe_interval")
-        return self
-
-    @model_validator(mode="after")
-    def distinct_pool_capacities(self) -> Limits:
-        """Reject contradictory capacity declarations for the same pool."""
-        identities = tuple(pool.pool_id for pool in self.pool_capacities)
-        if len(set(identities)) != len(identities):
-            raise ContractValidationError("pool_capacities", "duplicate pool_id")
-        return self
-
-
-class PureOption(Value):
-    """Pure option lifecycle contract."""
-
-    key: str = Field(min_length=1)
-    value: str | int | Annotated[float, Field(allow_inf_nan=False)] | bool | None
-
-
-class TaskStage(Value):
-    """One stage the task can measure and the seconds its execution may take."""
-
-    stage_id: str = Field(min_length=1)
-    execution_seconds: float = Field(ge=0, allow_inf_nan=False)
-
-
-class TaskObjective(Value):
-    """One axis the task compares candidates on, and which way is better."""
-
-    name: str = Field(min_length=1)
-    direction: Literal["max", "min"]
+A re-ask after a turn lost to its provider (``PROVIDER_UNAVAILABLE``) is no link of the chain:
+the run's capacity gate bounds an outage, by its budget and the pause that follows it."""
 
 
 class TaskTerms(Value):
@@ -719,6 +519,11 @@ class TaskTerms(Value):
     """Seconds a measurement may wait in the evaluation queue."""
     accuracy_stage: str | None = Field(default=None, min_length=1)
     """The stage whose pass is the correctness gate."""
+    benchmark_stage: str | None = Field(default=None, min_length=1)
+    """The stage whose benchmark reading a candidate is compared with its base on, if any.
+
+    A task without one has no number to compare, so core measures no base for it
+    (`vs_core._comparison`)."""
     accuracy_gated: tuple[EvidenceKind, ...] = ()
     """Evidence kinds that count only if the accuracy stage passed."""
     operation_seconds: float = Field(gt=0, allow_inf_nan=False)
@@ -727,6 +532,16 @@ class TaskTerms(Value):
     """The directed axes candidates are ranked on, headline first."""
     relative_noise: float = Field(default=0.0, ge=0.0, lt=1.0)
     """The benchmark's declared variation: a reading must beat the input by more than this."""
+    base_staleness: float = Field(default=21_600.0, gt=0, allow_inf_nan=False)
+    """Seconds after which a measured base no longer stands for the host it was timed on.
+
+    A candidate's comparison reads only base samples this young, on the run clock, and a base
+    with none fresh is measured again (`vs_core._comparison`)."""
+    runaway_evaluations: int = Field(default=40, ge=1)
+    """How many evaluations one attempt's agent may ask for before the run warns of it.
+
+    Evaluations have no allowance, so this refuses nothing: it marks only an egregious count
+    (`vs_core._runaway`)."""
     profile_fields: tuple[str, ...] = ()
     """The measurement fields the task's profile capture supplies."""
 
@@ -742,7 +557,11 @@ class TaskTerms(Value):
     @model_validator(mode="after")
     def _stages_exist(self) -> TaskTerms:
         known = {item.stage_id for item in self.stages}
-        named = {*self.measured, *([self.accuracy_stage] if self.accuracy_stage else [])}
+        named = {
+            *self.measured,
+            *([self.accuracy_stage] if self.accuracy_stage else []),
+            *([self.benchmark_stage] if self.benchmark_stage else []),
+        }
         if unknown := sorted(named - known):
             raise ContractValidationError("measured", f"names stages the task lacks: {unknown}")
         return self
@@ -758,33 +577,32 @@ class RunFacts(Value):
     evaluator_digest: str
     workload_digest: str
     environment_digest: str
+    dedicated_measurement_resources: bool = Field(default=False, exclude_if=unset)
+    """Each measurement job gets its GPUs and CPU cores to itself, as the run's executor declares.
+
+    The executor's capability, derived from how it submits jobs (a Slurm job with a bare
+    ``--exclusive`` or an operator declaration), never from a backend's name. A run timed so is timed as an official
+    measurement is, so only such a run may answer one (``vs_core._measurement_reuse``).
+    """
     artifacts: tuple[ArtifactRef, ...] = ()
     task: TaskTerms | None = None
     """What the task fixes; a search that measures candidates reads it with ``ctx.task``."""
 
 
-class StopMode(StrEnum):
-    """How a stop treats work in flight: let it finish, or cancel it."""
+def escalate_stop(held: StopMode | None, asked: StopMode) -> StopMode:
+    """The stop in force once ``asked`` arrives while ``held`` is: a stop only escalates.
 
-    DRAIN = "drain"
-    CANCEL = "cancel"
+    The one order of stop modes. A cancel replaces a drain and nothing replaces a cancel,
+    so the requests' order never weakens a stop: every holder of a run's stop (the run's
+    control channel, its bridge to core, core itself) folds requests through this.
+    """
+    return StopMode.CANCEL if StopMode.CANCEL in (held, asked) else StopMode.DRAIN
 
 
-class ControlInput(Value):
-    """Control input lifecycle contract."""
-
-    control_id: ControlId
-    action: Literal["pause", "resume", "stop", "steer"]
-    mode: StopMode | None = None
-    """Drain or cancel what is in flight: the operator's choice, given with every stop."""
-    artifact: ArtifactRef | None = None
-
-    @model_validator(mode="after")
-    def mode_belongs_to_stop(self) -> ControlInput:
-        """A stop names how it ends in-flight work; no other action has a mode."""
-        if (self.action == "stop") != (self.mode is not None):
-            raise ContractValidationError("mode", "required for stop and only for stop")
-        return self
+OPERATOR_ACTIONS: frozenset[ControlAction] = frozenset(
+    {"cancel_attempt", "cancel_item", "set_max_parallel"}
+)
+"""The typed operator actions on core entities, which core applies alike in every search."""
 
 
 class CompletionStatus(StrEnum):
@@ -864,6 +682,8 @@ class Observation(Value):
     status: ObservationStatus
     resource_id: ResourceId | None = None
     revision: RevisionRef | None = None
+    measured_input: str | None = Field(default=None, min_length=1, exclude_if=unset)
+    """The digest of what an evaluation reads at ``revision``, when the runtime computed it."""
     accepted: bool = False
     terminal: bool = False
     released: bool = False
@@ -894,20 +714,6 @@ class Observation(Value):
         if not set(self.children) <= set(self.child_manifest.members):
             raise ContractValidationError("child_manifest", "omits a reported child")
         return self
-
-
-class ChargeKind(StrEnum):
-    """Separate currencies with different admission and refund semantics.
-
-    ADMISSION charges accepted registration including queued starts. ATTEMPT
-    charges a paid invocation or failed setup cycle without an existing paid
-    charge. TURN charges one logical invocation, regardless of max_turns or
-    charge class, and never refunds.
-    """
-
-    ADMISSION = "admission"
-    ATTEMPT = "attempt"
-    TURN = "turn"
 
 
 class ChargeReceipt(Value):
@@ -1065,3 +871,28 @@ class ExecuteRegisteredOperation(RequestBase):
         if len(set(identities)) != len(identities):
             raise ContractValidationError("inputs", "duplicate input_id")
         return self
+
+
+class ActionRefusal(StrEnum):
+    """Why core refuses an operator action: it could change nothing, or exceed the launch."""
+
+    NO_SUCH_SUBJECT = "no_such_subject"
+    """The run holds no such attempt, or no attempt at such an item."""
+    ENDED = "ended"
+    """The attempt has ended."""
+    PARKED = "parked"
+    """The attempt is blocked, or parked with no reopening queued: nothing a cancel could stop."""
+    ALREADY_CANCELLED = "already_cancelled"
+    """The item is already cancelled."""
+    ABOVE_LAUNCH_LIMIT = "above_launch_limit"
+    """A parallel limit above the one the run was launched with."""
+
+
+ACTION_REFUSAL_TEXT: dict[ActionRefusal, str] = {
+    ActionRefusal.NO_SUCH_SUBJECT: "the run holds no such attempt or item",
+    ActionRefusal.ENDED: "the attempt has ended",
+    ActionRefusal.PARKED: "the attempt is parked or blocked, so there is nothing to stop",
+    ActionRefusal.ALREADY_CANCELLED: "the item is already cancelled",
+    ActionRefusal.ABOVE_LAUNCH_LIMIT: "the limit is above the one the run was launched with",
+}
+"""The one wording of each refusal, wherever an operator reads it."""

@@ -162,13 +162,19 @@ def test_each_refusal_names_its_reason_and_charges_nothing() -> None:
 
 
 @given(
-    status=st.sampled_from([s for s in core.RunStatus if s is not core.RunStatus.RUNNING]),
+    status=st.sampled_from(
+        [s for s in core.RunStatus if s not in (core.RunStatus.RUNNING, core.RunStatus.PAUSED)]
+    ),
     calls=st.integers(min_value=1, max_value=4),
 )
-def test_a_run_that_is_not_running_starts_no_agent_measurement(
+def test_a_run_that_is_closed_to_its_work_starts_no_agent_measurement(
     status: core.RunStatus, calls: int
 ) -> None:
-    """Cancel, stop and deadline close the run to new work: every later call is refused."""
+    """Cancel, stop and deadline close the run to new work: every later call is refused.
+
+    A paused run is not closed: a call from the turn still running when it was paused is
+    that turn's own work (``test_agent_turn_runs`` pauses before every answer).
+    """
     state = core.initial_state()
     state = state.model_copy(update={"run": state.run.model_copy(update={"status": status})})
     for number in range(calls):

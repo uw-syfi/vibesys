@@ -52,7 +52,7 @@ The divergence is **variable accepted length**, which is a shape change per step
 |:--|:--|
 | `cuda` | Capture per `(batch bucket, k)` shape; pad up when accept is shorter |
 | `rocm` | As cuda |
-| `trainium` | Keep accepted length out of the graph shape entirely — verify at fixed width `k+1` and commit by masking. NxD's supported path is **fused speculation** (`fused_speculation`), which compiles drafter and target together and handles variable accept length internally; it is also a prerequisite for `async_mode` |
+| `trainium` | Keep accepted length out of the graph shape entirely — verify at fixed width `k+1`, compute the accept prefix on device, and commit by masking into the resident cache; one compiled verify graph per `(batch bucket, k)` |
 | `metal` | No capture step; the variable shape is not a problem, and the cost model differs — evaluate whether spec decoding pays at all before building it |
 
 ## See also

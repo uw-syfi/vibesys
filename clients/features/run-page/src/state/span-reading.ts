@@ -27,14 +27,41 @@ export function indexSpans(spans: readonly Span[]): SpanIndex {
 }
 
 /** The span's label kind, or null when its search did not label it. */
-export function kindOf(span: Span): string | null {
+function kindOf(span: Span): string | null {
   return span.label?.kind ?? null;
 }
 
-/** What a span is called: its label's title, else its registered name. */
-export function titleOf(span: Span): string {
-  const title = span.label?.title;
-  return title === undefined || title === null || title === '' ? span.name : title;
+/**
+ * What the run's own steps are called, by the registered name of the operation or flow that
+ * records them. A search labels the steps it cares about (its workstreams, turns and gates); the
+ * rest are the plumbing around them, named by a closed registry (an operation's kind, a flow's
+ * name) and worded here, never in the backend. A strategy's operations are
+ * `<strategy>.<operation>`, so a name not listed whole is looked up by its operation
+ * (`multi.render_role_artifacts` reads as `render_role_artifacts`).
+ */
+const STEP_NAMES: Readonly<Record<string, string>> = {
+  render_role_artifacts: 'Writing the agent’s instructions',
+  interpret_evidence: 'Reading the measurement',
+  capture_command: 'Profiling',
+  validate_local: 'Validating the candidate',
+  verify_parent_revision: 'Checking the starting revision',
+  export_patch: 'Exporting the candidate’s changes',
+  write_handoff: 'Writing the hand-off notes',
+  'roadmap.read': 'Reading the roadmap',
+  'roadmap.put_items': 'Updating the roadmap',
+  'issue_board.read': 'Reading the issue board',
+  'issue_board.apply_changes': 'Updating the issue board',
+  'issue_board.log_progress': 'Logging progress',
+  'agent.turn': 'Agent turn',
+  play_round: 'Play round',
+  'measure-input': 'Measuring the input',
+};
+
+/** The words for a step's registered name, or null when the registry does not list it. */
+export function stepName(name: string): string | null {
+  const whole = STEP_NAMES[name];
+  if (whole !== undefined) return whole;
+  return name.includes('.') ? (STEP_NAMES[name.slice(name.indexOf('.') + 1)] ?? null) : null;
 }
 
 /** The label's attributes as a record; empty when it has none or they do not parse to one. */
@@ -74,27 +101,6 @@ export function nearest(index: SpanIndex, span: Span, kind: string): Span | null
   return null;
 }
 
-/** Every descendant of `span`, depth first in start order. */
-export function descendants(index: SpanIndex, span: Span): Span[] {
-  const found: Span[] = [];
-  const seen = new Set<string>([span.id]);
-  const visit = (id: string): void => {
-    for (const child of index.children.get(id) ?? []) {
-      if (seen.has(child.id)) continue;
-      seen.add(child.id);
-      found.push(child);
-      visit(child.id);
-    }
-  };
-  visit(span.id);
-  return found;
-}
-
-/** Whether the span is still under way: running, waiting, or not yet started. */
-export function isOpen(span: Span): boolean {
-  return span.status === 'running' || span.status === 'waiting' || span.status === 'pending';
-}
-
 /** The latest run-clock time any span records, or null with no spans. */
 export function latestTime(spans: readonly Span[]): number | null {
   let latest: number | null = null;
@@ -115,15 +121,6 @@ export function latestTime(spans: readonly Span[]): number | null {
   return latest;
 }
 
-/** The earliest run-clock time a span started at, or null with no spans. */
-export function earliestTime(spans: readonly Span[]): number | null {
-  let earliest: number | null = null;
-  for (const span of spans) {
-    if (earliest === null || span.started_at < earliest) earliest = span.started_at;
-  }
-  return earliest;
-}
-
 /** A duration in seconds as the screen writes it: `45s`, `9m`, `2h 05m`. */
 export function duration(seconds: number): string {
   const whole = Math.max(0, Math.floor(seconds));
@@ -134,12 +131,29 @@ export function duration(seconds: number): string {
   return `${hours}h ${String(minutes % 60).padStart(2, '0')}m`;
 }
 
+/**
+ * A metric value as the screen writes it everywhere: grouped, one decimal below a thousand (so a
+ * rate of 385.4 reads as the 385.4 the comparison stated, never as 385 or 390), fewer above and
+ * more below ten; trailing zeros are dropped.
+ */
+export function formatValue(value: number): string {
+  const abs = Math.abs(value);
+  const digits = abs >= 1000 ? 0 : abs >= 100 ? 1 : abs >= 10 ? 2 : abs >= 1 ? 2 : 3;
+  return value.toLocaleString('en-US', {maximumFractionDigits: digits});
+}
+
 /** A ratio to the baseline as the screen writes it: `1.42×`. */
 export function ratio(value: number): string {
   return `${value.toFixed(2)}×`;
 }
 
-/** Snake-case words as the screen writes them: `failed_check` reads `failed check`. */
+/**
+ * The reason a failed idea's span gives when its own trusted checks rejected it. It is the
+ * idea's result, which `failed` already says, so no screen words it as a reason.
+ */
+export const TURNED_DOWN = 'turned_down';
+
+/** Snake- and kebab-case words as the screen writes them: `failed_check` reads `failed check`. */
 export function words(value: string): string {
-  return value.replaceAll('_', ' ');
+  return value.replaceAll(/[_-]/g, ' ');
 }

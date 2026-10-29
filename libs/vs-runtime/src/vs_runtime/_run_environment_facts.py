@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from vs_evaluation.api import ProfileField
     from vs_sandbox.api.skypilot import ResolvedSkyPilotResources
     from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmOperatorSettings
+    from vs_slurm.api import WorkspaceRootProof
 
 
 @dataclass(frozen=True)
@@ -25,7 +26,11 @@ class HostEnvironmentFacts:
 
 @dataclass(frozen=True)
 class DockerEnvironmentFacts:
-    """Presentation facts for Docker execution."""
+    """Presentation facts for Docker execution.
+
+    Git writability is not among them: it depends on the workspace a session mounts, so
+    the session's ``RunEnvironmentView`` reports it from that session's mount plan.
+    """
 
 
 @dataclass(frozen=True)
@@ -34,16 +39,24 @@ class ClusterEvaluationFacts:
 
     ``settings`` is the operator file as the run parsed it once, and ``plan`` the
     evaluation plan the run wrote. Consumers read the cluster's capacity and the
-    executor's inputs here instead of re-reading either file.
+    executor's inputs here instead of re-reading either file. ``root_proof`` is the
+    run's workspace-root probe on a local Slurm root, which every Slurm submission
+    waits for; ``None`` where the root needs no probe.
     """
 
     settings: SlurmOperatorSettings
     plan: SlurmEvaluationPlan
+    root_proof: WorkspaceRootProof | None = None
 
     @property
     def evaluation_capacity(self) -> int:
         """How many evaluations the cluster runs at once."""
         return self.settings.config.evaluation_capacity
+
+    @property
+    def dedicated_measurement_resources(self) -> bool:
+        """Whether each trusted evaluation job holds its nodes alone (``SlurmConfig``)."""
+        return self.settings.config.dedicates_measurement_resources
 
     @property
     def captures_profile(self) -> bool:

@@ -126,7 +126,7 @@ function positiveInteger(name: string, value: number): number {
  * contract otherwise belongs. Validating in `parseServerMessage` would apply to
  * every parser consumer, including consumers that do not reconcile stream
  * history. Keeping the check here makes it part of adopting this state machine:
- * the TUI and web session both opt into the rejection when they delegate their
+ * every session opts into the rejection when it delegates its
  * batches here. Moving it to the boundary remains a separate contract change.
  */
 function declaredFloorOf(message: EventBatchMessage): number {
@@ -220,8 +220,7 @@ export class StreamReconciler {
    * (`reported_floor = 0 if request.tail is None`,
    * `src/server/transport/websocket.py:390`), because nothing was withheld. So
    * the next tail dial declares a floor above 0 and re-bootstraps again, even
-   * though the store did not change. TUI-identical
-   * (`session-controller.ts:1436`) and pinned by the resumed store-swap test.
+   * though the store did not change. This is pinned by the resumed store-swap test.
    */
   #highestDeclaredFloor: number | null = null;
   /**

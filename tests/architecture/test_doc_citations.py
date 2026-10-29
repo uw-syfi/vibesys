@@ -278,7 +278,6 @@ PACKAGE_FILES = {
         "from pkg.star import *\n"
     ),
     "docs/guide.md": "# Guide\n",
-    "clients/tui/package.json": "{}\n",
 }
 
 
@@ -339,7 +338,12 @@ def test_a_repo_path_resolves_to_a_tracked_file_directory_or_glob(
 
 @pytest.mark.parametrize(
     "text",
-    ["clients/tui/dist/launcher.js", "elsewhere/file.md", "docs/<name>.md", "uv run docs/x"],
+    [
+        "clients/apps/desktop-shell/dist/main.js",
+        "elsewhere/file.md",
+        "docs/<name>.md",
+        "uv run docs/x",
+    ],
 )
 def test_build_outputs_foreign_roots_and_placeholders_are_prose(tmp_path: Path, text: str) -> None:
     index = repo_index(tmp_path, _repo(tmp_path, PACKAGE_FILES))

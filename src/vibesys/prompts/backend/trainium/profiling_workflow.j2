@@ -1,31 +1,34 @@
-A Neuron profiling toolkit ships at `neuron_profiler/analyze_neuron.py`, wrapping AWS `neuron-explorer` (the successor to `neuron-profile`). Profiling a NeuronCore workload is a two-step process — capture a hardware profile, then analyze it — and capture only works once the model is actually compiled and running on the device (a NEFF exists). It takes minutes, so it is gated by the diagnosis step above.
+A Neuron profiling toolkit ships at `neuron_profiler/analyze_neuron.py`, wrapping AWS `neuron-explorer`. Profiling a NeuronCore workload is a two-step process — capture a profile from the process that owns the NeuronCores, then analyze it — and capture only works once the model actually runs on the device. It takes minutes, so it is gated by the diagnosis step above.
+
+The Neuron runtime records the profile inside the *server* process, so enable it on the server, not on the benchmark client. Use `NEURON_RT_INSPECT_DEVICE_PROFILE=session`: the default device mode produces no device trace under TorchNeuron's asynchronous execution. Session traces grow by gigabytes per minute of load, so keep the profiled load to seconds. Session device profiling also reserves about 4.75 GiB of HBM per logical core (measured on trn2: 23.5 GiB allocatable without it, 18.75 GiB with it): a server that needs more than ~18.7 GiB per core fails to load under it (`NRT_RESOURCE`, `Failed to allocate resource`). Then profile in this order: (1) the production configuration with `NEURON_RT_INSPECT_DEVICE_PROFILE=0` (a system profile: per-execution device time, host gaps and collectives, no HBM reserved); (2) only for a kernel-level question, a session device profile of a smaller configuration that fits (fewer slots or a shorter context), labeled as not the production shape. A NeuronCore belongs to one process: a stale server makes the next start fail with `Failed to initialize Neuron Runtime`.
 
 1. Inspect the manifest, checker, and candidate build/run documentation to identify
-   the real server command and port. Pre-warm so `neuronx-cc` compilation is
-   already cached (first compile of each graph shape takes minutes and would
-   otherwise dominate the capture):
+   the real server command and port. Pre-warm so every compile bucket is already in
+   the persistent cache (the first compile of each graph shape takes minutes and
+   would otherwise dominate the capture):
    ```
    {% include "shared/profilers/_stop_process_group.j2" %}
    setsid <declared server command> > /tmp/prewarm.log 2>&1 &
    PID=$!
-   for i in $(seq 1 180); do curl -s http://localhost:8077/health 2>/dev/null | grep -q ok && break; sleep 2; done
+   for i in $(seq 1 600); do curl -s http://localhost:8077/health 2>/dev/null | grep -q ok && break; sleep 2; done
    curl -s -X POST http://localhost:8077/v1/completions -H "Content-Type: application/json" \
      -d '{"prompt":"warmup","max_tokens":4,"temperature":0}' --max-time 600
    stop_group $PID
    ```
 
-2. Capture a system + device profile while the server is under a representative load. `neuron-explorer inspect` runs a command and captures both profiles around it:
+2. Start the server under the runtime's profiler, drive a short representative load, then stop it with SIGTERM and give the runtime time to write the trace:
    ```
    {% include "shared/profilers/_stop_process_group.j2" %}
-   setsid <declared server command> > /tmp/server.log 2>&1 &
+   rm -rf /tmp/neuronprof
+   NEURON_RT_INSPECT_ENABLE=1 NEURON_RT_INSPECT_DEVICE_PROFILE=session \
+   NEURON_RT_INSPECT_OUTPUT_DIR=/tmp/neuronprof \
+     setsid <declared server command> > /tmp/server.log 2>&1 &
    PID=$!
-   for i in $(seq 1 180); do curl -s http://localhost:8077/health 2>/dev/null | grep -q ok && break; sleep 2; done
-   python neuron_profiler/analyze_neuron.py capture \
-     --out-dir /tmp/neuronprof \
-     --workload "{% if benchmark_command is defined and benchmark_command %}{{ benchmark_command }}{% else %}<manifest benchmark command>{% endif %} --url http://localhost:8077 --lengths 256 --concurrency 4 --duration 10 --warmup-requests 1"
-   stop_group $PID
+   for i in $(seq 1 600); do curl -s http://localhost:8077/health 2>/dev/null | grep -q ok && break; sleep 2; done
+   {% if benchmark_command is defined and benchmark_command %}{{ benchmark_command }}{% else %}<manifest benchmark command>{% endif %} --url http://localhost:8077 --lengths 256 --concurrency 4 --duration 10 --warmup-requests 1
+   stop_group $PID TERM 300
    ```
-   (If your server cannot be driven this way, capture directly around a single compiled forward — see `analyze_neuron.py --help`.)
+   (For a standalone step script rather than a server, `python neuron_profiler/analyze_neuron.py capture --out-dir /tmp/neuronprof --workload "<command>"` runs it under `neuron-explorer inspect` with session device profiling.)
 
 3. Analyze the captured NTFF/NEFF:
    ```
@@ -37,6 +40,6 @@ A Neuron profiling toolkit ships at `neuron_profiler/analyze_neuron.py`, wrappin
    `cpu_launch_bound`, `python_overhead_bound`, `input_pipeline_bound`,
    `sync_bound`, `memcpy_bound`, `comm_bound`, `kernel_bound`, `mixed_or_unclear`.
 
-   On Trainium, map the evidence: low PE/compute-engine utilization with large host gaps → `cpu_launch_bound` or `python_overhead_bound`; DMA-dominated timelines → `memcpy_bound`; collective ops dominating (multi-core) → `comm_bound`; compute engines saturated → `kernel_bound`. Cite concrete numbers from the analysis output.
+   On Trainium, map the evidence: many small executions per step or low compute-engine utilization with large host gaps → `cpu_launch_bound` or `python_overhead_bound` (an eager hot path, graph breaks, or per-step host work); a blocking host read every step → `sync_bound`; DMA-dominated timelines or large host↔device copies → `memcpy_bound`; collective ops dominating (multi-core) → `comm_bound`; compute engines saturated → `kernel_bound`. Cite concrete numbers from the analysis output.
 
-If profiling fails (server won't start, no NEFF was produced because the model never compiled onto the device, capture is empty), file a `bug` issue describing what you tried and proceed to opportunities without profiler evidence — and call out explicitly that the model may not be running on the NeuronCore.
+If profiling fails (server won't start, the capture has no `.ntff`, or the model never compiled onto the device), file a `bug` issue describing what you tried and proceed to opportunities without profiler evidence — and call out explicitly that the model may not be running on the NeuronCore.

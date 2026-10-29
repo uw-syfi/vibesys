@@ -36,3 +36,17 @@ def _is_valid_component(component: str) -> bool:
     if ".." in component or "@{" in component or "*" in component:
         return False
     return not _FORBIDDEN & set(component)
+
+
+def require_branch_prefix(prefix: str) -> str:
+    """Return ``prefix`` when it names a branch hierarchy (``vibesys-runs/``) or is empty.
+
+    Empty selects every branch. A hierarchy prefix ends in ``/`` and is the start of a
+    legal branch name, so it can never widen into a pattern or an option.
+    """
+    if prefix == "":
+        return prefix
+    if not prefix.endswith("/") or not is_valid_branch_name(f"{prefix}x"):
+        message = f"not a branch hierarchy prefix: {prefix!r}"
+        raise ValueError(message)
+    return prefix

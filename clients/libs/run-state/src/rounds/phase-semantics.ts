@@ -1,3 +1,4 @@
+import {isChatAgentKind} from '@vibesys/contracts';
 import {type RoundKey, sameRoundKey} from '../round-key.js';
 import type {AgentPhase} from '../run-map.js';
 import type {ActiveAgentExecution, CoreState} from '../state.js';
@@ -46,7 +47,9 @@ interface PhaseContext {
 type PhaseParser = (context: PhaseContext) => PhaseDescription | null;
 
 function parseChat({label, kind}: PhaseContext): PhaseDescription | null {
-  if (label !== 'experiment chat' && label !== 'experiment-chat' && kind !== 'chat') return null;
+  if (label !== 'experiment chat' && label !== 'experiment-chat' && !isChatAgentKind(kind)) {
+    return null;
+  }
   return {activity: 'answering', attempt: null, subject: null, stage: 'chat'};
 }
 

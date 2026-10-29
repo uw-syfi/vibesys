@@ -44,13 +44,13 @@ How to make one kind of change in this repository.
 Tasks around the code.
 
 - [create-issue](create-issue/SKILL.md): investigate, draft and file issues.
-- [hunt-client-bugs](hunt-client-bugs/SKILL.md): drive the TUI headlessly to
-  find and report bugs.
 - [open-pr](open-pr/SKILL.md): prepare and open pull requests, including stacks.
 - [review-pr](review-pr/SKILL.md): review a pull request or local diff.
 - [triage-prs](triage-prs/SKILL.md): triage open pull requests into a
   maintainer queue.
 - [vs-meta-opt](vs-meta-opt/SKILL.md): run and audit meta-optimization campaigns.
+- [verify-desktop-ui](verify-desktop-ui/SKILL.md): verify a desktop UI change before
+  its PR opens: fixtures, screen checks, contact sheet, UX critic.
 - [write-docs](write-docs/SKILL.md): decide what belongs in docs, write it in
   the house style, and move or delete pages safely.
 - [write-skills](write-skills/SKILL.md): the convention for skills in this

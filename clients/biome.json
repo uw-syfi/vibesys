@@ -14,10 +14,12 @@
       "**/*.cts",
       "**/*.mts",
       "tools/scripts/**/*.mjs",
+      "libs/proto/**/*.mjs",
       "libs/ui/src/**/*.css",
       "!libs/ui/src/tokens.css",
       "!**/dist",
-      "!libs/contracts/src/generated"
+      "!libs/contracts/src/generated",
+      "!libs/proto/src/generated"
     ]
   },
   "css": {
@@ -65,20 +67,10 @@
   "overrides": [
     {
       "includes": [
-        "apps/ui-gallery/src/**/*.ts",
-        "apps/ui-gallery/src/**/*.tsx",
-        "apps/desktop-shell/src/**/*.ts",
-        "apps/desktop-shell/src/**/*.tsx",
-        "features/app-shell/src/**/*.ts",
-        "features/app-shell/src/**/*.tsx",
-        "features/machines/src/**/*.ts",
-        "features/machines/src/**/*.tsx",
-        "features/settings/src/**/*.ts",
-        "features/settings/src/**/*.tsx",
-        "features/run-page/src/**/*.ts",
-        "features/run-page/src/**/*.tsx",
-        "features/new-run/src/**/*.ts",
-        "features/new-run/src/**/*.tsx",
+        "features/**/src/**/*.ts",
+        "features/**/src/**/*.tsx",
+        "apps/**/src/**/*.ts",
+        "apps/**/src/**/*.tsx",
         "!**/*.test.ts",
         "!**/*.test.tsx"
       ],
@@ -120,29 +112,7 @@
       ]
     },
     {
-      "includes": [
-        "apps/web/src/**/*.ts",
-        "apps/web/src/**/*.tsx",
-        "features/*/src/**/*.ts",
-        "features/*/src/**/*.tsx",
-        "!apps/web/src/platform/backend.ts",
-        "!**/*.test.ts",
-        "!**/*.test.tsx"
-      ],
-      "plugins": ["./tools/lint-rules/web-fetch-only-in-backend.grit"]
-    },
-    {
-      "includes": [
-        "**/ui/**/*.ts",
-        "**/ui/**/*.tsx",
-        "!**/*.test.ts",
-        "!**/*.test.tsx",
-        "!tui/src/ui/activity-bar.ts",
-        "!tui/src/ui/agent-map.ts",
-        "!tui/src/ui/chat-composer.ts",
-        "!tui/src/ui/experiment-log.ts",
-        "!tui/src/ui/round-rail.ts"
-      ],
+      "includes": ["**/ui/**/*.ts", "**/ui/**/*.tsx", "!**/*.test.ts", "!**/*.test.tsx"],
       "plugins": ["./tools/lint-rules/ui-no-timers.grit"]
     },
     {
@@ -153,9 +123,7 @@
         "features/*/src/**/effects/**/*.tsx",
         "libs/connection/src/state/**/*.ts",
         "!**/*.test.ts",
-        "!**/*.test.tsx",
-        "!features/gateway-connect/src/renderer/effects/gateway-connect.ts",
-        "!features/hosts/src/renderer/effects/stores.ts"
+        "!**/*.test.tsx"
       ],
       "plugins": ["./tools/lint-rules/features-no-hand-rolled-control.grit"]
     },

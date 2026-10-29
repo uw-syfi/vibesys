@@ -12,6 +12,9 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
+from vs_core._generated.vibesys.core.v1.leaves_cv import ChargeClass
+from vs_core._generated.vibesys.core.v1.vocabulary_cv import Charge
+
 from .common import (
     CheckpointDecline,
     ContractValidationError,
@@ -20,9 +23,10 @@ from .common import (
     Seconds,
     Value,
 )
-from .evaluation import EvidenceRef
+from .evaluation import EvidenceRef, settling_named
 from .evaluation_history import RepeatedFailureGuidance
 from .job_observations import WaitEnd
+from .measurement import Comparison
 from .until import ReplyError
 
 
@@ -37,19 +41,7 @@ class Backoff(Value):
         return min(self.cap, self.first * 2**drops)
 
 
-type ChargeClass = Literal["free", "paid", "correction", "resume"]
 """The charge class of a turn request: a role's own (free or paid), a correction or a resume."""
-
-
-class Charge(StrEnum):
-    """What a role's first turn in a session costs the run's budget.
-
-    A turn that works on a candidate costs one ``ATTEMPT`` (and a turn); a turn that does not
-    (a judge, a planner) costs only a ``TURN``. Corrections and resumes cost a turn.
-    """
-
-    ATTEMPT = "paid"
-    TURN = "free"
 
 
 class Correctable(StrEnum):
@@ -102,6 +94,14 @@ class ResumeFacts(Value):
     budget: it never ran."""
     evidence: tuple[EvidenceRef, ...] = ()
     repeated_failure: RepeatedFailureGuidance | None = None
+    comparisons: tuple[Comparison, ...] = ()
+    """What the attempt's candidates measured against their base: the ratio, the noise and the
+    verdict the framework reached, so the agent need not work them out from a lone number.
+    Those the awaited evaluations measured, and any other whose verdict changed since the
+    attempt's last resume."""
+    settling: tuple[str, ...] = ()
+    """The candidate inputs of ``comparisons`` the framework still has runs under way for: their
+    verdicts are provisional."""
 
     @model_validator(mode="after")
     def budget_end_names_a_spent_budget(self) -> ResumeFacts:
@@ -112,6 +112,7 @@ class ResumeFacts(Value):
             raise ContractValidationError(
                 "queue_budget_spent", "must agree with what ended the wait"
             )
+        settling_named(self.comparisons, self.settling)
         return self
 
 
@@ -149,3 +150,20 @@ class Declined(Value):
 
 
 type Checkpoint = Annotated[Retained | Declined, Field(discriminator="kind")]
+
+
+__all__ = [
+    "Backoff",
+    "Charge",
+    "ChargeClass",
+    "Checkpoint",
+    "Correctable",
+    "Correction",
+    "Declined",
+    "Exchanges",
+    "ProtocolContext",
+    "ReplyCorrection",
+    "ResumeFacts",
+    "Retained",
+    "WaitUnrecorded",
+]

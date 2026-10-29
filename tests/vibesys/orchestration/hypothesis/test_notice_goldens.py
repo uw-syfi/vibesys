@@ -334,8 +334,8 @@ def _close(record: RoundRecord, closing: _Closing) -> CarryOver:
         search.initial(),
         plan,
         round_number=record.round_number,
-        current_commit=None,
-        records=[],
+        parent_round=None,
+        parent_commit=None,
     )
     closed = search.close_round(
         started.state,

@@ -19,7 +19,9 @@ _MODALITIES = st.sampled_from(_SERVING.modalities)
 
 
 def _facts(domain_id: str) -> RunFacts:
-    return RunFacts(domain_id=domain_id, objective="OBJ", benchmark_command="bench")
+    return RunFacts(
+        agent_git_writable=True, domain_id=domain_id, objective="OBJ", benchmark_command="bench"
+    )
 
 
 def test_serving_pack_declares_text_generation_as_default() -> None:

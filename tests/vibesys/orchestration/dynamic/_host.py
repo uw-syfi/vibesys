@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
 from tests.support.dynamic_script import REGISTRY
 from tests.vibesys.orchestration.dynamic._replies import (
+    abandon,
     implement,
     implemented,
     merge,
@@ -55,6 +56,7 @@ from vs_core.api import (
     InvocationId,
     InvocationRef,
     Measure,
+    MeasurementFailure,
     MeasurementFinished,
     MeasurementResult,
     Observation,
@@ -101,6 +103,10 @@ UNMEASURED_TERMS = TERMS.model_copy(update={"measured": ()})
 FACTS = initial_state().run.facts.model_copy(update={"task": TERMS})
 """The run facts every story starts from: the core's sample facts plus a task that measures."""
 
+type InputEnd = Literal["measured", "failed-workload", "failed-accuracy", "no-evidence", "lost"]
+"""How the input's measurement ends: measured; its benchmark or its accuracy check fails (a
+workload failure, typed); it ends without evidence; or it is lost."""
+
 _KINDS = {
     "accuracy": EvidenceKind.CORRECTNESS,
     "benchmark": EvidenceKind.BENCHMARK,
@@ -121,8 +127,13 @@ def handoff_path(call: int) -> str:
 
 
 def config(**overrides: object) -> DynamicConfig:
-    """A one-round, one-wide config, overridden by the test."""
-    fields = {"max_rounds": 1, "max_in_flight": 1}
+    """A one-round, one-wide config with no backlog, overridden by the test.
+
+    A story steps its workstreams one after another, so a workstream waiting for its measurement
+    keeps its agent slot (``max_backlog=0``). The search's default parks it; the stories of the
+    evaluation queue and the root's properties run with a backlog.
+    """
+    fields = {"max_rounds": 1, "max_in_flight": 1, "max_backlog": 0}
     return DynamicConfig.model_validate({**fields, **overrides})
 
 
@@ -167,8 +178,12 @@ class World(TypedDict, total=False):
     """The revision ids of candidates whose benchmark check fails."""
     verified: bool
     """Whether a parent revision still reproduces its retained content."""
-    baseline: Literal["measured", "failed-workload", "no-evidence", "lost"]
+    baseline: InputEnd
     """How the measurement of the input ends."""
+    input_blame: MeasurementFailure | None
+    """How the backend classified the input's failed measurement; None leaves it unclassified."""
+    input_recovers: bool
+    """The input's measurement ends as ``baseline`` once only: measured again, it is measured."""
     handoff_writes_open: bool
     """Leave each handoff write open for the story to answer; else the owner writes it at once."""
     merging: bool
@@ -179,6 +194,13 @@ class World(TypedDict, total=False):
     """Where each merge the planner asks for starts in the buildable hypotheses, the mergeable
     ones first, taking two in turn: a merge may name one the prompt did not list as mergeable.
     Once these run out, the planner merges the first two mergeable ones."""
+    replans: list[int]
+    """Which hypothesis each implement entry the planner writes names, in order: 0 a fresh ID;
+    any other pick an ID the planner already named (the pick modulo how many), continued when the
+    pick is odd and re-planned as new when it is even. Once these run out, every ID is fresh."""
+    abandons: list[int]
+    """For each plan the planner writes, in order: 0 nothing; any other pick also abandons an ID
+    the planner already named (the pick modulo how many). Once these run out, nothing."""
 
 
 @dataclass
@@ -208,7 +230,11 @@ class Host:
     throughputs: dict[str, float] = field(default_factory=dict)
     failing_benchmarks: set[str] = field(default_factory=set)
     verified: bool = True
-    baseline: Literal["measured", "failed-workload", "no-evidence", "lost"] = "measured"
+    baseline: InputEnd = "measured"
+    input_blame: MeasurementFailure | None = None
+    input_recovers: bool = False
+    input_measurements: int = 0
+    """How many times the host measured the input."""
     handoff_writes_open: bool = False
     merging: bool = False
     merger_answers: list[int] = field(default_factory=list)
@@ -218,6 +244,10 @@ class Host:
     merger_sessions: dict[str, set[str]] = field(default_factory=dict)
     """The sessions the merger turns ran in, by merge ID."""
     _merges: int = 0
+    replans: list[int] = field(default_factory=list)
+    abandons: list[int] = field(default_factory=list)
+    named: list[str] = field(default_factory=list)
+    """Every hypothesis ID the planner named fresh, in order."""
 
     def __post_init__(self) -> None:
         """Have the handoff owner write each file at once, unless the story answers the writes."""
@@ -346,16 +376,30 @@ class Host:
             case 0 | 1:
                 size = self._portfolio_size() if variant % 5 == 0 else 1
                 entries = self._merge_entries(asked)
-                for _ in range(size - len(entries)):
-                    self._hypotheses += 1
-                    entries.append(implement(f"h{self._hypotheses}"))
-                self.run.reply_raw(asked, plan_reply(*entries))
+                entries.extend(self._implement_entry() for _ in range(size - len(entries)))
+                self.run.reply_raw(asked, plan_reply(*entries, updates=self._abandon()))
             case 2:
                 self.run.reply_raw(asked, "not json")
             case 3:
                 self.run.fail(asked, FailureReason.TIMED_OUT)
             case _:
                 self.run.lose(asked)
+
+    def _implement_entry(self) -> dict[str, object]:
+        """A fresh hypothesis, or one already named, as the next of ``replans`` says."""
+        pick = self.replans.pop(0) if self.replans else 0
+        if pick == 0 or not self.named:
+            self._hypotheses += 1
+            self.named.append(f"h{self._hypotheses}")
+            return implement(self.named[-1])
+        return implement(self.named[pick % len(self.named)], continue_hypothesis=pick % 2 == 1)
+
+    def _abandon(self) -> list[dict[str, object]]:
+        """The hypothesis the next of ``abandons`` retires with this plan, if any."""
+        pick = self.abandons.pop(0) if self.abandons else 0
+        if pick == 0 or not self.named:
+            return []
+        return [abandon(self.named[pick % len(self.named)])]
 
     def _outliner(self, asked: Asked, variant: int) -> None:
         """Outline two steps, the second building on the first; or fail the turn."""
@@ -476,6 +520,10 @@ class Host:
         assert isinstance(plan.candidate, RevisionRef)
         candidate = plan.candidate
         is_input = plan.purpose == "baseline"
+        if is_input:
+            if self.input_recovers and self.input_measurements:
+                self.baseline = "measured"
+            self.input_measurements += 1
         if is_input and self.baseline == "lost":
             self.run.fail(asked, FailureReason.LOST)
             return
@@ -507,6 +555,7 @@ class Host:
             scope=request.scope,
             evidence=refs,
             status=ObservationStatus.FAILED if failed else ObservationStatus.SUCCEEDED,
+            failure=self.input_blame if is_input and self.baseline != "measured" else None,
         )
         self.run.answer(asked, MeasurementFinished(decision=asked.decision, result=result))
 
@@ -516,7 +565,10 @@ class Host:
         return not is_input and failing and stage == "benchmark"
 
     def _status_of(self, stage: str, *, is_input: bool) -> ObservationStatus:
-        broken = is_input and self.baseline == "failed-workload" and stage == "benchmark"
+        broken = is_input and (
+            (self.baseline == "failed-workload" and stage == "benchmark")
+            or (self.baseline == "failed-accuracy" and stage == "accuracy")
+        )
         return ObservationStatus.FAILED if broken else ObservationStatus.SUCCEEDED
 
     def _operation(self, asked: Asked, request: Operation) -> None:

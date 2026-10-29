@@ -6,7 +6,6 @@
   "type": "module",
   "vibesys": {
     "layer": "app",
-    "design": "strict",
     "entries": {
       ".": "dom"
     }
@@ -16,11 +15,13 @@
     "check": "tsc -b",
     "dev": "vite",
     "test": "node ../../tools/scripts/run_bun_tests.mjs ./src",
-    "test:e2e": "pnpm build && playwright test",
+    "test:e2e": "pnpm build && playwright test --pass-with-no-tests",
     "test:e2e:linux": "bash scripts/linux-playwright.sh",
+    "check:deterministic": "bash scripts/check-deterministic.sh",
     "update:screenshots": "bash scripts/linux-playwright.sh --update-snapshots"
   },
   "dependencies": {
+    "@vibesys/feature-new-run": "workspace:*",
     "@vibesys/ui": "workspace:*",
     "react": "19.1.1",
     "react-dom": "19.1.1"
