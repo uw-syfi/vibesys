@@ -131,6 +131,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
         stateless_tool_servers=stateless_tool_servers,
         plugin=plugin,
         options=options,
+        objectives=objective_axes_of(options),
         stop_timer=stop_timer,
         timing=timing,
         blocking=blocking,

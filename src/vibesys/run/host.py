@@ -40,7 +40,13 @@ from vs_agent.api import (
     DurableSessionStore,
     ProviderRoutedExecutor,
 )
-from vs_runtime.api import PollingEvaluationExecutor, RetryingEvaluationExecutor, TryHandles
+from vs_runtime.api import (
+    BenchmarkObjective,
+    MetricDirection,
+    PollingEvaluationExecutor,
+    RetryingEvaluationExecutor,
+    TryHandles,
+)
 from vs_runtime.api.core import MeasurementDecisions
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
@@ -71,7 +77,7 @@ if TYPE_CHECKING:
     from vibesys.run.profilers import ProfilerPreflight
     from vibesys.run.resources import _PreparedRun
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSpec
-    from vs_core.api import LifecycleCapability
+    from vs_core.api import LifecycleCapability, TaskObjective
     from vs_mcp.api import ToolServerDescriptor
     from vs_project.api import StateNamespace
     from vs_runtime.api import (
@@ -162,6 +168,7 @@ class _ProductHostFactory:
         | None
     )
     options: BaseModel
+    objectives: tuple[TaskObjective, ...]
     profiler_preflight: ProfilerPreflight
     stateless_tool_servers: Mapping[str, StatelessToolServer] | None = None
     core_services: CoreServices | None = field(default=None, init=False)
@@ -437,6 +444,12 @@ class _ProductHostFactory:
                         evaluation,
                         workspaces,
                         clock=self.timing.clock,
+                        objectives=tuple(
+                            BenchmarkObjective(
+                                name=axis.name, direction=MetricDirection(axis.direction)
+                            )
+                            for axis in self.objectives
+                        ),
                         stage_output=stage_output,
                         control=self.integration.control,
                     ),
@@ -686,6 +699,7 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
     *,
     plugin: OrchestrationPlugin,
     options: BaseModel,
+    objectives: tuple[TaskObjective, ...] = (),
     resume_policy: (
         Callable[
             [OrchestrationDescriptor, OrchestrationDescriptor],
@@ -732,6 +746,7 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
         network=network,
         resume_policy=resume_policy,
         options=options,
+        objectives=objectives,
         stateless_tool_servers=stateless_tool_servers,
     )
     async with open_run_host(factory.prepare, runner=blocking) as host:
