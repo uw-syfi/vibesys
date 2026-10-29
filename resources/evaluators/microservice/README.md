@@ -228,7 +228,9 @@ A workload declares:
 - weighted operations and optional objective tags;
 - open- or closed-loop model, rate, duration, warmup, concurrency, timeout,
   load seed, fixture seed, and repetitions;
-- the primary metric and direction; and
+- the primary metric (`operations_per_second`, or `latency_ms.p50`,
+  `latency_ms.p95`, or `latency_ms.p99` over the objective's successful
+  operations) and direction; and
 - correctness and offered-load constraints.
 
 Unknown TOML fields are rejected. Target session policy is explicit: the HTTP
