@@ -184,8 +184,8 @@ function desktopWorld(cleanups: RetirementCleanups = {}, skipped: SkippedRecent[
       };
       return 'started';
     },
-    detach: runId => {
-      launches.push(`detach:${runId}`);
+    detach: run => {
+      launches.push(`detach:${run.runId}`);
       bound = null;
     },
     resume: async () => undefined,

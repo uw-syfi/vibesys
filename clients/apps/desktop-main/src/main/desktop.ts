@@ -222,7 +222,7 @@ export class Desktop {
     }
     const run = runs.attached();
     if (run === null) return;
-    runs.detach(run.runId);
+    runs.detach(run);
     this.#openRunWindow(run);
   }
 

@@ -46,6 +46,14 @@ function gate(): Gate {
   };
 }
 
+/** Await a dial count reaching `count`, bounded so a routing mistake fails fast, not by hanging. */
+async function dialed(read: () => number, count: number): Promise<void> {
+  for (let turn = 0; turn < 200 && read() < count; turn += 1) {
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  expect(read()).toBe(count);
+}
+
 type LeaseFailure = {readonly error: Error; readonly mode: 'reject' | 'throw'};
 
 function lease(
@@ -576,6 +584,10 @@ describe('RunControl over the FakeHelper', () => {
     const remoteRun = {host: 'ssh:bravo', runId: 'shared-run'} as const;
     const pages = new Map<string, {closed: number}>();
     const releases = {local: 0, remote: 0};
+    let localDials = 0;
+    let remoteDials = 0;
+    localLink.helper.host.runs.set(RUN_A, () => (localDials += 1));
+    remoteLink.helper.host.runs.set(RUN_B, () => (remoteDials += 1));
     const runs = new RunControl({
       connection: async id =>
         id.kind === 'local'
@@ -586,7 +598,6 @@ describe('RunControl over the FakeHelper', () => {
         pages.set(run.host, page);
         return {wake: () => {}, close: () => (page.closed += 1)};
       },
-      confirm: async () => true,
       remember: async () => {},
       changed: () => {},
       log: () => {},
@@ -598,23 +609,21 @@ describe('RunControl over the FakeHelper', () => {
 
     expect([...pages.values()].map(page => page.closed)).toEqual([0, 0]);
     expect(releases).toEqual({local: 0, remote: 0});
-    expect(await runs.logs(localRun, {kind: 'list'})).toMatchObject({
-      ok: true,
-      instanceId: RUN_A,
-    });
-    expect(await runs.logs(remoteRun, {kind: 'list'})).toMatchObject({
-      ok: true,
-      instanceId: RUN_B,
-    });
+    // Connecting under one host's composite identity dials only that host's channel: the two
+    // same-named runs never cross-route to each other's instance.
+    runs.connect(new FakeRelayPort(), localRun);
+    await dialed(() => localDials, 1);
+    expect(remoteDials).toBe(0);
+    runs.connect(new FakeRelayPort(), remoteRun);
+    await dialed(() => remoteDials, 1);
+    expect(localDials).toBe(1);
 
     runs.detach(localRun);
     expect(pages.get('local')?.closed).toBe(1);
     expect(pages.get('ssh:bravo')?.closed).toBe(0);
     expect(releases).toEqual({local: 1, remote: 0});
-    expect(await runs.logs(remoteRun, {kind: 'list'})).toMatchObject({
-      ok: true,
-      instanceId: RUN_B,
-    });
+    runs.connect(new FakeRelayPort(), remoteRun);
+    await dialed(() => remoteDials, 2);
 
     runs.detach(remoteRun);
     await local[Symbol.asyncDispose]();
