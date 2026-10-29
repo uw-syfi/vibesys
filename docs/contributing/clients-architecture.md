@@ -44,7 +44,8 @@ clients/
   libs/transport/   @vibesys/transport        framing, redial, persistent stream -> contracts
   libs/hosts/       @vibesys/hosts            host identity, listing, connection status,
                                               checkout path rules              -> contracts
-  libs/runs/        @vibesys/runs             run identity, recent status, resume and stop
+  libs/runs/        @vibesys/runs             run identity, launch profiles, recent status,
+                                              resume and stop
                                                                                  -> contracts, hosts
   libs/run-session/ @vibesys/run-session      one live run: runStep, the session machine, its
                                               ports, connectRun, WebSession    -> contracts, run-state,
@@ -131,8 +132,8 @@ and `@vibesys/entities` were split for this reason: the first held both the gene
 and the run fold, the second every domain model the views shared, and each name invited the next
 unrelated addition. The split gave `store` (generic, domain-free like `ui`), `run-state` (the run
 fold, its round, performance, and transcript projections as separate entries), `hosts`, `runs`, and
-`run-session` (the live session below the UI). A helper used by one feature lives in that feature
-(task-argument parsing was `@vibesys/feature-start-run/state`'s). The `bucket-names` rule keeps foundation,
+`run-session` (the live session below the UI). A helper used by one feature lives in that feature;
+shared run-domain behavior such as `shellWords` belongs to `@vibesys/runs`. The `bucket-names` rule keeps foundation,
 core, and domain packages from being named `entities`, `core`, `common`, `utils`, `shared`,
 `helpers`, or `misc`.
 
@@ -665,10 +666,10 @@ names a missing or extra one.
 | `@vibesys/transport` | core | exists: `.` and `./testing` (the shared `FakeClock`) are `neutral`, `./websocket` is `dom` | backend-client split (#1910) |
 | `@vibesys/transport-node` | domain | deleted: its Unix-socket `ServerClient` lost its last importer with the terminal client (#3156), and it presented no operator key | #3158 |
 | `@vibesys/hosts` | core | exists: host identity and keys, labels, the checkout and project path rules (`HostValidationError`), a host's listed runs with their phase text (`instancePhaseText`), path completion for host path fields (`completionStep`, moved down from `feature-hosts`), and what the window shows about a connection; depends on `contracts`, `store` | domain split (#1949) |
-| `@vibesys/runs` | domain | exists: run, task, and instance ids, a recent run's status from its host's listing, the exact-resume policy, the stop flow; depends on `contracts`, `hosts` | domain split (#1949) |
+| `@vibesys/runs` | domain | exists: run, task, and instance ids, bounded launch-profile values and optimistic mutations, a recent run's status from its host's listing, the exact-resume policy, the stop flow; depends on `contracts`, `hosts` | domain split (#1949), launch profiles (#2718) |
 | `@vibesys/machine` | core | exists: `actorStore`, `clockFrom`, `unprovided` (`.`) and `checkMachine` (`./testing`); domain-free | state architecture (#1950) |
 | `@vibesys/run-session` | domain | exists: the run fold's wiring (`runStep`), the session lifecycle (`sessionMachine`, three parallel regions: start-up, recovery, and the fenced replacement snapshot), its ports, the run connection over a control transport (`connectRun`), and `WebSession`, with `./testing` (an in-memory control transport and page lifecycle, and `sessionWith`) | domain split (#1949) |
-| `@vibesys/entities` | domain | deleted: split into `hosts` and `runs`; task arguments (`shellWords`) lived in `@vibesys/feature-start-run`, deleted with the Start sheet | domain split (#1949) |
+| `@vibesys/entities` | domain | deleted: split into `hosts` and `runs`; task arguments (`shellWords`) lived in `@vibesys/feature-start-run`, deleted with the Start sheet, and are now owned by `runs` | domain split (#1949), launch profiles (#2718) |
 | `@vibesys/ipc` | service | exists: the run connection's port messages and their validation, and the shell's channels, events, and payloads, with each feature's requests (channels, bridge slice, and the parser the main process runs) in `welcome/<feature>.ts` (the surface's historical name); depends on `hosts`, `runs` | domain packages (phase 5 of #1878); per-feature parsers with phase 8 |
 | `@vibesys/connection` | service | exists (`.`, `node`): the connection manager (`ConnectionManager`, `HostConnection`: an XState machine in `state/` and a `shell/` owning the links, channels, and the machine's clock), the ssh and local links, the bootstrap, and `connectionStatus`, with `./testing` (`FakeHelper`, `FakeLink`, and the `HostConnection` contract suite); depends on `contracts`, `transport`, `hosts` | desktop main process (phase 8 of #1878) |
 | `@vibesys/settings` | service | exists (`.`, `node`): the settings store (`hosts.json`, `recent.json`, `preferences.json` with the appearance, notifications and archived runs; one writer, atomic replace), with `./testing` (`FakeSettingsFilesystem`); depends on `hosts`, `runs` | desktop main process (phase 8 of #1878) |
