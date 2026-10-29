@@ -516,6 +516,8 @@ def closed_answers(state: EvaluationState, moment: Moment) -> EvaluationState:
     `comparisons_settled`), and takes its verdict on the record as it stands then; a sample
     that lands later restates nothing (`restated_answers`), so the round's figure and the
     ledger's stay one. An answer with no comparison is closed at once: its flow does not wait.
+    An answer whose comparison left the view (its base went stale) while a run that feeds it
+    is under way stays open until that run ends, as the flow's wait does (`_settling`).
     """
     now_at = moment.now
     open_jobs = [
@@ -523,11 +525,7 @@ def closed_answers(state: EvaluationState, moment: Moment) -> EvaluationState:
     ]
     if not open_jobs:
         return state
-    settling = {
-        (stated.comparison.scope, stated.comparison.candidate_input)
-        for stated in stated_comparisons(state, moment)
-        if stated.settling
-    }
+    settling = {(scope, candidate_input) for scope, candidate_input, _ in _settling(state)}
     closing = {
         job.submission_id
         for job in open_jobs
@@ -857,41 +855,59 @@ def feeding_run_under_way(
 
 
 def comparisons_settled(
-    before: EvaluationState, after: EvaluationState, moment: Moment
+    before: EvaluationState, after: EvaluationState
 ) -> tuple[ComparisonSettled, ...]:
     """Every comparison that was settling in ``before`` and is settled in ``after``.
 
-    Read from the view's own statement of each comparison (`stated_comparisons`), so the report
-    and the ``settling`` a flow reads are one test: a flow that read a comparison settling is
-    told exactly once, in the step whose run's end leaves no run feeding it (after the runs that
-    end started), and never while one still does. A comparison stops settling only when a run
-    under way ends (`run_under_way`) or a sample lands, so any other step costs nothing here.
+    Settling is the test the view states for each comparison (`comparison_settling`), so the
+    report and the ``settling`` a flow reads are one test: a flow that read a comparison
+    settling is told exactly once, in the step whose run's end leaves no run feeding it (after
+    the runs that end started), and never while one still does. It is read for every
+    comparison the samples name (`_settling`), not only those the view states now:
+    a comparison whose base samples all went stale while a run fed it is out of the view until
+    that run lands, and its flow is still waiting to be told. A comparison stops settling only
+    when a run under way ends (`run_under_way`) or a sample lands, so any other step costs
+    nothing here.
     """
     # Samples are only ever appended.
     if _runs_under_way(before) <= _runs_under_way(after) and len(before.samples) == len(
         after.samples
     ):
         return ()
-    settling = {
-        _subject(stated.comparison)
-        for stated in stated_comparisons(before, moment)
-        if stated.settling
-    }
+    settling = _settling(before)
     if not settling:
         return ()
+    still = _settling(after)
     return tuple(
-        ComparisonSettled(
-            scope=stated.comparison.scope,
-            candidate_input=stated.comparison.candidate_input,
-            base_input=stated.comparison.base_input,
-        )
-        for stated in stated_comparisons(after, moment)
-        if not stated.settling and _subject(stated.comparison) in settling
+        ComparisonSettled(scope=scope, candidate_input=candidate_input, base_input=base_input)
+        for scope, candidate_input, base_input in settling
+        if (scope, candidate_input, base_input) not in still
     )
 
 
-def _subject(comparison: Comparison) -> tuple[Scope, str, str]:
-    return (comparison.scope, comparison.candidate_input, comparison.base_input)
+def _settling(state: EvaluationState) -> tuple[tuple[Scope, str, str], ...]:
+    """Every comparison the samples have made that a run still feeds, by its subject.
+
+    A comparison is made once the candidate's input in its scope and its base each hold a
+    sample, and it is settling exactly when `comparison_settling` says so: a run of its base in
+    any scope, or of the candidate's input in its scope, is under way. Whether the view states
+    it now does not matter: `comparison_of` leaves out one whose base samples all went stale,
+    and a run that feeds it brings it back when it lands. One whose base was never sampled was
+    never stated, so no flow waits for it.
+    """
+    latest: dict[tuple[str, str, str], Sample] = {}
+    for sample in state.samples:
+        if sample.base is not None:
+            latest[
+                sample.scope.model_dump_json(), sample.measured_input, sample.base.measured_input
+            ] = sample
+    return tuple(
+        (s.scope, s.measured_input, s.base.measured_input)
+        for s in latest.values()
+        if s.base is not None
+        and samples_of(state, Measured(s.evaluation, s.base.measured_input))
+        and feeding_run_under_way(state, s.scope, Measured(s.evaluation, s.measured_input), s.base)
+    )
 
 
 def _runs_under_way(state: EvaluationState) -> frozenset[RequestId]:
