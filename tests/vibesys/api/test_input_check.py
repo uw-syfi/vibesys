@@ -42,12 +42,12 @@ if TYPE_CHECKING:
     from typing import NoReturn
 
     from vibesys.api import AuxiliaryAgentLaunch, ManagedAgent
-    from vibesys.api.wiring import RunResources
+    from vibesys.api.wiring import AuxiliaryResources
     from vs_agent.api import AgentEventSink, AgentInvocationStore, AgentSessionKey
     from vs_project.api import GitFaultSink
     from vs_runtime.api.infrastructure import RunState
     from vs_sandbox.api import HostResource
-    from vs_sim.api import Event
+    from vs_sim.api import Event, OutputSink
 
 
 @dataclass
@@ -71,7 +71,7 @@ class _ForbiddenSessionAgents:
 
     def open_environment(
         self,
-        resources: RunResources,
+        resources: AuxiliaryResources,
         *,
         mounts: tuple[HostResource, ...] = (),
         agent_backend: str | None = None,
@@ -85,7 +85,7 @@ class _ForbiddenSessionAgents:
     def create_agent(
         self,
         launch: AuxiliaryAgentLaunch,
-        resources: RunResources,
+        resources: AuxiliaryResources,
         agent_events: AgentEventSink,
     ) -> ManagedAgent:
         del launch, resources, agent_events
@@ -219,10 +219,11 @@ class _FailingAccuracySandbox(FakeLifecycleRunner):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink,
     ) -> CommandResult:
         if command.endswith(" check-accuracy"):
             self.script_process(command, stderr="the input is incorrect\n", returncode=3)
-        return super().execute(command, timeout=timeout, cancel=cancel)
+        return super().execute(command, timeout=timeout, cancel=cancel, output=output)
 
 
 def test_input_check_runs_both_gates_without_starting_an_agent(tmp_path: Path, sim: Sim) -> None:
@@ -284,13 +285,23 @@ def test_a_failed_accuracy_gate_returns_a_failed_run_result(tmp_path: Path, sim:
     assert accuracy_failures[0].output_tail == "the input is incorrect"
     assert projection == {
         "baseline": {
-            "kind": "measured",
+            "kind": "unmeasurable",
+            "failure": {
+                "kind": "accuracy-failed",
+                "stage": "accuracy",
+                "blamed": "workload",
+                "status": None,
+                "output": "Framework accuracy gate failed.\nthe input is incorrect",
+                "ended": None,
+                "cause": None,
+            },
             "reading": {
                 "accuracy_passed": False,
                 "benchmark_passed": None,
                 "metrics": [],
                 "partial": None,
             },
+            "first_attempt": None,
         }
     }
     assert client_factory.calls == 0
@@ -334,6 +345,8 @@ def test_unreadable_benchmark_evidence_returns_a_failed_run_result(
             "kind": "unmeasurable",
             "failure": {
                 "kind": "benchmark-failed",
+                "stage": "benchmark",
+                "blamed": "ambiguous",
                 "status": None,
                 "output": (
                     "Framework benchmark failed.\n"
@@ -348,6 +361,19 @@ def test_unreadable_benchmark_evidence_returns_a_failed_run_result(
                 "benchmark_passed": False,
                 "metrics": [],
                 "partial": None,
+            },
+            "first_attempt": {
+                "kind": "benchmark-failed",
+                "stage": "benchmark",
+                "blamed": "ambiguous",
+                "status": None,
+                "output": (
+                    "Framework benchmark failed.\n"
+                    "not-json\n"
+                    "benchmark output did not include its result JSON"
+                ),
+                "ended": None,
+                "cause": None,
             },
         }
     }

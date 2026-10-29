@@ -2,6 +2,7 @@
 
 from vibesys.candidates.api import Baseline, failure, measure_input, trusted
 from vibesys.orchestration.input_check.operations import OPERATIONS
+from vibesys.search_spans.api import SPANS, adoption_label
 from vs_core.api.search import INPUT, Flow, NoWinner, Value, search
 
 
@@ -30,14 +31,14 @@ def failure_reason(baseline: Baseline) -> str:
     return f"the input did not pass its configured gates ({', '.join(details)})"
 
 
-@search("check-input", config=InputCheckConfig, operations=OPERATIONS)
+@search("check-input", config=InputCheckConfig, operations=OPERATIONS, spans=SPANS)
 async def check_input(ctx: Flow, _config: InputCheckConfig) -> NoWinner | None:
     """Run the task's gates once against the trusted input and finish."""
     baseline = await measure_input(ctx)
     ctx.publish(InputCheckSnapshot(baseline=baseline))
     if not trusted(baseline):
         return NoWinner(reason=failure_reason(baseline))
-    ctx.choose(INPUT)
+    ctx.choose(INPUT, adoption_label(INPUT, None, None))
     return None
 
 

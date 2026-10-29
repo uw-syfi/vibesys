@@ -114,14 +114,15 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
     )
 
 
-def _projector() -> RuntimeRecordProjector[FlowState]:
+def _projector() -> RuntimeRecordProjector[FlowState, InputCheckSnapshot]:
     """Project the checked baseline for live and historical readers."""
 
-    def project(state: FlowState, revision: int) -> PluginProjection:
-        snapshot = FlowDriver.published(state, InputCheckSnapshot)
-        payload = {} if snapshot is None else snapshot.model_dump(mode="json")
+    def published(state: FlowState) -> InputCheckSnapshot | None:
+        return FlowDriver.published(state, InputCheckSnapshot)
+
+    def project(snapshot: InputCheckSnapshot, revision: int) -> PluginProjection:
         return PluginProjection(
-            payload=payload,
+            payload=snapshot.model_dump(mode="json"),
             iterations=IterationTree.from_nodes(()),
             rounds=(),
             experiment_revision=revision,
@@ -132,6 +133,7 @@ def _projector() -> RuntimeRecordProjector[FlowState]:
         state_type=FlowState,
         record_type=RuntimeRecord[FlowState],
         operations=OPERATIONS.registry(),
+        published=published,
         project=project,
     )
 

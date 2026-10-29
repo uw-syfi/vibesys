@@ -222,7 +222,7 @@ def resolve_agent_specs(  # noqa: PLR0913  # lint-waiver: LW-221002 [PLR0913]; s
     return MappingProxyType(resolved)
 
 
-def resolve_run_agent_specs(
+def resolve_run_agent_specs(  # noqa: PLR0913  # lint-waiver: LW-221003 [PLR0913]; same inputs as resolve_agent_specs, passed through so a zero-role run short-circuits before its strict checks. A wrapper would only rename those inputs.
     config: Config,
     roles: tuple[AgentRole, ...],
     *,

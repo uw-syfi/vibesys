@@ -221,7 +221,9 @@ def parse_cli_invocation(argv: list[str], *, read_only: bool = False) -> CliInvo
                     stage="resume_resolution",
                 )
         loop_kind, remaining = _extract_loop_selection(argv)
-        if any(argument == "--resume" or argument.startswith("--resume=") for argument in remaining):
+        if any(
+            argument == "--resume" or argument.startswith("--resume=") for argument in remaining
+        ):
             probe, _ = _LOOP_COMMANDS[loop_kind].build_parser().parse_known_args(remaining)
             _normalize_runs_dir(probe)
             selection = _load_resume_selection(probe)

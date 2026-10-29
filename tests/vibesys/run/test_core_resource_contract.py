@@ -40,7 +40,7 @@ def _unused_session_spec(_role: AgentRole, _workspace: Path) -> NoReturn:
 
 def _agent_resources(sim: Sim) -> CoreAgentResources:
     return CoreAgentResources(
-        client=FakeAgentClient(threads=sim.threads()),
+        agent_turns=FakeAgentClient(threads=sim.threads()),
         invocation_slot=FakeAgentInvocationStore(),
         configuration=_unused_configuration,
         session_spec=_unused_session_spec,
@@ -65,17 +65,20 @@ def _resources(
         facts=RunFacts(
             domain_id="generic",
             objective="Check resource composition.",
+            agent_git_writable=True,
         ),
         options=EmptyOptions(),
         workspaces=workspaces,
         evaluation=PollingEvaluationExecutor(FakeEvaluation(), workspaces, clock=ManualClock()),
         environment=CoreEnvironment(
-            view=RunEnvironmentView(paths=AgentPaths()),
+            view=RunEnvironmentView(paths=AgentPaths(), workspace_git_writable=True),
             evaluation_plan=TrustedEvaluationPlan(),
             evaluation_capacity=1,
             queue_allowance_seconds=1,
             observe_interval_seconds=1,
             observe_backoff_cap_seconds=1,
+            queue_wait_budget_seconds=43_200,
+            queue_notice_interval_seconds=600,
             request_retries=RequestRetries(limit=1, backoff=1, backoff_cap=1),
             max_run_seconds=None,
             cancellation_bound_seconds=1,

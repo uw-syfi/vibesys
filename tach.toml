@@ -1627,7 +1627,7 @@ expose = ["InputCheckLaunch", "PLUGIN", "REGISTRATION"]
 [[modules]]
 path = "vibesys.orchestration.input_check.search"
 layer = "loops"
-depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.input_check.operations"]
+depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.input_check.operations", "vibesys.search_spans"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.input_check.search"]
