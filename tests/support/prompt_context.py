@@ -12,6 +12,7 @@ from tests.vibesys.reply_variables import context_variables, profiler_reply
 
 from vibesys.orchestration.dynamic.search.api import dynamic
 from vibesys.orchestration.evolve.search.api import evolve
+from vibesys.orchestration.input_check.search import check_input
 from vibesys.orchestration.issue_queue.search.api import issue_queue
 from vibesys.orchestration.multi.search.api import multi
 from vibesys.orchestration.single.search.api import single
@@ -31,7 +32,7 @@ __all__ = [
 
 def registered_searches() -> tuple[SearchDef[Any], ...]:
     """Every search a built-in orchestration runs."""
-    return (dynamic, evolve, issue_queue, multi, single)
+    return (check_input, dynamic, evolve, issue_queue, multi, single)
 
 
 def registered_reply_models() -> list[type[BaseModel]]:

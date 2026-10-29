@@ -960,6 +960,68 @@
       "title": "ChatThreadInfo",
       "type": "object"
     },
+    "CheckInputSpanAttributes": {
+      "additionalProperties": false,
+      "properties": {
+        "adoption": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AdoptionAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "agent_turn": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentTurnAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GateAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "planning_call": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlanningAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workstream": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkstreamAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "CheckInputSpanAttributes",
+      "type": "object"
+    },
     "CheckoutStatus": {
       "description": "Why the optional checkout update advanced or skipped the checkout.",
       "enum": [
@@ -7007,6 +7069,17 @@
     "SpanAttributes": {
       "additionalProperties": false,
       "properties": {
+        "check-input": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckInputSpanAttributes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "dynamic": {
           "anyOf": [
             {

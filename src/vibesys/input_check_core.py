@@ -152,6 +152,7 @@ def input_check_core_registration() -> OrchestrationRegistration:
             ),
             retention_label=_RETENTION_LABEL,
             prompt_templates=Path(prompts.__file__).parent,
+            span_kinds=check_input.spans,
         ),
     )
     return OrchestrationRegistration(

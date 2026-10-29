@@ -94,6 +94,7 @@ def test_committed_protocol_schema_matches_python_contract() -> None:
 def test_the_protocol_exports_the_span_kinds_attribute_schema_of_every_built_in_search() -> None:
     registered = {r.plugin.id for r in built_in_orchestrations().registrations()}
     assert registered == {
+        "check-input",
         "dynamic",
         "single-agent",
         "profile-guided-single-agent",
