@@ -168,8 +168,8 @@ class _ProductHostFactory:
         | None
     )
     options: BaseModel
-    objectives: tuple[TaskObjective, ...]
     profiler_preflight: ProfilerPreflight
+    objectives: tuple[TaskObjective, ...] = ()
     stateless_tool_servers: Mapping[str, StatelessToolServer] | None = None
     core_services: CoreServices | None = field(default=None, init=False)
     local_evaluation: Evaluation | None = field(default=None, init=False)
