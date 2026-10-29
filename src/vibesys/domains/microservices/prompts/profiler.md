@@ -14,9 +14,9 @@ Useful evidence includes:
 - Container or process CPU and memory during steady-state load.
 - Database/cache stats such as hit rate, slow queries, connection counts, and
   pool saturation.
-- A servicebench `telemetry` report with in-window service, span, and datastore
+- A normalized telemetry report from the trusted evaluator with in-window service, span, and datastore
   mean, p50, p95, p99, maximum, count, and error count.
-- A servicebench schema-v2 trace graph with workload-correlated synchronous
+- A schema-v2 trace graph from the same evaluator with workload-correlated synchronous
   critical-path contribution and a representative path decomposition.
 
 When using a system profiler, capture a steady-state run after warmup. For
