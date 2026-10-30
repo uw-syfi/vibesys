@@ -111,7 +111,7 @@ test = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "scripts/corevalue/tests", "scripts/host_operations/tests", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/tests", "libs/vs-redaction/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "libs/vs-logs/tests", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/tests", "skills/search/measure/tests"]
+testpaths = ["tests", "scripts/corevalue/tests", "scripts/host_operations/tests", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/tests", "libs/vs-redaction/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "libs/vs-logs/tests", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/tests", "skills/search/measure/tests", "skills/search/hooks/tests"]
 # Directories whose `slow` tests still run one case each in a pull request (see the vs-sim plugin).
 sim_smoke_slow = ["tests/system/chaos", "tests/system/skeleton", "libs/vs-core/tests"]
 # Bare `--cov` measures the packages listed in `[tool.coverage.run] source`
