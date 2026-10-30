@@ -129,6 +129,12 @@ def test_a_deadline_in_another_timezone_is_the_same_instant(new_repo: NewRepo) -
     assert json.loads(stop(repo)[1])["reason"].startswith("10 minutes remain")
 
 
+def test_a_deadline_written_with_z_is_utc(new_repo: NewRepo) -> None:
+    repo = new_repo()
+    start_run(repo, deadline=(NOW + timedelta(minutes=7)).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    assert json.loads(stop(repo)[1])["reason"].startswith("7 minutes remain")
+
+
 @pytest.mark.parametrize(
     "run_json",
     [
