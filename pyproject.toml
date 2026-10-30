@@ -52,7 +52,7 @@ vibesys = "entrypoints.launcher:main"
 vibesys-host-helper = "entrypoints.host_helper:main"
 
 [tool.setuptools.package-data]
-vibesys = ["prompts/*.j2", "prompts/**/*.j2", "prompts/**/*.md", "orchestration/*/prompts/*.j2", "orchestration/*/prompts/**/*.j2", "domains/README.md", "domains/*/prompts/*.md", "inputs/prompts/*.j2", "run/prompts/*.j2", "_resources/**/*", "_sdk/**/*", "fact_import/descriptors/*.json"]
+vibesys = ["prompts/*.j2", "prompts/**/*.j2", "prompts/**/*.md", "orchestration/*/prompts/*.j2", "orchestration/*/prompts/**/*.j2", "domains/README.md", "domains/*/prompts/*.md", "inputs/prompts/*.j2", "run/prompts/*.j2", "_resources/**/*", "_skills/**/*", "_sdk/**/*", "fact_import/descriptors/*.json"]
 entrypoints = ["py.typed"]
 server = ["py.typed", "chat/prompts/*.j2"]
 launch = ["py.typed"]
@@ -258,7 +258,7 @@ baseline = "tests/quality/isolation_baseline.jsonl"
 line-length = 100
 target-version = "py312"
 src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/src", "libs/vs-decode/tests", "libs/vs-redaction/src", "libs/vs-redaction/tests", "libs/vs-evaluation/src", "libs/vs-evaluation/tests", "libs/vs-async-ops/src", "libs/vs-async-ops/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-tracker/src", "libs/vs-issue-tracker/tests", "libs/vs-core/src", "libs/vs-core/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-runtime/src", "libs/vs-runtime/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "libs/vs-agent/src", "libs/vs-agent/tests", "libs/vs-slurm/src", "libs/vs-slurm/tests", "libs/vs-mcp/src", "libs/vs-mcp/tests", "libs/vs-faults/src", "libs/vs-faults/tests", "libs/vs-sim/src", "libs/vs-sim/pytest_plugin", "libs/vs-sim/tests", "libs/vs-dst/src", "libs/vs-dst/tests", "libs/vs-logs/src", "libs/vs-logs/tests", "libs/vs-proto/src", "libs/vs-runlog/src", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
-# resources/skills/ vendors reference code (submodule checkouts and copied
+# skills/domains/ vendors reference code (submodule checkouts and copied
 # reference material) that VibeSys does not own and does not hold to repo
 # lint standards; see the UP040/UP046/UP047 note below.
 extend-exclude = [
@@ -269,7 +269,7 @@ extend-exclude = [
     "scripts/corevalue/tests/generated_pb",
     "scripts/corevalue/tests/generated_values",
     "scripts/corevalue/tests/generated_boundary",
-    "resources/skills",
+    "skills/domains",
     "examples/microservices/repositories/deathstarbench",
     "examples/microservices/repositories/masa",
     "examples/microservices/repositories/rpcstack",
@@ -295,7 +295,7 @@ ignore = [
     # only becomes lintable at target-version py312, so raising the floor
     # surfaced 11 of these at once. The repo has not adopted that syntax, and
     # this is not the change to adopt it in: ruff marks the rewrites unsafe,
-    # and the hits include vendored reference code under `resources/skills/`
+    # and the hits include vendored reference code under `skills/domains/`
     # that VibeSys does not own. Moving to PEP 695 is a separate decision.
     "UP040",
     "UP046",
@@ -452,7 +452,7 @@ unused-ignore-comment = "error"
 [tool.ty.src]
 exclude = ["libs/vs-proto/src/vs_proto/_generated"]
 # Same tree the previous checker covered: first-party sources plus their
-# tests. `examples/` and `resources/skills/` vendor code VibeSys does not own
+# tests. `examples/` and `skills/domains/` vendor code VibeSys does not own
 # and are left out.
 include = [
     "src",

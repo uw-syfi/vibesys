@@ -89,7 +89,7 @@ def test_a_path_is_an_example_repository_only_at_the_one_depth() -> None:
     assert is_example_repository("examples/microservices/repositories/masa")
     assert not is_example_repository("examples/microservices/repositories/masa/sub")
     assert not is_example_repository("examples/microservices/repositories")
-    assert not is_example_repository("resources/skills/serving-systems/repos/vllm")
+    assert not is_example_repository("third_party/serving-repos/vllm")
 
 
 class _FakeGit:

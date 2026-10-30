@@ -19,8 +19,12 @@ A run picks its skills in three stages. Discovery finds every directory with a
 ([cli-flags.md](../../../docs/cli-flags.md)). Selection keeps a skill when the
 sidecar rule that matches it allows the run's compute backend and domain.
 Materialization copies each kept skill into the workspace, dropping other
-backends' platform directories and vendored checkouts. The wheel build copies
-the bundled tree into the package; a checkout wins at run time.
+backends' platform directories and vendored checkouts. The bundled tree is the
+domain-skills part of the repository's published skills tree, and a run never
+reads the rest of it. The wheel build copies the bundled tree into the package
+as its own staged tree; a checkout wins at run time. Reference repositories a
+skill cites are submodules outside every skill, so they never reach the wheel
+or a workspace.
 
 ## Builds on
 

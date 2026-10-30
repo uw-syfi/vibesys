@@ -1,11 +1,11 @@
 # SGLang source-code lookup
 
-Short reference into `repos/sglang/`. Depends on the `skills/serving-systems/repos/sglang` submodule being initialized.
+Short reference into `$SERVE_REPOS/sglang/`. Depends on the `third_party/serving-repos/sglang` submodule being initialized.
 
 ## Setup
 
 ```bash
-export SERVE_REPOS=<vibesys-root>/skills/serving-systems/repos
+export SERVE_REPOS=<vibesys-root>/third_party/serving-repos
 # or substitute $SERVE_REPOS inline below.
 ```
 
@@ -19,7 +19,7 @@ git fetch --depth 1 origin 04b1caf75b3c6f043a979ddce21d43ed07c217a6
 git checkout -q FETCH_HEAD
 ```
 
-(From the vibesys repo root the equivalent is `git submodule update --init --checkout resources/skills/serving-systems/repos/sglang`.)
+(From the vibesys repo root the equivalent is `git submodule update --init --checkout third_party/serving-repos/sglang`.)
 
 ## Directory map
 

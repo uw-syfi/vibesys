@@ -1,17 +1,18 @@
 """Stage bundled framework resources for inclusion in the Python wheel.
 
 Profiler support packages (``resources/profilers``), evaluator packages
-(``resources/evaluators``), the preset skills library (``resources/skills``), and the chat agent's
-skills (``resources/chat-skills``) are resolved from the repository checkout at run time. An installed wheel has
-no checkout, so the wheel build copies these
-trees into the ``vibesys._resources`` package directory; ``setup.py`` calls
-:func:`stage_resources` from the same custom ``build_py`` step that stages the
-desktop app. VibeSys configures ``vs_runtime.api.BundledResources`` to prefer the
-checkout and fall back to the staged copy.
+(``resources/evaluators``), and the chat agent's skills (``resources/chat-skills``) are resolved
+from the repository checkout at run time, as is the preset domain skills library
+(``skills/domains``). An installed wheel has no checkout, so the wheel build copies the resource
+trees into the ``vibesys._resources`` package directory and the domain skills into
+``vibesys._skills``; ``setup.py`` calls :func:`stage_resources` and :func:`stage_skills` from the
+same custom ``build_py`` step that stages the desktop app. VibeSys configures
+``vs_runtime.api.BundledResources`` to prefer the checkout and fall back to the staged copy.
 
-Vendored skill repository checkouts (``repos/`` inside a skill) are excluded:
-they are git submodules, are already excluded from workspace materialization,
-and would bloat the wheel by hundreds of megabytes.
+Only ``skills/domains`` is staged: it is the one part of the published ``skills/`` tree that
+optimization agents read. The reference serving-engine checkouts are git submodules under
+``third_party/`` and are not inside any staged tree; a ``repos/`` directory inside a skill is
+still excluded, because it is already excluded from workspace materialization.
 
 This module is imported inside an isolated build
 environment, so it depends only on the standard library.
@@ -25,7 +26,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 #: Subtrees of ``resources/`` staged into the wheel.
-STAGED_TREES: tuple[str, ...] = ("chat-skills", "evaluators", "profilers", "skills")
+STAGED_TREES: tuple[str, ...] = ("chat-skills", "evaluators", "profilers")
 
 #: Directory names never copied, at any depth.
 EXCLUDED_NAMES: frozenset[str] = frozenset(
@@ -87,6 +88,20 @@ def stage_resources(repo_root: Path, dest: Path, *, required: bool = False) -> b
         _copy_tree(source, dest / tree)
         staged_any = True
     return staged_any
+
+
+def stage_skills(repo_root: Path, dest: Path, *, required: bool = False) -> bool:
+    """Copy the domain skills (``skills/domains``) into ``dest``; return whether staged."""
+    source = repo_root / "skills" / "domains"
+    if not source.is_dir():
+        if required:
+            error = PackagingError.missing("skill trees", [source.relative_to(repo_root)])
+            raise error
+        return False
+    if dest.exists():
+        shutil.rmtree(dest)
+    _copy_tree(source, dest)
+    return True
 
 
 def stage_sdk(repo_root: Path, dest: Path, *, required: bool = False) -> bool:

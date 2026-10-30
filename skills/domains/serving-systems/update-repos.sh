@@ -1,11 +1,11 @@
 #!/bin/bash
-# Sparse-checkout reference serving engines into repos/.
+# Sparse-checkout reference serving engines into third_party/serving-repos/.
 # Usage: bash update-repos.sh [vllm|sglang|trtllm|all]
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPOS_DIR="$SCRIPT_DIR/repos"
+REPOS_DIR="$SCRIPT_DIR/../../../third_party/serving-repos"
 
 clone_or_update() {
     local name="$1"

@@ -20,7 +20,7 @@ size limits, lint waivers, and doc links.
 - Process composition (CLI parsing, `RunRequest` building, mode entries) lives
   in `src/entrypoints/`, not `libs/`. Prompt, loop, and domain behavior lives
   in the package that owns that surface.
-- Long-form serving knowledge lives under `resources/skills/`, not in framework
+- Long-form serving knowledge lives under `skills/domains/`, not in framework
   code or prompt skeletons.
 - Reusable targets live in their candidate repository under
   `.vibesys/tasks/<name>/`: `OBJECTIVE.md`, `vibesys.input.toml`, optional

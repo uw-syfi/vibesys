@@ -21,7 +21,7 @@ ranking only says where the time goes.
 It is the front door to this bundle. Run the ranker to get a verdict, read the
 verdict with the rules below, then hand off to the vendored `dial9-*` skills to
 root-cause a specific finding. The ranker and those skills are siblings here, in
-`resources/skills/dial9-tokio/`.
+`skills/domains/dial9-tokio/`.
 
 ## 1. Produce the ranking
 
@@ -29,7 +29,7 @@ One command. The ranker parses the trace, claims on-CPU nanoseconds to the
 innermost covering span per task, and writes profile result protocol v1:
 
 ```
-python3 resources/skills/dial9-tokio/ranker/analyze_dial9.py \
+python3 skills/domains/dial9-tokio/ranker/analyze_dial9.py \
     --traces <trace-dir-or-file> \
     --window <workload-driver.json> \
     --vs-output <out.json>

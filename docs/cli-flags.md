@@ -743,7 +743,7 @@ one skill directory containing `SKILL.md`, a parent tree containing multiple
 skills, or a single `SKILL.md` file:
 
 - **`--skills-dir PATH`** *replaces* the built-in preset roots. When omitted, the
-  preset `resources/skills/` is the base.
+  preset `skills/domains/` is the base.
 - **`--extra-skills PATH`** *stacks on top of* the presets (or on top of
   `--skills-dir` when that is given). Use this to add your own skills while
   keeping the presets such as the `llm-serving` serving-systems skills. A

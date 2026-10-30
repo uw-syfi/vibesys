@@ -144,4 +144,4 @@ Kernel implementation (writing CUDA / Triton / CUTLASS / HIP). For that, use the
 
 ## Reference repos
 
-The `repos/` directory (excluded from materialization to agents) holds full source trees of vLLM, SGLang, and TensorRT-LLM as git submodules. Engine-source-map references cite paths like `$SERVE_REPOS/<engine>/...`; export `SERVE_REPOS=$(git rev-parse --show-toplevel)/resources/skills/serving-systems/repos` or substitute inline.
+The `third_party/serving-repos/` directory at the repository root (outside this skill, never materialized to agents) holds full source trees of vLLM, SGLang, and TensorRT-LLM as git submodules. Engine-source-map references cite paths like `$SERVE_REPOS/<engine>/...`; export `SERVE_REPOS=$(git rev-parse --show-toplevel)/third_party/serving-repos` or substitute inline.

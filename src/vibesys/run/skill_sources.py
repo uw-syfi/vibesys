@@ -40,7 +40,7 @@ def resolve_skill_source_dirs(
 def chat_skill_dirs() -> tuple[Path, ...]:
     """The skills a run's chat agent is installed with: every skill of the bundled chat tree.
 
-    The tree is separate from the optimization agents' (``resources/skills``), whose discovery
+    The tree is separate from the optimization agents' (``skills/domains``), whose discovery
     has no way to scope a skill to one kind of agent, so a chat skill never reaches them. No
     sidecar applies: these skills teach steering and reading a run, on every backend and domain.
     Empty when no bundled tree is installed.
