@@ -42,8 +42,10 @@ def block_reason(cwd: Path, now: datetime) -> str | None:
         if not run_id or "/" in run_id or "\\" in run_id or run_id in (".", ".."):
             return None
         run_dir = cwd / STATE_DIR / run_id
+        stated = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))["deadline"]
+        # Python 3.10 does not read a trailing Z; 3.11 and later do.
         deadline = datetime.fromisoformat(
-            json.loads((run_dir / "run.json").read_text(encoding="utf-8"))["deadline"]
+            stated.removesuffix("Z") + "+00:00" if stated[-1:] == "Z" else stated
         )
         remaining = (deadline - now).total_seconds()
     except _FAIL_OPEN:
