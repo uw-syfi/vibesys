@@ -17,20 +17,20 @@
 ## Reading the measurement
 
 `show --run <dir> --commit <candidate>` lists the records. Look at: the metric and direction are
-the task's; the evaluator fingerprint is the same as the base's; the check is `pass`; the samples
-were taken on a comparable host. `compare` gives the verdict and the oriented ratio (above 1 is
-better).
+the task's; the evaluator fingerprint is the same as the base's; the check is `pass`; the
+samples were taken on a comparable host. `compare` gives the verdict and the oriented ratio
+(above 1 is better).
 
 - `better`: the gain is real by the recorded samples.
 - `within_noise`: no evidence of a gain. A claim of gain fails on "real".
 - `worse`: the candidate is slower or lower than its parent. It fails.
-- `inconclusive`: too few or alike samples. Measure once more through `vibesys:measure` (at
-  least 5 samples) if your verdict depends on it.
+- `inconclusive`: return `unmeasured` on Real. The lead decides whether another measurement
+  fits the budget; identical readings on both sides cannot be settled by repeating them.
 
 ## Verdict format
 
 ```
-Verdict: pass | fail
+Verdict: pass | fail | unmeasured
 Candidate: <SHA>      Parent: <SHA>
 Correct: yes/no - <reason>
 Active: yes/no - <the path from the benchmark to the change>

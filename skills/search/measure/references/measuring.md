@@ -24,23 +24,49 @@ The result JSON: a top-level field named by `metric` is the value. If the JSON i
 it only when exactly one entry carries that field. A value that is missing or not finite is a
 failed run: do not record it.
 
-## One measurement, as a script
+## Setup and runtime arguments
 
-```sh
-SHA=$(git rev-parse <ref>)
-W="$RUN/measure/${SHA:0:12}"
-git worktree add --detach "$W" "$SHA"
-cd "$W"
-<build command>                       # if declared; stop and report if it fails
-<accuracy command>; CHECK=$([ $? -eq 0 ] && echo pass || echo fail)
-if [ "$CHECK" = pass ]; then
-  for i in 1 2 3 4 5; do
-    <benchmark command> --output-json "$W/../result-${SHA:0:12}-$i.json"
-  done
-fi
-# read the metric from each result file, then:
-python3 <skill dir>/scripts/measurements.py record --run "$RUN" --commit "$SHA" ...
-```
+Before measuring, the lead writes one reproducible setup recipe into each brief: dependencies,
+build command, service start/readiness/stop commands (if needed), and the runtime arguments
+appended to the declared check and benchmark prefixes. Use the same workload and settings for
+base and candidates. Record the complete benchmark command including runtime arguments, not just
+the TOML prefix. Honor every objective gate, including ones not enforced by exit status.
+
+For the kv-store task, both declared prefixes require `--port <allocated port>` and an already
+running server. Build the measured revision, start its `./run.sh <port>` from that checkout, and
+verify `redis-cli -p <port> PING` returns `PONG` within five seconds. The seed revision may need
+the task's reference server instead of a launcher; read its argument help and record that
+baseline recipe. The checker needs Redis and redis-py; the benchmark needs Java and its YCSB
+download. Check the READ and UPDATE p99 values against OBJECTIVE.md before accepting samples.
+Stop the owned server on every exit, including timeout or failure; never stop unrelated servers.
+
+## One measurement
+
+1. The lead serializes check/benchmark/record sequences on a host, including profiling that
+   drives load. Workers can implement in parallel, but must receive a measurement slot in
+   their brief before measuring. A worker without a slot returns its committed revision as
+   `ready for measurement`; the lead measures it in a background job or resumes the worker
+   with the slot after the current owner finishes. Never wait inside a worker for permission
+   to measure. Do not dispatch overlapping measurement windows. This also
+   serializes the recorder's history validation and append; the script supplies no file lock.
+2. Use an absolute `RUN` path. Resolve the full commit SHA and create a new detached worktree:
+   `git worktree add --detach "$RUN/measure/<work-id>-<attempt>" <SHA>`.
+   Use a fresh attempt ID for every remeasurement. Make the parent directory first.
+3. From that checkout, execute the brief's build and service recipe, then the check. Save logs
+   under the attempt's artifacts directory. Abort on any failure or objective gate violation.
+4. Execute the benchmark five times, appending its declared `json_argument` and a distinct
+   absolute JSON output path each time. Abort on a nonzero exit, timeout, missing output,
+   missing metric or failed gate. Never reuse output from an earlier attempt.
+5. Use `--role base` whenever the measured SHA equals `run.json`'s `base_commit`, otherwise
+   `--role candidate`, including remeasurements. Read the metric from each fresh JSON and
+   call the recording CLI once with one `--sample`
+   flag per value, `--check pass`, and the full command. A repeat records only new samples,
+   never the old samples again. Return the slot and clean up the server and worktree.
+
+The lead runs this sequence as a background Bash job when measuring itself. Bound the whole
+sequence by the worker return time, and each command by its declared timeout as well. If fewer
+samples fit, record what completed and report `inconclusive` when there are too few for a
+verdict.
 
 A commit whose build or check fails has no samples to record. Record nothing for it; put the
 output in a file under the run directory and write the failure in the ledger and the handoff.
@@ -54,9 +80,9 @@ The compare output warns when they do not.
 ## Samples and the verdict
 
 The script compares a commit's samples with the base's by Welch's t test. A verdict needs at
-least 3 samples on each side that are not all alike. The bar is the Student-t 97.5% quantile at
-the Welch-Satterthwaite degrees of freedom (4.30 noises at the fewest samples, down to 2.04).
-Everything else is `inconclusive`.
+least 3 samples on each side and nonzero noise (one side may be constant). The bar is the
+Student-t 97.5% quantile at the floor of the Welch-Satterthwaite degrees of freedom (4.30 noises
+at the fewest samples, down to 2.04). Everything else is `inconclusive`.
 
 - Samples of one commit pool across records: take two more and record them again.
 - Only samples with the same metric and the same task fingerprint (a hash of the task
@@ -64,7 +90,7 @@ Everything else is `inconclusive`.
   comparable and the compare says so.
 - The oriented `ratio` is above 1 when the commit is better, whatever the direction.
 - One run has one base. A second `--role base` record must name the same commit.
-- To ask "is this no worse than main", record main's samples as ordinary candidate records and
+- To ask "is this no worse than main", record main's samples (base role for the initial commit, candidate otherwise) and
   compare with `--base <main SHA>`.
 
 ## Cleaning up

@@ -1,15 +1,20 @@
 # Brief templates
 
 A subagent knows nothing of this run. A brief is the whole of what it knows, so it must stand on
-its own. Fill every field; delete none. Dispatch with the Agent tool, in the background.
+its own. Fill every field; delete none. Dispatch with the Agent tool using a general-purpose
+subagent and background execution (`run_in_background: true` where offered). Do not create agent
+definition files or add a second automatic worktree: the lead already created the checkout.
 
 ## Common header (every kind)
 
 ```
 Goal: <what you want and why, in two or three sentences>
-Worktree: <absolute path>      Branch: <branch>      Base commit: <full SHA>
+Worktree: <absolute path>      Branch: <branch or detached>      Base commit: <full SHA>
 First run: cd <worktree> && git rev-parse --show-toplevel && git branch --show-current
-Confirm both match before you change anything. Work only in this worktree.
+Confirm both match before you change anything (an empty branch name means detached HEAD).
+Work only in this worktree.
+Return by: <ISO timestamp before the run deadline>; stop work and hand back by this time.
+Measurement setup: <build/start/readiness/stop commands, runtime arguments, resource allocation>.
 Task: .vibesys/tasks/<task>/ (read OBJECTIVE.md). Run directory: <abs path of $RUN>
 Load these skills first: <vibesys:implement-hypothesis | judge-candidate | combine-candidates |
   profile-revision>, vibesys:measure, and <domain skills>.
@@ -17,7 +22,7 @@ Rules:
 - Never edit anything under .vibesys/, the task's checker or its benchmark.
 - No stub, special case or shortcut that makes a check pass or a number rise without the
   program really doing the work. Obey every rule in OBJECTIVE.md.
-- Commit your work in this worktree before you report.
+- Implement and combine workers commit before reporting; judge and profile workers edit nothing.
 ```
 
 Domain skills: pick from the plugin's skill list those whose description fits the task's
@@ -47,7 +52,7 @@ Add:
 ```
 Candidate: <full SHA>      Parent: <full SHA>
 Claim: <the implementer's claim>      Recorded verdict: <from vibesys:measure compare, or none>
-Read only. Edit nothing. Return pass or fail with reasons.
+Read only. Edit nothing. Return pass, fail or unmeasured with reasons.
 ```
 
 Give the judge a detached worktree of the candidate: `git worktree add --detach <path> <SHA>`.
@@ -78,4 +83,5 @@ Change no code. Hand back findings with the evidence for each, and say which dec
 inform.
 ```
 
-Read-only worktree of the revision, as for the judge. Artifacts go in `<run dir>/profiles/<id>/`.
+Read-only worktree of the revision, as for the judge.
+Artifacts go in `<run dir>/profiles/<id>/`.
