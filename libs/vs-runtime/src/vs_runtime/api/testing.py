@@ -8,6 +8,14 @@ from vs_runtime._fake_core_execution import (
     FakePublicationDelivery,
     FakeRequestExecution,
 )
+from vs_runtime._fake_step_log import (
+    FakeStepLog,
+    LogEntry,
+    LoggedEnded,
+    LoggedFinished,
+    LoggedInterrupted,
+    LoggedStarted,
+)
 from vs_runtime._fake_step_runner import (
     AttemptHangs,
     AttemptRaises,
@@ -127,6 +135,7 @@ __all__ = [
     "FakeRunControlEventSink",
     "FakeRunHandle",
     "FakeRuns",
+    "FakeStepLog",
     "FakeStepRunner",
     "FakeStopTimer",
     "FakeTrustedAccuracyCall",
@@ -139,6 +148,11 @@ __all__ = [
     "InvalidReply",
     "Launch",
     "LeftoverWorkError",
+    "LogEntry",
+    "LoggedEnded",
+    "LoggedFinished",
+    "LoggedInterrupted",
+    "LoggedStarted",
     "MemoryValidationPasses",
     "ProbedRunClock",
     "RecordingSearch",
