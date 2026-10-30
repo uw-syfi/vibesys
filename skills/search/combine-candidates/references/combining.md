@@ -25,8 +25,9 @@ For a combine, the result is a new candidate, judged and compared like any other
 For a merge into main, the lead moves main only if the result passes the check and does not
 measure worse than main. Concretely, with main at `M` and the result at `C`:
 
-1. `compare --commit C --base M` shows no `worse` verdict. If it is `inconclusive`, take more
-   samples of both before deciding.
+1. Judge the new combination independently, even when every part passed. Require `pass`.
+   `compare --commit C --base M` must show `better` or `within_noise`, with a passing check.
+   If it is `inconclusive`, add samples only within the remaining budget; otherwise keep M.
 2. `git -C <main worktree> merge --ff-only C` moves `vibesys/<run-id>` to `C`.
 3. The lead records the merge in `decisions.md` and the ledger.
 

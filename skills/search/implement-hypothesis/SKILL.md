@@ -1,6 +1,6 @@
 ---
 name: implement-hypothesis
-description: Use when a vibesys optimize brief gives you one hypothesis to implement in your own git worktree. Makes the smallest change that yields a measurement, commits it, measures it with vibesys:measure, and hands back the claim, the commit, the verdict, what was learned and the next step. Never edits .vibesys/ or the task's checker or benchmark.
+description: "Use when a vibesys optimize brief gives you one hypothesis to implement in your own git worktree. Makes the smallest change that yields a measurement, commits it, measures it with vibesys:measure, and hands back the claim, the commit, the verdict, what was learned and the next step. Never edits .vibesys/ or the task's checker or benchmark."
 ---
 
 # Implement a hypothesis
@@ -25,7 +25,8 @@ parent commit and the scope. Details of the steps and the handoff are in
 2. Build, then run the cheapest check that covers what you changed. Once it builds and one local
    check passes, commit and measure; do not polish first. After a failure, change the code
    before you run the check again. When output is long, write it to a file and read the file.
-3. Commit in your worktree. Then measure that commit with `vibesys:measure`: the correctness
+3. Commit in your worktree. If your brief grants no measurement slot, return the SHA as
+   `ready for measurement`; the lead measures it before judging it. Otherwise measure that commit with `vibesys:measure`: the correctness
    check, then at least 5 benchmark samples, recorded in the run directory. Compare with the
    base: `compare --commit <sha>`. Add `--base <sha>` when you built on a candidate, to see the
    gain over your parent.

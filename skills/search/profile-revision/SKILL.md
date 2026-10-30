@@ -1,6 +1,6 @@
 ---
 name: profile-revision
-description: Use when a vibesys optimize brief asks you to answer one question about one revision with evidence, to inform the lead's next decision. Changes no code and produces no candidate: runs the profiler, trace or measurement the question needs on a read-only checkout and hands back findings with the decision they inform.
+description: "Use when a vibesys optimize brief asks you to answer one question about one revision with evidence, to inform the lead's next decision. Changes no code and produces no candidate: runs the profiler, trace or measurement the question needs on a read-only checkout and hands back findings with the decision they inform."
 ---
 
 # Profile a revision
@@ -12,7 +12,8 @@ lead plans its next work from your answer, so a clear "unsupported" beats a gues
 
 Run the first command of your brief and confirm the worktree: a checkout of the revision. Read
 the question and the decision it informs. Read `OBJECTIVE.md`. Load the domain skills the brief
-names; they usually say which profiler fits. Details are in [findings.md](references/findings.md).
+names; they usually say which profiler fits. Details are in
+[findings.md](references/findings.md).
 
 ## Work
 
@@ -34,5 +35,5 @@ Unsupported: <parts of the question the evidence does not answer, and what would
 Informs: <the decision from the brief, and which way the answer points>
 ```
 
-Do not propose and implement changes. Name the hypotheses the findings suggest if the brief
-asks for them.
+Do not propose and implement changes. Name the hypotheses the findings suggest if the brief asks
+for them.
