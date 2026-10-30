@@ -41,7 +41,7 @@ class _ArgsOptions(TypedDict, total=False):
     default_presets: bool
 
 
-NKI_WRAPPER_DIR = PROJECT_ROOT / "resources" / "skills" / "neuron-agentic-development"
+NKI_WRAPPER_DIR = PROJECT_ROOT / "skills" / "domains" / "neuron-agentic-development"
 NKI_SKILL_NAMES = {
     "neuron-explorer-profile-schema",
     "neuron-nki-debugging",
@@ -66,7 +66,7 @@ def _args(
     # By default emulate "presets only" by pointing --skills-dir at the repo
     # presets; pass default_presets=False to exercise the omitted-flag path.
     if skills_dir is None and default_presets:
-        skills_dir = [Path("resources/skills")]
+        skills_dir = [Path("skills/domains")]
     return argparse.Namespace(
         config=cfg,
         no_skills=no_skills,
@@ -135,7 +135,7 @@ def test_no_skills_disables_even_compatible_skills(tmp_path: Path) -> None:
 
 
 def test_omitted_skills_dir_uses_presets(tmp_path: Path) -> None:
-    # With no --skills-dir the preset roots (resources/skills) are the base.
+    # With no --skills-dir the preset roots (skills/domains) are the base.
     _, skills, _ = load_config_and_skills(
         _args(tmp_path, ComputeBackend.CUDA, default_presets=False),
         domain=DomainName.LLM_SERVING,
@@ -341,7 +341,7 @@ def test_missing_skill_frontmatter_is_invalid(tmp_path: Path) -> None:
 def test_all_repository_skill_metadata_is_valid() -> None:
     metadata = {
         item.skill_dir.name: item
-        for item in validate_skill_tree(PROJECT_ROOT / "resources" / "skills")
+        for item in validate_skill_tree(PROJECT_ROOT / "skills" / "domains")
     }
     assert metadata["serving-systems"].domains == (DomainName.LLM_SERVING,)
     assert metadata["kernel-correctness"].domains == (DomainName.KERNEL_WRITING,)
@@ -459,9 +459,7 @@ def test_serving_systems_platform_dirs_cover_every_compute_backend() -> None:
     Without this, selecting a backend silently falls back to reading another
     platform's floor — which is wrong work, not merely missing work.
     """
-    platforms = (
-        PROJECT_ROOT / "resources" / "skills" / "serving-systems" / "references" / "platforms"
-    )
+    platforms = PROJECT_ROOT / "skills" / "domains" / "serving-systems" / "references" / "platforms"
     present = {p.name for p in platforms.iterdir() if p.is_dir()}
 
     assert present == {backend.value for backend in ComputeBackend}
@@ -469,7 +467,7 @@ def test_serving_systems_platform_dirs_cover_every_compute_backend() -> None:
 
 # -- link discipline: portable tiers must not link into platforms/ ----------
 
-SERVING_SYSTEMS = PROJECT_ROOT / "resources" / "skills" / "serving-systems"
+SERVING_SYSTEMS = PROJECT_ROOT / "skills" / "domains" / "serving-systems"
 PORTABLE_TIERS = ("algorithms", "models", "tooling", "frameworks", "engines")
 # `](...)` targets that resolve into a platform directory.
 _PLATFORM_LINK = re.compile(r"\]\((?:\.{1,2}/)*platforms/[a-z0-9]+/[^)]+\)")

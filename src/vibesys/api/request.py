@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.composition import require_one_login_per_container, resolve_run_agent_specs
-from vibesys.config import BUNDLED_RESOURCES
+from vibesys.config import BUNDLED_SKILLS
 from vibesys.inputs import (
     InputBundle,
     InputSynthesisError,
@@ -76,7 +76,7 @@ if TYPE_CHECKING:
 
 def default_skill_roots() -> tuple[Path, ...]:
     """Return the bundled skill collection, when one is installed."""
-    skills = BUNDLED_RESOURCES.directory("skills")
+    skills = BUNDLED_SKILLS.root()
     return () if skills is None else (skills,)
 
 

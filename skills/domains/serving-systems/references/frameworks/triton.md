@@ -142,9 +142,9 @@ For non-NVIDIA targets, check that the kernel compiles on your Triton backend be
 |:--------|:-----|:-------|
 | **liger-kernel** | fused RMSNorm, RoPE, SwiGLU, cross-entropy, FlashAttention variants — training-plus-inference focus | https://github.com/linkedin/Liger-Kernel |
 | **unsloth** | fused training + inference kernels | https://github.com/unslothai/unsloth |
-| **sgl-kernel Triton ops** | SGLang's in-tree Triton kernel library | `repos/sglang/sgl-kernel/` |
-| **vLLM fused_moe Triton ops** | MoE routing / dispatch / expert GEMM | `repos/vllm/vllm/model_executor/layers/fused_moe/` |
-| **TRT-LLM triton_kernels/** | matmul_ogs, distributed, etc. | `repos/TensorRT-LLM/triton_kernels/` |
+| **sgl-kernel Triton ops** | SGLang's in-tree Triton kernel library | `$SERVE_REPOS/sglang/sgl-kernel/` |
+| **vLLM fused_moe Triton ops** | MoE routing / dispatch / expert GEMM | `$SERVE_REPOS/vllm/vllm/model_executor/layers/fused_moe/` |
+| **TRT-LLM triton_kernels/** | matmul_ogs, distributed, etc. | `$SERVE_REPOS/TensorRT-LLM/triton_kernels/` |
 | **flashinfer Triton ops** | some utility ops (most FI is CUDA) | inside flashinfer-python |
 
 ## When custom kernel stops making sense

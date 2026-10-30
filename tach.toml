@@ -65,7 +65,7 @@ source_roots = [
     "libs/vs-proto/src",
     "libs/vs-runlog/src",
 ]
-exclude = ["**/tests", "**/__pycache__", "docs", "examples", "sdk", "resources", "build", "dist", ".venv"]
+exclude = ["**/tests", "**/__pycache__", "docs", "examples", "sdk", "resources", "skills", "build", "dist", ".venv"]
 # Also freeze imports that exist only under TYPE_CHECKING.
 ignore_type_checking_imports = false
 forbid_circular_dependencies = true

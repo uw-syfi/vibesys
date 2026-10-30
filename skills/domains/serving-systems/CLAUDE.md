@@ -23,8 +23,6 @@ skills/serving-systems/
 │       ├── trainium/
 │       ├── metal/
 │       └── cpu/
-├── repos/                     # vLLM / SGLang / TensorRT-LLM submodules
-│                              # (excluded from agent materialization)
 └── README.md, OVERVIEW.md, CLAUDE.md, update-repos.sh   # repo docs
 ```
 
@@ -125,7 +123,7 @@ When a `references/<topic>.md` benefits from a compatibility matrix or a "where'
 Files under the `engines` tier (`references/engines/vllm.md`, `references/engines/sglang.md`, `references/engines/trtllm.md`) include a **"Where's X" table**:
 
 ```markdown
-| Need | Path in repos/<engine>/ |
+| Need | Path in $SERVE_REPOS/<engine>/ |
 |:-----|:------------------------|
 | Attention backends | python/sglang/srt/layers/attention/ |
 | Scheduler | python/sglang/srt/managers/scheduler.py |
@@ -162,10 +160,10 @@ This is how axis-crossing knowledge lives — not in the directory tree.
 
 ## Reference-repo path convention
 
-Repos live at `resources/skills/serving-systems/repos/{vllm,sglang,TensorRT-LLM}/` (git submodules). Reference files cite paths via:
+Repos live at `third_party/serving-repos/{vllm,sglang,TensorRT-LLM}/` (git submodules). Reference files cite paths via:
 
 ```
-$SERVE_REPOS = <vibesys-root>/resources/skills/serving-systems/repos
+$SERVE_REPOS = <vibesys-root>/third_party/serving-repos
 ```
 
 Example grep recipe:
@@ -174,11 +172,11 @@ Example grep recipe:
 rg "register.*backend" $SERVE_REPOS/vllm/vllm/v1/attention/backends/
 ```
 
-Tell the reader to export `SERVE_REPOS=$(git rev-parse --show-toplevel)/resources/skills/serving-systems/repos` or substitute inline.
+Tell the reader to export `SERVE_REPOS=$(git rev-parse --show-toplevel)/third_party/serving-repos` or substitute inline.
 
-The `repos/` directory is **excluded** from agent materialization (see `libs/vs-agent/src/vs_agent/cli_common.py::materialize_skills`); reference paths into it are advisory grep recipes, not runtime imports.
+The submodules live outside this skill, so they never reach agent materialization or the wheel (a `repos/` directory inside a skill is also excluded by `libs/vs-agent/src/vs_agent/cli_common.py::materialize_skills`); reference paths into them are advisory grep recipes, not runtime imports.
 
-`resources/skills/serving-systems/` is intentionally outside the code-citation gate in
+`skills/domains/serving-systems/` is intentionally outside the code-citation gate in
 `scripts/check_doc_citations.py`. Its source locations can refer to reference-repo revisions that
 are not materialized in the checkout, so a repository-local existence check would reject valid
 research notes. Keep those locations as advisory paths and only add this subtree to the gate with
@@ -216,9 +214,9 @@ an explicit external-checkout resolution policy.
 ## Running the reference repos
 
 ```bash
-git submodule update --init --checkout resources/skills/serving-systems/repos       # initialize all
-git submodule update --init --checkout resources/skills/serving-systems/repos/vllm  # initialize one
-git -C resources/skills/serving-systems/repos/vllm pull origin main      # update one
+git submodule update --init --checkout third_party/serving-repos       # initialize all
+git submodule update --init --checkout third_party/serving-repos/vllm  # initialize one
+git -C third_party/serving-repos/vllm pull origin main      # update one
 ```
 
 `update-repos.sh` is the upstream sparse-checkout helper; here the repos are tracked as shallow git submodules instead.

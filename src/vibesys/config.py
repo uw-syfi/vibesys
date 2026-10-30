@@ -39,6 +39,11 @@ from vs_runtime.api.infrastructure import (
 )
 
 BUNDLED_RESOURCES = BundledResources(PROJECT_ROOT / "resources", package="vibesys")
+# Skills VibeSys installs for optimization agents: the domain skills only, never the rest of
+# the published ``skills/`` tree. The wheel stages them as ``vibesys/_skills``.
+BUNDLED_SKILLS = BundledResources(
+    PROJECT_ROOT / "skills" / "domains", package="vibesys", packaged_subdir="_skills"
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

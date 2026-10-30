@@ -94,7 +94,7 @@ id = "python_support"
 class = "python_support"
 job = "python"
 # Central tests and project tooling are outside Tach's source roots.
-roots = ["tests", "libs", "sdk", "scripts", "packaging", "resources", "examples"]
+roots = ["tests", "libs", "sdk", "scripts", "packaging", "resources", "skills", "examples"]
 files = [
   "tach.toml",
   "pyproject.toml",

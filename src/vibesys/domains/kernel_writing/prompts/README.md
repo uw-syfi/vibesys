@@ -8,4 +8,4 @@ model architecture, or profiler.
 The role files provide kernel-specific correctness, performance, and profiling
 guidance. The task bundle owns its input shapes, numerical tolerances, permitted
 files, checker, and benchmark. The bundled kernel skills are selected by domain
-through `resources/skills/.vibesys.toml`.
+through `skills/domains/.vibesys.toml`.

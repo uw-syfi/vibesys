@@ -1,17 +1,17 @@
-[submodule "skills/serving-systems/repos/vllm"]
-	path = resources/skills/serving-systems/repos/vllm
+[submodule "third_party/serving-repos/vllm"]
+	path = third_party/serving-repos/vllm
 	url = https://github.com/vllm-project/vllm.git
 	branch = main
 	shallow = true
 	update = none
-[submodule "skills/serving-systems/repos/sglang"]
-	path = resources/skills/serving-systems/repos/sglang
+[submodule "third_party/serving-repos/sglang"]
+	path = third_party/serving-repos/sglang
 	url = https://github.com/sgl-project/sglang.git
 	branch = main
 	shallow = true
 	update = none
-[submodule "skills/serving-systems/repos/TensorRT-LLM"]
-	path = resources/skills/serving-systems/repos/TensorRT-LLM
+[submodule "third_party/serving-repos/TensorRT-LLM"]
+	path = third_party/serving-repos/TensorRT-LLM
 	url = https://github.com/NVIDIA/TensorRT-LLM.git
 	branch = main
 	shallow = true
