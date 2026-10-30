@@ -36,7 +36,6 @@ from vs_core.api.recovery import (
     StepResult,
     Wait,
 )
-from vs_core.types.until import FailureReason
 from vs_runtime.api.step_runner import Interruption, LoopExit, StepLoopTiming, run_step_loop
 from vs_runtime.api.testing import (
     AttemptHangs,
@@ -117,6 +116,7 @@ class Model:
     steps: tuple[StepState, ...]
     paused: Pause | None = None
     ending: bool = False
+    ended: bool = False
 
     def with_step(self, tag: core.RequestId, **changes: object) -> Model:
         return replace(
@@ -157,7 +157,7 @@ def _fold_log(state: Model, entry: LogEntry) -> Model:
             debit = 1 if why is Interruption.RAISED else 0
             return state.with_step(tag, running=False, debits=state.step(tag).debits + debit)
         case LoggedEnded():
-            return state
+            return replace(state, ended=True)
     message = f"unhandled entry {entry!r}"
     raise AssertionError(message)
 
@@ -205,7 +205,7 @@ class ModelRule:
         if state.ending:
             return Cancelled(reason=CancelReason.RUN_ENDING)
         if step.debits >= step.spec.max_attempts:
-            return Failed(reason=FailureReason.ATTEMPTS_EXHAUSTED)
+            return Failed(reason=core.FailureReason.ATTEMPTS_EXHAUSTED)
         if now >= step.spec.deadline_at:
             return Cancelled(reason=CancelReason.DEADLINE)
         return None
@@ -224,8 +224,10 @@ class ModelRule:
             return CancelReason.DEADLINE
         return None
 
-    def parked(self, state: Model) -> bool:
-        return state.paused is not None
+    def settled(self, state: Model) -> LoopExit | None:
+        if state.ended:
+            return LoopExit.ENDED
+        return LoopExit.PARKED if state.paused is not None else None
 
 
 @dataclass(frozen=True)
@@ -576,6 +578,20 @@ def test_the_run_ends_even_when_the_backend_stays_unreachable() -> None:
     assert outcome.runner.running() != ()
 
 
+def test_a_kill_at_any_boundary_of_a_one_step_run_still_ends_it_once() -> None:
+    scenario = Scenario((step("a", RAISES, FINISHES),))
+    for kill_at in range(run_world(scenario).boundaries):
+        check_invariants(run_world(scenario, kill_at), scenario)
+
+
+def test_a_pause_at_any_moment_parks_and_resumes_to_the_same_end() -> None:
+    steps = (step("a", RAISES, FINISHES), step("b", HANGS, FINISHES), step("c", FINISHES))
+    for pause_at in (moment / 2 for moment in range(20)):
+        for now in (False, True):
+            scenario = Scenario(steps, pause_at=pause_at, pause=Pause(pause_at + 1.0, now=now))
+            check_invariants(run_world(scenario), scenario)
+
+
 def test_every_boundary_of_a_rich_scenario_survives_a_kill() -> None:
     scenario = Scenario(
         (
@@ -613,12 +629,15 @@ def scenarios(draw: st.DrawFn) -> Scenario:
         for i in range(count)
     )
     ending = draw(st.sampled_from([None, 3.0, 8.0]))
+    pause_at = draw(st.sampled_from([None, 0.0, 0.5, 1.0, 2.0, 3.5, 5.0, 8.0]))
+    drain = draw(st.sampled_from([0.0, 1.0, 5.0]))
     return Scenario(
         steps,
         adopts=draw(st.booleans()),
         clear_takes_s=draw(st.sampled_from([0.0, 0.5])),
         unavailable=0 if ending is not None else draw(st.sampled_from([0, 0, 1, 2])),
-        pause_at=draw(st.sampled_from([None, 0.5, 2.0, 5.0])),
+        pause_at=pause_at,
+        pause=Pause(drain_deadline=(pause_at or 0.0) + drain, now=draw(st.booleans())),
         end_run_at=ending,
     )
 

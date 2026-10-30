@@ -93,8 +93,11 @@ class RecoveryRule[S](Protocol):
         """The actions the loop must take now."""
         ...
 
-    def parked(self, state: S) -> bool:
-        """Whether the run is paused, so the loop returns once nothing is in flight."""
+    def settled(self, state: S) -> LoopExit | None:
+        """``ENDED`` if the log already holds the end of the run, ``PARKED`` if the run is paused.
+
+        The loop returns at once for ``ENDED``, and for ``PARKED`` once nothing is in flight.
+        """
         ...
 
 
@@ -210,8 +213,25 @@ class _StepLoop[S]:
             await self._abandon_flights()
 
     async def _turn(self) -> LoopExit | None:
+        if self._rule.settled(self._log.state) is LoopExit.ENDED:
+            return LoopExit.ENDED
+        actions = self._rule.decide(self._log.state, self._clock.now())
+        end = next((a for a in actions if isinstance(a, End)), None)
+        if end is not None and not self._flights:
+            await self._append(self._log.run_ended(end))
+            return LoopExit.ENDED
+        wake_at = self._dispatch(actions)
+        if self._rule.settled(self._log.state) is LoopExit.PARKED:
+            self._release_unstarted()
+            if not self._flights:
+                return LoopExit.PARKED
+        await self._wake(wake_at)
+        return None
+
+    def _dispatch(self, actions: tuple[Action, ...]) -> float | None:
+        """Hand each action to its flight; return the time ``Wait`` asked to be woken at."""
         wake_at: float | None = None
-        for action in self._rule.decide(self._log.state, self._clock.now()):
+        for action in actions:
             match action:
                 case Run():
                     self._start(action)
@@ -222,17 +242,10 @@ class _StepLoop[S]:
                 case Wait(until=until):
                     wake_at = until
                 case End():
-                    if not self._flights:
-                        await self._append(self._log.run_ended(action))
-                        return LoopExit.ENDED
+                    pass
                 case _:
                     assert_never(action)
-        if self._rule.parked(self._log.state):
-            self._release_unstarted()
-            if not self._flights:
-                return LoopExit.PARKED
-        await self._wake(wake_at)
-        return None
+        return wake_at
 
     def _release_unstarted(self) -> None:
         """A parked run starts nothing, so flights still waiting on ``clear`` stop waiting."""
