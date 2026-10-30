@@ -195,3 +195,19 @@ def test_the_event_names_the_directory_and_its_absence_means_the_process_directo
     out = io.StringIO()
     assert hook.main(io.StringIO("{}"), out, now=lambda: NOW, fallback_cwd=held) == 0
     assert json.loads(out.getvalue())["decision"] == "block"
+
+
+@given(seconds=st.integers(min_value=1, max_value=10**6))
+@example(seconds=600)
+@pytest.mark.regression
+def test_a_repeated_stop_hook_continuation_is_released(new_repo: NewRepo, seconds: int) -> None:
+    repo = new_repo()
+    start_run(repo, deadline=at(seconds))
+    assert stop(repo, payload=json.dumps({"cwd": str(repo), "stop_hook_active": True})) == (0, "")
+
+
+@pytest.mark.parametrize("pending", ["background_tasks", "session_crons"])
+def test_pending_work_can_wake_the_lead_without_a_block(new_repo: NewRepo, pending: str) -> None:
+    repo = new_repo()
+    start_run(repo, deadline=at(600))
+    assert stop(repo, payload=json.dumps({"cwd": str(repo), pending: [{"id": "task"}]})) == (0, "")
