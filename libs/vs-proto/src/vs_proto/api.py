@@ -153,6 +153,14 @@ from vs_proto._generated.vibesys.store.v1.content_pb import (
     StreamRef,
     StreamState,
 )
+from vs_proto._generated.vibesys.store.v1.core_input_pb import (
+    AttemptInterrupted,
+    CoreInput,
+    InterruptionReason,
+    StepCancelReason,
+    StepFinished,
+    StepStarted,
+)
 from vs_proto._generated.vibesys.store.v1.environment_attrs_pb import (
     CapacityCondition,
     CapacityPolicy,
@@ -274,6 +282,7 @@ __all__ = [
     "AgentClient",
     "AgentTurnAttrs",
     "Attempt",
+    "AttemptInterrupted",
     "AttemptOutcome",
     "BaselineAttrs",
     "BaselineStatus",
@@ -300,6 +309,7 @@ __all__ = [
     "ComparisonAttrs",
     "ComparisonVerdict",
     "ConfigurationFailed",
+    "CoreInput",
     "CreateChatSessionRequest",
     "CreateChatSessionResponse",
     "DescriptorSet",
@@ -339,6 +349,7 @@ __all__ = [
     "IntentAction",
     "IntentState",
     "IntentStep",
+    "InterruptionReason",
     "Keyframe",
     "Label",
     "LegacyEvent",
@@ -413,6 +424,9 @@ __all__ = [
     "SteerMode",
     "SteerTarget",
     "SteerTargetKind",
+    "StepCancelReason",
+    "StepFinished",
+    "StepStarted",
     "Stop",
     "StreamKind",
     "StreamOwner",
