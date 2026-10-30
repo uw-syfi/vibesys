@@ -1,0 +1,249 @@
+"""The cases every ``StepRunner`` passes, the Fake and each real runner alike.
+
+A test module subclasses ``StepRunnerContract``, names the subclass ``Test<Variant>`` and
+implements ``step_runner_under_test``; pytest then runs every case against that runner. The
+cases drive a runner only through the interface and the few probes ``StepRunnerUnderTest``
+names, and none of them reads a clock to decide an outcome.
+
+They are the six clauses of ``docs/contributing/run-recovery.md``: a run returns a result or
+raises; after ``clear`` the same tag starts clean at a higher attempt; ``clear`` is idempotent
+and leaves nothing running; ``Adopted`` means the next ``run`` takes over what was left; a set
+cancel signal ends a run; an unreachable backend raises ``ClearUnavailableError``.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+from vs_core.api import RequestId
+from vs_core.api.recovery import Cancelled, CancelReason, Failed, Finished
+from vs_runtime._step_runner import Adopted, CancelSignal, Cleared, ClearUnavailableError
+from vs_sim.api import SeededRandom
+from vs_sim.api.testing import HANG_GUARD_S, examples, yield_until
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
+    from contextlib import AbstractContextManager
+
+    from vs_core.api import Request
+    from vs_core.api.recovery import StepResult
+    from vs_runtime._step_runner import StepRunner
+
+type Run = Callable[[Coroutine[Any, Any, Any]], Any]
+"""Run a coroutine to completion on the loop the runner under test belongs to."""
+
+_ACTIONS = ("finish", "kill", "cancel", "clear")
+
+
+@dataclass(frozen=True)
+class StepRunnerUnderTest:
+    """A runner, the steps it can be given, and the probes the cases read."""
+
+    runner: StepRunner
+    run: Run
+    finishing_step: Callable[[RequestId], Request]
+    """A step that ends by itself, with a result or by raising."""
+    running_step: Callable[[RequestId], Request]
+    """A step that runs until it is cancelled."""
+    left_running: Callable[[RequestId], Coroutine[Any, Any, int]]
+    """How many pieces of work carrying the tag still run, read from the backend itself."""
+    unreachable: Callable[[], AbstractContextManager[None]]
+    """Make the backend refuse every ``clear`` for as long as the context is open."""
+
+
+class StepRunnerContract:
+    """Cases for ``StepRunner``. Implement :meth:`step_runner_under_test`."""
+
+    def step_runner_under_test(self) -> StepRunnerUnderTest:
+        """A fresh runner over a fresh world, with its harness."""
+        raise NotImplementedError
+
+    def test_a_step_that_finishes_ends_with_a_step_result(self) -> None:
+        """Clause 1: ``run`` returns a result, or raises; it never returns anything else."""
+        subject = self.step_runner_under_test()
+        tag = _tag("finishing")
+
+        async def main() -> None:
+            try:
+                result = await subject.runner.run(
+                    subject.finishing_step(tag), tag, 1, CancelSignal()
+                )
+            except Exception:  # noqa: BLE001  # lint-waiver: LW-STEPRUN-2 [BLE001]; a raise is the second thing clause 1 allows, and any exception type is one
+                await subject.runner.clear(tag)
+            else:
+                assert isinstance(result, Finished | Failed | Cancelled)
+            assert await subject.left_running(tag) == 0
+
+        subject.run(main())
+
+    def test_after_a_kill_and_a_clear_the_same_tag_starts_clean_at_a_higher_attempt(self) -> None:
+        """Clause 2, whatever ``clear`` answered: nothing is left running and the step ends."""
+        subject = self.step_runner_under_test()
+        tag = _tag("restarted")
+
+        async def main() -> None:
+            await _kill_mid_run(subject, tag, attempt=1)
+            await _finish_after_clear(subject, tag, attempt=2)
+            assert await subject.left_running(tag) == 0
+
+        subject.run(main())
+
+    def test_clear_of_a_tag_that_never_started_is_cleared(self) -> None:
+        """Clause 3: there is nothing to remove or adopt."""
+        subject = self.step_runner_under_test()
+        assert subject.run(subject.runner.clear(_tag("never-started"))) == Cleared()
+
+    def test_clear_is_idempotent_and_leaves_nothing_running(self) -> None:
+        """Clause 3: clearing again changes nothing, and what is left running is only adopted work."""
+        subject = self.step_runner_under_test()
+        tag = _tag("cleared-twice")
+
+        async def main() -> None:
+            await _kill_mid_run(subject, tag, attempt=1)
+            first = await subject.runner.clear(tag)
+            second = await subject.runner.clear(tag)
+            if first == Cleared():
+                assert second == Cleared()
+            if not (first == Adopted(None) or second == Adopted(None)):
+                assert await subject.left_running(tag) == 0
+
+        subject.run(main())
+
+    def test_adopted_work_is_taken_over_by_the_next_run_and_never_started_twice(self) -> None:
+        """Clause 4: with no result the run attaches, with one it returns that result."""
+        subject = self.step_runner_under_test()
+        tag = _tag("adopted")
+
+        async def main() -> None:
+            await _kill_mid_run(subject, tag, attempt=1)
+            adopted = await subject.runner.clear(tag)
+            if isinstance(adopted, Adopted) and adopted.result is not None:
+                cancel = CancelSignal()
+                again = await subject.runner.run(subject.running_step(tag), tag, 2, cancel)
+                assert again == adopted.result
+            elif isinstance(adopted, Adopted):
+                task, cancel = await _start(subject, tag, attempt=2)
+                assert await subject.left_running(tag) == 1
+                cancel.set(CancelReason.WITHDRAWN)
+                assert isinstance(await task, Cancelled)
+            assert await subject.left_running(tag) == 0
+
+        subject.run(main())
+
+    def test_a_set_cancel_signal_ends_the_run_with_cancelled_and_nothing_running(self) -> None:
+        """Clause 5: the run returns ``Cancelled`` for the reason it was given."""
+        subject = self.step_runner_under_test()
+        tag = _tag("cancelled")
+
+        async def main() -> None:
+            for reason in CancelReason:
+                task, cancel = await _start(subject, tag, attempt=1)
+                cancel.set(reason)
+                assert await asyncio.wait_for(task, HANG_GUARD_S) == Cancelled(reason=reason)
+                assert await subject.left_running(tag) == 0
+
+        subject.run(main())
+
+    def test_an_unreachable_backend_raises_instead_of_clearing(self) -> None:
+        """Clause 6: ``clear`` proves nothing while unreachable, and works once reachable."""
+        subject = self.step_runner_under_test()
+        tag = _tag("unreachable")
+
+        async def main() -> None:
+            await _kill_mid_run(subject, tag, attempt=1)
+            with subject.unreachable():
+                for _ in range(2):
+                    refusal = await _refusal(subject.runner, tag)
+                    assert refusal is not None, "clear answered while its backend was unreachable"
+                    assert refusal.tag == tag
+            await _finish_after_clear(subject, tag, attempt=2)
+            assert await subject.left_running(tag) == 0
+
+        subject.run(main())
+
+    def test_any_order_of_kills_cancels_and_clears_never_runs_a_tag_twice_at_once(self) -> None:
+        """Clauses 2 to 5 over generated sequences: one copy at most, and none after a clear."""
+        for seed in range(examples(pr=6, nightly=60)):
+            subject = self.step_runner_under_test()
+            subject.run(_exercise(subject, _tag(f"sequence-{seed}"), _actions(seed)))
+
+
+async def _refusal(runner: StepRunner, tag: RequestId) -> ClearUnavailableError | None:
+    try:
+        await runner.clear(tag)
+    except ClearUnavailableError as error:
+        return error
+    return None
+
+
+def _tag(name: str) -> RequestId:
+    return RequestId(root=name)
+
+
+def _actions(seed: int) -> tuple[str, ...]:
+    rng = SeededRandom(seed)
+    return tuple(rng.choice(_ACTIONS) for _ in range(rng.randint(1, 8)))
+
+
+async def _start(
+    subject: StepRunnerUnderTest, tag: RequestId, *, attempt: int
+) -> tuple[asyncio.Task[StepResult], CancelSignal]:
+    """Start an attempt of a step that runs until cancelled; return once its work exists."""
+    cancel = CancelSignal()
+    step = subject.running_step(tag)
+    task = asyncio.ensure_future(subject.runner.run(step, tag, attempt, cancel))
+    await yield_until(
+        lambda: subject.left_running(tag), lambda running: running > 0 or task.done(), str(tag)
+    )
+    return task, cancel
+
+
+async def _kill_mid_run(subject: StepRunnerUnderTest, tag: RequestId, *, attempt: int) -> None:
+    """Cancel the task awaiting a running attempt: the program that started it died."""
+    task, _ = await _start(subject, tag, attempt=attempt)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+
+async def _finish_after_clear(
+    subject: StepRunnerUnderTest, tag: RequestId, *, attempt: int
+) -> None:
+    """Clear, then run the next attempt to its end, taking over what ``clear`` adopted."""
+    adopted = await subject.runner.clear(tag)
+    if isinstance(adopted, Adopted) and adopted.result is None:
+        task, cancel = await _start(subject, tag, attempt=attempt)
+        cancel.set(CancelReason.WITHDRAWN)
+        await asyncio.wait_for(task, HANG_GUARD_S)
+        return
+    try:
+        await subject.runner.run(subject.finishing_step(tag), tag, attempt, CancelSignal())
+    except Exception:  # noqa: BLE001  # lint-waiver: LW-STEPRUN-2 [BLE001]; see test_a_step_that_finishes_ends_with_a_step_result
+        await subject.runner.clear(tag)
+
+
+async def _exercise(subject: StepRunnerUnderTest, tag: RequestId, actions: tuple[str, ...]) -> None:
+    attempt = 0
+    dirty = False
+    for action in actions:
+        attempt += 1
+        if dirty and action != "clear":
+            await _finish_after_clear(subject, tag, attempt=attempt)
+            dirty = False
+        match action:
+            case "finish":
+                await _finish_after_clear(subject, tag, attempt=attempt)
+            case "kill":
+                await _kill_mid_run(subject, tag, attempt=attempt)
+                dirty = True
+            case "cancel":
+                task, cancel = await _start(subject, tag, attempt=attempt)
+                cancel.set(CancelReason.PAUSE_NOW)
+                await asyncio.wait_for(task, HANG_GUARD_S)
+            case "clear":
+                outcome = await subject.runner.clear(tag)
+                dirty = outcome == Adopted(None)
+        assert await subject.left_running(tag) <= 1
+    await _finish_after_clear(subject, tag, attempt=attempt + 1)
+    assert await subject.left_running(tag) == 0

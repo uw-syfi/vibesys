@@ -8,6 +8,17 @@ from vs_runtime._fake_core_execution import (
     FakePublicationDelivery,
     FakeRequestExecution,
 )
+from vs_runtime._fake_step_runner import (
+    AttemptHangs,
+    AttemptRaises,
+    AttemptReturns,
+    ClearedRunningAttemptError,
+    FakeStepRunner,
+    LeftoverWorkError,
+    RunnerCall,
+    RunnerMethod,
+    finished_result,
+)
 from vs_runtime._run_clocks import CrashableRunClock, ProbedRunClock
 from vs_runtime._run_environment import HostEnvironment
 from vs_runtime._runs import FakeRunHandle, FakeRuns
@@ -28,6 +39,7 @@ from vs_runtime._shell_kit import (
     scripted_host,
 )
 from vs_runtime._validation_passes import MemoryValidationPasses
+from vs_runtime.api.step_runner_contracts import StepRunnerContract, StepRunnerUnderTest
 from vs_runtime.fake_docker_daemon import DaemonBackend, daemon_docker_config, daemon_engine
 from vs_runtime.fakes import (
     FakeAccuracyCall,
@@ -87,6 +99,10 @@ def idle_environment_system(slurm_processes: Processes = NO_PROCESSES) -> Enviro
 __all__ = [
     "LEASE",
     "Admitting",
+    "AttemptHangs",
+    "AttemptRaises",
+    "AttemptReturns",
+    "ClearedRunningAttemptError",
     "CrashableRunClock",
     "DaemonBackend",
     "ExecutedRequest",
@@ -111,6 +127,7 @@ __all__ = [
     "FakeRunControlEventSink",
     "FakeRunHandle",
     "FakeRuns",
+    "FakeStepRunner",
     "FakeStopTimer",
     "FakeTrustedAccuracyCall",
     "FakeTrustedBenchmarkCall",
@@ -121,19 +138,25 @@ __all__ = [
     "HostOptions",
     "InvalidReply",
     "Launch",
+    "LeftoverWorkError",
     "MemoryValidationPasses",
     "ProbedRunClock",
     "RecordingSearch",
     "Run",
+    "RunnerCall",
+    "RunnerMethod",
     "Script",
     "ScriptedExecutors",
     "ScriptedHost",
+    "StepRunnerContract",
+    "StepRunnerUnderTest",
     "TranslatorFactory",
     "UnsafeControlSchemaError",
     "control_schema_fields",
     "daemon_docker_config",
     "daemon_engine",
     "drive_shell",
+    "finished_result",
     "idle_environment_system",
     "request_executors",
     "scripted_host",
