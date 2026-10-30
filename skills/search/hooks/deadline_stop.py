@@ -7,7 +7,9 @@ timezone). Before the deadline the hook blocks the stop and tells the lead to co
 after it, or once the file is gone, the stop goes through.
 
 It fails open: any problem reading the state allows the stop, so a broken run directory can
-never trap a session. Standard library only (Python 3.10 or newer).
+never trap a session. Repeated stop-hook continuations are released, as are turns with
+pending background tasks or scheduled wakeups; those resume the lead without busy waiting.
+Standard library only (Python 3.10 or newer).
 
 Reads the hook's JSON from stdin (the ``cwd`` field names the session's directory); a block is
 ``{"decision": "block", "reason": ...}`` on stdout, an allowed stop prints nothing. Exit code 0.
@@ -64,6 +66,12 @@ def main(stdin: TextIO, out: TextIO, *, now: Callable[[], datetime], fallback_cw
     """Answer one Stop event; always returns 0 (an error allows the stop)."""
     try:
         event = json.loads(stdin.read() or "{}")
+        if (
+            event.get("stop_hook_active")
+            or event.get("background_tasks")
+            or event.get("session_crons")
+        ):
+            return 0
         cwd = Path(event["cwd"]) if isinstance(event.get("cwd"), str) else fallback_cwd
         reason = block_reason(cwd, now())
     except _FAIL_OPEN:
