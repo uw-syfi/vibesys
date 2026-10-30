@@ -32,14 +32,6 @@ appended to the declared check and benchmark prefixes. Use the same workload and
 base and candidates. Record the complete benchmark command including runtime arguments, not just
 the TOML prefix. Honor every objective gate, including ones not enforced by exit status.
 
-For the kv-store task, both declared prefixes require `--port <allocated port>` and an already
-running server. Build the measured revision, start its `./run.sh <port>` from that checkout, and
-verify `redis-cli -p <port> PING` returns `PONG` within five seconds. The seed revision may need
-the task's reference server instead of a launcher; read its argument help and record that
-baseline recipe. The checker needs Redis and redis-py; the benchmark needs Java and its YCSB
-download. Check the READ and UPDATE p99 values against OBJECTIVE.md before accepting samples.
-Stop the owned server on every exit, including timeout or failure; never stop unrelated servers.
-
 ## One measurement
 
 1. The lead serializes check/benchmark/record sequences on a host, including profiling that
