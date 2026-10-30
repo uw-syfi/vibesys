@@ -5,6 +5,8 @@ disk, the one gateway that serves those files, the one connection that carries t
 model viewers read. It is written as the design. Parts not built yet are marked in the
 [status table](#status). It replaces [`wire-protocol.md`](wire-protocol.md) and
 [`desktop-connection.md`](desktop-connection.md), which describe the stack being retired.
+How a run recovers from a stop is owned by [run-recovery.md](run-recovery.md), which also changes the
+`state.pb` commit described below: the log is the authority and `state.pb` is a cache.
 
 ## Goals
 
