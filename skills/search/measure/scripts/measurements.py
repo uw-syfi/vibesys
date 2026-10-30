@@ -33,7 +33,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, NoReturn
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "Comparison",
-    "InvalidInput",
+    "InvalidInputError",
     "compare_samples",
     "main",
     "task_fingerprint",
@@ -92,12 +92,8 @@ _YES_NO = ("yes", "no")
 _SKIPPED_PARTS = ("__pycache__",)
 
 
-class InvalidInput(Exception):  # noqa: N818  (exit code 2 is the contract; the name says what it is)
+class InvalidInputError(Exception):
     """The arguments or the recorded data are not valid; the message names the offender."""
-
-
-def _invalid(message: str) -> InvalidInput:
-    return InvalidInput(message)
 
 
 @dataclass(frozen=True)
@@ -210,13 +206,13 @@ def task_fingerprint(task_dir: Path) -> str:
 
 def _validate_commit(commit: object) -> str:
     if not isinstance(commit, str):
-        raise _invalid("commit must be a string")
+        raise InvalidInputError("commit must be a string")
     if "dirty" in commit:
-        raise _invalid(
+        raise InvalidInputError(
             f"commit {commit!r} carries a dirty-tree marker: commit the change, then measure that"
         )
     if not _COMMIT.fullmatch(commit):
-        raise _invalid(
+        raise InvalidInputError(
             f"commit {commit!r} is not a full lowercase hex SHA (40 or 64 digits): "
             "use `git rev-parse HEAD`"
         )
@@ -225,37 +221,37 @@ def _validate_commit(commit: object) -> str:
 
 def _validate_choice(record: dict[str, Any], key: str, allowed: tuple[str, ...]) -> None:
     if record[key] not in allowed:
-        raise _invalid(f"{key} must be one of {', '.join(allowed)}, not {record[key]!r}")
+        raise InvalidInputError(f"{key} must be one of {', '.join(allowed)}, not {record[key]!r}")
 
 
 def _validate_text(record: dict[str, Any], key: str) -> None:
     value = record[key]
     if not isinstance(value, str) or not value.strip():
-        raise _invalid(f"{key} must be a non-empty string")
+        raise InvalidInputError(f"{key} must be a non-empty string")
 
 
 def _validate_samples(samples: object) -> None:
     if not isinstance(samples, list) or not samples:
-        raise _invalid("samples must be a non-empty list of numbers")
+        raise InvalidInputError("samples must be a non-empty list of numbers")
     for value in samples:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise _invalid(f"sample {value!r} is not a number")
+            raise InvalidInputError(f"sample {value!r} is not a number")
         if not math.isfinite(value):
-            raise _invalid(f"sample {value!r} is not finite")
+            raise InvalidInputError(f"sample {value!r} is not finite")
 
 
 def validate_record(record: object) -> dict[str, Any]:
-    """Return ``record`` if it is a valid measurement record, else raise ``InvalidInput``."""
+    """Return ``record`` if it is a valid measurement record, else raise ``InvalidInputError``."""
     if not isinstance(record, dict):
-        raise _invalid("a record must be a JSON object")
+        raise InvalidInputError("a record must be a JSON object")
     unknown = sorted(set(record) - set(_FIELDS))
     missing = sorted(set(_FIELDS) - set(record))
     if unknown:
-        raise _invalid(f"unknown field {', '.join(unknown)}")
+        raise InvalidInputError(f"unknown field {', '.join(unknown)}")
     if missing:
-        raise _invalid(f"missing field {', '.join(missing)}")
+        raise InvalidInputError(f"missing field {', '.join(missing)}")
     if record["schema"] != SCHEMA_VERSION:
-        raise _invalid(f"schema must be {SCHEMA_VERSION}, not {record['schema']!r}")
+        raise InvalidInputError(f"schema must be {SCHEMA_VERSION}, not {record['schema']!r}")
     _validate_commit(record["commit"])
     _validate_choice(record, "role", _ROLES)
     _validate_choice(record, "direction", _DIRECTIONS)
@@ -279,24 +275,26 @@ def _load(run: Path) -> list[dict[str, Any]]:
             continue
         try:
             records.append(validate_record(json.loads(line)))
-        except (ValueError, InvalidInput) as error:
-            raise _invalid(f"{path} line {number}: {error}") from error
+        except (ValueError, InvalidInputError) as error:
+            raise InvalidInputError(f"{path} line {number}: {error}") from error
     return records
 
 
 def _check_against_history(new: dict[str, Any], history: list[dict[str, Any]]) -> None:
     bases = {r["commit"] for r in history if r["role"] == "base"}
     if new["role"] == "base" and bases and new["commit"] not in bases:
-        raise _invalid(f"the run's base is {sorted(bases)[0]}; a second base commit is not allowed")
+        raise InvalidInputError(
+            f"the run's base is {sorted(bases)[0]}; a second base commit is not allowed"
+        )
     if new["role"] == "candidate" and new["commit"] in bases:
-        raise _invalid("this is the base commit: record it with --role base")
+        raise InvalidInputError("this is the base commit: record it with --role base")
     for record in history:
         same_metric = (record["metric"], record["evaluator"]) == (
             new["metric"],
             new["evaluator"],
         )
         if same_metric and record["direction"] != new["direction"]:
-            raise _invalid(
+            raise InvalidInputError(
                 f"metric {new['metric']!r} was recorded with direction {record['direction']}"
             )
 
@@ -304,14 +302,14 @@ def _check_against_history(new: dict[str, Any], history: list[dict[str, Any]]) -
 def _task_dir(run: Path) -> Path:
     meta = run / "run.json"
     if not meta.is_file():
-        raise _invalid(f"{meta} does not exist: this is not a run directory")
+        raise InvalidInputError(f"{meta} does not exist: this is not a run directory")
     try:
         task = json.loads(meta.read_text(encoding="utf-8"))["task"]
     except (ValueError, KeyError, TypeError) as error:
-        raise _invalid(f'{meta} has no readable "task"') from error
+        raise InvalidInputError(f'{meta} has no readable "task"') from error
     directory = run.parent.parent / ".vibesys" / "tasks" / str(task)
     if not directory.is_dir():
-        raise _invalid(f"the task directory {directory} does not exist")
+        raise InvalidInputError(f"the task directory {directory} does not exist")
     return directory
 
 
@@ -356,13 +354,13 @@ def _commit_check(records: list[dict[str, Any]]) -> str:
 def _compare_commit(records: list[dict[str, Any]], commit: str, base: str | None) -> dict[str, Any]:
     base_commit = base or next((r["commit"] for r in records if r["role"] == "base"), None)
     if base_commit is None:
-        raise _invalid("no base measurement is recorded: measure the base first")
+        raise InvalidInputError("no base measurement is recorded: measure the base first")
     mine = [r for r in records if r["commit"] == commit]
     theirs = [r for r in records if r["commit"] == base_commit]
     if not mine:
-        raise _invalid(f"no measurement is recorded for commit {commit}")
+        raise InvalidInputError(f"no measurement is recorded for commit {commit}")
     if not theirs:
-        raise _invalid(f"no measurement is recorded for base {base_commit}")
+        raise InvalidInputError(f"no measurement is recorded for base {base_commit}")
     anchor = theirs[-1]
     key = (anchor["metric"], anchor["evaluator"])
     comparable = [r for r in mine if (r["metric"], r["evaluator"]) == key]
@@ -511,8 +509,8 @@ def _cmd_show(args: argparse.Namespace, env: _Env) -> None:
 
 
 class _Parser(argparse.ArgumentParser):
-    def error(self, message: str) -> Any:  # noqa: ANN401  (matches the base class's NoReturn)
-        raise _invalid(message)
+    def error(self, message: str) -> NoReturn:
+        raise InvalidInputError(message)
 
 
 def _finite_number(text: str) -> float:
@@ -561,6 +559,13 @@ def _parser() -> argparse.ArgumentParser:
 _COMMANDS = {"record": _cmd_record, "compare": _cmd_compare, "best": _cmd_best, "show": _cmd_show}
 
 
+def _run_directory(value: str) -> Path:
+    run = Path(value).resolve()
+    if not run.is_dir():
+        raise InvalidInputError(f"the run directory {value} does not exist")
+    return run
+
+
 def main(
     argv: Sequence[str],
     *,
@@ -575,12 +580,10 @@ def main(
     """
     try:
         args = _parser().parse_args(argv)
-        run = Path(args.run).resolve()
-        if not run.is_dir():
-            raise _invalid(f"the run directory {args.run} does not exist")
+        run = _run_directory(args.run)
         args.run = str(run)
         _COMMANDS[args.command_name](args, _Env(out=out, now=now, host=host))
-    except InvalidInput as error:
+    except InvalidInputError as error:
         err.write(f"error: {error}\n")
         return 2
     return 0
