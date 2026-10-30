@@ -18,6 +18,7 @@ const sidebars: SidebarsConfig = {
         'contributing/coding-best-practices',
         'contributing/architecture',
         'contributing/run-transport',
+        'contributing/run-recovery',
         'contributing/agent-drivers',
         'contributing/domains',
         'contributing/extending-profilers',
