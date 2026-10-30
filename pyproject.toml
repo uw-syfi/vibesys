@@ -111,7 +111,7 @@ test = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "scripts/corevalue/tests", "scripts/host_operations/tests", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/tests", "libs/vs-redaction/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "libs/vs-logs/tests", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/tests"]
+testpaths = ["tests", "scripts/corevalue/tests", "scripts/host_operations/tests", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/tests", "libs/vs-redaction/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "libs/vs-logs/tests", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/tests", "skills/search/measure/tests"]
 # Directories whose `slow` tests still run one case each in a pull request (see the vs-sim plugin).
 sim_smoke_slow = ["tests/system/chaos", "tests/system/skeleton", "libs/vs-core/tests"]
 # Bare `--cov` measures the packages listed in `[tool.coverage.run] source`
@@ -245,7 +245,7 @@ roots = ["src", "libs", "scripts", "packaging", "sdk", "support"]
 # Glob patterns of directories scanned for Python tests and `*.test.ts`.
 # Python roots mirror `[tool.pytest.ini_options] testpaths`; `clients` adds the
 # TypeScript workspaces. `__pycache__` and `fixtures` directories are skipped.
-roots = ["tests", "libs/*/tests", "sdk/*/tests", "scripts/corevalue/tests", "clients"]
+roots = ["tests", "libs/*/tests", "sdk/*/tests", "scripts/corevalue/tests", "skills/search/*/tests", "clients"]
 
 # Repo-relative JSONL baseline, one {"path", "rule", "count"} entry per line.
 baseline = "tests/quality/isolation_baseline.jsonl"
@@ -342,6 +342,7 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "server.control_envelope
 "tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "libs/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "sdk/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
+"skills/search/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "support/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 # Build-tool tests live beside their tool, with the same assertion rules as library tests.
 "scripts/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
@@ -364,6 +365,13 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "server.control_envelope
 # on stdout, so `print` is the intended output mechanism rather than a stray
 # debug statement. Same categorical treatment as S101 in tests/.
 "scripts/**" = ["T201", "TID251"]
+# skills/search/ ships in the Claude Code plugin and its scripts (the measurement recorder and
+# the stop hook) run in the user's repository, where no VibeSys package or vs_sim is
+# importable, on any Python 3.10 or newer. They read the real clock once, at their command-line
+# entry, and take it as an argument everywhere else; UP017 stays off because `datetime.UTC` is
+# 3.11 or newer. TRY003 stays off because every error the scripts raise is a one-line message
+# for the user at the command line, which the exit code (2) and the message together are.
+"skills/search/**" = ["TID251", "UP017", "TRY003"]
 # packaging/ holds top-level build modules with no __init__.py on purpose (a
 # `packaging` package would shadow the PyPA `packaging` library), and release
 # tools that report on stdout/stderr like scripts/.
