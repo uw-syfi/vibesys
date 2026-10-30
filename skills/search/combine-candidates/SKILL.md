@@ -1,6 +1,6 @@
 ---
 name: combine-candidates
-description: Use when a vibesys optimize brief asks you to combine several candidates' changes into one new commit on a given base, or to merge judged winners into main. Applies each candidate's own change in the stated order, resolves conflicts as the brief says, runs the checks, measures the result with vibesys:measure, and hands back the commit and anything that could not be applied.
+description: "Use when a vibesys optimize brief asks you to combine several candidates' changes into one new commit on a given base, or to merge judged winners into main. Applies each candidate's own change in the stated order, resolves conflicts as the brief says, runs the checks, measures the result with vibesys:measure, and hands back the commit and anything that could not be applied."
 ---
 
 # Combine candidates
@@ -24,13 +24,14 @@ Load `vibesys:measure` and the domain skills the brief names.
 3. If an instruction cannot be followed without redesigning a candidate, stop and say which
    instruction and why. Main stays as it is.
 4. Run the project's fast tests and fix what the combination broke.
-5. Commit. Measure the commit with `vibesys:measure`: the check, then at least 5 samples.
+5. Commit. Without a measurement slot, return the SHA as `ready for measurement` for the lead.
+   Otherwise measure the commit with `vibesys:measure`: the check, then at least 5 samples.
    Compare it with main: `compare --commit <sha> --base <main SHA>`, and with each part.
 
 ## Never
 
-Edit anything under `.vibesys/`, the task's checker or its benchmark. Add a shortcut that
-raises a number without the work being done.
+Edit anything under `.vibesys/`, the task's checker or its benchmark. Add a shortcut that raises
+a number without the work being done.
 
 ## Hand back
 

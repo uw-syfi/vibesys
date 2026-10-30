@@ -1,6 +1,6 @@
 ---
 name: judge-candidate
-description: Use when a vibesys optimize brief asks you to independently review a candidate commit that claims a gain, before the lead treats it as a win. Read-only: compares the diff with its parent against the claim, checks that the change is on the measured path, looks for gaming of the check or benchmark and for broken rules in OBJECTIVE.md, and returns pass or fail with reasons.
+description: "Use when a vibesys optimize brief asks you to independently review a candidate commit that claims a gain, before the lead treats it as a win. Read-only: compares the diff with its parent against the claim, checks that the change is on the measured path, looks for gaming of the check or benchmark and for broken rules in OBJECTIVE.md, and returns pass or fail with reasons."
 ---
 
 # Judge a candidate
@@ -26,9 +26,9 @@ Start from the diff against the parent (`git diff <parent> <candidate>`) and the
 4. **Within the rules?** Does it break any rule or constraint that `OBJECTIVE.md` states?
 5. **Real?** Is the gain beyond noise? The recorded verdict decides this:
    `measurements.py compare --run <dir> --commit <candidate> --base <parent>`. Fail a claim
-   about speed only when a recorded result shows it is not there. If no verdict exists and your
-   answer depends on one, measure once with `vibesys:measure` and use the result. If you cannot,
-   do not fail the candidate for the missing number: say it is unmeasured.
+   about speed only when a recorded result shows it is not there. If no comparable verdict
+   exists, return `unmeasured` and ask the lead to schedule measurement. Never run a long
+   measurement in the judge; the lead supplies its result before requesting a new judgment.
 
 Source reading decides correctness and rule violations. Only a recorded measurement decides a
 claim about speed. Do not run other benchmarks or commands that take more than a few seconds.
@@ -37,4 +37,5 @@ Passing the check is not enough: reject a candidate that violates a rule in `OBJ
 
 ## Return
 
-`pass` or `fail`, and the reasons, each tied to a file and line or a recorded number.
+`pass`, `fail` or `unmeasured`, and the reasons, each tied to a file and line or a recorded
+number.
