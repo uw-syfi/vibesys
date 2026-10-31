@@ -17,8 +17,6 @@ import contextlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
-
 from vs_core.api import (
     ContractError,
     ControlId,
@@ -39,7 +37,7 @@ from vs_dst._effects import RecoverableExecutors
 from vs_dst._host import FIRST_HOST_STARTS_AT, Hosted, WrongStoreError
 from vs_dst._interruptions import Moment
 from vs_dst._snapshots import RecordingRecords
-from vs_proto.api import EpochStarted
+from vs_proto.api import EpochStarted, Timestamp
 from vs_runlog.api import ConfirmedLog
 from vs_runtime.api.core import DispatchCapExceededError, ExecutionContext
 from vs_runtime.api.step_runner import (

@@ -3260,6 +3260,8 @@ dependencies = [
     { name = "pydantic" },
     { name = "vs-core" },
     { name = "vs-project" },
+    { name = "vs-proto" },
+    { name = "vs-runlog" },
     { name = "vs-runtime" },
     { name = "vs-sim" },
 ]
@@ -3269,6 +3271,8 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2" },
     { name = "vs-core", editable = "libs/vs-core" },
     { name = "vs-project", editable = "libs/vs-project" },
+    { name = "vs-proto", editable = "libs/vs-proto" },
+    { name = "vs-runlog", editable = "libs/vs-runlog" },
     { name = "vs-runtime", editable = "libs/vs-runtime" },
     { name = "vs-sim", editable = "libs/vs-sim" },
 ]
