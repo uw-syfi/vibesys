@@ -333,6 +333,7 @@ func TestAlwaysOnCommandsAreWhatCIRunsOnEveryChange(t *testing.T) {
 		"scripts/check_doc_links.py",
 		"scripts.check_doc_citations",
 		"scripts.check_skills",
+		"scripts.published_skills",
 	}
 	got := []string{}
 	for _, command := range suite.Commands {
