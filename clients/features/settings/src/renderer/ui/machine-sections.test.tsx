@@ -206,6 +206,10 @@ function formAnswered(
 
 const alerts = (html: string): number => html.match(/role="alert"/g)?.length ?? 0;
 
+/** What the form's alert holds, as drawn: its status word and the detail beside it. */
+const alertText = (html: string): string[] =>
+  drawnText(html.match(/<div role="alert">[\s\S]*?<\/div><\/div>/)?.[0] ?? '');
+
 for (const [stage, says] of [
   ['reach', 'Could not reach the cluster'],
   ['scheduler', 'The cluster’s scheduler did not answer'],
@@ -219,7 +223,8 @@ for (const [stage, says] of [
     const html = renderToStaticMarkup(<ClustersSection {...props} view={view({form})} />);
     expect(alerts(html)).toBe(1);
     expect(drawnText(html).filter(text => text === says)).toHaveLength(1);
-    expect(drawnText(html)).toContain('not writable');
+    // The alert holds the word and the reason, so both are announced.
+    expect(alertText(html)).toEqual([says, 'Not writable']);
   });
 }
 
@@ -229,7 +234,8 @@ test('a failure that names no field is said in the form; one that names a field 
     <ClustersSection {...props} view={view({form: unnamed})} />,
   );
   expect(alerts(unnamedHtml)).toBe(1);
-  expect(drawnText(unnamedHtml)).toContain('the helper did not answer');
+  // The word says what the form was doing; the helper's own sentence is the detail, as a sentence.
+  expect(alertText(unnamedHtml)).toEqual(['Not tested', 'The helper did not answer']);
 
   const named = formAnswered({ok: false, error: 'cluster.workspace: not a directory'});
   const namedHtml = renderToStaticMarkup(<ClustersSection {...props} view={view({form: named})} />);

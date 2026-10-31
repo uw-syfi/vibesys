@@ -113,7 +113,7 @@ test('a machine that needs a sign-in has its status word, the reason as its desc
   expect(html).not.toContain('vs-banner');
 });
 
-test('a machine that could not be removed is said by the toast alone: its card has no row for it', () => {
+test('a failed Remove is a toast with its detail, and a status word on its machine until an action succeeds', () => {
   let {state} = initialMachines();
   const run = (action: MachinesAction) => {
     const step = machinesStep(state, action);
@@ -125,11 +125,25 @@ test('a machine that could not be removed is said by the toast alone: its card h
     token: 1,
     result: {ok: true, value: [{host: 'ssh:host-a', label: 'host-a', checkout: '~/vibesys'}]},
   });
-  const removal = run({type: 'remove', host: 'ssh:host-a'}).requests.find(
-    request => request.kind === 'remove',
-  );
-  const error = 'The machine was not removed.';
-  run({type: 'done', token: removal?.token ?? 0, result: {ok: false, error}});
-  expect(machinesProblems(state).map(problem => problem.title)).toEqual([error]);
-  expect(screen(state)).not.toContain(error);
+  const ask = (kind: 'remove' | 'sign-in', ok: boolean) => {
+    const request = run({type: kind, host: 'ssh:host-a'}).requests.find(each => each.kind === kind);
+    run({
+      type: 'done',
+      token: request?.token ?? 0,
+      result: ok ? {ok: true, value: null} : {ok: false, error: RAW},
+    });
+  };
+  ask('remove', false);
+  // The toast says what the machine reported; the card keeps a status word, not a sentence row.
+  expect(machinesProblems(state).map(problem => [problem.title, problem.detail])).toEqual([
+    ['The machine was not removed.', RAW],
+  ]);
+  const html = screen(state);
+  expect(html).toContain('>Not removed<');
+  expect(html).toContain(`aria-description="${RAW}"`);
+  expect(html).not.toContain(`>${RAW}<`);
+  // A dismissed toast leaves the card saying so, until an action of the machine succeeds.
+  expect(screen(state)).toContain('>Not removed<');
+  ask('sign-in', true);
+  expect(screen(state)).not.toContain('>Not removed<');
 });

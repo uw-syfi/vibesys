@@ -27,6 +27,7 @@ import {
   sentOf,
   tested,
 } from './cluster-form.js';
+import {formFailureWord} from './machine-words.js';
 
 /** A machine's key, as the app lists it. */
 type HostKey = MachineEntry['host'];
@@ -282,7 +283,8 @@ function testReply(
 ): MachineSettingsState {
   if (form.test.kind !== 'testing' || form.test.token !== action.token) return state;
   if (!action.result.ok) {
-    const problem = problemOf(action.result.error);
+    const {error, cause} = action.result;
+    const problem = problemOf(error, formFailureWord('test', cause));
     return withForm(state, host, {...form, test: {kind: 'untested'}, problem});
   }
   return withForm(state, host, tested(form, form.test.sent, action.result.value));
@@ -311,7 +313,8 @@ function saveReply(
   if (form.saving !== action.token) return state;
   const {result} = action;
   if (!result.ok) {
-    return withForm(state, host, {...form, saving: null, problem: problemOf(result.error)});
+    const problem = problemOf(result.error, formFailureWord('save', result.cause));
+    return withForm(state, host, {...form, saving: null, problem});
   }
   return withView(state, host, view => ({
     ...view,

@@ -27,19 +27,48 @@ test('a listing that failed is one problem, until a listing succeeds', () => {
   ).toEqual([]);
 });
 
-test('a machine action that failed is a problem worded as the action said, until the next action', () => {
+const RAW = 'ssh: connect to host host-a port 22: Connection refused';
+
+/** `state` after `kind` was asked of `host-a` and answered with `result`. */
+function answered(
+  state: MachinesState,
+  kind: 'remove' | 'sign-in',
+  result: Extract<MachinesAction, {type: 'done'}>['result'],
+): MachinesState {
+  const asked = machinesStep(state, {type: kind, host: 'ssh:host-a'}).state;
+  return machinesStep(asked, {type: 'done', token: asked.pending?.token ?? 0, result}).state;
+}
+
+test('a machine action that failed is a problem titled by the action, with what the machine said as its detail', () => {
   const listed: MachinesAction = {type: 'listed', token: 1, result: {ok: true, value: ENTRIES}};
-  const asked = machinesStep(drive([listed]), {type: 'sign-in', host: 'ssh:host-a'});
-  const failed = machinesStep(asked.state, {
-    type: 'done',
-    token: asked.state.pending?.token ?? 0,
-    result: {ok: false, error: 'The sign-in did not finish.'},
-  }).state;
+  const failed = answered(drive([listed]), 'sign-in', {ok: false, error: RAW});
   expect(machinesProblems(failed)).toEqual([
-    {id: 'machines/action', tone: 'err', title: 'The sign-in did not finish.'},
+    {
+      id: `machines/action/${failed.actionProblem?.token}`,
+      tone: 'err',
+      title: 'The sign-in did not finish.',
+      detail: RAW,
+    },
   ]);
-  const again = machinesStep(failed, {type: 'sign-in', host: 'ssh:host-a'}).state;
-  expect(machinesProblems(again)).toEqual([]);
+  // Words that are already the title are not said twice.
+  const worded = answered(drive([listed]), 'remove', {
+    ok: false,
+    error: 'The machine was not removed.',
+  });
+  expect(machinesProblems(worded).map(problem => problem.detail)).toEqual([undefined]);
+});
+
+test('a failed action stays until one succeeds, and one that fails again is a new problem', () => {
+  const listed: MachinesAction = {type: 'listed', token: 1, result: {ok: true, value: ENTRIES}};
+  const first = answered(drive([listed]), 'sign-in', {ok: false, error: RAW});
+  // Asking again leaves it standing until the answer.
+  const asked = machinesStep(first, {type: 'sign-in', host: 'ssh:host-a'}).state;
+  expect(machinesProblems(asked)).toEqual(machinesProblems(first));
+  // Failing again is a new problem, so a toast that was dismissed shows again.
+  const second = answered(first, 'sign-in', {ok: false, error: RAW});
+  expect(machinesProblems(second)[0]?.id).not.toBe(machinesProblems(first)[0]?.id);
+  // An action that took ends it.
+  expect(machinesProblems(answered(second, 'sign-in', {ok: true, value: null}))).toEqual([]);
 });
 
 test('nothing wrong is no problem', () => {

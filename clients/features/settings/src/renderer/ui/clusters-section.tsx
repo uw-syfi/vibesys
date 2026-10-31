@@ -35,6 +35,7 @@ import {
   modalWords,
   type ReachKind,
   reachWords,
+  sentenceCase,
   stale,
   statedHardware,
   testFailureWords,
@@ -239,21 +240,18 @@ function ClusterFormCard(props: FormProps): JSX.Element {
 
 /**
  * A failure the form holds, above the actions that try again: its status word, and beside it what
- * the person must read to act. The word is announced when it appears; it is as wide as its label,
- * so no row of the form is a status row.
+ * the person must read to act, at the weight of the rest of the form. The whole is announced when it
+ * appears, so a screen reader hears the detail with the word. The word is as wide as its label, so
+ * the row says it in a few words and a long detail wraps beside it.
  */
 function FormFailure(props: {readonly label: string; readonly detail?: string}): JSX.Element {
   return (
-    <Row gap="space-3" align="center" wrap>
-      <span role="alert">
+    <div role="alert">
+      <Row gap="space-3" align="center" wrap>
         <Chip label={props.label} tone="err" dot />
-      </span>
-      {props.detail === undefined ? null : (
-        <Text variant="small" tone="muted">
-          {props.detail}
-        </Text>
-      )}
-    </Row>
+        {props.detail === undefined ? null : <Text>{sentenceCase(props.detail)}</Text>}
+      </Row>
+    </div>
   );
 }
 
@@ -263,7 +261,7 @@ function FormResult(props: {readonly form: ClusterForm}): JSX.Element {
   return (
     <>
       {form.problem === null || form.problem.field !== null ? null : (
-        <FormFailure label="Failed" detail={form.problem.text} />
+        <FormFailure label={form.problem.word ?? 'Failed'} detail={form.problem.text} />
       )}
       <TestResult form={form} outdated={stale(form)} />
     </>

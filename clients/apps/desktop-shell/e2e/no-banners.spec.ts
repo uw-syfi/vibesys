@@ -9,7 +9,7 @@
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {expect, type Page, test} from '@playwright/test';
 import {REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
-import {fixtureNamed} from '@vibesys/run-fixtures';
+import {clusterTestsByAlias, fixtureNamed} from '@vibesys/run-fixtures';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
 import {screenCheck} from './checks/screen-check.js';
 import {dashboardWorld, MANY_RUNS, open as openDashboard} from './dashboard-world.js';
@@ -162,9 +162,42 @@ async function clusterTestFailed(page: Page, look: Look): Promise<void> {
   await settings.getByRole('button', {name: 'Test connection'}).click();
   const failure = settings.getByRole('alert');
   await expect(failure.locator('.vs-chip', {hasText: 'The workspace is not usable'})).toBeVisible();
+  // The alert holds the reason as well as the word, so a screen reader hears both.
+  await expect(failure).toContainText('The workspace /scratch/vibesys is missing or not writable');
   await expectNoBanner(page);
   expect(await screenCheck(page)).toEqual([]);
   await shoot(page, 'settings-cluster-test-failed', look);
+}
+
+const LONG_DETAIL =
+  'the workspace /scratch/vibesys is missing, not writable by the account the cluster logs in as, and not mounted on the login node either, so the test cannot create its scratch directory there';
+
+/**
+ * The same failure with a reason as long as a host can give, in a narrow window: the reason wraps
+ * beside the word and is announced with it, and neither the alert nor any row of the form is a
+ * status row.
+ */
+async function clusterTestFailedLong(page: Page, look: Look): Promise<void> {
+  const clusterTests = {
+    ...clusterTestsByAlias,
+    'long-detail': {outcome: 'failed', stage: 'workspace', detail: LONG_DETAIL},
+  };
+  await openSettingsAt(page, 660, themed({...SEED, clusterTests}, look));
+  await openSection(page, 'Clusters and clouds', 'host-b');
+  const settings = settingsMain(page);
+  await settings.getByRole('button', {name: 'Add a cluster'}).click();
+  await settings.getByRole('textbox', {name: 'Name'}).fill('lab');
+  await settings.getByRole('textbox', {name: 'Workspace on the cluster'}).fill('/scratch/vibesys');
+  await settings.getByRole('textbox', {name: 'SSH host alias'}).fill('long-detail');
+  await settings.getByRole('button', {name: 'Test connection'}).click();
+  const failure = settings.getByRole('alert');
+  await expect(failure.locator('.vs-chip', {hasText: 'The workspace is not usable'})).toBeVisible();
+  await expect(failure).toContainText('so the test cannot create its scratch directory there');
+  const box = await failure.boundingBox();
+  expect(box?.height ?? 0, 'the reason wraps over several lines').toBeGreaterThan(60);
+  await expectNoBanner(page);
+  expect(await screenCheck(page)).toEqual([]);
+  await shoot(page, 'settings-cluster-test-failed-long', look);
 }
 
 async function machinesStatus(page: Page, look: Look): Promise<void> {
@@ -273,6 +306,10 @@ const SCREENS: readonly {
   {
     title: 'Settings: a failed connection test is a status word in the form',
     walk: clusterTestFailed,
+  },
+  {
+    title: 'Settings: a failed test with a long reason wraps it beside the word, announced with it',
+    walk: clusterTestFailedLong,
   },
   {
     title: 'Machines: the status word, its reason on the pointer, its fix beside it',
