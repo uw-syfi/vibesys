@@ -11,11 +11,13 @@ from vs_core._actions import (
     Run,
     RunRest,
     Settle,
+    Tick,
     Wait,
     at_rest,
     interruption_of,
 )
-from vs_core._decide import decide, fold, may_start
+from vs_core._decide import decide, fold, may_start, start_due
+from vs_core._refusal import RecordRefusal, RecordRefusedError, RefusalReason
 from vs_core._step_attempts import open_step
 from vs_core._step_log import (
     ended_message,
@@ -50,6 +52,9 @@ __all__ = [
     "Interruption",
     "OpenStep",
     "OwnerEvent",
+    "RecordRefusal",
+    "RecordRefusedError",
+    "RefusalReason",
     "Run",
     "RunRest",
     "Settle",
@@ -57,6 +62,7 @@ __all__ = [
     "StepEffect",
     "StepResult",
     "StepsState",
+    "Tick",
     "Wait",
     "at_rest",
     "decide",
@@ -70,5 +76,6 @@ __all__ = [
     "open_step",
     "request_effect",
     "request_interrupt_policy",
+    "start_due",
     "started_message",
 ]

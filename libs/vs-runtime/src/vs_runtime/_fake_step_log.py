@@ -9,17 +9,20 @@ new log over the same records) and a resume control pushed into it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 import vs_core.api as core
 from vs_core.api.recovery import (
+    RecordRefusal,
+    Run,
     ended_message,
     finished_message,
     fold,
     input_message,
     interrupted_message,
     open_step,
+    start_due,
     started_message,
 )
 from vs_proto.api import EpochStarted, Record, Timestamp
@@ -31,7 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vs_core.api import CoreEvent, CoreState, OperationRegistry, RequestId
-    from vs_core.api.recovery import End, Interruption, Run, StepResult
+    from vs_core.api.recovery import End, Interruption, StepResult
     from vs_sim.api import Clock
 
 
@@ -127,9 +130,15 @@ class FakeStepLog:
         view = open_step(self._state, tag)
         return None if view is None else OpenStep(view.step, view.deadline_at, view.started)
 
-    async def step_started(self, run: Run) -> None:
-        """Append ``StepStarted``."""
-        self._append(started_message(run))
+    async def step_started(self, run: Run) -> Run | RecordRefusal:
+        """Append ``StepStarted`` if the rule would run the step now, with the limit it gives now."""
+        at = self._clock.now()
+        due = start_due(self._state, run.tag, at)
+        if isinstance(due, RecordRefusal):
+            return due
+        recorded = replace(run, deadline_at=due.deadline_at)
+        self._append(started_message(recorded), clock=at)
+        return recorded
 
     async def step_finished(self, tag: RequestId, attempt: int, result: StepResult) -> None:
         """Append ``StepFinished``."""
@@ -143,6 +152,10 @@ class FakeStepLog:
         """Append ``RunEnded``."""
         self._append(ended_message(end))
 
+    async def clock_advanced(self, at: float) -> None:
+        """Append the input that the run clock reached ``at``."""
+        self._append(input_message(core.ClockAdvanced(now_at=at)))
+
     async def next_input(self) -> None:
         """Return once ``push`` was called since this last returned."""
         await self._inputs.changed(self._inputs_seen)
@@ -151,11 +164,15 @@ class FakeStepLog:
     def _refolded(self) -> CoreState:
         return fold(self._records.read(), self._seed, registry=self._registry)
 
-    def _append(self, message: CoreMessage) -> None:
-        """Fold the next record first, so a record the fold refuses is never appended."""
-        at, clock = Timestamp(), self._clock.now()
+    def _append(self, message: CoreMessage, *, clock: float | None = None) -> None:
+        """Fold the next record first, so a record the fold refuses is never appended.
+
+        The record is stamped with ``clock`` when the caller read it for its own check, so the
+        check and the stamp are one instant.
+        """
+        stamp = self._clock.now() if clock is None else clock
         scratch = ConfirmedLog(_Scratch(self._records.read()))
-        built = scratch.append(message, epoch=self.epoch, at=at, clock=clock)
+        built = scratch.append(message, epoch=self.epoch, at=Timestamp(), clock=stamp)
         if not isinstance(built, Appended):
             raise FakeLogUncertainError
         folded = fold([built.record], self._state, registry=self._registry)
@@ -188,12 +205,19 @@ class FakeRunSeed:
     tags: tuple[RequestId, ...]
 
 
-def fake_run_seed(limits_s: Sequence[float], retries: int) -> FakeRunSeed:
+def fake_run_seed(
+    limits_s: Sequence[float],
+    retries: int,
+    *,
+    standing: core.RequestPhase = core.RequestPhase.PREPARED,
+) -> FakeRunSeed:
     """A run with one open step per entry of ``limits_s``, each allowed that many seconds.
 
     ``retries`` is the bound on re-sends of a step after its first attempt (core's
     ``Limits.request_retries``): a step whose charged attempts pass it ends as
-    ``ATTEMPTS_EXHAUSTED``.
+    ``ATTEMPTS_EXHAUSTED``. ``standing`` is how a log of an earlier version leaves each step:
+    ``PREPARED`` has not been sent, and ``DISPATCHED`` or ``RECONCILING`` was in flight with no
+    attempt in this log, so its work may exist.
     """
     descriptor = core.OperationDescriptor(
         kind="test.query",
@@ -231,5 +255,14 @@ def fake_run_seed(limits_s: Sequence[float], retries: int) -> FakeRunSeed:
             expected_revision=state.revision,
         )
         state = core.step(state, submitted).state
+    if standing is not core.RequestPhase.PREPARED:
+        sent = tuple(
+            row.model_copy(
+                update={"phase": standing, "dispatched_at": 0.0, "until": core.Until(at=limit)}
+            )
+            for row, limit in zip(state.records.records, limits_s, strict=True)
+        )
+        records = state.records.model_copy(update={"records": sent})
+        state = state.model_copy(update={"records": records})
     tags = tuple(row.request_id for row in state.records.records if row.request_id is not None)
     return FakeRunSeed(state, registry, tags)
