@@ -123,6 +123,13 @@ export const KNOWN_FAILURES: readonly KnownFailure[] = [
     /under the 40% a box fits: "(Benchmark|Optimizes)/,
   ),
   visual('usage-even-gaps', 'usage', 'spacing-order', EVEN_GAPS),
+  visual(
+    'machine-step-cards',
+    'dashboard',
+    'hollow-box',
+    /under the 40% a box fits: "[^"]*[●✓✕○](Starting gateway|Connecting|Loading runs)/,
+    /^runs\/(one-machine-connecting|machines-at-each-step)\//,
+  ),
 ];
 
 export function isKnown(failure: KnownFailure, screen: string, violation: Violation): boolean {

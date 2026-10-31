@@ -41,7 +41,8 @@ rendered from a fixture: a check reads a live page, so it cannot read these file
 ## Run it
 
 1. Render each screen from a fixture and run the screen checks with every check
-   on: the rows with a check must show that check on that screen.
+   on: the rows with a check must show that check on that screen. Where the app
+   has moved on, the screen's known-bad page stands in for it.
 2. Brief a fresh agent as [visual-review.md](visual-review.md) says, with the
    screens and the lines above, and nothing else from this file.
 3. Compare its findings with the key. A finding counts if it names the same
