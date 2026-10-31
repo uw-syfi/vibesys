@@ -29,6 +29,7 @@ export type CoreMethods =
   | 'setAppearance'
   | 'setNotifications'
   | 'onHostSettingsChanged'
+  | 'retryListing'
   | 'archive'
   | 'runDigests'
   | 'projectRuns'
@@ -227,6 +228,7 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
         store({...preferences, appearance}),
       setNotifications: (enabled: boolean) => store({...preferences, notifications: {enabled}}),
       onHostSettingsChanged: on('hostSettings'),
+      retryListing: () => ok(null),
       archive: (run: {host: string; runId: string}, archived: boolean) => {
         const others = preferences.archived.filter(
           each => each.host !== run.host || each.runId !== run.runId,

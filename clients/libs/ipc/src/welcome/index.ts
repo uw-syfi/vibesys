@@ -85,6 +85,7 @@ const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.setCheckout]: 3,
   [WELCOME_CHANNELS.cancelCheckout]: 1,
   [WELCOME_CHANNELS.signIn]: 1,
+  [WELCOME_CHANNELS.retryListing]: 1,
   [WELCOME_CHANNELS.complete]: 2,
   [WELCOME_CHANNELS.logs]: 3,
   [WELCOME_CHANNELS.releaseLogs]: 0,

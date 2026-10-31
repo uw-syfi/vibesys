@@ -98,7 +98,7 @@ export interface HostsDeps {
   /** Stop a host login when its checkout is replaced or the host is removed. */
   readonly endLogin?: (id: HostId) => void;
   /** The host's runs, from its gateway's WatchRuns while the host is shown. Cancel reaps the stream. */
-  readonly runs: Pick<RunWatch, 'observe' | 'cancel'>;
+  readonly runs: Pick<RunWatch, 'observe' | 'cancel' | 'retry'>;
   readonly savedRuns?: RegistrySavedRuns;
   /** Digests and the usage window, read through the gateway. */
   readonly runReads?: RegistryRunReads;
@@ -415,6 +415,11 @@ export class Hosts {
   async signIn(id: HostId): Promise<void> {
     await this.#deps.manager.signIn(id);
     this.#watched.get(hostKey(id))?.recheck();
+  }
+
+  /** Ask `id` for its runs again now, the user's retry of a machine that stopped. */
+  retryListing(id: HostId): void {
+    this.#watched.get(hostKey(id))?.retry();
   }
 
   /** The tasks `project` defines on `id`. */
@@ -805,6 +810,10 @@ export class Hosts {
       recheck: () => {
         if (live) gate.recheck();
       },
+      retry: () => {
+        if (live) gate.recheck();
+        else this.#deps.runs.retry(hostFromKey(key));
+      },
       stop: () => {
         stopped = true;
         gate.invalidate();
@@ -1107,6 +1116,8 @@ interface WatchedHost {
   readonly checkout: string;
   /** Ask the host's checkout again whether it can serve this app (the user's retry). */
   readonly recheck: () => void;
+  /** Ask the host again from the start of what stopped it (the user's retry). */
+  readonly retry: () => void;
   readonly stop: () => void;
 }
 

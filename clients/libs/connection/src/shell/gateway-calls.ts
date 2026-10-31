@@ -1,5 +1,5 @@
 /** Shared main-process ownership for the generic bridge: one session per host. */
-import type {HostKey} from '@vibesys/hosts';
+import type {HostKey, ListingStep} from '@vibesys/hosts';
 import {grpcCode, registerAbort, type ScheduleTimeout} from '@vibesys/transport';
 import {GatewayConnection, type GatewayDialer} from './gateway.js';
 import {failureDiagnostic} from './gateway-failures.js';
@@ -34,12 +34,20 @@ export class GatewayCalls {
     bytes: Uint8Array,
     signal: AbortSignal,
     receive: (bytes: Uint8Array) => void,
+    /** Told each step the host's session reaches on the way to this stream. */
+    reached?: (step: ListingStep) => void,
   ): Promise<void> {
     return this.#use(host, method, signal, (connection, owned) =>
-      connection.stream(method, bytes, owned, event => {
-        this.#observe(host, method, event);
-        receive(event);
-      }),
+      connection.stream(
+        method,
+        bytes,
+        owned,
+        event => {
+          this.#observe(host, method, event);
+          receive(event);
+        },
+        reached,
+      ),
     );
   }
 

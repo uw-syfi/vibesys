@@ -49,7 +49,9 @@ const SITUATIONS: readonly {
   {name: 'host not listed yet, recent', listings: [], recent: RECENT},
   {
     name: 'host still connecting',
-    listings: [{kind: 'unavailable', host: 'ssh:host-a', connection: {kind: 'connecting'}}],
+    listings: [
+      {kind: 'unavailable', host: 'ssh:host-a', step: 'gateway', connection: {kind: 'connecting'}},
+    ],
     recent: undefined,
   },
   {name: 'clean listing, no recent', listings: [LISTED], recent: undefined},

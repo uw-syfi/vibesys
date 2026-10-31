@@ -347,6 +347,7 @@ async function gatewayWorld(options: WorldOptions) {
         throw new Error('stop failed');
       }
     },
+    retry: (host: HostId) => watch.retry(host),
   };
   let acquisitions = 0;
   const manager = new ConnectionManager({
@@ -1689,6 +1690,7 @@ describe('Hosts watch the gateway of every desired host', () => {
     expect(world.pushed.filter(listing => listing.host === 'ssh:beta').at(0)).toEqual({
       kind: 'unavailable',
       host: 'ssh:beta',
+      step: 'gateway',
       connection: {kind: 'connecting'},
     });
   });
@@ -1758,6 +1760,7 @@ describe('Hosts watch the gateway of every desired host', () => {
     expect(world.pushed.at(0)).toEqual({
       kind: 'unavailable',
       host: 'ssh:beta',
+      step: 'gateway',
       connection: {kind: 'connecting'},
     });
   });
@@ -1822,6 +1825,49 @@ describe('Hosts watch the gateway of every desired host', () => {
       const world = await gatewayWorld({configured: []});
       await world.hosts.configured();
       expect(world.watched()).toEqual([hostKey(LOCAL)]);
+    });
+
+    test('a fresh profile hears This Mac say what runs it holds, with no run', async () => {
+      const world = await gatewayWorld({configured: []});
+      await world.hosts.configured();
+      world.gateway.announce(LOCAL, []);
+      await world.settled();
+      expect(world.pushed.at(-1)).toMatchObject({kind: 'listed', host: 'local', live: []});
+    });
+
+    test('a retry of a machine that stopped answering watches it again', async () => {
+      const world = await gatewayWorld({configured: [ALPHA]});
+      await world.hosts.configured();
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await world.failStreams(ALPHA);
+        world.clock.advanceBy(60_000);
+        await world.settled();
+      }
+      expect(world.pushed.at(-1)).toMatchObject({
+        kind: 'unavailable',
+        host: 'ssh:alpha',
+        connection: {kind: 'offline'},
+      });
+      expect(world.openStreams('ssh:alpha')).toBe(0);
+      world.hosts.retryListing(ALPHA);
+      await world.settled();
+      expect(world.openStreams('ssh:alpha')).toBe(1);
+      expect(world.pushed.at(-1)).toMatchObject({
+        kind: 'unavailable',
+        host: 'ssh:alpha',
+        step: 'gateway',
+        connection: {kind: 'connecting'},
+      });
+    });
+
+    test('a retry of a machine it does not watch does nothing', async () => {
+      const world = await gatewayWorld({configured: []});
+      await world.hosts.configured();
+      const pushed = world.pushed.length;
+      world.hosts.retryListing(ALPHA);
+      await world.settled();
+      expect(world.openStreams('ssh:alpha')).toBe(0);
+      expect(world.pushed).toHaveLength(pushed);
     });
 
     test('a removed machine stops being watched and a re-read cannot bring it back', async () => {
