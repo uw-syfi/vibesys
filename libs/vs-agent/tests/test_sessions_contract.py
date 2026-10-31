@@ -373,19 +373,17 @@ def test_malformed_ledger_fails_typed_before_dispatch(harness: _Harness) -> None
     assert harness.boundary.calls == 1
 
 
-SESSION = "thread-1"
-"""The conversation the harness's provider opens, so a stored turn continues the live checkpoint."""
+def _version_two_ledger(session_id: str) -> dict[str, object]:
+    """A ledger as a build of version 2 wrote it: one completed turn, usage without the new fields.
 
-
-def _version_two_ledger() -> dict[str, object]:
-    """A ledger as a build of version 2 wrote it: one completed turn, usage without the new fields."""
+    ``session_id`` is the conversation the turn ran in, so it continues the live checkpoint."""
     completed = Completed(
         session_key=str(KEY),
         invocation_id="turn-1",
         result=AgentTurnResult(
-            text="done", usage=AgentUsage(input_tokens=7), provider_session_id=SESSION
+            text="done", usage=AgentUsage(input_tokens=7), provider_session_id=session_id
         ),
-        checkpoint=AgentSessionCheckpoint(session_key=str(KEY), provider_session_id=SESSION),
+        checkpoint=AgentSessionCheckpoint(session_key=str(KEY), provider_session_id=session_id),
     )
     record = AgentInvocationRecord(payload_digest="digest", outcome=completed)
     stored = json.loads(AgentInvocationState(invocations={"turn-1": record}).model_dump_json())
@@ -397,7 +395,9 @@ def _version_two_ledger() -> dict[str, object]:
 
 def test_a_run_paused_under_ledger_version_two_resumes(harness: _Harness) -> None:
     """The previous ledger is read as the current one, its unknowns unknown, and written as it."""
-    harness.namespace.write_bytes("v2.json", json.dumps(_version_two_ledger()).encode())
+    live = harness.client.provider_session_id(KEY)
+    assert live is not None
+    harness.namespace.write_bytes("v2.json", json.dumps(_version_two_ledger(live)).encode())
     slot = harness.namespace.slot("v2.json", AgentInvocationState)
     sessions = ClientAgentSessions(harness.client, slot, threads=SimThreads())
     sessions.bind(KEY, harness.spec, harness.turn)
@@ -419,7 +419,7 @@ def test_a_run_paused_under_ledger_version_two_resumes(harness: _Harness) -> Non
 def test_a_ledger_of_any_other_version_is_refused_naming_the_remedy(
     harness: _Harness, version: int
 ) -> None:
-    stored = _version_two_ledger()
+    stored = _version_two_ledger("p")
     stored["schema_version"] = version
     harness.namespace.write_bytes("other.json", json.dumps(stored).encode())
     slot = harness.namespace.slot("other.json", AgentInvocationState)
