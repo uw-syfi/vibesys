@@ -30,7 +30,6 @@ import {
   MachinesPage,
   MachinesScreen,
   useDeliveringHosts,
-  useRecheckReached,
   WithHostLive,
 } from '@vibesys/feature-machines/renderer';
 import {
@@ -82,7 +81,7 @@ import {sameRun} from '@vibesys/runs';
 import type {Store} from '@vibesys/store';
 import type {SubscriptionPort} from '@vibesys/subscription';
 import {applyTheme, Card, EmptyState, Page, type ThemeTarget, WindowFrame} from '@vibesys/ui';
-import {type JSX, useMemo, useSyncExternalStore} from 'react';
+import {type JSX, useCallback, useMemo, useSyncExternalStore} from 'react';
 import {GatewayRun} from './gateway-run.js';
 import {loadingMachines, runInput} from './shell-runs.js';
 
@@ -597,13 +596,16 @@ export function Shell(props: {
   const tiles = useMemo(() => tilesOf(rows.map(row => runInput(row, Date.now()))), [rows]);
   const select = (screen: Screen): void => sidebar.store.dispatch({type: 'select', screen});
   // On the Machines screen the rail folds what the cards fold: a host that delivers is reached.
+  // The store hears which hosts deliver, and checks again one whose check found it unreachable.
+  const reportDelivering = useCallback(
+    (hosts: readonly HostKey[]) => machines.dispatch({type: 'delivering', hosts}),
+    [machines],
+  );
   const delivering = useDeliveringHosts(
     props.stores.live,
     machinesState.machines,
     sidebarState.selection.kind === 'machines',
-  );
-  useRecheckReached(delivering, machinesState.machines, host =>
-    machines.dispatch({type: 'reconnect', host}),
+    reportDelivering,
   );
   const machinesListed = machineCounts(machinesState).listed;
   const saved = machinesListed ? machinesState.machines.map(each => each.host) : null;

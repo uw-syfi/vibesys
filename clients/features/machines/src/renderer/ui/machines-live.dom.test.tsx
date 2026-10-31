@@ -20,7 +20,7 @@ import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {initialMachines, type MachinesState, machinesStep} from '../../state/index.js';
 import {createLiveStats} from '../effects/live.js';
-import {useDeliveringHosts, useRecheckReached, WithHostLive} from '../host-stats.js';
+import {useDeliveringHosts, WithHostLive} from '../host-stats.js';
 import {MachinesPage} from './machines-page.js';
 
 const window = new Window();
@@ -163,9 +163,11 @@ function rig(withRuns = false) {
   /** The rail's reading: which hosts deliver, as `useDeliveringHosts` says it, in its own root. */
   const rail = (shown: readonly string[], watching: boolean) => {
     const seen: ReadonlySet<string>[] = [];
+    const reports: (readonly string[])[] = [];
+    const report = (hosts: readonly string[]): void => void reports.push([...hosts].sort());
     const {machines} = listed(shown);
     const Reading = (): null => {
-      seen.push(useDeliveringHosts(live, machines, watching));
+      seen.push(useDeliveringHosts(live, machines, watching, report));
       return null;
     };
     const place = document.createElement('div');
@@ -174,24 +176,7 @@ function rig(withRuns = false) {
     return {
       mount: () => act(async () => hosts.render(<Reading />)),
       latest: () => [...(seen.at(-1) ?? [])].sort(),
-      unmount: () => act(async () => hosts.unmount()),
-    };
-  };
-  /** The page's re-check of hosts that stream though their check failed, and who it asked. */
-  const recheck = (shown: readonly string[], report: MachineReport) => {
-    const asked: string[] = [];
-    const {machines} = listed(shown, report);
-    const Reading = (): null => {
-      const delivering = useDeliveringHosts(live, machines, true);
-      useRecheckReached(delivering, machines, host => asked.push(host));
-      return null;
-    };
-    const place = document.createElement('div');
-    document.body.append(place);
-    const hosts = createRoot(place);
-    return {
-      mount: () => act(async () => hosts.render(<Reading />)),
-      asked: () => [...asked],
+      reported: () => reports,
       unmount: () => act(async () => hosts.unmount()),
     };
   };
@@ -200,7 +185,6 @@ function rig(withRuns = false) {
     gateway,
     subscriptions,
     rail,
-    recheck,
     container,
     show,
     card,
@@ -537,10 +521,15 @@ describe('the Machines page reads each host live', () => {
     expect(watching.latest()).toEqual([]);
     await world.snapshot(A);
     expect(watching.latest()).toEqual([A]);
+    // The store is told each change of who delivers, and nothing in between.
+    await world.advance(BEAT);
+    await world.send(A, stream => stream.send({case: 'heartbeat', value: {}}));
+    expect(watching.reported()).toEqual([[], [A]]);
     // One stream per host serves the card and the rail alike.
     expect(world.gateway.open.map(each => each.host).sort()).toEqual([A, B]);
     await world.advance(AGE + 1);
     expect(watching.latest()).toEqual([]);
+    expect(watching.reported()).toEqual([[], [A], []]);
     await watching.unmount();
     await world.stop();
     await world.advance(SUBSCRIPTION_LINGER_MS);
@@ -549,39 +538,5 @@ describe('the Machines page reads each host live', () => {
     expect(idle.latest()).toEqual([]);
     expect(world.gateway.open).toHaveLength(0);
     await idle.unmount();
-  });
-
-  test('a host that streams though its check found it unreachable is checked again once for each spell of streaming', async () => {
-    const world = rig();
-    const unreachable = {kind: 'unavailable', detail: 'timed out'} as const;
-    await world.show([A, B], unreachable);
-    const page = world.recheck([A, B], unreachable);
-    await page.mount();
-    expect(page.asked()).toEqual([]);
-    await world.snapshot(A);
-    expect(page.asked()).toEqual([A]);
-    // Beats and new values ask nothing more.
-    await world.advance(BEAT);
-    await world.send(A, stream => stream.send({case: 'heartbeat', value: {}}));
-    await world.snapshot(A);
-    expect(page.asked()).toEqual([A]);
-    // The host stops delivering and comes back: a new spell, one more check.
-    await world.advance(AGE + 1);
-    await world.advance(backoffMs(1));
-    await world.snapshot(A);
-    expect(page.asked()).toEqual([A, A]);
-    await page.unmount();
-    await world.stop();
-  });
-
-  test('a host whose check passed is never checked again for streaming', async () => {
-    const world = rig();
-    await world.show([A]);
-    const page = world.recheck([A], {kind: 'ready', facts: FACTS});
-    await page.mount();
-    await world.snapshot(A);
-    expect(page.asked()).toEqual([]);
-    await page.unmount();
-    await world.stop();
   });
 });

@@ -11,7 +11,7 @@ import (
 // index unlink alone must invalidate the scan, even while its target survives.
 func TestRunsIndexUnlinkWithoutTargetChange(t *testing.T) {
 	f := start(t)
-	stream, err := watchRuns(f.ctx, client(t, f, false))
+	stream, err := subscribeRuns(f.ctx, client(t, f, false))
 	if err != nil {
 		t.Fatal(err)
 	}

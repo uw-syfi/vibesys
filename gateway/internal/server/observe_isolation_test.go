@@ -89,7 +89,7 @@ func listing(t *testing.T, f fixture, c apiv1.HostServiceClient) map[string]*api
 	t.Helper()
 	ctx, cancel := context.WithCancel(f.ctx)
 	defer cancel()
-	stream, err := watchRuns(ctx, c)
+	stream, err := subscribeRuns(ctx, c)
 	if err != nil {
 		t.Fatal(err)
 	}

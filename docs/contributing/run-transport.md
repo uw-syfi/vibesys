@@ -36,7 +36,7 @@ read path and journal projection from the native core and control work still to 
 | Live JSONL journal projection into `run.log` | built as a tee installed before journal attachment; emits typed records | 1 |
 | Store records for every event kind ([inventory](#event-inventory)) | schemas and typed journal projection built; the native core producer remains unbuilt | 2 |
 | Skeleton keyframes, `run.head`, `~/.vibesys/runs/<run_id>` link | writers, discovery and converted head/keyframe publication built; legacy-only epochs have no native headline | 2 |
-| `Skeleton`, `GetBlobs`, `TailStream`, `WatchRuns`; new Run screen | RPCs, client skeleton/cache and opt-in raw record panel built; complete native Run screen remains unbuilt | 2 |
+| `Skeleton`, `GetBlobs`, `TailStream`, `Subscribe` (the `runs` topic); new Run screen | RPCs, client skeleton/cache and opt-in raw record panel built; complete native Run screen remains unbuilt | 2 |
 | Conversion of existing JSONL runs and `store.json` envelopes | typed journal conversion and bulk project/host-index conversion built, including blobs, final keyframes, head publication and repair; journals that predate the run trace convert with the events they have, and unsupported journals are reported as skipped; core envelopes remain the resume authority until phase 3 | 2 |
 | Core state as generated types, `state.pb`, native `run.log` writes | unbuilt; typed journal projection does not replace native core commits | 3 |
 | Intents as records (`IntentState`), Pause/Pause now, relaunch epochs | inbox outcomes, Pause and Resume epochs built over the current saved-state resume path; native state recovery remains unbuilt | 3 |
@@ -159,8 +159,8 @@ metric points a client plots; no reader folds a journal for it.
 This deletes the second (Python) copy of the summary fold.
 
 The canonical epoch comes from committed `EpochStarted` records. Process metadata
-never supplies it. For retained phase-1 heads whose epoch cache is zero, `WatchRuns`
-decodes the published log prefix into its response without rewriting either file.
+never supplies it. For retained phase-1 heads whose epoch cache is zero, the `runs` topic's source
+decodes the published log prefix into the entry it states without rewriting either file.
 An explicit zero committed sequence admits no records; an absent sequence retains
 the phase-1 complete-prefix rule. Without a log the epoch remains unknown. Native
 heads with a populated epoch cache avoid this scan. Python observation readers use
@@ -265,12 +265,11 @@ connect; a release build later downloads the released binary instead. It is stat
 | Call | Kind | What |
 |---|---|---|
 | `Hello` | unary | exact API-schema-hash check; returns host facts |
-| `WatchRuns` | stream | `run.head` of every linked run, then changes |
 | `Skeleton` | unary | latest keyframe plus log records after it |
 | `Tail` | stream | log records from a sequence, then live |
 | `GetBlobs` | unary | blobs by hash |
 | `TailStream` | stream | a log stream from an offset, then live |
-| `Subscribe` | stream | one topic's keyed state, then conflated changes; see below |
+| `Subscribe` | stream | one topic's keyed state, then conflated changes; the `runs` topic is `run.head` and liveness of every linked run; see below |
 | `PostIntent` | unary | writes the run's (or session's) inbox |
 | `HostCall` | unary | typed host operations, including `relaunch` of an existing run; `vibesys host <method>` with protobuf on stdin and stdout |
 | `Attach` | bidi | reserved |
@@ -315,7 +314,7 @@ match by construction; a mismatch means a stale copy on the host, and the app re
 **Store (`vibesys.store.v1` and core state).** Additive changes only, enforced by `buf breaking`
 in CI. New code must read data written by the last 7 days of nightlies; a CI test resumes saved
 runs from each. The retained-writer corpus is checked through Python head reads, gateway
-Skeleton/Tail/WatchRuns, and the client screen projections. A semantic break bumps the package
+Skeleton/Tail/the `runs` topic, and the client screen projections. A semantic break bumps the package
 version and ships one upgrade function. A newer writer is refused by name, never read as if it
 were older.
 
@@ -647,7 +646,7 @@ Notes on the records:
 | Phase | Delivers |
 |---|---|
 | 1. Walking skeleton | protos, codegen and CI; Go gateway with `Hello` and `Tail`; Electron provisioning and one HTTP/2 connection behind a per-host switch; a Python converter that follows a live JSONL journal into `run.log` as `LegacyEvent{json}` records |
-| 2. Complete read path | the inventory above in the store model; keyframes and `run.head`; `Skeleton`, `GetBlobs`, `TailStream`, `WatchRuns`; the new Run screen; conversion of all existing runs |
+| 2. Complete read path | the inventory above in the store model; keyframes and `run.head`; `Skeleton`, `GetBlobs`, `TailStream`, `Subscribe` (the `runs` topic); the new Run screen; conversion of all existing runs |
 | 3. Write path | core state as generated types and `state.pb`; the run writes `run.log` natively; intents, Pause and Pause now, Resume epochs; chat sessions; `HostCall` |
 | 4. Cutover | delete the run protocol, its service and transports, the relay and run sockets, the helper protocol and its features, the reader server, registry tombstones and record versions, the dual summary fold, the conformance corpus, the strategy-specific event kinds, the Pydantic contract models and JSON Schema pipeline, the envelope JSON migration chain and the persisted-shape snapshots |
 

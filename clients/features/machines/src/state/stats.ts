@@ -46,8 +46,8 @@ export type StatsView =
 /**
  * What a card says of a machine's runs: how many it holds and how many are alive, as its `runs`
  * subscription last said. One source for both, so the two never come from different reads. Once
- * the host has said, the counts stay: they are `stale` when it stopped delivering, and are never
- * taken away.
+ * the host has said, the counts stay: they are `stale` when it stopped delivering, however many
+ * attempts it has lost, and are never taken away while it keeps trying.
  */
 export interface RunsView {
   readonly total: number;
@@ -57,8 +57,10 @@ export interface RunsView {
 
 /** The runs `state` holds, or null while the host has not said. */
 export function runsView(state: SubscriptionState<HostRunFacts>): RunsView | null {
-  if (state.kind !== 'live' && state.kind !== 'stale') return null;
-  return {total: state.value.size, alive: aliveRuns(state.value), stale: state.kind === 'stale'};
+  const held =
+    state.kind === 'failed' ? state.held : state.kind === 'connecting' ? undefined : state.value;
+  if (held === undefined) return null;
+  return {total: held.size, alive: aliveRuns(held), stale: state.kind !== 'live'};
 }
 
 /**

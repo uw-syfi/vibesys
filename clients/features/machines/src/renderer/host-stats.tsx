@@ -3,8 +3,8 @@
  * The page takes it as a slot, because presentational code reaches no effects.
  */
 import type {HostKey} from '@vibesys/hosts';
-import {type JSX, useEffect, useMemo, useRef, useSyncExternalStore} from 'react';
-import {type HostLive, hostsToRecheck, type Machine} from '../state/index.js';
+import {type JSX, useEffect, useMemo, useSyncExternalStore} from 'react';
+import type {HostLive, Machine} from '../state/index.js';
 import {type LiveStats, useHostStats} from './effects/live.js';
 
 /** What `render` draws for `host`, given the host's live stats. */
@@ -19,21 +19,23 @@ export function WithHostLive(props: {
 /**
  * The hosts whose stream delivers right now, read while `watching`. It reads the sources the cards
  * read (the hub shares one stream per host), so the rail and the cards fold the one fact; nothing
- * is read, and no stream is held, while not watching.
+ * is read, and no stream is held, while not watching. Each change of the set is `report`ed to the
+ * machines store, which decides what a host that streams though its check failed is owed.
  */
 export function useDeliveringHosts(
   live: LiveStats | null,
   machines: readonly Machine[],
   watching: boolean,
+  report: (hosts: readonly HostKey[]) => void,
 ): ReadonlySet<HostKey> {
   // The sources follow the hosts, not the machines' other facts, which change all the time.
-  const hosts = machines.map(each => each.host).join('\n');
+  const named = machines.map(each => each.host).join('\n');
   const sources = useMemo(
     () =>
-      live === null || !watching || hosts === ''
+      live === null || !watching || named === ''
         ? []
-        : hosts.split('\n').map(host => [host, live.source(host)] as const),
-    [live, hosts, watching],
+        : named.split('\n').map(host => [host, live.source(host)] as const),
+    [live, named, watching],
   );
   const subscribe = useMemo(
     () => (listener: () => void) => {
@@ -50,25 +52,7 @@ export function useDeliveringHosts(
       .map(([host]) => host)
       .join('\n');
   const delivering = useSyncExternalStore(subscribe, read, read);
-  return useMemo(() => new Set(delivering === '' ? [] : delivering.split('\n')), [delivering]);
-}
-
-/**
- * Asks `recheck` for the machines that deliver though their check found them unreachable, once for
- * each spell of delivering: a host that streams is reached, so what its check could not read is
- * read again (its hardware, and what it can run) without the user pressing anything.
- */
-export function useRecheckReached(
-  delivering: ReadonlySet<HostKey>,
-  machines: readonly Machine[],
-  recheck: (host: HostKey) => void,
-): void {
-  const asked = useRef(new Set<HostKey>());
-  useEffect(() => {
-    for (const host of [...asked.current]) if (!delivering.has(host)) asked.current.delete(host);
-    for (const host of hostsToRecheck(machines, delivering, asked.current)) {
-      asked.current.add(host);
-      recheck(host);
-    }
-  }, [delivering, machines, recheck]);
+  const hosts = useMemo(() => (delivering === '' ? [] : delivering.split('\n')), [delivering]);
+  useEffect(() => report(hosts), [hosts, report]);
+  return useMemo(() => new Set(hosts), [hosts]);
 }

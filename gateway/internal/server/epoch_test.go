@@ -33,7 +33,7 @@ func TestRunsDecodesPhase1EpochFromPublishedLog(t *testing.T) {
 				original.Process = process
 				publishHead(t, f, original)
 				originalBytes := encode(t, original)
-				stream, err := watchRuns(f.ctx, client(t, f, false))
+				stream, err := subscribeRuns(f.ctx, client(t, f, false))
 				if err != nil {
 					t.Fatal(err)
 				}

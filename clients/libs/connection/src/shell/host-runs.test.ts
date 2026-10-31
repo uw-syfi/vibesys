@@ -1,7 +1,8 @@
 import {expect, test} from 'bun:test';
 import type {HostKey, HostListing} from '@vibesys/hosts';
 import {RunLiveness, TopicFailureCode} from '@vibesys/proto';
-import {backoffMs, OFFLINE_AFTER} from '@vibesys/subscription';
+import {backoffMs, OFFLINE_AFTER, runs as runsTopic} from '@vibesys/subscription';
+import fc from 'fast-check';
 import {LISTING_FAILURE_WORDS} from '../run-listing.js';
 import {announce, announceChange, hubRig, settle} from '../testing/index.js';
 import {hostRuns} from './host-runs.js';
@@ -84,6 +85,51 @@ test('a host that keeps failing is offline in the words of its reason, and a ret
   expect(gateway.open).toHaveLength(1);
 });
 
+test('property: a window that joins at any point is told the step the others were told, where the host stopped', async () => {
+  const STEPS = ['gateway', 'handshake', 'runs'] as const;
+  const OPS = fc.oneof(
+    fc.constantFrom(...STEPS).map(step => ({kind: 'reach', step}) as const),
+    fc.constant({kind: 'fail'} as const),
+    fc.constant({kind: 'retry'} as const),
+    fc.constant({kind: 'snapshot'} as const),
+  );
+  await fc.assert(
+    fc.asyncProperty(
+      fc.array(OPS, {minLength: 1, maxLength: 30}),
+      fc.nat({max: 30}),
+      async (ops, joinAt) => {
+        const {gateway, clock, runs, listings, release} = watching();
+        const late: HostListing[] = [];
+        let releaseLate: (() => void) | null = null;
+        // What the late window was told last is what the first window was told last, step and all.
+        const agree = (): void => {
+          const first = listings.at(-1);
+          const second = late.at(-1);
+          if (first !== undefined && second !== undefined) expect(second).toEqual(first);
+        };
+        for (const [index, op] of ops.entries()) {
+          if (index === joinAt) {
+            releaseLate = runs.observe(HOST, listing => late.push(listing));
+            agree();
+          }
+          const stream = gateway.streams.at(-1);
+          if (op.kind === 'reach') stream?.reached(op.step);
+          else if (op.kind === 'fail') stream?.fail();
+          else if (op.kind === 'retry') runs.retry(HOST);
+          else announce(gateway, HOST, [run('a')]);
+          await settle();
+          agree();
+          clock.advanceBy(backoffMs(1));
+          agree();
+        }
+        releaseLate?.();
+        release();
+      },
+    ),
+    {numRuns: 60},
+  );
+});
+
 test('a host that cannot serve the topic is offline with that word and is not retried by itself', () => {
   const {gateway, clock, last} = watching();
   gateway.streams[0]?.reached('runs');
@@ -132,6 +178,28 @@ test('alive says why a host did not answer, and never a count of none', async ()
   const failure = await counted.catch((error: unknown) => error);
   expect(failure).toBeInstanceOf(SubscriptionFailed);
   expect(failure).toMatchObject({reason: 'unsupported', retrying: false});
+});
+
+test('alive on a host that never answers ends at the topic’s first-frame bound, not after its attempts run out', async () => {
+  const rig = hubRig();
+  const counted = hostRuns(rig.subscriptions).alive(HOST, new AbortController().signal);
+  let outcome: unknown = 'pending';
+  counted.then(
+    value => (outcome = value),
+    error => (outcome = error),
+  );
+  // The stream opens and the host gives no frame; every attempt after it would too.
+  rig.gateway.streams[0]?.reached('handshake');
+  rig.clock.advanceBy(runsTopic.policy.firstFrameMs - 1);
+  await settle();
+  expect(outcome).toBe('pending');
+  rig.clock.advanceBy(1);
+  await settle();
+  expect(outcome).toBeInstanceOf(SubscriptionFailed);
+  expect(outcome).toMatchObject({reason: 'no_first_frame', retrying: true});
+  rig.clock.advanceBy(SUBSCRIPTION_LINGER_MS);
+  expect(rig.gateway.open).toHaveLength(0);
+  expect(rig.clock.pending).toBe(0);
 });
 
 test('alive stops waiting when its caller does, and leaves no stream behind', async () => {

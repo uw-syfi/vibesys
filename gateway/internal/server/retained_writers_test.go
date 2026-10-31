@@ -128,7 +128,7 @@ func TestSavedPreviousWritersRetainInputFacts(t *testing.T) {
 				if !checkpoint {
 					pinRetainedResponse(t, directory, response)
 				}
-				watch, err := watchRuns(f.ctx, c)
+				watch, err := subscribeRuns(f.ctx, c)
 				if err != nil {
 					t.Fatal(err)
 				}

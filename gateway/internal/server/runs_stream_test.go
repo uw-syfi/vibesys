@@ -24,7 +24,7 @@ type runFrame struct {
 	Heartbeat       bool
 }
 
-func watchRuns(ctx context.Context, c apiv1.HostServiceClient) (*runStream, error) {
+func subscribeRuns(ctx context.Context, c apiv1.HostServiceClient) (*runStream, error) {
 	stream, err := c.Subscribe(ctx, &apiv1.SubscribeRequest{Topic: &apiv1.SubscribeRequest_Runs{Runs: &apiv1.RunsTopic{}}})
 	if err != nil {
 		return nil, err

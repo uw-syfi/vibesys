@@ -88,7 +88,7 @@ func TestEveryLiveReadPathCarriesCanonicalPerformance(t *testing.T) {
 					write(t, filepath.Join(f.run, "keyframes", fmt.Sprintf("%d.pb", want.GetCommittedSeq())), false, encode(t, state))
 				}
 				watchCtx, cancel := context.WithCancel(f.ctx)
-				watch, err := watchRuns(watchCtx, c)
+				watch, err := subscribeRuns(watchCtx, c)
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -291,7 +291,7 @@ func TestRunsAtomicHeadAndRealLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	publishHead(t, f, head(proto.Uint64(1)))
-	stream, err := watchRuns(f.ctx, client(t, f, false))
+	stream, err := subscribeRuns(f.ctx, client(t, f, false))
 	if err != nil {
 		t.Fatal(err)
 	}

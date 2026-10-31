@@ -1,7 +1,8 @@
 /**
  * What a screen can know about a subscription, as one closed type. Every non-`failed` state is
  * bounded by a timer or by a bounded layer below it, so no state means "loading with no end", and
- * a value exists only in `live` and `stale`, so a screen cannot show data it does not hold.
+ * a value exists only in `live`, `stale` and a `failed` that is still retrying: there it is the
+ * value last held, named `held`, which a screen shows as old and never as current.
  */
 
 /** Milliseconds since the epoch on the clock the subscription's owner injects. Display only. */
@@ -51,7 +52,13 @@ export type SubscriptionState<S> =
       readonly attempt: number;
       readonly valueAt: Instant;
     }
-  | {readonly kind: 'failed'; readonly reason: FailureReason; readonly retrying: boolean};
+  | {
+      readonly kind: 'failed';
+      readonly reason: FailureReason;
+      readonly retrying: boolean;
+      /** The value held when the host was lost, while retrying; absent if it never spoke. */
+      readonly held?: S;
+    };
 
 /** Whether a reason leaves another attempt to come. */
 export function retryable(reason: FailureReason): reason is StaleReason {

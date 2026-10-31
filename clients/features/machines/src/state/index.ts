@@ -9,6 +9,7 @@ export {gpuLine, gpuName} from './hardware.js';
 export {
   type ActionProblem,
   type FormName,
+  hostsToRecheck,
   initialMachines,
   type Machine,
   type MachineStatus,
@@ -28,7 +29,6 @@ export {
   cardStatus,
   clockWord,
   hardwareLine,
-  hostsToRecheck,
   type Load,
   machineHardware,
   machineLoad,

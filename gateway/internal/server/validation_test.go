@@ -139,7 +139,7 @@ func TestHostWithholdsInvalidHeadFromTheListing(t *testing.T) {
 	value := head(nil)
 	value.Strategy = ""
 	publishHead(t, f, value)
-	stream, err := watchRuns(f.ctx, client(t, f, false))
+	stream, err := subscribeRuns(f.ctx, client(t, f, false))
 	if err != nil {
 		t.Fatal(err)
 	}

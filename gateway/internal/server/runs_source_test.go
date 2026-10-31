@@ -3,14 +3,17 @@ package server_test
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
+	"github.com/uw-syfi/vibesys/gateway/internal/hostoperations"
 	"github.com/uw-syfi/vibesys/gateway/internal/server"
 	"google.golang.org/protobuf/proto"
 )
@@ -138,6 +141,23 @@ func (w *runsWorld) probe(elapsed time.Duration) {
 	}
 }
 
+// takeWriterLock locks the run as its writer does. The source probes the lock by taking it shared
+// for an instant, and the probe of the last tick `probe` sent may still be running when it
+// returns, so a writer that did not wait would be refused by a probe that is about to let go. It
+// waits: what it ends up holding does not depend on which came first.
+func (w *runsWorld) takeWriterLock() {
+	w.t.Helper()
+	for {
+		err := syscall.Flock(int(w.lock.Fd()), syscall.LOCK_EX)
+		if err == nil {
+			return
+		}
+		if err != syscall.EINTR {
+			w.t.Fatal(err)
+		}
+	}
+}
+
 func succeeds(t *testing.T, got putRun) {
 	t.Helper()
 	if got.entry.Head.GetEpoch() != 8 || (!got.entry.Head.GetAwaitingLifecycle() && got.entry.Head.GetLifecycle().GetStarting() == nil) ||
@@ -188,9 +208,7 @@ func TestRunsSourceSuccessorBootGapProperty(t *testing.T) {
 					w.sink.drain()
 					for tick := 0; tick <= gap; tick++ {
 						if tick == gap {
-							if err := syscall.Flock(int(w.lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-								t.Fatal(err)
-							}
+							w.takeWriterLock()
 						}
 						w.probe(time.Duration(tick+1) * server.LivenessProbeInterval)
 						alive := false
@@ -222,11 +240,129 @@ func TestRunsSourceUnconfirmedProbeExpiresWithLease(t *testing.T) {
 	if got := w.sink.drain(); len(got) != 0 {
 		t.Fatalf("a tick past the lease changed a run: %v", got)
 	}
-	if err := syscall.Flock(int(w.lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		t.Fatal(err)
-	}
+	w.takeWriterLock()
 	w.probe(watchLease + server.LivenessProbeInterval)
 	if got := w.sink.drain(); len(got) != 0 {
 		t.Fatalf("expired probe was renewed: %v", got)
+	}
+}
+
+// A run whose head is past the topic's bound is listed without its head: it never fails the
+// topic for the runs beside it. Every put fits the bound, a head is dropped exactly when the
+// entry the source would otherwise state is past it (the run's project counts), and what the
+// run says of whether it is alive does not depend on whether its head was kept.
+func TestRunsSourceListsEveryRunWhateverItsHeadSize(t *testing.T) {
+	maxBytes := hostoperations.Topics[hostoperations.TopicRuns].MaxValueBytes
+	for seed := int64(1); seed <= 8; seed++ {
+		t.Run(fmt.Sprintf("seed-%d", seed), func(t *testing.T) {
+			random := rand.New(rand.NewSource(seed))
+			w := newRunsWorld(t)
+			written := map[string]*storev1.RunHead{}
+			projects := map[string]string{}
+			for index := range 3 + random.Intn(4) {
+				id := fmt.Sprintf("sized-%d", index)
+				project := addProjectRun(t, w, id)
+				projects[id] = project
+				written[id] = headFittingEntry(random, project, maxBytes+random.Intn(2*len(project)+40)-len(project)-20)
+				if random.Intn(8) == 0 {
+					// Past what a head is read to at all: still a listed run.
+					written[id] = headFittingEntry(random, project, 1<<20+1024)
+				}
+				publishHeadIn(t, filepath.Join(w.f.root, "runs", id), written[id])
+			}
+			defer w.run()()
+			w.sink.awaitSynced(t, w.ctx)
+			got := map[string]*apiv1.RunEntry{}
+			for _, put := range w.sink.drain() {
+				got[put.id] = put.entry
+			}
+			if _, listed := got["run-1"]; !listed {
+				t.Fatal("the run with no head is not listed")
+			}
+			for id, head := range written {
+				entry, listed := got[id]
+				if !listed {
+					t.Fatalf("%s is not listed", id)
+				}
+				if size := proto.Size(entry); size > maxBytes {
+					t.Fatalf("%s is stated at %d bytes, past the topic's bound of %d", id, size, maxBytes)
+				}
+				if entry.GetProjectRoot() != projects[id] {
+					t.Fatalf("%s lost its project: %q", id, entry.GetProjectRoot())
+				}
+				whole := proto.Size(&apiv1.RunEntry{Head: head, Liveness: entry.Liveness, ProjectRoot: entry.ProjectRoot})
+				if kept := entry.Head != nil; kept == (whole > maxBytes) {
+					t.Fatalf("%s: whole entry is %d bytes of a bound of %d, and its head kept is %t", id, whole, maxBytes, kept)
+				}
+				// The head says it ended; so does the run, whether or not its head is stated, if it
+				// could be read at all.
+				if proto.Size(head) <= 1<<20 && entry.Liveness != apiv1.RunLiveness_RUN_LIVENESS_ENDED {
+					t.Fatalf("%s: an ended run is %v", id, entry.Liveness)
+				}
+			}
+		})
+	}
+}
+
+// addProjectRun makes a run `id` in the layout a project's run has, so the source can tell its
+// project, links it into the index, and returns the project's canonical path.
+func addProjectRun(t *testing.T, w *runsWorld, id string) string {
+	t.Helper()
+	project := filepath.Join(t.TempDir(), "project-"+id)
+	logs := filepath.Join(project, ".vibesys", "state", "local", "runs", id, "logs")
+	if err := os.MkdirAll(logs, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(logs, filepath.Join(w.f.root, "runs", id)); err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := filepath.EvalSymlinks(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return canonical
+}
+
+// headFittingEntry is an ended run's head whose entry, with its project and an ended liveness,
+// is as near `target` bytes as a head of filler can be made without passing it.
+func headFittingEntry(random *rand.Rand, project string, target int) *storev1.RunHead {
+	// Filler keys of 60 000 bytes make most of the head, and one last key is cut to fit the rest.
+	fillers := max(0, (target-65_536+60_007)/60_008)
+	headOf := func(last int) *storev1.RunHead {
+		counts := map[string]uint64{}
+		for filler := range fillers {
+			counts[strings.Repeat(string(rune('a'+filler%26))+string(rune('a'+filler/26)), 30_000)] = 1
+		}
+		if last > 0 {
+			counts[strings.Repeat("z", last)] = 1
+		}
+		return &storev1.RunHead{
+			Lifecycle:  &storev1.Lifecycle{State: &storev1.Lifecycle_Ended{Ended: &storev1.Ended{Outcome: storev1.Outcome_OUTCOME_FINISHED}}},
+			Strategy:   "example",
+			SpanCounts: counts,
+		}
+	}
+	size := func(last int) int {
+		return proto.Size(&apiv1.RunEntry{Head: headOf(last), Liveness: apiv1.RunLiveness_RUN_LIVENESS_ENDED, ProjectRoot: proto.String(project)})
+	}
+	// The size grows with the last key, so the longest last key that fits is found by halving.
+	low, high := 0, 65_536
+	for low < high {
+		middle := (low + high + 1) / 2
+		if size(middle) <= target {
+			low = middle
+		} else {
+			high = middle - 1
+		}
+	}
+	return headOf(low)
+}
+
+// publishHeadIn writes a run's head as the writer does: whole, by rename.
+func publishHeadIn(t *testing.T, dir string, value *storev1.RunHead) {
+	t.Helper()
+	write(t, filepath.Join(dir, "head.tmp"), false, encode(t, value))
+	if err := os.Rename(filepath.Join(dir, "head.tmp"), filepath.Join(dir, "run.head")); err != nil {
+		t.Fatal(err)
 	}
 }

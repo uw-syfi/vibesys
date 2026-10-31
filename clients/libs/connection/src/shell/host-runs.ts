@@ -19,7 +19,9 @@ export interface HostRuns {
   observe(host: HostKey, listener: (listing: HostListing) => void): () => void;
   /**
    * How many runs the host says are alive, once it says so, or the failure it ends with
-   * (`SubscriptionFailed`). It is never a count of zero for a host that did not answer.
+   * (`SubscriptionFailed`), which is `no_first_frame` if it gives no first frame within the topic's
+   * own bound. It is never a count of zero for a host that did not answer, and it never waits for
+   * the subscription's attempts to run out.
    */
   alive(host: HostKey, signal: AbortSignal): Promise<number>;
   /** Try again now where a host is waiting or has stopped; a delivering subscription is left be. */
@@ -27,12 +29,16 @@ export interface HostRuns {
 }
 
 export function hostRuns(source: HostRunsSource): HostRuns {
+  // How far each host's subscription has come, shared by its observers: a window that joins a
+  // stream already failed is told where it stopped, as the window that watched it fail was. A
+  // new spell starts with a `connecting` state, which sets the step again.
+  const steps = new Map<HostKey, ListingStep>();
   return {
     observe(host, listener) {
-      let step: ListingStep = LISTING_STEPS[0];
       let waiting: string | null = null;
       return source.observe(host, runs, state => {
-        step = listingStep(step, state);
+        const step = listingStep(steps.get(host) ?? LISTING_STEPS[0], state);
+        steps.set(host, step);
         const listing = hostListingFromRuns(host, state, step);
         // The subscription changes in ways a listing does not show (why a stream was lost, a
         // retry that fails as the one before it did), and a screen is told only what it can see.
@@ -46,7 +52,7 @@ export function hostRuns(source: HostRunsSource): HostRuns {
       });
     },
     async alive(host, signal) {
-      return aliveRuns(await source.first(host, runs, signal));
+      return aliveRuns(await source.first(host, runs, signal, runs.policy.firstFrameMs));
     },
     retry: host => source.retry(host),
   };

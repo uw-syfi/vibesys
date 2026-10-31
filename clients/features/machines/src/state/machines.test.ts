@@ -10,6 +10,7 @@ import type {
   SlurmClusterSettings,
 } from '@vibesys/ipc';
 import {checkModel, type Seeded} from '@vibesys/store/testing';
+import fc from 'fast-check';
 import {
   type FormName,
   formSuggestions,
@@ -140,6 +141,7 @@ function userAction(random: Seeded, state: MachinesState): MachinesAction {
     {type: 'remove', host},
     {type: 'sign-in', host},
     {type: 'reconnect', host},
+    {type: 'delivering', hosts: HOSTS.filter(() => random.bool())},
     {type: 'test-cluster', host, name: random.pick(CLUSTERS).name},
   ]);
 }
@@ -479,5 +481,92 @@ describe('machinesStep', () => {
       {key: 'Harnesses', value: 'Claude Code · Codex · mystery installed', mono: false},
       {key: 'Runs', value: '1 live · 2 ended today', mono: false},
     ]);
+  });
+});
+
+describe('a host that streams though its check found it unreachable', () => {
+  const NAMES = ['ssh:host-a', 'ssh:host-b', 'ssh:host-c'];
+  const UNREACHABLE: MachineReport = {kind: 'unavailable', detail: 'timed out'};
+
+  /** Machines each listed and each checked, with the check `report` of each by host. */
+  function checked(reports: Readonly<Record<string, MachineReport>>): MachinesState {
+    let {state} = initialMachines();
+    const entries = NAMES.map(host => ({host, label: host, checkout: '~/vibesys'}));
+    state = machinesStep(state, {
+      type: 'listed',
+      token: 1,
+      result: {ok: true, value: entries},
+    }).state;
+    for (const machine of state.machines) {
+      state = machinesStep(state, {
+        type: 'reported',
+        token: machine.checking ?? 0,
+        host: machine.host,
+        result: {ok: true, value: reports[machine.host] ?? {kind: 'ready', facts: FACTS}},
+      }).state;
+    }
+    return state;
+  }
+
+  /** The runs of consecutive sets that hold `host`: each is a spell of delivering. */
+  function spells(sets: readonly (readonly string[])[], host: string): number {
+    return sets.filter((set, index) => set.includes(host) && !sets[index - 1]?.includes(host))
+      .length;
+  }
+
+  /** Plays `sets` as the hosts that deliver, answering each check with the host unreachable again. */
+  function play(start: MachinesState, sets: readonly (readonly string[])[]): Map<string, number> {
+    const asked = new Map<string, number>();
+    let state = start;
+    for (const set of sets) {
+      const step = machinesStep(state, {type: 'delivering', hosts: set});
+      state = step.state;
+      for (const request of step.requests) {
+        if (request.kind !== 'report') throw new Error(`asked for ${request.kind}`);
+        asked.set(request.host, (asked.get(request.host) ?? 0) + 1);
+        const result = {ok: true, value: UNREACHABLE} as const;
+        state = machinesStep(state, {
+          type: 'reported',
+          token: request.token,
+          host: request.host,
+          result,
+        }).state;
+      }
+    }
+    return asked;
+  }
+
+  test('property: it is checked again once for each spell of delivering, and only if its check failed', () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.subarray(NAMES), {maxLength: 30}),
+        fc.subarray(NAMES),
+        (sets, unreachable) => {
+          const start = checked(
+            Object.fromEntries(unreachable.map(host => [host, UNREACHABLE] as const)),
+          );
+          const asked = play(start, sets);
+          for (const host of NAMES) {
+            expect(asked.get(host) ?? 0).toBe(unreachable.includes(host) ? spells(sets, host) : 0);
+          }
+        },
+      ),
+    );
+  });
+
+  test('a check that cannot start is not owed, and is asked for when the host delivers again', () => {
+    const base = checked({'ssh:host-a': UNREACHABLE});
+    const waiting = machinesStep(base, {type: 'remove', host: 'ssh:host-b'}).state;
+    // A removal is awaited: no check starts, and none is counted as asked.
+    const blocked = machinesStep(waiting, {type: 'delivering', hosts: ['ssh:host-a']});
+    expect(blocked.requests).toEqual([]);
+    expect(blocked.state.rechecked).toEqual([]);
+    const free = machinesStep(base, {type: 'delivering', hosts: ['ssh:host-a']});
+    expect(free.requests).toEqual([expect.objectContaining({kind: 'report', host: 'ssh:host-a'})]);
+    expect(free.state.rechecked).toEqual(['ssh:host-a']);
+    // Hearing the same set again changes nothing, not even the state's identity.
+    const again = machinesStep(free.state, {type: 'delivering', hosts: ['ssh:host-a']});
+    expect(again.state).toBe(free.state);
+    expect(again.requests).toEqual([]);
   });
 });

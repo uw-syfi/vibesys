@@ -131,11 +131,7 @@ rescan:
 				live = apiv1.RunLiveness_RUN_LIVENESS_UNSPECIFIED
 			}
 			value := &apiv1.RunEntry{Head: head, Liveness: live}
-			if proto.Size(value) > maxRunBytes {
-				// One run past the bound must not fail the topic for every subscriber.
-				value.Head = nil
-			}
-			probes[entry.Name()] = probes[entry.Name()].observe(dir, value.Head.GetEpoch(), live, h.config.Probes.Now())
+			probes[entry.Name()] = probes[entry.Name()].observe(dir, head.GetEpoch(), live, h.config.Probes.Now())
 			if project, err := h.heads.project(h.config.Root, entry.Name(), dir, head); err == nil {
 				value.ProjectRoot = proto.String(project)
 			} else if old := previous[entry.Name()]; old != nil && old.ProjectRoot != nil {
@@ -143,6 +139,11 @@ rescan:
 				if root, err := externalProject(h.config.Root, entry.Name(), dir, old.GetProjectRoot()); err == nil {
 					value.ProjectRoot = proto.String(root)
 				}
+			}
+			if proto.Size(value) > maxRunBytes {
+				// One run past the bound, project included, must not fail the topic for every
+				// subscriber: it is listed without its head.
+				value.Head = nil
 			}
 			current[entry.Name()] = value
 			directories[entry.Name()] = dir

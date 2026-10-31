@@ -308,20 +308,25 @@ test('an age reads in the largest whole unit, never negative, and never goes dow
   );
 });
 
-test('property: a card counts its runs from one reading, and a host that stops delivering keeps its counts, dimmed', () => {
+test('property: a card counts its runs from one reading, and through any number of losses keeps them, dimmed', () => {
   fc.assert(
     fc.property(
       fc.nat({max: 40}),
       fc.nat({max: 40}),
       fc.constantFrom(...RETRYABLE_REASONS),
-      fc.integer({min: 1, max: 4}),
+      fc.integer({min: 1, max: 60}),
       (alive, ended, reason, attempt) => {
         const value = runsOf(alive, ended);
         const live = runsView({kind: 'live', value, since: 1});
         const stale = runsView({kind: 'stale', value, reason, attempt, valueAt: 1});
+        // A host lost `attempt` times in a row, as many as it takes to be called failed.
+        const failed = runsView({kind: 'failed', reason, retrying: true, held: value});
         expect(live).toEqual({total: alive + ended, alive, stale: false});
         // The same reading, so the same counts: only its currency changes.
         expect(stale).toEqual({total: alive + ended, alive, stale: true});
+        expect(failed).toEqual(stale);
+        // A failure with no attempt to come holds nothing, and nor does a host that never spoke.
+        expect(runsView({kind: 'failed', reason: 'closed', retrying: false})).toBeNull();
         // The alive runs are some of the runs held, never more.
         expect(alive).toBeLessThanOrEqual(alive + ended);
       },
