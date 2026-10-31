@@ -16,8 +16,10 @@ from typing import TYPE_CHECKING
 from vs_core.api import (
     ContractError,
     EventId,
+    MeasurementFailure,
     MeasurementPlan,
     Observation,
+    RequestObserved,
     SubmitMeasurement,
 )
 from vs_core.api.recovery import Cancelled, Finished
@@ -79,8 +81,10 @@ class JobStepRun:
                 submission.plan, submission.scope, handle, deadline_at=_deadline(submission.plan)
             )
             await self._executor.submit(request, handle_id=handle)
-        except (RejectedPlanError, ExecutorRejectedError) as error:
-            return self._refused(submission, tag, str(error))
+        except RejectedPlanError as error:
+            return self._refused(submission, tag, str(error), MeasurementFailure.WORKLOAD)
+        except ExecutorRejectedError as error:
+            return self._refused(submission, tag, str(error), None)
         while True:
             polled = await self._executor.poll(handle)
             if polled.phase is PollPhase.ENDED:
@@ -98,10 +102,12 @@ class JobStepRun:
         polled = await self._executor.poll(source)
         if polled.phase is PollPhase.ENDED:
             return self._finished(polled, submission, tag, source)
-        return self._refused(submission, tag, _UNREADABLE_RUN)
+        return self._refused(submission, tag, _UNREADABLE_RUN, MeasurementFailure.INFRASTRUCTURE)
 
     async def _until_change_or_cancel(self, handle: str, cancel: CancelSignal) -> None:
-        changed = asyncio.ensure_future(self._executor.wait_for_change(handle, self._poll_interval_s))
+        changed = asyncio.ensure_future(
+            self._executor.wait_for_change(handle, self._poll_interval_s)
+        )
         cancelled = asyncio.ensure_future(cancel.wait())
         try:
             await asyncio.wait({changed, cancelled}, return_when=asyncio.FIRST_COMPLETED)
@@ -129,6 +135,7 @@ class JobStepRun:
     def _finished(
         self, polled: ExecutorPoll, step: SubmitMeasurement, tag: RequestId, handle: str
     ) -> StepResult:
+        """The report of an ended job, whole: evidence, scientific facts and failure included."""
         subject = ObservationSubject(core_named(tag), step.scope, step.admission_id)
         view = job_view(
             polled,
@@ -138,11 +145,29 @@ class JobStepRun:
             self._clock.now(),
             lambda facts: self._observation(subject, facts),
         )
-        return Finished(observation=view.observation)
+        if step.reuses is not None:
+            view = view.reused_from(step.reuses)
+        observed = RequestObserved(
+            observation=view.observation,
+            progress=view.progress,
+            measurement_failure=view.failure,
+            evaluation_result=view.facts,
+            evidence=view.evidence,
+        )
+        return Finished(observation=view.observation, observed=observed)
 
-    def _refused(self, step: SubmitMeasurement, tag: RequestId, reason: str) -> StepResult:
+    def _refused(
+        self,
+        step: SubmitMeasurement,
+        tag: RequestId,
+        reason: str,
+        failure: MeasurementFailure | None,
+    ) -> StepResult:
+        """A refusal decided before the step created anything: it holds nothing."""
         subject = ObservationSubject(core_named(tag), step.scope, step.admission_id)
-        return Finished(observation=self._observation(subject, ObservationFacts.refused(reason)))
+        observation = self._observation(subject, ObservationFacts.refused(reason))
+        observed = RequestObserved(observation=observation, measurement_failure=failure)
+        return Finished(observation=observation, observed=observed)
 
     def _observation(self, subject: ObservationSubject, facts: ObservationFacts) -> Observation:
         """The one observation a step reports: a step ends once, so its sequence is 0."""

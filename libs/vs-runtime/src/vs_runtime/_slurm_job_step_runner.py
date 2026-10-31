@@ -1,10 +1,10 @@
 """A step that is a Slurm evaluation job, run again by finding the job it already started.
 
 The Slurm job outlives the host by design: the evaluation ledger on the cluster names it by
-the request's idempotency key (``vs_slurm.ledger``), and the executor keeps a durable record of
-each handle. A later process asks for the same handle, so the executor attaches to the job the
-earlier attempt submitted instead of submitting again. ``clear`` therefore removes nothing: it
-finds out whether an earlier attempt left a job, and says so.
+the request's idempotency key (``vs_slurm.ledger``), and binds each handle to that key. A later
+process asks for the same handle, so the executor attaches to the job the earlier attempt
+submitted instead of submitting again. ``clear`` therefore removes nothing: it asks the
+ledger whether an earlier attempt left a request, and says so.
 
 A job this runner cancelled is never attached to. The cancel interrupted the attempt (a pause,
 a drain deadline) and left no result, so the next attempt has to run the step: it takes the
@@ -21,13 +21,15 @@ from vs_evaluation.api import EvaluationState, PollPhase
 from vs_runtime._evaluation_jobs import handle_for
 from vs_runtime._job_step_run import JobStepRun
 from vs_runtime._step_runner import Adopted, Cleared, ClearUnavailableError
+from vs_slurm.api import LedgerError
 
 if TYPE_CHECKING:
     from vs_core.api import Request, RequestId
     from vs_core.api.recovery import StepResult
     from vs_evaluation.api import ExecutorPoll, PollingEvaluationExecutor
     from vs_runtime._step_runner import CancelSignal
-    from vs_sim.api import Clock
+    from vs_sandbox.api.slurm import SlurmLedgerAttachment
+    from vs_sim.api import BlockingRunner, Clock
 
 _BACKEND = "slurm"
 
@@ -36,10 +38,21 @@ class SlurmJobStepRunner:
     """Runs ``SubmitMeasurement`` steps on the Slurm executor, which submits each job once."""
 
     def __init__(
-        self, executor: PollingEvaluationExecutor, *, clock: Clock, poll_interval_s: float
+        self,
+        executor: PollingEvaluationExecutor,
+        ledger: SlurmLedgerAttachment,
+        blocking: BlockingRunner,
+        *,
+        clock: Clock,
+        poll_interval_s: float,
     ) -> None:
-        """Run on *executor*, a ledger-backed Slurm executor, and re-poll its jobs every interval."""
+        """Run on *executor*, which attaches through *ledger*; poll its jobs every interval.
+
+        *blocking* carries the ledger's blocking reads off the event loop.
+        """
         self._executor = executor
+        self._ledger = ledger
+        self._blocking = blocking
         self._job = JobStepRun(executor, clock=clock, poll_interval_s=poll_interval_s)
 
     async def run(
@@ -59,20 +72,20 @@ class SlurmJobStepRunner:
     async def clear(self, tag: RequestId) -> Adopted | Cleared:
         """Adopt the job an earlier attempt left, or report that it left none.
 
-        ``Adopted(None)`` for a job that is queued, running or ended: the next ``run``
-        attaches, and for an ended job returns its collected result without new work. A
-        result is not built here, because an observation needs the step's scope and plan and
-        ``clear`` is given only the tag. A cluster that cannot say raises
-        ``ClearUnavailableError``: neither a job nor its absence is proven.
+        The ledger decides, because it alone proves whether a job was submitted, also in the
+        window where the executor has not yet saved the job's handle. ``Adopted(None)`` for a
+        request that is claimed, queued, running or ended: the next ``run`` attaches, and for
+        an ended job returns its collected result without new work. A result is not built
+        here, because an observation needs the step's scope and plan and ``clear`` is given
+        only the tag. A ledger that cannot be read raises ``ClearUnavailableError``: neither a
+        job nor its absence is proven.
         """
-        _, polled = await self._current(tag)
-        match polled.phase:
-            case PollPhase.UNSUBMITTED:
-                return Cleared()
-            case PollPhase.UNKNOWN:
-                raise ClearUnavailableError(tag, _BACKEND)
-            case _:
-                return Adopted(None)
+        handle, _ = await self._current(tag)
+        try:
+            entry = await self._blocking.run(self._ledger.entry_of, handle)
+        except LedgerError as error:
+            raise ClearUnavailableError(tag, _BACKEND) from error
+        return Cleared() if entry is None else Adopted(None)
 
     async def _current(self, tag: RequestId) -> tuple[str, ExecutorPoll]:
         """The handle of the tag's current job and its poll: the first one not ended cancelled."""
