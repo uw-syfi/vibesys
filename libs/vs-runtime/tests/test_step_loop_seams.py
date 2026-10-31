@@ -23,7 +23,7 @@ from vs_core.api.recovery import (
     finished_message,
 )
 from vs_proto.api import AttemptInterrupted, StepFinished, StepStarted
-from vs_runtime.api.step_runner import StallBoard, StepLoopTiming, run_step_loop
+from vs_runtime.api.step_runner import StallBoard, StallKind, StepLoopTiming, run_step_loop
 from vs_runtime.api.testing import (
     AttemptHangs,
     AttemptHolds,
@@ -80,6 +80,25 @@ def resume_event(clock: VirtualClock, n: int = 1) -> core.RunControlEvent:
     return core.RunControlEvent(control=control, now_at=clock.now())
 
 
+class NotedBoard(StallBoard):
+    """A stall board that remembers every tag it showed held, for a run that parks over one.
+
+    The board empties as the loop returns, and a parked run may still have an attempt open in the
+    log for a call that ignored its cancel; this says which tags were held when it parked.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.held_ever: set[core.RequestId] = set()
+
+    def note(
+        self, tag: core.RequestId, kind: StallKind, error: BaseException | None, now: float
+    ) -> None:
+        if kind.held:
+            self.held_ever.add(tag)
+        super().note(tag, kind, error, now)
+
+
 @dataclass
 class World:
     """The far side of a run, which outlives the processes that host it."""
@@ -100,7 +119,7 @@ class World:
         log = FakeStepLog(self.records, self.seed.state, self.seed.registry, self.clock)
         for event in inputs:
             log.push(event)
-        board = StallBoard()
+        board = NotedBoard()
         loop = asyncio.ensure_future(run_step_loop(log, self.runner, self.clock, TIMING, board))
         return Process(self, log, board, loop)
 
@@ -121,7 +140,7 @@ class World:
 class Process:
     world: World
     log: FakeStepLog
-    board: StallBoard
+    board: NotedBoard
     loop: asyncio.Task[RunRest]
 
     async def die(self) -> None:

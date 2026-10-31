@@ -702,12 +702,15 @@ def test_an_ending_waits_for_a_held_tag_and_records_the_run_end_after_it_returns
     assert result_matches(world, 0, Cancelled(reason=CancelReason.RUN_ENDING))
 
 
-def test_a_pause_leaves_a_held_tag_to_the_process_exit() -> None:
-    scenario = Scenario((step(AttemptHolds(for_s=500.0), FINISHES),), pause_at=1.0)
+def test_a_pause_leaves_a_held_tag_to_the_process_exit_and_does_not_charge_it() -> None:
+    """The pause ended the held attempt, not the step: with no tries to spare it still finishes."""
+    scenario = Scenario((step(AttemptHolds(for_s=500.0), FINISHES),), pause_at=1.0, retries=0)
     world = run_world(scenario)
-    check_world(world)
-    assert world.exits[0] is RunRest.PARKED
-    assert attempts_started(world, 0) == [1, 2], "the held attempt was charged as a crash"
+    assert world.exits == [RunRest.PARKED, RunRest.ENDED]
+    assert attempts_started(world, 0) == [1, 2]
+    assert was_finished(world, 0), "the held attempt was charged as a crash"
+    assert world.runner.violations == ()
+    assert world.watch.problems == []
 
 
 def test_a_clear_that_raises_anything_is_retried_and_its_error_is_shown() -> None:

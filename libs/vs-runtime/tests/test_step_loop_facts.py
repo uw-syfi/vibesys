@@ -10,7 +10,9 @@ given moment, seeded with steps an earlier version left in flight. Every traject
 - no attempt starts on a step that may have work unless a ``clear`` returned first;
 - a result the work itself ended with is never replaced by one core settled;
 - a pause never ends the work of a runner that keeps it across a host;
-- a loop that reports it rested rests where the fold of the log says, never PARKED while draining;
+- a loop that reports it rested rests where the fold of the log says, never PARKED while draining,
+  and a parked run holds an attempt only for a call that ignored its cancel (the process exit ends
+  it, and the next epoch does not charge it);
 - the charge a step carries does not depend on when an unrelated step happens to end.
 """
 
@@ -210,6 +212,10 @@ async def check_rest(
         raise fail(plan, f"the run was stopped and did not end (rested {rest})")
     if rest is RunRest.PARKED and state.run.status is not core.RunStatus.PARKED:
         raise fail(plan, f"the loop reported PARKED and the log says {state.run.status}")
+    if rest is RunRest.PARKED:
+        running = {row.tag for row in state.steps.attempts if not row.ended}
+        if not running <= process.board.held_ever:
+            raise fail(plan, "the run parked with an attempt running that no held call explains")
     if rest is RunRest.ENDED and at_rest(state) is not RunRest.ENDED:
         raise fail(plan, "the loop reported ENDED and the log does not end the run")
     if rest is None and process.log.state.run.status is core.RunStatus.PARKED:

@@ -4,7 +4,8 @@ A test module subclasses ``StepLogContract``, names the subclass ``Test<Variant>
 ``step_log_under_test``. The cases drive a log only through the interface and the few probes
 ``StepLogUnderTest`` names. They hold a log to what the loop relies on: an append is in the state
 when it returns, a record the fold refuses is never appended, what was appended survives a restart,
-a charged attempt is charged only for a raise, and a start is checked and stamped at one instant:
+a charged attempt is charged only for a raise, the run clock core asks to have recorded is
+recorded, and a start is checked and stamped at one instant:
 the run clock the log reads when it appends, which is not the one its caller read when it decided.
 
 The end of a run is not here: core has no record for it yet, so no log can promise its durability.
@@ -136,6 +137,20 @@ class StepLogContract:
             open_step = subject.log.open_step(run.tag)
             assert open_step is not None
             assert open_step.started == run.attempt
+
+        subject.drive(main())
+
+    def test_the_clock_core_asks_to_have_recorded_is_in_the_state_and_survives_a_restart(
+        self,
+    ) -> None:
+        """Time changes the log only through a record: a drain's deadline passing is one."""
+        subject = self.step_log_under_test()
+
+        async def main() -> None:
+            assert subject.log.state.run.now_at < 7.5
+            await subject.log.clock_advanced(7.5)
+            assert subject.log.state.run.now_at >= 7.5
+            assert subject.reopen().state.run.now_at >= 7.5
 
         subject.drive(main())
 
