@@ -428,6 +428,12 @@ cooperative runners comes to rest.
   ordinary input that the fold takes. A drain in progress keeps its authority across the new epoch, so a
   Pause now still cancels.
 
+- **The log holds only starts the rule would run.** A flight that waited for its `clear` while the run
+  paused or parked would record a start into a parked run, leaving an attempt that nothing cancels. The
+  fold refuses a `StepStarted` that `decide` would not `Run`, and `may_start(state, tag, now)` is that
+  predicate for the loop to ask, under its append lock and with the clock it records at, before it
+  records a start. A flight that is refused stands down: its `clear` did no harm and the step stays open.
+
 `open_step(state, tag)` is the step as the loop runs it while it has no result: its request, its limit
 and the attempts that began. The loop reads it from core instead of rebuilding it from the ledger.
 
