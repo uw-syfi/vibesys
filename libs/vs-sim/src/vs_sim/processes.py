@@ -195,7 +195,7 @@ class OsProcesses:
             stderr=subprocess.PIPE,
             process_group=0,
         )
-        group = _OwnedProcessGroup(process, _host_exit_waiter())
+        group = _OwnedProcessGroup(process)
         captured = Capture(spec.max_output_bytes)
         pipes = _Pipes(spec.input, captured, tee(captured, output))
         deadline = None if timeout is None else time.monotonic() + timeout
@@ -589,7 +589,7 @@ def _close_pipe_resources(
 class _SubprocessGroup:
     """A just-started POSIX process group whose binary pipes still belong to its launcher."""
 
-    def __init__(self, process: subprocess.Popen[bytes], exit_waiter: ExitWaiter) -> None:
+    def __init__(self, process: subprocess.Popen[bytes], exit_waiter: ExitWaiter | None) -> None:
         self._process = process
         self._group = _OwnedProcessGroup(process, exit_waiter)
 
@@ -627,12 +627,28 @@ def _signal_process_group(pid: int, number: signal.Signals) -> None:
 
 
 def _host_exit_waiter() -> ExitWaiter:
-    """The host's exit waiter, loading ``vs_sim.exit_wait`` when a process first needs one."""
-    from vs_sim.exit_wait import (  # noqa: PLC0415  # lint-waiver: LW-731051 [PLC0415]; the host helper's hello path imports this module and its test caps the modules hello loads, so the waiter's module loads at the first process; a top-level import adds a module to every hello, and importlib would hide the declared dependency from tach.
+    """The host's exit waiter, loading ``vs_sim.exit_wait`` when a group first needs one."""
+    from vs_sim.exit_wait import (  # noqa: PLC0415  # lint-waiver: LW-731051 [PLC0415]; the host helper's hello path imports this module and its test caps the modules hello loads, so the waiter's module loads when a group first needs it; a top-level import adds a module to every hello, and importlib would hide the declared dependency from tach.
         host_exit_waiter,
     )
 
     return host_exit_waiter()
+
+
+def _group_has_live_member(pgid: int) -> bool:
+    """Whether the host's process table lists a live member in group ``pgid``.
+
+    Raises ``OSError`` when the table cannot be read.
+    """
+    from vs_sim.process_table import (  # noqa: PLC0415  # lint-waiver: LW-731052 [PLC0415]; the same hello-path module cap as the exit waiter's import: only a refused group signal reads the process table, so its module loads then.
+        ProcessTableUnavailableError,
+        group_running,
+    )
+
+    try:
+        return group_running(pgid)
+    except ProcessTableUnavailableError as unavailable:
+        raise OSError(str(unavailable)) from unavailable
 
 
 class _ProcessGroupLeader(Protocol):
@@ -658,7 +674,8 @@ class _WatcherStoppedError(RuntimeError):
 class _OwnedProcessGroup:
     """Serialize process-group signals with leader reaping while its PGID is reserved."""
 
-    def __init__(self, process: _ProcessGroupLeader, exit_waiter: ExitWaiter) -> None:
+    def __init__(self, process: _ProcessGroupLeader, exit_waiter: ExitWaiter | None = None) -> None:
+        """Own ``process``'s group; *exit_waiter* ``None`` chooses the host's when first needed."""
         self._process = process
         self._exit_waiter = exit_waiter
         self._reap_lock = threading.Lock()
@@ -703,6 +720,9 @@ class _OwnedProcessGroup:
                         failure = None  # The leader is gone, so there is nothing to wait for.
                     except OSError as error:
                         failure = error
+                    except BaseException as error:
+                        failure.__cause__ = error  # The thread's excepthook prints it too.
+                        raise
                     finally:
                         self._watch_failure = failure
                         exited.set()
@@ -731,11 +751,37 @@ class _OwnedProcessGroup:
             if observed_returncode is not None:
                 self._returncode = observed_returncode
                 return
-            _signal_process_group(self._process.pid, number)
+            try:
+                _signal_process_group(self._process.pid, number)
+            except PermissionError:
+                if not self._nothing_live_is_left():
+                    raise
+
+    def _nothing_live_is_left(self) -> bool:
+        """Whether a refused group signal was refused only because nothing live is left to signal.
+
+        macOS answers ``EPERM`` where Linux succeeds when every member of the group is an
+        unreaped zombie. A live member this user cannot signal (a setuid child) is refused the
+        same way and must still be reported, so the refusal is forgiven only when the leader
+        has exited and the host's process table lists no live member. If either cannot be
+        told, nothing is forgiven.
+        """
+        pid = self._process.pid
+        try:
+            return self._waiter().has_exited(pid) and not _group_has_live_member(pid)
+        except OSError:
+            return False
+
+    def _waiter(self) -> ExitWaiter:
+        """The exit waiter: the one given, else the host's, chosen on first use."""
+        waiter = self._exit_waiter
+        if waiter is None:
+            waiter = self._exit_waiter = _host_exit_waiter()
+        return waiter
 
     def _wait_until_exited_without_reaping(self) -> None:
         try:
-            self._exit_waiter.wait(self._process.pid)
+            self._waiter().wait(self._process.pid)
         except ChildProcessError:
             with self._reap_lock:
                 if self._returncode is not None:
@@ -814,7 +860,7 @@ def _start_subprocess_group(
     *,
     env: Mapping[str, str] | None,
     merge_stderr: bool,
-    exit_waiter: ExitWaiter,
+    exit_waiter: ExitWaiter | None,
 ) -> _StartedPipedProcess:
     process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-994699 [S603]; execute the caller's argv directly with no shell at the process adapter boundary.
         argv,
@@ -835,8 +881,11 @@ class SubprocessPipedProcessLauncher:
     """Start piped commands in owned groups on VibeSys's supported POSIX hosts."""
 
     def __init__(self, *, exit_waiter: ExitWaiter | None = None) -> None:
-        """Wait for a leader's exit with *exit_waiter*, by default the host's own mechanism."""
-        self._exit_waiter = _host_exit_waiter() if exit_waiter is None else exit_waiter
+        """Wait for a leader's exit with *exit_waiter*, by default the host's own mechanism.
+
+        The default is chosen when a group first needs it, so building a launcher loads nothing.
+        """
+        self._exit_waiter = exit_waiter
 
     def start(
         self,

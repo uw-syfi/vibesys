@@ -48,8 +48,13 @@ def test_the_typecheck_script_checks_linux_and_macos(tmp_path: Path) -> None:
     platforms = [item[item.index("--python-platform") + 1] for item in invocations]
     assert platforms == ["linux", "darwin"], invocations
     linux, darwin = invocations
-    assert "--exclude" not in linux, linux
-    assert "--exclude" in darwin, darwin
+    expected = {
+        "src",
+        *(str(path.relative_to(ROOT)) for path in ROOT.glob("libs/*/src")),
+        *(str(path.relative_to(ROOT)) for path in ROOT.glob("sdk/*/src")),
+    }
+    assert set(darwin[darwin.index("darwin") + 1 :]) == expected, darwin
+    assert linux == ["run", "ty", "check", "--python-platform", "linux"], linux
 
 
 def test_an_api_macos_lacks_fails_the_script_and_the_message_names_the_fix(tmp_path: Path) -> None:

@@ -22,14 +22,26 @@ if TYPE_CHECKING:
 
 
 class ExitWaiter(Protocol):
-    """Blocks until a child has exited and leaves it for its parent to reap."""
+    """Tells when a child of this process has exited, and leaves it for its parent to reap.
+
+    ``pid`` is always this process's own child. A pid that is not one, or that was reaped and
+    since reused, is outside the contract: the mechanisms answer it differently.
+    """
 
     def wait(self, pid: int) -> None:
         """Return once the child ``pid`` has exited, with its exit status still unreaped.
 
         Returns at once for a child that exited earlier and is still unreaped. Raises
-        ``ChildProcessError`` when ``pid`` is not an unreaped child of this process, and
-        ``OSError`` when the host cannot wait for it.
+        ``ChildProcessError`` when the child was already reaped, and ``OSError`` when the host
+        cannot wait for it.
+        """
+        ...
+
+    def has_exited(self, pid: int) -> bool:
+        """Whether the child ``pid`` has exited, without blocking and without reaping it.
+
+        ``True`` for a child that exited, reaped or not; ``False`` while it runs. Raises
+        ``OSError`` when the host cannot tell.
         """
         ...
 
@@ -57,6 +69,14 @@ class WaitidExitWaiter:
     def wait(self, pid: int) -> None:
         """Block in ``waitid`` until ``pid`` has exited, without reaping it."""
         self._waitid(os.P_PID, pid, self._options)
+
+    def has_exited(self, pid: int) -> bool:
+        """Poll ``waitid`` without blocking: it reports a child only once it has exited."""
+        try:
+            found = self._waitid(os.P_PID, pid, self._options | os.WNOHANG)
+        except ChildProcessError:
+            return True  # Reaped: it exited.
+        return found is not None
 
 
 class _Kevent(Protocol):
@@ -131,6 +151,25 @@ class KqueueExitWaiter:
 
     def wait(self, pid: int) -> None:
         """Block on a ``NOTE_EXIT`` watch of ``pid`` until it exits, without reaping it."""
+        events = self._watch(pid, None)
+        if not events:
+            message = f"the exit watch of process {pid} ended without an event"
+            raise OSError(message)
+        if events[0].flags & self._calls.error:
+            _settle_refused_watch(pid, events[0].data)
+
+    def has_exited(self, pid: int) -> bool:
+        """Poll a ``NOTE_EXIT`` watch of ``pid`` without blocking: an event is an exit."""
+        events = self._watch(pid, 0)
+        if events and events[0].flags & self._calls.error:
+            try:
+                _settle_refused_watch(pid, events[0].data)
+            except ChildProcessError:
+                return True  # Reaped: it exited.
+        return bool(events)
+
+    def _watch(self, pid: int, timeout: float | None) -> list[_Kevent]:
+        """Register a one-shot exit watch of ``pid`` and collect its event within *timeout*."""
         calls = self._calls
         queue = calls.kqueue()
         try:
@@ -140,14 +179,9 @@ class KqueueExitWaiter:
                 calls.register | calls.one_shot,
                 calls.exited,
             )
-            events = queue.control([watch], 1, None)
+            return queue.control([watch], 1, timeout)
         finally:
             queue.close()
-        if not events:
-            message = f"the exit watch of process {pid} ended without an event"
-            raise OSError(message)
-        if events[0].flags & calls.error:
-            _settle_refused_watch(pid, events[0].data)
 
 
 def _constant(name: str) -> int | None:
@@ -177,9 +211,16 @@ class UnavailableExitWaiter:
 
     def wait(self, pid: int) -> None:
         """Raise ``ExitWaitUnsupportedError``: ``pid`` cannot be waited for without reaping."""
+        raise self._unsupported(pid)
+
+    def has_exited(self, pid: int) -> bool:
+        """Raise ``ExitWaitUnsupportedError``: whether ``pid`` exited cannot be told unreaped."""
+        raise self._unsupported(pid)
+
+    def _unsupported(self, pid: int) -> ExitWaitUnsupportedError:
         detail = "; ".join(str(reason) for reason in self._reasons)
-        message = f"cannot wait for process {pid} to exit without reaping it: {detail}"
-        raise ExitWaitUnsupportedError(message)
+        message = f"cannot tell whether process {pid} exited without reaping it: {detail}"
+        return ExitWaitUnsupportedError(message)
 
 
 MECHANISMS: tuple[Callable[[], ExitWaiter], ...] = (WaitidExitWaiter, KqueueExitWaiter)

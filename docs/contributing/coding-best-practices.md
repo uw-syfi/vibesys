@@ -170,15 +170,17 @@ python3 -m scripts.check_doc_citations
 uv run pytest path/to/test.py
 ```
 
-`./scripts/check_types.sh` type-checks against Linux, the platform CI runs, and
-against macOS, which the product also runs on (the desktop app's local host) and
-no CI job does. typeshed marks each standard-library name a platform lacks, so an
-API such as `os.waitid` or `os.pidfd_open` used directly fails the macOS pass. A
-capability both hosts need goes behind an interface in one module that probes for
-it (`vs_sim.exit_wait` waits for a child's exit with `waitid` where `os` has it and
-a kqueue watch where `select` has it); a capability only one host has fails with a
-typed refusal, as `vs_sim.signals` does for pidfds on macOS. The real tiers
-(`sim_real_tiers`) drive Linux systems and are left out of the macOS pass.
+`./scripts/check_types.sh` type-checks against Linux, the platform CI's Linux jobs run,
+and against macOS, which the product also runs on (the desktop app's local host). typeshed
+marks each standard-library name a platform lacks, so an API such as `os.waitid` or
+`os.pidfd_open` used directly in product code fails the macOS pass. That pass covers the
+source roots a macOS host loads (`src`, `libs/*/src`, `sdk/*/src`), not the tests. It sees
+names, not behavior: the `sandbox-macos` job runs the `sandbox_tests` group on a macOS
+runner, including the vs-sim process-wait tests, which cover behavior. A capability both
+hosts need goes behind an interface in one module that probes for it (`vs_sim.exit_wait`
+waits for a child's exit with `waitid` where `os` has it and a kqueue watch where `select`
+has it); a capability only one host has fails with a typed refusal, as `vs_sim.signals`
+does for pidfds on macOS.
 
 The test-isolation ratchet scans owned Python tests and
 `clients/**/*.test.ts`, excluding dependency, generated, build, and vendor

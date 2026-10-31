@@ -126,6 +126,20 @@ class ExitWaiterContract:
             assert os.waitstatus_to_exitcode(status) == expected_exit_code(ending), ending
             _close(child)
 
+    def test_it_tells_without_blocking_whether_a_child_has_exited(self) -> None:
+        """Not while the child is held back, then yes once it ended, reaped or not."""
+        for ending in ENDINGS:
+            child = start_child(ending)
+            waiter = self.waiter()
+
+            assert not waiter.has_exited(child.pid), ending  # It cannot end before it is released.
+            release(child)
+            waiter.wait(child.pid)
+            assert waiter.has_exited(child.pid), ending
+            os.waitpid(child.pid, 0)
+            assert waiter.has_exited(child.pid), ending
+            _close(child)
+
     def test_a_child_that_was_already_reaped_is_not_a_child_of_this_process(self) -> None:
         """Once reaped, nothing is left to wait for: the wait says so instead of blocking."""
         child = start_child(("exit", 0))

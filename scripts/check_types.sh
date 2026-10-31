@@ -6,13 +6,15 @@ set -euo pipefail
 # os.waitid, signal.sigtimedwait, and os.pidfd_open.
 uv run ty check --python-platform linux
 
-# The product also runs on macOS (the desktop app's local host), and no CI job
-# does. typeshed marks every platform-limited standard-library name, so the same
-# check against darwin rejects an API macOS lacks wherever it is used directly.
-# The real tiers drive Linux containers and clusters, so they are left out; the
-# list is the one pytest reads as sim_real_tiers (tests/quality/test_typecheck_platform.py).
-if ! uv run ty check --python-platform darwin \
-  --exclude tests/e2e --exclude tests/slurm_cluster --exclude tests/minimal_container; then
+# The product also runs on macOS (the desktop app's local host). typeshed marks
+# every standard-library name a platform lacks, so the same check against darwin
+# rejects an API macOS lacks wherever product code uses it directly. Only the
+# source roots a macOS host loads are checked: tests, and the real tiers that
+# drive Linux systems, never run inside the product, and leaving them out roughly
+# halves this pass. CI's sandbox-macos job covers behavior (the vs-sim process-wait
+# tests); this check covers names. tests/quality/test_typecheck_platform.py ties
+# the roots to the ones ty is configured with.
+if ! uv run ty check --python-platform darwin src libs/*/src sdk/*/src; then
   cat >&2 <<'MESSAGE'
 
 A name above does not exist on macOS (the darwin check). Do not guard it with a

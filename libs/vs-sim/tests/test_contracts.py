@@ -522,7 +522,8 @@ class TestOsProcesses(ProcessesContract):
             # only because the whole group is killed. It starts before the leader writes: a
             # stop that follows the first bytes then finds both in the group. Written first, the
             # stop can land while the leader is forking, which kills the leader and leaves the
-            # new child (macOS forks slowly enough to lose that race most runs).
+            # new child (macOS forks slowly enough to lose that race often). A separate macOS
+            # refusal, of a stop after the leader exited, is covered by PipedProcessContract.
             outlives_timeout=lambda written: _python(
                 "import subprocess, sys, signal; "
                 "subprocess.Popen([sys.executable, '-c', 'import signal; signal.pause()']); "

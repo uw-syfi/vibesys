@@ -329,7 +329,9 @@ language = "python"
 directory = "."
 timeout_seconds = 900
 env = { VIBESYS_REQUIRE_SANDBOX_TESTS = "1" }
-commands = [["uv", "run", "python", "-m", "pytest", "libs/vs-agent/tests/test_hostsandbox.py", "tests/e2e/test_control_socket_reachability_e2e.py", "-v"]]
+# The vs-sim files are the host's own process waiting (waitid on Linux, kqueue on macOS): the
+# macOS job is the only CI run of the kqueue waiter and of the contracts' macOS-only cases.
+commands = [["uv", "run", "python", "-m", "pytest", "libs/vs-agent/tests/test_hostsandbox.py", "tests/e2e/test_control_socket_reachability_e2e.py", "libs/vs-sim/tests/test_exit_wait.py", "libs/vs-sim/tests/test_piped_process_launcher.py", "libs/vs-sim/tests/test_piped_process_contract.py", "-v"]]
 
 [[check_groups]]
 name = "microservice_workload_checks"

@@ -498,7 +498,7 @@ NO_PROCESSES = RefusingProcesses()
 
 
 class RefusingExitWaiter:
-    """An :class:`~vs_sim.exit_wait.ExitWaiter` whose every wait fails with ``error``.
+    """An :class:`~vs_sim.exit_wait.ExitWaiter` whose every call fails with ``error``.
 
     For a test of what a process group's owner does when it cannot watch its leader exit.
     """
@@ -509,6 +509,11 @@ class RefusingExitWaiter:
 
     def wait(self, pid: int) -> None:
         """Fail: this waiter cannot watch ``pid``."""
+        del pid
+        raise self._error
+
+    def has_exited(self, pid: int) -> bool:
+        """Fail: this waiter cannot tell whether ``pid`` exited."""
         del pid
         raise self._error
 

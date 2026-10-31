@@ -336,6 +336,26 @@ def test_holding_an_unoffered_provider_is_rejected_before_launch() -> None:
     assert launcher.started == []
 
 
+def test_a_login_whose_exit_cannot_be_watched_is_ended_instead_of_left_running() -> None:
+    """A failed wait used to skip the lifetime's cleanup, so the CLI kept running past it."""
+    threads = SimThreads()
+    process = ScriptedPipedProcess(threads, merge_stderr=True, wait_failure=OSError("no watch"))
+    process.write(stdout="Open https://login.example/device\nCode ABCD-EFGH1\n")
+    adapter = _adapter(
+        FakePipedProcessLauncher(lambda _start: process), threads, codex=_found("codex")
+    )
+
+    def run() -> None:
+        held = adapter.hold("codex")
+        waiter = threads.spawn(held.wait, name="login-reaped")
+        waiter.join(HANG_GUARD_S)
+        assert not waiter.is_alive()
+        assert process.signals == ["kill"]
+
+    with pytest.raises(OSError, match="no watch"):  # The reaper thread lets the failure surface.
+        threads.run(run)
+
+
 def test_a_held_login_keeps_the_process_until_cancel_and_reaps_it() -> None:
     threads = SimThreads()
     process = ScriptedPipedProcess(threads, merge_stderr=True)

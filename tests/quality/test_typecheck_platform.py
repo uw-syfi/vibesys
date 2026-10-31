@@ -4,21 +4,19 @@
 APIs (``os.waitid``, ``signal.sigtimedwait``, ``os.pidfd_open``) that the
 Linux typecheck job never sees, and on Linux it never reports an API macOS
 lacks. The script is the only command that job runs, so it checks both
-platforms: typeshed marks which names each platform lacks, and no CI job runs on
-macOS. The real tiers drive Linux systems and are the only code left out.
+platforms: typeshed marks which names each platform lacks. The macOS pass covers
+the source roots a macOS host loads, not the tests.
 """
 
 from __future__ import annotations
 
+import fnmatch
 import re
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import yaml
-
-if TYPE_CHECKING:
-    import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 CHECKS = ROOT / ".repoctl" / "checks.toml"
@@ -50,9 +48,14 @@ def test_the_type_check_covers_both_platforms_the_product_runs_on() -> None:
     assert [match.group(1) for match in platforms if match] == ["linux", "darwin"]
 
 
-def test_the_macos_check_leaves_out_exactly_the_real_tiers(request: pytest.FixtureRequest) -> None:
+def test_the_macos_check_covers_every_source_root_the_type_checker_is_configured_with() -> None:
+    """A new library under ``libs`` joins the macOS pass without anyone listing it there."""
     (darwin,) = (line for line in _commands() if "--python-platform darwin" in line)
+    globs = darwin.split("--python-platform darwin", 1)[1].split(";")[0].split()
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    included = config["tool"]["ty"]["src"]["include"]
+    roots = [entry for entry in included if entry == "src" or entry.endswith("/src")]
 
-    excluded = re.findall(r"--exclude ([\w./-]+)", darwin)
-
-    assert sorted(excluded) == sorted(request.config.getini("sim_real_tiers"))
+    assert globs == ["src", "libs/*/src", "sdk/*/src"]
+    assert roots, "the ty configuration lists no source roots"
+    assert all(any(fnmatch.fnmatchcase(root, glob) for glob in globs) for root in roots), roots

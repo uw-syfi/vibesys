@@ -1005,7 +1005,7 @@ jobs:
       - name: Set up repoctl
         uses: ./.github/actions/setup-repoctl
 
-      - name: Run workspace-confinement tests
+      - name: Run workspace-confinement and host process-wait tests
         run: ./support/repoctl/repoctl run-checks --group sandbox_tests
 
   # macOS counterpart of sandbox-linux: exercises the Seatbelt confinement
@@ -1042,7 +1042,7 @@ jobs:
       - name: Set up repoctl
         uses: ./.github/actions/setup-repoctl
 
-      - name: Run workspace-confinement tests
+      - name: Run workspace-confinement and host process-wait tests
         run: ./support/repoctl/repoctl run-checks --group sandbox_tests
 
   # The real-Slurm tier (issue #1732): the `slurm` and `slurm-gpu` run environments

@@ -992,7 +992,7 @@ depends_on = ["vs_sim.exit_wait", "vs_sim.waits"]
 [[modules]]
 path = "vs_sim.processes"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.exit_wait", "vs_sim.output"]
+depends_on = ["vs_sim.exit_wait", "vs_sim.output", "vs_sim.process_table"]
 
 [[modules]]
 path = "vs_sim.randomness"

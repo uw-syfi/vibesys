@@ -145,6 +145,8 @@ def test_a_timed_wait_on_a_running_group_times_out_and_the_group_then_ends_as_si
         expected = -signal.SIGKILL
 
     assert process.wait(HANG_GUARD_S) == expected
+    process.stdout.close()
+    process.stderr.close()
 
 
 @given(error=st.sampled_from((OSError("boom"), ExitWaitUnsupportedError("no mechanism"))))
@@ -162,3 +164,27 @@ def test_a_leader_whose_exit_cannot_be_watched_is_never_reported_as_exited(error
             process.wait(0)
     finally:
         process.kill_group()
+        # Every wait raises, so nothing can reap the leader: it stays a zombie until this
+        # test process ends. Its pipes are closed here.
+        process.stdout.close()
+        process.stderr.close()
+
+
+def test_building_a_launcher_or_running_a_command_loads_no_exit_waiter_module() -> None:
+    """The host helper's hello builds a launcher, and its test caps the modules hello loads.
+
+    The exit waiter loads when a group first waits, and the process table when a refused group
+    signal reads it: not when a launcher is built (this was loaded eagerly there) and not by
+    running a command to completion.
+    """
+    script = (
+        "import sys\n"
+        "from vs_sim.api import DISCARD, OsProcesses, ProcessSpec, SubprocessPipedProcessLauncher\n"
+        "SubprocessPipedProcessLauncher()\n"
+        "OsProcesses().run(ProcessSpec(('true',)), timeout=60, output=DISCARD)\n"
+        "print(sorted(name for name in ('vs_sim.exit_wait', 'vs_sim.process_table') if name in sys.modules))\n"
+    )
+    process = SubprocessPipedProcessLauncher().start((sys.executable, "-c", script))
+
+    assert process.stdout.read() == "[]\n"
+    assert process.wait(HANG_GUARD_S) == 0

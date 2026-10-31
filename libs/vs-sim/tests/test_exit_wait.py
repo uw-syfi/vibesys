@@ -74,6 +74,10 @@ class _Present:
     def wait(self, pid: int) -> None:
         del pid
 
+    def has_exited(self, pid: int) -> bool:
+        del pid
+        return True
+
     def __call__(self) -> ExitWaiter:
         return self
 
