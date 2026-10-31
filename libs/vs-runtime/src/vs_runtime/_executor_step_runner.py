@@ -54,7 +54,7 @@ from vs_core.api import (
 from vs_core.api.recovery import Finished
 from vs_runtime._cancel_wait import cancelled_for, finished_before_cancel
 from vs_runtime._core_requests import ExecutionContext, ExecutorRefusal, payload_digest_of
-from vs_runtime._operation_step_runner import ReadOnly
+from vs_runtime._rerun_policy import ReadOnly
 from vs_runtime._step_runner import Cleared
 
 if TYPE_CHECKING:

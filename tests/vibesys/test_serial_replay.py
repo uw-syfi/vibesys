@@ -41,8 +41,10 @@ from vs_runtime.api.core import (
     OperationRole,
     ReceiptStore,
     operation_roles,
+    read_or_keyed,
 )
 from vs_runtime.api.core_values import to_proto
+from vs_runtime.api.operation_step_runner import ClearedWork, UnwiredWorkCleaner
 from vs_runtime.api.replay import (
     RegisteredReplayExecutor,
     ReplayCompleted,
@@ -132,8 +134,11 @@ def world(tmp_path: Path, sim: Sim, storage: str) -> World:
     )
     registration = operation_roles(OPERATIONS)[OperationRole.CAPTURE_COMMAND]
     entries = (
-        *(OperationEntry.owned(item, roadmap_owner) for item in roadmap_operation_registrations()),
-        OperationEntry.owned(registration, capture_owner),
+        *(
+            OperationEntry.owned(item, roadmap_owner, read_or_keyed(item, "the roadmap items"))
+            for item in roadmap_operation_registrations()
+        ),
+        OperationEntry.owned(registration, capture_owner, ClearedWork(UnwiredWorkCleaner())),
     )
     catalog = OperationCatalog(
         OperationRegistry(tuple(entry.registration for entry in entries)), entries
