@@ -141,14 +141,20 @@ def test_every_prefix_of_the_log_that_folds_to_a_parked_run_shows_it_parked(
         _check(_play(Path(directory), moves), registry)
 
 
+def _lifecycle(records: tuple[Record, ...]) -> list[tuple[int, str]]:
+    """The sequence number and state of each lifecycle record the display wrote."""
+    shown = []
+    for record in records:
+        body = record.body
+        if body is not None and body.field == "lifecycle" and body.value.state is not None:
+            shown.append((record.seq, body.value.state.field))
+    return shown
+
+
 def test_a_run_parked_outright_shows_its_drain_and_then_its_park_before_core_records_it() -> None:
     with TemporaryDirectory() as directory:
         records = _play(Path(directory), [("pause_now", 0)])
-    shown = [
-        (record.seq, record.body.value.state.field)
-        for record in records
-        if record.body is not None and record.body.field == "lifecycle"
-    ]
+    shown = _lifecycle(records)
     (parked,) = [seq for seq, field in shown if field == "parked"]
     assert [field for _, field in shown][-2:] == ["draining", "parked"]
     pause = next(r.seq for r in records if r.body is not None and r.body.field == "core_input")
