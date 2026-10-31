@@ -737,7 +737,7 @@ test('extra arguments may not repeat an option set above, and roles change the r
   await main(page)
     .getByRole('button', {name: /^Reasoning effort:/})
     .click();
-  await main(page).getByLabel('Judge reasoning effort').selectOption('high');
+  await main(page).getByLabel('Reviewer reasoning effort').selectOption('high');
   await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
   await start(page).click();
   await expect(page.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
@@ -792,11 +792,11 @@ test('an agent for a role: closed until opened, chosen from the run harness, lis
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await expect(toggle).toContainText('Same as the run');
   await toggle.click();
-  const judge = main(page).getByLabel('Judge model');
+  const judge = main(page).getByLabel('Reviewer model');
   await expect(judge).toHaveValue('');
   // Models sit under their maker and family; the run's own harness is the only one a role may use.
   await expect(judge.locator('optgroup')).toHaveAttribute('label', 'Anthropic \u00b7 Claude');
-  await expect(main(page).getByLabel('Judge harness')).toHaveCount(0);
+  await expect(main(page).getByLabel('Reviewer harness')).toHaveCount(0);
   await judge.selectOption({label: 'Sonnet 4.5'});
   await expect(judge).not.toHaveValue('');
   // The run's own model is the same as no choice: the role follows the run again.
@@ -804,14 +804,14 @@ test('an agent for a role: closed until opened, chosen from the run harness, lis
   await expect(judge).toHaveValue('');
   await judge.selectOption({label: 'Sonnet 4.5'});
   await main(page).getByRole('button', {name: 'Continue'}).click();
-  await expect(main(page)).toContainText('Judge agent');
+  await expect(main(page)).toContainText('Reviewer agent');
   await expect(main(page)).toContainText('Sonnet 4.5 \u00b7 Claude Code');
   await main(page)
-    .getByText('Judge agent', {exact: true})
+    .getByText('Reviewer agent', {exact: true})
     .locator('xpath=ancestor::*[.//button][1]')
     .getByRole('button', {name: 'Change'})
     .click();
-  await expect(main(page).getByLabel('Judge model')).toBeVisible();
+  await expect(main(page).getByLabel('Reviewer model')).toBeVisible();
   await main(page).getByRole('button', {name: 'Continue'}).click();
   await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
   await start(page).click();

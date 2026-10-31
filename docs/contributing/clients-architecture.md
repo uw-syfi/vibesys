@@ -473,7 +473,11 @@ vendor id). Each vocabulary has one owner of its names:
   gathers them and `pnpm generate:protocol` writes `display-names.generated.ts` from it, which
   `@vibesys/contracts` serves as `roleName`. The `clients_quality` group regenerates it and fails on a
   diff; the role `title` pattern and `test_every_role_name_reads_as_words` fail a role with no
-  readable name. A role a plugin declares reads as the words of its id;
+  readable name. A role a plugin declares reads as the words of its id. No client source spells a
+  role's name: the `no-role-words` Biome rule fails a string, template or JSX text that does, and
+  `check_role_words.test.mjs` fails when the rule lacks a name the catalog declares. A reply
+  kind that leads with its role's old name (`JudgeResponse`) reads as the catalog's name for the
+  turn's role;
 - harness and model names are agentshim's, served by the backend. A client renders the field it
   receives and never maps or prettifies those ids.
 

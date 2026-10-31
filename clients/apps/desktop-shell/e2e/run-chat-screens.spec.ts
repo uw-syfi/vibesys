@@ -187,8 +187,8 @@ test('a proposed steer shows as a card, edited before anything is sent', async (
   await expect(panel(page).getByRole('combobox', {name: 'To'}).locator('option')).toHaveText([
     'Whole run',
     'Planner',
-    'Implementer',
-    'Judge',
+    'Builder',
+    'Reviewer',
   ]);
   await panel(page).getByRole('radiogroup', {name: 'When'}).getByText('Now', {exact: true}).click();
   expect(controls.posted.length).toBe(0);
@@ -207,13 +207,13 @@ const DELIVERIES: readonly {
     name: 'reached',
     mode: 'Next turn',
     steps: [{state: 'queued'}, {state: 'reached', role: 'implementer'}],
-    shows: 'Reached · Implementer',
+    shows: 'Reached · Builder',
   },
   {
     name: 'in-force',
     mode: 'Every turn',
     steps: [{state: 'queued'}, {state: 'in_force', role: 'implementer'}],
-    shows: 'In force · Implementer · every turn',
+    shows: 'In force · Builder · every turn',
   },
   {
     name: 'dropped',

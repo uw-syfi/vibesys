@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'bun:test';
-import type {RunEvent} from '@vibesys/contracts';
+import {type RunEvent, roleName} from '@vibesys/contracts';
 import {event} from '@vibesys/contracts/testing';
 import {initialCoreState, reduceEventBatch} from './index.js';
 import {transcriptBySpan} from './transcript/index.js';
@@ -127,4 +127,17 @@ it('regression: canonical replies replace equivalent JSON envelopes across every
       if (prefix) expect(transcript[0]?.content).toBe(prefix.trimEnd());
     }
   }
+});
+
+describe('a verdict in the transcript', () => {
+  it('names the role that gave it as the catalog does, whatever the verdict', () => {
+    for (const verdict of ['pass', 'fail'] as const) {
+      const verdictEvent = event(1, 'judge_result', {
+        data: {kind: 'judge_result', verdict, feedback: '', attempt: 1},
+      });
+      const {transcript} = reduceEventBatch(initialCoreState(), [verdictEvent]);
+      expect(transcript[0]?.label).toBe(`${roleName('judge')} · ${verdict.toUpperCase()}`);
+      expect(transcript[0]?.content).toBe(`${roleName('judge')} returned ${verdict}.`);
+    }
+  });
 });
