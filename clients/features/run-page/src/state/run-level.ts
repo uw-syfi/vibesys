@@ -648,8 +648,8 @@ export function stripChartView(
 export interface NowItem {
   readonly id: string;
   /**
-   * What runs, kept whole on a narrow row: who runs it and what (`Implementer · Agent turn`,
-   * `Waiting after Implementer`) for an idea, the role for an agent.
+   * What runs, kept whole on a narrow row: who runs it and what (`Builder · Agent turn`,
+   * `Waiting after Builder`) for an idea, the role for an agent.
    */
   readonly doing: string;
   /** What it belongs to, which gives way first: the idea's title, or what the agent works in. */

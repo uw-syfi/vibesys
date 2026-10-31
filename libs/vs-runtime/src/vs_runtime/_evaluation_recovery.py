@@ -24,10 +24,9 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from contextlib import AbstractContextManager
 
-    from vs_core.api.replay import ReplayRootReuse
     from vs_evaluation.api import EvaluationRequest, EvaluationStateNamespace
     from vs_project.api import StoreFence
-    from vs_runtime._writer_reconciliation import WriterRegistry
+    from vs_runtime._writer_reconciliation import ReplayRootReuse, WriterRegistry
 
 
 class EvaluationReceiptUnconfirmedError(RuntimeError):

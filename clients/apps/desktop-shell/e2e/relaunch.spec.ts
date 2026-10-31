@@ -187,7 +187,8 @@ test('Relaunch header action, results and new epoch survive Tail before acknowle
       await expect(page.getByRole('button', {name: 'Pause', exact: true})).toBeVisible();
       await expect(page.getByRole('button', {name: 'Resume', exact: true})).toHaveCount(0);
       world.release();
-      await expect(page.getByText('Resume · Applied', {exact: true})).toBeVisible();
+      // An applied request has no row: the host's record of the new epoch settles Resume's own line.
+      await expect(page.getByText('Resume · Applied', {exact: true})).toHaveCount(0);
       await capture(page, `${state}-${width}-epoch`);
       await page.close();
     }

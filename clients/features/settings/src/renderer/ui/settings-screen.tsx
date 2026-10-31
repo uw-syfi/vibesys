@@ -135,7 +135,7 @@ function AppContent(props: {
   if (state.kind === 'failed') {
     return (
       <Banner
-        tone="err"
+        tone="failed"
         title="Could not read settings"
         body={state.error}
         actions={<Button text="Retry" press={() => dispatch({type: 'retry'})} />}
@@ -151,9 +151,6 @@ function AppContent(props: {
         <Text as="h1" variant="title">
           Notifications
         </Text>
-        {state.problem === null ? null : (
-          <Banner tone="err" title="Could not save the change." body={state.problem} />
-        )}
         <Card section="Run notifications">
           <Switch
             label="Notify me when a run finishes, fails or pauses"
@@ -169,9 +166,6 @@ function AppContent(props: {
       <Text as="h1" variant="title">
         Appearance
       </Text>
-      {state.problem === null ? null : (
-        <Banner tone="err" title="Could not save the change." body={state.problem} />
-      )}
       <Card section="Mode">
         <SegmentedControl
           label="Appearance mode"

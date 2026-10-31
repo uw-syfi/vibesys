@@ -41,6 +41,7 @@ export {
   reachWords,
   signInBlocked,
 } from './machine-words.js';
+export {machineSettingsProblems, settingsProblems} from './problems.js';
 export {
   initialSettings,
   type SettingsAction,

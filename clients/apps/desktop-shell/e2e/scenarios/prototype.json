@@ -184,7 +184,7 @@
           "ended_at": 800,
           "label": {
             "kind": "agent_turn",
-            "title": "Implementer",
+            "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"op:w1-impl\"}"
           },
           "invocation": "op:w1-impl"
@@ -254,7 +254,7 @@
           "ended_at": 800,
           "label": {
             "kind": "agent_turn",
-            "title": "Implementer",
+            "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"op:w2-impl\"}"
           },
           "invocation": "op:w2-impl"
@@ -325,7 +325,7 @@
           "ended_at": 1280,
           "label": {
             "kind": "agent_turn",
-            "title": "Implementer",
+            "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"op:w3-impl\"}"
           },
           "invocation": "op:w3-impl"
@@ -396,7 +396,7 @@
           "ended_at": 1340,
           "label": {
             "kind": "agent_turn",
-            "title": "Implementer",
+            "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"op:w4-impl\"}"
           },
           "invocation": "op:w4-impl"
@@ -473,7 +473,7 @@
           "ended_at": 1640,
           "label": {
             "kind": "agent_turn",
-            "title": "Implementer",
+            "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"op:w5-impl\"}"
           },
           "invocation": "op:w5-impl"
@@ -544,7 +544,7 @@
           "started_at": 1261,
           "label": {
             "kind": "agent_turn",
-            "title": "Implementer",
+            "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"op:w6-impl\"}"
           },
           "invocation": "op:w6-impl"

@@ -7,7 +7,7 @@
 import {roleName} from '@vibesys/contracts';
 import {type AgentChoice, type AgentPick, defaultRole, type Form, type RoleChoice} from './form.js';
 
-/** A role a person reads ("Judge"): the backend's name for it, else the words of its id. */
+/** A role a person reads ("Reviewer"): the backend's name for it, else the words of its id. */
 export function roleLabel(role: string): string {
   return roleName(role);
 }

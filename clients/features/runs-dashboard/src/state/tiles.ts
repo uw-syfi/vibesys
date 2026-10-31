@@ -39,14 +39,11 @@ export interface RunInput {
   readonly runId: string;
   /** The run's title, as every screen words it (the sidebar's row, the run page's header). */
   readonly title: string;
-  /** The task it runs, or what it is of; groups tiles, never titles one. */
-  readonly task: string;
   /** When it started, worded; null when unknown. */
   readonly started: string | null;
   readonly machine: string;
-  /** The hardware it runs on (not on a tile) and the agent that drives it, when known. */
+  /** The hardware it runs on, when known (not on a tile). */
   readonly hardware: string | null;
-  readonly agent: string | null;
   readonly status: {readonly kind: StatusKind; readonly word: string};
   /** Why the run's state cannot be read, in a word or two; null when it can. */
   readonly problem: string | null;
@@ -109,8 +106,6 @@ export interface Tile {
   readonly attention: boolean;
   readonly createdAt: number;
   readonly machine: string;
-  readonly agent: string | null;
-  readonly task: string;
 }
 
 /** The base every result is measured against. */
@@ -378,8 +373,6 @@ export function tileOf(input: RunInput): Tile {
     attention: attention !== 'none',
     createdAt: input.createdAt,
     machine: input.machine,
-    agent: input.agent,
-    task: input.task,
   };
 }
 
@@ -396,8 +389,8 @@ export function needsYou(tiles: readonly Tile[]): Tile[] {
 }
 
 /** What the screen can group runs by. */
-export type GroupBy = 'status' | 'machine' | 'task' | 'agent';
-export const GROUP_BYS: readonly GroupBy[] = ['status', 'machine', 'task', 'agent'];
+export type GroupBy = 'status' | 'machine';
+export const GROUP_BYS: readonly GroupBy[] = ['status', 'machine'];
 
 /** The tiles of the runs on `machine` (as a tile names it), or all of them when it is null. */
 export function onMachine(tiles: readonly Tile[], machine: string | null): Tile[] {
@@ -425,9 +418,6 @@ const STATUS_ORDER: readonly StatusKind[] = [
   'unknown',
 ];
 
-/** The word of a group of runs whose agent is not known. */
-export const UNKNOWN_GROUP = 'Unknown';
-
 const STATUS_TITLES: Readonly<Record<StatusKind, string>> = {
   running: 'Running',
   paused: 'Paused',
@@ -445,12 +435,10 @@ function statusGroups(tiles: readonly Tile[]): TileGroup[] {
   });
 }
 
-function keyedGroups(tiles: readonly Tile[], by: Exclude<GroupBy, 'status'>): TileGroup[] {
+function machineGroups(tiles: readonly Tile[]): TileGroup[] {
   const groups = new Map<string, Tile[]>();
   for (const tile of tiles) {
-    const key =
-      by === 'machine' ? tile.machine : by === 'task' ? tile.task : (tile.agent ?? UNKNOWN_GROUP);
-    groups.set(key, [...(groups.get(key) ?? []), tile]);
+    groups.set(tile.machine, [...(groups.get(tile.machine) ?? []), tile]);
   }
   return [...groups.entries()]
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
@@ -460,14 +448,14 @@ function keyedGroups(tiles: readonly Tile[], by: Exclude<GroupBy, 'status'>): Ti
 /**
  * `tiles` in groups: first "Needs you", the runs that need their user; then the rest grouped by
  * `by`: by status, in the order running, paused, failed, finished, stopped, unknown, each under
- * its status word with its dot; otherwise by name, in name order. Every tile is in exactly one
- * group (a run that needs its user is in "Needs you" and not in its status, machine, task or agent
- * group) and each group keeps the order the tiles came in; a group with no tile is left out.
+ * its status word with its dot; by machine, in name order. Every tile is in exactly one group (a
+ * run that needs its user is in "Needs you" and not in its status or machine group) and each
+ * group keeps the order the tiles came in; a group with no tile is left out.
  */
 export function groupTiles(tiles: readonly Tile[], by: GroupBy): TileGroup[] {
   const attention = needsYou(tiles);
   const rest = tiles.filter(tile => !tile.attention);
-  const groups = by === 'status' ? statusGroups(rest) : keyedGroups(rest, by);
+  const groups = by === 'status' ? statusGroups(rest) : machineGroups(rest);
   return attention.length === 0
     ? groups
     : [{key: NEEDS_YOU, title: 'Needs you', tone: 'err', tiles: attention}, ...groups];

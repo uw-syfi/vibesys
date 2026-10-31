@@ -37,16 +37,17 @@
     "@vibesys/ipc": "workspace:*",
     "@vibesys/logs": "workspace:*",
     "@vibesys/machine": "workspace:*",
+    "@vibesys/problems": "workspace:*",
+    "@vibesys/request-identity": "workspace:*",
     "@vibesys/run-session": "workspace:*",
+    "@vibesys/run-skeleton": "workspace:*",
     "@vibesys/run-state": "workspace:*",
     "@vibesys/runs": "workspace:*",
     "@vibesys/store": "workspace:*",
     "@vibesys/transport": "workspace:*",
     "@vibesys/ui": "workspace:*",
     "react": "19.1.1",
-    "xstate": "5.33.2",
-    "@vibesys/run-skeleton": "workspace:*",
-    "@vibesys/request-identity": "workspace:*"
+    "xstate": "5.33.2"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",

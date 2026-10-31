@@ -126,8 +126,8 @@ describe('deliveriesOf', () => {
     );
     expect(deliveriesOf(steps, id => (id === 'a-3' ? 4 : null))).toEqual([
       {controlId: 'c-1', event: {kind: 'queued'}},
-      {controlId: 'c-1', event: {kind: 'delivered', idea: 4, where: 'Implementer'}},
-      {controlId: 'c-2', event: {kind: 'delivered', idea: null, where: 'Judge'}},
+      {controlId: 'c-1', event: {kind: 'delivered', idea: 4, where: 'Builder'}},
+      {controlId: 'c-2', event: {kind: 'delivered', idea: null, where: 'Reviewer'}},
       {controlId: 'c-3', event: {kind: 'dropped'}},
       {controlId: 'c-4', event: {kind: 'refused', reason: 'no such role'}},
       {controlId: 'c-2', event: {kind: 'withdrawn'}},
