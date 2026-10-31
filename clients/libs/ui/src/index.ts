@@ -7,6 +7,7 @@
 export {applyTheme, type ThemeTarget} from './apply-theme.js';
 export {ActionPanel} from './components/action-panel.js';
 export {AppFrame} from './components/app-frame.js';
+export {AreaChart, type ChartLayer as AreaChartLayer} from './components/area-chart.js';
 export {BRAND_MARK_NAMES, BrandMark, type BrandMarkName} from './components/brand-mark.js';
 export {
   Button,
@@ -85,6 +86,7 @@ export {
   type ToolLine,
 } from './components/narrative.js';
 export {NewBelow} from './components/new-below.js';
+export {type NiceScale, niceScale} from './components/nice-scale.js';
 export {
   type ChartKeyItem,
   OverviewGroup,
@@ -131,6 +133,7 @@ export {
   type SegmentOption,
 } from './components/segmented-control.js';
 export {Select, type SelectOption} from './components/select.js';
+export {ShareBar, type SharePart} from './components/share-bar.js';
 export {useSideActionLayout} from './components/side-action-layout.js';
 export {
   SidebarGroup,

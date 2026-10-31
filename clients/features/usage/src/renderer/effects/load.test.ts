@@ -1,126 +1,164 @@
 import {describe, expect, test} from 'bun:test';
-import type {ListedRun, UsageWindowEntry} from '@vibesys/hosts';
+import type {UsageSummaryEntry} from '@vibesys/hosts';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
-import {type FakeProject, FakeUsageBridge, ZERO_USAGE} from './fake-bridge.js';
-import {loadUsage} from './load.js';
+import {periodEdges} from '../../state/index.js';
+import {
+  EMPTY_BOOK,
+  emptySummary,
+  type FakeAnswer,
+  FakeUsageBridge,
+  seriesOf,
+} from './fake-bridge.js';
+import {readUsage, refreshRates, savePrices} from './load.js';
 
-const SPAN = {since: 1_000, until: 2_000};
+const NOW = Date.UTC(2026, 9, 30, 15, 0, 0);
+const EDGES = periodEdges('7d', NOW, 'UTC');
 const LIVE = new AbortController().signal;
 
-const runs = (count: number): ListedRun[] =>
-  Array.from({length: count}, (_, at) => ({
-    runId: `run-${String(count - at).padStart(4, '0')}`,
-    task: 'spsc',
-    createdAt: 1_000_000 - at,
-  }));
-
-const spent = (usd: number): UsageWindowEntry => ({
-  ...ZERO_USAGE,
-  spentUsd: usd,
-  turns: 1,
-  byRun: [{runId: 'run-0001', task: 'spsc', costUsd: usd, unpricedTurns: 0}],
-});
-
-async function loaded(bridge: FakeUsageBridge) {
-  const outcome = await loadUsage(bridge, SPAN, LIVE);
-  if (outcome.kind !== 'usage') throw new Error('expected figures');
-  return outcome.loaded;
+/** A host that spent `usd` in the first bucket. */
+function spent(usd: number): FakeAnswer {
+  return (_, book): UsageSummaryEntry => ({
+    ...emptySummary(book),
+    series: [seriesOf({}, [0], {estimateUsd: [usd], turns: [1]})],
+  });
 }
 
-describe('loadUsage', () => {
-  test('asks each project of each machine for its runs, newest first, over the window', async () => {
+const read = (bridge: FakeUsageBridge, hostsOff: readonly string[] = []) =>
+  readUsage(bridge, EDGES, NOW, hostsOff, LIVE);
+
+describe('readUsage', () => {
+  test('asks each reachable machine for the period in the buckets between the edges', async () => {
     const bridge = new FakeUsageBridge({
-      projects: [
-        {
-          host: 'local',
-          project: '/work/a',
-          runs: runs(3),
-          answer: {kind: 'usage', usage: spent(2)},
-        },
-        {
-          host: 'ssh:host-a',
-          project: '/srv/b',
-          runs: runs(1),
-          answer: {kind: 'usage', usage: spent(3)},
-        },
+      hosts: [
+        {host: 'local', projects: ['/work/a', '/work/b'], answer: spent(2)},
+        {host: 'ssh:host-a', projects: ['/srv/b'], answer: spent(3)},
       ],
     });
-    const result = await loaded(bridge);
-    expect(
-      result.sources.map(source => [source.host, source.project, source.usage.spentUsd]),
-    ).toEqual([
-      ['local', '/work/a', 2],
-      ['ssh:host-a', '/srv/b', 3],
+    const answer = await read(bridge);
+    expect(answer.replies.map(each => each.host)).toEqual(['local', 'ssh:host-a']);
+    expect(bridge.asked.map(each => [each.host, each.projects])).toEqual([
+      ['local', ['/work/a', '/work/b']],
+      ['ssh:host-a', ['/srv/b']],
     ]);
-    expect(bridge.asked).toEqual([
-      {host: 'local', project: '/work/a', runIds: ['run-0003', 'run-0002', 'run-0001'], ...SPAN},
-      {host: 'ssh:host-a', project: '/srv/b', runIds: ['run-0001'], ...SPAN},
-    ]);
-    expect(result).toMatchObject({unreachable: 0, unsupported: 0});
-    expect(result.sources.map(source => source.leftOut)).toEqual([0, 0]);
+    for (const each of bridge.asked) {
+      expect(each.edges).toEqual(EDGES.edges);
+      expect(each.now).toBe(NOW);
+    }
+    expect(answer).toMatchObject({unreachable: [], unsupported: []});
   });
 
-  test('property: it names at most the helper bound of runs, and counts the rest as left out', async () => {
-    for (const seed of SEEDS.slice(0, 40)) {
-      const count = new Seeded(seed).int(260);
-      const bridge = new FakeUsageBridge({
-        projects: [
-          {
-            host: 'local',
-            project: '/p',
-            runs: runs(count),
-            answer: {kind: 'usage', usage: spent(1)},
-          },
-        ],
-      });
-      const result = await loaded(bridge);
-      const named = bridge.asked.reduce((total, each) => total + each.runIds.length, 0);
-      expect(named).toBeLessThanOrEqual(100);
-      expect(named + (result.sources[0]?.leftOut ?? 0)).toBe(count);
-      // A project with no run is not asked at all.
-      expect(bridge.asked).toHaveLength(count === 0 ? 0 : 1);
+  test('property: up to 64 projects are all named; with more, none is, and the page says older runs are unread', async () => {
+    for (const seed of SEEDS.slice(0, 30)) {
+      const count = new Seeded(seed).int(150);
+      const projects = Array.from({length: count}, (_, at) => `/p/${at}`);
+      const bridge = new FakeUsageBridge({hosts: [{host: 'local', projects, answer: spent(1)}]});
+      const answer = await read(bridge);
+      const named = bridge.asked[0]?.projects ?? [];
+      // The host reads every run it indexed whatever it is told, so the figure is whole for runs it
+      // holds an index for; only a project that cannot be named leaves the older ones unread.
+      expect(named.length, `seed ${seed}`).toBe(count > 64 ? 0 : count);
+      expect([...named].sort(), `seed ${seed}`).toEqual(count > 64 ? [] : [...projects].sort());
+      expect(answer.olderRunsUnread, `seed ${seed}`).toBe(count > 64);
     }
   });
 
-  test('a machine, a project or a helper that cannot answer is counted and the rest are read', async () => {
-    const projects: FakeProject[] = [
-      {host: 'local', project: '/ok', runs: runs(1), answer: {kind: 'usage', usage: spent(5)}},
-      {host: 'local', project: '/unlisted', runs: null, answer: null},
-      {host: 'local', project: '/broken', runs: runs(1), answer: null},
-      {host: 'ssh:host-a', project: '/old', runs: runs(1), answer: {kind: 'unsupported'}},
-    ];
-    const result = await loaded(new FakeUsageBridge({projects, unavailable: ['ssh:host-b']}));
-    expect(result.sources.map(source => source.project)).toEqual(['/ok']);
-    expect(result).toMatchObject({unreachable: 3, unsupported: 1});
-  });
-
-  test('when every helper predates the question, the page says so', async () => {
+  test('a machine that is down, old or failing is counted and the others are read', async () => {
     const bridge = new FakeUsageBridge({
-      projects: [{host: 'local', project: '/p', runs: runs(1), answer: {kind: 'unsupported'}}],
+      hosts: [
+        {host: 'local', answer: spent(5)},
+        {host: 'ssh:host-a', answer: 'unsupported'},
+        {host: 'ssh:host-b', answer: 'fails'},
+        {host: 'ssh:host-c', answer: spent(1)},
+      ],
+      unavailable: ['ssh:host-c'],
     });
-    expect(await loadUsage(bridge, SPAN, LIVE)).toEqual({kind: 'unsupported'});
+    const answer = await read(bridge);
+    expect(answer.replies.map(each => each.host)).toEqual(['local']);
+    expect(answer.unsupported).toEqual(['ssh:host-a']);
+    expect([...answer.unreachable].sort()).toEqual(['ssh:host-b', 'ssh:host-c']);
   });
 
-  test('when every machine and project that was asked failed, nothing was read and the question fails', async () => {
+  test('a machine switched off is not asked', async () => {
+    const bridge = new FakeUsageBridge({
+      hosts: [
+        {host: 'local', answer: spent(1)},
+        {host: 'ssh:host-a', answer: spent(1)},
+      ],
+    });
+    const answer = await read(bridge, ['ssh:host-a']);
+    expect(bridge.asked.map(each => each.host)).toEqual(['local']);
+    expect(answer.unreachable).toEqual([]);
+  });
+
+  test('a machine still connecting is waited for, not counted as down', async () => {
+    const bridge = new FakeUsageBridge({
+      hosts: [
+        {host: 'local', answer: spent(1)},
+        {host: 'ssh:host-a', answer: spent(2)},
+      ],
+      connecting: ['ssh:host-a'],
+    });
+    const answer = await read(bridge);
+    expect(answer.replies.map(each => each.host)).toEqual(['local']);
+    expect(answer).toMatchObject({connecting: ['ssh:host-a'], unreachable: []});
+    const only = new FakeUsageBridge({
+      hosts: [{host: 'local', answer: spent(1)}],
+      connecting: ['local'],
+    });
+    expect(await read(only)).toMatchObject({replies: [], connecting: ['local']});
+  });
+
+  test('a catalogue that is not ready is asked for once more, and a missing one is left to the view', async () => {
+    const listed = {
+      kind: 'listed' as const,
+      harnesses: [
+        {
+          provider: 'claude',
+          model: 'claude-opus-5-5',
+          default: true,
+          display: {providerName: 'Claude Code', modelName: 'Opus 5.5'},
+        },
+      ],
+    };
+    const late = new FakeUsageBridge({
+      hosts: [{host: 'local', answer: spent(1)}],
+      harnesses: {local: listed},
+      harnessesFailing: 1,
+    });
+    expect((await read(late)).names.map(each => each.modelName)).toEqual(['Opus 5.5']);
+    expect(late.catalogues).toHaveLength(2);
+    const never = new FakeUsageBridge({
+      hosts: [{host: 'local', answer: spent(1)}],
+      harnesses: {local: listed},
+      harnessesFailing: 5,
+    });
+    expect((await read(never)).names).toEqual([]);
+  });
+
+  test('when nothing could be read the question fails, naming why', async () => {
     const down = new FakeUsageBridge({
-      projects: [{host: 'local', project: '/p', runs: null, answer: null}],
+      hosts: [{host: 'local', answer: 'fails'}],
       unavailable: ['ssh:host-a'],
     });
-    await expect(loadUsage(down, SPAN, LIVE)).rejects.toThrow('nothing could be read');
-    const unreachableOnly = new FakeUsageBridge({projects: [], unavailable: ['ssh:host-a']});
-    await expect(loadUsage(unreachableOnly, SPAN, LIVE)).rejects.toThrow('nothing could be read');
+    await expect(read(down)).rejects.toThrow('nothing could be read');
+    const none = new FakeUsageBridge({hosts: [], unavailable: ['ssh:host-a']});
+    await expect(read(none)).rejects.toThrow('nothing could be read');
+    const listing = new FakeUsageBridge({hosts: [], overviewFails: true});
+    await expect(read(listing)).rejects.toThrow('could not be listed');
   });
 
-  test('no project and no machine is an answer of no usage, not a failure', async () => {
-    const bridge = new FakeUsageBridge({projects: []});
-    expect(await loaded(bridge)).toMatchObject({sources: [], unreachable: 0});
+  test('every machine being old is an answer, not a failure', async () => {
+    const bridge = new FakeUsageBridge({hosts: [{host: 'local', answer: 'unsupported'}]});
+    expect(await read(bridge)).toMatchObject({replies: [], unsupported: ['local']});
   });
 
-  test('a model is named by the machine catalogue that lists it', async () => {
+  test('no machine at all is an answer of nothing', async () => {
+    expect(await read(new FakeUsageBridge({hosts: []}))).toMatchObject({replies: []});
+  });
+
+  test('a model is named by the catalogue of the machine that lists it', async () => {
     const bridge = new FakeUsageBridge({
-      projects: [
-        {host: 'local', project: '/p', runs: runs(1), answer: {kind: 'usage', usage: spent(1)}},
-      ],
+      hosts: [{host: 'local', answer: spent(1)}],
       harnesses: {
         local: {
           kind: 'listed',
@@ -136,65 +174,119 @@ describe('loadUsage', () => {
         },
       },
     });
-    expect((await loaded(bridge)).names).toEqual([
+    expect((await read(bridge)).names).toEqual([
       {
         harness: 'claude',
         model: 'claude-opus-5-5',
         harnessName: 'Claude Code',
         modelName: 'Opus 5.5',
       },
-      {harness: 'codex', model: 'gpt-6.1-luna', harnessName: 'codex', modelName: null},
+      {harness: 'codex', model: 'gpt-6.1-luna', harnessName: null, modelName: null},
     ]);
   });
 
-  test('the machines that cannot be listed fail the question, naming why', async () => {
-    const bridge = new FakeUsageBridge({projects: [], overviewFails: true});
-    await expect(loadUsage(bridge, SPAN, LIVE)).rejects.toThrow('could not be listed');
-  });
-
   test('a question nobody wants any more stops before its answers are used', async () => {
-    const bridge = new FakeUsageBridge({
-      projects: [
-        {host: 'local', project: '/p', runs: runs(1), answer: {kind: 'usage', usage: spent(1)}},
-      ],
-    });
+    const bridge = new FakeUsageBridge({hosts: [{host: 'local', answer: spent(1)}]});
     const stop = new AbortController();
     const release = bridge.holdAnswers();
-    const pending = loadUsage(bridge, SPAN, stop.signal);
+    const pending = readUsage(bridge, EDGES, NOW, [], stop.signal);
     stop.abort();
     release();
     await expect(pending).rejects.toThrow();
   });
+});
 
-  test('a question nobody wants any more cancels the listings it still waits for', async () => {
+describe('refreshRates', () => {
+  test('asks each named machine, and a failure on one is not a failure of the page', async () => {
     const bridge = new FakeUsageBridge({
-      projects: [
-        {host: 'local', project: '/a', runs: runs(1), answer: {kind: 'usage', usage: spent(1)}},
-        {host: 'local', project: '/b', runs: runs(1), answer: {kind: 'usage', usage: spent(1)}},
+      hosts: [
+        {host: 'local', answer: spent(1)},
+        {host: 'ssh:host-a', answer: spent(1)},
+      ],
+      unavailable: ['ssh:host-a'],
+    });
+    await refreshRates(bridge, ['local', 'ssh:host-a'], NOW, LIVE);
+    expect(bridge.refreshed.map(each => each.host)).toEqual(['local', 'ssh:host-a']);
+  });
+});
+
+describe('savePrices', () => {
+  const rate = {input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75, cacheWrite1h: null};
+  const draft = {
+    model: 'claude-opus-5-5',
+    rate: {input: '3', output: '15', cacheRead: '0.3', cacheWrite: '3.75'},
+    automatic: false,
+    mapTo: '',
+  };
+
+  test('saves the change to each destination against that destination’s own book', async () => {
+    const bridge = new FakeUsageBridge({
+      hosts: [
+        {host: 'local', answer: spent(1), book: {...EMPTY_BOOK, revision: 4}},
+        {host: 'ssh:host-a', answer: spent(1), book: EMPTY_BOOK},
       ],
     });
-    bridge.holdListings();
-    const stop = new AbortController();
-    const pending = loadUsage(bridge, SPAN, stop.signal);
-    for (let turn = 0; turn < 16 && bridge.listed.length < 2; turn += 1)
-      await new Promise(resolve => queueMicrotask(() => resolve(0)));
-    expect(bridge.listed).toHaveLength(2);
-    expect(new Set(bridge.listed).size).toBe(2);
-    expect(bridge.cancelled).toEqual([]);
-    stop.abort();
-    await expect(pending).rejects.toThrow();
-    expect([...bridge.cancelled].sort()).toEqual([...bridge.listed].sort());
+    const results = await savePrices(
+      bridge,
+      {
+        draft,
+        destinations: [
+          {host: 'local', book: bridge.bookOf('local')},
+          {host: 'ssh:host-a', book: bridge.bookOf('ssh:host-a')},
+        ],
+      },
+      LIVE,
+    );
+    expect(results.map(each => [each.host, each.outcome])).toEqual([
+      ['local', 'saved'],
+      ['ssh:host-a', 'saved'],
+    ]);
+    expect(bridge.saves.map(each => each.baseRevision)).toEqual([4, 0]);
+    expect(bridge.bookOf('local').overrides).toEqual([{model: 'claude-opus-5-5', rate}]);
   });
 
-  test('a listing that answered is not cancelled by a later abort', async () => {
+  test('a destination whose book moved is reported, and the others are still saved', async () => {
     const bridge = new FakeUsageBridge({
-      projects: [
-        {host: 'local', project: '/a', runs: runs(1), answer: {kind: 'usage', usage: spent(1)}},
+      hosts: [
+        {host: 'local', answer: spent(1)},
+        {host: 'ssh:host-a', answer: spent(1)},
+        {host: 'ssh:host-b', answer: spent(1)},
       ],
     });
-    const stop = new AbortController();
-    await loadUsage(bridge, SPAN, stop.signal);
-    stop.abort();
-    expect(bridge.cancelled).toEqual([]);
+    const books = ['local', 'ssh:host-a', 'ssh:host-b'].map(host => ({
+      host,
+      book: bridge.bookOf(host),
+    }));
+    bridge.edit('ssh:host-a', {overrides: [], aliases: []});
+    bridge.failSaves('ssh:host-b');
+    const results = await savePrices(bridge, {draft, destinations: books}, LIVE);
+    expect(results.map(each => each.outcome)).toEqual(['saved', 'moved', 'failed']);
+  });
+
+  test('a change that makes a book no host would accept is not sent', async () => {
+    const bridge = new FakeUsageBridge({hosts: [{host: 'local', answer: spent(1)}]});
+    const results = await savePrices(
+      bridge,
+      {
+        draft: {...draft, mapTo: 'claude-opus-5-5'},
+        destinations: [{host: 'local', book: EMPTY_BOOK}],
+      },
+      LIVE,
+    );
+    expect(results[0]).toMatchObject({outcome: 'failed'});
+    expect(bridge.saves).toEqual([]);
+  });
+
+  test('saving the same change twice leaves the book as it was after the first', async () => {
+    const bridge = new FakeUsageBridge({hosts: [{host: 'local', answer: spent(1)}]});
+    const once = await savePrices(
+      bridge,
+      {draft, destinations: [{host: 'local', book: bridge.bookOf('local')}]},
+      LIVE,
+    );
+    const first = bridge.bookOf('local');
+    await savePrices(bridge, {draft, destinations: [{host: 'local', book: first}]}, LIVE);
+    expect(once[0]).toMatchObject({outcome: 'saved'});
+    expect(bridge.bookOf('local')).toEqual(first);
   });
 });

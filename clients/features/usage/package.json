@@ -48,6 +48,7 @@
     "@types/node": "^24.0.0",
     "@types/react": "19.1.13",
     "@vibesys/transport": "workspace:*",
+    "fast-check": "4.10.2",
     "typescript": "^5.8.3"
   }
 }

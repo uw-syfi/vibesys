@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from vs_sim.concurrency import WorkerReservationStateError, WorkerStartRefusedError
 from vs_sim.gate import arrival
+from vs_sim.https_get import HttpsGetError
 from vs_sim.loopback_http import HttpReply
 from vs_sim.output import OutputStream
 from vs_sim.processes import (
@@ -710,6 +711,34 @@ class ScriptedStreamingCommand:
         if scripted.blocks:
             raise subprocess.TimeoutExpired(command, timeout_seconds, scripted.stdout, stderr)
         return subprocess.CompletedProcess(command, scripted.returncode, scripted.stdout, stderr)
+
+
+class FakeHttpsGet:
+    """HTTPS GET whose answers a test scripts: bodies and failures, first request first."""
+
+    def __init__(self, *outcomes: bytes | HttpsGetError) -> None:
+        """Script what each request gets; a request past the script fails, as a dead network does."""
+        self._outcomes = list(outcomes)
+        self.requests: list[tuple[str, str]] = []
+        """The url and ``Accept`` of every request, in order."""
+
+    def get(self, url: str, *, accept: str, timeout: float, max_bytes: int) -> bytes:
+        """Record the request and answer the next scripted outcome, under the real client's rules."""
+        del timeout
+        self.requests.append((url, accept))
+        if not url.startswith("https://"):
+            message = f"only https addresses are fetched, not {url[:40]!r}"
+            raise HttpsGetError(message)
+        if not self._outcomes:
+            message = f"no outcome scripted for {url[:60]}"
+            raise HttpsGetError(message)
+        outcome = self._outcomes.pop(0)
+        if isinstance(outcome, HttpsGetError):
+            raise outcome
+        if len(outcome) > max_bytes:
+            message = f"{url[:60]} answered a body over {max_bytes} bytes"
+            raise HttpsGetError(message)
+        return outcome
 
 
 class FakeLoopbackHttp:

@@ -446,7 +446,7 @@ wait, so `waited_seconds` is no longer a field.
 | `quota_resumed` | `run.agent_events` | span:`capacity_wait` end | quota stops (timeline exclusion) | S | Verdict `resumed`; attr `reason` (`operator\|wait_elapsed`). |
 | `quota_abandoned` | `run.agent_events` | span:`capacity_wait` end | quota stops | S | Status `failed`, verdict `abandoned`, attr `reason`. |
 | `provider_switched` | `run.agent_events` | span:`provider_switch` (instant) | header reason text | S | Attrs `from_provider`, `to_provider`, `to_model`, `reason`, `detail`; link `settles` to the `capacity_wait` span. |
-| `rate_limit_update` | `run.agent_events` | metric series `rate_limit.<provider>.<window>` | none | S | Value is the used fraction. `limit`, `resets_at` and `window_minutes` are dropped (no consumer; re-adding is additive). |
+| `rate_limit_update` | `run.agent_events` | metric series `rate_limit.<provider>.<window>` | none | S | Value is the used fraction. Attrs `limit`, `resets_at` and `window_minutes` stay (the Usage screen's limits read the latest reading of each window from them, through the run's usage rollup); the words are the provider's own and the screen never parses them. |
 
 ### Evaluation, candidates and results
 

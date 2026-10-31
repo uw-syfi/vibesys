@@ -25,6 +25,7 @@ import {
   registrySavedRuns,
   registrySetup,
   registryStart,
+  registryUsage,
   SshLink,
   Subscriptions,
   WATCH_METHOD,
@@ -381,6 +382,11 @@ function listedHosts(parts: {
       runReads: registryRunReads({
         checkout: effectiveCheckout(settings, REPOSITORY_ROOT),
         unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
+      }),
+      usage: registryUsage({
+        checkout: effectiveCheckout(settings, REPOSITORY_ROOT),
+        unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
+        mutate: (id, bytes, signal) => gateway.unary(hostKey(id), MUTATE_METHOD, bytes, signal),
       }),
       log,
       push: listing => {

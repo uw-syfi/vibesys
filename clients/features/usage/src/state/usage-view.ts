@@ -1,382 +1,656 @@
 /**
- * What the Usage page shows, folded from what each project's helper answered for the window: four
- * tiles, the cost of each run and of each kind of agent. The helper sums the turns' records, so
- * nothing here derives a cost from a turn; it only adds the answers of several projects. Every row
- * is a sum of the answers' rows, so the rows add up to the tile that says what they spent, and a
- * count the answers could not place (unpriced turns, agents past the helper's bound, runs it holds
- * no journal of) is carried as a status, never dropped.
+ * What the Usage page shows, folded from the series the hosts answered: the hero figure, the
+ * provider rows and the chart, the totals and their shares, the breakdown by model and by hour or
+ * day, and what only VibeSys has (cost by run, by role, per new best and per hour now).
+ *
+ * Every figure is a sum of the answers' numbers, so rows add up to the figure that says what they
+ * spent, and a count the answers could not place (tokens with no price, turns whose cost is a
+ * guess, a price list that is not fresh) is carried as a chip, never dropped. Hiding a provider or
+ * choosing a source changes a total by exactly the rows it leaves out. Nothing here prices
+ * anything: the hosts priced every row.
  */
 import {roleName} from '@vibesys/contracts';
-import {type HostKey, hostFromKey, hostLabel, type UsageWindowEntry} from '@vibesys/hosts';
-import {addTokens, NO_TOKENS, type TokenTally, totalTokens} from '@vibesys/run-state';
-import {compactTokens} from '@vibesys/run-state/usage';
+import {type HostKey, hostFromKey, hostLabel, type UsagePricingEntry} from '@vibesys/hosts';
+import type {PeriodEdges} from './edges.js';
+import {bucketLabel} from './edges.js';
+import {dollars, percent, plainName, tokens, turnsWords} from './format.js';
+import type {DenseSeries, Field, Merged, ProviderCost} from './merge.js';
 
-/** What a project's helper answered for the window, and where the project is. */
-export interface UsageSource {
-  readonly host: HostKey;
-  readonly project: string;
-  readonly usage: UsageWindowEntry;
-  /** The project's runs beyond the helper's bound on one question, which the answer does not count. */
-  readonly leftOut: number;
+export type UsageTab = 'cost' | 'tokens';
+export type UsageSourceChoice = 'all' | 'run' | 'outside';
+
+/** What the person chose to look at; the same answers, filtered. */
+export interface ViewFilters {
+  readonly tab: UsageTab;
+  readonly source: UsageSourceChoice;
+  /** Providers whose rows are left out. */
+  readonly hidden: ReadonlySet<string>;
 }
 
-/** How an agent's harness and model are named, as the machine's catalogue gives them. */
+/** How a provider and its model are named, as the machine's catalogue gives them. */
 export interface ModelName {
-  /** The provider the catalogue lists the model under (a usage row's harness). */
   readonly harness: string;
   readonly model: string;
-  readonly harnessName: string;
-  /** The model alone ("Opus 5.5"); null when the catalogue does not name it. */
+  /** The catalogue's name for the provider; null when it gives none. */
+  readonly harnessName: string | null;
   readonly modelName: string | null;
 }
 
-/** Everything the page folds: the answers and what could not be asked. */
-export interface UsageLoaded {
-  readonly sources: readonly UsageSource[];
-  readonly names: readonly ModelName[];
-  /** Projects whose runs or spend could not be read. */
-  readonly unreachable: number;
-  /** Projects whose machine's VibeSys does not offer usage. */
-  readonly unsupported: number;
+export interface ProviderRow {
+  readonly provider: string;
+  readonly name: string;
+  /** The palette slot of the provider's mark, stable across filters. */
+  readonly series: number;
+  /** The provider's total, or `Unpriced` when no price covers any of its tokens. */
+  readonly figure: string;
+  /** Its share of the figure above, from 0 to 1. */
+  readonly share: number;
+  readonly hidden: boolean;
 }
 
-export interface UsageTile {
+export interface ChartLayer {
+  readonly provider: string;
+  readonly name: string;
+  readonly series: number;
+  readonly values: readonly number[];
+}
+
+export interface Part {
+  readonly key: string;
+  readonly label: string;
+  readonly value: number;
+  readonly figure: string;
+}
+
+export interface Tile {
   readonly name: string;
   readonly figure: string;
   readonly detail: string | null;
 }
 
-export interface RunSpendRow {
+export interface ModelRow {
   readonly key: string;
-  readonly host: HostKey;
-  readonly project: string;
-  readonly runId: string;
-  /** The task the run was started for, else its id: only what equal costs are ordered by. */
+  readonly provider: string;
+  readonly providerName: string;
+  /** The model as the price list names it, else the catalogue's name for it. */
+  readonly id: string;
   readonly name: string;
   readonly costUsd: number;
+  /** What it cost, or `Unpriced` when no price covers any of its tokens. */
   readonly cost: string;
-  /** The row's cost against the costliest row's, from 0 to 1. */
-  readonly share: number;
-  /** Its turns in the window that reported no cost, which its cost leaves out. */
-  readonly unpriced: number;
-}
-
-export interface AgentSpendRow {
-  readonly key: string;
-  readonly role: string;
-  readonly harness: string;
-  /** The model as the catalogue names it; its id, when it names it differently, for the pointer. */
-  readonly model: {readonly name: string; readonly id: string | null};
-  readonly costUsd: number;
-  readonly cost: string;
+  readonly tokens: number;
+  readonly tokensFigure: string;
   readonly turns: number;
+  /** Dollars per million processed tokens; null when nothing was priced. */
+  readonly perMillion: string | null;
+  /** Cached input as a share of the input, from 0 to 1; null without input. */
+  readonly cacheHit: number | null;
+  readonly unpricedTokens: number;
   readonly share: number;
-  /** Those of its turns that reported no cost, which its cost leaves out. */
-  readonly unpriced: number;
+  /** The row's figure in each bucket, for its trend. */
+  readonly trend: readonly number[];
+  readonly overridden: boolean;
 }
 
-/** A run a status counts, with how many of its turns (or itself, once) the status counts there. */
-interface StatusRun {
+export interface TimeRow {
+  readonly key: string;
+  readonly label: string;
+  readonly cost: string;
+  readonly tokens: string;
+  readonly turns: number;
+  readonly runs: number;
+  readonly sessions: number;
+}
+
+export interface RunRow {
+  readonly key: string;
   readonly host: HostKey;
   readonly project: string;
   readonly runId: string;
-  readonly count: number;
+  readonly costUsd: number;
+  readonly cost: string;
+  readonly share: number;
 }
 
-/** A status chip: its count in words, and what the count is made of (for the pointer). */
-export interface UsageStatus {
+export interface AgentRow {
+  readonly key: string;
+  readonly role: string;
+  /** The model as the price list names it. */
+  readonly model: string;
+  /** The catalogue's name for it, else its id in words. */
+  readonly modelName: string;
+  readonly cost: string;
+  readonly share: number;
+}
+
+export interface ChipView {
   readonly key: string;
   readonly label: string;
-  /** The runs the count is of, each with its share; none when it counts something else. */
-  readonly runs: readonly StatusRun[];
-  /** Other parts of the count, each a name and a number: `<name>: <n>`. */
-  readonly parts: readonly string[];
-  /**
-   * What the count cannot say, one line each: a machine whose VibeSys is too old to say which runs
-   * hold the count names itself, so a count with no breakdown is still explained.
-   */
-  readonly notes: readonly string[];
+  readonly hint: string | null;
+  readonly tone: 'warn' | 'neutral';
 }
 
 export interface UsageView {
-  /** No agent turn ended in the window. */
   readonly empty: boolean;
-  readonly tiles: readonly UsageTile[];
-  /** The costliest run first. */
-  readonly runs: readonly RunSpendRow[];
-  /** The costliest agent first. */
-  readonly agents: readonly AgentSpendRow[];
-  /** Agents that spent in the window beyond the rows. */
-  readonly agentsOmitted: number;
-  readonly status: readonly UsageStatus[];
+  readonly tab: UsageTab;
+  /** The hero figure: what was spent (estimate) or processed (tokens). */
+  readonly hero: {readonly figure: string; readonly caption: string};
+  readonly chips: readonly ChipView[];
+  readonly providers: readonly ProviderRow[];
+  readonly chart: {
+    readonly unit: string;
+    readonly labels: readonly string[];
+    readonly layers: readonly ChartLayer[];
+  };
+  readonly tiles: readonly Tile[];
+  readonly costByKind: readonly Part[];
+  readonly bySpeed: readonly Part[];
+  readonly tokensByKind: readonly Part[];
+  readonly models: readonly ModelRow[];
+  readonly times: readonly TimeRow[];
+  readonly runs: readonly RunRow[];
+  readonly runsOther: string | null;
+  readonly outside: string | null;
+  readonly agents: readonly AgentRow[];
+  readonly perNewBest: string | null;
+  readonly newBests: number;
+  readonly perHourNow: string;
+  readonly unpricedModels: readonly string[];
 }
 
-const UNKNOWN = 'unknown';
-const NONE = 'none';
-
-/** Dollars as the Usage face writes them. */
-export function dollars(amount: number): string {
-  return `$${amount.toFixed(2)}`;
-}
+const PALETTE = 8;
 
 function sum(values: readonly number[]): number {
   return values.reduce((total, value) => total + value, 0);
 }
 
-function turnsWords(count: number): string {
-  return `${count} ${count === 1 ? 'turn' : 'turns'}`;
+function column(series: readonly DenseSeries[], field: Field, buckets: number): number[] {
+  const found = new Array<number>(buckets).fill(0);
+  for (const each of series) {
+    each.values[field].forEach((value, at) => {
+      found[at] = (found[at] ?? 0) + value;
+    });
+  }
+  return found;
 }
 
-function tokensDetail(tally: TokenTally): string | null {
-  if (tally.input === null && tally.output === null) return null;
-  const part = (count: number | null): string => (count === null ? UNKNOWN : compactTokens(count));
-  return `in ${part(tally.input)} · out ${part(tally.output)}`;
+function processed(each: DenseSeries): readonly number[] {
+  return each.values.cached.map(
+    (cached, at) =>
+      cached +
+      (each.values.cacheWrite[at] ?? 0) +
+      (each.values.uncached[at] ?? 0) +
+      (each.values.output[at] ?? 0),
+  );
 }
 
-/** The helper's tally in the run fold's terms, so the fold's sum and total serve both. */
-function tallyOf(tally: UsageWindowEntry['tokens']): TokenTally {
+/** Tokens processed in each bucket, over `series`. */
+function volumeOf(series: readonly DenseSeries[], buckets: number): number[] {
+  return series.reduce<number[]>(
+    (found, each) => processed(each).map((value, at) => value + (found[at] ?? 0)),
+    new Array<number>(buckets).fill(0),
+  );
+}
+
+/** The provider's name: the catalogue's if it has one, else its id in words. */
+export function providerName(names: readonly ModelName[], provider: string): string {
+  return names.find(each => each.harness === provider)?.harnessName ?? plainName(provider);
+}
+
+/** The model's name: the catalogue's if it has one, else its id in words. */
+export function modelName(names: readonly ModelName[], provider: string, model: string): string {
+  return (
+    names.find(each => each.harness === provider && each.model === model)?.modelName ??
+    plainName(model)
+  );
+}
+
+/** Providers in a fixed order so a provider keeps its color whatever is hidden. */
+export function providersOf(merged: Merged): readonly string[] {
+  return [...new Set(merged.series.map(each => each.provider))].sort();
+}
+
+/** What a view is cut from: the merged answers, what the person chose, and the rows that remain. */
+interface Cut {
+  readonly merged: Merged;
+  readonly filters: ViewFilters;
+  readonly names: readonly ModelName[];
+  readonly buckets: number;
+  /** The series the source and the hidden providers leave. */
+  readonly shown: readonly DenseSeries[];
+  /** The palette slot of each provider, over all of them. */
+  readonly palette: ReadonlyMap<string, number>;
+}
+
+const byTab = (tab: UsageTab, cost: number, count: number): number =>
+  tab === 'cost' ? cost : count;
+
+/** What a cost reads as when no price covers any of what was used: never a zero. */
+const UNPRICED = 'Unpriced';
+
+/** Whether tokens were used and none of them has a price. */
+const uncovered = (used: number, unpriced: number): boolean => used > 0 && unpriced >= used;
+
+function providerRows(cut: Cut, total: number): ProviderRow[] {
+  const {merged, filters, names, palette} = cut;
+  // Over every provider, so a hidden one can be turned back on.
+  const held = new Map<string, {cost: number; tokens: number; unpriced: number}>();
+  for (const each of merged.series) {
+    if (filters.source !== 'all' && each.origin !== filters.source) continue;
+    const own = held.get(each.provider) ?? {cost: 0, tokens: 0, unpriced: 0};
+    own.cost += sum(each.values.estimateUsd);
+    own.tokens += sum(processed(each));
+    if (each.source === 'unpriced') own.unpriced += sum(processed(each));
+    held.set(each.provider, own);
+  }
+  return [...held.entries()]
+    .map(([provider, own]) => {
+      const hidden = filters.hidden.has(provider);
+      return {
+        provider,
+        name: providerName(names, provider),
+        series: palette.get(provider) ?? 0,
+        figure:
+          filters.tab === 'cost'
+            ? uncovered(own.tokens, own.unpriced)
+              ? UNPRICED
+              : dollars(own.cost)
+            : tokens(own.tokens),
+        share: hidden || total === 0 ? 0 : byTab(filters.tab, own.cost, own.tokens) / total,
+        hidden,
+      };
+    })
+    .sort((a, b) => a.provider.localeCompare(b.provider));
+}
+
+function chartLayers(cut: Cut): ChartLayer[] {
+  const {shown, filters, names, palette, buckets} = cut;
+  const layers: ChartLayer[] = [];
+  for (const provider of [...new Set(shown.map(each => each.provider))].sort()) {
+    const own = shown.filter(each => each.provider === provider);
+    const unpriced = sum(
+      volumeOf(
+        own.filter(each => each.source === 'unpriced'),
+        buckets,
+      ),
+    );
+    // A provider no price covers has no cost to draw: a flat line at zero would say it was free.
+    if (filters.tab === 'cost' && uncovered(sum(volumeOf(own, buckets)), unpriced)) continue;
+    layers.push({
+      provider,
+      name: providerName(names, provider),
+      series: palette.get(provider) ?? 0,
+      values: filters.tab === 'cost' ? column(own, 'estimateUsd', buckets) : volumeOf(own, buckets),
+    });
+  }
+  return layers;
+}
+
+const part = (key: string, label: string, value: number, figure: string): Part => ({
+  key,
+  label,
+  value,
+  figure,
+});
+
+const costPart = (key: string, label: string, value: number): Part =>
+  part(key, label, value, dollars(value));
+
+const tokenPart = (key: string, label: string, value: number): Part =>
+  part(key, label, value, tokens(value));
+
+/** The token totals of the shown rows. */
+function tokenTotals(cut: Cut) {
+  const {shown, buckets: n} = cut;
+  const cached = sum(column(shown, 'cached', n));
+  const uncached = sum(column(shown, 'uncached', n));
+  const written = sum(column(shown, 'cacheWrite', n));
   return {
-    input: tally.input,
-    cacheRead: tally.cache_read,
-    cacheWrite: tally.cache_write,
-    output: tally.output,
-    reasoning: tally.reasoning,
+    cached,
+    uncached,
+    written,
+    output: sum(column(shown, 'output', n)),
+    input: cached + uncached + written,
   };
 }
 
-function tiles(loaded: UsageLoaded): readonly UsageTile[] {
-  const answers = loaded.sources.map(source => source.usage);
-  const spent = sum(answers.map(answer => answer.spentUsd));
-  const turns = sum(answers.map(answer => answer.turns));
-  const bests = sum(answers.map(answer => answer.newBests));
-  const tally = answers.reduce<TokenTally>(
-    (all, answer) => addTokens(all, tallyOf(answer.tokens)),
-    NO_TOKENS,
-  );
-  const total = totalTokens(tally);
+function tileRows(cut: Cut, totalTokens: number): Tile[] {
+  const {shown, buckets: n} = cut;
+  const {cached, uncached, output, input} = tokenTotals(cut);
+  const counts: Tile[] = [
+    {
+      name: 'Processed',
+      figure: tokens(totalTokens),
+      detail: `in ${tokens(input)} · out ${tokens(output)}`,
+    },
+    {
+      name: 'Cached',
+      figure: tokens(cached),
+      detail: input === 0 ? null : `${percent(cached / input)} of input`,
+    },
+    {name: 'Uncached', figure: tokens(uncached), detail: null},
+    {name: 'Output', figure: tokens(output), detail: null},
+  ];
+  // Tokens are not dollars: a screen of tokens carries no tile of money.
+  if (cut.filters.tab === 'tokens') return counts;
   return [
+    ...counts,
     {
-      name: 'Spent',
-      figure: dollars(spent),
-      detail: turnsWords(turns),
-    },
-    {
-      name: 'Per hour now',
-      figure: `${dollars(sum(answers.map(answer => answer.spendPerHourUsd)))}/h`,
-      detail: null,
-    },
-    {
-      name: 'Tokens',
-      figure: total === null ? UNKNOWN : compactTokens(total),
-      detail: tokensDetail(tally),
-    },
-    {
-      name: 'Per new best',
-      figure: bests === 0 ? NONE : dollars(spent / bests),
-      detail: bests === 0 ? null : `${bests} new ${bests === 1 ? 'best' : 'bests'}`,
+      name: 'Cache savings',
+      figure: dollars(sum(column(shown, 'cacheSavingsUsd', n))),
+      detail: `recorded ${dollars(sum(column(shown, 'recordedUsd', n)))}`,
     },
   ];
 }
 
-function compare(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
+function costKindParts(cut: Cut): Part[] {
+  const {shown, buckets: n} = cut;
+  return [
+    costPart('input', 'Input', sum(column(shown, 'inputUsd', n))),
+    costPart('cache-read', 'Cache read', sum(column(shown, 'cacheReadUsd', n))),
+    costPart('cache-write', 'Cache write', sum(column(shown, 'cacheWriteUsd', n))),
+    costPart('output', 'Output', sum(column(shown, 'outputUsd', n))),
+  ];
 }
 
-/** Costliest first; ties by name, then by key, so the order is total. */
-function byCost(
-  left: {readonly costUsd: number; readonly name: string; readonly key: string},
-  right: {readonly costUsd: number; readonly name: string; readonly key: string},
-): number {
-  return (
-    right.costUsd - left.costUsd || compare(left.name, right.name) || compare(left.key, right.key)
+function speedParts(cut: Cut, totalCost: number): Part[] {
+  const premium = sum(column(cut.shown, 'speedPremiumUsd', cut.buckets));
+  return [
+    costPart('standard', 'Standard', Math.max(0, totalCost - premium)),
+    costPart('premium', 'Fast premium', premium),
+  ];
+}
+
+function tokenKindParts(cut: Cut): Part[] {
+  const {cached, uncached, written, output} = tokenTotals(cut);
+  return [
+    tokenPart('uncached', 'Uncached', uncached),
+    tokenPart('cached', 'Cached', cached),
+    tokenPart('cache-write', 'Cache write', written),
+    tokenPart('output', 'Output', output),
+  ];
+}
+
+/** The series of one provider and model, as a row: over every speed and source. */
+function modelRow(
+  cut: Cut,
+  key: string,
+  own: readonly DenseSeries[],
+  overridden: ReadonlySet<string>,
+) {
+  const {filters, names, buckets: n} = cut;
+  const provider = own[0]?.provider ?? '';
+  const id = own[0]?.model ?? '';
+  const cost = sum(column(own, 'estimateUsd', n));
+  const count = sum(volumeOf(own, n));
+  const unpriced = sum(
+    volumeOf(
+      own.filter(each => each.source === 'unpriced'),
+      n,
+    ),
   );
+  const cached = sum(column(own, 'cached', n));
+  const input = cached + sum(column(own, 'uncached', n)) + sum(column(own, 'cacheWrite', n));
+  return {
+    key,
+    provider,
+    providerName: providerName(names, provider),
+    id,
+    name: modelName(names, provider, id),
+    costUsd: cost,
+    cost: uncovered(count, unpriced) ? UNPRICED : dollars(cost),
+    tokens: count,
+    tokensFigure: tokens(count),
+    turns: sum(column(own, 'turns', n)),
+    perMillion:
+      count === 0 || cost === 0 || uncovered(count, unpriced)
+        ? null
+        : dollars((cost / count) * 1_000_000),
+    cacheHit: input === 0 ? null : cached / input,
+    unpricedTokens: unpriced,
+    share: 0,
+    trend: filters.tab === 'cost' ? column(own, 'estimateUsd', n) : volumeOf(own, n),
+    overridden: overridden.has(id),
+  };
 }
 
-function shareOf(cost: number, top: number): number {
-  return top > 0 ? cost / top : 0;
-}
-
-function runRows(sources: readonly UsageSource[]): readonly RunSpendRow[] {
-  const rows = sources.flatMap(({host, project, usage}) =>
-    usage.byRun.map(run => ({
-      key: JSON.stringify([host, project, run.runId]),
-      host,
-      project,
-      runId: run.runId,
-      name: run.task ?? run.runId,
-      costUsd: run.costUsd,
-      unpriced: run.unpricedTurns ?? 0,
-    })),
-  );
-  rows.sort(byCost);
-  const top = rows[0]?.costUsd ?? 0;
-  return rows.map(row => ({
-    ...row,
-    cost: dollars(row.costUsd),
-    share: shareOf(row.costUsd, top),
+function modelRows(cut: Cut, overridden: ReadonlySet<string>): ModelRow[] {
+  const {filters, shown} = cut;
+  const grouped = new Map<string, DenseSeries[]>();
+  for (const each of shown) {
+    const key = `${each.provider}\u0000${each.model}`;
+    grouped.set(key, [...(grouped.get(key) ?? []), each]);
+  }
+  const models = [...grouped.entries()]
+    .map(([key, own]) => modelRow(cut, key, own, overridden))
+    .sort(
+      (a, b) =>
+        byTab(filters.tab, b.costUsd, b.tokens) - byTab(filters.tab, a.costUsd, a.tokens) ||
+        a.key.localeCompare(b.key),
+    );
+  const whole = sum(models.map(each => byTab(filters.tab, each.costUsd, each.tokens)));
+  return models.map(each => ({
+    ...each,
+    share: whole === 0 ? 0 : byTab(filters.tab, each.costUsd, each.tokens) / whole,
   }));
 }
 
-interface AgentSum {
-  readonly role: string | null;
-  readonly harness: string | null;
-  readonly model: string | null;
-  costUsd: number;
-  turns: number;
-  unpriced: number;
+function timeRows(cut: Cut, labels: readonly string[]): TimeRow[] {
+  const {merged, shown, buckets: n} = cut;
+  const estimate = column(shown, 'estimateUsd', n);
+  const volume = volumeOf(shown, n);
+  const unpriced = volumeOf(
+    shown.filter(each => each.source === 'unpriced'),
+    n,
+  );
+  const turns = column(shown, 'turns', n);
+  return labels.map((label, at) => ({
+    key: `${at}`,
+    label,
+    cost: uncovered(volume[at] ?? 0, unpriced[at] ?? 0) ? '—' : dollars(estimate[at] ?? 0),
+    tokens: tokens(volume[at] ?? 0),
+    turns: turns[at] ?? 0,
+    runs: merged.runs[at] ?? 0,
+    sessions: merged.sessions[at] ?? 0,
+  }));
 }
 
-function agentRows(loaded: UsageLoaded): readonly AgentSpendRow[] {
-  const sums = new Map<string, AgentSum>();
-  for (const {usage} of loaded.sources) {
-    for (const agent of usage.byAgent) {
-      const key = JSON.stringify([agent.role, agent.harness, agent.model]);
-      const found = sums.get(key);
-      if (found === undefined) sums.set(key, {...agent, unpriced: agent.unpricedTurns});
-      else {
-        found.costUsd += agent.costUsd;
-        found.turns += agent.turns;
-        found.unpriced += agent.unpricedTurns;
-      }
-    }
-  }
-  const harnessNames = new Map(loaded.names.map(each => [each.harness, each.harnessName]));
-  const modelNames = new Map(
-    loaded.names.map(each => [JSON.stringify([each.harness, each.model]), each.modelName]),
-  );
-  const rows = [...sums.entries()].map(([key, agent]) => {
-    const named =
-      agent.model === null
-        ? null
-        : (modelNames.get(JSON.stringify([agent.harness, agent.model])) ?? null);
-    return {
-      key,
-      role: agent.role === null ? UNKNOWN : roleName(agent.role),
-      harness:
-        agent.harness === null ? UNKNOWN : (harnessNames.get(agent.harness) ?? agent.harness),
-      model:
-        agent.model === null
-          ? {name: UNKNOWN, id: null}
-          : {
-              name: named ?? agent.model,
-              id: named === null || named === agent.model ? null : agent.model,
-            },
-      costUsd: agent.costUsd,
-      turns: agent.turns,
-      unpriced: agent.unpriced,
-    };
-  });
-  rows.sort((left, right) =>
-    byCost(
-      {...left, name: `${left.role} ${left.harness} ${left.model.name}`},
-      {...right, name: `${right.role} ${right.harness} ${right.model.name}`},
+/** What the visible providers of `costs` spent. */
+const visibleCost = (hidden: ReadonlySet<string>, costs: readonly ProviderCost[]): number =>
+  costs
+    .filter(each => !hidden.has(each.provider))
+    .reduce((total, each) => total + each.estimateUsd, 0);
+
+function runRows(cut: Cut): RunRow[] {
+  const {merged, filters} = cut;
+  if (filters.source === 'outside') return [];
+  const costed = merged.runRows
+    .map(row => ({row, cost: visibleCost(filters.hidden, row.costs)}))
+    .filter(each => each.cost > 0);
+  const total = sum(costed.map(each => each.cost));
+  return costed.map(({row, cost}) => ({
+    key: `${row.host}|${row.project}|${row.runId}`,
+    host: row.host,
+    project: row.project,
+    runId: row.runId,
+    costUsd: cost,
+    cost: dollars(cost),
+    share: total === 0 ? 0 : cost / total,
+  }));
+}
+
+function agentRows(cut: Cut): AgentRow[] {
+  const {merged, filters, names} = cut;
+  if (filters.source === 'outside') return [];
+  const costed = merged.agentRows
+    .map(row => ({row, cost: visibleCost(filters.hidden, row.costs)}))
+    .filter(each => each.cost > 0);
+  const total = sum(costed.map(each => each.cost));
+  return costed.map(({row, cost}) => ({
+    key: `${row.role}|${row.model}`,
+    role: roleName(row.role),
+    model: row.model,
+    modelName: names.find(each => each.model === row.model)?.modelName ?? plainName(row.model),
+    cost: dollars(cost),
+    share: total === 0 ? 0 : cost / total,
+  }));
+}
+
+/** What the figure leaves out or only estimates, as chips. */
+function chipRows(
+  cut: Cut,
+  totalTokens: number,
+  unpricedModels: readonly string[],
+  options: {
+    readonly pricing: readonly UsagePricingEntry[];
+    readonly unreadablePrices: boolean;
+    readonly olderRunsUnread: boolean;
+  },
+): ChipView[] {
+  const {shown, merged, buckets: n} = cut;
+  const unpriced = sum(
+    volumeOf(
+      shown.filter(each => each.source === 'unpriced'),
+      n,
     ),
   );
-  const top = rows[0]?.costUsd ?? 0;
-  return rows.map(row => ({...row, cost: dollars(row.costUsd), share: shareOf(row.costUsd, top)}));
-}
-
-/** What a count says of a machine whose VibeSys sends no per-run (or per-agent) unpriced counts. */
-export const NO_BREAKDOWN = 'no per-run counts from this version of VibeSys';
-
-function machineName(host: HostKey): string {
-  return hostLabel(hostFromKey(host));
-}
-
-function projectName(path: string): string {
-  return path.split('/').filter(Boolean).at(-1) ?? path;
-}
-
-function status(
-  loaded: UsageLoaded,
-  runs: readonly RunSpendRow[],
-  agents: readonly AgentSpendRow[],
-): readonly UsageStatus[] {
-  const answers = loaded.sources.map(source => source.usage);
-  const missing = loaded.sources.flatMap(({host, project, usage}) =>
-    usage.missingRuns.map(runId => ({host, project, runId, count: 1})),
-  );
-  const leftOut = loaded.sources.filter(source => source.leftOut > 0);
-  const notCounted = missing.length + sum(leftOut.map(source => source.leftOut));
-  const unpricedRuns = runs
-    .filter(row => row.unpriced > 0)
-    .map(({host, project, runId, unpriced}) => ({host, project, runId, count: unpriced}));
-  const unpricedParts = agents
-    .filter(row => row.unpriced > 0)
-    .map(row => `${row.role} ${row.harness} ${row.model.name}: ${row.unpriced}`);
-  const counted: readonly {
-    readonly key: string;
-    readonly count: number;
-    readonly words: string;
-    readonly runs: readonly StatusRun[];
-    readonly parts: readonly string[];
-    readonly notes: readonly string[];
-  }[] = [
-    {
+  const approximate = sum(column(shown, 'approximateTurns', n));
+  const chips: ChipView[] = [];
+  if (totalTokens > 0 && unpriced > 0) {
+    chips.push({
       key: 'unpriced',
-      count: sum(answers.map(answer => answer.unpricedTurns)),
-      words: 'unpriced',
-      runs: unpricedRuns,
-      parts: unpricedParts,
-      notes: loaded.sources
-        .filter(source => source.usage.unpricedTurns > 0 && !source.usage.unpricedItemised)
-        .map(source => `${machineName(source.host)}: ${NO_BREAKDOWN}`),
-    },
-    {
-      key: 'untimed',
-      count: sum(answers.map(answer => answer.untimedTurns)),
-      words: 'untimed',
-      runs: [],
-      parts: [],
-      notes: [],
-    },
-    {
-      key: 'not-counted',
-      count: notCounted,
-      words: notCounted === 1 ? 'run not counted' : 'runs not counted',
-      runs: missing,
-      parts: leftOut.map(source => `${projectName(source.project)}: ${source.leftOut}`),
-      notes: [],
-    },
-    {
-      key: 'unreachable',
-      count: loaded.unreachable,
-      words: 'unreachable',
-      runs: [],
-      parts: [],
-      notes: [],
-    },
-    {
-      key: 'unsupported',
-      count: loaded.unsupported,
-      words: 'unsupported',
-      runs: [],
-      parts: [],
-      notes: [],
-    },
-  ];
-  return counted
-    .filter(each => each.count > 0)
-    .map(({key, count, words, runs: of, parts, notes}) => ({
-      key,
-      label: `${count} ${words}`,
-      runs: of,
-      parts,
-      notes,
-    }));
+      label: `${percent(unpriced / totalTokens)} unpriced`,
+      hint: unpricedModels.map(key => key.split('\u0000').join(' ')).join('\n') || null,
+      tone: 'warn',
+    });
+  }
+  if (approximate > 0) {
+    chips.push({
+      key: 'approximate',
+      label: `${turnsWords(approximate)} approximate`,
+      hint: null,
+      tone: 'warn',
+    });
+  }
+  const stale = options.pricing.find(each => each.status !== 'fresh');
+  if (stale !== undefined) {
+    chips.push({
+      key: 'rates',
+      label:
+        stale.checkedOn === ''
+          ? `${stale.status === 'bundled' ? 'Bundled' : 'Cached'} prices`
+          : `Prices of ${stale.checkedOn}`,
+      hint:
+        stale.status === 'bundled'
+          ? 'The prices that came with this version, not a fresh list'
+          : 'The last price list fetched, not a fresh one',
+      tone: 'neutral',
+    });
+  }
+  if (options.unreadablePrices) {
+    chips.push({key: 'prices', label: 'Prices unreadable', hint: null, tone: 'warn'});
+  }
+  if (options.olderRunsUnread) {
+    chips.push({
+      key: 'older',
+      label: 'Older runs unread',
+      hint: 'More projects than one question can name: only the runs a host has indexed are read',
+      tone: 'neutral',
+    });
+  }
+  if (merged.foldedSeries > 0) {
+    chips.push({
+      key: 'folded',
+      label: `${merged.foldedSeries} folded`,
+      hint: null,
+      tone: 'neutral',
+    });
+  }
+  return chips;
 }
 
-/** The page's figures for what the projects answered. */
-export function usageView(loaded: UsageLoaded): UsageView {
-  const answers = loaded.sources.map(source => source.usage);
-  const runs = runRows(loaded.sources);
-  const agents = agentRows(loaded);
+/** The sessions the figure is over: runs, a person's own sessions, or both. */
+function sessionCount(merged: Merged, source: UsageSourceChoice): number {
+  if (source === 'run') return merged.distinct.runs;
+  if (source === 'outside') return merged.distinct.sessions;
+  return merged.distinct.runs + merged.distinct.sessions;
+}
+
+/** The view of `merged` under `filters`; `names` and `pricing` word what the hosts only name. */
+export function usageView(
+  merged: Merged,
+  filters: ViewFilters,
+  options: {
+    readonly names: readonly ModelName[];
+    readonly edges: PeriodEdges;
+    readonly pricing: readonly UsagePricingEntry[];
+    readonly unreadablePrices: boolean;
+    readonly olderRunsUnread: boolean;
+    readonly overridden: ReadonlySet<string>;
+  },
+): UsageView {
+  const {names, edges} = options;
+  const buckets = merged.buckets;
+  const palette = new Map(providersOf(merged).map((provider, at) => [provider, at % PALETTE]));
+  const shown = merged.series.filter(
+    each =>
+      (filters.source === 'all' || each.origin === filters.source) &&
+      !filters.hidden.has(each.provider),
+  );
+  const cut: Cut = {merged, filters, names, buckets, shown, palette};
+  const totalCost = sum(column(shown, 'estimateUsd', buckets));
+  const totalTokens = sum(volumeOf(shown, buckets));
+  const models = modelRows(cut, options.overridden);
+  const newBests = filters.source === 'outside' ? 0 : sum(merged.bests);
+  const runSpend = sum(
+    shown.filter(each => each.origin === 'run').map(each => sum(each.values.estimateUsd)),
+  );
+  const outsideCost = sum(
+    shown.filter(each => each.origin === 'outside').map(each => sum(each.values.estimateUsd)),
+  );
+  const otherRuns =
+    filters.source === 'outside' ? 0 : visibleCost(filters.hidden, merged.runsOther);
+  const sessions = sessionCount(merged, filters.source);
   return {
-    empty: sum(answers.map(answer => answer.turns)) === 0,
-    tiles: tiles(loaded),
-    runs,
-    agents,
-    agentsOmitted: sum(answers.map(answer => answer.agentsOmitted)),
-    status: status(loaded, runs, agents),
+    empty: shown.length === 0 || (totalCost === 0 && totalTokens === 0),
+    tab: filters.tab,
+    hero: {
+      figure: filters.tab === 'cost' ? dollars(totalCost) : tokens(totalTokens),
+      caption: `${sessions} ${sessions === 1 ? 'session' : 'sessions'} · ${filters.tab === 'cost' ? 'API estimate' : 'Processed'}`,
+    },
+    chips: chipRows(
+      cut,
+      totalTokens,
+      models.filter(each => each.unpricedTokens > 0).map(each => each.key),
+      options,
+    ),
+    providers: providerRows(cut, byTab(filters.tab, totalCost, totalTokens)),
+    chart: {
+      unit: filters.tab === 'cost' ? 'US dollars' : 'tokens',
+      labels: Array.from({length: buckets}, (_, at) => bucketLabel(edges, at)),
+      layers: chartLayers(cut),
+    },
+    tiles: tileRows(cut, totalTokens),
+    costByKind: costKindParts(cut),
+    bySpeed: speedParts(cut, totalCost),
+    tokensByKind: tokenKindParts(cut),
+    models,
+    times: timeRows(
+      cut,
+      Array.from({length: buckets}, (_, at) => bucketLabel(edges, at)),
+    ),
+    runs: runRows(cut),
+    runsOther: otherRuns > 0 ? dollars(otherRuns) : null,
+    outside: filters.source !== 'run' && outsideCost > 0 ? dollars(outsideCost) : null,
+    agents: agentRows(cut),
+    perNewBest: newBests === 0 ? null : dollars(runSpend / newBests),
+    newBests,
+    perHourNow: dollars(visibleCost(filters.hidden, merged.recent)),
+    unpricedModels: models.filter(each => each.unpricedTokens > 0).map(each => each.key),
   };
+}
+
+/** What a host is called in the host filter. */
+export function hostName(host: string): string {
+  return hostLabel(hostFromKey(host));
 }

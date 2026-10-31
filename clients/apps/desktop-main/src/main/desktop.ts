@@ -51,6 +51,9 @@ export interface DesktopDeps {
     | 'runDigests'
     | 'projectRuns'
     | 'usageWindow'
+    | 'usageSummary'
+    | 'usageRatesRefresh'
+    | 'usagePricesSave'
     | 'logs'
     | 'recent'
     | 'releaseLogs'
@@ -260,6 +263,44 @@ export class Desktop {
     return this.#deps.welcome.snapshot({recent: welcomeRecent(recent), skippedRecent: skipped});
   }
 
+  /** Answer one of the Usage page's questions. */
+  #answerUsage(
+    request: Extract<
+      WelcomeRequest,
+      {
+        readonly kind:
+          | 'usage-window'
+          | 'usage-summary'
+          | 'usage-rates-refresh'
+          | 'usage-prices-save';
+      }
+    >,
+  ): Promise<unknown> {
+    const {hosts} = this.#deps;
+    switch (request.kind) {
+      case 'usage-window':
+        return hosts.usageWindow(
+          request.host,
+          request.project,
+          request.runIds,
+          request.since,
+          request.until,
+        );
+
+      case 'usage-summary':
+        return hosts.usageSummary(request.host, request.projects, request.edges, request.now);
+      case 'usage-rates-refresh':
+        return hosts.usageRatesRefresh(request.host, request.force, request.now);
+      case 'usage-prices-save':
+        return hosts.usagePricesSave(
+          request.host,
+          request.baseRevision,
+          request.overrides,
+          request.aliases,
+        );
+    }
+  }
+
   /** Answer one validated surface request. */
   async #answer(request: WelcomeRequest, rendererGeneration: string): Promise<unknown> {
     const {hosts, runs} = this.#deps;
@@ -329,13 +370,10 @@ export class Desktop {
       case 'cancel-project-runs':
         return this.#listing(request, rendererGeneration);
       case 'usage-window':
-        return hosts.usageWindow(
-          request.host,
-          request.project,
-          request.runIds,
-          request.since,
-          request.until,
-        );
+      case 'usage-summary':
+      case 'usage-rates-refresh':
+      case 'usage-prices-save':
+        return this.#answerUsage(request);
       case 'release-run':
         this.#deps.window.releaseSurfaceRun();
         return null;

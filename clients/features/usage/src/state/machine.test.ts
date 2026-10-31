@@ -1,140 +1,255 @@
 import {describe, expect, test} from 'bun:test';
-import {checkMachine} from '@vibesys/machine/testing';
-import {createActor, fromPromise, getInitialSnapshot, getNextSnapshot} from 'xstate';
-import {type UsageOutcome, usageMachine} from './machine.js';
-import type {UsageLoaded} from './usage-view.js';
-import type {WindowClock} from './window.js';
+import {clockFrom} from '@vibesys/machine';
+import {Seeded} from '@vibesys/store/testing';
+import {FakeClock} from '@vibesys/transport/testing';
+import {createActor, fromPromise} from 'xstate';
+import type {periodEdges} from './edges.js';
+import {
+  hostsDue,
+  pendingWork,
+  type ReadAnswer,
+  type SaveRequest,
+  type SaveResult,
+  USAGE_REFRESH_MS,
+  usageMachine,
+} from './machine.js';
+import {repliesFor} from './testing/generate.js';
 
-const CLOCK: WindowClock = {now: 10_000_000_000, midnight: 9_990_000_000};
-const LATER: WindowClock = {now: 10_000_060_000, midnight: 9_990_000_000};
-const INPUT = {window: 'week', clock: CLOCK} as const;
+const NOW = Date.UTC(2026, 9, 30, 15, 0, 0);
+const CLOCK = {now: NOW, zone: 'UTC'};
 
-const EMPTY: UsageLoaded = {
-  sources: [],
-  names: [],
-  unreachable: 0,
-  unsupported: 0,
+interface Pending<T> {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
+  readonly reject: (error: Error) => void;
+}
+
+function deferred<T>(): Pending<T> {
+  let resolve: (value: T) => void = () => undefined;
+  let reject: (error: Error) => void = () => undefined;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return {promise, resolve, reject};
+}
+
+const answer = (pendingRuns = 0, refreshDue = false): ReadAnswer => {
+  const replies = repliesFor(new Seeded(11), 7, 1).map(reply => ({
+    ...reply,
+    summary: {
+      ...reply.summary,
+      pendingRuns,
+      pricing: {...reply.summary.pricing, refreshDue},
+    },
+  }));
+  return {
+    replies,
+    unreachable: [],
+    unsupported: [],
+    connecting: [],
+    names: [],
+    olderRunsUnread: false,
+  };
 };
-const USAGE: UsageOutcome = {kind: 'usage', loaded: EMPTY};
 
-function started() {
-  return getInitialSnapshot(usageMachine, INPUT);
+/** A machine whose questions are the test's to answer, one at a time. */
+function harness() {
+  const reads: {edges: ReturnType<typeof periodEdges>; reply: Pending<ReadAnswer>}[] = [];
+  const saves: Pending<readonly SaveResult[]>[] = [];
+  const refreshes: Pending<null>[] = [];
+  const time = new FakeClock();
+  const actor = createActor(
+    usageMachine.provide({
+      actors: {
+        read: fromPromise(({input}) => {
+          const reply = deferred<ReadAnswer>();
+          reads.push({edges: input.edges, reply});
+          return reply.promise;
+        }),
+        save: fromPromise(({input}: {input: SaveRequest}) => {
+          void input;
+          const reply = deferred<readonly SaveResult[]>();
+          saves.push(reply);
+          return reply.promise;
+        }),
+        refreshRates: fromPromise(() => {
+          const reply = deferred<null>();
+          refreshes.push(reply);
+          return reply.promise;
+        }),
+      },
+    }),
+    {input: {period: '7d', clock: CLOCK}, clock: clockFrom(time.schedule)},
+  );
+  actor.start();
+  const phase = (): string => String(actor.getSnapshot().value);
+  const flush = async (): Promise<void> => {
+    for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+  };
+  return {actor, reads, saves, refreshes, time, phase, flush};
 }
 
 describe('usageMachine', () => {
-  test('it asks for the window at once, and an answer shows its figures', () => {
-    const asking = started();
-    expect(asking.value).toBe('loading');
-    expect(asking.context.span).toEqual({since: CLOCK.now - 7 * 24 * 3_600_000, until: CLOCK.now});
-    expect(asking.context.view).toBeNull();
+  test('asks once on start, and shows what came back', async () => {
+    const {actor, reads, phase, flush} = harness();
+    expect(phase()).toBe('loading');
+    expect(reads).toHaveLength(1);
+    reads[0]?.reply.resolve(answer());
+    await flush();
+    expect(phase()).toBe('ready');
+    expect(actor.getSnapshot().context.answer?.replies).toHaveLength(1);
   });
 
-  test('choosing a window asks again over that window and forgets the figures of the last', () => {
-    const shown = getNextSnapshot(usageMachine, started(), {
-      type: 'xstate.done.actor.load',
-      output: USAGE,
-    } as never);
-    expect(shown.value).toBe('ready');
-    expect(shown.context.view).not.toBeNull();
-    const chosen = getNextSnapshot(usageMachine, shown, {
-      type: 'choose',
-      window: 'today',
-      clock: LATER,
+  test('a host with work left keeps the page scanning until it has none', async () => {
+    const {reads, phase, flush} = harness();
+    reads[0]?.reply.resolve(answer(5));
+    await flush();
+    expect(phase()).toBe('scanning');
+    expect(reads).toHaveLength(2);
+    reads[1]?.reply.resolve(answer(2));
+    await flush();
+    expect(phase()).toBe('scanning');
+    reads[2]?.reply.resolve(answer(0));
+    await flush();
+    expect(phase()).toBe('ready');
+    expect(pendingWork(answer(0))).toBe(false);
+  });
+
+  test('another period forgets the figures and ignores a late answer for the one left', async () => {
+    const {actor, reads, phase, flush} = harness();
+    actor.send({type: 'period', period: '24h', clock: CLOCK});
+    expect(phase()).toBe('loading');
+    expect(actor.getSnapshot().context.answer).toBeNull();
+    expect(reads).toHaveLength(2);
+    expect(reads[1]?.edges.edges).toHaveLength(25);
+    // The week's answer arrives after the day was chosen.
+    reads[0]?.reply.resolve(answer());
+    await flush();
+    expect(phase()).toBe('loading');
+    expect(actor.getSnapshot().context.answer).toBeNull();
+    reads[1]?.reply.resolve(answer());
+    await flush();
+    expect(phase()).toBe('ready');
+    expect(actor.getSnapshot().context.period).toBe('24h');
+  });
+
+  test('a failed first question fails the page; asking again with nothing shown fails it again, not Ready', async () => {
+    const {actor, reads, phase, flush} = harness();
+    reads[0]?.reply.reject(new Error('nothing could be read'));
+    await flush();
+    expect(phase()).toBe('failed');
+    expect(actor.getSnapshot().context.problem).toBe('nothing could be read');
+    actor.send({type: 'refresh', clock: CLOCK});
+    expect(phase()).toBe('refreshing');
+    reads[1]?.reply.reject(new Error('still down'));
+    await flush();
+    expect(phase()).toBe('failed');
+    expect(actor.getSnapshot().context.problem).toBe('still down');
+  });
+
+  test('a failed question with figures shown keeps them and says why', async () => {
+    const {actor, reads, phase, flush} = harness();
+    reads[0]?.reply.resolve(answer());
+    await flush();
+    const shown = actor.getSnapshot().context.answer;
+    actor.send({type: 'refresh', clock: CLOCK});
+    reads[1]?.reply.reject(new Error('timed out'));
+    await flush();
+    expect(phase()).toBe('ready');
+    expect(actor.getSnapshot().context.answer).toBe(shown);
+    expect(actor.getSnapshot().context.problem).toBe('timed out');
+  });
+
+  test('a shown page asks again after a minute, and a question nobody answers fails at its deadline', async () => {
+    const {reads, phase, flush, time} = harness();
+    reads[0]?.reply.resolve(answer());
+    await flush();
+    expect(phase()).toBe('ready');
+    time.advanceBy(USAGE_REFRESH_MS);
+    await flush();
+    expect(phase()).toBe('refreshing');
+    expect(reads).toHaveLength(2);
+    time.advanceBy(60_000);
+    await flush();
+    // Figures were held, so the page stays readable.
+    expect(phase()).toBe('ready');
+  });
+
+  test('a host whose prices are due is asked to fetch them once a visit, then the figures are read again', async () => {
+    const {actor, reads, refreshes, phase, flush} = harness();
+    reads[0]?.reply.resolve(answer(0, true));
+    await flush();
+    expect(phase()).toBe('rating');
+    expect(refreshes).toHaveLength(1);
+    refreshes[0]?.resolve(null);
+    await flush();
+    expect(phase()).toBe('refreshing');
+    // The host still says a fetch is due (it could not fetch): it is not asked again this visit.
+    reads[1]?.reply.resolve(answer(0, true));
+    await flush();
+    expect(phase()).toBe('ready');
+    expect(refreshes).toHaveLength(1);
+    expect(hostsDue(actor.getSnapshot().context)).toEqual([]);
+  });
+
+  test('the tab, source and hidden providers filter without asking, and a machine switched off asks again', async () => {
+    const {actor, reads, flush} = harness();
+    reads[0]?.reply.resolve(answer());
+    await flush();
+    actor.send({type: 'tab', tab: 'tokens'});
+    actor.send({type: 'source', source: 'outside'});
+    actor.send({type: 'provider', provider: 'claude'});
+    actor.send({type: 'provider', provider: 'claude'});
+    expect(actor.getSnapshot().context).toMatchObject({
+      tab: 'tokens',
+      source: 'outside',
+      hidden: [],
     });
-    expect(chosen.value).toBe('loading');
-    expect(chosen.context.window).toBe('today');
-    expect(chosen.context.span).toEqual({since: CLOCK.midnight, until: LATER.now});
-    expect(chosen.context.view).toBeNull();
+    expect(reads).toHaveLength(1);
+    actor.send({type: 'host', host: 'local'});
+    expect(reads).toHaveLength(2);
+    expect(actor.getSnapshot().context.hostsOff).toEqual(['local']);
   });
 
-  test('a refresh asks again over the same window and keeps the figures until the new ones come', () => {
-    const shown = getNextSnapshot(usageMachine, started(), {
-      type: 'xstate.done.actor.load',
-      output: USAGE,
-    } as never);
-    const again = getNextSnapshot(usageMachine, shown, {type: 'refresh', clock: LATER});
-    expect(again.value).toBe('loading');
-    expect(again.context.window).toBe('week');
-    expect(again.context.span.until).toBe(LATER.now);
-    expect(again.context.view).toBe(shown.context.view);
-  });
-
-  test('an answer that every machine cannot give is unsupported, a failure is a problem', () => {
-    const unsupported = getNextSnapshot(usageMachine, started(), {
-      type: 'xstate.done.actor.load',
-      output: {kind: 'unsupported'},
-    } as never);
-    expect(unsupported.value).toBe('unsupported');
-    expect(unsupported.context.view).toBeNull();
-    const failed = getNextSnapshot(usageMachine, started(), {
-      type: 'xstate.error.actor.load',
-      error: new Error('host-a is unreachable'),
-    } as never);
-    expect({value: failed.value, problem: failed.context.problem}).toEqual({
-      value: 'failed',
-      problem: 'host-a is unreachable',
+  test('saving records each destination’s result, then reads the figures again', async () => {
+    const {actor, reads, saves, phase, flush} = harness();
+    reads[0]?.reply.resolve(answer());
+    await flush();
+    actor.send({
+      type: 'prices',
+      key: 'claude\u0000model-a',
+      draft: {
+        model: 'model-a',
+        rate: {input: '1', output: '2', cacheRead: '', cacheWrite: ''},
+        automatic: false,
+        mapTo: '',
+      },
+      apply: ['local'],
     });
-  });
-
-  test('the deadline gives up on a question nobody answers', () => {
-    const timedOut = getNextSnapshot(usageMachine, started(), {
-      type: 'xstate.after.deadline.usage.loading',
-    } as never);
-    expect({value: timedOut.value, problem: timedOut.context.problem}).toEqual({
-      value: 'failed',
-      problem: 'timed out',
-    });
-  });
-
-  test('a late answer for a window the user left never shows', async () => {
-    const answers: ((outcome: UsageOutcome) => void)[] = [];
-    const actor = createActor(
-      usageMachine.provide({
-        actors: {
-          load: fromPromise(() => new Promise<UsageOutcome>(resolve => answers.push(resolve))),
+    actor.send({
+      type: 'save',
+      request: {
+        draft: {
+          model: 'model-a',
+          rate: {input: '1', output: '2', cacheRead: '', cacheWrite: ''},
+          automatic: false,
+          mapTo: '',
         },
-      }),
-      {input: INPUT},
-    );
-    actor.start();
-    actor.send({type: 'choose', window: 'today', clock: LATER});
-    expect(answers).toHaveLength(2);
-    // The first question's answer comes after the second was asked.
-    answers[0]?.({kind: 'unsupported'});
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(actor.getSnapshot().value).toBe('loading');
-    answers[1]?.(USAGE);
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(actor.getSnapshot().value).toBe('ready');
-    expect(actor.getSnapshot().context.window).toBe('today');
-    actor.stop();
-  });
-
-  test('model: a question and its deadline live only while loading', () => {
-    checkMachine({
-      machine: usageMachine,
-      input: INPUT,
-      event: (random, live) =>
-        random.pick([
-          {
-            type: 'choose' as const,
-            window: random.pick(['today', 'week', 'fortnight'] as const),
-            clock: LATER,
-          },
-          {type: 'refresh' as const, clock: LATER},
-          ...live.operations.map(operation => live.done(operation, USAGE)),
-          ...live.operations.map(operation => live.done(operation, {kind: 'unsupported'})),
-          ...live.operations.map(operation => live.error(operation, new Error('failed'))),
-          ...live.delays.map(delay => live.fire(delay)),
-        ]),
-      invariants: snapshot =>
-        snapshot.value === 'ready' && snapshot.context.view === null
-          ? ['ready without figures']
-          : snapshot.value === 'unsupported' && snapshot.context.view !== null
-            ? ['unsupported with figures']
-            : [],
+        destinations: [{host: 'local', book: {revision: 0, overrides: [], aliases: []}}],
+      },
     });
+    expect(phase()).toBe('saving');
+    saves[0]?.resolve([{host: 'local', outcome: 'failed', reason: 'down'}]);
+    await flush();
+    expect(phase()).toBe('refreshing');
+    const dialog = actor.getSnapshot().context.dialog;
+    expect(dialog?.kind === 'prices' ? dialog.results : null).toEqual([
+      {host: 'local', outcome: 'failed', reason: 'down'},
+    ]);
+    // Editing the draft clears the results, which belonged to the one before.
+    if (dialog?.kind === 'prices') actor.send({type: 'edit', draft: {...dialog.draft, mapTo: 'x'}});
+    const edited = actor.getSnapshot().context.dialog;
+    expect(edited?.kind === 'prices' ? edited.results : null).toEqual([]);
   });
 });

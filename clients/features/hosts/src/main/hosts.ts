@@ -15,6 +15,7 @@ import {
   type RegistryRunReads,
   type RegistrySavedRuns,
   type RegistrySetup,
+  type RegistryUsage,
   type Subscriptions,
 } from '@vibesys/connection';
 import {
@@ -36,7 +37,13 @@ import {
   inspectionReply,
   type ListedRun,
   type RunDigestsReply,
+  type UsageAliasEntry,
+  type UsagePricesOutcome,
+  type UsageRateOverrideEntry,
+  type UsageRatesOutcome,
+  type UsageSummaryOutcome,
   type UsageWindowOutcome,
+  usageSummaryRefusal,
   usageWindowRefusal,
   validHostPath,
 } from '@vibesys/hosts';
@@ -108,6 +115,8 @@ export interface HostsDeps {
   readonly savedRuns?: RegistrySavedRuns;
   /** Digests and the usage window, read through the gateway. */
   readonly runReads?: RegistryRunReads;
+  /** The Usage page's summary, price refresh and price book, through the gateway. */
+  readonly usage?: RegistryUsage;
   readonly catalog?: RegistryRunCatalog;
 }
 
@@ -613,6 +622,59 @@ export class Hosts {
   }
 
   /**
+   * What `id` made of its usage in each of `projects` over the buckets between `edges`
+   * (milliseconds, whole quarter hours); `unsupported` when the host's VibeSys does not offer it.
+   * A question the host would refuse (see `usageSummaryRefusal`) is a mistake of the caller and
+   * throws before any request.
+   */
+  async usageSummary(
+    id: HostId,
+    projects: readonly string[],
+    edges: readonly number[],
+    now: number,
+  ): Promise<UsageSummaryOutcome> {
+    const refusal = usageSummaryRefusal(projects, edges);
+    if (refusal !== null) throw new Error(refusal);
+    try {
+      return await this.#usage().summary(id, projects, edges, now, new AbortController().signal);
+    } catch (error) {
+      if (isHostUnsupported(error)) return {kind: 'unsupported'};
+      throw plain(error, 'Could not read the usage');
+    }
+  }
+
+  /** Ask `id` to fetch its price list if one is due; `force` fetches even a list under a day old. */
+  async usageRatesRefresh(id: HostId, force: boolean, now: number): Promise<UsageRatesOutcome> {
+    try {
+      return await this.#usage().refreshRates(id, force, now, new AbortController().signal);
+    } catch (error) {
+      if (isHostUnsupported(error)) return {kind: 'unsupported'};
+      throw plain(error, 'Could not refresh the prices');
+    }
+  }
+
+  /** Replace the prices a person set on `id`, edited from the book at `baseRevision`. */
+  async usagePricesSave(
+    id: HostId,
+    baseRevision: number,
+    overrides: readonly UsageRateOverrideEntry[],
+    aliases: readonly UsageAliasEntry[],
+  ): Promise<UsagePricesOutcome> {
+    try {
+      return await this.#usage().savePrices(
+        id,
+        baseRevision,
+        overrides,
+        aliases,
+        new AbortController().signal,
+      );
+    } catch (error) {
+      if (isHostUnsupported(error)) return {kind: 'unsupported'};
+      throw plain(error, 'Could not save the prices');
+    }
+  }
+
+  /**
    * Every run of `project` on `id`, newest first (`runs.list`); a digest is asked for separately.
    * The listing runs until `listing` is cancelled (`cancelProjectRuns`, or its owner going away),
    * which stops the host's scan and rejects the call.
@@ -1046,6 +1108,12 @@ export class Hosts {
     const reads = this.#deps.runReads;
     if (reads === undefined) throw new Error('run reads registry is missing');
     return reads;
+  }
+
+  #usage(): RegistryUsage {
+    const usage = this.#deps.usage;
+    if (usage === undefined) throw new Error('usage registry is missing');
+    return usage;
   }
 
   #catalog(): RegistryRunCatalog {

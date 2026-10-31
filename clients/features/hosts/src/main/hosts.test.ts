@@ -4,6 +4,7 @@ import {
   type ConnectionLease,
   ConnectionManager,
   type RegistryRunReads,
+  type RegistryUsage,
   registrySetup,
   SUBSCRIPTION_LINGER_MS,
 } from '@vibesys/connection';
@@ -22,6 +23,7 @@ import {
   type HostKey,
   type HostListing,
   hostKey,
+  usageSummaryRefusal,
   usageWindowRefusal,
 } from '@vibesys/hosts';
 import {FailureCategory, OperationFailed, RunLiveness} from '@vibesys/proto';
@@ -1169,6 +1171,127 @@ describe('Hosts.usageWindow', () => {
       ),
       {numRuns: 80, seed: 4313},
     );
+  });
+});
+
+/** The usage registry of a host: what it was asked, and the failure it answers with. */
+class FakeUsage implements RegistryUsage {
+  readonly summaries: {projects: readonly string[]; edges: readonly number[]; now: number}[] = [];
+  readonly refreshes: {force: boolean}[] = [];
+  readonly saves: {baseRevision: number}[] = [];
+  failure: Error | null = null;
+
+  async summary(_host: HostId, projects: readonly string[], edges: readonly number[], now: number) {
+    this.summaries.push({projects, edges, now});
+    if (this.failure !== null) throw this.failure;
+    return {kind: 'unsupported' as const};
+  }
+
+  async refreshRates(_host: HostId, force: boolean) {
+    this.refreshes.push({force});
+    if (this.failure !== null) throw this.failure;
+    return {kind: 'unsupported' as const};
+  }
+
+  async savePrices(_host: HostId, baseRevision: number) {
+    this.saves.push({baseRevision});
+    if (this.failure !== null) throw this.failure;
+    return {kind: 'unsupported' as const};
+  }
+}
+
+function usageSubject() {
+  const usage = new FakeUsage();
+  const manager = new ConnectionManager({
+    linkFor: () => {
+      throw new Error('helper unavailable; gateway still available');
+    },
+    appVersion: 'test',
+    scheduleTimeout: new FakeClock().scheduleTimeout,
+    log: () => {},
+  });
+  const settings = new SettingsStore({
+    settingsPath: '/settings/hosts.json',
+    recentPath: '/settings/recent.json',
+    preferencesPath: '/settings/preferences.json',
+    filesystem: new FakeSettingsFilesystem(),
+    log: () => {},
+  });
+  const hosts = hostsInWorld({
+    manager,
+    settings,
+    localCheckout: '/bundled',
+    sshConfigPath: '/missing',
+    usage,
+    log: () => {},
+    push: () => {},
+    retire: () => {},
+  });
+  return {hosts, usage, manager};
+}
+
+describe('Hosts usage reads', () => {
+  const QUARTER = 900_000;
+
+  test('a summary asks the registered read and a refused question never leaves', async () => {
+    const {hosts, usage, manager} = usageSubject();
+    await using _manager = manager;
+
+    await hosts.usageSummary(LOCAL, ['/srv/project'], [0, QUARTER], 7);
+    expect(usage.summaries).toEqual([{projects: ['/srv/project'], edges: [0, QUARTER], now: 7}]);
+
+    const tooMany = Array.from({length: 65}, (_, at) => `/p/${at}`);
+    await expect(hosts.usageSummary(LOCAL, tooMany, [0, QUARTER], 7)).rejects.toThrow('at most');
+    await expect(hosts.usageSummary(LOCAL, ['/p'], [QUARTER, 0], 7)).rejects.toThrow('increase');
+    expect(usage.summaries).toHaveLength(1);
+    // No project named: the host counts every run it indexed, so the question is asked.
+    await hosts.usageSummary(LOCAL, [], [0, QUARTER], 7);
+    expect(usage.summaries).toHaveLength(2);
+  });
+
+  test('property: a question is asked exactly when the host would accept it', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.string({minLength: 1, maxLength: 8}), {maxLength: 70}),
+        fc.array(fc.integer({min: -3, max: 120}), {maxLength: 105}),
+        async (projects, marks) => {
+          const {hosts, usage, manager} = usageSubject();
+          await using _manager = manager;
+          const edges = marks.map(mark => mark * QUARTER);
+          const refused = usageSummaryRefusal(projects, edges) !== null;
+
+          const asked = hosts.usageSummary(LOCAL, projects, edges, 1);
+
+          if (refused) await expect(asked).rejects.toThrow();
+          else await asked;
+          expect(usage.summaries).toHaveLength(refused ? 0 : 1);
+          const increasing = edges.every((edge, at) => at === 0 || (edges[at - 1] ?? 0) < edge);
+          expect(refused).toBe(
+            projects.length > 64 ||
+              edges.length < 2 ||
+              edges.length > 100 ||
+              !increasing ||
+              edges.some(edge => edge < 0),
+          );
+        },
+      ),
+      {numRuns: 80, seed: 3544},
+    );
+  });
+
+  test('a host without the reads answers typed unsupported outcomes, any other failure is plain', async () => {
+    const {hosts, usage, manager} = usageSubject();
+    await using _manager = manager;
+    usage.failure = new OperationFailed(FailureCategory.UNSUPPORTED, 'older checkout');
+
+    await expect(hosts.usageSummary(LOCAL, ['/p'], [0, QUARTER], 1)).resolves.toEqual({
+      kind: 'unsupported',
+    });
+    await expect(hosts.usageRatesRefresh(LOCAL, false, 1)).resolves.toEqual({kind: 'unsupported'});
+    await expect(hosts.usagePricesSave(LOCAL, 0, [], [])).resolves.toEqual({kind: 'unsupported'});
+
+    usage.failure = new Error('the host fell over');
+    await expect(hosts.usagePricesSave(LOCAL, 0, [], [])).rejects.toThrow();
   });
 });
 

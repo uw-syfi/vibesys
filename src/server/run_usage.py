@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final, Literal
 
@@ -34,6 +35,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, JsonValue, TypeAdapte
 
 from server.host_run_summary import (
     ModelUsage,
+    RateLimitReading,
     RecordedCostBasis,
     TokenTally,
     UsageRecord,
@@ -45,7 +47,9 @@ if TYPE_CHECKING:
 
 _TIMESTAMP: Final[TypeAdapter[AwareDatetime]] = TypeAdapter(AwareDatetime)
 
-USAGE_EVENTS: Final = frozenset({"agent_execution_started", "turn_usage_recorded"})
+USAGE_EVENTS: Final = frozenset(
+    {"agent_execution_started", "turn_usage_recorded", "rate_limit_update"}
+)
 """The event types ``UsageFold`` reads."""
 
 
@@ -70,13 +74,28 @@ class UsageFold:
 
     _starts: dict[str, ExecutionStart] = field(default_factory=dict)
     _records: list[UsageRecord] = field(default_factory=list)
+    _limits: dict[tuple[str | None, str | None, str | None], RateLimitReading] = field(
+        default_factory=dict
+    )
 
     @classmethod
     def from_state(
-        cls, starts: Iterable[ExecutionStart], records: Iterable[UsageRecord]
+        cls,
+        starts: Iterable[ExecutionStart],
+        records: Iterable[UsageRecord],
+        limits: Iterable[RateLimitReading] = (),
     ) -> UsageFold:
-        """A fold that has folded what ``starts`` and ``records`` hold."""
-        return cls({start.execution_id: start for start in starts}, list(records))
+        """A fold that has folded what ``starts``, ``records`` and ``limits`` hold."""
+        return cls(
+            {start.execution_id: start for start in starts},
+            list(records),
+            {_window(reading): reading for reading in limits},
+        )
+
+    @property
+    def limits(self) -> tuple[RateLimitReading, ...]:
+        """The latest reading of each limit window, in the order the windows were first seen."""
+        return tuple(self._limits.values())
 
     @property
     def starts(self) -> tuple[ExecutionStart, ...]:
@@ -111,7 +130,29 @@ class UsageFold:
             record = self._record(event, data)
             self._records.append(record)
             return record
+        elif kind == "rate_limit_update" and data.get("kind") == "rate_limit_update":
+            self._limit(event, data)
         return None
+
+    def _limit(self, event: Mapping[str, JsonValue], data: dict[str, JsonValue]) -> None:
+        """Keep the reading as the latest of its window; one with no readable time is not kept."""
+        observed_at = _time(event.get("timestamp"))
+        exhausted = data.get("exhausted")
+        if observed_at is None or not isinstance(exhausted, bool):
+            return
+        execution_id = _text(event.get("execution_id"))
+        start = self._starts.get(execution_id) if execution_id is not None else None
+        reading = RateLimitReading(
+            provider=_text(data.get("provider")) or (None if start is None else start.harness),
+            window=_text(data.get("window")),
+            limit=_text(data.get("limit")),
+            used_fraction=_fraction(data.get("used_fraction")),
+            resets_at=_epoch(data.get("resets_at")),
+            window_minutes=_minutes(data.get("window_minutes")),
+            exhausted=exhausted,
+            observed_at=observed_at,
+        )
+        self._limits[_window(reading)] = reading
 
     def _record(self, event: Mapping[str, JsonValue], data: dict[str, JsonValue]) -> UsageRecord:
         execution_id = _text(event.get("execution_id"))
@@ -142,6 +183,11 @@ class UsageFold:
             by_model=_rows(data.get("by_model")),
             provider_session_id=_text(data.get("provider_session_id")),
         )
+
+
+def _window(reading: RateLimitReading) -> tuple[str | None, str | None, str | None]:
+    """The identity of the window a reading describes: the latest reading of it replaces earlier ones."""
+    return reading.provider, reading.limit, reading.window
 
 
 def usage_records(events: Iterable[Mapping[str, JsonValue]]) -> list[UsageRecord]:
@@ -366,6 +412,26 @@ def _cost(value: JsonValue) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return float(value) if math.isfinite(value) and value >= 0 else None
+
+
+def _fraction(value: JsonValue) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if math.isfinite(value) and value >= 0 else None
+
+
+def _minutes(value: JsonValue) -> int | None:
+    return value if type(value) is int and value > 0 else None
+
+
+def _epoch(value: JsonValue) -> AwareDatetime | None:
+    """A time given as epoch seconds; ``None`` for one that is not a time of day."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    try:
+        return datetime.fromtimestamp(value, UTC)
+    except (OverflowError, OSError, ValueError):
+        return None
 
 
 def _time(value: JsonValue) -> AwareDatetime | None:

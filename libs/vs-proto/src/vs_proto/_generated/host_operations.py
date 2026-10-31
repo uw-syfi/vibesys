@@ -278,6 +278,56 @@ def accept_usage_window(request: pb.UsageWindowRequest) -> AcceptedRequest[pb.Us
     return UsageWindow.accept(request)
 
 
+UsageSummary = Operation(
+    "UsageSummary",
+    44,
+    44,
+    44,
+    25000,
+    5000,
+    1,
+    2,
+    1,
+    1,
+    None,
+    None,
+    pb.UsageSummaryRequest,
+    pb.UsageSummaryResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_usage_summary(
+    request: pb.UsageSummaryRequest,
+) -> AcceptedRequest[pb.UsageSummaryRequest]:
+    return UsageSummary.accept(request)
+
+
+UsageRatesRefresh = Operation(
+    "UsageRatesRefresh",
+    45,
+    45,
+    45,
+    60000,
+    5000,
+    1,
+    2,
+    1,
+    1,
+    None,
+    None,
+    pb.UsageRatesRefreshRequest,
+    pb.UsageRatesRefreshResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_usage_rates_refresh(
+    request: pb.UsageRatesRefreshRequest,
+) -> AcceptedRequest[pb.UsageRatesRefreshRequest]:
+    return UsageRatesRefresh.accept(request)
+
+
 CreateExample = Operation(
     "CreateExample",
     34,
@@ -445,6 +495,31 @@ def accept_terminate_run(
     return TerminateRun.accept(request)
 
 
+UsagePricesSave = Operation(
+    "UsagePricesSave",
+    46,
+    46,
+    46,
+    10000,
+    5000,
+    2,
+    3,
+    1,
+    1,
+    None,
+    None,
+    pb.UsagePricesSaveRequest,
+    pb.UsagePricesSaveResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_usage_prices_save(
+    request: pb.UsagePricesSaveRequest,
+) -> AcceptedRequest[pb.UsagePricesSaveRequest]:
+    return UsagePricesSave.accept(request)
+
+
 Login = Operation(
     "Login",
     40,
@@ -516,6 +591,8 @@ OPERATIONS: tuple[Operation, ...] = (
     ListAgentLogins,
     ListRunDigests,
     UsageWindow,
+    UsageSummary,
+    UsageRatesRefresh,
     CreateExample,
     CopyProject,
     PutCluster,
@@ -523,6 +600,7 @@ OPERATIONS: tuple[Operation, ...] = (
     TestCluster,
     StartRun,
     TerminateRun,
+    UsagePricesSave,
     Login,
     StreamSavedRuns,
 )
@@ -543,6 +621,8 @@ class Handlers:
     list_agent_logins: Callable[[pb.ListAgentLoginsRequest], pb.ListAgentLoginsResponse]
     list_run_digests: Callable[[pb.ListRunDigestsRequest], pb.ListRunDigestsResponse]
     usage_window: Callable[[pb.UsageWindowRequest], pb.UsageWindowResponse]
+    usage_summary: Callable[[pb.UsageSummaryRequest], pb.UsageSummaryResponse]
+    usage_rates_refresh: Callable[[pb.UsageRatesRefreshRequest], pb.UsageRatesRefreshResponse]
 
     def dispatch(self, request: AcceptedRequest) -> bytes:
         match request.operation.operation_id:
@@ -590,6 +670,14 @@ class Handlers:
                 return UsageWindow.validate_response(
                     request, self.usage_window(UsageWindow.request_value(request))
                 )
+            case 44:
+                return UsageSummary.validate_response(
+                    request, self.usage_summary(UsageSummary.request_value(request))
+                )
+            case 45:
+                return UsageRatesRefresh.validate_response(
+                    request, self.usage_rates_refresh(UsageRatesRefresh.request_value(request))
+                )
             case _:
                 raise ValueError("unknown operation id")
 
@@ -605,6 +693,7 @@ class MutationHandlers:
     test_cluster: Callable[[pb.TestClusterRequest], pb.TestClusterResponse]
     start_run: Callable[[pb.StartRunRequest], pb.StartRunResponse]
     terminate_run: Callable[[pb.TerminateRunRequest], pb.TerminateRunResponse]
+    usage_prices_save: Callable[[pb.UsagePricesSaveRequest], pb.UsagePricesSaveResponse]
 
     def dispatch(self, request: AcceptedRequest) -> bytes:
         match request.operation.operation_id:
@@ -635,6 +724,10 @@ class MutationHandlers:
             case 38:
                 return TerminateRun.validate_response(
                     request, self.terminate_run(TerminateRun.request_value(request))
+                )
+            case 46:
+                return UsagePricesSave.validate_response(
+                    request, self.usage_prices_save(UsagePricesSave.request_value(request))
                 )
             case _:
                 raise ValueError("unknown operation id")
@@ -752,6 +845,8 @@ READS: dict[str, Operation] = {
     "list_agent_logins": ListAgentLogins,
     "list_run_digests": ListRunDigests,
     "usage_window": UsageWindow,
+    "usage_summary": UsageSummary,
+    "usage_rates_refresh": UsageRatesRefresh,
 }
 READ_CALLS: tuple[HostCall, ...] = (
     HostCall("list_tasks", "list-tasks", 10, 10, 10000, 5000),
@@ -765,6 +860,8 @@ READ_CALLS: tuple[HostCall, ...] = (
     HostCall("list_agent_logins", "list-agent-logins", 19, 19, 25000, 5000),
     HostCall("list_run_digests", "list-run-digests", 41, 41, 25000, 5000),
     HostCall("usage_window", "usage-window", 42, 42, 25000, 5000),
+    HostCall("usage_summary", "usage-summary", 44, 44, 25000, 5000),
+    HostCall("usage_rates_refresh", "usage-rates-refresh", 45, 45, 60000, 5000),
 )
 MUTATIONS: dict[str, Operation] = {
     "create_example": CreateExample,
@@ -774,6 +871,7 @@ MUTATIONS: dict[str, Operation] = {
     "test_cluster": TestCluster,
     "start_run": StartRun,
     "terminate_run": TerminateRun,
+    "usage_prices_save": UsagePricesSave,
 }
 MUTATION_CALLS: tuple[HostCall, ...] = (
     HostCall("create_example", "create-example", 34, 34, 120000, 5000),
@@ -783,6 +881,7 @@ MUTATION_CALLS: tuple[HostCall, ...] = (
     HostCall("test_cluster", "test-cluster", 33, 33, 65000, 5000),
     HostCall("start_run", "start-run", 36, 36, 60000, 5000),
     HostCall("terminate_run", "terminate-run", 38, 38, 10000, 5000),
+    HostCall("usage_prices_save", "usage-prices-save", 46, 46, 10000, 5000),
 )
 WATCHES: dict[str, Operation] = {"login": Login, "stream_saved_runs": StreamSavedRuns}
 WATCH_CALLS: tuple[HostCall, ...] = (

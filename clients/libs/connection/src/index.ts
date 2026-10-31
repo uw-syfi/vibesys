@@ -91,6 +91,12 @@ export {
   registryStart,
 } from './shell/registry-start.js';
 export {
+  type RegistryUsage,
+  type RegistryUsagePorts,
+  registryUsage,
+  usageSummaryEntry,
+} from './shell/registry-usage.js';
+export {
   SUBSCRIPTION_LINGER_MS,
   SubscriptionFailed,
   type SubscriptionStreams,

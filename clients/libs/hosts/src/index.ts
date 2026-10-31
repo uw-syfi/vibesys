@@ -81,6 +81,33 @@ export {
 } from './run-digest.js';
 export {type EndKind, type EndLook, type EndTone, endedLook} from './run-look.js';
 export {
+  USAGE_QUARTER_MS,
+  USAGE_SUMMARY_MAX_EDGES,
+  USAGE_SUMMARY_MAX_PROJECTS,
+  type UsageAgentRowEntry,
+  type UsageAliasEntry,
+  type UsageBucketCountEntry,
+  type UsageEstimateSourceName,
+  type UsageOrigin,
+  type UsagePriceBookEntry,
+  type UsagePricesOutcome,
+  type UsagePricingEntry,
+  type UsagePricingStatusName,
+  type UsageProviderCostEntry,
+  type UsageRateEntry,
+  type UsageRateOverrideEntry,
+  type UsageRatesOutcome,
+  type UsageResolvedRateEntry,
+  type UsageRunRowEntry,
+  type UsageSeriesEntry,
+  type UsageSourceEntry,
+  type UsageSourceStatusName,
+  type UsageSpeedName,
+  type UsageSummaryEntry,
+  type UsageSummaryOutcome,
+  usageSummaryRefusal,
+} from './usage-summary.js';
+export {
   type AgentSpend,
   type RunSpend,
   USAGE_WINDOW_MAX_HOURS,

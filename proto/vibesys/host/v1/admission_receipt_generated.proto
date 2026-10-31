@@ -24,6 +24,8 @@ message AcceptedOperation {
     ListAgentLoginsRequest list_agent_logins = 19;
     ListRunDigestsRequest list_run_digests = 41;
     UsageWindowRequest usage_window = 42;
+    UsageSummaryRequest usage_summary = 44;
+    UsageRatesRefreshRequest usage_rates_refresh = 45;
     CreateExampleRequest create_example = 34;
     CopyProjectRequest copy_project = 35;
     PutClusterRequest put_cluster = 31;
@@ -31,6 +33,7 @@ message AcceptedOperation {
     TestClusterRequest test_cluster = 33;
     StartRunRequest start_run = 36;
     TerminateRunRequest terminate_run = 38;
+    UsagePricesSaveRequest usage_prices_save = 46;
     LoginRequest login = 40;
     StreamSavedRunsRequest stream_saved_runs = 43;
   }
@@ -52,6 +55,8 @@ message OperationResult {
     ListAgentLoginsResponse list_agent_logins = 19;
     ListRunDigestsResponse list_run_digests = 41;
     UsageWindowResponse usage_window = 42;
+    UsageSummaryResponse usage_summary = 44;
+    UsageRatesRefreshResponse usage_rates_refresh = 45;
     CreateExampleResponse create_example = 34;
     CopyProjectResponse copy_project = 35;
     PutClusterResponse put_cluster = 31;
@@ -59,6 +64,7 @@ message OperationResult {
     TestClusterResponse test_cluster = 33;
     StartRunResponse start_run = 36;
     TerminateRunResponse terminate_run = 38;
+    UsagePricesSaveResponse usage_prices_save = 46;
     LoginResponse login = 40;
     StreamSavedRunsResponse stream_saved_runs = 43;
   }

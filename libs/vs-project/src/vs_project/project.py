@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Self
@@ -14,8 +15,10 @@ from vs_project._layout import (
     TaskDirectory,
     TaskName,
     TasksRoot,
+    is_run_id,
     project_root_for_log_directory,
 )
+from vs_project._paths import STATE_DIRECTORY_PARTS
 from vs_project._state import ProjectState, _state_home, validate_run_id
 from vs_project._state_io import publish_run_link
 from vs_project._state_store import LocalStateStore
@@ -34,6 +37,15 @@ if TYPE_CHECKING:
         StateStoreFactory,
         StoreRecord,
     )
+
+
+@dataclass(frozen=True)
+class IndexedRun:
+    """A run this host published for discovery: its id, its project and where its logs are."""
+
+    run_id: str
+    project_root: Path
+    log_directory: Path
 
 
 class Project:
@@ -260,6 +272,51 @@ class Project:
             Path(project_root).expanduser().resolve(),
         )
         return publish_run_link(_state_home() / "runs" / run_id, directory)
+
+    @staticmethod
+    def usage_state_directory() -> Path:
+        """The host's directory for what the Usage screen keeps.
+
+        It holds the price documents, the prices a person set, the transcript scan and the host's
+        source identity. It lies in the state home beside the run index, so it follows the home a
+        profile or a shared file system selects. Nothing is created: the caller creates it when it
+        writes.
+        """
+        return _state_home() / "usage"
+
+    @staticmethod
+    def indexed_run_addresses() -> tuple[IndexedRun, ...]:
+        """The runs this host published for discovery, in run id order; a damaged address is left out.
+
+        Reads the addresses a run writes when it starts (``publish_run_for``). A run that predates
+        them is not here, and neither is one whose address cannot be read: a caller that must not
+        miss a run asks the state home's run directories as well.
+        """
+        directory = _state_home() / "run-addresses"
+        if not directory.is_dir():
+            return ()
+        found: list[IndexedRun] = []
+        for path in sorted(directory.glob("*.pb")):
+            named = import_module("vs_project._run_address").read_address(path)
+            if named is not None and is_run_id(path.stem):
+                found.append(IndexedRun(path.stem, *named))
+        return tuple(found)
+
+    @staticmethod
+    def run_id_for_workspace(path: str | Path) -> str | None:
+        """The run whose candidate worktrees contain ``path``, by the path alone; else ``None``.
+
+        A candidate worktree lives at ``<project>/.vibesys/state/local/runs/<run id>/worktrees/``
+        and only a run makes that path, so a working directory under it belongs to the run. The
+        path is read, not touched: the run may be gone.
+        """
+        parts = Path(path).parts
+        marker = (*STATE_DIRECTORY_PARTS, "local", "runs")
+        for start in range(len(parts) - len(marker) - 1):
+            at = start + len(marker)
+            if parts[start:at] == marker and parts[at + 1] == "worktrees" and is_run_id(parts[at]):
+                return parts[at]
+        return None
 
     @staticmethod
     def indexed_run_directories() -> tuple[Path, ...]:

@@ -222,6 +222,18 @@ function desktopWorld(cleanups: RetirementCleanups = {}, skipped: SkippedRecent[
       events.push(`usage-window:${JSON.stringify([id, project, runIds, since, until])}`);
       return {kind: 'unsupported'};
     },
+    usageSummary: async (id, projects, edges, now) => {
+      events.push(`usage-summary:${JSON.stringify([id, projects, edges, now])}`);
+      return {kind: 'unsupported'};
+    },
+    usageRatesRefresh: async (id, force, now) => {
+      events.push(`usage-rates-refresh:${JSON.stringify([id, force, now])}`);
+      return {kind: 'unsupported'};
+    },
+    usagePricesSave: async (id, baseRevision, overrides, aliases) => {
+      events.push(`usage-prices-save:${JSON.stringify([id, baseRevision, overrides, aliases])}`);
+      return {kind: 'unsupported'};
+    },
     logs: async () => ({ok: true, instanceId: '000000000001', streams: []}),
     recent: async () => undefined,
     configured: async () => {
@@ -559,6 +571,57 @@ describe('Desktop usage reads', () => {
     );
     expect(reply).toMatchObject({ok: false});
     expect(w.events.filter(event => event.startsWith('usage-window:'))).toEqual([]);
+  });
+});
+
+describe('Desktop usage summary reads', () => {
+  test('a summary question reaches the host with its machine, projects, edges and time', async () => {
+    const w = desktopWorld();
+    const reply = await w.ipc.invoke(
+      '10:100',
+      WELCOME_CHANNELS.usageSummary,
+      'ssh:host-b',
+      ['/p'],
+      [0, 900_000],
+      1_000,
+    );
+    expect(reply).toEqual({ok: true, value: {kind: 'unsupported'}});
+    expect(w.events).toContain(
+      `usage-summary:${JSON.stringify([{kind: 'ssh', alias: 'host-b'}, ['/p'], [0, 900000], 1000])}`,
+    );
+  });
+
+  test('edges the host would refuse are refused before they reach it', async () => {
+    const w = desktopWorld();
+    const reply = await w.ipc.invoke(
+      '10:100',
+      WELCOME_CHANNELS.usageSummary,
+      'local',
+      ['/p'],
+      [900_000, 0],
+      1_000,
+    );
+    expect(reply).toMatchObject({ok: false});
+    expect(w.events.filter(event => event.startsWith('usage-summary:'))).toEqual([]);
+  });
+
+  test('a price refresh and a price save reach the host for the machine they name', async () => {
+    const w = desktopWorld();
+    await w.ipc.invoke('10:100', WELCOME_CHANNELS.usageRatesRefresh, 'local', true, 5_000);
+    await w.ipc.invoke(
+      '10:100',
+      WELCOME_CHANNELS.usagePricesSave,
+      'local',
+      3,
+      [],
+      [{from: 'mine', to: 'theirs'}],
+    );
+    expect(w.events).toContain(
+      `usage-rates-refresh:${JSON.stringify([{kind: 'local'}, true, 5000])}`,
+    );
+    expect(w.events).toContain(
+      `usage-prices-save:${JSON.stringify([{kind: 'local'}, 3, [], [{from: 'mine', to: 'theirs'}]])}`,
+    );
   });
 });
 
