@@ -120,6 +120,17 @@ test('the Runs crumb goes up to the dashboard from any level, and Back returns t
   await expect(opened(page)).toBeVisible();
 });
 
+test('zooming keeps the crumbs in their row, so what is below them stays put', async ({page}) => {
+  await openShell(page);
+  await run(page).click();
+  const before = await ideas(page).boundingBox();
+  await ideas(page)
+    .getByRole('option', {name: /Combine W1 ring/})
+    .click();
+  await expect(opened(page)).toBeVisible();
+  expect(await ideas(page).boundingBox()).toEqual(before);
+});
+
 test('Back crosses screens, and each screen keeps one entry', async ({page}) => {
   await openShell(page);
   const rail = page.getByRole('navigation', {name: 'VibeSys'});

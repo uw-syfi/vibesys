@@ -75,6 +75,7 @@ test('a run opens in a window of its own, shown alone and live there', async ({p
   await expect(runWindow.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
   await expect(runWindow.getByText(`host-b · ${RUN_ID}`)).toBeVisible();
   await expect(sidebar(runWindow)).toHaveCount(0);
+  await expect(runWindow.getByRole('button', {name: 'Runs', exact: true})).toHaveCount(0);
   // Its title is clear of the window controls, below the same title-bar row as the main window's,
   // and the row drags the window.
   expect(await drawnUnderWindowControls(runWindow)).toEqual([]);

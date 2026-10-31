@@ -84,6 +84,25 @@ test('property: run-level spacing creates no inert or unnamed button on any face
           expect(runs).toHaveLength(1);
           await act(async () => runs[0]?.click());
           expect(left).toBe(1);
+          // A window that shows only this run has nowhere up to go.
+          await act(async () =>
+            root.render(
+              <RunScreen
+                state={state}
+                model={model}
+                whole={model}
+                core={null}
+                route={{...RUN_ROUTE, mode}}
+                zoom={() => undefined}
+                dispatch={() => undefined}
+              />,
+            ),
+          );
+          expect(
+            [...container.querySelectorAll('nav[aria-label="Zoom"] button')].filter(
+              button => button.textContent === 'Runs',
+            ),
+          ).toEqual([]);
           expect(container.querySelector('[inert] button') === null).toBe(true);
           for (const button of container.querySelectorAll('button'))
             expect((button.getAttribute('aria-label') ?? button.textContent ?? '').trim()).not.toBe(
