@@ -57,8 +57,6 @@ const NAV_LABEL = /^2 px between groups is not more than the 2 px inside one: "A
 const NAV_FIELD = /^2 px between groups is not more than the 6 px inside one: "Machine/;
 /** A stack nested in a stack of the same gap: nothing tells the groups from their rows. */
 const EVEN_GAPS = /^(\d+) px between groups is not more than the \1 px inside one/;
-/** A label that hugs a tile row, then a wide gap inside that row. */
-const TILE_GAPS = /^4 px between groups is not more than the 24 px inside one: "Total ops\/sec/;
 const USAGE_TITLE = /^the title "Usage" is 26 px and a text under it is \d+ px/;
 const USAGE_EDGE = /^the title of "Usage" starts at x \d+ and the content/;
 const RUN_HEADER_GAPS = /^4 px between groups is not more than the 4 px inside one: "queue-rs/;
@@ -66,17 +64,13 @@ const RUN_HEADER_GAPS = /^4 px between groups is not more than the 4 px inside o
 export const KNOWN_FAILURES: readonly KnownFailure[] = [
   visual('run-title-matrix', 'run-matrix', 'heading-depth', RUN_TITLE),
   visual('run-title-history', 'run-history', 'heading-depth', RUN_TITLE),
-  visual('run-title-chat', 'run-chat', 'heading-depth', RUN_TITLE),
-  visual('run-title-rail', 'dashboard', 'heading-depth', RUN_TITLE, /^rail\/run\//),
   visual(
     'run-usage-face-gaps',
     'run-matrix',
     'spacing-order',
     /^8 px between groups is not more than the 12 px inside one: "IdeasTimeline/,
   ),
-  visual('run-tile-gaps-rail', 'dashboard', 'spacing-order', TILE_GAPS),
   visual('run-header-gaps-rail', 'dashboard', 'spacing-order', RUN_HEADER_GAPS),
-  visual('run-tile-gaps-chat', 'run-chat', 'spacing-order', TILE_GAPS),
   visual('run-header-gaps-chat', 'run-chat', 'spacing-order', RUN_HEADER_GAPS),
   visual('chat-even-gaps', 'run-chat', 'spacing-order', EVEN_GAPS),
   visual(
