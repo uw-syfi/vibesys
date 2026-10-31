@@ -16,11 +16,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from protobuf import Message
-from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
 from vs_agent.api import OrphanReapError, reap_recorded_agents
-from vs_core.api.replay import ReplayWriterRecovery
-from vs_proto.api import ReplayStore as ReplayRecords
 from vs_proto.api import replay as pb
 from vs_proto.api import validate
 from vs_runtime._receipt_store import ReceiptStore
@@ -31,23 +28,12 @@ if TYPE_CHECKING:
 
     from vs_core.api.replay import ReplayRootReuse
     from vs_project.api import StateNamespace, StoreFence
-    from vs_runtime._replay_runtime import ReplayRuntime
     from vs_sandbox.api import DockerCli
-    from vs_sim.api import BlockingRunner, Clock, Threads
+    from vs_sim.api import Threads
 
 
 class WriterProofError(ValueError):
     """Missing, conflicting or unconfirmed writer evidence forbids backing reuse."""
-
-
-class ReplayWriterBlockedError(WriterProofError):
-    """A persisted prerequisite retains all outstanding identities and missing evidence."""
-
-    def __init__(self, result: pb.WriterReconciliation) -> None:
-        self.reconciliation = deepcopy(result)
-        super().__init__(
-            "Recovery blocked: previous writers may still modify this workspace; " + result.detail
-        )
 
 
 def _checked[T: Message](message: T) -> T:
@@ -228,58 +214,6 @@ class WriterRegistry:
                 problem = "Recovery blocked: previous writers may still modify this workspace"
                 raise WriterProofError(problem)
             return deepcopy(state.proof)
-
-
-@dataclass(frozen=True)
-class ReplayWriterBarrier:
-    """W2-W7 shell: durable manifest, owner reconciliation, then durable proof.
-
-    A crash at any boundary repeats inspection of the same closed domain. Native
-    release guards require the log observation as well as the registry proof.
-    """
-
-    registry: WriterRegistry
-    reconciler: WriterReconciler
-    blocking: BlockingRunner
-
-    def begin(self, runtime: ReplayRuntime, *, now: float, at: Timestamp) -> pb.WriterManifest:
-        try:
-            manifest = self.registry.close()
-        except WriterProofError as error:
-            recovery = ReplayWriterRecovery.from_records(
-                ReplayRecords.from_binary(runtime.archive.encode()).records
-            )
-            manifest = recovery.intent(self.registry.backing) or pb.WriterManifest(
-                backing=self.registry.backing
-            )
-            runtime.writer_intent(manifest, now=now, at=at)
-            result = pb.WriterReconciliation(
-                manifest=manifest,
-                status=pb.WriterReconciliationStatus.UNKNOWN,
-                detail=str(error),
-            )
-            runtime.writer_observation(result, now=now, at=at)
-            raise ReplayWriterBlockedError(result) from error
-        runtime.writer_intent(manifest, now=now, at=at)
-        return manifest
-
-    async def finish(
-        self, runtime: ReplayRuntime, manifest: pb.WriterManifest, *, clock: Clock
-    ) -> pb.WriterReconciliation:
-        result = await self.blocking.run(self.reconciler.reconcile_writers, manifest)
-        self.registry.record(result)
-        now = clock.now()
-        at = Timestamp(seconds=int(now), nanos=int((now - int(now)) * 1_000_000_000))
-        runtime.writer_observation(result, now=now, at=at)
-        if result.proof is None:
-            raise ReplayWriterBlockedError(result)
-        return result
-
-    async def reconcile(self, runtime: ReplayRuntime, *, clock: Clock) -> pb.WriterReconciliation:
-        now = clock.now()
-        at = Timestamp(seconds=int(now), nanos=int((now - int(now)) * 1_000_000_000))
-        manifest = self.begin(runtime, now=now, at=at)
-        return await self.finish(runtime, manifest, clock=clock)
 
 
 class WriterReconciler(Protocol):

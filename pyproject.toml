@@ -264,7 +264,6 @@ extend-exclude = [
     "libs/vs-runtime/src/vs_runtime/_core_values",
     "scripts/corevalue/tests/generated_pb",
     "libs/vs-core/tests/generated",
-    "libs/vs-runtime/tests/generated",
     "scripts/corevalue/tests/generated_values",
     "scripts/corevalue/tests/generated_boundary",
     "resources/skills",
