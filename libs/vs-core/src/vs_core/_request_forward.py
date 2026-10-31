@@ -41,7 +41,7 @@ from .types.evaluation import (
     RegisteredJobObserved,
     SubmitMeasurement,
 )
-from .types.records import RequestObserved, reply_owed
+from .types.records import reply_owed
 from .types.scope_reopen import ScopedAdmissionReopenOutcome
 from .types.sessions import (
     CloseSession,
@@ -58,7 +58,7 @@ from .types.settlement import AdoptionObserved, AdoptRevision, VerifyAdoption
 if TYPE_CHECKING:
     from .types.common import InvocationRef, Observation, OperationDescriptor, SchemaRef
     from .types.kernel import RecordsContext, Signal
-    from .types.records import RequestRecord, TargetObservation
+    from .types.records import RequestObserved, RequestRecord, TargetObservation
     from .types.sessions import Invocation
 
 type Facts = RequestObserved | TargetObservation
@@ -227,18 +227,6 @@ def _releases(
     )
 
 
-def _adoption_observed(observation: Observation, facts: Facts) -> AdoptionObserved:
-    """The adoption event of a report: what it published and did to the checkout travel with it."""
-    if isinstance(facts, RequestObserved):
-        return AdoptionObserved(
-            observation=observation,
-            revision=facts.revision,
-            publication=facts.publication,
-            checkout=facts.checkout,
-        )
-    return AdoptionObserved(observation=observation, revision=facts.revision)
-
-
 def owner_signals(
     context: RecordsContext, record: RequestRecord, facts: Facts
 ) -> tuple[Signal, ...]:
@@ -317,7 +305,14 @@ def _owner_signal(
                 ),
             )
         case AdoptRevision() | VerifyAdoption():
-            signals = (_adoption_observed(observation, facts),)
+            signals = (
+                AdoptionObserved(
+                    observation=observation,
+                    revision=facts.revision,
+                    publication=facts.publication,
+                    checkout=facts.checkout,
+                ),
+            )
         case _:
             pass
     return signals

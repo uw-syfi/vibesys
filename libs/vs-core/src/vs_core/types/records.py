@@ -693,6 +693,10 @@ class TargetObservation(OutcomeValue):
     """What a rejected turn reply got wrong, field by field, for the correction that follows."""
     outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
     operation_schema: OperationSchemaRef | None = None
+    publication: AdoptionPublication | None = Field(default=None, exclude_if=unset)
+    """Where an adoption published the winner, when it did."""
+    checkout: CheckoutUpdate | None = Field(default=None, exclude_if=unset)
+    """What an adoption did to the operator's checkout, when it touched it."""
     reissue: ReissueProof | None = None
     """Why core may send the inspected request out again, when the executor can prove it."""
 
