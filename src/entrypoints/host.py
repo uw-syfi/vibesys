@@ -137,7 +137,7 @@ def main(
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
         serve_read = import_module("entrypoints.host_reads").serve_read
-        destination.write(serve_read(arguments[0], source.read((1 << 20) + 1), threads=threads))
+        destination.write(serve_read(arguments[0], source.read((1 << 20) + 1), platform=runtime))
         return 0
     if arguments and arguments[0] in _WATCH_COMMANDS:
         parser = argparse.ArgumentParser(

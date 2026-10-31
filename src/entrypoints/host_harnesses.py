@@ -1,10 +1,9 @@
-"""The catalogs this checkout offers a host: its vetted harnesses and its example projects.
+"""The harnesses the agent library vets, as the host helper channel and ``list-harnesses`` offer them.
 
-Both the host helper channel and ``vibesys host <read>`` answer from them. The agent library
-and the example machinery load on first use, so a process that never asks for a catalog does
-not import them.
+The agent library loads on first use, so a process that never asks for the catalog does not
+import it.
 
-Public surface: ``vetted_harnesses`` and ``checkout_example_projects``.
+Public surface: ``vetted_harnesses``.
 """
 
 from __future__ import annotations
@@ -12,14 +11,10 @@ from __future__ import annotations
 from functools import cache
 from typing import TYPE_CHECKING
 
-from entrypoints.launcher import source_checkout_root
 from server.host_api import HarnessOption
 from server.host_harness import HarnessDisplay, Maker, ModelGeneration
-from vs_project.api import Git
-from vs_sim.api import OsProcesses
 
 if TYPE_CHECKING:
-    from server.host_helper_requests import ExampleProjects
     from vs_agent.api import ModelDisplay
 
 
@@ -72,16 +67,3 @@ def vetted_harnesses() -> tuple[HarnessOption, ...]:
             )
         )
     return tuple(options)
-
-
-@cache
-def checkout_example_projects() -> ExampleProjects:
-    """This checkout's example catalog and project maker; loaded on first use."""
-    # lint-waiver: LW-271505 [PLC0415]; the helper answers hello without loading the example machinery.
-    # > `entrypoints.examples` brings argparse, configparser and the catalog reader; at module
-    # > level every channel would load them before `hello`, past the helper's module ceiling
-    # > (`tests/e2e/test_host_helper.py`). Moving the machinery into the helper would split the
-    # > one implementation `vibesys example` uses, and the same deferral serves `harnesses`.
-    from entrypoints.examples import GitExampleMaterializer, HelperExampleProjects  # noqa: PLC0415
-
-    return HelperExampleProjects(source_checkout_root(), GitExampleMaterializer(Git(OsProcesses())))

@@ -21,7 +21,8 @@ from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from entrypoints.host_catalogs import checkout_example_projects, vetted_harnesses
+from entrypoints.host_example_projects import checkout_example_projects
+from entrypoints.host_harnesses import vetted_harnesses
 from entrypoints.launcher import headless_command, source_checkout_root
 from server.host_agent_logins import (
     harness_binaries,
@@ -73,7 +74,8 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from server.host_examples import CreatedProject, ExampleDestination, ExampleList
-    from vs_sim.api import Threads
+    from server.host_helper_requests import ExampleProjects
+    from vs_sim.api import Processes, Threads
 
 _STDIN_FD = 0
 _STDOUT_FD = 1
@@ -83,21 +85,31 @@ _STDERR_FD = 2
 class ExampleProjectsOnUse:
     """The helper's ``ExampleProjects``, which loads the example machinery on its first request."""
 
+    def __init__(self, processes: Processes) -> None:
+        """Bind the processes the example machinery will run Git with."""
+        self._processes = processes
+        self._projects: ExampleProjects | None = None
+
+    def _loaded(self) -> ExampleProjects:
+        if self._projects is None:
+            self._projects = checkout_example_projects(self._processes)
+        return self._projects
+
     def list(self, *, with_catalogue: bool = False) -> ExampleList:
         """Every catalogued example with its tasks, and with their catalogue facts if asked."""
-        return checkout_example_projects().list(with_catalogue=with_catalogue)
+        return self._loaded().list(with_catalogue=with_catalogue)
 
     def create(self, example: str, destination: Path) -> CreatedProject:
         """Copy ``example`` into its own new Git repository at ``destination``."""
-        return checkout_example_projects().create(example, destination)
+        return self._loaded().create(example, destination)
 
     def destination(self, example: str, destination: Path) -> tuple[ExampleDestination, str | None]:
         """What :meth:`create` would find at ``destination``, and the project there if it is one."""
-        return checkout_example_projects().destination(example, destination)
+        return self._loaded().destination(example, destination)
 
     def copy_out(self, source: Path, destination: Path) -> CreatedProject:
         """Copy ``source``'s tracked files into their own new Git repository at ``destination``."""
-        return checkout_example_projects().copy_out(source, destination)
+        return self._loaded().copy_out(source, destination)
 
 
 def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperHost:
@@ -136,7 +148,7 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
         directories=OsDirectories(),
         launcher=SubprocessRunLauncher(SubprocessLauncher(), headless_command),
         preflight=SubprocessRunPreflight(SubprocessLauncher(), headless_command),
-        examples=ExampleProjectsOnUse(),
+        examples=ExampleProjectsOnUse(OsProcesses()),
         checkout=GitCheckoutProbe(source_checkout_root(), SubprocessProbe()),
         dialer=network,
         vibesys_version=host_facts()[1],

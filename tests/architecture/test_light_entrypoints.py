@@ -58,6 +58,8 @@ ALLOWED_FIRST_PARTY = (
     "entrypoints.evals",
     "entrypoints.detached_run",
     "entrypoints.host_helper",
+    "entrypoints.host_example_projects",
+    "entrypoints.host_harnesses",
     "server",
     "server.control_envelope",
     "server.diagnostics",

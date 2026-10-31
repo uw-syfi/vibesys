@@ -27,8 +27,8 @@ from server.host_examples import (
     ExampleSummary,
     ExampleTask,
     ExampleWorkload,
+    read_task_goal,
 )
-from server.host_helper_os import read_task_goal
 from server.host_preflight import Backend
 from vs_project.api import (
     CatalogueInput,

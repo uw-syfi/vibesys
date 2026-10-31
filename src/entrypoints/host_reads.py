@@ -18,7 +18,7 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vs_sim.api import OsProcesses, SubprocessPipedProcessLauncher, SubprocessProbe, SystemClock
+from vs_sim.api import ProcessesProbe, SubprocessPipedProcessLauncher
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -30,22 +30,22 @@ if TYPE_CHECKING:
     from server.host_helper_requests import ExampleProjects, HelperHost
     from server.host_machine_facts import MachineDescription
     from server.registry import LiveRegistry
-    from vs_sim.api import Clock, Threads
+    from vs_sim.api import Clock, Platform
 
 
 class ReadHost:
     """The host facts a registered read asks for; each is built on first use and kept."""
 
-    def __init__(self, environ: Mapping[str, str], uid: int, threads: Threads) -> None:
-        """Bind this process's environment; nothing is constructed yet."""
+    def __init__(self, environ: Mapping[str, str], uid: int, platform: Platform) -> None:
+        """Bind this process's environment and platform; nothing is constructed yet."""
         self._environ = environ
         self._uid = uid
-        self._threads = threads
+        self._platform = platform
 
     @cached_property
     def clock(self) -> Clock:
         """Wall-clock epoch seconds."""
-        return SystemClock()
+        return self._platform.clock
 
     @cached_property
     def projects(self) -> FileProjects:
@@ -53,7 +53,9 @@ class ReadHost:
         os_projects = import_module("server.host_helper_os")
         projects = import_module("vs_project.api")
         return os_projects.FileProjects(
-            projects.git_repositories(projects.Git(OsProcesses())), self._threads, clock=self.clock
+            projects.git_repositories(projects.Git(self._platform.processes)),
+            self._platform.threads,
+            clock=self.clock,
         )
 
     @cached_property
@@ -64,7 +66,8 @@ class ReadHost:
     @cached_property
     def examples(self) -> ExampleProjects:
         """This checkout's example catalog and project maker."""
-        return import_module("entrypoints.host_catalogs").checkout_example_projects()
+        catalog = import_module("entrypoints.host_example_projects")
+        return catalog.checkout_example_projects(self._platform.processes)
 
     @cached_property
     def compute(self) -> MachineCompute:
@@ -72,7 +75,7 @@ class ReadHost:
         adapters = import_module("server.host_compute_runtime")
         return adapters.MachineCompute(
             adapters.OsConfigFiles(),
-            SubprocessProbe(),
+            ProcessesProbe(self._platform.processes),
             home=str(Path.home()),
             environ=self._environ,
         )
@@ -88,11 +91,13 @@ class ReadHost:
     def logins(self) -> AgentLibraryLogins:
         """Each vetted harness's login facts."""
         launcher = SubprocessPipedProcessLauncher()
-        return import_module("server.host_agent_logins").host_logins(launcher, self._threads)
+        return import_module("server.host_agent_logins").host_logins(
+            launcher, self._platform.threads
+        )
 
     def harnesses(self) -> tuple[HarnessOption, ...]:
         """The agent library's vetted harnesses."""
-        return import_module("entrypoints.host_catalogs").vetted_harnesses()
+        return import_module("entrypoints.host_harnesses").vetted_harnesses()
 
     def describe(self) -> MachineDescription:
         """What this machine offers runs; reads the whole host."""
@@ -108,13 +113,13 @@ class ReadHost:
     def _whole_host(self) -> HelperHost:
         """The helper's host with every collaborator; built only by a read that needs them all."""
         return import_module("entrypoints.host_helper").real_host(
-            self._environ, self._uid, self._threads
+            self._environ, self._uid, self._platform.threads
         )
 
 
-def serve_read(cli: str, payload: bytes, *, threads: Threads) -> bytes:
+def serve_read(cli: str, payload: bytes, *, platform: Platform) -> bytes:
     """Answer registered read ``cli`` for this process's user; the reply is the envelope bytes."""
-    host = ReadHost(os.environ, os.getuid(), threads)
+    host = ReadHost(os.environ, os.getuid(), platform)
     reads = import_module("server.host_operation_reads")
     source = reads.HostReadSource(host, None, describe=host.describe, preflight=host.preflight)
     return reads.answer_registered_read(cli, payload, source)

@@ -6,7 +6,7 @@
 ``server.host_api``, which embeds them in the helper's messages.
 
 Public surface: ``ProjectLookupError``, ``ExampleSummary``, ``ExampleTask`` and what it holds, ``TaskGoal`` with
-``bounded_goal``, ``ExampleList``, ``CreatedProject``, and a project's tasks: ``TaskSummary``,
+``bounded_goal`` and ``read_task_goal``, ``ExampleList``, ``CreatedProject``, and a project's tasks: ``TaskSummary``,
 ``TaskList``, ``TasksListRequest``, ``TasksListReply``, ``ProjectTaskGoalRequest``,
 ``ProjectTaskGoalReply``, and what a destination holds: ``ExampleDestination``,
 ``ExamplesDestinationRequest``, ``ExamplesDestinationReply``.
@@ -15,13 +15,16 @@ Public surface: ``ProjectLookupError``, ``ExampleSummary``, ``ExampleTask`` and 
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Final, Literal
+from typing import TYPE_CHECKING, Annotated, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from server.host_envelope import HelperErrorCode, HelperReplyBase, HelperRequestBase
 from server.host_preflight import Backend
-from vs_project.api import AcceleratorVendor, ExampleDomain, ModelMaker
+from vs_project.api import AcceleratorVendor, ExampleDomain, ModelMaker, load_objectives
+
+if TYPE_CHECKING:
+    from vs_project.api import TaskDirectory
 
 GOAL_MAX_CHARS: Final = 32_000
 """The most goal text an ``ExampleTask`` carries; a longer ``OBJECTIVE.md`` is cut and flagged."""
@@ -94,6 +97,29 @@ class TaskGoal(BaseModel):
 def bounded_goal(text: str) -> tuple[str, bool]:
     """``text`` cut to ``GOAL_MAX_CHARS``, and whether anything was cut."""
     return text[:GOAL_MAX_CHARS], len(text) > GOAL_MAX_CHARS
+
+
+def read_task_goal(task: TaskDirectory) -> TaskGoal:
+    """What ``task`` is for: its ``OBJECTIVE.md`` (cut to ``GOAL_MAX_CHARS``) and its axes.
+
+    Raises ``OSError`` for a file that cannot be read and ``ValueError`` (naming the file) for
+    ``objectives.toml`` that is invalid or a goal that is not UTF-8 text.
+    """
+    objectives = load_objectives(task.path).objective
+    try:
+        text = task.objective_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        message = f"{task.objective_path} is not UTF-8 text: {exc}"
+        raise ValueError(message) from exc
+    goal, truncated = bounded_goal(text)
+    return TaskGoal(
+        task=task.name.value,
+        objectives=tuple(
+            ExampleObjective(metric=axis.name, direction=axis.direction) for axis in objectives
+        ),
+        goal=goal,
+        goal_truncated=truncated,
+    )
 
 
 class ExampleTask(TaskGoal):
@@ -255,4 +281,5 @@ __all__ = [
     "TasksListReply",
     "TasksListRequest",
     "bounded_goal",
+    "read_task_goal",
 ]
