@@ -147,6 +147,7 @@ export function Hero(
             <ParetoChart
               label={pareto.label}
               size="strip"
+              legend={false}
               points={pareto.points}
               x={pareto.x}
               y={pareto.y}

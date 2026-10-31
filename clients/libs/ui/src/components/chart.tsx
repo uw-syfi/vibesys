@@ -724,7 +724,9 @@ export function ChartLegend(props: {
 
 /**
  * A chart under its heading: the `title` and what it `note`s (which way is better), and at the far
- * end a `figure` in the tone of its meaning, with `hint` on hover. The chart is `children`.
+ * end a `figure` in the tone of its meaning. A figure with a `hint` takes the keyboard focus and
+ * exposes the hint as its accessible description; the hint is drawn under it on hover and on focus
+ * (as a chip's is), so the exact numbers behind the figure need no pointer. The chart is `children`.
  */
 export function ChartPanel(props: {
   readonly title: string;
@@ -746,13 +748,20 @@ export function ChartPanel(props: {
           )}
         </span>
         {props.figure === undefined ? null : (
-          <Text
-            variant="body-strong"
-            tone={props.tone === 'ok' || props.tone === 'err' ? props.tone : 'muted'}
-            {...(props.hint === undefined ? {} : {title: props.hint})}
+          <span
+            className="vs-chart-figure"
+            aria-description={props.hint}
+            // As a chip's hint: the numbers behind the figure are information a keyboard and a screen
+            // reader must reach, which a `title` is not, so a figure with a hint is a tab stop.
+            tabIndex={props.hint === undefined ? undefined : 0}
           >
-            {props.figure}
-          </Text>
+            <Text
+              variant="body-strong"
+              tone={props.tone === 'ok' || props.tone === 'err' ? props.tone : 'muted'}
+            >
+              {props.figure}
+            </Text>
+          </span>
         )}
       </div>
       {props.children}

@@ -744,10 +744,24 @@ describe('Chart legend, panel and columns', () => {
       </ChartPanel>,
     );
     expect(one(container, 'section').getAttribute('aria-label')).toBe('Throughput');
-    const figure = one(container, '.vs-chart-panel-head > .vs-text');
+    const figure = one(container, '.vs-chart-panel-head > .vs-chart-figure');
     expect(figure.textContent).toBe('3.83× faster');
-    expect(figure.getAttribute('data-tone')).toBe('ok');
-    expect(figure.getAttribute('title')).toBe('6M · input 1.58M');
+    expect(one(figure, '.vs-text').getAttribute('data-tone')).toBe('ok');
+    // The hint is the figure's description and the figure a tab stop: no pointer is needed to read it.
+    expect(figure.getAttribute('aria-description')).toBe('6M · input 1.58M');
+    expect(figure.getAttribute('tabindex')).toBe('0');
+    expect(figure.hasAttribute('title')).toBe(false);
+  });
+
+  test('a figure with no hint is plain text, not a tab stop', async () => {
+    const {container} = await mount(
+      <ChartPanel title="Queue depth" figure="No clear change">
+        <span>chart</span>
+      </ChartPanel>,
+    );
+    const figure = one(container, '.vs-chart-figure');
+    expect(figure.hasAttribute('tabindex')).toBe(false);
+    expect(figure.hasAttribute('aria-description')).toBe(false);
   });
 
   test('a chart writes its y axis unit above the plot, inside its drawing', async () => {

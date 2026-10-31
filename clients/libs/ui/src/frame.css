@@ -869,6 +869,23 @@ button.vs-crumb:focus-visible {
   flex-direction: column;
   gap: var(--space-3);
 }
+/* Which way is better, in the corner of the frame: the one word in the chart that is not a value. */
+.vs-pareto-better {
+  fill: var(--ok);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+  font-weight: var(--text-body-strong-weight);
+}
+/* The input's name beside its mark, over a halo of the panel so no line or dot cuts it. */
+.vs-pareto-input {
+  fill: var(--muted);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+  paint-order: stroke;
+  stroke: var(--panel);
+  stroke-width: var(--space-2);
+  stroke-linejoin: round;
+}
 .vs-pareto-frontier {
   fill: none;
   stroke: var(--accent);
