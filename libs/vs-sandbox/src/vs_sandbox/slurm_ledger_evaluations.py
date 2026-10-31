@@ -136,6 +136,7 @@ class LedgerEvaluations:
         ledger = self.ledger
         deadline = self.clock.now() + self.job_timeout_seconds
         key = await self.in_thread(ledger.key, batch)
+        await self.in_thread(ledger.bind, handle_id, key)
         while True:
             # A sibling evaluation's withdrawal of this request runs wholly before
             # this step or wholly after it (``SlurmLedgerAttachment.guard``).

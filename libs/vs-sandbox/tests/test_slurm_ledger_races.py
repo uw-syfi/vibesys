@@ -167,6 +167,12 @@ class _SteppedLedger:
     def operator_file_sha256(self, path: str) -> str | None:
         return self.inner.operator_file_sha256(path)
 
+    def bind_handle(self, holder: str, handle: str, key: str) -> str:
+        return self.inner.bind_handle(holder, handle, key)
+
+    def bound_key(self, holder: str, handle: str) -> str | None:
+        return self.inner.bound_key(holder, handle)
+
 
 @dataclass
 class _SteppedCluster:
