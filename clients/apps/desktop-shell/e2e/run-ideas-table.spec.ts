@@ -2,7 +2,13 @@ import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
 import fc from 'fast-check';
 import {settled} from './checks/settle.js';
-import {type Anchor, anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
+import {
+  type Anchor,
+  anchorsOf,
+  pageBox,
+  RUN_ANCHORS,
+  stabilityViolations,
+} from './checks/stability.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
@@ -312,16 +318,10 @@ test('choosing another idea keeps the list, the detail and the chart where they 
   const before = await anchorsOf(page, PANES);
   const steps = page.getByRole('listbox', {name: /steps$/});
   // The steps list is as tall as the idea's steps, so only where it starts and how wide it is hold.
-  // Where it is on the page: pressing a row may scroll the page, which moves nothing.
-  const placed = async () =>
-    steps.evaluate(element => {
-      let scrolled = window.scrollY;
-      for (let node = element.parentElement; node !== null; node = node.parentElement) {
-        scrolled += node.scrollTop;
-      }
-      const box = element.getBoundingClientRect();
-      return {x: box.x, y: box.y + scrolled, width: box.width};
-    });
+  const placed = async () => {
+    const {x, y, width} = await pageBox(steps);
+    return {x, y, width};
+  };
   const stepsBefore = await placed();
   for (const index of [1, 2, 0]) {
     await options.nth(index).hover();
