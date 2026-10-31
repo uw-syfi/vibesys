@@ -13,7 +13,6 @@ when its host died left nothing and runs again.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -21,7 +20,6 @@ from vs_core.api import (
     ContractError,
     ControlId,
     ControlInput,
-    ControlRefusedError,
     FlowCodeChanged,
     HostFence,
     HostId,
@@ -226,7 +224,11 @@ class _Host:
         return self._result(inputs, halted=halted)
 
     def _resume(self, log: RunLogStepLog, epoch: int, clock: VirtualClock) -> None:
-        """The operator resumes a run that stood paused when its last process ended."""
+        """The operator resumes a run that stood paused when its last process ended.
+
+        The first Resume is always taken: a refusal fails the host, so a run that needs a second
+        Resume is an error and not a quiet retry.
+        """
         state = log.state
         paused = at_rest(state) is RunRest.PARKED or state.run.status in (
             RunStatus.PAUSED,
@@ -237,8 +239,7 @@ class _Host:
         control = ControlInput(
             control_id=ControlId(root=f"operator-resume:{epoch}"), action="resume", when="now"
         )
-        with contextlib.suppress(ControlRefusedError):
-            log.input(RunControlEvent(control=control, now_at=clock.now()))
+        log.input(RunControlEvent(control=control, now_at=clock.now()))
 
     @staticmethod
     async def _until(
