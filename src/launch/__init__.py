@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from vibesys.api.contracts import EventSink
     from vibesys.api.wiring import ProfilerPreflight, SessionAgents
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSessionKey
-    from vs_project.api import GitRepositoryFactory, Project, StateStoreFactory
+    from vs_project.api import GitRepositoryFactory, Project
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import RunState, StopTimer
     from vs_sandbox.api import ComputeBackendImpl
@@ -89,8 +89,6 @@ class LaunchSettings:
     """Builds the run's ``GitRepository`` implementations; ``None`` opens the configured one."""
     slurm_processes: Processes | None = None
     """Starts the Slurm transport's programs; ``None`` starts them with ``processes``."""
-    state_stores: StateStoreFactory | None = None
-    """Opens each run's ``StateStore``; ``None`` is the local crash-atomic one."""
     profiler_preflight: ProfilerPreflight | None = None
     """Checks native profiler availability; ``None`` probes the host through ``processes``."""
     login_environment: Callable[[], Mapping[str, str]] | None = None
@@ -209,7 +207,6 @@ def _implementations(
             ),
             process_table=settings.process_table,
         ),
-        state_stores=settings.state_stores,
         agent_providers=tuple(sorted(SHIPPED_PROVIDERS)),
     )
 

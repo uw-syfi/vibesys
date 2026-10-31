@@ -142,9 +142,7 @@ async def _run(world: World, channel: RuntimeRunControlChannel) -> CoreState:
     process = world.runtime()
     bridge = RunControlBridge(channel, StoredSteers(artifacts))
     host = CoreRunHost(process.shell, process.delivery, clock_from(1.0), bridge)
-    config = RunLoopConfig(
-        host_id="steer", lease_duration=LEASE, recovery_poll_interval=50.0, max_dispatches=60
-    )
+    config = RunLoopConfig(host_id="steer", lease_duration=LEASE, max_dispatches=60)
     start_core(host, config)
     await drive_core(host, config)
     core = process.shell.record.envelope.core

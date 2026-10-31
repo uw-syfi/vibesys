@@ -181,7 +181,6 @@ class _LocalRunSession:
         )
         self._integration = LocalRunIntegration(
             implementations.git_repository,
-            implementations.state_stores,
             clock=implementations.timing.clock,
             git=implementations.git,
             github=implementations.github,
@@ -419,7 +418,7 @@ class _LocalRunSession:
         """
         return project_run(
             self._registration,
-            Project.open(self._request.project_root, state_stores=self._integration.state_stores),
+            Project.open(self._request.project_root),
             run_id=self._run_id(),
             status=self._status,
             loop=self._request.orchestration.id,

@@ -56,8 +56,6 @@ if TYPE_CHECKING:
     from vs_sim.api import Threads
 
 ROUNDS = 1
-LEASE_SECONDS = 2.0
-"""A killed writer's lease: production's is 60 s, which a resume after a kill would wait out."""
 START = "start"
 TURN = "turn"
 
@@ -191,7 +189,6 @@ def main(base: Path, resume: str | None, hold: Hold | None, channel: Channel) ->
         slurm_processes=loop_input.connector,
         verify=False,
         relaunch_saved=resume is not None,
-        lease_seconds=LEASE_SECONDS,
         on_handle=lambda handle: reporters.append(
             asyncio.ensure_future(_report_all(handle, channel))
         ),

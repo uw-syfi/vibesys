@@ -128,7 +128,7 @@ def test_a_stopped_run_cancels_a_pending_benchmark_job(
                 ),
                 backend_factory=host_container_backend,
                 stop_timer=SystemClock().sleep,
-                timing=RunTiming(SystemClock(), 60.0, OsThreads()),
+                timing=RunTiming(SystemClock(), OsThreads()),
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
                 blocking=ThreadBlockingRunner(),
                 network=UnixNetwork(),

@@ -157,7 +157,6 @@ class _Shape:
     slurm_extra: str = ""
     deadline_seconds: float = 1000.0
     limits: Limits | None = None
-    lease_seconds: float = 60.0
     control_poll_seconds: float = 1.0
 
 
@@ -201,7 +200,6 @@ def _run(
             network=SimNetwork(threads),
             timing=RunTiming(
                 sim.clock,
-                shape.lease_seconds,
                 threads,
                 control_poll_seconds=shape.control_poll_seconds,
             ),
@@ -406,7 +404,6 @@ def test_a_queue_full_far_past_the_old_probe_deadline_holds_slurm_work_and_never
             ),
             # The loop renews its lease at a third of it and reads controls every poll: both
             # rarely, so hours of an idle run cost few loop steps.
-            lease_seconds=3600.0,
             control_poll_seconds=300.0,
         ),
     )

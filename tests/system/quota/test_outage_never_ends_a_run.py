@@ -39,6 +39,7 @@ from pydantic import TypeAdapter
 from tests.support.dynamic_script import FACTS, TERMS, Executors, config, harness
 from tests.support.owed_submissions import owed_namespace
 from tests.support.synthesized_evidence import SynthesizedEvidence
+from tests.support.timed_dynamic_run import LEASE_SECONDS
 from tests.vibesys.orchestration.dynamic._replies import (
     implement,
     implemented,
@@ -79,7 +80,6 @@ from vs_runtime.api.core import (
     drive_core,
     start_core,
 )
-from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS as LEASE_SECONDS
 from vs_runtime.api.infrastructure import (
     PROVIDER_OUTAGE,
     CapacityHandling,

@@ -79,7 +79,7 @@ from vs_runtime.api.core import (
     RuntimeCommitUncertainError,
     drive_core,
     handle_for,
-    start_core_awaiting_lease,
+    start_core,
 )
 from vs_runtime.api.executor_contracts import FaultingNamespace, ProcessKilledError
 from vs_runtime.api.testing import FakePublicationDelivery, ScriptedExecutors
@@ -719,7 +719,7 @@ def _play(
         host = boot(crash)
 
         async def run(host: CoreRunHost = host) -> None:
-            await start_core_awaiting_lease(host, config)
+            start_core(host, config)
             await drive_core(host, config)
 
         try:

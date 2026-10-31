@@ -114,6 +114,7 @@ from vs_runtime.api.infrastructure import (
     ProjectRunMismatchError,
     ProjectRunRequest,
     ProjectRunResources,
+    RunEnvironment,
     RunEnvironmentRequest,
     RunEnvironmentResources,
     TrustedEvaluationPlan,
@@ -464,7 +465,6 @@ def open_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-waiver:
                     ),
                     clock=clock,
                     git_repository=integration.git_repository,
-                    state_stores=integration.state_stores,
                     resume_recovery=recover_existing_run if existing else None,
                     capture_recovery=capture_recovery,
                 ),
@@ -681,6 +681,7 @@ def open_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-waiver:
                 candidate_startup_causes=resolve_domain(bundle.domain).candidate_startup_causes,
             ),
             environment_resources=environment_resources,
+            environment=environment,
             project_resources=project_resources,
             agent_host_resources=agent_host_resources,
             profiler_agent_resources=session.view.profiler_mcp_resources,
@@ -796,6 +797,8 @@ class _PreparedRun:
 
     project_resources: ProjectRunResources
     environment_resources: RunEnvironmentResources
+    environment: RunEnvironment
+    """The environment the run executes in, which ends what one step's agent left."""
     facts: RunFacts
     backend: ComputeBackend
     agent_specs: Mapping[str, AgentSpec]

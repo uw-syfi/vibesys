@@ -36,7 +36,6 @@ from vs_core.api import (
     LifecycleClass,
     ObservationStatus,
     ResumeSessionTurn,
-    TurnObserved,
     Until,
 )
 from vs_core.api.recovery import Cancelled, Finished
@@ -303,18 +302,15 @@ def _answered(result: ExecutionResult) -> bool:
 
 
 def _finished(result: ExecutionResult, tag: RequestId) -> Finished:
-    """The step's result: the observation, with the turn's reply carried in the report."""
+    """The step's result: the report, and the owner events that carry the turn's reply.
+
+    The reply is a fact only the session executor has (``TurnObserved``), not something the
+    ledger derives from a report, so it travels as the owner event it is and the fold applies it
+    after the report, as the live shell did.
+    """
     observed = result.observation
-    observation = observed.observation
-    if not observation.terminal:
-        raise TurnWithoutResultError(tag, observation)
-    turn = next((event for event in result.owner_events if isinstance(event, TurnObserved)), None)
-    if turn is not None:
-        observed = observed.model_copy(
-            update={
-                "outcome_schema": turn.output_schema,
-                "outcome_json": turn.output_json,
-                "suspension": turn.suspension,
-            }
-        )
-    return Finished(observation=observation, observed=observed)
+    if not observed.observation.terminal:
+        raise TurnWithoutResultError(tag, observed.observation)
+    return Finished(
+        observation=observed.observation, observed=observed, owner_events=result.owner_events
+    )

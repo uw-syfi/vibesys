@@ -100,7 +100,7 @@ def _services(tmp_path: Path) -> CoreServices:
                 integration,
                 plugin=plugin,
                 options=EmptyOptions(),
-                timing=RunTiming(clock, 60.0, OsThreads()),
+                timing=RunTiming(clock, OsThreads()),
                 agent_client_factory=_resumable_client,
                 backend_factory=host_container_backend,
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),

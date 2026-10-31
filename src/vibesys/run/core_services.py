@@ -10,12 +10,20 @@ cannot serve, fails at composition with the name of what is missing, never mid-r
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel
 
 from vibesys.run.evaluation_socket import prepare_evaluation_socket
+from vibesys.run.run_clock import RunClock
+from vibesys.run.step_runners import (
+    RunnerSeams,
+    RunnerServices,
+    UnwiredWorkCleaner,
+    build_run_runner,
+    rerun_policies,
+)
 from vs_agent.api import (
     AgentBackend,
     AgentExecutionPolicy,
@@ -49,7 +57,7 @@ from vs_runtime.api.core import (
     StoreWorkspaceReceipts,
     build_operation_catalog,
     commit_of,
-    core_bindings,
+    core_executors,
     new_core_state,
     production_owners,
     report_turns,
@@ -62,17 +70,23 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSpec
-    from vs_core.api import CoreState, LifecycleCapability, RequestRetries, SearchDef
+    from vs_core.api import (
+        CoreState,
+        LifecycleCapability,
+        OperationRegistry,
+        RequestRetries,
+        SearchDef,
+    )
     from vs_github.api import GitHubClient
     from vs_mcp.api import ToolServerDescriptor
-    from vs_project.api import ControlInbox, Project, StateNamespace, StateStore
+    from vs_project.api import ControlInbox, Project
     from vs_runtime.api import AgentRole, CaptureCommands, Commands, CorePolicy, RunFacts
     from vs_runtime.api.core import (
         CommitObserver,
-        CoreRuntimeBindings,
         MeasurementObserver,
         OperationCatalog,
         SessionSpecFactory,
+        TurnSteering,
     )
     from vs_runtime.api.infrastructure import (
         AgentConfigurationResolver,
@@ -84,7 +98,8 @@ if TYPE_CHECKING:
         RuntimeWorkspaces,
         TrustedEvaluationPlan,
     )
-    from vs_sim.api import BlockingRunner, Network, SleepingClock, Threads
+    from vs_runtime.api.step_runner import StepRunner
+    from vs_sim.api import BlockingRunner, Clock, Network, SleepingClock, Threads
 
 
 class CoreCompositionError(RuntimeError):
@@ -201,6 +216,13 @@ class CoreResources:
     """Role-specific process execution used only by command-capturing operations."""
     local_validation_events: LocalValidationEvents | None = None
     """Hears each recipe's start and settled result, for the host's event stream."""
+    seams: Callable[[], RunnerSeams] | None = None
+    """The runners the run environment decides: the agent's reaper and the evaluation job runner.
+
+    Called once, when the run's runner is built; ``None`` is a run that composes no step runner
+    (a composition test that only reads the services)."""
+    run_clock: RunClock | None = None
+    """The run's clock, which the loop and the log run on; started when the run's log is open."""
 
     def __post_init__(self) -> None:
         """Reject a role declaration whose session capability bundle disagrees."""
@@ -228,11 +250,10 @@ class _SessionComposition:
 class CoreServices:
     """Everything the production core run loop needs, built once per host.
 
-    ``state`` is the state of a run that has not started (the loop ignores it when the
-    store already holds a recoverable envelope). ``bindings`` execute every request
-    role, and ``registry`` inside them is the operation codec to hand the publication
-    delivery. ``store`` is the run's durable record; ``publications`` and ``receipts``
-    are its Project namespaces.
+    ``state`` is the seed of a run that has not started: the loop appends it as the run's first
+    record and ignores it when the log already holds one. ``registry`` is the operation codec
+    the log's records are decoded with. ``runner`` builds the run's step runners once the log
+    is open and names its epoch.
     """
 
     run_id: str
@@ -240,21 +261,24 @@ class CoreServices:
     config: object
     """The config the search runs on."""
     state: CoreState
-    bindings: CoreRuntimeBindings
+    registry: OperationRegistry
     catalog: OperationCatalog
-    store: StateStore
-    publications: StateNamespace
-    receipts: StateNamespace
+    steering: TurnSteering | None
+    """Reaches the turns this host runs while they run; ``None`` offers no input mid-turn."""
+    commit_observer: CommitObserver
+    """Hears the run's state after each record, for the committed view and its events."""
+    runner: Callable[[Clock, int], StepRunner]
     evaluation: ClosableEvaluation
     artifacts: ArtifactStore
-    clock: SleepingClock
+    clock: RunClock
     agent_evaluation: AgentEvaluationBridge | None = None
     """The in-turn evaluation tool service, when the plan offers one; the run loop serves it."""
     profile_capture_withheld: bool = False
     """The plan would offer profile work, but the run environment cannot capture a profile."""
-    """The operator force-stopped this run before (``record_stop_request``): it only ends."""
     control_inbox: ControlInbox | None = None
     """The run's durable control inbox, where ``vibesys control`` writes; the loop reads it."""
+    cancellation_bound_seconds: float = 30.0
+    """How long a cancelled step may take to return before the loop stops waiting on it."""
 
     async def close(self) -> None:
         """Release the evaluation executor; workspaces and the client close with the host."""
@@ -266,7 +290,6 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
     run_id = resources.run_id
     state_dir = resources.project.state
     receipts = state_dir.local_namespace(run_id, "receipts")
-    publications = state_dir.portable_namespace(run_id, "publications")
     artifacts = ArtifactStore(state_dir.portable_namespace(run_id, "artifacts"))
     receipt_store = ReceiptStore(receipts, resources.threads)
     try:
@@ -289,7 +312,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         state = _initial_state(plan, resources, catalog, suspendable=bridge is not None)
     except ContractError as error:
         raise CoreCompositionError(".".join(map(str, error.path)), error.detail) from error
-    bindings = core_bindings(
+    bound = core_executors(
         receipts=receipts,
         threads=resources.threads,
         blocking=resources.blocking,
@@ -303,23 +326,54 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         sessions=sessions,
         operations=catalog,
     )
+    runner_services = RunnerServices(
+        run_id=run_id,
+        executors=bound,
+        catalog=catalog,
+        policies=rerun_policies(
+            {item.registration.descriptor.kind: item.role for item in policy.operations},
+            catalog,
+            UnwiredWorkCleaner(),
+        ),
+        workspaces=resources.workspaces,
+        sessions=None if sessions is None else sessions.agent_sessions,
+        blocking=resources.blocking,
+        resuming=resources.resuming,
+    )
     return CoreServices(
         run_id=run_id,
         search=plan.search,
         config=plan.config,
         state=state,
-        bindings=replace(bindings, commits=resources.commit_observer, epoch=resources.epoch),
+        registry=catalog.registry,
         catalog=catalog,
-        store=resources.project.state_store(run_id),
-        publications=publications,
-        receipts=receipts,
+        steering=None if bound.sessions is None else bound.sessions.turns,
+        commit_observer=resources.commit_observer,
+        runner=lambda clock, epoch: build_run_runner(
+            runner_services, _seams(resources), clock=clock, epoch=epoch
+        ),
         evaluation=resources.evaluation,
         artifacts=artifacts,
-        clock=resources.clock,
+        clock=_run_clock(resources),
         agent_evaluation=bridge,
         profile_capture_withheld=plan.profile_capture_withheld,
         control_inbox=resources.project.state.control_inbox(run_id),
+        cancellation_bound_seconds=resources.environment.cancellation_bound_seconds,
     )
+
+
+def _run_clock(resources: CoreResources) -> RunClock:
+    """The run's clock, which a composition that runs no loop leaves to its wall clock."""
+    return resources.run_clock or RunClock(resources.clock)
+
+
+def _seams(resources: CoreResources) -> RunnerSeams:
+    """The runners the run environment decides, or the refusal of a composition that has none."""
+    if resources.seams is None:
+        detail = "the run environment supplies no step runners"
+        error = CoreCompositionError("step runners", detail)
+        raise error
+    return resources.seams()
 
 
 def _context(resources: CoreResources, artifacts: ArtifactStore) -> CoreRunContext:
@@ -386,7 +440,7 @@ def _initial_state(
         plan.search.declaration,
         offered=catalog,
         startup=CoreStartup(
-            deadline_at=resources.clock.now() + plan.deadline_seconds,
+            deadline_at=plan.deadline_seconds,
             duration_seconds=plan.deadline_seconds,
             limits=plan.limits,
             lifecycle=_lifecycle(resources, suspendable=suspendable),

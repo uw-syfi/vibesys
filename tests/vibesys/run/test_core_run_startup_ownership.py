@@ -1,4 +1,4 @@
-"""The product core runner rolls back resources when startup does not complete."""
+"""The product core runner closes what it opened when startup does not complete."""
 
 from __future__ import annotations
 
@@ -12,24 +12,26 @@ import pytest
 import vs_proto.api as p
 from vibesys.events import CoreEventType, IntentStateData, RunEndingData
 from vibesys.run import EventJournal
-from vibesys.run.core_run import CoreRunRefusedError, drive_core_run
+from vibesys.run.core_run import drive_core_run
 from vibesys.run.core_services import ClosableEvaluation, CoreServices
 from vibesys.run.environment_failure import RunEnvironmentFailure
 from vibesys.run.host import CoreHost
-from vs_core.api import Flow, RunResultProposal, RunStatus, initial_state
+from vibesys.run.run_clock import RunClock
+from vs_core.api import Flow, OperationRegistry, RunResultProposal, RunStatus, initial_state
 from vs_core.api.search import search
-from vs_project.api import FakeStateStore, Project
+from vs_project.api import Project
 from vs_project.api.testing import FakeControlInbox
 from vs_runtime.api import ArtifactStore
-from vs_runtime.api.core import CoreRuntimeBindings, RunStalledError, RunTiming
-from vs_runtime.api.core_shell_fixtures import CounterConfig, ShellTraceTransitions
+from vs_runtime.api.core import IgnoreCommits, RunTiming
+from vs_runtime.api.core_shell_fixtures import CounterConfig
 from vs_runtime.api.infrastructure import (
     PauseRequest,
     RunControlTransitionKind,
     RunStopped,
     create_run_control_channel,
 )
-from vs_runtime.api.testing import FakeRunControlEventSink
+from vs_runtime.api.step_runner import StepLoopStalledError
+from vs_runtime.api.testing import FakeRunControlEventSink, FakeStepRunner
 from vs_sim.api.testing import SimThreads, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
@@ -40,7 +42,7 @@ if TYPE_CHECKING:
     from vs_core.api import CoreState
     from vs_project.api import ControlInbox
     from vs_runtime.api import Evaluation, RunFacts
-    from vs_runtime.api.core import AgentEvaluationBridge, CoreRuntime, OperationCatalog
+    from vs_runtime.api.core import AgentEvaluationBridge, OperationCatalog
     from vs_runtime.api.infrastructure import (
         OwnedWorkspaces,
         RunControlChannel,
@@ -48,6 +50,7 @@ if TYPE_CHECKING:
         RunControlTransition,
         WorkspaceHolds,
     )
+    from vs_runtime.api.step_runner import StepRunner
 
 
 @search("startup-ownership", config=CounterConfig)
@@ -79,7 +82,7 @@ class BridgeCloseError(RuntimeError):
 
 
 class _FailingBridge:
-    """An evaluation bridge that owns its attached shell and then fails to serve."""
+    """An evaluation bridge that owns its attached run and then fails to serve."""
 
     def __init__(
         self,
@@ -87,13 +90,13 @@ class _FailingBridge:
         *,
         close_fails: bool = False,
     ) -> None:
-        self.shell: CoreRuntime | None = None
+        self.attached = False
         self.closed = False
         self._start_error = start_error
         self._close_fails = close_fails
 
-    def attach(self, shell: CoreRuntime, _clock: object) -> None:
-        self.shell = shell
+    def attach(self, _run: object, _clock: object) -> None:
+        self.attached = True
 
     async def serve(self) -> None:
         raise self._start_error
@@ -161,26 +164,20 @@ def _startup_host(
     project = Project.open(tmp_path)
     clock = VirtualClock(at=1.0)
     threads = SimThreads(clock)
-    store = FakeStateStore()
-    bindings = (
-        CoreRuntimeBindings()
-        if ended is not None
-        else CoreRuntimeBindings(transitions=ShellTraceTransitions())
-    )
     namespace = project.state.state_store_namespace("startup-ownership")
     services = CoreServices(
         run_id="startup-ownership",
         search=counter,
         config=CounterConfig(),
         state=_declared_state() if ended is None else ended.state,
-        bindings=bindings,
+        registry=OperationRegistry(),
         catalog=cast("OperationCatalog", object()),
-        store=store,
-        publications=namespace,
-        receipts=namespace,
+        steering=None,
+        commit_observer=IgnoreCommits(),
+        runner=lambda step_clock, _epoch: cast("StepRunner", FakeStepRunner(step_clock)),
         evaluation=cast("ClosableEvaluation", object()),
         artifacts=ArtifactStore(namespace),
-        clock=clock,
+        clock=RunClock(clock),
         agent_evaluation=None if bridge is None else cast("AgentEvaluationBridge", bridge),
         control_inbox=None if ended is None else ended.inbox,
     )
@@ -190,24 +187,27 @@ def _startup_host(
         cast("Evaluation", object()),
         cast("RunFacts", object()),
         services,
-        RunTiming(clock, 60.0, threads),
+        RunTiming(clock, threads),
     )
+    journal = EventJournal(clock, threads)
+    journal.enable_runlog(project, "startup-ownership")
+    journal.attach(Project.log_directory_for(tmp_path, "startup-ownership"), "startup-ownership")
     integration = cast(
         "LocalRunIntegration",
         _Integration(
             create_run_control_channel(
                 FakeRunControlEventSink() if ended is None else ended.sink, threads=threads
             ),
-            EventJournal(clock, threads),
+            journal,
         ),
     )
     return host, integration, clock
 
 
-def test_a_bridge_startup_failure_closes_the_bridge_and_releases_the_run_lease(
+def test_a_bridge_startup_failure_closes_the_bridge_and_ends_the_run_resumable(
     tmp_path: Path,
 ) -> None:
-    """Once core starts, every bridge-start exit still unwinds both product-owned resources."""
+    """Once the run's log is open, every bridge-start exit still closes the bridge."""
     bridge = _FailingBridge()
     host, integration, clock = _startup_host(tmp_path, bridge)
 
@@ -218,8 +218,7 @@ def test_a_bridge_startup_failure_closes_the_bridge_and_releases_the_run_lease(
     run_virtual(clock, exercise())
 
     assert bridge.closed
-    assert bridge.shell is not None
-    assert not bridge.shell.holds_lease(now_at=clock.now())
+    assert bridge.attached
     # The run recorded no result, so a resume continues it from its first round.
     events = cast("_Integration", integration).events
     assert [(e.type, e.data) for e in events.history()] == [
@@ -250,8 +249,6 @@ def test_a_bridge_startup_interruption_survives_a_close_failure(
         "BridgeCloseError: bridge close failed"
     ]
     assert bridge.closed
-    assert bridge.shell is not None
-    assert not bridge.shell.holds_lease(now_at=clock.now())
 
 
 class SinkError(OSError):
@@ -297,9 +294,7 @@ def test_an_ended_run_rejects_what_its_inbox_still_holds(
     host, integration, clock = _startup_host(tmp_path, bridge, ended=ended)
 
     async def exercise() -> None:
-        with contextlib.suppress(
-            BridgeStartError, CoreRunRefusedError, RunStopped, RunStalledError
-        ):
+        with contextlib.suppress(BridgeStartError, RunStopped, StepLoopStalledError):
             await drive_core_run(host, integration)
 
     run_virtual(clock, exercise())
@@ -312,10 +307,10 @@ def test_an_ended_run_rejects_what_its_inbox_still_holds(
 
 
 @pytest.mark.parametrize("bridge", [None, _FailingBridge()], ids=["returns", "raises"])
-def test_a_failure_answering_the_last_controls_still_releases_the_lease(
+def test_a_failure_answering_the_last_controls_does_not_replace_the_loops_error(
     tmp_path: Path, bridge: _FailingBridge | None
 ) -> None:
-    """The run's end is reported and its lease freed; the loop's own error is not replaced."""
+    """The run's end is reported; the loop's own error is not replaced."""
     host, integration, clock = _startup_host(tmp_path, bridge, ended=_ended_run(_FailingSink()))
 
     async def exercise() -> BaseException:
@@ -338,8 +333,6 @@ def test_a_failure_answering_the_last_controls_still_releases_the_lease(
         CoreEventType.RUN_ENDING
     ]
     assert_terminal_refusal(events)
-    # Another host takes the run's lease at once: this one freed it rather than let it lapse.
-    assert host.services.store.acquire("next-host", now=clock.now(), duration=1.0) is not None
 
 
 def assert_terminal_refusal(events: EventJournal) -> None:

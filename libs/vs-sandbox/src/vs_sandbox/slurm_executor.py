@@ -437,6 +437,11 @@ class SlurmEvaluationExecutor:
         # Evaluations this executor was asked to cancel: their jobs' ends are asked for.
         self._cancel_asked: set[str] = set()
 
+    @property
+    def cluster(self) -> Cluster:
+        """The scheduler this executor submits to."""
+        return self._cluster
+
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
         """Report normalized process-local capacity without probing credentials."""
         del requirements

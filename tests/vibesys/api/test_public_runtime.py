@@ -148,7 +148,7 @@ def test_product_host_closes_resources_when_composition_fails(tmp_path: Path) ->
                 integration,
                 plugin=_AGENT_PLUGIN,
                 options=EmptyOptions(),
-                timing=RunTiming(SystemClock(), 60.0, OsThreads()),
+                timing=RunTiming(SystemClock(), OsThreads()),
                 backend_factory=backend_factory,
                 stop_timer=FakeStopTimer(threads=OsThreads()),
                 blocking=ThreadBlockingRunner(),

@@ -9,7 +9,7 @@ from launch import LaunchSettings, default_run_readers, default_runs
 from server.runtime import UrlWebHealthProbe, WebDiscovery
 from vibesys.api.request import checkout_identity
 from vs_project.api import Git
-from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
+from vs_runtime.api.core import RunTiming
 from vs_sim.api import (
     OsProcesses,
     OsProcessTable,
@@ -35,7 +35,7 @@ __all__ = [
 
 def production_timing() -> RunTiming:
     """Wall time, real threads and the production lease: the one definition of a real run's timing."""
-    return RunTiming(SystemClock(), PRODUCTION_LEASE_SECONDS, OsThreads())
+    return RunTiming(SystemClock(), OsThreads())
 
 
 def _production_settings() -> LaunchSettings:

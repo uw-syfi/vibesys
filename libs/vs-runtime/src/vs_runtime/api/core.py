@@ -93,9 +93,7 @@ from vs_runtime._core_requests import (
 )
 from vs_runtime._core_run import (
     HEARTBEAT_TASK,
-    PRODUCTION_LEASE_SECONDS,
     WAIT_TASK,
-    CoreHeldWorkspaces,
     CoreRunHost,
     NextWake,
     RunLoopConfig,
@@ -106,13 +104,14 @@ from vs_runtime._core_run import (
     core_next_wake,
     drive_core,
     start_core,
-    start_core_awaiting_lease,
 )
 from vs_runtime._core_wiring import (
+    CoreExecutors,
     CoreStartup,
     MeasurementServices,
     SessionServices,
     core_bindings,
+    core_executors,
     empty_catalog,
     new_core_state,
 )
@@ -263,7 +262,6 @@ __all__ = [
     "HAND_ROLLED_ROLES",
     "HEARTBEAT_TASK",
     "NOT_TARGET_FACTS",
-    "PRODUCTION_LEASE_SECONDS",
     "REQUEST_DISPATCH",
     "RUNTIME_SCHEMA_VERSION",
     "WAIT_TASK",
@@ -295,7 +293,7 @@ __all__ = [
     "Conflict",
     "ContinuationBinding",
     "CoreContractGapError",
-    "CoreHeldWorkspaces",
+    "CoreExecutors",
     "CoreResumeError",
     "CoreRunHost",
     "CoreRuntime",
@@ -453,6 +451,7 @@ __all__ = [
     "build_operation_catalog",
     "commit_of",
     "core_bindings",
+    "core_executors",
     "core_next_wake",
     "drive_core",
     "empty_catalog",
@@ -474,6 +473,5 @@ __all__ = [
     "session_executors",
     "settle",
     "start_core",
-    "start_core_awaiting_lease",
     "winner_selection",
 ]

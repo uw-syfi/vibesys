@@ -34,7 +34,9 @@ from vibesys.run.measurement_events import CoreMeasurementEvents
 from vibesys.run.profilers import WITHHELD_TOOLS_ENV, ProfilerToolOffer, profiler_tool_offer
 from vibesys.run.queue_status import queue_status_reader, queue_status_service
 from vibesys.run.resources import open_run_resources
+from vibesys.run.run_clock import RunClock
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
+from vibesys.run.step_seams import step_seams
 from vs_agent.api import (
     AgentSessionKey,
     AgentSessionState,
@@ -60,6 +62,7 @@ from vs_runtime.api.infrastructure import (
     release_all,
     stop_gated_evaluation,
 )
+from vs_slurm.api import LedgerPolicy
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping
@@ -385,6 +388,21 @@ class _ProductHostFactory:
             stage_output,
             ledger_identity=(project.project.state.load_project().project_id, project.state.run_id),
         )
+        retrying = RetryingEvaluationExecutor(
+            executor
+            if executor is not None
+            else PollingEvaluationExecutor(
+                evaluation,
+                workspaces,
+                clock=self.timing.clock,
+                stage_output=stage_output,
+                control=self.integration.control,
+            ),
+            self.request.config.evaluation.evaluation_retries(),
+            project.project.state.local_namespace(project.state.run_id, "core-evaluation-tries"),
+            tries=tries,
+        )
+        environment = self._core_environment(resources)
         return build_core_services(
             policy,
             CoreResources(
@@ -394,23 +412,8 @@ class _ProductHostFactory:
                 facts=resources.facts,
                 options=self.options,
                 workspaces=workspaces,
-                evaluation=RetryingEvaluationExecutor(
-                    executor
-                    if executor is not None
-                    else PollingEvaluationExecutor(
-                        evaluation,
-                        workspaces,
-                        clock=self.timing.clock,
-                        stage_output=stage_output,
-                        control=self.integration.control,
-                    ),
-                    self.request.config.evaluation.evaluation_retries(),
-                    project.project.state.local_namespace(
-                        project.state.run_id, "core-evaluation-tries"
-                    ),
-                    tries=tries,
-                ),
-                environment=self._core_environment(resources),
+                evaluation=retrying,
+                environment=environment,
                 roles=roles,
                 role_models=role_models,
                 agents=agents,
@@ -436,6 +439,21 @@ class _ProductHostFactory:
                 epoch=lambda: self.integration.events.epoch,
                 commit_observer=self.integration.core_commit_observer(
                     project.state.run_id, self.projector, self.plugin.id
+                ),
+                run_clock=RunClock(self.timing.clock),
+                seams=lambda: step_seams(
+                    run_id=project.state.run_id,
+                    environment=resources.environment,
+                    kind=resources.environment_resources.view.env_kind,
+                    system=self.integration.system,
+                    blocking=self.blocking,
+                    namespace=lambda name: project.project.state.local_namespace(
+                        project.state.run_id, name
+                    ),
+                    log=project.logger.lprint,
+                    evaluation=retrying,
+                    slurm=executor,
+                    poll_interval_s=self._job_poll_seconds(resources, environment),
                 ),
             ),
         )
@@ -650,6 +668,14 @@ class _ProductHostFactory:
             ),
         )
 
+    @staticmethod
+    def _job_poll_seconds(resources: _PreparedRun, environment: CoreEnvironment) -> float:
+        """How often a job step asks its executor: the cluster's own pace, else core's."""
+        cluster = resources.environment_resources.view.cluster_evaluation
+        if cluster is None:
+            return float(environment.observe_interval_seconds)
+        return float(cluster.settings.config.poll_interval_seconds)
+
     def _semantic_executor(
         self,
         resources: _PreparedRun,
@@ -664,9 +690,11 @@ class _ProductHostFactory:
         if cluster is None:
             return None
         clock = self.timing.clock
+        policy = cluster.settings.policy
         return SlurmSemanticEvaluationExecutor(
             cluster.settings.config,
-            cluster.settings.policy,
+            # A step finds its job again through the ledger, so a run always attaches to it.
+            policy.model_copy(update={"ledger": policy.ledger or LedgerPolicy()}),
             cluster.plan,
             resources.evaluation_plan,
             workspaces,

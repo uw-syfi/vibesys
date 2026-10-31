@@ -118,7 +118,7 @@ def test_a_blocked_recovery_whose_closure_needs_an_unprovable_release_halts_at_o
     )
     clock = VirtualClock(1.0)
     host = CoreRunHost(shell, FakePublicationDelivery(), clock)
-    config = RunLoopConfig(host_id="blocked", lease_duration=100.0, recovery_poll_interval=50.0)
+    config = RunLoopConfig(host_id="blocked", lease_duration=100.0)
     start_core(host, config)
     with pytest.raises(RunStalledError, match=r"release is unproven \[.*submission'?\]"):
         run_virtual(clock, drive_core(host, config))
@@ -205,7 +205,7 @@ def test_a_check_blocked_after_its_last_answer_stops_the_run_despite_unrelated_t
     )
     clock = VirtualClock(1.0)
     host = CoreRunHost(shell, FakePublicationDelivery(), clock)
-    config = RunLoopConfig(host_id="blocked", lease_duration=100.0, recovery_poll_interval=50.0)
+    config = RunLoopConfig(host_id="blocked", lease_duration=100.0)
     start_core(host, config)
     with pytest.raises(RunStalledError):
         run_virtual(

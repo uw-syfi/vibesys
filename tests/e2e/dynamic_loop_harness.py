@@ -63,7 +63,7 @@ from vs_agent.api.testing import FakeAgentClient
 from vs_core.api import FlowDriver, FlowState, RunEnvelope
 from vs_core.testing.liveness import Budget, End, Journal, assert_live
 from vs_project.api import FakeStateStores, Project, StoredEnvelope
-from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
+from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import CrashableRunClock, FakeStopTimer
 from vs_sim.api import (
     OsThreads,
@@ -666,16 +666,13 @@ def run_request(  # noqa: PLR0913
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     slurm_processes: Processes | None = None,
     state_stores: StateStoreFactory | None = None,
-    lease_seconds: float = PRODUCTION_LEASE_SECONDS,
 ) -> LoopRun:
     """Execute a built request through the production host composition.
 
-    Without ``clock`` the run uses the production wall clock and lease. A scenario that
-    resumes a crashed run passes one ``simulated_clock()`` to both runs: the state store's
-    lease is compared on one shared timeline, and waiting advances it at once. Such a run
-    that waits more than ``SIMULATED_BUDGET_S`` simulated seconds fails instead of
-    spinning. ``lease_seconds`` is how long a writer's lease outlives it: a real-clock run that
-    resumes after its predecessor was killed waits that long, so such a scenario shortens it.
+    Without ``clock`` the run uses the production wall clock. A scenario that resumes a
+    crashed run passes one ``simulated_clock()`` to both runs, and waiting advances it at once.
+    Such a run that waits more than ``SIMULATED_BUDGET_S`` simulated seconds fails instead of
+    spinning.
     Simulated time decouples the loop from the agent turns that run in threads,
     so scenarios that depend on a turn finishing within one poll still use the wall clock.
     """
@@ -689,9 +686,9 @@ def run_request(  # noqa: PLR0913
             backend_factory=backend_factory or host_container_backend,
             stop_timer=stop_timer or FakeStopTimer(threads=OsThreads()),
             timing=(
-                RunTiming(SystemClock(), lease_seconds, OsThreads())
+                RunTiming(SystemClock(), OsThreads())
                 if clock is None
-                else RunTiming(clock, PRODUCTION_LEASE_SECONDS, OsThreads())
+                else RunTiming(clock, OsThreads())
             ),
             # The agent's container mounts the repository's `.git` read-only, so the
             # repository must exist on disk: these runs use the product's real Git.

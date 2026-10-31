@@ -7,11 +7,8 @@ binds its workspaces to that reading of core's committed state.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
-from typing import TYPE_CHECKING
 
-import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -40,21 +37,11 @@ from vs_core.api import (
     WorkspacePlan,
     initial_state,
 )
-from vs_project.api import FakeStateStore
 from vs_runtime.api.core import (
-    CoreRunHost,
-    CoreRuntime,
-    RunLoopConfig,
     revision_ref,
-    start_core_awaiting_lease,
 )
-from vs_runtime.api.core_shell_fixtures import CounterConfig, counter
+from vs_runtime.api.core_shell_fixtures import counter
 from vs_runtime.api.infrastructure import WorkspaceHolds, core_workspace_holds
-from vs_runtime.api.testing import FakePublicationDelivery
-from vs_sim.api.testing import VirtualClock, run_virtual
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 _ATTEMPTS = ("a0", "a1", "a2")
 
@@ -142,94 +129,3 @@ def test_core_holds_an_attempt_workspace_until_the_attempt_and_its_requests_end(
     assert holds.attempts == expected
     assert holds.workspace_ids() == WorkspaceHolds(final=False, attempts=expected).workspace_ids()
     assert len(holds.workspace_ids()) == len(expected)
-
-
-class _Following:
-    """Run workspaces that record what they follow and when they sweep."""
-
-    def __init__(self) -> None:
-        self.holds: Callable[[], WorkspaceHolds] | None = None
-        self.swept: list[WorkspaceHolds] = []
-
-    def follow(self, holds: Callable[[], WorkspaceHolds]) -> None:
-        self.holds = holds
-
-    async def release_unheld(self) -> None:
-        assert self.holds is not None, "a sweep before core is followed keeps nothing correct"
-        self.swept.append(self.holds())
-
-
-class _InterruptedFollowing(_Following):
-    """Run workspaces whose selected recovery step interrupts startup."""
-
-    def __init__(self, phase: str, error: BaseException) -> None:
-        super().__init__()
-        self._phase = phase
-        self._error = error
-
-    def follow(self, holds: Callable[[], WorkspaceHolds]) -> None:
-        super().follow(holds)
-        if self._phase == "follow":
-            raise self._error
-
-    async def release_unheld(self) -> None:
-        if self._phase == "release":
-            raise self._error
-        await super().release_unheld()
-
-
-def test_a_start_sweeps_by_and_then_follows_the_recovered_core_state() -> None:
-    """A host's start sweeps by what recovered core references, and close reads it live."""
-    open_attempt, ended = _attempt("a0", 0), _attempt("a1", 0)
-    state = _state(
-        (_view(open_attempt, AttemptPhase.ACTIVE), _view(ended, AttemptPhase.TERMINAL)),
-        (),
-        RunStatus.RUNNING,
-    )
-    shell = CoreRuntime(
-        FakeStateStore(), counter.driver(CounterConfig()), state, config=CounterConfig()
-    )
-    clock = VirtualClock(1.0)
-    workspaces = _Following()
-    host = CoreRunHost(shell, FakePublicationDelivery(), clock, workspaces=workspaces)
-    config = RunLoopConfig(host_id="follow", lease_duration=100.0)
-    run_virtual(clock, start_core_awaiting_lease(host, config))
-    assert workspaces.swept == [WorkspaceHolds(final=False, attempts=frozenset({open_attempt}))]
-    assert workspaces.holds is not None
-    assert workspaces.holds() == core_workspace_holds(shell.record.envelope.core)
-
-
-@pytest.mark.parametrize(
-    ("phase", "error_type"),
-    [("follow", RuntimeError), ("release", asyncio.CancelledError)],
-)
-def test_an_interrupted_workspace_recovery_releases_the_new_lease(
-    phase: str, error_type: type[BaseException]
-) -> None:
-    """A failed or cancelled post-acquisition step leaves no lease for a restart to wait out."""
-    store = FakeStateStore()
-    state = _state((), (), RunStatus.RUNNING)
-    clock = VirtualClock(1.0)
-    first = CoreRuntime(store, counter.driver(CounterConfig()), state, config=CounterConfig())
-    host = CoreRunHost(
-        first,
-        FakePublicationDelivery(),
-        clock,
-        workspaces=_InterruptedFollowing(phase, error_type("recovery interrupted")),
-    )
-    config = RunLoopConfig(host_id="interrupted", lease_duration=60.0)
-
-    with pytest.raises(error_type, match="recovery interrupted"):
-        run_virtual(clock, start_core_awaiting_lease(host, config))
-
-    assert not first.holds_lease(now_at=clock.now())
-    second = CoreRuntime(store, counter.driver(CounterConfig()), state, config=CounterConfig())
-    run_virtual(
-        clock,
-        start_core_awaiting_lease(
-            CoreRunHost(second, FakePublicationDelivery(), clock),
-            RunLoopConfig(host_id="restart", lease_duration=60.0),
-        ),
-    )
-    assert clock.now() == 1.0
-    assert second.holds_lease(now_at=clock.now())

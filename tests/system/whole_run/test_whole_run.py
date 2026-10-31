@@ -99,7 +99,6 @@ if TYPE_CHECKING:
 
 _PLUGIN_ID = "whole-run"
 _RUN_ID = "whole-run-1"
-_LEASE_S = 30.0
 _RUN_LIMIT_S = 3600.0
 """Virtual seconds a run may take; past it the run is stuck, so the test fails instead of hanging."""
 _DOCKER_COMMANDS = 40
@@ -493,7 +492,7 @@ def test_client_bounds_persistent_hello_failures(
         listener = platform.network.listen(str(socket_path))
         runs = default_runs(
             LaunchSettings(
-                timing=RunTiming(platform.clock, _LEASE_S, threads),
+                timing=RunTiming(platform.clock, threads),
                 processes=platform.processes,
                 piped_processes=FakePipedProcessLauncher(),
                 blocking=platform.blocking,
@@ -649,7 +648,7 @@ def _run(tmp_path: Path, sim: Sim, faults: _Faults, stall: _Stall | None = None)
         assert isinstance(network, SimNetwork)
         runs = default_runs(
             LaunchSettings(
-                timing=RunTiming(platform.clock, _LEASE_S, threads),
+                timing=RunTiming(platform.clock, threads),
                 processes=platform.processes,
                 piped_processes=FakePipedProcessLauncher(),
                 blocking=platform.blocking,

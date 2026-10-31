@@ -51,7 +51,7 @@ async def open_core_host(
         integration,
         plugin=plugin or capability_plugin(request.orchestration.id),
         options=EmptyOptions(),
-        timing=RunTiming(SystemClock(), 60.0, OsThreads()),
+        timing=RunTiming(SystemClock(), OsThreads()),
         agent_client_factory=_resumable_client,
         backend_factory=backend_factory,
         invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),

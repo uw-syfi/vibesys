@@ -332,7 +332,7 @@ def _run_keeping_a_candidate(
         settings=LaunchSettings(
             blocking=InlineBlockingRunner(),
             network=SimNetwork(threads),
-            timing=RunTiming(sim.clock, 60.0, threads),
+            timing=RunTiming(sim.clock, threads),
             processes=processes,
             piped_processes=FakePipedProcessLauncher(),
             agent_client_factory=lambda **_kwargs: _candidate_agent(

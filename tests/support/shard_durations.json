@@ -754,7 +754,6 @@
  "tests/e2e/test_host_command_bridge_docker_e2e.py": 0.0,
  "tests/e2e/test_host_command_broker_unix_socket.py": 0.13,
  "tests/e2e/test_host_helper.py": 3.97,
- "tests/e2e/test_iteration_store_fence_e2e.py": 0.44,
  "tests/e2e/test_launcher_signals.py": 3.13,
  "tests/e2e/test_light_host_commands.py": 3.42,
  "tests/e2e/test_live_instances_e2e.py": 2.13,

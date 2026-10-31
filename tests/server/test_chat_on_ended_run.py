@@ -53,7 +53,7 @@ from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
 from vs_evaluation.api.tool_relay import SOCKET_ENV, TOKEN_ENV, ToolRelayClient
 from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Project
-from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
+from vs_runtime.api.core import RunTiming
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api.testing import (
     FakePipedProcessLauncher,
@@ -372,7 +372,7 @@ def _reader_of(run: _EndedRun, threads: SimThreads, tools: _RunTools) -> RunRead
     )
     client.set_text(None, tools.answer)
     settings = LaunchSettings(
-        timing=RunTiming(ManualClock(), PRODUCTION_LEASE_SECONDS, threads),
+        timing=RunTiming(ManualClock(), threads),
         processes=sim_platform(threads).processes,
         piped_processes=FakePipedProcessLauncher(),
         blocking=SimBlockingRunner(threads),

@@ -414,7 +414,8 @@ def test_the_next_attempt_after_a_kill_is_asked_again_and_judged_from_the_record
         assert len(world.workspace.agent_restore_calls) == 1
         result = await world.runner.run(world.finishing(tag), tag, 2, DEADLINE_AT, CancelSignal())
         assert isinstance(result, Finished)
-        assert result.report.outcome_json == '{"value":7}'
+        replies = [e for e in result.owner_events if isinstance(e, core.TurnObserved)]
+        assert [reply.output_json for reply in replies] == ['{"value":7}']
         assert world.turns.settlement.fenced_by(world.workspace.path) == ()
 
     world.run(main())

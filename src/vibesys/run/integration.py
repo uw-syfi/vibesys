@@ -64,7 +64,7 @@ if TYPE_CHECKING:
     from vs_agent.api import AgentEventSink
     from vs_core.api import Comparison, Runaway
     from vs_github.api import GitHubCLI
-    from vs_project.api import Git, GitRepositoryFactory, Project, StateStoreFactory
+    from vs_project.api import Git, GitRepositoryFactory, Project
     from vs_runtime.api.core import WinnerSelection
     from vs_runtime.api.infrastructure import (
         EnvironmentSystem,
@@ -691,7 +691,6 @@ class LocalRunIntegration:
         # > instead of the two roles it passes on.
         self,
         git_repository: GitRepositoryFactory | None = None,
-        state_stores: StateStoreFactory | None = None,
         *,
         clock: SleepingClock,
         git: Git,
@@ -704,8 +703,7 @@ class LocalRunIntegration:
         ``git`` starts the run's Git commands and ``github`` its GitHub CLI commands. ``git_repository`` builds the run's
         ``GitRepository`` implementations; ``None`` opens the configured one over ``git``. ``system`` is the host's threads, sockets
         and processes the run's environments and Slurm evaluations run on.
-        ``state_stores`` opens each run's ``StateStore``; ``None`` is the local
-        crash-atomic one. ``clock`` counts seconds since the epoch; it stamps the
+        ``clock`` counts seconds since the epoch; it stamps the
         run's events, names its logs, and times its boot. ``threads`` makes the run's
         threads and locks.
         """
@@ -713,7 +711,6 @@ class LocalRunIntegration:
         self.github = github
         self.git_repository = git_repositories(git) if git_repository is None else git_repository
         self.system = system
-        self.state_stores = state_stores
         self.clock = clock
         self.threads = threads
         self.events = EventJournal(clock, threads)

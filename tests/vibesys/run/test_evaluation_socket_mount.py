@@ -97,7 +97,7 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
             integration,
             plugin=_plugin(templates),
             options=EmptyOptions(),
-            timing=RunTiming(clock, 60.0, OsThreads()),
+            timing=RunTiming(clock, OsThreads()),
             agent_client_factory=lambda **_: FakeAgentClient(
                 capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
             ),

@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     )
     from vs_github.api import GitHubCLI
     from vs_mcp.api import ToolServerDescriptor
-    from vs_project.api import Git, GitRepositoryFactory, StateStoreFactory
+    from vs_project.api import Git, GitRepositoryFactory
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import (
         EnvironmentSystem,
@@ -94,8 +94,6 @@ class SessionImplementations:
     """The server of each tool that holds no run state, which a core run may offer a role."""
     git_repository: GitRepositoryFactory | None = None
     """Builds the run's ``GitRepository`` implementations; ``None`` opens the configured one."""
-    state_stores: StateStoreFactory | None = None
-    """Opens each run's ``StateStore``; ``None`` is the local crash-atomic one."""
 
 
 __all__ = [
