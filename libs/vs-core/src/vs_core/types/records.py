@@ -990,6 +990,9 @@ class StepEffect(StrEnum):
     SNAPSHOTS = "snapshots"
     """It reads the files to retain them, so no writer may run beside it or before it ends."""
 
+    CLOSES = "closes"
+    """It closes the scope, so no other step of the scope may run beside it or after it began."""
+
     NEITHER = "neither"
     """It leaves the files of the scope alone."""
 
@@ -1013,6 +1016,8 @@ def request_effect(request: Request, registry: tuple[OperationDescriptor, ...]) 
             return StepEffect.WRITES
         case SnapshotAndRetain() | SnapshotAndRetainRun() | RetainRevision():
             return StepEffect.SNAPSHOTS
+        case CloseAttemptScope():
+            return StepEffect.CLOSES
         case (
             SubmitMeasurement()
             | InspectTurn()
@@ -1022,7 +1027,6 @@ def request_effect(request: Request, registry: tuple[OperationDescriptor, ...]) 
             | InspectRequest()
             | VerifyAdoption()
             | DiscardWorkspace()
-            | CloseAttemptScope()
             | EnsureSession()
             | CancelTurn()
             | CloseSession()

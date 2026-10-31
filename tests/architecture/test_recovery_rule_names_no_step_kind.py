@@ -10,7 +10,9 @@ pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
 _CORE = Path(__file__).resolve().parents[2] / "libs/vs-core/src/vs_core"
 _RULE = ("_decide.py", "_actions.py", "_scope_order.py", "_step_attempts.py", "_step_log.py")
-_NOT_STEP_KINDS = frozenset({"Finished", "Failed", "Cancelled", "Oneof", "Observation", "Run"})
+_NOT_STEP_KINDS = frozenset(
+    {"Finished", "Failed", "Cancelled", "Oneof", "Observation", "Run", "Cancel"}
+)
 """What the rule may test an instance of: a step's result and observation, the action it returns, and a log's record body."""
 
 

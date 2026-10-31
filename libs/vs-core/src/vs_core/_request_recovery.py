@@ -1848,6 +1848,11 @@ def _canonical(record: RequestRecord) -> bool:
     return not isinstance(record.request, InspectRequest | CancelOwnedResource | BlockRequest)
 
 
+def is_step(record: RequestRecord) -> bool:
+    """A canonical request, which the recovery rule runs: not a command of reconciliation."""
+    return _canonical(record)
+
+
 def is_open(record: RequestRecord) -> bool:
     """A canonical record that has not ended: core owes it a result by its ``until``."""
     return _canonical(record) and record.phase in (
