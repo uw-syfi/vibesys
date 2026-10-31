@@ -2,6 +2,9 @@
 
 from vs_runtime._step_loop import (
     OpenStep,
+    Stall,
+    StallBoard,
+    StallKind,
     StepLog,
     StepLoopTiming,
     StepLoopTimingError,
@@ -21,6 +24,9 @@ __all__ = [
     "ClearUnavailableError",
     "Cleared",
     "OpenStep",
+    "Stall",
+    "StallBoard",
+    "StallKind",
     "StepLog",
     "StepLoopTiming",
     "StepLoopTimingError",
