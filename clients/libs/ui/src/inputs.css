@@ -420,16 +420,20 @@
   white-space: nowrap;
 }
 /*
- * The hint of a chip (its accessible description) is drawn under it on hover and on keyboard focus.
+ * The hint of a chip, or of a chart's figure (its accessible description), is drawn under it on hover
+ * and on keyboard focus.
  * It is fixed and anchored to its chip, so no row that clips its text (`overflow: hidden`) clips
  * the hint, and it flips to the other side of the chip at the window's edge.
  */
-.vs-chip[aria-description] {
+.vs-chip[aria-description],
+.vs-chart-figure[aria-description] {
   anchor-name: --vs-chip-hint;
   anchor-scope: --vs-chip-hint;
 }
 .vs-chip[aria-description]:hover::after,
-.vs-chip[aria-description]:focus-visible::after {
+.vs-chip[aria-description]:focus-visible::after,
+.vs-chart-figure[aria-description]:hover::after,
+.vs-chart-figure[aria-description]:focus-visible::after {
   content: attr(aria-description) / "";
   position: fixed;
   position-anchor: --vs-chip-hint;

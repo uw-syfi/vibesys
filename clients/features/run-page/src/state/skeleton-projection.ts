@@ -11,6 +11,7 @@ import {agentGraph} from '@vibesys/run-state/agents';
 import {candidateTree} from '@vibesys/run-state/candidates';
 import {type RecordRow, rowsOfRecords} from '@vibesys/run-state/records';
 import {
+  clockThrough,
   coreIdeaKey,
   coreIdeaMeasurements,
   lifecycleState,
@@ -21,11 +22,13 @@ import {
 } from '@vibesys/run-state/skeleton';
 import {AppendLog} from './append-log.js';
 import {EMPTY_TRACE_LOG} from './live.js';
+import {bestSteps, readObjectives} from './objective-reading.js';
+import {clockStart} from './run-level.js';
 import type {RunModel} from './run-model.js';
 import {type RunPageSeed, type RunPageState, runPageInitial} from './run-page.js';
+import {marksAlong, placesAlong, runningTimeOf, runningWords} from './running-time.js';
 import {settleIdeas} from './settled-ideas.js';
 import {skeletonPerformance} from './skeleton-performance.js';
-import {duration} from './span-reading.js';
 import {STARTUP_LABELS} from './startup-stages.js';
 
 export {skeletonPositions} from '@vibesys/run-state/skeleton';
@@ -97,6 +100,7 @@ export function projectSkeleton(
     pauses: reading.pauses,
     baselines: reading.baselines,
     latest: reading.latest,
+    sessions: reading.sessions,
     inputGates: reading.inputFailures,
     changed: new Set(),
   };
@@ -160,13 +164,14 @@ export function skeletonScreenState(
           startedAt: 0,
           reason: lifecycle.reason,
         };
+  const positions = skeletonPositions(skeleton);
   const trace = {
     ...EMPTY_TRACE_LOG,
     base: whole.trace,
     head: whole.trace,
     baseOverview: whole.overview,
     headOverview: whole.overview,
-    positions: AppendLog.of(skeletonPositions(skeleton)),
+    positions: AppendLog.of(positions),
     calls: AppendLog.of(
       Object.values(skeleton.spans)
         .flatMap(history => {
@@ -183,7 +188,7 @@ export function skeletonScreenState(
     progress: whole.progress,
     recordDiagnostic: latestFailure(skeleton, ui.recordLog),
     lifecycleWord: lifecycle.word,
-    positionWord: whole.loadFailure ?? positionWord(whole.progress, reading.latest),
+    ...timeBar(skeleton, whole, reading.latest, positions),
     startupStages: reading.startup.map(step => ({
       id: step.stage,
       label: STARTUP_LABELS[step.stage],
@@ -222,7 +227,32 @@ function observedLifecycle(skeleton: Skeleton, hint: RunLivenessHint | undefined
     : lifecycleState(observation.lifecycle);
 }
 
-function positionWord(progress: LoadProgress | undefined, latest: number | null): string {
+/**
+ * The time bar's word and track: the run's running time, the same clock as the charts' axes. The
+ * word is the time of the view (`latest` on the run clock), the track spaces `positions` by it, and a
+ * mark on it is each new best of the charts' lines.
+ */
+function timeBar(
+  skeleton: Skeleton,
+  whole: RunModel,
+  latest: number | null,
+  positions: readonly number[],
+): Pick<RunPageState, 'positionWord' | 'positionPlaces' | 'positionMarks'> {
+  const start = clockStart(whole);
+  const time = runningTimeOf(whole.sessions ?? [], start);
+  const seconds = clockThrough(skeleton, positions).map(at => time.at(at ?? start));
+  const newBests = readObjectives(whole).flatMap(reading =>
+    bestSteps(reading).map(step => time.at(step.at)),
+  );
+  return {
+    positionWord:
+      whole.loadFailure ?? positionWord(whole.progress, latest === null ? null : time.at(latest)),
+    positionPlaces: placesAlong(seconds),
+    positionMarks: marksAlong(seconds, newBests),
+  };
+}
+
+function positionWord(progress: LoadProgress | undefined, running: number | null): string {
   if (progress && progress.phase !== 'complete') return 'Catching up';
-  return latest === null ? 'Start' : duration(latest);
+  return running === null ? 'Start' : runningWords(running);
 }

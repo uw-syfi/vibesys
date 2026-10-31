@@ -8,16 +8,17 @@ import {seedSkeleton} from '@vibesys/run-skeleton';
 import type {Candidate} from '@vibesys/run-state/candidates';
 import {lifecycleState} from '@vibesys/run-state/skeleton';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
+import {firstChart} from './chart-fixtures.js';
 import {adoptedCandidate} from './end-words.js';
 import {ideaTree} from './ideas-tree.js';
 import {IDEAS_FILTER_DEFAULT} from './ideas-view.js';
 import {
   clockStart,
   heroView,
-  ideaFocusView,
   ideasView,
   projectSkeleton,
-  stripChartView,
+  runPageInitial,
+  skeletonScreenState,
 } from './index.js';
 import type {RunModel} from './run-model.js';
 import {ratio} from './span-reading.js';
@@ -35,19 +36,18 @@ for (const item of cases) {
     const skeleton = seedSkeleton(fromBinary(KeyframeSchema, Buffer.from(item.skeleton, 'base64')));
     const model = projectSkeleton(skeleton, skeleton.throughSeq ?? 0n, '', {head});
     const facts = head.performance[0];
-    expect(heroView(model).tiles[0]?.ratio).toBe(
+    expect(heroView(model).headlines[0]?.ratio).toBe(
       item.card.adopted_ratio === null ? null : `${item.card.adopted_ratio.toFixed(2)}×`,
     );
     expect(facts).toBeDefined();
     const kept = facts?.points.filter(point => point.newBest) ?? [];
-    const chart = stripChartView(model, clockStart(model), model.latest);
-    expect(
-      chart?.points
-        .filter(point => point.filled && point.tone === 'accent')
-        .map(point => point.y) ?? [],
-    ).toEqual(kept.flatMap(point => (point.point ? [point.point.value] : [])));
-    expect(chart?.steps.at(-1)?.y).toBe(facts?.bestValue);
-    expect(heroView(model).tiles[0]?.trend?.steps.at(-1)?.y).toBe(facts?.bestValue);
+    const chart = firstChart(model, clockStart(model), model.latest);
+    // The line steps up exactly at the readings core calls a new best, to the best it states.
+    const stepped = chart.steps.map(step => step.y).filter((y, at, ys) => y !== ys[at - 1]);
+    expect(stepped.slice(chart.start === null ? 0 : 1)).toEqual(
+      kept.flatMap(point => (point.point ? [point.point.value] : [])),
+    );
+    expect(chart.steps.at(-1)?.y).toBe(facts?.bestValue);
     expect(head.objective?.bestValue).toBe(item.card.dashboard.best.value);
     expect(facts?.bestValue).toBe(item.card.dashboard.best.value);
     expect(
@@ -64,25 +64,49 @@ for (const item of cases) {
       head,
       progress: {phase: 'history', through: 1n, committed: skeleton.throughSeq ?? 0n},
     });
-    expect(heroView(catchingUp).measured).toBeNull();
-    expect(heroView(catchingUp).tiles[0]?.ratio).toBeNull();
+    expect(heroView(catchingUp).headlines[0]?.ratio).toBeNull();
     for (const idea of catchingUp.candidates.candidates) {
       expect(
         ideasView(catchingUp, {passed: true, failed: true, running: true, query: ''}).rows.find(
           row => row.id === idea.id,
         )?.figure,
       ).toBe('Catching up');
-      expect(ideaFocusView(catchingUp, idea.id)?.ratio).toBeNull();
     }
     const failed = {...catchingUp, loadFailure: 'Data loss'};
-    expect(heroView(failed).tiles[0]?.note).toBe('Data loss');
-    expect(heroView(failed).tiles[0]?.detail).not.toContain('Reading');
+    expect(heroView(failed).headlines[0]?.note).toBe('Data loss');
+    expect(heroView(failed).headlines[0]?.detail).not.toContain('Reading');
     for (const idea of failed.candidates.candidates)
       expect(
         ideasView(failed, {passed: true, failed: true, running: true, query: ''}).rows.find(
           row => row.id === idea.id,
         )?.figure,
       ).toBe('Data loss');
+  });
+}
+
+const SEED = {
+  identity: {host: 'local' as const, runId: 'run-a'},
+  title: {project: 'queue-rs', task: null},
+  hostLabel: 'Local',
+  unavailable: {},
+};
+
+for (const item of cases) {
+  test(`the time bar marks the new bests core states, once each: ${item.name}`, () => {
+    const head = fromBinary(RunHeadSchema, Buffer.from(item.head, 'base64'));
+    const skeleton = seedSkeleton(fromBinary(KeyframeSchema, Buffer.from(item.skeleton, 'base64')));
+    const model = projectSkeleton(skeleton, skeleton.throughSeq ?? 0n, '', {head});
+    const state = skeletonScreenState(SEED, skeleton, model, runPageInitial(SEED));
+    const marks = state.positionMarks ?? [];
+    const stated = head.performance[0]?.points.filter(point => point.newBest).length ?? 0;
+    // A mark for each new best (two at one moment share a place), none when the input stands.
+    expect(marks.length).toBeLessThanOrEqual(stated);
+    expect(marks.length > 0).toBe(stated > 0);
+    for (const [at, place] of marks.entries()) {
+      expect(place).toBeGreaterThanOrEqual(0);
+      expect(place).toBeLessThanOrEqual(1);
+      if (at > 0) expect(place).toBeGreaterThan(marks[at - 1] ?? 0);
+    }
   });
 }
 
@@ -172,10 +196,21 @@ function statedBestBelow(model: RunModel, head: RunHead): Map<string, number> {
 
 let closedSummaries = 0;
 
-/** The tile of the second axis, which core states the same series for. */
+const secondAxis = (model: RunModel) =>
+  ({name: 'second_axis', direction: model.direction ?? 'max'}) as const;
+
+/** The headline of the second axis, which core states the same series for. */
 function axisTileOf(model: RunModel) {
-  const axis = {name: 'second_axis', direction: model.direction ?? 'max'} as const;
-  return heroView(twoAxes(model), [axis, axis]).tiles[0];
+  const axis = secondAxis(model);
+  return heroView(twoAxes(model), [axis, axis]).headlines[0];
+}
+
+/** The chart of the second axis. */
+function axisChartOf(model: RunModel) {
+  const stated = twoAxes(model);
+  return firstChart(stated, clockStart(stated), stated.latest, null, null, new Set(), [
+    secondAxis(model),
+  ]);
 }
 
 for (const item of cases) {
@@ -185,7 +220,7 @@ for (const item of cases) {
 
     // The axis tile of a series reads the best core states, whatever the ideas passed with.
     expect(axisTileOf(misread)).toEqual(axisTileOf(model));
-    expect(axisTileOf(model)?.trend?.steps.at(-1)?.y).toBe(head.performance[0]?.bestValue);
+    expect(axisChartOf(model).steps.at(-1)?.y).toBe(head.performance[0]?.bestValue);
 
     // The Ideas tree's closed summary names core's latest new best below the idea.
     for (const seed of SEEDS.slice(0, 8)) {

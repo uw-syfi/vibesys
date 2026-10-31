@@ -11,7 +11,7 @@ import type {Candidate} from '@vibesys/run-state/candidates';
 import type {Direction} from './direction.js';
 
 /** What an idea's own measurement made of it. */
-export type IdeaResult = 'passed' | 'failed' | 'pending';
+type IdeaResult = 'passed' | 'failed' | 'pending';
 
 /** One measured idea. */
 export interface PerformancePoint {
@@ -86,14 +86,33 @@ function measuredAt(item: Candidate): number {
   return Math.min(shown, ...finished);
 }
 
-/** The input's value: any measurement's value over its ratio to the input; null when unknown. */
+/**
+ * The value an idea's measurement states for `metric`: the objective's own reading when the
+ * benchmark reported it, else its headline, the first reading, which is not always the objective's.
+ */
+export function ideaReading(item: Candidate, metric: string | null): number | null {
+  const measurement = item.measurement;
+  if (measurement === null || measurement === undefined) return null;
+  const own =
+    metric === null ? undefined : measurement.readings.find(reading => reading.name === metric);
+  return own?.value ?? measurement.metricValue ?? null;
+}
+
+/**
+ * The input's value: the earliest measurement's value over its ratio to the input; null when
+ * unknown. The earliest, not the first listed: ideas are listed as they began and measured in any
+ * order, and the run's input must be the same value whichever of them a view holds.
+ */
 export function inputValueOf(candidates: readonly Candidate[]): number | null {
+  let earliest: {at: number; input: number} | null = null;
   for (const item of candidates) {
     const value = item.measurement?.metricValue ?? null;
     const vs = item.measurement?.vsBaseline ?? null;
-    if (value !== null && vs !== null && vs !== 0) return value / vs;
+    if (value === null || vs === null || vs === 0) continue;
+    const at = item.measurement?.at ?? Number.POSITIVE_INFINITY;
+    if (earliest === null || at < earliest.at) earliest = {at, input: value / vs};
   }
-  return null;
+  return earliest === null ? null : earliest.input;
 }
 
 /**
@@ -104,16 +123,17 @@ export function performanceFold(
   candidates: readonly Candidate[],
   direction: Direction,
   input: number | null,
+  metric: string | null = null,
 ): PerformanceFold {
   const measured = candidates
-    .filter(item => item.measurement?.metricValue != null)
+    .filter(item => ideaReading(item, metric) !== null)
     .map(item => ({item, at: measuredAt(item)}))
     .sort((a, b) => a.at - b.at);
   const points: PerformancePoint[] = [];
   const best: BestStep[] = [];
   let standing = input;
   for (const {item, at} of measured) {
-    const value = item.measurement?.metricValue as number;
+    const value = ideaReading(item, metric) as number;
     const result = resultOf(item);
     const sets =
       result === 'passed' &&

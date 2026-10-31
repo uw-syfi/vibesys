@@ -219,8 +219,10 @@ test('the run level says what will appear before anything is measured, and keeps
 }) => {
   await open(page, {...SEED, listings: [listed([server('running')], [])]});
 
-  // With nothing folded yet the hero and the ideas say what will appear, not a guess.
-  await expect(page.getByText('nothing measured yet')).toBeVisible();
+  // With nothing folded yet the chart is silent, its axes drawn with four gridlines and no words, and
+  // the ideas say there are none.
+  await expect(page.locator('.vs-chart-box .vs-chart-grid')).toHaveCount(4);
+  await expect(page.getByText('nothing measured yet')).toHaveCount(0);
   await expect(page.getByText('No ideas yet')).toBeVisible();
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   await shot(page, 'ink-run-empty');

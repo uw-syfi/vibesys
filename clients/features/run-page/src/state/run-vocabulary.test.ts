@@ -1,9 +1,10 @@
 import {describe, expect, test} from 'bun:test';
 import type {RunEvent, Span} from '@vibesys/contracts';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
+import {firstChart} from './chart-fixtures.js';
+import {heroView} from './headline.js';
 import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {EMPTY_TRACE_LOG, traceStep} from './live.js';
-import {heroView, stripChartView} from './run-level.js';
 import {createRunReader} from './run-model.js';
 
 /**
@@ -148,10 +149,9 @@ function isMark(badge: {readonly label: string}): boolean {
   return badge.label === 'best' || badge.label === 'adopted';
 }
 
-/** Red when failed; grey when passed without a new best (slower than the input never is one). */
-function expectedTone(round: Round, onLine: boolean): 'accent' | 'muted' | 'err' {
-  if (!round.passed) return 'err';
-  return onLine && (round.value ?? 0) > INPUT ? 'accent' : 'muted';
+/** A failed idea sets no step, and neither does one slower than the input. */
+function setsStep(round: Round): boolean {
+  return round.passed && (round.value ?? 0) > INPUT;
 }
 
 const EVERYTHING = {...IDEAS_FILTER_DEFAULT, failed: true};
@@ -199,20 +199,22 @@ describe('the Run screen words over generated runs', () => {
         expect(
           marked.map(row => [row.title, row.badges.filter(isMark).map(badge => badge.label)]),
         ).toEqual([[`idea ${best.n}`, [word]]]);
-        const chart = stripChartView(model, 0, null);
-        const onLine = chart?.points.filter(point => point.tone === 'accent') ?? [];
-        expect(onLine.at(-1)?.id).toBe(`flow:r${best.n}/#1`);
+        const chart = firstChart(model, 0, null);
+        // The line ends at the best the badge marks.
+        const last = chart.steps.at(-1)?.y;
+        expect(chart.readings.find(point => point.y === last)?.id).toBe(`flow:r${best.n}/#1`);
       }
     }
   });
 
-  test('a passed idea that does not beat the best is grey on the chart, a failed one red', () => {
+  test('only a passed idea that beat the input sets a step of the line; a failed or slower one never does', () => {
     for (const seed of SEEDS) {
       const rounds = roundsOf(new Seeded(seed));
-      const chart = stripChartView(modelOf(spansOf(rounds, false)), 0, null);
-      for (const point of chart?.points ?? []) {
+      const chart = firstChart(modelOf(spansOf(rounds, false)), 0, null);
+      for (const point of chart.readings) {
         const round = rounds.find(each => `flow:r${each.n}/#1` === point.id) as Round;
-        expect(point.tone).toBe(expectedTone(round, point.tone === 'accent'));
+        const steps = chart.steps.some(step => step.x === point.x && step.y === point.y);
+        if (steps) expect(setsStep(round)).toBe(true);
       }
     }
   });
@@ -223,11 +225,11 @@ describe('the Run screen words over generated runs', () => {
       for (const adopted of [false, true]) {
         const model = modelOf(spansOf(rounds, adopted));
         const view = ideasView(model, EVERYTHING);
-        const chart = stripChartView(model, 0, null);
+        const chart = firstChart(model, 0, null);
         const words = [
           JSON.stringify(view.rows),
           JSON.stringify(heroView(model)),
-          JSON.stringify(chart?.points.map(point => point.label) ?? []),
+          JSON.stringify(chart.readings.map(point => point.label)),
           ...Object.keys(view.counts),
         ].join(' ');
         expect(words).not.toMatch(OLD_WORDS);

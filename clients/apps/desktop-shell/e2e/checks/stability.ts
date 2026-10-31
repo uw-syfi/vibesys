@@ -22,7 +22,7 @@ export interface Anchor {
 export const RUN_ANCHORS: readonly Anchor[] = [
   {
     name: 'performance chart',
-    selector: '[role="group"][aria-label*="of each measured idea over the run"]',
+    selector: '[role="group"][aria-label*="of each reading over the run"]',
   },
   {name: 'time bar', selector: '[role="slider"][aria-label="Run position"]'},
   {

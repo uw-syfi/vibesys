@@ -1,7 +1,8 @@
 /**
- * The performance row as the user sees it: with the history loaded through the gateway, the tile's
- * sparkline and the strip chart are drawn exactly when the run holds a measured point, at every
- * prefix of every generated history (one point is a chart too; no point is none).
+ * The performance row as the user sees it: with the history loaded through the gateway, the chart
+ * draws a dot for every measured point of the run, at every prefix of every generated history (one
+ * point is a dot; no point is none, and the axes are drawn all the same), and the line of the best so
+ * far is drawn only where the run's own states give a best or an input to start it from.
  */
 
 import {afterAll, beforeAll, expect, test} from 'bun:test';
@@ -27,6 +28,7 @@ import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {
   heroView,
+  objectiveCharts,
   objectivesOf,
   projectSkeleton,
   RUN_ROUTE,
@@ -88,13 +90,17 @@ async function rendered(
       />,
     ),
   );
+  const [chart] = objectiveCharts(whole, {start: 0, now: null});
   const drawn = {
-    sparklines: container.querySelectorAll('.vs-spark-line').length,
-    charts: container.querySelectorAll('.vs-chart').length,
-    hasProgression: (heroView(whole, objectivesOf(whole)).tiles[0]?.trend?.steps.length ?? 0) > 0,
+    dots: container.querySelectorAll('.vs-chart-box .vs-chart-point').length,
+    lines: container.querySelectorAll('.vs-chart-box .vs-chart-step').length,
+    charts: container.querySelectorAll('.vs-chart-box').length,
+    hasLine: (chart?.steps.length ?? 0) > 0,
     points: skeleton.metrics.reduce((sum, series) => sum + series.points.length, 0),
-    // Whether the tile claims a measured value: what it shows, the chart must draw from too.
-    tileValue: heroView(whole, objectivesOf(whole)).tiles.some(tile => tile.figure !== '\u2013'),
+    // Whether the headline claims a measured value: what it shows, the chart must draw from too.
+    headlineValue: heroView(whole, objectivesOf(whole)).headlines.some(
+      headline => headline.figure !== '\u2013',
+    ),
   };
   await act(async () => root.unmount());
   container.remove();
@@ -165,31 +171,38 @@ function withStandaloneInput(
   );
 }
 
-test('the tile, the sparkline and the chart read one source, whoever measured the input', async () => {
+/** The writer's head of the whole prefix: the best it states is the input's own value. */
+const stated = (through: bigint): RunHead =>
+  create(RunHeadSchema, {
+    committedSeq: through,
+    objective: {series: {name: 'throughput', unit: 'ops/s'}, bestValue: 100, inputValue: 100},
+  });
+
+/** What the page draws for the first `length` records of the run, against what the run holds. */
+async function checkDrawn(
+  records: ReturnType<typeof storeRunFixture>['records'],
+  length: number,
+  head: ((through: bigint) => RunHead) | undefined,
+  label: string,
+): Promise<void> {
+  const drawn = await rendered(records.slice(0, length), head);
+  // Every measured point is a dot, and a headline that shows a value never stands alone.
+  expect(drawn.points, label).toBeGreaterThan(0);
+  expect(drawn.dots, `dots: ${label}`).toBe(drawn.points);
+  expect(drawn.lines, `line: ${label}`).toBe(drawn.hasLine ? 1 : 0);
+  if (drawn.headlineValue) {
+    expect(drawn.dots + drawn.lines, `headline: ${label}`).toBeGreaterThan(0);
+  }
+}
+
+test('the headline and the chart read one source, whoever measured the input', async () => {
   for (const count of [0, 1, 3]) {
     const made = storeRunFixture('short', count, 1).records;
     for (const withHead of [false, true]) {
       const records = withStandaloneInput(made, 100);
       for (let length = 4; length <= records.length; length += 3) {
-        const head = withHead
-          ? (through: bigint): RunHead =>
-              create(RunHeadSchema, {
-                committedSeq: through,
-                objective: {
-                  series: {name: 'throughput', unit: 'ops/s'},
-                  bestValue: 100,
-                  inputValue: 100,
-                },
-              })
-          : undefined;
-        const drawn = await rendered(records.slice(0, length), head);
         const label = `${count} ideas, ${length} records, head ${withHead}`;
-        // Every measured point is drawn, and a tile that shows a value never stands alone.
-        expect(drawn.points, label).toBeGreaterThan(0);
-        expect(drawn.sparklines, `sparkline: ${label}`).toBeGreaterThan(0);
-        expect(drawn.charts, `chart: ${label}`).toBeGreaterThan(0);
-        if (drawn.tileValue)
-          expect(drawn.charts, `tile without chart: ${label}`).toBeGreaterThan(0);
+        await checkDrawn(records, length, withHead ? stated : undefined, label);
       }
     }
   }
@@ -206,8 +219,9 @@ test('raw readings remain charted without inventing a best progression', async (
         for (let length = 1; length <= records.length; length += 3) {
           const drawn = await rendered(records.slice(0, length));
           const label = `${kind} ${count} ideas, ${length} records, ${whose} points`;
-          expect(drawn.sparklines > 0, `sparkline: ${label}`).toBe(drawn.hasProgression);
-          expect(drawn.charts > 0, `chart: ${label}`).toBe(drawn.points > 0);
+          expect(drawn.lines > 0, `line: ${label}`).toBe(drawn.hasLine);
+          expect(drawn.dots, `dots: ${label}`).toBe(drawn.points);
+          expect(drawn.charts, `axes: ${label}`).toBeGreaterThan(0);
         }
     }
   }

@@ -17,20 +17,105 @@ export interface ScrubberTick {
  */
 function fitTicks(
   ticks: readonly ScrubberTick[],
-  last: number,
+  share: (at: number) => number,
   word: string | undefined,
   width: number | null,
 ): {readonly fitted: readonly PlacedLabel[] | null; readonly words: string | undefined} {
   if (width === null) return {fitted: null, words: undefined};
   const along = (prefix: string | undefined) =>
     ticks.map(tick => ({
-      share: last === 0 ? 0 : tick.at / last,
+      share: share(tick.at),
       text: prefix === undefined ? tick.label : `${prefix} ${tick.label}`,
     }));
   const worded = word === undefined ? null : placeLabels(along(word), width);
   return worded !== null && worded.length === ticks.length
     ? {fitted: worded, words: word}
     : {fitted: placeLabels(along(undefined), width), words: undefined};
+}
+
+/** The resolution of a track spaced by `places`: the range reads 0 to this. */
+const SPAN = 1000;
+
+/** The newest position at or before `along` (0 to 1) of a track spaced by `places`. */
+function positionAt(places: readonly number[], along: number): number {
+  let found = 0;
+  for (let at = 0; at < places.length; at += 1) {
+    if ((places[at] ?? 0) <= along) found = at;
+  }
+  return found;
+}
+
+/** Where a key moves the playhead from position `value` of `last`, or null for a key that does not move it. */
+function keyed(key: string, value: number, last: number): number | null {
+  const jump = Math.max(1, Math.trunc(last / 10));
+  const moved: Record<string, number> = {
+    ArrowLeft: value - 1,
+    ArrowDown: value - 1,
+    ArrowRight: value + 1,
+    ArrowUp: value + 1,
+    PageDown: value - jump,
+    PageUp: value + jump,
+    Home: 0,
+    End: last,
+  };
+  const target = moved[key];
+  return target === undefined ? null : Math.max(0, Math.min(last, target));
+}
+
+/**
+ * The range of a `Scrubber`: over the positions themselves, or, when the track is spaced by `places`,
+ * over `SPAN` steps of it, a point on it standing for the newest position at or before it.
+ */
+function Track(props: {
+  readonly id: string;
+  readonly label: string;
+  readonly position: string;
+  readonly value: number;
+  readonly last: number;
+  readonly single: boolean;
+  readonly places: readonly number[] | undefined;
+  readonly change: (value: number) => void;
+}): JSX.Element {
+  const {places, single} = props;
+  const along = places === undefined ? 0 : (places[props.value] ?? 0);
+  return (
+    <input
+      id={props.id}
+      className="vs-scrubber-range"
+      type="range"
+      min={0}
+      max={single ? 1 : places === undefined ? props.last : SPAN}
+      step={1}
+      value={single ? 1 : places === undefined ? props.value : Number((along * SPAN).toFixed(0))}
+      disabled={single}
+      aria-label={props.label}
+      aria-valuetext={props.position}
+      onChange={event =>
+        props.change(
+          places === undefined
+            ? Number(event.target.value)
+            : positionAt(places, Number(event.target.value) / SPAN),
+        )
+      }
+      onKeyDown={event => {
+        const next = places === undefined ? null : keyed(event.key, props.value, props.last);
+        if (next === null) return;
+        event.preventDefault();
+        props.change(next);
+      }}
+    />
+  );
+}
+
+/** A small diamond on the track, `at` (0 to 1) of the way along it; it takes no pointer or focus. */
+function Mark(props: {readonly at: number}): JSX.Element {
+  const place: StyleWithVars = {'--mark-at': props.at};
+  return (
+    // A drawn shape, not an empty box with a fill: a row of those reads as a strip of segments.
+    <svg className="vs-scrubber-mark" viewBox="0 0 8 8" aria-hidden="true" style={place}>
+      <path d="M4 .5 7.5 4 4 7.5 .5 4z" />
+    </svg>
+  );
 }
 
 /**
@@ -40,6 +125,9 @@ function fitTicks(
  * that has ended reads, for example, "End" and "Jump to end". The arrows, Page Up and Down, Home
  * and End step it (a native range).
  * `position` describes the playhead in words (for example a time), read out as its value.
+ * With `places` (where each position stands along the track, 0 to 1, ascending) the track is spaced
+ * by them, not evenly: a long quiet stretch is a long stretch of track, as on a chart over the same
+ * time. The arrows, Page Up and Down, Home and End then step by position, as the native range does.
  * A sequence with one position has nothing to scrub: the track is drawn whole with the playhead at
  * its end (the one position is the newest) and cannot be moved, instead of a zero-width range with
  * the playhead at the start of a track that reads "End".
@@ -57,6 +145,10 @@ export function Scrubber(props: {
   /** The action that returns to the newest position; "Back to live" unless given. */
   readonly backLabel?: string;
   readonly ticks?: readonly ScrubberTick[];
+  /** Where each position (0 to `last`) stands along the track, 0 to 1; even when absent. */
+  readonly places?: readonly number[];
+  /** Where a small diamond is drawn on the track, each 0 to 1 along it: the moments worth finding. */
+  readonly marks?: readonly number[];
   /**
    * What a tick's label counts (`Call`): each label reads `Call 3` while every one fits beside the
    * others, and the bare number once they would not, so labels never skip.
@@ -67,11 +159,16 @@ export function Scrubber(props: {
 }): JSX.Element {
   const id = useId();
   const single = props.last === 0;
-  const share = (at: number): number => (props.last === 0 ? 0 : at / props.last);
+  const places =
+    props.places !== undefined && props.places.length === props.last + 1 && !single
+      ? props.places
+      : undefined;
+  const share = (at: number): number =>
+    places !== undefined ? (places[at] ?? 0) : props.last === 0 ? 0 : at / props.last;
   const [measure, width] = useInlineSize();
   const ticks = props.ticks ?? [];
   // Once the track is measured only the labels that can be read side by side are drawn.
-  const {fitted, words} = fitTicks(ticks, props.last, props.tickWord, width);
+  const {fitted, words} = fitTicks(ticks, share, props.tickWord, width);
   return (
     <div className="vs-scrubber">
       <div className="vs-scrubber-head">
@@ -87,19 +184,19 @@ export function Scrubber(props: {
           <Button size="sm" text={props.backLabel ?? 'Back to live'} press={props.backToLive} />
         )}
       </div>
-      <input
-        id={id}
-        className="vs-scrubber-range"
-        type="range"
-        min={0}
-        max={single ? 1 : props.last}
-        step={1}
-        value={single ? 1 : props.value}
-        disabled={single}
-        aria-label={props.label}
-        aria-valuetext={props.position}
-        onChange={event => props.change(Number(event.target.value))}
-      />
+      <div className="vs-scrubber-track">
+        <Track
+          id={id}
+          label={props.label}
+          position={props.position}
+          value={props.value}
+          last={props.last}
+          single={single}
+          places={places}
+          change={props.change}
+        />
+        {single ? null : (props.marks ?? []).map(at => <Mark key={at} at={at} />)}
+      </div>
       {props.ticks === undefined ? null : (
         <div ref={measure} className="vs-scrubber-ticks" aria-hidden="true">
           {(fitted ?? ticks.map((_, index) => ({index, left: null}))).map(({index, left}) => {

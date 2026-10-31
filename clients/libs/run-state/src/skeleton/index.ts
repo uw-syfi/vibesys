@@ -15,10 +15,12 @@ import {skeletonCore} from './core.js';
 import {baselineFacts, capacityIntervals, comparisonFacts, inputFailures} from './facts.js';
 import {streamOwner} from './logs.js';
 import {inputMeasurement, measuredSpans} from './readings.js';
+import {type RunSession, sessionsOf} from './sessions.js';
 import {screenSpans} from './spans.js';
 import {type StartupStep, startupSteps} from './startup.js';
 import type {SkeletonContent, StoreHistory, StoreView} from './types.js';
 
+export {clockThrough, type RunSession} from './sessions.js';
 export type {SkeletonContent, StoreHistory, StoreView} from './types.js';
 
 /** Scalar screen values copied from the writer's committed primary measurement. */
@@ -53,6 +55,8 @@ export interface SkeletonReading {
   readonly overview: RunOverview | null;
   readonly direction: 'max' | 'min' | null;
   readonly latest: number | null;
+  /** The run's sessions through the view's sequence, oldest first (see `sessionsOf`). */
+  readonly sessions: readonly RunSession[];
   readonly core: CoreState;
   readonly phase: RunStatus | null;
   readonly comparisons: ReturnType<typeof comparisonFacts>;
@@ -180,6 +184,7 @@ export function readSkeleton(
       (last, time) => (last === null ? time : Math.max(last, time)),
       null,
     ),
+    sessions: sessionsOf(skeleton, view.seq),
     // Transcript frames have no journal cursor; only the current view can include their bytes.
     core: skeletonCore(view, {
       ...content,

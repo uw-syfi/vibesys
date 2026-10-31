@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {FIXTURE_NAMES, fixtureNamed} from '@vibesys/run-fixtures';
-import {ideaFocusView, ideaOutcomeLine} from './idea-focus.js';
+import {ideaOutcomeLine} from './idea-focus.js';
 import {EMPTY_TRACE_LOG, traceStep} from './live.js';
 import {createRunReader, type RunModel} from './run-model.js';
 
@@ -42,14 +42,6 @@ describe('a failed idea', () => {
   test('leads with its reason, not with the status its badge already says', () => {
     for (const {model, item} of ideas('failed')) {
       expect(ideaOutcomeLine(model, item)).not.toMatch(/^Failed · /);
-    }
-  });
-
-  test('has no multiple on the hero’s selected-idea line, and a capitalized status', () => {
-    for (const {model, item} of ideas('failed')) {
-      const view = ideaFocusView(model, item.id);
-      expect(view?.ratio).toBeNull();
-      expect(view?.outcome).toMatch(/^Failed/);
     }
   });
 });

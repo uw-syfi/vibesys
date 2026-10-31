@@ -11,6 +11,7 @@ import type {Candidate, CandidateOutcome, CandidateTree} from '@vibesys/run-stat
 import {type IdeaBase, type IdeaBases, ideaBases} from './idea-bases.js';
 import {figureCell, type IdeaTone, outcomeWords} from './idea-words.js';
 import {objectiveUnit} from './metric-words.js';
+import {vsInputOf} from './objective-reading.js';
 import {inputValueOf} from './performance.js';
 import type {Direction, RunModel} from './run-model.js';
 import {duration, formatValue} from './span-reading.js';
@@ -146,6 +147,8 @@ interface RowContext {
   readonly unit: string;
   /** The run measured its input: a multiple over it can be told. */
   readonly inputKnown: boolean;
+  /** An idea's multiple of the input: the same reading as the chart's headline. */
+  readonly vsInput: (idea: Candidate) => number | null;
   readonly loadWord: string | undefined;
   readonly changed: ReadonlySet<string>;
   readonly bases: IdeaBases;
@@ -182,7 +185,13 @@ function summaryOf(item: Candidate): string | null {
 }
 
 function rowOf(item: Candidate, context: RowContext): IdeaRow {
-  const {figure, tone, figureTitle} = figureCell(item, context.inputKnown, context.tree.candidates);
+  const {figure, tone, figureTitle} = figureCell(
+    item,
+    context.inputKnown,
+    context.tree.candidates,
+    undefined,
+    context.vsInput,
+  );
   const attempts = item.attempts.length;
   return {
     id: item.id,
@@ -242,6 +251,7 @@ export function ideaRowsById(model: RunModel): ReadonlyMap<string, IdeaRow> {
     direction: model.direction,
     unit: unitOf(model),
     inputKnown: inputValueOf(tree.candidates) !== null,
+    vsInput: vsInputOf(model),
     loadWord:
       model.loadFailure ??
       (model.progress && model.progress.phase !== 'complete' ? 'Catching up' : undefined),
