@@ -111,7 +111,7 @@ def dispatch_allowed(state: CoreState, request: Request) -> bool:
         return state.run.park is not None and state.records.recovery.epoch > state.run.park.epoch
     if state.run.status != RunStatus.DRAINING:
         return True
-    if _pause_now_holds_back(state, request):
+    if _withdrawn(state, request):
         return False
     return (
         _request_bound(state, request) is not None
@@ -142,8 +142,8 @@ def _past_deadline(state: CoreState, park: RunPark) -> bool:
     return park.deadline_at is not None and state.run.now_at >= park.deadline_at
 
 
-def _pause_now_holds_back(state: CoreState, request: Request) -> bool:
-    """Whether a committed Pause-now, or a pause past its deadline, lets this effect start no more."""
+def _withdrawn(state: CoreState, request: Request) -> bool:
+    """Whether Pause now, or a drain past its deadline, no longer lets this effect start."""
     park = state.run.park
     return (
         park is not None

@@ -15,7 +15,7 @@ from ._actions import Action, Cancel, End, Run, Settle, Wait
 from ._proofs import request_dependency_status, stop_mode
 from ._request_ledger import dispatch_until, retry_limit
 from ._request_recovery import is_open
-from ._run_park import dispatch_allowed, pause_withdraws
+from ._run_park import dispatch_allowed
 from ._scope_order import holds_back
 from ._step import advance_run_time, step
 from ._step_attempts import (
@@ -158,8 +158,6 @@ def _stop_running(state: CoreState, record: RequestRecord, now: float) -> Cancel
     park = state.run.park
     if now >= record.until.at:
         return Cancel(tag=tag, reason=CancelReason.DEADLINE)
-    if pause_withdraws(state, record.request):
-        return Cancel(tag=tag, reason=CancelReason.PAUSE_NOW)
     if park is not None and park.deadline_at is not None and now >= park.deadline_at:
         return Cancel(tag=tag, reason=CancelReason.DRAIN_EXPIRED)
     return None
