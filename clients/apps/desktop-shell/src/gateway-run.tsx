@@ -8,10 +8,11 @@ import {
   RunScreen,
   useGatewayRun,
 } from '@vibesys/feature-run-page/renderer';
-import type {RunPageSeed} from '@vibesys/feature-run-page/state';
+import {type RunPageSeed, runPageProblems} from '@vibesys/feature-run-page/state';
 import type {RecordedProjectRoot} from '@vibesys/hosts';
 import type {GatewayBridge} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
+import type {ProblemBoard} from '@vibesys/problems';
 import {type RecordsFanout, type RecordsListener, recordsFanout} from '@vibesys/run-skeleton';
 import {gatewayContentCache} from '@vibesys/run-skeleton/cache';
 import {type GatewayReader, gatewayReader} from '@vibesys/run-skeleton/reader';
@@ -19,6 +20,7 @@ import {Card, EmptyState, Page, Text} from '@vibesys/ui';
 import {type JSX, useMemo} from 'react';
 import {useGatewayChat} from './gateway-chat.js';
 import {gatewayTransport} from './gateway-transport.js';
+import {useReportedProblems} from './problem-host.js';
 
 interface GatewayRunProps {
   readonly seed: RunPageSeed;
@@ -27,6 +29,8 @@ interface GatewayRunProps {
   readonly schedule: ScheduleTimeout;
   readonly address: RunPageAddress;
   readonly navigation: RunPageNavigation;
+  /** Where this run's problems go while its screen is up. */
+  readonly problems: ProblemBoard;
 }
 
 export function GatewayRun(props: GatewayRunProps): JSX.Element {
@@ -37,6 +41,11 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
   );
   const page = useGatewayRun({seed, ports, schedule, address});
   const {snapshot} = page;
+  const reported = useMemo(
+    () => (page.state === null ? [] : runPageProblems(page.state)),
+    [page.state],
+  );
+  useReportedProblems(props.problems, `run ${seed.identity.host} ${seed.identity.runId}`, reported);
   const {observation} = page.writer;
   const projectRoot = props.projectRoot;
   const intents = useRunIntents({

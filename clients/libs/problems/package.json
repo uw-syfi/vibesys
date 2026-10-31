@@ -1,0 +1,36 @@
+{
+  "name": "@vibesys/problems",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "vibesys": {
+    "layer": "core",
+    "entries": {
+      ".": "neutral"
+    }
+  },
+  "exports": {
+    ".": {
+      "@vibesys/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/.*.tsbuildinfo"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.lib.json",
+    "check": "tsc -b",
+    "test": "node ../../tools/scripts/run_bun_tests.mjs ./src"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "fast-check": "4.10.2",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@vibesys/store": "workspace:*"
+  }
+}

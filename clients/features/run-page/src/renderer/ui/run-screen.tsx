@@ -291,7 +291,7 @@ function EndedBanner(props: {
       <Banner
         tone={ended.tone}
         title={state.lifecycleWord ?? ended.title}
-        body={reason ?? ''}
+        {...(reason ? {body: reason} : {})}
         actions={logsAndAgain}
       />
     );
@@ -523,10 +523,7 @@ function CommandStatus({state}: {readonly state: RunPageState}): JSX.Element {
   return (
     <>
       {state.resumeStatus === null ? null : (
-        <Banner tone="neutral" title="Resume" body={state.resumeStatus.message} />
-      )}
-      {state.notice === null ? null : (
-        <Banner tone="err" title="The run did not take the command" body={state.notice} />
+        <Banner tone="neutral" title={state.resumeStatus.message} />
       )}
     </>
   );

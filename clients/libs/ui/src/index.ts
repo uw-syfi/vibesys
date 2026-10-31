@@ -111,6 +111,7 @@ export {
   type Tradeoff,
 } from './components/pareto-frontier.js';
 export {type Completion, PathInput} from './components/path-input.js';
+export {withoutPaths} from './components/paths.js';
 export {
   type HeaderColumn,
   type ListHeader,
@@ -154,6 +155,7 @@ export {
 export {ThemeSwatch} from './components/theme-swatch.js';
 export {Thread, type ThreadItem} from './components/thread.js';
 export {type Stage, type StageState, Timeline} from './components/timeline.js';
+export {Toast, type ToastItem, ToastStack, type ToastTone} from './components/toast.js';
 export {Checkbox, Switch} from './components/toggle.js';
 export {type RowChip, Tree, TreeRow} from './components/tree.js';
 export {TurnResult} from './components/turn-result.js';

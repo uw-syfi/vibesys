@@ -22,10 +22,12 @@ const BUTTON_LABELS: Record<RunIntentAction, string> = {
   pauseNow: 'Pause now',
   steer: 'Guidance',
 };
-const STATUS_LABELS: Record<IntentRow['status'], string> = {
+/** A request still on its way, or one that did not take, keeps its row; an applied one is done. */
+type Unsettled = IntentRow & {readonly status: Exclude<IntentRow['status'], 'applied'>};
+const isUnsettled = (row: IntentRow): row is Unsettled => row.status !== 'applied';
+const STATUS_LABELS: Record<Unsettled['status'], string> = {
   sending: 'Sending',
   pending: 'Pending',
-  applied: 'Applied',
   refused: 'Refused',
   uncertain: 'Not confirmed',
 };
@@ -70,11 +72,6 @@ export function IntentControls(props: {
       {props.actions.includes('pauseNow') ? (
         <Text tone="muted">Unfinished work may need repeating and may still incur charges.</Text>
       ) : null}
-      {props.entries.length > 0 || props.relaunch?.result ? (
-        <Text variant="small" tone="muted">
-          Request history
-        </Text>
-      ) : null}
       {props.relaunch &&
       !props.entries.some(
         entry =>
@@ -100,14 +97,11 @@ export function IntentControls(props: {
           Updates unavailable
         </Text>
       ) : null}
-      {props.entries.map(entry => (
+      {props.entries.filter(isUnsettled).map(entry => (
         <Row key={`${entry.source}:${entry.id}`} gap="space-2" wrap>
           <Text {...(entry.reason ? {title: entry.reason} : {})}>
             {ACTION_LABELS[entry.action]} · {STATUS_LABELS[entry.status]}
             {entry.epoch !== null && entry.epoch < props.epoch ? ' · Earlier epoch' : ''}
-            {entry.epoch === props.epoch && entry.status === 'applied' && !entry.current
-              ? ' · Earlier action'
-              : ''}
           </Text>
           {entry.status === 'uncertain' ? (
             <Button

@@ -10,6 +10,8 @@ import {
 /** What a `Field` gives the one control inside it: its id, what describes it, and its validity. */
 export interface FieldWiring {
   readonly id: string;
+  /** The label's text, for a control that draws it inside itself. */
+  readonly label: string;
   /** The label's id, for a popup the control owns (a list of completions) to be named by. */
   readonly labelId: string;
   readonly describedBy: string | undefined;
@@ -48,7 +50,13 @@ export function Field(props: {
   const errorId = props.error === undefined ? undefined : `${id}-error`;
   const describedBy = [helpId, errorId].filter(Boolean).join(' ') || undefined;
   const labelId = `${id}-label`;
-  const wiring: FieldWiring = {id, labelId, describedBy, invalid: errorId !== undefined};
+  const wiring: FieldWiring = {
+    id,
+    label: props.label,
+    labelId,
+    describedBy,
+    invalid: errorId !== undefined,
+  };
   return (
     <div className="vs-field">
       <label

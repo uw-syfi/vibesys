@@ -25,10 +25,7 @@
       "path": "../../libs/contracts/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/run-state/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/run-state/tsconfig.trace.json"
+      "path": "../../libs/contracts/tsconfig.lib.json"
     },
     {
       "path": "../../libs/hosts/tsconfig.lib.json"
@@ -37,28 +34,10 @@
       "path": "../../libs/logs/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/runs/tsconfig.lib.json"
+      "path": "../../libs/problems/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/contracts/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/run-state/tsconfig.overview.json"
-    },
-    {
-      "path": "../../libs/run-state/tsconfig.trace.json"
-    },
-    {
-      "path": "../../libs/run-state/tsconfig.candidates.json"
-    },
-    {
-      "path": "../../libs/run-state/tsconfig.agents.json"
-    },
-    {
-      "path": "../../libs/run-state/tsconfig.usage.json"
-    },
-    {
-      "path": "../../libs/run-state/tsconfig.skeleton.json"
+      "path": "../../libs/run-skeleton/tsconfig.cache.json"
     },
     {
       "path": "../../libs/run-skeleton/tsconfig.lib.json"
@@ -67,10 +46,34 @@
       "path": "../../libs/run-skeleton/tsconfig.reader.json"
     },
     {
-      "path": "../../libs/run-skeleton/tsconfig.cache.json"
+      "path": "../../libs/run-state/tsconfig.agents.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.candidates.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.overview.json"
     },
     {
       "path": "../../libs/run-state/tsconfig.records.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.skeleton.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.trace.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.trace.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.usage.json"
+    },
+    {
+      "path": "../../libs/runs/tsconfig.lib.json"
     }
   ]
 }

@@ -126,7 +126,7 @@ def lineage_fixture(declaration: dict[str, Any]) -> dict[str, Any]:
             identity,
             "agent_turn",
             end=at + 900 if done else None,
-            title="Implementer",
+            title="implementer",
             at=at + 1,
             status="done" if done else "running",
             attrs={"role": "implementer", "agent": identity},

@@ -118,11 +118,11 @@ describe('cardView', () => {
   test('a delivery with no named place says where the draft was aimed', () => {
     const delivery = foldDelivery(SENT, {kind: 'delivered', idea: null, where: null});
     expect(cardView(context({delivery}), SENT_IDLE).status?.label).toBe(
-      'In force · Implementer · every turn',
+      'In force · Builder · every turn',
     );
     const once = {...DRAFT, mode: 'next_turn'} as const;
     expect(cardView(context({delivery, draft: once}), SENT_IDLE).status?.label).toBe(
-      'Reached · Implementer',
+      'Reached · Builder',
     );
   });
 });

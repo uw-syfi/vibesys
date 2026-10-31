@@ -11,9 +11,9 @@ describe('the catalog the backend declarations generate', () => {
   });
 
   it('reads the examples a person expects', () => {
-    expect(roleName('judge')).toBe('Judge');
+    expect(roleName('judge')).toBe('Reviewer');
     expect(roleName('perf-evaluator')).toBe('Perf evaluator');
-    expect(roleName('dynamic-implementer')).toBe('Implementer');
+    expect(roleName('dynamic-implementer')).toBe('Builder');
   });
 
   it('lists the harness and model ids the screens must not draw', () => {

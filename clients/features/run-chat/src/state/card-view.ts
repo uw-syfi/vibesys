@@ -18,7 +18,7 @@ export type CardPhase = 'draft' | 'sending' | 'sent' | 'withdrawing' | 'dismisse
 
 export interface CardView {
   readonly phase: CardPhase;
-  /** The one status line, for example `In force · Implementer · every turn`; null while a draft. */
+  /** The one status line, for example `In force · Builder · every turn`; null while a draft. */
   readonly status: CardStatus | null;
   /** Why Send is off, as a short word; null when the draft can be sent. */
   readonly sendBlocked: string | null;

@@ -36,6 +36,7 @@ export {
 } from './overview.js';
 export {formSuggestions} from './path-form.js';
 export type {ClusterCheck, LastCheck, Places, PlacesReading} from './places.js';
+export {machinesProblems} from './problems.js';
 export {
   type MachineFact,
   machineFacts,

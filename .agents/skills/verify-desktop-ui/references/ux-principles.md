@@ -112,6 +112,18 @@ can decide it.
     `legend` and `chart-size` checks; whether it reads calmly is Unenforced
     (judgment).
 
+## Messages
+
+20. **A failure passed through is a toast; a state held is one line.** "Could not
+    save", "could not be read" and "did not take the command" are toasts at the
+    top right of the window: a title and a tone, the detail behind a details
+    button, kept until dismissed or cleared, never covering the title bar. A
+    state the screen is in (the run ended, a machine needs an update) or a
+    message with actions beside it stays on the page as one line with the same
+    details button. Enforced for the split of tones by the `Banner` type, which
+    has no `err`, and for the toast stack by the Toasts and banners tests;
+    whether a message is passing or held is Unenforced (judgment).
+
 ## Sizes the checks cover
 
 Windows of 1000, 1440 and 1920 px wide with the sidebar shown and hidden, live
