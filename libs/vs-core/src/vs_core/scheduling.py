@@ -168,7 +168,11 @@ def _accepting(context: SchedulingContext) -> bool:
 
 
 def _deadline_retirements(state: SchedulingState, context: SchedulingContext) -> tuple[Signal, ...]:
-    """Expired queued episodes retain ownership until Attempts proves retirement."""
+    """Expired queued episodes retain ownership until Attempts proves retirement.
+
+    A run draining an operator's pause (``RunStatus.DRAINING``) keeps its queue for the resume,
+    which retires what expired meanwhile: this check runs again then, and the entries hold no slot.
+    """
     live_run = context.run.status in (RunStatus.RUNNING, RunStatus.PAUSED)
     if context.run.now_at < context.run.deadline_at or not (
         (live_run and context.run.result is None) or stop_draining(context.run)

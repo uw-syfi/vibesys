@@ -104,13 +104,19 @@ def _submit(executor: Executor, decision: core.Wait) -> core.Transition:
     )
 
 
+HOLDS: dict[Pause, tuple[core.ControlAction, core.PauseOwner | None]] = {
+    Pause.OPERATOR: ("pause", core.PauseOwner.OPERATOR),
+    Pause.NOW: ("pause_now", None),
+    Pause.PARK: ("park", None),
+    Pause.QUOTA: ("pause", core.PauseOwner.QUOTA),
+}
+"""The control that puts the run under each pause."""
+
+
 def _hold(executor: Executor, pause: Pause) -> None:
     if pause is Pause.NONE:
         return
-    action = {Pause.NOW: "pause_now", Pause.PARK: "park"}.get(pause, "pause")
-    owner = {Pause.OPERATOR: core.PauseOwner.OPERATOR, Pause.QUOTA: core.PauseOwner.QUOTA}.get(
-        pause
-    )
+    action, owner = HOLDS[pause]
     executor.feed(
         core.RunControlEvent(
             control=core.ControlInput(
