@@ -10,6 +10,10 @@ from the event's ``drain_seconds``; Pause-now has the run's cleanup bound when i
 At the deadline the drain stops waiting: a request recovery would send again goes back to
 PREPARED, interrupted and unreported (``resent``), and the next epoch runs it again; the rest is
 cancelled and ends at its limit, a cleanup bound after the deadline.
+
+The one exception is a request whose attempt the step loop runs (``_attempt_running``). A drain
+that cancels does not wait for it: the loop cancels the attempt and records its interruption
+when it can, and a call that cannot be stopped ends with the process.
 """
 
 from __future__ import annotations
@@ -175,6 +179,23 @@ def _unfinished(state: CoreState, record: RequestRecord) -> bool:
         isinstance(record.request, SubmitMeasurement)
         and any(job.submission_id == record.request_id for job in state.evaluation.jobs)
     )
+
+
+def _holds_park(state: CoreState, record: RequestRecord, *, immediate: bool) -> bool:
+    """Whether this request keeps the drain from parking: it is unfinished, and the drain waits.
+
+    A drain that cancels (a Pause now, or any pause past its deadline) does not wait for a request
+    whose attempt the step loop runs: the loop cancels it, and a call that cannot be stopped
+    ends with the process, which the next epoch's ``clear`` reaps. The kernel's own requests are
+    waited for, so a park leaves none of them open.
+    """
+    return _unfinished(state, record) and not (immediate and _attempt_running(state, record))
+
+
+def _attempt_running(state: CoreState, record: RequestRecord) -> bool:
+    """Whether the log holds an attempt of this step that no record has ended."""
+    attempts = state.steps.of(record.request_id)
+    return attempts is not None and not attempts.ended
 
 
 def _turns_in_flight(state: CoreState) -> bool:
@@ -355,7 +376,7 @@ def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
         return state, tuple(pending)
     if (
         not released
-        or any(_unfinished(state, row) for row in state.records.records)
+        or any(_holds_park(state, row, immediate=immediate) for row in state.records.records)
         or (not immediate and _turns_in_flight(state))
     ):
         return state, ()

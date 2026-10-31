@@ -452,16 +452,19 @@ def test_a_pause_now_cancels_every_running_step_and_starts_none(script: Script) 
     retries=st.integers(0, 3),
     count=st.integers(1, 3),
     action=st.sampled_from(["pause", "pause_now"]),
-    drain_seconds=st.floats(min_value=0.5, max_value=50.0),
+    drain_seconds=st.floats(min_value=10.0, max_value=50.0),
 )
 def test_a_pause_parks_once_the_attempts_it_interrupted_are_back_to_unstarted(
     retries: int, count: int, action: Literal["pause", "pause_now"], drain_seconds: float
 ) -> None:
-    """The drain waits for every step to be unstarted or ended: an interrupted attempt is neither.
+    """A Pause now parks at once, over attempts the loop cancels; a pause drains until they end.
 
-    The interruption sends its step back to the state of one no one has started, with no result,
-    no failure and no retry spent, and that alone lets the drain park the run, so the next epoch
-    runs the step again.
+    The loop cancels the attempts and a call that cannot be stopped ends with the process, so a
+    drain that cancels does not wait for them (`_run_park`); a pause that does not waits for every
+    step to be unstarted or ended, and an interrupted attempt is neither until the interruption
+    sends its step back to the state of one no one has started, with no result, no failure and
+    no retry spent. That alone lets the drain park the run, so the next epoch runs the step again.
+    The drain's deadline is further off than the records of the test (a second each) reach.
     """
     build = Builder()
     for _ in range(count):
@@ -480,9 +483,9 @@ def test_a_pause_parks_once_the_attempts_it_interrupted_are_back_to_unstarted(
     )
     build.append(Oneof("core_input", input_message(pause)))
     state = fold(build.script.records[-1:], state)
-    assert state.run.status is core.RunStatus.DRAINING
+    waiting = core.RunStatus.PARKED if action == "pause_now" else core.RunStatus.DRAINING
+    assert state.run.status is waiting
     for number, step in enumerate(build.steps, 1):
-        assert state.run.status is core.RunStatus.DRAINING
         build.interrupt(step, Interruption.PAUSE)
         state = fold(build.script.records[-1:], state)
         record = state.records.record(step.tag)
@@ -493,7 +496,9 @@ def test_a_pause_parks_once_the_attempts_it_interrupted_are_back_to_unstarted(
         attempts = state.steps.of(step.tag)
         assert attempts is not None
         assert attempts.uncharged == 1
-        assert (state.run.status is core.RunStatus.PARKED) == (number == count)
+        assert (state.run.status is core.RunStatus.PARKED) == (
+            action == "pause_now" or number == count
+        )
     assert at_rest(state) is RunRest.PARKED
     assert {row.phase for row in state.records.records} == {core.RequestPhase.PREPARED}
 
