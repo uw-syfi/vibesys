@@ -186,7 +186,7 @@
   flex: none;
   width: var(--space-4);
   text-align: center;
-  color: var(--text-muted);
+  color: var(--muted);
 }
 
 .vs-step[data-state="current"] .vs-step-mark {
