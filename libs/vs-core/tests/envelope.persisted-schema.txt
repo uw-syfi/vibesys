@@ -266,6 +266,7 @@ CloseAttemptScope.depends_on optional {"default":[],"items":{"$ref":"#/$defs/Req
 CloseAttemptScope.kind optional {"const":"close_attempt_scope","default":"close_attempt_scope","type":"string"}
 CloseAttemptScope.request_id optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
 CloseAttemptScope.scope required {"$ref":"#/$defs/Scope"}
+ClosePolicy {"enum":["wait","withdraw"],"type":"string"}
 CloseSession {"additionalProperties":false,"type":"object"}
 CloseSession.admission_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
 CloseSession.decision_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
@@ -817,6 +818,7 @@ OperationDescriptor.inspect optional {"default":false,"type":"boolean"}
 OperationDescriptor.kind required {"minLength":1,"type":"string"}
 OperationDescriptor.lifecycle required {"$ref":"#/$defs/LifecycleClass"}
 OperationDescriptor.normalization optional {"$ref":"#/$defs/OperationNormalizationKind","default":"none"}
+OperationDescriptor.on_close optional {"$ref":"#/$defs/ClosePolicy","default":"wait"}
 OperationDescriptor.on_interrupt optional {"$ref":"#/$defs/InterruptPolicy","default":"rerun"}
 OperationDescriptor.outcome_schema required {"$ref":"#/$defs/SchemaRef"}
 OperationDescriptor.request_schema required {"$ref":"#/$defs/SchemaRef"}
