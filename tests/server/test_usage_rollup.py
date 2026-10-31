@@ -19,11 +19,15 @@ from typing import Any
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.server.run_summary_support import RUN_ID, events, journal_lines
-from tests.server.usage_support import MemoryRollupStore, MemoryUsageJournal
+from tests.server.usage_support import (
+    MemoryRollupStore,
+    MemoryUsageJournal,
+    Projects,
+    write_run,
+)
 
 from server.events import EventType, RunEvent, TurnUsageData
-from server.host_api import RUN_EVENTS_FILE
-from server.run_summary import RunSummaryFold, Summarized, SummaryState
+from server.run_summary import RunSummaryFold, SummaryState
 from server.run_summary_cache import summarize_journal
 from server.usage_rollup import (
     ROLLUP_FILE,
@@ -37,7 +41,6 @@ from server.usage_rollup import (
     read_or_build,
 )
 from server.usage_scan import FileRollupStore, collect_runs
-from vs_project.api import Project
 from vs_proto.api import validate
 
 IDENTITY = JournalIdentity(1, "1" * 64, "2" * 64)
@@ -298,23 +301,6 @@ def test_a_journal_that_grew_is_folded_again() -> None:
 # --- the real files ---
 
 
-class _Projects:
-    """The host's projects for ``collect_runs``: the helper's own summary of the journals."""
-
-    def run_summary(self, project: Path, run_id: str) -> Summarized:
-        return summarize_journal(Project.log_directory_for(project, run_id) / RUN_EVENTS_FILE)
-
-    def run_digest(self, project_root: Path, run_id: str) -> None:
-        del project_root, run_id
-
-
-def _write_run(project: Path, run_id: str, body: bytes) -> Path:
-    journal = Project.log_directory_for(project, run_id) / RUN_EVENTS_FILE
-    journal.parent.mkdir(parents=True, exist_ok=True)
-    journal.write_bytes(body)
-    return journal
-
-
 @settings(max_examples=15)
 @given(run_events=_timed_events(max_size=25).filter(bool))
 def test_a_finished_run_with_a_valid_summary_and_no_rollup_gets_one(
@@ -328,12 +314,12 @@ def test_a_finished_run_with_a_valid_summary_and_no_rollup_gets_one(
     """
     with tempfile.TemporaryDirectory() as raw:
         project = Path(raw)
-        journal = _write_run(project, RUN_ID, b"".join(journal_lines(run_events)))
+        journal = write_run(project, RUN_ID, b"".join(journal_lines(run_events)))
         rollup_file = journal.with_name(ROLLUP_FILE)
         summarize_journal(journal)  # the summary is cached, as for a run read before rollups
         since = START - timedelta(days=1)
 
-        first = collect_runs(_Projects(), [project], since=since, budget=Budget(1))
+        first = collect_runs(Projects(), [project], since=since, budget=Budget(1))
         rollup = FileRollupStore(rollup_file).read()
         assert first.pending == 0
         assert rollup is not None
@@ -344,7 +330,7 @@ def test_a_finished_run_with_a_valid_summary_and_no_rollup_gets_one(
         assert rollup.to_binary() == build_rollup(_fold(run_events), (), identity).to_binary()
 
         stamp = rollup_file.stat().st_mtime_ns
-        again = collect_runs(_Projects(), [project], since=since, budget=Budget(1))
+        again = collect_runs(Projects(), [project], since=since, budget=Budget(1))
         assert again.pending == 0
         assert rollup_file.stat().st_mtime_ns == stamp
 
@@ -353,9 +339,9 @@ def test_a_stale_journal_is_not_opened() -> None:
     """A journal not written since the window began cannot hold a turn in it."""
     with tempfile.TemporaryDirectory() as raw:
         project = Path(raw)
-        journal = _write_run(project, RUN_ID, b"".join(journal_lines([])))
+        journal = write_run(project, RUN_ID, b"".join(journal_lines([])))
         collected = collect_runs(
-            _Projects(), [project], since=START + timedelta(days=3650), budget=Budget(1)
+            Projects(), [project], since=START + timedelta(days=3650), budget=Budget(1)
         )
         assert (collected.scanned, collected.skipped, collected.runs) == (0, 1, ())
         assert not journal.with_name(ROLLUP_FILE).exists()

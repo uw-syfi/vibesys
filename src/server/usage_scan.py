@@ -36,14 +36,15 @@ import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol
 
-from server.host_api import RUN_EVENTS_FILE, RunDigest
-from server.host_run_dashboard import kept_landings
+from server.host_api import RUN_EVENTS_FILE
+from server.run_digest import journal_kept_landings
 from server.run_summary_cache import journal_fingerprint
 from server.usage_outside import Outside, RunFacts, exclude
 from server.usage_pricing import (
     DocumentFetcher,
     FetchError,
     ListPricing,
+    PriceBookUnreadableError,
     RateDocument,
     check_book,
     read_rate_book,
@@ -66,11 +67,10 @@ from vs_proto.api import Timestamp, ValidationError, host_payloads, usage_state,
 from vs_sim.api import HttpsGetError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
     from datetime import datetime
     from pathlib import Path
 
-    from server.host_api import RunDigestUnreadable
     from server.run_summary import Summarized
     from server.usage_summary import Pricing
     from vs_sim.api import HttpsGet
@@ -93,31 +93,20 @@ _PRICES_FILE = "prices.pb"
 
 
 class UsageProjects(Protocol):
-    """What reading usage needs of the host's projects: the fold and the digest of a run."""
+    """What reading usage needs of the host's projects: the fold of a run's journal."""
 
     def run_summary(self, project: Path, run_id: str) -> Summarized:
         """The fold of the run's journal as it is now."""
-        ...
-
-    def run_digest(self, project_root: Path, run_id: str) -> RunDigest | RunDigestUnreadable | None:
-        """What the journal says of the run at a glance."""
         ...
 
 
 class JsonlUsageJournal:
     """One run's JSONL journal, as the rollup reads it."""
 
-    def __init__(
-        self,
-        journal: Path,
-        *,
-        summarize: Callable[[], Summarized],
-        bests: Callable[[], tuple[datetime, ...]],
-    ) -> None:
-        """Read ``journal``; ``summarize`` folds it and ``bests`` says when its kept ideas landed."""
+    def __init__(self, journal: Path, *, summarize: Callable[[], Summarized]) -> None:
+        """Read ``journal``; ``summarize`` folds it."""
         self._journal = journal
         self._summarize = summarize
-        self._bests = bests
 
     def identity(self) -> JournalIdentity | None:
         """The fingerprint of the journal's complete lines; ``None`` when it cannot be read."""
@@ -134,7 +123,12 @@ class JsonlUsageJournal:
             return 0
 
     def fold(self) -> FoldedJournal:
-        """The summary fold, the prefix it covers, and whether that prefix ends a complete line."""
+        """The summary fold, when its kept ideas landed, the prefix it covers, and whether that prefix ends a line.
+
+        The landings are read from the same prefix the fold covers, so a rollup describes one
+        state of the journal and a line appended while it was built waits for the next build.
+        Raises ``OSError`` when the journal cannot be read.
+        """
         summarized = self._summarize()
         covered = summarized.journal_bytes
         found = journal_fingerprint(self._journal, covered)
@@ -145,10 +139,21 @@ class JsonlUsageJournal:
         )
         return FoldedJournal(
             state=summarized.fold.state(),
-            bests=self._bests(),
+            bests=journal_kept_landings(_prefix(self._journal, covered)),
             identity=identity,
             persistable=found is not None,
         )
+
+
+def _prefix(journal: Path, size: int) -> Iterator[bytes]:
+    """The lines of the first ``size`` bytes of ``journal``."""
+    read = 0
+    with journal.open("rb") as stream:
+        for line in stream:
+            if read >= size:
+                return
+            read += len(line)
+            yield line
 
 
 class FileRollupStore:
@@ -238,15 +243,20 @@ def collect_runs(
         skipped += held.skipped
         failed += held.failed
         for _, run_id, journal in sorted(held.journals, reverse=True):
-            reading = read_or_build(
-                JsonlUsageJournal(
-                    journal,
-                    summarize=lambda run_id=run_id, path=path: projects.run_summary(path, run_id),
-                    bests=lambda run_id=run_id, root=root: _bests(projects, root, run_id),
-                ),
-                FileRollupStore(journal.with_name(ROLLUP_FILE)),
-                budget,
-            )
+            try:
+                reading = read_or_build(
+                    JsonlUsageJournal(
+                        journal,
+                        summarize=lambda run_id=run_id, path=path: projects.run_summary(
+                            path, run_id
+                        ),
+                    ),
+                    FileRollupStore(journal.with_name(ROLLUP_FILE)),
+                    budget,
+                )
+            except OSError:
+                failed += 1
+                continue
             if reading.outcome is Outcome.MISSING:
                 failed += 1
                 continue
@@ -363,15 +373,17 @@ def collect_host_runs(
                 continue
         except OSError:
             continue
-        reading = read_or_build(
-            JsonlUsageJournal(
-                journal,
-                summarize=lambda run=run: projects.run_summary(run.project_root, run.run_id),
-                bests=lambda run=run: _bests(projects, run.project_root, run.run_id),
-            ),
-            FileRollupStore(journal.with_name(ROLLUP_FILE)),
-            budget,
-        )
+        try:
+            reading = read_or_build(
+                JsonlUsageJournal(
+                    journal,
+                    summarize=lambda run=run: projects.run_summary(run.project_root, run.run_id),
+                ),
+                FileRollupStore(journal.with_name(ROLLUP_FILE)),
+                budget,
+            )
+        except OSError:
+            continue
         pending += reading.outcome is Outcome.PENDING
         if reading.rollup is not None:
             facts[run.run_id] = _facts(run.run_id, str(run.project_root), reading.rollup)
@@ -493,20 +505,34 @@ class ProtoRateStore:
 
 
 class FilePriceBook:
-    """What a person set, in ``prices.pb``: the only copy, so a write that fails is reported."""
+    """What a person set, in ``prices.pb``: the only copy, so damage is reported and never overwritten."""
 
     def __init__(self, path: Path) -> None:
         """Keep the book at ``path``."""
         self._path = path
 
     def read(self) -> usage_state.UsagePriceBook:
-        """The stored book; an empty one at revision 0 when there is none or it fails its rules."""
+        """The stored book: an empty one at revision 0 when there is no file.
+
+        Raises ``PriceBookUnreadableError`` when there is a file and it cannot be used: it does
+        not read, does not decode, fails its rules, or has a ``Map to`` chain that loops. The
+        file is the person's only copy, so a damaged one is never taken for an empty book.
+        """
         try:
-            found = usage_state.UsagePriceBook.from_binary(self._path.read_bytes())
-            validate(found)
-        except (OSError, ValueError, ValidationError):
+            raw = self._path.read_bytes()
+        except FileNotFoundError:
             return usage_state.UsagePriceBook()
-        return found
+        except OSError as error:
+            message = f"{_PRICES_FILE} cannot be read: {error.strerror or 'an I/O error'}"
+            raise PriceBookUnreadableError(message) from error
+        try:
+            book = usage_state.UsagePriceBook.from_binary(raw)
+            validate(book)
+            check_book(book.overrides, book.aliases)
+        except (ValueError, ValidationError) as error:
+            message = f"{_PRICES_FILE} cannot be used: {str(error).splitlines()[0][:200]}"
+            raise PriceBookUnreadableError(message) from error
+        return book
 
     def write(self, book: usage_state.UsagePriceBook) -> None:
         """Replace the book. Raises ``OSError`` when it cannot be written."""
@@ -542,11 +568,20 @@ def usage_directory() -> Path:
 
 
 def stored_pricing(directory: Path, *, now: datetime) -> ListPricing:
-    """The prices of the list on disk (or the pinned table) and the person's book; no network."""
-    return ListPricing(
-        read_rate_book(ProtoRateStore(directory / _RATES_FILE), now=now),
-        FilePriceBook(directory / _PRICES_FILE).read(),
-    )
+    """The prices of the list on disk (or the pinned table) and the person's book; no network.
+
+    A book that exists and cannot be used does not stop the read: estimates are made without it
+    and the pricing says so (``prices_status``), so the person is told and nothing is saved over
+    their only copy.
+    """
+    rates = read_rate_book(ProtoRateStore(directory / _RATES_FILE), now=now)
+    try:
+        book = FilePriceBook(directory / _PRICES_FILE).read()
+    except PriceBookUnreadableError:
+        return ListPricing(
+            rates, usage_state.UsagePriceBook(), status=usage_state.UsagePricesStatus.UNREADABLE
+        )
+    return ListPricing(rates, book)
 
 
 def refresh_rates(
@@ -571,7 +606,8 @@ def save_prices(
     nothing, so a retry after an unknown outcome is safe; one made against an older revision
     changes nothing and answers with the host's book, so concurrent edits cannot overwrite each
     other unseen. Raises ``PriceBookError`` (a ``ValueError``) naming the offending key when the
-    book cannot be saved.
+    book cannot be saved, and ``PriceBookUnreadableError`` when the stored book is damaged: it is
+    never replaced without the person's say.
     """
     file = FilePriceBook(directory / _PRICES_FILE)
     current = file.read()
@@ -597,10 +633,3 @@ def _write(path: Path, contents: bytes) -> None:
         atomic_write_bytes(path, contents)
     except (OSError, ProjectError):
         return
-
-
-def _bests(projects: UsageProjects, root: Path, run_id: str) -> tuple[datetime, ...]:
-    digest = projects.run_digest(root, run_id)
-    if isinstance(digest, RunDigest) and digest.dashboard is not None:
-        return kept_landings(digest.dashboard.points)
-    return ()

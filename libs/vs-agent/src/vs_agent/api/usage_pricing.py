@@ -13,7 +13,8 @@ module is the one thing that imports the list side, so the split is held by the 
 
 Public surface: ``Rate``, ``ModelRates``, ``Counts``, ``Cost``, ``price_counts``,
 ``speed_premium``, ``cache_savings``, ``RateStatus``, ``RateDocument``, ``DocumentStore``,
-``DocumentFetcher``, ``FetchError``, ``RateBook``, ``read_rate_book`` and ``refresh_rate_book``.
+``DocumentFetcher``, ``FetchError``, ``RateBook``, ``book_key``, ``read_rate_book`` and
+``refresh_rate_book``.
 """
 
 from __future__ import annotations
@@ -209,8 +210,18 @@ class RateBook:
         entry = rates_for(self._read.table, provider, model)
         if entry is not None:
             return entry.name
-        names = candidate_names(model)
-        return names[0] if names else normalize_name(model)
+        return book_key(model)
+
+
+def book_key(name: str) -> str:
+    """The id a person's override or ``Map to`` names ``name`` by, whatever provider ran it.
+
+    Trimmed, lowercase, without a bracketed variant (``[1m]``): two spellings that differ only
+    so are one model. A book compares every name through this one function, on both ends of a
+    ``Map to``, so a chain can only be followed, never missed or looped by a spelling.
+    """
+    names = candidate_names(name)
+    return names[0] if names else normalize_name(name)
 
 
 def read_rate_book(store: DocumentStore, *, now: datetime) -> RateBook:
@@ -325,6 +336,7 @@ __all__ = [
     "RateBook",
     "RateDocument",
     "RateStatus",
+    "book_key",
     "cache_savings",
     "price_counts",
     "read_rate_book",

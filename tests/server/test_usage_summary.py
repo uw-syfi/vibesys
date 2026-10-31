@@ -18,6 +18,7 @@ from tests.server.usage_support import (
     FIRST_QUARTER,
     TablePricing,
     edge_lists,
+    price_books,
     rollup_rows,
     run_inputs,
 )
@@ -57,7 +58,11 @@ def _journal() -> host_payloads.UsageSource:
 
 
 def _summary(
-    runs: list[RunInput], edges: list[datetime], *, max_bytes: int = USAGE_REPLY_MAX_BYTES
+    runs: list[RunInput],
+    edges: list[datetime],
+    *,
+    max_bytes: int = USAGE_REPLY_MAX_BYTES,
+    book: usage_state.UsagePriceBook | None = None,
 ) -> host_payloads.UsageSummaryResponse:
     return summarize(
         SummaryInputs(
@@ -66,7 +71,7 @@ def _summary(
             now=NOW,
             runs=runs,
             journal=_journal(),
-            pricing=TablePricing(),
+            pricing=TablePricing(book=book),
             max_bytes=max_bytes,
         )
     )
@@ -247,13 +252,17 @@ def test_a_reply_folded_to_fit_keeps_every_total(runs: list[RunInput], limit: in
 
 
 @settings(max_examples=8)
-@given(runs=_crowded())
-def test_no_reply_is_over_the_bound(runs: list[RunInput]) -> None:
-    """The reply fits ``USAGE_REPLY_MAX_BYTES`` whatever the rollups hold."""
+@given(runs=_crowded(), book=price_books(largest=True))
+def test_no_reply_is_over_the_bound(runs: list[RunInput], book: usage_state.UsagePriceBook) -> None:
+    """The reply fits ``USAGE_REPLY_MAX_BYTES`` whatever the rollups hold and however large the book.
+
+    The book is the largest the contract allows (256 overrides and 256 aliases of 128 byte
+    names, the names multi-byte), and it travels in every reply, so it is part of the bound.
+    """
     edges = [
         datetime.fromtimestamp((FIRST_QUARTER + step) * QUARTER_SECONDS, UTC) for step in range(101)
     ]
-    response = _summary(runs, edges)
+    response = _summary(runs, edges, book=book)
     validate(response)
     assert len(response.to_binary()) <= USAGE_REPLY_MAX_BYTES
 
@@ -337,7 +346,20 @@ def test_the_largest_reply_the_proto_allows_fits_the_bound() -> None:
             for _ in range(32)
         ],
         pricing=usage_state.UsagePricing(checked_on="2026-10-30", known_models=U32),
-        prices=usage_state.UsagePriceBook(revision=U64),
+        prices=usage_state.UsagePriceBook(
+            revision=U64,
+            overrides=[
+                usage_state.UsageRateOverride(
+                    model="é" * 64,
+                    rate=usage_state.UsageRate(
+                        input=1e6, output=1e6, cache_read=1e6, cache_write=1e6, cache_write_1h=1e6
+                    ),
+                )
+                for _ in range(256)
+            ],
+            aliases=[usage_state.UsageAlias(from_="é" * 64, to="é" * 64) for _ in range(256)],
+        ),
+        prices_status=usage_state.UsagePricesStatus.UNREADABLE,
         rates=[
             host_payloads.UsageResolvedRate(
                 provider=name,
@@ -350,7 +372,7 @@ def test_the_largest_reply_the_proto_allows_fits_the_bound() -> None:
             )
             for name in providers
             for _ in range(32)
-        ][:512],
+        ][:256],
         pending_runs=U32,
         pending_files=U32,
         folded_series=U32,

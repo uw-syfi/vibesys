@@ -15,6 +15,7 @@ from vibesys.api.host_operations.api import (
     ClusterRefusedError,
     LoginRefusedFact,
     LoginStartedFact,
+    PricesDamagedError,
     PricesRefusedError,
     PricesUnknownError,
     ProjectRefusedError,
@@ -299,6 +300,8 @@ def _serve_usage_prices(payload: bytes) -> bytes:
     def apply(request: pb.UsagePricesSaveRequest) -> pb.UsagePricesSaveResponse:
         try:
             return scan.save_prices(scan.usage_directory(), request)
+        except pricing.PriceBookUnreadableError as exc:
+            raise PricesDamagedError(str(exc)) from exc
         except pricing.PriceBookError as exc:
             raise PricesRefusedError(str(exc)) from exc
         except OSError as exc:

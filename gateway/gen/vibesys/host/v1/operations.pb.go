@@ -11589,8 +11589,10 @@ type UsageSummaryResponse struct {
 	PendingRuns  uint32 `protobuf:"varint,14,opt,name=pending_runs,json=pendingRuns,proto3" json:"pending_runs,omitempty"`
 	PendingFiles uint32 `protobuf:"varint,15,opt,name=pending_files,json=pendingFiles,proto3" json:"pending_files,omitempty"`
 	// How many of the cheapest series the reply folded into `other` to stay under its size bound.
-	FoldedSeries  uint32                 `protobuf:"varint,16,opt,name=folded_series,json=foldedSeries,proto3" json:"folded_series,omitempty"`
-	ReadAt        *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=read_at,json=readAt,proto3" json:"read_at,omitempty"`
+	FoldedSeries uint32                 `protobuf:"varint,16,opt,name=folded_series,json=foldedSeries,proto3" json:"folded_series,omitempty"`
+	ReadAt       *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=read_at,json=readAt,proto3" json:"read_at,omitempty"`
+	// Whether `prices` is what the person set, or the host could not read it and `prices` is empty.
+	PricesStatus  UsagePricesStatus `protobuf:"varint,18,opt,name=prices_status,json=pricesStatus,proto3,enum=vibesys.host.v1.UsagePricesStatus" json:"prices_status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -11742,6 +11744,13 @@ func (x *UsageSummaryResponse) GetReadAt() *timestamppb.Timestamp {
 		return x.ReadAt
 	}
 	return nil
+}
+
+func (x *UsageSummaryResponse) GetPricesStatus() UsagePricesStatus {
+	if x != nil {
+		return x.PricesStatus
+	}
+	return UsagePricesStatus_USAGE_PRICES_STATUS_UNSPECIFIED
 }
 
 // Fetch the price list now, if one is due, and say how current the host's rates are. The host
@@ -12970,7 +12979,7 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05speed\x123\n" +
 	"\x04rate\x18\x04 \x01(\v2\x1a.vibesys.host.v1.UsageRateH\x00R\x04rate\x88\x01\x01\x12<\n" +
 	"\x06source\x18\x05 \x01(\x0e2$.vibesys.host.v1.UsageEstimateSourceR\x06sourceB\a\n" +
-	"\x05_rate\"\xa1\b\n" +
+	"\x05_rate\"\xf6\b\n" +
 	"\x14UsageSummaryResponse\x12)\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tB\n" +
@@ -12988,11 +12997,13 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	" \x03(\v2\x1c.vibesys.host.v1.UsageSourceB\b\xbaH\x05\x92\x01\x02\x10 R\asources\x12?\n" +
 	"\apricing\x18\v \x01(\v2\x1d.vibesys.host.v1.UsagePricingB\x06\xbaH\x03\xc8\x01\x01R\apricing\x12?\n" +
 	"\x06prices\x18\f \x01(\v2\x1f.vibesys.host.v1.UsagePriceBookB\x06\xbaH\x03\xc8\x01\x01R\x06prices\x12C\n" +
-	"\x05rates\x18\r \x03(\v2\".vibesys.host.v1.UsageResolvedRateB\t\xbaH\x06\x92\x01\x03\x10\x80\x04R\x05rates\x12!\n" +
+	"\x05rates\x18\r \x03(\v2\".vibesys.host.v1.UsageResolvedRateB\t\xbaH\x06\x92\x01\x03\x10\x80\x02R\x05rates\x12!\n" +
 	"\fpending_runs\x18\x0e \x01(\rR\vpendingRuns\x12#\n" +
 	"\rpending_files\x18\x0f \x01(\rR\fpendingFiles\x12#\n" +
 	"\rfolded_series\x18\x10 \x01(\rR\ffoldedSeries\x12;\n" +
-	"\aread_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x06readAt\"\x91\x01\n" +
+	"\aread_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x06readAt\x12S\n" +
+	"\rprices_status\x18\x12 \x01(\x0e2\".vibesys.host.v1.UsagePricesStatusB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\fpricesStatus\"\x91\x01\n" +
 	"\x18UsageRatesRefreshRequest\x12)\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tB\n" +
@@ -13009,8 +13020,8 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"request_id\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01\x18\x80\x01R\trequestId\x12#\n" +
 	"\rbase_revision\x18\x02 \x01(\x04R\fbaseRevision\x12K\n" +
-	"\toverrides\x18\x03 \x03(\v2\".vibesys.host.v1.UsageRateOverrideB\t\xbaH\x06\x92\x01\x03\x10\x80\x04R\toverrides\x12@\n" +
-	"\aaliases\x18\x04 \x03(\v2\x1b.vibesys.host.v1.UsageAliasB\t\xbaH\x06\x92\x01\x03\x10\x80\x04R\aaliases:\xa1\x01\xbaH\x9d\x01\x1a\x9a\x01\n" +
+	"\toverrides\x18\x03 \x03(\v2\".vibesys.host.v1.UsageRateOverrideB\t\xbaH\x06\x92\x01\x03\x10\x80\x02R\toverrides\x12@\n" +
+	"\aaliases\x18\x04 \x03(\v2\x1b.vibesys.host.v1.UsageAliasB\t\xbaH\x06\x92\x01\x03\x10\x80\x02R\aaliases:\xa1\x01\xbaH\x9d\x01\x1a\x9a\x01\n" +
 	"\x1ausage_prices_save.distinct\x12+a model is overridden once and aliased once\x1aOthis.overrides.map(o, o.model).unique() && this.aliases.map(a, a.from).unique()\"\x9b\x01\n" +
 	"\x17UsagePricesSaveResponse\x12)\n" +
 	"\n" +
@@ -13402,8 +13413,9 @@ var file_vibesys_host_v1_operations_proto_goTypes = []any{
 	(*UsageRate)(nil),                            // 190: vibesys.host.v1.UsageRate
 	(*UsagePricing)(nil),                         // 191: vibesys.host.v1.UsagePricing
 	(*UsagePriceBook)(nil),                       // 192: vibesys.host.v1.UsagePriceBook
-	(*UsageRateOverride)(nil),                    // 193: vibesys.host.v1.UsageRateOverride
-	(*UsageAlias)(nil),                           // 194: vibesys.host.v1.UsageAlias
+	(UsagePricesStatus)(0),                       // 193: vibesys.host.v1.UsagePricesStatus
+	(*UsageRateOverride)(nil),                    // 194: vibesys.host.v1.UsageRateOverride
+	(*UsageAlias)(nil),                           // 195: vibesys.host.v1.UsageAlias
 }
 var file_vibesys_host_v1_operations_proto_depIdxs = []int32{
 	27,  // 0: vibesys.host.v1.TaskList.tasks:type_name -> vibesys.host.v1.TaskSummary
@@ -13587,17 +13599,18 @@ var file_vibesys_host_v1_operations_proto_depIdxs = []int32{
 	192, // 178: vibesys.host.v1.UsageSummaryResponse.prices:type_name -> vibesys.host.v1.UsagePriceBook
 	175, // 179: vibesys.host.v1.UsageSummaryResponse.rates:type_name -> vibesys.host.v1.UsageResolvedRate
 	183, // 180: vibesys.host.v1.UsageSummaryResponse.read_at:type_name -> google.protobuf.Timestamp
-	183, // 181: vibesys.host.v1.UsageRatesRefreshRequest.now:type_name -> google.protobuf.Timestamp
-	191, // 182: vibesys.host.v1.UsageRatesRefreshResponse.pricing:type_name -> vibesys.host.v1.UsagePricing
-	193, // 183: vibesys.host.v1.UsagePricesSaveRequest.overrides:type_name -> vibesys.host.v1.UsageRateOverride
-	194, // 184: vibesys.host.v1.UsagePricesSaveRequest.aliases:type_name -> vibesys.host.v1.UsageAlias
-	192, // 185: vibesys.host.v1.UsagePricesSaveResponse.prices:type_name -> vibesys.host.v1.UsagePriceBook
-	53,  // 186: vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry.value:type_name -> vibesys.host.v1.HarnessChoice
-	187, // [187:187] is the sub-list for method output_type
-	187, // [187:187] is the sub-list for method input_type
-	187, // [187:187] is the sub-list for extension type_name
-	187, // [187:187] is the sub-list for extension extendee
-	0,   // [0:187] is the sub-list for field type_name
+	193, // 181: vibesys.host.v1.UsageSummaryResponse.prices_status:type_name -> vibesys.host.v1.UsagePricesStatus
+	183, // 182: vibesys.host.v1.UsageRatesRefreshRequest.now:type_name -> google.protobuf.Timestamp
+	191, // 183: vibesys.host.v1.UsageRatesRefreshResponse.pricing:type_name -> vibesys.host.v1.UsagePricing
+	194, // 184: vibesys.host.v1.UsagePricesSaveRequest.overrides:type_name -> vibesys.host.v1.UsageRateOverride
+	195, // 185: vibesys.host.v1.UsagePricesSaveRequest.aliases:type_name -> vibesys.host.v1.UsageAlias
+	192, // 186: vibesys.host.v1.UsagePricesSaveResponse.prices:type_name -> vibesys.host.v1.UsagePriceBook
+	53,  // 187: vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry.value:type_name -> vibesys.host.v1.HarnessChoice
+	188, // [188:188] is the sub-list for method output_type
+	188, // [188:188] is the sub-list for method input_type
+	188, // [188:188] is the sub-list for extension type_name
+	188, // [188:188] is the sub-list for extension extendee
+	0,   // [0:188] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_host_v1_operations_proto_init() }

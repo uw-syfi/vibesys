@@ -46,9 +46,11 @@ if TYPE_CHECKING:
     from server.host_run_summary import RateLimitReading, UsageRecord
     from server.run_summary import SummaryState
 
-ROLLUP_VERSION: Final = 1
+ROLLUP_VERSION: Final = 2
 """The version of what a rollup holds and how its rows are made. A stored rollup of another
-version is rebuilt, so bump it with any change to ``build_rollup`` or to the digest's kept ideas."""
+version is rebuilt, so bump it with any change to ``build_rollup`` or to the fold of kept ideas.
+
+2: ``new_bests`` hold every kept idea of the run, not only those the digest's capped dashboard keeps."""
 
 ROLLUP_FILE: Final = "run-usage.pb"
 """The rollup's file, beside the run's journal."""

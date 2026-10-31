@@ -61,7 +61,7 @@ _MODEL_MAX_BYTES: Final = 128
 _ROLE_MAX_BYTES: Final = 64
 _PROVIDER: Final = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 _RECENT_QUARTERS: Final = 4
-_MAX_RATES: Final = 512
+_MAX_RATES: Final = 256
 _MIN_EDGES: Final = 2
 _APPROXIMATE: Final = frozenset({UsageCostBasis.LEGACY_RECORDED, UsageCostBasis.LEGACY_UNPRICED})
 _SOURCE: Final = usage_state.UsageEstimateSource
@@ -108,6 +108,11 @@ class Pricing(Protocol):
     @property
     def book(self) -> usage_state.UsagePriceBook:
         """What the person set."""
+        ...
+
+    @property
+    def prices_status(self) -> usage_state.UsagePricesStatus:
+        """Whether ``book`` is what the person set, or the host could not read it."""
         ...
 
 
@@ -328,6 +333,7 @@ class _Builder:
             pending_runs=inputs.pending_runs,
             pending_files=inputs.pending_files,
             read_at=Timestamp.from_datetime(inputs.now.astimezone(UTC)),
+            prices_status=inputs.pricing.prices_status,
         )
         return response, columns
 

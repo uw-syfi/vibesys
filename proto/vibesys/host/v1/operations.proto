@@ -2198,7 +2198,7 @@ message UsageSummaryResponse {
   repeated UsageSource sources = 10 [(buf.validate.field).repeated.max_items = 32];
   UsagePricing pricing = 11 [(buf.validate.field).required = true];
   UsagePriceBook prices = 12 [(buf.validate.field).required = true];
-  repeated UsageResolvedRate rates = 13 [(buf.validate.field).repeated.max_items = 512];
+  repeated UsageResolvedRate rates = 13 [(buf.validate.field).repeated.max_items = 256];
   // Runs whose journals were left for a later call by the byte budget, and transcript files
   // likewise. While either is above zero the figures are partial: ask again.
   uint32 pending_runs = 14;
@@ -2206,6 +2206,11 @@ message UsageSummaryResponse {
   // How many of the cheapest series the reply folded into `other` to stay under its size bound.
   uint32 folded_series = 16;
   google.protobuf.Timestamp read_at = 17 [(buf.validate.field).required = true];
+  // Whether `prices` is what the person set, or the host could not read it and `prices` is empty.
+  UsagePricesStatus prices_status = 18 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
 }
 
 // Fetch the price list now, if one is due, and say how current the host's rates are. The host
@@ -2245,8 +2250,8 @@ message UsagePricesSaveRequest {
     max_len: 128
   }];
   uint64 base_revision = 2;
-  repeated UsageRateOverride overrides = 3 [(buf.validate.field).repeated.max_items = 512];
-  repeated UsageAlias aliases = 4 [(buf.validate.field).repeated.max_items = 512];
+  repeated UsageRateOverride overrides = 3 [(buf.validate.field).repeated.max_items = 256];
+  repeated UsageAlias aliases = 4 [(buf.validate.field).repeated.max_items = 256];
 }
 message UsagePricesSaveResponse {
   string request_id = 1 [(buf.validate.field).string = {

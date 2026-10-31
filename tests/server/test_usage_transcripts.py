@@ -9,26 +9,49 @@ any schedule of appends and budgets equal the rows of one read of the finished f
 from __future__ import annotations
 
 import tempfile
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.server.transcript_support import START, Request, line, requests, session_file
 
-from server.usage_transcripts import RETENTION, SCAN_FILE, SCAN_VERSION, scan_transcripts
+from server.usage_transcripts import (
+    RETENTION,
+    SCAN_FILE,
+    SCAN_VERSION,
+    OutsideScan,
+    scan_transcripts,
+)
 from vs_proto.api import usage_state
 
 SESSIONS = ("s1", "s2", "s3")
 NOW = START + timedelta(days=1)
 
 
-def _rows(scan_dir: Path, home: Path, *, budget: int, now=NOW):  # noqa: ANN001, ANN202
+class _Found(NamedTuple):
+    """One row of the cache, as a test compares them."""
+
+    provider: str
+    quarter: int
+    session: str
+    cwd: str
+    model: str
+    input: int
+    cache_read: int
+    output: int
+    turns: int
+
+
+def _rows(
+    scan_dir: Path, home: Path, *, budget: int, now: datetime = NOW
+) -> tuple[OutsideScan, list[_Found]]:
     scan = scan_transcripts(
         scan_dir, {"HOME": str(home)}, now=now, since=START - timedelta(days=1), budget=budget
     )
     return scan, sorted(
-        (
+        _Found(
             found.provider,
             found.row.quarter,
             found.row.session_id,
@@ -122,12 +145,12 @@ def test_a_file_that_was_rewritten_is_read_again_and_its_old_rows_are_dropped() 
         home = root / "home"
         _write(home, [Request("s1", 3, "claude-opus-5-5", "/work/alpha", 100, 0, 5)] * 3, {})
         _, first = _rows(root / "cache", home, budget=10**9)
-        assert sum(row[-1] for row in first) == 3
+        assert sum(row.turns for row in first) == 3
         session_file(home, "s1").write_bytes(
             line(Request("s1", 40, "claude-haiku-5-5", "/work/alpha", 7, 0, 1), 0)
         )
         _, second = _rows(root / "cache", home, budget=10**9)
-        assert [(row[4], row[5]) for row in second] == [("claude-haiku-5-5", 7)]
+        assert [(row.model, row.input) for row in second] == [("claude-haiku-5-5", 7)]
 
 
 def test_a_request_still_being_written_is_counted_once_it_is_whole() -> None:
@@ -141,7 +164,7 @@ def test_a_request_still_being_written_is_counted_once_it_is_whole() -> None:
         assert torn == []
         path.write_bytes(whole)
         _, done = _rows(root / "cache", home, budget=10**9)
-        assert [row[-1] for row in done] == [1]
+        assert [row.turns for row in done] == [1]
 
 
 def test_rows_older_than_the_retention_are_dropped_whatever_the_files_hold() -> None:

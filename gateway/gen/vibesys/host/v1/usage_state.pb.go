@@ -301,6 +301,59 @@ func (UsagePricingStatus) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_usage_state_proto_rawDescGZIP(), []int{4}
 }
 
+// How the person's price book was read.
+type UsagePricesStatus int32
+
+const (
+	UsagePricesStatus_USAGE_PRICES_STATUS_UNSPECIFIED UsagePricesStatus = 0
+	UsagePricesStatus_USAGE_PRICES_STATUS_OK          UsagePricesStatus = 1
+	// `prices.pb` exists and cannot be used: it does not decode, fails its rules, or its `Map to`
+	// chains loop. Estimates are made without the book, nothing is saved over it, and the person
+	// is told, since it is the only copy of what they set.
+	UsagePricesStatus_USAGE_PRICES_STATUS_UNREADABLE UsagePricesStatus = 2
+)
+
+// Enum value maps for UsagePricesStatus.
+var (
+	UsagePricesStatus_name = map[int32]string{
+		0: "USAGE_PRICES_STATUS_UNSPECIFIED",
+		1: "USAGE_PRICES_STATUS_OK",
+		2: "USAGE_PRICES_STATUS_UNREADABLE",
+	}
+	UsagePricesStatus_value = map[string]int32{
+		"USAGE_PRICES_STATUS_UNSPECIFIED": 0,
+		"USAGE_PRICES_STATUS_OK":          1,
+		"USAGE_PRICES_STATUS_UNREADABLE":  2,
+	}
+)
+
+func (x UsagePricesStatus) Enum() *UsagePricesStatus {
+	p := new(UsagePricesStatus)
+	*p = x
+	return p
+}
+
+func (x UsagePricesStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (UsagePricesStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_host_v1_usage_state_proto_enumTypes[5].Descriptor()
+}
+
+func (UsagePricesStatus) Type() protoreflect.EnumType {
+	return &file_vibesys_host_v1_usage_state_proto_enumTypes[5]
+}
+
+func (x UsagePricesStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use UsagePricesStatus.Descriptor instead.
+func (UsagePricesStatus) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_usage_state_proto_rawDescGZIP(), []int{5}
+}
+
 // US dollars per million tokens for one model at one speed. Zero is a price: a free model.
 type UsageRate struct {
 	state      protoimpl.MessageState `protogen:"open.v1"`
@@ -486,6 +539,9 @@ func (x *UsageAlias) GetTo() string {
 }
 
 // What a person set about prices, shared by every client of the host. Persisted as `prices.pb`.
+//
+// The limits are what keep a reply under its size bound with the book in it: 256 entries of at
+// most 128 bytes a name each way.
 type UsagePriceBook struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Counts up with each save; a save names the revision it was made against.
@@ -1572,18 +1628,18 @@ const file_vibesys_host_v1_usage_state_proto_rawDesc = "" +
 	"\x0f_cache_write_1h\"m\n" +
 	"\x11UsageRateOverride\x12 \n" +
 	"\x05model\x18\x01 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01(\x80\x04R\x05model\x126\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x01R\x05model\x126\n" +
 	"\x04rate\x18\x02 \x01(\v2\x1a.vibesys.host.v1.UsageRateB\x06\xbaH\x03\xc8\x01\x01R\x04rate\"H\n" +
 	"\n" +
 	"UsageAlias\x12\x1e\n" +
 	"\x04from\x18\x01 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01(\x80\x04R\x04from\x12\x1a\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x01R\x04from\x12\x1a\n" +
 	"\x02to\x18\x02 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01(\x80\x04R\x02to\"\xbb\x01\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x01R\x02to\"\xbb\x01\n" +
 	"\x0eUsagePriceBook\x12\x1a\n" +
 	"\brevision\x18\x01 \x01(\x04R\brevision\x12K\n" +
-	"\toverrides\x18\x02 \x03(\v2\".vibesys.host.v1.UsageRateOverrideB\t\xbaH\x06\x92\x01\x03\x10\x80\x04R\toverrides\x12@\n" +
-	"\aaliases\x18\x03 \x03(\v2\x1b.vibesys.host.v1.UsageAliasB\t\xbaH\x06\x92\x01\x03\x10\x80\x04R\aaliases\"\x86\x02\n" +
+	"\toverrides\x18\x02 \x03(\v2\".vibesys.host.v1.UsageRateOverrideB\t\xbaH\x06\x92\x01\x03\x10\x80\x02R\toverrides\x12@\n" +
+	"\aaliases\x18\x03 \x03(\v2\x1b.vibesys.host.v1.UsageAliasB\t\xbaH\x06\x92\x01\x03\x10\x80\x02R\aaliases\"\x86\x02\n" +
 	"\fUsagePricing\x12;\n" +
 	"\x06status\x18\x01 \x01(\x0e2#.vibesys.host.v1.UsagePricingStatusR\x06status\x12>\n" +
 	"\n" +
@@ -1728,7 +1784,11 @@ const file_vibesys_host_v1_usage_state_proto_rawDesc = "" +
 	" USAGE_PRICING_STATUS_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aUSAGE_PRICING_STATUS_FRESH\x10\x01\x12\x1f\n" +
 	"\x1bUSAGE_PRICING_STATUS_CACHED\x10\x02\x12 \n" +
-	"\x1cUSAGE_PRICING_STATUS_BUNDLED\x10\x03B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3"
+	"\x1cUSAGE_PRICING_STATUS_BUNDLED\x10\x03*x\n" +
+	"\x11UsagePricesStatus\x12#\n" +
+	"\x1fUSAGE_PRICES_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n" +
+	"\x16USAGE_PRICES_STATUS_OK\x10\x01\x12\"\n" +
+	"\x1eUSAGE_PRICES_STATUS_UNREADABLE\x10\x02B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3"
 
 var (
 	file_vibesys_host_v1_usage_state_proto_rawDescOnce sync.Once
@@ -1742,7 +1802,7 @@ func file_vibesys_host_v1_usage_state_proto_rawDescGZIP() []byte {
 	return file_vibesys_host_v1_usage_state_proto_rawDescData
 }
 
-var file_vibesys_host_v1_usage_state_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
+var file_vibesys_host_v1_usage_state_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
 var file_vibesys_host_v1_usage_state_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_vibesys_host_v1_usage_state_proto_goTypes = []any{
 	(UsageEstimateSource)(0),      // 0: vibesys.host.v1.UsageEstimateSource
@@ -1750,47 +1810,48 @@ var file_vibesys_host_v1_usage_state_proto_goTypes = []any{
 	(UsageSourceKind)(0),          // 2: vibesys.host.v1.UsageSourceKind
 	(UsageSourceStatus)(0),        // 3: vibesys.host.v1.UsageSourceStatus
 	(UsagePricingStatus)(0),       // 4: vibesys.host.v1.UsagePricingStatus
-	(*UsageRate)(nil),             // 5: vibesys.host.v1.UsageRate
-	(*UsageRateOverride)(nil),     // 6: vibesys.host.v1.UsageRateOverride
-	(*UsageAlias)(nil),            // 7: vibesys.host.v1.UsageAlias
-	(*UsagePriceBook)(nil),        // 8: vibesys.host.v1.UsagePriceBook
-	(*UsagePricing)(nil),          // 9: vibesys.host.v1.UsagePricing
-	(*UsageRateSnapshot)(nil),     // 10: vibesys.host.v1.UsageRateSnapshot
-	(*UsageSourceIdentity)(nil),   // 11: vibesys.host.v1.UsageSourceIdentity
-	(*LimitReading)(nil),          // 12: vibesys.host.v1.LimitReading
-	(*RunUsageRollup)(nil),        // 13: vibesys.host.v1.RunUsageRollup
-	(*JournalIdentity)(nil),       // 14: vibesys.host.v1.JournalIdentity
-	(*UsageRollupRow)(nil),        // 15: vibesys.host.v1.UsageRollupRow
-	(*TranscriptRow)(nil),         // 16: vibesys.host.v1.TranscriptRow
-	(*TranscriptFileState)(nil),   // 17: vibesys.host.v1.TranscriptFileState
-	(*TranscriptRootState)(nil),   // 18: vibesys.host.v1.TranscriptRootState
-	(*TranscriptScanCache)(nil),   // 19: vibesys.host.v1.TranscriptScanCache
-	(*timestamppb.Timestamp)(nil), // 20: google.protobuf.Timestamp
-	(v1.UsageSpeed)(0),            // 21: vibesys.store.v1.UsageSpeed
-	(v1.UsageCostBasis)(0),        // 22: vibesys.store.v1.UsageCostBasis
+	(UsagePricesStatus)(0),        // 5: vibesys.host.v1.UsagePricesStatus
+	(*UsageRate)(nil),             // 6: vibesys.host.v1.UsageRate
+	(*UsageRateOverride)(nil),     // 7: vibesys.host.v1.UsageRateOverride
+	(*UsageAlias)(nil),            // 8: vibesys.host.v1.UsageAlias
+	(*UsagePriceBook)(nil),        // 9: vibesys.host.v1.UsagePriceBook
+	(*UsagePricing)(nil),          // 10: vibesys.host.v1.UsagePricing
+	(*UsageRateSnapshot)(nil),     // 11: vibesys.host.v1.UsageRateSnapshot
+	(*UsageSourceIdentity)(nil),   // 12: vibesys.host.v1.UsageSourceIdentity
+	(*LimitReading)(nil),          // 13: vibesys.host.v1.LimitReading
+	(*RunUsageRollup)(nil),        // 14: vibesys.host.v1.RunUsageRollup
+	(*JournalIdentity)(nil),       // 15: vibesys.host.v1.JournalIdentity
+	(*UsageRollupRow)(nil),        // 16: vibesys.host.v1.UsageRollupRow
+	(*TranscriptRow)(nil),         // 17: vibesys.host.v1.TranscriptRow
+	(*TranscriptFileState)(nil),   // 18: vibesys.host.v1.TranscriptFileState
+	(*TranscriptRootState)(nil),   // 19: vibesys.host.v1.TranscriptRootState
+	(*TranscriptScanCache)(nil),   // 20: vibesys.host.v1.TranscriptScanCache
+	(*timestamppb.Timestamp)(nil), // 21: google.protobuf.Timestamp
+	(v1.UsageSpeed)(0),            // 22: vibesys.store.v1.UsageSpeed
+	(v1.UsageCostBasis)(0),        // 23: vibesys.store.v1.UsageCostBasis
 }
 var file_vibesys_host_v1_usage_state_proto_depIdxs = []int32{
-	5,  // 0: vibesys.host.v1.UsageRateOverride.rate:type_name -> vibesys.host.v1.UsageRate
-	6,  // 1: vibesys.host.v1.UsagePriceBook.overrides:type_name -> vibesys.host.v1.UsageRateOverride
-	7,  // 2: vibesys.host.v1.UsagePriceBook.aliases:type_name -> vibesys.host.v1.UsageAlias
+	6,  // 0: vibesys.host.v1.UsageRateOverride.rate:type_name -> vibesys.host.v1.UsageRate
+	7,  // 1: vibesys.host.v1.UsagePriceBook.overrides:type_name -> vibesys.host.v1.UsageRateOverride
+	8,  // 2: vibesys.host.v1.UsagePriceBook.aliases:type_name -> vibesys.host.v1.UsageAlias
 	4,  // 3: vibesys.host.v1.UsagePricing.status:type_name -> vibesys.host.v1.UsagePricingStatus
-	20, // 4: vibesys.host.v1.UsagePricing.fetched_at:type_name -> google.protobuf.Timestamp
-	20, // 5: vibesys.host.v1.UsageRateSnapshot.fetched_at:type_name -> google.protobuf.Timestamp
-	20, // 6: vibesys.host.v1.UsageRateSnapshot.last_attempt_at:type_name -> google.protobuf.Timestamp
-	20, // 7: vibesys.host.v1.LimitReading.resets_at:type_name -> google.protobuf.Timestamp
-	20, // 8: vibesys.host.v1.LimitReading.observed_at:type_name -> google.protobuf.Timestamp
-	14, // 9: vibesys.host.v1.RunUsageRollup.journal:type_name -> vibesys.host.v1.JournalIdentity
-	15, // 10: vibesys.host.v1.RunUsageRollup.rows:type_name -> vibesys.host.v1.UsageRollupRow
-	20, // 11: vibesys.host.v1.RunUsageRollup.first_turn_at:type_name -> google.protobuf.Timestamp
-	20, // 12: vibesys.host.v1.RunUsageRollup.last_turn_at:type_name -> google.protobuf.Timestamp
-	12, // 13: vibesys.host.v1.RunUsageRollup.last_limits:type_name -> vibesys.host.v1.LimitReading
-	20, // 14: vibesys.host.v1.RunUsageRollup.new_bests:type_name -> google.protobuf.Timestamp
-	21, // 15: vibesys.host.v1.UsageRollupRow.speed:type_name -> vibesys.store.v1.UsageSpeed
-	22, // 16: vibesys.host.v1.UsageRollupRow.basis:type_name -> vibesys.store.v1.UsageCostBasis
-	21, // 17: vibesys.host.v1.TranscriptRow.speed:type_name -> vibesys.store.v1.UsageSpeed
-	16, // 18: vibesys.host.v1.TranscriptFileState.rows:type_name -> vibesys.host.v1.TranscriptRow
-	17, // 19: vibesys.host.v1.TranscriptRootState.files:type_name -> vibesys.host.v1.TranscriptFileState
-	18, // 20: vibesys.host.v1.TranscriptScanCache.roots:type_name -> vibesys.host.v1.TranscriptRootState
+	21, // 4: vibesys.host.v1.UsagePricing.fetched_at:type_name -> google.protobuf.Timestamp
+	21, // 5: vibesys.host.v1.UsageRateSnapshot.fetched_at:type_name -> google.protobuf.Timestamp
+	21, // 6: vibesys.host.v1.UsageRateSnapshot.last_attempt_at:type_name -> google.protobuf.Timestamp
+	21, // 7: vibesys.host.v1.LimitReading.resets_at:type_name -> google.protobuf.Timestamp
+	21, // 8: vibesys.host.v1.LimitReading.observed_at:type_name -> google.protobuf.Timestamp
+	15, // 9: vibesys.host.v1.RunUsageRollup.journal:type_name -> vibesys.host.v1.JournalIdentity
+	16, // 10: vibesys.host.v1.RunUsageRollup.rows:type_name -> vibesys.host.v1.UsageRollupRow
+	21, // 11: vibesys.host.v1.RunUsageRollup.first_turn_at:type_name -> google.protobuf.Timestamp
+	21, // 12: vibesys.host.v1.RunUsageRollup.last_turn_at:type_name -> google.protobuf.Timestamp
+	13, // 13: vibesys.host.v1.RunUsageRollup.last_limits:type_name -> vibesys.host.v1.LimitReading
+	21, // 14: vibesys.host.v1.RunUsageRollup.new_bests:type_name -> google.protobuf.Timestamp
+	22, // 15: vibesys.host.v1.UsageRollupRow.speed:type_name -> vibesys.store.v1.UsageSpeed
+	23, // 16: vibesys.host.v1.UsageRollupRow.basis:type_name -> vibesys.store.v1.UsageCostBasis
+	22, // 17: vibesys.host.v1.TranscriptRow.speed:type_name -> vibesys.store.v1.UsageSpeed
+	17, // 18: vibesys.host.v1.TranscriptFileState.rows:type_name -> vibesys.host.v1.TranscriptRow
+	18, // 19: vibesys.host.v1.TranscriptRootState.files:type_name -> vibesys.host.v1.TranscriptFileState
+	19, // 20: vibesys.host.v1.TranscriptScanCache.roots:type_name -> vibesys.host.v1.TranscriptRootState
 	21, // [21:21] is the sub-list for method output_type
 	21, // [21:21] is the sub-list for method input_type
 	21, // [21:21] is the sub-list for extension type_name
@@ -1814,7 +1875,7 @@ func file_vibesys_host_v1_usage_state_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_host_v1_usage_state_proto_rawDesc), len(file_vibesys_host_v1_usage_state_proto_rawDesc)),
-			NumEnums:      5,
+			NumEnums:      6,
 			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,

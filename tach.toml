@@ -333,7 +333,7 @@ depends_on = ["server.usage_summary", "vs_agent.api.usage_pricing", "vs_proto"]
 
 [[interfaces]]
 from = ["server.usage_pricing"]
-expose = ["DocumentFetcher", "DocumentStore", "FetchError", "ListPricing", "PriceBookError", "RateBook", "RateDocument", "check_book", "read_rate_book", "refresh_rate_book", "same_book", "saved_book"]
+expose = ["DocumentFetcher", "DocumentStore", "FetchError", "ListPricing", "PriceBookError", "PriceBookUnreadableError", "RateBook", "Rates", "RateDocument", "book_key", "check_book", "read_rate_book", "refresh_rate_book", "same_book", "saved_book"]
 
 [[modules]]
 # A person's own CLI use on a host: the provider transcripts, read incrementally into a cache.
@@ -349,7 +349,7 @@ expose = ["OutsideScan", "RETENTION", "RootReport", "SCAN_FILE", "SCAN_VERSION",
 # Reading a host's usage from disk: the journals behind the rollups and the byte budget that
 # bounds a read. Light, loaded on the first usage read.
 path = "server.usage_scan"
-depends_on = ["server.host_api", "server.host_run_dashboard", "server.run_summary", "server.run_summary_cache", "server.usage_outside", "server.usage_pricing", "server.usage_rollup", "server.usage_summary", "server.usage_transcripts", "vs_project", "vs_proto", "vs_sim.api"]
+depends_on = ["server.host_api", "server.run_digest", "server.run_summary", "server.run_summary_cache", "server.usage_outside", "server.usage_pricing", "server.usage_rollup", "server.usage_summary", "server.usage_transcripts", "vs_project", "vs_proto", "vs_sim.api"]
 
 [[interfaces]]
 from = ["server.usage_scan"]

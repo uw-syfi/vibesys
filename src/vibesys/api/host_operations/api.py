@@ -27,6 +27,7 @@ from vibesys.api.host_operations._saved_runs import (
 )
 from vibesys.api.host_operations._start import StartRefusedError, StartUnknownError, serve_start
 from vibesys.api.host_operations._usage_prices import (
+    PricesDamagedError,
     PricesRefusedError,
     PricesUnknownError,
     serve_usage_prices,
@@ -48,6 +49,7 @@ __all__ = [
     "ClusterUnknownError",
     "LoginRefusedFact",
     "LoginStartedFact",
+    "PricesDamagedError",
     "PricesRefusedError",
     "PricesUnknownError",
     "ProjectRefusedError",

@@ -17,7 +17,7 @@ import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
-from server.usage_pricing import PriceBookError
+from server.usage_pricing import PriceBookError, PriceBookUnreadableError
 from server.usage_scan import (
     FilePriceBook,
     HttpsFetcher,
@@ -27,11 +27,13 @@ from server.usage_scan import (
     stored_pricing,
 )
 from vibesys.api.host_operations.api import (
+    PricesDamagedError,
     PricesRefusedError,
     serve_usage_prices,
 )
 from vs_project.api.testing import FakeAdmissionStore
 from vs_proto.api import (
+    FailureCategory,
     MutateRequest,
     MutateResponse,
     Oneof,
@@ -235,14 +237,6 @@ def test_a_book_that_repeats_a_key_or_loops_is_refused_and_nothing_is_written() 
         assert not (directory / "prices.pb").exists()
 
 
-def test_a_damaged_book_reads_as_empty_so_the_next_save_replaces_it() -> None:
-    with tempfile.TemporaryDirectory() as raw:
-        directory = Path(raw)
-        (directory / "prices.pb").write_bytes(b"\xff\xfe broken")
-        assert FilePriceBook(directory / "prices.pb").read().revision == 0
-        assert _save(directory, 0, {"a": 1.0}).saved
-
-
 # --- The admitted save ---
 
 
@@ -336,3 +330,89 @@ def test_the_refresh_request_needs_a_time() -> None:
     validate(
         host_payloads.UsageRatesRefreshRequest(request_id="r", now=Timestamp.from_datetime(START))
     )
+
+
+# --- A book that cannot be used is reported, never taken for an empty one ---
+
+
+def _write_book(directory: Path, contents: bytes) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "prices.pb").write_bytes(contents)
+
+
+def _looping_book() -> bytes:
+    return usage_state.UsagePriceBook(
+        revision=3,
+        aliases=[
+            usage_state.UsageAlias(from_="a", to="b"),
+            usage_state.UsageAlias(from_="b", to="a[1m]"),
+        ],
+    ).to_binary()
+
+
+@given(contents=st.binary(min_size=1, max_size=300))
+@example(contents=b"\xff\xfe broken")
+@example(contents=_looping_book())
+def test_whatever_prices_pb_holds_a_read_prices_and_says_whether_it_could_use_it(
+    contents: bytes,
+) -> None:
+    """Any bytes: the read does not fail and does not touch the file; a save agrees with the read.
+
+    The status says the book was not usable exactly when a save over it is refused, and a refused
+    save leaves the person's only copy as it was.
+    """
+    with tempfile.TemporaryDirectory() as raw:
+        directory = Path(raw)
+        _write_book(directory, contents)
+        pricing = stored_pricing(directory, now=START)
+        usable = pricing.prices_status is usage_state.UsagePricesStatus.OK
+        if usable:
+            assert _save(directory, pricing.book.revision, {"fresh": 1.0}).saved
+        else:
+            assert pricing.book == usage_state.UsagePriceBook()
+            with pytest.raises(PriceBookUnreadableError, match=r"prices\.pb"):
+                _save(directory, 0, {"fresh": 1.0})
+            assert (directory / "prices.pb").read_bytes() == contents
+
+
+def test_a_looping_book_on_disk_is_unreadable_not_followed() -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        directory = Path(raw)
+        _write_book(directory, _looping_book())
+        pricing = stored_pricing(directory, now=START)
+        assert pricing.prices_status is usage_state.UsagePricesStatus.UNREADABLE
+        with pytest.raises(PriceBookUnreadableError, match=r"loop|back"):
+            FilePriceBook(directory / "prices.pb").read()
+
+
+def test_a_missing_book_is_an_empty_one_and_that_is_not_damage() -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        pricing = stored_pricing(Path(raw), now=START)
+        assert pricing.prices_status is usage_state.UsagePricesStatus.OK
+        assert pricing.book.revision == 0
+
+
+def test_a_save_over_a_damaged_book_is_a_stored_configuration_failure() -> None:
+    applied = 0
+
+    def apply(
+        request: host_payloads.UsagePricesSaveRequest,
+    ) -> host_payloads.UsagePricesSaveResponse:
+        nonlocal applied
+        applied += 1
+        message = f"prices.pb cannot be used: {request.request_id}"
+        raise PricesDamagedError(message)
+
+    store = FakeAdmissionStore()
+    payload = _envelope("request-c", {"a": 1.0})
+    first = MutateResponse.from_binary(
+        serve_usage_prices(payload, store=store, host_user="host-a", apply=apply)
+    )
+    second = MutateResponse.from_binary(
+        serve_usage_prices(payload, store=store, host_user="host-a", apply=apply)
+    )
+    assert applied == 1
+    assert first.result is not None
+    assert first.result.field == "failure"
+    assert first.result.value.category == FailureCategory.CONFIGURATION
+    assert second.result == first.result

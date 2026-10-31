@@ -16,14 +16,18 @@ from typing import TYPE_CHECKING
 
 from hypothesis import strategies as st
 
+from server.host_api import RUN_EVENTS_FILE
+from server.run_summary_cache import summarize_journal
 from server.usage_rollup import QUARTER_SECONDS, FoldedJournal, JournalIdentity
 from server.usage_summary import Priced, RunInput
+from vs_project.api import Project
 from vs_proto.api import Timestamp, UsageCostBasis, UsageSpeed, usage_state
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from pathlib import Path
 
-    from server.run_summary import SummaryState
+    from server.run_summary import Summarized, SummaryState
 
 PROVIDERS = ("claude_code", "codex", "opencode", "gemini")
 MODELS = ("opus-5-5", "Opus-5-5[1m]", "gpt-6.1-sol", "haiku-5-5", "<synthetic>", "mystery-model")
@@ -86,6 +90,48 @@ def rollups(
     return rollup
 
 
+_NAME = st.text(min_size=1, max_size=128).filter(
+    lambda text: 1 <= len(text.encode()) <= 128
+) | st.just("é" * 64)
+_PRICE = st.floats(min_value=0, max_value=1_000_000, allow_nan=False)
+
+
+def _numbered(base: str, index: int) -> str:
+    """``base`` with its tail replaced by ``index``, still at most 128 bytes."""
+    tag = f"-{index}".encode()
+    return (base.encode()[: 128 - len(tag)].decode(errors="ignore").encode() + tag).decode()
+
+
+@st.composite
+def price_books(draw: st.DrawFn, *, largest: bool = False) -> usage_state.UsagePriceBook:
+    """A price book as the contract allows: up to 256 overrides and 256 aliases, names to 128 bytes.
+
+    ``largest`` fills every list and makes every name as long as it may be, multi-byte. Not
+    necessarily a book a host would accept (its ``Map to`` chains may loop): the reply echoes the
+    book, and its size is what is checked.
+    """
+    count = 256 if largest else draw(st.integers(min_value=0, max_value=256))
+    base = "é" * 64 if largest else draw(_NAME)
+    rate = usage_state.UsageRate(
+        input=draw(_PRICE),
+        output=draw(_PRICE),
+        cache_read=draw(_PRICE),
+        cache_write=draw(_PRICE),
+        cache_write_1h=draw(_PRICE),
+    )
+    return usage_state.UsagePriceBook(
+        revision=draw(st.integers(min_value=0, max_value=2**64 - 1)),
+        overrides=[
+            usage_state.UsageRateOverride(model=_numbered(base, index), rate=rate)
+            for index in range(count)
+        ],
+        aliases=[
+            usage_state.UsageAlias(from_=_numbered(base, index), to=_numbered(base, index + 1))
+            for index in range(count)
+        ],
+    )
+
+
 @st.composite
 def run_inputs(draw: st.DrawFn, *, quarters: int = 400, max_runs: int = 6) -> list[RunInput]:
     count = draw(st.integers(min_value=0, max_value=max_runs))
@@ -120,8 +166,13 @@ def edge_lists(draw: st.DrawFn, *, quarters: int = 400) -> list[datetime]:
 class TablePricing:
     """A ``Pricing`` over a fixed table: every row of a listed model costs a cent per thousand tokens."""
 
-    def __init__(self, listed: Sequence[str] = ("opus-5-5", "gpt-6.1-sol")) -> None:
+    def __init__(
+        self,
+        listed: Sequence[str] = ("opus-5-5", "gpt-6.1-sol"),
+        book: usage_state.UsagePriceBook | None = None,
+    ) -> None:
         self._listed = frozenset(listed)
+        self._book = book or usage_state.UsagePriceBook()
 
     def price(self, provider: str, row: usage_state.UsageRollupRow) -> Priced:
         del provider
@@ -157,7 +208,11 @@ class TablePricing:
 
     @property
     def book(self) -> usage_state.UsagePriceBook:
-        return usage_state.UsagePriceBook()
+        return self._book
+
+    @property
+    def prices_status(self) -> usage_state.UsagePricesStatus:
+        return usage_state.UsagePricesStatus.OK
 
 
 @dataclass
@@ -206,3 +261,20 @@ class MemoryUsageJournal:
         assert self.state is not None
         self.folds += 1
         return FoldedJournal(self.state, self._bests, self.identity(), persistable=True)
+
+
+class Projects:
+    """The host's projects for ``collect_runs``: the helper's own summary of the journals."""
+
+    def run_summary(self, project: Path, run_id: str) -> Summarized:
+        return summarize_journal(Project.log_directory_for(project, run_id) / RUN_EVENTS_FILE)
+
+    def run_digest(self, project_root: Path, run_id: str) -> None:
+        del project_root, run_id
+
+
+def write_run(project: Path, run_id: str, body: bytes) -> Path:
+    journal = Project.log_directory_for(project, run_id) / RUN_EVENTS_FILE
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_bytes(body)
+    return journal

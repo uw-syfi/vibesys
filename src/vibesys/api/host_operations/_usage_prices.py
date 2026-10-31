@@ -37,6 +37,15 @@ class PricesRefusedError(Exception):
         self.message = message
 
 
+class PricesDamagedError(Exception):
+    """The stored price book cannot be used, so nothing was saved over it."""
+
+    def __init__(self, message: str) -> None:
+        """Keep the words for the stored refusal."""
+        super().__init__(message)
+        self.message = message
+
+
 class PricesUnknownError(Exception):
     """The save returned without a result the receipt can store."""
 
@@ -104,6 +113,13 @@ def _admit(
             response = apply(request)
         except PricesRefusedError as refused:
             failure = _operation_failure(FailureCategory.INVALID_INPUT, refused.message)
+            claim.settle(
+                admission.AdmissionStatus.REFUSED,
+                admission.OperationResult(result=Oneof("failure", failure)),
+            )
+            return MutateResponse(result=Oneof("failure", failure)).to_binary()
+        except PricesDamagedError as damaged:
+            failure = _operation_failure(FailureCategory.CONFIGURATION, damaged.message)
             claim.settle(
                 admission.AdmissionStatus.REFUSED,
                 admission.OperationResult(result=Oneof("failure", failure)),

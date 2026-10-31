@@ -93,11 +93,21 @@ message UsageRate {
   }];
 }
 
+// How the person's price book was read.
+enum UsagePricesStatus {
+  USAGE_PRICES_STATUS_UNSPECIFIED = 0;
+  USAGE_PRICES_STATUS_OK = 1;
+  // `prices.pb` exists and cannot be used: it does not decode, fails its rules, or its `Map to`
+  // chains loop. Estimates are made without the book, nothing is saved over it, and the person
+  // is told, since it is the only copy of what they set.
+  USAGE_PRICES_STATUS_UNREADABLE = 2;
+}
+
 // A price a person set for one model id. It prices the model at every speed.
 message UsageRateOverride {
   string model = 1 [(buf.validate.field).string = {
     min_len: 1
-    max_bytes: 512
+    max_bytes: 128
   }];
   UsageRate rate = 2 [(buf.validate.field).required = true];
 }
@@ -106,20 +116,23 @@ message UsageRateOverride {
 message UsageAlias {
   string from = 1 [(buf.validate.field).string = {
     min_len: 1
-    max_bytes: 512
+    max_bytes: 128
   }];
   string to = 2 [(buf.validate.field).string = {
     min_len: 1
-    max_bytes: 512
+    max_bytes: 128
   }];
 }
 
 // What a person set about prices, shared by every client of the host. Persisted as `prices.pb`.
+//
+// The limits are what keep a reply under its size bound with the book in it: 256 entries of at
+// most 128 bytes a name each way.
 message UsagePriceBook {
   // Counts up with each save; a save names the revision it was made against.
   uint64 revision = 1;
-  repeated UsageRateOverride overrides = 2 [(buf.validate.field).repeated.max_items = 512];
-  repeated UsageAlias aliases = 3 [(buf.validate.field).repeated.max_items = 512];
+  repeated UsageRateOverride overrides = 2 [(buf.validate.field).repeated.max_items = 256];
+  repeated UsageAlias aliases = 3 [(buf.validate.field).repeated.max_items = 256];
 }
 
 // How current the price list is.

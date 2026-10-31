@@ -17,8 +17,12 @@ ran it:
 5. Otherwise the row is unpriced: no figure is made up.
 
 A person's ``Map to`` applies first: it renames a model to the one whose price it should have, and
-chains are followed to their end. The price book is checked on every save (``check_book``), so a
-chain cannot loop; a stored book with a loop anyway is followed until a name repeats.
+chains are followed to their end. Names are compared as ``book_key`` makes them (trimmed, lowercase,
+no bracketed variant) on both ends of every ``Map to``, so ``x -> x[1m]`` is a model mapped to itself.
+The book is a graph on those keys and must be acyclic: ``check_book`` refuses a book that is not, on
+every save and again whenever one is loaded (``ListPricing`` will not be built over a book that
+fails it). Following a chain is bounded by the number of entries besides, so no book, however it
+came to be, can make a read loop.
 
 The estimate is never stored and never reaches a recorded cost: the list and the arithmetic come
 from ``vs_agent.api.usage_pricing``, the one door to them, whose types are not the ones a recorded
@@ -27,15 +31,16 @@ cost is computed from.
 Light: ``vs_proto``, ``server.usage_summary`` and the sub-facade, which is imported on the first
 usage read and not at ``hello``.
 
-Public surface: ``ListPricing``, ``PriceBookError``, ``check_book``, ``same_book``, ``saved_book`` and,
+Public surface: ``ListPricing``, ``Rates``, ``PriceBookError``, ``PriceBookUnreadableError``, ``check_book``, ``same_book``, ``saved_book`` and,
 re-exported from the sub-facade so one module holds the edge, ``RateBook``, ``RateDocument``,
-``DocumentStore``, ``DocumentFetcher``, ``FetchError``, ``read_rate_book`` and ``refresh_rate_book``.
+``DocumentStore``, ``DocumentFetcher``, ``FetchError``, ``book_key``, ``read_rate_book`` and
+``refresh_rate_book``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Protocol
 
 from server.usage_summary import Priced
 from vs_agent.api import usage_pricing as lists
@@ -45,6 +50,7 @@ from vs_agent.api.usage_pricing import (
     FetchError,
     RateBook,
     RateDocument,
+    book_key,
     read_rate_book,
     refresh_rate_book,
 )
@@ -52,6 +58,7 @@ from vs_proto.api import Timestamp, UsageCostBasis, UsageSpeed, usage_state
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+    from datetime import date, datetime
 
 _SPEEDS: Final = {
     UsageSpeed.STANDARD: "standard",
@@ -71,40 +78,61 @@ class PriceBookError(ValueError):
     """A price book that cannot be saved; the message names the offending key."""
 
 
+class PriceBookUnreadableError(PriceBookError):
+    """The stored price book exists and cannot be used: it is damaged, or it could not be followed."""
+
+
 def check_book(
     overrides: Sequence[usage_state.UsageRateOverride], aliases: Sequence[usage_state.UsageAlias]
 ) -> None:
     """Refuse a book with a repeated key, a model mapped to itself, or a chain that loops.
 
-    Keys are compared as the list files them: trimmed and lowercase. The check runs over the whole
-    book as it will be saved, so a batch that closes a loop between its own entries is refused.
+    Every name is compared as ``book_key`` makes it, which is also how pricing follows a chain,
+    so what is accepted here is exactly what pricing can follow to an end. The check is over the
+    whole book as it will be saved, so a batch that closes a loop between its own entries is
+    refused, and the message names the offending entry as typed.
     """
     seen: set[str] = set()
     for override in overrides:
-        key = _name(override.model)
+        key = book_key(override.model)
         if key in seen:
             message = f"overrides: {override.model!r} is set twice"
             raise PriceBookError(message)
         seen.add(key)
     mapped: dict[str, str] = {}
+    spelled: dict[str, str] = {}
     for alias in aliases:
-        source, target = _name(alias.from_), _name(alias.to)
+        source, target = book_key(alias.from_), book_key(alias.to)
         if source in mapped:
             message = f"aliases: {alias.from_!r} is mapped twice"
             raise PriceBookError(message)
-        mapped[source] = target
-    for source, first in mapped.items():
-        walked = {source}
-        step = first
-        while step in mapped:
-            if step in walked:
-                message = f"aliases: {source!r} maps back to itself through {step!r}"
-                raise PriceBookError(message)
-            walked.add(step)
-            step = mapped[step]
-        if step == source:
-            message = f"aliases: {source!r} maps to itself"
+        if source == target:
+            message = f"aliases: {alias.from_!r} maps to itself"
             raise PriceBookError(message)
+        mapped[source] = target
+        spelled[source] = alias.from_
+    for start in mapped:
+        found = _loop_from(start, mapped)
+        if found is not None:
+            message = f"aliases: {spelled[start]!r} {found}"
+            raise PriceBookError(message)
+
+
+def _loop_from(start: str, mapped: Mapping[str, str]) -> str | None:
+    """What is wrong with the chain that ``start`` begins, or ``None`` when it ends.
+
+    A chain has at most one step per entry, so one that is still going after that many steps has
+    repeated a name.
+    """
+    step = mapped[start]
+    for _ in range(len(mapped)):
+        if step == start:
+            return "maps back to itself"
+        following = mapped.get(step)
+        if following is None:
+            return None
+        step = following
+    return "leads into a loop"
 
 
 def same_book(
@@ -127,14 +155,14 @@ def saved_book(
         revision=book.revision + 1,
         overrides=sorted(
             (
-                usage_state.UsageRateOverride(model=_name(each.model), rate=each.rate)
+                usage_state.UsageRateOverride(model=book_key(each.model), rate=each.rate)
                 for each in overrides
             ),
             key=lambda each: each.model,
         ),
         aliases=sorted(
             (
-                usage_state.UsageAlias(from_=_name(each.from_), to=_name(each.to))
+                usage_state.UsageAlias(from_=book_key(each.from_), to=book_key(each.to))
                 for each in aliases
             ),
             key=lambda each: each.from_,
@@ -146,13 +174,46 @@ def _content(
     overrides: Sequence[usage_state.UsageRateOverride], aliases: Sequence[usage_state.UsageAlias]
 ) -> tuple[list[tuple[str, bytes]], list[tuple[str, str]]]:
     return (
-        sorted((_name(each.model), each.rate.to_binary()) for each in overrides if each.rate),
-        sorted((_name(each.from_), _name(each.to)) for each in aliases),
+        sorted((book_key(each.model), each.rate.to_binary()) for each in overrides if each.rate),
+        sorted((book_key(each.from_), book_key(each.to)) for each in aliases),
     )
 
 
-def _name(model: str) -> str:
-    return model.strip().lower()
+class Rates(Protocol):
+    """The list prices a host holds, as pricing reads them: ``vs_agent``'s rate book, or a double."""
+
+    @property
+    def status(self) -> lists.RateStatus:
+        """Whether the list was fetched lately, is the last good document, or is the pinned table."""
+        ...
+
+    @property
+    def fetched_at(self) -> datetime | None:
+        """When the document behind the rates was fetched."""
+        ...
+
+    @property
+    def known_models(self) -> int:
+        """How many names the list knows."""
+        ...
+
+    @property
+    def refresh_due(self) -> bool:
+        """Whether a refresh would fetch now."""
+        ...
+
+    @property
+    def checked_on(self) -> date:
+        """The day the list was read."""
+        ...
+
+    def lookup(self, provider: str, model: str) -> lists.ModelRates | None:
+        """The rates of ``model`` run through ``provider``, or ``None`` when it has none."""
+        ...
+
+    def canonical(self, provider: str, model: str) -> str:
+        """The id ``model`` is filed under."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -166,15 +227,27 @@ class _Resolved:
 class ListPricing:
     """Today's list prices and the person's book, as the summary prices rows with them."""
 
-    def __init__(self, rates: lists.RateBook, book: usage_state.UsagePriceBook) -> None:
-        """Price over ``rates`` and the person's ``book``."""
+    def __init__(
+        self,
+        rates: Rates,
+        book: usage_state.UsagePriceBook,
+        *,
+        status: usage_state.UsagePricesStatus = usage_state.UsagePricesStatus.OK,
+    ) -> None:
+        """Price over ``rates`` and the person's ``book``; ``status`` says how the book was read.
+
+        Raises ``PriceBookError`` when ``book`` repeats a key or its ``Map to`` chains loop, so a
+        book that could not be followed to an end is never priced over.
+        """
+        check_book(book.overrides, book.aliases)
         self._rates = rates
         self._book = book
+        self._status = status
         self._aliases: Mapping[str, str] = {
-            _name(each.from_): _name(each.to) for each in book.aliases
+            book_key(each.from_): book_key(each.to) for each in book.aliases
         }
         self._overrides: Mapping[str, lists.Rate] = {
-            _name(each.model): _rate_of(each.rate) for each in book.overrides if each.rate
+            book_key(each.model): _rate_of(each.rate) for each in book.overrides if each.rate
         }
         self._resolved: dict[tuple[str, str], _Resolved] = {}
 
@@ -236,16 +309,31 @@ class ListPricing:
         """What the person set."""
         return self._book
 
+    @property
+    def prices_status(self) -> usage_state.UsagePricesStatus:
+        """Whether ``book`` is what the person set, or the host could not read it."""
+        return self._status
+
     def _resolve(self, provider: str, model: str) -> _Resolved:
+        """The id ``model`` is priced under after ``Map to``, with its list rates and override.
+
+        The chain is followed in ``book_key`` space for at most as many steps as the book has
+        entries, which ends it whatever the book holds.
+        """
         key = (provider, model)
         found = self._resolved.get(key)
         if found is None:
-            name = self._rates.canonical(provider, model) or _UNPRICED_NAMES
-            seen = {name}
-            while (target := self._aliases.get(name)) is not None and target not in seen:
-                name = self._rates.canonical(provider, target)
-                seen.add(name)
-            found = _Resolved(name, self._rates.lookup(provider, name), self._overrides.get(name))
+            name = book_key(model)
+            for _ in range(len(self._aliases)):
+                target = self._aliases.get(name)
+                if target is None:
+                    break
+                name = target
+            named = model if name == book_key(model) else name
+            final = self._rates.canonical(provider, named) or _UNPRICED_NAMES
+            found = _Resolved(
+                final, self._rates.lookup(provider, final), self._overrides.get(book_key(final))
+            )
             self._resolved[key] = found
         return found
 
@@ -326,8 +414,11 @@ __all__ = [
     "FetchError",
     "ListPricing",
     "PriceBookError",
+    "PriceBookUnreadableError",
     "RateBook",
     "RateDocument",
+    "Rates",
+    "book_key",
     "check_book",
     "read_rate_book",
     "refresh_rate_book",

@@ -159,3 +159,30 @@ def test_the_outside_series_carry_the_index_of_the_source_they_were_read_from() 
             assert source.kind == usage_state.UsageSourceKind.TRANSCRIPTS
             assert source.provider == "claude"
             assert series.key.speed == UsageSpeed.STANDARD
+
+
+def test_a_damaged_price_book_is_said_in_the_reply_and_the_figures_still_come() -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        project, home = root / "project", root / "home"
+        project.mkdir()
+        session_file(home, "sess-person").write_bytes(
+            line(Request("sess-person", 4, "claude-opus-5-5", "/work/alpha", 700, 0, 70), 0)
+        )
+        directory = usage_directory()
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "prices.pb").write_bytes(b"\xff\xfe damaged")
+
+        reply = usage_summary(
+            _request([START - timedelta(hours=1), START + timedelta(hours=3)], project),
+            _Projects(),
+            [project],
+            stored_pricing(directory, now=NOW),
+            {"HOME": str(home)},
+        )
+
+        validate(reply)
+        assert reply.prices_status is usage_state.UsagePricesStatus.UNREADABLE
+        assert reply.prices == usage_state.UsagePriceBook()
+        assert reply.series
+        assert (directory / "prices.pb").read_bytes() == b"\xff\xfe damaged"
