@@ -1,5 +1,8 @@
 """One scan of a project's saved runs, as the frames of one stream.
 
+This is the stream half of the host operations: a process that only lists a project's runs imports
+it alone, without the admission, login and candidate modules.
+
 The caller's rows arrive in discovery order from a single scan, so a frame costs its own rows and
 nothing is rescanned. A frame is how the gateway knows the call is alive, and the last one says the
 listing is complete: a stream that ends any other way is partial, whatever it delivered.
@@ -7,7 +10,7 @@ listing is complete: a stream that ends any other way is partial, whatever it de
 
 from collections.abc import Callable, Iterable, Iterator
 
-from vibesys.api.host_operations._login import frame
+from vibesys.api.host_operations._frames import frame
 from vibesys.api.host_operations._reads import ReadSource
 from vs_proto.api import (
     FailureCategory,
@@ -19,6 +22,8 @@ from vs_proto.api import (
     validate,
 )
 from vs_proto.api import host_payloads as pb
+
+__all__ = ["host_watch_failure", "saved_run_frames", "serve_saved_runs"]
 
 _MAX_BYTES = 1 << 20
 _MAX_DIAGNOSTIC = 65536

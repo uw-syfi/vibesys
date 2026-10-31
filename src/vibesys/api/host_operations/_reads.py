@@ -44,11 +44,11 @@ class ReadSource(Protocol):
         ...
 
     def harnesses(self) -> list[pb.HarnessOption]:
-        """Vetted harnesses in display order, installed providers first."""
-        ...
+        """Vetted harnesses in the agent library's order, from its static catalog.
 
-    def installed_harnesses(self) -> tuple[str, ...]:
-        """The providers observed on the host launch PATH."""
+        The answer names no installed provider: telling which CLIs a machine has takes a
+        shell probe, and the machine description already reports them.
+        """
         ...
 
     def examples(self, *, with_catalogue: bool) -> pb.ExampleList:
