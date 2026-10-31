@@ -8,13 +8,26 @@ import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from types import ModuleType
+
+_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _load(name: str, relative: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(name, _ROOT / relative)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_host_git_obeys_controller_contract(tmp_path: Path) -> None:
-    source = Path(__file__).resolve().parents[2] / "skills/search/optimize/tests/test_run.py"
-    spec = importlib.util.spec_from_file_location("plugin_git_contract", source)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = _load("plugin_git_contract", "skills/search/optimize/tests/test_run.py")
     git = module.controller.HostGit()
     git(tmp_path, ["init"])
     for message in ("base", "candidate"):
@@ -39,10 +52,7 @@ def test_host_git_obeys_controller_contract(tmp_path: Path) -> None:
 
 
 def test_controller_transaction_excludes_another_process(tmp_path: Path) -> None:
-    source = Path(__file__).resolve().parents[2] / "skills/search/optimize/tests/test_run.py"
-    spec = importlib.util.spec_from_file_location("plugin_lock_contract", source)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = _load("plugin_lock_contract", "skills/search/optimize/tests/test_run.py")
     run = module.Run(tmp_path)
 
     class InspectingGit(module.Git):
@@ -71,10 +81,7 @@ with open(sys.argv[1], "a") as lock:
 
 
 def test_service_owner_stops_and_verifies_its_process_group() -> None:
-    source = Path(__file__).resolve().parents[2] / "skills/search/measure/scripts/service.py"
-    spec = importlib.util.spec_from_file_location("plugin_service_contract", source)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = _load("plugin_service_contract", "skills/search/measure/scripts/service.py")
     assert (
         module.serve(
             [sys.executable, "-c", "import signal; signal.pause()"],
@@ -87,11 +94,7 @@ def test_service_owner_stops_and_verifies_its_process_group() -> None:
 
 
 def test_benchmark_wrapper_holds_the_host_lock_in_its_child() -> None:
-    source = Path(__file__).resolve().parents[2] / "skills/search/measure/scripts/measurements.py"
-    spec = importlib.util.spec_from_file_location("benchmark_lock_contract", source)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+    module = _load("benchmark_lock_contract", "skills/search/measure/scripts/measurements.py")
     program = """import fcntl, sys
 with open("/tmp/vibesys-benchmark.lock", "a") as lock:
     try:
