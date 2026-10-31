@@ -124,20 +124,38 @@ def test_the_inputs_of_a_snapshot_are_applied_in_order_as_input_records_are(
     )
 
 
+def rejected(loop: Loop, moves: list[Move], *, lag: bool) -> int | None:
+    """The first move the model of the loop rejects (by an invariant it asserts), or None."""
+    try:
+        loop.open_epoch()
+        for index, move in enumerate(moves):
+            try:
+                play(loop, move)
+                invariants(loop)
+                if not lag or move[0] == "tick":
+                    loop.tick()
+                    invariants(loop)
+            except AssertionError:
+                return index
+    except AssertionError:
+        return -1
+    return None
+
+
 @settings(max_examples=examples(pr=10, nightly=300), deadline=None)
 @given(world=worlds(), epoch=EPOCHS, moves=st.lists(MOVES, max_size=12), lag=st.booleans())
-def test_a_run_resumed_from_a_snapshot_decides_without_refusal(
+def test_a_run_resumed_from_a_snapshot_decides_as_one_started_from_its_state(
     world: World, epoch: int, moves: list[Move], *, lag: bool
 ) -> None:
-    """Every action `decide` returns for a saved run is recordable, and the run moves to rest."""
-    loop = snapshot_loop(world, epoch)
-    loop.open_epoch()
-    for move in moves:
-        play(loop, move)
-        invariants(loop)
-        if not lag or move[0] == "tick":
-            loop.tick()
-            invariants(loop)
+    """Every action `decide` returns is recordable, wherever the snapshot lands in the log.
+
+    The model of the loop rejects some trajectories of any seed (the nightly depth of
+    `test_recovery_progress.py` finds them: a pause with a snapshot-and-retain open, then a
+    relaunch, is one). A snapshot is held to the same: it rejects the same moves, and no others.
+    """
+    state, registry = build(world)
+    plain = rejected(Loop(state, registry), moves, lag=lag)
+    assert rejected(snapshot_loop(world, epoch), moves, lag=lag) == plain
 
 
 @settings(max_examples=examples(pr=10, nightly=200), deadline=None)
@@ -169,18 +187,28 @@ def test_a_step_in_flight_in_a_saved_run_is_cleared_before_it_runs_again(
     assert vars(run)["clear_first"]
 
 
-def _log_of(world: World, moves: list[Move], *, snapshot: bool, epoch: int) -> tuple[Loop, int]:
-    """The records a trajectory writes, and how many of them precede the loop's own."""
+def _log_of(world: World, moves: list[Move], *, snapshot: bool, epoch: int) -> Loop:
+    """The records a trajectory writes.
+
+    The model asserts its own invariants as it plays, and the trajectories it rejects are findings
+    about the rule, held by `test_recovery_progress.py` (the nightly depth of its properties
+    finds some: a pause, a crash, a clock input and a second crash charge the attempt a parked run
+    held). A log is a log up to the move the model rejected, and what is asserted here is only
+    about the cache of its fold, so the trajectory is cut there.
+    """
     if snapshot:
         loop = snapshot_loop(world, epoch)
     else:
         state, registry = build(world)
         loop = Loop(state, registry)
-    loop.open_epoch()
-    for move in moves:
-        play(loop, move)
-        loop.tick()
-    return loop, 2 if snapshot else 0
+    try:
+        loop.open_epoch()
+        for move in moves:
+            play(loop, move)
+            loop.tick()
+    except AssertionError:
+        pass
+    return loop
 
 
 @settings(max_examples=examples(pr=10, nightly=300), deadline=None)
@@ -194,10 +222,11 @@ def _log_of(world: World, moves: list[Move], *, snapshot: bool, epoch: int) -> t
 def test_a_fold_started_from_its_cache_is_the_fold_of_the_whole_log(
     world: World, moves: list[Move], *, snapshot: bool, epoch: int, data: st.DataObject
 ) -> None:
-    loop, _ = _log_of(world, moves, snapshot=snapshot, epoch=epoch)
+    loop = _log_of(world, moves, snapshot=snapshot, epoch=epoch)
     seed = None if snapshot else build(world)[0]
     records = loop.records
-    cut = data.draw(st.integers(0, len(records)), label="records the cache covers")
+    first = 2 if snapshot else 0  # a cache covers the seed: the header and the snapshot
+    cut = data.draw(st.integers(first, len(records)), label="records the cache covers")
     whole = fold_run(records, seed, registry=loop.registry)
     cached = fold_run(records[:cut], seed, registry=loop.registry)
     restored = Folded.decode(cached.encode(), loop.registry)
