@@ -17,7 +17,6 @@ from vs_core.api import (
     ContractError,
     EventId,
     MeasurementFailure,
-    MeasurementPlan,
     Observation,
     RequestObserved,
     SubmitMeasurement,
@@ -35,7 +34,7 @@ from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
 if TYPE_CHECKING:
     from vs_core.api import Request, RequestId
     from vs_core.api.recovery import StepResult
-    from vs_evaluation.api import ExecutorPoll, PollingEvaluationExecutor
+    from vs_evaluation.api import EvaluationRequest, ExecutorPoll, PollingEvaluationExecutor
     from vs_runtime._step_runner import CancelSignal
     from vs_sim.api import Clock
 
@@ -69,17 +68,16 @@ class JobStepRun:
         self._poll_interval_s = poll_interval_s
 
     async def run(
-        self, step: Request, tag: RequestId, handle: str, cancel: CancelSignal
+        self, step: Request, tag: RequestId, handle: str, deadline_at: float, cancel: CancelSignal
     ) -> StepResult:
         """Return the result of the submission ``step``, run under ``handle``, or ``Cancelled``.
 
         The executor attaches to the job of a handle it already holds, so one handle is one job.
+        ``deadline_at`` is the run-clock second the job's stages are told to end by.
         """
-        submission = _submission(step)
+        submission = submission_of(step)
         try:
-            request = measurement_request(
-                submission.plan, submission.scope, handle, deadline_at=_deadline(submission.plan)
-            )
+            request = evaluation_request(submission, handle, deadline_at=deadline_at)
             await self._executor.submit(request, handle_id=handle)
         except RejectedPlanError as error:
             return self._refused(submission, tag, str(error), MeasurementFailure.WORKLOAD)
@@ -98,7 +96,7 @@ class JobStepRun:
 
         A job that is not seen ended is a refusal, so core measures afresh.
         """
-        submission = _submission(step)
+        submission = submission_of(step)
         polled = await self._executor.poll(source)
         if polled.phase is PollPhase.ENDED:
             return self._finished(polled, submission, tag, source)
@@ -189,12 +187,16 @@ class JobStepRun:
         )
 
 
-def _submission(step: Request) -> SubmitMeasurement:
+def submission_of(step: Request) -> SubmitMeasurement:
+    """The step as a measurement submission, the one kind a job step runner runs."""
     if not isinstance(step, SubmitMeasurement):
         message = f"a job step runner runs submit_measurement, not {step.kind}"
         raise ContractError(("step", "kind"), message)
     return step
 
 
-def _deadline(plan: MeasurementPlan) -> float:
-    return plan.submitted_at + plan.time_bound
+def evaluation_request(
+    submission: SubmitMeasurement, handle: str, *, deadline_at: float
+) -> EvaluationRequest:
+    """The evaluation request of a submission, or ``RejectedPlanError`` for a plan that cannot run."""
+    return measurement_request(submission.plan, submission.scope, handle, deadline_at=deadline_at)

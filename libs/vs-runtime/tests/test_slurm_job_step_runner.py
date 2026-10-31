@@ -17,7 +17,13 @@ import pytest
 from vs_core.api import MeasurementFailure, ObservationStatus, RequestId
 from vs_core.api.recovery import Cancelled, CancelReason, Finished
 from vs_runtime.api.evaluation_step_runners import SlurmJobStepRunner
-from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster, Stack, build_stack, submission
+from vs_runtime.api.slurm_evaluation_stack import (
+    ScenarioCluster,
+    Stack,
+    build_stack,
+    plan,
+    submission,
+)
 from vs_runtime.api.step_runner import Adopted, CancelSignal, Cleared
 from vs_runtime.api.testing import StepRunnerContract, StepRunnerUnderTest
 from vs_sandbox.api.slurm import SlurmLedgerAttachment
@@ -53,6 +59,9 @@ CONFIG = SlurmConfig(
     name="test", remote_workspace_root="/runs", transport=SlurmSshTransport(host="test")
 )
 POLL_S = 5.0
+STAGES = ("accuracy", "benchmark")
+DEADLINE_AT = 1_000_000.0
+"""A step limit no case reaches: they end work by a cancel, a kill or a clear."""
 
 
 class FlakyCluster(ScenarioCluster):
@@ -81,10 +90,6 @@ class FlakyLedger(FakeEvaluationLedger):
         self._check()
         return super().read(key)
 
-    def bound_key(self, holder: str, handle: str) -> str | None:
-        self._check()
-        return super().bound_key(holder, handle)
-
     def _check(self) -> None:
         if self.refusing:
             message = "the ledger is unreachable"
@@ -94,11 +99,11 @@ class FlakyLedger(FakeEvaluationLedger):
 class Process:
     """One executor stack and the runner over it: what a restart replaces."""
 
-    def __init__(self, world: World, stack: Stack, attachment: SlurmLedgerAttachment) -> None:
+    def __init__(self, world: World, stack: Stack) -> None:
         self.stack = stack
         self.runner = SlurmJobStepRunner(
             stack.executor,
-            attachment,
+            world.ledger,
             InlineBlockingRunner(),
             clock=world.clock,
             poll_interval_s=POLL_S,
@@ -135,7 +140,7 @@ class World:
             clock=self.clock,
         )
         stack = await build_stack(self.root, self.cluster, sleeper=self.clock, ledger=attachment)
-        process = Process(self, stack, attachment)
+        process = Process(self, stack)
         self.processes.append(process)
         return process
 
@@ -144,10 +149,15 @@ class World:
         for process in reversed(self.processes):
             await process.stack.executor.close()
 
+    def submission(self, tag: RequestId, stages: tuple[str, ...] = STAGES) -> Request:
+        """The measurement step of ``tag``: its content is the plan's, never the tag's."""
+        override = plan(stages=stages, candidate=self.first.stack.snapshot)
+        return submission(tag.root, override=override)
+
     def step(self, tag: RequestId, *, ends: bool) -> Request:
         """A step whose job ends by itself (``ends``) or stays in the queue until cancelled."""
         self.cluster.states = (SlurmJobStatus.COMPLETED,) if ends else (SlurmJobStatus.PENDING,)
-        return submission(tag.root, candidate=self.first.stack.snapshot)
+        return self.submission(tag)
 
     async def submitted(self) -> int:
         """How many jobs the cluster has accepted, read from the cluster."""
@@ -161,7 +171,7 @@ class World:
         """Cancel the step's job through its own run, as a Pause does, and see it end."""
         cancel = CancelSignal()
         step = self.step(tag, ends=False)
-        task = asyncio.ensure_future(process.runner.run(step, tag, attempt, cancel))
+        task = asyncio.ensure_future(process.runner.run(step, tag, attempt, DEADLINE_AT, cancel))
         await yield_until(self.live, lambda jobs: jobs > 0 or task.done(), str(tag))
         cancel.set(CancelReason.PAUSE_NOW)
         assert await task == Cancelled(reason=CancelReason.PAUSE_NOW)
@@ -169,7 +179,9 @@ class World:
     async def die_mid_run(self, process: Process, tag: RequestId, attempt: int) -> None:
         """Submit the step's job, then lose the process: only the task awaiting it is cancelled."""
         step = self.step(tag, ends=False)
-        task = asyncio.ensure_future(process.runner.run(step, tag, attempt, CancelSignal()))
+        task = asyncio.ensure_future(
+            process.runner.run(step, tag, attempt, DEADLINE_AT, CancelSignal())
+        )
         await yield_until(self.submitted, lambda jobs: jobs > 0 or task.done(), str(tag))
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
@@ -219,9 +231,11 @@ def test_a_restarted_process_adopts_the_job_a_killed_one_submitted_and_returns_i
         await world.die_mid_run(world.first, tag, attempt=1)
         assert len(world.cluster.submissions) == 1
         second = await world.spawn()
-        assert await second.runner.clear(tag) == Adopted(None)
+        assert await second.runner.clear(world.submission(tag), tag) == Adopted(None)
         world.cluster.finish_jobs()
-        result = await second.runner.run(world.step(tag, ends=True), tag, 2, CancelSignal())
+        result = await second.runner.run(
+            world.step(tag, ends=True), tag, 2, DEADLINE_AT, CancelSignal()
+        )
         assert isinstance(result, Finished)
         assert result.observation.status is ObservationStatus.SUCCEEDED
         assert result.observation.request_id == tag
@@ -233,7 +247,7 @@ def test_a_restarted_process_adopts_the_job_a_killed_one_submitted_and_returns_i
     assert len(world.cluster.submissions) == 1
 
 
-def test_clear_of_a_tag_the_cluster_never_saw_is_cleared_even_after_a_restart(
+def test_clear_of_a_step_whose_content_the_cluster_never_saw_is_cleared_after_a_restart(
     tmp_path: Path,
 ) -> None:
     world = World(tmp_path)
@@ -241,7 +255,29 @@ def test_clear_of_a_tag_the_cluster_never_saw_is_cleared_even_after_a_restart(
     async def main() -> None:
         await world.die_mid_run(world.first, tag_of("seen"), attempt=1)
         second = await world.spawn()
-        assert await second.runner.clear(tag_of("unseen")) == Cleared()
+        other = world.submission(tag_of("unseen"), stages=("accuracy",))
+        assert await second.runner.clear(other, tag_of("unseen")) == Cleared()
+        await world.close()
+
+    world.run(main())
+    assert len(world.cluster.submissions) == 1
+
+
+def test_a_step_of_the_content_another_step_submitted_attaches_to_its_job(tmp_path: Path) -> None:
+    """The key names the content, not the tag: one content is one job, whoever asked first."""
+    world = World(tmp_path)
+    first, second_tag = tag_of("first"), tag_of("second")
+
+    async def main() -> None:
+        await world.die_mid_run(world.first, first, attempt=1)
+        second = await world.spawn()
+        assert await second.runner.clear(world.submission(second_tag), second_tag) == Adopted(None)
+        world.cluster.finish_jobs()
+        result = await second.runner.run(
+            world.step(second_tag, ends=True), second_tag, 1, DEADLINE_AT, CancelSignal()
+        )
+        assert isinstance(result, Finished)
+        assert result.observation.request_id == second_tag
         await world.close()
 
     world.run(main())
@@ -258,12 +294,14 @@ def test_a_cancelled_job_is_never_attached_to_so_the_next_attempt_submits_a_new_
 
     async def main() -> None:
         cancel = CancelSignal()
-        task = asyncio.ensure_future(runner.run(world.step(tag, ends=False), tag, 1, cancel))
+        task = asyncio.ensure_future(
+            runner.run(world.step(tag, ends=False), tag, 1, DEADLINE_AT, cancel)
+        )
         await yield_until(world.submitted, lambda jobs: jobs == 1, "the first job")
         cancel.set(CancelReason.PAUSE_NOW)
         assert await task == Cancelled(reason=CancelReason.PAUSE_NOW)
-        assert await runner.clear(tag) == Cleared()
-        again = await runner.run(world.step(tag, ends=True), tag, 2, CancelSignal())
+        assert await runner.clear(world.submission(tag), tag) == Cleared()
+        again = await runner.run(world.step(tag, ends=True), tag, 2, DEADLINE_AT, CancelSignal())
         assert isinstance(again, Finished)
         assert again.observation.status is ObservationStatus.SUCCEEDED
         await world.close()
@@ -300,10 +338,12 @@ async def _a_sequence_ends_with_a_result(world: World, seed: int) -> None:
             case "restart":
                 current = await world.spawn()
             case _:
-                await current.runner.clear(tag)
+                await current.runner.clear(world.submission(tag), tag)
     current = await world.spawn()
     world.cluster.finish_jobs()
-    result = await current.runner.run(world.step(tag, ends=True), tag, 99, CancelSignal())
+    result = await current.runner.run(
+        world.step(tag, ends=True), tag, 99, DEADLINE_AT, CancelSignal()
+    )
     assert isinstance(result, Finished), seed
     await world.close()
 
@@ -314,10 +354,12 @@ def test_a_step_that_reuses_a_finished_submission_launches_nothing(tmp_path: Pat
     source, reusing = tag_of("source"), tag_of("reusing")
 
     async def main() -> None:
-        first = await runner.run(world.step(source, ends=True), source, 1, CancelSignal())
+        first = await runner.run(
+            world.step(source, ends=True), source, 1, DEADLINE_AT, CancelSignal()
+        )
         assert isinstance(first, Finished)
         step = world.step(reusing, ends=True).model_copy(update={"reuses": source})
-        again = await runner.run(step, reusing, 1, CancelSignal())
+        again = await runner.run(step, reusing, 1, DEADLINE_AT, CancelSignal())
         assert isinstance(again, Finished)
         assert again.observation.status is ObservationStatus.SUCCEEDED
         assert again.observation.request_id == reusing
@@ -335,7 +377,7 @@ def test_a_step_that_reuses_a_submission_not_seen_ended_is_refused(tmp_path: Pat
 
     async def main() -> None:
         step = world.step(reusing, ends=True).model_copy(update={"reuses": tag_of("nobody")})
-        result = await world.first.runner.run(step, reusing, 1, CancelSignal())
+        result = await world.first.runner.run(step, reusing, 1, DEADLINE_AT, CancelSignal())
         assert isinstance(result, Finished)
         assert result.observation.status is ObservationStatus.REJECTED
         assert result.report.measurement_failure is MeasurementFailure.INFRASTRUCTURE

@@ -38,6 +38,8 @@ if TYPE_CHECKING:
 GATED_BENCHMARKS = 32
 """Every benchmark call a test makes is held, so a step with a benchmark stage runs until cancelled."""
 POLL_S = 5.0
+DEADLINE_AT = 1_000_000.0
+"""A step limit no case reaches: they end work by a cancel, a kill or a clear."""
 
 
 class FakeStageWorkReaper:
@@ -94,7 +96,7 @@ class World:
     async def die_mid_run(self, tag: RequestId, attempt: int) -> None:
         """Start the step and lose the caller awaiting it; the evaluation task goes on."""
         task = asyncio.ensure_future(
-            self.runner.run(self.step(tag, ends=False), tag, attempt, CancelSignal())
+            self.runner.run(self.step(tag, ends=False), tag, attempt, DEADLINE_AT, CancelSignal())
         )
         await yield_until(
             lambda: self.left_running(tag), lambda running: running > 0 or task.done(), str(tag)
@@ -138,9 +140,11 @@ def test_a_killed_attempt_is_cancelled_by_clear_and_the_next_attempt_runs_a_new_
     async def main() -> None:
         await world.die_mid_run(tag, attempt=1)
         assert await world.left_running(tag) == 1
-        assert await world.runner.clear(tag) == Cleared()
+        assert await world.runner.clear(world.step(tag, ends=False), tag) == Cleared()
         assert await world.left_running(tag) == 0
-        again = await world.runner.run(world.step(tag, ends=True), tag, 2, CancelSignal())
+        again = await world.runner.run(
+            world.step(tag, ends=True), tag, 2, DEADLINE_AT, CancelSignal()
+        )
         assert isinstance(again, Finished)
         assert again.observation.status is ObservationStatus.SUCCEEDED
 
@@ -158,7 +162,7 @@ def test_clear_reaps_the_stage_work_a_dead_process_left_by_the_tag_alone() -> No
     world.reaper.leave(other)
 
     async def main() -> None:
-        assert await world.runner.clear(left) == Cleared()
+        assert await world.runner.clear(world.step(left, ends=False), left) == Cleared()
         assert await world.left_running(left) == 0
         assert await world.left_running(other) == 1
 
@@ -172,13 +176,17 @@ def test_a_cancelled_step_returns_cancelled_and_the_same_tag_then_runs_clean() -
 
     async def main() -> None:
         cancel = CancelSignal()
-        task = asyncio.ensure_future(world.runner.run(world.step(tag, ends=False), tag, 1, cancel))
+        task = asyncio.ensure_future(
+            world.runner.run(world.step(tag, ends=False), tag, 1, DEADLINE_AT, cancel)
+        )
         await yield_until(
             lambda: world.left_running(tag), lambda running: running == 1, "the evaluation"
         )
         cancel.set(CancelReason.DRAIN_EXPIRED)
         assert await task == Cancelled(reason=CancelReason.DRAIN_EXPIRED)
-        again = await world.runner.run(world.step(tag, ends=True), tag, 2, CancelSignal())
+        again = await world.runner.run(
+            world.step(tag, ends=True), tag, 2, DEADLINE_AT, CancelSignal()
+        )
         assert isinstance(again, Finished)
         assert again.observation.status is ObservationStatus.SUCCEEDED
 
@@ -190,10 +198,12 @@ def test_a_step_that_reuses_a_finished_submission_launches_nothing() -> None:
     source, reusing = tag_of("source"), tag_of("reusing")
 
     async def main() -> None:
-        first = await world.runner.run(world.step(source, ends=True), source, 1, CancelSignal())
+        first = await world.runner.run(
+            world.step(source, ends=True), source, 1, DEADLINE_AT, CancelSignal()
+        )
         assert isinstance(first, Finished)
         step = world.step(reusing, ends=True).model_copy(update={"reuses": source})
-        again = await world.runner.run(step, reusing, 1, CancelSignal())
+        again = await world.runner.run(step, reusing, 1, DEADLINE_AT, CancelSignal())
         assert isinstance(again, Finished)
         assert again.observation.request_id == reusing
         assert {item.reused_from for item in again.report.evidence} == {source}

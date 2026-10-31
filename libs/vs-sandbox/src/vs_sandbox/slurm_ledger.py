@@ -234,19 +234,6 @@ class SlurmLedgerAttachment:
             # The attempt moved on (settled, taken over, or claimed by another): read again.
         return AttachPending(key, "the request's attempts kept changing")
 
-    def bind(self, handle: str, key: str) -> None:
-        """Record that this run's evaluation ``handle`` asks for request ``key``."""
-        self.ledger.bind_handle(self.holder, handle, key)
-
-    def entry_of(self, handle: str) -> LedgerEntry | None:
-        """The request this run's evaluation ``handle`` asked for, None if it never asked.
-
-        Found through the handle alone, so a process that lost the content the request's
-        key hashes still reaches its job.
-        """
-        key = self.ledger.bound_key(self.holder, handle)
-        return None if key is None else self.ledger.read(key)
-
     def renew(self, key: str) -> None:
         """Write this run's lease on ``key``, valid for one lease period from now."""
         now = self.clock.now()

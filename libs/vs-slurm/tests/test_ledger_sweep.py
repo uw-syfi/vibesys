@@ -109,12 +109,6 @@ class _Interleaved:
     def operator_file_sha256(self, path: str) -> str | None:
         return self._inner.operator_file_sha256(path)
 
-    def bind_handle(self, holder: str, handle: str, key: str) -> str:
-        return self._inner.bind_handle(holder, handle, key)
-
-    def bound_key(self, holder: str, handle: str) -> str | None:
-        return self._inner.bound_key(holder, handle)
-
 
 class _Unleased:
     """One request whose job runs and whose only lease expired long before ``NOW``."""

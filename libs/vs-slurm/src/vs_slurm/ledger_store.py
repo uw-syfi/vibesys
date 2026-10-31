@@ -30,7 +30,6 @@ from .ledger import (
     encode,
     entry_of,
     read_withdrawal_revision,
-    validate_handle,
     validate_holder,
     validate_key,
     validate_project,
@@ -45,7 +44,6 @@ if TYPE_CHECKING:
     from .config import SlurmConfig
 
 _LEDGER_DIRECTORY = "ledger"
-_HANDLE_DIRECTORY = "handles"
 _END = "VS-LEDGER-END"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _REVISION = re.compile(
@@ -227,35 +225,6 @@ class RemoteEvaluationLedger:
             except LedgerError:
                 continue  # a stray entry is not a request
         return tuple(sorted(found))
-
-    def bind_handle(self, holder: str, handle: str, key: str) -> str:
-        """Bind the handle to the key unless it is bound; return the key it is bound to."""
-        path = self._handle_path(holder, handle)
-        self._publish(path, f"{validate_key(key)}\n", create_only=True)
-        bound = self.bound_key(holder, handle)
-        if bound is None:
-            raise LedgerError.claim_unreadable(key)
-        return bound
-
-    def bound_key(self, holder: str, handle: str) -> str | None:
-        """The key the handle was bound to, or None when it never was."""
-        quoted = shlex.quote(self._handle_path(holder, handle).as_posix())
-        lines = self._exec(
-            f"if test -f {quoted}; then cat {quoted}; else printf '%s\\n' ABSENT; fi; "
-            f"printf '%s\\n' {_END}"
-        ).splitlines()
-        match lines:
-            case ["ABSENT", end] if end == _END:
-                return None
-            case [reply, end] if end == _END:
-                return validate_key(reply.strip())
-            case _:
-                raise LedgerError.malformed_reply("handle")
-
-    def _handle_path(self, holder: str, handle: str) -> PurePosixPath:
-        """Beside the requests, never inside one: a build that lists requests skips this name."""
-        name = f"{validate_holder(holder)}.{validate_handle(handle)}"
-        return self._root / _HANDLE_DIRECTORY / name
 
     def _key_directory(self, key: str) -> PurePosixPath:
         return self._root / validate_key(key)

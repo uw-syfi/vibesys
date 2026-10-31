@@ -58,7 +58,12 @@ class LocalJobStepRunner:
         self._lives: dict[RequestId, int] = {}
 
     async def run(
-        self, step: Request, tag: RequestId, attempt: int, cancel: CancelSignal
+        self,
+        step: Request,
+        tag: RequestId,
+        attempt: int,
+        deadline_at: float,
+        cancel: CancelSignal,
     ) -> StepResult:
         """Run the step's evaluation from clean, or follow the one of this process still going.
 
@@ -69,10 +74,11 @@ class LocalJobStepRunner:
             return await self._job.read_ended(step, tag, self._handle(step.reuses))
         if (await self._executor.poll(self._handle(tag))).phase is PollPhase.ENDED:
             self._lives[tag] = self._lives.get(tag, 0) + 1
-        return await self._job.run(step, tag, self._handle(tag), cancel)
+        return await self._job.run(step, tag, self._handle(tag), deadline_at, cancel)
 
-    async def clear(self, tag: RequestId) -> Adopted | Cleared:
+    async def clear(self, step: Request, tag: RequestId) -> Adopted | Cleared:
         """End every evaluation of ``tag`` this process runs, then what a dead process left."""
+        del step  # the work of a local evaluation is found by the tag alone
         handle = self._handle(tag)
         polled = await self._executor.poll(handle)
         if polled.phase is not PollPhase.UNSUBMITTED:
