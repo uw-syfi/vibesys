@@ -9,6 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from hypothesis import example, given, settings
+from hypothesis import strategies as st
+
 import vs_core.api as core
 from vs_core.api.recovery import Interruption, Run, RunRest, at_rest, decide
 from vs_runtime.api.step_runner import CoreInputs
@@ -89,15 +92,45 @@ def _runs(log: FakeStepLog) -> list[Run]:
 
 
 def test_a_run_that_waits_on_nothing_is_reported_with_what_it_has_open() -> None:
+    """Once its deadline has stopped it, a run no timer will move is reported, by name."""
     inputs, log, clock = inputs_over([])
 
+    async def main() -> None:
+        await inputs.next_input()  # sleeps to the deadline, which stops the run
+
+    run_virtual(clock, main())
     why = inputs.stalled()
 
     assert why is not None
     assert "stalled" in why
     assert log.state.run.run_id.root in why
     assert at_rest(log.state) is None
-    del clock
+
+
+@given(ahead=st.floats(min_value=0.5, max_value=0.999))
+@example(ahead=0.5)
+@settings(deadline=None)
+def test_a_run_with_nothing_in_flight_and_a_deadline_ahead_is_waiting_for_it(ahead: float) -> None:
+    """The deadline is a timer: a run the clock will stop is waiting, and ``next_input`` wakes at it.
+
+    ``stalled`` and the wait ``next_input`` sleeps through read one list of timers; a run
+    that ``stalled`` called stuck while ``next_input`` had a deadline to sleep to was reported
+    dead hours before the deadline that would have ended it.
+    """
+    inputs, log, clock = inputs_over([])
+    deadline = log.state.run.deadline_at
+    woke: list[float] = []
+
+    async def main() -> None:
+        await clock.sleep(deadline * ahead)
+        assert inputs.stalled() is None
+        await inputs.next_input()
+        woke.append(clock.now())
+
+    run_virtual(clock, main())
+
+    assert woke == [deadline]
+    assert any(c.control_id.root.startswith("deadline:") for c in log.state.run.controls)
 
 
 def test_a_paused_run_is_not_a_stall_it_waits_for_its_operator() -> None:
