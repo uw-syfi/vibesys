@@ -43,9 +43,7 @@ const DASHBOARDS: readonly (readonly [string, readonly RunCase[]])[] = [
 
 async function check(page: Page, name: string, ignore: string[] = []): Promise<void> {
   await settled(page);
-  const found = (await screenCheck(page, EVERY_CHECK)).filter(
-    each => !ignore.includes(each.check),
-  );
+  const found = (await screenCheck(page, EVERY_CHECK)).filter(each => !ignore.includes(each.check));
   const lines = ledger.unexplained(name, found);
   if (shots !== undefined) {
     const file = `${name.replaceAll('/', '__')}.png`;
@@ -138,9 +136,7 @@ for (const width of WIDTHS) {
   });
 }
 
-ledger.requireEveryFailure(
-  () => ledger.screens >= WIDTHS.length * (DASHBOARDS.length + 3),
-);
+ledger.requireEveryFailure(() => ledger.screens >= WIDTHS.length * (DASHBOARDS.length + 3));
 
 test('the contact sheet shows every dashboard and rail screen', async ({browser}) => {
   test.skip(shots === undefined, 'set SCREENS_DIR to write the screenshots and the contact sheet');

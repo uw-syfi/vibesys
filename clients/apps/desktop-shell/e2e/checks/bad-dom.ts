@@ -316,7 +316,8 @@ export const BAD_SCREENS: readonly BadScreen[] = [
   {
     name: 'F11: a group label as close to the rows above it as to its own',
     check: 'spacing-order',
-    message: /2 px between groups is not more than the 2 px inside one: "Agent logins" and "This appAppearance"/,
+    message:
+      /2 px between groups is not more than the 2 px inside one: "Agent logins" and "This appAppearance"/,
     html: `<div style="${PAGE}"><div style="display:flex;flex-direction:column;gap:2px"><div>Clusters and clouds</div><div>Agent logins</div><section style="display:flex;flex-direction:column;gap:2px"><span>This app</span><div>Appearance</div></section></div></div>`,
   },
   {
@@ -340,7 +341,8 @@ export const BAD_SCREENS: readonly BadScreen[] = [
   {
     name: 'F12: three short lines in a full-width card',
     check: 'hollow-box',
-    message: /a box 440 px wide holds \d+ px of content \(\d+%\), under the 40% a box fits: "This Mac/,
+    message:
+      /a box 440 px wide holds \d+ px of content \(\d+%\), under the 40% a box fits: "This Mac/,
     html: `<div style="${PAGE}"><div style="border:1px solid #888;width:440px;box-sizing:border-box;padding:12px"><div>This Mac</div><div>Connecting</div><div>Loading runs</div></div></div>`,
   },
   {

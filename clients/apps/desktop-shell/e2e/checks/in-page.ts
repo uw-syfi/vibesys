@@ -946,7 +946,9 @@ function drawsBox(element: Element): boolean {
   );
   if (sides.length >= 3) return true;
   const fill = style.backgroundColor;
-  return fill !== 'rgba(0, 0, 0, 0)' && toRgb(fill)[3] > 40 && !sameColor(fill, backdropOf(element));
+  return (
+    fill !== 'rgba(0, 0, 0, 0)' && toRgb(fill)[3] > 40 && !sameColor(fill, backdropOf(element))
+  );
 }
 
 interface Ink {
@@ -1012,8 +1014,8 @@ function titleOf(head: Element, texts: readonly TextBox[]): TextBox | null {
 /**
  * Law 1 of the visual spec: a screen has one left edge. The back control, the title and the
  * content start at one x, to within 1 px. What is compared is what is drawn, so a borderless back
- * button counts from its icon, not from the padding around it, and a title counts from where it
- * starts even with a back control before it.
+ * button counts from its icon, not from the padding around it, on the title's line or above it,
+ * and a title counts from where it starts even with a back control before it.
  */
 export function leftEdgeCheck(): Violation[] {
   const found: Violation[] = [];
@@ -1025,7 +1027,10 @@ export function leftEdgeCheck(): Violation[] {
     const content = extentOf(inkIn(body, ink));
     if (title === null || line === undefined || content === null) continue;
     const onLine = inkIn(head, ink).filter(box => box.top < line.bottom && box.bottom > line.top);
-    const first = extentOf(onLine)?.left ?? line.left;
+    const back = [...head.querySelectorAll('[aria-label^="Back"]')].flatMap(each =>
+      inkIn(each, ink),
+    );
+    const first = extentOf(back.length > 0 ? back : onLine)?.left ?? line.left;
     const edges: readonly [string, number][] = [
       ['back control', first],
       ['title', line.left],
@@ -1136,6 +1141,20 @@ function gapInside(element: Element): number {
   return Math.max(0, ...gaps);
 }
 
+/** What is wrong with the gap between two stacked neighbours, or null when it shows their groups. */
+function spacingFault(before: Row, row: Row): string | null {
+  if (
+    drawsSide(getComputedStyle(before.element), 'Bottom') ||
+    drawsSide(getComputedStyle(row.element), 'Top')
+  ) {
+    return null;
+  }
+  const gap = row.rect.top - before.rect.bottom;
+  const inside = Math.max(gapInside(before.element), gapInside(row.element));
+  if (inside <= 0 || gap > inside) return null;
+  return `${Math.round(gap)} px between groups is not more than the ${Math.round(inside)} px inside one: "${(before.element.textContent ?? '').trim().slice(0, 24)}" and "${(row.element.textContent ?? '').trim().slice(0, 24)}"`;
+}
+
 /**
  * Law 3 of the visual spec: spacing shows relationships. Two neighbours stacked in a column, one of
  * them a group of rows: the gap between them is larger than the gap inside the group, or the eye
@@ -1150,21 +1169,10 @@ export function spacingOrderCheck(): Violation[] {
     if (parent.matches('.vs-screen, .vs-page-content')) continue;
     const rows = stackedRows(parent);
     if (rows === null || !isShown(parent)) continue;
-    for (const [at, row] of rows.slice(1).entries()) {
-      const before = rows[at];
-      if (before === undefined) continue;
-      const divided =
-        drawsSide(getComputedStyle(before.element), 'Bottom') ||
-        drawsSide(getComputedStyle(row.element), 'Top');
-      if (divided) continue;
-      const gap = row.rect.top - before.rect.bottom;
-      const inside = Math.max(gapInside(before.element), gapInside(row.element));
-      if (inside <= 0 || gap > inside) continue;
-      found.push({
-        check: 'spacing-order',
-        message: `${Math.round(gap)} px between groups is not more than the ${Math.round(inside)} px inside one: "${(before.element.textContent ?? '').trim().slice(0, 24)}" and "${(row.element.textContent ?? '').trim().slice(0, 24)}"`,
-        where: describe(parent),
-      });
+    const pairs = rows.slice(1).map((row, at) => [rows[at] ?? row, row] as const);
+    for (const [before, row] of pairs) {
+      const message = spacingFault(before, row);
+      if (message !== null) found.push({check: 'spacing-order', message, where: describe(parent)});
     }
   }
   return found;
@@ -1182,12 +1190,11 @@ function canBeHollow(element: Element, width: number): boolean {
   const waiting = element.matches('[role="progressbar"]:not([aria-valuenow])');
   return (
     width >= 400 &&
-    ((element.textContent ?? '').trim() !== '' || waiting) &&
     element.closest(never) === null &&
     element.closest(grid) === null &&
     element.querySelector(grid) === null &&
     isShown(element) &&
-    drawsBox(element)
+    (waiting || ((element.textContent ?? '').trim() !== '' && drawsBox(element)))
   );
 }
 
@@ -1197,7 +1204,10 @@ function fullyDrawn(element: Element, rect: DOMRect): boolean {
   const box = boxOf(rect);
   const drawn = [cut(box, window), cut(box, clipArea(element.parentElement ?? element) ?? box)];
   return drawn.every(
-    each => each !== null && each.bottom - each.top >= rect.height - 1 && each.right - each.left >= rect.width - 1,
+    each =>
+      each !== null &&
+      each.bottom - each.top >= rect.height - 1 &&
+      each.right - each.left >= rect.width - 1,
   );
 }
 
@@ -1294,6 +1304,7 @@ export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
   headingsLargerThanParent,
   stackedRows,
   gapInside,
+  spacingFault,
   canBeHollow,
   fullyDrawn,
   contentWidth,

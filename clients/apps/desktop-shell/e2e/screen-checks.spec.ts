@@ -1,4 +1,5 @@
 import {expect, type Page, test} from '@playwright/test';
+import fc from 'fast-check';
 import {BAD_SCREENS, CLEAN_PAGE, CLEAN_SCREEN} from './checks/bad-dom.js';
 import {contactSheetHtml} from './checks/contact-sheet.js';
 import {isKnown, KNOWN_FAILURES, type KnownFailure} from './checks/known-failures.js';
@@ -35,6 +36,69 @@ test('a box partly out of sight is not called hollow for what cannot be seen', a
     `<div style="height:300px"></div><div style="border:1px solid #888;width:440px;height:60px;padding-top:40px">Machine</div>`,
   );
   expect(await screenCheck(page, ['hollow-box'])).toEqual([]);
+});
+
+/** Whether `check` holds of a page: `build` draws it from the generated numbers. */
+function decides<Case>(
+  page: Page,
+  check: 'hollow-box' | 'spacing-order' | 'left-edge' | 'heading-depth',
+  cases: fc.Arbitrary<Case>,
+  build: (each: Case) => string,
+  fails: (each: Case) => boolean,
+): Promise<void> {
+  return fc.assert(
+    fc.asyncProperty(cases, async each => {
+      await show(page, build(each));
+      expect((await screenCheck(page, [check])).length > 0).toBe(fails(each));
+    }),
+    {numRuns: 20},
+  );
+}
+
+test('property: a box is hollow exactly when its content spans under 40% of it', async ({page}) => {
+  await decides(
+    page,
+    'hollow-box',
+    fc.record({box: fc.integer({min: 400, max: 470}), used: fc.integer({min: 20, max: 390})}),
+    ({box, used}) =>
+      `<div style="border:1px solid #888;box-sizing:border-box;width:${box}px">x<div style="width:${used}px;height:8px;background:#888"></div></div>`,
+    ({box, used}) => used < (box - 2) * 0.4,
+  );
+});
+
+test('property: groups must stand further apart than the rows inside them', async ({page}) => {
+  const group = (gap: number): string =>
+    `<div style="display:flex;flex-direction:column;gap:${gap}px"><span>Name</span><span>Host</span></div>`;
+  await decides(
+    page,
+    'spacing-order',
+    fc.record({inside: fc.integer({min: 1, max: 24}), between: fc.integer({min: 1, max: 24})}),
+    ({inside, between}) =>
+      `<div style="display:flex;flex-direction:column;gap:${between}px">${group(inside)}${group(inside)}</div>`,
+    ({inside, between}) => between <= inside,
+  );
+});
+
+test('property: a back control off the content’s left edge fails past a pixel', async ({page}) => {
+  await decides(
+    page,
+    'left-edge',
+    fc.integer({min: 0, max: 40}),
+    inset =>
+      `<div class="vs-page-content"><div class="vs-page-header" style="display:flex;flex-direction:column"><button aria-label="Back" style="all:unset;display:flex;padding-left:${inset}px"><svg width="16" height="16"><path d="M0 3h16v10H0z"/></svg></button><h1 style="font-size:24px;line-height:28px;margin:0">Logins</h1></div><div class="vs-page-scroll"><div class="vs-page-body"><div>Machine</div></div></div></div>`,
+    inset => inset > 1,
+  );
+});
+
+test('property: nothing under a title is as large as the title', async ({page}) => {
+  await decides(
+    page,
+    'heading-depth',
+    fc.record({title: fc.integer({min: 12, max: 32}), child: fc.integer({min: 10, max: 36})}),
+    ({title, child}) =>
+      `<div class="vs-page-content"><div class="vs-page-header"><h1 style="font-size:${title}px;margin:0">Logins</h1></div><div class="vs-page-scroll"><div class="vs-page-body" style="font-size:${child}px"><div>Machine</div></div></div></div>`,
+    ({title, child}) => child >= title,
+  );
 });
 
 for (const bad of BAD_SCREENS) {
@@ -172,7 +236,9 @@ for (const broken of [false, true]) {
 
 test('a paragraph at the line cap passes pane-fill however wide its pane is', async ({page}) => {
   await page.setViewportSize({width: 1800, height: 320});
-  const text = 'The judge read the candidate source and found that it matches the outcome. '.repeat(4);
+  const text = 'The judge read the candidate source and found that it matches the outcome. '.repeat(
+    4,
+  );
   await show(
     page,
     `<div class="vs-pane-body" style="width:1600px;font:14px/20px monospace"><div style="max-width:735px">${text}</div></div>`,
