@@ -31,6 +31,7 @@ import {
   ALL_RUNS_EMPTY,
   type AllRunsState,
   askProjectRuns,
+  type CancelProjectRuns,
   type ListProjectRuns,
   projectRunGaps,
   projectRunsListed,
@@ -213,7 +214,9 @@ export type SidebarRequest =
       readonly project: string;
       readonly runIds: readonly string[];
     }
-  | ListProjectRuns;
+  | ListProjectRuns
+  /** Stop reading a project's runs: the screen asked again, or no longer waits for them. */
+  | CancelProjectRuns;
 
 export type SidebarStep = Step<SidebarState, SidebarRequest>;
 
@@ -248,13 +251,14 @@ function selected(state: SidebarState, screen: Screen): SidebarStep {
       ? state.selection
       : state.beforeSettings;
   const entering = screen.kind === 'runs' && state.selection.kind !== 'runs';
+  const asked = entering ? refreshed(state.allRuns) : null;
   const next = {
     ...state,
     selection: screen,
     beforeSettings,
-    ...(entering ? {allRuns: refreshed(state.allRuns)} : {}),
+    ...(asked === null ? {} : {allRuns: asked.all}),
   };
-  return same(next);
+  return {state: next, requests: asked?.requests ?? []};
 }
 
 /** How many runs Recent shows before "Show all". */

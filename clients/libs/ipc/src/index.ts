@@ -41,7 +41,6 @@ export {
 export {
   type AgentLogin,
   attempt,
-  nextOperationToken,
   type CheckoutInspection,
   type ClusterTest,
   type ComputeSettings,
@@ -64,6 +63,7 @@ export {
   type MachinesWelcomeBridge,
   type MeasureTarget,
   type NewRunWelcomeBridge,
+  nextOperationToken,
   type Offered,
   type PathCompletion,
   type PreferencesView,

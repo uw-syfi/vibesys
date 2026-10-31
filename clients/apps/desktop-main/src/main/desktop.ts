@@ -326,13 +326,8 @@ export class Desktop {
       case 'run-digests':
         return hosts.runDigests(request.host, request.project, request.runIds);
       case 'project-runs':
-        return hosts.projectRuns(request.host, request.project, {
-          owner: rendererGeneration,
-          token: request.token,
-        });
       case 'cancel-project-runs':
-        hosts.cancelProjectRuns({owner: rendererGeneration, token: request.token});
-        return null;
+        return this.#listing(request, rendererGeneration);
       case 'usage-window':
         return hosts.usageWindow(
           request.host,
@@ -353,6 +348,20 @@ export class Desktop {
         // Every other request is a screen's (`ScreenRequest`), which the type checks.
         return this.#screen(request);
     }
+  }
+
+  /** Start or end a project listing, which belongs to the renderer document that asked for it. */
+  #listing(
+    request: Extract<WelcomeRequest, {kind: 'project-runs' | 'cancel-project-runs'}>,
+    owner: string,
+  ): Promise<unknown> | null {
+    const {hosts} = this.#deps;
+    const listing = {owner, token: request.token};
+    if (request.kind === 'project-runs') {
+      return hosts.projectRuns(request.host, request.project, listing);
+    }
+    hosts.cancelProjectRuns(listing);
+    return null;
   }
 
   /** Answer one request of the Machines or New run screen, or of the windows. */

@@ -229,7 +229,8 @@ for (const [slot, budget] of Object.entries(watchBudgets) as [
 test('a listing over a gateway that stopped serving fails in the registry bound, not never', {
   timeout: 15000,
 }, async () => {
-  const {progressMs, graceMs} = watchBudgets.streamSavedRuns;
+  const {firstEventMs, progressMs, graceMs} = watchBudgets.streamSavedRuns;
+  const firstFrameMs = (firstEventMs > 0 ? firstEventMs : progressMs) + graceMs;
   const fake = new FakeGateway();
   const clock = new FakeClock();
   const calls = new GatewayCalls(() => fake, clock.schedule);
@@ -247,10 +248,11 @@ test('a listing over a gateway that stopped serving fails in the registry bound,
     );
   try {
     const watch = await fake.nextWatch();
-    await clock.waitUntilScheduled(progressMs + graceMs);
-    clock.advanceBy(progressMs + graceMs);
+    await clock.waitUntilScheduled(firstFrameMs);
+    clock.advanceBy(firstFrameMs);
     const error = await outcome;
     expect(error).toBeInstanceOf(CallTimedOut);
+    expect((error as CallTimedOut).bound).toBe('first-frame');
     await watch.closed;
     expect(clock.pendingDelays()).toEqual([]);
   } finally {

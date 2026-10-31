@@ -66,6 +66,7 @@ function settle(
     const next: SidebarRequest[] = [];
     for (const request of pending) {
       let action: SidebarAction;
+      if (request.kind === 'cancel-project-runs') continue;
       if (request.kind === 'read-digests') {
         digestRequests += 1;
         action = {type: 'digests-read', token: request.token, reply: reply(request.runIds)};

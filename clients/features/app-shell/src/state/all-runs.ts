@@ -42,6 +42,12 @@ export interface ListProjectRuns {
   readonly project: string;
 }
 
+/** What the All runs screen asks the main process to stop: a listing it no longer waits for. */
+export interface CancelProjectRuns {
+  readonly kind: 'cancel-project-runs';
+  readonly token: number;
+}
+
 /** The key of a project's slot on a machine. */
 function projectKey(host: HostKey, project: string): string {
   return JSON.stringify([host, project]);
@@ -140,14 +146,20 @@ export interface ProjectRunRef {
 
 /**
  * Asking every project again: what each had listed is kept as the runs to show until its new
- * listing answers, and the next `askProjectRuns` asks for them all.
+ * listing answers, and the next `askProjectRuns` asks for them all. A listing still being read
+ * is superseded by that ask, so it is cancelled: its reply would be dropped anyway.
  */
-export function refreshed(all: AllRunsState): AllRunsState {
+export function refreshed(all: AllRunsState): {
+  readonly all: AllRunsState;
+  readonly requests: readonly CancelProjectRuns[];
+} {
   const stale: Record<string, readonly ListedRun[]> = {...all.stale};
+  const requests: CancelProjectRuns[] = [];
   for (const [key, slot] of Object.entries(all.projects)) {
     if (slot.kind === 'listed') stale[key] = slot.runs;
+    if (slot.kind === 'loading') requests.push({kind: 'cancel-project-runs', token: slot.token});
   }
-  return {...all, projects: {}, stale};
+  return {all: {...all, projects: {}, stale}, requests};
 }
 
 /**

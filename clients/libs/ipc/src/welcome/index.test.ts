@@ -223,7 +223,7 @@ describe('parseWelcomeRequest', () => {
       parseWelcomeRequest(WELCOME_CHANNELS.projectRuns, ['ssh:gpu', '/srv/project', 9]),
     ).toEqual({
       kind: 'project-runs',
-      host: {kind: 'ssh', host: 'gpu'},
+      host: {kind: 'ssh', alias: 'gpu'},
       project: '/srv/project',
       token: 9,
     });

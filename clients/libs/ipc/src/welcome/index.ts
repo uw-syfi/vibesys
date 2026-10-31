@@ -246,9 +246,9 @@ export type {
 } from './start-run.js';
 export {
   attempt,
-  nextOperationToken,
   FAILURE_CAUSE_WORDS,
   type FailureCause,
+  nextOperationToken,
   type PathCompletion,
   settled,
   UNEXPECTED_FAILURE,
