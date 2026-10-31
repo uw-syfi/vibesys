@@ -22,6 +22,7 @@ from vs_core.api.recovery import (
     Action,
     Cancel,
     Cancelled,
+    CancelReason,
     End,
     Finished,
     Interruption,
@@ -151,7 +152,7 @@ class Loop:
         started = self.state.steps.of(tag)
         return 0 if started is None else started.started
 
-    def _ended(self, tag: core.RequestId, reason: core.CancelReason) -> Body:
+    def _ended(self, tag: core.RequestId, reason: CancelReason) -> Body:
         """How a cancelled attempt ends: interrupted, or the step's cancelled result."""
         why = interruption_of(reason)
         if why is not None:

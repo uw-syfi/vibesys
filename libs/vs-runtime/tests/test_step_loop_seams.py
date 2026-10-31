@@ -57,14 +57,20 @@ def stop_event(clock: VirtualClock) -> core.RunControlEvent:
     return core.RunControlEvent(control=control, now_at=clock.now(), result=result)
 
 
-def pause_event(
-    clock: VirtualClock, action: str = "pause", drain_s: float | None = None
-) -> core.RunControlEvent:
-    owner = core.PauseOwner.OPERATOR if action == "pause" else None
+def pause_event(clock: VirtualClock, drain_s: float | None = None) -> core.RunControlEvent:
     control = core.ControlInput(
-        control_id=core.ControlId(root=f"operator-{action}"), action=action, owner=owner
+        control_id=core.ControlId(root="operator-pause"),
+        action="pause",
+        owner=core.PauseOwner.OPERATOR,
     )
     return core.RunControlEvent(control=control, now_at=clock.now(), drain_seconds=drain_s)
+
+
+def pause_now_event(clock: VirtualClock) -> core.RunControlEvent:
+    control = core.ControlInput(
+        control_id=core.ControlId(root="operator-pause-now"), action="pause_now"
+    )
+    return core.RunControlEvent(control=control, now_at=clock.now())
 
 
 def resume_event(clock: VirtualClock, n: int = 1) -> core.RunControlEvent:
@@ -279,7 +285,7 @@ def test_a_pause_leaves_a_job_the_runner_adopts_running_and_the_resume_attaches_
         (tag,) = world.seed.tags
         first = world.start()
         await clock.sleep(1.0)
-        first.log.push(pause_event(clock, "pause_now"))
+        first.log.push(pause_now_event(clock))
         assert await first.rest() is RunRest.PARKED
         assert world.runner is not None
         assert world.runner.ended_by_cancel == (), "a pause cancelled the job"
@@ -318,7 +324,7 @@ class Held:
         """Pause with a drain of one second a second into the run, and let the loop rest."""
         process = self.world.start()
         await self.clock.sleep(1.0)
-        process.log.push(pause_event(self.clock, "pause", drain_s=1.0))
+        process.log.push(pause_event(self.clock, drain_s=1.0))
         await process.rest()
         return process
 
@@ -372,7 +378,7 @@ def test_a_drain_with_a_held_call_and_a_flight_waiting_on_clear_still_parks() ->
         with world.runner.unreachable(stuck):
             second = world.start()
             await clock.sleep(2.0)
-            second.log.push(pause_event(clock, "pause", drain_s=1.0))
+            second.log.push(pause_event(clock, drain_s=1.0))
             assert await second.rest() is RunRest.PARKED
             assert second.log.state.run.status is core.RunStatus.PARKED
 

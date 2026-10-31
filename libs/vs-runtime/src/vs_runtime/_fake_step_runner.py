@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
     from vs_core.api import Request
-    from vs_core.api.recovery import StepResult
+    from vs_core.api.recovery import CancelReason, StepResult
     from vs_sim.api import SleepingClock
 
 
@@ -187,7 +187,8 @@ class FakeStepRunner:
         self._scripts: dict[RequestId, tuple[Behavior, ...]] = {}
         self._work: dict[RequestId, _Work] = {}
         self._attached: set[RequestId] = set()
-        self._cancel_ended: list[RequestId] = []
+        self._cancel_ended: list[tuple[RequestId, CancelReason]] = []
+        self._adopted: dict[RequestId, StepResult] = {}
         self._pending: dict[RequestId, list[str]] = {}
         self._resisting: set[RequestId] = set()
         self._threads: set[asyncio.Future[None]] = set()
@@ -244,9 +245,14 @@ class FakeStepRunner:
         return tuple(self._violations)
 
     @property
-    def ended_by_cancel(self) -> tuple[RequestId, ...]:
-        """The tags whose work a cancel signal ended, in order; a pause that left it is not here."""
+    def ended_by_cancel(self) -> tuple[tuple[RequestId, CancelReason], ...]:
+        """The work a cancel signal ended, with the reason, in order; work a pause left is not here."""
         return tuple(self._cancel_ended)
+
+    @property
+    def adopted_results(self) -> dict[RequestId, StepResult]:
+        """The result each tag's ended work handed to ``clear``: the step's one true result."""
+        return dict(self._adopted)
 
     def running(self) -> tuple[RequestId, ...]:
         """The tags whose work is still going."""
@@ -338,11 +344,12 @@ class FakeStepRunner:
             del self._work[tag]
             return Cleared()
         result = work.ended(self._clock.now())
+        self._attached.add(tag)
         if result is None:
-            self._attached.add(tag)
             return Adopted(None)
-        del self._work[tag]
-        self._attached.discard(tag)
+        # Ended work keeps its result until a run returns it: a crash before the loop records
+        # it must find it again, as a job's end on a cluster is found again.
+        self._adopted[tag] = result
         return Adopted(result)
 
     def _enter(self, tag: RequestId, method: str) -> None:
@@ -421,12 +428,13 @@ class FakeStepRunner:
             self._cancel_polls -= 1
             raise StillRunningAfterCancelError(tag)
         self._attached.discard(tag)
-        if cancel_won and self._adopts and interruption_of(cancel.reason) is not None:
-            return Cancelled(reason=cancel.reason)
-        if cancel_won:
-            self._cancel_ended.append(tag)
+        result = next(wait.result() for wait in waits if wait in done)
+        if cancel_won and isinstance(result, Cancelled):
+            if self._adopts and interruption_of(result.reason) is not None:
+                return result
+            self._cancel_ended.append((tag, result.reason))
         self._work.pop(tag, None)
-        return next(wait.result() for wait in waits if wait in done)
+        return result
 
     async def _ends_by_itself(self, work: _Work) -> StepResult:
         if work.ends_at is None or work.result is None:
