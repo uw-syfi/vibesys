@@ -24,6 +24,7 @@ from ._recovery_unanswered import Inspection, settlement
 from ._request_recovery import resent
 from ._turn_permit import (
     cap_open_records,
+    drain_in_force,
     invocation_permit,
     permit_for_command,
     permit_for_request,
@@ -98,7 +99,7 @@ def drain_bound(state: CoreState, command: Command) -> float | None:
     admitted by the running run.
     """
     park = state.run.park
-    if park is None or park.immediate or park.epoch != state.records.recovery.epoch:
+    if park is None or park.immediate or not drain_in_force(state.run, state.records):
         return None
     permit = permit_for_command(state, command)
     return None if permit is None else permit.deadline_at
@@ -115,7 +116,7 @@ def dispatch_allowed(state: CoreState, request: Request) -> bool:
         return state.run.park is not None and state.records.recovery.epoch > state.run.park.epoch
     if state.run.status != RunStatus.DRAINING:
         return True
-    if _withdrawn(state, request):
+    if _pause_now_holds_back(state, request):
         return False
     return (
         _request_bound(state, request) is not None
@@ -146,21 +147,24 @@ def _past_deadline(state: CoreState, park: RunPark) -> bool:
     return park.deadline_at is not None and state.run.now_at >= park.deadline_at
 
 
-def pause_withdraws(state: CoreState, request: Request) -> bool:
-    """Whether committed Pause now withdrew this effect's right to complete the epoch."""
+def _pause_now_holds_back(state: CoreState, request: Request) -> bool:
+    """Whether a committed Pause-now, or a pause past its deadline, lets this effect start no more."""
     park = state.run.park
-    return park is not None and park.immediate and _park_holds_back(state, park, request)
+    return (
+        park is not None
+        and drain_in_force(state.run, state.records)
+        and _immediate(state, park)
+        and not isinstance(request, _DRAIN_EFFECTS)
+    )
 
 
-def _withdrawn(state: CoreState, request: Request) -> bool:
-    """Whether Pause now, or a drain past its deadline, no longer lets this effect start."""
-    park = state.run.park
-    return park is not None and _immediate(state, park) and _park_holds_back(state, park, request)
+def pause_cancels(state: CoreState, request: Request) -> bool:
+    """Whether the drain of a pause cancels this running request now.
 
-
-def _park_holds_back(state: CoreState, park: RunPark, request: Request) -> bool:
-    """Whether this epoch's park holds ``request`` back; what finishes a turn's work is left to end."""
-    return state.records.recovery.epoch == park.epoch and not isinstance(request, _DRAIN_EFFECTS)
+    A Pause-now does from the start, and any pause does once its drain deadline has passed. The
+    effects that finish work a turn already did (a snapshot, a cleanup) are left to end.
+    """
+    return _pause_now_holds_back(state, request)
 
 
 def _unfinished(state: CoreState, record: RequestRecord) -> bool:
