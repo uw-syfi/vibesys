@@ -1,0 +1,17 @@
+shared/failure-reasons
+records 148
+blobs 2
+streams 0
+record kinds
+  blob 1
+  declaration_amended 1
+  epoch_started 1
+  lifecycle 1
+  metric 5
+  span 139
+span label kinds
+  (no label) 1
+  agent_turn 63
+  gate 11
+  planning_call 2
+  workstream 62

@@ -1,0 +1,20 @@
+journeys/live
+records 58
+blobs 3
+streams 5
+record kinds
+  blob 2
+  declaration_amended 2
+  epoch_started 1
+  lifecycle 1
+  metric 5
+  span 42
+  stream 5
+span label kinds
+  (no label) 1
+  adoption 1
+  agent_turn 15
+  cache_warmup 1
+  gate 9
+  planning_call 4
+  workstream 11

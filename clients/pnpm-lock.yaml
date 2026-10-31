@@ -1106,6 +1106,9 @@ importers:
       '@types/bun':
         specifier: 1.4.2
         version: 1.4.2
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
       '@vibesys/store':
         specifier: workspace:*
         version: link:../store

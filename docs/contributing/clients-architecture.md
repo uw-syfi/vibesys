@@ -406,11 +406,19 @@ timer of its own.
 Enforced: `@vibesys/ui` has no `Banner`; no stylesheet rule paints a panel with the tone fills
 (`--banner-*-bg`, `--chip-*-bg`, or a mix of a status color) unless it is on the allow-list of
 `tone-fills.test.ts`; the `banner` screen check fails an element at least half as wide as the
-main pane that is filled with a status color, whatever it is called; a feature's `./state` is the
-only place a problem's words are written; and `toasts.spec.ts` shows a toast on every top-level
+main pane that is filled with a status color, whatever it is called; the `status-row` screen check
+fails one that is not filled: an alert, a status or a live region outside a toast, or `Text` in a
+status tone, whose words reach half the pane (it measures the words, not the box, so a figure a flex
+column stretches or a live region around other content is not one), and a chip whose box reaches half
+the pane (a chip must be as wide as its label); an announced element that holds a chip is a status
+word with its detail, however long the detail wraps; a
+feature's `./state` is the only place a problem's words are written; and `toasts.spec.ts` shows a toast on every top-level
 screen at the smallest and a wide window, with each platform's window controls, and checks it
 sits below the header row and covers nothing in it. Unenforced: whether a message is a passing
-event or a problem with a thing needs a reader; and a new screen that puts its title row in the
+event or a problem with a thing needs a reader; a lone status word on a line of its own (it cannot be
+told from a figure or an empty-state word), and a strip that is neither filled, announced nor written
+in a status tone (a bordered box with a status dot, a chevron and a sentence), are found by no check,
+because the screens' data rows have the same parts; and a new screen that puts its title row in the
 body instead of the `header` slot gets toasts over that row, until it is added to the spec's
 screens and given a `header`.
 
@@ -527,6 +535,33 @@ Components, under `renderer/ui/`:
 
 To see a change on a recorded run with hot reload, use the fixture dev app
 (`pnpm --filter @vibesys/app-desktop-shell dev:fixture`, see the `verify-desktop-ui` skill).
+
+The native replays that the run page tests and the desktop e2e read (the records the shipping Python
+projector makes of each declaration in `libs/run-fixtures/src/data` and
+`apps/desktop-shell/e2e/scenarios`) are not committed. `tests/support/derived_replays.py` stores them
+under a hash of every file they can derive from: the roots and files of the `derived_replays`
+component in `.repoctl/components.toml` (whole source packages the projection imports, the lock and
+project files, the generators) and the Python version. The key errs wide because regenerating takes
+seconds. CI selects the client jobs on a change to the same component, so a projector, schema or
+library change the projection runs still runs the client tests that read the replays. The thirteen
+libraries the projection only imports (the runtime, the sandbox, the agent library and their kin)
+are entries written `{ path = "...", selects = false }`: they key the set and regenerate it, but a
+change to one selects no client job, because the projection snapshots and the conversion golden in
+the Python job still see what it does to a replay. A stale set is never read, and two pull requests
+cannot conflict on them.
+
+The `test` script of `run-page` and the `e2e`, `e2e:linux` and `dev:fixture` scripts of the desktop
+shell start through `tools/scripts/with_derived_replays.mjs`, which makes the set (about 15 s the
+first time for each key, shared by every checkout on the machine; 0.1 s after) and exports its
+directory, and forwards SIGINT, SIGTERM and SIGHUP to what it runs. This is a prerequisite a
+TypeScript-only checkout did not have: `uv` and a synced Python environment (`uv sync --dev`). A
+test reads a replay through `@vibesys/run-fixtures/derived`, which fails naming the script when it
+was skipped. A fixture that differs from its declaration is projected by the same projector into
+`variants/` inside the set. `e2e:linux` makes the set on the host and mounts it read-only into the
+Linux image, which has no `uv`; a spec that builds such a fixture needs one host run first. Because a projector change no
+longer shows as a changed file, `tests/vibesys/run/projection_shapes` commits a text snapshot of
+what each scenario projects to (record kinds and span label kinds, with counts). Only the goldens
+that pin a contract stay committed (`proto/testdata`), rewritten by `./scripts/regenerate_goldens.sh`.
 
 ## Display names
 

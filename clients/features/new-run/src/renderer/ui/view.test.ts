@@ -43,7 +43,7 @@ describe('readinessStatus', () => {
       {id: 'a', state: 'ok', label: 'A'},
       {id: 'b', state: 'pending', label: 'Project', detail: 'Choose a project.'},
     ]);
-    expect(status).toEqual({state: 'pending', text: 'Choose a project.', open: false});
+    expect(status).toEqual({state: 'pending', text: 'Choose a project', open: false});
   });
 
   test('one check reads in the singular', () => {

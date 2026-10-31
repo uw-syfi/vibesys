@@ -61,6 +61,9 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
       'e2e/**/*.spec.ts',
       // The static server the suite starts (`playwright.config.ts`).
       'e2e/serve-dist.mjs',
+      // The fixture dev app (`dev:fixture`). Its script starts through `with_derived_replays.mjs`,
+      // which knip does not read through to the `bun` command it runs.
+      'e2e/tools/dev-fixture.ts',
     ],
     project: ['src/**/*.ts', 'src/**/*.tsx', 'e2e/**/*.{ts,mjs}'],
   },

@@ -234,7 +234,8 @@ def start_due(state: CoreState, tag: RequestId, now: float) -> Run | RecordRefus
         return RecordRefusal(
             RefusalReason.STEP_NOT_OPEN, tag, f"the log names step {tag.root}, which is not open"
         )
-    action = _of_step(advance_run_time(state, now), record, now)
+    advanced = advance_run_time(state, now)
+    action = None if _park_is_due(state, advanced) else _of_step(advanced, record, now)
     if isinstance(action, Run):
         return action
     return RecordRefusal(
@@ -329,10 +330,11 @@ def _finish(
     state: CoreState, message: StepFinished, registry: OperationRegistry | None
 ) -> tuple[CoreState, tuple[StrategyEvent, ...]]:
     tag = RequestId(root=message.tag)
-    if ended_by_core(state, tag):
+    by_core = ended_by_core(state, tag)
+    reported_by(state, tag, message.attempt)  # core ending the step excuses no stale attempt
+    if by_core:
         state, published = _concluded_by_core(state, tag, decode_result(message, registry))
         return settle_park(state), published
-    reported_by(state, tag, message.attempt)
     state = dispatched(state, tag)
     report, owner_events = finish(state, tag, decode_result(message, registry))
     transition = step_recorded(state, report)

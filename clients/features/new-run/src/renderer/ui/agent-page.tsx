@@ -26,6 +26,7 @@ import {
   generationsIn,
   groupOf,
   harnessLabel,
+  installedHarnesses,
   modelAtTier,
   modelLabel,
   offersIn,
@@ -158,10 +159,7 @@ export function AgentPage(props: CardProps): JSX.Element {
     return <Text tone="warn">No agents</Text>;
   }
   const pick: Pick = (provider, model) => dispatch({type: 'agent', provider, model});
-  const installed =
-    context.facts?.for === machine && context.facts.value.kind === 'offered'
-      ? context.facts.value.value.harness_clis
-      : null;
+  const installed = installedHarnesses(context.facts, machine);
   return (
     <Stack gap="space-5">
       <Stack gap="space-3">

@@ -1,0 +1,17 @@
+shared/input-gate-failed
+records 28
+blobs 2
+streams 0
+record kinds
+  blob 2
+  epoch_started 1
+  lifecycle 1
+  metric 4
+  span 20
+span label kinds
+  (no label) 1
+  agent_turn 6
+  comparison 2
+  gate 5
+  planning_call 2
+  workstream 4

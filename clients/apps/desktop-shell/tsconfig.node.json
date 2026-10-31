@@ -14,6 +14,7 @@
     {"path": "../../libs/contracts/tsconfig.lib.json"},
     {"path": "../../libs/ipc/tsconfig.lib.json"},
     {"path": "../../libs/run-fixtures/tsconfig.lib.json"},
+    {"path": "../../libs/run-fixtures/tsconfig.derived.json"},
     {"path": "../../features/new-run/tsconfig.state.json"}
   ]
 }
