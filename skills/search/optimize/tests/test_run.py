@@ -376,6 +376,7 @@ def test_abort_releases_active_marker_and_records_reason(tmp_path: Path) -> None
     assert run.call("abort", "--reason", "lead crashed; manual recovery") == 0
     assert not (run.path.parent / "active").exists()
     assert run.state()["decisions"][-1]["kind"] == "abort"
+    assert controller.status(run.state(), NOW)["next"] == "run aborted"
 
 
 def test_live_foreign_pid_can_be_forcibly_untracked_with_reason(tmp_path: Path) -> None:
