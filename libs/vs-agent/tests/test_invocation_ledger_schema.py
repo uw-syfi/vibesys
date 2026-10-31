@@ -96,12 +96,29 @@ def test_the_models_and_cost_basis_of_a_stored_turn_survive_a_reload(
     assert loaded == ledger
 
 
-def test_a_ledger_the_previous_version_wrote_is_refused_naming_the_remedy() -> None:
-    """Version 2 stored a turn's usage without its models and basis; it is not decoded as if it had."""
-    stored = json.loads(_ledger(()).model_dump_json())
+def test_a_ledger_the_previous_version_wrote_is_upgraded_with_its_unknowns_unknown() -> None:
+    """Version 2 stored a turn's usage without its models and basis: they are unknown, not absent
+    by decision, and the ledger is the current version once loaded."""
+    stored = json.loads(_ledger(("steer-op-1",)).model_dump_json())
     stored["schema_version"] = 2
+    usage = stored["invocations"]["turn-1"]["outcome"]["result"]["usage"]
+    del usage["cost_basis"], usage["by_model"]
 
-    with pytest.raises(ValidationError, match=r"version 2 .*start a new run"):
+    loaded = AgentInvocationState.model_validate(stored)
+
+    assert loaded.schema_version == AgentInvocationState.model_fields["schema_version"].default
+    outcome = loaded.invocations["turn-1"].outcome
+    assert isinstance(outcome, Completed)
+    assert (outcome.result.usage.cost_basis, outcome.result.usage.by_model) == (None, ())
+    assert outcome.result.refused_steers == ("steer-op-1",)
+
+
+@pytest.mark.parametrize("version", [0, 1, 4, 99])
+def test_a_ledger_of_any_other_version_is_refused_naming_the_remedy(version: int) -> None:
+    stored = json.loads(_ledger(()).model_dump_json())
+    stored["schema_version"] = version
+
+    with pytest.raises(ValidationError, match=rf"version {version} .*start a new run"):
         AgentInvocationState.model_validate(stored)
 
 
