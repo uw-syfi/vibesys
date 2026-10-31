@@ -27,7 +27,7 @@ from vs_agent.contracts import (
 )
 from vs_agent.reply_limits import ReplyGuard, reply_breach
 from vs_agent.session_errors import SessionResumeError
-from vs_agent.step_tags import step_tag_env
+from vs_sandbox.api import step_tag_env
 
 if TYPE_CHECKING:
     from collections.abc import Callable

@@ -603,7 +603,7 @@ class AgentTurnRequest:
     """
     step_tag: str | None = None
     """The step that asked for this turn: every agent process the turn starts carries it
-    (``vs_agent.step_tags``), so ``reap_step_agents`` can end exactly those. It is not part of
+    (``vs_sandbox.step_marks``), so ``reap_step_agents`` can end exactly those. It is not part of
     the turn's payload digest: the same step asks the same turn in every attempt."""
 
 
