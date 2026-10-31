@@ -241,6 +241,8 @@ export interface RunPageState {
   readonly readOnly?: boolean;
   readonly lifecycleWord?: string | undefined;
   readonly positionWord?: string | undefined;
+  /** An older diagnostic was not searched because its recovery cost exceeded the page budget. */
+  readonly diagnosticsIncomplete?: boolean | undefined;
   readonly identity: RunRef;
   /** What the sidebar knows about the run's name: its project and task. */
   readonly title: {readonly project: string; readonly task: string | null};

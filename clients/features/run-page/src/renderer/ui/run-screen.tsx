@@ -618,6 +618,13 @@ function RunScreenBody(props: {
       {state.recordDiagnostic ? (
         <Banner tone="warn" title="Run diagnostic" body={state.recordDiagnostic.message} />
       ) : null}
+      {state.diagnosticsIncomplete ? (
+        <Banner
+          tone="warn"
+          title="Earlier diagnostics may be incomplete"
+          body="The most recent failure search reached its bounded history window. Older diagnostic messages may not appear here."
+        />
+      ) : null}
       {before === null ? (
         <Hero
           {...base}

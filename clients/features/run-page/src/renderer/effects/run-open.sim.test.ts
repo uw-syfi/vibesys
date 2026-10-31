@@ -366,7 +366,7 @@ test('every load ends in content or a final state, whatever the replies are', as
 });
 
 /** A short run with an error notice early, then `trailing` ordinary records. */
-function withEarlyFailure(trailing: number): SimRun['records'] {
+function withEarlyFailure(trailing: number, failure = true): SimRun['records'] {
   const base = storeRunFixture('short', 2, 1).records;
   const notice = (message: string, severity: Severity) =>
     create(RecordSchema, {
@@ -375,7 +375,7 @@ function withEarlyFailure(trailing: number): SimRun['records'] {
     });
   const all = [
     ...base.slice(0, 4),
-    notice('Measurement unavailable', Severity.ERROR),
+    ...(failure ? [notice('Measurement unavailable', Severity.ERROR)] : []),
     ...base.slice(4),
     ...Array.from({length: trailing}, (_, index) => notice(`filler ${index}`, Severity.WARNING)),
   ];
@@ -388,57 +388,112 @@ async function bannerOf(records: SimRun['records'], run: Partial<SimRun>) {
   await until(clock, () => false, MINUTE);
   const {load, ui} = actor.getSnapshot().context;
   if (!load) throw new Error('loaded history required');
-  const whole = projectSkeleton(load.skeleton, load.skeleton.throughSeq ?? 0n);
+  const whole = projectSkeleton(load.skeleton, load.skeleton.throughSeq ?? 0n, '', {
+    diagnosticsIncomplete: load.diagnosticsIncomplete,
+  });
+  const screen = skeletonScreenState(SEED, load.skeleton, whole, ui);
   actor.stop();
   return {
-    message: skeletonScreenState(SEED, load.skeleton, whole, ui).recordDiagnostic?.message,
+    message: screen.recordDiagnostic?.message,
+    diagnosticsIncomplete: screen.diagnosticsIncomplete,
     tails: gateway.callsTo('Tail').length,
   };
 }
 
 test('a finished run’s failure diagnostic does not depend on how many records follow it', async () => {
-  // Tracked keyframes (none, final, middle) and keyframes without failure facts (final, middle),
-  // with the notice inside the window, just outside it, and several pages back.
+  // Tracked keyframes (none, final, middle), legacy keyframes and checkpoints that track records
+  // but predate failure facts, with the notice inside, just outside, and beyond the paging horizon.
   const cases = [
     ...[0, 257, 700].flatMap(count =>
-      (['none', 'final', 'middle'] as const).map(at => ({count, at, legacy: false})),
+      (['none', 'final', 'middle'] as const).map(at => ({
+        count,
+        at,
+        legacy: false,
+        untrackedFailures: false,
+      })),
     ),
     ...[256, 257, 1500].flatMap(count =>
-      (['final', 'middle'] as const).map(at => ({count, at, legacy: true})),
+      (['final', 'middle'] as const).map(at => ({
+        count,
+        at,
+        legacy: true,
+        untrackedFailures: false,
+      })),
+    ),
+    ...[256, 257, 1500, 10000].flatMap(count =>
+      (['final', 'middle'] as const).map(at => ({
+        count,
+        at,
+        legacy: false,
+        untrackedFailures: true,
+      })),
     ),
   ];
-  for (const {count, at, legacy} of cases) {
+  for (const {count, at, legacy, untrackedFailures} of cases) {
     const records = withEarlyFailure(count);
     const through = at === 'final' ? records.length : Math.floor(records.length / 2);
-    const label = `${count} records after the notice, ${at} checkpoint, ${legacy ? 'without failure facts' : 'tracked'}`;
-    const {message, tails} = await bannerOf(records, {
+    const mode = legacy ? 'legacy' : untrackedFailures ? 'untracked failures' : 'tracked';
+    const label = `${count} records after the notice, ${at} checkpoint, ${mode}`;
+    const {message, diagnosticsIncomplete, tails} = await bannerOf(records, {
       keyframes: at === 'none' ? [] : [through],
       legacyKeyframes: legacy,
+      untrackedFailures,
     });
-    expect(message, label).toBe('Measurement unavailable');
-    // Bounded cost: the live Tail, plus at most one paged read per page looked back.
-    expect(tails, label).toBeLessThanOrEqual(1 + FAILURE_PAGES);
+    const outsideBudget = untrackedFailures && count > Number(RECORD_WINDOW) * FAILURE_PAGES;
+    expectDiagnosticSearch(
+      {message, diagnosticsIncomplete},
+      {label, outsideBudget, untrackedFailures, records, tails},
+    );
   }
 });
 
-test('an old keyframe with no failure ever recorded costs a bounded read, not a replay', async () => {
-  const records = storeRunFixture('short', 400, 1).records;
-  const {clock, gateway, actor} = open(
-    {records, keyframes: [records.length], legacyKeyframes: true},
-    {rttMs: 20, bytesPerMs: 1400},
-  );
-  await until(clock, () => false, MINUTE);
-  expect(gateway.callsTo('Tail').length).toBeLessThanOrEqual(1 + FAILURE_PAGES);
-  const read = new Set(
-    gateway
-      .callsTo('Tail')
-      .map(call => Number(fromBinary(TailRequestSchema, call.request).fromSeq)),
-  );
-  // No page starts before FAILURE_PAGES windows back from the first record read.
-  expect(Math.min(...read)).toBeGreaterThanOrEqual(
-    records.length - (FAILURE_PAGES + 1) * Number(RECORD_WINDOW),
-  );
-  actor.stop();
+function expectDiagnosticSearch(
+  outcome: {message: string | undefined; diagnosticsIncomplete: boolean | undefined},
+  expected: {
+    label: string;
+    outsideBudget: boolean;
+    untrackedFailures: boolean;
+    records: SimRun['records'];
+    tails: number;
+  },
+) {
+  const {label, outsideBudget, untrackedFailures, records, tails} = expected;
+  expect(outcome.message, label).toBe(outsideBudget ? undefined : 'Measurement unavailable');
+  expect(outcome.diagnosticsIncomplete, label).toBe(outsideBudget);
+  // Every recovery is bounded, irrespective of how many records follow the notice.
+  const budget = untrackedFailures
+    ? 1 + FAILURE_PAGES
+    : 1 + Math.ceil(records.length / Number(RECORD_WINDOW));
+  expect(tails, label).toBeLessThanOrEqual(budget);
+}
+
+test('failure recovery has a fixed request budget and reports an incomplete search', async () => {
+  for (const trailing of [10_000]) {
+    const records = withEarlyFailure(trailing, false);
+    const {clock, gateway, actor} = open(
+      {records, keyframes: [records.length], untrackedFailures: true},
+      {rttMs: 20, bytesPerMs: 1400},
+    );
+    await until(
+      clock,
+      () => actor.getSnapshot().context.load?.diagnosticsIncomplete === true,
+      MINUTE,
+    );
+    expect(gateway.callsTo('Tail').length, `${trailing} records`).toBeLessThanOrEqual(
+      1 + FAILURE_PAGES,
+    );
+    expect(actor.getSnapshot().context.load?.diagnosticsIncomplete, `${trailing} records`).toBe(
+      true,
+    );
+    const read = new Set(
+      gateway
+        .callsTo('Tail')
+        .map(call => Number(fromBinary(TailRequestSchema, call.request).fromSeq)),
+    );
+    // The read stops above the epoch start; reaching it would prove that no failure was recorded.
+    expect(Math.min(...read), `${trailing} records`).toBeGreaterThan(Number(records[0]?.seq ?? 0n));
+    actor.stop();
+  }
 });
 
 test('a checkpoint stored over the read limit is skipped though its reply would fit', async () => {

@@ -122,13 +122,14 @@ function recordPublisher(records: RecordsListener) {
   };
 }
 
-/** Pages of a record window each: how far back a failure is looked for; at most eight raw-record windows. */
+/** The most recovery pages one screen load reads; later pages are not fetched automatically. */
 export const FAILURE_PAGES = 8;
 
 /**
  * Error notices of the current epoch before `before`, newest page first, from bounded reads of
  * the log: each page a Tail from its start, cancelled once it reaches the page after. It stops at
- * the first page holding one, at the epoch's start, or after FAILURE_PAGES pages.
+ * the first page holding one, after FAILURE_PAGES pages, or at the epoch's start. A bounded stop
+ * marks the diagnostic partial; silence beyond the window is never reported as a complete absence.
  */
 async function pageFailures(
   transport: RunTransport,
@@ -138,7 +139,7 @@ async function pageFailures(
   let end = input.before;
   for (
     let page = 0;
-    end !== undefined && page < FAILURE_PAGES && end > input.epochStart;
+    end !== undefined && end > input.epochStart && page < FAILURE_PAGES;
     page += 1
   ) {
     const start = end - RECORD_WINDOW > input.epochStart ? end - RECORD_WINDOW : input.epochStart;
@@ -149,6 +150,7 @@ async function pageFailures(
     }
     end = start;
   }
+  if (end !== undefined && end > input.epochStart) input.receive({type: 'failures-incomplete'});
 }
 
 /** The current epoch's records in [start, end), by a Tail cancelled on reaching `end`. */

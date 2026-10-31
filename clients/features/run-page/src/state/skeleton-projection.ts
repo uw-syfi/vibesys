@@ -49,6 +49,7 @@ export function projectSkeleton(
     content?: SkeletonContent;
     progress?: LoadProgress;
     loadFailure?: string | undefined;
+    diagnosticsIncomplete?: boolean | undefined;
   } = {},
 ): RunModel {
   const head =
@@ -85,6 +86,7 @@ export function projectSkeleton(
   return {
     progress: options.progress,
     loadFailure: options.loadFailure,
+    diagnosticsIncomplete: options.diagnosticsIncomplete,
     headline,
     series: skeletonPerformance(view, reading.spans, candidates.candidates, head),
     input: reading.input,
@@ -180,6 +182,7 @@ export function skeletonScreenState(
   };
   return {
     ...ui,
+    diagnosticsIncomplete: whole.diagnosticsIncomplete,
     progress: whole.progress,
     recordDiagnostic: latestFailure(skeleton, ui.recordLog),
     lifecycleWord: lifecycle.word,

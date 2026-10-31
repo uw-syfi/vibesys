@@ -62,6 +62,8 @@ export interface RunModel {
   /** Whether the reader has caught up with the committed prefix. */
   readonly progress?: LoadProgress | undefined;
   readonly loadFailure?: string | undefined;
+  /** A bounded recovery could not prove whether an older diagnostic exists. */
+  readonly diagnosticsIncomplete?: boolean | undefined;
   /**
    * The input's measured value of the objective metric, read from the input gate itself: known
    * before any idea is measured, when no idea's measurement carries it.

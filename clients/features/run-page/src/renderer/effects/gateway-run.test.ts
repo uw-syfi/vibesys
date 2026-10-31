@@ -807,6 +807,7 @@ test('property: writer refreshes never replace a displayed epoch with an older c
                   complete: length === records.length,
                   windowFrom: undefined,
                   failuresBefore: undefined,
+                  diagnosticsIncomplete: false,
                 },
           progress: {phase: 'history', through: BigInt(length), committed: BigInt(records.length)},
           failure: undefined,

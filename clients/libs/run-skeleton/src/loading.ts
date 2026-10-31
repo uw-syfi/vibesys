@@ -35,6 +35,8 @@ export interface SkeletonLoad {
    * this sequence were never read, so the error notices among them are paged in from the log.
    */
   readonly failuresBefore: bigint | undefined;
+  /** An old keyframe needed more recovery pages than the screen's bounded read allows. */
+  readonly diagnosticsIncomplete: boolean;
   readonly committedSeq: bigint;
   readonly complete: boolean;
 }
@@ -85,6 +87,7 @@ export function ingestSkeleton(response: SkeletonResponse): SkeletonLoad {
       response.keyframe === undefined || skeleton.failuresTracked || !skeleton.recordsTracked
         ? undefined
         : windowStart(response),
+    diagnosticsIncomplete: false,
     committedSeq: response.committedSeq,
     complete: response.complete,
   };

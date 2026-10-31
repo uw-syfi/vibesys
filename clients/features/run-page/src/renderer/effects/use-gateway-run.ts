@@ -1,5 +1,11 @@
 import type {ScheduleTimeout} from '@vibesys/machine';
-import {observeRun, transcriptStreamFor} from '@vibesys/run-skeleton';
+import {
+  observeRun,
+  type RunLivenessHint,
+  type Skeleton,
+  type SkeletonLoad,
+  transcriptStreamFor,
+} from '@vibesys/run-skeleton';
 import {RunLiveness, type RunWriterFacts} from '@vibesys/runs/intents';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {getInitialSnapshot} from 'xstate';
@@ -29,54 +35,19 @@ export function useGatewayRun(options: {
   const loadFailure = terminalLoadFailure(snapshot.context);
   const skeleton = paintedSkeleton(load);
   const {hint, writer} = useWriterFacts(snapshot.context);
-  const at = ui.view.at === 'live' ? (skeleton?.throughSeq ?? 0n) : BigInt(ui.view.at);
-  const epoch = skeleton?.epochs.filter(item => item.seq <= at).at(-1)?.epoch;
-  const objective = text[epoch?.run?.objective?.sha256 ?? ''] ?? '';
-  const wholeHash = skeleton?.epochs.at(-1)?.epoch?.run?.objective?.sha256 ?? '';
-  const wholeText = text[wholeHash] ?? '';
-  const wholeRead = useMemo(
-    () =>
-      project(() =>
-        skeleton
-          ? projectSkeleton(skeleton, skeleton.throughSeq ?? 0n, wholeText, {
-              head: hint?.head,
-              progress,
-              loadFailure,
-              content: {text, replies, transcripts},
-            })
-          : null,
-      ),
-    [skeleton, wholeText, hint?.head, progress, loadFailure, text, replies, transcripts],
-  );
-  const modelRead = useMemo(
-    () =>
-      at === skeleton?.throughSeq
-        ? wholeRead
-        : project(() =>
-            skeleton
-              ? projectSkeleton(skeleton, at, objective, {
-                  content: {text, replies, transcripts},
-                  progress,
-                  loadFailure,
-                })
-              : null,
-          ),
-    [skeleton, at, objective, wholeRead, text, replies, transcripts, progress, loadFailure],
-  );
-  const {value: whole} = wholeRead,
-    {value: model} = modelRead;
-  const stateRead = useMemo(
-    () =>
-      project(() =>
-        skeleton && whole
-          ? skeletonScreenState(seed, skeleton, whole, ui, hint, {text, replies, transcripts})
-          : null,
-      ),
-    [skeleton, whole, seed, ui, hint, text, replies, transcripts],
-  );
-  const {value: state} = stateRead;
-  const projectionError = wholeRead.error ?? modelRead.error ?? stateRead.error;
-  const follow = state && model ? logStreamToFollow(state, model, route) : null;
+  const {whole, model, state, projectionError, follow} = useRunProjections({
+    seed,
+    skeleton,
+    load,
+    progress,
+    loadFailure,
+    hint,
+    ui,
+    route,
+    text,
+    replies,
+    transcripts,
+  });
   useFollowedContent(actor, follow, skeleton, route.step);
   return {
     snapshot,
@@ -93,6 +64,105 @@ export function useGatewayRun(options: {
     dispatch: (action: import('../../state/index.js').RunPageAction) =>
       actor?.send({type: 'ui', action}),
   };
+}
+
+function useRunProjections({
+  seed,
+  skeleton,
+  load,
+  progress,
+  loadFailure,
+  hint,
+  ui,
+  route,
+  text,
+  replies,
+  transcripts,
+}: {
+  seed: RunPageSeed;
+  skeleton: Skeleton | undefined;
+  load: SkeletonLoad | undefined;
+  progress: GatewayRunContext['progress'];
+  loadFailure: string | undefined;
+  hint: RunLivenessHint | undefined;
+  ui: GatewayRunContext['ui'];
+  route: ReturnType<typeof useZoom>['route'];
+  text: GatewayRunContext['text'];
+  replies: GatewayRunContext['replies'];
+  transcripts: GatewayRunContext['transcripts'];
+}) {
+  const at = ui.view.at === 'live' ? (skeleton?.throughSeq ?? 0n) : BigInt(ui.view.at);
+  const epoch = skeleton?.epochs.filter(item => item.seq <= at).at(-1)?.epoch;
+  const objective = text[epoch?.run?.objective?.sha256 ?? ''] ?? '';
+  const wholeHash = skeleton?.epochs.at(-1)?.epoch?.run?.objective?.sha256 ?? '';
+  const wholeText = text[wholeHash] ?? '';
+  const wholeRead = useMemo(
+    () =>
+      project(() =>
+        skeleton
+          ? projectSkeleton(skeleton, skeleton.throughSeq ?? 0n, wholeText, {
+              head: hint?.head,
+              progress,
+              loadFailure,
+              diagnosticsIncomplete: load?.diagnosticsIncomplete,
+              content: {text, replies, transcripts},
+            })
+          : null,
+      ),
+    [
+      skeleton,
+      wholeText,
+      hint?.head,
+      progress,
+      loadFailure,
+      load?.diagnosticsIncomplete,
+      text,
+      replies,
+      transcripts,
+    ],
+  );
+  const modelRead = useMemo(
+    () =>
+      at === skeleton?.throughSeq
+        ? wholeRead
+        : project(() =>
+            skeleton
+              ? projectSkeleton(skeleton, at, objective, {
+                  content: {text, replies, transcripts},
+                  progress,
+                  loadFailure,
+                  diagnosticsIncomplete: load?.diagnosticsIncomplete,
+                })
+              : null,
+          ),
+    [
+      skeleton,
+      at,
+      objective,
+      wholeRead,
+      text,
+      replies,
+      transcripts,
+      progress,
+      loadFailure,
+      load?.diagnosticsIncomplete,
+    ],
+  );
+  const {value: whole} = wholeRead,
+    {value: model} = modelRead;
+  const stateRead = useMemo(
+    () =>
+      project(() =>
+        skeleton && whole
+          ? skeletonScreenState(seed, skeleton, whole, ui, hint, {text, replies, transcripts})
+          : null,
+      ),
+    [skeleton, whole, seed, ui, hint, text, replies, transcripts],
+  );
+  const {value: state} = stateRead;
+  const projectionError = wholeRead.error ?? modelRead.error ?? stateRead.error;
+  const follow = state && model ? logStreamToFollow(state, model, route) : null;
+  return {wholeRead, modelRead, stateRead, whole, model, state, projectionError, follow};
 }
 
 function useGatewayActor(seed: RunPageSeed, ports: GatewayRunPorts, schedule: ScheduleTimeout) {

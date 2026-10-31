@@ -28,6 +28,7 @@ export interface FailuresInput {
 export type LoaderEvent =
   | {type: 'history'; records: readonly StoreRecord[]; through: bigint}
   | {type: 'failures'; records: readonly StoreRecord[]}
+  | {type: 'failures-incomplete'}
   | {type: 'tail'; response: TailResponse}
   /** A Tail message that only fed the record log reached `through`: a resume starts after it. */
   | {type: 'window'; through: bigint}
@@ -193,6 +194,13 @@ export const skeletonLoaderMachine = setup({
                     skeleton: absorbFailures(context.load.skeleton, event.records),
                   },
                 },
+          ),
+        },
+        'failures-incomplete': {
+          actions: assign(({context}) =>
+            context.load === undefined
+              ? {}
+              : {load: {...context.load, diagnosticsIncomplete: true}},
           ),
         },
         window: {
