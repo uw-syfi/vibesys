@@ -29,10 +29,12 @@ import {
   type ObjectiveChartView,
   type ObjectiveHeadline,
   objectiveCharts,
+  objectiveSeriesOf,
   objectivesOf,
   paretoView,
   type RunModel,
 } from '../../state/index.js';
+import {RunStats} from './run-stats.js';
 import type {ViewBase} from './views/props.js';
 
 /** The comparisons with no reading, each a small label with its status word; none when all read. */
@@ -130,6 +132,13 @@ export function Hero(
   const legend = chartLegend(charts);
   return (
     <Stack gap="space-3">
+      <RunStats
+        model={props.model}
+        whole={props.whole}
+        start={props.clock.start}
+        tokens={props.tokens.total}
+        objectives={props.objectives ?? objectiveSeriesOf(props.whole)}
+      />
       <ChartColumns count={charts.length + (pareto === null ? 0 : 1)}>
         {charts.map((chart, at) => (
           <ObjectivePanel

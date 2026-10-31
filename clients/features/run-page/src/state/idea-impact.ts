@@ -142,7 +142,7 @@ function sharesOf(
 }
 
 /** What the ideas did to `readings` (the run's objectives, read), in the readings' order. */
-export function impactOfReadings(readings: readonly ObjectiveReading[]): Impact {
+function impactOfReadings(readings: readonly ObjectiveReading[]): Impact {
   const points = readings.map(pointsByIdea);
   const gainsByIdea = readings.map(reading => {
     const byIdea = new Map<string, number>();

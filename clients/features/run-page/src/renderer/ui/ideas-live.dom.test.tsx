@@ -73,16 +73,21 @@ async function rendered(
 
 interface Line {
   readonly title: string;
-  readonly line: string;
-  readonly badge: string;
+  readonly builtOn: string;
+  readonly status: string;
+  readonly tag: string;
 }
 
 function lines(container: HTMLElement): Line[] {
-  return [...container.querySelectorAll('[aria-label="Ideas"] [role="option"]')].map(row => ({
-    title: row.querySelector('.vs-pickrow-text > .vs-text:first-child')?.textContent ?? '',
-    line: row.querySelector('.vs-pickrow-text > .vs-text:nth-child(2)')?.textContent ?? '',
-    badge: row.querySelector('.vs-chip')?.textContent ?? '',
-  }));
+  return [...container.querySelectorAll('[aria-label="Ideas"] [role="option"]')].map(row => {
+    const cells = [...row.querySelectorAll('.vs-columnlist-cell')];
+    return {
+      title: cells[0]?.querySelector('.vs-text')?.textContent ?? '',
+      tag: cells[0]?.querySelector('.vs-chip')?.textContent ?? '',
+      builtOn: cells[1]?.textContent ?? '',
+      status: cells[2]?.textContent ?? '',
+    };
+  });
 }
 
 test('the list says what each idea built on, marks the leader Best, and says each status once', async () => {
@@ -91,26 +96,19 @@ test('the list says what each idea built on, marks the leader Best, and says eac
   );
   const rows = lines(screen.container);
   const byTitle = (title: string) => rows.find(row => row.title === title);
-  expect(byTitle('Padded counters')?.line).toBe('From input · beat its base');
-  expect(byTitle('Batched enqueue on the padded counters')?.line).toBe('From best · beat its base');
-  expect(byTitle('Per-core free lists')?.line).toBe('From a passed idea · did not beat its base');
-  expect(byTitle('Prefetch the next slot')?.line).toBe('From its own work · beat its base');
-  expect(rows.filter(row => row.badge === 'Best').map(row => row.title)).toEqual([
+  expect(byTitle('Padded counters')?.builtOn).toBe('Input');
+  expect(byTitle('Batched enqueue on the padded counters')?.builtOn).toBe('Padded counters');
+  expect(byTitle('Per-core free lists')?.builtOn).toBe('Padded counters');
+  expect(byTitle('Prefetch the next slot')?.builtOn).toBe('Own work');
+  expect(rows.filter(row => row.tag === 'Best').map(row => row.title)).toEqual([
     'Prefetch the next slot',
   ]);
-  expect(rows.some(row => row.badge === 'Adopted')).toBe(false);
-  for (const row of rows) expect(row.line.toLowerCase()).not.toBe(row.badge.toLowerCase());
-  expect(byTitle('Spin before parking')).toMatchObject({
-    badge: 'Passed',
-    line: 'From input · within noise of its base',
-  });
-  expect(byTitle('Widen the batch to sixty-four')).toMatchObject({
-    badge: 'Failed',
-    line: 'From best',
-  });
-  // Still taking in runs: no verdict yet, so never a provisional "within noise".
-  expect(byTitle('Combine adjacent slots')?.line).toBe('From its own work · measuring');
-  expect(screen.container.textContent).not.toMatch(/turned down/i);
+  expect(rows.some(row => row.tag === 'Adopted')).toBe(false);
+  expect(byTitle('Spin before parking')?.status).toBe('Faster');
+  // An idea its own checks turned down is dropped, and says why under the status.
+  expect(byTitle('Widen the batch to sixty-four')?.status).toBe('DroppedTurned down');
+  // Still taking in runs: no verdict yet.
+  expect(byTitle('Combine adjacent slots')?.status).toBe('Running');
   await screen.done();
 });
 
@@ -150,7 +148,7 @@ test('the idea view says what the idea built on, its effect, and its outcome', a
       dispatch={() => undefined}
     />,
   );
-  const pane = screen.container.textContent ?? '';
+  const pane = [...screen.container.querySelectorAll('.vs-pane')].at(-1)?.textContent ?? '';
   expect(pane).toContain('Passed');
   expect(pane).toContain('within noise of its base');
   expect(pane).toContain('Passed · 1.07× the input');

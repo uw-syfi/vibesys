@@ -42,7 +42,10 @@ describe('a failed idea', () => {
 describe('the bar column', () => {
   test('every row holds it, so a row with no share leaves an empty track under "vs best"', () => {
     const measured = idea('m', 'passed', 0, 60);
-    const view = ideasView(modelOf([measured, failedFor('not_measured')], 'm'), IDEAS_FILTER_DEFAULT);
+    const view = ideasView(
+      modelOf([measured, failedFor('not_measured')], 'm'),
+      IDEAS_FILTER_DEFAULT,
+    );
     expect(view.rows.map(row => row.bar.value > 0)).toEqual([false, true]);
     expect(view.rows).toHaveLength(2);
   });

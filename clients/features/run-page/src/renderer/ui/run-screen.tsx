@@ -35,6 +35,7 @@ import {
   machineBlockWords,
   NO_MODEL_NAMES,
   type Offer,
+  objectiveSeriesOf,
   pauseNowBannerView,
   predatesTraceWords,
   type ResolvedZoom,
@@ -551,6 +552,7 @@ function RunScreenBody(props: {
     emptyLabelsOnly: state.readOnly === true,
     names,
     model,
+    objectives: objectiveSeriesOf(props.whole),
     // The run's own start, read from the whole run: a scrubbed model before its first span has no
     // start to give, and every face measures its times from the same origin at every position.
     clock: {start: clockStart(props.whole), now: clockAt(model, runNow(state))},

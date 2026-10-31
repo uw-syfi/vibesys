@@ -32,15 +32,6 @@ export {ChatMessage} from './components/chat-message.js';
 export {type CheckItem, CheckList, type CheckState} from './components/check-list.js';
 export {ChoiceTiles, type TileOption} from './components/choice-tiles.js';
 export {Collapsible} from './components/collapsible.js';
-export {Dialog} from './components/dialog.js';
-export {
-  EmptyState,
-  KeyValue,
-  type KeyValueItem,
-  Prose,
-  type ProseBlock,
-  Stat,
-} from './components/display.js';
 export {
   CellInline,
   CellLines,
@@ -51,6 +42,15 @@ export {
   type ListColumn,
   type RowMarks,
 } from './components/column-list.js';
+export {Dialog} from './components/dialog.js';
+export {
+  EmptyState,
+  KeyValue,
+  type KeyValueItem,
+  Prose,
+  type ProseBlock,
+  Stat,
+} from './components/display.js';
 export {DotLegend, type LegendItem} from './components/dot-legend.js';
 export {Fact, FactLine} from './components/facts.js';
 export {Field, TextInput} from './components/field.js';

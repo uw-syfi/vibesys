@@ -24,19 +24,19 @@ import {
   type TextTone,
 } from '@vibesys/ui';
 import type {JSX} from 'react';
+import {NO_CLEAR_CHANGE} from '../../state/headline.js';
 import {
-  type ObjectiveCell,
   type IdeaStatus,
   type IdeasFilter,
   type IdeasSort,
-  type IdeaTableRow,
   type IdeasTable as IdeasTableView,
+  type IdeaTableRow,
   ideasTable,
+  type ObjectiveCell,
   type RunPageAction,
   type TableColumn,
 } from '../../state/index.js';
 import {formatValue, ratio} from '../../state/span-reading.js';
-import {NO_CLEAR_CHANGE} from '../../state/headline.js';
 import {workedWords} from '../../state/time-words.js';
 import type {ViewBase} from './views/props.js';
 
@@ -83,7 +83,9 @@ function ObjectiveFigure(props: {
     <span title={exact}>
       <CellInline>
         <CellMark on={cell.setBest} />
-        {form === 'multiple' ? null : <Text variant="code">{form === 'value' ? exact : value}</Text>}
+        {form === 'multiple' ? null : (
+          <Text variant="code">{form === 'value' ? exact : value}</Text>
+        )}
         {form === 'value' ? null : <Multiple cell={cell} />}
       </CellInline>
     </span>
@@ -106,18 +108,19 @@ function sameSort(a: IdeasSort, b: IdeasSort): boolean {
   return a.by === b.by;
 }
 
-function columnsOf(
+type Column = ListColumn<IdeaTableRow>;
+type Sorting = NonNullable<Column['sort']>;
+
+function quiet(text: string): JSX.Element {
+  return <Text tone="muted">{text}</Text>;
+}
+
+function objectiveColumns(
   table: IdeasTableView,
-  base: ViewBase,
-  sort: IdeasSort | null,
-  setSort: (sort: IdeasSort | null) => void,
-): readonly ListColumn<IdeaTableRow>[] {
-  const sorted = (by: IdeasSort) => ({
-    marked: sameSort(table.sort, by),
-    press: () => setSort(sort !== null && sameSort(sort, by) ? null : by),
-  });
-  const objective = table.columns.map(
-    (column, at): ListColumn<IdeaTableRow> => ({
+  sorted: (by: IdeasSort) => Sorting,
+): readonly Column[] {
+  return table.columns.map(
+    (column, at): Column => ({
       key: `objective-${column.index}`,
       header: column.title,
       size: table.form === 'multiple' ? 'short' : 'wide',
@@ -126,21 +129,53 @@ function columnsOf(
       cell: row => {
         const cell = row.cells[at];
         return cell === undefined ? (
-          <Text tone="muted">{NONE}</Text>
+          quiet(NONE)
         ) : (
           <ObjectiveFigure cell={cell} column={column} form={table.form} />
         );
       },
     }),
   );
-  const alone = table.form === 'value';
-  return [
-    {
-      key: 'idea',
-      header: 'Idea',
-      size: 'fill',
-      cell: row => <IdeaName row={row} />,
+}
+
+/** The columns of a run with one objective: the multiple of the input, each comparison, the share. */
+function singleColumns(table: IdeasTableView): readonly Column[] {
+  const vsInput: Column = {
+    key: 'vs-input',
+    header: 'vs input',
+    size: 'short',
+    cell: row => {
+      const cell = row.cells[0];
+      return cell === undefined || cell.multiple === null ? quiet(NONE) : <Multiple cell={cell} />;
     },
+  };
+  const comparisons = table.baselines.map(
+    (label, at): Column => ({
+      key: `baseline-${at}`,
+      header: label,
+      size: 'short',
+      optional: true,
+      cell: row => <Text variant="code">{row.baselines[at] ?? NONE}</Text>,
+    }),
+  );
+  const share: Column = {
+    key: 'share',
+    header: 'Share of gain',
+    size: 'wide',
+    optional: true,
+    cell: row =>
+      row.share === null ? (
+        quiet(NONE)
+      ) : (
+        <Text variant="code">{`+${formatValue(row.share.gain)} ${row.share.percent}%`}</Text>
+      ),
+  };
+  return [vsInput, ...comparisons, ...(table.shares ? [share] : [])];
+}
+
+function leadColumns(base: ViewBase): readonly Column[] {
+  return [
+    {key: 'idea', header: 'Idea', size: 'fill', cell: row => <IdeaName row={row} />},
     {
       key: 'built-on',
       header: 'Built on',
@@ -148,7 +183,7 @@ function columnsOf(
       optional: true,
       cell: row =>
         row.builtOn.parent === null ? (
-          <Text tone="muted">{row.builtOn.label}</Text>
+          quiet(row.builtOn.label)
         ) : (
           <CellLink
             label={markdownToPlain(row.builtOn.label)}
@@ -172,49 +207,23 @@ function columnsOf(
         />
       ),
     },
-    ...objective,
-    ...(alone
-      ? [
-          {
-            key: 'vs-input',
-            header: 'vs input',
-            size: 'short',
-            cell: (row: IdeaTableRow) => {
-              const cell = row.cells[0];
-              return cell === undefined || cell.multiple === null ? (
-                <Text tone="muted">{NONE}</Text>
-              ) : (
-                <Multiple cell={cell} />
-              );
-            },
-          } satisfies ListColumn<IdeaTableRow>,
-        ]
-      : []),
-    ...table.baselines.map(
-      (label, at): ListColumn<IdeaTableRow> => ({
-        key: `baseline-${at}`,
-        header: label,
-        size: 'short',
-        optional: true,
-        cell: row => <Text variant="code">{row.baselines[at] ?? NONE}</Text>,
-      }),
-    ),
-    ...(table.shares
-      ? [
-          {
-            key: 'share',
-            header: 'Share of gain',
-            size: 'wide',
-            optional: true,
-            cell: (row: IdeaTableRow) =>
-              row.share === null ? (
-                <Text tone="muted">{NONE}</Text>
-              ) : (
-                <Text variant="code">{`+${formatValue(row.share.gain)} ${row.share.percent}%`}</Text>
-              ),
-          } satisfies ListColumn<IdeaTableRow>,
-        ]
-      : []),
+  ];
+}
+
+function columnsOf(
+  table: IdeasTableView,
+  base: ViewBase,
+  sort: IdeasSort | null,
+  setSort: (sort: IdeasSort | null) => void,
+): readonly Column[] {
+  const sorted = (by: IdeasSort): Sorting => ({
+    marked: sameSort(table.sort, by),
+    press: () => setSort(sort !== null && sameSort(sort, by) ? null : by),
+  });
+  return [
+    ...leadColumns(base),
+    ...objectiveColumns(table, sorted),
+    ...(table.form === 'value' ? singleColumns(table) : []),
     {
       key: 'agent-time',
       header: 'Agent time',
@@ -267,7 +276,9 @@ export function IdeasTable(props: {
     <Stack gap="space-3" grow>
       <Row gap="space-3" align="center">
         <Text variant="heading">Ideas</Text>
-        <Text tone="muted">{shown === table.total ? `${table.total}` : `${shown} of ${table.total}`}</Text>
+        <Text tone="muted">
+          {shown === table.total ? `${table.total}` : `${shown} of ${table.total}`}
+        </Text>
         <Chips table={table} filter={filter} dispatch={props.dispatch} />
         <Row gap="space-0" grow justify="end">
           <SearchBox

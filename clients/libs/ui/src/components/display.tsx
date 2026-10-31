@@ -98,12 +98,18 @@ export function Stat(props: {
   readonly value: string;
   readonly unit?: string;
   readonly sub?: string;
+  /** A value that is a word, not a number (`Not reported`): body size and muted. */
+  readonly quiet?: boolean;
 }): JSX.Element {
   return (
     <div className="vs-stat">
       <Text variant="section">{props.label}</Text>
       <span className="vs-stat-value">
-        <Text variant="metric">{props.value}</Text>
+        {props.quiet === true ? (
+          <Text tone="muted">{props.value}</Text>
+        ) : (
+          <Text variant="metric">{props.value}</Text>
+        )}
         {props.unit === undefined ? null : (
           <Text variant="small" tone="muted">
             {props.unit}

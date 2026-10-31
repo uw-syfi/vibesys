@@ -10,13 +10,9 @@
 import type {Candidate} from '@vibesys/run-state/candidates';
 import {type BaselineColumns, baselineColumns} from './baselines.js';
 import type {Direction} from './direction.js';
-import {ideaBases} from './idea-bases.js';
-import {
-  type Impact,
-  impactOf,
-  type ObjectiveCell,
-  type ObjectiveColumn,
-} from './idea-impact.js';
+import {unitWords} from './headline.js';
+import {type IdeaBases, ideaBases} from './idea-bases.js';
+import {type Impact, impactOf, type ObjectiveCell, type ObjectiveColumn} from './idea-impact.js';
 import {
   IDEA_STATUSES,
   type IdeaStatus,
@@ -24,15 +20,14 @@ import {
   ideaStatus,
   STATUS_WORDS,
 } from './idea-status.js';
-import {type IdeasFilter, matchesIdeaQuery} from './ideas-view.js';
 import {ideaAncestry} from './ideas-tree.js';
+import {type IdeasFilter, matchesIdeaQuery} from './ideas-view.js';
 import {metricLabel} from './metric-words.js';
-import {unitWords} from './headline.js';
 import type {ObjectiveSeries} from './objective-reading.js';
 import type {RunModel} from './run-model.js';
 
 /** How many objectives get a column of their own; the rest are counted in the header. */
-export const OBJECTIVE_COLUMNS = 4;
+const OBJECTIVE_COLUMNS = 4;
 
 /** What the list is sorted by: an objective (its index among the run's), or the agents' time. */
 export type IdeasSort =
@@ -63,6 +58,8 @@ export interface IdeaTableRow {
   readonly status: IdeaStatusView & {readonly word: string};
   /** The idea's cell for each of the table's columns, in their order. */
   readonly cells: readonly ObjectiveCell[];
+  /** The idea's reading of each of the run's objectives, by the objective's place; null for none. */
+  readonly readings: readonly (number | null)[];
   /** Its multiple of each comparison baseline, in the table's `baselines` order (a dash for none). */
   readonly baselines: readonly string[];
   /** The gain it added and its share of the whole gain (a whole percent); null without one. */
@@ -138,7 +135,10 @@ function columnsOf(
   });
   const moved = all.filter(column => column.moved);
   const shown = moved.length > 0 ? moved : all.slice(0, 1);
-  return {columns: shown.slice(0, OBJECTIVE_COLUMNS), more: Math.max(0, shown.length - OBJECTIVE_COLUMNS)};
+  return {
+    columns: shown.slice(0, OBJECTIVE_COLUMNS),
+    more: Math.max(0, shown.length - OBJECTIVE_COLUMNS),
+  };
 }
 
 /** How a cell of a table with `count` columns says its objective (see v5's "How the impact columns scale"). */
@@ -161,6 +161,97 @@ function byValue(a: number | null, b: number | null, direction: Direction): numb
   return direction === 'min' ? a - b : b - a;
 }
 
+/** The chips: every idea, then each status that has one, with its count. */
+function chipsOf(
+  statuses: ReadonlyMap<string, IdeaStatusView>,
+  total: number,
+): readonly StatusChip[] {
+  const counts = new Map<IdeaStatus, number>();
+  for (const {status} of statuses.values()) counts.set(status, (counts.get(status) ?? 0) + 1);
+  return [
+    {status: null, word: 'All', count: total},
+    ...IDEA_STATUSES.filter(status => (counts.get(status) ?? 0) > 0).map(status => ({
+      status,
+      word: STATUS_WORDS[status],
+      count: counts.get(status) ?? 0,
+    })),
+  ];
+}
+
+/** What a row is drawn from, whatever the idea. */
+interface RowContext {
+  readonly model: RunModel;
+  readonly impact: Impact;
+  readonly columns: readonly TableColumn[];
+  readonly statuses: ReadonlyMap<string, IdeaStatusView>;
+  readonly bases: IdeaBases;
+  readonly titles: ReadonlyMap<string, string>;
+  readonly comparisons: BaselineColumns;
+  readonly lit: ReadonlySet<string>;
+  readonly selected: string | null;
+  readonly now: number | null;
+}
+
+/** What an idea built on: the idea it started from, its own work, or the input. */
+function builtOnOf(item: Candidate, context: RowContext): IdeaTableRow['builtOn'] {
+  const base = context.bases.get(item.id);
+  const parent = base?.parent ?? null;
+  if (parent !== null) return {label: context.titles.get(parent) ?? '…', parent};
+  return {label: base?.kind === 'own work' ? 'Own work' : 'Input', parent: null};
+}
+
+function rowOf(item: Candidate, context: RowContext): IdeaTableRow {
+  const {model, impact} = context;
+  const best = model.candidates.best;
+  const all = impact.cells.get(item.id) ?? [];
+  const status = context.statuses.get(item.id) ?? ideaStatus(item, null);
+  const gain = all[0]?.gain ?? null;
+  const fraction = impact.shares?.get(item.id);
+  return {
+    id: item.id,
+    title: item.title,
+    adopted: best?.candidate === item.id && best.adopted,
+    best: best?.candidate === item.id && !best.adopted,
+    builtOn: builtOnOf(item, context),
+    status: {...status, word: STATUS_WORDS[status.status]},
+    cells: context.columns.map(column => all[column.index] ?? EMPTY),
+    readings: context.impact.columns.map((_, at) => all[at]?.value ?? null),
+    baselines: context.comparisons.cells.get(item.id) ?? [],
+    share:
+      gain !== null && fraction !== undefined ? {gain, percent: Math.round(fraction * 100)} : null,
+    agentSeconds: workedSeconds(item, context.now),
+    lineage: context.lit.has(item.id) && item.id !== context.selected,
+    fresh: model.changed.has(item.id),
+  };
+}
+
+/**
+ * `rows` in the order of `sort`; null is the default: running first, then the first objective's best.
+ * Ties keep the newest first.
+ */
+function sorted(
+  rows: readonly IdeaTableRow[],
+  order: ReadonlyMap<string, number>,
+  sort: IdeasSort | null,
+  directions: (index: number) => Direction,
+): readonly IdeaTableRow[] {
+  const by = sort ?? DEFAULT_SORT;
+  const running = (row: IdeaTableRow): number => Number(row.status.status === 'running');
+  const newest = (a: IdeaTableRow, b: IdeaTableRow): number =>
+    (order.get(b.id) ?? 0) - (order.get(a.id) ?? 0);
+  const value = (row: IdeaTableRow): number | null =>
+    by.by === 'objective' ? (row.readings[by.index] ?? null) : null;
+  return [...rows].sort((a, b) => {
+    const pinned = sort === null ? running(b) - running(a) : 0;
+    if (pinned !== 0) return pinned;
+    const ordered =
+      by.by === 'agent-time'
+        ? b.agentSeconds - a.agentSeconds
+        : byValue(value(a), value(b), directions(by.index));
+    return ordered || newest(a, b);
+  });
+}
+
 /**
  * The Ideas table of `model` under `filter` and `sort`. `objectives` are the run's, read from the
  * whole run so a scrubbed model keeps its columns; `selected` is the idea the charts single out
@@ -181,90 +272,50 @@ export function ideasTable(
   const objectives = options.objectives ?? [];
   const impact = impactOf(model, objectives);
   const {columns, more} = columnsOf(model, objectives, impact);
-  const bases = ideaBases(tree, model.direction);
-  const titles = new Map(tree.candidates.map(item => [item.id, item.title]));
-  const lit = ideaAncestry(model, options.selected);
+  const sole = impact.columns.length === 1;
   const statuses = new Map(
     tree.candidates.map(item => [item.id, ideaStatus(item, changeOver(impact.cells.get(item.id)))]),
   );
-  const counts = new Map<IdeaStatus, number>();
-  for (const {status} of statuses.values()) counts.set(status, (counts.get(status) ?? 0) + 1);
-  const chips: StatusChip[] = [
-    {status: null, word: 'All', count: tree.candidates.length},
-    ...IDEA_STATUSES.filter(status => (counts.get(status) ?? 0) > 0).map(status => ({
-      status,
-      word: STATUS_WORDS[status],
-      count: counts.get(status) ?? 0,
-    })),
-  ];
-  const sole = impact.columns.length === 1;
-  const comparisons: BaselineColumns = sole
-    ? baselineColumns(model)
-    : {labels: [], cells: new Map()};
-  const sort = options.sort ?? DEFAULT_SORT;
-  const rows = tree.candidates
-    .filter(item => matchesIdeaQuery(item, options.filter.query))
-    .filter(item => options.filter.status === null || statuses.get(item.id)?.status === options.filter.status)
-    .map((item, order) => {
-      const all = impact.cells.get(item.id) ?? [];
-      const status = statuses.get(item.id) ?? ideaStatus(item, null);
-      const base = bases.get(item.id);
-      const parent = base?.parent ?? null;
-      const gain = all[0]?.gain ?? null;
-      const fraction = impact.shares?.get(item.id);
-      const row: IdeaTableRow = {
-        id: item.id,
-        title: item.title,
-        adopted: tree.best?.candidate === item.id && tree.best.adopted,
-        best: tree.best?.candidate === item.id && !tree.best.adopted,
-        builtOn: {
-          label:
-            parent !== null
-              ? (titles.get(parent) ?? '…')
-              : base?.kind === 'own work'
-                ? 'Own work'
-                : 'Input',
-          parent,
-        },
-        status: {...status, word: STATUS_WORDS[status.status]},
-        cells: columns.map(column => all[column.index] ?? EMPTY),
-        baselines: comparisons.cells.get(item.id) ?? [],
-        share:
-          sole && gain !== null && fraction !== undefined
-            ? {gain, percent: Math.round(fraction * 100)}
-            : null,
-        agentSeconds: workedSeconds(item, options.now),
-        lineage: lit.has(item.id) && item.id !== options.selected,
-        fresh: model.changed.has(item.id),
-      };
-      return {row, order, running: status.status === 'running'};
-    });
-  const cellOf = (entry: (typeof rows)[number], index: number): number | null =>
-    impact.cells.get(entry.row.id)?.[index]?.value ?? null;
-  rows.sort((a, b) => {
-    const pinned = options.sort === null ? Number(b.running) - Number(a.running) : 0;
-    if (pinned !== 0) return pinned;
-    const ordered =
-      sort.by === 'agent-time'
-        ? b.row.agentSeconds - a.row.agentSeconds
-        : byValue(
-            cellOf(a, sort.index),
-            cellOf(b, sort.index),
-            impact.columns[sort.index]?.direction ?? model.direction,
-          );
-    return ordered || b.order - a.order;
-  });
+  const comparisons = sole ? baselineColumns(model) : {labels: [], cells: new Map()};
+  const context: RowContext = {
+    model,
+    impact,
+    columns,
+    statuses,
+    bases: ideaBases(tree, model.direction),
+    titles: new Map(tree.candidates.map(item => [item.id, item.title])),
+    comparisons,
+    lit: ideaAncestry(model, options.selected),
+    selected: options.selected,
+    now: options.now,
+  };
+  const {query, status} = options.filter;
+  const shown = tree.candidates
+    .filter(item => matchesIdeaQuery(item, query))
+    .filter(item => status === null || statuses.get(item.id)?.status === status);
+  const order = new Map(tree.candidates.map((item, at) => [item.id, at]));
   return {
     columns,
     more,
     form: formOf(columns.length),
-    sort,
-    chips,
-    rows: rows.map(entry => entry.row),
+    sort: options.sort ?? DEFAULT_SORT,
+    chips: chipsOf(statuses, tree.candidates.length),
+    rows: sorted(
+      shown.map(item => rowOf(item, context)),
+      order,
+      options.sort,
+      index => impact.columns[index]?.direction ?? model.direction,
+    ),
     total: tree.candidates.length,
     shares: sole && impact.shares !== null,
     baselines: comparisons.labels,
   };
 }
 
-const EMPTY: ObjectiveCell = {value: null, multiple: null, change: null, setBest: false, gain: null};
+const EMPTY: ObjectiveCell = {
+  value: null,
+  multiple: null,
+  change: null,
+  setBest: false,
+  gain: null,
+};

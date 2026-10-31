@@ -91,8 +91,8 @@ test('the Ideas table has a ratio column for each comparison, a dash where there
       dispatch={() => undefined}
     />,
   );
-  const header = [...screen.container.querySelectorAll('.vs-columnlist-headcell')].map(
-    column => column.textContent?.replace(/ ▾$/, ''),
+  const header = [...screen.container.querySelectorAll('.vs-columnlist-headcell')].map(column =>
+    column.textContent?.replace(/ ▾$/, ''),
   );
   expect(header.slice(header.indexOf('vs input'), header.indexOf('vs input') + 3)).toEqual([
     'vs input',
@@ -101,14 +101,15 @@ test('the Ideas table has a ratio column for each comparison, a dash where there
   ]);
   const at = header.indexOf('vs input');
   const rows = [...screen.container.querySelectorAll('[role="option"]')].map(row => ({
-    title: row.querySelector('.vs-columnlist-cell')?.textContent,
+    title: row.querySelector('.vs-columnlist-cell .vs-text')?.textContent,
     cells: [...row.querySelectorAll('.vs-columnlist-cell')]
       .slice(at, at + 3)
       .map(cell => cell.textContent),
   }));
   expect(rows).toEqual([
-    {title: 'Pin the consumers to cores', cells: ['5.82×', '5.82×', '–']},
-    {title: 'Preallocate the arena', cells: ['5.29×', '5.29×', '–']},
+    // The run has no reading of its input: `vs input` is a dash and the comparison carries the ratio.
+    {title: 'Pin the consumers to cores', cells: ['–', '5.82×', '–']},
+    {title: 'Preallocate the arena', cells: ['–', '5.29×', '–']},
   ]);
   await screen.done();
 });

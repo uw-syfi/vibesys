@@ -5,13 +5,7 @@ import {fromBinary} from '@bufbuild/protobuf';
 import {SkeletonResponseSchema} from '@vibesys/proto';
 import {DescriptorCache, ingestSkeleton} from '@vibesys/run-skeleton';
 import {firstChart} from './chart-fixtures.js';
-import {
-  clockStart,
-  heroView,
-  IDEAS_FILTER_DEFAULT,
-  ideasView,
-  projectSkeleton,
-} from './index.js';
+import {clockStart, heroView, IDEAS_FILTER_DEFAULT, ideasView, projectSkeleton} from './index.js';
 
 const corpus = new URL('../../../../../proto/testdata/retained/', import.meta.url);
 const cases = JSON.parse(readFileSync(new URL('manifest.json', corpus), 'utf8')) as Record<

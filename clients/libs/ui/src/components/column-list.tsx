@@ -1,11 +1,4 @@
-import {
-  type CSSProperties,
-  type FocusEvent,
-  type JSX,
-  type ReactNode,
-  useId,
-  useRef,
-} from 'react';
+import {type CSSProperties, type FocusEvent, type JSX, type ReactNode, useId, useRef} from 'react';
 import {SIZE} from '../tokens/index.js';
 import {navigationKeys, pickKeys} from './listbox.js';
 import {Text} from './text.js';
@@ -220,10 +213,7 @@ export function CellLines(props: {
 }
 
 /** A cell's link: a word that acts on its own, without picking the row (a row's parent). */
-export function CellLink(props: {
-  readonly label: string;
-  readonly press: () => void;
-}): JSX.Element {
+export function CellLink(props: {readonly label: string; readonly press: () => void}): JSX.Element {
   return (
     <button
       type="button"

@@ -95,7 +95,7 @@ const ringed = (container: HTMLElement): number =>
 
 function row(container: HTMLElement, title: string): Element {
   const found = [...container.querySelectorAll('[role="option"]')].find(
-    each => each.querySelector('.vs-pickrow-text > .vs-text')?.textContent === title,
+    each => each.querySelector('.vs-columnlist-cell .vs-text')?.textContent === title,
   );
   if (found === undefined) throw new Error(`no row ${title}`);
   return found;

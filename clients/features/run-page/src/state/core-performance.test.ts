@@ -60,9 +60,7 @@ for (const item of cases) {
     expect(heroView(catchingUp).headlines[0]?.ratio).toBeNull();
     for (const idea of catchingUp.candidates.candidates) {
       expect(
-        ideasView(catchingUp, IDEAS_FILTER_DEFAULT).rows.find(
-          row => row.id === idea.id,
-        )?.figure,
+        ideasView(catchingUp, IDEAS_FILTER_DEFAULT).rows.find(row => row.id === idea.id)?.figure,
       ).toBe('Catching up');
     }
     const failed = {...catchingUp, loadFailure: 'Data loss'};
@@ -70,9 +68,7 @@ for (const item of cases) {
     expect(heroView(failed).headlines[0]?.detail).not.toContain('Reading');
     for (const idea of failed.candidates.candidates)
       expect(
-        ideasView(failed, IDEAS_FILTER_DEFAULT).rows.find(
-          row => row.id === idea.id,
-        )?.figure,
+        ideasView(failed, IDEAS_FILTER_DEFAULT).rows.find(row => row.id === idea.id)?.figure,
       ).toBe('Data loss');
   });
 }

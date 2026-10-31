@@ -69,9 +69,7 @@ async function shown() {
       if (action.type === 'ideas-hover') hovered.push(action.idea);
       setState(now => runPageStep(now, action).state);
     };
-    return (
-      <RunLevel state={state} base={base} core={null} mode="ideas" dispatch={send} />
-    );
+    return <RunLevel state={state} base={base} core={null} mode="ideas" dispatch={send} />;
   }
   await act(async () => root.render(<Harness />));
   return {
@@ -175,7 +173,7 @@ test('a search narrows the list, and one that matches nothing says No matches', 
   await screen.press({type: 'ideas-filter', filter: {query: 'idea 4', status: null}});
   expect(column(screen.container, 'Idea')).toEqual(['idea 4']);
   await screen.press({type: 'ideas-filter', filter: {query: 'zzzz', status: null}});
-  expect(column(screen.container, 'Idea')).toEqual([]);
+  expect(screen.container.querySelectorAll(ROWS)).toHaveLength(0);
   expect(screen.container.textContent).toContain('No matches');
   await screen.done();
 });
@@ -185,10 +183,15 @@ test('a header sorts by its column and the same header again restores the defaul
   const header = [...screen.container.querySelectorAll('.vs-columnlist-headcell button')].find(
     each => each.textContent?.startsWith('Agent time'),
   ) as HTMLElement;
+  const marked = (): string[] =>
+    [...screen.container.querySelectorAll('.vs-columnlist-headcell[data-marked]')].map(
+      each => each.textContent?.replace(/ ▾$/, '') ?? '',
+    );
+  expect(marked()).toEqual(['Metric']);
   await act(async () => header.click());
-  // Every idea worked as long as the others: the order falls back to newest first.
-  expect(column(screen.container, 'Idea')[0]).toBe('idea 6');
+  expect(marked()).toEqual(['Agent time']);
   await act(async () => header.click());
+  expect(marked()).toEqual(['Metric']);
   expect(column(screen.container, 'Idea')[0]).toBe('idea 6');
   await screen.done();
 });

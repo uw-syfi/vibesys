@@ -135,6 +135,8 @@ export interface StatTile {
   readonly figure: string;
   /** A word after the figure (`input`); null for none. */
   readonly unit: string | null;
+  /** The figure is a word (`Not reported`), not a number. */
+  readonly quiet: boolean;
   readonly note: string;
 }
 
@@ -142,14 +144,23 @@ const NOT_REPORTED = 'Not reported';
 
 function tokenTile(tally: TokenTally | null): StatTile {
   if (tally === null) {
-    return {id: 'tokens', label: 'Tokens', figure: NOT_REPORTED, unit: null, note: ''};
+    return {
+      id: 'tokens',
+      label: 'Tokens',
+      figure: NOT_REPORTED,
+      unit: null,
+      quiet: true,
+      note: '',
+    };
   }
-  const count = (value: number | null): string => (value === null ? 'unknown' : compactTokens(value));
+  const count = (value: number | null): string =>
+    value === null ? 'unknown' : compactTokens(value);
   return {
     id: 'tokens',
     label: 'Tokens',
     figure: count(tally.input),
     unit: 'input',
+    quiet: false,
     note: [
       `${tally.cacheRead === null ? 'cached unknown' : `${compactTokens(tally.cacheRead)} cached`}`,
       `${count(tally.output)} output`,
@@ -165,12 +176,20 @@ export function statTiles(stats: RunStats): readonly StatTile[] {
     ...(ideas.running > 0 ? [`${ideas.running} running`] : []),
   ].join(' · ');
   return [
-    {id: 'ideas', label: 'Ideas tried', figure: String(ideas.tried), unit: null, note: ideaNote},
+    {
+      id: 'ideas',
+      label: 'Ideas tried',
+      figure: String(ideas.tried),
+      unit: null,
+      quiet: false,
+      note: ideaNote,
+    },
     {
       id: 'measurements',
       label: 'Measurements',
       figure: String(measurements.measured),
       unit: null,
+      quiet: false,
       note: `${measurements.failed} failed`,
     },
     {
@@ -178,6 +197,7 @@ export function statTiles(stats: RunStats): readonly StatTile[] {
       label: 'Agent time',
       figure: stats.agentSeconds === null ? '–' : workedWords(stats.agentSeconds),
       unit: null,
+      quiet: false,
       note: stats.runningSeconds === null ? '' : `of ${workedWords(stats.runningSeconds)} running`,
     },
     tokenTile(stats.tokens),

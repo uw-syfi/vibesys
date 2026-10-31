@@ -93,6 +93,7 @@ export function ideaStatus(idea: Candidate, change: Change | null): IdeaStatusVi
   if (measurement?.failed != null || measurement?.verdict === 'failed_check') {
     return {status: 'failed', cause: 'Check failed'};
   }
-  const status: IdeaStatus = idea.reason !== null && DROPPED.has(idea.reason) ? 'dropped' : 'failed';
+  const status: IdeaStatus =
+    idea.reason !== null && DROPPED.has(idea.reason) ? 'dropped' : 'failed';
   return {status, cause: causeOf(idea.reason, status)};
 }

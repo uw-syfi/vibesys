@@ -21,12 +21,24 @@ export {type HistoryLoadingView, historyLoadingView} from './history-words.js';
 export {type IdeaBase, type IdeaBases, ideaBases} from './idea-bases.js';
 export {effectWords, type IdeaEffect, type IdeaEffects, ideaEffects} from './idea-effects.js';
 export {ideaOutcomeLine, openIdeaId} from './idea-focus.js';
+export {type Impact, impactOf, type ObjectiveCell} from './idea-impact.js';
 export {
   type ImplementerOutcome,
   type ImplementerOutcomes,
   implementerOutcomes,
 } from './idea-outcomes.js';
+export {IDEA_STATUSES, type IdeaStatus, STATUS_WORDS} from './idea-status.js';
 export {outcomeWords} from './idea-words.js';
+export {
+  type CellForm,
+  DEFAULT_SORT,
+  type IdeasSort,
+  type IdeasTable,
+  type IdeaTableRow,
+  ideasTable,
+  type StatusChip,
+  type TableColumn,
+} from './ideas-table-view.js';
 export {
   type BestLine,
   bestLine,
@@ -44,18 +56,6 @@ export {
   type IdeasFilter,
   ideasView,
 } from './ideas-view.js';
-export {
-  DEFAULT_SORT,
-  type IdeasSort,
-  type IdeasTable,
-  type IdeaTableRow,
-  ideasTable,
-  type StatusChip,
-  type TableColumn,
-} from './ideas-table-view.js';
-export {IDEA_STATUSES, type IdeaStatus, STATUS_WORDS} from './idea-status.js';
-export {type Impact, impactOf, type ObjectiveCell} from './idea-impact.js';
-export {type RunStats, runStats, type StatTile, statTiles} from './run-stats.js';
 export type {GateFailure} from './input-gates.js';
 export {
   EMPTY_TRACE_LOG,
@@ -128,6 +128,7 @@ export {
   runWallNow,
   type SpanDetailReply,
 } from './run-page.js';
+export {type RunStats, runStats, type StatTile, statTiles} from './run-stats.js';
 export {type SummaryReply, summaryFacts, type WireSummary} from './run-summary.js';
 export {type RunningTime, runningSeconds, runningTimeOf} from './running-time.js';
 export {scrubberView, viewAtPosition} from './scrub.js';
