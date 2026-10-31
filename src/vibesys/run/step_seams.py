@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from vibesys.run.step_runners import RunnerSeams
 from vs_runtime.api.evaluation_step_runners import (
+    EachStageWorkReaper,
     HostStageWork,
     LocalJobStepRunner,
     SlurmJobStepRunner,
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
 
     from vibesys.run.core_services import ClosableEvaluation
     from vs_project.api import StateNamespace
+    from vs_runtime.api.core import JobRegistry
     from vs_runtime.api.infrastructure import (
         EnvironmentSystem,
         RunEnvironment,
@@ -34,17 +36,6 @@ if TYPE_CHECKING:
 
 NO_STEP_EVALUATION = frozenset({"skypilot", "modal"})
 """The environments whose agent runs the evaluation helper inside its turn."""
-
-
-class SlurmLedgerRequiredError(RuntimeError):
-    """A Slurm run has no evaluation ledger, so a job it left cannot be found again."""
-
-    def __init__(self) -> None:
-        """Say what the operator can do."""
-        super().__init__(
-            "a Slurm run finds its jobs again through the evaluation ledger: "
-            "set the [vibesys.ledger] table in the cluster's settings"
-        )
 
 
 def step_seams(  # noqa: PLR0913  # lint-waiver: LW-263519 [PLR0913]; each argument is an independent port or fact of the one environment this builds seams for.
@@ -70,7 +61,7 @@ def step_seams(  # noqa: PLR0913  # lint-waiver: LW-263519 [PLR0913]; each argum
         return RunnerSeams(agent_work=agent_work, jobs=None)
     if slurm is not None:
         return RunnerSeams(
-            agent_work=agent_work, jobs=_slurm_jobs(slurm, blocking, poll_interval_s)
+            agent_work=agent_work, jobs=_slurm_jobs(slurm, evaluation, blocking, poll_interval_s)
         )
     containers = DockerStepContainers(
         SubprocessDockerCli(processes=system.processes, launcher=system.launcher), run_id
@@ -79,25 +70,42 @@ def step_seams(  # noqa: PLR0913  # lint-waiver: LW-263519 [PLR0913]; each argum
         system.process_table, containers if kind == "docker" else None, run_id, blocking
     )
 
-    def local(clock: Clock) -> StepRunner:
+    def local(clock: Clock, registry: JobRegistry) -> StepRunner:
         return LocalJobStepRunner.on_host(
-            evaluation, stage_work, clock=clock, poll_interval_s=poll_interval_s
+            evaluation, stage_work, registry, clock=clock, poll_interval_s=poll_interval_s
         )
 
     return RunnerSeams(agent_work=agent_work, jobs=local)
 
 
 def _slurm_jobs(
-    slurm: SemanticSlurmEvaluationExecutor, blocking: BlockingRunner, poll_interval_s: float
-) -> Callable[[Clock], StepRunner]:
-    ledger = slurm.ledger
-    if ledger is None:
-        raise SlurmLedgerRequiredError
+    slurm: SemanticSlurmEvaluationExecutor,
+    evaluation: ClosableEvaluation,
+    blocking: BlockingRunner,
+    poll_interval_s: float,
+) -> Callable[[Clock, JobRegistry], StepRunner]:
+    """The job runner of a cluster run: adopt a job through the ledger, or end it and run again.
 
-    def jobs(clock: Clock) -> StepRunner:
+    A run whose operator configured ``[vibesys.ledger]`` finds a job its dead process left by the
+    request's key and attaches to it. Without a ledger nothing names the job but its handle, so
+    ``clear`` cancels that handle (the executor persists it) and the step runs on a new job. No
+    local process or container is involved, so there is no stage work to reap.
+    """
+    ledger = slurm.ledger
+
+    def jobs(clock: Clock, registry: JobRegistry) -> StepRunner:
+        if ledger is None:
+            return LocalJobStepRunner(
+                evaluation,
+                EachStageWorkReaper(),
+                registry,
+                clock=clock,
+                poll_interval_s=poll_interval_s,
+            )
         return SlurmJobStepRunner(
             slurm,
             SlurmScheduler(ledger, slurm.cluster, blocking),
+            registry,
             clock=clock,
             poll_interval_s=poll_interval_s,
         )

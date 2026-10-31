@@ -47,7 +47,6 @@ from vs_agent.api import AgentCapabilities, reap_orphaned_agents
 from vs_agent.api.testing import FakeAgentClient, FakeConfinement, FakeDockerBuildRunner
 from vs_core.api import EndReason
 from vs_core.api.testing import sample_limits
-from vs_project.api import FakeStateStores
 from vs_project.api.testing import FakeGitRepositories
 from vs_runtime.api import AgentRole
 from vs_runtime.api.core import RunTiming
@@ -212,7 +211,6 @@ def _run(
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(threads=threads),
             git_repository=_ProductGit().repository,
             # Run records in memory: hours of a run's virtual time take many commits.
-            state_stores=FakeStateStores(),
         ),
     )
 

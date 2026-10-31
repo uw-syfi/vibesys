@@ -39,6 +39,8 @@ from tests.support.scratch_tree import remove_scratch_tree
 from entrypoints.control import control_main, time_ordered_id
 from vibesys.events import CoreEventType
 from vibesys.orchestration.dynamic.scripted.api import IMPLEMENTER_KIND, PLANNER_KIND
+from vs_project.api import Project
+from vs_runlog.api import read_current_epoch
 from vs_sim.api import OsThreads
 from vs_sim.api.testing import HANG_GUARD_S
 from vs_slurm.fake_connector import active_jobs, pending_jobs, release_jobs
@@ -63,6 +65,7 @@ SILENCE_GUARD_S = 20.0
 A running scripted run reports many events a second, and a held step is waited for only
 until it announces itself, so a third of the hang guard is far above any healthy gap.
 """
+RESUMED_EPOCH = 2
 _PARKED = "parked"
 _COMPLETED = "completed"
 
@@ -313,6 +316,17 @@ def _wait_until_only_evaluations_remain(scenario: Scenario, run: RunProcess) -> 
     scenario.wait_for_pending_job()
 
 
+def _assert_epoch_opened_at_once(scenario: Scenario, resumed: RunProcess, run_id: str) -> None:
+    """The resumed process holds the run's lock and has recorded its epoch by its first report.
+
+    The run's lock is the only fence: the kernel dropped the killed writer's, so nothing waits
+    for a lease to lapse. The record is what is asserted, not the seconds.
+    """
+    resumed.wait_for(lambda line: "event" in line)
+    log = Project.run_log_path_for(scenario.loop_input.root, run_id)
+    assert read_current_epoch(log).number == RESUMED_EPOCH
+
+
 def _pause(scenario: Scenario, run: RunProcess) -> None:
     """Post ``vibesys control RUN pause`` while the run holds its step, and wait until it lands."""
     out, err = StringIO(), StringIO()
@@ -354,10 +368,6 @@ def test_a_run_paused_in_an_evaluation_resumes_to_the_uninterrupted_result(
     _assert_ends_as_uninterrupted(scenario, resumed.finish(), uninterrupted)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#3475 recovery redesign: the resumed run stays silent on the killed turn's request",
-)
 def test_a_run_killed_in_an_agent_turn_resumes_to_the_uninterrupted_result(
     scenario: Scenario, uninterrupted: dict[str, object]
 ) -> None:
@@ -366,6 +376,7 @@ def test_a_run_killed_in_an_agent_turn_resumes_to_the_uninterrupted_result(
     first.kill()
 
     resumed = scenario.resume(first.run_id)
+    _assert_epoch_opened_at_once(scenario, resumed, first.run_id)
 
     _assert_ends_as_uninterrupted(scenario, resumed.finish(), uninterrupted)
 
@@ -380,6 +391,29 @@ def test_a_run_killed_in_an_evaluation_resumes_to_the_uninterrupted_result(
     scenario.release_evaluations()
 
     resumed = scenario.resume(first.run_id)
+
+    _assert_ends_as_uninterrupted(scenario, resumed.finish(), uninterrupted)
+
+
+@pytest.mark.parametrize("released", ["before-resume", "after-resume"])
+def test_a_run_killed_as_its_evaluation_is_pending_resumes_whichever_the_job_ends_first(
+    scenario: Scenario, uninterrupted: dict[str, object], released: str
+) -> None:
+    """The kill lands where the judge's request may still be open, with the job held or let go.
+
+    A pending job is all this waits for, so the kill falls inside the judge's step in some runs:
+    the request an agent turn left open is cleared and run again like any other.
+    """
+    scenario.hold_evaluations()
+    first = scenario.start()
+    scenario.wait_for_pending_job()
+    first.kill()
+    if released == "before-resume":
+        scenario.release_evaluations()
+
+    resumed = scenario.resume(first.run_id)
+    if released == "after-resume":
+        scenario.release_evaluations()
 
     _assert_ends_as_uninterrupted(scenario, resumed.finish(), uninterrupted)
 

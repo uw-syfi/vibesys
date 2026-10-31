@@ -52,7 +52,6 @@ def test_scripted_agents_plan_edit_and_judge_through_the_real_backend(tmp_path: 
         NoAgents(),
         client_factory=scripted_client,
         slurm_processes=loop_input.connector,
-        state_stores=loop_input.state_stores,
         verify=False,
     )
 

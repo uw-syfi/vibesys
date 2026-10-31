@@ -85,7 +85,6 @@ if TYPE_CHECKING:
     from vibesys.api import CoreEvent, RunHandle
     from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionStore, SkillSelection
     from vs_agent.api.testing import FakeInvocation
-    from vs_project.api import StateStoreFactory
     from vs_runtime.api.infrastructure import StopTimer
     from vs_sandbox.api import ComputeBackendImpl
     from vs_sim.api import Processes
@@ -665,7 +664,6 @@ def run_request(  # noqa: PLR0913
     clock: CrashableRunClock | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     slurm_processes: Processes | None = None,
-    state_stores: StateStoreFactory | None = None,
 ) -> LoopRun:
     """Execute a built request through the production host composition.
 
@@ -696,7 +694,6 @@ def run_request(  # noqa: PLR0913
             piped_processes=SubprocessPipedProcessLauncher(),
             git_repository=None,
             slurm_processes=slurm_processes,
-            state_stores=state_stores,
         )
     )
     events: list[CoreEvent] = []
@@ -726,13 +723,11 @@ def run_request(  # noqa: PLR0913
 
     finished = asyncio.run(run()) if clock is None else run_virtual(clock, run())
     if verify and finished.error is None:
-        _assert_invariants(request, finished, state_stores)
+        _assert_invariants(request, finished)
     return finished
 
 
-def _assert_invariants(
-    request: RunRequest, run: LoopRun, state_stores: StateStoreFactory | None
-) -> None:
+def _assert_invariants(request: RunRequest, run: LoopRun) -> None:
     """Fail the scenario when the run's own records violate a loop invariant.
 
     A run that raised (a crash or stall) has no terminal event by design, so only runs
@@ -741,7 +736,7 @@ def _assert_invariants(
     root = request.project_root
     records = RunRecords.from_core(
         [event.model_dump(mode="json") for event in run.events],
-        load_envelope(Project.open(root, state_stores=state_stores), run.run_id),
+        load_envelope(Project.open(root), run.run_id),
         root.parent / "cluster",
         Project.log_directory_for(root, run.run_id),
     )

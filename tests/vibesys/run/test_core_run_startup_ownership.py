@@ -50,7 +50,6 @@ if TYPE_CHECKING:
         RunControlTransition,
         WorkspaceHolds,
     )
-    from vs_runtime.api.step_runner import StepRunner
 
 
 @search("startup-ownership", config=CounterConfig)
@@ -174,7 +173,7 @@ def _startup_host(
         catalog=cast("OperationCatalog", object()),
         steering=None,
         commit_observer=IgnoreCommits(),
-        runner=lambda step_clock, _epoch: cast("StepRunner", FakeStepRunner(step_clock)),
+        runner=lambda step_clock, _epoch: FakeStepRunner(step_clock),
         evaluation=cast("ClosableEvaluation", object()),
         artifacts=ArtifactStore(namespace),
         clock=RunClock(clock),

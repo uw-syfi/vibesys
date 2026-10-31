@@ -20,9 +20,7 @@ from vibesys.run.run_clock import RunClock
 from vibesys.run.step_runners import (
     RunnerSeams,
     RunnerServices,
-    UnwiredWorkCleaner,
     build_run_runner,
-    rerun_policies,
 )
 from vs_agent.api import (
     AgentBackend,
@@ -99,7 +97,7 @@ if TYPE_CHECKING:
         TrustedEvaluationPlan,
     )
     from vs_runtime.api.step_runner import StepRunner
-    from vs_sim.api import BlockingRunner, Clock, Network, SleepingClock, Threads
+    from vs_sim.api import BlockingRunner, Network, SleepingClock, Threads
 
 
 class CoreCompositionError(RuntimeError):
@@ -267,7 +265,7 @@ class CoreServices:
     """Reaches the turns this host runs while they run; ``None`` offers no input mid-turn."""
     commit_observer: CommitObserver
     """Hears the run's state after each record, for the committed view and its events."""
-    runner: Callable[[Clock, int], StepRunner]
+    runner: Callable[[SleepingClock, int], StepRunner]
     evaluation: ClosableEvaluation
     artifacts: ArtifactStore
     clock: RunClock
@@ -330,15 +328,9 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         run_id=run_id,
         executors=bound,
         catalog=catalog,
-        policies=rerun_policies(
-            {item.registration.descriptor.kind: item.role for item in policy.operations},
-            catalog,
-            UnwiredWorkCleaner(),
-        ),
         workspaces=resources.workspaces,
         sessions=None if sessions is None else sessions.agent_sessions,
         blocking=resources.blocking,
-        resuming=resources.resuming,
     )
     return CoreServices(
         run_id=run_id,

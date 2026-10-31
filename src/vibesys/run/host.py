@@ -62,7 +62,6 @@ from vs_runtime.api.infrastructure import (
     release_all,
     stop_gated_evaluation,
 )
-from vs_slurm.api import LedgerPolicy
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping
@@ -690,11 +689,9 @@ class _ProductHostFactory:
         if cluster is None:
             return None
         clock = self.timing.clock
-        policy = cluster.settings.policy
         return SlurmSemanticEvaluationExecutor(
             cluster.settings.config,
-            # A step finds its job again through the ledger, so a run always attaches to it.
-            policy.model_copy(update={"ledger": policy.ledger or LedgerPolicy()}),
+            cluster.settings.policy,
             cluster.plan,
             resources.evaluation_plan,
             workspaces,

@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vs_core.api import HostFence, HostId, LifecycleClass
+from vs_core.api import HostFence, HostId
 from vs_runtime.api.adoption_step_runner import AdoptionStepRunner
 from vs_runtime.api.agent_step_runners import (
     AgentTurnStepRunner,
@@ -20,27 +20,24 @@ from vs_runtime.api.agent_step_runners import (
     TurnPaths,
     TurnState,
 )
-from vs_runtime.api.core import OperationRole
-from vs_runtime.api.executor_step_runner import DECLARED_REPEATS, ExecutorStepRunner, ReadOnly
+from vs_runtime.api.core import JobRegistry
+from vs_runtime.api.executor_step_runner import DECLARED_REPEATS, ExecutorStepRunner
 from vs_runtime.api.operation_step_runner import (
-    ClearedWork,
-    KeyedWrite,
     OperationStepRunner,
 )
 from vs_runtime.api.step_router import NoRunnerError, StepRouter, StepRunnerParts, build_step_runner
-from vs_runtime.api.step_runner import Adopted, Cleared, ClearUnavailableError
+from vs_runtime.api.step_runner import Adopted, Cleared
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable
 
     from vs_agent.api import ClientAgentSessions
-    from vs_core.api import ExecuteRegisteredOperation, OperationRequest, Request, RequestId
+    from vs_core.api import ExecuteRegisteredOperation, Request, RequestId
     from vs_core.api.recovery import StepResult
     from vs_runtime.api.agent_step_runners import OperationTurns
     from vs_runtime.api.core import CoreExecutors, OperationCatalog
     from vs_runtime.api.evaluation_step_runners import StageWorkReaper
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
-    from vs_runtime.api.operation_step_runner import RerunPolicy, WorkCleaner
     from vs_runtime.api.step_runner import CancelSignal, StepRunner
     from vs_sim.api import BlockingRunner, Clock
 
@@ -51,8 +48,9 @@ class RunnerSeams:
 
     agent_work: StageWorkReaper
     """Ends the agent processes of one step by its tag, in the environment the agent runs in."""
-    jobs: Callable[[Clock], StepRunner] | None
-    """Builds the runner of ``SubmitMeasurement`` and owned-job operations on the run clock;
+    jobs: Callable[[Clock, JobRegistry], StepRunner] | None
+    """Builds the runner of ``SubmitMeasurement`` and owned-job operations on the run clock and
+    the registry that tells the run's other job requests where each job is;
     ``None`` where the agent runs the evaluation helper inside its turn (SkyPilot, Modal)."""
 
 
@@ -63,13 +61,9 @@ class RunnerServices:
     run_id: str
     executors: CoreExecutors
     catalog: OperationCatalog
-    policies: dict[str, RerunPolicy]
-    """What a rerun of each owned operation may repeat, by operation kind."""
     workspaces: RuntimeWorkspaces
     sessions: ClientAgentSessions | None
     blocking: BlockingRunner
-    resuming: bool
-    """Whether an earlier process ran this run: an adoption then keeps the operator's tree."""
 
 
 class NoOperationTurns:
@@ -130,12 +124,9 @@ def build_run_runner(
                 bound.evidence,
                 bound.observations,
                 clock=clock,
-                publishes=not services.resuming,
             ),
-            operations=OperationStepRunner(
-                services.catalog, services.policies, bound.observations, clock=clock
-            ),
-            jobs=None if seams.jobs is None else seams.jobs(clock),
+            operations=OperationStepRunner(services.catalog, bound.observations, clock=clock),
+            jobs=None if seams.jobs is None else seams.jobs(clock, JobRegistry(bound.store)),
         )
     )
 
@@ -174,65 +165,10 @@ class _AlwaysHeld:
         return True
 
 
-class UnwiredWorkCleaner:
-    """The cleaner of a command operation no environment can clear: it says so, and the run waits.
-
-    The two command operations run a process in a workspace, and nothing ends it by the step's
-    tag yet. A rerun after a crash therefore waits visibly on ``clear`` instead of repeating a
-    command whose process nobody ended.
-    """
-
-    async def clear(self, tag: RequestId, request: OperationRequest) -> None:
-        """Report that nothing here can end the processes of ``tag``."""
-        del request
-        raise ClearUnavailableError(tag, "no work cleaner is wired for command operations")
-
-
-_ROLE_RERUN: Mapping[OperationRole, ReadOnly | KeyedWrite] = {
-    OperationRole.RENDER_ARTIFACTS: KeyedWrite("the digest of the rendered artifact"),
-    OperationRole.VERIFY_REVISION: ReadOnly(),
-    OperationRole.INTERPRET_EVIDENCE: ReadOnly(),
-    OperationRole.RETAIN_REVISION: KeyedWrite("the retention label of the request"),
-    OperationRole.EXPORT_PATCH: ReadOnly(),
-}
-
-
-def rerun_policies(
-    roles: Mapping[str, OperationRole], catalog: OperationCatalog, cleaner: WorkCleaner
-) -> dict[str, RerunPolicy]:
-    """What a rerun of each owned operation may repeat, by operation kind.
-
-    A role fixes it for the runtime's own operations (``roles`` names the role of each kind the
-    strategy registered); a command role runs a process, so its policy is ``cleaner``. An
-    operation outside the roles is read only when it is a query and keyed when it is a write.
-    """
-    policies: dict[str, RerunPolicy] = {}
-    for entry in catalog.entries:
-        kind = entry.schema.kind
-        if entry.owner is None or entry.schema.lifecycle not in _RERUNNABLE:
-            continue
-        role = roles.get(kind)
-        if role is not None and role in _ROLE_RERUN:
-            policies[kind] = _ROLE_RERUN[role]
-        elif role is not None:
-            policies[kind] = ClearedWork(cleaner)
-        elif entry.schema.lifecycle is LifecycleClass.QUERY:
-            policies[kind] = ReadOnly()
-        else:
-            policies[kind] = KeyedWrite("the key the owner's inspect reads back")
-    return policies
-
-
-_RERUNNABLE = frozenset({LifecycleClass.QUERY, LifecycleClass.IDEMPOTENT_WRITE})
-"""The lifecycles the operation runner serves; a job or a turn is another runner's."""
-
-
 __all__ = [
     "NoOperationTurns",
     "RunnerSeams",
     "RunnerServices",
     "UnservedRunner",
-    "UnwiredWorkCleaner",
     "build_run_runner",
-    "rerun_policies",
 ]
