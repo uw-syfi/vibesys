@@ -5,8 +5,17 @@
  */
 import type {DashboardRow, RunRowStatus} from '@vibesys/feature-app-shell/state';
 import {digestKey, formatStarted} from '@vibesys/feature-app-shell/state';
+import type {MachineSteps} from '@vibesys/feature-runs-dashboard/renderer';
 import type {RunInput, StatusKind} from '@vibesys/feature-runs-dashboard/state';
-import type {HostKey} from '@vibesys/hosts';
+import {
+  type HostKey,
+  hostFromKey,
+  hostLabel,
+  type LoadStep,
+  loadSteps,
+  type MachineLoad,
+} from '@vibesys/hosts';
+import type {StepItem} from '@vibesys/ui';
 
 const STATUS_KINDS: Readonly<Record<RunRowStatus, StatusKind>> = {
   live: 'running',
@@ -25,6 +34,37 @@ const STATUS_WORDS: Readonly<Record<RunRowStatus, string>> = {
   stopped: 'stopped',
   unknown: 'unknown',
 };
+
+/** A step of `load` as the screen lists it, with what `load` adds to the step it stands on. */
+function stepItem(load: Exclude<MachineLoad, {readonly kind: 'listed'}>, step: LoadStep): StepItem {
+  const note =
+    load.kind === 'failed' ? load.reason : load.attempt > 0 ? `Retry ${load.attempt}` : null;
+  return {
+    id: step.step,
+    label: step.word,
+    state: step.state,
+    position: step.position,
+    ...(note === null ? {} : {note}),
+  };
+}
+
+/** The machines of `loads` that have not listed, each with its steps; a stopped one can `retry`. */
+export function loadingMachines(
+  loads: readonly MachineLoad[],
+  retry: (host: HostKey) => void,
+): MachineSteps[] {
+  return loads.flatMap(load =>
+    load.kind === 'listed'
+      ? []
+      : [
+          {
+            machine: hostLabel(hostFromKey(load.host)),
+            steps: loadSteps(load).map(step => stepItem(load, step)),
+            retry: load.kind === 'failed' ? () => retry(load.host) : null,
+          },
+        ],
+  );
+}
 
 /** How many runs the dashboard lists on each machine: what the Machines page says of each. */
 export function runCounts(rows: readonly {readonly host: HostKey}[]): ReadonlyMap<HostKey, number> {

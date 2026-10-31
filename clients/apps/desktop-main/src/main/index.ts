@@ -163,8 +163,8 @@ function runNotifier(preferences: PreferencesMain, focus: () => void): RunNotifi
 function watchHostRuns(gateway: ReturnType<typeof installGateway>, manager: ConnectionManager) {
   const runs = runWatch(
     {
-      stream: (host, bytes, signal, receive) =>
-        gateway.stream(hostKey(host), WATCH_RUNS_METHOD, bytes, signal, receive),
+      stream: (host, bytes, signal, receive, reached) =>
+        gateway.stream(hostKey(host), WATCH_RUNS_METHOD, bytes, signal, receive, reached),
     },
     realTimers,
   );

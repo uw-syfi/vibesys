@@ -137,11 +137,19 @@ export interface ShellActions {
    * for New run when it showed that run.
    */
   openWindow(run: RunRef): void;
+  /** Ask a machine for its runs again now, and the overview when that is what failed. */
+  retryLoad(host: HostKey): void;
 }
 
+/** The overview's one read: waited on, heard, or failed with what the bridge said. */
+type OverviewRead =
+  | {readonly kind: 'waiting'}
+  | {readonly kind: 'heard'}
+  | {readonly kind: 'failed'; readonly reason: string};
+
 export interface SidebarState {
-  /** Whether the overview (the first listings and Recent) has been heard. */
-  readonly overviewHeard: boolean;
+  /** Where the overview (the first listings and Recent) stands. */
+  readonly overview: OverviewRead;
   /** Whether any run has been shown: a machine that stops answering later has runs, not none. */
   readonly runsSeen: boolean;
   /** The latest listing of each host, one per host. */
@@ -170,6 +178,10 @@ export type SidebarAction =
       readonly recent: readonly RecentRun[];
       readonly skippedRecent: readonly SkippedRecent[];
     }
+  /** The overview could not be read; `reason` is what the bridge said. */
+  | {readonly type: 'overview-failed'; readonly reason: string}
+  /** The user asks for the overview again. */
+  | {readonly type: 'overview-asked'}
   | {readonly type: 'listing'; readonly listing: HostListing}
   | {readonly type: 'recent'; readonly recent: readonly RecentRun[]}
   | {readonly type: 'archived'; readonly archived: readonly RunRef[]}
@@ -206,7 +218,7 @@ export type SidebarRequest =
 export type SidebarStep = Step<SidebarState, SidebarRequest>;
 
 export const SIDEBAR_EMPTY: SidebarState = {
-  overviewHeard: false,
+  overview: {kind: 'waiting'},
   runsSeen: false,
   listings: [],
   recent: [],
@@ -529,11 +541,15 @@ function baseStep(state: SidebarState, action: SidebarAction): SidebarStep {
     case 'overview':
       return same({
         ...state,
-        overviewHeard: true,
+        overview: {kind: 'heard'},
         listings: action.listings.reduce<HostListing[]>(withListing, []),
         recent: action.recent,
         skippedRecent: action.skippedRecent,
       });
+    case 'overview-failed':
+      return same({...state, overview: {kind: 'failed', reason: action.reason}});
+    case 'overview-asked':
+      return same({...state, overview: {kind: 'waiting'}});
     case 'listing':
       return same({...state, listings: withListing(state.listings, action.listing)});
     // A pushed list is of a file the store has just written, which it writes only when all is readable.

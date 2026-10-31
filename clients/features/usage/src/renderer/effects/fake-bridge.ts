@@ -63,6 +63,7 @@ const listedHost = (host: HostKey): HostListing => ({
 const unavailableHost = (host: HostKey): HostListing => ({
   kind: 'unavailable',
   host,
+  step: 'gateway',
   connection: {kind: 'offline', detail: 'unreachable'},
 });
 
