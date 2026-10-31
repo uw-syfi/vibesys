@@ -25,6 +25,7 @@ from vs_core.api import (
 )
 from vs_core.api.recovery import Cancelled, CancelReason, Finished
 from vs_project.api import Project
+from vs_runtime.api import RuntimeContractError
 from vs_runtime.api.adoption_step_runner import AdoptionStepRunner
 from vs_runtime.api.core import ObservationFactory, ReceiptStore
 from vs_runtime.api.operation_fixtures import revision
@@ -36,7 +37,6 @@ from vs_runtime.api.testing import (
     StepRunnerContract,
     StepRunnerUnderTest,
 )
-from vs_runtime.contracts import RuntimeContractError
 from vs_sim.api.testing import HANG_GUARD_S, SimThreads, VirtualClock, run_virtual, yield_until
 
 if TYPE_CHECKING:
