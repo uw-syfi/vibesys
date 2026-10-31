@@ -17,7 +17,6 @@ from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
-from vs_sim.exit_wait import ExitWaiter, host_exit_waiter
 from vs_sim.output import Capture, OutputStream, tee
 
 if TYPE_CHECKING:
@@ -25,6 +24,7 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import IO
 
+    from vs_sim.exit_wait import ExitWaiter
     from vs_sim.output import OutputSink
 
 
@@ -195,7 +195,7 @@ class OsProcesses:
             stderr=subprocess.PIPE,
             process_group=0,
         )
-        group = _OwnedProcessGroup(process, host_exit_waiter())
+        group = _OwnedProcessGroup(process, _host_exit_waiter())
         captured = Capture(spec.max_output_bytes)
         pipes = _Pipes(spec.input, captured, tee(captured, output))
         deadline = None if timeout is None else time.monotonic() + timeout
@@ -626,6 +626,15 @@ def _signal_process_group(pid: int, number: signal.Signals) -> None:
         return
 
 
+def _host_exit_waiter() -> ExitWaiter:
+    """The host's exit waiter, loading ``vs_sim.exit_wait`` when a process first needs one."""
+    from vs_sim.exit_wait import (  # noqa: PLC0415  # lint-waiver: LW-731051 [PLC0415]; the host helper's hello path imports this module and its test caps the modules hello loads, so the waiter's module loads at the first process; a top-level import adds a module to every hello, and importlib would hide the declared dependency from tach.
+        host_exit_waiter,
+    )
+
+    return host_exit_waiter()
+
+
 class _ProcessGroupLeader(Protocol):
     """The identity and wait surface shared by text and binary ``Popen`` handles."""
 
@@ -827,7 +836,7 @@ class SubprocessPipedProcessLauncher:
 
     def __init__(self, *, exit_waiter: ExitWaiter | None = None) -> None:
         """Wait for a leader's exit with *exit_waiter*, by default the host's own mechanism."""
-        self._exit_waiter = host_exit_waiter() if exit_waiter is None else exit_waiter
+        self._exit_waiter = _host_exit_waiter() if exit_waiter is None else exit_waiter
 
     def start(
         self,
