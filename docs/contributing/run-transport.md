@@ -172,6 +172,13 @@ including as escalation during a drain. It warns: "Unfinished work may need repe
 still incur charges." Neither interruption becomes a policy failure or retry debit. Actual
 usage and accepted results remain saved. The quota hold is internal.
 
+A pause never exits with a request in flight. Both pauses close admission and wait until every
+request already dispatched has recorded its end. A pause may carry a drain deadline
+(`drain_seconds`; the run's cleanup bound for Pause now). At the deadline, a request that can be
+sent again goes back to unsent and is dispatched again by the next epoch, and the rest is
+cancelled and ends at its limit a cleanup bound later. The drain deadline is saved in the run's
+park (`RunPark.deadline_at`), so a restart keeps it.
+
 **Resume** permits every prior ending and starts a new epoch with a fresh duration, defaulting
 to the original length. Prior closing intents cannot close the successor epoch. It leaves the
 operator's project checkout in place. P1 uses today's core store and loader; retained older
