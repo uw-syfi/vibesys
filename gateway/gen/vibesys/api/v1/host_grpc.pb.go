@@ -30,6 +30,7 @@ const (
 	HostService_WatchRuns_FullMethodName        = "/vibesys.api.v1.HostService/WatchRuns"
 	HostService_GetBlobs_FullMethodName         = "/vibesys.api.v1.HostService/GetBlobs"
 	HostService_TailStream_FullMethodName       = "/vibesys.api.v1.HostService/TailStream"
+	HostService_Subscribe_FullMethodName        = "/vibesys.api.v1.HostService/Subscribe"
 )
 
 // HostServiceClient is the client API for HostService service.
@@ -59,6 +60,10 @@ type HostServiceClient interface {
 	WatchRuns(ctx context.Context, in *WatchRunsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchRunsResponse], error)
 	GetBlobs(ctx context.Context, in *GetBlobsRequest, opts ...grpc.CallOption) (*GetBlobsResponse, error)
 	TailStream(ctx context.Context, in *TailStreamRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TailStreamResponse], error)
+	// Subscribe sends one topic's keyed state, then conflated changes, until the
+	// client cancels or a failed frame ends it. The gateway shares one producer
+	// across subscribers and stops it when the last one leaves.
+	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SubscribeResponse], error)
 }
 
 type hostServiceClient struct {
@@ -215,6 +220,25 @@ func (c *hostServiceClient) TailStream(ctx context.Context, in *TailStreamReques
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type HostService_TailStreamClient = grpc.ServerStreamingClient[TailStreamResponse]
 
+func (c *hostServiceClient) Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SubscribeResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[4], HostService_Subscribe_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[SubscribeRequest, SubscribeResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type HostService_SubscribeClient = grpc.ServerStreamingClient[SubscribeResponse]
+
 // HostServiceServer is the server API for HostService service.
 // All implementations must embed UnimplementedHostServiceServer
 // for forward compatibility.
@@ -242,6 +266,10 @@ type HostServiceServer interface {
 	WatchRuns(*WatchRunsRequest, grpc.ServerStreamingServer[WatchRunsResponse]) error
 	GetBlobs(context.Context, *GetBlobsRequest) (*GetBlobsResponse, error)
 	TailStream(*TailStreamRequest, grpc.ServerStreamingServer[TailStreamResponse]) error
+	// Subscribe sends one topic's keyed state, then conflated changes, until the
+	// client cancels or a failed frame ends it. The gateway shares one producer
+	// across subscribers and stops it when the last one leaves.
+	Subscribe(*SubscribeRequest, grpc.ServerStreamingServer[SubscribeResponse]) error
 	mustEmbedUnimplementedHostServiceServer()
 }
 
@@ -284,6 +312,9 @@ func (UnimplementedHostServiceServer) GetBlobs(context.Context, *GetBlobsRequest
 }
 func (UnimplementedHostServiceServer) TailStream(*TailStreamRequest, grpc.ServerStreamingServer[TailStreamResponse]) error {
 	return status.Error(codes.Unimplemented, "method TailStream not implemented")
+}
+func (UnimplementedHostServiceServer) Subscribe(*SubscribeRequest, grpc.ServerStreamingServer[SubscribeResponse]) error {
+	return status.Error(codes.Unimplemented, "method Subscribe not implemented")
 }
 func (UnimplementedHostServiceServer) mustEmbedUnimplementedHostServiceServer() {}
 func (UnimplementedHostServiceServer) testEmbeddedByValue()                     {}
@@ -476,6 +507,17 @@ func _HostService_TailStream_Handler(srv interface{}, stream grpc.ServerStream) 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type HostService_TailStreamServer = grpc.ServerStreamingServer[TailStreamResponse]
 
+func _HostService_Subscribe_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(SubscribeRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(HostServiceServer).Subscribe(m, &grpc.GenericServerStream[SubscribeRequest, SubscribeResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type HostService_SubscribeServer = grpc.ServerStreamingServer[SubscribeResponse]
+
 // HostService_ServiceDesc is the grpc.ServiceDesc for HostService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -531,6 +573,11 @@ var HostService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "TailStream",
 			Handler:       _HostService_TailStream_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "Subscribe",
+			Handler:       _HostService_Subscribe_Handler,
 			ServerStreams: true,
 		},
 	},

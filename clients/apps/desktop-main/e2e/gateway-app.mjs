@@ -59,7 +59,7 @@ gatewayState.vibesysGatewayReady = app.whenReady().then(async () => {
       }),
   );
   ipcMain.on('vibesys:welcome:first-paint', event => {
-    event.returnValue = {theme: 'ink', chromeInset: {width: 0, height: 0}};
+    event.returnValue = {theme: 'ink', chromeInset: {startWidth: 0, startHeight: 0, endHeight: 0}};
   });
   const page = 'app://vibesys/gateway.html';
   const window = new BrowserWindow({

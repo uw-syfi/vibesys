@@ -104,7 +104,7 @@ def test_a_refusal_is_stored_and_not_launched_again() -> None:
     "payload",
     [
         b"\xff",
-        b"\0" * ((1 << 20) + 1),
+        pytest.param(b"\0" * ((1 << 20) + 1), id="over-one-mebibyte"),
         MutateRequest(checkout="/checkout").to_binary(),
         MutateRequest(
             checkout="/checkout",

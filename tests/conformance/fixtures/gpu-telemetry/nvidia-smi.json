@@ -1,0 +1,72 @@
+{
+  "provenance": "Synthetic rows in the shape vs_sandbox.gpu_monitor expects. No recording from a real GPU host exists yet, so this holds the two parsers to each other and not to a real tool.",
+  "query": [
+    "--query-gpu=index,uuid,name,memory.used,memory.total,utilization.gpu",
+    "--format=csv,noheader,nounits"
+  ],
+  "cases": [
+    {
+      "name": "two gpus",
+      "output": "0, GPU-00000000-0000-0000-0000-000000000000, NVIDIA Test GPU, 1024, 40960, 17\n1, GPU-11111111-1111-1111-1111-111111111111, NVIDIA Test GPU, 0, 40960, 0\n",
+      "gpus": [
+        {
+          "index": 0,
+          "uuid": "GPU-00000000-0000-0000-0000-000000000000",
+          "name": "NVIDIA Test GPU",
+          "memory_used_mib": 1024,
+          "memory_total_mib": 40960,
+          "utilization_pct": 17
+        },
+        {
+          "index": 1,
+          "uuid": "GPU-11111111-1111-1111-1111-111111111111",
+          "name": "NVIDIA Test GPU",
+          "memory_used_mib": 0,
+          "memory_total_mib": 40960,
+          "utilization_pct": 0
+        }
+      ]
+    },
+    {
+      "name": "no rows",
+      "output": "\n",
+      "gpus": []
+    },
+    {
+      "name": "a short row",
+      "output": "0, GPU-a, NVIDIA Test GPU, 1024, 40960, 17\nNo devices were found\n",
+      "gpus": [
+        {
+          "index": 0,
+          "uuid": "GPU-a",
+          "name": "NVIDIA Test GPU",
+          "memory_used_mib": 1024,
+          "memory_total_mib": 40960,
+          "utilization_pct": 17
+        }
+      ],
+      "refused_by_gateway": true
+    },
+    {
+      "name": "utilization not available",
+      "output": "0, GPU-a, NVIDIA Test GPU, 1024, 40960, [N/A]\n1, GPU-b, NVIDIA Test GPU, 0, 40960, 5\n",
+      "gpus": [
+        {
+          "index": 1,
+          "uuid": "GPU-b",
+          "name": "NVIDIA Test GPU",
+          "memory_used_mib": 0,
+          "memory_total_mib": 40960,
+          "utilization_pct": 5
+        }
+      ],
+      "refused_by_gateway": true
+    },
+    {
+      "name": "a comma in the name",
+      "output": "0, GPU-a, NVIDIA Test, GPU, 1024, 40960, 17\n",
+      "gpus": [],
+      "refused_by_gateway": true
+    }
+  ]
+}

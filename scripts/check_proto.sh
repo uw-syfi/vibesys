@@ -24,7 +24,7 @@ trap '[[ -z "$warm" ]] || kill "$warm" 2>/dev/null || true' EXIT
 stage layers uv run --locked python -m scripts.check_proto_layers
 stage lint uv run --locked --group proto buf lint
 stage generate ./scripts/generate_proto.sh
-generated=(proto/vibesys/host/v1/admission_receipt_generated.proto gateway/internal/hostoperations/registry_generated.go src/server/host_operation_types_generated.py libs/vs-proto/src/vs_proto/_generated clients/libs/proto/src/generated gateway/gen
+generated=(proto/vibesys/host/v1/admission_receipt_generated.proto gateway/internal/hostoperations/registry_generated.go gateway/internal/hostoperations/topics_generated.go src/server/host_operation_types_generated.py libs/vs-proto/src/vs_proto/_generated clients/libs/proto/src/generated gateway/gen
   libs/vs-core/src/vs_core/_generated libs/vs-runtime/src/vs_runtime/_core_values
   scripts/corevalue/tests/generated_pb scripts/corevalue/tests/generated_values scripts/corevalue/tests/generated_boundary)
 git diff --exit-code -- "${generated[@]}"
@@ -41,6 +41,11 @@ stage breaking breaking &
 pids+=("$!")
 # 1,000 small tests with no dominant one: spread across the cores the checks beside it leave, not one.
 stage pytest uv run --locked pytest libs/vs-proto/tests libs/vs-runlog/tests scripts/corevalue/tests scripts/host_operations/tests -n auto --no-cov -q &
+pids+=("$!")
+# A native golden that a schema change left stale fails here, from hashes alone and naming the
+# command that regenerates it; the golden tests that project every scenario run in the shards.
+# Its own process: each xdist worker above would import the projector's modules again.
+stage goldens uv run --locked pytest tests/vibesys/run/test_native_goldens_current.py --no-cov -q &
 pids+=("$!")
 go_gen() { (cd gateway && go build ./gen/... && go vet ./gen/...); }
 stage go go_gen &

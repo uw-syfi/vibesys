@@ -12,6 +12,7 @@ import {rawTextOf} from './checks/screen-check.js';
 import {settled} from './checks/settle.js';
 import {
   installFakeBridge,
+  installFakeChrome,
   installFakeMachines,
   installFakeNewRun,
   installFakeProjectRuns,
@@ -658,6 +659,7 @@ test('Run again opens Review with the run as it was started', async ({page}) => 
   );
   const seed = {...SEED, recent};
   await addInitScripts(page, [
+    initScript(installFakeChrome, seed),
     initScript(installFakeBridge, seed),
     initScript(installFakeProjectRuns, seed),
     initScript(installFakeMachines, seed),
@@ -1005,6 +1007,7 @@ test('a bridge call that throws is worded plainly, names what failed, and Try ag
   page,
 }) => {
   await addInitScripts(page, [
+    initScript(installFakeChrome, SEED),
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
     initScript(installFakeMachines, SEED),

@@ -1,0 +1,8 @@
+Processes: 832 total, 11 running, 821 sleeping, 5590 threads 
+Load Avg: 6.31, 6.65, 10.49 
+CPU usage: 79.55% user, 20.44% sys, 0.0% idle 
+PhysMem: 35G used (4258M wired, 5559M compressor), 89M unused.
+Processes: 837 total, 7 running, 830 sleeping, 5741 threads 
+Load Avg: 7.33, 6.86, 10.54 
+CPU usage: 68.76% user, 19.58% sys, 11.64% idle 
+PhysMem: 35G used (4143M wired, 5767M compressor), 167M unused.

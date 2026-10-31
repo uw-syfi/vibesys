@@ -13,7 +13,13 @@
  * `preload-sandbox`): the payload types come from the bridge interface, which types every member
  * below.
  */
-import type {FirstPaint, WelcomeBridge, WelcomeEvent, WelcomeResult} from '@vibesys/ipc';
+import type {
+  ChromeInset,
+  FirstPaint,
+  WelcomeBridge,
+  WelcomeEvent,
+  WelcomeResult,
+} from '@vibesys/ipc';
 
 type Channels = typeof import('@vibesys/ipc').WELCOME_CHANNELS;
 type Events = typeof import('@vibesys/ipc').WELCOME_EVENTS;
@@ -76,6 +82,8 @@ const EVENTS: Events = {
 };
 const FIRST_PAINT_CHANNEL: typeof import('@vibesys/ipc').FIRST_PAINT_CHANNEL =
   'vibesys:welcome:first-paint';
+const CHROME_INSET_CHANNEL: typeof import('@vibesys/ipc').CHROME_INSET_CHANNEL =
+  'vibesys:welcome:chrome-inset';
 const CONNECT_CHANNEL: typeof import('@vibesys/ipc').CONNECT_CHANNEL = 'vibesys:connect';
 const WAKE_CHANNEL: typeof import('@vibesys/ipc').WAKE_CHANNEL = 'vibesys:wake';
 const OPEN_SETTINGS_CHANNEL: typeof import('@vibesys/ipc').OPEN_SETTINGS_CHANNEL =
@@ -212,13 +220,22 @@ if (process.type === 'renderer') {
     }),
   );
   prepareFirstPaint(electron.ipcRenderer.sendSync(FIRST_PAINT_CHANNEL));
+  electron.ipcRenderer.on(CHROME_INSET_CHANNEL, (_event, inset: ChromeInset) =>
+    applyChromeInset(document.documentElement, inset),
+  );
+}
+
+/** Tell the page what the window's own controls cover, as the root element's `--chrome-*` properties. */
+function applyChromeInset(root: HTMLElement, inset: ChromeInset): void {
+  root.style.setProperty('--chrome-start-width', `${inset.startWidth}px`);
+  root.style.setProperty('--chrome-start-height', `${inset.startHeight}px`);
+  root.style.setProperty('--chrome-end-height', `${inset.endHeight}px`);
 }
 
 /**
- * Set the stored theme and the window controls' inset (`--chrome-inset-width`,
- * `--chrome-inset-height`) on the root element as the parser inserts it, before the first paint. A
- * preload runs before the document has a root element, so this waits for it with a mutation
- * observer, whose callback runs before the page renders.
+ * Set the stored theme and the window controls' inset on the root element as the parser inserts it,
+ * before the first paint. A preload runs before the document has a root element, so this waits for
+ * it with a mutation observer, whose callback runs before the page renders.
  */
 function prepareFirstPaint(reply: unknown): void {
   const firstPaint = reply as FirstPaint | undefined;
@@ -227,8 +244,7 @@ function prepareFirstPaint(reply: unknown): void {
     const root = document.documentElement;
     if (root === null) return false;
     root.setAttribute('data-theme', firstPaint.theme);
-    root.style.setProperty('--chrome-inset-width', `${firstPaint.chromeInset.width}px`);
-    root.style.setProperty('--chrome-inset-height', `${firstPaint.chromeInset.height}px`);
+    applyChromeInset(root, firstPaint.chromeInset);
     return true;
   };
   if (apply()) return;

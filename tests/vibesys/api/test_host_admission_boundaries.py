@@ -168,7 +168,9 @@ def test_an_uncertain_effect_is_not_reapplied_or_displaced_by_another_request(sl
 
 
 @pytest.mark.parametrize("slot", _SLOTS)
-@pytest.mark.parametrize("message", ["  ", "é" * 40000])
+@pytest.mark.parametrize(
+    "message", ["  ", pytest.param("é" * 40000, id="40000-two-byte-characters")]
+)
 def test_refusals_are_bounded_valid_utf8_and_replay_without_applying(
     slot: str, message: str
 ) -> None:
@@ -194,7 +196,9 @@ def test_refusals_are_bounded_valid_utf8_and_replay_without_applying(
 
 
 @pytest.mark.parametrize("slot", ["put_cluster", "create_example"])
-@pytest.mark.parametrize("payload", [b"\xff", b"\0" * ((1 << 20) + 1), b""])
+@pytest.mark.parametrize(
+    "payload", [b"\xff", pytest.param(b"\0" * ((1 << 20) + 1), id="over-one-mebibyte"), b""]
+)
 def test_invalid_envelopes_do_not_reach_the_effect(slot: str, payload: bytes) -> None:
     applied: list[str] = []
 
