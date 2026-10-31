@@ -15,7 +15,7 @@ from ._proofs import (
     accepted_receipt_for,
     admission_remaining,
     committed_stop,
-    draining,
+    stop_draining,
     stop_mode,
 )
 from ._request_ledger import due_retries
@@ -161,17 +161,21 @@ def _accepting(context: SchedulingContext) -> bool:
     # durable status, so closing intake cannot strand its already accepted FIFO.
     open_run = context.run.status == RunStatus.RUNNING and context.run.result is None
     return (
-        (open_run or draining(context.run))
+        (open_run or stop_draining(context.run))
         and context.run.now_at < context.run.deadline_at
         and context.records.recovery.phase == RecoveryPhase.READY
     )
 
 
 def _deadline_retirements(state: SchedulingState, context: SchedulingContext) -> tuple[Signal, ...]:
-    """Expired queued episodes retain ownership until Attempts proves retirement."""
+    """Expired queued episodes retain ownership until Attempts proves retirement.
+
+    A run draining an operator's pause (``RunStatus.DRAINING``) keeps its queue for the resume,
+    which retires what expired meanwhile: this check runs again then, and the entries hold no slot.
+    """
     live_run = context.run.status in (RunStatus.RUNNING, RunStatus.PAUSED)
     if context.run.now_at < context.run.deadline_at or not (
-        (live_run and context.run.result is None) or draining(context.run)
+        (live_run and context.run.result is None) or stop_draining(context.run)
     ):
         return ()
     return tuple(
