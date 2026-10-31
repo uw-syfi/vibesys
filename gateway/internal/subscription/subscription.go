@@ -25,8 +25,9 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// HeartbeatInterval is the longest gap between frames on a healthy stream.
-const HeartbeatInterval = 5 * time.Second
+// HeartbeatInterval is the longest gap between frames on a healthy stream. The
+// descriptor states it, so the client's lease is checked against the same number.
+var HeartbeatInterval = hostoperations.SubscribeFrameTiming.Heartbeat
 
 // StopGrace is how long a producer may take to return once it is cancelled. A
 // source that ignores its context cannot be killed, so past this the hub stops

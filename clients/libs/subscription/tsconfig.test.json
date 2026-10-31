@@ -1,0 +1,31 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    "types": [
+      "bun"
+    ],
+    "noEmit": true,
+    "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo"
+  },
+  "include": [
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx"
+  ],
+  "references": [
+    {
+      "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.testing.json"
+    },
+    {
+      "path": "../machine/tsconfig.testing.json"
+    },
+    {
+      "path": "../store/tsconfig.testing.json"
+    },
+    {
+      "path": "../transport/tsconfig.testing.json"
+    }
+  ]
+}

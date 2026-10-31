@@ -1,0 +1,520 @@
+{
+  "provenance": "Emitted by gateway/internal/subscription/corpus_test.go from the real hub. Run `go test ./internal/subscription -run TestFrameCorpus -update-corpus` to rewrite it. @vibesys/subscription folds every stream in a test.",
+  "max_keys": 4,
+  "cases": [
+    {
+      "name": "a snapshot of two keys",
+      "streams": [
+        {
+          "frames": [
+            {
+              "entry": {
+                "key": "a",
+                "machineStats": {
+                  "cpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "gpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "memoryUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "sampledAt": "1970-01-01T00:00:01Z"
+                }
+              }
+            },
+            {
+              "entry": {
+                "key": "b",
+                "machineStats": {
+                  "cpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "gpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "memoryUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "sampledAt": "1970-01-01T00:00:02Z"
+                }
+              }
+            },
+            {
+              "synced": {}
+            }
+          ],
+          "producer": {
+            "a": {
+              "cpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "gpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "memoryUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "sampledAt": "1970-01-01T00:00:01Z"
+            },
+            "b": {
+              "cpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "gpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "memoryUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "sampledAt": "1970-01-01T00:00:02Z"
+            }
+          },
+          "ends": "open"
+        }
+      ]
+    },
+    {
+      "name": "changes after the snapshot",
+      "streams": [
+        {
+          "frames": [
+            {
+              "entry": {
+                "key": "a",
+                "machineStats": {
+                  "cpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "gpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "memoryUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "sampledAt": "1970-01-01T00:00:01Z"
+                }
+              }
+            },
+            {
+              "entry": {
+                "key": "b",
+                "machineStats": {
+                  "cpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "gpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "memoryUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "sampledAt": "1970-01-01T00:00:02Z"
+                }
+              }
+            },
+            {
+              "synced": {}
+            },
+            {
+              "entry": {
+                "key": "a",
+                "machineStats": {
+                  "cpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "gpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "memoryUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "sampledAt": "1970-01-01T00:00:03Z"
+                }
+              }
+            },
+            {
+              "removed": "b"
+            },
+            {
+              "entry": {
+                "key": "c",
+                "machineStats": {
+                  "cpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "gpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "memoryUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "sampledAt": "1970-01-01T00:00:04Z"
+                }
+              }
+            }
+          ],
+          "producer": {
+            "a": {
+              "cpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "gpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "memoryUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "sampledAt": "1970-01-01T00:00:03Z"
+            },
+            "c": {
+              "cpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "gpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "memoryUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "sampledAt": "1970-01-01T00:00:04Z"
+            }
+          },
+          "ends": "open"
+        }
+      ]
+    },
+    {
+      "name": "an empty snapshot",
+      "streams": [
+        {
+          "frames": [
+            {
+              "synced": {}
+            }
+          ],
+          "producer": {},
+          "ends": "open"
+        }
+      ]
+    },
+    {
+      "name": "a key removed before it was sent is never sent",
+      "streams": [
+        {
+          "frames": [
+            {
+              "entry": {
+                "key": "a",
+                "machineStats": {
+                  "cpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "gpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "memoryUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "sampledAt": "1970-01-01T00:00:01Z"
+                }
+              }
+            },
+            {
+              "synced": {}
+            }
+          ],
+          "producer": {
+            "a": {
+              "cpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "gpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "memoryUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "sampledAt": "1970-01-01T00:00:01Z"
+            }
+          },
+          "ends": "open"
+        }
+      ]
+    },
+    {
+      "name": "writes between flushes are conflated to the latest value",
+      "streams": [
+        {
+          "frames": [
+            {
+              "entry": {
+                "key": "a",
+                "machineStats": {
+                  "cpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "gpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "memoryUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "sampledAt": "1970-01-01T00:00:01Z"
+                }
+              }
+            },
+            {
+              "synced": {}
+            },
+            {
+              "entry": {
+                "key": "a",
+                "machineStats": {
+                  "cpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "gpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "memoryUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "sampledAt": "1970-01-01T00:00:04Z"
+                }
+              }
+            }
+          ],
+          "producer": {
+            "a": {
+              "cpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "gpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "memoryUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "sampledAt": "1970-01-01T00:00:04Z"
+            }
+          },
+          "ends": "open"
+        }
+      ]
+    },
+    {
+      "name": "a new stream starts from the producer's map, not the last stream's",
+      "streams": [
+        {
+          "frames": [
+            {
+              "entry": {
+                "key": "a",
+                "machineStats": {
+                  "cpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "gpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "memoryUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "sampledAt": "1970-01-01T00:00:01Z"
+                }
+              }
+            },
+            {
+              "entry": {
+                "key": "b",
+                "machineStats": {
+                  "cpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "gpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "memoryUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "sampledAt": "1970-01-01T00:00:02Z"
+                }
+              }
+            },
+            {
+              "synced": {}
+            }
+          ],
+          "producer": {
+            "a": {
+              "cpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "gpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "memoryUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "sampledAt": "1970-01-01T00:00:01Z"
+            },
+            "b": {
+              "cpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "gpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "memoryUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "sampledAt": "1970-01-01T00:00:02Z"
+            }
+          },
+          "ends": "open"
+        },
+        {
+          "frames": [
+            {
+              "entry": {
+                "key": "a",
+                "machineStats": {
+                  "cpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "gpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "memoryUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "sampledAt": "1970-01-01T00:00:05Z"
+                }
+              }
+            },
+            {
+              "synced": {}
+            }
+          ],
+          "producer": {
+            "a": {
+              "cpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "gpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "memoryUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "sampledAt": "1970-01-01T00:00:05Z"
+            }
+          },
+          "ends": "open"
+        }
+      ]
+    },
+    {
+      "name": "heartbeats keep a quiet stream alive",
+      "streams": [
+        {
+          "frames": [
+            {
+              "entry": {
+                "key": "a",
+                "machineStats": {
+                  "cpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "gpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "memoryUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "sampledAt": "1970-01-01T00:00:01Z"
+                }
+              }
+            },
+            {
+              "synced": {}
+            },
+            {
+              "heartbeat": {}
+            },
+            {
+              "heartbeat": {}
+            }
+          ],
+          "producer": {
+            "a": {
+              "cpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "gpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "memoryUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "sampledAt": "1970-01-01T00:00:01Z"
+            }
+          },
+          "ends": "open"
+        }
+      ]
+    },
+    {
+      "name": "a failing topic ends its stream in a failed frame",
+      "streams": [
+        {
+          "frames": [
+            {
+              "entry": {
+                "key": "a",
+                "machineStats": {
+                  "cpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "gpuUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "memoryUnavailable": {
+                    "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+                  },
+                  "sampledAt": "1970-01-01T00:00:01Z"
+                }
+              }
+            },
+            {
+              "synced": {}
+            },
+            {
+              "failed": {
+                "code": "TOPIC_FAILURE_CODE_SOURCE_FAILED",
+                "detail": "scripted failure"
+              }
+            }
+          ],
+          "producer": {
+            "a": {
+              "cpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "gpuUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "memoryUnavailable": {
+                "reason": "ABSENCE_REASON_TOOL_NOT_FOUND"
+              },
+              "sampledAt": "1970-01-01T00:00:01Z"
+            }
+          },
+          "ends": "failed"
+        }
+      ]
+    }
+  ]
+}

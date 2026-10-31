@@ -1,7 +1,7 @@
 /** A real in-process HTTP/2 peer over memory duplexes, with controllable Tail delivery. */
 import {createServer, type ServerHttp2Session, type ServerHttp2Stream} from 'node:http2';
 import {Duplex, PassThrough} from 'node:stream';
-import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
+import {create, fromBinary, type MessageInitShape, toBinary} from '@bufbuild/protobuf';
 import {
   API_SCHEMA_HASH,
   HelloRequestSchema,
@@ -13,10 +13,15 @@ import {
   MutateRequestSchema,
   type ReadRequest,
   ReadRequestSchema,
+  type SubscribeRequest,
+  SubscribeRequestSchema,
+  SubscribeResponseSchema,
   TailRequestSchema,
+  validatedFromBinary,
   type WatchRequest,
   WatchRequestSchema,
 } from '@vibesys/proto';
+import {SUBSCRIBE_METHOD} from '@vibesys/subscription';
 import {GrpcError} from '@vibesys/transport';
 import {
   type GatewayDialer,
@@ -51,6 +56,19 @@ export interface FakeMutate {
   end(code?: number, detail?: string): void;
 }
 
+export interface FakeSubscribe {
+  readonly request: SubscribeRequest;
+  /** Settles when the client has ended this stream: cancelled it, run out of patience, or closed. */
+  readonly closed: Promise<void>;
+  send(frame: Frame): void;
+  /** The connection drops under the stream, as an ssh link does. */
+  disconnect(): void;
+  end(code?: number, detail?: string): void;
+}
+
+/** A frame as a test writes it: the case and the value's fields. */
+type Frame = NonNullable<MessageInitShape<typeof SubscribeResponseSchema>['frame']>;
+
 export interface FakeWatch {
   readonly request: WatchRequest;
   /** Settles when the client has ended this stream: cancelled it, run out of patience, or closed. */
@@ -73,6 +91,9 @@ export class FakeGateway implements GatewayDialer {
   readonly #hostWaiters: Array<(call: FakeHostCall) => void> = [];
   readonly #mutations: FakeMutate[] = [];
   readonly #mutateWaiters: Array<(call: FakeMutate) => void> = [];
+  #subscribed = 0;
+  readonly #subscribes: FakeSubscribe[] = [];
+  readonly #subscribeWaiters: Array<(subscribe: FakeSubscribe) => void> = [];
   readonly #watches: FakeWatch[] = [];
   readonly #watchWaiters: Array<(watch: FakeWatch) => void> = [];
   readonly #reads: FakeRead[] = [];
@@ -145,6 +166,10 @@ export class FakeGateway implements GatewayDialer {
       this.#watch(stream, bytes);
       return true;
     }
+    if (method === SUBSCRIBE_METHOD) {
+      this.#subscribe(stream, bytes);
+      return true;
+    }
     return false;
   }
 
@@ -181,6 +206,25 @@ export class FakeGateway implements GatewayDialer {
     const waiter = this.#watchWaiters.shift();
     if (waiter === undefined) this.#watches.push(watch);
     else waiter(watch);
+  }
+
+  #subscribe(stream: ServerHttp2Stream, bytes: Uint8Array): void {
+    this.#subscribed += 1;
+    const session = stream.session;
+    const subscribe: FakeSubscribe = {
+      request: validatedFromBinary(SubscribeRequestSchema, bytes),
+      closed: new Promise<void>(resolve => stream.once('close', () => resolve())),
+      send: frame => {
+        stream.write(
+          grpcFrame(toBinary(SubscribeResponseSchema, create(SubscribeResponseSchema, {frame}))),
+        );
+      },
+      disconnect: () => session?.destroy(),
+      end: (code, detail) => end(stream, code, detail),
+    };
+    const waiter = this.#subscribeWaiters.shift();
+    if (waiter === undefined) this.#subscribes.push(subscribe);
+    else waiter(subscribe);
   }
 
   #read(stream: ServerHttp2Stream, bytes: Uint8Array): void {
@@ -264,6 +308,18 @@ export class FakeGateway implements GatewayDialer {
     return watch === undefined
       ? new Promise(resolve => this.#watchWaiters.push(resolve))
       : Promise.resolve(watch);
+  }
+
+  /** How many Subscribe requests the gateway has received, however many are still open. */
+  get subscribed(): number {
+    return this.#subscribed;
+  }
+
+  nextSubscribe(): Promise<FakeSubscribe> {
+    const subscribe = this.#subscribes.shift();
+    return subscribe === undefined
+      ? new Promise(resolve => this.#subscribeWaiters.push(resolve))
+      : Promise.resolve(subscribe);
   }
 
   nextRead(): Promise<FakeRead> {
