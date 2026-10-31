@@ -18,8 +18,8 @@ import {
   readObjective,
 } from './objective-reading.js';
 import type {RunModel} from './run-model.js';
-import {type RunningTime, runningTimeOf} from './running-time.js';
-import {duration, formatValue, ratio} from './span-reading.js';
+import {type RunningTime, runningTimeOf, runningWords} from './running-time.js';
+import {formatValue, ratio} from './span-reading.js';
 
 /** One reading of an objective as the chart draws it. */
 export interface ChartReadingView {
@@ -123,11 +123,6 @@ function timeTicks(seconds: number) {
   return found;
 }
 
-/** A length of running time as the axis words it: to the minute from a minute on (`11h 18m`). */
-function runningWords(seconds: number): string {
-  return duration(seconds < 60 ? seconds : Math.round(seconds / 60) * 60);
-}
-
 function unitOf(model: RunModel, reading: ObjectiveReading, alone: boolean): string {
   if (alone) return objectiveUnit(model.overview);
   const unit = model.candidates.candidates
@@ -181,7 +176,10 @@ function chartOf(
       lit.has(point.id) &&
       stepped.some(step => step.idea === point.id && step.value === point.value),
   }));
-  const end = Math.max(MIN_AXIS, minutes(frame.reached), ...readings.map(point => point.x));
+  // What the run has worked, as the time bar says it: the axis may be longer (`MIN_AXIS`), this is not.
+  const worked = Math.max(time.at(frame.reached), ...reading.fold.points.map(p => time.at(p.at)));
+  const reached = Math.max(MIN_AXIS * 60, worked);
+  const end = reached / 60;
   const steps = stepped.map(step => ({x: minutes(step.at), y: step.value}));
   if (reading.input !== null) steps.unshift({x: 0, y: reading.input});
   const last = steps.at(-1);
@@ -210,11 +208,11 @@ function chartOf(
     start: reading.input === null ? null : 'Input',
     baselines,
     xEnd: end,
-    xTicks: timeTicks(end * 60),
+    xTicks: timeTicks(reached),
     yTicks: empty ? [] : valueTicks(low, top),
     yDomain: [low, top > 0 ? top * HEADROOM : 1],
     resumes: time.resumes.map(seconds => seconds / 60),
-    caption: `running time · ${runningWords(end * 60)}`,
+    caption: `running time · ${runningWords(worked)}`,
     cursor: scrub === null ? null : minutes(scrub),
   };
 }

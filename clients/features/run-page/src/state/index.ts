@@ -120,7 +120,7 @@ export {
   type SpanDetailReply,
 } from './run-page.js';
 export {type SummaryReply, summaryFacts, type WireSummary} from './run-summary.js';
-export {type RunningTime, runningSeconds, runningTimeOf} from './running-time.js';
+export {type RunningTime, runningTimeOf, runningWords} from './running-time.js';
 export {hasDiagnostic} from './scoped-logs.js';
 export {scrubberView, viewAtPosition} from './scrub.js';
 export {

@@ -9,7 +9,6 @@
  * for the time bar, so the time bar's position and the charts' cursor name one moment.
  */
 import type {RunSession} from '@vibesys/run-state/skeleton';
-import type {RunModel} from './run-model.js';
 
 /** A stopped stretch of the run clock. */
 interface Gap {
@@ -66,10 +65,14 @@ export function placesAlong(seconds: readonly number[]): readonly number[] {
 }
 
 /**
- * The seconds the run has worked in all, from its start to the latest time it recorded: the sum of
- * what its sessions worked, with every stopped stretch left out. Null before the run recorded a
- * time. This is the one sum a header, a stats row and a chart's caption say of the run's length.
+ * A length of running time in words, the one way the screen says it: the time bar's word and the
+ * caption of every chart. Floored, because a clock never says a time it has not reached: to the
+ * second below an hour (`21m 40s`), to the minute from an hour on (`11h 17m`).
  */
-export function runningSeconds(whole: RunModel, start: number): number | null {
-  return whole.latest === null ? null : runningTimeOf(whole.sessions ?? [], start).at(whole.latest);
+export function runningWords(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds));
+  if (whole < 60) return `${whole}s`;
+  const minutes = Math.floor(whole / 60);
+  if (minutes < 60) return `${minutes}m ${String(whole % 60).padStart(2, '0')}s`;
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
 }
