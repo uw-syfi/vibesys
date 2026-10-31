@@ -16,6 +16,7 @@ from tests.support.sharding import (
     DEFAULT_DURATIONS,
     HEAVY_SHARE,
     SHARD_BUDGET_SECONDS,
+    WORKERS_PER_SHARD,
     assign_heavy_items,
     assign_shards,
     discover_test_files,
@@ -196,7 +197,7 @@ def test_a_file_missing_from_the_record_or_far_over_it_is_reported_as_stale() ->
         {"old.py": 90.0, "close.py": 30.0, "tiny.py": 1.0},
     )
 
-    assert seconds == pytest.approx(385.0)
+    assert seconds == pytest.approx(770.0 / WORKERS_PER_SHARD)
     assert [line.split(":")[0] for line in stale] == ["new.py"]
 
 
@@ -229,6 +230,23 @@ def test_the_checked_in_record_keeps_every_ci_shard_within_its_budget() -> None:
     assert max(projected) <= SHARD_BUDGET_SECONDS, (
         f"projected slowest shard {max(projected):.0f}s exceeds {SHARD_BUDGET_SECONDS:.0f}s: "
         "add shards in .github/workflows/test.yml or refresh tests/support/shard_durations.json"
+    )
+
+
+def test_the_checked_in_record_names_nearly_every_test_file() -> None:
+    # The cold-start record and the floor under every cache entry. It had decayed to 920 of
+    # 1,432 files and a quarter of the suite's seconds, so the budget check above passed on
+    # a record that did not describe the suite. A new file is not an error; a quarter of the
+    # suite missing is a record nobody refreshed.
+    durations = json.loads(DEFAULT_DURATIONS.read_text())
+    options = tomllib.loads((_REPO / "pyproject.toml").read_text())["tool"]["pytest"]["ini_options"]
+    files = discover_test_files(_REPO, options["testpaths"], ["test_*.py", "*_test.py"])
+
+    missing = [name for name in files if name not in durations]
+
+    assert len(missing) <= len(files) // 20, (
+        f"{len(missing)} of {len(files)} test files have no recorded seconds, e.g. {missing[:3]}: "
+        "refresh tests/support/shard_durations.json (scripts/refresh_shard_durations.py)"
     )
 
 
