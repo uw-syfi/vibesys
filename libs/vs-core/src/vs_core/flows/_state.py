@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from hashlib import sha256
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal, Self
 
 from pydantic import Field, TypeAdapter, field_validator
 
@@ -55,6 +55,8 @@ from vs_core.types.until import Failed
 from ._spans import RunTrace, SpanLabel
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from vs_core._registry import OperationRegistry
 
 
@@ -272,6 +274,36 @@ class FlowState(StrategyState):
     restart_settled: tuple[RestartSettled, ...] = ()
     """The workspaces the restarts since this journal began settled themselves, with why."""
 
+    def extended(self, changes: Iterable[bytes]) -> Self:
+        """This state with each of ``changes`` (a ``FlowChanges`` from a log) applied in order.
+
+        ``live`` keeps the flows' snapshots of the checkpoint it came from, which is where a
+        restart on changed code starts, but its decision numbers are current: the restarted flows
+        never reuse the id of a decision the dead ones issued. The steps are joined once, so
+        reading a long run of changes costs their size and not the journal's per change.
+        """
+        steps = list(self.journal)
+        dropped, settled = self.dropped, self.restart_settled
+        published = self.live.published
+        issued = {(i.path, i.label): i for i in self.live.issued}
+        for encoded in changes:
+            gained = FlowChanges.model_validate_json(encoded)
+            steps.extend(gained.steps)
+            dropped, settled = gained.dropped, gained.restart_settled
+            published = published if gained.published is None else gained.published
+            issued.update({(i.path, i.label): i for i in gained.issued})
+        live = self.live.model_copy(
+            update={"issued": tuple(issued.values()), "published": published}
+        )
+        return self.model_copy(
+            update={
+                "journal": tuple(steps),
+                "dropped": dropped,
+                "restart_settled": settled,
+                "live": live,
+            }
+        )
+
 
 class FlowChanges(Value):
     """What one advance added to a ``FlowState``.
@@ -286,6 +318,9 @@ class FlowChanges(Value):
     issued: tuple[Issued, ...] = ()
     """The decision numbers the steps moved: a restart from an older checkpoint must number past
     every id the dead flows issued, or an answer for an old decision reaches a new one."""
+    published: str | None = None
+    """The record the flows published in these steps, when they did: what a reader of the log
+    shows of the run, which the steps alone do not rebuild without running the flows."""
 
 
 _DECISIONS = TypeAdapter(list[Decision])

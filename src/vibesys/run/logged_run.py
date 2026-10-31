@@ -1,10 +1,11 @@
 """A run's state as its run.log leaves it, for a process that is not running it.
 
-The log is the one truth of a run: core's state is a fold of its records. A reader that holds no
-search driver cannot replay the search's steps, so it takes the search's state from the last whole
-state the log holds. The search logs one at a restart, as the log doubles, and when the run
-parks or ends: exact for a run at rest, and as old as the last of them for a run still going.
-The process running the run shows the live state through its commit observer instead.
+The log is the one truth of a run: core's state is a fold of its records, and the search's state
+is the last whole state the log holds with the changes its later records add (``FlowState``
+extended by them). The search logs a whole state at a restart, as the log doubles, and when the
+run parks or ends, and every other advance logs only what it adds, so a run still going is read
+exactly as of the last committed record. A read costs the committed log once (its records) and
+the changes after the last whole state, which are fewer than the records the run has logged.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from protobuf import Oneof
 
+from vs_core.api import FlowState
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import Project
 from vs_proto.api import RUN_LOG_MAX_RECORD_BYTES
@@ -23,21 +25,21 @@ from vs_runtime.api.step_runner import saved_run_in, start_fold
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from vs_core.api import CoreState, OperationRegistry, StrategyState
+    from vs_core.api import CoreState, OperationRegistry
     from vs_proto.api import Record
 
 
 @dataclass(frozen=True)
-class LoggedRun[S: StrategyState]:
+class LoggedRun[S: FlowState]:
     """What a log shows of a run."""
 
     core: CoreState
     """The fold of the log's committed prefix."""
     strategy: S | None
-    """The search's state at the last whole state the log holds; ``None`` before the first."""
+    """The search's state as of the last committed record; ``None`` before its first whole state."""
 
 
-def read_logged_run[S: StrategyState](
+def read_logged_run[S: FlowState](
     project: Project, run_id: str, *, registry: OperationRegistry, state_type: type[S]
 ) -> LoggedRun[S] | None:
     """The run ``run_id`` as its log leaves it, or None while the log holds no start of it.
@@ -54,25 +56,37 @@ def read_logged_run[S: StrategyState](
     )
     if folded is None:
         return None
-    return LoggedRun(folded.state, _last_whole_state(records, registry, state_type))
+    return LoggedRun(folded.state, _search_state(records, registry, state_type))
 
 
-def _last_whole_state[S: StrategyState](
+def _search_state[S: FlowState](
     records: Sequence[Record], registry: OperationRegistry, state_type: type[S]
 ) -> S | None:
+    """The last whole state the log holds, extended by the changes of the records after it."""
+    changes: list[bytes] = []
     for record in reversed(records):
         encoded = _whole_state_of(record, registry)
         if encoded is not None:
-            decoded = decode_json(
-                encoded,
-                state_type,
-                source=f"the search state in record {record.seq} of the log",
-                max_bytes=RUN_LOG_MAX_RECORD_BYTES,
-            )
-            if isinstance(decoded, Unreadable):
-                raise ValueError(str(decoded))
-            return decoded
+            return _decoded(encoded, record, state_type).extended(reversed(changes))
+        if record.body is not None and record.body.field == "strategy_advanced":
+            match record.body.value.strategy:
+                case Oneof(field="steps", value=gained):
+                    changes.append(gained)
     return None
+
+
+def _decoded[S: FlowState](encoded: bytes, record: Record, state_type: type[S]) -> S:
+    decoded = decode_json(
+        encoded,
+        state_type,
+        source=f"the search state in record {record.seq} of the log",
+        max_bytes=RUN_LOG_MAX_RECORD_BYTES,
+    )
+    match decoded:
+        case Unreadable():
+            raise ValueError(str(decoded))
+        case _:
+            return decoded
 
 
 def _whole_state_of(record: Record, registry: OperationRegistry) -> bytes | None:
