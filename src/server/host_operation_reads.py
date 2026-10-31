@@ -372,7 +372,7 @@ def stream_saved_runs(
     operations = import_module("vibesys.api.host_operations.api")
     try:
         operations.serve_saved_runs(payload, source, cli="stream-saved-runs", write=write)
-    except ProjectLookupError as error:
+    except import_module("server.host_examples").ProjectLookupError as error:
         write(operations.host_watch_failure(read_failure_category(error.code), str(error)))
 
 

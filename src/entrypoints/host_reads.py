@@ -7,7 +7,7 @@ never constructs the project catalog, the registry or the agent library, and ``l
 constructs the compute settings. ``describe-machine`` and ``preflight-run`` genuinely read the
 whole host (its registry, machine probes and launcher), so they build the helper's host on use.
 
-Public surface: ``ReadHost`` and ``serve_read``.
+Public surface: ``ReadHost``, ``read_source`` and ``serve_read``.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from server.host_helper_os import FileProjects, OsDirectories
     from server.host_helper_requests import ExampleProjects, HelperHost
     from server.host_machine_facts import MachineDescription
+    from server.host_operation_reads import HostReadSource
     from server.registry import LiveRegistry
     from vs_sim.api import Clock, Platform
 
@@ -117,9 +118,14 @@ class ReadHost:
         )
 
 
-def serve_read(cli: str, payload: bytes, *, platform: Platform) -> bytes:
-    """Answer registered read ``cli`` for this process's user; the reply is the envelope bytes."""
+def read_source(platform: Platform) -> HostReadSource:
+    """The read adapter over this process's user, host and ``platform``."""
     host = ReadHost(os.environ, os.getuid(), platform)
     reads = import_module("server.host_operation_reads")
-    source = reads.HostReadSource(host, None, describe=host.describe, preflight=host.preflight)
-    return reads.answer_registered_read(cli, payload, source)
+    return reads.HostReadSource(host, None, describe=host.describe, preflight=host.preflight)
+
+
+def serve_read(cli: str, payload: bytes, *, platform: Platform) -> bytes:
+    """Answer registered read ``cli`` for this process's user; the reply is the envelope bytes."""
+    reads = import_module("server.host_operation_reads")
+    return reads.answer_registered_read(cli, payload, read_source(platform))

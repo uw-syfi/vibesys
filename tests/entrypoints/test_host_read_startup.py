@@ -29,6 +29,8 @@ from vs_proto.api import (
     ReadRequest,
     ReadResponse,
     Timestamp,
+    WatchRequest,
+    WatchResponse,
     host_operations,
     validate,
 )
@@ -85,9 +87,10 @@ class _Read:
     """One registered read: its command, the request that exercises its answer, its limits."""
 
     command: str
-    build: Callable[[Path], ReadRequest]
+    build: Callable[[Path], ReadRequest | WatchRequest]
     reply: str
-    """The reply slot a successful answer fills (``failure`` where the request is refused)."""
+    """The reply slot a successful answer fills (``failure`` where the request is refused). A
+    stream's is the slot of its last frame."""
     modules: int
     """The most modules the command may load, counted in a fresh interpreter."""
     agent_library: bool = False
@@ -96,10 +99,23 @@ class _Read:
     """Whether the read needs the helper's whole host."""
     catalog: bool = False
     """Whether the read is a catalog the app asks for at every launch: it answers from files."""
+    stream: bool = False
+    """Whether the command answers with framed responses, not one envelope."""
 
 
 def _request(slot: str, message: object) -> ReadRequest:
     request = ReadRequest(checkout="/src/checkout", method=Oneof(slot, message))
+    validate(request)
+    return request
+
+
+def _watch(project: Path) -> WatchRequest:
+    request = WatchRequest(
+        checkout="/src/checkout",
+        method=Oneof(
+            "stream_saved_runs", pb.StreamSavedRunsRequest(request_id="r", project=str(project))
+        ),
+    )
     validate(request)
     return request
 
@@ -189,12 +205,11 @@ READS: tuple[_Read, ...] = (
         catalog=True,
     ),
     _Read(
-        "list-saved-runs",
-        lambda project: _request(
-            "list_saved_runs", pb.ListSavedRunsRequest(request_id="r", project=str(project))
-        ),
-        "list_saved_runs",
+        "stream-saved-runs",
+        _watch,
+        "stream_saved_runs",
         modules=580,
+        stream=True,
     ),
     _Read(
         "list-run-digests",
@@ -241,7 +256,8 @@ READS: tuple[_Read, ...] = (
 class _Probe:
     """What one fresh interpreter reported for one read."""
 
-    reply: ReadResponse
+    reply: str
+    """The slot the reply (a stream's last frame) fills."""
     modules: frozenset[str]
     spawned: tuple[str, ...]
 
@@ -281,9 +297,26 @@ def _probe(read: _Read, root: Path) -> _Probe:
     )
     report = json.loads(completed.stderr.decode().strip().splitlines()[-1])
     assert report["status"] == 0
-    reply = ReadResponse.from_binary(completed.stdout)
-    validate(reply)
-    return _Probe(reply, frozenset(report["modules"]), tuple(report["spawned"]))
+    return _Probe(
+        _reply_slot(read, completed.stdout), frozenset(report["modules"]), tuple(report["spawned"])
+    )
+
+
+def _reply_slot(read: _Read, written: bytes) -> str:
+    """The slot the reply fills: a read's one envelope, or the last frame of a stream."""
+    if not read.stream:
+        reply = ReadResponse.from_binary(written)
+        validate(reply)
+        assert reply.result is not None
+        return reply.result.field
+    frame = b""
+    while written:
+        length = int.from_bytes(written[:4], "big")
+        frame, written = written[4 : 4 + length], written[4 + length :]
+    last = WatchResponse.from_binary(frame)
+    validate(last)
+    assert last.result is not None
+    return last.result.field
 
 
 def _loaded(probe: _Probe, roots: tuple[str, ...]) -> list[str]:
@@ -300,8 +333,7 @@ def test_a_read_loads_only_the_modules_it_uses(read: _Read, host_directory: Path
     does not touch, or whose closure grows past its budget."""
     probe = _probe(read, host_directory)
 
-    assert probe.reply.result is not None
-    assert probe.reply.result.field == read.reply
+    assert probe.reply == read.reply
     assert _loaded(probe, _ENGINE) == []
     if not read.agent_library:
         assert _loaded(probe, _AGENT_LIBRARY) == []
@@ -322,4 +354,5 @@ def test_a_catalog_read_starts_no_process(read: _Read, host_directory: Path) -> 
 
 def test_every_registered_read_has_a_probe() -> None:
     registered = {operation.cli for operation in host_operations.READ_CALLS}
-    assert registered | {"inspect-candidate"} == {read.command for read in READS}
+    watches = {slot.replace("_", "-") for slot in host_operations.WATCHES} - {"login"}
+    assert registered | watches | {"inspect-candidate"} == {read.command for read in READS}

@@ -148,7 +148,7 @@ def main(
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
         _WATCH_SERVERS[_WATCH_COMMANDS[arguments[0]]](
-            source.read((1 << 20) + 1), destination, threads
+            source.read((1 << 20) + 1), destination, runtime
         )
         return 0
     if arguments and arguments[0] in _MUTATION_COMMANDS:
@@ -193,10 +193,9 @@ def main(
     return code
 
 
-def _serve_saved_runs(payload: bytes, destination: BinaryIO, threads: Threads) -> None:
+def _serve_saved_runs(payload: bytes, destination: BinaryIO, platform: Platform) -> None:
     """Stream one project's runs: one scan in this process, a frame as each batch is read."""
-    host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
-    facts = import_module("server.host_helper_requests").registry_read_source(host)
+    facts = import_module("entrypoints.host_reads").read_source(platform)
 
     def write(chunk: bytes) -> None:
         destination.write(chunk)
@@ -206,14 +205,15 @@ def _serve_saved_runs(payload: bytes, destination: BinaryIO, threads: Threads) -
     import_module("server.host_operation_reads").stream_saved_runs(payload, facts, write)
 
 
-def _serve_login(payload: bytes, destination: BinaryIO, threads: Threads) -> None:
+def _serve_login(payload: bytes, destination: BinaryIO, platform: Platform) -> None:
     """Wire the native login watch without constructing unrelated helper resources."""
+    threads = platform.threads
     launcher = import_module("vs_sim.api").SubprocessPipedProcessLauncher()
     logins = import_module("server.host_agent_logins").host_logins(launcher, threads)
     watch_login(payload, destination, logins, threads, WakeupFdSignalRelay(threads))
 
 
-_WATCH_SERVERS: dict[str, Callable[[bytes, BinaryIO, Threads], None]] = {
+_WATCH_SERVERS: dict[str, Callable[[bytes, BinaryIO, Platform], None]] = {
     "login": _serve_login,
     "stream_saved_runs": _serve_saved_runs,
 }
