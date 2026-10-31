@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run a service and a client under one bounded POSIX process-group owner.
 
-Public API: serve(service, probe, client, host, attempts, timeout). Readiness exhaustion
+Public API: serve(service, probe, client, host, timeout=30). Readiness exhaustion
 raises ValueError; cleanup runs on every exit. CLI accepts JSON argv arrays, never a shell.
 """
 

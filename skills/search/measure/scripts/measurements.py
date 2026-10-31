@@ -5,8 +5,10 @@ The single writer of a run's ``measurements.jsonl``. It uses only the Python sta
 library (3.10 or newer) and runs from an installed Claude Code plugin, outside any VibeSys
 package, so nothing here may import one.
 
-Subcommands (every one takes ``--run DIR``, the run's directory ``.vibesys-optimize/<run-id>``):
+Subcommands use ``--run DIR`` (``.vibesys-optimize/<run-id>``), except ``run``:
 
+* ``run -- <command>``: execute any benchmark load under the host-wide lock.
+* ``gates``: list the task objective gate declaration keys.
 * ``record``: validate one measurement and append it.
 * ``compare``: a commit's samples against the base's.
 * ``best``: the commit with the best verdict-backed result.
