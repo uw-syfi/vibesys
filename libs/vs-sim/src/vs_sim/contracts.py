@@ -1003,6 +1003,23 @@ class PipedProcessContract:
 
         assert subject.drive(case) == (3, 3)
 
+    def test_a_signal_after_the_leader_exited_and_before_it_is_reaped_changes_nothing(self) -> None:
+        """A stop that arrives once the leader exited but is not yet reaped is not an error.
+
+        macOS refuses a signal to a group whose only members are unreaped zombies (``EPERM``,
+        where Linux succeeds), and the stop paths turned that refusal into a failed stop.
+        """
+        subject = self.piped_under_test()
+
+        def case() -> object:
+            process = subject.writes_then_exits(_PIPED_TEXT, "", 3)
+            process.stdout.read()  # Its output closed: the leader has exited or is exiting.
+            process.terminate_group()
+            process.kill_group()
+            return process.wait(None)
+
+        assert subject.drive(case) == 3
+
     def test_a_signal_before_reaping_reaches_a_descendant_that_holds_the_output(self) -> None:
         """A leader that exited but is unreaped still lets a group signal end its descendants.
 

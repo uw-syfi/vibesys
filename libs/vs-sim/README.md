@@ -45,6 +45,17 @@ timing: the clock, sleeping, seeds, signals, child processes and blocking calls.
   synchronization points is atomic, so this finds ordering bugs around locks, conditions,
   events and timers, not unsynchronized data races.
 
+## Waiting for a child's exit
+
+A process group's owner waits for its leader to exit without reaping it, because reaping
+frees the group ID for reuse and a signal sent after it could reach an unrelated group.
+`ExitWaiter` is that wait, and `host_exit_waiter()` picks the mechanism by capability:
+`WaitidExitWaiter` where `os` provides `waitid` (Linux), `KqueueExitWaiter` where `select`
+provides a kqueue `NOTE_EXIT` watch (macOS), and a waiter that refuses with
+`ExitWaitUnsupportedError` otherwise. `SubprocessPipedProcessLauncher(exit_waiter=...)`
+takes another, and a watch that fails raises from the wait instead of reading as an exit.
+`ExitWaiterContract` (in `vs_sim.api.testing`) is the suite every mechanism passes.
+
 ## Command output
 
 A command's output goes through one write interface. Every runner (`Processes.run`,

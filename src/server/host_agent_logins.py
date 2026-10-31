@@ -13,6 +13,7 @@ Public surface: the fact and helper message models in ``__all__``, ``AgentLibrar
 from __future__ import annotations
 
 import re
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import cache
@@ -502,6 +503,12 @@ def _reap(process: PipedProcess, lifetime: float, finished: Callable[[], None]) 
         except ProcessTimeoutError:
             process.kill_group()
             process.wait(5.0)
+    except OSError:
+        # The host cannot watch the child exit, so its lifetime cannot be enforced: end the
+        # group now instead of leaving the login running, and let the failure surface.
+        with suppress(OSError):
+            process.kill_group()
+        raise
     finally:
         finished()
 
