@@ -388,6 +388,39 @@ describe('Field', () => {
 });
 
 describe('Select', () => {
+  test('with its label inside, shows the label before the choice and is named once', async () => {
+    const container = await mount(
+      <Field label="Group by" hideLabel>
+        <Select
+          labelInside
+          size="sm"
+          value="b"
+          change={() => undefined}
+          options={[
+            {value: 'a', label: 'Status'},
+            {value: 'b', label: 'Machine'},
+          ]}
+        />
+      </Field>,
+    );
+    const inside = one(container, '.vs-select-label');
+    expect(inside.textContent).toBe('Group by');
+    expect(inside.getAttribute('aria-hidden')).toBe('true');
+    expect(inside.compareDocumentPosition(one(container, 'select'))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(one(container, 'label').getAttribute('for')).toBe(one(container, 'select').id);
+  });
+
+  test('without labelInside it draws no label of its own', async () => {
+    const container = await mount(
+      <Field label="Size">
+        <Select value="a" change={() => undefined} options={[{value: 'a', label: 'Small'}]} />
+      </Field>,
+    );
+    expect(container.querySelector('.vs-select-label')).toBeNull();
+  });
+
   test('a disabled option says why and cannot be chosen', async () => {
     const chosen: string[] = [];
     const container = await mount(

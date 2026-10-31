@@ -231,20 +231,11 @@ function ClusterFormCard(props: FormProps): JSX.Element {
         <SlurmFields {...props} />
         <HardwareFields {...props} />
         <TestResult form={form} outdated={stale(form)} />
-        {form.problem !== null && form.problem.field === null ? (
-          <Banner tone="err" title="The cluster was not saved." body={form.problem.text} />
-        ) : null}
         <FormActions {...props} />
       </Stack>
     </Card>
   );
 }
-
-const STAGES = {
-  reach: 'Could not reach the cluster',
-  scheduler: 'The cluster’s scheduler did not answer',
-  workspace: 'The workspace is not usable',
-} as const;
 
 function TestResult(props: {
   readonly form: ClusterForm;
@@ -261,9 +252,7 @@ function TestResult(props: {
       />
     );
   }
-  if (test.kind === 'failed') {
-    return <Banner tone="err" title={STAGES[test.stage]} body={test.detail} />;
-  }
+  if (test.kind === 'failed') return null;
   return (
     <Banner
       tone="ok"
@@ -372,9 +361,6 @@ function Clusters(props: {
           <Button text="Add a cluster" press={() => dispatch({type: 'open-form', host})} />
         ) : null}
       </Row>
-      {view.removeProblem === null ? null : (
-        <Banner tone="err" title="The cluster was not removed." body={view.removeProblem} />
-      )}
       {view.form === null ? null : (
         <ClusterFormCard host={host} machine={machine} form={view.form} dispatch={dispatch} />
       )}

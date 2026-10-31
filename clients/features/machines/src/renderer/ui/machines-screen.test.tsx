@@ -72,7 +72,7 @@ test('the header is a title, with the sentence on the pointer', () => {
   expect(html).toContain('title="Each machine runs VibeSys');
 });
 
-test('an unreachable machine says its status word, with the connection text on the pointer', () => {
+test('an unreachable machine says its status word, with the connection text behind it', () => {
   const state = drive([
     {
       type: 'listed',
@@ -87,6 +87,6 @@ test('an unreachable machine says its status word, with the connection text on t
     },
   ]);
   const html = screen(state);
-  expect(html).toContain(`title="The app couldn’t connect: ${RAW}"`);
-  expect(html).not.toContain(`>${RAW}<`);
+  expect(html).toContain('aria-expanded="false"');
+  expect(html).not.toContain(RAW);
 });

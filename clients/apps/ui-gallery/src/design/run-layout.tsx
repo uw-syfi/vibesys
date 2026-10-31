@@ -41,6 +41,7 @@ import {
   ToolCall,
 } from '@vibesys/ui';
 import {type JSX, useEffect, useState} from 'react';
+import {BUILDER_LOWER} from '../role-words.js';
 import {
   AGENTS,
   type Agent,
@@ -671,7 +672,7 @@ function Running(props: {readonly open: (c: string, step: string) => void}): JSX
           id="now-2"
           title="slot-arena"
           mono
-          summary="implementer · editing src/lib.rs"
+          summary={`${BUILDER_LOWER} · editing src/lib.rs`}
           figure="46s"
           figureTone="muted"
           state={{tone: 'live', label: 'Running'}}

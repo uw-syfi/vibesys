@@ -358,9 +358,6 @@ export function MachinesScreen(props: {
   const content = (
     <Stack>
       <AddMachine state={state} dispatch={dispatch} />
-      {state.listProblem === null ? null : (
-        <Banner tone="err" title="The machines could not be read" body={state.listProblem} />
-      )}
       {machine === null ? (
         <NoMachine state={state} />
       ) : (

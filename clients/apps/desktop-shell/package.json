@@ -44,7 +44,8 @@
     "@vibesys/feature-run-intents": "workspace:*",
     "@vibesys/feature-run-sessions": "workspace:*",
     "@vibesys/request-identity": "workspace:*",
-    "@vibesys/run-state": "workspace:*"
+    "@vibesys/run-state": "workspace:*",
+    "@vibesys/problems": "workspace:*"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.10.2",

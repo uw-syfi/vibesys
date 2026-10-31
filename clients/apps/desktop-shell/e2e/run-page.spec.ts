@@ -241,6 +241,7 @@ test('every ended run offers Resume', async ({page}) => {
     resumable: false,
   });
   await open(page, {...SEED, listings: [listed([], [stopped])]});
+  await page.locator('.vs-banner').getByRole('button', {name: 'Show details'}).click();
   await expect(page.getByText('Stopped by you.')).toBeVisible();
   await expect(page.getByRole('button', {name: 'Resume', exact: true})).toBeVisible();
   await page.getByRole('button', {name: 'View logs'}).click();

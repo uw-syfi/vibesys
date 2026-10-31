@@ -38,7 +38,7 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
    it is the only writer. Nothing else proves a process dead, and nothing needs to: the lock proves that
    no other process writes the log, and `clear` (rule 3) handles what the dead process left running.
 3. **No result means run again.** Core never asks whether an open step happened. The runner of the
-   step first calls `clear(tag)`, which removes or adopts what an earlier attempt left, and then runs the
+   step first calls `clear(step, tag)`, which removes or adopts what an earlier attempt left, and then runs the
    next attempt. The attempt number is recorded and shown.
 4. **Pause is not a crash.** Pause stops starting steps, lets running steps finish or cancels them
    within a deadline, records that the run is parked, and exits. A clean pause leaves no open attempt.
@@ -51,7 +51,7 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
 | Core inputs as log records: `CoreInput`, `StepStarted`, `StepFinished`, `AttemptInterrupted`, and the confirmed append in `vs_runlog` | built, dormant (#3475 item 4a) |
 | `RunStarted` and `CoreSnapshot` records, the seed of a fold | unbuilt; `fold` takes its seed as an argument until the cutover (PR 6a) |
 | `fold(log)` and `decide(state, now) -> actions` in `vs_core` | built, dormant (#3475 item 4a) |
-| Runner loop, `StepRunner` Protocol, `FakeStepRunner`, contract suite | unbuilt |
+| Runner loop, `StepRunner` Protocol, `FakeStepRunner`, contract suite | built and dormant: `vs_runtime.api.step_runner` and `vs_runtime.api.testing`; no run selects it (#3475 item 4b) |
 | Runners: agent turn, workspace, Slurm and local evaluation, registered operation, adoption | unbuilt; `libs/vs-slurm/src/vs_slurm/ledger.py` is the model |
 | Pause drains within a deadline and records `Parked` | in progress (#3475 item 1) |
 | `vs-dst` kills and pauses at every log write and every await | in progress (#3475 item 2) |
@@ -162,7 +162,7 @@ unreachable. The first case is #3458, a completed `EnsureSession` whose session 
 acceptance. The table below marks `EnsureSession` safe to run twice. It keeps the four classes and adds
 what `clear` does for each.
 
-| Steps | Effect | After a crash | `clear(tag)` | Key |
+| Steps | Effect | After a crash | `clear(step, tag)` | Key |
 |---|---|---|---|---|
 | `ObserveOwnedJob`, `CollectEvidence`, `VerifyAdoption`; registered `QUERY` operations (`interpret_evidence`, `verify_revision`, board reads) | read only | safe | none | none |
 | `EnsureWorkspace`, `RestoreRevision` | create or reset an attempt's workspace to a recorded revision | safe: the end state is fixed by the request | none | tag (workspace is keyed by attempt and generation) |
@@ -245,7 +245,7 @@ New records (one proto envelope, `vibesys/store/v1/core_input.proto`, validated 
 | `CoreInput` | a decision or proposal, an owner event, an operator control, an epoch resume, a clock advance that changed state | the external inputs of `step` |
 | `StepStarted` | tag, attempt, request, deadline | durable intent before any I/O; makes a re-run visible |
 | `StepFinished` | tag, attempt, `Finished` (the report and the owner events), `Failed` or `Cancelled` with a typed reason | the result; one per step, and one atomic record, so a crash loses no owner event |
-| `AttemptInterrupted` | tag, attempt, reason (`PAUSE`, `SHUTDOWN`, `RAISED`) | an attempt that ended without ending the step; a `RAISED` one (the runner raised or gave nothing back) is charged to the retry bound, the other two are not |
+| `AttemptInterrupted` | tag, attempt, reason (`PAUSE`, `SHUTDOWN`, `RAISED`) | an attempt that ended without ending the step; a `RAISED` one (the runner raised or gave nothing back) is charged to the retry bound, the other two are not. The loop writes `PAUSE` and `RAISED`; an orderly stop of the process (`SHUTDOWN`) is not built, and a cancelled loop is a crash |
 | `CoreSnapshot` | an old `RunEnvelope` | the seed of a migrated or imported run only; never written for a new run |
 
 The bodies of decisions, requests and observations are the canonical encoding of today's validated
@@ -450,18 +450,32 @@ class Cleared:
 
 class StepRunner(Protocol):
     async def run(
-        self, step: Request, tag: RequestId, attempt: int, cancel: CancelSignal
+        self,
+        step: Request,
+        tag: RequestId,
+        attempt: int,
+        deadline_at: float,     # run-clock seconds; the limit of the work the runner starts
+        cancel: CancelSignal,
     ) -> StepResult: ...
 
-    async def clear(self, tag: RequestId) -> Adopted | Cleared: ...
+    async def clear(self, step: Request, tag: RequestId) -> Adopted | Cleared: ...
 ```
 
-Contract, which every implementation passes in `vs_runtime.api.testing.step_runner_contract`:
+`clear` takes the step, not only the tag, so a runner finds what an attempt left from the request itself
+and keeps no index from tag back to step (an agent runner needs no persisted receipt of which turn a tag
+was, an evaluation runner no table of handles). The loop always has the step: it is in the `Run` action,
+and after a restart the fold of the log holds the request of every open step, including one whose attempt
+ran in an earlier epoch. `deadline_at` is the `Run` action's, so a runner builds the limit of its work from
+it and needs no wiring of its own to learn the step's limit.
 
-1. `run` returns a result, or raises. A raise is "no result": the loop treats it like a crash.
+Contract, which every implementation passes in `vs_runtime.api.testing.StepRunnerContract`, a class a test
+module subclasses with one factory method, as the `vs_sim` contracts are:
+
+1. `run` returns a result, or raises. A raise is "no result": the loop treats it like a crash. A `run` that
+   never returns fails the suite: every `run` in it carries the hang guard.
 2. After `clear`, a second `run` with the same tag and a higher attempt starts clean.
 3. `clear` is idempotent, returns `Cleared` for a tag that never started, and returns only when nothing
-   carrying the tag runs or will start.
+   carrying the tag runs or will start. It is given the step the attempt ran.
 4. `Adopted` means the runner took over what an earlier attempt left. With `result` set the step had
    ended, and `run` returns that result. With `result` unset the work is still going, and `run` attaches
    to it instead of starting new work. Agent turns never adopt. Slurm jobs adopt, because they survive
@@ -481,18 +495,48 @@ The loop, `vs_runtime/_step_loop.py`:
 state = fold(log)                      # cache plus suffix, or the whole log
 repeat:
     for action in decide(state, clock.now()):
-        Run:    if attempt > 1: await runner.clear(tag)
+        Run:    if attempt > 1: await runner.clear(step, tag)
                 append StepStarted(tag, attempt)      # durable before I/O
-                start runner.run(...) as a task
+                start runner.run(step, tag, attempt, deadline_at, signal) as a task
         Cancel: set the signal; on return append StepFinished or AttemptInterrupted
-        Settle: await runner.clear(tag) if an attempt was interrupted; append StepFinished
-        Wait:   await the first of: a task ending, a new input, the timer, the pause signal
+        Settle: await runner.clear(step, tag) if an attempt was interrupted; append StepFinished
+                (step: from the fold, for a step with no attempt in flight)
+        Wait:   await the first of: a task ending, a new input (a pause is one), the timer
         End:    append Ended; release the lock
     state = fold(state, the records just appended)
 ```
 
 The loop owns timers, tasks, cancellation and recording. `decide` owns every decision, including that a
 deadline passed. No `if isinstance(step, ...)` appears in either.
+
+In code the loop decides with core's own functions, `decide` and `at_rest`, and sees the log through one
+interface it owns. `StepLog` is the log as the loop uses it: one atomic durable append per method, a
+`state` that is the fold of everything appended (by the loop or by an input from elsewhere), and
+`open_step(tag)`, the step with no result as the fold has it (its request, its limit and its latest
+attempt), which is where `clear` gets the step for a tag with no attempt in flight. `StepLogContract`
+holds a log to what the loop relies on, and a restarted log over the records of a dead process is how the
+tests kill the host. The loop's clock is the run clock, the one `decide` reads and the records carry.
+`at_rest(state)` says the run ended (the loop returns at once, so a restart never records the end twice)
+or parked (it returns once nothing is in flight). Each running attempt is a flight, one task that owns the
+attempt from `clear` to the record of how it ended, so a `clear` that waits on an unreachable backend never
+blocks the loop or an ending. How an attempt ends depends on why it was cancelled:
+
+| Cancel reason | Recorded | `clear` unreachable |
+|---|---|---|
+| `PAUSE_NOW`, `DRAIN_EXPIRED` | `AttemptInterrupted(PAUSE)` | give up; the next epoch's `clear` handles the leftovers |
+| `RUN_ENDING` | `StepFinished(Cancelled)` | give up; the leftovers are a named residual |
+| `DEADLINE`, `WITHDRAWN`, `INTERRUPTED` | `StepFinished(Cancelled)` | keep retrying with backoff |
+
+An attempt that returned a result on its own is recorded as that result even when a cancel was set, unless
+the run is parked: core drops a result in a parked epoch, so the attempt is recorded as
+`AttemptInterrupted(PAUSE)` and the step runs again after the resume. A parked run also takes no `Settle`: it
+waits for the resume, so a step past its limit is not settled over and over. An
+attempt the loop gave up on (it ignored the signal through the grace period, or raised) is cleared before
+its end is recorded, so a paused or ended run leaves nothing running. A parked run starts nothing, so
+flights still waiting on `clear` stop waiting. `Settle` and a `Cancel` with no flight (the host restarted)
+run `clear` and record the result; if `clear` adopts work that is still going, the loop attaches to it with
+the cancel signal set so that it ends. A raise out of `run` is "no result": the loop records
+`AttemptInterrupted(RAISED)`, and the next `Run` is attempt n + 1 after a `clear`.
 
 A re-run is shown from the same facts. The store already has a span `Attempt` message with `n` and `of`
 (`proto/vibesys/store/v1/span.proto`). The journal projection sets `n` from `StepStarted.attempt`.
@@ -572,7 +616,7 @@ Each pull request below is dormant until the cutover: test-reachable, not select
 | PR | Write set | Deletes |
 |---|---|---|
 | 4a. Inputs and decide | `proto/vibesys/store/v1/core_input.proto` and its generated code; `libs/vs-runlog/src/vs_runlog/` (input append, read, the log-prefix rule moved from `_replay_store.py`); `libs/vs-core/src/vs_core/api/recovery.py` and `_decide.py` (`fold`, `decide`, `Action`); `libs/vs-core/tests` (properties over generated logs: fold twice equals once, cached start equals full fold, crash at every record prefix yields `Run` for every open step and never a blocked action) | nothing |
-| 4b. Loop and Protocol | `libs/vs-runtime/src/vs_runtime/_step_loop.py`, `_step_runner.py`, `api/step_runner.py`, `api/testing.py` (`FakeStepRunner`, `step_runner_contract`); `tach.toml`; `libs/vs-dst` hooks (#3475 item 2 owns the points) | nothing |
+| 4b. Loop and Protocol | `libs/vs-runtime/src/vs_runtime/_step_loop.py`, `_step_runner.py`, `api/step_runner.py`, `api/step_runner_contracts.py`, `api/step_log_contracts.py`, `api/testing.py` (`FakeStepRunner`, `FakeStepLog`, `StepRunnerContract`, `StepLogContract`); `tach.toml`; `libs/vs-dst` hooks (#3475 item 2 owns the points) | nothing |
 | 5a. Agent turn and workspace runners | `libs/vs-runtime/src/vs_runtime/_agent_turn_step_runner.py`, `_workspace_step_runner.py`; `libs/vs-agent/src/vs_agent/orphans.py` gains reap by step tag beside reap by run | nothing |
 | 5b. Evaluation runners | `libs/vs-runtime/src/vs_runtime/_slurm_job_step_runner.py`, `_local_job_step_runner.py`; Slurm tier case | nothing |
 | 5c. Operation, adoption and environment runners | `libs/vs-runtime/src/vs_runtime/_operation_step_runner.py`, `_adoption_step_runner.py`; per-environment `clear` in `_run_environment.py` (Docker, SkyPilot, Modal, Host) | nothing |

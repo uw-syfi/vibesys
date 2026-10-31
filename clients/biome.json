@@ -112,6 +112,22 @@
       ]
     },
     {
+      "includes": [
+        "apps/*/src/**/*.ts",
+        "apps/*/src/**/*.tsx",
+        "features/*/src/**/*.ts",
+        "features/*/src/**/*.tsx",
+        "libs/*/src/**/*.ts",
+        "libs/*/src/**/*.tsx",
+        "!**/*.test.ts",
+        "!**/*.test.tsx",
+        "!**/generated/**",
+        "!**/testing/**",
+        "!libs/run-fixtures/**"
+      ],
+      "plugins": ["./tools/lint-rules/no-role-words.grit"]
+    },
+    {
       "includes": ["**/ui/**/*.ts", "**/ui/**/*.tsx", "!**/*.test.ts", "!**/*.test.tsx"],
       "plugins": ["./tools/lint-rules/ui-no-timers.grit"]
     },

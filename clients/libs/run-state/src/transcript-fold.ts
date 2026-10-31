@@ -3,7 +3,7 @@
  * folds entries into a transcript. The run fold calls into this module; nothing here imports back,
  * so the dependency stays one-way.
  */
-import type {RunEvent} from '@vibesys/contracts';
+import {type RunEvent, roleName} from '@vibesys/contracts';
 import {ownProjectionInput, type ReadonlyProjection} from './publication.js';
 import {type RoundKey, roundKeyFor, roundNumberFor} from './round-key.js';
 import {beforeStructuredReply} from './transcript-reply-suffix.js';
@@ -423,6 +423,9 @@ function toolTranscriptEntry(
   };
 }
 
+/** The role whose verdict a `judge_result` event reports; its name is the catalog's. */
+const JUDGE_ROLE = 'judge';
+
 function resultTranscriptEntry(
   event: RunEvent,
   data: Extract<RunEventData, {kind: 'judge_result' | 'benchmark_result' | 'round_finished'}>,
@@ -432,8 +435,8 @@ function resultTranscriptEntry(
     return {
       id: fields.id,
       kind: 'result',
-      content: data.feedback || `Judge returned ${data.verdict}.`,
-      label: `Judge · ${data.verdict.toUpperCase()}`,
+      content: data.feedback || `${roleName(JUDGE_ROLE)} returned ${data.verdict}.`,
+      label: `${roleName(JUDGE_ROLE)} · ${data.verdict.toUpperCase()}`,
       tone: data.verdict === 'pass' ? 'success' : 'failure',
       ...fields.agentFields,
       ...fields.roundFields,

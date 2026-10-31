@@ -6,6 +6,7 @@ import {settled} from './checks/settle.js';
 import {
   installFakeBridge,
   installFakeChrome,
+  installFakeMachines,
   installFakeNewRun,
   installFakeProjectRuns,
   installFakeUsage,
@@ -36,6 +37,7 @@ async function open(page: Page, usage: UsageCase, width: number): Promise<void> 
   await addInitScripts(page, [
     initScript(installFakeChrome, seed),
     initScript(installFakeBridge, seed),
+    initScript(installFakeMachines, seed),
     initScript(installFakeProjectRuns, seed),
     initScript(installFakeNewRun, seed),
     initScript(installFakeUsage, seed),

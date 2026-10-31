@@ -77,7 +77,7 @@ not form a plan, and asks again after a lost turn.
 
 IMPLEMENTER = Role(
     name=AgentName.IMPLEMENTER.value,
-    title="Implementer",
+    title="Builder",
     prompt="implement.j2",
     reply=ImplementerResult,
     workspace=WorkspaceMode.ISOLATED_CHILD,
@@ -94,7 +94,7 @@ IMPLEMENTER = Role(
 
 JUDGE = Role(
     name=AgentName.JUDGE.value,
-    title="Judge",
+    title="Reviewer",
     prompt="review.j2",
     reply=ReviewResult,
     workspace=WorkspaceMode.READ_ONLY_REVISION,
