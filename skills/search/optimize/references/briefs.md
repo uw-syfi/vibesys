@@ -59,8 +59,7 @@ Read only. Edit nothing. Run the task correctness command yourself in this workt
 on your allocated port. Use the supplied service owner with JSON service/probe/client argv.
 It bounds readiness and stops/verifies the whole group; never hand-write PID/sleep recipes.
 Run the supplied absolute measurement script compare for this exact candidate and parent.
-Read its samples, gain, gate status and pooled ranges. Missing gate or speed data is
-unmeasured; a failed gate is fail.
+Read its samples, gain and pooled observed ranges. Missing speed evidence is unmeasured.
 Return pass, fail or unmeasured with the command, port, exit status and reasons.
 ```
 

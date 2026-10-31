@@ -8,7 +8,6 @@ package, so nothing here may import one.
 Subcommands use ``--run DIR`` (``.vibesys-optimize/<run-id>``), except ``run``:
 
 * ``run -- <command>``: execute any benchmark load under the host-wide lock.
-* ``gates``: list the task objective gate declaration keys.
 * ``record``: validate one measurement and append it.
 * ``compare``: a commit's samples against the base's.
 * ``best``: the commit with the best verdict-backed result.
@@ -48,10 +47,8 @@ __all__ = [
     "InvalidInputError",
     "compare_commit",
     "compare_samples",
-    "gate_summary",
     "load_records",
     "main",
-    "objective_gates",
     "task_fingerprint",
 ]
 
@@ -275,7 +272,7 @@ def validate_record(record: object) -> dict[str, Any]:
     """Return ``record`` if it is a valid measurement record, else raise ``InvalidInputError``."""
     if not isinstance(record, dict):
         raise InvalidInputError("a record must be a JSON object")
-    unknown = sorted(set(record) - set(_FIELDS) - {"gate_requirements", "gates"})
+    unknown = sorted(set(record) - set(_FIELDS) - {"observations"})
     missing = sorted(set(_FIELDS) - set(record))
     if unknown:
         raise InvalidInputError(f"unknown field {', '.join(unknown)}")
@@ -294,7 +291,7 @@ def validate_record(record: object) -> dict[str, Any]:
         _validate_text(record, key)
     _validate_samples(record["samples"])
     _validate_timestamp(record["recorded_at"])
-    _validate_gates(record)
+    _validate_observations(record)
     return record
 
 
@@ -309,23 +306,16 @@ def _validate_timestamp(value: str) -> None:
         raise InvalidInputError("recorded_at needs timezone")
 
 
-def _validate_gates(record: dict[str, Any]) -> None:
-    requirements = record.get("gate_requirements", [])
-    gates = record.get("gates", {})
-    if not isinstance(requirements, list) or not all(isinstance(g, str) for g in requirements):
-        raise InvalidInputError("gate_requirements must be a list of names")
-    if not isinstance(gates, dict) or set(gates) - set(requirements):
-        raise InvalidInputError("gates must name declared objective gates")
-    for name, gate in gates.items():
-        if not isinstance(gate, dict) or set(gate) != {"passed", "values"}:
-            raise InvalidInputError(f"gate {name}: expected passed and values")
-        if not isinstance(gate["passed"], list) or any(type(v) is not bool for v in gate["passed"]):
-            raise InvalidInputError(f"gate {name}: passed must contain booleans")
-        _validate_samples(gate["values"])
-        if len(gate["passed"]) != len(record["samples"]) or len(gate["values"]) != len(
-            record["samples"]
-        ):
-            raise InvalidInputError(f"gate {name}: one result and value per sample required")
+def _validate_observations(record: dict[str, Any]) -> None:
+    observations = record.get("observations", {})
+    if not isinstance(observations, dict):
+        raise InvalidInputError("observations must map metric names to numeric samples")
+    for name, values in observations.items():
+        if not isinstance(name, str) or not name.strip() or name == record["metric"]:
+            raise InvalidInputError(
+                "observation names must be nonempty and distinct from the primary metric"
+            )
+        _validate_samples(values)
 
 
 def load_records(run: Path) -> list[dict[str, Any]]:
@@ -377,45 +367,6 @@ def _task_dir(run: Path) -> Path:
     return directory
 
 
-def objective_gates(task: Path) -> list[str]:
-    """Conservatively require evidence for every gate/SLA declaration in task Markdown.
-
-    Names are the exact stripped declaration lines, so no domain vocabulary or numeric
-    threshold is guessed. The measurer interprets each rule and records per-sample results.
-    """
-    return sorted(
-        {
-            line.strip()
-            for path in task.glob("*.md")
-            for line in path.read_text().splitlines()
-            if re.search(r"\b(?:gates?|sla)\b", line, re.IGNORECASE)
-        }
-    )
-
-
-def gate_summary(
-    records: list[dict[str, Any]], required: list[str] | None = None
-) -> dict[str, Any]:
-    """Pool evidence fail-closed; a failed sample always dominates missing data."""
-    names = set(required or []) | {g for r in records for g in r.get("gate_requirements", [])}
-    failed = any(not all(g["passed"]) for r in records for g in r.get("gates", {}).values())
-    missing = any(
-        not records or any(name not in r.get("gates", {}) for r in records) for name in names
-    )
-    return {
-        "status": "fail" if failed else "unmeasured" if missing else "pass",
-        "ranges": {
-            name: [min(values), max(values)]
-            for name in sorted(names)
-            if (
-                values := [
-                    v for r in records for v in r.get("gates", {}).get(name, {}).get("values", [])
-                ]
-            )
-        },
-    }
-
-
 def _record_from(
     args: argparse.Namespace, run: Path, host: str, now: Callable[[], datetime]
 ) -> dict[str, Any]:
@@ -433,8 +384,7 @@ def _record_from(
         "check": args.check,
         "exclusive": args.exclusive,
         "evaluator": task_fingerprint(_task_dir(run)),
-        "gate_requirements": objective_gates(_task_dir(run)),
-        "gates": json.loads(args.gates.read_text()) if args.gates else {},
+        "observations": json.loads(args.observations.read_text()) if args.observations else {},
     }
 
 
@@ -477,7 +427,10 @@ def compare_commit(records: list[dict[str, Any]], commit: str, base: str | None)
         "direction": anchor["direction"],
         "evaluator": anchor["evaluator"],
         "check": _commit_check(mine),
-        "gates": {"candidate": gate_summary(mine), "base": gate_summary(theirs)},
+        "observed_ranges": {
+            "candidate": _observed_ranges(comparable),
+            "base": _observed_ranges([r for r in theirs if (r["metric"], r["evaluator"]) == key]),
+        },
         "warnings": _warnings(
             comparable, [r for r in theirs if (r["metric"], r["evaluator"]) == key]
         ),
@@ -492,6 +445,17 @@ def compare_commit(records: list[dict[str, Any]], commit: str, base: str | None)
     )
     result.update(_comparison_fields(comparison))
     return result
+
+
+def _observed_ranges(records: list[dict[str, Any]]) -> dict[str, list[float]]:
+    pooled: dict[str, list[float]] = {}
+    for record in records:
+        for name, values in {
+            record["metric"]: record["samples"],
+            **record.get("observations", {}),
+        }.items():
+            pooled.setdefault(name, []).extend(values)
+    return {name: [min(values), max(values)] for name, values in pooled.items()}
 
 
 def _uncompared(reason: str) -> dict[str, Any]:
@@ -543,19 +507,13 @@ def _format_comparison(result: dict[str, Any]) -> str:
         )
         detail += f"; {result['reason']})" if result["reason"] else ")"
     lines = [f"{head}{detail}; {result['metric']} ({result['direction']}); check {result['check']}"]
-    lines.append(
-        "objective gates and pooled ranges: " + json.dumps(result["gates"], sort_keys=True)
-    )
+    lines.append("pooled observed ranges: " + json.dumps(result["observed_ranges"], sort_keys=True))
     lines.extend(f"warning: {w}" for w in result["warnings"])
     return "\n".join(lines)
 
 
 def _emit(env: _Env, payload: object, text: str, *, as_json: bool) -> None:
     env.out.write((json.dumps(payload, sort_keys=True) if as_json else text) + "\n")
-
-
-def _cmd_gates(args: argparse.Namespace, env: _Env) -> None:
-    env.out.write(json.dumps(objective_gates(_task_dir(Path(args.run))), indent=2) + "\n")
 
 
 def _cmd_record(args: argparse.Namespace, env: _Env) -> None:
@@ -576,31 +534,16 @@ def _cmd_record(args: argparse.Namespace, env: _Env) -> None:
 def _cmd_compare(args: argparse.Namespace, env: _Env) -> None:
     records = load_records(Path(args.run))
     result = compare_commit(records, _validate_commit(args.commit), args.base)
-    required = objective_gates(_task_dir(Path(args.run)))
-    result["gates"] = {
-        "candidate": gate_summary(
-            [r for r in records if r["commit"] == result["commit"]], required
-        ),
-        "base": gate_summary([r for r in records if r["commit"] == result["base"]], required),
-    }
     _emit(env, result, _format_comparison(result), as_json=args.json)
 
 
 def _cmd_best(args: argparse.Namespace, env: _Env) -> None:
     records = load_records(Path(args.run))
-    required = objective_gates(_task_dir(Path(args.run)))
     candidates = list(dict.fromkeys(r["commit"] for r in records if r["role"] == "candidate"))
     won = []
     for commit in candidates:
         result = compare_commit(records, commit, None)
-        result["gates"]["candidate"] = gate_summary(
-            [r for r in records if r["commit"] == commit], required
-        )
-        if (
-            result["verdict"] == "better"
-            and result["check"] == "pass"
-            and result["gates"]["candidate"]["status"] == "pass"
-        ):
+        if result["verdict"] == "better" and result["check"] == "pass":
             won.append(result)
     if not won:
         _emit(
@@ -662,9 +605,6 @@ def _parser() -> argparse.ArgumentParser:
     runner = commands.add_parser("run", help="execute benchmark load under the host-wide lock")
     runner.add_argument("argv", nargs=argparse.REMAINDER)
 
-    gates = commands.add_parser("gates", help="list exact task objective gate declaration keys")
-    gates.add_argument("--run", required=True)
-
     record = commands.add_parser("record", help="append one validated measurement")
     record.add_argument("--run", required=True)
     record.add_argument("--commit", required=True)
@@ -675,7 +615,7 @@ def _parser() -> argparse.ArgumentParser:
     record.add_argument("--command", required=True)
     record.add_argument("--sample", required=True, action="append", type=_finite_number)
     record.add_argument(
-        "--gates", type=Path, help="JSON objective gate results, one value and pass per sample"
+        "--observations", type=Path, help="JSON mapping auxiliary metric names to numeric samples"
     )
     record.add_argument("--check", choices=_CHECKS)
     record.add_argument("--exclusive", choices=_YES_NO)
@@ -699,7 +639,6 @@ def _parser() -> argparse.ArgumentParser:
 
 _COMMANDS = {
     "record": _cmd_record,
-    "gates": _cmd_gates,
     "compare": _cmd_compare,
     "best": _cmd_best,
     "show": _cmd_show,

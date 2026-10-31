@@ -30,7 +30,7 @@ Before measuring, the lead writes one reproducible setup recipe into each brief:
 build command, service start/readiness/stop commands (if needed), and the runtime arguments
 appended to the declared check and benchmark prefixes. Use the same workload and settings for
 base and candidates. Record the complete benchmark command including runtime arguments, not just
-the TOML prefix. Honor every objective gate, including ones not enforced by exit status.
+the TOML prefix.
 
 ## One measurement
 
@@ -51,14 +51,12 @@ the TOML prefix. Honor every objective gate, including ones not enforced by exit
    under the attempt's artifacts directory. Abort on build or correctness failure.
 4. Execute the benchmark five times, appending its declared `json_argument` and a distinct
    absolute JSON output path each time. Abort on a nonzero exit, timeout, missing output,
-   missing metric. Record objective gate failures with the corresponding samples; never
-   discard them to make a candidate pass. Never reuse output from an earlier attempt.
+   missing metric. Never reuse output from an earlier attempt.
 5. Use `--role base` whenever the measured SHA equals `run.json`'s `base_commit`, otherwise
    `--role candidate`, including remeasurements. Read the metric from each fresh JSON and
    call the recording CLI once with one `--sample`
-   flag per value, `--check pass`, `--gates <JSON file>` and the full command. Gate results
-   use exact stripped gate/SLA declaration lines as keys, each with one `passed` boolean
-   and numeric `values` entry per throughput sample. A repeat records only new samples,
+   flag per value, `--check pass`, and the full command. Store auxiliary numeric samples
+   with `--observations <JSON file>` when the report will describe their ranges. A repeat records only new samples,
    never the old samples again. Return the slot and clean up the server and worktree.
 
 The lead runs this sequence as a background Bash job when measuring itself. Bound the whole

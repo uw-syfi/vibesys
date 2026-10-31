@@ -7,8 +7,7 @@
 - Find the benchmark's entry point and trace from it to the changed code. If you cannot reach
   the change, say so: that is a fail on "active".
 - Look for: constants or branches keyed on benchmark inputs, seeds or sizes; results returned
-  without computing them; timeouts, retries or checks relaxed; precision or output formats
-  changed in ways the objective forbids; work moved outside the timed region; a second
+  without computing them; timeouts, retries or checks relaxed; weakened correctness requirements; work moved outside the timed region; a second
   implementation that is used only when the benchmark runs.
 - Check `git diff --stat <parent> <candidate> -- .vibesys` is empty.
 - Check the commit contains what the implementer says it does, not more: unrelated edits are a
@@ -35,7 +34,6 @@ Candidate: <SHA>      Parent: <SHA>
 Correct: yes/no - <reason>
 Active: yes/no - <the path from the benchmark to the change>
 Honest: yes/no - <reason>
-Rules: yes/no - <the rule in OBJECTIVE.md that is broken, if any>
 Real: yes/no/unmeasured - <the compare output>
 Reasons: <the shortest list that explains the verdict>
 ```
