@@ -32,8 +32,8 @@ hypotheses that can each succeed or fail alone.
 too large. Name the exact blocker and give the narrower step it proposed. Two tries in a row
 without convergence: park the direction and say why.
 
-**Idle slots.** A free slot before wrap-up. Apply the refill step in the optimize loop,
-including new hypotheses from the winner.
+**Idle slots.** A free slot before wrap-up. Dispatch a new idea branched from the winner, or record
+why not through `run.py idle --reason`. Re-decide after an item returns or main moves.
 
 **Long measurements in the foreground.** A 25-minute benchmark loop in your own turn. Use the tracked Bash recipe in `vibesys:measure` and go back to the other slots.
 

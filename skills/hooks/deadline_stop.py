@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stop gate for optimization runs. Unreadable state fails open.
 
-Only running subagents or explicitly tracked shell commands release search turns.
+Running tasks, a current recorded idle reason or full slots release search turns.
 Crons and stop_hook_active never bypass the gate. The run deadline bounds blocking;
 Claude Code additionally caps consecutive tool-free continuations at eight.
 """
@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "search/measure/scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "search/optimize/scripts"))
 from run import read_state, status
 
 if TYPE_CHECKING:
@@ -48,12 +48,13 @@ def block_reason(cwd: Path, now: datetime, event: dict[str, Any] | None = None) 
             )
             for t in pending
         )
-        if now < wrap_up and running:
+        if now < wrap_up and (running or state["idle_reason"] or not summary["free_slots"]):
             return None
         return (
             f"{summary['seconds_left']:g} seconds left; wrap-up {summary['wrap_up_at']}; "
             f"{summary['free_slots']} free slots. {summary['next']}. "
-            f'Run python3 "{Path(__file__).resolve().parents[1]}/search/measure/scripts/run.py" status --run "{run}"'
+            "Dispatch with add, or record why not with idle --reason. "
+            f'Run python3 "{Path(__file__).resolve().parents[1]}/search/optimize/scripts/run.py" status --run "{run}"'
         )
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return None

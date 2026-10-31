@@ -7,7 +7,7 @@ description: "Use when asked to optimize a repository against a benchmark, unatt
 
 You are the lead of a time-boxed optimization run. You steer; you never edit candidate code.
 Subagents do that, each in its own git worktree. You choose what to try, check what comes back,
-and keep every slot busy until the deadline. Everything you need to resume lives in files, so a
+and treat the time box as a limit, not a quota. Everything you need to resume lives in files, so a
 context limit costs you nothing: after any compaction, reread `run.json`, `ledger.md`,
 `decisions.md` and the newest files in `notes/` before acting.
 
@@ -26,7 +26,7 @@ before you plan and again at each wrap-up.
    `[benchmark.result]` table, the task directory is not committed, or tracked files have
    uncommitted changes (the base must be a commit).
    Verify background Agent execution and session scheduling are available before creating state.
-2. Run `python3 "${CLAUDE_SKILL_DIR}/../measure/scripts/run.py" start --task <task>
+2. Run `python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" start --task <task>
    --seconds <duration-in-seconds> --fanout <N>`. Save its absolute output as `$RUN`.
    The controller creates main and owns all lifecycle state; commands are in run-state.md.
 3. Create exactly one one-shot wrap-up wakeup with `CronCreate`, `recurring: false`.
@@ -39,17 +39,26 @@ before you plan and again at each wrap-up.
 After every completion notification or wakeup, run:
 
 ```sh
-python3 "${CLAUDE_SKILL_DIR}/../measure/scripts/run.py" status --run "$RUN"
+python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" status --run "$RUN"
 ```
 
 Do what `next` says. Use the commands in [run-state.md](references/run-state.md) to add work
 before dispatch, transition it on return, record its judge result, and promote winners.
 Give each background subagent a self-contained brief from briefs.md and its own worktree.
 Keep measurements serialized as tracked background Bash commands (`run_in_background: true`).
-Use `track` with the Bash task ID; after its completion notification use `untrack`.
+Use `track` with the Bash task ID and the saved process PID (`--pid`); after its completion
+notification use `untrack`.
 
-Wait only on completion notifications or the one wakeup. Never use foreground `sleep` or a
-`pgrep` loop. Do useful work or yield. A cron alone does not release the Stop hook.
+Branch new ideas from the current winner. When leaving slots idle, run
+`idle --run "$RUN" --reason "<why>"`; the controller records the decision in state, ledger
+and report. It holds until a new item returns or main moves; then decide again.
+Finish before wrap-up only with `finish --early --reason "<why>"`, after all other guards pass.
+
+Wait only on completion notifications or the one wakeup. Never use a timer sleep to wait out
+the budget or an open-ended polling loop.
+Bounded readiness waits for a service are allowed; use the task readiness probe with a fixed
+attempt limit and fail if it never becomes ready. Do useful work or yield. A cron alone does
+not release the Stop hook.
 
 ## Wrap-up
 
@@ -59,11 +68,11 @@ untrack commands only after they have stopped. Promote only through `move-main`.
 Re-measure the current main head after its last move, then run:
 
 ```sh
-python3 "${CLAUDE_SKILL_DIR}/../measure/scripts/run.py" finish --run "$RUN"
+python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" finish --run "$RUN"
 ```
 
 `finish` checks time, closed work, stopped tracked commands and a fresh final measurement.
-It writes result numbers into `report.md` and removes `active`. Append explanatory prose to
-the report; do not copy numbers or remove the marker yourself. Cancel the owned wakeup.
+It prints and writes the exact public comparison with its record ids and decision history
+into `report.md` and removes `active`. Append explanatory prose to the report; do not copy numbers or remove the marker yourself. Cancel the owned wakeup.
 If the deadline prevents finishing, report the failed guard and incomplete verification.
 The result branch is `vibesys/<run-id>`; preserve the user's checked-out branch.

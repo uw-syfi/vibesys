@@ -11,19 +11,30 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
 import re
-import shutil
 import subprocess
 import sys
-from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, TextIO
+from typing import TYPE_CHECKING, Any, Protocol, TextIO
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "measure/scripts"))
 from measurements import InvalidInputError, compare_commit, load_records
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 State = dict[str, Any]
-Git = Callable[[Path, list[str]], str]
+
+
+class Git(Protocol):
+    """Host operations used by the controller shell."""
+
+    def __call__(self, cwd: Path, args: list[str]) -> str: ...
+
+    def alive(self, pid: int) -> bool: ...
+
 
 __all__ = ["finishable", "main", "status", "transition"]
 
@@ -63,9 +74,9 @@ def status(state: State, now: datetime) -> dict[str, Any]:
     elif now >= _date(state["wrap_up_at"]):
         action = "begin wrap-up: close open items, stop owned tasks, measure main, run finish"
     elif any(i["state"] == "returned" for i in opened):
-        action = "judge returned items, then dispatch into free slots"
-    elif free:
-        action = f"dispatch {free} items with add"
+        action = "judge returned items, then choose work or record idle --reason"
+    elif free and not state["idle_reason"]:
+        action = f"dispatch {free} items with add, or record why not with idle --reason"
     else:
         action = "wait for completion notifications"
     return {
@@ -74,6 +85,7 @@ def status(state: State, now: datetime) -> dict[str, Any]:
         "open_items": opened,
         "free_slots": free,
         "next": action,
+        "idle_reason": state["idle_reason"],
     }
 
 
@@ -89,13 +101,24 @@ def transition(state: State, item: str, target: str, reason: str) -> State:
         raise ValueError("no free judge slot")
     if target == "won" and not row.get("judge_pass"):
         raise ValueError("won requires a recorded judge pass")
+    if target == "returned":
+        result["idle_reason"] = None
     row.update(state=target, reason=reason)
     return result
 
 
-def finishable(state: State, now: datetime, records: list[dict[str, Any]]) -> dict[str, Any]:
+def finishable(
+    state: State,
+    now: datetime,
+    records: list[dict[str, Any]],
+    *,
+    early: bool = False,
+    reason: str = "",
+) -> dict[str, Any]:
     """Check all finish guards, including a fresh successful measurement of current main."""
-    if now < _date(state["wrap_up_at"]):
+    if early and not reason.strip():
+        raise ValueError("finish --early requires --reason")
+    if now < _date(state["wrap_up_at"]) and not (early and reason.strip()):
         raise ValueError("too early: wrap-up starts at " + state["wrap_up_at"])
     if any(i["state"] not in TERMINAL for i in state["items"].values()):
         raise ValueError("open work items: collect or abandon them first")
@@ -110,10 +133,7 @@ def finishable(state: State, now: datetime, records: list[dict[str, Any]]) -> di
     ]
     if not fresh:
         raise ValueError("record a final successful measurement after main last moved")
-    final_records = [r for r in records if r["commit"] == state["base_commit"]]
-    if state["main_commit"] != state["base_commit"]:
-        final_records.extend(fresh)
-    result = compare_commit(final_records, state["main_commit"], state["base_commit"])
+    result = compare_commit(records, state["main_commit"], state["base_commit"])
     if result["ratio"] is None or result["check"] != "pass":
         raise ValueError("final measurement must compare with the base and pass correctness")
     return result
@@ -139,6 +159,8 @@ def read_state(run: Path) -> State:
         "finished",
         "pending_move",
         "promotions",
+        "idle_reason",
+        "decisions",
     }
     if not isinstance(state, dict) or set(state) != fields:
         raise ValueError(f"run.json keys must be {sorted(fields)}; got {state}")
@@ -166,6 +188,7 @@ def _save(run: Path, state: State) -> None:
             + " | ".join(str(v).replace("|", "&#124;").replace("\n", " ") for v in fields)
             + " |"
         )
+    rows.extend(["", "## Decisions", "", json.dumps(state["decisions"], indent=2)])
     (run / "ledger.md").write_text("\n".join(rows) + "\n")
 
 
@@ -205,6 +228,8 @@ def _start(args: argparse.Namespace, now: datetime, git: Git) -> Path:
         "finished": False,
         "pending_move": None,
         "promotions": [],
+        "idle_reason": None,
+        "decisions": [],
     }
     exclude = Path(git(root, ["rev-parse", "--git-path", "info/exclude"]).strip())
     if not exclude.is_absolute():
@@ -243,7 +268,9 @@ def _move(run: Path, state: State, item: str, now: datetime, git: Git) -> None:
     state["promotions"].append(
         {"commit": commit, "comparison": comparison, "moved_at": now.isoformat()}
     )
-    state.update(main_commit=commit, main_moved_at=now.isoformat(), pending_move=None)
+    state.update(
+        idle_reason=None, main_commit=commit, main_moved_at=now.isoformat(), pending_move=None
+    )
 
 
 def _recover(run: Path, state: State, now: datetime, git: Git) -> None:
@@ -254,7 +281,7 @@ def _recover(run: Path, state: State, now: datetime, git: Git) -> None:
             raise ValueError("unexpected main head during recovery")
         if head == pending["commit"]:
             state["promotions"].append({**pending, "moved_at": now.isoformat()})
-            state.update(main_commit=head, main_moved_at=now.isoformat())
+            state.update(idle_reason=None, main_commit=head, main_moved_at=now.isoformat())
         state["pending_move"] = None
         _save(run, state)
 
@@ -285,19 +312,42 @@ def _item_command(args: argparse.Namespace, state: State, now: datetime) -> Stat
     return state
 
 
-def _finish(run: Path, state: State, now: datetime, git: Git) -> None:
+def _finish(
+    run: Path, state: State, now: datetime, git: Git, args: argparse.Namespace
+) -> dict[str, Any]:
     head = git(run / "worktrees/main", ["rev-parse", "HEAD"]).strip()
     if head != state["main_commit"]:
         raise ValueError("main moved outside run.py")
-    comparison = finishable(state, now, load_records(run))
+    records = load_records(run)
+    comparison = finishable(state, now, records, early=args.early, reason=args.reason)
+    if args.early:
+        _decision(state, "early-finish", args.reason, now)
+    record_ids = [
+        index
+        for index, row in enumerate(records, 1)
+        if row["commit"] in {state["base_commit"], state["main_commit"]}
+        and (row["metric"], row["evaluator"]) == (comparison["metric"], comparison["evaluator"])
+    ]
     (run / "report.md").write_text(
-        "# Result\n\n```json\n" + json.dumps(comparison, indent=2) + "\n```\n\n"
+        "# Result\n\n```json\n"
+        + json.dumps(comparison, indent=2)
+        + "\n```\n\n"
+        + "Record ids (1-based measurements.jsonl record ordinals): "
+        + json.dumps(record_ids)
+        + "\n\nDecisions:\n"
+        + json.dumps(state["decisions"], indent=2)
+        + "\n"
     )
     state["finished"] = True
+    return comparison
 
 
 def _operate(
-    args: argparse.Namespace, run: Path, state: State, now: datetime, git: Git
+    args: argparse.Namespace,
+    run: Path,
+    state: State,
+    now: datetime,
+    git: Git,
 ) -> dict[str, Any]:
     command = args.command
     if state["finished"] and command != "status":
@@ -306,20 +356,38 @@ def _operate(
         state = _item_command(args, state, now)
     elif command == "move-main":
         _move(run, state, args.id, now, git)
-    elif command == "track":
-        if args.id in state["commands"]:
-            raise ValueError("command already tracked")
-        state["commands"][args.id] = args.description
-    elif command == "untrack":
-        del state["commands"][args.id]
+    elif command in {"track", "untrack"}:
+        _command(args, state, git)
+    elif command == "idle":
+        _decision(state, "idle", args.reason, now)
+        state["idle_reason"] = args.reason
     elif command == "finish":
-        _finish(run, state, now, git)
+        if any(git.alive(row["pid"]) for row in state["commands"].values()):
+            raise ValueError("tracked process still alive")
+        comparison = _finish(run, state, now, git, args)
     _save(run, state)
     if state["finished"]:
         active = run.parent / "active"
         if active.exists() and active.read_text().strip() == state["run_id"]:
             active.unlink()
-    return status(state, now)
+    return comparison if command == "finish" else status(state, now)
+
+
+def _command(args: argparse.Namespace, state: State, git: Git) -> None:
+    if args.command == "track":
+        if args.id in state["commands"] or args.pid <= 0:
+            raise ValueError("duplicate command or nonpositive pid")
+        state["commands"][args.id] = {"description": args.description, "pid": args.pid}
+    else:
+        if git.alive(state["commands"][args.id]["pid"]):
+            raise ValueError("command still running; stop it and confirm completion first")
+        del state["commands"][args.id]
+
+
+def _decision(state: State, kind: str, reason: str, now: datetime) -> None:
+    if not reason.strip():
+        raise ValueError("a written reason is required")
+    state["decisions"].append({"kind": kind, "reason": reason, "at": now.isoformat()})
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -329,7 +397,17 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("--task", required=True)
     start.add_argument("--seconds", type=int, required=True)
     start.add_argument("--fanout", type=int, default=3)
-    for name in ("status", "add", "transition", "judge", "move-main", "track", "untrack", "finish"):
+    for name in (
+        "status",
+        "add",
+        "transition",
+        "judge",
+        "move-main",
+        "track",
+        "untrack",
+        "idle",
+        "finish",
+    ):
         sub = subs.add_parser(name)
         sub.add_argument("--run", type=Path, required=True)
         if name in {"add", "transition", "judge", "move-main", "track", "untrack"}:
@@ -341,17 +419,28 @@ def _parser() -> argparse.ArgumentParser:
             sub.add_argument("--hypothesis", required=True)
         if name == "transition":
             sub.add_argument("--to", choices=tuple(EDGES) + tuple(sorted(TERMINAL)), required=True)
-        if name in {"transition", "judge"}:
+        if name in {"transition", "judge", "idle"}:
             sub.add_argument("--reason", required=True)
         if name == "judge":
             sub.add_argument("--commit", required=True)
             sub.add_argument("--result", choices=("pass", "fail"), required=True)
         if name == "track":
             sub.add_argument("--description", required=True)
+            sub.add_argument("--pid", type=int, required=True)
+        if name == "finish":
+            sub.add_argument("--early", action="store_true")
+            sub.add_argument("--reason", default="")
     return parser
 
 
-def main(argv: Sequence[str], *, now: datetime, out: TextIO, err: TextIO, git: Git) -> int:
+def main(
+    argv: Sequence[str],
+    *,
+    now: datetime,
+    out: TextIO,
+    err: TextIO,
+    git: Git,
+) -> int:
     """Execute one command with an explicit instant and injected git command runner."""
     try:
         args = _parser().parse_args(argv)
@@ -369,22 +458,40 @@ def main(argv: Sequence[str], *, now: datetime, out: TextIO, err: TextIO, git: G
     return 0
 
 
-def _git(cwd: Path, args: list[str]) -> str:
-    # Arguments are generated by this controller, without a shell. Splitting git into
-    # separate wrappers would obscure the single injected I/O seam.
-    result = subprocess.run(  # noqa: S603
-        [shutil.which("git") or "/usr/bin/git", "-C", str(cwd), *args],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    if result.returncode:
-        raise ValueError(result.stderr)
-    return result.stdout
+class HostGit:
+    """Git and PID inspection for the standalone installed controller."""
+
+    def __call__(self, cwd: Path, args: list[str]) -> str:
+        # LW-100348 [S603]; git argv is controller-owned and never uses a shell. Separate
+        # wrappers for each git verb would duplicate this single I/O boundary.
+        result = subprocess.run(  # noqa: S603
+            ["/usr/bin/git", "-C", str(cwd), *args],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        if result.returncode:
+            raise ValueError(result.stderr)
+        return result.stdout
+
+    def alive(self, pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
 
 
 if __name__ == "__main__":
     sys.exit(
-        main(sys.argv[1:], now=datetime.now(timezone.utc), out=sys.stdout, err=sys.stderr, git=_git)
+        main(
+            sys.argv[1:],
+            now=datetime.now(timezone.utc),
+            out=sys.stdout,
+            err=sys.stderr,
+            git=HostGit(),
+        )
     )

@@ -32,6 +32,25 @@ parent commit and the scope. Details of the steps and the handoff are in
    gain over your parent.
 4. With the verdict in hand, build the next step on it, or stop.
 
+
+Start a required service with `&`, save `$!` immediately, and kill only that saved PID:
+
+```sh
+./server --port "$P" &
+service_pid=$!
+trap 'kill "$service_pid" 2>/dev/null || true; wait "$service_pid" 2>/dev/null || true' EXIT
+ready=false
+for i in $(seq 50); do
+  if redis-cli -p "$P" PING; then ready=true; break; fi
+  sleep 0.1
+done
+[ "$ready" = true ] || exit 1
+```
+
+Adapt the start command and readiness probe to the task. Bounded readiness waits are fine;
+fixed startup delays and open-ended sleeps are not. Never use `pkill`, `killall`, or a PID
+found through port lookup. Ownership comes from `$!`, not a process name or listening port.
+
 ## Never
 
 - Edit anything under `.vibesys/`, the task's checker or its benchmark.

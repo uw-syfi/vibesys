@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 spec = importlib.util.spec_from_file_location(
     "deadline_stop", Path(__file__).resolve().parents[1] / "deadline_stop.py"
@@ -21,15 +23,24 @@ NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 @pytest.mark.parametrize("window", ["search", "wrap-up", "deadline"])
 @pytest.mark.parametrize("kind", ["none", "cron", "subagent", "tracked", "untracked", "completed"])
 @pytest.mark.parametrize("run_state", ["active", "finished", "missing", "corrupt"])
-@pytest.mark.parametrize("continuation", [False, True])
+@pytest.mark.parametrize(
+    "choices", [(a, b, c) for a in (False, True) for b in (False, True) for c in (False, True)]
+)
 def test_stop_decision_table(
-    tmp_path: Path, window: str, kind: str, run_state: str, *, continuation: bool
+    tmp_path: Path,
+    window: str,
+    kind: str,
+    run_state: str,
+    choices: tuple[bool, bool, bool],
 ) -> None:
+    continuation, idle, full = choices
     run = tmp_path / ".vibesys-optimize/run-1"
     run.mkdir(parents=True)
     (run.parent / "active").write_text("run-1")
     state = {
         "schema": 1,
+        "idle_reason": "host busy" if idle else None,
+        "decisions": [],
         "run_id": "run-1",
         "task": "demo",
         "started_at": NOW.isoformat(),
@@ -41,7 +52,7 @@ def test_stop_decision_table(
         "promotions": [],
         "deadline": (NOW + timedelta(seconds=1800)).isoformat(),
         "wrap_up_at": (NOW + timedelta(seconds=1350)).isoformat(),
-        "items": {},
+        "items": {str(i): {"state": "dispatched"} for i in range(3)} if full else {},
         "fanout": 3,
         "finished": run_state == "finished",
         "commands": {"task": "measurement"},
@@ -71,16 +82,16 @@ def test_stop_decision_table(
     blocked = (
         run_state == "active"
         and window != "deadline"
-        and not (window == "search" and kind in {"subagent", "tracked"})
+        and not (window == "search" and (kind in {"subagent", "tracked"} or idle or full))
     )
     assert bool(out.getvalue()) == blocked
     if blocked:
-        assert "3 free slots" in json.loads(out.getvalue())["reason"]
+        assert "free slots" in json.loads(out.getvalue())["reason"]
         assert "status --run" in json.loads(out.getvalue())["reason"]
 
 
 def test_trial_two_cron_alone_cannot_release_idle_slots(tmp_path: Path) -> None:
-    test_stop_decision_table(tmp_path, "search", "cron", "active", continuation=False)
+    test_stop_decision_table(tmp_path, "search", "cron", "active", choices=(False, False, False))
 
 
 @pytest.mark.parametrize("payload", ["[]", "null", "invalid", "{}"])
@@ -88,3 +99,10 @@ def test_bad_input_fails_open(tmp_path: Path, payload: str) -> None:
     out = io.StringIO()
     assert hook.main(io.StringIO(payload), out, now=lambda: NOW, fallback_cwd=tmp_path) == 0
     assert out.getvalue() == ""
+
+
+@given(choices=st.tuples(st.booleans(), st.booleans(), st.booleans()))
+def test_search_gate_blocks_iff_idle_unexplained_and_nothing_running(
+    tmp_path_factory: pytest.TempPathFactory, choices: tuple[bool, bool, bool]
+) -> None:
+    test_stop_decision_table(tmp_path_factory.mktemp("gate"), "search", "none", "active", choices)

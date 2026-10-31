@@ -43,7 +43,9 @@ brief's budget; identical readings on both sides remain inconclusive even after 
 code 2 means the input was invalid and the message says which part.
 
 Run each measurement's build/check/benchmark/record sequence as one tracked background Bash
-command with `run_in_background: true`. Never detach with `nohup`, `setsid`, shell `&` or
+command with `run_in_background: true`. At the start of that shell, write `echo "$BASHPID" > "$RUN/<attempt>.pid"`;
+the lead reads it and supplies `track --pid <PID>` with the task id.
+Never detach the whole sequence with `nohup`, `setsid`, shell `&` or
 `disown`: Claude Code must track completion and notify the lead. Serialize by starting the
 next measurement only when the previous command's completion notification arrives. Do not
 launch a home-made chain script of measurements. While it runs, do other useful work or yield
@@ -54,4 +56,7 @@ Use `set -euo pipefail` in the measurement shell. Preserve failure with
 call after notification. Never append `; tail ...` to a measurement. Record the exact
 executed benchmark command, including dependency flags, port and output argument. Build
 that command once and execute the same value you record; do not reconstruct it from memory.
-Stop only services you started, by their saved PID in cleanup.
+Services within the tracked sequence may start with `&`; save `$!` immediately and
+stop only that saved PID in cleanup, never names or port lookups. Use a bounded task readiness
+probe with a fixed attempt limit and fail when it expires; do not use fixed startup sleeps
+or open-ended polling.
