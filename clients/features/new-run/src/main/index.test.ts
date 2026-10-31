@@ -1,7 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {registryProjects} from '@vibesys/connection';
 import {olderHost} from '@vibesys/connection/testing';
-import type {HostId} from '@vibesys/hosts';
 import type {StoredRecentRun} from '@vibesys/settings';
 import {NewRunMain} from './index.js';
 import {NATIVE_FEATURES} from './native-features.js';
@@ -11,18 +10,12 @@ const LOCAL = {kind: 'local'} as const;
 describe('NewRunMain', () => {
   test('a start uses the registry', async () => {
     const remembered: StoredRecentRun[] = [];
-    const watched: HostId[] = [];
     const main = new NewRunMain({
       remember: async run => {
         remembered.push(run);
       },
       now: () => 42,
       registryStart: async () => ({runId: 'run-9', instanceId: 'inst-9'}),
-      watchRuns: {
-        start(host) {
-          watched.push(host);
-        },
-      },
     });
     const started = await main.answer({
       kind: 'start-run',
@@ -38,7 +31,6 @@ describe('NewRunMain', () => {
       },
     });
     expect(started).toEqual({runId: 'run-9', instanceId: 'inst-9'});
-    expect(watched).toEqual([LOCAL]);
     expect(remembered[0]?.runId).toBe('run-9');
   });
 

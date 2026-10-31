@@ -9,6 +9,8 @@ import {fileURLToPath} from 'node:url';
 import {
   ConnectionManager,
   controlDirectory,
+  type HostRuns,
+  hostRuns,
   installAskpass,
   type Link,
   LocalLink,
@@ -23,11 +25,9 @@ import {
   registrySavedRuns,
   registrySetup,
   registryStart,
-  runWatch,
   SshLink,
   Subscriptions,
   WATCH_METHOD,
-  WATCH_RUNS_METHOD,
 } from '@vibesys/connection';
 import {RunNotifier} from '@vibesys/feature-app-shell/main';
 import {Hosts} from '@vibesys/feature-hosts/main';
@@ -100,7 +100,6 @@ function newRunMain(
   hosts: Hosts,
   settings: SettingsStore,
   gateway: ReturnType<typeof installGateway>,
-  runs: ReturnType<typeof runWatch>,
 ): NewRunMain {
   const starts = registryStart({
     checkout: id => hosts.checkout(id),
@@ -123,7 +122,6 @@ function newRunMain(
       read: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
       mutate: (id, bytes, signal) => gateway.unary(hostKey(id), MUTATE_METHOD, bytes, signal),
     }),
-    watchRuns: runs,
   });
 }
 
@@ -160,18 +158,6 @@ function runNotifier(preferences: PreferencesMain, focus: () => void): RunNotifi
       notification.show();
     },
   });
-}
-
-function watchHostRuns(gateway: ReturnType<typeof installGateway>, manager: ConnectionManager) {
-  const runs = runWatch(
-    {
-      stream: (host, bytes, signal, receive, reached) =>
-        gateway.stream(hostKey(host), WATCH_RUNS_METHOD, bytes, signal, receive, reached),
-    },
-    realTimers,
-  );
-  manager.onDisposing(() => runs.close());
-  return runs;
 }
 
 function installGateway(manager: ConnectionManager) {
@@ -229,7 +215,8 @@ async function openWindow(
   });
   const gateway = installGateway(manager);
   const subscriptions = startSubscriptions(gateway, manager);
-  const watchedRuns = watchHostRuns(gateway, manager);
+  // The runs ride the same hub as every other topic: one stream per host, however many read it.
+  const watchedRuns = hostRuns(subscriptions);
   const welcome = new WelcomeFeed();
   const preferences = new PreferencesMain({
     store: settings,
@@ -284,7 +271,7 @@ async function openWindow(
     runs,
     settings,
     preferences,
-    newRun: newRunMain(hosts, settings, gateway, watchedRuns),
+    newRun: newRunMain(hosts, settings, gateway),
     runWindows: windows.runs,
     shellUrl: SHELL_URL,
     openExternal: url => shell.openExternal(url),
@@ -362,7 +349,7 @@ function listedHosts(parts: {
   readonly welcome: WelcomeFeed;
   readonly broadcast: (listing: HostListing) => void;
   readonly endLogin?: (id: HostId) => void;
-  readonly runs: ReturnType<typeof runWatch>;
+  readonly runs: HostRuns;
   /** Removing a host ends the subscriptions on it (`Hosts.remove`). */
   readonly subscriptions: Pick<Subscriptions, 'closeHost'>;
 }): {readonly hosts: Hosts; readonly setup: ReturnType<typeof registrySetup>} {
@@ -433,7 +420,7 @@ function machinesOver(
   gateway: ReturnType<typeof installGateway>,
   setup: ReturnType<typeof registrySetup>,
   logins: LoginActor,
-  runs: ReturnType<typeof runWatch>,
+  runs: HostRuns,
 ): MachinesMain {
   return new MachinesMain({
     settings,

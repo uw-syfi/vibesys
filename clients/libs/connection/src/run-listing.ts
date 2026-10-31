@@ -1,5 +1,5 @@
 /**
- * A host's runs as the views list them, from what the host's WatchRuns stream says: the pure
+ * A host's runs as the views list them, from what the host's `runs` subscription says: the pure
  * projection of each run's head and liveness into the registry listing the sidebar, notices and
  * run pages read. Runs without a validated project address remain listed in the typed unknownProject state.
  */
@@ -11,6 +11,7 @@ import {
   type HostListing,
   type HostRun,
   instancePhaseText,
+  type ListingStep,
 } from '@vibesys/hosts';
 import {
   DrainGoal,
@@ -22,7 +23,13 @@ import {
   type Starting,
   StartupStage,
 } from '@vibesys/proto';
-import type {RunsState, WatchedRun} from './shell/run-watch.js';
+import {
+  type ConnectStep,
+  FAILURE_WORDS,
+  type HostRunFacts,
+  type RunFacts,
+  type SubscriptionState,
+} from '@vibesys/subscription';
 
 const STAGES: Readonly<Record<StartupStage, NonNullable<RunPhase['stage']> | null>> = {
   [StartupStage.UNSPECIFIED]: null,
@@ -35,8 +42,12 @@ const STAGES: Readonly<Record<StartupStage, NonNullable<RunPhase['stage']> | nul
 /** Why a run whose writer died without an ending reads as failed. */
 const INTERRUPTED_REASON = 'The run stopped without recording an ending.';
 
-/** The failures after which the views call a host offline rather than reconnecting. */
-const RECONNECT_OFFLINE_AFTER = 5;
+/** The step of the way to a host's runs that a subscription's step is. */
+const LISTING_STEP: Readonly<Record<ConnectStep, ListingStep>> = {
+  gateway: 'gateway',
+  handshake: 'handshake',
+  stream: 'runs',
+};
 
 interface LivePhase {
   readonly phase: HostRun['phase'];
@@ -113,7 +124,7 @@ function endedPhase(lifecycle: Lifecycle | undefined): {
   return {phase: 'failed', reason: INTERRUPTED_REASON};
 }
 
-function listed(runId: string, run: WatchedRun): Omit<HostRun, 'projectRoot'> {
+function listed(runId: string, run: RunFacts): Omit<HostRun, 'projectRoot'> {
   const startedAt = run.head?.process?.startedAt;
   const common = {
     id: runId,
@@ -130,7 +141,7 @@ function listed(runId: string, run: WatchedRun): Omit<HostRun, 'projectRoot'> {
 }
 
 /** `runs` as `host`'s registry listing: live writers, ended or dead ones, and the unverifiable. */
-export function watchedListing(host: HostKey, runs: ReadonlyMap<string, WatchedRun>): HostListing {
+export function watchedListing(host: HostKey, runs: HostRunFacts): HostListing {
   const live: HostRun[] = [];
   const ended: HostRun[] = [];
   const unverified: string[] = [];
@@ -161,18 +172,44 @@ export function watchedListing(host: HostKey, runs: ReadonlyMap<string, WatchedR
   };
 }
 
-/** What the views say of a host while its run stream is not delivering. */
-function waiting(phase: Exclude<RunsState['phase'], {readonly kind: 'live'}>): ConnectionStatus {
-  if (phase.kind === 'connecting') return {kind: 'connecting'};
-  return phase.attempt >= RECONNECT_OFFLINE_AFTER
-    ? {kind: 'offline', detail: phase.detail}
-    : {kind: 'reconnecting', attempt: phase.attempt};
+/** The step a subscription has reached, as a listing names it; a value in hand means the last one. */
+export function listingStep(previous: ListingStep, state: SubscriptionState<unknown>): ListingStep {
+  switch (state.kind) {
+    case 'connecting':
+      return LISTING_STEP[state.step];
+    case 'live':
+      return 'runs';
+    default:
+      return previous;
+  }
 }
 
-/** The host's listing once its stream has delivered every run, else why there is none yet. */
-export function hostListingFromRuns(host: HostKey, state: RunsState): HostListing {
-  const {phase} = state;
-  return phase.kind === 'live'
-    ? watchedListing(host, state.runs)
-    : {kind: 'unavailable', host, step: phase.step, connection: waiting(phase)};
+/** What the views say of a host while its subscription is not delivering. */
+function waiting(
+  state: Exclude<SubscriptionState<unknown>, {readonly kind: 'live'}>,
+): ConnectionStatus {
+  switch (state.kind) {
+    case 'connecting':
+      return state.attempt === 0
+        ? {kind: 'connecting'}
+        : {kind: 'reconnecting', attempt: state.attempt};
+    case 'stale':
+      return {kind: 'reconnecting', attempt: state.attempt};
+    case 'failed':
+      return {kind: 'offline', detail: FAILURE_WORDS[state.reason]};
+  }
+}
+
+/**
+ * The host's listing once its subscription is live, else why there is none yet. `step` is the
+ * furthest the subscription has come (`listingStep`): where a failure is said to have stopped.
+ */
+export function hostListingFromRuns(
+  host: HostKey,
+  state: SubscriptionState<HostRunFacts>,
+  step: ListingStep,
+): HostListing {
+  return state.kind === 'live'
+    ? watchedListing(host, state.value)
+    : {kind: 'unavailable', host, step, connection: waiting(state)};
 }

@@ -8,7 +8,6 @@ import {
   type RegistryCatalog,
   type RegistryProjects,
   type RegistryRunCatalog,
-  type RunWatch,
 } from '@vibesys/connection';
 import type {
   CreatedProject,
@@ -64,8 +63,6 @@ export interface NewRunMainDeps {
   readonly registryProjects?: RegistryProjects;
   readonly registryCatalog?: RegistryRunCatalog;
   readonly registryReads?: RegistryCatalog;
-  /** WatchRuns for the host a start just launched on. */
-  readonly watchRuns?: Pick<RunWatch, 'start'>;
 }
 
 /** A failure the user reads: the helper's message, prefixed with what was being done. */
@@ -248,11 +245,8 @@ export class NewRunMain {
     } catch (error) {
       throw plain(error, 'Could not start the run');
     }
-    const watch = this.#deps.watchRuns;
-    if (watch === undefined) {
-      throw new Error('the run watch is missing');
-    }
-    watch.start(host);
+    // Remembering the start adds its host to the recent runs, and a recent host's runs are
+    // subscribed: the new run appears in the list without a request of its own.
     await this.#remember(host, inputs, started.runId, started.instanceId);
     return started;
   }

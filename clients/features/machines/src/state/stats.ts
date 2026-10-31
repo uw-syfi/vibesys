@@ -4,13 +4,15 @@
  * subscription's state and never stored.
  */
 import {
-  type FailureReason,
+  FAILURE_WORDS,
   type Instant,
   type MachineReadings,
   type MachineStats,
   machineReadings,
   type SubscriptionState,
 } from '@vibesys/subscription';
+
+export {FAILURE_WORDS};
 
 /** A reading is drawn hot from here: the share of its capacity in use. */
 const HOT_SHARE = 0.9;
@@ -37,21 +39,6 @@ export type StatsView =
 
 const UNREADABLE = '–';
 const GIB = 2 ** 30;
-
-/** Why a host has no stream, in a word. */
-export const FAILURE_WORDS: Readonly<Record<FailureReason, string>> = {
-  unreachable: 'Unreachable',
-  ended: 'Disconnected',
-  silent: 'No signal',
-  outdated: 'Not updating',
-  no_first_frame: 'No reading',
-  source_failed: 'Failed',
-  resource_exhausted: 'Overloaded',
-  internal: 'Failed',
-  unsupported: 'Not supported',
-  invalid_frame: 'Invalid reading',
-  closed: 'Closed',
-};
 
 function tone(share: number): GaugeView['tone'] {
   return share >= HOT_SHARE ? 'accent' : 'ok';

@@ -20,10 +20,11 @@ import {
   TailRequestSchema,
 } from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
-import {FAILURE_PAGES, MAX_ATTEMPTS, RECORD_WINDOW, RETRY_CAP_MS} from '@vibesys/run-skeleton';
+import {FAILURE_PAGES, MAX_ATTEMPTS, RECORD_WINDOW} from '@vibesys/run-skeleton';
 import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
 import {gatewayReader} from '@vibesys/run-skeleton/reader';
 import {
+  FakeRunHost,
   GATEWAY_REPLY_BYTES,
   type LinkModel,
   type SimFault,
@@ -112,7 +113,12 @@ function open(
   const gateway = new SimGateway(run, clock, link, fault);
   const actor = startGatewayRun(
     {
-      reader: gatewayReader(gateway, new FakeSkeletonCache(), clock.schedule),
+      reader: gatewayReader(
+        gateway,
+        new FakeSkeletonCache(),
+        clock.schedule,
+        new FakeRunHost().feed,
+      ),
     },
     clock.schedule,
     {seed: SEED},
@@ -184,9 +190,7 @@ test('a run with no run.log is refused once, in words, and nothing retries it', 
     const before = gateway.calls.length;
     await until(clock, () => false, 10 * MINUTE);
     expect(gateway.calls.length).toBe(before);
-    expect(
-      gateway.calls.filter(call => !call.method.endsWith('WatchRuns')).length,
-    ).toBeLessThanOrEqual(2);
+    expect(gateway.calls.length).toBeLessThanOrEqual(2);
     actor.stop();
   }
 });
@@ -204,12 +208,7 @@ test('calls per open stay bounded while the link is down or refusing, and the en
       method => faults[seed % 2]?.(method) ?? {kind: 'down'},
     );
     await until(clock, () => false, 10 * MINUTE);
-    const history = gateway.calls.filter(call => !call.method.endsWith('WatchRuns')).length;
-    const liveness = gateway.callsTo('WatchRuns').length;
-    expect(history).toBeLessThanOrEqual(MAX_ATTEMPTS + 1);
-    expect(liveness).toBeLessThanOrEqual(
-      MAX_ATTEMPTS + 1 + Math.ceil((10 * MINUTE) / RETRY_CAP_MS),
-    );
+    expect(gateway.calls.length).toBeLessThanOrEqual(MAX_ATTEMPTS + 1);
     expect(loadView(actor.getSnapshot().context)).toEqual({
       kind: 'failed',
       word: expect.any(String),

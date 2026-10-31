@@ -5,21 +5,25 @@ import {
   ConnectionManager,
   type RegistryRunReads,
   registrySetup,
-  runWatch,
-  Subscriptions,
+  SUBSCRIPTION_LINGER_MS,
 } from '@vibesys/connection';
 import {
   FakeLink,
   FakeReadCatalog,
-  FakeRunGateway,
-  FakeSubscribeStreams,
-  idleRunWatch,
+  FakeRunsGateway,
+  idleHostRuns,
   idleSubscriptions,
   olderHost,
   record,
 } from '@vibesys/connection/testing';
 import {RUN_EVENT_TYPES_BY_KINDS} from '@vibesys/contracts/host-helper';
-import {type HostId, type HostListing, hostKey, usageWindowRefusal} from '@vibesys/hosts';
+import {
+  type HostId,
+  type HostKey,
+  type HostListing,
+  hostKey,
+  usageWindowRefusal,
+} from '@vibesys/hosts';
 import {FailureCategory, OperationFailed, RunLiveness} from '@vibesys/proto';
 import {
   decodeRetainedSettings,
@@ -31,7 +35,12 @@ import {
   withHostSettings,
 } from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
-import {machineStats, type SubscriptionState} from '@vibesys/subscription';
+import {
+  backoffMs,
+  machineStats,
+  OFFLINE_AFTER,
+  type SubscriptionState,
+} from '@vibesys/subscription';
 import {FakeClock} from '@vibesys/transport/testing';
 import fc from 'fast-check';
 import {Hosts, type SshConfigFilesystem} from './index.js';
@@ -303,7 +312,7 @@ function hostsInWorld(
   }
   return new Hosts({
     setup: registrySetup(peer),
-    runs: runWatch(new FakeRunGateway(), new FakeClock().schedule),
+    runs: idleHostRuns(),
     subscriptions: idleSubscriptions(),
     ...deps,
   });
@@ -336,26 +345,30 @@ async function gatewayWorld(options: WorldOptions) {
     log: () => {},
   });
   await configuredSettings(settings, options.configured ?? []);
-  const gateway = new FakeRunGateway();
   const clock = new FakeClock();
-  const subscriptions = new Subscriptions(new FakeSubscribeStreams(), clock.schedule, () =>
-    clock.now(),
-  );
-  const watch = runWatch(gateway, clock.schedule);
+  const gateway = new FakeRunsGateway(clock);
+  const {subscriptions} = gateway;
   let stopFailed = false;
+  // Who is watching each host. The hub keeps a stream a moment after its last watcher leaves, so
+  // a host is watched while it has a watcher, which is what Hosts decides.
+  const watchers = new Map<HostKey, number>();
+  const releases = new Map<HostKey, number>();
   const runs = {
-    observe: (host: HostId, listener: Parameters<typeof watch.observe>[1]) => {
-      if (hostKey(host) === options.refuse) throw new Error(`cannot watch ${hostKey(host)}`);
-      return watch.observe(host, listener);
+    observe: (host: HostKey, listener: Parameters<typeof gateway.runs.observe>[1]) => {
+      if (host === options.refuse) throw new Error(`cannot watch ${host}`);
+      const release = gateway.runs.observe(host, listener);
+      watchers.set(host, (watchers.get(host) ?? 0) + 1);
+      return () => {
+        release();
+        watchers.set(host, (watchers.get(host) ?? 1) - 1);
+        releases.set(host, (releases.get(host) ?? 0) + 1);
+        if (host === options.failStopOnce && !stopFailed) {
+          stopFailed = true;
+          throw new Error('stop failed');
+        }
+      };
     },
-    cancel: (host: HostId) => {
-      watch.cancel(host);
-      if (hostKey(host) === options.failStopOnce && !stopFailed) {
-        stopFailed = true;
-        throw new Error('stop failed');
-      }
-    },
-    retry: (host: HostId) => watch.retry(host),
+    retry: (host: HostKey) => gateway.runs.retry(host),
   };
   let acquisitions = 0;
   const manager = new ConnectionManager({
@@ -408,12 +421,13 @@ async function gatewayWorld(options: WorldOptions) {
     logged,
     settled,
     helperAcquisitions: () => acquisitions,
-    openStreams: (key: string) =>
-      gateway.streams.filter(s => s.host === key && !s.signal.aborted).length,
+    openStreams: (key: HostKey) => watchers.get(key) ?? 0,
+    /** How many watchers of the host have been released, whether replaced or retired. */
+    releases: (key: HostKey) => releases.get(key) ?? 0,
     watched: () =>
       everyHost
-        .filter(host => gateway.open(host).length > 0)
         .map(hostKey)
+        .filter(key => (watchers.get(key) ?? 0) > 0)
         .sort(),
     /** The checkouts the host-version check has asked the registry about, in order. */
     checked: () =>
@@ -512,7 +526,7 @@ describe('Hosts.complete', () => {
       log: () => {},
     });
     const hosts = new Hosts({
-      runs: idleRunWatch(),
+      runs: idleHostRuns(),
       subscriptions: idleSubscriptions(),
       manager,
       settings: new SettingsStore({
@@ -1354,7 +1368,7 @@ describe('Hosts checkout changes', () => {
 
     expect(settingsFor((await world.settings.hosts()).settings, LOCAL)?.checkout).toBe('/newer');
     // The cancelled candidate never replaced the watcher; the newer checkout replaced it once.
-    expect(first.every(stream => stream.signal.aborted)).toBe(true);
+    expect(world.releases('local')).toBe(1);
     expect(world.openStreams('local')).toBe(1);
     world.gateway.announce(LOCAL, []);
     await world.settled();
@@ -1376,7 +1390,7 @@ describe('Hosts checkout changes', () => {
 
     await expect(changing).resolves.toBe('/src/vibesys');
     expect(settingsFor((await world.settings.hosts()).settings, LOCAL)?.checkout).toBe('/new');
-    expect(first.every(stream => stream.signal.aborted)).toBe(true);
+    expect(world.releases('local')).toBe(1);
     expect(world.openStreams('local')).toBe(1);
     world.gateway.announce(LOCAL, []);
     await world.settled();
@@ -1751,6 +1765,8 @@ describe('Hosts watch the gateway of every desired host', () => {
 
     await world.hosts.recent([]);
     expect(world.watched()).toEqual(['ssh:beta']);
+    // Its stream goes after the linger that lets a page come straight back to it.
+    world.clock.advanceBy(SUBSCRIPTION_LINGER_MS);
     expect(alpha.every(stream => stream.signal.aborted)).toBe(true);
   });
 
@@ -1761,7 +1777,7 @@ describe('Hosts watch the gateway of every desired host', () => {
     const old = world.gateway.open(ALPHA);
     await world.hosts.setCheckout(ALPHA, '/new', {owner: '10:100', sequence: 1});
 
-    expect(old.every(stream => stream.signal.aborted)).toBe(true);
+    expect(world.releases('ssh:alpha')).toBe(1);
     expect(world.openStreams('ssh:alpha')).toBe(1);
     world.gateway.announce(ALPHA, []);
     await world.settled();
@@ -1778,7 +1794,7 @@ describe('Hosts watch the gateway of every desired host', () => {
 
     await world.hosts.recent([ALPHA]);
 
-    expect(old.every(stream => stream.signal.aborted)).toBe(true);
+    expect(world.releases('ssh:alpha')).toBe(1);
     world.gateway.announce(ALPHA, []);
     await world.settled();
     expect(world.checked().at(-1)).toBe('/authoritative');
@@ -1884,9 +1900,9 @@ describe('Hosts watch the gateway of every desired host', () => {
     test('a retry of a machine that stopped answering watches it again', async () => {
       const world = await gatewayWorld({configured: [ALPHA]});
       await world.hosts.configured();
-      for (let attempt = 0; attempt < 5; attempt += 1) {
+      for (let attempt = 1; attempt <= OFFLINE_AFTER; attempt += 1) {
         await world.failStreams(ALPHA);
-        world.clock.advanceBy(60_000);
+        world.clock.advanceBy(backoffMs(attempt));
         await world.settled();
       }
       expect(world.pushed.at(-1)).toMatchObject({
@@ -1894,10 +1910,11 @@ describe('Hosts watch the gateway of every desired host', () => {
         host: 'ssh:alpha',
         connection: {kind: 'offline'},
       });
-      expect(world.openStreams('ssh:alpha')).toBe(0);
+      // It is tried again slowly, and no stream is open meanwhile.
+      expect(world.gateway.open(ALPHA)).toHaveLength(0);
       world.hosts.retryListing(ALPHA);
       await world.settled();
-      expect(world.openStreams('ssh:alpha')).toBe(1);
+      expect(world.gateway.open(ALPHA)).toHaveLength(1);
       expect(world.pushed.at(-1)).toMatchObject({
         kind: 'unavailable',
         host: 'ssh:alpha',

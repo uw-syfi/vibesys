@@ -1,7 +1,14 @@
 import {expect, test} from 'bun:test';
 import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
-import {AbsenceReason, MachineStatsSchema, type TopicEntry, TopicEntrySchema} from '@vibesys/proto';
+import {
+  AbsenceReason,
+  MachineStatsSchema,
+  RunHeadSchema,
+  RunLiveness,
+  type TopicEntry,
+  TopicEntrySchema,
+} from '@vibesys/proto';
 import {ALL_TOPICS, TOPICS, type TopicArm} from '@vibesys/subscription';
 import fc from 'fast-check';
 import {type TopicCase, topicContract} from '../testing/topic-contract.js';
@@ -76,6 +83,42 @@ const STATS_ENTRY: fc.Arbitrary<TopicEntry> = fc
     }),
   );
 
+const RUN_ID = fc.stringMatching(/^[A-Za-z0-9][A-Za-z0-9_-]{0,15}$/);
+
+/**
+ * A run entry the schema accepts: a run with a head states its liveness, a phase 1 run has none,
+ * and a project root, when present, is an absolute path.
+ */
+const RUN_ENTRY: fc.Arbitrary<TopicEntry> = fc
+  .record({
+    key: RUN_ID,
+    head: fc.boolean(),
+    liveness: fc.constantFrom(
+      RunLiveness.ALIVE,
+      RunLiveness.INTERRUPTED,
+      RunLiveness.ENDED,
+      RunLiveness.PARKED,
+    ),
+    unknown: fc.boolean(),
+    strategy: fc.constantFrom('example', 'search'),
+    project: fc.option(fc.stringMatching(/^\/[a-z]{1,8}(\/[a-z]{1,8}){0,2}$/), {nil: undefined}),
+  })
+  .map(({key, head, liveness, unknown, strategy, project}) =>
+    create(TopicEntrySchema, {
+      key,
+      value: {
+        case: 'runs',
+        value: {
+          head: head
+            ? create(RunHeadSchema, {lifecycle: {state: {case: 'running', value: {}}}, strategy})
+            : undefined,
+          liveness: head || !unknown ? liveness : RunLiveness.UNSPECIFIED,
+          projectRoot: project,
+        },
+      },
+    }),
+  );
+
 /** One case per topic arm: a new arm in the registry fails to compile here until it has one. */
 const CASES = {
   machineStats: {
@@ -84,6 +127,14 @@ const CASES = {
       first: fc.array(STATS_ENTRY, {minLength: 1, maxLength: 1}),
       changes: fc.array(STATS_ENTRY, {maxLength: 4}),
       second: fc.array(STATS_ENTRY, {minLength: 1, maxLength: 1}),
+    }),
+  },
+  runs: {
+    topic: TOPICS.runs,
+    scenario: fc.record({
+      first: fc.array(RUN_ENTRY, {minLength: 1, maxLength: 6}),
+      changes: fc.array(RUN_ENTRY, {maxLength: 6}),
+      second: fc.array(RUN_ENTRY, {minLength: 1, maxLength: 6}),
     }),
   },
 } satisfies Record<TopicArm, TopicCase<unknown>>;

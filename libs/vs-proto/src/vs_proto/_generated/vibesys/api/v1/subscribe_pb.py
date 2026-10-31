@@ -60,7 +60,8 @@ class TopicPolicy(Message[_TopicPolicyFields]):
             uint32 max_keys = 4;
             ```
         min_interval_ms:
-            Smallest gap between flushes of one stream. Changed keys wait and conflate.
+            Smallest gap between the flushes of one stream after its snapshot, which is never
+            held back. Changed keys wait and conflate.
 
             ```proto
             uint32 min_interval_ms = 5;

@@ -53,7 +53,12 @@ test('retained converted history always uses the gateway', async () => {
   const clock = new FakeClock();
   const actor = startGatewayRun(
     {
-      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      reader: gatewayReader(
+        transport,
+        new FakeSkeletonCache(),
+        clock.schedule,
+        transport.host.feed,
+      ),
     },
     clock.schedule,
     {seed: SEED},

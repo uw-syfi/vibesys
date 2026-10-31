@@ -27,7 +27,6 @@ export {
   ListChatSessionsRequestSchema,
   type ListChatSessionsResponse,
   ListChatSessionsResponseSchema,
-  RunLiveness,
   SkeletonRequestSchema,
   type SkeletonResponse,
   SkeletonResponseSchema,
@@ -37,9 +36,6 @@ export {
   TailResponseSchema,
   TailStreamRequestSchema,
   TailStreamResponseSchema,
-  WatchRunsRequestSchema,
-  type WatchRunsResponse,
-  WatchRunsResponseSchema,
 } from './generated/vibesys/api/v1/host_pb.js';
 export {
   type ReadRequest,

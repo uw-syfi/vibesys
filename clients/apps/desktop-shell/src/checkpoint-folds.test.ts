@@ -139,7 +139,7 @@ async function folds(records: StoreRecord[], cut: number, previous = false) {
     }
   }
   const peer = new FakeRunTransport({records, ...(keyframe ? {keyframe} : {})});
-  const reader = gatewayReader(peer, new FakeSkeletonCache(), clock.schedule);
+  const reader = gatewayReader(peer, new FakeSkeletonCache(), clock.schedule, peer.host.feed);
   const fanout = recordsFanout();
   let raw: ReturnType<typeof recordRows> = [];
   let intents: ReturnType<typeof foldOutcomes> = [];

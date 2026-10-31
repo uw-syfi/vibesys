@@ -4,25 +4,27 @@ import {
   GetBlobsResponseSchema,
   HostService,
   RecordSchema,
+  type RunEntry,
+  RunEntrySchema,
   RunLiveness,
   SkeletonResponseSchema,
   TailRequestSchema,
   TailResponseSchema,
   TailStreamResponseSchema,
-  WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import type {StoreRunFixture} from '@vibesys/run-fixtures';
 import {epochHasEnded} from '@vibesys/run-skeleton';
 
 export interface WireFixture {
-  methods: Record<'skeleton' | 'tail' | 'blobs' | 'log' | 'hostCall' | 'watchRuns', string>;
+  methods: Record<'skeleton' | 'tail' | 'blobs' | 'log' | 'hostCall', string>;
   skeleton: number[];
   tail: number[];
   blobs: Record<string, number[]>;
   log: number[];
   chatRequest: number[];
   chat: number[];
-  watchRuns: number[];
+  /** What the host says of the run: its liveness and head. */
+  run: RunEntry;
 }
 export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixture {
   const encoded = fixture.records.map(record => toBinary(RecordSchema, record));
@@ -33,27 +35,20 @@ export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixt
   const lifecycle = last?.body.case === 'lifecycle' ? last.body.value : undefined;
   const epoch = fixture.records.at(-1)?.epoch ?? 1;
   return {
-    watchRuns: [
-      ...toBinary(
-        WatchRunsResponseSchema,
-        create(WatchRunsResponseSchema, {
-          runId: 'run-a',
-          liveness: liveness ?? (epochHasEnded(lifecycle) ? RunLiveness.ENDED : RunLiveness.ALIVE),
-          head: {
-            strategy: 'fixture',
-            lifecycle,
-            process: {pid: 1, epoch, startedAt: {seconds: 1700000000n}},
-          },
-        }),
-      ),
-    ],
+    run: create(RunEntrySchema, {
+      liveness: liveness ?? (epochHasEnded(lifecycle) ? RunLiveness.ENDED : RunLiveness.ALIVE),
+      head: {
+        strategy: 'fixture',
+        lifecycle,
+        process: {pid: 1, epoch, startedAt: {seconds: 1700000000n}},
+      },
+    }),
     methods: {
       skeleton: method('skeleton'),
       tail: method('tail'),
       blobs: method('getBlobs'),
       log: method('tailStream'),
       hostCall: method('hostCall'),
-      watchRuns: method('watchRuns'),
     },
     skeleton: [
       ...toBinary(

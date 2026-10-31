@@ -1,15 +1,34 @@
 /** The run reader owns independent history and transient host observations. */
-import {unprovided} from '@vibesys/machine';
 import {RunLiveness} from '@vibesys/proto';
 import {assign, fromCallback, setup} from 'xstate';
 import type {SkeletonLoadFailure} from './loader-machine.js';
-import {retryDelay} from './loader-machine.js';
 import {epochHasEnded, type RunLivenessHint, type SkeletonLoad} from './loading.js';
 
 export interface ObservationInput {
   readonly runId: string;
+  /** The history loader's own deadline for a reply. The host's liveness has no timer here. */
   readonly timeoutMs: number;
 }
+
+/**
+ * What the host says of one run. The host's subscription owns the stream, its lease and its
+ * retries, so the reader holds none: it is told whether the host is delivering.
+ */
+export type RunLivenessState =
+  /** Nothing yet, and nothing lost. */
+  | {readonly kind: 'waiting'}
+  /** The host is delivering; `hint` is the run's liveness, absent when the host lists no such run. */
+  | {readonly kind: 'live'; readonly hint: RunLivenessHint | undefined}
+  /** The host stopped delivering: its last word is no longer a fact. */
+  | {readonly kind: 'lost'};
+
+/** One run's liveness as an external store, which the reader subscribes to while it watches. */
+export interface RunLivenessFeed {
+  subscribe(listener: () => void): () => void;
+  /** The same object until the state changes. */
+  getSnapshot(): RunLivenessState;
+}
+
 export type ObservationEvent =
   | {
       type: 'read';
@@ -18,8 +37,7 @@ export type ObservationEvent =
       /** The loader gave up: only a new observation can load this run. */
       terminal: boolean;
     }
-  | {type: 'hint'; hint: RunLivenessHint | undefined}
-  | {type: 'ready'};
+  | {type: 'liveness'; state: RunLivenessState};
 export interface ObservationOperation extends ObservationInput {
   readonly receive: (event: ObservationEvent) => void;
 }
@@ -67,9 +85,8 @@ interface Context extends ObservationInput {
   hint: RunLivenessHint | undefined;
   failure: SkeletonLoadFailure | undefined;
   terminal: boolean;
+  /** The host delivered and has stopped: no screen may take its last word for a fact. */
   watchFailed: boolean;
-  /** Consecutive liveness-stream failures; backoff grows with it until the stream is live. */
-  watchAttempts: number;
 }
 export const runObservationMachine = setup({
   types: {context: {} as Context, input: {} as ObservationInput, events: {} as ObservationEvent},
@@ -77,11 +94,18 @@ export const runObservationMachine = setup({
     history: fromCallback<ObservationEvent, ObservationOperation>(() => {
       throw new Error('history not provided');
     }),
-    watch: unprovided<void, ObservationOperation>('run liveness'),
+    watch: fromCallback<ObservationEvent, ObservationOperation>(() => {
+      throw new Error('run liveness not provided');
+    }),
   },
-  delays: {
-    deadline: ({context}) => context.timeoutMs,
-    retry: ({context}) => retryDelay(context.watchAttempts),
+  actions: {
+    // A probe is a fact of the writer that held the lock, and only the host delivering gives one.
+    heard: assign(({context, event}) => {
+      if (event.type !== 'liveness' || event.state.kind !== 'live') return {};
+      const fenced = fenceProbe(context.seen, event.state.hint);
+      return {hint: fenced.hint, seen: fenced.seen, watchFailed: false};
+    }),
+    lost: assign({watchFailed: true, hint: undefined}),
   },
 }).createMachine({
   id: 'runObservation',
@@ -93,7 +117,6 @@ export const runObservationMachine = setup({
     failure: undefined,
     terminal: false,
     watchFailed: false,
-    watchAttempts: 0,
   }),
   invoke: {
     id: 'history',
@@ -111,12 +134,6 @@ export const runObservationMachine = setup({
         terminal: ({event}) => event.terminal,
       }),
     },
-    hint: {
-      actions: assign(({context, event}) => {
-        const fenced = fenceProbe(context.seen, event.hint);
-        return {hint: fenced.hint, seen: fenced.seen};
-      }),
-    },
   },
   initial: 'watching',
   states: {
@@ -129,34 +146,18 @@ export const runObservationMachine = setup({
         id: 'watch',
         src: 'watch',
         input: ({context, self}) => ({...context, receive: event => self.send(event)}),
-        onDone: 'retrying',
-        onError: 'retrying',
+      },
+      on: {
+        liveness: [
+          {guard: ({event}) => event.state.kind === 'live', target: '.live', actions: 'heard'},
+          {guard: ({event}) => event.state.kind === 'lost', target: '.waiting', actions: 'lost'},
+          {target: '.waiting'},
+        ],
       },
       states: {
-        waiting: {
-          after: {deadline: '#runObservation.retrying'},
-          on: {ready: {target: 'live', actions: assign({watchFailed: false, watchAttempts: 0})}},
-        },
-        live: {
-          after: {deadline: '#runObservation.retrying'},
-          on: {
-            ready: {
-              target: 'live',
-              reenter: true,
-              actions: assign({watchFailed: false, watchAttempts: 0}),
-            },
-          },
-        },
+        waiting: {},
+        live: {},
       },
-    },
-    retrying: {
-      always: {guard: ({context}) => context.failure?.kind === 'refused', target: 'stopped'},
-      entry: assign({
-        watchFailed: true,
-        hint: undefined,
-        watchAttempts: ({context}) => context.watchAttempts + 1,
-      }),
-      after: {retry: 'watching'},
     },
   },
 });

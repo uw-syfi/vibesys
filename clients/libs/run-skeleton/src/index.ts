@@ -30,6 +30,7 @@ export {
   type RunLivenessHint,
   type SkeletonLoad,
 } from './loading.js';
+export type {RunLivenessFeed, RunLivenessState} from './observation.js';
 export {
   foldSkeleton,
   type Skeleton,

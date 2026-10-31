@@ -11,15 +11,18 @@ import {
   LifecycleSchema,
   Outcome,
   RecordSchema,
+  type RunEntry,
+  RunEntrySchema,
   RunLiveness,
   StageState,
   StartupStage,
   type Record as StoreRecord,
   TailRequestSchema,
   TailResponseSchema,
-  WatchRunsResponseSchema,
+  TopicEntrySchema,
 } from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
+import {FakeSubscriptionPort, type FakePortCall} from '@vibesys/subscription/testing';
 import {FakeClock} from '@vibesys/transport/testing';
 import {IDBFactory} from 'fake-indexeddb';
 import fc from 'fast-check';
@@ -46,15 +49,75 @@ afterAll(async () => {
   await window.happyDOM.close();
 });
 
+const RUN_ID = 'run-a';
+
+/**
+ * Main's side of the window's subscription to the host's runs: it says what the host says of the
+ * run to each observation, as main relays a subscription that is delivering, and says it has
+ * stopped delivering when asked. The window holds no lease and no timer of its own for this.
+ */
+class LivenessHost {
+  readonly port = new FakeSubscriptionPort();
+  #delivering = true;
+  #since = 0;
+
+  constructor(public run: RunEntry) {
+    const observe = this.port.observe;
+    this.port.observe = (host, request, key, receive, ended) => {
+      const handle = observe(host, request, key, receive, ended);
+      // Main answers after the window has the handle, as it does over a port.
+      queueMicrotask(() => {
+        const call = this.port.calls.find(each => each.open && each.request === request);
+        if (call !== undefined && this.#delivering) this.#say(call);
+      });
+      return handle;
+    };
+  }
+
+  /** The observations of the run the window holds now. */
+  get followers(): FakePortCall[] {
+    return this.port.calls.filter(call => call.open);
+  }
+
+  #say(call: FakePortCall): void {
+    this.#since += 1;
+    call.send({kind: 'begin'});
+    call.send({
+      kind: 'entry',
+      entry: create(TopicEntrySchema, {key: RUN_ID, value: {case: 'runs', value: this.run}}),
+    });
+    call.send({kind: 'synced'});
+    call.send({kind: 'control', control: {kind: 'live', since: this.#since}});
+  }
+
+  /** The host says `run` of the run, on every observation: a stream that delivers. */
+  publish(run: RunEntry = this.run): void {
+    this.run = run;
+    this.#delivering = true;
+    for (const call of this.followers) this.#say(call);
+  }
+
+  /** The host's stream was lost or went silent: main's lease says so, and keeps what it had. */
+  lose(): void {
+    this.#delivering = false;
+    for (const call of this.followers)
+      call.send({
+        kind: 'control',
+        control: {kind: 'stale', reason: 'silent', attempt: 1, valueAt: this.#since},
+      });
+  }
+}
+
 /** The same protobuf peer as the app journeys, through the Electron byte bridge role. */
 class RunPeer extends FakeGatewayBridge {
-  silent = false;
+  readonly host: LivenessHost;
   constructor(
     readonly input: WireFixture,
     readonly records: StoreRecord[],
     readonly loading: boolean,
   ) {
     super();
+    this.host = new LivenessHost(input.run);
   }
   override unary(host: HostKey, method: string, request: Uint8Array) {
     const call = super.unary(host, method, request);
@@ -77,7 +140,6 @@ class RunPeer extends FakeGatewayBridge {
     ended: (error?: string) => void,
   ) {
     const owned = super.stream(host, method, request, receive, ended);
-    if (this.silent && method === this.input.methods.watchRuns) return owned;
     if (method === this.input.methods.tail) {
       const tail = fromBinary(TailRequestSchema, request);
       const records = this.records.filter(record => record.seq >= tail.fromSeq);
@@ -91,9 +153,7 @@ class RunPeer extends FakeGatewayBridge {
             }),
           ),
         );
-    } else if (method === this.input.methods.watchRuns)
-      receive(new Uint8Array(this.input.watchRuns));
-    else if (method === this.input.methods.log) receive(new Uint8Array(this.input.log));
+    } else if (method === this.input.methods.log) receive(new Uint8Array(this.input.log));
     else throw new Error(`Unexpected stream ${method}`);
     return owned;
   }
@@ -197,10 +257,8 @@ function peerFor({lifecycle, liveness, epoch, loading, history, modernHead}: Sce
   };
   const input = wire(fixture, liveness);
   if (modernHead) {
-    const observed = fromBinary(WatchRunsResponseSchema, new Uint8Array(input.watchRuns));
-    if (!observed.head) throw new Error('head required');
-    observed.head.epoch = epoch;
-    input.watchRuns = [...toBinary(WatchRunsResponseSchema, observed)];
+    if (!input.run.head) throw new Error('head required');
+    input.run.head.epoch = epoch;
   }
   return new RunPeer(input, records, loading);
 }
@@ -237,6 +295,7 @@ async function verifyOffers(input: Scenario) {
               unavailable: {},
             }}
             bridge={peer}
+            subscriptions={peer.host.port}
             schedule={clock.schedule}
             address={ADDRESS}
             navigation={NAVIGATION}
@@ -283,6 +342,7 @@ async function verifyOffers(input: Scenario) {
     container.remove();
   }
   expect(peer.streams.every(stream => stream.cancelled)).toBe(true);
+  expect(peer.host.followers).toEqual([]);
 }
 
 test('property: every loading live run exposes the controls its writer admits through the real app bridge', async () => {
@@ -359,6 +419,7 @@ async function withPeer(
             unavailable: {},
           }}
           bridge={peer}
+          subscriptions={peer.host.port}
           schedule={clock.schedule}
           address={ADDRESS}
           navigation={NAVIGATION}
@@ -371,6 +432,7 @@ async function withPeer(
     container.remove();
   }
   expect(peer.streams.every(stream => stream.cancelled)).toBe(true);
+  expect(peer.host.followers).toEqual([]);
   expect(clock.pending).toBe(0);
 }
 
@@ -380,26 +442,28 @@ const controlButtons = (container: HTMLElement) =>
     .filter(text => ['Pause', 'Pause now', 'Guidance', 'Resume'].includes(text));
 
 const FAULT = fc.record({
-  // The intent history shares the lifecycle's reader: one records stream, not two.
+  // The intent history shares the lifecycle's reader: one records stream, not two. The host's
+  // liveness is main's subscription: its stream ending or stalling reaches the window as one
+  // thing, the host no longer delivering.
   source: fc.constantFrom('liveness', 'lifecycle'),
   fault: fc.constantFrom('end', 'stall'),
   elapsed: fc.integer({min: 0, max: 31_000}),
 });
 type Fault = Generated<typeof FAULT>;
 
-function followers(peer: RunPeer, source: Fault['source']) {
+/** The records streams the reader follows; the host's liveness is `peer.host`, held by main. */
+function followers(peer: RunPeer, source: 'lifecycle') {
   return peer.streams.filter(stream => {
     if (stream.cancelled) return false;
-    if (source === 'liveness') return stream.method === peer.input.methods.watchRuns;
     if (stream.method !== peer.input.methods.tail) return false;
     const request = fromBinary(TailRequestSchema, stream.bytes);
     return !request.sessionId && request.fromSeq > 0n;
   });
 }
 
-/** The run holds one WatchRuns lease, shared by the header and the controls. */
+/** The run holds one observation of the host's runs, shared by the header and the controls. */
 function assertOneLease(peer: RunPeer) {
-  expect(followers(peer, 'liveness').length).toBeLessThanOrEqual(1);
+  expect(peer.host.followers.length).toBeLessThanOrEqual(1);
 }
 
 /** The header and the controls project one reading of the writer, whichever stream led. */
@@ -436,9 +500,11 @@ test('property: independently ending or stalling streams cannot revive a dead wr
         await withPeer(peer, async (container, clock) => {
           for (const fault of faults) {
             const before = peer.streams.length;
-            const old = followers(peer, fault.source);
+            const old = fault.source === 'lifecycle' ? followers(peer, 'lifecycle') : [];
             await act(async () => {
-              if (fault.fault === 'end') for (const stream of old) stream.ended('disconnected');
+              if (fault.source === 'liveness') peer.host.lose();
+              else if (fault.fault === 'end')
+                for (const stream of old) stream.ended('disconnected');
             });
             expect(
               controlButtons(container).some(text =>
@@ -456,25 +522,29 @@ test('property: independently ending or stalling streams cannot revive a dead wr
             assertVisible(container);
             assertOneLease(peer);
             await act(async () => clock.advanceBy(31_000));
-            expect(peer.streams.length).toBeGreaterThan(before);
+            // The reader reopens a records stream that ended; main reopens the host's own.
+            if (fault.source === 'lifecycle' && fault.fault === 'end')
+              expect(peer.streams.length).toBeGreaterThan(before);
             assertVisible(container);
             assertOneLease(peer);
             const recovered = controlButtons(container);
-            // Late bytes from retired subscriptions are fenced by their owning actor.
+            // Late words from an observation the window has released are fenced by its port.
+            const released = peer.host.port.calls.filter(call => !call.open);
             await act(async () => {
-              for (const stream of old.filter(stream => stream.cancelled)) {
-                if (stream.method === peer.input.methods.watchRuns)
-                  stream.receive(
-                    toBinary(
-                      WatchRunsResponseSchema,
-                      create(WatchRunsResponseSchema, {
-                        runId: 'run-a',
+              for (const call of released)
+                call.send({
+                  kind: 'entry',
+                  entry: create(TopicEntrySchema, {
+                    key: RUN_ID,
+                    value: {
+                      case: 'runs',
+                      value: create(RunEntrySchema, {
                         head: {epoch: 1},
                         liveness: RunLiveness.ALIVE,
                       }),
-                    ),
-                  );
-              }
+                    },
+                  }),
+                });
             });
             expect(controlButtons(container)).toEqual(recovered);
           }
@@ -535,13 +605,10 @@ test('property: a successor on any independent stream exposes a stalled lifecycl
           RunLiveness.ALIVE,
         );
         // The gateway states the epoch of every head it sends.
-        const stated = fromBinary(WatchRunsResponseSchema, new Uint8Array(snapshot.watchRuns));
-        if (!stated.head) throw new Error('head required');
-        stated.head.epoch = epoch;
-        snapshot.watchRuns = [...toBinary(WatchRunsResponseSchema, stated)];
+        if (!snapshot.run.head) throw new Error('head required');
+        snapshot.run.head.epoch = epoch;
         // The host has the successor, while the already-open lifecycle follower stalls.
         peer.input.skeleton = snapshot.skeleton;
-        peer.input.watchRuns = snapshot.watchRuns;
         const before = peer.calls.filter(
           call => call.method === peer.input.methods.skeleton,
         ).length;
@@ -553,8 +620,9 @@ test('property: a successor on any independent stream exposes a stalled lifecycl
         assertVisible(container);
         for (const fault of faults) {
           await act(async () => {
-            if (fault.fault === 'end')
-              for (const stream of followers(peer, fault.source)) stream.ended('disconnected');
+            if (fault.source === 'liveness') peer.host.lose();
+            else if (fault.fault === 'end')
+              for (const stream of followers(peer, 'lifecycle')) stream.ended('disconnected');
           });
           assertVisible(container);
           await act(async () => clock.advanceBy(fault.elapsed));
@@ -566,8 +634,7 @@ test('property: a successor on any independent stream exposes a stalled lifecycl
         ).toBeGreaterThan(before);
         await act(async () => {
           clock.advanceBy(1000);
-          for (const stream of followers(peer, 'liveness'))
-            stream.receive(new Uint8Array(snapshot.watchRuns));
+          peer.host.publish(snapshot.run);
         });
         const buttons = controlButtons(container);
         expect(buttons).toContain('Pause now');
@@ -607,9 +674,7 @@ function deliverLead(
           create(TailResponseSchema, {records: [toBinary(RecordSchema, successor)]}),
         ),
       );
-  else if (lead === 'liveness')
-    for (const stream of followers(peer, 'liveness'))
-      stream.receive(new Uint8Array(snapshot.watchRuns));
+  else if (lead === 'liveness') peer.host.publish(snapshot.run);
   else {
     const resume = [...container.querySelectorAll('button')].find(
       button => button.textContent === 'Resume',
@@ -732,36 +797,19 @@ test('property: optional recorded facts never erase the catalog-addressed contro
 });
 
 const RECEIPT = fc.record({
-  kind: fc.constantFrom('frame', 'freeze', 'close', 'resume'),
+  // The host says what it says, or stops delivering, or delivers again.
+  kind: fc.constantFrom('frame', 'lose', 'resume'),
   elapsed: fc.integer({min: 0, max: 35000}),
 });
 
-async function receiveHostStep(
-  peer: RunPeer,
-  step: Generated<typeof RECEIPT>,
-  state: {frozen: boolean; lastFrame: number},
-  now: number,
-) {
-  if (step.kind === 'freeze') state.frozen = true;
-  if (step.kind === 'resume') state.frozen = false;
-  const streams = followers(peer, 'liveness');
-  if (step.kind === 'close') {
-    state.lastFrame = -Infinity;
-    await act(async () => {
-      for (const stream of streams) stream.ended('closed');
-    });
-  } else if (
-    ((step.kind === 'frame' && !state.frozen) || step.kind === 'resume') &&
-    streams.length
-  ) {
-    state.lastFrame = now;
-    await act(async () => {
-      for (const stream of streams) stream.receive(new Uint8Array(peer.input.watchRuns));
-    });
-  }
+async function receiveHostStep(peer: RunPeer, step: Generated<typeof RECEIPT>) {
+  await act(async () => {
+    if (step.kind === 'lose') peer.host.lose();
+    else peer.host.publish();
+  });
 }
 
-test('property: host byte receipts alone renew the page controls lease across freeze, close and resume', async () => {
+test('property: only the host delivering decides the page controls, however long it stays silent', async () => {
   await fc.assert(
     fc.asyncProperty(fc.array(RECEIPT, {minLength: 1, maxLength: 4}), async steps => {
       const peer = peerFor({
@@ -775,16 +823,17 @@ test('property: host byte receipts alone renew the page controls lease across fr
         modernHead: true,
       });
       await withPeer(peer, async (container, clock) => {
-        peer.silent = true;
-        const state = {frozen: false, lastFrame: clock.now()};
+        // The lease on the host's frames is main's: the window has none, so time alone changes nothing.
+        let delivering = true;
         const check = () => {
-          const live = controlButtons(container).includes('Pause');
-          expect(live).toBe(clock.now() - state.lastFrame < 30000);
+          expect(controlButtons(container).includes('Pause')).toBe(delivering);
           assertVisible(container);
           assertOneLease(peer);
         };
+        check();
         for (const step of steps) {
-          await receiveHostStep(peer, step, state, clock.now());
+          await receiveHostStep(peer, step);
+          delivering = step.kind !== 'lose';
           check();
           for (let elapsed = 0; elapsed < step.elapsed; elapsed += 1000) {
             await act(async () => clock.advanceBy(Math.min(1000, step.elapsed - elapsed)));
@@ -799,7 +848,7 @@ test('property: host byte receipts alone renew the page controls lease across fr
       examples: [
         [
           [
-            {kind: 'freeze', elapsed: 35000},
+            {kind: 'lose', elapsed: 35000},
             {kind: 'resume', elapsed: 0},
           ],
         ],
@@ -833,29 +882,21 @@ test('property: relaunch headers and controls share the committed epoch even whe
           modernHead: true,
         });
         await withPeer(peer, async (container, clock) => {
-          peer.silent = true;
           let seq = peer.records.at(-1)?.seq ?? 0n;
           for (let index = 1; index <= count; index += 1) {
             const nextEpoch = epoch + index;
             const packet = (running: boolean) =>
-              toBinary(
-                WatchRunsResponseSchema,
-                create(WatchRunsResponseSchema, {
-                  runId: 'run-a',
-                  liveness: RunLiveness.ALIVE,
-                  head: {
-                    epoch: nextEpoch,
-                    committedSeq: seq + (running ? 2n : 1n),
-                    lifecycle: {
-                      state: running ? {case: 'running', value: {}} : {case: 'starting', value: {}},
-                    },
+              create(RunEntrySchema, {
+                liveness: RunLiveness.ALIVE,
+                head: {
+                  epoch: nextEpoch,
+                  committedSeq: seq + (running ? 2n : 1n),
+                  lifecycle: {
+                    state: running ? {case: 'running', value: {}} : {case: 'starting', value: {}},
                   },
-                }),
-              );
-            const deliver = async (bytes: Uint8Array) =>
-              act(async () => {
-                for (const stream of followers(peer, 'liveness')) stream.receive(bytes);
+                },
               });
+            const deliver = async (entry: RunEntry) => act(async () => peer.host.publish(entry));
             await deliver(packet(false));
             expect(statusWord(container)).toBe('Starting');
             expect(controlButtons(container)).toEqual(['Pause', 'Pause now']);
@@ -864,7 +905,8 @@ test('property: relaunch headers and controls share the committed epoch even whe
             expect(controlButtons(container)).toEqual(['Pause', 'Pause now', 'Guidance']);
             await deliver(packet(false));
             expect(statusWord(container)).toBe('Running');
-            await act(async () => clock.advanceBy(30000));
+            // The host stops delivering: its last word is no fact, and the controls go.
+            await act(async () => peer.host.lose());
             expect(statusWord(container)).toBe('Running');
             expect(controlButtons(container)).toEqual([]);
             assertVisible(container);
@@ -895,14 +937,7 @@ function hostFrame(
   liveness: RunLiveness,
   state: {case: 'starting' | 'running'; value: object} | {case: 'ended'; value: object},
 ) {
-  return toBinary(
-    WatchRunsResponseSchema,
-    create(WatchRunsResponseSchema, {
-      runId: 'run-a',
-      liveness,
-      head: {epoch, committedSeq, lifecycle: {state}},
-    }),
-  );
+  return create(RunEntrySchema, {liveness, head: {epoch, committedSeq, lifecycle: {state}}});
 }
 
 /** A lock probe is a fact of the writer that held the lock: before this reader has seen the
@@ -940,12 +975,8 @@ test('property: a successor epoch never shows the predecessor outcome or an unco
           modernHead: true,
         });
         await withPeer(peer, async container => {
-          peer.silent = true;
           const seq = peer.records.at(-1)?.seq ?? 0n;
-          const deliver = (bytes: Uint8Array) =>
-            act(async () => {
-              for (const stream of followers(peer, 'liveness')) stream.receive(bytes);
-            });
+          const deliver = (entry: RunEntry) => act(async () => peer.host.publish(entry));
           await deliver(hostFrame(epoch, seq, RunLiveness.ENDED, ended));
           let aliveSeen = false;
           for (const [index, value] of liveness.entries()) {

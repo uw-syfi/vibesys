@@ -105,6 +105,8 @@ export interface ShellStores {
   readonly bridge: WelcomeBridge;
   readonly schedule: Schedule;
   readonly machines: ReturnType<typeof createMachinesStore>;
+  /** The window's way to a host's live data, or null when it has none. */
+  readonly subscriptions: SubscriptionPort | null;
   /** The machines' live stats, or null when the window has no way to a host's live data. */
   readonly live: LiveStats | null;
   /** What the Usage page shows; it asks only while the page is on screen. */
@@ -228,6 +230,7 @@ export function createShellStores(
     settings,
     machineSettings,
     machines,
+    subscriptions: page.subscriptions ?? null,
     live:
       page.subscriptions === undefined
         ? null
@@ -365,7 +368,8 @@ function RunRoute(props: {
   const ports = typeof window === 'undefined' ? undefined : window.vibesysGateway;
   const gateway = useMemo(() => (ports === undefined ? undefined : gatewayBridge(ports)), [ports]);
   const address = useMemo(() => runAddress(stores, run), [stores, run]);
-  return gateway === undefined ? (
+  const {subscriptions} = stores;
+  return gateway === undefined || subscriptions === null ? (
     <Page>
       <Card>
         <EmptyState title="Run service unavailable" />
@@ -377,6 +381,7 @@ function RunRoute(props: {
       seed={seed}
       projectRoot={projectRoot}
       bridge={gateway}
+      subscriptions={subscriptions}
       schedule={stores.schedule}
       address={address}
       navigation={place.navigation(run)}

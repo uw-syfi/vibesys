@@ -215,7 +215,8 @@ type TopicPolicy struct {
 	FirstFrameMs uint32 `protobuf:"varint,3,opt,name=first_frame_ms,json=firstFrameMs,proto3" json:"first_frame_ms,omitempty"`
 	// A breach ends the stream with RESOURCE_EXHAUSTED. Nothing is ever truncated.
 	MaxKeys uint32 `protobuf:"varint,4,opt,name=max_keys,json=maxKeys,proto3" json:"max_keys,omitempty"`
-	// Smallest gap between flushes of one stream. Changed keys wait and conflate.
+	// Smallest gap between the flushes of one stream after its snapshot, which is never
+	// held back. Changed keys wait and conflate.
 	MinIntervalMs uint32 `protobuf:"varint,5,opt,name=min_interval_ms,json=minIntervalMs,proto3" json:"min_interval_ms,omitempty"`
 	// A breach ends the stream with RESOURCE_EXHAUSTED.
 	MaxValueBytes uint32 `protobuf:"varint,6,opt,name=max_value_bytes,json=maxValueBytes,proto3" json:"max_value_bytes,omitempty"`

@@ -23,10 +23,13 @@ export {deferredKillProcess, fakeProcess, pipeHeldProcess} from './fake-process.
 export {FakeReadCatalog} from './fake-read-catalog.js';
 export {
   type AnnouncedRun,
-  FakeRunGateway,
-  type FakeRunStream,
-  idleRunWatch,
-} from './fake-run-gateway.js';
+  announce,
+  announceChange,
+  announceEntries,
+  FakeRunsGateway,
+  idleHostRuns,
+  runEntry,
+} from './fake-host-runs.js';
 export {
   type FakeSubscribeStream,
   FakeSubscribeStreams,

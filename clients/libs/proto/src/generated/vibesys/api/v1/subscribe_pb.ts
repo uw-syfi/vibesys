@@ -53,7 +53,8 @@ export type TopicPolicy = Message<"vibesys.api.v1.TopicPolicy"> & {
   maxKeys: number;
 
   /**
-   * Smallest gap between flushes of one stream. Changed keys wait and conflate.
+   * Smallest gap between the flushes of one stream after its snapshot, which is never
+   * held back. Changed keys wait and conflate.
    *
    * @generated from field: uint32 min_interval_ms = 5;
    */
