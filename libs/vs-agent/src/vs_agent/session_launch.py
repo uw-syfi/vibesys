@@ -20,6 +20,7 @@ a backend.
 
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -42,7 +43,7 @@ from vs_agent.session_environment import (
     validate_env_names,
 )
 from vs_agent.shim_turns import LaunchedSession, SteerLedger, TurnEvents
-from vs_sandbox.api import build_host_sandbox
+from vs_sandbox.api import STEP_TAG_ENV, build_host_sandbox, step_shell_argv
 from vs_sim.api import CloseOnce, NothingLeft, Released
 
 if TYPE_CHECKING:
@@ -162,11 +163,16 @@ class _ConfinableSandbox(Protocol):
         ...
 
 
+_LEADER_SHELL = "/bin/sh"
+"""The shell that leads a marked host command, as ``LocalShellRunner`` leads a stage command."""
+
+
 def confine_to_sandbox(
     executor: agentshim.CommandExecutor,
     sandbox: _ConfinableSandbox,
     *,
     find_binary: Callable[[str, Mapping[str, str]], str] | None = None,
+    leads_group: bool = False,
 ) -> agentshim.CommandExecutor:
     """Return *executor* with every command rewritten through *sandbox*.
 
@@ -183,10 +189,25 @@ def confine_to_sandbox(
     sandbox's ``env`` carries the *container's* ``PATH``, which resolves to
     nothing on this host, so its caller passes an override that trusts the
     bare name to the far side of ``docker exec`` instead.
+
+    A step's turn carries the step's mark in its environment (``STEP_TAG_ENV``). With
+    *leads_group* the host process that launches the sandboxed command also carries the mark
+    as an argument, led by a shell that waits for it (``step_shell_argv``), because macOS
+    shows another process's arguments and not its environment. A command that runs in a
+    container needs no leader: the container's own processes are searched there.
     """
 
     def transform(request: agentshim.CommandRequest) -> agentshim.CommandRequest:
-        return replace(request, argv=sandbox.wrap(list(request.argv), request.cwd))
+        argv = list(request.argv)
+        tag = request.env.get(STEP_TAG_ENV)
+        if tag is not None:
+            # The sandbox starts the program with its own environment, so the step's marker
+            # is set by ``env`` inside it: the process then carries the tag from exec on.
+            argv = ["env", f"{STEP_TAG_ENV}={tag}", *argv]
+        wrapped = sandbox.wrap(argv, request.cwd)
+        if tag is not None and leads_group:
+            wrapped = list(step_shell_argv(_LEADER_SHELL, shlex.join(wrapped), request.env))
+        return replace(request, argv=wrapped)
 
     return agentshim.TransformingExecutor(executor, transform, find_binary=find_binary)
 
@@ -498,7 +519,9 @@ class ConfinedSessionLauncher:
 
         executor: agentshim.CommandExecutor = self._executor_factory()
         if sandbox is not None:
-            executor = confine_to_sandbox(executor, sandbox, find_binary=find_binary)
+            executor = confine_to_sandbox(
+                executor, sandbox, find_binary=find_binary, leads_group=not in_container
+            )
         env = sandbox.env if sandbox is not None else host_env
         return _Launch(
             executor=executor,

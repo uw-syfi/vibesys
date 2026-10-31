@@ -41,8 +41,8 @@ from vs_runtime._run_environment import (
     DockerEnvironment,
     HostEnvironment,
     ModalEnvironment,
-    SkyPilotEnvironment,
 )
+from vs_runtime._skypilot_environment import SkyPilotEnvironment
 from vs_runtime._slurm_environment import SlurmEnvironment
 
 if TYPE_CHECKING:

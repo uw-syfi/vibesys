@@ -3,7 +3,7 @@ import {expect, test} from '@playwright/test';
 import {fixtureNamed} from '@vibesys/run-fixtures';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
 import {KNOWN_FAILURES} from './checks/known-failures.js';
-import {report, screenCheck} from './checks/screen-check.js';
+import {IN_PAGE_CHECKS, report, SCREEN_CHECKS, screenCheck} from './checks/screen-check.js';
 import {openFixture, playLive} from './fixture-world.js';
 import {type Journey, walkScreens} from './screens.js';
 
@@ -85,6 +85,13 @@ const LIGHT: readonly Cell[] = [
 ];
 const CELLS: readonly Cell[] = [...MAIN, ...STRESS, ...LIGHT];
 
+/**
+ * The fixtures whose titles are written in scripts and emoji on purpose, to test how long text
+ * wraps: no bundled face has those glyphs, and they are the run's own text, not the UI's, so they
+ * skip the bundled-font check.
+ */
+const OTHER_SCRIPTS: ReadonlySet<string> = new Set(['long-titles']);
+
 const matched = new Set<string>();
 let walked = 0;
 const sheet: SheetEntry[] = [];
@@ -105,7 +112,14 @@ for (const cell of CELLS) {
     const unexplained: string[] = [];
     const moved = await walkScreens(page, cell.journey, async (screen, current) => {
       const name = nameOf(cell, screen);
-      const result = report(name, await screenCheck(current), KNOWN_FAILURES);
+      const result = report(
+        name,
+        await screenCheck(
+          current,
+          OTHER_SCRIPTS.has(cell.fixture) ? IN_PAGE_CHECKS : SCREEN_CHECKS,
+        ),
+        KNOWN_FAILURES,
+      );
       for (const each of result.known) matched.add(each.failure.id);
       unexplained.push(
         ...result.unexplained.map(

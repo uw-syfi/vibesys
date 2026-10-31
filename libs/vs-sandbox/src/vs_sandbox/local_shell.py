@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from vs_sandbox.command_execution import execute_command
 from vs_sandbox.process_execution import PipedStoppableProcess
+from vs_sandbox.step_marks import step_shell_argv
 
 if TYPE_CHECKING:
     from vs_sandbox.execution import CommandResult
@@ -91,7 +92,9 @@ class LocalShellRunner:
             cancel=cancel,
             max_output_chars=self._max_output_chars,
             launch=lambda: PipedStoppableProcess(
-                self._launcher.start((_SHELL, "-c", command), cwd=self.root_dir, env=self.env),
+                self._launcher.start(
+                    step_shell_argv(_SHELL, command, self.env), cwd=self.root_dir, env=self.env
+                ),
                 threads=self._threads,
                 output=output,
             ),

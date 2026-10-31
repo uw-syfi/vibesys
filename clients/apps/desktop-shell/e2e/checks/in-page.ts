@@ -23,6 +23,7 @@ export type CheckId =
   | 'column-tops'
   | 'truncation-room'
   | 'focus-ring'
+  | 'bundled-font'
   | 'stability';
 
 export interface Violation {

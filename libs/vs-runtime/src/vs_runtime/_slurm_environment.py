@@ -85,14 +85,16 @@ from vs_slurm.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from vs_agent.api.images import DockerBuildRunner
-    from vs_project.api import RunResourceRequest
+    from vs_project.api import RunResourceRequest, StateNamespace
     from vs_runtime._environment_system import EnvironmentSystem
+    from vs_runtime._local_job_step_runner import StageWorkReaper
     from vs_runtime._run_environment import _OrphanReaper
     from vs_sandbox.api import DockerCli
     from vs_sandbox.api.slurm import GpuLauncher, JobConfinement
+    from vs_sim.api import BlockingRunner
 
 _REMOTE_PROFILER_IDS = frozenset({"auto", "none", "rocprof"})
 _NO_PROFILER_IDS = frozenset({"auto", "none"})
@@ -349,6 +351,26 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
 
     isolated = False
     uses_docker = True
+
+    def reap_orphans(
+        self, run_id: str, *, system: EnvironmentSystem, log: Callable[[str], None]
+    ) -> None:
+        """End the agents a dead host left in the run's local editor container, which Docker owns."""
+        self._docker.reap_orphans(run_id, system=system, log=log)
+
+    def agent_work_reaper(
+        self,
+        run_id: str,
+        *,
+        system: EnvironmentSystem,
+        blocking: BlockingRunner,
+        local_namespace: Callable[[str], StateNamespace],
+        log: Callable[[str], None],
+    ) -> StageWorkReaper:
+        """End one step's agent processes in the local editor container, which Docker owns."""
+        return self._docker.agent_work_reaper(
+            run_id, system=system, blocking=blocking, local_namespace=local_namespace, log=log
+        )
 
     def attaches_backend_accelerator(self, *, docker_in_docker: bool) -> bool:
         """The local editor holds no accelerator; the cluster does the GPU work."""

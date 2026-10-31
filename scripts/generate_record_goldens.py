@@ -378,6 +378,16 @@ def record_examples() -> dict[str, p.Record]:
                 ),
             ),
         ),
+        "run_ended": p.Record(
+            clock=4,
+            body=p.Oneof(
+                "run_ended",
+                p.RunEnded(
+                    schema_version=1,
+                    result=b'{"outcome":"success","reason":"done","selection":null}',
+                ),
+            ),
+        ),
         "attempt_interrupted": p.Record(
             clock=3,
             body=p.Oneof(

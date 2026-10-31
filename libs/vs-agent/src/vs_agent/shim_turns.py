@@ -27,6 +27,7 @@ from vs_agent.contracts import (
 )
 from vs_agent.reply_limits import ReplyGuard, reply_breach
 from vs_agent.session_errors import SessionResumeError
+from vs_sandbox.api import step_tag_env
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -510,6 +511,7 @@ def _turn_request(live: LaunchedSession, request: AgentTurnRequest) -> agentshim
         reasoning_effort=(
             live.spec.reasoning_effort if live.profile.supports_reasoning_effort else None
         ),
+        env=None if request.step_tag is None else step_tag_env(request.step_tag),
     )
 
 

@@ -132,7 +132,7 @@ def test_pause_preserves_only_an_admitted_logical_turns_successors(
 
 
 def test_pause_now_releases_active_invocations_before_the_epoch_exits() -> None:
-    state, _ = write_turn_world(access=core.Access.READ_ONLY)
+    state, turn = write_turn_world(access=core.Access.READ_ONLY)
     result = core.step(state, core.RunControlEvent(control=control("pause_now", 1), now_at=1))
     assert result.state.run.status is core.RunStatus.DRAINING
     (cancel,) = [request for request in result.requests if isinstance(request, core.CancelTurn)]
@@ -156,39 +156,45 @@ def test_pause_now_releases_active_invocations_before_the_epoch_exits() -> None:
         terminal=True,
         released=True,
     )
-    ended = core.step(dispatched, core.RequestObserved(observation=observed))
+    released = core.step(dispatched, core.RequestObserved(observation=observed))
+    # The turn's own dispatch has not returned: the epoch exits only once it has recorded its end.
+    assert released.state.run.status is core.RunStatus.DRAINING
+    returned = terminal_yield(released.state, turn, None, core.ObservationStatus.CANCELLED)
+    recorded = core.step(released.state, core.RequestObserved(observation=returned.observation))
+    ended = core.step(recorded.state, returned)
     assert ended.state.run.status is core.RunStatus.PARKED
     assert ended.state.run.result is None
     assert ended.state.sessions.run_charges == state.sessions.run_charges
 
 
-def test_pause_now_retains_unresolved_cancellation_after_its_cleanup_bound() -> None:
-    state, _ = write_turn_world(access=core.Access.READ_ONLY)
+def test_pause_now_ends_a_dispatch_that_never_returns_a_cleanup_bound_after_its_deadline() -> None:
+    state, turn = write_turn_world(access=core.Access.READ_ONLY)
+    unbounded = tuple(
+        row.model_copy(update={"until": row.until.model_copy(update={"at": 1e9})})
+        for row in state.records.records
+    )
+    state = state.model_copy(
+        update={"records": state.records.model_copy(update={"records": unbounded})}
+    )
     state = core.step(state, core.RunControlEvent(control=control("pause_now", 1), now_at=1)).state
+    bound = state.run.limits.cleanup_bound
+    assert state.run.park is not None
+    assert state.run.park.deadline_at == 1 + bound
+    dispatch = state.records.record(turn.request_id)
+    assert dispatch is not None
+    assert dispatch.until.at == 1 + 2 * bound
     cancellation = next(
         row for row in state.records.records if isinstance(row.request, core.CancelTurn)
     )
-    state = state.model_copy(
-        update={
-            "records": state.records.model_copy(
-                update={
-                    "records": tuple(
-                        row.model_copy(update={"phase": core.RequestPhase.BLOCKED})
-                        if row.request_id == cancellation.request_id
-                        else row
-                        for row in state.records.records
-                    )
-                }
-            )
-        }
-    )
-    ended = core.step(state, core.ClockAdvanced(now_at=cancellation.until.at))
+    state = core.step(state, core.DispatchAuthorized(request_id=cancellation.request_id)).state
+    state = core.step(state, core.ClockAdvanced(now_at=1 + bound)).state
+    assert state.run.status is core.RunStatus.DRAINING
+    ended = core.step(state, core.ClockAdvanced(now_at=1 + 2 * bound))
     assert ended.state.run.status is core.RunStatus.PARKED
-    retained = ended.state.records.record(cancellation.request_id)
-    assert retained is not None
-    assert retained.observation is None
-    assert retained.phase is core.RequestPhase.BLOCKED
     assert ended.state.run.result is None
+    retained = ended.state.records.record(turn.request_id)
+    assert retained is not None
+    assert retained.phase is core.RequestPhase.BLOCKED
 
 
 @pytest.mark.regression
