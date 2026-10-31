@@ -59,7 +59,9 @@ class LocalJobStepRunner:
 
         What a dead process left is found by the marks in the process table *processes*.
         """
-        job = JobStepRun(executor, registry, clock=clock, poll_interval_s=poll_interval_s)
+        job = JobStepRun(
+            executor, registry, clock=clock, poll_interval_s=poll_interval_s, outlives_host=False
+        )
         return cls(executor, MarkedStageWorkReaper(processes), job)
 
     def __init__(

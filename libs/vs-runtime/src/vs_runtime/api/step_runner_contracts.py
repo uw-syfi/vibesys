@@ -9,6 +9,11 @@ They are the six clauses of ``docs/contributing/run-recovery.md``: a run returns
 raises; after ``clear`` the same tag starts clean at a higher attempt; ``clear`` is idempotent
 and leaves nothing running; ``Adopted`` means the next ``run`` takes over what was left; a set
 cancel signal ends a run; an unreachable backend raises ``ClearUnavailableError``.
+
+A cancel that interrupts the attempt (a pause, a drain deadline) is not a cancel that ends the
+step. The run returns ``Cancelled`` for both, but only the second ends the work: a runner whose
+work survives the host (a Slurm job) leaves it running through a pause, and the next ``clear``
+adopts it.
 """
 
 from __future__ import annotations
@@ -18,7 +23,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from vs_core.api import RequestId
-from vs_core.api.recovery import Cancelled, CancelReason, Failed, Finished
+from vs_core.api.recovery import Cancelled, CancelReason, Failed, Finished, interruption_of
 from vs_runtime._step_runner import Adopted, CancelSignal, Cleared, ClearUnavailableError
 from vs_sim.api import SeededRandom
 from vs_sim.api.testing import HANG_GUARD_S, examples, yield_until
@@ -135,8 +140,14 @@ class StepRunnerContract:
 
         subject.run(main())
 
-    def test_a_set_cancel_signal_ends_the_run_with_cancelled_and_nothing_running(self) -> None:
-        """Clause 5: the run returns ``Cancelled`` for the reason it was given."""
+    def test_a_set_cancel_signal_ends_the_run_with_cancelled_and_only_adoptable_work_left(
+        self,
+    ) -> None:
+        """Clause 5: the run returns ``Cancelled`` for the reason it was given.
+
+        A cancel that ends the step leaves nothing running. One that interrupts the attempt leaves
+        nothing running, or work that ``clear`` adopts and the next run attaches to.
+        """
         subject = self.step_runner_under_test()
         tag = _tag("cancelled")
 
@@ -145,6 +156,8 @@ class StepRunnerContract:
                 task, cancel = await _start(subject, tag, attempt=1)
                 cancel.set(reason)
                 assert await _ends(task, tag) == Cancelled(reason=reason)
+                if interruption_of(reason):
+                    await _end_what_a_pause_left(subject, tag)
                 assert await subject.left_running(tag) == 0
 
         subject.run(main())
@@ -280,6 +293,17 @@ async def _run_to_the_end(
     return outcome
 
 
+async def _end_what_a_pause_left(subject: StepRunnerUnderTest, tag: RequestId) -> None:
+    """After an interrupting cancel: work still running must be adopted, not started again."""
+    if await subject.left_running(tag) == 0:
+        return
+    assert await _clear(subject, tag) == Adopted(None), "a pause left work that clear cannot find"
+    task, cancel = await _start(subject, tag, attempt=2)
+    assert await subject.left_running(tag) == 1, "the next run started the work again"
+    cancel.set(CancelReason.WITHDRAWN)
+    assert isinstance(await _ends(task, tag), Cancelled)
+
+
 async def _exercise(subject: StepRunnerUnderTest, tag: RequestId, actions: tuple[str, ...]) -> None:
     attempt = 0
     dirty = False
@@ -298,6 +322,7 @@ async def _exercise(subject: StepRunnerUnderTest, tag: RequestId, actions: tuple
                 task, cancel = await _start(subject, tag, attempt=attempt)
                 cancel.set(CancelReason.PAUSE_NOW)
                 await _ends(task, tag)
+                dirty = await subject.left_running(tag) > 0
             case "clear":
                 outcome = await _clear(subject, tag)
                 dirty = outcome == Adopted(None)

@@ -11,9 +11,13 @@ The key names the content, not the tag, so two steps of one content and one spec
 job; a step that finds the job another step submitted attaches to it, as it would have if it
 had run first.
 
-A job this runner cancelled is never attached to. The cancel interrupted the attempt (a pause,
-a drain deadline) and left no result, so the next attempt has to run the step: it takes the
-next handle of the tag, and the ledger, which holds a withdrawn attempt final, claims a new job.
+A pause or a drain deadline interrupts the attempt and leaves its job queued or running: the
+cancel would throw away the queue time and the work done, and the job survives the host by
+design. The next attempt's ``clear`` adopts it and its ``run`` attaches.
+
+A job that was cancelled is never attached to. Its cancel ended the step, or someone else
+cancelled it, so the next attempt has to run the step: it takes the next handle of the tag, and
+the ledger, which holds a withdrawn attempt final, claims a new job.
 """
 
 from __future__ import annotations

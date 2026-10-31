@@ -63,7 +63,13 @@ class World:
         )
         self.reaper = FakeStageWorkReaper()
         self.registry = JobRegistry(receipt_store_in(root))
-        job = JobStepRun(self.executor, self.registry, clock=self.clock, poll_interval_s=POLL_S)
+        job = JobStepRun(
+            self.executor,
+            self.registry,
+            clock=self.clock,
+            poll_interval_s=POLL_S,
+            outlives_host=False,
+        )
         self.runner = LocalJobStepRunner(self.executor, self.reaper, job)
         self.snapshot = self.run(self.workspaces.root.snapshot("candidate"))
 

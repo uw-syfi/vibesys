@@ -27,7 +27,7 @@ from vs_core.api import (
     RequestId,
     ResourceId,
 )
-from vs_core.api.recovery import Cancelled, CancelReason, Finished
+from vs_core.api.recovery import Cancelled, CancelReason, Finished, interruption_of
 from vs_runtime.api.core import JobRegistry, MeasurementRequests, RequestExecutors
 from vs_runtime.api.evaluation_step_runners import JobStepRun, SlurmJobStepRunner
 from vs_runtime.api.executor_contexts import RevocableLease, receipt_store_in
@@ -116,7 +116,13 @@ class Process:
 
     def __init__(self, world: World, stack: Stack) -> None:
         self.stack = stack
-        job = JobStepRun(stack.executor, world.registry, clock=world.clock, poll_interval_s=POLL_S)
+        job = JobStepRun(
+            stack.executor,
+            world.registry,
+            clock=world.clock,
+            poll_interval_s=POLL_S,
+            outlives_host=True,
+        )
         self.runner = SlurmJobStepRunner(stack.executor, world.ledger, InlineBlockingRunner(), job)
 
 
@@ -180,13 +186,14 @@ class World:
         return self.cluster.live_jobs()
 
     async def pause(self, process: Process, tag: RequestId, attempt: int) -> None:
-        """Cancel the step's job through its own run, as a Pause does, and see it end."""
+        """Pause the step through its own run, as a Pause does, and see its job left alone."""
         cancel = CancelSignal()
         step = self.step(tag, ends=False)
         task = asyncio.ensure_future(process.runner.run(step, tag, attempt, DEADLINE_AT, cancel))
         await yield_until(self.live, lambda jobs: jobs > 0 or task.done(), str(tag))
         cancel.set(CancelReason.PAUSE_NOW)
         assert await task == Cancelled(reason=CancelReason.PAUSE_NOW)
+        assert self.cluster.live_jobs() == 1
 
     async def die_mid_run(self, process: Process, tag: RequestId, attempt: int) -> None:
         """Submit the step's job, then lose the process: only the task awaiting it is cancelled."""
@@ -296,10 +303,11 @@ def test_a_step_of_the_content_another_step_submitted_attaches_to_its_job(tmp_pa
     assert len(world.cluster.submissions) == 1
 
 
-def test_a_cancelled_job_is_never_attached_to_so_the_next_attempt_submits_a_new_one(
-    tmp_path: Path,
+@pytest.mark.parametrize("reason", [CancelReason.PAUSE_NOW, CancelReason.DRAIN_EXPIRED])
+def test_a_pause_leaves_the_job_running_and_the_next_attempt_adopts_it(
+    tmp_path: Path, reason: CancelReason
 ) -> None:
-    """The cancel interrupted the attempt and left no result; attaching would return Cancelled."""
+    """A cancel would throw away the queue time and the work done; the job survives the host."""
     world = World(tmp_path)
     runner = world.first.runner
     tag = tag_of("paused")
@@ -310,8 +318,42 @@ def test_a_cancelled_job_is_never_attached_to_so_the_next_attempt_submits_a_new_
             runner.run(world.step(tag, ends=False), tag, 1, DEADLINE_AT, cancel)
         )
         await yield_until(world.submitted, lambda jobs: jobs == 1, "the first job")
-        cancel.set(CancelReason.PAUSE_NOW)
-        assert await task == Cancelled(reason=CancelReason.PAUSE_NOW)
+        cancel.set(reason)
+        assert await task == Cancelled(reason=reason)
+        assert world.cluster.live_jobs() == 1
+        assert await runner.clear(world.submission(tag), tag) == Adopted(None)
+        world.cluster.finish_jobs()
+        again = await runner.run(world.step(tag, ends=True), tag, 2, DEADLINE_AT, CancelSignal())
+        assert isinstance(again, Finished)
+        assert again.observation.status is ObservationStatus.SUCCEEDED
+        await world.close()
+
+    world.run(main())
+    assert len(world.cluster.submissions) == 1
+    assert world.cluster.cancelled == []
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [reason for reason in CancelReason if not interruption_of(reason)],
+)
+def test_a_cancel_that_ends_the_step_cancels_the_job_and_the_next_attempt_submits_a_new_one(
+    tmp_path: Path, reason: CancelReason
+) -> None:
+    """The cancel ended the job; attaching to it would return Cancelled, so the next one is new."""
+    world = World(tmp_path)
+    runner = world.first.runner
+    tag = tag_of("ended")
+
+    async def main() -> None:
+        cancel = CancelSignal()
+        task = asyncio.ensure_future(
+            runner.run(world.step(tag, ends=False), tag, 1, DEADLINE_AT, cancel)
+        )
+        await yield_until(world.submitted, lambda jobs: jobs == 1, "the first job")
+        cancel.set(reason)
+        assert await task == Cancelled(reason=reason)
+        assert world.cluster.live_jobs() == 0
         assert await runner.clear(world.submission(tag), tag) == Cleared()
         again = await runner.run(world.step(tag, ends=True), tag, 2, DEADLINE_AT, CancelSignal())
         assert isinstance(again, Finished)
@@ -323,17 +365,15 @@ def test_a_cancelled_job_is_never_attached_to_so_the_next_attempt_submits_a_new_
     assert world.cluster.live_jobs() == 0
 
 
-def test_any_order_of_kills_pauses_restarts_and_clears_leaves_one_job_that_was_not_cancelled(
+def test_any_order_of_kills_pauses_restarts_and_clears_runs_one_job_and_cancels_none(
     tmp_path: Path,
 ) -> None:
-    """One tag is one live job: every other job it ever had was cancelled, never duplicated."""
+    """One tag is one job: a kill, a pause or a clear never duplicates it and never cancels it."""
     for seed in range(examples(pr=6, nightly=40)):
         world = World(tmp_path / f"world-{seed}")
         world.run(_a_sequence_ends_with_a_result(world, seed))
-        submitted = set(world.cluster.submissions)
-        cancelled = set(world.cluster.cancelled)
-        assert cancelled <= submitted, seed
-        assert len(submitted - cancelled) == 1, seed
+        assert len(world.cluster.submissions) == 1, seed
+        assert world.cluster.cancelled == [], seed
 
 
 async def _a_sequence_ends_with_a_result(world: World, seed: int) -> None:
