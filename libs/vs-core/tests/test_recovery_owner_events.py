@@ -54,7 +54,11 @@ def test_the_fold_applies_the_report_and_then_each_owner_event_as_the_live_shell
     )
 
     assert folded.sessions == live.sessions
-    assert folded.records.records == live.records.records
+    # The fold starts the attempt the live shell had dispatched before this seed: it stamps when.
+    assert (
+        tuple(row.model_copy(update={"dispatched_at": None}) for row in folded.records.records)
+        == live.records.records
+    )
     assert folded.steps.attempts == ()
 
 

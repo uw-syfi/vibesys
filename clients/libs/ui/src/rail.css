@@ -1,26 +1,49 @@
-/* The rail frame: a narrow rail of destinations beside the page. Imported by components.css. */
+/* The window frame and its rail: a column of destinations beside the page. Imported by components.css. */
 
-.vs-rail-frame {
-  --titlebar-row: max(var(--chrome-inset-height, var(--space-0)), var(--control));
+/*
+ * The window's own controls are facts the desktop app sets on the root element, each 0 where there are no
+ * such controls and in full screen: `--chrome-start-width` by `--chrome-start-height` is the
+ * top-left corner the macOS traffic lights cover, and `--chrome-end-height` the strip across the
+ * top the Windows and Linux controls (drawn at the top right) cover. The start column is as tall
+ * as the window, at least as wide as the corner, and holds what it holds below the corner. The page
+ * starts at the window's top edge, below only the end strip.
+ */
+.vs-window-frame {
   position: relative;
   display: flex;
-  flex-direction: column;
   height: 100%;
   background: var(--bg);
 }
-.vs-rail-band {
+.vs-window-start {
   flex: none;
-  box-sizing: border-box;
-  height: var(--titlebar-row);
-  /* The band holds the window's own controls and moves the window. */
+  width: var(--chrome-start-width, var(--space-0));
+  /* Empty, but for the window's controls: it moves the window. */
   -webkit-app-region: drag;
-  border-bottom: var(--hairline) solid var(--line);
-  background: var(--bg);
+  transition: width var(--duration-fast) var(--easing);
 }
-.vs-rail-body {
-  display: flex;
-  flex: 1 1 0;
-  min-height: 0;
+.vs-window-frame > .vs-app-main {
+  box-sizing: border-box;
+  position: relative;
+  /* The band below sits under the page, in the stacking context this makes. */
+  isolation: isolate;
+  padding-top: var(--chrome-end-height, var(--space-0));
+  transition: padding-top var(--duration-fast) var(--easing);
+}
+/*
+ * The top of the page moves the window: the end strip where there is one, else the page's own top
+ * margin, where no control sits. Controls are carved out of it (`primitives.css`).
+ */
+.vs-window-drag {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: -1;
+  height: max(var(--space-5), var(--chrome-end-height, var(--space-0)));
+  -webkit-app-region: drag;
+}
+.vs-window-frame :is(a, button, input, select, textarea, summary, [role="button"], [tabindex]:not([tabindex="-1"])) {
+  -webkit-app-region: no-drag;
 }
 .vs-rail {
   box-sizing: border-box;
@@ -28,13 +51,17 @@
   flex: none;
   flex-direction: column;
   justify-content: space-between;
-  width: var(--rail);
+  width: max(var(--rail), var(--chrome-start-width, var(--space-0)));
   max-height: 100%;
-  padding: var(--space-3) var(--space-1) var(--space-4);
+  /* The window's controls sit in the corner at the top; the items start below it. */
+  padding: calc(var(--chrome-start-height, var(--space-0)) + var(--space-3)) var(--space-1) var(--space-4);
   /* The rail's background moves the window; its controls stay controls. */
   -webkit-app-region: drag;
   border-right: var(--hairline) solid var(--line);
   background: var(--panel-2);
+  transition:
+    width var(--duration-fast) var(--easing),
+    padding-top var(--duration-fast) var(--easing);
 }
 .vs-rail-group {
   display: flex;
