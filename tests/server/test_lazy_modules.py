@@ -10,7 +10,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from server.lazy_modules import lazy_module
+from server import lazy_module
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

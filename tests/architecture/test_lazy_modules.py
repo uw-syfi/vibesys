@@ -1,6 +1,6 @@
 """A lazy module is declared by an import that pyright and tach read, beside the handle that runs.
 
-``server.lazy_modules.lazy_module`` hides an import from the interpreter until first use. It would
+``server.lazy_module`` hides an import from the interpreter until first use. It would
 hide it from the type checker and the dependency graph too, but for the import the declaration
 puts in the ``if TYPE_CHECKING:`` branch. This test holds the two branches to each other: a
 ``lazy_module("a.b")`` that has no such import beside it, or names another module than the import
@@ -109,7 +109,7 @@ def _declaration(package: str, module: str, alias: str, target: str | None = Non
     """A compliant declaration of ``package.module`` as ``alias``; ``target`` is what runs."""
     return (
         "from typing import TYPE_CHECKING\n"
-        "from server.lazy_modules import lazy_module\n\n"
+        "from server import lazy_module\n\n"
         "if TYPE_CHECKING:\n"
         f"    from {package} import {module} as {alias}\n"
         "else:\n"
@@ -138,7 +138,7 @@ def test_a_handle_naming_another_module_than_its_import_is_rejected(
 
 
 def test_a_handle_with_no_import_beside_it_is_rejected_naming_the_line() -> None:
-    source = "from server.lazy_modules import lazy_module\n\nexamples = lazy_module('server.x')\n"
+    source = "from server import lazy_module\n\nexamples = lazy_module('server.x')\n"
     [problem] = lazy_declaration_problems(source, "m.py")
     assert problem.startswith("m.py:3:")
     assert "outside an `else:`" in problem
@@ -147,7 +147,7 @@ def test_a_handle_with_no_import_beside_it_is_rejected_naming_the_line() -> None
 def test_a_handle_on_a_computed_name_is_rejected() -> None:
     source = (
         "from typing import TYPE_CHECKING\n"
-        "from server.lazy_modules import lazy_module\n"
+        "from server import lazy_module\n"
         "if TYPE_CHECKING:\n    from server import x\nelse:\n    x = lazy_module(NAME)\n"
     )
     [problem] = lazy_declaration_problems(source, "m.py")
@@ -211,7 +211,6 @@ def test_the_host_read_path_defers_imports_only_through_lazy_module() -> None:
     problems = [
         problem
         for path in files
-        if path.name != "lazy_modules.py"
         for problem in deferred_import_calls(
             path.read_text(encoding="utf-8"), str(path.relative_to(SOURCE_ROOT.parent))
         )

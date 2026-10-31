@@ -16,7 +16,7 @@ from functools import cached_property
 from typing import TYPE_CHECKING
 
 from entrypoints.host_facts import HostFacts
-from server.lazy_modules import lazy_module
+from server import lazy_module
 
 if TYPE_CHECKING:
     from entrypoints import host_helper

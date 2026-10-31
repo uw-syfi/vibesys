@@ -58,7 +58,6 @@ ALLOWED_FIRST_PARTY = (
     "entrypoints.evals",
     "entrypoints.detached_run",
     "entrypoints.host_helper",
-    "entrypoints.host_facts",
     "server",
     "server.control_envelope",
     "server.diagnostics",
@@ -89,7 +88,6 @@ ALLOWED_FIRST_PARTY = (
     "server.run_summary",
     "server.run_summary_cache",
     "server.instances",
-    "server.lazy_modules",
     "server.registry",
     "server.relay",
     "server.run_digest",
@@ -232,8 +230,8 @@ def test_light_entrypoint_imports_only_light_modules(entrypoint: str) -> None:
     assert violations(entrypoint) == []
 
 
-LAZY_MODULE_PRIMITIVE = frozenset({"server", "server.lazy_modules"})
-"""The empty ``server`` package and ``lazy_module``, which imports nothing until a handle is read."""
+LAZY_MODULE_PRIMITIVE = frozenset({"server"})
+"""The ``server`` package, whose init holds only ``lazy_module``: it imports nothing until a handle is read."""
 
 
 @pytest.mark.regression

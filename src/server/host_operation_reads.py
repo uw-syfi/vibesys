@@ -6,7 +6,7 @@ category; callers receive a validated registry response.
 
 ``vibesys host <read>`` is a new process per read, so every module this one loads at
 import is paid by every read. It therefore declares the modules only some reads use as lazy
-modules (``server.lazy_modules``), loaded at the read or refusal that needs them.
+modules (``server.lazy_module``), loaded at the read or refusal that needs them.
 
 Public surface: HostReadFacts, HostReadSource, ReadRefusedError,
 read_failure_category, answer_registered_read and stream_saved_runs.
@@ -17,7 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from server.lazy_modules import lazy_module
+from server import lazy_module
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator

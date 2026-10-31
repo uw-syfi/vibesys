@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Final, Literal, Protocol, assert_never, overlo
 
 from pydantic import TypeAdapter
 
+from server import lazy_module
 from server.host_api import (
     CLI_PROVIDER_FLAG,
     ENVIRONMENT_FLAGS,
@@ -145,7 +146,6 @@ from server.host_run_events import (
 )
 from server.host_run_reader import RunReaderReply, RunReaderRequest
 from server.host_run_summary import UsageWindowReply, UsageWindowRequest
-from server.lazy_modules import lazy_module
 from server.registry import driving
 from server.relay import (
     BridgeResult,

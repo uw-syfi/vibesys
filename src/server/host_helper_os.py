@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, BinaryIO
 
 from pydantic import JsonValue, TypeAdapter
 
+from server import lazy_module
 from server.host_api import (
     RUN_EVENTS_FILE,
     RUN_EVENTS_READ_MAX_BYTES,
@@ -68,7 +69,6 @@ from server.host_helper_requests import (
 )
 from server.host_preflight import PreflightReport
 from server.host_run_events import EVENT_TYPES_BY_KINDS, RunEventKinds
-from server.lazy_modules import lazy_module
 from server.run_digest import digest_journal
 from server.span_index import (
     Entry,

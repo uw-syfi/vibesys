@@ -142,6 +142,6 @@ def test_intent_admission_loads_contracts_without_the_run_engine(
         name
         for name in loaded
         if any(name == root or name.startswith(root + ".") for root in engines)
-        # The empty ``server`` package and ``lazy_module``, which imports nothing until a handle is read.
-        and name not in {"server", "server.lazy_modules"}
+        # The ``server`` package, whose init holds only ``lazy_module``: nothing is imported until a handle is read.
+        and name != "server"
     ] == []

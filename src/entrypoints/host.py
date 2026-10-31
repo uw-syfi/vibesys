@@ -2,7 +2,7 @@
 
 Each command is a new process, so a command pays for every module its family imports. The
 module level holds the command tables and nothing else a command might not use; each family
-is a lazy module (``server.lazy_modules``) loaded when its command is dispatched, and a
+is a lazy module (``server.lazy_module``) loaded when its command is dispatched, and a
 registered read builds only the host facts it asks for (``entrypoints.host_reads``).
 """
 
@@ -14,7 +14,7 @@ from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from server.lazy_modules import lazy_module
+from server import lazy_module
 from vs_proto.api import host_operations
 from vs_sim.api import (
     OsThreads,

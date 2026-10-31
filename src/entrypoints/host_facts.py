@@ -1,15 +1,16 @@
-"""The host facts that a host read and the host helper's channel answer from, wired in one place.
+"""The host facts a ``vibesys host <read>`` answers from, each built when the read asks for it.
 
 ``vibesys host <read>`` is a new process for every read, so what a read builds is paid by every
 read. Each fact is therefore built the first time it is asked for and kept (``cached_property``),
-and the modules behind it are lazy modules (``server.lazy_modules``): ``list-compute`` never
+and the modules behind it are lazy modules (``server.lazy_module``): ``list-compute`` never
 constructs the project catalog, the registry or the agent library, and ``list-tasks`` never
 constructs the compute settings.
 
 The host helper builds the same facts, all of them, when it starts
-(``entrypoints.host_helper.real_host``). It takes them from this class rather than wiring its
-own, so a fact is built the same way in whichever process asks for it.
-``tests/entrypoints/test_host_facts.py`` holds the two to each other.
+(``entrypoints.host_helper.real_host``), and wires them itself: it imports them statically before
+it answers ``hello``, and this module and its lazy modules would add to what that counts
+(``tests/e2e/test_host_helper.py``). ``tests/entrypoints/test_host_facts.py`` holds the two
+wirings to each other.
 
 Public surface: ``HostFacts``.
 """
@@ -20,7 +21,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from server.lazy_modules import lazy_module
+from server import lazy_module
 from vs_sim.api import ProcessesProbe, SubprocessPipedProcessLauncher
 
 if TYPE_CHECKING:
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     from entrypoints import host_example_projects, host_harnesses
     from server import host_agent_logins, host_api, host_compute_runtime, host_helper_os
     from server import registry as live_registry
+    from server.host_helper_requests import ExampleProjects
     from vs_project import api as project_library
     from vs_sim.api import Processes, SleepingClock, Threads
 else:
@@ -90,9 +92,9 @@ class HostFacts:
         return host_helper_os.OsDirectories()
 
     @cached_property
-    def examples(self) -> host_example_projects.ExampleProjectsOnUse:
-        """This checkout's example catalog and project maker, loaded when one is asked for."""
-        return host_example_projects.ExampleProjectsOnUse(self._processes)
+    def examples(self) -> ExampleProjects:
+        """This checkout's example catalog and project maker; only an example read asks for it."""
+        return host_example_projects.checkout_example_projects(self._processes)
 
     @cached_property
     def compute(self) -> host_compute_runtime.MachineCompute:

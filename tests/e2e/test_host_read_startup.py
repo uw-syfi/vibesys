@@ -164,7 +164,6 @@ _WHOLE_HOST_READ = frozenset(
         Group.READ_ADAPTER,
         Group.PROJECT_HOST,
         Group.WHOLE_HOST,
-        Group.EXAMPLES,
         Group.COMPUTE,
         Group.AGENT_LIBRARY,
         Group.LOGINS,

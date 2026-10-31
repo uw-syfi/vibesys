@@ -11,9 +11,9 @@ from __future__ import annotations
 from functools import cache
 from typing import TYPE_CHECKING
 
+from server import lazy_module
 from server.host_api import HarnessOption
 from server.host_harness import HarnessDisplay, Maker, ModelGeneration
-from server.lazy_modules import lazy_module
 
 if TYPE_CHECKING:
     from vs_agent import api as agents
