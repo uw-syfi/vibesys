@@ -203,3 +203,65 @@ test('cancel stops an observed host for good: no reconnect, no listener call', a
   watch.close();
   expect(clock.pending).toBe(0);
 });
+
+test('a connecting stream names each step, and a failed one the step it stopped at', () => {
+  const gateway = new FakeRunGateway();
+  const watch = runWatch(gateway, new FakeClock().schedule);
+  const phases: RunsState['phase'][] = [];
+  watch.observe(HOST, state => phases.push(state.phase));
+  const stream = gateway.open(HOST)[0];
+  stream?.reached('handshake');
+  stream?.reached('runs');
+  expect(phases.map(phase => (phase.kind === 'connecting' ? phase.step : phase.kind))).toEqual([
+    'gateway',
+    'handshake',
+    'runs',
+  ]);
+});
+
+test('a failure keeps the step it stopped at while the next try starts over', async () => {
+  const gateway = new FakeRunGateway();
+  const clock = new FakeClock();
+  const watch = runWatch(gateway, clock.schedule);
+  const phases: RunsState['phase'][] = [];
+  watch.observe(HOST, state => {
+    phases.push(state.phase);
+  });
+  const first = gateway.open(HOST)[0];
+  first?.reached('handshake');
+  first?.fail(new Error('gateway startup exited: 1'));
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(phases.at(-1)).toEqual({
+    kind: 'reconnecting',
+    attempt: 1,
+    detail: 'gateway startup exited: 1',
+    step: 'handshake',
+  });
+  clock.advanceBy(1_000);
+  expect(gateway.open(HOST)).toHaveLength(1);
+  gateway.open(HOST)[0]?.reached('handshake');
+  expect(phases.at(-1)).toMatchObject({kind: 'reconnecting', attempt: 1, step: 'handshake'});
+});
+
+test('retry opens a failed stream now, counts no failure, and leaves a delivering one be', async () => {
+  const gateway = new FakeRunGateway();
+  const clock = new FakeClock();
+  const watch = runWatch(gateway, clock.schedule);
+  const phases: RunsState['phase'][] = [];
+  watch.observe(HOST, state => phases.push(state.phase));
+  gateway.open(HOST)[0]?.fail(new Error('down'));
+  await Promise.resolve();
+  await Promise.resolve();
+  watch.retry(HOST);
+  expect(phases.at(-1)).toEqual({kind: 'connecting', step: 'gateway'});
+  expect(gateway.open(HOST)).toHaveLength(1);
+  // The delay the failure had armed is gone: waiting it out opens nothing more.
+  clock.advanceBy(1_000);
+  expect(gateway.streams).toHaveLength(2);
+  gateway.announce(HOST, []);
+  const delivering = gateway.open(HOST)[0];
+  watch.retry(HOST);
+  expect(delivering?.signal.aborted).toBe(false);
+  expect(phases.at(-1)).toEqual({kind: 'live'});
+});

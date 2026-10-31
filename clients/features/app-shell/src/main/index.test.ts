@@ -42,6 +42,7 @@ test('notifies only while enabled, and not again after the host was unavailable'
   notifier.listing({
     kind: 'unavailable',
     host: 'local',
+    step: 'gateway',
     connection: {kind: 'offline', detail: 'no route'},
   });
   notifier.listing(listed('completed', true));
