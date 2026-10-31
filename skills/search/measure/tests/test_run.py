@@ -225,3 +225,41 @@ def test_transition_rejects_illegal_edges_without_mutating_input(
             controller.transition(before, "item", target, "done")
     assert run.state() == before
     assert before["items"]["item"]["state"] == "dispatched"
+
+
+@given(
+    events=st.lists(
+        st.tuples(
+            st.sampled_from(["add", "returned", "judging", "parked", "abandoned"]),
+            st.integers(min_value=0, max_value=5),
+        ),
+        max_size=40,
+    )
+)
+def test_interleaved_work_sequences_preserve_ledger_and_slot_invariants(
+    tmp_path_factory: pytest.TempPathFactory, events: list[tuple[str, int]]
+) -> None:
+    run = Run(tmp_path_factory.mktemp("run"))
+    for action, index in events:
+        item = f"item-{index}"
+        before = run.state()
+        if action == "add":
+            code = run.call(
+                "add", "--id", item, "--kind", "implement", "--hypothesis", "reduce copies"
+            )
+        else:
+            code = run.call("transition", "--id", item, "--to", action, "--reason", "evidence")
+        after = run.state()
+        if code:
+            assert after == before
+        opened = controller.status(after, NOW)["open_items"]
+        busy = sum(row["state"] in {"dispatched", "judging"} for row in opened)
+        assert 0 <= busy <= after["fanout"]
+        assert controller.status(after, NOW)["free_slots"] == after["fanout"] - busy
+        ledger = (run.path / "ledger.md").read_text()
+        assert len(ledger.splitlines()) == len(after["items"]) + 2
+        for key, row in after["items"].items():
+            assert (
+                f"| {key} | implement | reduce copies | {row['state']} | {row['reason']} |"
+                in ledger
+            )
