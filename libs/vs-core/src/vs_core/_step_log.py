@@ -6,6 +6,8 @@ versioned by ``SCHEMA_VERSION``, until those values are proto messages (run-reco
 
 from __future__ import annotations
 
+import zlib
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
 from protobuf import Oneof
@@ -14,6 +16,7 @@ from pydantic import TypeAdapter
 from vs_proto.api import (
     AttemptInterrupted,
     CoreInput,
+    CoreSnapshot,
     InterruptionReason,
     RunStarted,
     StepCancelReason,
@@ -28,6 +31,7 @@ from vs_proto.api import (
 from .types.common import Value
 from .types.kernel import CoreEvent, CoreState
 from .types.records import Request, RequestObserved
+from .types.search import Discarded, Event
 from .types.settlement import RunResultProposal
 from .types.steps import (
     Cancelled,
@@ -56,12 +60,22 @@ class _FinishedBody(Value):
     owner_events: tuple[OwnerEvent, ...] = ()
 
 
+class _FoldBody(Value):
+    """A cached fold: core's state, and the events the search has yet to hear."""
+
+    schema_version: int = SCHEMA_VERSION
+    state: CoreState
+    events: tuple[Event, ...] = ()
+    discarded: tuple[Discarded, ...] = ()
+
+
 _EVENT = TypeAdapter(CoreEvent)
 _STATE = TypeAdapter(CoreState)
 _DECISIONS = TypeAdapter(tuple[Decision, ...])
 _REQUEST = TypeAdapter(Request)
 _FINISHED = TypeAdapter(_FinishedBody)
 _RESULT = TypeAdapter(RunResultProposal)
+_FOLD = TypeAdapter(_FoldBody)
 
 _CANCEL_REASONS = {
     CancelReason.DEADLINE: StepCancelReason.DEADLINE,
@@ -94,6 +108,78 @@ def decode_seed(message: RunStarted, registry: OperationRegistry | None) -> Core
     """The state a ``RunStarted`` begins the fold from, refused when written by another encoding."""
     _same_encoding(message.schema_version)
     return _STATE.validate_json(message.state, context=_context(registry))
+
+
+@dataclass(frozen=True)
+class SavedRun:
+    """A run an older version saved, as it enters the log: what its fold starts from.
+
+    ``inputs`` are the owner events the saved run had received and not yet applied. ``strategy``
+    is the search's whole state in the driver's own encoding, ``wakes`` and ``held`` what it had
+    asked for and could not hand core yet.
+    """
+
+    state: CoreState
+    envelope_version: int
+    strategy: bytes
+    inputs: tuple[CoreEvent, ...] = ()
+    wakes: tuple[float, ...] = ()
+    held: tuple[Decision, ...] = ()
+
+
+def snapshot_message(saved: SavedRun) -> CoreSnapshot:
+    """The record body that seeds a log with a run an older version saved.
+
+    The state and the search are compressed: a saved state is megabytes of JSON, and the record
+    holds one of them and the other.
+    """
+    return CoreSnapshot(
+        schema_version=SCHEMA_VERSION,
+        envelope_version=saved.envelope_version,
+        state=zlib.compress(_STATE.dump_json(saved.state)),
+        inputs=[_EVENT.dump_json(event) for event in saved.inputs],
+        strategy=zlib.compress(saved.strategy),
+        wakes=list(saved.wakes),
+        held=_DECISIONS.dump_json(saved.held),
+    )
+
+
+def decode_snapshot(message: CoreSnapshot, registry: OperationRegistry | None) -> SavedRun:
+    """The run a ``CoreSnapshot`` holds, refused when written by another encoding or damaged."""
+    _same_encoding(message.schema_version)
+    context = _context(registry)
+    return SavedRun(
+        state=_STATE.validate_json(_inflated(message.state), context=context),
+        envelope_version=message.envelope_version,
+        strategy=_inflated(message.strategy),
+        inputs=tuple(_EVENT.validate_json(event, context=context) for event in message.inputs),
+        wakes=tuple(message.wakes),
+        held=_DECISIONS.validate_json(message.held, context=context) if message.held else (),
+    )
+
+
+def _inflated(data: bytes) -> bytes:
+    try:
+        return zlib.decompress(data)
+    except zlib.error as error:
+        message = f"the log holds a snapshot that does not inflate: {error}"
+        raise ValueError(message) from error
+
+
+def encode_fold(
+    state: CoreState, events: tuple[Event, ...], discarded: tuple[Discarded, ...]
+) -> bytes:
+    """The canonical JSON of a fold: a state and what the search still has to hear."""
+    return _FOLD.dump_json(_FoldBody(state=state, events=events, discarded=discarded))
+
+
+def decode_fold(
+    data: bytes, registry: OperationRegistry | None
+) -> tuple[CoreState, tuple[Event, ...], tuple[Discarded, ...]]:
+    """A fold written by ``encode_fold``, refused when another encoding or damaged wrote it."""
+    body = _FOLD.validate_json(data, context=_context(registry))
+    _same_encoding(body.schema_version)
+    return body.state, body.events, body.discarded
 
 
 def encode_event(event: CoreEvent) -> bytes:

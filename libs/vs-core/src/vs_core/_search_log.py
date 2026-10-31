@@ -21,13 +21,13 @@ from vs_proto.api import StrategyAdvanced
 
 from ._search_run import Advanced, Inbox, SearchHost, advance, begin, deferred
 from ._step import step
-from ._step_log import SCHEMA_VERSION, decode_held, encode_event, encode_held
+from ._step_log import SCHEMA_VERSION, decode_held, decode_snapshot, encode_event, encode_held
 from .types.search import TimeReached
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from vs_proto.api import Record
+    from vs_proto.api import CoreSnapshot, Record
 
     from ._registry import OperationRegistry
     from ._search_events import Translated
@@ -82,6 +82,8 @@ def restore[S: StrategyState, C](
         body = record.body
         if body is not None and body.field == "strategy_advanced":
             progress = _read(body.value, progress, search, registry)
+        elif body is not None and body.field == "core_snapshot":
+            progress = _saved(body.value, search, registry)
     return None if progress is None else replace(progress, state=search.resume(progress.state))
 
 
@@ -196,6 +198,22 @@ def _strategy(
     if whole or changes is None:
         return Oneof("checkpoint", state.model_dump_json().encode())
     return Oneof("steps", changes)
+
+
+def _saved[S: StrategyState, C](
+    message: CoreSnapshot, search: SearchDriver[S, C], registry: OperationRegistry | None
+) -> Progress[S]:
+    """The search a run an older version saved left: its whole state, as a checkpoint is."""
+    saved = decode_snapshot(message, registry)
+    state = search.state_model.model_validate_json(saved.strategy)
+    return Progress(
+        state,
+        tuple(sorted(saved.wakes)),
+        saved.held,
+        advances=1,
+        checkpoint_at=1,
+        checkpointed=True,
+    )
 
 
 def _read[S: StrategyState, C](
