@@ -198,7 +198,7 @@ function namesWhoRanIt(width: number): void {
     await page.getByRole('radiogroup', {name: 'Show'}).getByText('Ideas').click();
     await page
       .getByRole('listbox', {name: 'Ideas'})
-      .getByRole('option', {name: /Pad the slot headers/})
+      .getByRole('option', {name: /^Pad the slot headers/})
       .click();
     const steps = page.getByRole('listbox', {name: /steps$/});
     await expect(steps).toBeVisible();

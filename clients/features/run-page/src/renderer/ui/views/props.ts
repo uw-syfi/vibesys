@@ -14,7 +14,13 @@
  */
 import type {CoreState, TokenLedger} from '@vibesys/run-state';
 import type {ReactNode} from 'react';
-import type {ModelNames, RunModel, WhoBySpan, ZoomEvent} from '../../../state/index.js';
+import type {
+  ModelNames,
+  RunModel,
+  RunPosition,
+  WhoBySpan,
+  ZoomEvent,
+} from '../../../state/index.js';
 
 /** Moves the screen: the route machine's events. */
 export type Zoom = (event: ZoomEvent) => void;
@@ -29,6 +35,11 @@ interface RunClock {
 export interface ViewBase {
   readonly emptyLabelsOnly?: boolean;
   readonly model: RunModel;
+  /**
+   * The run to its end and the time bar's place on it: the figures of the dashboard (the charts, the
+   * stats, the Ideas table) are the whole run's cut there. Absent: `model` is the whole run.
+   */
+  readonly position?: RunPosition;
   readonly clock: RunClock;
   /** The tokens the run's turns spent, by turn span (empty before any turn finished). */
   readonly tokens: TokenLedger;

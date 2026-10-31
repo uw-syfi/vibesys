@@ -6,6 +6,7 @@ import {
   FIXTURE_NAMES,
   findLeaks,
   fixtureNamed,
+  objectivesRun,
   type RunFixture,
   splitLive,
   weeksRun,
@@ -168,5 +169,40 @@ describe('each scenario shows its case', () => {
 
   it('14 days: is the same run every time', () => {
     expect(weeksRun()).toEqual(weeksRun());
+  });
+});
+
+/** The metrics a gate span states, in the order it states them; none for any other event. */
+function metricsOf(event: RunFixture['events'][number]): {name: string; value: number}[] {
+  const text = (event.data as {span?: {label?: {attrs_json?: string}}} | null)?.span?.label
+    ?.attrs_json;
+  return text === undefined ? [] : (JSON.parse(text).metrics ?? []);
+}
+
+describe('the runs of three and of six objectives', () => {
+  it('read every extra objective at every gate, and the run of six has one that never moves', () => {
+    for (const count of [3, 6] as const) {
+      const fixture = objectivesRun(count);
+      const declared = fixture.events.flatMap(event =>
+        event.data?.kind === 'run_started'
+          ? (event.data.overview?.objective.objectives ?? []).map(each => each.name)
+          : [],
+      );
+      expect(declared).toHaveLength(count);
+      for (const event of fixture.events) {
+        const metrics = metricsOf(event);
+        if (metrics.length > 0) expect(metrics.map(each => each.name)).toEqual(declared);
+      }
+    }
+    const values = (name: string) =>
+      new Set(
+        objectivesRun(6).events.flatMap(event =>
+          metricsOf(event)
+            .filter(each => each.name === name)
+            .map(each => each.value),
+        ),
+      );
+    expect(values('completed_requests').size).toBe(1);
+    expect(values('ttft_ms').size).toBeGreaterThan(3);
   });
 });

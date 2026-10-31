@@ -66,8 +66,6 @@ export type IdeaTreeEntry = IdeaTreeRow | FoldTreeRow;
 
 export interface IdeaTree {
   readonly rows: readonly IdeaTreeEntry[];
-  /** Failed ideas the filter hides, as in the flat list. */
-  readonly hiddenFailed: number;
   readonly counts: ReturnType<typeof ideasView>['counts'];
   readonly total: number;
 }
@@ -353,7 +351,7 @@ export function ideaTree(model: RunModel, shape: TreeShape): IdeaTree {
   };
   const roots = kidsRoots(walk);
   if (!chained(walk, roots)) siblings(walk, roots, [], true);
-  return {rows: walk.out, hiddenFailed: view.hiddenFailed, counts: view.counts, total: view.total};
+  return {rows: walk.out, counts: view.counts, total: view.total};
 }
 
 function kidsRoots(walk: Walk): string[] {

@@ -21,45 +21,44 @@ async function shot(page: Page, name: string): Promise<void> {
 test.use({colorScheme: 'dark', viewport: {width: 1440, height: 900}});
 
 const ideas = (page: Page) => page.getByRole('listbox', {name: 'Ideas'});
-const failedChip = (page: Page) => page.locator('button.vs-dotlegend-item', {hasText: '4 failed'});
+const failedChip = (page: Page) =>
+  page.locator('button.vs-dotlegend-item', {hasText: /^Failed \d+/});
 const failedRows = (page: Page) =>
   ideas(page)
     .getByRole('option')
-    .filter({has: page.locator('.vs-chip[data-tone="err"]')});
+    .filter({has: page.locator('[role="img"][aria-label="Failed"]')});
 
 test('failed ideas are listed in the flat table and a chip lists only them', async ({page}) => {
   await openFixture(page, fixtureNamed('finished-ten-ideas'));
-  await expect(page.getByRole('combobox', {name: 'Sort ideas'})).toHaveValue('newest');
   await expect(ideas(page).locator('.vs-guide, .vs-pickrow-fold')).toHaveCount(0);
-  await expect(ideas(page).getByRole('option')).not.toHaveCount(0);
-  await expect(failedRows(page)).toHaveCount(4);
+  await expect(ideas(page).getByRole('option')).toHaveCount(10);
+  await expect(failedRows(page)).toHaveCount(3);
   await expect(failedChip(page)).toHaveAttribute('aria-pressed', 'false');
-  // A failed idea keeps its reason visible beside a compact status pill.
-  await expect(ideas(page).getByRole('option', {name: /Replace the mutex/})).toContainText(
+  // A failed idea keeps its cause visible under its status.
+  await expect(ideas(page).getByRole('option', {name: /^Replace the mutex/})).toContainText(
     /review rejected/i,
   );
-  await expect(failedRows(page).first().locator('.vs-chip')).toHaveText('Failed');
   for (const width of [1440, 1000]) {
-    await page.setViewportSize({width, height: 900});
+    await page.setViewportSize({width, height: 2000});
     const visibility = await failedRows(page).evaluateAll(rows =>
       rows.map(row => {
-        const reason = row.querySelector('.vs-pickrow-text > .vs-text:last-child');
+        const reason = row.querySelector('.vs-columnlist-lines > .vs-text');
         const box = reason?.getBoundingClientRect();
-        const parent = reason?.parentElement?.getBoundingClientRect();
+        const parent = reason?.closest('.vs-columnlist-cell')?.getBoundingClientRect();
         return {
-          clipped: reason !== null && reason.scrollHeight > reason.clientHeight + 1,
+          clipped: reason !== null && reason.scrollWidth > reason.clientWidth + 1,
           inRow: box !== undefined && parent !== undefined && box.right <= parent.right + 1,
         };
       }),
     );
-    expect(visibility).toHaveLength(4);
+    expect(visibility).toHaveLength(3);
     expect(visibility.every(item => !item.clipped && item.inRow)).toBe(true);
   }
   await shot(page, 'ten-ideas-table');
 
   await failedChip(page).click();
-  await expect(failedRows(page)).toHaveCount(4);
-  await expect(ideas(page).getByRole('option')).toHaveCount(4);
+  await expect(failedRows(page)).toHaveCount(3);
+  await expect(ideas(page).getByRole('option')).toHaveCount(3);
   await expect(failedChip(page)).toHaveAttribute('aria-pressed', 'true');
   await failedChip(page).click();
   await expect(ideas(page).getByRole('option')).toHaveCount(10);

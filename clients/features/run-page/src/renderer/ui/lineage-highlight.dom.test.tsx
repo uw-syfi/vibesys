@@ -6,7 +6,13 @@ import {Window} from 'happy-dom';
 import {act, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {modelOfShape} from '../../state/ideas-tree-fixtures.js';
-import {ideaAncestry, type RunPageAction, runPageInitial, runPageStep} from '../../state/index.js';
+import {
+  ideaAncestry,
+  positionOf,
+  type RunPageAction,
+  runPageInitial,
+  runPageStep,
+} from '../../state/index.js';
 import {Hero} from './hero.js';
 import {RunLevel} from './run-level.js';
 
@@ -69,7 +75,7 @@ async function shown() {
       <>
         <Hero
           {...base}
-          whole={model}
+          position={positionOf(base.model, model, 0)}
           idea={null}
           lit={lit}
           hover={idea => dispatch({type: 'ideas-hover', idea})}
@@ -95,7 +101,7 @@ const ringed = (container: HTMLElement): number =>
 
 function row(container: HTMLElement, title: string): Element {
   const found = [...container.querySelectorAll('[role="option"]')].find(
-    each => each.querySelector('.vs-pickrow-text > .vs-text')?.textContent === title,
+    each => each.querySelector('.vs-columnlist-cell .vs-text')?.textContent === title,
   );
   if (found === undefined) throw new Error(`no row ${title}`);
   return found;

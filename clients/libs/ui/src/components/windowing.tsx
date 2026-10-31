@@ -4,6 +4,14 @@ import {SIZE} from '../tokens/index.js';
 /** Rows drawn beyond the visible ones on each side, so a scroll does not show a gap. */
 const OVERSCAN = 6;
 
+/**
+ * How far beyond the drawn rows the row a `reveal` handed over stays drawn. Rows are measured as they
+ * are drawn, and one taller than its estimate pushes the rest of the list down, so the row the reader
+ * was sent to (the end, say) can fall outside the rows drawn for a commit and be drawn again later as
+ * another element, which would take the focus it had with it.
+ */
+const KEEP = 3 * OVERSCAN;
+
 /** Where each row starts, and, last, the total height; `measured` holds the rows drawn so far. */
 function offsetsOf(
   count: number,
@@ -56,6 +64,15 @@ function unclamped(element: HTMLElement, before: number | null, resting: boolean
 function scrollToEnd(element: HTMLElement): number {
   element.scrollTop = element.scrollHeight;
   return element.scrollTop;
+}
+
+/** The rows drawn: `first` up to `last`, widened to the row a reveal handed over when it is close. */
+function drawn(first: number, last: number, kept: number | null): {first: number; last: number} {
+  if (kept === null) return {first, last};
+  return {
+    first: kept < first && first - kept <= KEEP ? kept : first,
+    last: kept >= last && kept - last < KEEP ? kept + 1 : last,
+  };
 }
 
 /** The element of the row at `index`, or null while it is not drawn. */
@@ -199,6 +216,7 @@ export function useWindowed(options: {
   const held = useRef(startAt !== undefined && startAt >= 0 && startAt < count);
   const following = useRef(follow && !held.current);
   const scrolledToEnd = useRef(toEnd);
+  const kept = useRef<number | null>(null);
   const pane = useRef<HTMLElement | null>(null);
   // Where the list last put itself at its end: a reader above that has left it, even before the
   // scroll event that says so arrives.
@@ -217,8 +235,11 @@ export function useWindowed(options: {
   const holdAt = held.current ? (offsets[startAt ?? 0] ?? 0) : null;
   const top =
     holdAt !== null ? holdAt : following.current ? Math.max(0, total - view.height) : view.top;
-  const first = Math.max(0, indexAt(offsets, top) - OVERSCAN);
-  const last = Math.min(count, indexAt(offsets, top + view.height) + 1 + OVERSCAN);
+  const {first, last} = drawn(
+    Math.max(0, indexAt(offsets, top) - OVERSCAN),
+    Math.min(count, indexAt(offsets, top + view.height) + 1 + OVERSCAN),
+    kept.current,
+  );
 
   // The scroll as this commit's render finds it: before any layout the commit forces.
   const before = pane.current?.scrollTop ?? null;
@@ -266,6 +287,7 @@ export function useWindowed(options: {
     if (element === null) return;
     held.current = false;
     following.current = false;
+    kept.current = index;
     const height = element.clientHeight || view.height;
     const next = scrollFor(offsets[index] ?? 0, offsets[index + 1], element.scrollTop, height);
     element.scrollTop = next;

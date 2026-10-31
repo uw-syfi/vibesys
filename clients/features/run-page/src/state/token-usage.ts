@@ -41,3 +41,25 @@ export function tokensByAgent(
 export function turnTokens(ledger: TokenLedger, span: string): TokenTally | null {
   return ledger.bySpan[span] ?? null;
 }
+
+/**
+ * What the run's turns had spent at the time bar's position. At the run's end (`atEnd`) that is the
+ * whole ledger, which also holds the turns no span names. At an earlier position it is the usage of
+ * the turns whose span, as the viewed run (`spans`) holds it, had ended by then: a turn that had not
+ * begun or still ran spent nothing yet, and a later position never has less than an earlier one.
+ */
+export function tokensAt(
+  ledger: TokenLedger,
+  spans: ReadonlyMap<string, Span>,
+  atEnd: boolean,
+): TokenTally {
+  if (atEnd) return ledger.total;
+  let spent = NO_TOKENS;
+  for (const [id, tally] of Object.entries(ledger.bySpan)) {
+    const span = spans.get(id);
+    if (span?.label?.kind === 'agent_turn' && !IN_PROGRESS.has(span.status)) {
+      spent = addTokens(spent, tally);
+    }
+  }
+  return spent;
+}

@@ -220,10 +220,10 @@ test('the run level says what will appear before anything is measured, and keeps
   await open(page, {...SEED, listings: [listed([server('running')], [])]});
 
   // With nothing folded yet the chart is silent, its axes drawn with four gridlines and no words, and
-  // the ideas say there are none.
+  // no list of ideas is drawn.
   await expect(page.locator('.vs-chart-box .vs-chart-grid')).toHaveCount(4);
   await expect(page.getByText('nothing measured yet')).toHaveCount(0);
-  await expect(page.getByText('No ideas yet')).toBeVisible();
+  await expect(page.getByRole('listbox', {name: 'Ideas'})).toHaveCount(0);
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   await shot(page, 'ink-run-empty');
 
@@ -233,7 +233,7 @@ test('the run level says what will appear before anything is measured, and keeps
   await expect(show.getByRole('radio', {name: 'Agents'})).toBeChecked();
   await show.getByText('Ideas').click();
   await expect(show.getByRole('radio', {name: 'Ideas'})).toBeChecked();
-  await expect(page.getByText('No ideas yet')).toBeVisible();
+  await expect(page.getByRole('listbox', {name: 'Ideas'})).toHaveCount(0);
 });
 
 test('every ended run offers Resume', async ({page}) => {
