@@ -114,7 +114,10 @@ describe('the performance chart', () => {
     const chart = chartOf(modelOf([idea('a', 'running', 0, 10)]), 5);
     expect(chart?.readings).toEqual([]);
     expect(chart?.steps).toEqual([]);
-    expect(chart?.yTicks).toEqual([]);
+    // Silent axes: four gridlines over the whole height, none with a word, and the time axis.
+    expect(chart?.yTicks.map(tick => tick.value)).toEqual([0.25, 0.5, 0.75, 1]);
+    expect(chart?.yTicks.every(tick => tick.label === '')).toBe(true);
+    expect(chart?.yDomain).toEqual([0, 1]);
     expect(chart?.xTicks.length).toBeGreaterThan(0);
   });
 

@@ -43,7 +43,7 @@ export interface ObjectiveHeadline {
    * input`; with only a value, its unit; null with neither.
    */
   readonly note: string | null;
-  /** The whole headline: `3.83× faster`, `No clear change`, `287 ops/s`, `Unavailable`. */
+  /** The whole headline: `3.83× faster`, `No clear change`, `287 ops/s`, `Unavailable`; empty when nothing was measured. */
   readonly words: string;
   readonly tone: 'ok' | 'err' | 'muted';
   /** The best's value and the input's, with the unit: `6,054,154 ops/s · input 1,581,539 ops/s`. */
@@ -161,11 +161,14 @@ function noInputWords(model: RunModel): string {
     : 'no input';
 }
 
-/** What an objective with no value says: that the input could not be measured, else that nothing was. */
+/**
+ * What an objective with no value says: that the input could not be measured, else nothing: an empty
+ * chart is silent, its axes drawn, and the Ideas list says there are no ideas.
+ */
 function notMeasured(model: RunModel): string {
   return model.inputGates.some(failure => failure.supersededBy === null)
     ? 'input not measured'
-    : 'nothing measured yet';
+    : '';
 }
 
 /** The tooltip of a ratio to the base: the compared means, then the ratio worded by its base. */
@@ -213,8 +216,8 @@ function wordsOf(model: RunModel, read: Reading): Words {
       note: null,
       words: why,
       tone: 'muted',
-      detail: [why, ...inputPart].join(' · '),
-      hint: [why, ...inputPart].join(' · '),
+      detail: [why, ...inputPart].filter(part => part !== '').join(' · '),
+      hint: [why, ...inputPart].filter(part => part !== '').join(' · '),
     };
   }
   if (better === null) {

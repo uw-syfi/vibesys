@@ -339,8 +339,8 @@ describe('the best idea while the run works', () => {
         const settled = roundsEnd.filter(end => end <= sequence).length;
         const hero = heroView(model);
         if (settled === 0) {
-          expect(hero.headlines[0]).toMatchObject({ratio: null, note: null});
-          expect(hero.headlines[0]?.detail).toContain('nothing measured yet');
+          // Nothing measured: the headline is silent.
+          expect(hero.headlines[0]).toMatchObject({ratio: null, note: null, words: ''});
           continue;
         }
         const best = Math.max(...values.slice(0, settled));

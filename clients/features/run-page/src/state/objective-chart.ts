@@ -80,6 +80,9 @@ const MIN_AXIS = 1;
 /** The share of the largest value left above it, so the top dot is not on the frame. */
 const HEADROOM = 1.1;
 
+/** The gridlines of a chart with nothing measured: four, evenly spaced, with no words, so the axes read as a chart. */
+const SILENT_TICKS = [0.25, 0.5, 0.75, 1].map(value => ({value, label: ''}));
+
 /** A value on a y axis in the short form its size reads in: `6M`, `12K`, `0.42`. */
 const COMPACT = new Intl.NumberFormat('en-US', {notation: 'compact', maximumFractionDigits: 2});
 
@@ -248,7 +251,7 @@ function chartOf(
     baselines,
     xEnd: end,
     xTicks: timeTicks(reached),
-    yTicks: empty ? [] : valueTicks(low, top),
+    yTicks: empty ? SILENT_TICKS : valueTicks(low, top),
     yDomain: [low, top > 0 ? top * HEADROOM : 1],
     resumes: time.resumes.map(seconds => seconds / 60),
     caption: `running time · ${runningWords(worked)}`,
