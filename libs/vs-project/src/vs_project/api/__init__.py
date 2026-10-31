@@ -176,7 +176,7 @@ from vs_project.api.state_store import (
     Unknown,
 )
 from vs_project.errors import ProjectError, StateDocumentDamagedError
-from vs_project.project import Project
+from vs_project.project import IndexedRun, Project
 
 if TYPE_CHECKING:
     from vs_project._admission import FileAdmissionStore
@@ -275,6 +275,7 @@ __all__ = [
     "HardwareInput",
     "InboxClosedError",
     "InboxEntry",
+    "IndexedRun",
     "InvalidTaskDefinitionError",
     "InvalidTaskNameError",
     "LocalAtomicWriteEffects",

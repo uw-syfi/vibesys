@@ -1184,6 +1184,378 @@ func (x *UsageRollupRow) GetTurns() uint32 {
 	return 0
 }
 
+// The usage of one conversation in one quarter hour, for one model and speed, as a provider's
+// transcript says it. A cache of the transcript, kept in `TranscriptFileState`.
+type TranscriptRow struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Quarter   int64                  `protobuf:"varint,1,opt,name=quarter,proto3" json:"quarter,omitempty"`
+	SessionId string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	// The working directory of the session: a path on this host, which never leaves it.
+	Cwd   string        `protobuf:"bytes,3,opt,name=cwd,proto3" json:"cwd,omitempty"`
+	Model string        `protobuf:"bytes,4,opt,name=model,proto3" json:"model,omitempty"`
+	Speed v1.UsageSpeed `protobuf:"varint,5,opt,name=speed,proto3,enum=vibesys.store.v1.UsageSpeed" json:"speed,omitempty"`
+	// Input counts cache reads and writes, as everywhere; reasoning is part of output.
+	Input         uint64 `protobuf:"varint,6,opt,name=input,proto3" json:"input,omitempty"`
+	CacheRead     uint64 `protobuf:"varint,7,opt,name=cache_read,json=cacheRead,proto3" json:"cache_read,omitempty"`
+	CacheWrite    uint64 `protobuf:"varint,8,opt,name=cache_write,json=cacheWrite,proto3" json:"cache_write,omitempty"`
+	CacheWrite_1H uint64 `protobuf:"varint,9,opt,name=cache_write_1h,json=cacheWrite1h,proto3" json:"cache_write_1h,omitempty"`
+	Output        uint64 `protobuf:"varint,10,opt,name=output,proto3" json:"output,omitempty"`
+	Reasoning     uint64 `protobuf:"varint,11,opt,name=reasoning,proto3" json:"reasoning,omitempty"`
+	// The requests the row counts.
+	Turns         uint32 `protobuf:"varint,12,opt,name=turns,proto3" json:"turns,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TranscriptRow) Reset() {
+	*x = TranscriptRow{}
+	mi := &file_vibesys_host_v1_usage_state_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TranscriptRow) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TranscriptRow) ProtoMessage() {}
+
+func (x *TranscriptRow) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_usage_state_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TranscriptRow.ProtoReflect.Descriptor instead.
+func (*TranscriptRow) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_usage_state_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *TranscriptRow) GetQuarter() int64 {
+	if x != nil {
+		return x.Quarter
+	}
+	return 0
+}
+
+func (x *TranscriptRow) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *TranscriptRow) GetCwd() string {
+	if x != nil {
+		return x.Cwd
+	}
+	return ""
+}
+
+func (x *TranscriptRow) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *TranscriptRow) GetSpeed() v1.UsageSpeed {
+	if x != nil {
+		return x.Speed
+	}
+	return v1.UsageSpeed(0)
+}
+
+func (x *TranscriptRow) GetInput() uint64 {
+	if x != nil {
+		return x.Input
+	}
+	return 0
+}
+
+func (x *TranscriptRow) GetCacheRead() uint64 {
+	if x != nil {
+		return x.CacheRead
+	}
+	return 0
+}
+
+func (x *TranscriptRow) GetCacheWrite() uint64 {
+	if x != nil {
+		return x.CacheWrite
+	}
+	return 0
+}
+
+func (x *TranscriptRow) GetCacheWrite_1H() uint64 {
+	if x != nil {
+		return x.CacheWrite_1H
+	}
+	return 0
+}
+
+func (x *TranscriptRow) GetOutput() uint64 {
+	if x != nil {
+		return x.Output
+	}
+	return 0
+}
+
+func (x *TranscriptRow) GetReasoning() uint64 {
+	if x != nil {
+		return x.Reasoning
+	}
+	return 0
+}
+
+func (x *TranscriptRow) GetTurns() uint32 {
+	if x != nil {
+		return x.Turns
+	}
+	return 0
+}
+
+// Where a read of one transcript file stopped, what it found, and what is needed to go on.
+type TranscriptFileState struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Path    string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	Size    uint64                 `protobuf:"varint,2,opt,name=size,proto3" json:"size,omitempty"`
+	MtimeNs int64                  `protobuf:"varint,3,opt,name=mtime_ns,json=mtimeNs,proto3" json:"mtime_ns,omitempty"`
+	// Bytes of complete lines already read.
+	Offset      uint64 `protobuf:"varint,4,opt,name=offset,proto3" json:"offset,omitempty"`
+	GuardLength uint32 `protobuf:"varint,5,opt,name=guard_length,json=guardLength,proto3" json:"guard_length,omitempty"`
+	GuardHash   uint32 `protobuf:"varint,6,opt,name=guard_hash,json=guardHash,proto3" json:"guard_hash,omitempty"`
+	// The format's parser state at `offset`, opaque to the host.
+	State []byte `protobuf:"bytes,7,opt,name=state,proto3" json:"state,omitempty"`
+	// Whether the read reached the end of the file; false when the byte budget stopped it.
+	Complete      bool             `protobuf:"varint,8,opt,name=complete,proto3" json:"complete,omitempty"`
+	Malformed     uint32           `protobuf:"varint,9,opt,name=malformed,proto3" json:"malformed,omitempty"`
+	Rows          []*TranscriptRow `protobuf:"bytes,10,rep,name=rows,proto3" json:"rows,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TranscriptFileState) Reset() {
+	*x = TranscriptFileState{}
+	mi := &file_vibesys_host_v1_usage_state_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TranscriptFileState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TranscriptFileState) ProtoMessage() {}
+
+func (x *TranscriptFileState) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_usage_state_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TranscriptFileState.ProtoReflect.Descriptor instead.
+func (*TranscriptFileState) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_usage_state_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *TranscriptFileState) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *TranscriptFileState) GetSize() uint64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+func (x *TranscriptFileState) GetMtimeNs() int64 {
+	if x != nil {
+		return x.MtimeNs
+	}
+	return 0
+}
+
+func (x *TranscriptFileState) GetOffset() uint64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *TranscriptFileState) GetGuardLength() uint32 {
+	if x != nil {
+		return x.GuardLength
+	}
+	return 0
+}
+
+func (x *TranscriptFileState) GetGuardHash() uint32 {
+	if x != nil {
+		return x.GuardHash
+	}
+	return 0
+}
+
+func (x *TranscriptFileState) GetState() []byte {
+	if x != nil {
+		return x.State
+	}
+	return nil
+}
+
+func (x *TranscriptFileState) GetComplete() bool {
+	if x != nil {
+		return x.Complete
+	}
+	return false
+}
+
+func (x *TranscriptFileState) GetMalformed() uint32 {
+	if x != nil {
+		return x.Malformed
+	}
+	return 0
+}
+
+func (x *TranscriptFileState) GetRows() []*TranscriptRow {
+	if x != nil {
+		return x.Rows
+	}
+	return nil
+}
+
+// What the host knows of one provider's transcript directory.
+type TranscriptRootState struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Provider      string                 `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
+	Path          string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	Files         []*TranscriptFileState `protobuf:"bytes,3,rep,name=files,proto3" json:"files,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TranscriptRootState) Reset() {
+	*x = TranscriptRootState{}
+	mi := &file_vibesys_host_v1_usage_state_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TranscriptRootState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TranscriptRootState) ProtoMessage() {}
+
+func (x *TranscriptRootState) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_usage_state_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TranscriptRootState.ProtoReflect.Descriptor instead.
+func (*TranscriptRootState) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_usage_state_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *TranscriptRootState) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *TranscriptRootState) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *TranscriptRootState) GetFiles() []*TranscriptFileState {
+	if x != nil {
+		return x.Files
+	}
+	return nil
+}
+
+// The transcripts of every provider on this host, read incrementally. A cache, persisted as
+// `transcript-scan.pb`: a file that fails its rules is rebuilt whole.
+type TranscriptScanCache struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Version       uint32                 `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
+	Roots         []*TranscriptRootState `protobuf:"bytes,2,rep,name=roots,proto3" json:"roots,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TranscriptScanCache) Reset() {
+	*x = TranscriptScanCache{}
+	mi := &file_vibesys_host_v1_usage_state_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TranscriptScanCache) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TranscriptScanCache) ProtoMessage() {}
+
+func (x *TranscriptScanCache) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_usage_state_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TranscriptScanCache.ProtoReflect.Descriptor instead.
+func (*TranscriptScanCache) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_usage_state_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *TranscriptScanCache) GetVersion() uint32 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+func (x *TranscriptScanCache) GetRoots() []*TranscriptRootState {
+	if x != nil {
+		return x.Roots
+	}
+	return nil
+}
+
 var File_vibesys_host_v1_usage_state_proto protoreflect.FileDescriptor
 
 const file_vibesys_host_v1_usage_state_proto_rawDesc = "" +
@@ -1292,7 +1664,45 @@ const file_vibesys_host_v1_usage_state_proto_rawDesc = "" +
 	"\treasoning\x18\f \x01(\x04R\treasoning\x128\n" +
 	"\frecorded_usd\x18\r \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00H\x00R\vrecordedUsd\x88\x01\x01\x12\x14\n" +
 	"\x05turns\x18\x0e \x01(\rR\x05turnsB\x0f\n" +
-	"\r_recorded_usd*\xed\x01\n" +
+	"\r_recorded_usd\"\x96\x03\n" +
+	"\rTranscriptRow\x12\x18\n" +
+	"\aquarter\x18\x01 \x01(\x03R\aquarter\x12'\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03(\x80\x02R\tsessionId\x12\x1a\n" +
+	"\x03cwd\x18\x03 \x01(\tB\b\xbaH\x05r\x03(\x80 R\x03cwd\x12\x1e\n" +
+	"\x05model\x18\x04 \x01(\tB\b\xbaH\x05r\x03(\x80\x04R\x05model\x12>\n" +
+	"\x05speed\x18\x05 \x01(\x0e2\x1c.vibesys.store.v1.UsageSpeedB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05speed\x12\x14\n" +
+	"\x05input\x18\x06 \x01(\x04R\x05input\x12\x1d\n" +
+	"\n" +
+	"cache_read\x18\a \x01(\x04R\tcacheRead\x12\x1f\n" +
+	"\vcache_write\x18\b \x01(\x04R\n" +
+	"cacheWrite\x12$\n" +
+	"\x0ecache_write_1h\x18\t \x01(\x04R\fcacheWrite1h\x12\x16\n" +
+	"\x06output\x18\n" +
+	" \x01(\x04R\x06output\x12\x1c\n" +
+	"\treasoning\x18\v \x01(\x04R\treasoning\x12\x14\n" +
+	"\x05turns\x18\f \x01(\rR\x05turns\"\xcb\x02\n" +
+	"\x13TranscriptFileState\x12\x1c\n" +
+	"\x04path\x18\x01 \x01(\tB\b\xbaH\x05r\x03(\x80 R\x04path\x12\x12\n" +
+	"\x04size\x18\x02 \x01(\x04R\x04size\x12\x19\n" +
+	"\bmtime_ns\x18\x03 \x01(\x03R\amtimeNs\x12\x16\n" +
+	"\x06offset\x18\x04 \x01(\x04R\x06offset\x12!\n" +
+	"\fguard_length\x18\x05 \x01(\rR\vguardLength\x12\x1d\n" +
+	"\n" +
+	"guard_hash\x18\x06 \x01(\rR\tguardHash\x12\x1f\n" +
+	"\x05state\x18\a \x01(\fB\t\xbaH\x06z\x04\x18\x80\x80@R\x05state\x12\x1a\n" +
+	"\bcomplete\x18\b \x01(\bR\bcomplete\x12\x1c\n" +
+	"\tmalformed\x18\t \x01(\rR\tmalformed\x122\n" +
+	"\x04rows\x18\n" +
+	" \x03(\v2\x1e.vibesys.host.v1.TranscriptRowR\x04rows\"\x95\x01\n" +
+	"\x13TranscriptRootState\x12$\n" +
+	"\bprovider\x18\x01 \x01(\tB\b\xbaH\x05r\x03(\x80\x02R\bprovider\x12\x1c\n" +
+	"\x04path\x18\x02 \x01(\tB\b\xbaH\x05r\x03(\x80 R\x04path\x12:\n" +
+	"\x05files\x18\x03 \x03(\v2$.vibesys.host.v1.TranscriptFileStateR\x05files\"k\n" +
+	"\x13TranscriptScanCache\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\rR\aversion\x12:\n" +
+	"\x05roots\x18\x02 \x03(\v2$.vibesys.host.v1.TranscriptRootStateR\x05roots*\xed\x01\n" +
 	"\x13UsageEstimateSource\x12%\n" +
 	"!USAGE_ESTIMATE_SOURCE_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1eUSAGE_ESTIMATE_SOURCE_OVERRIDE\x10\x01\x12\"\n" +
@@ -1333,7 +1743,7 @@ func file_vibesys_host_v1_usage_state_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_host_v1_usage_state_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_vibesys_host_v1_usage_state_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_vibesys_host_v1_usage_state_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_vibesys_host_v1_usage_state_proto_goTypes = []any{
 	(UsageEstimateSource)(0),      // 0: vibesys.host.v1.UsageEstimateSource
 	(UsageOrigin)(0),              // 1: vibesys.host.v1.UsageOrigin
@@ -1351,33 +1761,41 @@ var file_vibesys_host_v1_usage_state_proto_goTypes = []any{
 	(*RunUsageRollup)(nil),        // 13: vibesys.host.v1.RunUsageRollup
 	(*JournalIdentity)(nil),       // 14: vibesys.host.v1.JournalIdentity
 	(*UsageRollupRow)(nil),        // 15: vibesys.host.v1.UsageRollupRow
-	(*timestamppb.Timestamp)(nil), // 16: google.protobuf.Timestamp
-	(v1.UsageSpeed)(0),            // 17: vibesys.store.v1.UsageSpeed
-	(v1.UsageCostBasis)(0),        // 18: vibesys.store.v1.UsageCostBasis
+	(*TranscriptRow)(nil),         // 16: vibesys.host.v1.TranscriptRow
+	(*TranscriptFileState)(nil),   // 17: vibesys.host.v1.TranscriptFileState
+	(*TranscriptRootState)(nil),   // 18: vibesys.host.v1.TranscriptRootState
+	(*TranscriptScanCache)(nil),   // 19: vibesys.host.v1.TranscriptScanCache
+	(*timestamppb.Timestamp)(nil), // 20: google.protobuf.Timestamp
+	(v1.UsageSpeed)(0),            // 21: vibesys.store.v1.UsageSpeed
+	(v1.UsageCostBasis)(0),        // 22: vibesys.store.v1.UsageCostBasis
 }
 var file_vibesys_host_v1_usage_state_proto_depIdxs = []int32{
 	5,  // 0: vibesys.host.v1.UsageRateOverride.rate:type_name -> vibesys.host.v1.UsageRate
 	6,  // 1: vibesys.host.v1.UsagePriceBook.overrides:type_name -> vibesys.host.v1.UsageRateOverride
 	7,  // 2: vibesys.host.v1.UsagePriceBook.aliases:type_name -> vibesys.host.v1.UsageAlias
 	4,  // 3: vibesys.host.v1.UsagePricing.status:type_name -> vibesys.host.v1.UsagePricingStatus
-	16, // 4: vibesys.host.v1.UsagePricing.fetched_at:type_name -> google.protobuf.Timestamp
-	16, // 5: vibesys.host.v1.UsageRateSnapshot.fetched_at:type_name -> google.protobuf.Timestamp
-	16, // 6: vibesys.host.v1.UsageRateSnapshot.last_attempt_at:type_name -> google.protobuf.Timestamp
-	16, // 7: vibesys.host.v1.LimitReading.resets_at:type_name -> google.protobuf.Timestamp
-	16, // 8: vibesys.host.v1.LimitReading.observed_at:type_name -> google.protobuf.Timestamp
+	20, // 4: vibesys.host.v1.UsagePricing.fetched_at:type_name -> google.protobuf.Timestamp
+	20, // 5: vibesys.host.v1.UsageRateSnapshot.fetched_at:type_name -> google.protobuf.Timestamp
+	20, // 6: vibesys.host.v1.UsageRateSnapshot.last_attempt_at:type_name -> google.protobuf.Timestamp
+	20, // 7: vibesys.host.v1.LimitReading.resets_at:type_name -> google.protobuf.Timestamp
+	20, // 8: vibesys.host.v1.LimitReading.observed_at:type_name -> google.protobuf.Timestamp
 	14, // 9: vibesys.host.v1.RunUsageRollup.journal:type_name -> vibesys.host.v1.JournalIdentity
 	15, // 10: vibesys.host.v1.RunUsageRollup.rows:type_name -> vibesys.host.v1.UsageRollupRow
-	16, // 11: vibesys.host.v1.RunUsageRollup.first_turn_at:type_name -> google.protobuf.Timestamp
-	16, // 12: vibesys.host.v1.RunUsageRollup.last_turn_at:type_name -> google.protobuf.Timestamp
+	20, // 11: vibesys.host.v1.RunUsageRollup.first_turn_at:type_name -> google.protobuf.Timestamp
+	20, // 12: vibesys.host.v1.RunUsageRollup.last_turn_at:type_name -> google.protobuf.Timestamp
 	12, // 13: vibesys.host.v1.RunUsageRollup.last_limits:type_name -> vibesys.host.v1.LimitReading
-	16, // 14: vibesys.host.v1.RunUsageRollup.new_bests:type_name -> google.protobuf.Timestamp
-	17, // 15: vibesys.host.v1.UsageRollupRow.speed:type_name -> vibesys.store.v1.UsageSpeed
-	18, // 16: vibesys.host.v1.UsageRollupRow.basis:type_name -> vibesys.store.v1.UsageCostBasis
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	20, // 14: vibesys.host.v1.RunUsageRollup.new_bests:type_name -> google.protobuf.Timestamp
+	21, // 15: vibesys.host.v1.UsageRollupRow.speed:type_name -> vibesys.store.v1.UsageSpeed
+	22, // 16: vibesys.host.v1.UsageRollupRow.basis:type_name -> vibesys.store.v1.UsageCostBasis
+	21, // 17: vibesys.host.v1.TranscriptRow.speed:type_name -> vibesys.store.v1.UsageSpeed
+	16, // 18: vibesys.host.v1.TranscriptFileState.rows:type_name -> vibesys.host.v1.TranscriptRow
+	17, // 19: vibesys.host.v1.TranscriptRootState.files:type_name -> vibesys.host.v1.TranscriptFileState
+	18, // 20: vibesys.host.v1.TranscriptScanCache.roots:type_name -> vibesys.host.v1.TranscriptRootState
+	21, // [21:21] is the sub-list for method output_type
+	21, // [21:21] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_host_v1_usage_state_proto_init() }
@@ -1397,7 +1815,7 @@ func file_vibesys_host_v1_usage_state_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_host_v1_usage_state_proto_rawDesc), len(file_vibesys_host_v1_usage_state_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   11,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

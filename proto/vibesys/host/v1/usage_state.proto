@@ -236,3 +236,57 @@ message UsageRollupRow {
   // The turns the row counts: a turn counts once, on its primary model's row.
   uint32 turns = 14;
 }
+
+// The usage of one conversation in one quarter hour, for one model and speed, as a provider's
+// transcript says it. A cache of the transcript, kept in `TranscriptFileState`.
+message TranscriptRow {
+  int64 quarter = 1;
+  string session_id = 2 [(buf.validate.field).string.max_bytes = 256];
+  // The working directory of the session: a path on this host, which never leaves it.
+  string cwd = 3 [(buf.validate.field).string.max_bytes = 4096];
+  string model = 4 [(buf.validate.field).string.max_bytes = 512];
+  vibesys.store.v1.UsageSpeed speed = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Input counts cache reads and writes, as everywhere; reasoning is part of output.
+  uint64 input = 6;
+  uint64 cache_read = 7;
+  uint64 cache_write = 8;
+  uint64 cache_write_1h = 9;
+  uint64 output = 10;
+  uint64 reasoning = 11;
+  // The requests the row counts.
+  uint32 turns = 12;
+}
+
+// Where a read of one transcript file stopped, what it found, and what is needed to go on.
+message TranscriptFileState {
+  string path = 1 [(buf.validate.field).string.max_bytes = 4096];
+  uint64 size = 2;
+  int64 mtime_ns = 3;
+  // Bytes of complete lines already read.
+  uint64 offset = 4;
+  uint32 guard_length = 5;
+  uint32 guard_hash = 6;
+  // The format's parser state at `offset`, opaque to the host.
+  bytes state = 7 [(buf.validate.field).bytes.max_len = 1048576];
+  // Whether the read reached the end of the file; false when the byte budget stopped it.
+  bool complete = 8;
+  uint32 malformed = 9;
+  repeated TranscriptRow rows = 10;
+}
+
+// What the host knows of one provider's transcript directory.
+message TranscriptRootState {
+  string provider = 1 [(buf.validate.field).string.max_bytes = 256];
+  string path = 2 [(buf.validate.field).string.max_bytes = 4096];
+  repeated TranscriptFileState files = 3;
+}
+
+// The transcripts of every provider on this host, read incrementally. A cache, persisted as
+// `transcript-scan.pb`: a file that fails its rules is rebuilt whole.
+message TranscriptScanCache {
+  uint32 version = 1;
+  repeated TranscriptRootState roots = 2;
+}

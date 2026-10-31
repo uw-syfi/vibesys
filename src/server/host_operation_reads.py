@@ -10,6 +10,7 @@ read_failure_category, answer_registered_read and stream_saved_runs.
 
 from __future__ import annotations
 
+import os
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -201,7 +202,7 @@ class HostReadSource:
             raise ValueError(message)
         pricing = scan.stored_pricing(scan.usage_directory(), now=request.now.to_datetime())
         paths = [self._path(project) for project in request.projects]
-        return scan.usage_summary(request, self._host.projects, paths, pricing)
+        return scan.usage_summary(request, self._host.projects, paths, pricing, os.environ)
 
     def usage_rates_refresh(
         self, request: pb.UsageRatesRefreshRequest

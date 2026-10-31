@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Final, Protocol
 from server.host_api import RUN_EVENTS_FILE, RunDigest
 from server.host_run_dashboard import kept_landings
 from server.run_summary_cache import journal_fingerprint
+from server.usage_outside import Outside, RunFacts, exclude
 from server.usage_pricing import (
     DocumentFetcher,
     FetchError,
@@ -58,13 +59,14 @@ from server.usage_rollup import (
     Outcome,
     read_or_build,
 )
-from server.usage_summary import RunInput, SummaryInputs, summarize
+from server.usage_summary import OutsideInput, RunInput, SummaryInputs, summarize
+from server.usage_transcripts import RootReport, scan_transcripts
 from vs_project.api import Project, ProjectError, atomic_write_bytes
 from vs_proto.api import Timestamp, ValidationError, host_payloads, usage_state, validate
 from vs_sim.api import HttpsGetError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from datetime import datetime
     from pathlib import Path
 
@@ -83,6 +85,7 @@ RATES_REFRESH_TIMEOUT_S: Final = 10.0
 RATES_MAX_BYTES: Final = 16 * 1024 * 1024
 """The most bytes the price list may be: it is about 3 MiB today."""
 
+_ROOT_MAX_BYTES: Final = 512
 _NO_DIGEST = "0" * 64
 _SOURCE_ID_FILE = "source-id"
 _RATES_FILE = "rates.pb"
@@ -287,15 +290,21 @@ def _written_since(root: Path, since: datetime) -> _Held:
     return _Held(tuple(journals), skipped, failed)
 
 
-def usage_summary(
+def usage_summary(  # noqa: PLR0913  # lint-waiver: LW-518204 [PLR0913]; one read's independent inputs: the request, the host's projects, the directories, the prices and the environment the provider CLIs keep their sessions by.
     request: host_payloads.UsageSummaryRequest,
     projects: UsageProjects,
     paths: Sequence[Path],
     pricing: Pricing,
+    environment: Mapping[str, str],
     *,
     budget_bytes: int = COLD_BUDGET_BYTES,
 ) -> host_payloads.UsageSummaryResponse:
     """The reply to ``request`` over the runs of ``paths`` (the request's projects, expanded).
+
+    One byte budget pays for the journals first, then the transcripts, so a cold host answers in
+    calls of bounded size and says what is left. A person's own CLI use is the transcript
+    sessions that no run of this host made (``server.usage_outside``); it is left partial while
+    any run of the host is still waiting, since that run might yet claim a session.
 
     Raises ``ValueError`` when the request's edges do not increase, which the read maps to invalid
     input.
@@ -304,17 +313,132 @@ def usage_summary(
         message = "now: required"
         raise ValueError(message)
     edges = [stamp.to_datetime() for stamp in request.edges]
-    collected = collect_runs(projects, paths, since=edges[0], budget=Budget(budget_bytes))
+    now = request.now.to_datetime()
+    budget = Budget(budget_bytes)
+    collected = collect_runs(projects, paths, since=edges[0], budget=budget)
+    host = collect_host_runs(projects, collected, since=edges[0], budget=budget)
+    outside, pending_files = _outside(
+        request, collected, host, environment, now=now, since=edges[0], budget=budget
+    )
     return summarize(
         SummaryInputs(
             request_id=request.request_id,
             edges=edges,
-            now=request.now.to_datetime(),
+            now=now,
             runs=collected.runs,
             journal=_journal_source(collected),
             pricing=pricing,
-            pending_runs=collected.pending,
+            pending_runs=collected.pending + host.pending,
+            pending_files=pending_files,
+            outside=outside,
         )
+    )
+
+
+@dataclass(frozen=True)
+class HostRuns:
+    """What the host's other runs say, for telling a run's sessions from a person's."""
+
+    facts: tuple[RunFacts, ...]
+    pending: int
+    """Runs whose rollups the budget could not pay for."""
+
+
+def collect_host_runs(
+    projects: UsageProjects, requested: CollectedRuns, *, since: datetime, budget: Budget
+) -> HostRuns:
+    """The facts of every run this host published for discovery, and of the ``requested`` ones.
+
+    A transcript session may belong to a run of any project on the host, not only those asked
+    for, so exclusion reads every run: each costs its rollup, built once and then served.
+    """
+    facts: dict[str, RunFacts] = {
+        each.run_id: _facts(each.run_id, None, each.rollup) for each in requested.runs
+    }
+    pending = 0
+    for run in Project.indexed_run_addresses():
+        journal = run.log_directory / RUN_EVENTS_FILE
+        try:
+            if journal.stat().st_mtime < since.timestamp():
+                continue
+        except OSError:
+            continue
+        reading = read_or_build(
+            JsonlUsageJournal(
+                journal,
+                summarize=lambda run=run: projects.run_summary(run.project_root, run.run_id),
+                bests=lambda run=run: _bests(projects, run.project_root, run.run_id),
+            ),
+            FileRollupStore(journal.with_name(ROLLUP_FILE)),
+            budget,
+        )
+        pending += reading.outcome is Outcome.PENDING
+        if reading.rollup is not None:
+            facts[run.run_id] = _facts(run.run_id, str(run.project_root), reading.rollup)
+    return HostRuns(tuple(facts.values()), pending)
+
+
+def _facts(run_id: str, project_root: str | None, rollup: usage_state.RunUsageRollup) -> RunFacts:
+    return RunFacts(
+        run_id=run_id,
+        project_root=project_root,
+        providers=frozenset(row.provider for row in rollup.rows),
+        session_ids=frozenset(rollup.provider_session_ids),
+        session_ids_complete=rollup.session_ids_complete,
+        first_turn_at=None if rollup.first_turn_at is None else rollup.first_turn_at.to_datetime(),
+        last_turn_at=None if rollup.last_turn_at is None else rollup.last_turn_at.to_datetime(),
+    )
+
+
+def _outside(  # noqa: PLR0913  # lint-waiver: LW-518205 [PLR0913]; the stages of one read, each an independent input.
+    request: host_payloads.UsageSummaryRequest,
+    collected: CollectedRuns,
+    host: HostRuns,
+    environment: Mapping[str, str],
+    *,
+    now: datetime,
+    since: datetime,
+    budget: Budget,
+) -> tuple[list[OutsideInput], int]:
+    """The transcript sources with the runs' own sessions left out, and the files still pending."""
+    del collected
+    directory = usage_directory()
+    scanned = scan_transcripts(
+        directory, environment, now=now, since=since, budget=max(1, budget.remaining)
+    )
+    window = (int(since.timestamp()), int(request.edges[-1].seconds))
+    left = exclude(scanned.rows, host.facts, Project.run_id_for_workspace, counted=window)
+    source_id = source_identity(directory)
+    partial = host.pending > 0
+    sources = [
+        OutsideInput(
+            source=_transcript_source(report, source_id, left, partial=partial),
+            rows=tuple(found for found in left.kept if found.provider == report.provider),
+        )
+        for report in scanned.reports
+    ]
+    return sources, scanned.pending_files
+
+
+def _transcript_source(
+    report: RootReport, source_id: str, left: Outside, *, partial: bool
+) -> host_payloads.UsageSource:
+    """How completely one provider directory was read, and what was left out of it."""
+    status = report.status
+    if partial and status is usage_state.UsageSourceStatus.OK:
+        status = usage_state.UsageSourceStatus.PARTIAL
+    return host_payloads.UsageSource(
+        kind=usage_state.UsageSourceKind.TRANSCRIPTS,
+        source_id=source_id,
+        provider=report.provider,
+        root=report.root.encode()[:_ROOT_MAX_BYTES].decode(errors="ignore"),
+        status=status,
+        scanned=report.scanned,
+        skipped=report.skipped,
+        malformed=report.malformed,
+        failed=report.failed,
+        excluded_exact=len(left.excluded_sessions.get(report.provider, ())),
+        excluded_approximate=left.excluded_turns.get(report.provider, 0),
     )
 
 

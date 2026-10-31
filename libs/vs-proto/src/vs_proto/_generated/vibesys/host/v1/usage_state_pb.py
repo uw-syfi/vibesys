@@ -668,6 +668,278 @@ class UsageRollupRow(Message[_UsageRollupRowFields]):
         recorded_usd: float
         turns: int
 
+_TranscriptRowFields: TypeAlias = Literal["quarter", "session_id", "cwd", "model", "speed", "input", "cache_read", "cache_write", "cache_write_1h", "output", "reasoning", "turns"]
+
+class TranscriptRow(Message[_TranscriptRowFields]):
+    """
+    The usage of one conversation in one quarter hour, for one model and speed, as a provider's
+    transcript says it. A cache of the transcript, kept in `TranscriptFileState`.
+
+    ```proto
+    message vibesys.host.v1.TranscriptRow
+    ```
+
+    Attributes:
+        quarter:
+            ```proto
+            int64 quarter = 1;
+            ```
+        session_id:
+            ```proto
+            string session_id = 2;
+            ```
+        cwd:
+            The working directory of the session: a path on this host, which never leaves it.
+
+            ```proto
+            string cwd = 3;
+            ```
+        model:
+            ```proto
+            string model = 4;
+            ```
+        speed:
+            ```proto
+            vibesys.store.v1.UsageSpeed speed = 5;
+            ```
+        input:
+            Input counts cache reads and writes, as everywhere; reasoning is part of output.
+
+            ```proto
+            uint64 input = 6;
+            ```
+        cache_read:
+            ```proto
+            uint64 cache_read = 7;
+            ```
+        cache_write:
+            ```proto
+            uint64 cache_write = 8;
+            ```
+        cache_write_1h:
+            ```proto
+            uint64 cache_write_1h = 9;
+            ```
+        output:
+            ```proto
+            uint64 output = 10;
+            ```
+        reasoning:
+            ```proto
+            uint64 reasoning = 11;
+            ```
+        turns:
+            The requests the row counts.
+
+            ```proto
+            uint32 turns = 12;
+            ```
+    """
+
+    __slots__ = ("quarter", "session_id", "cwd", "model", "speed", "input", "cache_read", "cache_write", "cache_write_1h", "output", "reasoning", "turns")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            quarter: int = 0,
+            session_id: str = "",
+            cwd: str = "",
+            model: str = "",
+            speed: UsageSpeed | None = None,
+            input: int = 0,
+            cache_read: int = 0,
+            cache_write: int = 0,
+            cache_write_1h: int = 0,
+            output: int = 0,
+            reasoning: int = 0,
+            turns: int = 0,
+        ) -> None:
+            pass
+
+        quarter: int
+        session_id: str
+        cwd: str
+        model: str
+        speed: UsageSpeed
+        input: int
+        cache_read: int
+        cache_write: int
+        cache_write_1h: int
+        output: int
+        reasoning: int
+        turns: int
+
+_TranscriptFileStateFields: TypeAlias = Literal["path", "size", "mtime_ns", "offset", "guard_length", "guard_hash", "state", "complete", "malformed", "rows"]
+
+class TranscriptFileState(Message[_TranscriptFileStateFields]):
+    """
+    Where a read of one transcript file stopped, what it found, and what is needed to go on.
+
+    ```proto
+    message vibesys.host.v1.TranscriptFileState
+    ```
+
+    Attributes:
+        path:
+            ```proto
+            string path = 1;
+            ```
+        size:
+            ```proto
+            uint64 size = 2;
+            ```
+        mtime_ns:
+            ```proto
+            int64 mtime_ns = 3;
+            ```
+        offset:
+            Bytes of complete lines already read.
+
+            ```proto
+            uint64 offset = 4;
+            ```
+        guard_length:
+            ```proto
+            uint32 guard_length = 5;
+            ```
+        guard_hash:
+            ```proto
+            uint32 guard_hash = 6;
+            ```
+        state:
+            The format's parser state at `offset`, opaque to the host.
+
+            ```proto
+            bytes state = 7;
+            ```
+        complete:
+            Whether the read reached the end of the file; false when the byte budget stopped it.
+
+            ```proto
+            bool complete = 8;
+            ```
+        malformed:
+            ```proto
+            uint32 malformed = 9;
+            ```
+        rows:
+            ```proto
+            repeated vibesys.host.v1.TranscriptRow rows = 10;
+            ```
+    """
+
+    __slots__ = ("path", "size", "mtime_ns", "offset", "guard_length", "guard_hash", "state", "complete", "malformed", "rows")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            path: str = "",
+            size: int = 0,
+            mtime_ns: int = 0,
+            offset: int = 0,
+            guard_length: int = 0,
+            guard_hash: int = 0,
+            state: bytes = b"",
+            complete: bool = False,
+            malformed: int = 0,
+            rows: list[TranscriptRow] | None = None,
+        ) -> None:
+            pass
+
+        path: str
+        size: int
+        mtime_ns: int
+        offset: int
+        guard_length: int
+        guard_hash: int
+        state: bytes
+        complete: bool
+        malformed: int
+        rows: list[TranscriptRow]
+
+_TranscriptRootStateFields: TypeAlias = Literal["provider", "path", "files"]
+
+class TranscriptRootState(Message[_TranscriptRootStateFields]):
+    """
+    What the host knows of one provider's transcript directory.
+
+    ```proto
+    message vibesys.host.v1.TranscriptRootState
+    ```
+
+    Attributes:
+        provider:
+            ```proto
+            string provider = 1;
+            ```
+        path:
+            ```proto
+            string path = 2;
+            ```
+        files:
+            ```proto
+            repeated vibesys.host.v1.TranscriptFileState files = 3;
+            ```
+    """
+
+    __slots__ = ("provider", "path", "files")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            provider: str = "",
+            path: str = "",
+            files: list[TranscriptFileState] | None = None,
+        ) -> None:
+            pass
+
+        provider: str
+        path: str
+        files: list[TranscriptFileState]
+
+_TranscriptScanCacheFields: TypeAlias = Literal["version", "roots"]
+
+class TranscriptScanCache(Message[_TranscriptScanCacheFields]):
+    """
+    The transcripts of every provider on this host, read incrementally. A cache, persisted as
+    `transcript-scan.pb`: a file that fails its rules is rebuilt whole.
+
+    ```proto
+    message vibesys.host.v1.TranscriptScanCache
+    ```
+
+    Attributes:
+        version:
+            ```proto
+            uint32 version = 1;
+            ```
+        roots:
+            ```proto
+            repeated vibesys.host.v1.TranscriptRootState roots = 2;
+            ```
+    """
+
+    __slots__ = ("version", "roots")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            version: int = 0,
+            roots: list[TranscriptRootState] | None = None,
+        ) -> None:
+            pass
+
+        version: int
+        roots: list[TranscriptRootState]
+
 class UsageEstimateSource(Enum):
     """
     How the estimate of one series was reached, in the order the host tries them: an override the
@@ -851,7 +1123,7 @@ class UsagePricingStatus(Enum):
 
 
 _DESC = file_desc(
-    b'\n!vibesys/host/v1/usage_state.proto\x12\x0fvibesys.host.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a"vibesys/store/v1/agent_attrs.proto"\xbe\x02\n\tUsageRate\x12/\n\x05input\x18\x01 \x01(\x01R\x05inputB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x121\n\x06output\x18\x02 \x01(\x01R\x06outputB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x128\n\ncache_read\x18\x03 \x01(\x01R\tcacheReadB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x12:\n\x0bcache_write\x18\x04 \x01(\x01R\ncacheWriteB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x12D\n\x0ecache_write_1h\x18\x05 \x01(\x01H\x00R\x0ccacheWrite1hB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01B\x11\n\x0f_cache_write_1h"m\n\x11UsageRateOverride\x12 \n\x05model\x18\x01 \x01(\tR\x05modelB\n\xbaH\x07r\x05\x10\x01(\x80\x04\x126\n\x04rate\x18\x02 \x01(\x0b2\x1a.vibesys.host.v1.UsageRateR\x04rateB\x06\xbaH\x03\xc8\x01\x01"H\n\nUsageAlias\x12\x1e\n\x04from\x18\x01 \x01(\tR\x04fromB\n\xbaH\x07r\x05\x10\x01(\x80\x04\x12\x1a\n\x02to\x18\x02 \x01(\tR\x02toB\n\xbaH\x07r\x05\x10\x01(\x80\x04"\xbb\x01\n\x0eUsagePriceBook\x12\x1a\n\x08revision\x18\x01 \x01(\x04R\x08revision\x12K\n\toverrides\x18\x02 \x03(\x0b2".vibesys.host.v1.UsageRateOverrideR\toverridesB\t\xbaH\x06\x92\x01\x03\x10\x80\x04\x12@\n\x07aliases\x18\x03 \x03(\x0b2\x1b.vibesys.host.v1.UsageAliasR\x07aliasesB\t\xbaH\x06\x92\x01\x03\x10\x80\x04"\x86\x02\n\x0cUsagePricing\x12;\n\x06status\x18\x01 \x01(\x0e2#.vibesys.host.v1.UsagePricingStatusR\x06status\x12>\n\nfetched_at\x18\x02 \x01(\x0b2\x1a.google.protobuf.TimestampH\x00R\tfetchedAt\x88\x01\x01\x12!\n\x0cknown_models\x18\x03 \x01(\rR\x0bknownModels\x12\x1f\n\x0brefresh_due\x18\x04 \x01(\x08R\nrefreshDue\x12&\n\nchecked_on\x18\x05 \x01(\tR\tcheckedOnB\x07\xbaH\x04r\x02(\x10B\r\n\x0b_fetched_at"\x88\x03\n\x11UsageRateSnapshot\x12+\n\x08document\x18\x01 \x01(\x0cH\x00R\x08documentB\n\xbaH\x07z\x05\x18\x80\x80\x80\x10\x88\x01\x01\x12>\n\nfetched_at\x18\x02 \x01(\x0b2\x1a.google.protobuf.TimestampH\x01R\tfetchedAt\x88\x01\x01\x12G\n\x0flast_attempt_at\x18\x03 \x01(\x0b2\x1a.google.protobuf.TimestampH\x02R\rlastAttemptAt\x88\x01\x01B\x0b\n\t_documentB\r\n\x0b_fetched_atB\x12\n\x10_last_attempt_at:\x8c\x01\xbaH\x88\x01\x1a\x85\x01\n\x1busage_rate_snapshot.fetched\x12:a snapshot has a fetch time exactly when it has a document\x1a*has(this.document) == has(this.fetched_at)"<\n\x13UsageSourceIdentity\x12%\n\x02id\x18\x01 \x01(\tR\x02idB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{32}$"\xc9\x03\n\x0cLimitReading\x12$\n\x08provider\x18\x01 \x01(\tR\x08providerB\x08\xbaH\x05r\x03(\x80\x02\x12%\n\x06window\x18\x02 \x01(\tH\x00R\x06windowB\x08\xbaH\x05r\x03(\x80\x02\x88\x01\x01\x12#\n\x05limit\x18\x03 \x01(\tH\x01R\x05limitB\x08\xbaH\x05r\x03(\x80\x02\x88\x01\x01\x12:\n\rused_fraction\x18\x04 \x01(\x01H\x02R\x0cusedFractionB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12<\n\tresets_at\x18\x05 \x01(\x0b2\x1a.google.protobuf.TimestampH\x03R\x08resetsAt\x88\x01\x01\x12*\n\x0ewindow_minutes\x18\x06 \x01(\rH\x04R\rwindowMinutes\x88\x01\x01\x12\x1c\n\texhausted\x18\x07 \x01(\x08R\texhausted\x12;\n\x0bobserved_at\x18\x08 \x01(\x0b2\x1a.google.protobuf.TimestampR\nobservedAtB\t\n\x07_windowB\x08\n\x06_limitB\x10\n\x0e_used_fractionB\x0c\n\n_resets_atB\x11\n\x0f_window_minutes"\xd0\x04\n\x0eRunUsageRollup\x12\x18\n\x07version\x18\x01 \x01(\rR\x07version\x12B\n\x07journal\x18\x02 \x01(\x0b2 .vibesys.host.v1.JournalIdentityR\x07journalB\x06\xbaH\x03\xc8\x01\x01\x123\n\x04rows\x18\x03 \x03(\x0b2\x1f.vibesys.host.v1.UsageRollupRowR\x04rows\x120\n\x14provider_session_ids\x18\x04 \x03(\tR\x12providerSessionIds\x120\n\x14session_ids_complete\x18\x05 \x01(\x08R\x12sessionIdsComplete\x12C\n\rfirst_turn_at\x18\x06 \x01(\x0b2\x1a.google.protobuf.TimestampH\x00R\x0bfirstTurnAt\x88\x01\x01\x12A\n\x0clast_turn_at\x18\x07 \x01(\x0b2\x1a.google.protobuf.TimestampH\x01R\nlastTurnAt\x88\x01\x01\x12>\n\x0blast_limits\x18\x08 \x03(\x0b2\x1d.vibesys.host.v1.LimitReadingR\nlastLimits\x127\n\tnew_bests\x18\t \x03(\x0b2\x1a.google.protobuf.TimestampR\x08newBests\x12#\n\runtimed_turns\x18\n \x01(\rR\x0cuntimedTurnsB\x10\n\x0e_first_turn_atB\x0f\n\r_last_turn_at"\x9d\x01\n\x0fJournalIdentity\x12\x1a\n\x08boundary\x18\x01 \x01(\x04R\x08boundary\x126\n\x0bhead_sha256\x18\x02 \x01(\tR\nheadSha256B\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x126\n\x0btail_sha256\x18\x03 \x01(\tR\ntailSha256B\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$"\xa5\x04\n\x0eUsageRollupRow\x12\x18\n\x07quarter\x18\x01 \x01(\x03R\x07quarter\x12$\n\x08provider\x18\x02 \x01(\tR\x08providerB\x08\xbaH\x05r\x03(\x80\x02\x12\x1e\n\x05model\x18\x03 \x01(\tR\x05modelB\x08\xbaH\x05r\x03(\x80\x04\x12>\n\x05speed\x18\x04 \x01(\x0e2\x1c.vibesys.store.v1.UsageSpeedR\x05speedB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1c\n\x04role\x18\x05 \x01(\tR\x04roleB\x08\xbaH\x05r\x03(\x80\x02\x12B\n\x05basis\x18\x06 \x01(\x0e2 .vibesys.store.v1.UsageCostBasisR\x05basisB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x14\n\x05input\x18\x07 \x01(\x04R\x05input\x12\x1d\n\ncache_read\x18\x08 \x01(\x04R\tcacheRead\x12\x1f\n\x0bcache_write\x18\t \x01(\x04R\ncacheWrite\x12$\n\x0ecache_write_1h\x18\n \x01(\x04R\x0ccacheWrite1h\x12\x16\n\x06output\x18\x0b \x01(\x04R\x06output\x12\x1c\n\treasoning\x18\x0c \x01(\x04R\treasoning\x128\n\x0crecorded_usd\x18\r \x01(\x01H\x00R\x0brecordedUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12\x14\n\x05turns\x18\x0e \x01(\rR\x05turnsB\x0f\n\r_recorded_usd*\xed\x01\n\x13UsageEstimateSource\x12%\n!USAGE_ESTIMATE_SOURCE_UNSPECIFIED\x10\x00\x12"\n\x1eUSAGE_ESTIMATE_SOURCE_OVERRIDE\x10\x01\x12"\n\x1eUSAGE_ESTIMATE_SOURCE_REPORTED\x10\x02\x12"\n\x1eUSAGE_ESTIMATE_SOURCE_RECORDED\x10\x03\x12\x1f\n\x1bUSAGE_ESTIMATE_SOURCE_MODEL\x10\x04\x12"\n\x1eUSAGE_ESTIMATE_SOURCE_UNPRICED\x10\x05*`\n\x0bUsageOrigin\x12\x1c\n\x18USAGE_ORIGIN_UNSPECIFIED\x10\x00\x12\x14\n\x10USAGE_ORIGIN_RUN\x10\x01\x12\x1d\n\x19USAGE_ORIGIN_OUTSIDE_RUNS\x10\x02*v\n\x0fUsageSourceKind\x12!\n\x1dUSAGE_SOURCE_KIND_UNSPECIFIED\x10\x00\x12\x1d\n\x19USAGE_SOURCE_KIND_JOURNAL\x10\x01\x12!\n\x1dUSAGE_SOURCE_KIND_TRANSCRIPTS\x10\x02*\xb6\x01\n\x11UsageSourceStatus\x12#\n\x1fUSAGE_SOURCE_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n\x16USAGE_SOURCE_STATUS_OK\x10\x01\x12\x1f\n\x1bUSAGE_SOURCE_STATUS_MISSING\x10\x02\x12\x1f\n\x1bUSAGE_SOURCE_STATUS_PARTIAL\x10\x03\x12\x1e\n\x1aUSAGE_SOURCE_STATUS_FAILED\x10\x04*\x9d\x01\n\x12UsagePricingStatus\x12$\n USAGE_PRICING_STATUS_UNSPECIFIED\x10\x00\x12\x1e\n\x1aUSAGE_PRICING_STATUS_FRESH\x10\x01\x12\x1f\n\x1bUSAGE_PRICING_STATUS_CACHED\x10\x02\x12 \n\x1cUSAGE_PRICING_STATUS_BUNDLED\x10\x03B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3',
+    b'\n!vibesys/host/v1/usage_state.proto\x12\x0fvibesys.host.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a"vibesys/store/v1/agent_attrs.proto"\xbe\x02\n\tUsageRate\x12/\n\x05input\x18\x01 \x01(\x01R\x05inputB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x121\n\x06output\x18\x02 \x01(\x01R\x06outputB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x128\n\ncache_read\x18\x03 \x01(\x01R\tcacheReadB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x12:\n\x0bcache_write\x18\x04 \x01(\x01R\ncacheWriteB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x12D\n\x0ecache_write_1h\x18\x05 \x01(\x01H\x00R\x0ccacheWrite1hB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01B\x11\n\x0f_cache_write_1h"m\n\x11UsageRateOverride\x12 \n\x05model\x18\x01 \x01(\tR\x05modelB\n\xbaH\x07r\x05\x10\x01(\x80\x04\x126\n\x04rate\x18\x02 \x01(\x0b2\x1a.vibesys.host.v1.UsageRateR\x04rateB\x06\xbaH\x03\xc8\x01\x01"H\n\nUsageAlias\x12\x1e\n\x04from\x18\x01 \x01(\tR\x04fromB\n\xbaH\x07r\x05\x10\x01(\x80\x04\x12\x1a\n\x02to\x18\x02 \x01(\tR\x02toB\n\xbaH\x07r\x05\x10\x01(\x80\x04"\xbb\x01\n\x0eUsagePriceBook\x12\x1a\n\x08revision\x18\x01 \x01(\x04R\x08revision\x12K\n\toverrides\x18\x02 \x03(\x0b2".vibesys.host.v1.UsageRateOverrideR\toverridesB\t\xbaH\x06\x92\x01\x03\x10\x80\x04\x12@\n\x07aliases\x18\x03 \x03(\x0b2\x1b.vibesys.host.v1.UsageAliasR\x07aliasesB\t\xbaH\x06\x92\x01\x03\x10\x80\x04"\x86\x02\n\x0cUsagePricing\x12;\n\x06status\x18\x01 \x01(\x0e2#.vibesys.host.v1.UsagePricingStatusR\x06status\x12>\n\nfetched_at\x18\x02 \x01(\x0b2\x1a.google.protobuf.TimestampH\x00R\tfetchedAt\x88\x01\x01\x12!\n\x0cknown_models\x18\x03 \x01(\rR\x0bknownModels\x12\x1f\n\x0brefresh_due\x18\x04 \x01(\x08R\nrefreshDue\x12&\n\nchecked_on\x18\x05 \x01(\tR\tcheckedOnB\x07\xbaH\x04r\x02(\x10B\r\n\x0b_fetched_at"\x88\x03\n\x11UsageRateSnapshot\x12+\n\x08document\x18\x01 \x01(\x0cH\x00R\x08documentB\n\xbaH\x07z\x05\x18\x80\x80\x80\x10\x88\x01\x01\x12>\n\nfetched_at\x18\x02 \x01(\x0b2\x1a.google.protobuf.TimestampH\x01R\tfetchedAt\x88\x01\x01\x12G\n\x0flast_attempt_at\x18\x03 \x01(\x0b2\x1a.google.protobuf.TimestampH\x02R\rlastAttemptAt\x88\x01\x01B\x0b\n\t_documentB\r\n\x0b_fetched_atB\x12\n\x10_last_attempt_at:\x8c\x01\xbaH\x88\x01\x1a\x85\x01\n\x1busage_rate_snapshot.fetched\x12:a snapshot has a fetch time exactly when it has a document\x1a*has(this.document) == has(this.fetched_at)"<\n\x13UsageSourceIdentity\x12%\n\x02id\x18\x01 \x01(\tR\x02idB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{32}$"\xc9\x03\n\x0cLimitReading\x12$\n\x08provider\x18\x01 \x01(\tR\x08providerB\x08\xbaH\x05r\x03(\x80\x02\x12%\n\x06window\x18\x02 \x01(\tH\x00R\x06windowB\x08\xbaH\x05r\x03(\x80\x02\x88\x01\x01\x12#\n\x05limit\x18\x03 \x01(\tH\x01R\x05limitB\x08\xbaH\x05r\x03(\x80\x02\x88\x01\x01\x12:\n\rused_fraction\x18\x04 \x01(\x01H\x02R\x0cusedFractionB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12<\n\tresets_at\x18\x05 \x01(\x0b2\x1a.google.protobuf.TimestampH\x03R\x08resetsAt\x88\x01\x01\x12*\n\x0ewindow_minutes\x18\x06 \x01(\rH\x04R\rwindowMinutes\x88\x01\x01\x12\x1c\n\texhausted\x18\x07 \x01(\x08R\texhausted\x12;\n\x0bobserved_at\x18\x08 \x01(\x0b2\x1a.google.protobuf.TimestampR\nobservedAtB\t\n\x07_windowB\x08\n\x06_limitB\x10\n\x0e_used_fractionB\x0c\n\n_resets_atB\x11\n\x0f_window_minutes"\xd0\x04\n\x0eRunUsageRollup\x12\x18\n\x07version\x18\x01 \x01(\rR\x07version\x12B\n\x07journal\x18\x02 \x01(\x0b2 .vibesys.host.v1.JournalIdentityR\x07journalB\x06\xbaH\x03\xc8\x01\x01\x123\n\x04rows\x18\x03 \x03(\x0b2\x1f.vibesys.host.v1.UsageRollupRowR\x04rows\x120\n\x14provider_session_ids\x18\x04 \x03(\tR\x12providerSessionIds\x120\n\x14session_ids_complete\x18\x05 \x01(\x08R\x12sessionIdsComplete\x12C\n\rfirst_turn_at\x18\x06 \x01(\x0b2\x1a.google.protobuf.TimestampH\x00R\x0bfirstTurnAt\x88\x01\x01\x12A\n\x0clast_turn_at\x18\x07 \x01(\x0b2\x1a.google.protobuf.TimestampH\x01R\nlastTurnAt\x88\x01\x01\x12>\n\x0blast_limits\x18\x08 \x03(\x0b2\x1d.vibesys.host.v1.LimitReadingR\nlastLimits\x127\n\tnew_bests\x18\t \x03(\x0b2\x1a.google.protobuf.TimestampR\x08newBests\x12#\n\runtimed_turns\x18\n \x01(\rR\x0cuntimedTurnsB\x10\n\x0e_first_turn_atB\x0f\n\r_last_turn_at"\x9d\x01\n\x0fJournalIdentity\x12\x1a\n\x08boundary\x18\x01 \x01(\x04R\x08boundary\x126\n\x0bhead_sha256\x18\x02 \x01(\tR\nheadSha256B\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x126\n\x0btail_sha256\x18\x03 \x01(\tR\ntailSha256B\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$"\xa5\x04\n\x0eUsageRollupRow\x12\x18\n\x07quarter\x18\x01 \x01(\x03R\x07quarter\x12$\n\x08provider\x18\x02 \x01(\tR\x08providerB\x08\xbaH\x05r\x03(\x80\x02\x12\x1e\n\x05model\x18\x03 \x01(\tR\x05modelB\x08\xbaH\x05r\x03(\x80\x04\x12>\n\x05speed\x18\x04 \x01(\x0e2\x1c.vibesys.store.v1.UsageSpeedR\x05speedB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1c\n\x04role\x18\x05 \x01(\tR\x04roleB\x08\xbaH\x05r\x03(\x80\x02\x12B\n\x05basis\x18\x06 \x01(\x0e2 .vibesys.store.v1.UsageCostBasisR\x05basisB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x14\n\x05input\x18\x07 \x01(\x04R\x05input\x12\x1d\n\ncache_read\x18\x08 \x01(\x04R\tcacheRead\x12\x1f\n\x0bcache_write\x18\t \x01(\x04R\ncacheWrite\x12$\n\x0ecache_write_1h\x18\n \x01(\x04R\x0ccacheWrite1h\x12\x16\n\x06output\x18\x0b \x01(\x04R\x06output\x12\x1c\n\treasoning\x18\x0c \x01(\x04R\treasoning\x128\n\x0crecorded_usd\x18\r \x01(\x01H\x00R\x0brecordedUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12\x14\n\x05turns\x18\x0e \x01(\rR\x05turnsB\x0f\n\r_recorded_usd"\x96\x03\n\rTranscriptRow\x12\x18\n\x07quarter\x18\x01 \x01(\x03R\x07quarter\x12\'\n\nsession_id\x18\x02 \x01(\tR\tsessionIdB\x08\xbaH\x05r\x03(\x80\x02\x12\x1a\n\x03cwd\x18\x03 \x01(\tR\x03cwdB\x08\xbaH\x05r\x03(\x80 \x12\x1e\n\x05model\x18\x04 \x01(\tR\x05modelB\x08\xbaH\x05r\x03(\x80\x04\x12>\n\x05speed\x18\x05 \x01(\x0e2\x1c.vibesys.store.v1.UsageSpeedR\x05speedB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x14\n\x05input\x18\x06 \x01(\x04R\x05input\x12\x1d\n\ncache_read\x18\x07 \x01(\x04R\tcacheRead\x12\x1f\n\x0bcache_write\x18\x08 \x01(\x04R\ncacheWrite\x12$\n\x0ecache_write_1h\x18\t \x01(\x04R\x0ccacheWrite1h\x12\x16\n\x06output\x18\n \x01(\x04R\x06output\x12\x1c\n\treasoning\x18\x0b \x01(\x04R\treasoning\x12\x14\n\x05turns\x18\x0c \x01(\rR\x05turns"\xcb\x02\n\x13TranscriptFileState\x12\x1c\n\x04path\x18\x01 \x01(\tR\x04pathB\x08\xbaH\x05r\x03(\x80 \x12\x12\n\x04size\x18\x02 \x01(\x04R\x04size\x12\x19\n\x08mtime_ns\x18\x03 \x01(\x03R\x07mtimeNs\x12\x16\n\x06offset\x18\x04 \x01(\x04R\x06offset\x12!\n\x0cguard_length\x18\x05 \x01(\rR\x0bguardLength\x12\x1d\n\nguard_hash\x18\x06 \x01(\rR\tguardHash\x12\x1f\n\x05state\x18\x07 \x01(\x0cR\x05stateB\t\xbaH\x06z\x04\x18\x80\x80@\x12\x1a\n\x08complete\x18\x08 \x01(\x08R\x08complete\x12\x1c\n\tmalformed\x18\t \x01(\rR\tmalformed\x122\n\x04rows\x18\n \x03(\x0b2\x1e.vibesys.host.v1.TranscriptRowR\x04rows"\x95\x01\n\x13TranscriptRootState\x12$\n\x08provider\x18\x01 \x01(\tR\x08providerB\x08\xbaH\x05r\x03(\x80\x02\x12\x1c\n\x04path\x18\x02 \x01(\tR\x04pathB\x08\xbaH\x05r\x03(\x80 \x12:\n\x05files\x18\x03 \x03(\x0b2$.vibesys.host.v1.TranscriptFileStateR\x05files"k\n\x13TranscriptScanCache\x12\x18\n\x07version\x18\x01 \x01(\rR\x07version\x12:\n\x05roots\x18\x02 \x03(\x0b2$.vibesys.host.v1.TranscriptRootStateR\x05roots*\xed\x01\n\x13UsageEstimateSource\x12%\n!USAGE_ESTIMATE_SOURCE_UNSPECIFIED\x10\x00\x12"\n\x1eUSAGE_ESTIMATE_SOURCE_OVERRIDE\x10\x01\x12"\n\x1eUSAGE_ESTIMATE_SOURCE_REPORTED\x10\x02\x12"\n\x1eUSAGE_ESTIMATE_SOURCE_RECORDED\x10\x03\x12\x1f\n\x1bUSAGE_ESTIMATE_SOURCE_MODEL\x10\x04\x12"\n\x1eUSAGE_ESTIMATE_SOURCE_UNPRICED\x10\x05*`\n\x0bUsageOrigin\x12\x1c\n\x18USAGE_ORIGIN_UNSPECIFIED\x10\x00\x12\x14\n\x10USAGE_ORIGIN_RUN\x10\x01\x12\x1d\n\x19USAGE_ORIGIN_OUTSIDE_RUNS\x10\x02*v\n\x0fUsageSourceKind\x12!\n\x1dUSAGE_SOURCE_KIND_UNSPECIFIED\x10\x00\x12\x1d\n\x19USAGE_SOURCE_KIND_JOURNAL\x10\x01\x12!\n\x1dUSAGE_SOURCE_KIND_TRANSCRIPTS\x10\x02*\xb6\x01\n\x11UsageSourceStatus\x12#\n\x1fUSAGE_SOURCE_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n\x16USAGE_SOURCE_STATUS_OK\x10\x01\x12\x1f\n\x1bUSAGE_SOURCE_STATUS_MISSING\x10\x02\x12\x1f\n\x1bUSAGE_SOURCE_STATUS_PARTIAL\x10\x03\x12\x1e\n\x1aUSAGE_SOURCE_STATUS_FAILED\x10\x04*\x9d\x01\n\x12UsagePricingStatus\x12$\n USAGE_PRICING_STATUS_UNSPECIFIED\x10\x00\x12\x1e\n\x1aUSAGE_PRICING_STATUS_FRESH\x10\x01\x12\x1f\n\x1bUSAGE_PRICING_STATUS_CACHED\x10\x02\x12 \n\x1cUSAGE_PRICING_STATUS_BUNDLED\x10\x03B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3',
     [
         validate_pb.desc(),
         timestamp_pb.desc(),
@@ -869,6 +1141,10 @@ _DESC = file_desc(
         "RunUsageRollup": RunUsageRollup,
         "JournalIdentity": JournalIdentity,
         "UsageRollupRow": UsageRollupRow,
+        "TranscriptRow": TranscriptRow,
+        "TranscriptFileState": TranscriptFileState,
+        "TranscriptRootState": TranscriptRootState,
+        "TranscriptScanCache": TranscriptScanCache,
         "UsageEstimateSource": UsageEstimateSource,
         "UsageOrigin": UsageOrigin,
         "UsageSourceKind": UsageSourceKind,

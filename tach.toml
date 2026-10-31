@@ -308,14 +308,23 @@ from = ["server.usage_rollup"]
 expose = ["QUARTER_SECONDS", "ROLLUP_FILE", "ROLLUP_VERSION", "Budget", "FoldedJournal", "JournalIdentity", "Outcome", "RollupRead", "RollupStore", "UsageJournal", "build_rollup", "is_fresh", "quarter_of", "read_or_build"]
 
 [[modules]]
-# What the Usage screen shows for one host: rollups cut into the caller's buckets, priced, and
-# folded to fit the reply's bound. A pure function. Light, loaded on the first usage read.
-path = "server.usage_summary"
+# Which transcript sessions are a person's own: those no run of the host made. Pure.
+path = "server.usage_outside"
 depends_on = ["server.usage_rollup", "vs_proto"]
 
 [[interfaces]]
+from = ["server.usage_outside"]
+expose = ["Outside", "ProviderRow", "RunFacts", "exclude"]
+
+[[modules]]
+# What the Usage screen shows for one host: rollups cut into the caller's buckets, priced, and
+# folded to fit the reply's bound. A pure function. Light, loaded on the first usage read.
+path = "server.usage_summary"
+depends_on = ["server.usage_outside", "server.usage_rollup", "vs_proto"]
+
+[[interfaces]]
 from = ["server.usage_summary"]
-expose = ["MAX_AGENT_ROWS", "MAX_PROVIDERS", "MAX_RUN_ROWS", "OTHER", "USAGE_REPLY_MAX_BYTES", "Priced", "Pricing", "RunInput", "SummaryInputs", "summarize"]
+expose = ["MAX_AGENT_ROWS", "MAX_PROVIDERS", "MAX_RUN_ROWS", "OTHER", "OutsideInput", "USAGE_REPLY_MAX_BYTES", "Priced", "Pricing", "RunInput", "SummaryInputs", "summarize"]
 
 [[modules]]
 # What a row's tokens would cost, in the estimate order. Pure. Light, loaded on the first usage read.
@@ -327,10 +336,20 @@ from = ["server.usage_pricing"]
 expose = ["DocumentFetcher", "DocumentStore", "FetchError", "ListPricing", "PriceBookError", "RateBook", "RateDocument", "check_book", "read_rate_book", "refresh_rate_book", "same_book", "saved_book"]
 
 [[modules]]
+# A person's own CLI use on a host: the provider transcripts, read incrementally into a cache.
+# Light, loaded on the first usage read.
+path = "server.usage_transcripts"
+depends_on = ["server.usage_outside", "server.usage_rollup", "vs_agent.api.usage_transcripts", "vs_project", "vs_proto"]
+
+[[interfaces]]
+from = ["server.usage_transcripts"]
+expose = ["OutsideScan", "RETENTION", "RootReport", "SCAN_FILE", "SCAN_VERSION", "TRANSCRIPT_BUDGET_BYTES", "scan_transcripts"]
+
+[[modules]]
 # Reading a host's usage from disk: the journals behind the rollups and the byte budget that
 # bounds a read. Light, loaded on the first usage read.
 path = "server.usage_scan"
-depends_on = ["server.host_api", "server.host_run_dashboard", "server.run_summary", "server.run_summary_cache", "server.usage_pricing", "server.usage_rollup", "server.usage_summary", "vs_project", "vs_proto", "vs_sim.api"]
+depends_on = ["server.host_api", "server.host_run_dashboard", "server.run_summary", "server.run_summary_cache", "server.usage_outside", "server.usage_pricing", "server.usage_rollup", "server.usage_summary", "server.usage_transcripts", "vs_project", "vs_proto", "vs_sim.api"]
 
 [[interfaces]]
 from = ["server.usage_scan"]
@@ -651,6 +670,13 @@ depends_on = ["vs_decode.api", "vs_sandbox", "vs_project", "vs_prompts", "vs_mcp
 # The Usage screen's one door to agentshim's price list and cost arithmetic. Its only importer is
 # `server.usage_pricing`: no recorded cost can be computed from a list price without this edge.
 path = "vs_agent.api.usage_pricing"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+# A person's own CLI use on a host, read from the transcripts the provider CLIs keep. Its only
+# importer is `server.usage_transcripts`.
+path = "vs_agent.api.usage_transcripts"
 layer = "prompts_and_lower_libs"
 depends_on = []
 

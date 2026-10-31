@@ -20,7 +20,7 @@ only adds, so every total is the same before and after; ``folded_series`` says h
 Light: the standard library, ``vs_proto`` and the rollup module; no agentshim.
 
 Public surface: ``summarize``, ``SummaryInputs``, ``RunInput``, ``Pricing``, ``Priced``,
-``USAGE_REPLY_MAX_BYTES``, ``MAX_RUN_ROWS``, ``MAX_AGENT_ROWS``, ``MAX_PROVIDERS`` and
+``OutsideInput``, ``USAGE_REPLY_MAX_BYTES``, ``MAX_RUN_ROWS``, ``MAX_AGENT_ROWS``, ``MAX_PROVIDERS`` and
 ``OTHER``.
 """
 
@@ -40,6 +40,8 @@ from vs_proto.api import Timestamp, UsageCostBasis, UsageSpeed, host_payloads, u
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
+
+    from server.usage_outside import ProviderRow
 
 USAGE_REPLY_MAX_BYTES: Final = 768 * 1024
 """The most bytes a reply encodes to. The host process's output and the gateway's response each
@@ -120,6 +122,15 @@ class RunInput:
 
 
 @dataclass(frozen=True)
+class OutsideInput:
+    """One provider directory's sessions that no run made, and how completely it was read."""
+
+    source: host_payloads.UsageSource
+    """Its kind, root and status; the summary fills in the sessions it counts."""
+    rows: Sequence[ProviderRow]
+
+
+@dataclass(frozen=True)
 class SummaryInputs:
     """Everything one reply is a function of."""
 
@@ -133,7 +144,8 @@ class SummaryInputs:
     pending_runs: int = 0
     pending_files: int = 0
     max_bytes: int = USAGE_REPLY_MAX_BYTES
-    extra_sources: Sequence[host_payloads.UsageSource] = field(default=())
+    outside: Sequence[OutsideInput] = field(default=())
+    """The transcript sources, in the order their index in a series key names (the journal is 0)."""
 
 
 def summarize(inputs: SummaryInputs) -> host_payloads.UsageSummaryResponse:
@@ -146,6 +158,8 @@ def summarize(inputs: SummaryInputs) -> host_payloads.UsageSummaryResponse:
     built = _Builder(inputs, edge_seconds, now)
     for run in inputs.runs:
         built.add_run(run)
+    for index, outside in enumerate(inputs.outside, start=1):
+        built.add_outside(index, outside)
     response, columns = built.response()
     response.folded_series = _fit(response, columns, inputs.max_bytes)
     return response
@@ -194,9 +208,11 @@ class _Builder:
         self._inputs = inputs
         self._edges = edge_seconds
         self._buckets = len(edge_seconds) - 1
-        self._providers = _provider_names(inputs.runs)
+        self._providers = _provider_names(inputs)
         self._series: dict[_Key, dict[int, _Cell]] = defaultdict(dict)
         self._runs_in_bucket: dict[tuple[int, str], set[tuple[int, str]]] = defaultdict(set)
+        self._sessions_in_bucket: dict[tuple[int, str], set[str]] = defaultdict(set)
+        self._sessions_in_source: dict[int, set[str]] = defaultdict(set)
         self._run_costs: dict[tuple[int, str], dict[str, _Costs]] = {}
         self._agent_costs: dict[tuple[str, str], dict[str, _Costs]] = {}
         self._bests: dict[int, int] = defaultdict(int)
@@ -227,6 +243,24 @@ class _Builder:
             self._agent_costs.setdefault((role, model), {}).setdefault(provider, _Costs()).add(
                 priced, row
             )
+            self._rate(row, provider, model, priced)
+
+    def add_outside(self, index: int, outside: OutsideInput) -> None:
+        """Add the sessions of one transcript source; its series are read from source ``index``."""
+        for found in outside.rows:
+            row = _as_row(found)
+            provider = self._providers[found.provider]
+            priced = self._inputs.pricing.price(found.provider, row)
+            model = priced.model if len(priced.model.encode()) <= _MODEL_MAX_BYTES else OTHER
+            if self._now_quarter - _RECENT_QUARTERS < row.quarter <= self._now_quarter:
+                self._recent.setdefault(provider, _Costs()).add(priced, row)
+            bucket = self._bucket(row.quarter)
+            if bucket is None:
+                continue
+            key = (_ORIGIN.OUTSIDE_RUNS, provider, model, int(row.speed), int(priced.source), index)
+            _add_row(self._series[key].setdefault(bucket, _Cell()), row, priced)
+            self._sessions_in_bucket[(bucket, provider)].add(found.row.session_id)
+            self._sessions_in_source[index].add(found.row.session_id)
             self._rate(row, provider, model, priced)
 
     def _rate(
@@ -261,12 +295,22 @@ class _Builder:
         distinct.distinct_sessions = len(
             {run for found in self._runs_in_bucket.values() for run in found}
         )
+        sources = [distinct]
+        for index, outside in enumerate(inputs.outside, start=1):
+            counted = host_payloads.UsageSource.from_binary(outside.source.to_binary())
+            counted.distinct_sessions = len(self._sessions_in_source.get(index, ()))
+            sources.append(counted)
         response = host_payloads.UsageSummaryResponse(
             request_id=inputs.request_id,
             series=[_message(each) for each in columns],
             counts=[
-                host_payloads.UsageBucketCount(bucket=bucket, provider=provider, runs=len(found))
-                for (bucket, provider), found in sorted(self._runs_in_bucket.items())
+                host_payloads.UsageBucketCount(
+                    bucket=bucket,
+                    provider=provider,
+                    runs=len(self._runs_in_bucket.get((bucket, provider), ())),
+                    outside_sessions=len(self._sessions_in_bucket.get((bucket, provider), ())),
+                )
+                for bucket, provider in sorted({*self._runs_in_bucket, *self._sessions_in_bucket})
             ],
             bests=[
                 host_payloads.UsageBucketBests(bucket=bucket, count=count)
@@ -277,7 +321,7 @@ class _Builder:
             agents=agents,
             agents_other=agents_other,
             recent=_provider_costs(self._recent),
-            sources=[distinct, *inputs.extra_sources],
+            sources=sources,
             pricing=inputs.pricing.pricing,
             prices=inputs.pricing.book,
             rates=[self._rates[key] for key in sorted(self._rates)],
@@ -325,15 +369,35 @@ def _add_row(cell: _Cell, row: usage_state.UsageRollupRow, priced: Priced) -> No
     cell.cache_savings_usd.append(priced.cache_savings_usd)
 
 
-def _provider_names(runs: Iterable[RunInput]) -> dict[str, str]:
+def _provider_names(inputs: SummaryInputs) -> dict[str, str]:
     """Each raw provider id as the reply names it: itself if it is an id, else ``other``.
 
     Past ``MAX_PROVIDERS`` ids the later ones (in name order) are ``other`` too, so the reply's
     lists have a size that does not depend on how garbled a journal is.
     """
-    raw = {row.provider for run in runs for row in run.rollup.rows}
+    raw = {row.provider for run in inputs.runs for row in run.rollup.rows}
+    raw |= {found.provider for each in inputs.outside for found in each.rows}
     named = set(sorted(name for name in raw if _PROVIDER.fullmatch(name))[: MAX_PROVIDERS - 1])
     return {name: name if name in named else OTHER for name in raw}
+
+
+def _as_row(found: ProviderRow) -> usage_state.UsageRollupRow:
+    """A transcript row as a rollup row that reported no cost, so one pricing prices both."""
+    row = found.row
+    return usage_state.UsageRollupRow(
+        quarter=row.quarter,
+        provider=found.provider,
+        model=row.model,
+        speed=row.speed,
+        basis=UsageCostBasis.NOT_REPORTED,
+        input=row.input,
+        cache_read=row.cache_read,
+        cache_write=row.cache_write,
+        cache_write_1h=row.cache_write_1h,
+        output=row.output,
+        reasoning=row.reasoning,
+        turns=row.turns,
+    )
 
 
 def _provider_costs(costs: dict[str, _Costs]) -> list[host_payloads.UsageProviderCost]:

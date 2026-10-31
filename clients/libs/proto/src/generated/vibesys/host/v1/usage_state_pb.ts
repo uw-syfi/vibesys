@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/host/v1/usage_state.proto.
  */
 export const file_vibesys_host_v1_usage_state: GenFile = /*@__PURE__*/
-  fileDesc("CiF2aWJlc3lzL2hvc3QvdjEvdXNhZ2Vfc3RhdGUucHJvdG8SD3ZpYmVzeXMuaG9zdC52MSKKAgoJVXNhZ2VSYXRlEigKBWlucHV0GAEgASgBQhm6SBYSFEABGQAAAACAhC5BKQAAAAAAAAAAEikKBm91dHB1dBgCIAEoAUIZukgWEhRAARkAAAAAgIQuQSkAAAAAAAAAABItCgpjYWNoZV9yZWFkGAMgASgBQhm6SBYSFEABGQAAAACAhC5BKQAAAAAAAAAAEi4KC2NhY2hlX3dyaXRlGAQgASgBQhm6SBYSFEABGQAAAACAhC5BKQAAAAAAAAAAEjYKDmNhY2hlX3dyaXRlXzFoGAUgASgBQhm6SBYSFEABGQAAAACAhC5BKQAAAAAAAAAASACIAQFCEQoPX2NhY2hlX3dyaXRlXzFoImAKEVVzYWdlUmF0ZU92ZXJyaWRlEhkKBW1vZGVsGAEgASgJQgq6SAdyBRABKIAEEjAKBHJhdGUYAiABKAsyGi52aWJlc3lzLmhvc3QudjEuVXNhZ2VSYXRlQga6SAPIAQEiPgoKVXNhZ2VBbGlhcxIYCgRmcm9tGAEgASgJQgq6SAdyBRABKIAEEhYKAnRvGAIgASgJQgq6SAdyBRABKIAEIp0BCg5Vc2FnZVByaWNlQm9vaxIQCghyZXZpc2lvbhgBIAEoBBJACglvdmVycmlkZXMYAiADKAsyIi52aWJlc3lzLmhvc3QudjEuVXNhZ2VSYXRlT3ZlcnJpZGVCCbpIBpIBAxCABBI3CgdhbGlhc2VzGAMgAygLMhsudmliZXN5cy5ob3N0LnYxLlVzYWdlQWxpYXNCCbpIBpIBAxCABCLPAQoMVXNhZ2VQcmljaW5nEjMKBnN0YXR1cxgBIAEoDjIjLnZpYmVzeXMuaG9zdC52MS5Vc2FnZVByaWNpbmdTdGF0dXMSMwoKZmV0Y2hlZF9hdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIAIgBARIUCgxrbm93bl9tb2RlbHMYAyABKA0SEwoLcmVmcmVzaF9kdWUYBCABKAgSGwoKY2hlY2tlZF9vbhgFIAEoCUIHukgEcgIoEEINCgtfZmV0Y2hlZF9hdCLkAgoRVXNhZ2VSYXRlU25hcHNob3QSIQoIZG9jdW1lbnQYASABKAxCCrpIB3oFGICAgBBIAIgBARIzCgpmZXRjaGVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEgBiAEBEjgKD2xhc3RfYXR0ZW1wdF9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIAogBATqMAbpIiAEahQEKG3VzYWdlX3JhdGVfc25hcHNob3QuZmV0Y2hlZBI6YSBzbmFwc2hvdCBoYXMgYSBmZXRjaCB0aW1lIGV4YWN0bHkgd2hlbiBpdCBoYXMgYSBkb2N1bWVudBoqaGFzKHRoaXMuZG9jdW1lbnQpID09IGhhcyh0aGlzLmZldGNoZWRfYXQpQgsKCV9kb2N1bWVudEINCgtfZmV0Y2hlZF9hdEISChBfbGFzdF9hdHRlbXB0X2F0IjgKE1VzYWdlU291cmNlSWRlbnRpdHkSIQoCaWQYASABKAlCFbpIEnIQMg5eWzAtOWEtZl17MzJ9JCLyAgoMTGltaXRSZWFkaW5nEhoKCHByb3ZpZGVyGAEgASgJQgi6SAVyAyiAAhIdCgZ3aW5kb3cYAiABKAlCCLpIBXIDKIACSACIAQESHAoFbGltaXQYAyABKAlCCLpIBXIDKIACSAGIAQESLAoNdXNlZF9mcmFjdGlvbhgEIAEoAUIQukgNEgtAASkAAAAAAAAAAEgCiAEBEjIKCXJlc2V0c19hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIA4gBARIbCg53aW5kb3dfbWludXRlcxgGIAEoDUgEiAEBEhEKCWV4aGF1c3RlZBgHIAEoCBIvCgtvYnNlcnZlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCCQoHX3dpbmRvd0IICgZfbGltaXRCEAoOX3VzZWRfZnJhY3Rpb25CDAoKX3Jlc2V0c19hdEIRCg9fd2luZG93X21pbnV0ZXMi0wMKDlJ1blVzYWdlUm9sbHVwEg8KB3ZlcnNpb24YASABKA0SOQoHam91cm5hbBgCIAEoCzIgLnZpYmVzeXMuaG9zdC52MS5Kb3VybmFsSWRlbnRpdHlCBrpIA8gBARItCgRyb3dzGAMgAygLMh8udmliZXN5cy5ob3N0LnYxLlVzYWdlUm9sbHVwUm93EhwKFHByb3ZpZGVyX3Nlc3Npb25faWRzGAQgAygJEhwKFHNlc3Npb25faWRzX2NvbXBsZXRlGAUgASgIEjYKDWZpcnN0X3R1cm5fYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wSACIAQESNQoMbGFzdF90dXJuX2F0GAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEgBiAEBEjIKC2xhc3RfbGltaXRzGAggAygLMh0udmliZXN5cy5ob3N0LnYxLkxpbWl0UmVhZGluZxItCgluZXdfYmVzdHMYCSADKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhUKDXVudGltZWRfdHVybnMYCiABKA1CEAoOX2ZpcnN0X3R1cm5fYXRCDwoNX2xhc3RfdHVybl9hdCJ7Cg9Kb3VybmFsSWRlbnRpdHkSEAoIYm91bmRhcnkYASABKAQSKgoLaGVhZF9zaGEyNTYYAiABKAlCFbpIEnIQMg5eWzAtOWEtZl17NjR9JBIqCgt0YWlsX3NoYTI1NhgDIAEoCUIVukgSchAyDl5bMC05YS1mXXs2NH0kIqQDCg5Vc2FnZVJvbGx1cFJvdxIPCgdxdWFydGVyGAEgASgDEhoKCHByb3ZpZGVyGAIgASgJQgi6SAVyAyiAAhIXCgVtb2RlbBgDIAEoCUIIukgFcgMogAQSNwoFc3BlZWQYBCABKA4yHC52aWJlc3lzLnN0b3JlLnYxLlVzYWdlU3BlZWRCCrpIB4IBBBABIAASFgoEcm9sZRgFIAEoCUIIukgFcgMogAISOwoFYmFzaXMYBiABKA4yIC52aWJlc3lzLnN0b3JlLnYxLlVzYWdlQ29zdEJhc2lzQgq6SAeCAQQQASAAEg0KBWlucHV0GAcgASgEEhIKCmNhY2hlX3JlYWQYCCABKAQSEwoLY2FjaGVfd3JpdGUYCSABKAQSFgoOY2FjaGVfd3JpdGVfMWgYCiABKAQSDgoGb3V0cHV0GAsgASgEEhEKCXJlYXNvbmluZxgMIAEoBBIrCgxyZWNvcmRlZF91c2QYDSABKAFCELpIDRILQAEpAAAAAAAAAABIAIgBARINCgV0dXJucxgOIAEoDUIPCg1fcmVjb3JkZWRfdXNkKu0BChNVc2FnZUVzdGltYXRlU291cmNlEiUKIVVTQUdFX0VTVElNQVRFX1NPVVJDRV9VTlNQRUNJRklFRBAAEiIKHlVTQUdFX0VTVElNQVRFX1NPVVJDRV9PVkVSUklERRABEiIKHlVTQUdFX0VTVElNQVRFX1NPVVJDRV9SRVBPUlRFRBACEiIKHlVTQUdFX0VTVElNQVRFX1NPVVJDRV9SRUNPUkRFRBADEh8KG1VTQUdFX0VTVElNQVRFX1NPVVJDRV9NT0RFTBAEEiIKHlVTQUdFX0VTVElNQVRFX1NPVVJDRV9VTlBSSUNFRBAFKmAKC1VzYWdlT3JpZ2luEhwKGFVTQUdFX09SSUdJTl9VTlNQRUNJRklFRBAAEhQKEFVTQUdFX09SSUdJTl9SVU4QARIdChlVU0FHRV9PUklHSU5fT1VUU0lERV9SVU5TEAIqdgoPVXNhZ2VTb3VyY2VLaW5kEiEKHVVTQUdFX1NPVVJDRV9LSU5EX1VOU1BFQ0lGSUVEEAASHQoZVVNBR0VfU09VUkNFX0tJTkRfSk9VUk5BTBABEiEKHVVTQUdFX1NPVVJDRV9LSU5EX1RSQU5TQ1JJUFRTEAIqtgEKEVVzYWdlU291cmNlU3RhdHVzEiMKH1VTQUdFX1NPVVJDRV9TVEFUVVNfVU5TUEVDSUZJRUQQABIaChZVU0FHRV9TT1VSQ0VfU1RBVFVTX09LEAESHwobVVNBR0VfU09VUkNFX1NUQVRVU19NSVNTSU5HEAISHwobVVNBR0VfU09VUkNFX1NUQVRVU19QQVJUSUFMEAMSHgoaVVNBR0VfU09VUkNFX1NUQVRVU19GQUlMRUQQBCqdAQoSVXNhZ2VQcmljaW5nU3RhdHVzEiQKIFVTQUdFX1BSSUNJTkdfU1RBVFVTX1VOU1BFQ0lGSUVEEAASHgoaVVNBR0VfUFJJQ0lOR19TVEFUVVNfRlJFU0gQARIfChtVU0FHRV9QUklDSU5HX1NUQVRVU19DQUNIRUQQAhIgChxVU0FHRV9QUklDSU5HX1NUQVRVU19CVU5ETEVEEANCP1o9Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9ob3N0L3YxO2hvc3R2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_store_v1_agent_attrs]);
+  fileDesc("CiF2aWJlc3lzL2hvc3QvdjEvdXNhZ2Vfc3RhdGUucHJvdG8SD3ZpYmVzeXMuaG9zdC52MSKKAgoJVXNhZ2VSYXRlEigKBWlucHV0GAEgASgBQhm6SBYSFEABGQAAAACAhC5BKQAAAAAAAAAAEikKBm91dHB1dBgCIAEoAUIZukgWEhRAARkAAAAAgIQuQSkAAAAAAAAAABItCgpjYWNoZV9yZWFkGAMgASgBQhm6SBYSFEABGQAAAACAhC5BKQAAAAAAAAAAEi4KC2NhY2hlX3dyaXRlGAQgASgBQhm6SBYSFEABGQAAAACAhC5BKQAAAAAAAAAAEjYKDmNhY2hlX3dyaXRlXzFoGAUgASgBQhm6SBYSFEABGQAAAACAhC5BKQAAAAAAAAAASACIAQFCEQoPX2NhY2hlX3dyaXRlXzFoImAKEVVzYWdlUmF0ZU92ZXJyaWRlEhkKBW1vZGVsGAEgASgJQgq6SAdyBRABKIAEEjAKBHJhdGUYAiABKAsyGi52aWJlc3lzLmhvc3QudjEuVXNhZ2VSYXRlQga6SAPIAQEiPgoKVXNhZ2VBbGlhcxIYCgRmcm9tGAEgASgJQgq6SAdyBRABKIAEEhYKAnRvGAIgASgJQgq6SAdyBRABKIAEIp0BCg5Vc2FnZVByaWNlQm9vaxIQCghyZXZpc2lvbhgBIAEoBBJACglvdmVycmlkZXMYAiADKAsyIi52aWJlc3lzLmhvc3QudjEuVXNhZ2VSYXRlT3ZlcnJpZGVCCbpIBpIBAxCABBI3CgdhbGlhc2VzGAMgAygLMhsudmliZXN5cy5ob3N0LnYxLlVzYWdlQWxpYXNCCbpIBpIBAxCABCLPAQoMVXNhZ2VQcmljaW5nEjMKBnN0YXR1cxgBIAEoDjIjLnZpYmVzeXMuaG9zdC52MS5Vc2FnZVByaWNpbmdTdGF0dXMSMwoKZmV0Y2hlZF9hdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIAIgBARIUCgxrbm93bl9tb2RlbHMYAyABKA0SEwoLcmVmcmVzaF9kdWUYBCABKAgSGwoKY2hlY2tlZF9vbhgFIAEoCUIHukgEcgIoEEINCgtfZmV0Y2hlZF9hdCLkAgoRVXNhZ2VSYXRlU25hcHNob3QSIQoIZG9jdW1lbnQYASABKAxCCrpIB3oFGICAgBBIAIgBARIzCgpmZXRjaGVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEgBiAEBEjgKD2xhc3RfYXR0ZW1wdF9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIAogBATqMAbpIiAEahQEKG3VzYWdlX3JhdGVfc25hcHNob3QuZmV0Y2hlZBI6YSBzbmFwc2hvdCBoYXMgYSBmZXRjaCB0aW1lIGV4YWN0bHkgd2hlbiBpdCBoYXMgYSBkb2N1bWVudBoqaGFzKHRoaXMuZG9jdW1lbnQpID09IGhhcyh0aGlzLmZldGNoZWRfYXQpQgsKCV9kb2N1bWVudEINCgtfZmV0Y2hlZF9hdEISChBfbGFzdF9hdHRlbXB0X2F0IjgKE1VzYWdlU291cmNlSWRlbnRpdHkSIQoCaWQYASABKAlCFbpIEnIQMg5eWzAtOWEtZl17MzJ9JCLyAgoMTGltaXRSZWFkaW5nEhoKCHByb3ZpZGVyGAEgASgJQgi6SAVyAyiAAhIdCgZ3aW5kb3cYAiABKAlCCLpIBXIDKIACSACIAQESHAoFbGltaXQYAyABKAlCCLpIBXIDKIACSAGIAQESLAoNdXNlZF9mcmFjdGlvbhgEIAEoAUIQukgNEgtAASkAAAAAAAAAAEgCiAEBEjIKCXJlc2V0c19hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIA4gBARIbCg53aW5kb3dfbWludXRlcxgGIAEoDUgEiAEBEhEKCWV4aGF1c3RlZBgHIAEoCBIvCgtvYnNlcnZlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCCQoHX3dpbmRvd0IICgZfbGltaXRCEAoOX3VzZWRfZnJhY3Rpb25CDAoKX3Jlc2V0c19hdEIRCg9fd2luZG93X21pbnV0ZXMi0wMKDlJ1blVzYWdlUm9sbHVwEg8KB3ZlcnNpb24YASABKA0SOQoHam91cm5hbBgCIAEoCzIgLnZpYmVzeXMuaG9zdC52MS5Kb3VybmFsSWRlbnRpdHlCBrpIA8gBARItCgRyb3dzGAMgAygLMh8udmliZXN5cy5ob3N0LnYxLlVzYWdlUm9sbHVwUm93EhwKFHByb3ZpZGVyX3Nlc3Npb25faWRzGAQgAygJEhwKFHNlc3Npb25faWRzX2NvbXBsZXRlGAUgASgIEjYKDWZpcnN0X3R1cm5fYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wSACIAQESNQoMbGFzdF90dXJuX2F0GAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEgBiAEBEjIKC2xhc3RfbGltaXRzGAggAygLMh0udmliZXN5cy5ob3N0LnYxLkxpbWl0UmVhZGluZxItCgluZXdfYmVzdHMYCSADKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhUKDXVudGltZWRfdHVybnMYCiABKA1CEAoOX2ZpcnN0X3R1cm5fYXRCDwoNX2xhc3RfdHVybl9hdCJ7Cg9Kb3VybmFsSWRlbnRpdHkSEAoIYm91bmRhcnkYASABKAQSKgoLaGVhZF9zaGEyNTYYAiABKAlCFbpIEnIQMg5eWzAtOWEtZl17NjR9JBIqCgt0YWlsX3NoYTI1NhgDIAEoCUIVukgSchAyDl5bMC05YS1mXXs2NH0kIqQDCg5Vc2FnZVJvbGx1cFJvdxIPCgdxdWFydGVyGAEgASgDEhoKCHByb3ZpZGVyGAIgASgJQgi6SAVyAyiAAhIXCgVtb2RlbBgDIAEoCUIIukgFcgMogAQSNwoFc3BlZWQYBCABKA4yHC52aWJlc3lzLnN0b3JlLnYxLlVzYWdlU3BlZWRCCrpIB4IBBBABIAASFgoEcm9sZRgFIAEoCUIIukgFcgMogAISOwoFYmFzaXMYBiABKA4yIC52aWJlc3lzLnN0b3JlLnYxLlVzYWdlQ29zdEJhc2lzQgq6SAeCAQQQASAAEg0KBWlucHV0GAcgASgEEhIKCmNhY2hlX3JlYWQYCCABKAQSEwoLY2FjaGVfd3JpdGUYCSABKAQSFgoOY2FjaGVfd3JpdGVfMWgYCiABKAQSDgoGb3V0cHV0GAsgASgEEhEKCXJlYXNvbmluZxgMIAEoBBIrCgxyZWNvcmRlZF91c2QYDSABKAFCELpIDRILQAEpAAAAAAAAAABIAIgBARINCgV0dXJucxgOIAEoDUIPCg1fcmVjb3JkZWRfdXNkIqkCCg1UcmFuc2NyaXB0Um93Eg8KB3F1YXJ0ZXIYASABKAMSHAoKc2Vzc2lvbl9pZBgCIAEoCUIIukgFcgMogAISFQoDY3dkGAMgASgJQgi6SAVyAyiAIBIXCgVtb2RlbBgEIAEoCUIIukgFcgMogAQSNwoFc3BlZWQYBSABKA4yHC52aWJlc3lzLnN0b3JlLnYxLlVzYWdlU3BlZWRCCrpIB4IBBBABIAASDQoFaW5wdXQYBiABKAQSEgoKY2FjaGVfcmVhZBgHIAEoBBITCgtjYWNoZV93cml0ZRgIIAEoBBIWCg5jYWNoZV93cml0ZV8xaBgJIAEoBBIOCgZvdXRwdXQYCiABKAQSEQoJcmVhc29uaW5nGAsgASgEEg0KBXR1cm5zGAwgASgNIvQBChNUcmFuc2NyaXB0RmlsZVN0YXRlEhYKBHBhdGgYASABKAlCCLpIBXIDKIAgEgwKBHNpemUYAiABKAQSEAoIbXRpbWVfbnMYAyABKAMSDgoGb2Zmc2V0GAQgASgEEhQKDGd1YXJkX2xlbmd0aBgFIAEoDRISCgpndWFyZF9oYXNoGAYgASgNEhgKBXN0YXRlGAcgASgMQgm6SAZ6BBiAgEASEAoIY29tcGxldGUYCCABKAgSEQoJbWFsZm9ybWVkGAkgASgNEiwKBHJvd3MYCiADKAsyHi52aWJlc3lzLmhvc3QudjEuVHJhbnNjcmlwdFJvdyJ+ChNUcmFuc2NyaXB0Um9vdFN0YXRlEhoKCHByb3ZpZGVyGAEgASgJQgi6SAVyAyiAAhIWCgRwYXRoGAIgASgJQgi6SAVyAyiAIBIzCgVmaWxlcxgDIAMoCzIkLnZpYmVzeXMuaG9zdC52MS5UcmFuc2NyaXB0RmlsZVN0YXRlIlsKE1RyYW5zY3JpcHRTY2FuQ2FjaGUSDwoHdmVyc2lvbhgBIAEoDRIzCgVyb290cxgCIAMoCzIkLnZpYmVzeXMuaG9zdC52MS5UcmFuc2NyaXB0Um9vdFN0YXRlKu0BChNVc2FnZUVzdGltYXRlU291cmNlEiUKIVVTQUdFX0VTVElNQVRFX1NPVVJDRV9VTlNQRUNJRklFRBAAEiIKHlVTQUdFX0VTVElNQVRFX1NPVVJDRV9PVkVSUklERRABEiIKHlVTQUdFX0VTVElNQVRFX1NPVVJDRV9SRVBPUlRFRBACEiIKHlVTQUdFX0VTVElNQVRFX1NPVVJDRV9SRUNPUkRFRBADEh8KG1VTQUdFX0VTVElNQVRFX1NPVVJDRV9NT0RFTBAEEiIKHlVTQUdFX0VTVElNQVRFX1NPVVJDRV9VTlBSSUNFRBAFKmAKC1VzYWdlT3JpZ2luEhwKGFVTQUdFX09SSUdJTl9VTlNQRUNJRklFRBAAEhQKEFVTQUdFX09SSUdJTl9SVU4QARIdChlVU0FHRV9PUklHSU5fT1VUU0lERV9SVU5TEAIqdgoPVXNhZ2VTb3VyY2VLaW5kEiEKHVVTQUdFX1NPVVJDRV9LSU5EX1VOU1BFQ0lGSUVEEAASHQoZVVNBR0VfU09VUkNFX0tJTkRfSk9VUk5BTBABEiEKHVVTQUdFX1NPVVJDRV9LSU5EX1RSQU5TQ1JJUFRTEAIqtgEKEVVzYWdlU291cmNlU3RhdHVzEiMKH1VTQUdFX1NPVVJDRV9TVEFUVVNfVU5TUEVDSUZJRUQQABIaChZVU0FHRV9TT1VSQ0VfU1RBVFVTX09LEAESHwobVVNBR0VfU09VUkNFX1NUQVRVU19NSVNTSU5HEAISHwobVVNBR0VfU09VUkNFX1NUQVRVU19QQVJUSUFMEAMSHgoaVVNBR0VfU09VUkNFX1NUQVRVU19GQUlMRUQQBCqdAQoSVXNhZ2VQcmljaW5nU3RhdHVzEiQKIFVTQUdFX1BSSUNJTkdfU1RBVFVTX1VOU1BFQ0lGSUVEEAASHgoaVVNBR0VfUFJJQ0lOR19TVEFUVVNfRlJFU0gQARIfChtVU0FHRV9QUklDSU5HX1NUQVRVU19DQUNIRUQQAhIgChxVU0FHRV9QUklDSU5HX1NUQVRVU19CVU5ETEVEEANCP1o9Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9ob3N0L3YxO2hvc3R2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_store_v1_agent_attrs]);
 
 /**
  * US dollars per million tokens for one model at one speed. Zero is a price: a free model.
@@ -496,6 +496,211 @@ export type UsageRollupRow = Message<"vibesys.host.v1.UsageRollupRow"> & {
  */
 export const UsageRollupRowSchema: GenMessage<UsageRollupRow> = /*@__PURE__*/
   messageDesc(file_vibesys_host_v1_usage_state, 10);
+
+/**
+ * The usage of one conversation in one quarter hour, for one model and speed, as a provider's
+ * transcript says it. A cache of the transcript, kept in `TranscriptFileState`.
+ *
+ * @generated from message vibesys.host.v1.TranscriptRow
+ */
+export type TranscriptRow = Message<"vibesys.host.v1.TranscriptRow"> & {
+  /**
+   * @generated from field: int64 quarter = 1;
+   */
+  quarter: bigint;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * The working directory of the session: a path on this host, which never leaves it.
+   *
+   * @generated from field: string cwd = 3;
+   */
+  cwd: string;
+
+  /**
+   * @generated from field: string model = 4;
+   */
+  model: string;
+
+  /**
+   * @generated from field: vibesys.store.v1.UsageSpeed speed = 5;
+   */
+  speed: UsageSpeed;
+
+  /**
+   * Input counts cache reads and writes, as everywhere; reasoning is part of output.
+   *
+   * @generated from field: uint64 input = 6;
+   */
+  input: bigint;
+
+  /**
+   * @generated from field: uint64 cache_read = 7;
+   */
+  cacheRead: bigint;
+
+  /**
+   * @generated from field: uint64 cache_write = 8;
+   */
+  cacheWrite: bigint;
+
+  /**
+   * @generated from field: uint64 cache_write_1h = 9;
+   */
+  cacheWrite1h: bigint;
+
+  /**
+   * @generated from field: uint64 output = 10;
+   */
+  output: bigint;
+
+  /**
+   * @generated from field: uint64 reasoning = 11;
+   */
+  reasoning: bigint;
+
+  /**
+   * The requests the row counts.
+   *
+   * @generated from field: uint32 turns = 12;
+   */
+  turns: number;
+};
+
+/**
+ * Describes the message vibesys.host.v1.TranscriptRow.
+ * Use `create(TranscriptRowSchema)` to create a new message.
+ */
+export const TranscriptRowSchema: GenMessage<TranscriptRow> = /*@__PURE__*/
+  messageDesc(file_vibesys_host_v1_usage_state, 11);
+
+/**
+ * Where a read of one transcript file stopped, what it found, and what is needed to go on.
+ *
+ * @generated from message vibesys.host.v1.TranscriptFileState
+ */
+export type TranscriptFileState = Message<"vibesys.host.v1.TranscriptFileState"> & {
+  /**
+   * @generated from field: string path = 1;
+   */
+  path: string;
+
+  /**
+   * @generated from field: uint64 size = 2;
+   */
+  size: bigint;
+
+  /**
+   * @generated from field: int64 mtime_ns = 3;
+   */
+  mtimeNs: bigint;
+
+  /**
+   * Bytes of complete lines already read.
+   *
+   * @generated from field: uint64 offset = 4;
+   */
+  offset: bigint;
+
+  /**
+   * @generated from field: uint32 guard_length = 5;
+   */
+  guardLength: number;
+
+  /**
+   * @generated from field: uint32 guard_hash = 6;
+   */
+  guardHash: number;
+
+  /**
+   * The format's parser state at `offset`, opaque to the host.
+   *
+   * @generated from field: bytes state = 7;
+   */
+  state: Uint8Array;
+
+  /**
+   * Whether the read reached the end of the file; false when the byte budget stopped it.
+   *
+   * @generated from field: bool complete = 8;
+   */
+  complete: boolean;
+
+  /**
+   * @generated from field: uint32 malformed = 9;
+   */
+  malformed: number;
+
+  /**
+   * @generated from field: repeated vibesys.host.v1.TranscriptRow rows = 10;
+   */
+  rows: TranscriptRow[];
+};
+
+/**
+ * Describes the message vibesys.host.v1.TranscriptFileState.
+ * Use `create(TranscriptFileStateSchema)` to create a new message.
+ */
+export const TranscriptFileStateSchema: GenMessage<TranscriptFileState> = /*@__PURE__*/
+  messageDesc(file_vibesys_host_v1_usage_state, 12);
+
+/**
+ * What the host knows of one provider's transcript directory.
+ *
+ * @generated from message vibesys.host.v1.TranscriptRootState
+ */
+export type TranscriptRootState = Message<"vibesys.host.v1.TranscriptRootState"> & {
+  /**
+   * @generated from field: string provider = 1;
+   */
+  provider: string;
+
+  /**
+   * @generated from field: string path = 2;
+   */
+  path: string;
+
+  /**
+   * @generated from field: repeated vibesys.host.v1.TranscriptFileState files = 3;
+   */
+  files: TranscriptFileState[];
+};
+
+/**
+ * Describes the message vibesys.host.v1.TranscriptRootState.
+ * Use `create(TranscriptRootStateSchema)` to create a new message.
+ */
+export const TranscriptRootStateSchema: GenMessage<TranscriptRootState> = /*@__PURE__*/
+  messageDesc(file_vibesys_host_v1_usage_state, 13);
+
+/**
+ * The transcripts of every provider on this host, read incrementally. A cache, persisted as
+ * `transcript-scan.pb`: a file that fails its rules is rebuilt whole.
+ *
+ * @generated from message vibesys.host.v1.TranscriptScanCache
+ */
+export type TranscriptScanCache = Message<"vibesys.host.v1.TranscriptScanCache"> & {
+  /**
+   * @generated from field: uint32 version = 1;
+   */
+  version: number;
+
+  /**
+   * @generated from field: repeated vibesys.host.v1.TranscriptRootState roots = 2;
+   */
+  roots: TranscriptRootState[];
+};
+
+/**
+ * Describes the message vibesys.host.v1.TranscriptScanCache.
+ * Use `create(TranscriptScanCacheSchema)` to create a new message.
+ */
+export const TranscriptScanCacheSchema: GenMessage<TranscriptScanCache> = /*@__PURE__*/
+  messageDesc(file_vibesys_host_v1_usage_state, 14);
 
 /**
  * How the estimate of one series was reached, in the order the host tries them: an override the
