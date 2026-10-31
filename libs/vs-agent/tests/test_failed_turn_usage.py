@@ -46,7 +46,6 @@ from vs_sim.api.testing import ManualClock, SimThreads, examples
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vs_agent.session_launch import SessionLauncher
 
 _COUNTS = st.integers(0, 10**6)
 
@@ -91,18 +90,19 @@ class _TimesOutAfterStreaming(FakeExecutor):
         raise agentshim.CliTimeoutError(request.argv, 1.0)
 
 
-def _claude(executor: agentshim.CommandExecutor) -> SessionLauncher:
-    return fake_agentshim_launcher(provider="claude", executor=executor, threads=SimThreads())
-
-
 def _run(
-    root: Path, driver: SessionLauncher | FakeProvider
+    root: Path, source: FakeExecutor | FakeProvider
 ) -> tuple[BaseException, TurnUsageData, dict[str, object]]:
     """Run one claude turn that fails; the error, its journal event and its usage row."""
     journal = EventJournal(clock=ManualClock(), threads=SimThreads())
     journal.attach(root / "run", "run-1")
     logs = root / "logs"
     logs.mkdir()
+    driver = (
+        source
+        if isinstance(source, FakeProvider)
+        else fake_agentshim_launcher(provider="claude", executor=source, threads=SimThreads())
+    )
     client = AgentClient(
         driver,
         provider="claude",
@@ -160,7 +160,7 @@ def test_a_turn_that_timed_out_after_part_of_its_stream_records_its_spend_and_it
 ) -> None:
     scripted = scripted_turn("claude", text="partial", session_id="sess-timeout", usage=spent)
     with tempfile.TemporaryDirectory() as directory:
-        error, data, row = _run(Path(directory), _claude(_TimesOutAfterStreaming(scripted.stdout)))
+        error, data, row = _run(Path(directory), _TimesOutAfterStreaming(scripted.stdout))
 
     assert isinstance(error, AgentTurnTimeoutError)
     assert error.provider_session_id == "sess-timeout"
@@ -213,7 +213,7 @@ def test_a_turn_that_failed_before_reporting_anything_records_no_basis_it_was_no
 ) -> None:
     """Nothing reported is ``NOT_REPORTED`` on a new line, never null: null means an old line."""
     scripted = scripted_turn("claude", text="partial", session_id=None)
-    error, data, row = _run(tmp_path, _claude(_TimesOutAfterStreaming(scripted.stdout[:1])))
+    error, data, row = _run(tmp_path, _TimesOutAfterStreaming(scripted.stdout[:1]))
 
     assert isinstance(error, AgentTurnTimeoutError)
     assert data.cost_basis is CostBasis.NOT_REPORTED
