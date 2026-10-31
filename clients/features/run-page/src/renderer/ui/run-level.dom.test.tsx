@@ -177,7 +177,7 @@ async function chartAt(scrub: number | null): Promise<{yLabels: string[]; cursor
           yLabels: [...chart.querySelectorAll('text.vs-chart-label')].map(
             each => each.textContent ?? '',
           ),
-          cursor: chart.querySelector('.vs-chart-playhead') !== null,
+          cursor: chart.querySelector('.vs-chart-cursor') !== null,
         };
   await act(async () => root.unmount());
   container.remove();
@@ -243,7 +243,8 @@ test('the run level says passed, failed and running, never accepted, kept or rej
       expect(text).toContain('1 passed');
       expect(text).toContain('1 failed');
       expect(text).toContain('1 running');
-      expect(text).not.toContain('Best so far');
+      // The chart's legend names its line once; no idea row or chip says it.
+      expect(text.split('Best so far')).toHaveLength(2);
       expect(text).not.toMatch(/turned down/i);
       expect(text).not.toMatch(/accepted|kept|rejected/i);
     }
@@ -268,9 +269,10 @@ test('the performance row is one element whatever idea is open: dots are singled
   };
   const draw = (idea: string | null) =>
     act(async () => root.render(<Hero {...base} whole={model} idea={idea} />));
+  /** Which readings are ringed as the open idea's: `focus`, else `-`. */
   const kinds = () =>
-    [...container.querySelectorAll('.vs-chart-pick')].map(
-      point => point.getAttribute('data-emphasis') ?? '-',
+    [...container.querySelectorAll('.vs-chart-pick')].map(point =>
+      point.querySelector('.vs-chart-ring') === null ? '-' : 'focus',
     );
   const chartNode = () => container.querySelector('svg.vs-chart');
 
@@ -287,11 +289,12 @@ test('the performance row is one element whatever idea is open: dots are singled
     expect(focused).toBe(['i1', 'i0', 'i2'].includes(idea ?? '') ? 1 : 0);
   }
   await draw('i1');
-  expect(kinds()).toEqual(['dim', 'focus', 'dim']);
-  // The idea's own result reads under the hero's figure.
-  expect(container.textContent).toContain('Selected idea:');
-  // The line names the idea it is about, in its own text and not only in a tooltip.
-  expect(container.textContent).toMatch(/Selected idea:\s*i1/);
+  expect(kinds()).toEqual(['-', 'focus', '-']);
+  // The legend names the ring only while an idea is open.
+  expect(container.textContent).toContain('Selected');
+  await draw(null);
+  expect(container.textContent).not.toContain('Selected');
+  await draw('i1');
 
   const third = container.querySelectorAll('.vs-chart-pick')[2];
   await act(async () => {
@@ -468,7 +471,7 @@ test('the selected idea’s line words the objective’s unit, not its metric ke
   expect(text).not.toContain('output_tokens_per_s');
 });
 
-test('a run whose input benchmark failed shows no gate card and no best-so-far line', async () => {
+test('a run whose input benchmark failed shows no gate card', async () => {
   const state = runPageStep(attaching(), SNAPSHOT).state;
   const failure = {sequence: 1, gate: 'benchmark', recipe: null, supersededBy: null};
   for (const adopted of [false, true]) {
@@ -492,7 +495,6 @@ test('a run whose input benchmark failed shows no gate card and no best-so-far l
     const text = container.textContent ?? '';
     await act(async () => root.unmount());
     container.remove();
-    expect(text).not.toContain('Best so far');
     expect(text).not.toContain('Adopted:');
     expect(text).not.toContain('Details');
     expect(text).not.toContain('failed ·');

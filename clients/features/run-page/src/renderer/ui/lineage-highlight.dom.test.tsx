@@ -31,12 +31,14 @@ afterAll(async () => {
   await window.happyDOM.close();
 });
 
-// 0 ─ 1 ─ 2 (best)
-//  └─ 3 ─ 4 ─ 5
+// 0 ─ 1 ─ 2
+//  └─ 3 ─ 4 ─ 5 (best)
+// Each idea measures a little more than the one before, so every idea but the first (which only
+// equals the input) sets a new step of the best-so-far line.
 const SHAPE = {
   parents: [null, 0, 1, 0, 3, 4],
   outcomes: ['passed', 'passed', 'passed', 'passed', 'passed', 'passed'],
-  best: 2,
+  best: 5,
 } as const;
 
 async function shown() {
@@ -107,10 +109,11 @@ test('the chart joins no dots, and rings none until the reader points at somethi
   expect(container.querySelector('[role="option"][data-path]')).toBeNull();
 });
 
-test('pointing at a flat idea row lights its chain on the chart, and leaving clears it', async () => {
+test('pointing at a flat idea row rings the steps its chain set on the chart, and leaving clears it', async () => {
   const container = await shown();
   await hover(row(container, 'idea 5'), true);
-  expect(ringed(container)).toBe(4);
+  // Its chain is ideas 5, 4, 3 and 0; idea 0 only equals the input, so it set no step.
+  expect(ringed(container)).toBe(3);
   expect(container.querySelector('[role="option"][data-path]')).toBeNull();
   await hover(row(container, 'idea 5'), false);
   expect(ringed(container)).toBe(0);
@@ -120,7 +123,7 @@ test('pointing at a point lights its chain the same way', async () => {
   const container = await shown();
   const point = container.querySelector('[role="button"][aria-label^="idea 1"]') as Element;
   await hover(point, true);
-  expect(ringed(container)).toBe(2);
+  expect(ringed(container)).toBe(1);
   await hover(point, false);
   expect(ringed(container)).toBe(0);
 });

@@ -20,7 +20,7 @@ import type {LoadProgress} from '@vibesys/run-skeleton';
 import type {ComparisonBaseline, CoreState} from '@vibesys/run-state';
 import {AgentFold, type AgentGraph, agentGraph} from '@vibesys/run-state/agents';
 import {CandidateFold, type CandidateTree, candidateTree} from '@vibesys/run-state/candidates';
-import type {HeadlineReading} from '@vibesys/run-state/skeleton';
+import type {HeadlineReading, RunSession} from '@vibesys/run-state/skeleton';
 import {closeSpans, type RunEnding, type RunTrace, traceSpans} from '@vibesys/run-state/trace';
 import type {AppendLog} from './append-log.js';
 import type {Direction} from './direction.js';
@@ -84,6 +84,11 @@ export interface RunModel {
   readonly baselines: readonly ComparisonBaseline[];
   /** The latest run-clock time the trace's spans carry, or null when they carry none. */
   readonly latest: number | null;
+  /**
+   * The run's sessions (what each epoch of the run recorded on its clock), when the writer's
+   * records state them; absent for a run read from events, whose clock is read as it stands.
+   */
+  readonly sessions?: readonly RunSession[];
   /** The gates that failed before the first idea began: the run could not measure its input. */
   readonly inputGates: readonly GateFailure[];
   /**

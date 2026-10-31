@@ -537,6 +537,8 @@ function RunHeader(
           ended={runHasEnded(state)}
           wall={runWallNow(state)}
           position={state.positionWord}
+          places={state.positionPlaces}
+          marks={state.positionMarks}
           change={view => dispatch({type: 'view', view})}
         />
       ) : null}

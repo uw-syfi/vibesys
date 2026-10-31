@@ -875,6 +875,23 @@ button.vs-crumb:focus-visible {
   flex-direction: column;
   gap: var(--space-3);
 }
+/* Which way is better, in the corner of the frame: the one word in the chart that is not a value. */
+.vs-pareto-better {
+  fill: var(--ok);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+  font-weight: var(--text-body-strong-weight);
+}
+/* The input's name beside its mark, over a halo of the panel so no line or dot cuts it. */
+.vs-pareto-input {
+  fill: var(--muted);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+  paint-order: stroke;
+  stroke: var(--panel);
+  stroke-width: var(--space-2);
+  stroke-linejoin: round;
+}
 .vs-pareto-frontier {
   fill: none;
   stroke: var(--accent);
@@ -1207,34 +1224,74 @@ button.vs-crumb:focus-visible {
   color: var(--text);
 }
 
-.vs-chart-point[data-faint] {
-  opacity: 0.45;
-}
-/* A chart that singles points out: the others stay, dimmed. */
-.vs-chart-point[data-emphasis="dim"] {
-  opacity: 0.25;
-}
-.vs-chart-point[data-emphasis="focus"] {
-  stroke-width: 3;
-}
-.vs-chart-related {
-  fill: none;
-  stroke: var(--muted);
-  stroke-width: 1;
-}
 /* The chain the reader points at: its dots are ringed in the accent, and no line joins them. */
 .vs-chart-lit {
   fill: none;
   stroke: var(--accent);
   stroke-width: 2;
 }
-.vs-chart-span-band {
-  fill: var(--accent);
-  opacity: 0.08;
+.vs-chart-tip-box {
+  fill: var(--text);
 }
-.vs-chart-span-bar {
-  fill: var(--accent);
-  opacity: 0.5;
+.vs-chart-tip-text {
+  fill: var(--panel);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+}
+.vs-chart-legend {
+  gap: var(--space-5);
+}
+.vs-chart-legend-mark {
+  flex: none;
+  display: inline-block;
+}
+/* The key's marks, each drawn as the chart draws it: the line, a dot, a ring. */
+.vs-chart-legend-mark[data-mark="line"] {
+  width: var(--space-6);
+  height: var(--space-1);
+  background: var(--accent);
+}
+.vs-chart-legend-mark[data-mark="dot"] {
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: var(--radius-full);
+  background: var(--muted);
+}
+.vs-chart-legend-mark[data-mark="ring"] {
+  width: var(--space-4);
+  height: var(--space-4);
+  border: var(--focus-ring) solid var(--text);
+  border-radius: var(--radius-full);
+}
+.vs-chart-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.vs-chart-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  column-gap: var(--space-3);
+}
+.vs-chart-panel-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--space-3);
+  min-width: 0;
+}
+/* A heading's words stay whole: when they do not fit side by side the figure goes under the name. */
+.vs-chart-panel-head .vs-text {
+  white-space: nowrap;
+}
+/* Charts side by side, as many as fit at a readable width, equally wide; the rest wrap below. */
+.vs-chart-columns {
+  display: grid;
+  gap: var(--space-6);
+  grid-template-columns: repeat(auto-fit, minmax(var(--chart-min), 1fr));
 }
 
 /* --- flat lists: a trailing column ("from <parent>") -------------------------------------------- */

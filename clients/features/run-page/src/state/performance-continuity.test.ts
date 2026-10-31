@@ -56,7 +56,7 @@ for (const item of cases) {
         const performance = model.series?.get(head.performance[0]?.series ?? '');
         expect(performance).toBeDefined();
         expect(performance?.refusal).toBeUndefined();
-        expect(heroView(model).tiles[0]?.note).not.toBe('Unavailable');
+        expect(heroView(model).headlines[0]?.note).not.toBe('Unavailable');
       }
       const checkpoint = create(KeyframeSchema, {...load.skeleton, throughSeq: seq});
       load = ingestSkeleton(

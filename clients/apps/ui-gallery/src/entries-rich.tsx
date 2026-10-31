@@ -3,6 +3,9 @@ import {
   Button,
   Card,
   Chart,
+  ChartColumns,
+  ChartLegend,
+  ChartPanel,
   type ChartPoint,
   type CheckItem,
   CheckList,
@@ -357,40 +360,40 @@ function ScrubberDemo(): JSX.Element {
 }
 
 const PICK_POINTS: readonly ChartPoint[] = [
-  {id: 'input', label: 'input · 1.00x', x: 0, y: 100, filled: true},
-  {id: 'ring', label: 'ring · 1.18x', x: 3, y: 118, filled: true},
-  {id: 'batching', label: 'batching · 1.09x', x: 5, y: 109, filled: false},
-  {id: 'padding', label: 'padding · 1.27x', x: 6, y: 127, filled: true},
+  {id: 'ring', label: 'ring · 118 · 1.18×', x: 3, y: 118},
+  {id: 'batching', label: 'batching · 109 · 1.09×', x: 5, y: 109},
+  {id: 'padding', label: 'padding · 127 · 1.27×', x: 6, y: 127},
 ];
 
 function PickChartDemo(): JSX.Element {
   const [selected, setSelected] = useState('ring');
   return (
     <Chart
-      label="Throughput of each candidate; pick a point to select it"
+      label="Throughput of each reading; pick a dot to select it"
       size="strip"
-      points={PICK_POINTS}
+      points={PICK_POINTS.map(point => ({...point, selected: point.id === selected}))}
       steps={[
         {x: 0, y: 100},
         {x: 3, y: 118},
         {x: 6, y: 127},
+        {x: 7, y: 127},
       ]}
-      reference={{y: 100, label: 'input'}}
-      selected={selected}
+      start="Input"
       pick={setSelected}
       yTicks={[100, 120].map(value => ({value, label: `${value / 100}x`}))}
       xTicks={[0, 3, 6].map(value => ({value, label: `${value}m`}))}
+      xDomain={[0, 7]}
     />
   );
 }
 
 const LARGE_POINTS = [
-  {x: 1, y: 18_000_000, filled: true},
-  {x: 2, y: 17_200_000, filled: false},
-  {x: 3, y: 21_500_000, filled: true},
-  {x: 4, y: 20_100_000, filled: false},
-  {x: 5, y: 24_000_000, filled: true},
-  {x: 6, y: 22_800_000, filled: false},
+  {x: 1, y: 18_000_000},
+  {x: 2, y: 17_200_000},
+  {x: 3, y: 21_500_000},
+  {x: 4, y: 20_100_000},
+  {x: 5, y: 24_000_000},
+  {x: 6, y: 22_800_000},
 ];
 
 const PARETO_THROUGHPUT: ParetoAxis = {name: 'Throughput', unit: 'ops/s', direction: 'higher'};
@@ -422,12 +425,12 @@ const PARETO_POINTS: readonly ParetoPoint[] = (() => {
 })();
 
 const POINTS = [
-  {x: 1, y: 100, filled: true},
-  {x: 2, y: 96, filled: false},
-  {x: 3, y: 118, filled: true},
-  {x: 4, y: 112, filled: false},
-  {x: 5, y: 127, filled: true},
-  {x: 6, y: 121, filled: false},
+  {x: 1, y: 100},
+  {x: 2, y: 96},
+  {x: 3, y: 118},
+  {x: 4, y: 112},
+  {x: 5, y: 127},
+  {x: 6, y: 121},
 ];
 
 /** The data display, navigation and overlay components (batch 2 of the design system). */
@@ -543,63 +546,46 @@ export const RICH_ENTRIES = {
       <Stack>
         <Card>
           <Chart
-            label="Throughput of each measured attempt relative to the baseline"
-            points={POINTS}
+            label="Throughput of each reading, with the best so far, scrubbed to the middle"
+            points={POINTS.map(point => ({...point, label: `reading at ${point.x}`}))}
             steps={[
-              {x: 1, y: 100},
+              {x: 0, y: 100},
               {x: 3, y: 118},
               {x: 5, y: 127},
               {x: 6, y: 127},
             ]}
-            reference={{y: 100, label: 'baseline'}}
-            playhead={4.5}
+            start="Input"
+            cursor={3.5}
+            marks={[2, 4]}
+            markLabel="resumed"
+            caption="running time · 6m 00s"
             yTicks={[
               {value: 90, label: '0.9x'},
               {value: 110, label: '1.1x'},
               {value: 130, label: '1.3x'},
             ]}
-            xTicks={[1, 2, 3, 4, 5, 6].map(value => ({value, label: String(value)}))}
-            xTitle="measurements"
+            xTicks={[0, 1, 2, 3, 4, 5, 6].map(value => ({value, label: `${value}m`}))}
+            xDomain={[0, 6]}
           />
         </Card>
         <Card>
           <Chart
-            label="Throughput from zero: new bests on the line, a slower pass grey, a failure red"
-            points={[
-              {id: 'a', x: 1, y: 100, filled: true, tone: 'accent'},
-              {id: 'b', x: 2, y: 90, filled: true, tone: 'muted'},
-              {id: 'c', x: 3, y: 130, filled: true, tone: 'accent'},
-              {id: 'd', x: 4, y: 40, filled: true, tone: 'err'},
-              {id: 'e', x: 5, y: 120, filled: true, tone: 'muted'},
-            ]}
-            steps={[
-              {x: 1, y: 100},
-              {x: 3, y: 130},
-              {x: 6, y: 130},
-            ]}
-            yDomain={[0, 143]}
-            yTicks={[0, 50, 100].map(value => ({value, label: String(value)}))}
-            xTicks={[1, 2, 3, 4, 5, 6].map(value => ({value, label: String(value)}))}
-            playhead={4.5}
-          />
-        </Card>
-        <Card>
-          <Chart
-            label="Throughput in operations per second, with large values"
+            label="Throughput in operations per second, with large values and a baseline"
             points={LARGE_POINTS}
             steps={[
-              {x: 1, y: 18_000_000},
+              {x: 0, y: 18_000_000},
               {x: 3, y: 21_500_000},
               {x: 5, y: 24_000_000},
               {x: 6, y: 24_000_000},
             ]}
-            reference={{y: 18_000_000, label: 'baseline'}}
+            start="Input"
+            references={[{y: 20_000_000, label: 'baseline'}]}
             yTicks={[16_000_000, 20_000_000, 24_000_000].map(value => ({
               value,
               label: value.toLocaleString('en-US'),
             }))}
-            xTicks={[1, 2, 3, 4, 5, 6].map(value => ({value, label: String(value)}))}
-            xTitle="measurements"
+            xTicks={[0, 1, 2, 3, 4, 5, 6].map(value => ({value, label: `${value}m`}))}
+            xDomain={[0, 6]}
           />
         </Card>
         <Card>
@@ -607,28 +593,112 @@ export const RICH_ENTRIES = {
         </Card>
         <Card>
           <Chart
-            label="Throughput with one point singled out: the others dimmed, its base outlined, its span shaded"
+            label="Throughput with one reading ringed and the steps of its lineage ringed in the accent"
             size="strip"
             points={[
-              {id: 'a', x: 1, y: 100, filled: true, emphasis: 'related'},
-              {id: 'b', x: 2, y: 90, filled: true, tone: 'muted', emphasis: 'dim'},
-              {id: 'c', x: 3, y: 130, filled: true, emphasis: 'focus'},
-              {id: 'd', x: 4, y: 40, filled: true, tone: 'err', emphasis: 'dim'},
-              {id: 'e', x: 5, y: 120, filled: true, tone: 'muted', emphasis: 'dim'},
+              {id: 'a', x: 1, y: 100, lit: true},
+              {id: 'b', x: 2, y: 90},
+              {id: 'c', x: 3, y: 130, selected: true, lit: true},
+              {id: 'd', x: 4, y: 40},
+              {id: 'e', x: 5, y: 120},
             ]}
-            spans={[{from: 2.2, to: 3.2, label: 'the open idea'}]}
             steps={[
+              {x: 0, y: 90},
               {x: 1, y: 100},
               {x: 3, y: 130},
               {x: 6, y: 130},
             ]}
             yDomain={[0, 143]}
             yTicks={[0, 50, 100].map(value => ({value, label: String(value)}))}
-            xTicks={[1, 2, 3, 4, 5, 6].map(value => ({value, label: String(value)}))}
+            xTicks={[0, 2, 4, 6].map(value => ({value, label: `${value}m`}))}
+            xDomain={[0, 6]}
             pick={noop}
           />
         </Card>
       </Stack>
+    ),
+  },
+  ChartLegend: {
+    render: () => (
+      <Stack>
+        <ChartLegend
+          label="What the chart draws"
+          items={[
+            {label: 'Best so far', mark: 'line'},
+            {label: 'Reading', mark: 'dot'},
+          ]}
+        />
+        <ChartLegend
+          label="What the chart draws, with an idea selected"
+          items={[
+            {label: 'Best so far', mark: 'line'},
+            {label: 'Reading', mark: 'dot'},
+            {label: 'Selected', mark: 'ring'},
+          ]}
+        />
+      </Stack>
+    ),
+  },
+  ChartPanel: {
+    render: () => (
+      <Stack>
+        <ChartPanel
+          title="Throughput"
+          note="higher is better"
+          figure="3.83× faster"
+          tone="ok"
+          hint="6,054,154 ops/s · input 1,581,539 ops/s"
+        >
+          <Chart
+            label="Throughput"
+            unit="ops/s"
+            size="strip"
+            points={PICK_POINTS}
+            steps={[
+              {x: 0, y: 100},
+              {x: 6, y: 127},
+            ]}
+            start="Input"
+            xTicks={[0, 3, 6].map(value => ({value, label: `${value}m`}))}
+            xDomain={[0, 6]}
+          />
+        </ChartPanel>
+        <ChartPanel title="Queue depth" note="lower is better" figure="No clear change">
+          <Chart label="Queue depth" size="strip" points={[]} />
+        </ChartPanel>
+      </Stack>
+    ),
+  },
+  ChartColumns: {
+    render: () => (
+      <ChartColumns>
+        {[
+          {title: 'Time to first token', better: 'lower', figure: '1.78× faster', end: 56},
+          {title: 'Time per output token', better: 'lower', figure: '1.25× faster', end: 80},
+          {title: 'Completed requests', better: 'higher', figure: '1.27× faster', end: 127},
+        ].map(panel => (
+          <ChartPanel
+            key={panel.title}
+            title={panel.title}
+            note={`${panel.better} is better`}
+            figure={panel.figure}
+            tone="ok"
+          >
+            <Chart
+              label={panel.title}
+              size="strip"
+              points={PICK_POINTS}
+              steps={[
+                {x: 0, y: 100},
+                {x: 6, y: panel.end},
+              ]}
+              start="Input"
+              xTicks={[0, 3, 6].map(value => ({value, label: `${value}m`}))}
+              xDomain={[0, 6]}
+            />
+          </ChartPanel>
+        ))}
+      </ChartColumns>
     ),
   },
   ParetoChart: {

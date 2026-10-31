@@ -5,7 +5,7 @@ import {openFixture} from './fixture-world.js';
 /**
  * A finished run of ten ideas (six passed, four failed), as the user sees it: the failed ideas are
  * listed by default in the flat table and can be hidden by the filter; the performance row
- * is a tile per measure with a unit on its values; the chart joins no dots; and tokens are split
+ * is a chart per objective with a headline and a unit on its values; the chart joins no dots; and tokens are split
  * into input (with its cached share) and output wherever they are written, with a part nobody
  * reported written as unknown. `RUN_SHOTS` names a directory to save the app window in.
  */
@@ -65,27 +65,29 @@ test('failed ideas are listed in the flat table and a chip lists only them', asy
   await expect(ideas(page).getByRole('option')).toHaveCount(10);
 });
 
-test('the performance row is a tile with a ratio, what it means, and values that carry a unit', async ({
+test('the performance row is a chart with a headline and values that carry a unit', async ({
   page,
 }) => {
   await openFixture(page, fixtureNamed('finished-ten-ideas'));
-  const tiles = page.getByRole('region', {name: 'Performance'});
-  const tile = tiles.locator('.vs-tile');
-  await expect(tile).toHaveCount(1);
-  await expect(tile.getByText('Total ops/sec', {exact: true})).toBeVisible();
-  await expect(tile.getByText('3.83×', {exact: true})).toBeVisible();
-  await expect(tile.getByText('faster than input')).toBeVisible();
-  await expect(tile.locator('.vs-tile-detail')).toHaveText(
+  const panel = page.getByRole('region', {name: 'Total ops/sec', exact: true});
+  await expect(panel).toBeVisible();
+  await expect(panel.locator('.vs-chart-figure')).toHaveText('3.83× faster');
+  await expect(panel.locator('.vs-chart-figure')).toHaveAccessibleDescription(
     '6,054,154 ops/s · input 1,581,539 ops/s',
   );
   // No line names the idea the figures belong to: the Ideas list badges it.
-  await expect(page.getByText(/Adopted:|Best so far/)).toHaveCount(0);
+  await expect(page.getByText(/Adopted:/)).toHaveCount(0);
+  // The key names what the chart draws, and the ring of an open idea only while one is open.
+  const key = page.getByRole('list', {name: 'Chart key'});
+  await expect(key.getByText('Best so far', {exact: true})).toBeVisible();
+  await expect(key.getByText('Reading', {exact: true})).toBeVisible();
+  await expect(key.getByText('Selected', {exact: true})).toHaveCount(0);
   await shot(page, 'ten-ideas-hero');
 });
 
 test('the chart draws the best-so-far step line and joins no dots', async ({page}) => {
   await openFixture(page, fixtureNamed('finished-ten-ideas'));
-  const chart = page.getByRole('group', {name: /of each measured idea/});
+  const chart = page.getByRole('group', {name: /of each reading over the run/});
   await expect(chart.locator('.vs-chart-point').first()).toBeVisible();
   await expect(chart.locator('path')).toHaveCount(1);
   await expect(chart.locator('path.vs-chart-step')).toHaveCount(1);
@@ -130,13 +132,11 @@ test('the hero, the chart and the ideas table at 1440 and 1000 px', async ({page
   await openFixture(page, fixtureNamed('finished-ten-ideas'));
   for (const width of [1440, 1000]) {
     await page.setViewportSize({width, height: 900});
-    await expect(page.getByRole('region', {name: 'Performance'})).toBeVisible();
+    await expect(page.locator('.vs-chart-columns')).toBeVisible();
     await page.screenshot({path: `${shots}/window-${width}.png`});
+    await page.locator('.vs-chart-columns').screenshot({path: `${shots}/hero-${width}.png`});
     await page
-      .getByRole('region', {name: 'Performance'})
-      .screenshot({path: `${shots}/hero-${width}.png`});
-    await page
-      .getByRole('group', {name: /of each measured idea/})
+      .getByRole('group', {name: /of each reading over the run/})
       .screenshot({path: `${shots}/chart-${width}.png`});
     await page
       .getByRole('listbox', {name: 'Ideas'})

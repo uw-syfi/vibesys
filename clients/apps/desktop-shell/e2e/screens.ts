@@ -140,6 +140,10 @@ export async function walkScreens(
 ): Promise<Violation[]> {
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
   await expect(ideas.getByRole('option').first()).toBeVisible();
+  // A window too short for the charts and the lists (the lists keep their floor, the page scrolls)
+  // is read from the lists: a reader scrolls to them before opening an idea, so the walk starts
+  // there. Where the screen fits nothing scrolls, and an idea that moved the page would be caught.
+  await ideas.scrollIntoViewIfNeeded();
   await settled(page);
   const walk = new Walk(page, visit, anchors, await anchorsOf(page, anchors));
   await walk.at('run');

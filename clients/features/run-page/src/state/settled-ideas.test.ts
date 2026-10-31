@@ -4,11 +4,12 @@ import {event as fixtureEvent} from '@vibesys/contracts/testing';
 import {type CoreState, initialCoreState, reduceEvent} from '@vibesys/run-state';
 import {EMPTY_TRACE} from '@vibesys/run-state/trace';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
-import {ideaFocusView} from './idea-focus.js';
+import {firstChart} from './chart-fixtures.js';
+import {heroView} from './headline.js';
+import {ideaOutcomeLine} from './idea-focus.js';
 import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {traceLog} from './live.js';
 import {NO_PAUSES} from './quota-pauses.js';
-import {heroView, stripChartView} from './run-level.js';
 import {createRunReader, type RunFacts, type RunModel} from './run-model.js';
 import {timelineRows} from './timeline-rows.js';
 
@@ -140,7 +141,7 @@ describe('an idea whose measurement the framework compared', () => {
   });
 
   test('headlines the best idea’s compared mean with the ratio the comparison made, by its base', () => {
-    const [tile] = heroView(model).tiles;
+    const [tile] = heroView(model).headlines;
     expect(tile).toMatchObject({
       figure: '385.4',
       ratio: null,
@@ -151,11 +152,16 @@ describe('an idea whose measurement the framework compared', () => {
   });
 
   test('has that mean in the chart’s points, whose tooltips read it', () => {
-    const chart = stripChartView(model, T0, T0 + 4000);
-    expect(chart?.points.map(point => point.y)).toEqual([350.39, 385.4]);
-    expect(chart?.points.map(point => point.label)).toEqual([
-      'Idea 2 · 350.4 · New best',
-      'Idea 3 · 385.4 · New best',
+    const chart = firstChart(model, T0, T0 + 4000);
+    expect(chart.readings.map(point => point.y)).toEqual([350.39, 385.4]);
+    expect(chart.readings.map(point => `${point.tip.lead} · ${point.tip.detail}`)).toEqual([
+      'Idea 2 · 350.4 tok/s',
+      'Idea 3 · 385.4 tok/s',
+    ]);
+    // The names for assistive technology say the same, and when each was read and that it set a step.
+    expect(chart.readings.map(point => point.label)).toEqual([
+      'Idea 2 · 350.4 tok/s · 46m 40s · new best',
+      'Idea 3 · 385.4 tok/s · 1h 03m · new best',
     ]);
   });
 
@@ -174,9 +180,9 @@ describe('an idea whose measurement the framework compared', () => {
     expect(rows.map(row => row.figureTitle)).toEqual(['1.10× vs round 2', '1.22× vs its base']);
   });
 
-  test('says the ratio it made in the selected idea’s line, by its base', () => {
-    const line = ideaFocusView(model, model.candidates.candidates[1]?.id ?? null);
-    expect(line).toMatchObject({ratio: '1.10×', base: 'round 2', value: '385.4 tok/s'});
+  test('says the ratio it made in the open idea’s line, by its base', () => {
+    const idea = model.candidates.candidates[1];
+    expect(idea && ideaOutcomeLine(model, idea)).toContain('1.10× vs round 2 (385.4 tok/s)');
   });
 
   test('words the objective’s unit as the rest of the page does, never as its metric key', () => {
@@ -187,8 +193,8 @@ describe('an idea whose measurement the framework compared', () => {
         objective: {...model.overview.objective, unit: 'output_tokens_per_s'},
       },
     };
-    const line = ideaFocusView(keyed, model.candidates.candidates[1]?.id ?? null);
-    expect(line).toMatchObject({value: '385.4 output tokens/s'});
+    const idea = keyed.candidates.candidates[1];
+    expect(idea && ideaOutcomeLine(keyed, idea)).toContain('385.4 output tokens/s');
     const ideas = ideasView(keyed, IDEAS_FILTER_DEFAULT);
     expect(JSON.stringify(ideas)).not.toContain('output_tokens_per_s');
   });
@@ -252,11 +258,10 @@ describe('an idea whose comparison with its base was within noise', () => {
   const model = modelOf(SPANS, NOISY);
 
   test('is no new best in the chart, though its value is higher', () => {
-    const chart = stripChartView(model, T0, T0 + 4000);
-    expect(chart?.points.map(point => point.label)).toEqual([
-      'Idea 2 · 350.4 · New best',
-      'Idea 3 · 352.4 · Passed',
-    ]);
+    const chart = firstChart(model, T0, T0 + 4000);
+    expect(chart.readings.map(point => point.y)).toEqual([350.39, 352.4]);
+    // The line holds the first idea's value to the end: the second is no step of it.
+    expect(new Set(chart.steps.map(step => step.y))).toEqual(new Set([350.39]));
   });
 
   test('is no best on the Ideas list, from the same reading', () => {
@@ -273,11 +278,11 @@ describe('an idea whose comparison with its base was within noise', () => {
           compared(1, 'c2', 'rin', {candidate: first, base: 1}),
           compared(2, 'c3', 'c2', {candidate: second, base: first}, verdict),
         ].reduce(reduceEvent, initialCoreState());
-        const labels = stripChartView(modelOf(SPANS, core), T0, T0 + 4000)?.points.map(point =>
-          point.label.endsWith('New best'),
-        );
+        const chart = firstChart(modelOf(SPANS, core), T0, T0 + 4000);
+        const reading = chart.readings[1];
+        const sets = chart.steps.some(step => step.x === reading?.x && step.y === reading?.y);
         const expected = verdict === 'better' || verdict === 'inconclusive';
-        expect(labels?.[1], `seed ${seed} ${verdict}`).toBe(expected);
+        expect(sets, `seed ${seed} ${verdict}`).toBe(expected);
       }
     }
   });

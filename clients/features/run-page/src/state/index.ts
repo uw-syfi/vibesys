@@ -17,10 +17,11 @@ export {
   type GatewayTranscriptInput,
   gatewayRunMachine,
 } from './gateway-machine.js';
+export {type HeroView, heroView, type ObjectiveHeadline} from './headline.js';
 export {type HistoryLoadingView, historyLoadingView} from './history-words.js';
 export {type IdeaBase, type IdeaBases, ideaBases} from './idea-bases.js';
 export {effectWords, type IdeaEffect, type IdeaEffects, ideaEffects} from './idea-effects.js';
-export {type IdeaFocusView, ideaFocusView, ideaOutcomeLine, openIdeaId} from './idea-focus.js';
+export {ideaOutcomeLine, openIdeaId} from './idea-focus.js';
 export {
   type ImplementerOutcome,
   type ImplementerOutcomes,
@@ -58,6 +59,25 @@ export {isCatchUpBatch, type LoadView, loadView, paintedSkeleton} from './load-v
 export {type ModelNames, modelNamesOf, NO_MODEL_NAMES} from './model-names.js';
 export {roleLabel, stepKicker, stepLabel, stepTitle} from './names.js';
 export {
+  type ChartLegendEntry,
+  type ChartMoment,
+  type ChartReadingView,
+  chartLegend,
+  type ObjectiveChartView,
+  objectiveCharts,
+} from './objective-chart.js';
+export {
+  type BestReading,
+  bestSoFar,
+  multipleOver,
+  type ObjectiveReading,
+  type ObjectiveSeries,
+  objectiveSeriesOf,
+  readObjective,
+  readObjectives,
+  vsInputOf,
+} from './objective-reading.js';
+export {
   objectivesOf,
   type ParetoAxisView,
   type ParetoPointView,
@@ -75,15 +95,11 @@ export {createFactsReader} from './run-facts.js';
 export {
   clockAt,
   clockStart,
-  type HeroView,
-  heroView,
   logStreamToFollow,
-  type MetricTileView,
   type NowItem,
   nowView,
   type ResolvedZoom,
   resolveZoom,
-  stripChartView,
 } from './run-level.js';
 export {createRunReader, type RunModel} from './run-model.js';
 export {
@@ -104,6 +120,7 @@ export {
   type SpanDetailReply,
 } from './run-page.js';
 export {type SummaryReply, summaryFacts, type WireSummary} from './run-summary.js';
+export {type RunningTime, runningTimeOf, runningWords} from './running-time.js';
 export {hasDiagnostic} from './scoped-logs.js';
 export {scrubberView, viewAtPosition} from './scrub.js';
 export {

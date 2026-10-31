@@ -34,6 +34,7 @@ import {storeRunFixture} from '@vibesys/run-fixtures';
 import {foldSkeleton, ingestSkeleton, seedSkeleton, seekSkeleton} from '@vibesys/run-skeleton';
 import {readSkeleton} from '@vibesys/run-state/skeleton';
 import {totalUsage, usageOverTime} from '@vibesys/run-state/usage';
+import {firstChart} from './chart-fixtures.js';
 import {
   clockStart,
   headerView,
@@ -43,7 +44,6 @@ import {
   runPageInitial,
   skeletonPositions,
   skeletonScreenState,
-  stripChartView,
   timelineView,
 } from './index.js';
 
@@ -343,8 +343,8 @@ test('a keyframe map order cannot change the run origin or performance chart dur
       );
       const fromKeyframe = projectSkeleton(keyframe, through);
       expect(clockStart(fromKeyframe)).toBe(clockStart(fromRecords));
-      expect(stripChartView(fromKeyframe, clockStart(fromKeyframe), fromKeyframe.latest)).toEqual(
-        stripChartView(fromRecords, clockStart(fromRecords), fromRecords.latest),
+      expect(firstChart(fromKeyframe, clockStart(fromKeyframe), fromKeyframe.latest)).toEqual(
+        firstChart(fromRecords, clockStart(fromRecords), fromRecords.latest),
       );
     }
   }
@@ -454,8 +454,8 @@ test('a native metric headlines the writer fact even without candidate-shaped sp
   });
   const model = projectSkeleton(skeleton, 2n, '', {head});
   expect(model.candidates.candidates).toHaveLength(0);
-  expect(heroView(model).tiles[0]?.figure).toBe('3.21×');
-  expect(heroView(model).tiles[0]?.detail).toContain('321 ops/s');
+  expect(heroView(model).headlines[0]?.figure).toBe('3.21×');
+  expect(heroView(model).headlines[0]?.detail).toContain('321 ops/s');
   for (const committedSeq of [1n, 3n]) {
     expect(
       projectSkeleton(skeleton, 2n, '', {head: {...head, committedSeq}}).headline,
@@ -509,7 +509,7 @@ for (const reversed of [false, true]) {
       .map((record, index) => create(RecordSchema, {...record, seq: BigInt(index + 1)}));
     const skeleton = foldSkeleton(seedSkeleton(), events);
     const seq = skeleton.throughSeq ?? 0n;
-    const original = heroView(projectSkeleton(skeleton, seq)).tiles;
+    const original = heroView(projectSkeleton(skeleton, seq)).headlines;
     const head = create(RunHeadSchema, {
       epoch: 1,
       committedSeq: seq,
@@ -521,7 +521,7 @@ for (const reversed of [false, true]) {
         bestValue: 320,
       },
     });
-    const tiles = heroView(projectSkeleton(skeleton, seq, '', {head})).tiles;
+    const tiles = heroView(projectSkeleton(skeleton, seq, '', {head})).headlines;
     expect(tiles.map(tile => tile.id)).toEqual(original.map(tile => tile.id));
     expect(tiles).toHaveLength(2);
     for (const tile of original) {
@@ -529,10 +529,6 @@ for (const reversed of [false, true]) {
       if (tile.id === 'throughput') {
         expect(updated?.figure).toBe('3.20×');
         expect(updated?.detail).toBe('320 ops/s · input 100 ops/s');
-        expect(tile.trend).not.toBeNull();
-        expect(updated?.trend?.reference).toBe(100);
-        expect(updated?.trend?.from).toBe(tile.trend?.from);
-        expect(updated?.trend?.to).toBe(tile.trend?.to);
       } else {
         expect(updated).toEqual(tile);
       }

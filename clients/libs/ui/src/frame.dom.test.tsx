@@ -7,6 +7,9 @@ import {createRoot} from 'react-dom/client';
 import {
   Breadcrumb,
   Chart,
+  ChartColumns,
+  ChartLegend,
+  ChartPanel,
   DotLegend,
   Gantt,
   type GanttRow,
@@ -480,15 +483,15 @@ describe('Gantt', () => {
 
 describe('Chart picks', () => {
   const points = [
-    {id: 'a', label: 'A', x: 0, y: 1, filled: true},
-    {id: 'b', label: 'B', x: 1, y: 2, filled: false},
-    {x: 2, y: 3, filled: true},
+    {id: 'a', label: 'A', x: 0, y: 1, selected: false},
+    {id: 'b', label: 'B', x: 1, y: 2, selected: true},
+    {x: 2, y: 3},
   ];
 
   test('a point with an id is a button that picks it, and the selected one says so', async () => {
     const picked: string[] = [];
     const {container} = await mount(
-      <Chart label="Series" points={points} selected="b" pick={id => picked.push(id)} />,
+      <Chart label="Series" points={points} pick={id => picked.push(id)} />,
     );
     const buttons = all(container, '[role="button"]');
     expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(['A', 'B']);
@@ -501,7 +504,7 @@ describe('Chart picks', () => {
   });
 
   test('without a pick there are no buttons, and a selected point is still ringed', async () => {
-    const {container} = await mount(<Chart label="Series" points={points} selected="a" />);
+    const {container} = await mount(<Chart label="Series" points={points} />);
     expect(container.querySelector('[role="button"]')).toBeNull();
     expect(one(container, 'svg').getAttribute('role')).toBe('img');
     expect(all(container, '.vs-chart-ring')).toHaveLength(1);
@@ -515,6 +518,280 @@ describe('Chart picks', () => {
       return Number(one(container, 'svg').getAttribute('viewBox')?.split(' ')[3]);
     };
     expect(await height('strip')).toBeLessThan(await height());
+  });
+});
+
+describe('Chart tip', () => {
+  const points = [
+    {id: 'a', label: 'Keep a free list · 8.7 ms · 1.43×', x: 0, y: 1},
+    {id: 'b', label: 'Batch the enqueue · 4.9M ops/s', x: 1, y: 2},
+  ];
+
+  test('hovering a point says its label, and leaving it takes the words away', async () => {
+    const {container} = await mount(<Chart label="Series" points={points} pick={noop} />);
+    expect(container.querySelector('.vs-chart-tip')).toBeNull();
+    const [first] = all(container, '[role="button"]') as [HTMLElement];
+    await act(async () => {
+      first.dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));
+    });
+    expect(one(container, '.vs-chart-tip-text').textContent).toBe(points[0]?.label as string);
+    await act(async () => {
+      first.dispatchEvent(new MouseEvent('mouseout', {bubbles: true}));
+    });
+    expect(container.querySelector('.vs-chart-tip')).toBeNull();
+  });
+
+  /** The tip a point with a `tip` of `lead` and `detail` draws on hover, and the plot it must stay in. */
+  async function tipOf(lead: string, detail: string) {
+    const {container} = await mount(
+      <Chart
+        label="Series"
+        points={[{id: 'a', label: `${lead} · ${detail}`, tip: {lead, detail}, x: 0, y: 1}]}
+        pick={noop}
+      />,
+    );
+    const [first] = all(container, '[role="button"]') as [HTMLElement];
+    await act(async () => {
+      first.dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));
+    });
+    const box = one(container, '.vs-chart-tip-box');
+    const [axis] = all(container, '.vs-chart-axis');
+    const x = Number(box.getAttribute('x'));
+    return {
+      words: one(container, '.vs-chart-tip-text').textContent ?? '',
+      left: x,
+      right: x + Number(box.getAttribute('width')),
+      plotLeft: Number(axis?.getAttribute('x1')),
+      plotRight: Number(one(container, 'svg').getAttribute('width')) - 10,
+    };
+  }
+
+  test('a long name is cut with an ellipsis, and the figures are never cut', async () => {
+    const detail = '8.7 ms · 1.43×';
+    for (const length of [0, 1, 5, 28, 60, 90, 200, 1000]) {
+      const lead = 'Keep a free list per core '.repeat(40).slice(0, length);
+      const tip = await tipOf(lead, detail);
+      expect(tip.words.endsWith(detail)).toBe(true);
+      // The box stays inside the plot, so nothing of it is clipped by the drawing.
+      expect(tip.left).toBeGreaterThanOrEqual(tip.plotLeft);
+      expect(tip.right).toBeLessThanOrEqual(tip.plotRight);
+      if (length > 90) expect(tip.words).toContain('…');
+      if (length <= 28) expect(tip.words).toBe(length === 0 ? detail : `${lead} · ${detail}`);
+    }
+  });
+
+  test('a point with no tip says its label, cut to the plot', async () => {
+    const label = 'a name that goes on '.repeat(40);
+    const {container} = await mount(
+      <Chart label="Series" points={[{id: 'a', label, x: 0, y: 1}]} pick={noop} />,
+    );
+    const [first] = all(container, '[role="button"]') as [HTMLElement];
+    await act(async () => {
+      first.dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));
+    });
+    const words = one(container, '.vs-chart-tip-text').textContent ?? '';
+    expect(words.endsWith('…')).toBe(true);
+    expect(label.startsWith(words.slice(0, -1))).toBe(true);
+  });
+});
+
+describe('Chart cursor', () => {
+  const points = [
+    {id: 'a', x: 1, y: 2},
+    {id: 'b', x: 3, y: 3},
+    {id: 'c', x: 5, y: 1},
+  ];
+  const steps = [
+    {x: 0, y: 1},
+    {x: 3, y: 3},
+    {x: 6, y: 3},
+  ];
+
+  test('draws a line there, dims the dots after it and the line after it, and moves nothing', async () => {
+    const plain = await mount(<Chart label="Series" points={points} steps={steps} />);
+    const {container} = await mount(
+      <Chart label="Series" points={points} steps={steps} cursor={4} />,
+    );
+    expect(plain.container.querySelector('.vs-chart-cursor')).toBeNull();
+    expect(all(container, '.vs-chart-cursor')).toHaveLength(1);
+    expect(all(container, '.vs-chart-point').map(dot => dot.hasAttribute('data-after'))).toEqual([
+      false,
+      false,
+      true,
+    ]);
+    // The line is one path, drawn twice over the halves the cursor divides: the second dimmed.
+    expect(all(container, 'path.vs-chart-step')).toHaveLength(2);
+    expect(all(container, 'path.vs-chart-step[data-after]')).toHaveLength(1);
+    const where = (each: HTMLElement) =>
+      all(each, '.vs-chart-point').map(dot => [dot.getAttribute('cx'), dot.getAttribute('cy')]);
+    expect(where(container)).toEqual(where(plain.container));
+  });
+
+  test('marks on the axis and a caption, with a sample of a mark and its word', async () => {
+    const {container} = await mount(
+      <Chart
+        label="Series"
+        points={points}
+        marks={[2, 4]}
+        markLabel="resumed"
+        caption="running time · 25m"
+      />,
+    );
+    expect(all(container, '.vs-chart-mark').length).toBe(3);
+    const words = all(container, '.vs-chart-label').map(each => each.textContent);
+    expect(words).toContain('running time · 25m');
+    expect(words).toContain('resumed');
+    const unmarked = await mount(
+      <Chart label="Series" points={points} markLabel="resumed" caption="running time · 25m" />,
+    );
+    expect(all(unmarked.container, '.vs-chart-label').map(each => each.textContent)).not.toContain(
+      'resumed',
+    );
+  });
+
+  test('names what the line starts from, above it', async () => {
+    const {container} = await mount(
+      <Chart label="Series" points={points} steps={steps} start="Input" />,
+    );
+    expect(all(container, '.vs-chart-label').map(each => each.textContent)).toContain('Input');
+  });
+});
+
+describe('Chart lit chain', () => {
+  const points = [
+    {id: 'a', x: 1, y: 2},
+    {id: 'b', x: 2, y: 3},
+    {id: 'c', x: 3, y: 1},
+  ];
+
+  test('rings the dots on the chain and draws no line between points', async () => {
+    const {container} = await mount(
+      <Chart
+        label="Series"
+        steps={[
+          {x: 1, y: 2},
+          {x: 2, y: 3},
+        ]}
+        points={points.map(point => ({...point, lit: point.id !== 'c'}))}
+      />,
+    );
+    expect(all(container, '.vs-chart-lit')).toHaveLength(2);
+    // The only drawn path is the best-so-far step line: nothing joins one dot to another.
+    expect(all(container, 'path')).toHaveLength(1);
+    expect(all(container, 'line:not([class])')).toHaveLength(0);
+  });
+
+  test('adds no point and moves no axis', async () => {
+    const plain = await mount(<Chart label="Series" points={points} />);
+    const drawn = await mount(
+      <Chart label="Series" points={points.map(point => ({...point, lit: true}))} />,
+    );
+    const where = (container: HTMLElement) =>
+      all(container, '.vs-chart-point').map(each => [
+        each.getAttribute('cx'),
+        each.getAttribute('cy'),
+      ]);
+    expect(where(drawn.container)).toEqual(where(plain.container));
+  });
+
+  test('tells the page which point the pointer or the focus is on, and when it leaves', async () => {
+    const seen: (string | null)[] = [];
+    const {container} = await mount(
+      <Chart label="Series" points={points} pick={noop} hover={id => seen.push(id)} />,
+    );
+    const [first] = all(container, '[role="button"]') as [HTMLElement];
+    await act(async () => {
+      first.dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));
+      first.dispatchEvent(new MouseEvent('mouseout', {bubbles: true}));
+    });
+    expect(seen).toEqual(['a', null]);
+  });
+});
+
+describe('Chart legend, panel and columns', () => {
+  test('a legend names each mark as the chart draws it', async () => {
+    const {container} = await mount(
+      <ChartLegend
+        label="Chart key"
+        items={[
+          {label: 'Best so far', mark: 'line'},
+          {label: 'Reading', mark: 'dot'},
+          {label: 'Selected', mark: 'ring'},
+        ]}
+      />,
+    );
+    expect(one(container, 'ul').getAttribute('aria-label')).toBe('Chart key');
+    expect(all(container, 'li').map(item => item.textContent)).toEqual([
+      'Best so far',
+      'Reading',
+      'Selected',
+    ]);
+    expect(
+      all(container, 'li .vs-chart-legend-mark').map(mark => mark.getAttribute('data-mark')),
+    ).toEqual(['line', 'dot', 'ring']);
+  });
+
+  test('a panel puts its figure at the far end of its heading, with its hint on hover', async () => {
+    const {container} = await mount(
+      <ChartPanel
+        title="Throughput"
+        note="higher is better"
+        figure="3.83× faster"
+        tone="ok"
+        hint="6M · input 1.58M"
+      >
+        <span>chart</span>
+      </ChartPanel>,
+    );
+    expect(one(container, 'section').getAttribute('aria-label')).toBe('Throughput');
+    const figure = one(container, '.vs-chart-panel-head > .vs-chart-figure');
+    expect(figure.textContent).toBe('3.83× faster');
+    expect(one(figure, '.vs-text').getAttribute('data-tone')).toBe('ok');
+    // The hint is the figure's description and the figure a tab stop: no pointer is needed to read it.
+    expect(figure.getAttribute('aria-description')).toBe('6M · input 1.58M');
+    expect(figure.getAttribute('tabindex')).toBe('0');
+    expect(figure.hasAttribute('title')).toBe(false);
+  });
+
+  test('a figure with no hint is plain text, not a tab stop', async () => {
+    const {container} = await mount(
+      <ChartPanel title="Queue depth" figure="No clear change">
+        <span>chart</span>
+      </ChartPanel>,
+    );
+    const figure = one(container, '.vs-chart-figure');
+    expect(figure.hasAttribute('tabindex')).toBe(false);
+    expect(figure.hasAttribute('aria-description')).toBe(false);
+  });
+
+  test('a chart writes its y axis unit above the plot, inside its drawing', async () => {
+    const {container} = await mount(
+      <Chart
+        label="Series"
+        unit="ops/s"
+        points={[{x: 0, y: 1}]}
+        yTicks={[{value: 1, label: '1'}]}
+      />,
+    );
+    const words = [...container.querySelectorAll('svg text')].map(text => text.textContent);
+    expect(words).toContain('ops/s');
+    const unit = [...container.querySelectorAll('svg text')].find(
+      text => text.textContent === 'ops/s',
+    );
+    const axis = one(container, '.vs-chart-axis');
+    // Above the plot's top edge and at the drawing's left edge.
+    expect(Number(unit?.getAttribute('y'))).toBeLessThan(Number(axis.getAttribute('y1')));
+    expect(Number(unit?.getAttribute('x'))).toBe(0);
+  });
+
+  test('columns hold their charts as children, in order', async () => {
+    const {container} = await mount(
+      <ChartColumns>
+        <span>one</span>
+        <span>two</span>
+      </ChartColumns>,
+    );
+    expect(one(container, '.vs-chart-columns').textContent).toBe('onetwo');
   });
 });
 
@@ -1022,27 +1299,27 @@ describe('at scale: windowed lists draw a bounded number of rows', () => {
     const points = Array.from({length: 5000}, (_, index) => ({
       x: index,
       y: (index * 37) % 101,
-      filled: index % 250 === 0,
+      selected: index % 250 === 0,
     }));
     const {container} = await mount(<Chart label="Series" points={points} />);
-    expect(all(container, '.vs-chart-point[data-filled]')).toHaveLength(20);
+    expect(all(container, '.vs-chart-ring')).toHaveLength(20);
     expect(all(container, '.vs-chart-point').length).toBeLessThanOrEqual(3000 + 20);
     const few = await mount(<Chart label="Few" points={points.slice(0, 500)} />);
     expect(all(few.container, '.vs-chart-point')).toHaveLength(500);
   });
 
-  test('Chart: 600 points, hollow ones faint, one tab stop and arrows among the pickable', async () => {
+  test('Chart: 600 points, small dots, one tab stop and arrows among the pickable', async () => {
     const points = Array.from({length: 600}, (_, index) => ({
       id: `p${index}`,
       x: index,
       y: (index * 7) % 50,
-      filled: index % 10 === 0,
     }));
     const {container} = await mount(<Chart label="Series" points={points} pick={noop} />);
     const buttons = all(container, '[role="button"]');
     expect(buttons).toHaveLength(600);
     expect(buttons.filter(button => button.getAttribute('tabindex') === '0')).toHaveLength(1);
-    expect(all(container, '.vs-chart-point[data-faint]')).toHaveLength(540);
+    const radii = new Set(all(container, '.vs-chart-point').map(dot => dot.getAttribute('r')));
+    expect(radii).toEqual(new Set(['2.5']));
     await press(buttons[0] as unknown as HTMLElement, 'ArrowRight');
     expect(document.activeElement).toBe(buttons[1] as unknown as Element);
     await press(buttons[1] as unknown as HTMLElement, 'End');
@@ -1158,15 +1435,12 @@ describe('filter chips and search', () => {
 });
 
 describe('series colors', () => {
-  test('Chart: a point carries its tone, and a fixed y range keeps a value where it is whatever else is drawn', async () => {
-    const a = {id: 'a', x: 1, y: 50, filled: true, tone: 'err' as const};
-    const b = {id: 'b', x: 2, y: 10, filled: true, tone: 'muted' as const};
+  test('Chart: a fixed y range keeps a value where it is whatever else is drawn', async () => {
+    const a = {id: 'a', x: 1, y: 50};
+    const b = {id: 'b', x: 2, y: 10};
     const domain = [0, 100] as const;
     const alone = await mount(<Chart label="One" points={[a]} yDomain={domain} />);
     const both = await mount(<Chart label="Two" points={[a, b]} yDomain={domain} />);
-    expect(
-      all(both.container, '.vs-chart-point').map(dot => dot.getAttribute('data-tone')),
-    ).toEqual(['err', 'muted']);
     expect(one(alone.container, 'circle').getAttribute('cy')).toBe(
       one(both.container, 'circle').getAttribute('cy'),
     );
