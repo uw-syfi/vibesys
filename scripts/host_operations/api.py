@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
 
+from scripts.generate_proto_framing import HOST_API_MAX_MESSAGE_BYTES
 from scripts.host_operations._emit import (
     Topic,
     go_host_call,
@@ -41,7 +42,8 @@ _BOUNDED_READ = 2
 _STREAM = 2
 _CHECKOUT = 1
 _FAILURE_RESPONSE_TAG = 2
-_MAX_TOPIC_VALUE_BYTES = 20971520
+# Tags and length prefixes of the response, the entry, its key and its value.
+_ENTRY_FRAMING_BYTES = 16
 
 
 class GenerationError(ValueError):
@@ -223,6 +225,7 @@ def compile_topics(image: bytes) -> tuple[Topic, ...]:
         pool.FindMessageTypeByName("google.protobuf.MessageOptions")
     )
     request = pool.FindMessageTypeByName("vibesys.api.v1.SubscribeRequest")
+    value_room = HOST_API_MAX_MESSAGE_BYTES - _ENTRY_FRAMING_BYTES - _entry_key_bytes(pool)
     values = {
         field.name: field.message_type.full_name
         for field in pool.FindMessageTypeByName("vibesys.api.v1.TopicEntry")
@@ -239,7 +242,7 @@ def compile_topics(image: bytes) -> tuple[Topic, ...]:
             _fail(field.message_type.name, "no TopicEntry.value arm of the same name")
         if not (policy.first_frame_ms and policy.max_keys and policy.max_value_bytes):
             _fail(field.message_type.name, "first_frame_ms, max_keys, max_value_bytes are required")
-        if policy.max_value_bytes > _MAX_TOPIC_VALUE_BYTES:
+        if policy.max_value_bytes > value_room:
             _fail(field.message_type.name, "max_value_bytes exceeds the transport cap")
         if policy.stale_after_ms and policy.stale_after_ms <= policy.cadence_ms:
             _fail(field.message_type.name, "stale_after_ms must exceed cadence_ms")
@@ -247,6 +250,14 @@ def compile_topics(image: bytes) -> tuple[Topic, ...]:
     if len(topics) != len(values):
         _fail("TopicEntry", "a value arm has no SubscribeRequest.topic arm of the same name")
     return tuple(topics)
+
+
+def _entry_key_bytes(pool: descriptor_pool.DescriptorPool) -> int:
+    """The longest key an entry may carry, as `TopicEntry.key` states it."""
+    rules = pool.FindExtensionByName("buf.validate.field")
+    options = message_factory.GetMessageClass(pool.FindMessageTypeByName("google.protobuf.FieldOptions"))
+    key = pool.FindMessageTypeByName("vibesys.api.v1.TopicEntry").fields_by_name["key"]
+    return options.FromString(key.GetOptions().SerializeToString()).Extensions[rules].string.max_bytes
 
 
 def _minimum_checkout_version(image: bytes) -> str:

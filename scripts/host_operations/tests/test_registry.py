@@ -10,6 +10,7 @@ import pytest
 from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
 from hypothesis import example, given
 from hypothesis import strategies as st
+from scripts.generate_proto_framing import HOST_API_MAX_MESSAGE_BYTES
 from scripts.host_operations.api import (
     GenerationError,
     compile_outputs,
@@ -241,7 +242,9 @@ def test_a_topic_without_its_value_arm_fails_generation() -> None:
         ("first_frame_ms", 0, "first_frame_ms"),
         ("max_keys", 0, "max_keys"),
         ("max_value_bytes", 0, "max_value_bytes"),
-        ("max_value_bytes", 20971521, "exceeds the transport cap"),
+        # A value of exactly the transport cap leaves no room for its key and framing.
+        ("max_value_bytes", HOST_API_MAX_MESSAGE_BYTES, "exceeds the transport cap"),
+        ("max_value_bytes", HOST_API_MAX_MESSAGE_BYTES + 1, "exceeds the transport cap"),
         ("stale_after_ms", 10000, "stale_after_ms must exceed cadence_ms"),
     ],
 )
@@ -255,6 +258,14 @@ def test_invalid_topic_policies_name_the_topic(field: str, value: int, message: 
 
     with pytest.raises(GenerationError, match=f"MachineStatsTopic: .*{message}"):
         compile_topics(_topic_image(change))
+
+
+def test_a_value_with_room_for_its_key_and_framing_is_accepted() -> None:
+    def change(topic: descriptor_pb2.DescriptorProto, _: object) -> None:
+        raw = topic.options.SerializeToString()
+        topic.options.ParseFromString(raw + _append_to_policy(6, HOST_API_MAX_MESSAGE_BYTES - 1024))
+
+    assert compile_topics(_topic_image(change))[0].policy.max_value_bytes == HOST_API_MAX_MESSAGE_BYTES - 1024
 
 
 def _varint(value: int) -> bytes:
