@@ -49,13 +49,14 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
 | Part | Status |
 |---|---|
 | Core inputs as log records: `CoreInput`, `StepStarted`, `StepFinished`, `AttemptInterrupted`, and the confirmed append in `vs_runlog` | built, dormant (#3475 item 4a) |
-| `RunStarted` and `CoreSnapshot` records, the seed of a fold | unbuilt; `fold` takes its seed as an argument until the cutover (PR 6a) |
+| `RunStarted` (the seed of a fold) and `StrategyAdvanced` (one advance of the search) records, `RunLogStepLog`, `CoreInputs`, `StepRouter`, one appender and one lock for the run's records | built and dormant, run in simulation by `vs_dst.StepLoopHosting` (PR 6a-2) |
+| `CoreSnapshot` record, the seed of a migrated run | unbuilt (PR 6a) |
 | `fold(log)` and `decide(state, now) -> actions` in `vs_core` | built, dormant (#3475 item 4a) |
 | Parked, draining, ended and resumed runs in the fold: the `RunEnded` record, `open_step`, the park advance (#3475, core gaps) | built, dormant |
 | Runner loop, `StepRunner` Protocol, `FakeStepRunner`, contract suite | built and dormant: `vs_runtime.api.step_runner` and `vs_runtime.api.testing`; no run selects it (#3475 item 4b) |
-| Runners: agent turn, workspace, Slurm and local evaluation, registered operation, adoption | unbuilt; `libs/vs-slurm/src/vs_slurm/ledger.py` is the model |
+| Runners: agent turn, workspace, Slurm and local evaluation, registered operation, adoption, executor | built and dormant (#3475 items 5a to 5c); `StepRouter` gives the loop its one runner |
 | Pause drains within a deadline and records `Parked` | in progress (#3475 item 1) |
-| `vs-dst` kills and pauses at every log write and every await | in progress (#3475 item 2) |
+| `vs-dst` kills and pauses at every log write and every await | built; `StepLoopHosting` runs the production loop for all five searches (PR 6a-2) |
 | `state.pb` as a cache, one-append commit | unbuilt |
 | Prove-or-block layer ([inventory](#consumer-inventory)) | built; deleted at the cutover |
 | Keyed replay, parts 1 to 7a | deleted (the `vs_runtime` driver, the `vs_core` flows and `api/replay.py`, `serial_replay.py` and their tests); the protos and `RunLogReplayStore` stay until 6b (see [what of keyed replay stays](#what-of-keyed-replay-stays)) |
@@ -216,7 +217,7 @@ Field by field (`libs/vs-core/src/vs_core/types/kernel.py:CoreState`, `RunEnvelo
 | `scheduling`, `attempts`, `sessions`, `evaluation`, `settlement` | envelope | Derived by the fold of decisions, step results, controls and clock marks |
 | `records.records` (the request ledger) | envelope | Derived. `phase` collapses to open or finished; attempts come from `StepStarted` |
 | `records.recovery`, `records.hosts`, `records.children` | envelope | Not needed: the recovery barrier, the host epoch log and child leases are deleted |
-| `strategy` and `event_cursor` | envelope | Derived: strategy state is a fold of the `StrategyEvent`s the fold emits, restored as today by replaying them |
+| `strategy` and `event_cursor` | envelope | Logged by the search itself, one `StrategyAdvanced` record per advance ([The search in the log](#the-search-in-the-log)); a resume on the same code replays the journal it holds |
 | `fence` | envelope | Replaced by the run lock |
 | `pending_inputs`, `pending_decisions`, `wakes`, `pending_publications`, `delivery_cursor` | runtime record | Derived, except the owner events: the ledger derives the owner event of a report (`_request_forward.py`) but not every fact an executor tells an owner (a turn's reply, a refused mid-turn steer, a job's failure class, an adoption's publication), so those travel in the `StepFinished` record ([Owner events](#owner-events)). Decisions and wakes are the strategy's output; publications are the fold's output. The delivery cursor is the one fact that is not derived: after a restart every publication since the last recorded acknowledgement is delivered again |
 
@@ -235,14 +236,18 @@ A fold is only as good as three conditions, and the design states each.
 2. **Same code.** A log folds only under the code that wrote it. A resume on changed code keeps today's
    rule: it continues at the next round with the ledger and best result carried over, and does not
    restore mid-round state. The log records the tree hash per epoch (`EpochStarted`), so the loop can name
-   the divergence. Resume across a code change that reorders a flow is out of scope here.
+   the divergence. Resume across a code change that reorders a flow is out of scope here. A resume on
+   changed code restarts the flows from their last checkpoint and lets go of work the new code does not
+   ask for in that restart step: the dead flows' request is cleared, its workspace is settled and holds
+   no slot, and a flow that asks for the same work later gets new work.
 3. **Complete inputs.** Every external input is a record.
 
 New records (one proto envelope, `vibesys/store/v1/core_input.proto`, validated with protovalidate):
 
 | Record | Carries | Why |
 |---|---|---|
-| `RunStarted` | the inputs `new_core_state` takes | seed of the fold |
+| `RunStarted` | the `CoreState` the run starts from, deadline included | seed of the fold; the first core record of a run, so every process folds from the same state |
+| `StrategyAdvanced` | the proposals core took, the steps the search's journal gained or its whole state, the wake-ups it asked for and delivered, the decisions core could not take yet | one advance of the search, in one record, so what it proposed and what it kept cannot disagree after a crash |
 | `CoreInput` | a decision or proposal, an owner event, an operator control, an epoch resume, a clock advance that changed state | the external inputs of `step` |
 | `StepStarted` | tag, attempt, request, deadline | durable intent before any I/O; makes a re-run visible |
 | `StepFinished` | tag, attempt, `Finished` (the report and the owner events), `Failed` or `Cancelled` with a typed reason | the result; one per step, and one atomic record, so a crash loses no owner event |
@@ -259,6 +264,37 @@ prerequisite of this design. A migration from
 an existing run's `store.json` writes one `CoreSnapshot` record holding the old envelope as the seed of
 the fold, with its recovery fields dropped and its open requests becoming open steps. The migration code
 is deleted seven days after it ships.
+
+### The search in the log
+
+The strategy needs more than core's state: its flows are suspended mid-search, and a resumed process has
+to hold them where they were. Appending the whole state after each advance grows with the square of the
+advances (measured: 33 MB at 130 advances of a dynamic search, 150 MB at 290, about 2 GB at 1,000, a record
+of up to 4 MB each), so the log keeps the journal's steps instead, 2 to 2.6 KB per advance.
+
+- One advance is one `StrategyAdvanced` record: the proposals core took, the journal steps the search
+  gained, and the wake-ups it asked for and was given. The fold applies the proposals; nothing of the search
+  runs at fold time. The events core published since the last advance record are kept by `fold_run`, so a
+  process that takes a log over after a crash lets the search hear them first.
+- The whole state is logged when a run restarts, each time the number of advances reaches
+  `CHECKPOINT_GROWTH` (2) times that of the last whole state, and when the run parks or ends. The log then
+  holds about twice its last state in checkpoints, however long the run, and grows with the steps.
+- A resume on the same code replays the journal through the flow driver's own digest-guarded replay
+  (`FlowDriver.resume`); there is no second replay. A digest that differs means the code changed.
+- A resume on changed code restarts the flows from the checkpoint the log holds. After a clean pause or a
+  finish that is the latest state, as it is today. After a crash together with a code change it is the last
+  whole state, at most `1 - 1 / CHECKPOINT_GROWTH` of the journal old; the decision numbers are kept
+  current in the steps, so the restarted flows never reuse the id of a decision the dead ones issued.
+  Tightening that age is a change to `CHECKPOINT_GROWTH` alone, and nothing else depends on its value.
+- A decision the search held while the run was paused is offered to core only if the flows still stand
+  behind it after the search has heard what arrived: a restart gives the flows a new incarnation that asks
+  again for what it needs.
+
+A run is never left silent. `CoreInputs` brings in what is due (the operator's controls, the deadline stop,
+the clock when it changes core's state, the search's wake-ups), and a run that waits on nothing, with no
+step in flight, no timer, no wake-up and no operator input that could move it, raises
+`StepLoopStalledError` naming the open records, the waits nothing will end and the work the search has
+left.
 
 ### state.pb is a cache
 
