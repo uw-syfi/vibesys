@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -30,6 +31,8 @@ if TYPE_CHECKING:
 
     from vs_sandbox.fake_docker_command import DockerResult
     from vs_sim.api import OutputSink, PipedProcess, PipedProcessLauncher
+
+_FORMAT_LABEL = re.compile(r"\{\{\.Label \"([^\"]+)\"\}\}")
 
 # The container program's parent, standing in for the ``docker exec`` client.
 # It starts the program in a session of its own (the daemon's side), records
@@ -541,18 +544,28 @@ class FakeDockerEngine:
         everything = any(
             a.startswith("-") and not a.startswith("--") and "a" in a for a in arguments
         )
-        wanted: dict[str, str] = {}
+        wanted: dict[str, str | None] = {}
         for flag, value in pairwise(arguments):
             if flag == "--filter" and value.startswith("label="):
-                key, _, label = value.removeprefix("label=").partition("=")
-                wanted[key] = label
+                key, has_value, label = value.removeprefix("label=").partition("=")
+                wanted[key] = label if has_value else None
         found = [
-            identifier
+            (identifier, container)
             for identifier, container in self._containers.items()
             if (everything or container.running)
-            and all(container.labels.get(key) == label for key, label in wanted.items())
+            and all(
+                key in container.labels if label is None else container.labels.get(key) == label
+                for key, label in wanted.items()
+            )
         ]
-        return subprocess.CompletedProcess(arguments, 0, "".join(f"{i}\n" for i in found), "")
+        labelled = _FORMAT_LABEL.search(" ".join(arguments))
+        rows = [
+            identifier
+            if labelled is None
+            else f"{identifier} {container.labels.get(labelled[1], '')}"
+            for identifier, container in found
+        ]
+        return subprocess.CompletedProcess(arguments, 0, "".join(f"{row}\n" for row in rows), "")
 
     def _exec(
         self, arguments: tuple[str, ...], timeout_seconds: float
