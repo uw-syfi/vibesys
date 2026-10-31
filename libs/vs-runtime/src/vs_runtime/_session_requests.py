@@ -128,8 +128,9 @@ if TYPE_CHECKING:
         Observation,
         RequestBase,
     )
+    from vs_core.api.recovery import OwnerEvent
     from vs_prompts.api import RenderedPrompt
-    from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
+    from vs_runtime._core_requests import SessionRoleRequest
     from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._workspace_access import AccessGrant, AccessGuardedWorkspace
     from vs_sim.api import BlockingRunner
@@ -628,10 +629,8 @@ class RuntimeSessionRequests:
     async def _run(self, call: _Call) -> ExecutionOutcome:
         request, context = call.request, call.context
 
-        async def perform(
-            *, resumed: bool
-        ) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
-            del resumed  # the journal, not this flag, says whether a dispatch happened
+        async def perform(*, repeat: bool) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
+            del repeat  # the journal, not this flag, says whether a dispatch happened
             return await self._performed(call)
 
         execution = await self._store.run_once(

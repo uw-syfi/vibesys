@@ -45,6 +45,8 @@ if TYPE_CHECKING:
     from vs_issue_tracker.api import Issue, IssueTracker, ProgressLog
     from vs_runtime._core_requests import ExecutionContext
 
+BOARD_KEY = "the change key the tracker stores with the issue or progress entry it wrote"
+"""What a keyed board write is keyed by: its owner's ``inspect`` reads it back from the tracker."""
 _PROGRESS_MARKER = "<!-- vibesys:progress-key:v1 {key} -->\n"
 _JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 _MAX_PAYLOAD_BYTES = 16 * 1024 * 1024

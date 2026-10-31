@@ -98,7 +98,7 @@ test('Clusters and clouds says how a cluster is reached in a few words', () => {
   expect(text).toContain('Login node');
 });
 
-test('a machine too old for a section says Needs an update, with the detail behind it', () => {
+test('a machine too old for a section says Needs an update, with the detail as its description', () => {
   const old = view({
     compute: {kind: 'ready', offered: {kind: 'unsupported'}},
     logins: {kind: 'ready', offered: {kind: 'unsupported'}},
@@ -109,16 +109,64 @@ test('a machine too old for a section says Needs an update, with the detail behi
   ]) {
     expect(prose(html)).toEqual([]);
     expect(drawnText(html)).toContain('Needs an update');
-    expect(html).toContain('aria-expanded="false"');
-    expect(html).not.toContain('is too old for this');
+    expect(html).toContain('aria-description="The VibeSys on host-b is too old for this.');
   }
 });
 
 test('Agent logins draws labels, with each harness’s detail on its status', () => {
   const html = renderToStaticMarkup(<LoginsSection {...props} view={view({})} />);
   expect(prose(html)).toEqual([]);
-  expect(html).toContain('title="Codex is not installed on host-b."');
+  expect(html).toContain('aria-description="Codex is not installed on host-b."');
   expect(html).toContain('title="Or set an API key on host-b"');
+});
+
+test('a section that could not be read says so as a status word with Try again, the detail on the pointer', () => {
+  const failed = view({
+    compute: {kind: 'failed', error: 'the helper hung up'},
+    logins: {kind: 'failed', error: 'the helper hung up'},
+  });
+  for (const html of [
+    renderToStaticMarkup(<ClustersSection {...props} view={failed} />),
+    renderToStaticMarkup(<LoginsSection {...props} view={failed} />),
+  ]) {
+    expect(prose(html)).toEqual([]);
+    expect(drawnText(html)).toContain('Not read');
+    expect(drawnText(html)).toContain('Try again');
+    expect(html).toContain('the helper hung up');
+    expect(html).not.toContain('>the helper hung up<');
+    expect(html).toContain('data-tone="err"');
+  }
+});
+
+test('a login the helper cannot start, or has started, is a status word on its card', () => {
+  const unavailable = renderToStaticMarkup(
+    <LoginsSection
+      {...props}
+      view={view({starts: {claude: {kind: 'unavailable', reason: 'no_login_command'}}})}
+    />,
+  );
+  expect(drawnText(unavailable)).toContain('Cannot sign in');
+  expect(unavailable).toContain('aria-description="Claude Code has no login command to start."');
+  const started = renderToStaticMarkup(
+    <LoginsSection
+      {...props}
+      view={view({
+        starts: {
+          claude: {
+            kind: 'started',
+            instruction: 'Open https://example.com/device and enter the code AB12',
+          },
+        },
+      })}
+    />,
+  );
+  expect(drawnText(started)).toContain('Login started');
+  expect(drawnText(started)).toContain('Check again');
+  // The next step is on the page as the two things to read off it, not only a description.
+  expect(drawnText(started)).toContain('https://example.com/device');
+  expect(drawnText(started)).toContain('AB12');
+  expect(started).not.toContain('aria-description="Open https://');
+  expect(prose(started)).toEqual([]);
 });
 
 const HOST = 'ssh:host-b';
@@ -196,12 +244,13 @@ test('a test result of settings that have since changed is not shown as a failur
   );
   const html = renderToStaticMarkup(<ClustersSection {...props} view={view({form})} />);
   expect(alerts(html)).toBe(0);
-  expect(drawnText(html)).toContain('Test the connection again.');
+  expect(drawnText(html)).toContain('Test again');
+  expect(html).toContain('aria-description="The settings changed since the last test."');
 });
 
 test('a connection test that passed is not an alert', () => {
   const form = formAnswered({ok: true, value: {outcome: 'passed', hardware: {}, partitions: []}});
   const html = renderToStaticMarkup(<ClustersSection {...props} view={view({form})} />);
   expect(alerts(html)).toBe(0);
-  expect(drawnText(html)).toContain('The connection works.');
+  expect(drawnText(html)).toContain('Connection works');
 });

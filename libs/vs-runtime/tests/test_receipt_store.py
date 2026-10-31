@@ -59,12 +59,12 @@ class Performer:
 
     def __init__(self, *, transient_first: bool = False) -> None:
         self.calls = 0
-        self.resumed: list[bool] = []
+        self.repeat: list[bool] = []
         self._transient_first = transient_first
 
-    async def __call__(self, *, resumed: bool) -> Settled[Done] | Transient[Done]:
+    async def __call__(self, *, repeat: bool) -> Settled[Done] | Transient[Done]:
         self.calls += 1
-        self.resumed.append(resumed)
+        self.repeat.append(repeat)
         if self._transient_first and self.calls == 1:
             return Transient(Done(value=0))
         return Settled(Done(value=self.calls))
@@ -78,8 +78,8 @@ class HeldPerformer:
         self.started = Gate()
         self.release = Gate()
 
-    async def __call__(self, *, resumed: bool) -> Settled[Done]:
-        del resumed
+    async def __call__(self, *, repeat: bool) -> Settled[Done]:
+        del repeat
         self.calls += 1
         self.started.open()
         await self.release.wait()
@@ -94,8 +94,8 @@ class HeldTransientPerformer:
         self.started = Gate()
         self.release = Gate()
 
-    async def __call__(self, *, resumed: bool) -> Transient[Done]:
-        del resumed
+    async def __call__(self, *, repeat: bool) -> Transient[Done]:
+        del repeat
         self.calls += 1
         self.started.open()
         await self.release.wait()
@@ -117,8 +117,8 @@ class HeldFailingPerformer:
         self.started = Gate()
         self.release = Gate()
 
-    async def __call__(self, *, resumed: bool) -> Settled[Done]:
-        del resumed
+    async def __call__(self, *, repeat: bool) -> Settled[Done]:
+        del repeat
         self.calls += 1
         self.started.open()
         await self.release.wait()
@@ -237,7 +237,7 @@ async def test_live_duplicates_share_a_transient_outcome_before_a_later_retry() 
 
         retry = Performer()
         assert await run(store, retry, context) == Performed(Done(value=1))
-        assert retry.resumed == [True]
+        assert retry.repeat == [True]
 
 
 async def test_a_conflicting_live_duplicate_never_enters_the_performer() -> None:
@@ -302,7 +302,7 @@ async def test_canceling_the_active_delivery_is_shared_with_its_queued_follower(
 
         retry = Performer()
         assert await run(store, retry, context) == Performed(Done(value=1))
-        assert retry.resumed == [True]
+        assert retry.repeat == [True]
 
 
 async def test_a_performer_exception_is_shared_with_its_queued_follower() -> None:
@@ -327,7 +327,7 @@ async def test_a_performer_exception_is_shared_with_its_queued_follower() -> Non
 
         retry = Performer()
         assert await run(store, retry, context) == Performed(Done(value=1))
-        assert retry.resumed == [True]
+        assert retry.repeat == [True]
 
 
 async def test_different_request_identities_remain_concurrent() -> None:
@@ -378,7 +378,7 @@ async def test_a_transient_result_is_not_sealed_and_the_retry_is_told_it_resumes
         assert isinstance(await run(store_at(Path(raw)), effect, ctx), Performed)
         assert isinstance(await run(store_at(Path(raw)), effect, ctx), Performed)
         assert isinstance(await run(store_at(Path(raw)), effect, ctx), Replayed)
-        assert effect.resumed == [False, True]
+        assert effect.repeat == [False, True]
 
 
 async def test_another_payload_under_the_same_identity_conflicts_without_an_effect() -> None:
@@ -408,7 +408,7 @@ async def test_a_lost_lease_or_stale_fence_runs_no_effect_and_leaves_no_marker()
         assert effect.calls == 0
         # The refused request was never begun, so a holder of authority runs it fresh.
         assert isinstance(await run(store, effect, context_for(request(), epoch=3)), Performed)
-        assert effect.resumed == [False]
+        assert effect.repeat == [False]
 
 
 async def test_authority_lost_during_the_effect_does_not_seal_the_result() -> None:
@@ -416,8 +416,8 @@ async def test_authority_lost_during_the_effect_does_not_seal_the_result() -> No
         store = store_at(Path(raw))
         lease = RevocableLease()
 
-        async def revoking(*, resumed: bool) -> Settled[Done]:
-            del resumed
+        async def revoking(*, repeat: bool) -> Settled[Done]:
+            del repeat
             lease.valid = False
             return Settled(Done(value=1))
 
@@ -426,7 +426,7 @@ async def test_authority_lost_during_the_effect_does_not_seal_the_result() -> No
         assert isinstance(got, Declined)
         effect = Performer()
         assert isinstance(await run(store, effect, context_for(request())), Performed)
-        assert effect.resumed == [True]
+        assert effect.repeat == [True]
 
 
 async def test_an_unreadable_receipt_is_refused_not_guessed() -> None:

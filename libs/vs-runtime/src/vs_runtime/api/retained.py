@@ -19,8 +19,8 @@ from vs_decode.api import Unreadable, ValidationOptions, decode_json
 from vs_runtime._access_settlement import AccessReceipt, UnsettledInvocations
 from vs_runtime._core_requests import ExecutionResult
 from vs_runtime._effect_fence import _FenceRecord
-from vs_runtime._evaluation_requests import JobRecord, ScopeJobs
 from vs_runtime._evidence_ledger import EvidenceEntry
+from vs_runtime._job_registry import JobRecord, ScopeJobs
 from vs_runtime._operation_receipts import RecordReceipt, ResultReceipt
 from vs_runtime._owed_submissions import _Entries
 from vs_runtime._receipt_store import ExecutionPhase, ExecutionRecord
