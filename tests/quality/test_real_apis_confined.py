@@ -1794,6 +1794,11 @@ PARSE_EDGE_MODULES: dict[str, tuple[ParseKind, str]] = {
         "a recorded turn's output: vs_agent's runner decoded it under MAX_AGENT_REPLY_BYTES"
         " (8 MiB) and vs_runtime recorded it re-serialized",
     ),
+    "libs/vs-core/src/vs_core/_step_log.py": (
+        ParseKind.OWN_STORE,
+        "the core records of the run's own run.log: the loop encoded them, and the log's frames are"
+        " checksummed and validated on read",
+    ),
     "libs/vs-core/src/vs_core/_waitable.py": (
         ParseKind.MODEL_HOOK,
         "forwards to pydantic with the waitable registry in context",

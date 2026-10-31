@@ -144,10 +144,15 @@ def check_one_way_to_resume(*, fallback: bool, when: ResumeWhen) -> None:
 
 
 class PauseRequest(_Request):
-    """Finish turns in flight, release evaluation jobs, save and exit for relaunch."""
+    """Finish turns in flight, release evaluation jobs, save and exit for relaunch.
+
+    ``drain_seconds`` bounds the wait: when it passes, the pause cancels what still runs, as
+    Pause-now does. Without it the pause waits for its turns' own limits.
+    """
 
     action: Literal[ControlAction.PAUSE] = ControlAction.PAUSE
     expected_epoch: Annotated[int, Field(ge=0)] | None = None
+    drain_seconds: Annotated[float, Field(gt=0, allow_inf_nan=False)] | None = None
 
 
 class ResumeRequest(_Request):
@@ -170,10 +175,15 @@ class ResumeRequest(_Request):
 
 
 class PauseNowRequest(_Request):
-    """Cancel unfinished work and exit; saved work remains resumable."""
+    """Cancel unfinished work and exit; saved work remains resumable.
+
+    ``drain_seconds`` is how long requests that cannot be cancelled at once get to finish before
+    they are interrupted; the run's cleanup bound when absent.
+    """
 
     action: Literal[ControlAction.PAUSE_NOW] = ControlAction.PAUSE_NOW
     expected_epoch: Annotated[int, Field(ge=0)] | None = None
+    drain_seconds: Annotated[float, Field(gt=0, allow_inf_nan=False)] | None = None
 
 
 class CancelAttemptRequest(_Request):

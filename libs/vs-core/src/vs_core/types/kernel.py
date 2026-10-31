@@ -86,6 +86,7 @@ from .settlement import (
     SettlementEvent,
     SettlementState,
 )
+from .steps import StepsState
 from .strategy import (
     Command,
     DecisionFeedback,
@@ -145,6 +146,10 @@ class RunSummary(Value):
     result: RunResultProposal | None
 
 
+NO_STEPS = StepsState()
+"""The steps of a log with none: ``CoreState`` leaves them out of its JSON, so identities hold."""
+
+
 class CoreState(Value):
     """Core state lifecycle contract."""
 
@@ -157,6 +162,10 @@ class CoreState(Value):
     evaluation: EvaluationState = EvaluationState()
     settlement: SettlementState = SettlementState()
     records: RecordsState = RecordsState(hosts=())
+    steps: StepsState = Field(
+        default=NO_STEPS, exclude_if=lambda value: value is NO_STEPS or value == NO_STEPS
+    )
+    """The attempts the log records, which only the recovery rule's fold writes."""
 
 
 class CoreView(Value):
@@ -211,6 +220,9 @@ class DecisionCompleted(Value):
     status: CompletionStatus
 
 
+_PAUSES = ("pause", "pause_now", "park")
+
+
 class RunControlEvent(Value):
     """Operator control with explicit stop publication, never an invented result.
 
@@ -219,18 +231,26 @@ class RunControlEvent(Value):
     conflict), or carries none. A stop without a result only records the request and tells the
     search: it changes no status, and the search ends the run itself. Other actions cannot
     supply a result.
+
+    A pause may carry ``drain_seconds``, how long its drain waits for running requests before it
+    interrupts them; core records the deadline it makes in the run's park (``RunPark.deadline_at``).
+    A Pause-now that names none waits the run's cleanup bound, and a pause that names none waits
+    for its turns' own limits.
     """
 
     kind: Literal["run_control"] = "run_control"
     control: ControlInput
     now_at: Seconds
     result: RunResultProposal | None = None
+    drain_seconds: Annotated[float, Field(gt=0, allow_inf_nan=False)] | None = None
 
     @model_validator(mode="after")
     def stop_result_correspondence(self) -> RunControlEvent:
         """Only an explicit stop proposal may authorize final run publication by the kernel."""
         if self.result is not None and self.control.action != "stop":
             raise ContractValidationError("result", "allowed only for stop control")
+        if self.drain_seconds is not None and self.control.action not in _PAUSES:
+            raise ContractValidationError("drain_seconds", "allowed only for a pause")
         return self
 
 

@@ -542,6 +542,7 @@ def failure_of(event: Failed, role: AgentName | None) -> Failure:  # noqa: PLR09
             | FailureReason.OWNER_GONE
             | FailureReason.LOST
             | FailureReason.MEASUREMENT_UNTRUSTED
+            | FailureReason.ATTEMPTS_EXHAUSTED
         ):
             return Failure(kind=FailureKind.ENDED, ended=event.reason, role=role)
 

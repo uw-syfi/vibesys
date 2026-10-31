@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from vs_project.api import Committed, Conflict, ConflictReason, StoredEnvelope, Unknown
 from vs_proto.api import ReplayStore as ReplayRecords
+from vs_runlog.api import ConfirmedLog, Uncertain
 
 if TYPE_CHECKING:
     from vs_project.api import CommitOutcome, StateStore, StoreFence, StoreRecord
@@ -60,6 +61,7 @@ class RunLogReplayStore:
 
     def __init__(self, writer: FileRunLogWriter, store: StateStore) -> None:
         self._writer, self._store = writer, store
+        self._log = ConfirmedLog(writer)
         self._confirmed: tuple[StoreFence, StoredEnvelope | None] | None = None
 
     def load(self) -> StoreRecord | None:
@@ -102,10 +104,7 @@ class RunLogReplayStore:
         if confirmed is None and (outcome := self._install_fence(fence, now)) is not None:
             return outcome
         self._confirmed = None
-        try:
-            self._writer.append(record)
-            self._writer.commit()
-        except OSError:
+        if isinstance(self._log.extend(record), Uncertain):
             return Unknown(revision=envelope.revision)
         prefix = b"" if confirmed is None else confirmed.payload
         extended = StoredEnvelope(
@@ -119,7 +118,8 @@ class RunLogReplayStore:
     def _prefix(self, fence: StoreFence) -> StoredEnvelope | None:
         """The confirmed log prefix, read again unless this fence's own appends confirmed it."""
         if self._confirmed is None or self._confirmed[0] != fence:
-            records = self._writer.read()
+            self._log.forget()
+            records = self._log.records()
             self._confirmed = fence, _envelope(records) if records else None
         return self._confirmed[1]
 
