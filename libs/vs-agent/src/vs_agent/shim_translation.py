@@ -58,6 +58,7 @@ _COST_BASIS = {
     agentshim.CostSource.PRICE_TABLE: CostBasis.PRICE_TABLE,
     agentshim.CostSource.PROVIDER_REPORTED: CostBasis.PROVIDER_REPORTED,
     agentshim.CostSource.UNKNOWN_MODEL: CostBasis.UNKNOWN_MODEL,
+    agentshim.CostSource.NOT_REPORTED: CostBasis.NOT_REPORTED,
 }
 _SPEED = {
     agentshim.UsageSpeed.STANDARD: UsageSpeed.STANDARD,
@@ -211,7 +212,8 @@ def timeout_error_from(error: agentshim.TurnTimeoutError) -> AgentTurnTimeoutErr
     """
     partial = error.partial if isinstance(error, agentshim.CliTimeoutError) else None
     usage = usage_from(partial.usage, cost_usd=partial.cost_usd) if partial is not None else None
-    return AgentTurnTimeoutError(error.timeout, usage=usage)
+    session_id = None if partial is None else partial.session_id
+    return AgentTurnTimeoutError(error.timeout, usage=usage, provider_session_id=session_id)
 
 
 def failure_from(

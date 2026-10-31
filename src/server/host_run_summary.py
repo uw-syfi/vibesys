@@ -241,10 +241,11 @@ class SpanTokens(BaseModel):
     tally: TokenTally
 
 
-RecordedCostBasis = Literal["price_table", "provider_reported", "unknown_model"]
+RecordedCostBasis = Literal["price_table", "provider_reported", "unknown_model", "not_reported"]
 """How a turn's cost was reached, as the journal records it: ``vs_agent.contracts.CostBasis``'s
-values and the first three of ``vibesys.store.v1.UsageCostBasis``. The proto's last two are never
-recorded; ``server.run_usage.basis_of`` derives them."""
+values and the recordable ones of ``vibesys.store.v1.UsageCostBasis``. Every line written since
+the field exists records one (``not_reported`` when the provider reported no cost); the proto's two
+legacy values are never recorded, and ``server.run_usage.basis_of`` derives them."""
 
 UsageSpeedName = Literal["standard", "fast", "ultrafast"]
 """The service speed a request ran at: ``vibesys.store.v1.UsageSpeed`` without its unreported."""
@@ -320,8 +321,9 @@ class UsageRecord(BaseModel):
     cost_usd: NonNegativeFloat | None
     duration_ms: NonNegativeInt | None
     cost_basis: RecordedCostBasis | None = None
-    """How ``cost_usd`` was reached; ``None``: the turn reported no cost, or the journal line
-    predates the field (``server.run_usage.basis_of`` tells the two apart by the cost)."""
+    """How ``cost_usd`` was reached. ``None`` means one thing: the journal line predates the field
+    (``server.run_usage.basis_of`` reads such a line by its cost). A turn that reported no cost
+    records ``not_reported``."""
     by_model: tuple[ModelUsage, ...] = ()
     """Each model the turn ran. ``tokens`` counts the main conversation only, so these rows are a
     superset of it; empty when the provider reports no split, or the line predates the field."""

@@ -49,6 +49,7 @@ const COST_BASES: ReadonlySet<unknown> = new Set<RecordedCostBasis>([
   'price_table',
   'provider_reported',
   'unknown_model',
+  'not_reported',
 ]);
 const SPEEDS: ReadonlySet<unknown> = new Set<UsageSpeed>(['standard', 'fast', 'ultrafast']);
 

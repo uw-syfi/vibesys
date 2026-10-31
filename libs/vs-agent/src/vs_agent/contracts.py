@@ -46,12 +46,21 @@ class AgentTurnTimeoutError(TimeoutError):
     ``usage`` is the accounting from a partial turn parsed before the timeout,
     when one reached the boundary. It stays ``None`` when there was no parsed
     partial turn; individual fields retain the provider's known/unknown semantics.
+    ``provider_session_id`` is the conversation the partial turn named, which the CLI's transcript
+    is filed under; ``None`` when it named none.
     """
 
-    def __init__(self, timeout_seconds: float, *, usage: AgentUsage | None = None) -> None:
-        """Record the configured budget and any provider-reported partial usage."""
+    def __init__(
+        self,
+        timeout_seconds: float,
+        *,
+        usage: AgentUsage | None = None,
+        provider_session_id: str | None = None,
+    ) -> None:
+        """Record the configured budget and any provider-reported partial usage and session."""
         self.timeout_seconds = timeout_seconds
         self.usage = usage
+        self.provider_session_id = provider_session_id
         super().__init__(f"agent turn timed out after {timeout_seconds:g} seconds")
 
 
@@ -82,11 +91,13 @@ class AgentOutputSchemaError(RuntimeError):
         violations: tuple[SchemaViolation, ...] = (),
         *,
         usage: AgentUsage | None = None,
+        provider_session_id: str | None = None,
     ) -> None:
-        """Record the validation errors and any usage measured before rejection."""
+        """Record the validation errors and any usage and session measured before rejection."""
         self.detail = detail
         self.violations = violations or (SchemaViolation(path=(), message=detail),)
         self.usage = usage
+        self.provider_session_id = provider_session_id
         super().__init__(f"agent output did not match the response schema: {detail}")
 
 
@@ -498,7 +509,11 @@ class UsageSpeed(StrEnum):
 
 
 class CostBasis(StrEnum):
-    """How a turn's ``total_cost_usd`` was reached: what the library says, never inferred here."""
+    """How a turn's ``total_cost_usd`` was reached: what the library says, never inferred here.
+
+    A turn the client records carries one of these; ``None`` on a stored line means only that the
+    line predates the field (``AgentUsage.recorded_cost_basis`` is what the client writes).
+    """
 
     PRICE_TABLE = "price_table"
     """Computed from the turn's tokens and the library's pinned price table."""
@@ -506,6 +521,8 @@ class CostBasis(StrEnum):
     """The CLI's own figure, used when it did not say which model ran."""
     UNKNOWN_MODEL = "unknown_model"
     """A model in the turn has no price, so the turn has no cost."""
+    NOT_REPORTED = "not_reported"
+    """The provider reported no cost and none is computed, or the library named no source."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -551,10 +568,20 @@ class AgentUsage:
     reasoning_output_tokens: int | None = None
     """The part of ``output_tokens`` the provider reports as reasoning (never in addition to it)."""
     cost_basis: CostBasis | None = None
-    """How ``total_cost_usd`` was reached; ``None`` when the provider reported no cost."""
+    """How ``total_cost_usd`` was reached; ``None`` when the usage carries no basis (a turn that
+    failed before reporting any, an unknown increment): ``recorded_cost_basis`` is what is written."""
     by_model: tuple[AgentModelUsage, ...] = ()
     """Each model the turn ran. The token fields above count only the main conversation, so
     these rows are a superset; empty when the provider reports no split."""
+
+    @property
+    def recorded_cost_basis(self) -> CostBasis:
+        """The basis a new journal line records: the library's, ``NOT_REPORTED`` when it names none.
+
+        A line never records ``None``, so a missing basis on a stored line means one thing only:
+        the line was written before the field existed.
+        """
+        return CostBasis.NOT_REPORTED if self.cost_basis is None else self.cost_basis
 
 
 @dataclass(frozen=True, slots=True)

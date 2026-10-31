@@ -541,7 +541,7 @@ class AgentClient:
                 isinstance(exc, (AgentTurnTimeoutError, AgentOutputSchemaError))
                 and exc.usage is not None
             ):
-                accounting = _TurnAccounting(exc.usage, AgentSkillUse())
+                accounting = _TurnAccounting(exc.usage, AgentSkillUse(), exc.provider_session_id)
             stream.close()
             _emit_and_log(
                 self._sink, f"\n=== {label} ROUND ERROR: {turn.label} ===", self._run_log_file

@@ -997,7 +997,9 @@ class TurnUsageData(EventPayload):
     duration_ms: int | None = None
     span_id: SpanId | None = None
     """The agent-turn span of the run trace this turn ran as."""
-    cost_basis: Literal["price_table", "provider_reported", "unknown_model"] | None = None
+    cost_basis: (
+        Literal["price_table", "provider_reported", "unknown_model", "not_reported"] | None
+    ) = None
     by_model: tuple[ModelTurnUsageData, ...] = ()
     provider_session_id: str | None = Field(default=None, min_length=1)
 

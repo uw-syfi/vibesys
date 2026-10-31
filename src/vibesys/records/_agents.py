@@ -5,11 +5,17 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from typing import TYPE_CHECKING
 
 import vibesys.events as e
 import vs_proto.api as p
 from vibesys.records._common import INLINE_BYTES, Projection, enum_value
 from vibesys.records._types import StreamWrite
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from protovalidate import ViolationPb
 
 
 def owner(projection: Projection) -> str:
@@ -160,6 +166,22 @@ def usage(projection: Projection) -> None:
     update_turn(projection, span, attrs)
 
 
+def _model_row(row: e.ModelTurnUsageData) -> p.ModelTurnUsage:
+    return p.ModelTurnUsage(
+        model=row.model,
+        input=row.input_tokens,
+        cache_read=row.cache_read_input_tokens,
+        cache_creation=row.cache_creation_input_tokens,
+        cache_creation_1h=row.cache_creation_1h_input_tokens,
+        output=row.output_tokens,
+        reasoning=row.reasoning_output_tokens,
+        turns=row.turns,
+        recorded_usd=row.recorded_usd,
+        speed=None if row.speed is None else enum_value(p.UsageSpeed, row.speed),
+        primary=row.primary,
+    )
+
+
 def _usage_detail(data: e.TurnUsageData) -> p.TurnUsageDetail | None:
     """The turn's provenance and per-model rows; ``None`` for a line recorded before they existed."""
     if data.cost_basis is None and data.provider_session_id is None and not data.by_model:
@@ -169,23 +191,38 @@ def _usage_detail(data: e.TurnUsageData) -> p.TurnUsageDetail | None:
         cost_basis=None
         if data.cost_basis is None
         else enum_value(p.UsageCostBasis, data.cost_basis),
-        by_model=[
-            p.ModelTurnUsage(
-                model=row.model,
-                input=row.input_tokens,
-                cache_read=row.cache_read_input_tokens,
-                cache_creation=row.cache_creation_input_tokens,
-                cache_creation_1h=row.cache_creation_1h_input_tokens,
-                output=row.output_tokens,
-                reasoning=row.reasoning_output_tokens,
-                turns=row.turns,
-                recorded_usd=row.recorded_usd,
-                speed=None if row.speed is None else enum_value(p.UsageSpeed, row.speed),
-                primary=row.primary,
-            )
-            for row in data.by_model
-        ],
+        by_model=[_model_row(row) for row in data.by_model],
     )
+
+
+def usage_split_refusals(rows: Sequence[e.ModelTurnUsageData]) -> tuple[str, ...]:
+    """What the ``.proto`` refuses in a turn's per-model rows, one line each; empty if it accepts.
+
+    The projector validates every record it writes, and a refused record disables the run log's
+    tee, so a producer asks here first, before the journal line that would carry the rows is
+    written. The rules live in ``agent_attrs.proto`` only: this builds the message the projector
+    would build and lets protovalidate say what is wrong, so there is no second copy to drift.
+    """
+    try:
+        p.validate(p.TurnUsageDetail(by_model=[_model_row(row) for row in rows]))
+    except p.ValidationError as refusal:
+        return tuple(_violation(violation) for violation in refusal.to_proto().violations)
+    return ()
+
+
+def _violation(violation: ViolationPb) -> str:
+    """One refused rule as ``path: reason``, the path naming the row and field when it has one."""
+    reason = violation.message or violation.rule_id
+    field = violation.field
+    if field is None:
+        return reason
+    path = ""
+    for element in field.elements:
+        path += f".{element.field_name}"
+        subscript = element.subscript
+        if subscript is not None and subscript.field == "index":
+            path += f"[{subscript.value}]"
+    return f"{path.lstrip('.')}: {reason}"
 
 
 def stream_id(span: str) -> str:

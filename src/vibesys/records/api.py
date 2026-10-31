@@ -14,6 +14,7 @@ UNATTRIBUTED_EVENT notice's typed detail; they never invent extra work units.
 Anonymous legacy controls use ``journal:<source sequence>`` as a local identity.
 """
 
+from vibesys.records._agents import usage_split_refusals
 from vibesys.records._lifecycle import epoch_header
 from vibesys.records._mapping import DISPOSITIONS, map_event
 from vibesys.records._types import BlobWrite, MappedEvent, MappingState, StreamWrite
@@ -26,4 +27,5 @@ __all__ = [
     "StreamWrite",
     "epoch_header",
     "map_event",
+    "usage_split_refusals",
 ]

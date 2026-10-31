@@ -164,13 +164,15 @@ def usage_records(events: Iterable[Mapping[str, JsonValue]]) -> list[UsageRecord
 class UsageCostBasis(StrEnum):
     """How a row's cost was reached: ``vibesys.store.v1.UsageCostBasis`` by name.
 
-    The first three are what the journal records for a turn (``UsageRecord.cost_basis``). The last
-    two are never recorded: ``legacy_basis`` derives them for a turn that recorded none.
+    The first three and ``NOT_REPORTED`` are what the journal records for a turn
+    (``UsageRecord.cost_basis``). The two ``LEGACY_*`` are never recorded: ``legacy_basis`` derives
+    them for a line written before the field existed.
     """
 
     PRICE_TABLE = "price_table"
     PROVIDER_REPORTED = "provider_reported"
     UNKNOWN_MODEL = "unknown_model"
+    NOT_REPORTED = "not_reported"
     LEGACY_RECORDED = "legacy_recorded"
     LEGACY_UNPRICED = "legacy_unpriced"
 
@@ -196,14 +198,15 @@ class UsageRow:
 
 
 def legacy_basis(record: UsageRecord) -> UsageCostBasis:
-    """The basis of a turn that recorded none: recorded when it has a cost, unpriced when not.
+    """The basis of a line written before ``cost_basis`` existed: recorded if it has a cost.
 
-    A deliberate read branch on pre-schema journals. The journal is not migrated: a rewrite would
-    mutate journals on every host, and a stamp would turn a cache (the rollup) into the source of
-    truth. A turn journaled before ``cost_basis`` existed has no per-model split either, so it
-    reads as one row of its own tokens. Delete this function and the two ``LEGACY_*`` members 92
-    days after the change that added ``cost_basis`` merged, when no such turn can fall in a window
-    the Usage screen shows (#3531).
+    A deliberate read branch on pre-schema journals, and the only one: every line written since
+    records a basis (``NOT_REPORTED`` when the provider reported no cost), so a line without one is
+    old, whatever its provider. The journal is not migrated: a rewrite would mutate journals on
+    every host, and a stamp would turn a cache (the rollup) into the source of truth. Such a line
+    has no per-model split either, so it reads as one row of its own tokens. Delete this function
+    and the two ``LEGACY_*`` members 92 days after the change that added ``cost_basis`` merged,
+    when no such line can fall in a window the Usage screen shows (#3531).
     """
     return (
         UsageCostBasis.LEGACY_RECORDED
@@ -224,9 +227,13 @@ def usage_rows(record: UsageRecord) -> tuple[UsageRow, ...]:
 
     The rows of a split turn are a superset of ``record.tokens`` (which counts the main
     conversation only) and sum to the whole turn. Every row carries the turn's basis, and the
-    turn's requests are counted once, on the primary row. A turn with no split is one row of
-    ``record.tokens`` and ``record.cost_usd`` that counts one request; its model is the one the
-    session was configured with, ``None`` when the journal does not hold it.
+    turn's requests are counted once, on the primary row. A row's basis is the turn's, not the
+    row's own pricing state: a priced row of a turn with an unpriced sibling is ``UNKNOWN_MODEL``
+    with its ``recorded_usd`` set. A turn with no split is one row of ``record.tokens`` and
+    ``record.cost_usd`` that counts one request; its model is the one the session was configured
+    with, ``None`` when the journal does not hold it. A split the reader could not parse reads as
+    no split, so its turn is that one row at the whole turn's cost, as every turn was before the
+    split existed.
     """
     basis = basis_of(record)
     if not record.by_model:
@@ -271,6 +278,8 @@ def _recorded_basis(value: JsonValue) -> RecordedCostBasis | None:
         return "provider_reported"
     if value == "unknown_model":
         return "unknown_model"
+    if value == "not_reported":
+        return "not_reported"
     return None
 
 
