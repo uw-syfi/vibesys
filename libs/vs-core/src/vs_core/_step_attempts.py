@@ -64,6 +64,19 @@ def interrupted(state: CoreState, tag: RequestId, attempt: int) -> CoreState:
     )
 
 
+def dispatched(state: CoreState, tag: RequestId) -> CoreState:
+    """``state`` with the open step ``tag`` out of PREPARED.
+
+    The ledger takes an observation only of a dispatched request. A step core settles without
+    ever running it (a limit passed in the queue, its dependency failed) is dispatched at that
+    instant, so the settlement is an ordinary conclusive observation.
+    """
+    record = open_record(state, tag)
+    if record.phase is not RequestPhase.PREPARED:
+        return state
+    return _replaced(state, record.model_copy(update={"phase": RequestPhase.DISPATCHED}))
+
+
 def report_of(state: CoreState, tag: RequestId, result: StepResult) -> RequestObserved:
     """The report the ledger takes for the result of ``tag``.
 

@@ -48,8 +48,9 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
 
 | Part | Status |
 |---|---|
-| Core inputs as log records: `CoreInput`, `StepStarted`, `StepFinished`, `AttemptInterrupted` | unbuilt |
-| `fold(log)` and `decide(state, now) -> actions` in `vs_core` | unbuilt |
+| Core inputs as log records: `CoreInput`, `StepStarted`, `StepFinished`, `AttemptInterrupted`, and the confirmed append in `vs_runlog` | built, dormant (#3475 item 4a) |
+| `RunStarted` and `CoreSnapshot` records, the seed of a fold | unbuilt; `fold` takes its seed as an argument until the cutover (PR 6a) |
+| `fold(log)` and `decide(state, now) -> actions` in `vs_core` | built, dormant (#3475 item 4a) |
 | Runner loop, `StepRunner` Protocol, `FakeStepRunner`, contract suite | built and dormant: `vs_runtime.api.step_runner` and `vs_runtime.api.testing`; no run selects it (#3475 item 4b) |
 | Runners: agent turn, workspace, Slurm and local evaluation, registered operation, adoption | unbuilt; `libs/vs-slurm/src/vs_slurm/ledger.py` is the model |
 | Pause drains within a deadline and records `Parked` | in progress (#3475 item 1) |
@@ -315,22 +316,47 @@ class CancelReason(StrEnum):   # DEADLINE, PAUSE_NOW, DRAIN_EXPIRED, RUN_ENDING,
 
 type StepResult = Finished | Failed | Cancelled   # Failed carries a FailureReason, Cancelled a CancelReason
 
-def fold(records: Iterable[Record], seed: CoreState | None = None) -> CoreState: ...
+def fold(
+    records: Iterable[Record], seed: CoreState | None = None, *, registry: OperationRegistry | None = None
+) -> CoreState: ...
 def decide(state: CoreState, now: float) -> tuple[Action, ...]: ...
 ```
+
+`registry` decodes the outcome of a registered operation (`bind_outcome` needs it), which a bare
+`CoreEvent` cannot. Without a seed or a `RunStarted` record a fold has no state to start from, so `fold`
+raises; `RunStarted` is built with the cutover. `CancelReason` is a `StrEnum` in `vs_core`, and the record
+carries the same set as the proto enum `StepCancelReason`, because the store package cannot import the core
+package (a cycle); a test pins that the two name the same members. `Finished` carries the observation and,
+when the executor reported more (a turn's reply, evidence, a revision), the whole `RequestObserved`.
+`FailureReason` gains `ATTEMPTS_EXHAUSTED`.
 
 `decide(fold(log), now)` is the issue's `decide(log) -> actions`. It is split in two so a cached state can
 stand in for the fold. The action type has no `Blocked` or `Unknown` variant, and no variant names a step
 kind. The rule is:
 
-- an open step with no running attempt and no pause is `Run`, with `attempt = 1 + attempts ended`;
-- an open step past its deadline, or whose cancellation is owed, is `Cancel`;
-- an open step whose attempts are spent (`Limits.request_retries`) is `Settle(Failed(ATTEMPTS_EXHAUSTED))`;
-- an open step marked `on_interrupt = CANCEL` with an interrupted attempt is
-  `Settle(Cancelled(INTERRUPTED))`;
-- a paused run gets no `Run` for new steps; steps that continue admitted work run until their own
-  deadline, or `Cancel(DRAIN_EXPIRED)` at the drain deadline;
+- an open step with no running attempt, whose dependencies hold and whose run may start steps, is `Run`,
+  with `attempt = 1 + the latest attempt that began`; its deadline is the step's own limit, counted from
+  its first start, and a later attempt keeps it;
+- a running attempt past its deadline is `Cancel(DEADLINE)`; an open step with no running attempt past its
+  deadline is `Settle(Cancelled(DEADLINE))`, because there is nothing to cancel;
+- an open step whose attempts are spent is `Settle(Failed(ATTEMPTS_EXHAUSTED))`: attempts that began, less
+  the ones an `AttemptInterrupted` record ended, exceed the step's retry limit (`retry_limit` of the
+  request, else `Limits.request_retries.limit`);
+- an open step marked `on_interrupt = CANCEL` whose attempt ended without a result, by an interruption
+  record or by its process, is `Settle(Cancelled(INTERRUPTED))`;
+- an open step whose dependency can never succeed is `Settle(Cancelled(WITHDRAWN))`; one whose dependency is
+  still pending waits;
+- a paused run (`PAUSED`, `DRAINING`, `PARKED`) starts no step except, while `DRAINING`, work the drain
+  admits (`_run_park.dispatch_allowed`); a running step is `Cancel(PAUSE_NOW)` when Pause now withdrew it
+  and `Cancel(DRAIN_EXPIRED)` from the pause's drain deadline (`RunPark.deadline_at`);
+- a run whose committed finish is a cancel, or that has ended, gets `Cancel(RUN_ENDING)` for each running
+  step and `Settle(Cancelled(RUN_ENDING))` for each other open step, and starts none;
 - a run with a committed finish and no open step is `End`.
+
+A step runs now when its latest attempt began in the epoch the log is in and no interruption record ended
+it. The epoch of the log is the largest `Record.epoch` the fold has seen, so an attempt of an earlier epoch
+ended with its process. Cleanup steps that core issues while a cancelling finish is committed are cancelled
+like any other; whether cleanup should instead outlive the finish is left to the cutover.
 
 `decide` is total: it never raises on a validated log, and a log that fails validation is a read error at
 the boundary (a corrupt record stops the reader, as `vs_runlog` does today), never an action.
@@ -440,8 +466,11 @@ Chat sessions are interactive: a person watches the turn, has seen partial outpu
 decide. Re-running a paid turn that someone already read can repeat what they saw.
 
 DECISION: a step declares `on_interrupt: RERUN | CANCEL` as a typed field, default `RERUN`. The field is
-on `TurnSpec` and on `OperationDescriptor`, because the asker knows whether a human is present and the
-runner does not. Non-turn steps cannot set `CANCEL`: the type is `Literal[InterruptPolicy.RERUN]` there.
+on `TurnSpec` and on `OperationSchemaRef`, which `OperationDescriptor` extends and a registered request
+carries, so `decide` reads it from the request without a registry lookup. The asker knows whether a human
+is present and the runner does not. Non-turn steps cannot set `CANCEL`: a schema reference that is not a
+session turn refuses it at construction, and every other request kind is `RERUN` by
+`request_interrupt_policy`.
 For `CANCEL`, an interrupted attempt is cleared and then settled as `Cancelled(INTERRUPTED)`, the chat UI
 shows the interruption and offers a retry, and the retry is a new step with a new tag (t3code's behavior).
 Search and evaluation steps keep `RERUN`: nobody reads their partial output, and they are the steps whose
@@ -576,8 +605,13 @@ beyond their review time, and neither blocks the sequence above.
 These are facts the implementation must settle, found while checking the design against the code.
 
 - **Re-run and limits.** A re-run attempt spends the step's retry bound
-  (`Limits.request_retries`); an interruption by Pause does not. Whether a re-run turn also counts against
-  per-round turn or iteration limits is not settled by this design; the fold PR pins it with a property test.
+  (`Limits.request_retries`); an interruption by Pause does not.
+  DECISION: a re-run turn does not count against any per-round limit. Turn, attempt and admission charges
+  are made when a request is accepted, once per invocation, and a re-run is another attempt of the same
+  invocation, so `StepStarted` and `AttemptInterrupted` change only the step's own record and the attempts
+  the fold keeps. `libs/vs-core/tests/test_recovery_decide.py` pins it: folding a log with its re-runs,
+  interruptions and restarts gives the same attempts, sessions, scheduling, evaluation and settlement state
+  as folding it with them removed.
 - **Partial transcripts.** Whether a killed provider turn leaves entries a resume would show depends on the
   provider. The checkpoint saved after each completed turn (`vs_agent/session_store.py`) is the safe point;
   a provider that cannot resume from it falls back to a fresh conversation from retained content, which the

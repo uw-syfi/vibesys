@@ -17,7 +17,7 @@ from ._request_ledger import dispatch_until, retry_limit
 from ._request_recovery import is_open
 from ._run_park import dispatch_allowed, pause_withdraws
 from ._step import advance_run_time, step
-from ._step_attempts import forgotten, interrupted, open_record, report_of, started
+from ._step_attempts import dispatched, forgotten, interrupted, open_record, report_of, started
 from ._step_log import decode_event, decode_request, decode_result
 from .types.common import DependencyStatus, InterruptPolicy, RequestId, RunStatus, StopMode
 from .types.records import request_interrupt_policy
@@ -87,6 +87,7 @@ def _apply(
             return started(state, tag, message.attempt, decode_request(message, registry), deadline)
         case Oneof(field="step_finished", value=message):
             tag = RequestId(root=message.tag)
+            state = dispatched(state, tag)
             report = report_of(state, tag, decode_result(message, registry))
             state = forgotten(step(state, report).state, tag)
             if any(is_open(row) for row in state.records.find(tag)):
