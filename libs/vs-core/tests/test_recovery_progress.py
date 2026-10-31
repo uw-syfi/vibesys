@@ -49,6 +49,8 @@ from vs_proto.api import EpochStarted, Oneof, Record, Timestamp
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vs_proto.api import (
         AttemptInterrupted,
         CoreInput,
@@ -131,7 +133,7 @@ class RunDidNotRestError(AssertionError):
 class RefusedRecordError(AssertionError):
     """The fold refused the record of an action `decide` returned."""
 
-    def __init__(self, action: Action, error: Exception) -> None:
+    def __init__(self, action: Action, error: ValueError) -> None:
         super().__init__(f"the fold refused the record of {action!r}: {error}")
 
 
@@ -198,9 +200,7 @@ class Loop:
         before = self.state
         try:
             self.add(body)
-        except (
-            Exception
-        ) as error:  # lint-waiver: LW-402302 [BLE001]; any refusal is the failure this test names.
+        except ValueError as error:
             raise RefusedRecordError(action, error) from error
         assert self.state != before, f"{action!r} was recorded and changed nothing"
 
@@ -261,12 +261,21 @@ class Loop:
         with contextlib.suppress(core.ControlRefusedError):
             self.add(Oneof("core_input", input_message(event)))
 
-    def control(self, action: str, **fields: object) -> core.ControlInput:
+    def control(
+        self,
+        action: core.ControlAction,
+        *,
+        owner: core.PauseOwner | None = None,
+        mode: core.StopMode | None = None,
+        when: core.ResumeWhen | None = None,
+    ) -> core.ControlInput:
         self.operator += 1
         return core.ControlInput(
             control_id=core.ControlId(root=f"operator-{self.operator}"),
-            action=action,  # ty: ignore[invalid-argument-type]  # lint-waiver: LW-402303 [PGH003]; the action names come from the test's own table.
-            **fields,  # ty: ignore[invalid-argument-type]  # lint-waiver: LW-402303 [PGH003]; the fields come from the test's own table.
+            action=action,
+            owner=owner,
+            mode=mode,
+            when=when,
         )
 
 
@@ -374,9 +383,9 @@ PINNED: list[tuple[tuple[tuple[float, ...], int], list[Move]]] = [
 ]
 
 
-def pinned[F](test: F) -> F:
+def pinned[F: Callable[..., object]](test: F) -> F:
     for seed, moves in PINNED:
-        test = example(seed=seed, moves=moves)(test)  # ty: ignore[invalid-argument-type]  # lint-waiver: LW-402304 [PGH003]; hypothesis types its decorators on the wrapped test.
+        test = example(seed=seed, moves=moves)(test)
     return test
 
 

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, overload
 
 from protobuf import Oneof
 
-from ._actions import Action, Cancel, End, Run, Settle, Wait, at_rest
+from ._actions import Action, Cancel, End, Run, RunRest, Settle, Wait, at_rest
 from ._proofs import request_dependency_status, stop_mode
 from ._request_ledger import dispatch_until, retry_limit
 from ._request_recovery import is_open
@@ -134,20 +134,34 @@ def apply_record(
 def decide(state: CoreState, now: float) -> tuple[Action, ...]:
     """What the runner loop does next, for the run clock ``now``. Total: it never raises.
 
-    A parked or ended run is at rest and has nothing to do: a step it holds waits for the epoch
-    that resumes the run, and an ended run is over.
+    An ended run is over. A parked run starts and settles nothing (a step it holds waits for the
+    epoch that resumes the run), but an attempt it still has running is cancelled: the kernel
+    parks at a Pause now before the loop has stopped what runs, and a flight nothing cancels
+    would hold the process up.
     """
     state = advance_run_time(state, now)
     rest = at_rest(state)
-    if rest is not None:
+    if rest is RunRest.ENDED:
         return (Wait(until=None),)
     open_steps = tuple(record for record in state.records.records if is_open(record))
+    if rest is RunRest.PARKED:
+        stops = tuple(
+            Cancel(tag=record.request_id, reason=CancelReason.PAUSE_NOW)
+            for record in open_steps
+            if _running(state, record)
+        )
+        return stops or (Wait(until=None),)
     if state.run.result is not None and not open_steps:
         return (End(result=state.run.result),)
     actions = tuple(
         action for record in open_steps if (action := _of_step(state, record, now)) is not None
     )
     return actions or (Wait(until=_wake_at(state, open_steps, now)),)
+
+
+def _running(state: CoreState, record: RequestRecord) -> bool:
+    attempts = state.steps.of(record.request_id)
+    return attempts is not None and not attempts.ended
 
 
 def may_start(state: CoreState, tag: RequestId, now: float) -> bool:
@@ -260,8 +274,7 @@ def _observed(state: CoreState, record: Record) -> CoreState:
 
 def _of_step(state: CoreState, record: RequestRecord, now: float) -> Action | None:
     tag = record.request_id
-    attempts = state.steps.of(tag)
-    running = attempts is not None and not attempts.ended
+    running = _running(state, record)
     if _run_is_ending(state):
         return (
             Cancel(tag=tag, reason=CancelReason.RUN_ENDING)

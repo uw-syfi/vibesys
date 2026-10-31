@@ -641,10 +641,17 @@ def test_a_turn_declares_what_an_interruption_means_on_its_turn_spec(
 
 @settings(max_examples=examples(pr=12, nightly=200))
 @given(script=scripts(), late=st.floats(0, 1e4))
-def test_a_parked_run_does_nothing_whatever_its_steps_hold_or_how_late_it_is(
+def test_a_parked_run_starts_and_settles_nothing_and_stops_only_what_still_runs(
     script: Script, late: float
 ) -> None:
-    """Nothing runs, cancels or settles in a parked run: an overdue step waits for the resume."""
-    for length, (state, _) in enumerate(states(script)):
+    """An overdue step waits for the resume; an attempt the park found running is cancelled."""
+    for length, (state, open_steps) in enumerate(states(script)):
         parked = paused(state, core.RunStatus.PARKED)
-        assert decide(parked, clock_of(length) + late) == (Wait(until=None),)
+        actions = decide(parked, clock_of(length) + late)
+        running = {step.tag for step in open_steps if step.running}
+        stops = {a.tag for a in actions if isinstance(a, Cancel)}
+        assert stops == running
+        assert {a.reason for a in actions if isinstance(a, Cancel)} <= {CancelReason.PAUSE_NOW}
+        assert not [a for a in actions if isinstance(a, Run | Settle | End)]
+        if not running:
+            assert actions == (Wait(until=None),)

@@ -404,7 +404,12 @@ async def run_epochs(world: World, clock: VirtualClock, kill_at: int | None) -> 
     while True:
         log = FakeStepLog(world.records, world.seed.state, world.seed.registry, clock)
         if parked:
-            log.resume_run()
+            resume = core.ControlInput(
+                control_id=core.ControlId(root=f"resume-{len(world.exits)}"),
+                action="resume",
+                when="now",
+            )
+            log.push(core.RunControlEvent(control=resume, now_at=clock.now()))
         switch = Switch(None if killed else kill_at)
         loop = asyncio.ensure_future(
             run_step_loop(

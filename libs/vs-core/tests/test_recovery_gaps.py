@@ -76,7 +76,9 @@ def test_a_result_recorded_while_the_run_is_parked_is_kept_not_dropped() -> None
     (tag,) = [row.request_id for row in loop.state.records.records]
     result = Cancelled(reason=CancelReason.WITHDRAWN)
     loop.add(Oneof("step_finished", finished_message(tag, 1, result)))
-    assert loop.state.records.record(tag).phase is core.RequestPhase.COMPLETED  # ty: ignore[unresolved-attribute]
+    settled = loop.state.records.record(tag)
+    assert settled is not None
+    assert settled.phase is core.RequestPhase.COMPLETED
     assert open_step(loop.state, tag) is None
 
 
@@ -294,3 +296,38 @@ def test_may_start_is_false_for_a_step_with_a_result_and_for_one_no_one_knows(
         assert not may_start(loop.state, tag, loop.clock)
     else:
         assert not may_start(loop.state, core.RequestId(root="no-such-step"), loop.clock)
+
+
+# --- a kill in the middle of a drain ----------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind", ["pause", "pause_now"])
+def test_a_drain_a_kill_cut_short_parks_in_the_next_epoch_and_admits_the_resume_there(
+    kind: str,
+) -> None:
+    """The operator paused in epoch 1 and the process died; the Resume belongs to epoch 2's process.
+
+    `RunPark.epoch` stays the epoch the pause was made in, so the park the new epoch makes of the
+    drain is older than it and the resume is not refused as "terminal for this epoch".
+    """
+    loop = started((100.0,))
+    pause(loop) if kind == "pause" else play(loop, ("pause_now", None))
+    assert loop.state.run.status is core.RunStatus.DRAINING
+    draining = loop.state.run.park
+    assert draining is not None
+    paused_in = draining.epoch
+    play(loop, ("crash", None))
+    assert loop.state.run.status is core.RunStatus.PARKED
+    park = loop.state.run.park
+    assert park is not None
+    assert park.epoch == paused_in < loop.state.records.recovery.epoch
+    resume_in_next_epoch_without_a_new_one(loop)
+    assert loop.state.run.status is core.RunStatus.RUNNING
+    (rerun,) = [a for a in decide(loop.state, loop.clock) if isinstance(a, Run)]
+    assert rerun.attempt == 2
+
+
+def resume_in_next_epoch_without_a_new_one(loop: Loop) -> None:
+    """The resume control of the epoch the drain parked in."""
+    resume = loop.control("resume", when="now")
+    loop.add(Oneof("core_input", input_message(core.RunControlEvent(control=resume, now_at=0))))

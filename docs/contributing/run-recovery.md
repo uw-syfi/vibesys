@@ -52,7 +52,7 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
 | `RunStarted` and `CoreSnapshot` records, the seed of a fold | unbuilt; `fold` takes its seed as an argument until the cutover (PR 6a) |
 | `fold(log)` and `decide(state, now) -> actions` in `vs_core` | built, dormant (#3475 item 4a) |
 | Parked, draining, ended and resumed runs in the fold: the `RunEnded` record, `open_step`, the park advance (#3475, core gaps) | built, dormant |
-| Runner loop, `StepRunner` Protocol, `FakeStepRunner`, contract suite | unbuilt |
+| Runner loop, `StepRunner` Protocol, `FakeStepRunner`, contract suite | built and dormant: `vs_runtime.api.step_runner` and `vs_runtime.api.testing`; no run selects it (#3475 item 4b) |
 | Runners: agent turn, workspace, Slurm and local evaluation, registered operation, adoption | unbuilt; `libs/vs-slurm/src/vs_slurm/ledger.py` is the model |
 | Pause drains within a deadline and records `Parked` | in progress (#3475 item 1) |
 | `vs-dst` kills and pauses at every log write and every await | in progress (#3475 item 2) |
@@ -246,7 +246,7 @@ New records (one proto envelope, `vibesys/store/v1/core_input.proto`, validated 
 | `CoreInput` | a decision or proposal, an owner event, an operator control, an epoch resume, a clock advance that changed state | the external inputs of `step` |
 | `StepStarted` | tag, attempt, request, deadline | durable intent before any I/O; makes a re-run visible |
 | `StepFinished` | tag, attempt, `Finished` (the report and the owner events), `Failed` or `Cancelled` with a typed reason | the result; one per step, and one atomic record, so a crash loses no owner event |
-| `AttemptInterrupted` | tag, attempt, reason (`PAUSE`, `SHUTDOWN`, `RAISED`) | an attempt that ended without ending the step; a `RAISED` one (the runner raised or gave nothing back) is charged to the retry bound, the other two are not |
+| `AttemptInterrupted` | tag, attempt, reason (`PAUSE`, `SHUTDOWN`, `RAISED`) | an attempt that ended without ending the step; a `RAISED` one (the runner raised or gave nothing back) is charged to the retry bound, the other two are not. The loop writes `PAUSE` and `RAISED`; an orderly stop of the process (`SHUTDOWN`) is not built, and a cancelled loop is a crash |
 | `RunEnded` | the run's result | the end of the run, published once nothing is open; a run has ended when this is in the log, not when the kernel reaches its terminal status |
 | `CoreSnapshot` | an old `RunEnvelope` | the seed of a migrated or imported run only; never written for a new run |
 
@@ -384,7 +384,8 @@ kind. The rule is:
   (`_run_park.dispatch_allowed`); a running step is `Cancel(PAUSE_NOW)` when Pause now withdrew it and
   `Cancel(DRAIN_EXPIRED)` once the pause's drain deadline (`RunPark.deadline_at`) has passed
   (`_run_park.pause_cancels`);
-- a parked run is at rest: `decide` returns only `Wait`, whatever its steps hold or however late the clock is;
+- a parked run is at rest: it starts and settles nothing, whatever its steps hold or however late the clock is, and
+  an attempt it still has running gets `Cancel(PAUSE_NOW)`; with none, `decide` returns only `Wait`;
 - a run whose committed finish is a cancel, or that has ended, gets `Cancel(RUN_ENDING)` for each running
   step and `Settle(Cancelled(RUN_ENDING))` for each other open step, and starts none;
 - a step that snapshots its scope's files waits while any step that writes them is open, and a step that
@@ -409,7 +410,9 @@ cooperative runners comes to rest.
 - **Parked is at rest, and a recorded result is never dropped.** A parked epoch ignores what is offered
   to it (`parked_epoch_drops`). That is a filter on live input. A fact the log holds is history, and the
   fold applies the report and the owner events of a `StepFinished` through `step_recorded`, which does not
-  drop. `decide` is silent in a parked run, so it never asks for a result the kernel would ignore.
+  drop. `decide` settles nothing in a parked run, so it never asks for a result the kernel would ignore;
+  it still cancels an attempt the park found running, because the kernel can park at a Pause now before
+  the loop has stopped what runs, and a flight nothing cancels would hold the process up.
 - **A draining pause parks when no attempt runs.** An attempt that ends without a result (an
   interruption, a raise, a crash into a new epoch) returns its step to the state of a step no one has
   started, as a drain that interrupts a request does (`resent`), and the fold then advances the drain
@@ -425,8 +428,17 @@ cooperative runners comes to rest.
   rest of the epoch it was made in, and the kernel refuses a resume there ("pause is terminal for this
   epoch"). Resume is a relaunch: the new process opens the next epoch (`EpochStarted`), which moves the
   kernel's host epoch with the log's and leaves the parked run parked, and the resume control is then an
-  ordinary input that the fold takes. A drain in progress keeps its authority across the new epoch, so a
-  Pause now still cancels.
+  ordinary input that the fold takes.
+- **The pause epoch and the drain's authority are different things.** `RunPark.epoch` is the epoch the
+  operator paused in and never moves. A drain keeps its authority over the work in flight in whatever epoch
+  it is (`drain_in_force`: still draining, or parked in this epoch), so a Pause now still cancels after a
+  kill. A drain a kill cut short therefore parks in the next epoch with a park that is older than that
+  epoch, and the Resume that follows is admitted there at once instead of being refused.
+- **A drain with only held calls left ends with the process.** A held call ignored its cancel and its
+  task's cancellation, and the loop records nothing about its tag while it runs. The drain cannot finish
+  in that process, so the loop returns `PARKED` as a parked run does; the caller exits, the call dies with
+  the process, and the next process's log ends the attempt (charged as a crash), parks the drain and
+  admits the Resume.
 
 - **The log holds only starts the rule would run.** A flight that waited for its `clear` while the run
   paused or parked would record a start into a parked run, leaving an attempt that nothing cancels. The
@@ -528,8 +540,9 @@ repeat:
                 append StepStarted(tag, attempt)      # durable before I/O
                 start runner.run(...) as a task
         Cancel: set the signal; on return append StepFinished or AttemptInterrupted
-        Settle: await runner.clear(tag) if an attempt was interrupted; append StepFinished
-        Wait:   await the first of: a task ending, a new input, the timer, the pause signal
+        Settle: await runner.clear(step, tag) if an attempt was interrupted; append StepFinished
+                (step: from the fold, for a step with no attempt in flight)
+        Wait:   await the first of: a task ending, a new input (a pause is one), the timer
         End:    append RunEnded; release the lock
     state = fold(state, the records just appended)
 ```

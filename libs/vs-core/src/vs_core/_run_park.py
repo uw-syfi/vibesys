@@ -20,6 +20,7 @@ from ._recovery_unanswered import Inspection, settlement
 from ._request_recovery import resent
 from ._turn_permit import (
     cap_open_records,
+    drain_in_force,
     invocation_permit,
     permit_for_command,
     permit_for_request,
@@ -94,7 +95,7 @@ def drain_bound(state: CoreState, command: Command) -> float | None:
     admitted by the running run.
     """
     park = state.run.park
-    if park is None or park.immediate or park.epoch != state.records.recovery.epoch:
+    if park is None or park.immediate or not drain_in_force(state.run, state.records):
         return None
     permit = permit_for_command(state, command)
     return None if permit is None else permit.deadline_at
@@ -147,7 +148,7 @@ def _pause_now_holds_back(state: CoreState, request: Request) -> bool:
     park = state.run.park
     return (
         park is not None
-        and state.records.recovery.epoch == park.epoch
+        and drain_in_force(state.run, state.records)
         and _immediate(state, park)
         and not isinstance(request, _DRAIN_EFFECTS)
     )
