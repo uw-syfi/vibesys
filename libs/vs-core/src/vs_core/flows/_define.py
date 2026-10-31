@@ -30,7 +30,7 @@ from vs_core._ids import IdScheme
 from vs_core._registry import ContractError, OperationRegistration, OperationRegistry
 from vs_core.types.common import OperationSchemaRef, StrategyId
 from vs_core.types.search import StopLifted
-from vs_core.types.strategy import SearchDeclaration
+from vs_core.types.strategy import Finish, SearchDeclaration, WakeAt
 
 from ._defs import FlowDef
 from ._errors import FlowCodeChanged
@@ -38,7 +38,7 @@ from ._labels import SpanKind, declared
 from ._resource import kit_of
 from ._roles import Role, with_models
 from ._run import Wiring, _Run
-from ._state import FlowState, Step, Waiting, digest, key, recorded
+from ._state import FlowChanges, FlowState, Step, Waiting, digest, key, recorded
 from ._winner import NoWinner, Uncompared, conclude
 
 if TYPE_CHECKING:
@@ -256,9 +256,12 @@ class FlowDriver[C]:
         item = journaled or kept
         if item is None:
             raise ContractError(("event",), "an event is journaled as itself or as a record")
-        if lifting and (run.concluded or event.new_epoch):
-            # The search ended the run under the stop, so no flow is left to take the lift:
-            # every flow starts again from its latest checkpoint, with the stop taken back.
+        if lifting and run.concluded and (run.stop is not None or event.new_epoch):
+            # The search ended the run, and what ended it is gone: the stop it answered is lifted,
+            # or the run was reopened and core forgot its ending. No flow is left to take the
+            # lift, so every flow starts again from its latest checkpoint, with the stop taken
+            # back. A run that was only paused, or that concluded for its own reasons while it
+            # was, goes on as it was: its ending is still the search's to propose.
             state, run, restarting = self._restart(state, view, lifted=True)
             restarted.extend(restarting)
         decisions = run.feed(item, view, None)
@@ -279,6 +282,85 @@ class FlowDriver[C]:
         )
         self._cached = (key(new), run)
         return new, [*restarted, *decisions]
+
+    def awaits(self, state: FlowState, decision: Decision) -> bool:
+        """Whether a flow of ``state`` still waits for the answer to ``decision``.
+
+        A restart gives the flows a new incarnation that asks again for what it needs, so a
+        decision the dead one made and core never took is no longer waited for.
+        """
+        if isinstance(decision, WakeAt):
+            return True
+        identifier = (
+            decision.decision_id if isinstance(decision, Finish) else decision.request.decision_id
+        )
+        return self._runtime(state).awaits(identifier)
+
+    def changes(self, before: FlowState, after: FlowState) -> bytes | None:
+        """What ``after`` adds to ``before``, for the log; None when it does not continue it.
+
+        A restart rebuilds the journal from a checkpoint, so its state is not a continuation
+        and the log keeps all of it.
+        """
+        seen = len(before.journal)
+        continues = (
+            len(after.journal) >= seen
+            and after.journal[seen - 1].digest == before.journal[-1].digest
+            and (after.base is before.base or after.base == before.base)
+        )
+        if not continues:
+            return None
+        before_counts = {(i.path, i.label): i.count for i in before.live.issued}
+        gained = FlowChanges(
+            steps=after.journal[seen:],
+            dropped=after.dropped,
+            restart_settled=after.restart_settled,
+            issued=tuple(
+                i for i in after.live.issued if before_counts.get((i.path, i.label)) != i.count
+            ),
+        )
+        return gained.model_dump_json().encode()
+
+    def extend(self, state: FlowState, changes: bytes) -> FlowState:
+        """``state`` with ``changes`` (from ``changes``) applied.
+
+        ``live`` keeps the flows' snapshots of the checkpoint it came from, which is where a
+        restart on changed code starts, but its decision numbers are current: the restarted flows
+        never reuse the id of a decision the dead ones issued.
+        """
+        gained = FlowChanges.model_validate_json(changes)
+        counts = {(i.path, i.label): i for i in state.live.issued}
+        counts.update({(i.path, i.label): i for i in gained.issued})
+        return state.model_copy(
+            update={
+                "journal": (*state.journal, *gained.steps),
+                "dropped": gained.dropped,
+                "restart_settled": gained.restart_settled,
+                "live": state.live.model_copy(update={"issued": tuple(counts.values())}),
+            }
+        )
+
+    def resume(self, state: FlowState) -> FlowState:
+        """``state`` as the process that logged it left it: where the flows are now.
+
+        The log keeps ``live`` only at checkpoints, so the journal is replayed (with its digest
+        guard) and the flows' snapshots are read from the replay. A journal the code cannot
+        replay any more is returned as it is: the next ``update`` restarts the flows from the
+        checkpoint ``live`` still holds.
+        """
+        try:
+            run = self._runtime(state)
+        except FlowCodeChanged:
+            return state
+        resumed = state.model_copy(
+            update={
+                "live": run.checkpoint(),
+                "dropped": tuple(run.dropped),
+                "restart_settled": tuple(run.restart_settled),
+            }
+        )
+        self._cached = (key(resumed), run)
+        return resumed
 
     @staticmethod
     def published[M: BaseModel](state: FlowState, model: type[M]) -> M | None:

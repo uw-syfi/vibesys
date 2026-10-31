@@ -77,7 +77,7 @@ One directory per run, opened only through `vs-project`'s `Project`.
 | `run.head` | tiny status and headline for dashboards, and `committed_seq` | the run | replaced atomically |
 | `launch.lock` | serializes host relaunch admission until the new epoch is observed | the host command | held only during launch |
 | `run.lock` | an advisory lock the live run holds; no content | the run | held while the process lives |
-| `state.pb` | core's snapshot; records the last log sequence it covers | the run | compare-and-swap |
+| `state.pb` | a cache of core's fold; records the log sequence it covers and the digest of those records | the run | replaced atomically (see [run-recovery.md](run-recovery.md#statepb-is-a-cache)) |
 | `inbox/` | intents posted by viewers | the gateway | one file per request |
 | `sessions/<id>/` | a chat session: its own `session.log` and inbox | the session process | as the run |
 

@@ -922,7 +922,7 @@ depends_on = ["vibesys", "vibesys.run.measurement_events", "vs_core", "vs_logs",
 [[modules]]
 path = "vs_dst"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core", "vs_project", "vs_runtime", "vs_sim.api", "vs_sim.api.testing"]
+depends_on = ["vs_core", "vs_project", "vs_proto", "vs_runlog", "vs_runtime", "vs_sim.api", "vs_sim.api.testing"]
 
 [[modules]]
 path = "vs_sim.blocking"
@@ -1452,7 +1452,7 @@ expose = ["NativeProfilerPreflight", "ProfilerPreflight", "SessionAgents", "Sess
 [[modules]]
 path = "vs_core"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_proto", "vs_core._corevalue", "vs_core._generated", "vs_core._dispatch_episode", "vs_core._session_checkpoints", "vs_core._session_rows", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
+depends_on = ["vs_proto", "vs_decode.api", "vs_core._corevalue", "vs_core._generated", "vs_core._dispatch_episode", "vs_core._session_checkpoints", "vs_core._session_rows", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
 
 [[interfaces]]
 from = ["vs_core"]

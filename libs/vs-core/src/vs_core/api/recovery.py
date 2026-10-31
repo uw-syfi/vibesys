@@ -16,14 +16,40 @@ from vs_core._actions import (
     at_rest,
     interruption_of,
 )
-from vs_core._decide import decide, fold, may_start, start_due
+from vs_core._decide import (
+    Folded,
+    apply_record,
+    apply_saved,
+    decide,
+    fold,
+    fold_run,
+    may_start,
+    start_due,
+    starts_run,
+)
 from vs_core._refusal import RecordRefusal, RecordRefusedError, RefusalReason
+from vs_core._search_events import Translated
+from vs_core._search_log import (
+    CHECKPOINT_GROWTH,
+    Advancing,
+    Progress,
+    advance_search,
+    checkpoint_search,
+    restore,
+)
+from vs_core._step import advance_run_time
 from vs_core._step_attempts import open_step
 from vs_core._step_log import (
+    EncodedSavedRun,
+    SavedRun,
+    decode_saved,
+    decode_seed,
+    encode_saved,
     ended_message,
     finished_message,
     input_message,
     interrupted_message,
+    seed_message,
     started_message,
 )
 from vs_core.types.records import StepEffect, request_effect, request_interrupt_policy
@@ -41,34 +67,50 @@ from vs_core.types.steps import (
 )
 
 __all__ = [
+    "CHECKPOINT_GROWTH",
     "Action",
+    "Advancing",
     "Cancel",
     "CancelReason",
     "Cancelled",
+    "EncodedSavedRun",
     "End",
     "Failed",
     "Finished",
+    "Folded",
     "InterruptPolicy",
     "Interruption",
     "OpenStep",
     "OwnerEvent",
+    "Progress",
     "RecordRefusal",
     "RecordRefusedError",
     "RefusalReason",
     "Run",
     "RunRest",
+    "SavedRun",
     "Settle",
     "StepAttempts",
     "StepEffect",
     "StepResult",
     "StepsState",
     "Tick",
+    "Translated",
     "Wait",
+    "advance_run_time",
+    "advance_search",
+    "apply_record",
+    "apply_saved",
     "at_rest",
+    "checkpoint_search",
     "decide",
+    "decode_saved",
+    "decode_seed",
+    "encode_saved",
     "ended_message",
     "finished_message",
     "fold",
+    "fold_run",
     "input_message",
     "interrupted_message",
     "interruption_of",
@@ -76,6 +118,9 @@ __all__ = [
     "open_step",
     "request_effect",
     "request_interrupt_policy",
+    "restore",
+    "seed_message",
     "start_due",
     "started_message",
+    "starts_run",
 ]

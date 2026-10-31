@@ -116,6 +116,26 @@ class SearchDriver[S: StrategyState, C](Protocol):
         """Deliver one event."""
         ...
 
+    def awaits(self, state: S, decision: Decision) -> bool:
+        """Whether the search in ``state`` still waits for the answer to ``decision``.
+
+        False for a decision of an incarnation of the search that a restart replaced: it asks
+        again for what it needs, so the old decision, held or not, no longer stands.
+        """
+        ...
+
+    def changes(self, before: S, after: S) -> bytes | None:
+        """What ``after`` adds to ``before``, for the log; None when it does not continue it."""
+        ...
+
+    def extend(self, state: S, changes: bytes) -> S:
+        """``state`` with ``changes`` applied, as a process that reads the log builds it."""
+        ...
+
+    def resume(self, state: S) -> S:
+        """``state`` as the process that logged it left it, rebuilding what the log does not keep."""
+        ...
+
 
 @dataclass(frozen=True)
 class Inbox:

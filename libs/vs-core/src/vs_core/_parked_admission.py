@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._run_pause import pause_outlived
 from .types.common import RunStatus
 from .types.kernel import (
     DecisionSubmitted,
@@ -34,11 +35,7 @@ def parked_epoch_drops(state: CoreState, event: CoreEvent) -> bool:
     recorded with nothing for the next turn to read. A different payload under that
     input's id is admitted so the conflict is reported. Any other input stays out.
     """
-    if (
-        state.run.status != RunStatus.PARKED
-        or state.run.park is None
-        or state.records.recovery.epoch != state.run.park.epoch
-    ):
+    if state.run.status != RunStatus.PARKED or state.run.park is None or pause_outlived(state):
         return False
     if isinstance(
         event,

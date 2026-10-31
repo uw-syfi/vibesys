@@ -52,7 +52,7 @@ from ._quota_pause_clock import credit_quota_pause
 from ._registry import ContractError
 from ._request_recovery import is_open
 from ._routing import SIGNAL_ORDER, event_area
-from ._run_pause import EpochFacts, control_refusal, reopened, stop_standing
+from ._run_pause import EpochFacts, control_refusal, pause_outlived, reopened, stop_standing
 from ._session_inputs import check_declared_target, may_have_been_read
 from ._session_inputs import mid_turn_offers as _mid_turn_offers
 from ._validation import validate_decision
@@ -1437,10 +1437,14 @@ def _lifted(state: CoreState, control: ControlInput) -> tuple[CoreState, bool]:
     """
     if control.action != "resume":
         return state, False
-    lifting = stop_standing(state.run) or state.run.status in (RunStatus.TERMINAL, RunStatus.PARKED)
-    if state.run.status == RunStatus.TERMINAL:
+    stopped = stop_standing(state.run)
+    terminal = state.run.status == RunStatus.TERMINAL
+    lifting = stopped or terminal or pause_outlived(state)
+    if terminal:
         state = state.model_copy(update={"run": reopened(state.run)})
-    if lifting:
+    if stopped or terminal:
+        # The adoption of a stopped run answered the stop. One a pause merely outlasted was the
+        # run's own, and stays: the search that made it goes on to finish the run with it.
         state = state.model_copy(update={"settlement": reopen_adoption(state.settlement)})
     return state, lifting
 
@@ -1466,7 +1470,7 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     if refusal is not None:
         raise refusal
     check_declared_target(event.control.target, state.run.declaration)
-    new_epoch = state.run.status in (RunStatus.TERMINAL, RunStatus.PARKED)
+    new_epoch = state.run.status == RunStatus.TERMINAL
     state, lifting = _lifted(state, event.control)
     # A capacity wait leaves the run paused: it only records when the run resumes itself.
     waits = event.control.when == "capacity_returns"
