@@ -252,21 +252,16 @@ export class Subscriptions {
     }
     const joined = instance;
     let released = false;
-    const handle = {
+    // Joining cannot throw: the replay is delivered as every later update is, with an observer's
+    // failure reported and the observer kept, so the handle below always reaches its owner.
+    joined.join(observer);
+    return {
       cancel: () => {
         if (released) return;
         released = true;
         joined.leave(observer);
       },
     };
-    try {
-      joined.join(observer);
-    } catch (error) {
-      // An instance made for this observer must not outlive a join that did not complete.
-      handle.cancel();
-      throw error;
-    }
-    return handle;
   }
 
   /** The relay as a window's port, for what serves windows. */
