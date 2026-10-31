@@ -52,7 +52,7 @@ from vs_proto.api import (
     validate,
 )
 from vs_proto.api import host_payloads as pb
-from vs_sim.api.testing import ManualClock, SimNetwork, SimThreads
+from vs_sim.api.testing import FakeHttpsGet, ManualClock, SimNetwork, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -234,6 +234,12 @@ _REQUESTS: dict[str, Callable[[str], ReadRequest]] = {
             ),
         )
     ),
+    "usage_rates_refresh": lambda _project: ReadRequest(
+        method=Oneof(
+            "usage_rates_refresh",
+            pb.UsageRatesRefreshRequest(request_id="r", now=Timestamp.from_seconds(1_790_086_400)),
+        )
+    ),
     "usage_summary": lambda project: ReadRequest(
         method=Oneof(
             "usage_summary",
@@ -292,7 +298,7 @@ def _git_work(tmp_path: Path, slot: str, runs: int) -> tuple[_GitWork, ReadRespo
         reply = answer_registered_read(
             slot.replace("_", "-"),
             request.to_binary(),
-            registry_read_source(_host(repositories, work, catalog)),
+            registry_read_source(_host(repositories, work, catalog), https=FakeHttpsGet()),
         )
     return work, ReadResponse.from_binary(reply)
 

@@ -300,7 +300,7 @@ class _Costs:
 
     def add(self, priced: Priced, row: usage_state.UsageRollupRow) -> None:
         self.estimate.append(priced.estimate_usd)
-        if row.recorded_usd is not None:
+        if row.has_field("recorded_usd"):
             self.recorded.append(row.recorded_usd)
         self.tokens += row.input + row.output
 
@@ -314,7 +314,7 @@ def _add_row(cell: _Cell, row: usage_state.UsageRollupRow, priced: Priced) -> No
     cell.turns += row.turns
     if row.basis in _APPROXIMATE:
         cell.approximate_turns += row.turns
-    if row.recorded_usd is not None:
+    if row.has_field("recorded_usd"):
         cell.recorded.append(row.recorded_usd)
     cell.estimate_usd.append(priced.estimate_usd)
     cell.input_usd.append(priced.input_usd)

@@ -15,6 +15,8 @@ from vibesys.api.host_operations.api import (
     ClusterRefusedError,
     LoginRefusedFact,
     LoginStartedFact,
+    PricesRefusedError,
+    PricesUnknownError,
     ProjectRefusedError,
     StartRefusedError,
     execute_inspect_candidate,
@@ -22,6 +24,7 @@ from vibesys.api.host_operations.api import (
     serve_login,
     serve_project,
     serve_start,
+    serve_usage_prices,
 )
 from vs_project.api import Project, ProjectError
 from vs_proto.api import host_operations
@@ -142,7 +145,9 @@ def main(
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
         host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
-        facts = import_module("server.host_helper_requests").registry_read_source(host)
+        facts = import_module("server.host_helper_requests").registry_read_source(
+            host, https=import_module("vs_sim.api").UrllibHttpsGet()
+        )
         reply = import_module("server.host_operation_reads").answer_registered_read
         destination.write(reply(arguments[0], source.read((1 << 20) + 1), facts))
         return 0
@@ -281,7 +286,27 @@ def _serve_mutation(cli: str, payload: bytes, threads: Threads, processes: Proce
         return _serve_start(payload, threads)
     if slot in {"put_cluster", "remove_cluster", "test_cluster"}:
         return _serve_cluster(payload, processes)
+    if slot == "usage_prices_save":
+        return _serve_usage_prices(payload)
     return _serve_project(payload, threads)
+
+
+def _serve_usage_prices(payload: bytes) -> bytes:
+    """Admit one price save, then apply it. Replay does not apply it again."""
+    scan = import_module("server.usage_scan")
+    pricing = import_module("server.usage_pricing")
+
+    def apply(request: pb.UsagePricesSaveRequest) -> pb.UsagePricesSaveResponse:
+        try:
+            return scan.save_prices(scan.usage_directory(), request)
+        except pricing.PriceBookError as exc:
+            raise PricesRefusedError(str(exc)) from exc
+        except OSError as exc:
+            raise PricesUnknownError from exc
+
+    return serve_usage_prices(
+        payload, store=Project.admissions(), host_user=str(os.getuid()), apply=apply
+    )
 
 
 def _serve_project(payload: bytes, threads: Threads) -> bytes:

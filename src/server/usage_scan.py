@@ -19,8 +19,15 @@ skipped by its modification time without being opened.
 
 Light like the helper: the standard library, ``vs_project.api`` and the light ``server`` modules.
 
+The price list and the person's prices live beside them in the host's usage state directory
+(``Project.usage_state_directory``): ``rates.pb`` is the last document fetched and ``prices.pb``
+the only copy of what a person set. The host fetches only in ``refresh_rates``, never in a read;
+``stored_pricing`` prices from what is on disk.
+
 Public surface: ``JsonlUsageJournal``, ``FileRollupStore``, ``UsageProjects``, ``CollectedRuns``,
-``collect_runs``, ``usage_summary``, ``source_identity`` and ``COLD_BUDGET_BYTES``.
+``collect_runs``, ``usage_summary``, ``source_identity``, ``usage_directory``, ``COLD_BUDGET_BYTES``,
+``ProtoRateStore``, ``FilePriceBook``, ``stored_pricing``, ``refresh_rates``, ``save_prices`` and
+``RATES_REFRESH_TIMEOUT_S``.
 """
 
 from __future__ import annotations
@@ -32,6 +39,17 @@ from typing import TYPE_CHECKING, Final, Protocol
 from server.host_api import RUN_EVENTS_FILE, RunDigest
 from server.host_run_dashboard import kept_landings
 from server.run_summary_cache import journal_fingerprint
+from server.usage_pricing import (
+    DocumentFetcher,
+    FetchError,
+    ListPricing,
+    RateDocument,
+    check_book,
+    read_rate_book,
+    refresh_rate_book,
+    same_book,
+    saved_book,
+)
 from server.usage_rollup import (
     ROLLUP_FILE,
     Budget,
@@ -42,7 +60,8 @@ from server.usage_rollup import (
 )
 from server.usage_summary import RunInput, SummaryInputs, summarize
 from vs_project.api import Project, ProjectError, atomic_write_bytes
-from vs_proto.api import ValidationError, host_payloads, usage_state, validate
+from vs_proto.api import Timestamp, ValidationError, host_payloads, usage_state, validate
+from vs_sim.api import HttpsGetError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -52,14 +71,22 @@ if TYPE_CHECKING:
     from server.host_api import RunDigestUnreadable
     from server.run_summary import Summarized
     from server.usage_summary import Pricing
+    from vs_sim.api import HttpsGet
 
 COLD_BUDGET_BYTES: Final = 256 * 1024 * 1024
 """The journal bytes one read may fold from nothing. Folding runs at tens to hundreds of
 megabytes a second, so a call stays inside the operation's deadline, and a host with more asks
 again (``pending``)."""
 
+RATES_REFRESH_TIMEOUT_S: Final = 10.0
+"""The longest one fetch of the price list may take."""
+RATES_MAX_BYTES: Final = 16 * 1024 * 1024
+"""The most bytes the price list may be: it is about 3 MiB today."""
+
 _NO_DIGEST = "0" * 64
 _SOURCE_ID_FILE = "source-id"
+_RATES_FILE = "rates.pb"
+_PRICES_FILE = "prices.pb"
 
 
 class UsageProjects(Protocol):
@@ -301,12 +328,151 @@ def _journal_source(collected: CollectedRuns) -> host_payloads.UsageSource:
         status = usage_state.UsageSourceStatus.OK
     return host_payloads.UsageSource(
         kind=usage_state.UsageSourceKind.JOURNAL,
-        source_id=source_identity(Project.usage_state_directory()),
+        source_id=source_identity(usage_directory()),
         status=status,
         scanned=collected.scanned,
         skipped=collected.skipped,
         failed=collected.failed,
     )
+
+
+class ProtoRateStore:
+    """The last price document in ``rates.pb``: a cache of the network, rebuilt when it is damaged."""
+
+    def __init__(self, path: Path) -> None:
+        """Keep the document at ``path``."""
+        self._path = path
+
+    def read(self) -> RateDocument | None:
+        """The stored document; ``None`` when there is none or the file fails its rules."""
+        try:
+            found = usage_state.UsageRateSnapshot.from_binary(self._path.read_bytes())
+            validate(found)
+        except (OSError, ValueError, ValidationError):
+            return None
+        return RateDocument(
+            found.document if found.has_field("document") else None,
+            None if found.fetched_at is None else found.fetched_at.to_datetime(),
+            None if found.last_attempt_at is None else found.last_attempt_at.to_datetime(),
+        )
+
+    def write(self, stored: RateDocument) -> None:
+        """Replace the document; a write that fails loses only the next read's rates."""
+        snapshot = usage_state.UsageRateSnapshot()
+        if stored.document is not None:
+            snapshot.document = stored.document
+        if stored.fetched_at is not None:
+            snapshot.fetched_at = Timestamp.from_datetime(stored.fetched_at)
+        if stored.last_attempt_at is not None:
+            snapshot.last_attempt_at = Timestamp.from_datetime(stored.last_attempt_at)
+        _write(self._path, snapshot.to_binary())
+
+
+class FilePriceBook:
+    """What a person set, in ``prices.pb``: the only copy, so a write that fails is reported."""
+
+    def __init__(self, path: Path) -> None:
+        """Keep the book at ``path``."""
+        self._path = path
+
+    def read(self) -> usage_state.UsagePriceBook:
+        """The stored book; an empty one at revision 0 when there is none or it fails its rules."""
+        try:
+            found = usage_state.UsagePriceBook.from_binary(self._path.read_bytes())
+            validate(found)
+        except (OSError, ValueError, ValidationError):
+            return usage_state.UsagePriceBook()
+        return found
+
+    def write(self, book: usage_state.UsagePriceBook) -> None:
+        """Replace the book. Raises ``OSError`` when it cannot be written."""
+        validate(book)
+        directory = self._path.parent
+        try:
+            directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+            atomic_write_bytes(self._path, book.to_binary())
+        except ProjectError as error:
+            raise OSError(str(error)) from error
+
+
+class HttpsFetcher:
+    """The price list's fetcher over the host's HTTPS client."""
+
+    def __init__(self, https: HttpsGet) -> None:
+        """Fetch with ``https``, bounded in time and size."""
+        self._https = https
+
+    def fetch(self, url: str, accept: str) -> bytes:
+        """The body at ``url``; ``FetchError`` when it cannot be had whole."""
+        try:
+            return self._https.get(
+                url, accept=accept, timeout=RATES_REFRESH_TIMEOUT_S, max_bytes=RATES_MAX_BYTES
+            )
+        except HttpsGetError as error:
+            raise FetchError(str(error)) from error
+
+
+def usage_directory() -> Path:
+    """The host's directory for the usage state: the price list, the person's prices, the source id."""
+    return Project.usage_state_directory()
+
+
+def stored_pricing(directory: Path, *, now: datetime) -> ListPricing:
+    """The prices of the list on disk (or the pinned table) and the person's book; no network."""
+    return ListPricing(
+        read_rate_book(ProtoRateStore(directory / _RATES_FILE), now=now),
+        FilePriceBook(directory / _PRICES_FILE).read(),
+    )
+
+
+def refresh_rates(
+    directory: Path, fetcher: DocumentFetcher, *, now: datetime, force: bool
+) -> usage_state.UsagePricing:
+    """Fetch the price list if one is due and say how current the rates are after.
+
+    A failed fetch is not an error: the answer then says the last good document (or the pinned
+    table) is in use, which is what a read will price with.
+    """
+    store = ProtoRateStore(directory / _RATES_FILE)
+    book = refresh_rate_book(store, fetcher, now=now, force=force)
+    return ListPricing(book, usage_state.UsagePriceBook()).pricing
+
+
+def save_prices(
+    directory: Path, request: host_payloads.UsagePricesSaveRequest
+) -> host_payloads.UsagePricesSaveResponse:
+    """Save the person's book if it was edited from the host's current revision.
+
+    The book is replaced whole. A request equal to the host's book is already saved and changes
+    nothing, so a retry after an unknown outcome is safe; one made against an older revision
+    changes nothing and answers with the host's book, so concurrent edits cannot overwrite each
+    other unseen. Raises ``PriceBookError`` (a ``ValueError``) naming the offending key when the
+    book cannot be saved.
+    """
+    file = FilePriceBook(directory / _PRICES_FILE)
+    current = file.read()
+    if same_book(current, request.overrides, request.aliases):
+        check_book(request.overrides, request.aliases)
+        return host_payloads.UsagePricesSaveResponse(
+            request_id=request.request_id, prices=current, saved=True
+        )
+    if request.base_revision != current.revision:
+        return host_payloads.UsagePricesSaveResponse(
+            request_id=request.request_id, prices=current, saved=False
+        )
+    book = saved_book(current, request.overrides, request.aliases)
+    file.write(book)
+    return host_payloads.UsagePricesSaveResponse(
+        request_id=request.request_id, prices=book, saved=True
+    )
+
+
+def _write(path: Path, contents: bytes) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        atomic_write_bytes(path, contents)
+    except (OSError, ProjectError):
+        return
 
 
 def _bests(projects: UsageProjects, root: Path, run_id: str) -> tuple[datetime, ...]:

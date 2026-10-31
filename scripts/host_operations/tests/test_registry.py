@@ -59,6 +59,7 @@ def _slots() -> tuple[str, ...]:
         "list_run_digests",
         "usage_window",
         "usage_summary",
+        "usage_rates_refresh",
         "list_harnesses",
         "list_examples",
         "get_task_goal",
@@ -74,6 +75,7 @@ def _slots() -> tuple[str, ...]:
         "create_example",
         "copy_project",
         "start_run",
+        "usage_prices_save",
     )
 
 

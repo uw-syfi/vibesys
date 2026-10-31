@@ -320,21 +320,21 @@ expose = ["MAX_AGENT_ROWS", "MAX_PROVIDERS", "MAX_RUN_ROWS", "OTHER", "USAGE_REP
 [[modules]]
 # What a row's tokens would cost, in the estimate order. Pure. Light, loaded on the first usage read.
 path = "server.usage_pricing"
-depends_on = ["server.usage_summary", "vs_proto"]
+depends_on = ["server.usage_summary", "vs_agent.api.usage_pricing", "vs_proto"]
 
 [[interfaces]]
 from = ["server.usage_pricing"]
-expose = ["RecordedPricing"]
+expose = ["DocumentFetcher", "DocumentStore", "FetchError", "ListPricing", "PriceBookError", "RateBook", "RateDocument", "check_book", "read_rate_book", "refresh_rate_book", "same_book", "saved_book"]
 
 [[modules]]
 # Reading a host's usage from disk: the journals behind the rollups and the byte budget that
 # bounds a read. Light, loaded on the first usage read.
 path = "server.usage_scan"
-depends_on = ["server.host_api", "server.host_run_dashboard", "server.run_summary", "server.run_summary_cache", "server.usage_rollup", "server.usage_summary", "vs_project", "vs_proto"]
+depends_on = ["server.host_api", "server.host_run_dashboard", "server.run_summary", "server.run_summary_cache", "server.usage_pricing", "server.usage_rollup", "server.usage_summary", "vs_project", "vs_proto", "vs_sim.api"]
 
 [[interfaces]]
 from = ["server.usage_scan"]
-expose = ["COLD_BUDGET_BYTES", "CollectedRuns", "FileRollupStore", "JsonlUsageJournal", "UsageProjects", "collect_runs", "source_identity", "usage_summary"]
+expose = ["COLD_BUDGET_BYTES", "CollectedRuns", "FilePriceBook", "FileRollupStore", "JsonlUsageJournal", "ProtoRateStore", "RATES_REFRESH_TIMEOUT_S", "UsageProjects", "collect_runs", "refresh_rates", "save_prices", "HttpsFetcher", "source_identity", "stored_pricing", "usage_directory", "usage_summary"]
 
 [[modules]]
 # What runs spent in a window, summed from their usage records: a pure function. Light, and
@@ -648,6 +648,13 @@ layer = "prompts_and_lower_libs"
 depends_on = ["vs_decode.api", "vs_sandbox", "vs_project", "vs_prompts", "vs_mcp", "vs_faults", "vs_sim.api", "vs_sim.api.testing"]
 
 [[modules]]
+# The Usage screen's one door to agentshim's price list and cost arithmetic. Its only importer is
+# `server.usage_pricing`: no recorded cost can be computed from a list price without this edge.
+path = "vs_agent.api.usage_pricing"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
 path = "vs_project"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_decode.api", "vs_sim.api", "vs_proto"]
@@ -925,7 +932,7 @@ depends_on = []
 [[modules]]
 path = "vs_sim.api"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.blocking", "vs_sim.byte_source", "vs_sim.clock", "vs_sim.concurrency", "vs_sim.loopback_http", "vs_sim.network", "vs_sim.os_platform", "vs_sim.output", "vs_sim.probes", "vs_sim.process_table", "vs_sim.processes", "vs_sim.randomness", "vs_sim.release", "vs_sim.signal_relay", "vs_sim.signals", "vs_sim.streaming", "vs_sim.sync", "vs_sim.yields"]
+depends_on = ["vs_sim.blocking", "vs_sim.byte_source", "vs_sim.clock", "vs_sim.concurrency", "vs_sim.https_get", "vs_sim.loopback_http", "vs_sim.network", "vs_sim.os_platform", "vs_sim.output", "vs_sim.probes", "vs_sim.process_table", "vs_sim.processes", "vs_sim.randomness", "vs_sim.release", "vs_sim.signal_relay", "vs_sim.signals", "vs_sim.streaming", "vs_sim.sync", "vs_sim.yields"]
 
 [[modules]]
 path = "vs_sim.api.testing"
@@ -1064,6 +1071,11 @@ layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
+path = "vs_sim.https_get"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
 path = "vs_sim.signal_relay_contracts"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_sim.concurrency", "vs_sim.signal_relay", "vs_sim.waits"]
@@ -1086,7 +1098,7 @@ depends_on = ["vs_sim.concurrency", "vs_sim.network", "vs_sim.randomness", "vs_s
 [[modules]]
 path = "vs_sim.contracts"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.blocking", "vs_sim.child", "vs_sim.clock", "vs_sim.gate", "vs_sim.loopback_http", "vs_sim.output", "vs_sim.probes", "vs_sim.processes", "vs_sim.randomness", "vs_sim.signals", "vs_sim.streaming", "vs_sim.waits"]
+depends_on = ["vs_sim.blocking", "vs_sim.child", "vs_sim.clock", "vs_sim.gate", "vs_sim.https_get", "vs_sim.loopback_http", "vs_sim.output", "vs_sim.probes", "vs_sim.processes", "vs_sim.randomness", "vs_sim.signals", "vs_sim.streaming", "vs_sim.waits"]
 
 [[modules]]
 path = "vs_sim.crash"
@@ -1101,7 +1113,7 @@ depends_on = []
 [[modules]]
 path = "vs_sim.fakes"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.clock", "vs_sim.concurrency", "vs_sim.gate", "vs_sim.loopback_http", "vs_sim.output", "vs_sim.probes", "vs_sim.processes", "vs_sim.states"]
+depends_on = ["vs_sim.clock", "vs_sim.concurrency", "vs_sim.gate", "vs_sim.https_get", "vs_sim.loopback_http", "vs_sim.output", "vs_sim.probes", "vs_sim.processes", "vs_sim.states"]
 
 [[modules]]
 path = "vs_sim.faults"
@@ -2170,7 +2182,7 @@ depends_on = ["vibesys.fact_import", "vibesys.fact_import.reader"]
 
 [[modules]]
 path = "vibesys.api.host_operations"
-depends_on = ["vs_proto", "vibesys.api.host_operations._candidate", "vibesys.api.host_operations._compute", "vibesys.api.host_operations._handlers", "vibesys.api.host_operations._login", "vibesys.api.host_operations._project", "vibesys.api.host_operations._reads", "vibesys.api.host_operations._start"]
+depends_on = ["vs_proto", "vibesys.api.host_operations._candidate", "vibesys.api.host_operations._compute", "vibesys.api.host_operations._handlers", "vibesys.api.host_operations._login", "vibesys.api.host_operations._project", "vibesys.api.host_operations._reads", "vibesys.api.host_operations._start", "vibesys.api.host_operations._usage_prices"]
 
 [[interfaces]]
 from = ["vibesys.api.host_operations"]
@@ -2194,6 +2206,10 @@ depends_on = ["vs_proto", "vs_project"]
 
 [[modules]]
 path = "vibesys.api.host_operations._compute"
+depends_on = ["vs_proto", "vs_project"]
+
+[[modules]]
+path = "vibesys.api.host_operations._usage_prices"
 depends_on = ["vs_proto", "vs_project"]
 
 [[modules]]

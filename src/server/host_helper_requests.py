@@ -181,7 +181,7 @@ if TYPE_CHECKING:
     from server.run_summary import Summarized
     from vs_project.api import OperatorDialer
     from vs_proto.api import host_payloads as pb
-    from vs_sim.api import Clock, Connection
+    from vs_sim.api import Clock, Connection, HttpsGet
 
 SCAN_LIMIT: Final = 10_000
 """The most entries ``paths.complete`` reads from one directory."""
@@ -1370,8 +1370,14 @@ def _wire() -> ModuleType:
     return import_module("vs_proto.api")
 
 
-def registry_read_source(host: HelperHost, request: HelperRequest | None = None) -> HostReadSource:
-    """Bind shared read facts; preserve only a legacy request's role display order."""
+def registry_read_source(
+    host: HelperHost, request: HelperRequest | None = None, *, https: HttpsGet | None = None
+) -> HostReadSource:
+    """Bind shared read facts; preserve only a legacy request's role display order.
+
+    ``https`` is the client for the price list's fetch, given only where the host may reach the
+    network (``vibesys host``); a read source without one answers every read but that refresh.
+    """
     role_order = (
         tuple(request.agents)
         if isinstance(request, RunPreflightRequest) and request.agents is not None
@@ -1382,6 +1388,7 @@ def registry_read_source(host: HelperHost, request: HelperRequest | None = None)
         role_order,
         describe=lambda: describe_machine(host),
         preflight=lambda value: _preflight_facts(value, host),
+        https=https,
     )
 
 

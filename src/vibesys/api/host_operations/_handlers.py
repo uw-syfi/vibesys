@@ -32,6 +32,13 @@ class _Reads:
         response.request_id = request.request_id
         return response
 
+    def usage_rates_refresh(
+        self, request: pb.UsageRatesRefreshRequest
+    ) -> pb.UsageRatesRefreshResponse:
+        response = self._source.usage_rates_refresh(request)
+        response.request_id = request.request_id
+        return response
+
     def list_tasks(self, request: pb.ListTasksRequest) -> pb.ListTasksResponse:
         return pb.ListTasksResponse(
             request_id=request.request_id, tasks=self._source.tasks(request.project)
@@ -115,6 +122,7 @@ MUTATION_SLOTS = (
     "create_example",
     "copy_project",
     "start_run",
+    "usage_prices_save",
 )
 
 
@@ -126,6 +134,7 @@ def handlers(source: ReadSource) -> host_operations.Handlers:
         list_run_digests=reads.list_run_digests,
         usage_window=reads.usage_window,
         usage_summary=reads.usage_summary,
+        usage_rates_refresh=reads.usage_rates_refresh,
         list_harnesses=reads.list_harnesses,
         list_agent_logins=reads.list_agent_logins,
         list_examples=reads.list_examples,

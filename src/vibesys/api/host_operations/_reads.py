@@ -29,6 +29,12 @@ class ReadSource(Protocol):
         """What the host's runs and its people's CLI use cost, in the buckets the request cuts."""
         ...
 
+    def usage_rates_refresh(
+        self, request: pb.UsageRatesRefreshRequest
+    ) -> pb.UsageRatesRefreshResponse:
+        """Fetch the price list if one is due; how current the host's rates are after."""
+        ...
+
     def tasks(self, project: str) -> pb.TaskList:
         """The canonical project's task catalog."""
         ...

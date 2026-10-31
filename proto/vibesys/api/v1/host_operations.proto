@@ -514,4 +514,39 @@ service HostOperationsService {
       }
     };
   }
+  // Fetch the price list if one is due. A read: it changes only the host's cache of the list.
+  rpc UsageRatesRefresh(vibesys.host.v1.UsageRatesRefreshRequest) returns (vibesys.host.v1.UsageRatesRefreshResponse) {
+    option (vibesys.host.v1.operation) = {
+      operation_id: 45
+      request_tag: 45
+      response_tag: 45
+      cap_ms: 60000
+      grace_ms: 5000
+      effect: OPERATION_EFFECT_READ
+      retry: RETRY_BOUNDED_READ
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CHECKOUT
+      correlation: {
+        request_path: 1
+        response_path: 1
+      }
+    };
+  }
+  rpc UsagePricesSave(vibesys.host.v1.UsagePricesSaveRequest) returns (vibesys.host.v1.UsagePricesSaveResponse) {
+    option (vibesys.host.v1.operation) = {
+      operation_id: 46
+      request_tag: 46
+      response_tag: 46
+      cap_ms: 10000
+      grace_ms: 5000
+      effect: OPERATION_EFFECT_IDEMPOTENT_MUTATION
+      retry: RETRY_RECONCILE_SAME_ID
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CHECKOUT
+      correlation: {
+        request_path: 1
+        response_path: 1
+      }
+    };
+  }
 }

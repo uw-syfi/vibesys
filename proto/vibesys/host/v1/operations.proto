@@ -2207,3 +2207,53 @@ message UsageSummaryResponse {
   uint32 folded_series = 16;
   google.protobuf.Timestamp read_at = 17 [(buf.validate.field).required = true];
 }
+
+// Fetch the price list now, if one is due, and say how current the host's rates are. The host
+// keeps the document it fetched; no reply carries it. A refresh within a minute of the last
+// attempt, failed or not, fetches nothing and answers from what the host holds, so a client may
+// ask whenever a reply said a refresh was due.
+message UsageRatesRefreshRequest {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  // Fetch even if the document is under a day old.
+  bool force = 2;
+  google.protobuf.Timestamp now = 3 [(buf.validate.field).required = true];
+}
+message UsageRatesRefreshResponse {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  UsagePricing pricing = 2 [(buf.validate.field).required = true];
+}
+
+// Replace the prices a person set on this host. The book is saved whole, against the revision it
+// was read at: when the host's revision has moved the host changes nothing and answers with its
+// book, so two clients editing at once cannot overwrite each other unseen. A request that equals
+// the host's book is saved already and changes nothing, so a retry after an unknown outcome is
+// safe.
+message UsagePricesSaveRequest {
+  option (buf.validate.message).cel = {
+    id: "usage_prices_save.distinct"
+    message: "a model is overridden once and aliased once"
+    expression: "this.overrides.map(o, o.model).unique() && this.aliases.map(a, a.from).unique()"
+  };
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  uint64 base_revision = 2;
+  repeated UsageRateOverride overrides = 3 [(buf.validate.field).repeated.max_items = 512];
+  repeated UsageAlias aliases = 4 [(buf.validate.field).repeated.max_items = 512];
+}
+message UsagePricesSaveResponse {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  // The host's book after the request: the saved one, or the one that moved.
+  UsagePriceBook prices = 2 [(buf.validate.field).required = true];
+  bool saved = 3;
+}

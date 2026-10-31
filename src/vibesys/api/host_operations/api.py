@@ -26,6 +26,11 @@ from vibesys.api.host_operations._saved_runs import (
     serve_saved_runs,
 )
 from vibesys.api.host_operations._start import StartRefusedError, StartUnknownError, serve_start
+from vibesys.api.host_operations._usage_prices import (
+    PricesRefusedError,
+    PricesUnknownError,
+    serve_usage_prices,
+)
 from vs_proto.api import (
     AcceptedRequest,
     FailureCategory,
@@ -43,6 +48,8 @@ __all__ = [
     "ClusterUnknownError",
     "LoginRefusedFact",
     "LoginStartedFact",
+    "PricesRefusedError",
+    "PricesUnknownError",
     "ProjectRefusedError",
     "ProjectUnknownError",
     "ReadSource",
@@ -59,6 +66,7 @@ __all__ = [
     "serve_project",
     "serve_saved_runs",
     "serve_start",
+    "serve_usage_prices",
 ]
 
 _READ_COMMANDS = {item.slot: item.cli for item in host_operations.READ_CALLS}

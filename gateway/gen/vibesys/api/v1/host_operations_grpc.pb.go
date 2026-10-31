@@ -47,6 +47,8 @@ const (
 	HostOperationsService_ListRunDigests_FullMethodName     = "/vibesys.api.v1.HostOperationsService/ListRunDigests"
 	HostOperationsService_UsageWindow_FullMethodName        = "/vibesys.api.v1.HostOperationsService/UsageWindow"
 	HostOperationsService_UsageSummary_FullMethodName       = "/vibesys.api.v1.HostOperationsService/UsageSummary"
+	HostOperationsService_UsageRatesRefresh_FullMethodName  = "/vibesys.api.v1.HostOperationsService/UsageRatesRefresh"
+	HostOperationsService_UsagePricesSave_FullMethodName    = "/vibesys.api.v1.HostOperationsService/UsagePricesSave"
 )
 
 // HostOperationsServiceClient is the client API for HostOperationsService service.
@@ -100,6 +102,9 @@ type HostOperationsServiceClient interface {
 	UsageWindow(ctx context.Context, in *v1.UsageWindowRequest, opts ...grpc.CallOption) (*v1.UsageWindowResponse, error)
 	// The Usage screen's read: one call per host, for every project, in the buckets the caller cuts.
 	UsageSummary(ctx context.Context, in *v1.UsageSummaryRequest, opts ...grpc.CallOption) (*v1.UsageSummaryResponse, error)
+	// Fetch the price list if one is due. A read: it changes only the host's cache of the list.
+	UsageRatesRefresh(ctx context.Context, in *v1.UsageRatesRefreshRequest, opts ...grpc.CallOption) (*v1.UsageRatesRefreshResponse, error)
+	UsagePricesSave(ctx context.Context, in *v1.UsagePricesSaveRequest, opts ...grpc.CallOption) (*v1.UsagePricesSaveResponse, error)
 }
 
 type hostOperationsServiceClient struct {
@@ -398,6 +403,26 @@ func (c *hostOperationsServiceClient) UsageSummary(ctx context.Context, in *v1.U
 	return out, nil
 }
 
+func (c *hostOperationsServiceClient) UsageRatesRefresh(ctx context.Context, in *v1.UsageRatesRefreshRequest, opts ...grpc.CallOption) (*v1.UsageRatesRefreshResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.UsageRatesRefreshResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_UsageRatesRefresh_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostOperationsServiceClient) UsagePricesSave(ctx context.Context, in *v1.UsagePricesSaveRequest, opts ...grpc.CallOption) (*v1.UsagePricesSaveResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.UsagePricesSaveResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_UsagePricesSave_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // HostOperationsServiceServer is the server API for HostOperationsService service.
 // All implementations must embed UnimplementedHostOperationsServiceServer
 // for forward compatibility.
@@ -449,6 +474,9 @@ type HostOperationsServiceServer interface {
 	UsageWindow(context.Context, *v1.UsageWindowRequest) (*v1.UsageWindowResponse, error)
 	// The Usage screen's read: one call per host, for every project, in the buckets the caller cuts.
 	UsageSummary(context.Context, *v1.UsageSummaryRequest) (*v1.UsageSummaryResponse, error)
+	// Fetch the price list if one is due. A read: it changes only the host's cache of the list.
+	UsageRatesRefresh(context.Context, *v1.UsageRatesRefreshRequest) (*v1.UsageRatesRefreshResponse, error)
+	UsagePricesSave(context.Context, *v1.UsagePricesSaveRequest) (*v1.UsagePricesSaveResponse, error)
 	mustEmbedUnimplementedHostOperationsServiceServer()
 }
 
@@ -539,6 +567,12 @@ func (UnimplementedHostOperationsServiceServer) UsageWindow(context.Context, *v1
 }
 func (UnimplementedHostOperationsServiceServer) UsageSummary(context.Context, *v1.UsageSummaryRequest) (*v1.UsageSummaryResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UsageSummary not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) UsageRatesRefresh(context.Context, *v1.UsageRatesRefreshRequest) (*v1.UsageRatesRefreshResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UsageRatesRefresh not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) UsagePricesSave(context.Context, *v1.UsagePricesSaveRequest) (*v1.UsagePricesSaveResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UsagePricesSave not implemented")
 }
 func (UnimplementedHostOperationsServiceServer) mustEmbedUnimplementedHostOperationsServiceServer() {}
 func (UnimplementedHostOperationsServiceServer) testEmbeddedByValue()                               {}
@@ -1033,6 +1067,42 @@ func _HostOperationsService_UsageSummary_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _HostOperationsService_UsageRatesRefresh_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.UsageRatesRefreshRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).UsageRatesRefresh(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_UsageRatesRefresh_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).UsageRatesRefresh(ctx, req.(*v1.UsageRatesRefreshRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostOperationsService_UsagePricesSave_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.UsagePricesSaveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).UsagePricesSave(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_UsagePricesSave_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).UsagePricesSave(ctx, req.(*v1.UsagePricesSaveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // HostOperationsService_ServiceDesc is the grpc.ServiceDesc for HostOperationsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1139,6 +1209,14 @@ var HostOperationsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UsageSummary",
 			Handler:    _HostOperationsService_UsageSummary_Handler,
+		},
+		{
+			MethodName: "UsageRatesRefresh",
+			Handler:    _HostOperationsService_UsageRatesRefresh_Handler,
+		},
+		{
+			MethodName: "UsagePricesSave",
+			Handler:    _HostOperationsService_UsagePricesSave_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

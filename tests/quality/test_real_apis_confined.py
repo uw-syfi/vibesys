@@ -234,6 +234,7 @@ REAL_IMPLEMENTATIONS: dict[str, str] = _names(
             "SubprocessProbe",
             "SubprocessStreamingCommand",
             "SystemRandomSource",
+            "UrllibHttpsGet",
             "UrllibLoopbackHttp",
             "Platform.real",
         )
@@ -1542,6 +1543,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     "src/server/run_summary_cache.py": (
         EdgeKind.STORE,
         "the run summary's cache beside the event journal",
+    ),
+    "src/server/usage_scan.py": (
+        EdgeKind.STORE,
+        "the host's usage state: each run's rollup beside its journal, the price list, the person's prices and the source id, behind RollupStore and DocumentStore",
     ),
     "src/server/transport/discovery.py": (
         EdgeKind.STORE,

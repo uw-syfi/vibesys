@@ -22,6 +22,7 @@ export const operationPolicies = Object.freeze({
   ListRunDigests: Object.freeze({name: 'ListRunDigests', id: 41, requestTag: 41, responseTag: 41, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   UsageWindow: Object.freeze({name: 'UsageWindow', id: 42, requestTag: 42, responseTag: 42, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   UsageSummary: Object.freeze({name: 'UsageSummary', id: 44, requestTag: 44, responseTag: 44, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  UsageRatesRefresh: Object.freeze({name: 'UsageRatesRefresh', id: 45, requestTag: 45, responseTag: 45, capMs: 60000, graceMs: 5000, totalMs: 65000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   CreateExample: Object.freeze({name: 'CreateExample', id: 34, requestTag: 34, responseTag: 34, capMs: 120000, graceMs: 5000, totalMs: 125000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   CopyProject: Object.freeze({name: 'CopyProject', id: 35, requestTag: 35, responseTag: 35, capMs: 120000, graceMs: 5000, totalMs: 125000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   PutCluster: Object.freeze({name: 'PutCluster', id: 31, requestTag: 31, responseTag: 31, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
@@ -29,6 +30,7 @@ export const operationPolicies = Object.freeze({
   TestCluster: Object.freeze({name: 'TestCluster', id: 33, requestTag: 33, responseTag: 33, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   StartRun: Object.freeze({name: 'StartRun', id: 36, requestTag: 36, responseTag: 36, capMs: 60000, graceMs: 5000, totalMs: 65000, effect: 3, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   TerminateRun: Object.freeze({name: 'TerminateRun', id: 38, requestTag: 38, responseTag: 38, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  UsagePricesSave: Object.freeze({name: 'UsagePricesSave', id: 46, requestTag: 46, responseTag: 46, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   Login: Object.freeze({name: 'Login', id: 40, requestTag: 40, responseTag: 40, capMs: 600000, graceMs: 5000, totalMs: 605000, effect: 3, retry: 3, executor: 1, cardinality: 2, firstEventMs: 25000, progressMs: undefined} as const),
   StreamSavedRuns: Object.freeze({name: 'StreamSavedRuns', id: 43, requestTag: 43, responseTag: 43, capMs: 600000, graceMs: 5000, totalMs: 605000, effect: 1, retry: 2, executor: 1, cardinality: 2, firstEventMs: 60000, progressMs: 25000} as const),
 });
@@ -122,6 +124,12 @@ export function acceptUsageSummary(input: MessageInitShape<typeof pb.UsageSummar
 export async function callUsageSummary(transport: OperationTransport, request: Accepted<"UsageSummary">, signal: OperationSignal): Promise<pb.UsageSummaryResponse> {
   return call(transport, {policy: operationPolicies.UsageSummary, requestSchema: pb.UsageSummaryRequestSchema, responseSchema: pb.UsageSummaryResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
 }
+export function acceptUsageRatesRefresh(input: MessageInitShape<typeof pb.UsageRatesRefreshRequestSchema>): Accepted<"UsageRatesRefresh"> {
+  return accept(operationPolicies.UsageRatesRefresh, pb.UsageRatesRefreshRequestSchema, input);
+}
+export async function callUsageRatesRefresh(transport: OperationTransport, request: Accepted<"UsageRatesRefresh">, signal: OperationSignal): Promise<pb.UsageRatesRefreshResponse> {
+  return call(transport, {policy: operationPolicies.UsageRatesRefresh, requestSchema: pb.UsageRatesRefreshRequestSchema, responseSchema: pb.UsageRatesRefreshResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
+}
 export function acceptCreateExample(input: MessageInitShape<typeof pb.CreateExampleRequestSchema>): Accepted<"CreateExample"> {
   return accept(operationPolicies.CreateExample, pb.CreateExampleRequestSchema, input);
 }
@@ -163,6 +171,12 @@ export function acceptTerminateRun(input: MessageInitShape<typeof pb.TerminateRu
 }
 export async function callTerminateRun(transport: OperationTransport, request: Accepted<"TerminateRun">, signal: OperationSignal): Promise<pb.TerminateRunResponse> {
   return call(transport, {policy: operationPolicies.TerminateRun, requestSchema: pb.TerminateRunRequestSchema, responseSchema: pb.TerminateRunResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
+}
+export function acceptUsagePricesSave(input: MessageInitShape<typeof pb.UsagePricesSaveRequestSchema>): Accepted<"UsagePricesSave"> {
+  return accept(operationPolicies.UsagePricesSave, pb.UsagePricesSaveRequestSchema, input);
+}
+export async function callUsagePricesSave(transport: OperationTransport, request: Accepted<"UsagePricesSave">, signal: OperationSignal): Promise<pb.UsagePricesSaveResponse> {
+  return call(transport, {policy: operationPolicies.UsagePricesSave, requestSchema: pb.UsagePricesSaveRequestSchema, responseSchema: pb.UsagePricesSaveResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
 }
 export function acceptLogin(input: MessageInitShape<typeof pb.LoginRequestSchema>): Accepted<"Login"> {
   return accept(operationPolicies.Login, pb.LoginRequestSchema, input);
@@ -216,6 +230,7 @@ export const readBudgets = Object.freeze({
   listRunDigests: Object.freeze({capMs: 25000, graceMs: 5000, totalMs: 30000} as const),
   usageWindow: Object.freeze({capMs: 25000, graceMs: 5000, totalMs: 30000} as const),
   usageSummary: Object.freeze({capMs: 25000, graceMs: 5000, totalMs: 30000} as const),
+  usageRatesRefresh: Object.freeze({capMs: 60000, graceMs: 5000, totalMs: 65000} as const),
 } as const);
 export function encodeHostRead(checkout: string, name: string, payload: Uint8Array): Uint8Array {
   switch (name) {
@@ -247,6 +262,8 @@ export function encodeHostRead(checkout: string, name: string, payload: Uint8Arr
       return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'usageWindow', value: fromBinary(pb.UsageWindowRequestSchema, payload)}}));
     case 'UsageSummary':
       return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'usageSummary', value: fromBinary(pb.UsageSummaryRequestSchema, payload)}}));
+    case 'UsageRatesRefresh':
+      return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'usageRatesRefresh', value: fromBinary(pb.UsageRatesRefreshRequestSchema, payload)}}));
     default: throw new Error("unknown read");
   }
 }
@@ -298,6 +315,9 @@ export function decodeHostRead(name: string, payload: Uint8Array): Uint8Array {
     case 'UsageSummary':
       if (result.case !== 'usageSummary') throw new Error('response correlation mismatch');
       return toBinary(pb.UsageSummaryResponseSchema, result.value);
+    case 'UsageRatesRefresh':
+      if (result.case !== 'usageRatesRefresh') throw new Error('response correlation mismatch');
+      return toBinary(pb.UsageRatesRefreshResponseSchema, result.value);
     default: throw new Error("unknown read");
   }
 }
@@ -318,6 +338,8 @@ export function encodeHostMutate(checkout: string, name: string, payload: Uint8A
       return toBinary(MutateRequestSchema, create(MutateRequestSchema, {checkout, method: {case: 'startRun', value: fromBinary(pb.StartRunRequestSchema, payload)}}));
     case 'TerminateRun':
       return toBinary(MutateRequestSchema, create(MutateRequestSchema, {checkout, method: {case: 'terminateRun', value: fromBinary(pb.TerminateRunRequestSchema, payload)}}));
+    case 'UsagePricesSave':
+      return toBinary(MutateRequestSchema, create(MutateRequestSchema, {checkout, method: {case: 'usagePricesSave', value: fromBinary(pb.UsagePricesSaveRequestSchema, payload)}}));
     default: throw new Error('unknown mutation');
   }
 }
@@ -348,6 +370,9 @@ export function decodeHostMutate(name: string, payload: Uint8Array): Uint8Array 
     case 'TerminateRun':
       if (result.case !== 'terminateRun') throw new Error('response correlation mismatch');
       return toBinary(pb.TerminateRunResponseSchema, result.value);
+    case 'UsagePricesSave':
+      if (result.case !== 'usagePricesSave') throw new Error('response correlation mismatch');
+      return toBinary(pb.UsagePricesSaveResponseSchema, result.value);
     default: throw new Error('unknown mutation');
   }
 }
@@ -383,6 +408,7 @@ export const mutateBudgets = Object.freeze({
   testCluster: Object.freeze({capMs: 65000, graceMs: 5000, totalMs: 70000} as const),
   startRun: Object.freeze({capMs: 60000, graceMs: 5000, totalMs: 65000} as const),
   terminateRun: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
+  usagePricesSave: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
 } as const);
 export const watchBudgets = Object.freeze({
   login: Object.freeze({capMs: 600000, graceMs: 5000, totalMs: 605000, firstEventMs: 25000, progressMs: 0} as const),

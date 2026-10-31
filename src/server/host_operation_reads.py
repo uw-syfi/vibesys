@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from server.run_summary import Summarized
     from vs_proto.api import FailureCategory
     from vs_proto.api import host_payloads as pb
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, HttpsGet
 
 
 class _ReadProjects(Protocol):
@@ -141,12 +141,18 @@ class HostReadSource:
         *,
         describe: Callable[[], MachineDescription],
         preflight: Callable[[RunPreflightRequest], RunPreflightReply | HelperError],
+        https: HttpsGet | None = None,
     ) -> None:
-        """Bind host I/O and the existing machine/preflight probe adapters."""
+        """Bind host I/O and the existing machine/preflight probe adapters.
+
+        ``https`` is the host's client for the one fetch it makes, the price list; a host built
+        without one refuses the refresh.
+        """
         self._host = host
         self._role_order = role_order
         self._describe = describe
         self._preflight = preflight
+        self._https = https
 
     def _path(self, text: str) -> Path:
         expanded = Path(self._host.directories.expand(text))
@@ -190,9 +196,35 @@ class HostReadSource:
     def usage_summary(self, request: pb.UsageSummaryRequest) -> pb.UsageSummaryResponse:
         """Cut the host's runs into the request's buckets, through the owners of the rollup and the summary."""
         scan = import_module("server.usage_scan")
-        pricing = import_module("server.usage_pricing")
+        if request.now is None:
+            message = "now: required"
+            raise ValueError(message)
+        pricing = scan.stored_pricing(scan.usage_directory(), now=request.now.to_datetime())
         paths = [self._path(project) for project in request.projects]
-        return scan.usage_summary(request, self._host.projects, paths, pricing.RecordedPricing())
+        return scan.usage_summary(request, self._host.projects, paths, pricing)
+
+    def usage_rates_refresh(
+        self, request: pb.UsageRatesRefreshRequest
+    ) -> pb.UsageRatesRefreshResponse:
+        """Fetch the price list if one is due, through the owner of the host's usage state."""
+        scan = import_module("server.usage_scan")
+        if self._https is None or request.now is None:
+            raise ReadRefusedError(
+                HelperError(
+                    code=HelperErrorCode.INTERNAL,
+                    message="this host has no network client to fetch prices with",
+                    request_id=request.request_id,
+                )
+            )
+        pricing = scan.refresh_rates(
+            scan.usage_directory(),
+            scan.HttpsFetcher(self._https),
+            now=request.now.to_datetime(),
+            force=request.force,
+        )
+        return _wire().host_payloads.UsageRatesRefreshResponse(
+            request_id=request.request_id, pricing=pricing
+        )
 
     def tasks(self, project: str) -> pb.TaskList:
         """Read through the existing project's task owner."""
