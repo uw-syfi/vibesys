@@ -389,6 +389,22 @@ class InterruptPolicy(StrEnum):
     """Settle it as ``Cancelled(INTERRUPTED)``: a person watched the attempt and decides."""
 
 
+class ClosePolicy(StrEnum):
+    """What a scope that is closing does with an open step of its own scope.
+
+    Every kind of step declares one (``request_close_policy``), so the rule never names a kind.
+    A step the close depends on is waited for; a step only the scope would read is withdrawn.
+    """
+
+    WAIT = "wait"
+    """The close waits for the step to end by itself or at its limit: cleanup the close depends
+    on, work whose result something still reads. The default."""
+
+    WITHDRAW = "withdraw"
+    """The close cancels the step if it runs and settles it if it does not: nothing outside the
+    scope reads its result, so waiting for it only keeps the scope open."""
+
+
 class OperationSchemaRef(Value):
     """Operation schema ref lifecycle contract."""
 
@@ -464,6 +480,10 @@ class OperationDescriptor(OperationSchemaRef):
     watch: bool = False
     resource_pool: PoolId | None = None
     revision_authority: RevisionAuthority = RevisionAuthority.NONE
+    on_close: ClosePolicy = Field(
+        default=ClosePolicy.WAIT, exclude_if=lambda policy: policy is ClosePolicy.WAIT
+    )
+    """Whether a scope that is closing withdraws this operation or waits for it; it waits by default."""
 
     @model_validator(mode="after")
     def lifecycle_contract(self) -> OperationDescriptor:

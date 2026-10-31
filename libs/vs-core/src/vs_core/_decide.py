@@ -18,6 +18,7 @@ from ._refusal import RecordRefusal, RecordRefusedError, RefusalReason
 from ._request_ledger import dispatch_until, retry_limit
 from ._request_recovery import is_open
 from ._run_park import pause_cancels, starts
+from ._scope_order import withdrawn_by_close
 from ._search_events import Translated, translate
 from ._step import advance_run_time, settle_end, settle_park, step, step_recorded
 from ._step_attempts import (
@@ -443,6 +444,12 @@ def _of_step(state: CoreState, record: RequestRecord, now: float) -> Action | No
             Cancel(tag=tag, reason=CancelReason.RUN_ENDING)
             if running
             else Settle(tag=tag, result=Cancelled(reason=CancelReason.RUN_ENDING))
+        )
+    if withdrawn_by_close(state, record):
+        return (
+            Cancel(tag=tag, reason=CancelReason.WITHDRAWN)
+            if running
+            else Settle(tag=tag, result=Cancelled(reason=CancelReason.WITHDRAWN))
         )
     if running:
         return _stop_running(state, record, now)

@@ -53,7 +53,13 @@ from vs_core._step_log import (
     seed_message,
     started_message,
 )
-from vs_core.types.records import StepEffect, request_effect, request_interrupt_policy
+from vs_core.types.common import ClosePolicy
+from vs_core.types.records import (
+    StepEffect,
+    request_close_policy,
+    request_effect,
+    request_interrupt_policy,
+)
 from vs_core.types.steps import (
     Cancelled,
     CancelReason,
@@ -75,6 +81,7 @@ __all__ = [
     "Cancel",
     "CancelReason",
     "Cancelled",
+    "ClosePolicy",
     "EncodedSavedRun",
     "End",
     "Failed",
@@ -118,6 +125,7 @@ __all__ = [
     "interruption_of",
     "may_start",
     "open_step",
+    "request_close_policy",
     "request_effect",
     "request_interrupt_policy",
     "restore",

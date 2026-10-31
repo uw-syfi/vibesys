@@ -10,6 +10,11 @@ Closing a scope reads the registry of what the scope holds (its jobs, its sessio
 rest, so the close runs only when every other step of its scope has a result: a step that began
 before the close and reports its job after it would leave that job running with no one to cancel it.
 A step that waits for the close itself cannot end before it, and does not hold it back.
+
+A scope is closing while its close is open, and a closing scope does not wait for work its kind
+declares withdrawable (``ClosePolicy.WITHDRAW``): nothing outside the scope reads its result, so
+``withdrawn_by_close`` has the loop end it, by a cancel while it runs and by a settlement while it
+does not. Every other step is waited for, as the cleanup the close depends on must be.
 """
 
 from __future__ import annotations
@@ -17,7 +22,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ._request_recovery import is_open
-from .types.records import StepEffect, request_effect
+from .types.common import ClosePolicy
+from .types.records import StepEffect, request_close_policy, request_effect
 
 if TYPE_CHECKING:
     from .types.common import RequestId
@@ -49,6 +55,24 @@ def holds_back(state: CoreState, record: RequestRecord) -> bool:
         request_effect(row.request, state.registry) is StepEffect.SNAPSHOTS
         and _has_running_attempt(state, row)
         for row in siblings
+    )
+
+
+def withdrawn_by_close(state: CoreState, record: RequestRecord) -> bool:
+    """Whether the closing scope of the open step ``record`` withdraws it rather than waits for it.
+
+    The scope is closing when another of its steps closes it and is open. A step that waits for
+    that close cannot end before it, so it is the close's to run and is not withdrawn.
+    """
+    if request_close_policy(record.request, state.registry) is not ClosePolicy.WITHDRAW:
+        return False
+    return any(
+        is_open(row)
+        and row.request_id != record.request_id
+        and row.request.scope == record.request.scope
+        and request_effect(row.request, state.registry) is StepEffect.CLOSES
+        and not _follows(state, record, row.request_id)
+        for row in state.records.records
     )
 
 
