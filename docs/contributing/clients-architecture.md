@@ -408,13 +408,17 @@ Enforced: `@vibesys/ui` has no `Banner`; no stylesheet rule paints a panel with 
 `tone-fills.test.ts`; the `banner` screen check fails an element at least half as wide as the
 main pane that is filled with a status color, whatever it is called; the `status-row` screen check
 fails one that is not filled: an alert, a status or a live region outside a toast, or `Text` in a
-status tone, at that width, so a status is a chip or a dot as wide as its label and never a row; a
+status tone, whose words reach half the pane (it measures the words, not the box, so a figure a flex
+column stretches or a live region around other content is not one), and a chip whose box reaches half
+the pane (a chip must be as wide as its label); an announced element that holds a chip is a status
+word with its detail, however long the detail wraps; a
 feature's `./state` is the only place a problem's words are written; and `toasts.spec.ts` shows a toast on every top-level
 screen at the smallest and a wide window, with each platform's window controls, and checks it
 sits below the header row and covers nothing in it. Unenforced: whether a message is a passing
-event or a problem with a thing needs a reader; a strip that is neither filled, announced nor
-written in a status tone (a bordered box with a status dot, a chevron and a sentence) is found by
-no check, because the screens' data rows have the same parts; and a new screen that puts its title row in the
+event or a problem with a thing needs a reader; a lone status word on a line of its own (it cannot be
+told from a figure or an empty-state word), and a strip that is neither filled, announced nor written
+in a status tone (a bordered box with a status dot, a chevron and a sentence), are found by no check,
+because the screens' data rows have the same parts; and a new screen that puts its title row in the
 body instead of the `header` slot gets toasts over that row, until it is added to the spec's
 screens and given a `header`.
 
