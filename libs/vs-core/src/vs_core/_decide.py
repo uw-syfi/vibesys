@@ -12,8 +12,9 @@ from typing import TYPE_CHECKING, overload
 
 from protobuf import Oneof
 
-from ._actions import Action, Cancel, End, Run, RunRest, Settle, Wait, at_rest
+from ._actions import Action, Cancel, End, Run, RunRest, Settle, Tick, Wait, at_rest
 from ._proofs import request_dependency_status, stop_mode
+from ._refusal import RecordRefusal, RecordRefusedError, RefusalReason
 from ._request_ledger import dispatch_until, retry_limit
 from ._request_recovery import is_open
 from ._run_park import pause_cancels, starts
@@ -108,7 +109,7 @@ def fold_run(
         folded = apply_record(folded, record, registry)
     if folded is None:
         message = "a log folds from a seed state; it holds no record of the run's start"
-        raise ValueError(message)
+        raise RecordRefusedError(RefusalReason.NO_SEED, message)
     return folded
 
 
@@ -152,10 +153,13 @@ def decide(state: CoreState, now: float) -> tuple[Action, ...]:
     parks at a Pause now before the loop has stopped what runs, and a flight nothing cancels
     would hold the process up.
     """
+    recorded = state
     state = advance_run_time(state, now)
     rest = at_rest(state)
     if rest is RunRest.ENDED:
         return (Wait(until=None),)
+    if _park_is_due(recorded, state):
+        return (Tick(at=now),)
     open_steps = tuple(record for record in state.records.records if is_open(record))
     if rest is RunRest.PARKED:
         stops = (
@@ -176,22 +180,53 @@ def decide(state: CoreState, now: float) -> tuple[Action, ...]:
     return actions or (Wait(until=_wake_at(state, open_steps, now)),)
 
 
+def _park_is_due(recorded: CoreState, now: CoreState) -> bool:
+    """Whether the time that passed parks a draining run, which no record has yet said.
+
+    The drain of a pause stops waiting at its deadline, so a run that waited only on attempts
+    the loop cancels parks once the clock reaches it. The log shows that only through a record,
+    and ending a step is not always the next one: the run clock is an input (``Tick``), so the
+    park is in the log whatever else the run does.
+    """
+    return (
+        recorded.run.status is RunStatus.DRAINING
+        and settle_park(now).run.status is RunStatus.PARKED
+    )
+
+
 def _running(state: CoreState, record: RequestRecord) -> bool:
     attempts = state.steps.of(record.request_id)
     return attempts is not None and not attempts.ended
 
 
-def may_start(state: CoreState, tag: RequestId, now: float) -> bool:
-    """Whether the run lets the step ``tag`` start an attempt at the run clock ``now``.
+def start_due(state: CoreState, tag: RequestId, now: float) -> Run | RecordRefusal:
+    """The attempt the rule would ``Run`` for the step ``tag`` at the run clock ``now``, or why not.
 
-    That is when the rule would ``Run`` it. The fold refuses a start the rule forbids, so the log
-    never holds one. A flight that waited (for a ``clear``) while the run paused, parked or ran
-    out the step's time asks again, with the clock it records its start at, before it does.
+    The fold refuses a ``StepStarted`` that is not this, so the log never holds a start the rule
+    forbids. A start is checked and stamped at one ``now``: a ``Run`` decided earlier carries the
+    limit of its own instant (an unstarted step gets ``now`` plus its limit), and a pause, a park
+    or the end of the step's time may have come since. A flight that waited (for a ``clear``,
+    or for a writer) asks again at the instant the log stamps its start, and records what this
+    returns. The refusal is ``STEP_NOT_OPEN`` or ``START_NOT_DUE``, the two a race explains.
     """
     record = state.records.record(tag)
     if record is None or not is_open(record):
-        return False
-    return isinstance(_of_step(advance_run_time(state, now), record, now), Run)
+        return RecordRefusal(
+            RefusalReason.STEP_NOT_OPEN, tag, f"the log names step {tag.root}, which is not open"
+        )
+    action = _of_step(advance_run_time(state, now), record, now)
+    if isinstance(action, Run):
+        return action
+    return RecordRefusal(
+        RefusalReason.START_NOT_DUE,
+        tag,
+        f"the log starts step {tag.root} in a run that may not start it",
+    )
+
+
+def may_start(state: CoreState, tag: RequestId, now: float) -> bool:
+    """Whether the run lets the step ``tag`` start an attempt at the run clock ``now``."""
+    return isinstance(start_due(state, tag, now), Run)
 
 
 def _begin(
@@ -202,11 +237,11 @@ def _begin(
     if body is not None and body.field == "run_started":
         if state is not None:
             message = f"record {record.seq} starts a run the log already started"
-            raise ValueError(message)
+            raise RecordRefusedError(RefusalReason.SEED_REPEATED, message)
         return Folded(_observed(decode_seed(body.value, registry), record))
     if body is not None and body.field in _CORE_RECORDS:
         message = f"record {record.seq} is core's, and the log holds no seed before it"
-        raise ValueError(message)
+        raise RecordRefusedError(RefusalReason.NO_SEED, message)
     return None
 
 
@@ -236,10 +271,11 @@ def _stepped(state: CoreState, event: CoreEvent) -> tuple[CoreState, tuple[Strat
     """``state`` after one input of core's, and the events it published.
 
     A log has no timer and no executor, so what the kernel leaves for them is settled here: the
-    commands it registered lapse, and the end a resume reopened is dropped.
+    commands it registered lapse, the end a resume reopened is dropped, and a drain that has
+    nothing left to wait for parks.
     """
     transition = step(state, event)
-    return commands_lapsed(end_lifted(transition.state)), transition.events
+    return settle_park(commands_lapsed(end_lifted(transition.state))), transition.events
 
 
 def _advanced(
@@ -254,9 +290,9 @@ def _advanced(
 def _start(state: CoreState, message: StepStarted, registry: OperationRegistry | None) -> CoreState:
     tag = RequestId(root=message.tag)
     record = open_record(state, tag)
-    if not may_start(state, tag, state.run.now_at):
-        problem = f"the log starts step {tag.root} in a run that may not start it"
-        raise ValueError(problem)
+    due = start_due(state, tag, state.run.now_at)
+    if isinstance(due, RecordRefusal):
+        raise RecordRefusedError(due.reason, due.detail, due.tag)
     deadline = Until(at=message.deadline_at, watches=record.until.watches)
     return started(state, tag, message.attempt, decode_request(message, registry), deadline)
 
@@ -278,7 +314,7 @@ def _finish(
         state, published = transition.state, (*published, *transition.events)
     if any(is_open(row) for row in state.records.find(tag)):
         problem = f"the log finishes step {tag.root} with an observation that does not end it"
-        raise ValueError(problem)
+        raise RecordRefusedError(RefusalReason.RESULT_MISMATCH, problem, tag)
     return settle_park(forgotten(state, tag)), published
 
 
@@ -404,6 +440,7 @@ def _start_or_settle(state: CoreState, record: RequestRecord, now: float) -> Run
         tag=tag,
         attempt=1 if attempts is None else attempts.started + 1,
         deadline_at=deadline.at,
+        clear_first=attempts is not None,
     )
 
 

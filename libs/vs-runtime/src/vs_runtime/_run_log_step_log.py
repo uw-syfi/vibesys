@@ -14,12 +14,15 @@ that parks or ends gets its search state logged whole.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import TYPE_CHECKING, Protocol
 
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
+from vs_core.api import ClockAdvanced
 from vs_core.api.recovery import (
     Interruption,
+    RecordRefusal,
     RunRest,
     apply_record,
     at_rest,
@@ -28,9 +31,9 @@ from vs_core.api.recovery import (
     fold_run,
     input_message,
     interrupted_message,
-    may_start,
     open_step,
     seed_message,
+    start_due,
     started_message,
 )
 from vs_runlog.api import Appended
@@ -153,17 +156,21 @@ class RunLogStepLog:
         """The step ``tag`` as the state has it, while it has no result."""
         return open_step(self.state, tag)
 
-    async def step_started(self, run: Run) -> StepRecord:
-        """Append ``StepStarted`` if the run still lets the step start.
+    async def step_started(self, run: Run) -> Run | RecordRefusal:
+        """Append ``StepStarted`` if the rule would run the step now, with the limit it gives now.
 
-        The verdict is made on the state the append extends: a pause that landed since the loop
-        last looked is already in it.
+        The clock is read once: the verdict and the stamp are one instant, and both are made on
+        the state the append extends, so a pause that landed since the loop last looked is
+        already in it.
         """
         with self._log.transaction():
-            if not may_start(self.state, run.tag, self._clock.now()):
-                return Interrupted()
-            self._commit(started_message(run))
-            return Recorded()
+            at = self._clock.now()
+            due = start_due(self.state, run.tag, at)
+            if isinstance(due, RecordRefusal):
+                return due
+            recorded = replace(run, deadline_at=due.deadline_at)
+            self._commit(started_message(recorded), clock=at)
+            return recorded
 
     async def step_finished(self, tag: RequestId, attempt: int, result: StepResult) -> StepRecord:
         """Append ``StepFinished``; for a parked run, ``AttemptInterrupted`` for its attempt.
@@ -183,6 +190,11 @@ class RunLogStepLog:
         """Append ``AttemptInterrupted``."""
         with self._log.transaction():
             self._commit(interrupted_message(tag, attempt, why))
+
+    async def clock_advanced(self, at: float) -> None:
+        """Append the input that the run clock reached ``at``, which core asked for with ``Tick``."""
+        with self._log.transaction():
+            self._commit(input_message(ClockAdvanced(now_at=at)))
 
     async def run_ended(self, end: End) -> None:
         """Log the search whole, then append the end of the run.
@@ -232,16 +244,23 @@ class RunLogStepLog:
         """Never: an input from outside can always arrive, and the owner of this log sends it."""
         return None
 
-    def _commit(self, message: CoreMessage) -> None:
-        """Append one record, then let the search hear what it caused."""
-        self._record(message)
+    def _commit(self, message: CoreMessage, *, clock: float | None = None) -> None:
+        """Append one record, then let the search hear what it caused.
+
+        ``clock`` is the run clock the caller read for its own check, when the record has to be
+        stamped at that same instant.
+        """
+        self._record(message, clock=clock)
         self._settle()
 
-    def _record(self, message: CoreMessage) -> None:
+    def _record(self, message: CoreMessage, *, clock: float | None = None) -> None:
         """Fold the next record, and only then append it: a record the fold refuses stays out."""
         with self._log.transaction():
             record = self._log.next_record(
-                message, epoch=self._epoch, at=self._stamp(), clock=self._clock.now()
+                message,
+                epoch=self._epoch,
+                at=self._stamp(),
+                clock=self._clock.now() if clock is None else clock,
             )
             self._folded = apply_record(self._folded, record, self._registry)
             self._confirm(record)

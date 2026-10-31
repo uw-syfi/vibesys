@@ -58,7 +58,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_core.api import CoreEvent, CoreState, Observation, Request, RequestId
-    from vs_core.api.recovery import End, Interruption, OpenStep, StepResult
+    from vs_core.api.recovery import End, Interruption, OpenStep, RecordRefusal, StepResult
     from vs_core.api.recovery import Run as RunAction
     from vs_dst._effects import Effects
     from vs_dst._snapshots import OutsideWorld, Store, Watcher
@@ -126,7 +126,7 @@ class _Counting:
     def open_step(self, tag: RequestId) -> OpenStep | None:
         return self.inner.open_step(tag)
 
-    async def step_started(self, run: RunAction) -> StepRecord:
+    async def step_started(self, run: RunAction) -> RunAction | RecordRefusal:
         self.started += 1
         if self.started > MAX_STEPS:
             raise DispatchCapExceededError(MAX_STEPS, {run.step.kind: self.started})
@@ -137,6 +137,9 @@ class _Counting:
 
     async def attempt_interrupted(self, tag: RequestId, attempt: int, why: Interruption) -> None:
         await self.inner.attempt_interrupted(tag, attempt, why)
+
+    async def clock_advanced(self, at: float) -> None:
+        await self.inner.clock_advanced(at)
 
     async def run_ended(self, end: End) -> None:
         await self.inner.run_ended(end)

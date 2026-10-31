@@ -31,6 +31,7 @@ from vs_core.api.recovery import (
     End,
     Failed,
     Interruption,
+    RecordRefusal,
     Run,
     RunRest,
     finished_message,
@@ -126,6 +127,9 @@ class Scenario:
     """When the operator stops the run; ``None`` waits until every step has its result."""
     race: bool = False
     """Whether a pause lands, and the run parks, just before the first result is recorded."""
+    start_waits_s: tuple[float, ...] = ()
+    """How long the start of each attempt waits behind the writer before the log stamps it, by
+    attempt number; the last entry holds for the attempts after it."""
 
 
 CLEAR_HOLD_S = 20.0
@@ -256,11 +260,15 @@ class CrashingLog:
         inner: StepLog,
         switch: Switch,
         watch: Watch,
+        clock: WatchedClock,
+        start_waits_s: tuple[float, ...],
         before_result: Callable[[core.RequestId, int], Awaitable[None]] | None = None,
     ) -> None:
         self._inner = inner
         self._switch = switch
         self._watch = watch
+        self._clock = clock
+        self._start_waits_s = start_waits_s
         self._before_result = before_result
 
     @property
@@ -278,9 +286,17 @@ class CrashingLog:
     def open_step(self, tag: core.RequestId) -> OpenStep | None:
         return self._inner.open_step(tag)
 
-    async def step_started(self, run: Run) -> StepRecord:
+    async def step_started(self, run: Run) -> Run | RecordRefusal:
         self._watch.before_record("step_started", run.tag)
-        return await self._around(lambda: self._inner.step_started(run))
+
+        async def behind_the_writer() -> Run | RecordRefusal:
+            waits = self._start_waits_s
+            wait = waits[min(run.attempt, len(waits)) - 1] if waits else 0.0
+            if wait > 0:
+                await self._clock.sleep(wait)
+            return await self._inner.step_started(run)
+
+        return await self._around(behind_the_writer)
 
     async def step_finished(
         self, tag: core.RequestId, attempt: int, result: StepResult
@@ -298,6 +314,9 @@ class CrashingLog:
 
     async def run_ended(self, end: End) -> None:
         await self._around(lambda: self._inner.run_ended(end))
+
+    async def clock_advanced(self, at: float) -> None:
+        await self._around(lambda: self._inner.clock_advanced(at))
 
     async def next_input(self) -> None:
         await self._inner.next_input()
@@ -436,6 +455,7 @@ async def run_epochs(world: World, clock: VirtualClock, kill_at: int | None) -> 
     delivered: set[str] = set()
     parked = False
     killed = False
+    watched = WatchedClock(clock, world.watch)
     while True:
         log = FakeStepLog(
             world.records, world.seed.state, world.seed.registry, clock, loop_threads()
@@ -452,10 +472,15 @@ async def run_epochs(world: World, clock: VirtualClock, kill_at: int | None) -> 
         loop = asyncio.ensure_future(
             run_step_loop(
                 CrashingLog(
-                    log, switch, world.watch, racing(world.scenario, log, clock, delivered)
+                    log,
+                    switch,
+                    world.watch,
+                    watched,
+                    world.scenario.start_waits_s,
+                    racing(world.scenario, log, clock, delivered),
                 ),
                 CrashingRunner(world.runner, switch, world.watch),
-                WatchedClock(clock, world.watch),
+                watched,
                 TIMING,
                 world.watch.new_board(),
             )
@@ -807,13 +832,15 @@ def test_an_ending_waits_for_a_held_tag_and_records_the_run_end_after_it_returns
     assert result_matches(world, 0, Cancelled(reason=CancelReason.RUN_ENDING))
 
 
-def test_a_pause_leaves_a_held_tag_to_the_process_exit() -> None:
-    # The step's limit outlasts the hold: a step whose limit passed while held is settled, not run again.
-    scenario = Scenario((step(AttemptHolds(for_s=500.0), FINISHES, limit_s=2000.0),), pause_at=1.0)
+def test_a_pause_leaves_a_held_tag_to_the_process_exit_and_does_not_charge_it() -> None:
+    """The pause ended the held attempt, not the step: with no tries to spare it still finishes."""
+    scenario = Scenario((step(AttemptHolds(for_s=500.0), FINISHES),), pause_at=1.0, retries=0)
     world = run_world(scenario)
-    check_world(world)
-    assert world.exits[0] is RunRest.PARKED
-    assert attempts_started(world, 0) == [1, 2], "the held attempt was charged as a crash"
+    assert world.exits == [RunRest.PARKED, RunRest.ENDED]
+    assert attempts_started(world, 0) == [1, 2]
+    assert was_finished(world, 0), "the held attempt was charged as a crash"
+    assert world.runner.violations == ()
+    assert world.watch.problems == []
 
 
 def test_a_clear_that_raises_anything_is_retried_and_its_error_is_shown() -> None:
@@ -847,6 +874,41 @@ def test_a_start_recorded_after_the_limit_passed_is_cancelled_without_waiting_fo
     assert result_matches(world, 0, Cancelled(reason=CancelReason.DEADLINE))
 
 
+def test_a_start_held_behind_the_writer_runs_with_the_limit_of_its_stamp() -> None:
+    """The limit counts from the instant the log stamps the start, not from the decision.
+
+    The writer holds the start for longer than the step's limit. Stamped with the decision's
+    limit, the attempt would begin already past it and be cancelled before it ran.
+    """
+    world = run_world(Scenario((step(FINISHES, limit_s=6.0),), start_waits_s=(7.0,)))
+    check_world(world)
+    assert was_finished(world, 0)
+    assert attempts_started(world, 0) == [1]
+
+
+def test_a_retry_held_behind_the_writer_past_the_limit_is_refused_and_the_step_cancelled() -> None:
+    """The first start fixed the limit, and it ran out while the retry waited for the writer.
+
+    The log refuses the retry by type instead of raising, and the step ends at its limit.
+    """
+    scenario = Scenario((step(RAISES, FINISHES, limit_s=6.0),), start_waits_s=(0.0, 7.0))
+    world = run_world(scenario)
+    check_world(world)
+    assert result_matches(world, 0, Cancelled(reason=CancelReason.DEADLINE))
+    assert attempts_started(world, 0) == [1]
+
+
+def test_a_pause_that_lands_while_a_start_waits_behind_the_writer_is_not_started_over() -> None:
+    """The pause is in the log before the start would be: the start is refused, and the step
+    runs once the run resumes."""
+    scenario = Scenario((step(FINISHES),), start_waits_s=(2.0,), pause_at=2.0)
+    world = run_world(scenario)
+    check_world(world)
+    assert world.exits[0] is RunRest.PARKED
+    assert was_finished(world, 0)
+    assert attempts_started(world, 0) == [1]
+
+
 behaviors = st.one_of(
     st.builds(AttemptReturns, after_s=st.sampled_from([0.0, 1.0, 4.0])),
     st.just(RAISES),
@@ -877,6 +939,9 @@ def scenarios(draw: st.DrawFn) -> Scenario:
         unavailable=0 if stop_at is not None else draw(st.sampled_from([0, 0, 1, 2])),
         pause_at=draw(st.sampled_from([None, 0.0, 0.5, 1.0, 2.0, 3.5, 5.0, 8.0])),
         stop_at=stop_at,
+        start_waits_s=draw(
+            st.sampled_from([(), (), (0.5,), (2.0,), (7.0,), (0.0, 2.0), (0.0, 7.0)])
+        ),
     )
 
 
