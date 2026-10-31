@@ -1,12 +1,19 @@
 """The runner loop: executes core's actions through a ``StepRunner`` and records what happened.
 
 ``decide`` owns every decision, including that a deadline passed. The loop owns tasks, bounds
-and the log: a step's ``StepStarted`` is durable before any of its I/O, ``clear`` runs before
-every attempt after the first, a late return from an attempt the loop gave up on is dropped,
-and no await on a runner is unbounded. The loop never looks at what kind of step it runs.
+and the log: a step's ``StepStarted`` is durable before any of its I/O, and ``clear`` runs
+before every attempt after the first. The loop never looks at what kind of step it runs.
 
 Each running attempt is a flight, one task that owns the attempt from ``clear`` to the record
 of how it ended. The main task only reads state, hands actions to flights and waits.
+
+One flight holds a tag at a time, and a flight holds it until every ``run`` and ``clear`` it
+started has returned: the awaitable ending is the only proof that its work ended, because a
+cancel cannot stop a thread. A call that ignores its cancel is nudged (its task is cancelled)
+and waited for, never given up on: nothing starts, clears or records on that tag meanwhile, and
+the tag is on the ``StallBoard`` for as long as it is held or failing. A result is recorded
+only over proof, which is a ``Cleared``, an ended ``Adopted`` or a returned result; a call
+that did not finish, or a ``clear`` that raised, proves nothing and goes back to ``clear``.
 """
 
 from __future__ import annotations
@@ -14,8 +21,10 @@ from __future__ import annotations
 import asyncio
 import math
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, assert_never
 
+from vs_core.api import RunStatus
 from vs_core.api.recovery import (
     Cancel,
     Cancelled,
@@ -29,6 +38,7 @@ from vs_core.api.recovery import (
     at_rest,
     decide,
     interruption_of,
+    may_start,
 )
 from vs_runtime._step_runner import Adopted, CancelSignal, Cleared, ClearUnavailableError
 
@@ -121,6 +131,93 @@ class StepLoopTiming:
                 raise StepLoopTimingError(name, value)
 
 
+class StallKind(StrEnum):
+    """Why a tag is not making progress, as far as the loop can tell."""
+
+    RUN_HELD = "run-held"
+    """A ``run`` ignored its cancel signal and its task's cancellation; it has not returned."""
+
+    CLEAR_HELD = "clear-held"
+    """A ``clear`` outlived its timeout and its task's cancellation; it has not returned."""
+
+    CLEAR_UNAVAILABLE = "clear-unavailable"
+    """The backend of ``clear`` could not be reached; the call returned and will be repeated."""
+
+    CLEAR_FAILED = "clear-failed"
+    """A ``clear`` raised or was cancelled; it has not cleared, so it will be repeated."""
+
+    STILL_RUNNING = "still-running"
+    """``clear`` found work still going and a cancelled attempt to attach did not end it."""
+
+    @property
+    def held(self) -> bool:
+        """Whether a call of the runner is still unfinished, so nothing may act on the tag."""
+        return self in (StallKind.RUN_HELD, StallKind.CLEAR_HELD)
+
+
+@dataclass(frozen=True)
+class Stall:
+    """One tag the loop is waiting on, for the report that shows a run its stalls."""
+
+    tag: RequestId
+    kind: StallKind
+    since: float
+    """Run-clock seconds at which the tag first stalled in its flight."""
+    error: BaseException | None
+    """What kept it stalled, when something raised: a programmer error stays visible here."""
+
+
+class StallBoard:
+    """The tags the loop is waiting on, written by the loop and read by whoever reports them.
+
+    An entry lasts as long as the flight that holds the tag. ``unproven`` lists steps the run's
+    end recorded over a ``clear`` that returned without clearing (an unreachable or failing
+    backend), the one residual the loop accepts, because ending a run cannot depend on a backend.
+    """
+
+    def __init__(self) -> None:
+        """Start with nothing stalled."""
+        self._stalls: dict[RequestId, Stall] = {}
+        self._unproven: list[Stall] = []
+
+    def stalls(self) -> tuple[Stall, ...]:
+        """The tags stalled now."""
+        return tuple(self._stalls.values())
+
+    def unproven(self) -> tuple[Stall, ...]:
+        """The steps an ending recorded without proof that their work ended."""
+        return tuple(self._unproven)
+
+    def holds(self, tag: RequestId) -> bool:
+        """Whether a call on ``tag`` is unfinished (see ``StallKind.held``)."""
+        stall = self._stalls.get(tag)
+        return stall is not None and stall.kind.held
+
+    def note(
+        self, tag: RequestId, kind: StallKind, error: BaseException | None, now: float
+    ) -> None:
+        """Show ``tag`` as stalled (called by the loop); the first note keeps its ``since``."""
+        earlier = self._stalls.get(tag)
+        self._stalls[tag] = Stall(tag, kind, now if earlier is None else earlier.since, error)
+
+    def release(self, tag: RequestId) -> None:
+        """Stop showing ``tag`` (called by the loop)."""
+        self._stalls.pop(tag, None)
+
+    def mark_unproven(self, tag: RequestId) -> None:
+        """Keep the stall of ``tag`` as one an ending recorded over (called by the loop)."""
+        stall = self._stalls.get(tag)
+        if stall is not None:
+            self._unproven.append(stall)
+
+
+@dataclass(frozen=True)
+class _Failed:
+    """A call of the runner that ended without a result: what it raised, or that it was cancelled."""
+
+    error: BaseException
+
+
 class _Flight:
     """One attempt, or one conclusion of a step with no attempt running."""
 
@@ -145,16 +242,26 @@ class _Flight:
 
 
 async def run_step_loop(
-    log: StepLog, runner: StepRunner, clock: SleepingClock, timing: StepLoopTiming
+    log: StepLog,
+    runner: StepRunner,
+    clock: SleepingClock,
+    timing: StepLoopTiming,
+    stalls: StallBoard,
 ) -> RunRest:
     """Execute the actions ``vs_core.api.recovery.decide`` asks for until the run ends or parks.
 
     ``clock`` is the run clock, the one ``decide`` reads and the log's records carry: it
-    excludes the time the run was not running. Cancelling this call, or an exception out of
-    it, is a crash: running attempts are abandoned with no record, and the next loop over
-    the same log runs them again.
+    excludes the time the run was not running. ``stalls`` shows every tag the loop is waiting
+    on. Cancelling this call, or an exception out of it, is a crash: running attempts are
+    abandoned with no record, and the next loop over the same log runs them again.
+
+    A run ends only when no tag is held: a held tag keeps its step open, so ``decide`` does
+    not ask for ``End`` while work may still be going, and the stall shows until the call
+    returns. A run that parks while tags are held returns ``PARKED`` and its caller must exit
+    the process, which is how a held call stops; the next process's ``clear`` reaps what the
+    exit left, and the unfinished attempts are charged as a crash.
     """
-    return await _StepLoop(log, runner, clock, timing).run()
+    return await _StepLoop(log, runner, clock, timing, stalls).run()
 
 
 class _StepLoop:
@@ -164,14 +271,18 @@ class _StepLoop:
         runner: StepRunner,
         clock: SleepingClock,
         timing: StepLoopTiming,
+        stalls: StallBoard,
     ) -> None:
         self._log = log
         self._runner = runner
         self._clock = clock
         self._timing = timing
+        self._stalls = stalls
         self._flights: dict[RequestId, _Flight] = {}
         self._appending = asyncio.Lock()
         self._input: asyncio.Task[None] | None = None
+        self._nudged = asyncio.Event()
+        """Set when a flight changed what ``decide`` reads without ending: a start, a held call."""
 
     async def run(self) -> RunRest:
         try:
@@ -189,6 +300,8 @@ class _StepLoop:
         actions = decide(self._log.state, self._clock.now())
         if rest is RunRest.PARKED:
             return await self._park(actions)
+        if self._drain_waits_on_the_exit():
+            return RunRest.PARKED
         end = next((a for a in actions if isinstance(a, End)), None)
         if end is not None and not self._flights:
             await self._record_ended(end)
@@ -196,16 +309,34 @@ class _StepLoop:
         await self._wake(self._dispatch(actions))
         return None
 
+    def _drain_waits_on_the_exit(self) -> bool:
+        """Whether a pause's drain has nothing left but calls that only the process exit stops.
+
+        A held call ignored its cancel and its task's cancellation, and no record may name its tag
+        while it runs. The drain cannot finish in this process, so the loop returns as a parked run
+        does: the caller exits, the call dies with the process, and the next process's log ends the
+        attempt, parks the drain and admits the operator's Resume.
+        """
+        state = self._log.state
+        draining = state.run.status is RunStatus.DRAINING and state.run.park is not None
+        return (
+            draining
+            and bool(self._flights)
+            and all(self._stalls.holds(tag) for tag in self._flights)
+        )
+
     async def _park(self, actions: tuple[Action, ...]) -> RunRest | None:
         """A parked run starts nothing and takes no result: it only stops what still runs.
 
         Core drops a result in a parked epoch, so a ``Settle`` it still decides (a step
-        past its limit) waits for the resume instead of being dispatched over and over.
+        past its limit) waits for the resume instead of being dispatched over and over. A
+        flight whose call is held cannot stop, so it does not keep the run from parking: the
+        process exits, and that is what ends it.
         """
         stops = tuple(a for a in actions if isinstance(a, Cancel) and a.tag in self._flights)
         self._dispatch(stops)
-        self._release_unstarted()
-        if not self._flights:
+        self._release_flights()
+        if all(self._stalls.holds(tag) for tag in self._flights):
             return RunRest.PARKED
         await self._wake(None)
         return None
@@ -229,10 +360,10 @@ class _StepLoop:
                     assert_never(action)
         return wake_at
 
-    def _release_unstarted(self) -> None:
-        """A parked run starts nothing, so flights still waiting on ``clear`` stop waiting."""
+    def _release_flights(self) -> None:
+        """A parked run starts and settles nothing, so flights that retry stop retrying."""
         for flight in self._flights.values():
-            if not flight.started and not flight.parked:
+            if not flight.parked:
                 flight.parked = True
                 flight.changed.set()
 
@@ -265,12 +396,23 @@ class _StepLoop:
 
     def _launch(self, flight: _Flight, work: Coroutine[object, object, None]) -> None:
         self._flights[flight.tag] = flight
-        flight.task = asyncio.ensure_future(work)
+        flight.task = asyncio.ensure_future(self._fly(flight, work))
+
+    async def _fly(self, flight: _Flight, work: Coroutine[object, object, None]) -> None:
+        """Run a flight's work; the tag stops stalling when the flight ends, however it ends."""
+        try:
+            await work
+        finally:
+            self._stalls.release(flight.tag)
+
+    async def _until_nudged(self) -> None:
+        await self._nudged.wait()
 
     async def _wake(self, wake_at: float | None) -> None:
         if self._input is None or self._input.done():
             self._input = asyncio.ensure_future(self._log.next_input())
-        waits: set[asyncio.Future[None]] = {self._input}
+        nudged = asyncio.ensure_future(self._until_nudged())
+        waits: set[asyncio.Future[None]] = {self._input, nudged}
         waits.update(f.task for f in self._flights.values() if f.task is not None)
         now = self._clock.now()
         deadlines = [f.deadline_at for f in self._flights.values() if f.deadline_at is not None]
@@ -282,6 +424,8 @@ class _StepLoop:
         try:
             await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
         finally:
+            nudged.cancel()
+            self._nudged.clear()
             if timer is not None:
                 timer.cancel()
         self._reap()
@@ -300,9 +444,13 @@ class _StepLoop:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _record_started(self, run: Run) -> None:
+    async def _record_started(self, run: Run) -> bool:
+        """Record the start unless the run no longer lets the step start: the decision is stale."""
         async with self._appending:
+            if not may_start(self._log.state, run.tag, self._clock.now()):
+                return False
             await self._log.step_started(run)
+            return True
 
     async def _record_finished(self, tag: RequestId, attempt: int, result: StepResult) -> None:
         async with self._appending:
@@ -325,7 +473,8 @@ class _StepLoop:
         if cleared is None or (flight.signal.is_set() and isinstance(cleared, Cleared)):
             await self._finish_unstarted(flight)
             return
-        await self._record_started(run)
+        if not await self._record_started(run):
+            return
         flight.started = True
         outcome = await self._run_bounded(run, flight.signal)
         await self._finish_attempt(run, flight, outcome)
@@ -338,10 +487,12 @@ class _StepLoop:
                 flight.tag, self._last_attempt(flight.tag), Cancelled(reason=reason)
             )
 
-    async def _finish_attempt(self, run: Run, flight: _Flight, outcome: StepResult | None) -> None:
+    async def _finish_attempt(
+        self, run: Run, flight: _Flight, outcome: StepResult | _Failed
+    ) -> None:
         reason = flight.signal.reason
         pause = None if reason is None else interruption_of(reason)
-        if outcome is None:
+        if isinstance(outcome, _Failed):
             await self._finish_without_result(run, flight)
         elif pause is not None and isinstance(outcome, Cancelled):
             await self._record_interrupted(run.tag, run.attempt, pause)
@@ -349,20 +500,21 @@ class _StepLoop:
             await self._record_outcome(run, outcome)
 
     async def _finish_without_result(self, run: Run, flight: _Flight) -> None:
-        """The attempt raised or was given up on: clear what it left, then say how it ended."""
+        """The attempt raised or was cancelled: clear what it left, then say how it ended."""
         cleared = await self._clear(flight)
         reason = flight.signal.reason
         pause = None if reason is None else interruption_of(reason)
         if isinstance(cleared, Adopted) and cleared.result is not None:
-            await self._record_outcome(run, cleared.result)
-        elif reason is None or pause is not None:
-            await self._record_interrupted(run.tag, run.attempt, pause or Interruption.RAISED)
+            await self._finish_attempt(run, flight, cleared.result)
+        elif reason is None or pause is not None or self._parked():
+            why = Interruption.PAUSE if self._parked() else (pause or Interruption.RAISED)
+            await self._record_interrupted(run.tag, run.attempt, why)
         elif isinstance(cleared, Adopted):
-            outcome = await self._run_bounded(run, flight.signal)
-            if outcome is None:
+            ended = await self._end_alive(flight, run)
+            if isinstance(ended, Cleared) or ended is None:
                 await self._record_outcome(run, Cancelled(reason=reason))
             else:
-                await self._finish_attempt(run, flight, outcome)
+                await self._finish_attempt(run, flight, ended)
         else:
             await self._record_outcome(run, Cancelled(reason=reason))
 
@@ -371,7 +523,12 @@ class _StepLoop:
         if (cleared is None and not flight.ending) or self._parked():
             return
         if isinstance(cleared, Adopted) and cleared.result is None:
-            await self._end_adopted(flight)
+            open_step = self._log.open_step(flight.tag)
+            if open_step is not None:
+                run = Run(flight.step, flight.tag, open_step.started + 1, open_step.deadline_at)
+                await self._end_alive(flight, run)
+            if self._parked():
+                return
         await self._record_finished(flight.tag, self._last_attempt(flight.tag), result)
 
     def _parked(self) -> bool:
@@ -389,34 +546,90 @@ class _StepLoop:
         else:
             await self._record_finished(run.tag, run.attempt, result)
 
-    async def _end_adopted(self, flight: _Flight) -> None:
-        """Attach to work ``clear`` adopted and still going, with the signal set, so it ends."""
-        open_step = self._log.open_step(flight.tag)
-        if open_step is not None:
-            flight.signal.set(CancelReason.WITHDRAWN)
-            run = Run(flight.step, flight.tag, open_step.started + 1, open_step.deadline_at)
-            await self._run_bounded(run, flight.signal)
+    async def _end_alive(self, flight: _Flight, run: Run) -> StepResult | Cleared | None:
+        """``clear`` found work still going: attach to it, cancel set, until it ends.
+
+        Never records. Returns the proof that the work ended (the attached ``run`` returned a
+        result, or ``clear`` now answers ``Cleared`` or an ended ``Adopted``), or ``None`` when a
+        parked run stops waiting. An attach that did not finish proves nothing: the work may
+        be alive, so it asks ``clear`` again, with backoff.
+        """
+        flight.signal.set(CancelReason.WITHDRAWN)
+        delay = self._timing.clear_backoff_s
+        while True:
+            outcome = await self._run_bounded(run, flight.signal)
+            if not isinstance(outcome, _Failed):
+                return outcome
+            cleared = await self._clear(flight)
+            if not isinstance(cleared, Adopted):
+                return cleared
+            if cleared.result is not None:
+                return cleared.result
+            self._stalls.note(flight.tag, StallKind.STILL_RUNNING, outcome.error, self._clock.now())
+            if flight.parked:
+                return None
+            await self._backoff(flight, delay)
+            delay = min(delay * 2, self._timing.clear_backoff_max_s)
 
     async def _clear(self, flight: _Flight) -> Adopted | Cleared | None:
-        """``clear`` the tag, retrying while its backend is unreachable.
+        """``clear`` the tag until it answers; a call that raised has not cleared.
 
-        Returns ``None`` when the wait was given up (see ``_Flight.abandons_clear``).
+        A failing or unreachable backend is retried with backoff and shown on the stall
+        board, whatever it raised. Returns ``None`` when the wait was given up (see
+        ``_Flight.abandons_clear``); an ending gives up, and leaves the step ``unproven``.
         """
         delay = self._timing.clear_backoff_s
         while True:
-            try:
-                return await self._bounded(
-                    self._runner.clear(flight.step, flight.tag), self._timing.clear_timeout_s
-                )
-            except (ClearUnavailableError, TimeoutError):
-                if flight.abandons_clear():
-                    return None
-            flight.changed.clear()
-            await self._first_of(self._clock.sleep(delay), flight.changed.wait())
+            outcome = await self._clear_once(flight)
+            if not isinstance(outcome, _Failed):
+                self._stalls.release(flight.tag)
+                return outcome
+            kind = (
+                StallKind.CLEAR_UNAVAILABLE
+                if isinstance(outcome.error, ClearUnavailableError)
+                else StallKind.CLEAR_FAILED
+            )
+            self._stalls.note(flight.tag, kind, outcome.error, self._clock.now())
+            if flight.abandons_clear():
+                if flight.ending:
+                    self._stalls.mark_unproven(flight.tag)
+                return None
+            await self._backoff(flight, delay)
             delay = min(delay * 2, self._timing.clear_backoff_max_s)
 
-    async def _run_bounded(self, run: Run, signal: CancelSignal) -> StepResult | None:
-        """Run the attempt; give a cancel its grace, then cancel the task, then let go of it."""
+    async def _backoff(self, flight: _Flight, delay: float) -> None:
+        flight.changed.clear()
+        await self._first_of(self._clock.sleep(delay), flight.changed.wait())
+
+    async def _clear_once(self, flight: _Flight) -> Adopted | Cleared | _Failed:
+        """One ``clear``, waited for until it returns. Its timeout makes it stall, not end.
+
+        Past the timeout the task is cancelled, which is only a nudge: the call may be
+        blocking work in a thread that cancellation cannot stop. The loop therefore waits for
+        the call to return, with the tag held and on the board, before it does anything else.
+        """
+        task = asyncio.ensure_future(self._runner.clear(flight.step, flight.tag))
+        try:
+            await self._first_of(_await(task), self._clock.sleep(self._timing.clear_timeout_s))
+            if not task.done():
+                self._stalls.note(flight.tag, StallKind.CLEAR_HELD, None, self._clock.now())
+                self._nudged.set()
+                task.cancel()
+                await _await(task)
+        finally:
+            if not task.done():
+                task.cancel()
+            task.add_done_callback(_drop)
+        return _outcome_of(task)
+
+    async def _run_bounded(self, run: Run, signal: CancelSignal) -> StepResult | _Failed:
+        """Run the attempt and wait for it to return: the result, or why it has none.
+
+        A cancel gives the call its grace period; past it the task is cancelled, which is only
+        a nudge (see ``_clear_once``), and the loop waits for the call to return, with the tag
+        held and on the board.
+        """
+        self._nudged.set()
         task = asyncio.ensure_future(
             self._runner.run(run.step, run.tag, run.attempt, run.deadline_at, signal)
         )
@@ -425,27 +638,17 @@ class _StepLoop:
             if not task.done():
                 await self._first_of(_await(task), self._clock.sleep(self._timing.cancel_grace_s))
             if not task.done():
+                self._stalls.note(run.tag, StallKind.RUN_HELD, None, self._clock.now())
+                self._nudged.set()
                 task.cancel()
-                await self._first_of(_await(task), self._clock.sleep(self._timing.cancel_grace_s))
+                await _await(task)
         finally:
             if not task.done():
                 task.cancel()
             task.add_done_callback(_drop)
-        if task.done() and not task.cancelled() and task.exception() is None:
-            return task.result()
-        return None
-
-    async def _bounded[T](self, call: Coroutine[object, object, T], seconds: float) -> T:
-        task = asyncio.ensure_future(call)
-        try:
-            await self._first_of(_await(task), self._clock.sleep(seconds))
-        finally:
-            if not task.done():
-                task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
-        if not task.done() or task.cancelled():
-            raise TimeoutError
-        return task.result()
+        if self._stalls.holds(run.tag):
+            self._stalls.release(run.tag)
+        return _outcome_of(task)
 
     @staticmethod
     async def _first_of(*waits: Awaitable[object]) -> None:
@@ -463,6 +666,14 @@ async def _await[T](task: asyncio.Future[T]) -> None:
     await asyncio.wait({task})
 
 
+def _outcome_of[T](task: asyncio.Future[T]) -> T | _Failed:
+    """What a finished call returned, or why it did not: it raised, or its task was cancelled."""
+    if task.cancelled():
+        return _Failed(asyncio.CancelledError())
+    error = task.exception()
+    return task.result() if error is None else _Failed(error)
+
+
 def _drop[T](task: asyncio.Future[T]) -> None:
     """Consume the result of an attempt the loop gave up on, so a late return is dropped."""
     if not task.cancelled():
@@ -471,6 +682,9 @@ def _drop[T](task: asyncio.Future[T]) -> None:
 
 __all__ = [
     "OpenStep",
+    "Stall",
+    "StallBoard",
+    "StallKind",
     "StepLog",
     "StepLoopTiming",
     "StepLoopTimingError",

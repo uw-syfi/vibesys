@@ -47,12 +47,15 @@ from vs_runtime.api.step_runner import (
     CancelSignal,
     Cleared,
     OpenStep,
+    StallBoard,
+    StallKind,
     StepLoopTiming,
     StepLoopTimingError,
     run_step_loop,
 )
 from vs_runtime.api.testing import (
     AttemptHangs,
+    AttemptHolds,
     AttemptRaises,
     AttemptReturns,
     FakeRunRecords,
@@ -102,10 +105,20 @@ class Scenario:
     adopts: bool = False
     clear_takes_s: float = 0.0
     unavailable: int = 0
+    cancel_polls: int = 0
+    """How many times a cancel leaves the work alive and its call raising, as a job still completing."""
+    clear_holds: int = 0
+    """How many calls of ``clear`` ignore cancellation for ``CLEAR_HOLD_S`` seconds."""
+    clear_failures: int = 0
+    """How many calls of ``clear`` raise an error that is not ``ClearUnavailableError``."""
     pause_at: float | None = None
     """When the operator pauses the run now (core's ``pause_now``)."""
     stop_at: float | None = None
     """When the operator stops the run; ``None`` waits until every step has its result."""
+
+
+CLEAR_HOLD_S = 20.0
+CLEAR_BUG = RuntimeError("a bug inside clear")
 
 
 @dataclass
@@ -114,8 +127,71 @@ class World:
     seed: FakeRunSeed
     records: FakeRunRecords
     runner: FakeStepRunner
+    watch: Watch
     boundaries: int = 0
     exits: list[RunRest] = field(default_factory=list)
+    unproven: list[core.RequestId] = field(default_factory=list)
+    """The steps an ending recorded without proof that their work ended."""
+
+
+class Watch:
+    """What the loop owes a tag it holds, checked at every boundary and before every record.
+
+    A boundary is a log append, a runner call, and every start and end of a wait on the clock the
+    loop and the runner share (``WatchedClock``), so a stall is seen while it lasts.
+    """
+
+    def __init__(self) -> None:
+        self.board = StallBoard()
+        self.runner: FakeStepRunner | None = None
+        self.problems: list[str] = []
+        """Each way the loop acted on a tag it should have left alone, as it was seen."""
+        self.shown: set[StallKind] = set()
+        """Every kind of stall the board showed at some boundary."""
+        self.errors: list[BaseException] = []
+        """Every error the board showed with a stall."""
+
+    def new_board(self) -> StallBoard:
+        """The board of the next process: a restart starts with nothing stalled."""
+        self.board = StallBoard()
+        return self.board
+
+    def boundary(self) -> None:
+        if self.runner is None:
+            return
+        for tag in self.runner.resisting():
+            if not self.board.holds(tag):
+                self.problems.append(f"{tag.root} resists a cancel and is not shown held")
+        for stall in self.board.stalls():
+            self.shown.add(stall.kind)
+            if stall.error is not None:
+                self.errors.append(stall.error)
+
+    def before_record(self, what: str, tag: core.RequestId) -> None:
+        """No record on a tag while a call on it is unfinished, nor a result over live work."""
+        if self.runner is None:
+            return
+        if tag in self.runner.pending():
+            self.problems.append(f"{what} on {tag.root} while a call of it is unfinished")
+        unproven = any(stall.tag == tag for stall in self.board.unproven())
+        if what == "step_finished" and tag in self.runner.running() and not unproven:
+            self.problems.append(f"step_finished on {tag.root} over work still going")
+
+
+class WatchedClock:
+    """The virtual clock, with the watch run at each end of every wait."""
+
+    def __init__(self, inner: VirtualClock, watch: Watch) -> None:
+        self._inner = inner
+        self._watch = watch
+
+    def now(self) -> float:
+        return self._inner.now()
+
+    async def sleep(self, seconds: float) -> None:
+        self._watch.boundary()
+        await self._inner.sleep(seconds)
+        self._watch.boundary()
 
 
 class Switch:
@@ -139,31 +215,37 @@ class Switch:
 
 
 class CrashingLog:
-    def __init__(self, inner: StepLog, switch: Switch) -> None:
+    def __init__(self, inner: StepLog, switch: Switch, watch: Watch) -> None:
         self._inner = inner
         self._switch = switch
+        self._watch = watch
 
     @property
     def state(self) -> core.CoreState:
         return self._inner.state
 
     async def _around(self, write: Callable[[], Awaitable[None]]) -> None:
+        self._watch.boundary()
         self._switch.tick()
         await write()
+        self._watch.boundary()
         self._switch.tick()
 
     def open_step(self, tag: core.RequestId) -> OpenStep | None:
         return self._inner.open_step(tag)
 
     async def step_started(self, run: Run) -> None:
+        self._watch.before_record("step_started", run.tag)
         await self._around(lambda: self._inner.step_started(run))
 
     async def step_finished(self, tag: core.RequestId, attempt: int, result: StepResult) -> None:
+        self._watch.before_record("step_finished", tag)
         await self._around(lambda: self._inner.step_finished(tag, attempt, result))
 
     async def attempt_interrupted(
         self, tag: core.RequestId, attempt: int, why: Interruption
     ) -> None:
+        self._watch.before_record("attempt_interrupted", tag)
         await self._around(lambda: self._inner.attempt_interrupted(tag, attempt, why))
 
     async def run_ended(self, end: End) -> None:
@@ -174,9 +256,10 @@ class CrashingLog:
 
 
 class CrashingRunner:
-    def __init__(self, inner: FakeStepRunner, switch: Switch) -> None:
+    def __init__(self, inner: FakeStepRunner, switch: Switch, watch: Watch) -> None:
         self._inner = inner
         self._switch = switch
+        self._watch = watch
 
     async def run(
         self,
@@ -186,14 +269,18 @@ class CrashingRunner:
         deadline_at: float,
         cancel: CancelSignal,
     ) -> StepResult:
+        self._watch.boundary()
         self._switch.tick()
         result = await self._inner.run(step, tag, attempt, deadline_at, cancel)
+        self._watch.boundary()
         self._switch.tick()
         return result
 
     async def clear(self, step: core.Request, tag: core.RequestId) -> Adopted | Cleared:
+        self._watch.boundary()
         self._switch.tick()
         outcome = await self._inner.clear(step, tag)
+        self._watch.boundary()
         self._switch.tick()
         return outcome
 
@@ -255,11 +342,19 @@ def run_world(scenario: Scenario, kill_at: int | None = None) -> World:
         behaviors = specs[tag].behaviors
         return behaviors[min(attempt, len(behaviors)) - 1]
 
+    watch = Watch()
     runner = FakeStepRunner(
-        clock, adopts=scenario.adopts, clear_takes_s=scenario.clear_takes_s, behave=behave
+        WatchedClock(clock, watch),
+        adopts=scenario.adopts,
+        clear_takes_s=scenario.clear_takes_s,
+        behave=behave,
+        cancel_needs_polls=scenario.cancel_polls,
     )
     runner.clears_unavailable(scenario.unavailable)
-    world = World(scenario, seed, FakeRunRecords(), runner)
+    runner.clears_hold(CLEAR_HOLD_S, scenario.clear_holds)
+    runner.clears_fail(CLEAR_BUG, scenario.clear_failures)
+    watch.runner = runner
+    world = World(scenario, seed, FakeRunRecords(), runner, watch)
     return run_virtual(clock, run_epochs(world, clock, kill_at))
 
 
@@ -270,11 +365,20 @@ async def run_epochs(world: World, clock: VirtualClock, kill_at: int | None) -> 
     while True:
         log = FakeStepLog(world.records, world.seed.state, world.seed.registry, clock)
         if parked:
-            log.resume_run()
+            resume = core.ControlInput(
+                control_id=core.ControlId(root=f"resume-{len(world.exits)}"),
+                action="resume",
+                when="now",
+            )
+            log.push(core.RunControlEvent(control=resume, now_at=clock.now()))
         switch = Switch(None if killed else kill_at)
         loop = asyncio.ensure_future(
             run_step_loop(
-                CrashingLog(log, switch), CrashingRunner(world.runner, switch), clock, TIMING
+                CrashingLog(log, switch, world.watch),
+                CrashingRunner(world.runner, switch, world.watch),
+                WatchedClock(clock, world.watch),
+                TIMING,
+                world.watch.new_board(),
             )
         )
         switch.loop = loop
@@ -285,6 +389,8 @@ async def run_epochs(world: World, clock: VirtualClock, kill_at: int | None) -> 
         if isinstance(operated, Exception):
             raise operated
         world.boundaries += switch.ticks
+        world.unproven.extend(stall.tag for stall in world.watch.board.unproven())
+        world.runner.process_died()
         killed = True
         if isinstance(outcome, asyncio.CancelledError):
             parked = False
@@ -368,13 +474,14 @@ def check_log_of(world: World, tag: core.RequestId) -> None:
 
 def check_world(world: World) -> None:
     assert world.exits[-1] is RunRest.ENDED
-    assert len(world.records.ends) <= 1, "the run's end was recorded twice"
+    assert world.records.count("run_ended") <= 1, "the run's end was recorded twice"
     for tag in world.seed.tags:
         check_log_of(world, tag)
     check_clear_precedes_every_rerun(world)
     check_runs_carry_the_step_limit(world)
-    assert world.runner.running() == (), "work was left running"
+    assert set(world.runner.running()) <= set(world.unproven), "work was left running"
     assert world.runner.violations == ()
+    assert world.watch.problems == []
 
 
 def check_clear_precedes_every_rerun(world: World) -> None:
@@ -491,6 +598,7 @@ def test_the_run_ends_even_when_the_backend_stays_unreachable() -> None:
     assert world.exits[-1] is RunRest.ENDED
     assert result_matches(world, 0, Cancelled(reason=CancelReason.RUN_ENDING))
     assert world.runner.running() != ()
+    assert world.unproven == [world.seed.tags[0]]
 
 
 def test_a_stop_cancels_what_runs_and_ends_the_run_once() -> None:
@@ -521,11 +629,98 @@ def test_a_pause_at_any_moment_parks_and_resumes_to_the_same_end() -> None:
         check_world(run_world(Scenario(steps, pause_at=pause_at)))
 
 
+def test_a_job_still_running_after_its_cancel_is_not_recorded_cancelled_until_clear_proves_it_ended() -> (
+    None
+):
+    scenario = Scenario((step(HANGS, limit_s=5.0),), adopts=True, cancel_polls=3)
+    world = run_world(scenario)
+    check_world(world)
+    assert result_matches(world, 0, Cancelled(reason=CancelReason.DEADLINE))
+    assert StallKind.STILL_RUNNING in world.watch.shown
+    assert clear_calls(world) == scenario.cancel_polls, (
+        "clear is asked after each cancel that proved nothing"
+    )
+
+
+def test_an_ending_waits_for_a_job_that_is_still_running_after_its_cancel() -> None:
+    scenario = Scenario((step(HANGS),), adopts=True, cancel_polls=4, stop_at=3.0)
+    world = run_world(scenario)
+    check_world(world)
+    assert result_matches(world, 0, Cancelled(reason=CancelReason.RUN_ENDING))
+    assert StallKind.STILL_RUNNING in world.watch.shown
+    assert world.unproven == []
+
+
+def test_a_run_that_ignores_its_cancel_holds_its_tag_and_shows_it_until_it_returns() -> None:
+    scenario = Scenario((step(AttemptHolds(for_s=30.0), FINISHES, limit_s=5.0),))
+    world = run_world(scenario)
+    check_world(world)
+    assert StallKind.RUN_HELD in world.watch.shown
+    assert result_matches(world, 0, Cancelled(reason=CancelReason.DEADLINE))
+
+
+def test_a_clear_that_outlives_its_timeout_holds_its_tag_and_nothing_overlaps_it() -> None:
+    world = run_world(Scenario((step(RAISES, FINISHES),), clear_holds=1))
+    check_world(world)
+    assert StallKind.CLEAR_HELD in world.watch.shown
+    assert clear_calls(world) == 2, (
+        "one clear after the raise and one before attempt 2, never overlapping"
+    )
+    assert was_finished(world, 0)
+
+
+def test_an_ending_waits_for_a_held_tag_and_records_the_run_end_after_it_returns() -> None:
+    world = run_world(Scenario((step(AttemptHolds(for_s=40.0)),), stop_at=3.0))
+    check_world(world)
+    assert StallKind.RUN_HELD in world.watch.shown
+    assert result_matches(world, 0, Cancelled(reason=CancelReason.RUN_ENDING))
+
+
+def test_a_pause_leaves_a_held_tag_to_the_process_exit() -> None:
+    scenario = Scenario((step(AttemptHolds(for_s=500.0), FINISHES),), pause_at=1.0)
+    world = run_world(scenario)
+    check_world(world)
+    assert world.exits[0] is RunRest.PARKED
+    assert attempts_started(world, 0) == [1, 2], "the held attempt was charged as a crash"
+
+
+def test_a_clear_that_raises_anything_is_retried_and_its_error_is_shown() -> None:
+    world = run_world(Scenario((step(RAISES, FINISHES),), clear_failures=3))
+    check_world(world)
+    assert StallKind.CLEAR_FAILED in world.watch.shown
+    assert CLEAR_BUG in world.watch.errors
+    assert clear_calls(world) >= 4
+    assert was_finished(world, 0)
+
+
+def test_a_clear_that_keeps_raising_does_not_stop_the_run_ending() -> None:
+    scenario = Scenario((step(RAISES, FINISHES),), clear_failures=1000, stop_at=20.0)
+    world = run_world(scenario)
+    assert world.exits[-1] is RunRest.ENDED
+    assert result_matches(world, 0, Cancelled(reason=CancelReason.RUN_ENDING))
+    assert world.unproven == [world.seed.tags[0]]
+    assert CLEAR_BUG in world.watch.errors
+
+
+def test_a_start_recorded_after_the_limit_passed_is_cancelled_without_waiting_for_a_wake() -> None:
+    """A restarted attempt whose ``clear`` failed past the step's limit was never cancelled.
+
+    The main task woke only for ends, inputs and future deadlines, so a deadline that passed
+    before the start was recorded left it waiting on nothing: a deadlock, now a nudge.
+    """
+    steps = (step(HANGS, limit_s=6.0), step(AttemptReturns(after_s=0.0), limit_s=6.0))
+    scenario = Scenario(steps, retries=1, clear_failures=3)
+    world = run_world(scenario, kill_at=1)
+    check_world(world)
+    assert result_matches(world, 0, Cancelled(reason=CancelReason.DEADLINE))
+
+
 behaviors = st.one_of(
     st.builds(AttemptReturns, after_s=st.sampled_from([0.0, 1.0, 4.0])),
     st.just(RAISES),
     st.just(HANGS),
     st.just(DEAF),
+    st.builds(AttemptHolds, for_s=st.sampled_from([3.0, 10.0, 25.0]), returns_anyway=st.booleans()),
 )
 
 
@@ -544,6 +739,9 @@ def scenarios(draw: st.DrawFn) -> Scenario:
         retries=draw(st.integers(1, 3)),
         adopts=draw(st.booleans()),
         clear_takes_s=draw(st.sampled_from([0.0, 0.5])),
+        cancel_polls=draw(st.sampled_from([0, 0, 1, 3])),
+        clear_holds=draw(st.sampled_from([0, 0, 1])),
+        clear_failures=draw(st.sampled_from([0, 0, 1, 3])),
         unavailable=0 if stop_at is not None else draw(st.sampled_from([0, 0, 1, 2])),
         pause_at=draw(st.sampled_from([None, 0.0, 0.5, 1.0, 2.0, 3.5, 5.0, 8.0])),
         stop_at=stop_at,

@@ -8,6 +8,7 @@ from vs_runtime._fake_core_execution import (
     FakePublicationDelivery,
     FakeRequestExecution,
 )
+from vs_runtime._fake_stage_work_reaper import FakeStageWorkReaper
 from vs_runtime._fake_step_log import (
     FakeLogUncertainError,
     FakeQuery,
@@ -18,14 +19,17 @@ from vs_runtime._fake_step_log import (
 )
 from vs_runtime._fake_step_runner import (
     AttemptHangs,
+    AttemptHolds,
     AttemptRaises,
     AttemptReturns,
     Behavior,
     FakeStepRunner,
     LeftoverWorkError,
+    OverlappingCallError,
     RunnerCall,
     RunnerMethod,
     StepTagMismatchError,
+    StillRunningAfterCancelError,
     finished_result,
 )
 from vs_runtime._run_clocks import CrashableRunClock, ProbedRunClock
@@ -48,6 +52,11 @@ from vs_runtime._shell_kit import (
     scripted_host,
 )
 from vs_runtime._validation_passes import MemoryValidationPasses
+from vs_runtime.api.stage_work_contracts import (
+    StageWorkPlace,
+    StageWorkReaperContract,
+    StageWorkUnderTest,
+)
 from vs_runtime.api.step_log_contracts import StepLogContract, StepLogUnderTest
 from vs_runtime.api.step_runner_contracts import StepRunnerContract, StepRunnerUnderTest
 from vs_runtime.fake_docker_daemon import DaemonBackend, daemon_docker_config, daemon_engine
@@ -110,6 +119,7 @@ __all__ = [
     "LEASE",
     "Admitting",
     "AttemptHangs",
+    "AttemptHolds",
     "AttemptRaises",
     "AttemptReturns",
     "Behavior",
@@ -141,6 +151,7 @@ __all__ = [
     "FakeRunRecords",
     "FakeRunSeed",
     "FakeRuns",
+    "FakeStageWorkReaper",
     "FakeStepLog",
     "FakeStepRunner",
     "FakeStopTimer",
@@ -155,6 +166,7 @@ __all__ = [
     "Launch",
     "LeftoverWorkError",
     "MemoryValidationPasses",
+    "OverlappingCallError",
     "ProbedRunClock",
     "RecordingSearch",
     "Run",
@@ -163,11 +175,15 @@ __all__ = [
     "Script",
     "ScriptedExecutors",
     "ScriptedHost",
+    "StageWorkPlace",
+    "StageWorkReaperContract",
+    "StageWorkUnderTest",
     "StepLogContract",
     "StepLogUnderTest",
     "StepRunnerContract",
     "StepRunnerUnderTest",
     "StepTagMismatchError",
+    "StillRunningAfterCancelError",
     "TranslatorFactory",
     "UnsafeControlSchemaError",
     "control_schema_fields",

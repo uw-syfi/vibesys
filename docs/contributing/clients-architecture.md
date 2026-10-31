@@ -287,6 +287,7 @@ There is no per-package opt-in or frozen-package list.
 | S4 | Feature and app code contains no raw colors or lengths: a string or template literal with a hex color, `rgb(`, `rgba(`, `hsl(`, `hsla(`, `oklch(`, `color-mix(`, or a `px`, `rem`, `em`, `vh` or `vw` length is an error | Grit rule `tools/lint-rules/strict-no-raw-values.grit` |
 | S6 | Feature and app packages import UI only from `@vibesys/ui`'s `.` and `./tokens`. Their other workspace imports are the non-UI libraries in `STRICT_WORKSPACE_IMPORTS` and feature packages composed by apps; third-party imports are `react`, `react-dom` and `xstate` (`STRICT_THIRD_PARTY`; Electron and Node builtins stay confined by `external-dependencies`). Test code is exempt. An app may also import `@vibesys/ui/tokens.css`, `@vibesys/ui/fonts.css` and `@vibesys/ui/components.css` in its entry wiring. Deep imports are refused by `imports-use-exports` and `.dependency-cruiser.mjs`, feature-to-feature imports by `layer-direction` | `check_package_graph.mjs` rule `strict-imports` |
 | S8 | `@vibesys/ui` itself uses tokens: `strict-no-raw-values.grit` also runs on `libs/ui/src` except the token table (`src/tokens/`) and tests, and `tools/lint-rules/ui-no-raw-css-values.grit` bans raw colors and lengths in the declarations of `libs/ui/src/*.css` except the generated `tokens.css`. Lengths in `@media` conditions are not declarations and stay | the two Grit rules, wired by `biome.json` |
+| S10 | Every `var(--name)` without a fallback in a stylesheet or TypeScript source names a custom property that a stylesheet declares or a TypeScript style sets (a `'--name':` key or `setProperty('--name', ...)`). A deleted token whose last reader is in another change otherwise builds, merges and leaves the declaration invalid at runtime. The scan is by name, not scope. A property set under a computed name cannot be found, so a `var()` on it needs a fallback | `check_css_custom_properties.mjs`, run by `pnpm check:ts-architecture` |
 
 `biome.json` excludes `libs/ui/src/primitives.css` from the stylesheet rule: the old primitives'
 pixel values (`10px`, `5px`, `14px`, ...) have no token to read, and a token would change what they
@@ -436,6 +437,16 @@ any difference; `scripts/check_clients.sh` runs it (see "Client checks before a 
 
 When the job fails on a screenshot, it uploads the actual and the diff as the
 `ui-gallery-test-results-1` artifact.
+
+Every glyph the UI draws comes from a bundled font. The body face has no check mark, bullet or
+cross, so a symbol set in it is drawn by whatever font the machine falls back to, and the same
+screen differs between operating systems (the gallery's baselines are the one place it showed
+first). Set a symbol in `var(--font-mono)`, whose bundled face has it, or use an icon. Enforced:
+the gallery's `every glyph the gallery draws comes from a bundled font` test and the
+`bundled-font` check in the desktop shell's `screenCheck` ask Chromium which font drew each text
+(`CSS.getPlatformFontsForNode`) and fail on any family `fonts.css` does not declare. One fixture
+writes run titles in other scripts and emoji on purpose, to test wrapping, and is exempt
+(`OTHER_SCRIPTS` in `screens.spec.ts`).
 
 ## Where a Run screen change goes
 

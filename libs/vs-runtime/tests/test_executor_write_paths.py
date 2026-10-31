@@ -30,6 +30,10 @@ OWNERS = frozenset(
         "_shell_kit.py",
         # The Fake step runner stands in for a runner, so it builds the result a runner returns.
         "_fake_step_runner.py",
+        # The job runners' shared core builds the result of a step, whose observation is the one
+        # it ends with (sequence 0): a runner keeps no observation row, so the factory, which
+        # numbers rows across retries, has nothing to number.
+        "_job_step_run.py",
     }
 )
 RECORD_NAMES = frozenset({"ExecutionRecord", "ExecutionPhase"})

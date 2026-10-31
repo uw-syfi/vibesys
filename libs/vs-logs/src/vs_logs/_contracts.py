@@ -186,6 +186,19 @@ class LogStoreContract:
         assert len({left_open.stream_id, fresh.stream_id}) == 2
         assert subject.reader.read(left_open.stream_id, Tail(100), 100).data == b"partial"
 
+    def test_a_stream_opened_again_for_one_owner_after_a_crash_starts_apart_and_empty(self) -> None:
+        """A re-run stage's stream shares no bytes with the partial output its dead predecessor left."""
+        subject = self.store_under_test(LogLimits())
+        owner = ContractOwner(name="gate")
+        crashed = subject.store.open(owner, "cmd")
+        crashed.write(OutputStream.STDERR, b"partial")
+        with subject.reopen().open(owner, "cmd") as rerun:
+            assert subject.reader.read(rerun.stream_id, Tail(100), 100).data == b""
+            rerun.write(OutputStream.STDOUT, b"fresh")
+        assert rerun.stream_id != crashed.stream_id
+        assert subject.reader.read(rerun.stream_id, Tail(100), 100).data == b"fresh"
+        assert subject.reader.read(crashed.stream_id, Tail(100), 100).data == b"partial"
+
     def test_a_torn_last_index_line_is_cut_when_the_store_reopens(self) -> None:
         """A short index write (a full disk) never corrupts the records written after it."""
         for seed in range(_CASES):

@@ -25,6 +25,7 @@ export type CheckId =
   | 'focus-ring'
   | 'chrome-clear'
   | 'drag-region'
+  | 'bundled-font'
   | 'stability';
 
 export interface Violation {

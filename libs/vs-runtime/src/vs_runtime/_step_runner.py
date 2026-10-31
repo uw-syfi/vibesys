@@ -96,7 +96,12 @@ class StepRunner(Protocol):
         passes it on as the limit of the work it starts. A raise is "no result": the loop
         treats it like a crash of the attempt. Once ``cancel`` is set the runner returns
         ``Cancelled`` within the loop's grace period; the loop cancels the task otherwise and
-        calls ``clear``.
+        keeps waiting.
+
+        The call returns, or raises, only when its work has ended. Cancelling its task is a
+        nudge, not a proof: work in a thread keeps going, so a runner that blocks in a thread
+        shields it and lets the call end when the thread has. The loop starts nothing on the
+        tag, ``clear`` included, until this call has returned.
         """
         ...
 
@@ -107,6 +112,8 @@ class StepRunner(Protocol):
         its leftovers from the step itself and keeps no index from tag to step. Idempotent.
         Returns ``Cleared`` for a step that never started. Returns only when nothing carrying
         the tag runs or will start. Raises ``ClearUnavailableError`` when the backend cannot
-        be reached.
+        be reached, and any other error when it could not clear: a ``clear`` that raised has
+        not cleared, and the loop calls it again. Like ``run``, it returns only when its own
+        work has ended, however it is cancelled.
         """
         ...

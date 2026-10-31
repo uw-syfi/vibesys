@@ -19,10 +19,14 @@ from vs_proto.api import (
     StepFinished,
     StepStarted,
 )
+from vs_proto.api import (
+    RunEnded as RunEndedRecord,
+)
 
 from .types.common import Value
 from .types.kernel import CoreEvent
 from .types.records import Request, RequestObserved
+from .types.settlement import RunResultProposal
 from .types.steps import (
     Cancelled,
     CancelReason,
@@ -34,7 +38,7 @@ from .types.steps import (
 )
 
 if TYPE_CHECKING:
-    from ._actions import Run
+    from ._actions import End, Run
     from ._registry import OperationRegistry
     from .types.common import RequestId
 
@@ -52,6 +56,7 @@ class _FinishedBody(Value):
 _EVENT = TypeAdapter(CoreEvent)
 _REQUEST = TypeAdapter(Request)
 _FINISHED = TypeAdapter(_FinishedBody)
+_RESULT = TypeAdapter(RunResultProposal)
 
 _CANCEL_REASONS = {
     CancelReason.DEADLINE: StepCancelReason.DEADLINE,
@@ -109,6 +114,17 @@ def interrupted_message(tag: RequestId, attempt: int, why: Interruption) -> Atte
 def decode_interruption(message: AttemptInterrupted) -> Interruption:
     """Why the attempt of an ``AttemptInterrupted`` ended."""
     return _INTERRUPTION_NAMES[message.reason]
+
+
+def ended_message(end: End) -> RunEndedRecord:
+    """The end of the run: its result, published once nothing is open."""
+    return RunEndedRecord(schema_version=SCHEMA_VERSION, result=_RESULT.dump_json(end.result))
+
+
+def decode_run_ended(message: RunEndedRecord) -> RunResultProposal:
+    """The result a ``RunEnded`` record published, refused when written by another encoding."""
+    _same_encoding(message.schema_version)
+    return _RESULT.validate_json(message.result)
 
 
 def decode_event(message: CoreInput, registry: OperationRegistry | None) -> CoreEvent:
