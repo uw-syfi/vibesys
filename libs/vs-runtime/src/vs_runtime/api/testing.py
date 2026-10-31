@@ -50,6 +50,7 @@ from vs_runtime._shell_kit import (
     request_executors,
     scripted_host,
 )
+from vs_runtime._holding_step_runner import HoldAt, HoldingStepRunner
 from vs_runtime._validation_passes import MemoryValidationPasses
 from vs_runtime.api.stage_work_contracts import (
     StageWorkPlace,
@@ -159,6 +160,8 @@ __all__ = [
     "FakeTrustedShellCall",
     "FakeWorkspace",
     "FakeWorkspaces",
+    "HoldAt",
+    "HoldingStepRunner",
     "HostOptions",
     "InvalidReply",
     "Launch",
