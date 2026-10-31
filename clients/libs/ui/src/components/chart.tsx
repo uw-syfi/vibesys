@@ -653,7 +653,7 @@ function Tip(props: {
 /** A mark of a key: the line, a dot, or a ring. */
 export type ChartLegendMark = 'line' | 'dot' | 'ring';
 
-/** One entry of a `ChartKey`. */
+/** One entry of a `ChartLegend`. */
 export interface ChartLegendItem {
   readonly label: string;
   readonly mark: ChartLegendMark;
@@ -668,21 +668,7 @@ export function ChartLegend(props: {
     <ul className="vs-dotlegend vs-chart-legend" aria-label={props.label}>
       {props.items.map(item => (
         <li key={item.label} className="vs-dotlegend-item">
-          <svg
-            className="vs-chart-legend-mark"
-            width={20}
-            height={14}
-            viewBox="0 0 20 14"
-            aria-hidden="true"
-          >
-            {item.mark === 'line' ? (
-              <line className="vs-chart-step" x1={0} x2={20} y1={7} y2={7} />
-            ) : item.mark === 'dot' ? (
-              <circle className="vs-chart-point" cx={10} cy={7} r={POINT_RADIUS} />
-            ) : (
-              <circle className="vs-chart-ring" cx={10} cy={7} r={SELECTED_RADIUS - 1} />
-            )}
-          </svg>
+          <span className="vs-chart-legend-mark" data-mark={item.mark} aria-hidden="true" />
           <Text variant="small" tone="muted">
             {item.label}
           </Text>
@@ -738,7 +724,7 @@ export function ChartPanel(props: {
 }
 
 /**
- * Charts side by side, as wide as the others and none narrower than a chart can be read (280 px):
+ * Charts side by side, as wide as the others and none narrower than a chart and its axis titles can be read:
  * as many to a row as fit, the rest on the rows below.
  */
 export function ChartColumns(props: {readonly children: ReactNode}): JSX.Element {

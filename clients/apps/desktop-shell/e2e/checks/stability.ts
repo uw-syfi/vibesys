@@ -22,7 +22,7 @@ export interface Anchor {
 export const RUN_ANCHORS: readonly Anchor[] = [
   {
     name: 'performance chart',
-    selector: '[role="group"][aria-label*="of each measured idea over the run"]',
+    selector: '[role="group"][aria-label*="of each reading over the run"]',
   },
   {name: 'time bar', selector: '[role="slider"][aria-label="Run position"]'},
   {
@@ -47,13 +47,22 @@ export async function anchorsOf(
   anchors: readonly Anchor[] = RUN_ANCHORS,
 ): Promise<readonly (Placed | null)[]> {
   return page.evaluate(wanted => {
+    // Where an element is on the page, not on the screen: a page that scrolled to a pressed row has
+    // moved nothing, so the scroll of the window and of every container above it is added back.
+    const scrolled = (element: Element): number => {
+      let total = window.scrollY;
+      for (let node = element.parentElement; node !== null; node = node.parentElement) {
+        total += node.scrollTop;
+      }
+      return total;
+    };
     const kept = new Map<string, Element>();
     const placed = wanted.map(anchor => {
       const element = document.querySelector(anchor.selector);
       if (element === null) return null;
       kept.set(anchor.name, element);
       const {x, y, width, height} = element.getBoundingClientRect();
-      return {name: anchor.name, x, y, width, height};
+      return {name: anchor.name, x, y: y + scrolled(element), width, height};
     });
     (window as unknown as {screenAnchors: Map<string, Element>}).screenAnchors = kept;
     return placed;
@@ -71,12 +80,28 @@ export async function stabilityViolations(
   anchors: readonly Anchor[] = RUN_ANCHORS,
 ): Promise<Violation[]> {
   const now = await page.evaluate(wanted => {
+    // Where an element is on the page, not on the screen: a page that scrolled to a pressed row has
+    // moved nothing, so the scroll of the window and of every container above it is added back.
+    const scrolled = (element: Element): number => {
+      let total = window.scrollY;
+      for (let node = element.parentElement; node !== null; node = node.parentElement) {
+        total += node.scrollTop;
+      }
+      return total;
+    };
     const kept = (window as unknown as {screenAnchors: Map<string, Element>}).screenAnchors;
     return wanted.map(anchor => {
       const element = document.querySelector(anchor.selector);
       if (element === null) return null;
       const {x, y, width, height} = element.getBoundingClientRect();
-      return {name: anchor.name, x, y, width, height, same: kept.get(anchor.name) === element};
+      return {
+        name: anchor.name,
+        x,
+        y: y + scrolled(element),
+        width,
+        height,
+        same: kept.get(anchor.name) === element,
+      };
     });
   }, anchors);
   const found: Violation[] = [];
