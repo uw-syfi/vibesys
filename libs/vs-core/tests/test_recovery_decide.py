@@ -201,13 +201,14 @@ def scripts(draw: st.DrawFn) -> Script:
         running = [step for step in open_steps if step.running]
         idle = [step for step in open_steps if not step.running]
         choices = ["restart", *(["prepare"] if len(build.steps) < 3 else [])]
-        choices += ["start"] if idle else []
+        startable = [step for step in idle if not step.spent]
+        choices += ["start"] if startable else []
         choices += ["interrupt", "finish", "cancel"] if running else []
         match draw(st.sampled_from(choices)):
             case "prepare":
                 build.prepare(draw(st.integers(0, 3)))
             case "start":
-                build.start(draw(st.sampled_from(idle)))
+                build.start(draw(st.sampled_from(startable)))
             case "interrupt":
                 build.interrupt(draw(st.sampled_from(running)), draw(st.sampled_from(Interruption)))
             case "finish":
@@ -394,7 +395,7 @@ def test_a_step_that_asks_to_be_cancelled_still_runs_its_first_attempt() -> None
     )
 
 
-PAUSES = st.sampled_from([core.RunStatus.PAUSED, core.RunStatus.DRAINING, core.RunStatus.PARKED])
+PAUSES = st.sampled_from([core.RunStatus.PAUSED, core.RunStatus.DRAINING])
 
 
 def paused(
@@ -406,7 +407,7 @@ def paused(
 ) -> core.CoreState:
     standing = core.RunPark(
         control_id=core.ControlId(root="pause"),
-        epoch=0,
+        epoch=state.records.recovery.epoch,
         immediate=immediate,
         deadline_at=deadline_at,
     )
@@ -445,6 +446,62 @@ def test_a_pause_now_cancels_every_running_step_and_starts_none(script: Script) 
         }
         assert {a.reason for a in actions if isinstance(a, Cancel)} <= {CancelReason.PAUSE_NOW}
         assert not [a for a in actions if isinstance(a, Run)]
+
+
+@settings(max_examples=examples(pr=12, nightly=200))
+@given(
+    retries=st.integers(0, 3),
+    count=st.integers(1, 3),
+    action=st.sampled_from(["pause", "pause_now"]),
+    drain_seconds=st.floats(min_value=10.0, max_value=50.0),
+)
+def test_a_pause_parks_once_the_attempts_it_interrupted_are_back_to_unstarted(
+    retries: int, count: int, action: Literal["pause", "pause_now"], drain_seconds: float
+) -> None:
+    """A Pause now parks at once, over attempts the loop cancels; a pause drains until they end.
+
+    The loop cancels the attempts and a call that cannot be stopped ends with the process, so a
+    drain that cancels does not wait for them (`_run_park`); a pause that does not waits for every
+    step to be unstarted or ended, and an interrupted attempt is neither until the interruption
+    sends its step back to the state of one no one has started, with no result, no failure and
+    no retry spent. That alone lets the drain park the run, so the next epoch runs the step again.
+    The drain's deadline is further off than the records of the test (a second each) reach.
+    """
+    build = Builder()
+    for _ in range(count):
+        build.prepare(retries)
+    for step in build.steps:
+        build.start(step)
+    state = fold(build.script.records, SEED)
+    pause = core.RunControlEvent(
+        control=core.ControlInput(
+            control_id=core.ControlId(root="pause"),
+            action=action,
+            owner=core.PauseOwner.OPERATOR if action == "pause" else None,
+        ),
+        now_at=state.run.now_at,
+        drain_seconds=drain_seconds,
+    )
+    build.append(Oneof("core_input", input_message(pause)))
+    state = fold(build.script.records[-1:], state)
+    waiting = core.RunStatus.PARKED if action == "pause_now" else core.RunStatus.DRAINING
+    assert state.run.status is waiting
+    for number, step in enumerate(build.steps, 1):
+        build.interrupt(step, Interruption.PAUSE)
+        state = fold(build.script.records[-1:], state)
+        record = state.records.record(step.tag)
+        assert record is not None
+        assert record.phase is core.RequestPhase.PREPARED
+        assert record.observation is None
+        assert record.retry_count == 0
+        attempts = state.steps.of(step.tag)
+        assert attempts is not None
+        assert attempts.uncharged == 1
+        assert (state.run.status is core.RunStatus.PARKED) == (
+            action == "pause_now" or number == count
+        )
+    assert at_rest(state) is RunRest.PARKED
+    assert {row.phase for row in state.records.records} == {core.RequestPhase.PREPARED}
 
 
 @settings(max_examples=examples(pr=12, nightly=200))
@@ -567,11 +624,21 @@ def test_a_later_epoch_ends_every_running_attempt_and_charges_it(script: Script)
 @pytest.mark.parametrize("status", list(core.RunStatus))
 def test_a_run_is_at_rest_only_when_it_ended_or_parked(status: core.RunStatus) -> None:
     run = SEED.run.model_copy(update={"status": status})
-    expected = {
-        core.RunStatus.TERMINAL: RunRest.ENDED,
-        core.RunStatus.PARKED: RunRest.PARKED,
-    }.get(status)
+    expected = RunRest.PARKED if status is core.RunStatus.PARKED else None
     assert at_rest(SEED.model_copy(update={"run": run})) is expected
+
+
+def test_a_run_has_ended_when_its_end_is_recorded_not_when_the_kernel_reaches_terminal() -> None:
+    result = core.RunResultProposal(outcome="cancelled", reason="done")
+    run = SEED.run.model_copy(update={"status": core.RunStatus.TERMINAL, "result": result})
+    terminal = SEED.model_copy(update={"run": run})
+    assert at_rest(terminal) is None
+    published = terminal.model_copy(update={"steps": StepsState(ended=result)})
+    assert at_rest(published) is RunRest.ENDED
+    resumed = published.model_copy(
+        update={"run": run.model_copy(update={"status": core.RunStatus.RUNNING, "result": None})}
+    )
+    assert at_rest(resumed) is None
 
 
 @pytest.mark.parametrize("reason", list(CancelReason))
@@ -626,3 +693,21 @@ def test_a_turn_declares_what_an_interruption_means_on_its_turn_spec(
     else:
         assert isinstance(action, Run)
         assert action.attempt == 2
+
+
+@settings(max_examples=examples(pr=12, nightly=200))
+@given(script=scripts(), late=st.floats(0, 1e4))
+def test_a_parked_run_starts_and_settles_nothing_and_stops_only_what_still_runs(
+    script: Script, late: float
+) -> None:
+    """An overdue step waits for the resume; an attempt the park found running is cancelled."""
+    for length, (state, open_steps) in enumerate(states(script)):
+        parked = paused(state, core.RunStatus.PARKED)
+        actions = decide(parked, clock_of(length) + late)
+        running = {step.tag for step in open_steps if step.running}
+        stops = {a.tag for a in actions if isinstance(a, Cancel)}
+        assert stops == running
+        assert {a.reason for a in actions if isinstance(a, Cancel)} <= {CancelReason.PAUSE_NOW}
+        assert not [a for a in actions if isinstance(a, Run | Settle | End)]
+        if not running:
+            assert actions == (Wait(until=None),)

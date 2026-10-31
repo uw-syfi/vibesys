@@ -34,7 +34,13 @@ from tests.support.command_runner_contract import (
 )
 
 from vs_agent.api.images import agent_image
-from vs_sandbox.api import CommandRunner, DockerSandbox, LocalShellRunner, SubprocessDockerCli
+from vs_sandbox.api import (
+    STEP_TAG_ENV,
+    CommandRunner,
+    DockerSandbox,
+    LocalShellRunner,
+    SubprocessDockerCli,
+)
 from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sim.api import (
     MonotonicClock,
@@ -140,6 +146,27 @@ class TestLocalShellRunner(CommandRunnerContract):
         harness = _ShellHarness(
             LocalShellRunner(
                 tmp_path,
+                max_output_chars=CAP,
+                threads=OsThreads(),
+                launcher=SubprocessPipedProcessLauncher(),
+            ),
+            tmp_path,
+        )
+        try:
+            yield harness
+        finally:
+            harness.close()
+
+
+class TestMarkedLocalShellRunner(CommandRunnerContract):
+    """A stage command under the step mark runs in a leader wrapper; the contract still holds."""
+
+    @pytest.fixture
+    def harness(self, tmp_path: Path) -> Iterator[Harness]:
+        harness = _ShellHarness(
+            LocalShellRunner(
+                tmp_path,
+                env={STEP_TAG_ENV: "run-a:vs-x"},
                 max_output_chars=CAP,
                 threads=OsThreads(),
                 launcher=SubprocessPipedProcessLauncher(),

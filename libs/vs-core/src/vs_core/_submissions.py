@@ -21,7 +21,7 @@ from ._proofs import (
     current_admission,
     released_owner,
 )
-from ._run_park import scope_in_flight
+from ._turn_permit import scope_in_flight
 from ._values import digest
 from .types.attempts import (
     AttemptPhase,

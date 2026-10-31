@@ -9,6 +9,12 @@ The deadline dump is separate. Its absolute unix time is
 ``VIBESYS_PYTEST_DUMP_AT``, which ``scripts/pytest_job_deadline.py`` derives
 from the job's ``timeout-minutes``. Unset, as in a local run, nothing is armed.
 
+Every process arms its own timer: the controller and each xdist worker, because
+only a worker knows which test it is inside. A worker's stderr is captured
+while a test runs, so its dump is written with pytest's capture suspended,
+the way ``capsys.disabled()`` does; otherwise the one process that can name
+the running test is the one whose output is lost.
+
 Stacks are printed with ``traceback.print_stack`` while this thread holds the
 GIL. ``faulthandler.dump_traceback_later`` is not used: its watchdog dumps from
 a C thread that holds no GIL, and that has segfaulted workers in this suite
@@ -26,7 +32,7 @@ import threading
 import time
 import traceback
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import pytest
 
@@ -34,6 +40,7 @@ from scripts.pytest_job_deadline import DUMP_AT_ENV
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
+    from contextlib import AbstractContextManager
     from types import FrameType
 
 _TIMER = pytest.StashKey[threading.Timer]()
@@ -41,14 +48,24 @@ _TIMER = pytest.StashKey[threading.Timer]()
 _NAMED_PROGRESS = 1
 
 
+class _CaptureManager(Protocol):
+    """The part of pytest's capture manager the dump needs."""
+
+    def global_and_fixture_disabled(self) -> AbstractContextManager[None]:
+        """Suspend every capture, so a write reaches the process's real streams."""
+        ...
+
+
 class _Running:
     """Which test this process is inside, and whether its deadline timer is armed."""
 
     def __init__(self) -> None:
         self.nodeid: str | None = None
+        self.started_at: float | None = None
         self.armed = False
         self.verbose = 0
         self.worker = False
+        self.capture: _CaptureManager | None = None
 
 
 _state = _Running()
@@ -57,17 +74,30 @@ _state = _Running()
 @contextmanager
 def running_test(nodeid: str) -> Iterator[None]:
     """Name ``nodeid`` as the test a deadline dump should report."""
-    previous = _state.nodeid
+    previous = (_state.nodeid, _state.started_at)
     _state.nodeid = nodeid
+    _state.started_at = time.monotonic()
     try:
         yield
     finally:
-        _state.nodeid = previous
+        _state.nodeid, _state.started_at = previous
 
 
 def current_nodeid() -> str | None:
     """The test running on this worker, or None between tests."""
     return _state.nodeid
+
+
+def running_seconds() -> float | None:
+    """How long the running test has run, or None between tests."""
+    if _state.started_at is None:
+        return None
+    return time.monotonic() - _state.started_at
+
+
+def process_name() -> str:
+    """Which pytest process this is: an xdist worker's id (``gw1``), else the controller."""
+    return os.environ.get("PYTEST_XDIST_WORKER", "controller")
 
 
 @contextmanager
@@ -99,11 +129,16 @@ def render_dump(
     nodeid: str | None,
     frames: Mapping[int, FrameType],
     names: Mapping[int, str],
+    *,
+    process: str = "controller",
+    running_s: float | None = None,
 ) -> str:
-    """The cancel dump: the running test, then one stack per thread."""
+    """The cancel dump: this process, the running test and how long it ran, one stack per thread."""
     running = nodeid or "(no test is running)"
+    if nodeid is not None and running_s is not None:
+        running = f"{running} (running for {running_s:.0f} s)"
     parts = [
-        "pytest job deadline: dumping every thread before the job is cancelled\n",
+        f"pytest job deadline: dumping every thread of {process} before the job is cancelled\n",
         f"running test: {running}\n",
     ]
     for ident, frame in frames.items():
@@ -119,6 +154,7 @@ def pytest_configure(config: pytest.Config) -> None:
     _state.verbose = int(config.option.verbose)
     # workerinput exists only in an xdist worker. The controller reports outcomes.
     _state.worker = hasattr(config, "workerinput")
+    _state.capture = config.pluginmanager.getplugin("capturemanager")
     raw = os.environ.get(DUMP_AT_ENV)
     if _state.armed or raw is None or raw == "":
         return
@@ -128,7 +164,7 @@ def pytest_configure(config: pytest.Config) -> None:
         message = f"{DUMP_AT_ENV} must be a unix time, got {raw!r}"
         raise pytest.UsageError(message) from error
     delay = deadline - time.time()
-    timer = threading.Timer(max(delay, 0.0), _dump)
+    timer = threading.Timer(max(delay, 0.0), dump_stacks)
     timer.daemon = True
     timer.start()
     _state.armed = True
@@ -153,13 +189,32 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
     sys.stderr.flush()
 
 
-def _dump() -> None:
+def dump_stacks() -> None:
+    """Write every thread's stack, and the running test, to the process's real stderr.
+
+    Called by the deadline timer. A test is running when it fires, and pytest is capturing
+    that test's stderr, so the write happens with the capture suspended.
+    """
     frames = _thread_frames()
     names = {
         thread.ident: thread.name for thread in threading.enumerate() if thread.ident is not None
     }
-    sys.stderr.write(render_dump(current_nodeid(), frames, names))
-    sys.stderr.flush()
+    text = render_dump(
+        current_nodeid(), frames, names, process=process_name(), running_s=running_seconds()
+    )
+    with _uncaptured():
+        sys.stderr.write(text)
+        sys.stderr.flush()
+
+
+@contextmanager
+def _uncaptured() -> Iterator[None]:
+    """Let a write reach the process's real streams, whatever pytest is capturing."""
+    if _state.capture is None:
+        yield
+        return
+    with _state.capture.global_and_fixture_disabled():
+        yield
 
 
 def _thread_frames() -> dict[int, FrameType]:
