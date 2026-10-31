@@ -73,6 +73,132 @@ func (AgentClient) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_store_v1_agent_attrs_proto_rawDescGZIP(), []int{0}
 }
 
+// How a turn's recorded cost was reached. A turn records one of PRICE_TABLE, PROVIDER_REPORTED,
+// UNKNOWN_MODEL and NOT_REPORTED, each what the provider library said. Absence of the field means
+// only that the line was recorded before it existed. The two LEGACY values are never recorded: a
+// reader derives them for such a line, and a row keyed on a basis never mixes turns priced in
+// different ways.
+type UsageCostBasis int32
+
+const (
+	UsageCostBasis_USAGE_COST_BASIS_UNSPECIFIED UsageCostBasis = 0
+	// Computed from the turn's tokens and agentshim's pinned price table.
+	UsageCostBasis_USAGE_COST_BASIS_PRICE_TABLE UsageCostBasis = 1
+	// The CLI's own figure: Claude's when its result named no model, and opencode's.
+	UsageCostBasis_USAGE_COST_BASIS_PROVIDER_REPORTED UsageCostBasis = 2
+	// A model in the turn has no price, so the turn has no recorded cost.
+	UsageCostBasis_USAGE_COST_BASIS_UNKNOWN_MODEL UsageCostBasis = 3
+	// An older turn that has a recorded cost.
+	UsageCostBasis_USAGE_COST_BASIS_LEGACY_RECORDED UsageCostBasis = 4
+	// An older turn that has none.
+	UsageCostBasis_USAGE_COST_BASIS_LEGACY_UNPRICED UsageCostBasis = 5
+	// The provider reported no cost and none is computed (a CLI that prints none, a resumed turn
+	// whose increment is unknown), or the library named no source for the cost it has.
+	UsageCostBasis_USAGE_COST_BASIS_NOT_REPORTED UsageCostBasis = 6
+)
+
+// Enum value maps for UsageCostBasis.
+var (
+	UsageCostBasis_name = map[int32]string{
+		0: "USAGE_COST_BASIS_UNSPECIFIED",
+		1: "USAGE_COST_BASIS_PRICE_TABLE",
+		2: "USAGE_COST_BASIS_PROVIDER_REPORTED",
+		3: "USAGE_COST_BASIS_UNKNOWN_MODEL",
+		4: "USAGE_COST_BASIS_LEGACY_RECORDED",
+		5: "USAGE_COST_BASIS_LEGACY_UNPRICED",
+		6: "USAGE_COST_BASIS_NOT_REPORTED",
+	}
+	UsageCostBasis_value = map[string]int32{
+		"USAGE_COST_BASIS_UNSPECIFIED":       0,
+		"USAGE_COST_BASIS_PRICE_TABLE":       1,
+		"USAGE_COST_BASIS_PROVIDER_REPORTED": 2,
+		"USAGE_COST_BASIS_UNKNOWN_MODEL":     3,
+		"USAGE_COST_BASIS_LEGACY_RECORDED":   4,
+		"USAGE_COST_BASIS_LEGACY_UNPRICED":   5,
+		"USAGE_COST_BASIS_NOT_REPORTED":      6,
+	}
+)
+
+func (x UsageCostBasis) Enum() *UsageCostBasis {
+	p := new(UsageCostBasis)
+	*p = x
+	return p
+}
+
+func (x UsageCostBasis) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (UsageCostBasis) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_store_v1_agent_attrs_proto_enumTypes[1].Descriptor()
+}
+
+func (UsageCostBasis) Type() protoreflect.EnumType {
+	return &file_vibesys_store_v1_agent_attrs_proto_enumTypes[1]
+}
+
+func (x UsageCostBasis) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use UsageCostBasis.Descriptor instead.
+func (UsageCostBasis) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_agent_attrs_proto_rawDescGZIP(), []int{1}
+}
+
+// The service speed a request ran at.
+type UsageSpeed int32
+
+const (
+	UsageSpeed_USAGE_SPEED_UNSPECIFIED UsageSpeed = 0
+	UsageSpeed_USAGE_SPEED_STANDARD    UsageSpeed = 1
+	UsageSpeed_USAGE_SPEED_FAST        UsageSpeed = 2
+	UsageSpeed_USAGE_SPEED_ULTRAFAST   UsageSpeed = 3
+)
+
+// Enum value maps for UsageSpeed.
+var (
+	UsageSpeed_name = map[int32]string{
+		0: "USAGE_SPEED_UNSPECIFIED",
+		1: "USAGE_SPEED_STANDARD",
+		2: "USAGE_SPEED_FAST",
+		3: "USAGE_SPEED_ULTRAFAST",
+	}
+	UsageSpeed_value = map[string]int32{
+		"USAGE_SPEED_UNSPECIFIED": 0,
+		"USAGE_SPEED_STANDARD":    1,
+		"USAGE_SPEED_FAST":        2,
+		"USAGE_SPEED_ULTRAFAST":   3,
+	}
+)
+
+func (x UsageSpeed) Enum() *UsageSpeed {
+	p := new(UsageSpeed)
+	*p = x
+	return p
+}
+
+func (x UsageSpeed) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (UsageSpeed) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_store_v1_agent_attrs_proto_enumTypes[2].Descriptor()
+}
+
+func (UsageSpeed) Type() protoreflect.EnumType {
+	return &file_vibesys_store_v1_agent_attrs_proto_enumTypes[2]
+}
+
+func (x UsageSpeed) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use UsageSpeed.Descriptor instead.
+func (UsageSpeed) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_agent_attrs_proto_rawDescGZIP(), []int{2}
+}
+
 // Attrs for agent_turn, including the final usage and transcript byte length.
 // `client` names the executor. The provider and model stay the role's selection.
 type AgentTurnAttrs struct {
@@ -93,9 +219,12 @@ type AgentTurnAttrs struct {
 	// Set when the turn ends. The transcript stays a stream, never a second blob.
 	TranscriptLength *uint64 `protobuf:"varint,12,opt,name=transcript_length,json=transcriptLength,proto3,oneof" json:"transcript_length,omitempty"`
 	// Wall timestamps reported by execution events, independent of elapsed span clocks.
-	StartedAt     *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
-	EndedAt       *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=ended_at,json=endedAt,proto3" json:"ended_at,omitempty"`
-	Client        *AgentClient           `protobuf:"varint,15,opt,name=client,proto3,enum=vibesys.store.v1.AgentClient,oneof" json:"client,omitempty"`
+	StartedAt *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	EndedAt   *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=ended_at,json=endedAt,proto3" json:"ended_at,omitempty"`
+	Client    *AgentClient           `protobuf:"varint,15,opt,name=client,proto3,enum=vibesys.store.v1.AgentClient,oneof" json:"client,omitempty"`
+	// One entry for each finished turn the span ran, in the order they finished. `usage` is their
+	// sum, and counts only each turn's main conversation.
+	UsageDetails  []*TurnUsageDetail `protobuf:"bytes,16,rep,name=usage_details,json=usageDetails,proto3" json:"usage_details,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -235,6 +364,13 @@ func (x *AgentTurnAttrs) GetClient() AgentClient {
 	return AgentClient_AGENT_CLIENT_UNSPECIFIED
 }
 
+func (x *AgentTurnAttrs) GetUsageDetails() []*TurnUsageDetail {
+	if x != nil {
+		return x.UsageDetails
+	}
+	return nil
+}
+
 // Absence means unreported. A reported zero stays present on the wire.
 type TokenUsage struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -328,11 +464,214 @@ func (x *TokenUsage) GetDurationMs() uint64 {
 	return 0
 }
 
+// What one finished turn spent beyond the main-conversation totals of `TokenUsage`: who paid
+// for it, and how its cost was reached.
+type TurnUsageDetail struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The provider's own id of the conversation the turn ran in. It joins a turn to the transcript
+	// the CLI wrote for it. Absent when the provider named none.
+	ProviderSessionId *string `protobuf:"bytes,1,opt,name=provider_session_id,json=providerSessionId,proto3,oneof" json:"provider_session_id,omitempty"`
+	// Absent only on a line recorded before the basis existed: a turn that reports no cost records
+	// NOT_REPORTED.
+	CostBasis *UsageCostBasis `protobuf:"varint,2,opt,name=cost_basis,json=costBasis,proto3,enum=vibesys.store.v1.UsageCostBasis,oneof" json:"cost_basis,omitempty"`
+	// A superset of the turn's `TokenUsage`: the rows sum to the whole turn, which can include
+	// models the main conversation did not run. Empty when the provider reports no split.
+	ByModel       []*ModelTurnUsage `protobuf:"bytes,3,rep,name=by_model,json=byModel,proto3" json:"by_model,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TurnUsageDetail) Reset() {
+	*x = TurnUsageDetail{}
+	mi := &file_vibesys_store_v1_agent_attrs_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TurnUsageDetail) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TurnUsageDetail) ProtoMessage() {}
+
+func (x *TurnUsageDetail) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_agent_attrs_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TurnUsageDetail.ProtoReflect.Descriptor instead.
+func (*TurnUsageDetail) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_agent_attrs_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *TurnUsageDetail) GetProviderSessionId() string {
+	if x != nil && x.ProviderSessionId != nil {
+		return *x.ProviderSessionId
+	}
+	return ""
+}
+
+func (x *TurnUsageDetail) GetCostBasis() UsageCostBasis {
+	if x != nil && x.CostBasis != nil {
+		return *x.CostBasis
+	}
+	return UsageCostBasis_USAGE_COST_BASIS_UNSPECIFIED
+}
+
+func (x *TurnUsageDetail) GetByModel() []*ModelTurnUsage {
+	if x != nil {
+		return x.ByModel
+	}
+	return nil
+}
+
+// One model's share of one finished turn. Cost is never recomputed from these counts here: the
+// provider library prices them, and `recorded_usd` is its figure.
+type ModelTurnUsage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// As the provider reports it.
+	Model string `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	// Input tokens, cached ones included.
+	Input         uint64 `protobuf:"varint,2,opt,name=input,proto3" json:"input,omitempty"`
+	CacheRead     uint64 `protobuf:"varint,3,opt,name=cache_read,json=cacheRead,proto3" json:"cache_read,omitempty"`
+	CacheCreation uint64 `protobuf:"varint,4,opt,name=cache_creation,json=cacheCreation,proto3" json:"cache_creation,omitempty"`
+	// The part of `cache_creation` written with a one-hour lifetime.
+	CacheCreation_1H uint64 `protobuf:"varint,5,opt,name=cache_creation_1h,json=cacheCreation1h,proto3" json:"cache_creation_1h,omitempty"`
+	// Output tokens, reasoning included.
+	Output    uint64 `protobuf:"varint,6,opt,name=output,proto3" json:"output,omitempty"`
+	Reasoning uint64 `protobuf:"varint,7,opt,name=reasoning,proto3" json:"reasoning,omitempty"`
+	// The requests the turn made. Only the primary row counts them, so summing rows counts each once.
+	Turns uint32 `protobuf:"varint,8,opt,name=turns,proto3" json:"turns,omitempty"`
+	// The pinned price table's price of these tokens at the standard tier; absent when the table
+	// has no price for the model. A list price at that tier, not a bill.
+	RecordedUsd *float64 `protobuf:"fixed64,9,opt,name=recorded_usd,json=recordedUsd,proto3,oneof" json:"recorded_usd,omitempty"`
+	// Absent: the provider reported none, which reads as standard.
+	Speed *UsageSpeed `protobuf:"varint,10,opt,name=speed,proto3,enum=vibesys.store.v1.UsageSpeed,oneof" json:"speed,omitempty"`
+	// The model the turn was run with. Exactly one row of a turn is.
+	Primary       bool `protobuf:"varint,11,opt,name=primary,proto3" json:"primary,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelTurnUsage) Reset() {
+	*x = ModelTurnUsage{}
+	mi := &file_vibesys_store_v1_agent_attrs_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelTurnUsage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelTurnUsage) ProtoMessage() {}
+
+func (x *ModelTurnUsage) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_agent_attrs_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelTurnUsage.ProtoReflect.Descriptor instead.
+func (*ModelTurnUsage) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_agent_attrs_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ModelTurnUsage) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *ModelTurnUsage) GetInput() uint64 {
+	if x != nil {
+		return x.Input
+	}
+	return 0
+}
+
+func (x *ModelTurnUsage) GetCacheRead() uint64 {
+	if x != nil {
+		return x.CacheRead
+	}
+	return 0
+}
+
+func (x *ModelTurnUsage) GetCacheCreation() uint64 {
+	if x != nil {
+		return x.CacheCreation
+	}
+	return 0
+}
+
+func (x *ModelTurnUsage) GetCacheCreation_1H() uint64 {
+	if x != nil {
+		return x.CacheCreation_1H
+	}
+	return 0
+}
+
+func (x *ModelTurnUsage) GetOutput() uint64 {
+	if x != nil {
+		return x.Output
+	}
+	return 0
+}
+
+func (x *ModelTurnUsage) GetReasoning() uint64 {
+	if x != nil {
+		return x.Reasoning
+	}
+	return 0
+}
+
+func (x *ModelTurnUsage) GetTurns() uint32 {
+	if x != nil {
+		return x.Turns
+	}
+	return 0
+}
+
+func (x *ModelTurnUsage) GetRecordedUsd() float64 {
+	if x != nil && x.RecordedUsd != nil {
+		return *x.RecordedUsd
+	}
+	return 0
+}
+
+func (x *ModelTurnUsage) GetSpeed() UsageSpeed {
+	if x != nil && x.Speed != nil {
+		return *x.Speed
+	}
+	return UsageSpeed_USAGE_SPEED_UNSPECIFIED
+}
+
+func (x *ModelTurnUsage) GetPrimary() bool {
+	if x != nil {
+		return x.Primary
+	}
+	return false
+}
+
 var File_vibesys_store_v1_agent_attrs_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_agent_attrs_proto_rawDesc = "" +
 	"\n" +
-	"\"vibesys/store/v1/agent_attrs.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xdb\x06\n" +
+	"\"vibesys/store/v1/agent_attrs.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa3\a\n" +
 	"\x0eAgentTurnAttrs\x12!\n" +
 	"\x05agent\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x05agent\x12\x1f\n" +
 	"\x04role\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x04role\x12&\n" +
@@ -354,7 +693,8 @@ const file_vibesys_store_v1_agent_attrs_proto_rawDesc = "" +
 	"started_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x125\n" +
 	"\bended_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt\x12F\n" +
 	"\x06client\x18\x0f \x01(\x0e2\x1d.vibesys.store.v1.AgentClientB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\aR\x06client\x88\x01\x01B\b\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\aR\x06client\x88\x01\x01\x12F\n" +
+	"\rusage_details\x18\x10 \x03(\v2!.vibesys.store.v1.TurnUsageDetailR\fusageDetailsB\b\n" +
 	"\x06_modelB\n" +
 	"\n" +
 	"\b_attemptB\v\n" +
@@ -382,11 +722,54 @@ const file_vibesys_store_v1_agent_attrs_proto_rawDesc = "" +
 	"\n" +
 	"_reasoningB\v\n" +
 	"\t_cost_usdB\x0e\n" +
-	"\f_duration_ms*a\n" +
+	"\f_duration_ms\"\xbb\x03\n" +
+	"\x0fTurnUsageDetail\x12@\n" +
+	"\x13provider_session_id\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\x11providerSessionId\x88\x01\x01\x12T\n" +
+	"\n" +
+	"cost_basis\x18\x02 \x01(\x0e2 .vibesys.store.v1.UsageCostBasisB\x0e\xbaH\v\x82\x01\b\x10\x01 \x00 \x04 \x05H\x01R\tcostBasis\x88\x01\x01\x12;\n" +
+	"\bby_model\x18\x03 \x03(\v2 .vibesys.store.v1.ModelTurnUsageR\abyModel:\xab\x01\xbaH\xa7\x01\x1a\xa4\x01\n" +
+	"\x1dturn_usage_detail.one_primary\x122a turn with model rows has exactly one primary row\x1aOthis.by_model.size() == 0 || this.by_model.filter(row, row.primary).size() == 1B\x16\n" +
+	"\x14_provider_session_idB\r\n" +
+	"\v_cost_basis\"\xc3\a\n" +
+	"\x0eModelTurnUsage\x12!\n" +
+	"\x05model\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x05model\x12\x14\n" +
+	"\x05input\x18\x02 \x01(\x04R\x05input\x12\x1d\n" +
+	"\n" +
+	"cache_read\x18\x03 \x01(\x04R\tcacheRead\x12%\n" +
+	"\x0ecache_creation\x18\x04 \x01(\x04R\rcacheCreation\x12*\n" +
+	"\x11cache_creation_1h\x18\x05 \x01(\x04R\x0fcacheCreation1h\x12\x16\n" +
+	"\x06output\x18\x06 \x01(\x04R\x06output\x12\x1c\n" +
+	"\treasoning\x18\a \x01(\x04R\treasoning\x12\x14\n" +
+	"\x05turns\x18\b \x01(\rR\x05turns\x128\n" +
+	"\frecorded_usd\x18\t \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00H\x00R\vrecordedUsd\x88\x01\x01\x12C\n" +
+	"\x05speed\x18\n" +
+	" \x01(\x0e2\x1c.vibesys.store.v1.UsageSpeedB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\x01R\x05speed\x88\x01\x01\x12\x18\n" +
+	"\aprimary\x18\v \x01(\bR\aprimary:\x85\x04\xbaH\x81\x04\x1a\x88\x01\n" +
+	"#model_turn_usage.cache_within_input\x12,cache reads and writes are part of the input\x1a3this.cache_read + this.cache_creation <= this.input\x1a\x8f\x01\n" +
+	"*model_turn_usage.long_writes_within_writes\x122one-hour cache writes are part of the cache writes\x1a-this.cache_creation_1h <= this.cache_creation\x1aj\n" +
+	"(model_turn_usage.reasoning_within_output\x12\x1freasoning is part of the output\x1a\x1dthis.reasoning <= this.output\x1av\n" +
+	"!model_turn_usage.turns_on_primary\x12/only the primary row counts the turn's requests\x1a this.primary || this.turns == 0uB\x0f\n" +
+	"\r_recorded_usdB\b\n" +
+	"\x06_speed*a\n" +
 	"\vAgentClient\x12\x1c\n" +
 	"\x18AGENT_CLIENT_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15AGENT_CLIENT_SCRIPTED\x10\x01\x12\x19\n" +
-	"\x15AGENT_CLIENT_PROVIDER\x10\x02BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
+	"\x15AGENT_CLIENT_PROVIDER\x10\x02*\x8f\x02\n" +
+	"\x0eUsageCostBasis\x12 \n" +
+	"\x1cUSAGE_COST_BASIS_UNSPECIFIED\x10\x00\x12 \n" +
+	"\x1cUSAGE_COST_BASIS_PRICE_TABLE\x10\x01\x12&\n" +
+	"\"USAGE_COST_BASIS_PROVIDER_REPORTED\x10\x02\x12\"\n" +
+	"\x1eUSAGE_COST_BASIS_UNKNOWN_MODEL\x10\x03\x12$\n" +
+	" USAGE_COST_BASIS_LEGACY_RECORDED\x10\x04\x12$\n" +
+	" USAGE_COST_BASIS_LEGACY_UNPRICED\x10\x05\x12!\n" +
+	"\x1dUSAGE_COST_BASIS_NOT_REPORTED\x10\x06*t\n" +
+	"\n" +
+	"UsageSpeed\x12\x1b\n" +
+	"\x17USAGE_SPEED_UNSPECIFIED\x10\x00\x12\x18\n" +
+	"\x14USAGE_SPEED_STANDARD\x10\x01\x12\x14\n" +
+	"\x10USAGE_SPEED_FAST\x10\x02\x12\x19\n" +
+	"\x15USAGE_SPEED_ULTRAFAST\x10\x03BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
 
 var (
 	file_vibesys_store_v1_agent_attrs_proto_rawDescOnce sync.Once
@@ -400,24 +783,32 @@ func file_vibesys_store_v1_agent_attrs_proto_rawDescGZIP() []byte {
 	return file_vibesys_store_v1_agent_attrs_proto_rawDescData
 }
 
-var file_vibesys_store_v1_agent_attrs_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_vibesys_store_v1_agent_attrs_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_vibesys_store_v1_agent_attrs_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_vibesys_store_v1_agent_attrs_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_vibesys_store_v1_agent_attrs_proto_goTypes = []any{
 	(AgentClient)(0),              // 0: vibesys.store.v1.AgentClient
-	(*AgentTurnAttrs)(nil),        // 1: vibesys.store.v1.AgentTurnAttrs
-	(*TokenUsage)(nil),            // 2: vibesys.store.v1.TokenUsage
-	(*timestamppb.Timestamp)(nil), // 3: google.protobuf.Timestamp
+	(UsageCostBasis)(0),           // 1: vibesys.store.v1.UsageCostBasis
+	(UsageSpeed)(0),               // 2: vibesys.store.v1.UsageSpeed
+	(*AgentTurnAttrs)(nil),        // 3: vibesys.store.v1.AgentTurnAttrs
+	(*TokenUsage)(nil),            // 4: vibesys.store.v1.TokenUsage
+	(*TurnUsageDetail)(nil),       // 5: vibesys.store.v1.TurnUsageDetail
+	(*ModelTurnUsage)(nil),        // 6: vibesys.store.v1.ModelTurnUsage
+	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
 }
 var file_vibesys_store_v1_agent_attrs_proto_depIdxs = []int32{
-	2, // 0: vibesys.store.v1.AgentTurnAttrs.usage:type_name -> vibesys.store.v1.TokenUsage
-	3, // 1: vibesys.store.v1.AgentTurnAttrs.started_at:type_name -> google.protobuf.Timestamp
-	3, // 2: vibesys.store.v1.AgentTurnAttrs.ended_at:type_name -> google.protobuf.Timestamp
+	4, // 0: vibesys.store.v1.AgentTurnAttrs.usage:type_name -> vibesys.store.v1.TokenUsage
+	7, // 1: vibesys.store.v1.AgentTurnAttrs.started_at:type_name -> google.protobuf.Timestamp
+	7, // 2: vibesys.store.v1.AgentTurnAttrs.ended_at:type_name -> google.protobuf.Timestamp
 	0, // 3: vibesys.store.v1.AgentTurnAttrs.client:type_name -> vibesys.store.v1.AgentClient
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	5, // 4: vibesys.store.v1.AgentTurnAttrs.usage_details:type_name -> vibesys.store.v1.TurnUsageDetail
+	1, // 5: vibesys.store.v1.TurnUsageDetail.cost_basis:type_name -> vibesys.store.v1.UsageCostBasis
+	6, // 6: vibesys.store.v1.TurnUsageDetail.by_model:type_name -> vibesys.store.v1.ModelTurnUsage
+	2, // 7: vibesys.store.v1.ModelTurnUsage.speed:type_name -> vibesys.store.v1.UsageSpeed
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_agent_attrs_proto_init() }
@@ -427,13 +818,15 @@ func file_vibesys_store_v1_agent_attrs_proto_init() {
 	}
 	file_vibesys_store_v1_agent_attrs_proto_msgTypes[0].OneofWrappers = []any{}
 	file_vibesys_store_v1_agent_attrs_proto_msgTypes[1].OneofWrappers = []any{}
+	file_vibesys_store_v1_agent_attrs_proto_msgTypes[2].OneofWrappers = []any{}
+	file_vibesys_store_v1_agent_attrs_proto_msgTypes[3].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_store_v1_agent_attrs_proto_rawDesc), len(file_vibesys_store_v1_agent_attrs_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   2,
+			NumEnums:      3,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
