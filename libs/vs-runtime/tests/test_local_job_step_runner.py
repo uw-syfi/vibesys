@@ -16,13 +16,15 @@ from typing import TYPE_CHECKING, Any
 from vs_core.api import ObservationStatus, RequestId
 from vs_core.api.recovery import Cancelled, CancelReason, Finished
 from vs_evaluation.api import ResourceRequirements
+from vs_runtime._evaluation_jobs import handle_of_life
 from vs_runtime.api import AccuracyEvaluation, PollingEvaluationExecutor
 from vs_runtime.api.evaluation_step_runners import LocalJobStepRunner
 from vs_runtime.api.slurm_evaluation_stack import plan, submission
-from vs_runtime.api.step_runner import CancelSignal, Cleared, ClearUnavailableError
+from vs_runtime.api.step_runner import CancelSignal, Cleared
 from vs_runtime.api.testing import (
     FakeCandidateWorkspace,
     FakeEvaluation,
+    FakeStageWorkReaper,
     FakeWorkspace,
     FakeWorkspaces,
     StepRunnerContract,
@@ -40,25 +42,6 @@ GATED_BENCHMARKS = 32
 POLL_S = 5.0
 DEADLINE_AT = 1_000_000.0
 """A step limit no case reaches: they end work by a cancel, a kill or a clear."""
-
-
-class FakeStageWorkReaper:
-    """The stage work of dead processes, by tag; ``reap`` ends it, unless the host is unreachable."""
-
-    def __init__(self) -> None:
-        self.alive: set[RequestId] = set()
-        self.reaped: list[RequestId] = []
-        self.refusing = False
-
-    def leave(self, tag: RequestId) -> None:
-        """A process that ran ``tag``'s stages died and left them running."""
-        self.alive.add(tag)
-
-    async def reap(self, tag: RequestId) -> None:
-        if self.refusing:
-            raise ClearUnavailableError(tag, "host")
-        self.alive.discard(tag)
-        self.reaped.append(tag)
 
 
 class World:
@@ -210,3 +193,19 @@ def test_a_step_that_reuses_a_finished_submission_launches_nothing() -> None:
 
     world.run(main())
     assert len(world.evaluation.accuracy_calls) == 1
+
+
+def test_the_evaluation_opens_its_candidate_under_the_mark_of_its_handle() -> None:
+    world = World()
+    tag = tag_of("marked")
+
+    async def main() -> None:
+        await world.runner.run(world.step(tag, ends=True), tag, 1, CancelSignal())
+        await world.runner.clear(tag)
+        await world.runner.run(world.step(tag, ends=True), tag, 2, CancelSignal())
+
+    world.run(main())
+    assert world.workspaces.measured_step_tags[-2:] == (
+        handle_of_life(tag, 0),
+        handle_of_life(tag, 1),
+    )

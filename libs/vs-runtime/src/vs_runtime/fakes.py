@@ -511,6 +511,7 @@ class FakeWorkspaces:
         self._measured_step_tags.append(step_tag)
         return candidate
 
+    @property
     def measured_step_tags(self) -> tuple[str | None, ...]:
         """The step tag each measured candidate was opened for, in order."""
         return tuple(self._measured_step_tags)

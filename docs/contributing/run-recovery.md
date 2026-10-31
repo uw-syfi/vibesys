@@ -53,7 +53,7 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
 | `fold(log)` and `decide(state, now) -> actions` in `vs_core` | built, dormant (#3475 item 4a) |
 | Runner loop, `StepRunner` Protocol, `FakeStepRunner`, contract suite | built and dormant: `vs_runtime.api.step_runner` and `vs_runtime.api.testing`; no run selects it (#3475 item 4b) |
 | Runners: agent turn (`DispatchTurn`, `ResumeSessionTurn`, registered `SESSION_TURN` operations) and workspace | built, dormant: `vs_runtime.api.agent_step_runners`, with `vs_agent.reap_step_agents` and `AgentSessions.forget_unfinished` beneath them (#3475 item 5a). [Which runner owns each request kind](#the-runner-of-each-request-kind) names the 13 kinds with no owner |
-| Runners: Slurm and local evaluation (`SlurmJobStepRunner`, `LocalJobStepRunner`) | built and dormant; the local runner reaps what a dead process left through a `StageWorkReaper` that has no production implementation yet |
+| Runners: Slurm and local evaluation (`SlurmJobStepRunner`, `LocalJobStepRunner`) | built and dormant; the local runner reaps what a dead process left through a `StageWorkReaper`; `MarkedStageWorkReaper` finds the host processes of a local evaluation by the `VIBESYS_STEP_TAG` mark its candidate session sets (Linux), and Docker candidate containers are not yet reaped by tag |
 | Runners: registered operation and adoption | built and dormant: `vs_runtime.api.operation_step_runner` and `vs_runtime.api.adoption_step_runner`, each in the contract suite (#3475 item 5c) |
 | Per-environment `clear` (Docker, SkyPilot, Modal, Host) | unbuilt; see [open risks](#open-risks) for what each environment can and cannot clear |
 | Pause drains within a deadline and records `Parked` | in progress (#3475 item 1) |
