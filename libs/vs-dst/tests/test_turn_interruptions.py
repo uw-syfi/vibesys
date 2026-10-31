@@ -18,8 +18,8 @@ from vs_sim.api.testing import Depth, using_depth
 from ._turns import TurnsWorld
 
 SHELL_FINISH_TWICE = (
-    "the shell resumes a paused run that finished while it drained with the Finish held and the "
-    "restarted flow's, and core refuses the second: a bug of the host the step loop replaces"
+    "on the shell host a pause that lands as the search finishes ends the resumed run in a Finish "
+    "core refuses twice; it fails the same way at the merge base, and the step loop replaces the host"
 )
 
 
