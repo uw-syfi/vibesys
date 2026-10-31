@@ -78,6 +78,8 @@ const FIRST_PAINT_CHANNEL: typeof import('@vibesys/ipc').FIRST_PAINT_CHANNEL =
   'vibesys:welcome:first-paint';
 const CONNECT_CHANNEL: typeof import('@vibesys/ipc').CONNECT_CHANNEL = 'vibesys:connect';
 const WAKE_CHANNEL: typeof import('@vibesys/ipc').WAKE_CHANNEL = 'vibesys:wake';
+const SUBSCRIPTION_CHANNEL: typeof import('@vibesys/ipc').SUBSCRIPTION_CHANNEL =
+  'vibesys:subscription';
 const OPEN_SETTINGS_CHANNEL: typeof import('@vibesys/ipc').OPEN_SETTINGS_CHANNEL =
   'vibesys:open-settings';
 const RUN_PORT_MESSAGE: typeof import('@vibesys/ipc').RUN_PORT_MESSAGE = 'vibesys:run-port';
@@ -195,21 +197,26 @@ if (process.type === 'renderer') {
       },
     }),
   );
+  // Two byte-only capabilities over the same kind of port: the generic gateway, which refuses
+  // Subscribe, and the subscription port, which only Subscribe's hub in main answers.
+  const portTo = (channel: string) => (): GatewayPreloadChannel => {
+    const {port1, port2} = new MessageChannel();
+    return {
+      listen: (receive, failed) => {
+        port1.onmessage = event => receive(event.data);
+        port1.onmessageerror = failed;
+      },
+      send: request => electron.ipcRenderer.postMessage(channel, request, [port2]),
+      close: () => port1.close(),
+    };
+  };
   electron.contextBridge.exposeInMainWorld(
     'vibesysGateway',
-    createGatewayPreload({
-      channel: () => {
-        const {port1, port2} = new MessageChannel();
-        return {
-          listen: (receive, failed) => {
-            port1.onmessage = event => receive(event.data);
-            port1.onmessageerror = failed;
-          },
-          send: request => electron.ipcRenderer.postMessage('vibesys:gateway', request, [port2]),
-          close: () => port1.close(),
-        };
-      },
-    }),
+    createGatewayPreload({channel: portTo('vibesys:gateway')}),
+  );
+  electron.contextBridge.exposeInMainWorld(
+    'vibesysSubscription',
+    createGatewayPreload({channel: portTo(SUBSCRIPTION_CHANNEL)}),
   );
   prepareFirstPaint(electron.ipcRenderer.sendSync(FIRST_PAINT_CHANNEL));
 }

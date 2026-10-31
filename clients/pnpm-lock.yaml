@@ -69,6 +69,9 @@ importers:
       '@vibesys/settings':
         specifier: workspace:*
         version: link:../../libs/settings
+      '@vibesys/subscription':
+        specifier: workspace:*
+        version: link:../../libs/subscription
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../../libs/transport
@@ -977,6 +980,9 @@ importers:
       '@vibesys/runs':
         specifier: workspace:*
         version: link:../runs
+      '@vibesys/subscription':
+        specifier: workspace:*
+        version: link:../subscription
       '@vibesys/ui':
         specifier: workspace:*
         version: link:../ui
@@ -987,6 +993,9 @@ importers:
       '@vibesys/store':
         specifier: workspace:*
         version: link:../store
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       typescript:
         specifier: ^5.8.3
         version: 5.9.3

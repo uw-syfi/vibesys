@@ -39,6 +39,15 @@ export {
   type RunLogsRequest,
 } from './run-logs.js';
 export {
+  decodeUpdate,
+  encodeSubscribeCall,
+  encodeUpdate,
+  parseSubscribeCall,
+  SUBSCRIPTION_CHANNEL,
+  type SubscribeCall,
+  subscriptionBridge,
+} from './subscription.js';
+export {
   type AgentLogin,
   attempt,
   type CheckoutInspection,

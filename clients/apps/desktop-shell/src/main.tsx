@@ -19,6 +19,7 @@ declare global {
   interface Window {
     vibesysWelcome?: WelcomeBridge;
     vibesysGateway?: import('@vibesys/ipc').GatewayPortBridge;
+    vibesysSubscription?: import('@vibesys/ipc').GatewayPortBridge;
   }
 }
 

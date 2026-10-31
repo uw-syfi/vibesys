@@ -14,11 +14,12 @@ import {
   SshLink,
 } from '@vibesys/connection';
 import {type HostId, type HostKey, hostFromKey} from '@vibesys/hosts';
-import {GATEWAY_CHANNEL, gatewayEnd, gatewayReply, parseGatewayRequest} from '@vibesys/ipc';
+import {GATEWAY_CHANNEL, gatewayReply, parseGatewayRequest} from '@vibesys/ipc';
 import {configuredHostCall, configuredRead, HOST_CALL_METHOD} from '@vibesys/runs/intents';
-import {grpcCode, type ScheduleTimeout} from '@vibesys/transport';
+import type {ScheduleTimeout} from '@vibesys/transport';
 import type {IpcMain} from 'electron';
-import {rendererGeneration, type WelcomeInvokeEvent} from './welcome-ipc.js';
+import {servePort} from './port-ipc.js';
+import type {WelcomeInvokeEvent} from './welcome-ipc.js';
 
 export function createGatewayCalls(
   manager: ConnectionManager,
@@ -47,45 +48,13 @@ export function installGatewayIpc(
     admits: (event: WelcomeInvokeEvent) => boolean;
   },
 ): void {
-  ipc.on(GATEWAY_CHANNEL, (event, value: unknown) => {
-    const port = event.ports[0];
-    if (port === undefined) return;
-    const abort = new AbortController();
-    let done = false;
-    const finish = (error?: unknown): void => {
-      if (done) return;
-      done = true;
-      abort.abort();
-      event.sender.removeListener('destroyed', cancelled);
-      event.sender.removeListener('did-start-navigation', navigated);
-      port.postMessage(endOf(error));
-      port.close();
-    };
-    const cancelled = (): void => finish(new Error('gateway caller closed'));
-    const navigated = (
-      _event: unknown,
-      _url: string,
-      inPage: boolean,
-      mainFrame: boolean,
-    ): void => {
-      if (!inPage && mainFrame) cancelled();
-    };
-    port.on('message', cancelled);
-    port.on('close', cancelled);
-    port.start();
-    event.sender.once('destroyed', cancelled);
-    event.sender.on('did-start-navigation', navigated);
-    void (async () => {
-      authorize(event, admits);
-      const request = parseGatewayRequest(value);
-      const receive = (bytes: Uint8Array): void => {
-        if (!done) port.postMessage(gatewayReply(bytes));
-      };
-      if (request.kind === 'unary') {
-        const bytes = await withCheckout(checkout, request);
-        receive(await calls.unary(request.host, request.method, bytes, abort.signal));
-      } else await calls.stream(request.host, request.method, request.bytes, abort.signal, receive);
-    })().then(() => finish(), finish);
+  servePort(ipc, GATEWAY_CHANNEL, admits, async (value, signal, send) => {
+    const request = parseGatewayRequest(value);
+    const receive = (bytes: Uint8Array): void => send(gatewayReply(bytes));
+    if (request.kind === 'unary') {
+      const bytes = await withCheckout(checkout, request);
+      receive(await calls.unary(request.host, request.method, bytes, signal));
+    } else await calls.stream(request.host, request.method, request.bytes, signal, receive);
   });
 }
 
@@ -99,18 +68,6 @@ async function withCheckout(
   return request.method === HOST_CALL_METHOD
     ? configuredHostCall(request.bytes, saved)
     : configuredRead(request.bytes, saved);
-}
-
-/** One terminal reply: the failure's text and, when the gateway refused the call, its gRPC status. */
-export function endOf(error?: unknown): Uint8Array {
-  const status = grpcCode(error);
-  const message =
-    error === undefined
-      ? undefined
-      : status !== undefined && error instanceof Error
-        ? error.message
-        : String(error);
-  return gatewayEnd(message, status);
 }
 
 function gatewayFor(
@@ -153,19 +110,4 @@ function gatewayFor(
       }
     },
   };
-}
-
-function authorize(
-  event: import('electron').IpcMainEvent,
-  admits: (event: WelcomeInvokeEvent) => boolean,
-): void {
-  if (
-    event.senderFrame !== event.sender.mainFrame ||
-    !admits({
-      senderId: event.sender.id,
-      senderUrl: event.senderFrame?.url ?? null,
-      rendererGeneration: rendererGeneration(event.senderFrame),
-    })
-  )
-    throw new Error('not an app-owned shell document');
 }
