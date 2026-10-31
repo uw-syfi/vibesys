@@ -114,7 +114,6 @@ class Harness:
     def runner(self, *, publishes: bool = True) -> AdoptionStepRunner:
         return AdoptionStepRunner(
             self.workspaces,
-            self.workspaces,
             FakeEvidenceLedger(),
             ObservationFactory(self.store),
             clock=self.clock,
