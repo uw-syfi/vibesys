@@ -10,6 +10,7 @@ import {computeSettings, computeSettingsEmpty, sshCluster} from '@vibesys/run-fi
 import {
   type FakeBridgeSeed,
   installFakeBridge,
+  installFakeChrome,
   installFakeMachineSettings,
   installFakeMachines,
   installFakeProjectRuns,
@@ -201,6 +202,7 @@ export const rail = (page: Page) => page.getByRole('navigation', {name: 'VibeSys
 export async function openMachines(page: Page, width: number, world: MachinesWorld): Promise<void> {
   const {seed} = world;
   await addInitScripts(page, [
+    initScript(installFakeChrome, seed),
     initScript(installFakeBridge, seed),
     initScript(installFakeMachines, seed),
     initScript(installFakeMachineSettings, seed),

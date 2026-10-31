@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import contextlib
 import os
-import select
 import signal
 import subprocess
 import sys
@@ -22,6 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.e2e.descriptor_lines import DescriptorLines
 from tests.support.unique_run_id import unique_run_id
 
 from vs_core.api import RequestId
@@ -57,7 +57,6 @@ from vs_sim.api.testing import InlineBlockingRunner, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
-    from typing import IO
 
 pytestmark = pytest.mark.skipif(
     not (sys.platform.startswith("linux") or sys.platform == "darwin"),
@@ -142,91 +141,12 @@ def _owner_with_stage(mark: str, workdir: Path) -> tuple[subprocess.Popen[str], 
         session=False,
     )
     assert owner.stdout is not None
-    reports = _Reports(owner.stdout, bound=_START_BOUND_S)
-    pid = int(reports.next_line())
+    reports = DescriptorLines(owner.stdout.fileno(), bound=_START_BOUND_S)
+    pid = int(reports.next_line() or "")
     assert reports.next_line() == "ready"
     pgid = _pgid_of(pid)
     _LEFT_RUNNING.append(pgid)
     return owner, pgid
-
-
-class _Reports:
-    """The lines a child prints, read through the descriptor so that ``select`` sees every byte.
-
-    A buffered ``readline`` takes whatever the pipe holds, and two lines the child wrote close
-    together arrive in one read: the first ``readline`` then keeps the second in the stream's own
-    buffer, and a ``select`` on the descriptor waits for bytes that are not coming. The wait ends
-    only when ``bound`` runs out, which is how this file once failed one run in a dozen with the
-    child alive and its report already read. This reader keeps its own buffer, so a line is
-    waited for only while no whole line is held; ``bound`` only guards against a child that never
-    reports.
-    """
-
-    def __init__(self, stdout: IO[str], *, bound: float) -> None:
-        self._descriptor = stdout.fileno()
-        self._bound = bound
-        self._pending = b""
-
-    def next_line(self) -> str:
-        """The child's next line, without its newline."""
-        while b"\n" not in self._pending:
-            ready, _, _ = select.select([self._descriptor], [], [], self._bound)
-            assert ready, "the process did not report it started"
-            chunk = os.read(self._descriptor, 4096)
-            assert chunk, "the process ended before it reported"
-            self._pending += chunk
-        line, _, self._pending = self._pending.partition(b"\n")
-        return line.decode()
-
-
-def _two_lines_in_one_write() -> tuple[IO[str], int]:
-    """A pipe holding two lines that one write put there, its writer still open: no end of file.
-
-    This is what the owner's pipe holds when the stage shell prints its pid and its readiness
-    close together. Returns the reading stream and the writing end, for the test to close.
-    """
-    read_end, write_end = os.pipe()
-    os.write(write_end, b"4242\nready\n")
-    return os.fdopen(read_end, encoding="utf-8"), write_end
-
-
-def test_a_buffered_readline_keeps_the_second_line_where_select_cannot_see_it() -> None:
-    """Why ``_Reports`` reads the descriptor: this is the hang a ``select`` before ``readline`` had."""
-    stream, write_end = _two_lines_in_one_write()
-    try:
-        assert stream.readline() == "4242\n"
-        # A poll, not a wait: the descriptor is empty, and "ready" is in the stream's buffer.
-        assert select.select([stream], [], [], 0)[0] == []
-        assert stream.readline() == "ready\n"
-    finally:
-        stream.close()
-        os.close(write_end)
-
-
-def test_two_lines_that_arrive_together_are_each_reported_with_no_wait_for_more_bytes() -> None:
-    stream, write_end = _two_lines_in_one_write()
-    try:
-        # The bound is not met: both lines are in hand, so no ``select`` is made for the second.
-        reports = _Reports(stream, bound=_START_BOUND_S)
-        assert reports.next_line() == "4242"
-        assert reports.next_line() == "ready"
-    finally:
-        stream.close()
-        os.close(write_end)
-
-
-def test_a_child_that_ends_before_it_reports_is_named_and_not_waited_for() -> None:
-    read_end, write_end = os.pipe()
-    os.write(write_end, b"4242\n")
-    os.close(write_end)
-    stream = os.fdopen(read_end, encoding="utf-8")
-    try:
-        reports = _Reports(stream, bound=_START_BOUND_S)
-        assert reports.next_line() == "4242"
-        with pytest.raises(AssertionError, match="ended before it reported"):
-            reports.next_line()
-    finally:
-        stream.close()
 
 
 def _kill_owner(owner: subprocess.Popen[str]) -> None:

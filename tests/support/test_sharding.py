@@ -16,6 +16,7 @@ from tests.support.sharding import (
     DEFAULT_DURATIONS,
     HEAVY_SHARE,
     SHARD_BUDGET_SECONDS,
+    WORKERS_PER_SHARD,
     assign_heavy_items,
     assign_shards,
     discover_test_files,
@@ -28,6 +29,7 @@ from tests.support.sharding import (
     parse_durations,
     parse_shard,
     projected_shard_seconds,
+    projection_lines,
     read_durations,
     record_durations,
     shard_loads,
@@ -196,7 +198,7 @@ def test_a_file_missing_from_the_record_or_far_over_it_is_reported_as_stale() ->
         {"old.py": 90.0, "close.py": 30.0, "tiny.py": 1.0},
     )
 
-    assert seconds == pytest.approx(385.0)
+    assert seconds == pytest.approx(770.0 / WORKERS_PER_SHARD)
     assert [line.split(":")[0] for line in stale] == ["new.py"]
 
 
@@ -229,6 +231,23 @@ def test_the_checked_in_record_keeps_every_ci_shard_within_its_budget() -> None:
     assert max(projected) <= SHARD_BUDGET_SECONDS, (
         f"projected slowest shard {max(projected):.0f}s exceeds {SHARD_BUDGET_SECONDS:.0f}s: "
         "add shards in .github/workflows/test.yml or refresh tests/support/shard_durations.json"
+    )
+
+
+def test_the_checked_in_record_names_nearly_every_test_file() -> None:
+    # The cold-start record and the floor under every cache entry. It had decayed to 920 of
+    # 1,432 files and a quarter of the suite's seconds, so the budget check above passed on
+    # a record that did not describe the suite. A new file is not an error; a quarter of the
+    # suite missing is a record nobody refreshed.
+    durations = json.loads(DEFAULT_DURATIONS.read_text())
+    options = tomllib.loads((_REPO / "pyproject.toml").read_text())["tool"]["pytest"]["ini_options"]
+    files = discover_test_files(_REPO, options["testpaths"], ["test_*.py", "*_test.py"])
+
+    missing = [name for name in files if name not in durations]
+
+    assert len(missing) <= len(files) // 20, (
+        f"{len(missing)} of {len(files)} test files have no recorded seconds, e.g. {missing[:3]}: "
+        "refresh tests/support/shard_durations.json (scripts/refresh_shard_durations.py)"
     )
 
 
@@ -330,6 +349,74 @@ def test_a_shard_that_owns_no_test_under_the_given_path_passes(
 
     assert [result.ret for result in results] == [0, 0]
     assert sorted(result.parseoutcomes().get("passed", 0) for result in results) == [0, 1]
+
+
+@given(
+    durations=st.dictionaries(
+        _NAMES, st.floats(min_value=0, max_value=900), min_size=1, max_size=25
+    ),
+    extra=st.sets(_NAMES.map(lambda name: f"new/{name}"), max_size=5),
+    count=st.integers(min_value=1, max_value=5),
+    data=st.data(),
+)
+def test_the_projection_names_the_shards_cost_its_heaviest_files_and_what_the_record_lacks(
+    durations: dict[str, float], extra: set[str], count: int, data: st.DataObject
+) -> None:
+    files = sorted({*durations, *extra})
+    index = data.draw(st.integers(min_value=1, max_value=count))
+
+    lines = projection_lines(index, count, files, durations)
+
+    seconds = projected_shard_seconds(files, durations, count)[index - 1]
+    assert lines[0].startswith(f"shard {index}/{count}: projected {seconds:.0f}s of tests")
+    assert f"{len(extra)} of {len(files)} test files have no recorded seconds" in lines[0]
+    owned = assign_shards(files, durations, count)
+    named = [
+        part.rsplit(" ", 1)[0]
+        for part in lines[1].removeprefix("shard heaviest whole files: ").split(", ")
+        if part != "none"
+    ]
+    assert len(named) <= 3
+    assert all(owned[name] == index for name in named)
+    assert [line.startswith("::warning::") for line in lines[2:]] == [True] * (
+        seconds > SHARD_BUDGET_SECONDS
+    )
+
+
+def test_a_projection_over_the_budget_is_a_warning_at_the_top_of_the_log() -> None:
+    durations = {
+        f"test_{i}.py": float(2 * SHARD_BUDGET_SECONDS * WORKERS_PER_SHARD) for i in range(3)
+    }
+
+    (summary, heaviest, warning) = projection_lines(1, 3, durations, durations)
+
+    assert "projected" in summary
+    assert heaviest.startswith("shard heaviest whole files: test_")
+    assert warning.startswith("::warning::shard 1/3 is projected at")
+
+
+def test_a_sharded_session_prints_its_projection_before_any_test(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PYTEST_ADDOPTS", "")
+    pytester.makepyfile(test_only="def test_only(): pass")
+    durations = pytester.path / "durations.json"
+    durations.write_text(json.dumps({"test_only.py": 1.0}))
+
+    result = pytester.runpytest(
+        *BARE_PYTEST,
+        "-p",
+        "tests.support.sharding",
+        "--shard",
+        "1/2",
+        "--shard-durations",
+        str(durations),
+        "test_only.py",
+    )
+
+    text = result.stdout.str()
+    assert text.index("shard 1/2: projected") < text.index("test_only.py")
+    assert "shard heaviest whole files:" in text
 
 
 @given(

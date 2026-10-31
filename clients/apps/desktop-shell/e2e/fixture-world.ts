@@ -20,6 +20,7 @@ import {
   type ExampleDestinationMethods,
   type FakeBridgeSeed,
   installFakeBridge,
+  installFakeChrome,
   installFakeExampleDestination,
   installFakeMachineSettings,
   installFakeMachines,
@@ -28,6 +29,7 @@ import {
   installFakeUsage,
   installFakeWindows,
   installRequestBound,
+  MAC_CHROME,
   type MachineSettingsMethods,
   type MachinesMethods,
   type NewRunMethods,
@@ -157,7 +159,7 @@ function seedOf(fixture: RunFixture, theme: 'ink' | 'paper'): FakeBridgeSeed {
   ];
   return {
     theme,
-    chromeInset: {width: 84, height: 40},
+    chromeInset: MAC_CHROME,
     appearance: {mode: theme === 'ink' ? 'dark' : 'light', light: 'paper', dark: 'ink'},
     listings: [listing],
     recent,
@@ -183,6 +185,7 @@ function seedOf(fixture: RunFixture, theme: 'ink' | 'paper'): FakeBridgeSeed {
 export function fixtureScripts(fixture: RunFixture, options: OpenOptions = {}): readonly string[] {
   const seed = seedOf(fixture, options.theme ?? 'ink');
   const scripts = [
+    script(installFakeChrome, seed),
     script(installFakeBridge, seed),
     script(installFakeMachines, seed),
     script(installFakeMachineSettings, seed),

@@ -22,15 +22,30 @@ export const SETTINGS_CHANNELS = {
  */
 export const FIRST_PAINT_CHANNEL = 'vibesys:welcome:first-paint';
 
+/**
+ * The channel on which the main process pushes the window's `ChromeInset` whenever it changes (the
+ * window enters or leaves full screen), so the page re-lays itself out without a reload.
+ */
+export const CHROME_INSET_CHANNEL = 'vibesys:welcome:chrome-inset';
+
+/**
+ * What the window's own controls cover, in CSS pixels; all zero where there are none (full screen).
+ * The page keeps the rail and its content clear of it and draws no strip for it.
+ */
+export interface ChromeInset {
+  /** Width of the top-left corner the controls cover, with their margin (the macOS traffic lights). */
+  readonly startWidth: number;
+  /** Height of that corner: the room at the top of the rail the controls sit in. */
+  readonly startHeight: number;
+  /** Height of the strip across the top of the page the controls at the top right cover (Windows, Linux). */
+  readonly endHeight: number;
+}
+
 /** What a page needs before its first paint. */
 export interface FirstPaint {
   /** The stored theme, for the system's mode now. */
   readonly theme: ThemeName;
-  /**
-   * The top-left rectangle the window's own controls cover (macOS's traffic lights and their
-   * margin), in CSS pixels; zero where the controls are drawn elsewhere.
-   */
-  readonly chromeInset: {readonly width: number; readonly height: number};
+  readonly chromeInset: ChromeInset;
 }
 
 /** The preferences the views read: the appearance, notifications, and the runs archived. */

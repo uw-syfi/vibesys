@@ -5,6 +5,7 @@ import {report, screenCheck} from './checks/screen-check.js';
 import {settled} from './checks/settle.js';
 import {
   installFakeBridge,
+  installFakeChrome,
   installFakeMachines,
   installFakeNewRun,
   installFakeProjectRuns,
@@ -34,6 +35,7 @@ async function open(page: Page, usage: UsageCase, width: number): Promise<void> 
   const seed = seedFor(usage);
   await page.setViewportSize({width, height: 900});
   await addInitScripts(page, [
+    initScript(installFakeChrome, seed),
     initScript(installFakeBridge, seed),
     initScript(installFakeMachines, seed),
     initScript(installFakeProjectRuns, seed),
@@ -277,6 +279,7 @@ test('Usage asks nothing until it is shown, and again each time it is shown', as
     page.evaluate(() => (window as unknown as UsageHost).fakeHost.usageAsked.length);
   const seed = seedFor(one);
   await addInitScripts(page, [
+    initScript(installFakeChrome, seed),
     initScript(installFakeBridge, seed),
     initScript(installFakeProjectRuns, seed),
     initScript(installFakeNewRun, seed),

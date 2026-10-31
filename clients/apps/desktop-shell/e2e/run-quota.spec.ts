@@ -4,8 +4,10 @@ import {Controls} from './chat-controls.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
+  installFakeChrome,
   installFakeMachines,
   installFakeProjectRuns,
+  MAC_CHROME,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyFixture, journeyScript} from './journey-world.js';
@@ -35,7 +37,7 @@ const LIVE = {
 
 const SEED: FakeBridgeSeed = {
   theme: 'ink',
-  chromeInset: {width: 84, height: 40},
+  chromeInset: MAC_CHROME,
   appearance: {mode: 'dark', light: 'paper', dark: 'ink'},
   listings: [
     {kind: 'listed', host: 'ssh:host-b', live: [LIVE], ended: [], unreadable: [], unverified: []},
@@ -69,6 +71,7 @@ test('a quota hold stays internal while the operator can cancel the epoch', asyn
   const controls = new Controls(page, journeyFixture('quota'));
   await controls.attach();
   await addInitScripts(page, [
+    initScript(installFakeChrome, SEED),
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
     initScript(installFakeMachines, SEED),

@@ -73,18 +73,33 @@
 
 /* --- toast ------------------------------------------------------------------------------------- */
 
-/* Below the title bar, at the top right; the stack passes pointer events to the page around its toasts. */
+/*
+ * The window's header is a page's `.vs-page-header` or a screen's `.vs-screen-header`: it names itself
+ * as the anchor the toast stack hangs under, so whatever a header holds (a title row, its actions, a
+ * scrubber) and however tall it grows, the stack starts below it and no screen positions anything.
+ */
+.vs-page-header,
+.vs-screen-header {
+  anchor-name: --vs-header;
+}
+/*
+ * At the top right, a small gap below the header; under the window's end strip, at the page's top
+ * edge, where a screen has no header. It runs to the bottom of the window and passes pointer events
+ * to the page around its toasts.
+ */
 .vs-toast-stack {
   position: fixed;
-  top: calc(var(--titlebar) + var(--space-3));
+  top: calc(
+    anchor(--vs-header bottom, var(--chrome-end-height, var(--space-0))) + var(--space-3)
+  );
   right: var(--space-4);
+  bottom: var(--space-4);
   z-index: 30;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   width: calc(var(--column-aside) + var(--space-8));
   max-width: calc(100% - 2 * var(--space-4));
-  max-height: calc(100% - var(--titlebar) - var(--space-5));
   overflow-y: auto;
   pointer-events: none;
 }

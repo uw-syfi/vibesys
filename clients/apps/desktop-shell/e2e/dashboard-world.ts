@@ -9,6 +9,7 @@ import {expect, type Page} from '@playwright/test';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
+  installFakeChrome,
   installFakeDigests,
   installFakeMachineSettings,
   installFakeMachines,
@@ -177,6 +178,7 @@ export function dashboardWorld(
 export async function open(page: Page, world: FakeBridgeSeed): Promise<void> {
   await page.clock.setFixedTime(NOW);
   await addInitScripts(page, [
+    initScript(installFakeChrome, world),
     initScript(installFakeBridge, world),
     initScript(installFakeMachines, world),
     initScript(installFakeMachineSettings, world),

@@ -1007,7 +1007,14 @@ def test_a_status_object_without_its_cluster_list_is_not_an_absent_cluster(stdou
         runner.inspect_cluster("lease")
 
 
-@pytest.mark.parametrize("stdout", ["[" * 100_000, "{" * 100_000, '{"lease": ' * 50_000])
+@pytest.mark.parametrize(
+    "stdout",
+    [
+        pytest.param("[" * 100_000, id="nested-arrays"),
+        pytest.param("{" * 100_000, id="nested-objects"),
+        pytest.param('{"lease": ' * 50_000, id="nested-lease-objects"),
+    ],
+)
 def test_absurdly_nested_control_output_is_a_typed_error(stdout: str) -> None:
     status = SkyPilotJobRunner(FakeCommandRunner([_result(stdout=stdout)]))
     queue = SkyPilotJobRunner(FakeCommandRunner([_result(stdout=stdout)]))

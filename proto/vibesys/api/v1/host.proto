@@ -7,6 +7,7 @@ import "vibesys/api/v1/host_call.proto";
 import "vibesys/api/v1/host_mutate_generated.proto";
 import "vibesys/api/v1/host_read_generated.proto";
 import "vibesys/api/v1/host_watch_generated.proto";
+import "vibesys/api/v1/subscribe.proto";
 import "vibesys/store/v1/chat.proto";
 import "vibesys/store/v1/skeleton.proto";
 
@@ -35,6 +36,10 @@ service HostService {
   rpc WatchRuns(WatchRunsRequest) returns (stream WatchRunsResponse);
   rpc GetBlobs(GetBlobsRequest) returns (GetBlobsResponse);
   rpc TailStream(TailStreamRequest) returns (stream TailStreamResponse);
+  // Subscribe sends one topic's keyed state, then conflated changes, until the
+  // client cancels or a failed frame ends it. The gateway shares one producer
+  // across subscribers and stops it when the last one leaves.
+  rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
 }
 
 message HelloRequest {

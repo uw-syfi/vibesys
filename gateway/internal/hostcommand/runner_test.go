@@ -47,6 +47,19 @@ func TestProgram(t *testing.T) {
 			writeTestFrame(os.Stdout, []byte(strconv.Itoa(cmd.Process.Pid)))
 			waitForTerm()
 			_ = cmd.Wait()
+		case "groupfile":
+			cmd := exec.Command(os.Args[0], "-test.run=^TestProgram$", "--", "--host-command-program", "pause")
+			if err := cmd.Start(); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(3)
+			}
+			pidFile := os.Getenv("VIBESYS_STATE_HOME") + "/pid"
+			if err := os.WriteFile(pidFile+".tmp", []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); err != nil {
+				os.Exit(4)
+			}
+			_ = os.Rename(pidFile+".tmp", pidFile)
+			waitForTerm()
+			_ = cmd.Wait()
 		case "pause":
 			waitForTerm()
 		}
@@ -186,6 +199,62 @@ func TestStreamCancelReapsTheProcessGroup(t *testing.T) {
 	// descendants after the process-group signal. Observe their disappearance;
 	// the deadline only guards a hang, rather than synchronizing cancellation.
 	waitUntilGone(t, pid)
+}
+
+// A wrapper that times out takes its children with it: killing only the wrapper
+// leaves them running, and holding the output pipes open past the deadline.
+func TestRunCancelReapsTheProcessGroup(t *testing.T) {
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateRoot := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := hostcommand.ExecRunner{}.Run(ctx, hostcommand.Command{
+			Executable: binary,
+			Args:       []string{"-test.run=^TestProgram$", "--", "--host-command-program", "groupfile"},
+			StateRoot:  stateRoot,
+		})
+		done <- runErr
+	}()
+	pid := waitForPid(t, stateRoot+"/pid")
+	cancel()
+	select {
+	case runErr := <-done:
+		if !errors.Is(runErr, context.Canceled) {
+			t.Fatalf("cancel: %v", runErr)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run did not return after cancellation")
+	}
+	waitUntilGone(t, pid)
+}
+
+// waitForPid polls for the pid a helper process writes. The deadline only guards
+// a hang.
+func waitForPid(t *testing.T, path string) int {
+	t.Helper()
+	guard := time.NewTimer(10 * time.Second)
+	defer guard.Stop()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		if data, err := os.ReadFile(path); err == nil {
+			pid, parseErr := strconv.Atoi(string(data))
+			if parseErr != nil {
+				t.Fatalf("pid file %q: %v", data, parseErr)
+			}
+			return pid
+		}
+		select {
+		case <-poll.C:
+		case <-guard.C:
+			t.Fatal("the helper never reported its child")
+		}
+	}
 }
 
 // A killed orphan stays a zombie until PID 1 reaps it, and a PID 1 that does

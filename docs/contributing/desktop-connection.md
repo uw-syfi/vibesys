@@ -689,7 +689,11 @@ attached run, trace events in increasing sequence, commands sent only when offer
 seeded action sequences with stale replies. The theme is in the first paint: the welcome preload asks
 the main process synchronously for the stored theme and the window controls' inset
 (`FIRST_PAINT_CHANNEL`, one fact from `window-chrome.ts`) and sets them on the root element before
-the page's scripts run.
+the page's scripts run. The inset says what the window's controls cover: the top-left corner the
+macOS traffic lights sit in (the rail keeps its items below it), or the strip across the page's top
+that the Windows and Linux controls are drawn over. Full screen hides the controls, so the window
+pushes the inset again on entering and leaving it (`CHROME_INSET_CHANNEL`) and the page collapses
+the reserved room.
 
 ## Windows and notifications
 

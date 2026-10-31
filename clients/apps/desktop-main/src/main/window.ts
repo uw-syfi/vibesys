@@ -11,6 +11,7 @@
 
 import type {RelayPort} from '@vibesys/feature-run-control/main';
 import {
+  CHROME_INSET_CHANNEL,
   CONNECT_CHANNEL,
   OPEN_SETTINGS_CHANNEL,
   WAKE_CHANNEL,
@@ -27,7 +28,7 @@ import {
   WelcomePageLifecycle,
   type WelcomePageLoss,
 } from './welcome-page-lifecycle.js';
-import {windowChrome} from './window-chrome.js';
+import {chromeInset, windowChrome} from './window-chrome.js';
 
 /**
  * The one process-wide run-connect registry every window competes through.
@@ -121,6 +122,9 @@ export class AppWindow {
       onDestroyed: listener => this.#destroyed.add(listener),
     };
     this.#window.on('resize', () => this.#layout());
+    // Full screen hides the window controls, so the page reclaims the room they take.
+    this.#window.on('enter-full-screen', () => this.#sendChromeInset());
+    this.#window.on('leave-full-screen', () => this.#sendChromeInset());
     this.#window.on('closed', () => {
       this.#pages.abandon();
       for (const listener of [...this.#destroyed]) listener();
@@ -212,6 +216,8 @@ export class AppWindow {
         for (const listener of [...this.#newDocuments]) listener(null);
       }
     });
+    // The first paint assumes a window that is not full screen; a document loaded in one corrects it.
+    view.webContents.on('did-finish-load', () => this.#sendChromeInset());
     this.#layout();
     observeWelcomePage(view.webContents, this.#deps.surfaceUrl, lost);
   }
@@ -227,6 +233,16 @@ export class AppWindow {
     if (run === null) return;
     this.#currentRun = null;
     this.#deps.closed(run);
+  }
+
+  /** Tell the surface what the window's controls cover now. */
+  #sendChromeInset(): void {
+    const surface = this.#pages.current;
+    if (this.#window.isDestroyed() || surface === null || surface.webContents.isDestroyed()) return;
+    surface.webContents.send(
+      CHROME_INSET_CHANNEL,
+      chromeInset(process.platform, this.#window.isFullScreen()),
+    );
   }
 
   /** The surface fills the window. */

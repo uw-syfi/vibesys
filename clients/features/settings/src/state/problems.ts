@@ -5,16 +5,9 @@
  */
 import type {MachineEntry} from '@vibesys/ipc';
 import type {Problem} from '@vibesys/problems';
-import {type ClusterForm, stale} from './cluster-form.js';
 import type {MachineSettingsState, MachineView} from './machine-settings.js';
 import {failureWords} from './machine-words.js';
 import type {SettingsState} from './settings.js';
-
-const TEST_STAGE_WORDS = {
-  reach: 'Could not reach the cluster',
-  scheduler: 'The cluster’s scheduler did not answer',
-  workspace: 'The workspace is not usable',
-} as const;
 
 /** The Settings screen's save failure, until the next change. */
 export function settingsProblems(state: SettingsState): readonly Problem[] {
@@ -25,27 +18,6 @@ export function settingsProblems(state: SettingsState): readonly Problem[] {
 }
 
 type Host = MachineEntry['host'];
-
-function formProblems(host: Host, form: ClusterForm): Problem[] {
-  const problems: Problem[] = [];
-  if (form.problem !== null && form.problem.field === null) {
-    problems.push({
-      id: `settings/cluster-save/${host}`,
-      tone: 'err',
-      title: 'The cluster was not saved.',
-      detail: form.problem.text,
-    });
-  }
-  if (form.test.kind === 'failed' && !stale(form)) {
-    problems.push({
-      id: `settings/cluster-test/${host}`,
-      tone: 'err',
-      title: TEST_STAGE_WORDS[form.test.stage],
-      detail: form.test.detail,
-    });
-  }
-  return problems;
-}
 
 function loginProblems(host: Host, machine: string, starts: MachineView['starts']): Problem[] {
   return Object.entries(starts).flatMap(([provider, progress]) => {
@@ -63,9 +35,9 @@ function loginProblems(host: Host, machine: string, starts: MachineView['starts'
 }
 
 /**
- * The machine sections' failures on every machine: a cluster not saved or removed, a connection
- * test that failed (until the settings change and it must be run again), a login that did not
- * start. `label` names a machine for a title.
+ * The machine sections' failures on every machine: a cluster not removed, a login that did not
+ * start. `label` names a machine for a title. The Add a cluster form holds its own failures (a
+ * connection test that failed, a cluster not saved) beside its actions, so they are not here.
  */
 export function machineSettingsProblems(
   state: MachineSettingsState,
@@ -74,7 +46,6 @@ export function machineSettingsProblems(
   return Object.entries(state.views).flatMap(([key, view]) => {
     const host = key as Host;
     return [
-      ...(view.form === null ? [] : formProblems(host, view.form)),
       ...(view.removeProblem === null
         ? []
         : [
