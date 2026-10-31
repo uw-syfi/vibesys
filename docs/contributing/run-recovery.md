@@ -237,6 +237,8 @@ A local evaluation runs its stages in a throwaway candidate session opened under
 | macOS | only arguments, so only the group leader | the leader's whole group | none atomic: the pid and its start second are checked, then the group is signalled; a wrong kill needs the pid space to wrap within that second and a new group leader to take the pid |
 | Docker | the container label, read from the daemon | the container, listed again afterwards to confirm | the container id |
 
+Not found on Linux: a process of another user (it cannot be this host's launcher's work), and a process of the same user that cleared its dumpable flag, such as an `ssh-agent` or a browser's sandbox, because `/proc/<pid>/environ` is then unreadable to its own user. Raising for them would make every clear fail on a desktop that runs one, and waiting would never end it, which is not the outage `ClearUnavailableError` is for. Any other failure to read the table (no file descriptors, no memory, an I/O error) is `ClearUnavailableError`, and a process still marked after the bounded wait that follows its SIGKILL is a survivor, as on macOS.
+
 Not found on macOS: the members of a group whose leader died first, and a `setsid` child, because nothing visible carries the mark any more. `clear` then reports a clean host although they run. The leader is a shell that waits for its command and never replaces itself, so it dies before its group only by an outside `SIGKILL`. A durable record of the group, kept through `Project`, would close this; it is not built. Partial output is never reset: each open of a stage stream is a new stream with a new id, so a re-run starts empty and the dead attempt's bytes stay as its history.
 
 ### What fits none
@@ -806,7 +808,13 @@ These are facts the implementation must settle, found while checking the design 
   would end every step's agent, so it is not a substitute. Each environment, and the step kinds a gap would
   leave unable to run there:
   - **Docker** sweeps the containers labelled with the run for processes whose initial environment carries
-    the tag (`DockerAgentWorkReaper`, over `vs_agent.reap_step_agents`) and removes no container.
+    the tag (`DockerAgentWorkReaper`, over `vs_agent.reap_step_agents`) and removes no container. The
+    sweep prints how many processes it found, not how many it killed, and repeats until a sweep finds
+    none, so a kill that fails is never read as "nothing there". It runs as the container's own user,
+    which is the agent's: the agent image's `USER` is the agent and neither the agent's `docker exec` nor
+    the sweep passes `-u`. A process's environment is readable only by its owner (and by root with
+    `CAP_SYS_PTRACE`, which a default container lacks), so `-u root` would read nothing of the agent's.
+    Residual: a process of another non-root user is skipped; the agent is never started as one.
   - **SkyPilot** runs the agent in the same editor container, so it gets that sweep, and then cancels the
     remote jobs the step's agent asked for. The premise that a SkyPilot evaluation is a step is wrong in
     code: no `SubmitMeasurement` runs on SkyPilot (or Modal); the agent calls the evaluator helper inside
@@ -825,7 +833,19 @@ These are facts the implementation must settle, found while checking the design 
     Modal's own cleanup and is not measured here: after a kill, a function call may keep running, and
     spending, until Modal ends it. A real-tier test with a Modal account is owed.
   - **Slurm** edits in a local Docker container too and gets the Docker sweep. Its jobs are adopted, not
-    cleared (`SlurmJobStepRunner`).
+    cleared (`SlurmJobStepRunner`). The ledger key names the content, not the run, so two runs on one
+    cluster that ask for one content share one job, and a step can attach to a job another run
+    submitted. A run's cancel goes through `relinquish`, which drops that run's lease and leaves the
+    job to every other run that holds one, and `clear` itself cancels only the job of an attempt the
+    ledger holds withdrawn, which no run wants by definition. A test pins that one run's cancel leaves a
+    job another run wants. `clear` asks the tag's own handle first: a job on record is adopted whatever
+    the workspace shows, and a handle on record whose plan cannot be keyed (the workspace lost the
+    candidate's commit) is `ClearUnavailableError`, never "never ran". A withdrawn entry is recorded
+    after the scancel was asked for, not after the job ended, so the scheduler is asked and the step is
+    cleared only once no live job of that attempt shows; a reading that cannot tell is
+    `ClearUnavailableError`. Residual: a submission a dead host had in flight when its attempt was
+    withdrawn can still start a job under that name afterwards; the ledger's orphan check cancels it by
+    name, and `clear` does not wait for that check.
   - **Host** finds the agent's processes through the same process table and reaper as a local
     evaluation's stage commands (`ProcessStageWorkReaper`). The mark an agent carries is the stage mark of
     the step's own handle (`agent_mark`), so one reaper finds both. `confine_to_sandbox(leads_group=True)`
@@ -836,6 +856,19 @@ These are facts the implementation must settle, found while checking the design 
     end-to-end case runs the production argv against the real `ps` or `/proc` of the host it runs on. The
     macOS residual below applies to an agent too: a descendant that left its group, or whose group leader
     died first, is not found.
+  - **A call returns only when its thread work has ended.** The loop starts nothing on a tag until its
+    `run` and `clear` have returned, and a task cancel is a nudge, so a runner that blocks in a thread
+    must not return while the thread goes on. Every runner and reaper that takes a `BlockingRunner`
+    shields it (`ShieldedBlockingRunner`): a cancelled caller waits for the function and then gets its
+    cancel. That covers the agent turn runner's cancel, inspect and `forget_unfinished`,
+    `SlurmJobStepRunner.clear`, and the Docker, SkyPilot, process and container reapers. The workspace
+    layer and the executors shield theirs, and the workspace, adoption, operation and executor runners
+    make no thread call of their own. `StepRunnerContract` holds a `DetachedBlockingRunner` (a Fake whose
+    call outlives its caller, as a thread does) shut, cancels a `run` in its stop path and a `clear`
+    mid-work, and fails if the call returned first; `StageWorkReaperContract` does the same for `reap`.
+    The case fails if a runner offers a blocking runner and never calls it from `run` or `clear`. It
+    runs on the local runner (both process tables), the agent turn runner and every reaper; Slurm's own
+    thread work is on the ledger path, which a dedicated test cancels.
   - **Found on the way:** `SkyPilotEnvironment` inherited a Docker run-wide reap that read Docker settings
     its configuration lacks, so resuming a SkyPilot run raised `AttributeError`; and the Modal and Slurm
     environments never reaped their run-labelled agent containers on resume. Both are fixed, with a test
