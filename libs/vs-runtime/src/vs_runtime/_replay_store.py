@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from vs_project.api import CommitOutcome, StateStore, StoreFence, StoreRecord
     from vs_proto.api import Record
     from vs_runlog.api import FileRunLogWriter
+    from vs_sim.api import Threads
 
 
 REPLAY_STORE_SCHEMA_VERSION = 2
@@ -59,9 +60,9 @@ class RunLogReplayStore:
     fence or an uncertain append reads the log again.
     """
 
-    def __init__(self, writer: FileRunLogWriter, store: StateStore) -> None:
+    def __init__(self, writer: FileRunLogWriter, store: StateStore, threads: Threads) -> None:
         self._writer, self._store = writer, store
-        self._log = ConfirmedLog(writer)
+        self._log = ConfirmedLog(writer, threads)
         self._confirmed: tuple[StoreFence, StoredEnvelope | None] | None = None
 
     def load(self) -> StoreRecord | None:

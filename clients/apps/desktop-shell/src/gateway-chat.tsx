@@ -12,7 +12,7 @@ import {newRequestId} from '@vibesys/request-identity';
 import type {CoreState} from '@vibesys/run-state';
 import {chatControlIntent, createdSession, type HarnessOption} from '@vibesys/runs/chat';
 import {addressedIntent, runReference} from '@vibesys/runs/intents';
-import {Button, Stack, Text} from '@vibesys/ui';
+import {Button, Chip, Row, Stack} from '@vibesys/ui';
 import {useEffect, useMemo} from 'react';
 
 function harnessEntry(option: HarnessOption) {
@@ -139,12 +139,10 @@ export function useGatewayChat(input: Parameters<typeof useGatewayChatState>[0])
     panel: chat.panel ? (
       <Stack gap="space-2" grow>
         {error ? (
-          <Stack gap="space-1">
-            <Text tone="err" title={error}>
-              Unavailable
-            </Text>
+          <Row gap="space-3" align="center" wrap>
+            <Chip label="Unavailable" tone="err" dot hint={error} />
             <Button text="Retry history" press={reload} />
-          </Stack>
+          </Row>
         ) : null}
         <ChatPanel {...chat.panel} />
       </Stack>

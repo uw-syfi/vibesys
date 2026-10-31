@@ -33,6 +33,7 @@ export {
 } from './machine-settings.js';
 export {
   failureWords,
+  formFailureWord,
   hardwareModels,
   hardwareWords,
   type LoginSteps,
@@ -41,6 +42,7 @@ export {
   machinesDetail,
   modalWords,
   reachWords,
+  sentenceCase,
   signInBlocked,
   testFailureWords,
 } from './machine-words.js';

@@ -402,6 +402,23 @@ def record_examples() -> dict[str, p.Record]:
                 "core_input", p.CoreInput(schema_version=1, event=b'{"kind":"epoch_resumed"}')
             ),
         ),
+        "run_started": p.Record(
+            clock=0,
+            body=p.Oneof("run_started", p.RunStarted(schema_version=1, state=b'{"revision":0}')),
+        ),
+        "strategy_advanced": p.Record(
+            clock=2,
+            body=p.Oneof(
+                "strategy_advanced",
+                p.StrategyAdvanced(
+                    schema_version=1,
+                    proposals=[b'{"kind":"proposal_submitted"}'],
+                    strategy=p.Oneof("steps", b'[{"digest":"a"}]'),
+                    wakes=[30.0],
+                    delivered=[10.0],
+                ),
+            ),
+        ),
         "step_started": p.Record(
             clock=2,
             body=p.Oneof(

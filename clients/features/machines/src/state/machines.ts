@@ -53,6 +53,16 @@ export type FormName = 'add' | 'fix';
 /** Which field of a form a problem belongs under. */
 type FormField = 'host' | 'checkout';
 
+/** A removal or sign-in that failed: for which machine, and what it reported. */
+export interface ActionProblem {
+  readonly kind: 'remove' | 'sign-in';
+  readonly host: HostKey;
+  /** The attempt's token, so a failure that comes again is a new problem, not the dismissed one. */
+  readonly token: number;
+  /** What the machine reported, in its own words. */
+  readonly error: string;
+}
+
 /** What is wrong with a form, and the one field it names. */
 interface FormProblem {
   readonly field: FormField;
@@ -96,8 +106,8 @@ export interface MachinesState {
     readonly host: HostKey;
     readonly token: number;
   } | null;
-  /** Why the last removal or sign-in failed, until the next one. */
-  readonly actionProblem: string | null;
+  /** The last removal or sign-in that failed, for its machine, until an action succeeds. */
+  readonly actionProblem: ActionProblem | null;
   /** What each ready machine has set up and how its clusters tested, by machine. */
   readonly places: Readonly<Record<HostKey, Places>>;
   readonly lastToken: number;
@@ -486,7 +496,7 @@ function startPending(
     return same(state);
   const token = state.lastToken + 1;
   return {
-    state: {...state, pending: {kind, host, token}, actionProblem: null, lastToken: token},
+    state: {...state, pending: {kind, host, token}, lastToken: token},
     requests: [{kind, token, host}],
   };
 }
@@ -494,8 +504,16 @@ function startPending(
 function done(state: MachinesState, action: Extract<MachinesAction, {type: 'done'}>): MachinesStep {
   const {pending} = state;
   if (pending === null || pending.token !== action.token) return same(state);
-  const cleared = {...state, pending: null};
-  if (!action.result.ok) return same({...cleared, actionProblem: action.result.error});
+  if (!action.result.ok) {
+    const {kind, host, token} = pending;
+    return same({
+      ...state,
+      pending: null,
+      actionProblem: {kind, host, token, error: action.result.error},
+    });
+  }
+  // An action that took ends the last one's failure.
+  const cleared = {...state, pending: null, actionProblem: null};
   if (pending.kind === 'remove') {
     const entries = (action.result.value ?? state.machines).filter(
       entry => entry.host !== pending.host,

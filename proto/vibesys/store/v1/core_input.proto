@@ -11,6 +11,61 @@ option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;sto
 // requests, observations and failures are the canonical JSON of today's validated
 // vs_core values, versioned by schema_version, until those values are proto messages.
 
+// RunStarted is the first core record of a run: the state its fold starts from. It holds the
+// inputs the run was built from, so every process that folds the log starts from the same
+// state, the run's deadline included.
+message RunStarted {
+  // Version of the canonical encoding of state.
+  uint32 schema_version = 1 [(buf.validate.field).uint32.gte = 1];
+  // The canonical JSON of the vs_core CoreState the run starts from.
+  bytes state = 2 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 524288
+  }];
+}
+
+// StrategyAdvanced is one advance of the run's search, appended as one record so that what it
+// proposed and what it kept can never disagree after a crash: the proposals core took, the
+// state change the search made, and the wake-ups it asked for.
+message StrategyAdvanced {
+  // Version of the canonical encoding of proposals and held.
+  uint32 schema_version = 1 [(buf.validate.field).uint32.gte = 1];
+  // The canonical JSON of each ProposalSubmitted core took from the search in this advance, in
+  // the order core took them.
+  repeated bytes proposals = 2 [(buf.validate.field).repeated.items.bytes = {
+    min_len: 1
+    max_len: 524288
+  }];
+  // What the search kept of the advance, in the search driver's own encoding: the steps its
+  // journal gained, or the whole state at a checkpoint.
+  oneof strategy {
+    option (buf.validate.oneof).required = true;
+    // The steps the state gained.
+    bytes steps = 3 [(buf.validate.field).bytes = {
+      min_len: 1
+      max_len: 524288
+    }];
+    // The whole state, written at a restart, at a doubling of the advance count, and when the
+    // run parks or ends.
+    bytes checkpoint = 4 [(buf.validate.field).bytes = {
+      min_len: 1
+      max_len: 524288
+    }];
+  }
+  // Run-clock times the search asked to be woken at in this advance.
+  repeated double wakes = 5 [(buf.validate.field).repeated.items.double = {
+    gte: 0
+    finite: true
+  }];
+  // Run-clock times of the wake-ups this advance delivered to the search.
+  repeated double delivered = 6 [(buf.validate.field).repeated.items.double = {
+    gte: 0
+    finite: true
+  }];
+  // The canonical JSON of the decisions core could not take yet, replacing those held before.
+  bytes held = 7 [(buf.validate.field).bytes.max_len = 524288];
+}
+
 // CoreInput is one external input core consumed: a decision or proposal, an owner event,
 // an operator control, an epoch resume, or a clock advance that changed state.
 message CoreInput {
