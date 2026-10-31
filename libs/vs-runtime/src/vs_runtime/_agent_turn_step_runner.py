@@ -43,7 +43,11 @@ from vs_core.api.recovery import Cancelled, Finished
 from vs_runtime._access_settlement import AccessKey, AccessSettlementError
 from vs_runtime._core_identity import core_identity
 from vs_runtime._core_requests import ExecutionContext
-from vs_runtime._session_requests import load_session_binding, session_binding_key
+from vs_runtime._session_requests import (
+    conversation_key,
+    load_session_binding,
+    session_binding_key,
+)
 from vs_runtime._stage_marks import agent_mark
 from vs_runtime._step_runner import Cleared, ClearUnavailableError
 
@@ -257,10 +261,11 @@ class AgentTurnStepRunner:
         if execution.done() and not cancel.is_set():
             return _finished(execution.result(), tag)
         reason = await cancel.wait()
-        journaled = self._journaled(plan)
-        if journaled is not None:
-            _, key, invocation = journaled
-            await self._blocking.run(self._sessions.cancel, key, invocation)
+        # The conversation is named from the turn itself, never from its binding or journal row:
+        # a turn that has not begun is refused its start, so one that begins after this call
+        # (a pause that arrived before the session or the turn was up) does not run to its end.
+        key = conversation_key(plan.binding_of, plan.spec.session)
+        await self._blocking.run(self._sessions.cancel, key, plan.spec.invocation_id.root)
         (outcome,) = await asyncio.gather(execution, return_exceptions=True)
         if isinstance(outcome, BaseException) and not isinstance(outcome, Exception):
             raise outcome

@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from vs_agent.api import (
     AgentCapabilities,
     AgentClient,
+    AgentExecutionCancelledError,
     AgentExecutionPolicy,
     AgentInvocationRecord,
     AgentInvocationState,
@@ -947,6 +948,34 @@ def test_release_refuses_while_an_invocation_is_active_and_cancel_ignores_idle_t
     assert isinstance(harness.sessions.resume(KEY, harness.message, "busy"), Completed)
     assert len(seen) == 1
     assert "active invocation" in seen[0]
+
+
+def test_a_cancel_that_arrives_before_a_turn_begins_refuses_its_start_exactly_once(
+    harness: _Harness,
+) -> None:
+    """A pause can be sent while the turn is still being prepared: it must not be lost."""
+    harness.sessions.cancel(KEY, "early-1")
+    calls = harness.boundary.calls
+
+    with pytest.raises(AgentExecutionCancelledError):
+        harness.sessions.resume(KEY, harness.message, "early-1")
+
+    assert harness.boundary.calls == calls
+    assert isinstance(harness.sessions.inspect(KEY, "early-1"), Unknown)
+    assert isinstance(harness.sessions.resume(KEY, harness.message, "early-1"), Completed)
+
+
+def test_a_cancel_of_an_answered_turn_or_of_one_still_to_be_forgotten_refuses_no_later_start(
+    harness: _Harness,
+) -> None:
+    answered = harness.sessions.resume(KEY, harness.message, "answered-1")
+    assert isinstance(answered, Completed)
+    harness.sessions.cancel(KEY, "answered-1")
+    assert harness.sessions.resume(KEY, harness.message, "answered-1") == answered
+
+    harness.sessions.cancel(KEY, "never-begun-1")
+    harness.sessions.forget_unfinished(KEY, "never-begun-1")
+    assert isinstance(harness.sessions.resume(KEY, harness.message, "never-begun-1"), Completed)
 
 
 def test_a_steer_reaches_no_turn_but_the_running_invocation(harness: _Harness) -> None:

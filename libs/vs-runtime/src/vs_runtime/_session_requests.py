@@ -148,6 +148,19 @@ def scope_binding_key(scope: Scope, session_id: SessionId) -> str:
     return f"{scope.owner.kind}:{scope.owner.root}:{scope.generation}/{session_id.root}"
 
 
+def conversation_key(request: RequestBase, session: SessionSpec) -> AgentSessionKey:
+    """The key of the provider conversation *session* has under *request*'s scope.
+
+    An ensure writes it into the session's binding; it is derived from the scope and the spec
+    alone, so whoever holds a turn of the session names the conversation without the binding.
+    """
+    owner = request.scope.owner
+    member = f"{owner.kind}:{owner.root}:{session.session_id.root}"
+    return AgentSessionKey.for_member(
+        session.role_id.root, member, generation=request.scope.generation + 1
+    )
+
+
 def load_session_binding(store: ReceiptStore, bkey: str) -> SessionBinding | None:
     """Read a binding; the only reader of the binding family outside this module's writers."""
     return store.load(_BINDINGS, "binding", bkey, SessionBinding)
@@ -730,16 +743,6 @@ class RuntimeSessionRequests:
     def _binding_key(request: RequestBase, session_id: SessionId) -> str:
         return session_binding_key(request, session_id)
 
-    @staticmethod
-    def _conversation_key(request: RequestBase, session: SessionSpec) -> str:
-        owner = request.scope.owner
-        member = f"{owner.kind}:{owner.root}:{session.session_id.root}"
-        return str(
-            AgentSessionKey.for_member(
-                session.role_id.root, member, generation=request.scope.generation + 1
-            )
-        )
-
     async def _ensure(self, request: EnsureSession, call: _Call) -> _Facts:
         request_id = call.canonical
         spec = request.spec
@@ -754,7 +757,7 @@ class RuntimeSessionRequests:
             spec=spec,
             ensure_request=request_id,
             resource_id=ResourceId(root=f"session:{key}"),
-            session_key=self._conversation_key(request, spec),
+            session_key=str(conversation_key(request, spec)),
             turn_timeout_seconds=None if timeout is None else timeout.total_seconds(),
         )
         binding = self._bind(key, wanted, required, episode_fence(key, request.admission_id), call)

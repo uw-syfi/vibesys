@@ -62,7 +62,7 @@ from vs_runtime.api.testing import (
 )
 from vs_sandbox.api import RUN_ID_LABEL, STEP_TAG_ENV, step_tag_env
 from vs_sandbox.fake_docker_engine import FakeDockerEngine
-from vs_sim.api import DISCARD
+from vs_sim.api import DISCARD, yield_now
 from vs_sim.api.testing import (
     HANG_GUARD_S,
     FakePipedProcessLauncher,
@@ -468,6 +468,50 @@ def test_an_answered_turn_is_never_asked_again_and_a_clear_never_reverts_its_wri
         assert world.workspace.agent_restore_calls == []
 
     world.run(main())
+
+
+@settings(max_examples=examples(pr=12, nightly=80), deadline=None)
+@given(kind=st.sampled_from(list(Kind)), yields=st.integers(min_value=0, max_value=60))
+def test_a_cancel_at_any_point_of_a_turn_s_start_stops_the_turn_and_leaves_no_process(
+    kind: Kind, yields: int, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """A pause can arrive before the turn has reached the provider, or before it is journaled.
+
+    The cancel must reach a turn that begins after it was sent: a turn that hangs would otherwise
+    run to its guard while the runner waits for it. It also must not matter how far the start had
+    got, so the cancel is sent after each number of scheduler turns.
+    """
+    world = open_world(tmp_path_factory.mktemp("world"), kind)
+    tag = tag_named("step-a")
+    cancel = CancelSignal()
+
+    async def main() -> None:
+        turn = asyncio.ensure_future(
+            world.runner.run(world.running(tag), tag, 1, DEADLINE_AT, cancel)
+        )
+        for _ in range(yields):
+            await yield_now()
+        cancel.set(CancelReason.WITHDRAWN)
+        assert await turn == Cancelled(reason=CancelReason.WITHDRAWN)
+        assert await world.left_running(tag) == 0
+
+    world.run(main())
+    assert world.clock.now() < HANG_GUARD_S, "the cancel did not stop the turn; its guard ended it"
+
+
+@pytest.mark.parametrize("kind", list(Kind))
+def test_a_cancel_set_before_the_run_starts_begins_no_turn(tmp_path: Path, kind: Kind) -> None:
+    world = open_world(tmp_path, kind)
+    tag = tag_named("step-a")
+    cancel = CancelSignal()
+    cancel.set(CancelReason.WITHDRAWN)
+
+    async def main() -> None:
+        result = await world.runner.run(world.finishing(tag), tag, 1, DEADLINE_AT, cancel)
+        assert result == Cancelled(reason=CancelReason.WITHDRAWN)
+
+    world.run(main())
+    assert [t for t in world.provider_turns if t.step_tag == mark_of(tag)] == []
 
 
 def test_a_step_that_is_not_a_turn_or_not_the_tags_own_is_refused(tmp_path: Path) -> None:
