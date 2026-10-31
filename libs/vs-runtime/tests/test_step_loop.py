@@ -365,7 +365,12 @@ async def run_epochs(world: World, clock: VirtualClock, kill_at: int | None) -> 
     while True:
         log = FakeStepLog(world.records, world.seed.state, world.seed.registry, clock)
         if parked:
-            log.resume_run()
+            resume = core.ControlInput(
+                control_id=core.ControlId(root=f"resume-{len(world.exits)}"),
+                action="resume",
+                when="now",
+            )
+            log.push(core.RunControlEvent(control=resume, now_at=clock.now()))
         switch = Switch(None if killed else kill_at)
         loop = asyncio.ensure_future(
             run_step_loop(
@@ -469,7 +474,7 @@ def check_log_of(world: World, tag: core.RequestId) -> None:
 
 def check_world(world: World) -> None:
     assert world.exits[-1] is RunRest.ENDED
-    assert len(world.records.ends) <= 1, "the run's end was recorded twice"
+    assert world.records.count("run_ended") <= 1, "the run's end was recorded twice"
     for tag in world.seed.tags:
         check_log_of(world, tag)
     check_clear_precedes_every_rerun(world)

@@ -12,6 +12,7 @@ from vs_proto.api import (
     CoreInput,
     EpochStarted,
     Record,
+    RunEnded,
     StepFinished,
     StepStarted,
 )
@@ -19,7 +20,9 @@ from vs_proto.api import (
 if TYPE_CHECKING:
     from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
-type CoreMessage = EpochStarted | CoreInput | StepStarted | StepFinished | AttemptInterrupted
+type CoreMessage = (
+    EpochStarted | CoreInput | StepStarted | StepFinished | AttemptInterrupted | RunEnded
+)
 """The messages core folds into its state, each the body of one record.
 
 The epoch header opens an epoch: its first record proves the earlier epoch's process dead."""
@@ -30,6 +33,7 @@ type _CoreBody = (
     | Oneof[Literal["step_started"], StepStarted]
     | Oneof[Literal["step_finished"], StepFinished]
     | Oneof[Literal["attempt_interrupted"], AttemptInterrupted]
+    | Oneof[Literal["run_ended"], RunEnded]
 )
 
 
@@ -123,3 +127,5 @@ def _body(message: CoreMessage) -> _CoreBody:
             return Oneof("step_finished", message)
         case AttemptInterrupted():
             return Oneof("attempt_interrupted", message)
+        case RunEnded():
+            return Oneof("run_ended", message)

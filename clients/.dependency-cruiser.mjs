@@ -27,6 +27,13 @@ const ANY_TEST_SUPPORT = [
   `^(?:${PACKAGE_DIRECTORIES})/src/.*/(?:testing|test-support)/`,
 ];
 const LEAF_TOOL_DIRECTORIES = pathAlternation(layout.toolingDirectories);
+// The end-to-end specs, and the support they share (`tools/e2e/`: the free port, the shards, the
+// check that every drawn glyph is a bundled font).
+const E2E_DIRECTORIES = pathAlternation(
+  layout.toolingDirectories.filter(directory => directory.endsWith('/e2e')),
+);
+const E2E_SPECS = `^(?:${E2E_DIRECTORIES})/`;
+const SHARED_E2E_SUPPORT = '^tools/e2e/';
 const LEAF_TOOLS = `^(?:${LEAF_TOOL_DIRECTORIES})/`;
 // The importer of a `tools-are-leaves` edge: any file in a leaf tool directory, or any other file
 // in a package. Group 1 is the importer's own leaf tool directory, so `to.pathNot: '^$1/'`
@@ -223,7 +230,15 @@ export default {
       name: 'tools-are-leaves',
       severity: 'error',
       from: {path: LEAF_TOOL_IMPORTER},
-      to: {path: LEAF_TOOLS, pathNot: '^$1/'},
+      to: {path: LEAF_TOOLS, pathNot: ['^$1/', SHARED_E2E_SUPPORT]},
+    },
+    {
+      // The exception above, closed again: the shared end-to-end support is for the end-to-end
+      // specs and the workspace's own `tools/`, not for package code or the packages' benchmarks.
+      name: 'shared-e2e-support-is-for-e2e-specs',
+      severity: 'error',
+      from: {pathNot: [E2E_SPECS, '^tools/']},
+      to: {path: SHARED_E2E_SUPPORT},
     },
     {
       // `tools/scripts/` is repository tooling (architecture checks). It reads package manifests
