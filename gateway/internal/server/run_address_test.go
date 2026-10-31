@@ -48,7 +48,7 @@ func TestWatchRunsCarriesPublishedProject(t *testing.T) {
 			}
 			ctx, cancel := context.WithCancel(f.ctx)
 			defer cancel()
-			stream, err := client(t, f, false).WatchRuns(ctx, &apiv1.WatchRunsRequest{})
+			stream, err := watchRuns(ctx, client(t, f, false))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -95,7 +95,7 @@ func TestWatchRunsNeverPublishesAnEmptyOrRelativeAddress(t *testing.T) {
 		}
 	}
 	for _, project := range []string{"", "relative"} {
-		response := &apiv1.WatchRunsResponse{RunId: "run-1", ProjectRoot: proto.String(project)}
+		response := &apiv1.RunEntry{ProjectRoot: proto.String(project)}
 		if err := protovalidate.Validate(response); err == nil {
 			t.Fatalf("schema accepted %q", project)
 		}
@@ -111,7 +111,7 @@ func TestWatchRunsObservesAddressBackfillAndRejectsStaleTargets(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(f.ctx)
 	defer cancel()
-	stream, err := client(t, f, false).WatchRuns(ctx, &apiv1.WatchRunsRequest{})
+	stream, err := watchRuns(ctx, client(t, f, false))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,13 +7,15 @@ import { enumDesc, extDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/cod
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
 import type { MessageOptions, Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_descriptor, file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
+import type { RunHead } from "../../store/v1/skeleton_pb.js";
+import { file_vibesys_store_v1_skeleton } from "../../store/v1/skeleton_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file vibesys/api/v1/subscribe.proto.
  */
 export const file_vibesys_api_v1_subscribe: GenFile = /*@__PURE__*/
-  fileDesc("Ch52aWJlc3lzL2FwaS92MS9zdWJzY3JpYmUucHJvdG8SDnZpYmVzeXMuYXBpLnYxIrABCgtUb3BpY1BvbGljeRISCgpjYWRlbmNlX21zGAEgASgNEhYKDnN0YWxlX2FmdGVyX21zGAIgASgNEh8KDmZpcnN0X2ZyYW1lX21zGAMgASgNQge6SAQqAiAAEhkKCG1heF9rZXlzGAQgASgNQge6SAQqAiAAEhcKD21pbl9pbnRlcnZhbF9tcxgFIAEoDRIgCg9tYXhfdmFsdWVfYnl0ZXMYBiABKA1CB7pIBCoCIAAiSwoPU3Vic2NyaWJlVGltaW5nEh0KDGhlYXJ0YmVhdF9tcxgBIAEoDUIHukgEKgIgABIZCghsZWFzZV9tcxgCIAEoDUIHukgEKgIgACJrChBTdWJzY3JpYmVSZXF1ZXN0EjoKDW1hY2hpbmVfc3RhdHMYASABKAsyIS52aWJlc3lzLmFwaS52MS5NYWNoaW5lU3RhdHNUb3BpY0gAOgvq8xgHCIgnELDqAUIOCgV0b3BpYxIFukgCCAEi+QEKEVN1YnNjcmliZVJlc3BvbnNlEisKBWVudHJ5GAEgASgLMhoudmliZXN5cy5hcGkudjEuVG9waWNFbnRyeUgAEh0KB3JlbW92ZWQYAiABKAlCCrpIB3IFEAEogAFIABIoCgZzeW5jZWQYAyABKAsyFi52aWJlc3lzLmFwaS52MS5TeW5jZWRIABIuCgloZWFydGJlYXQYBCABKAsyGS52aWJlc3lzLmFwaS52MS5IZWFydGJlYXRIABIuCgZmYWlsZWQYBSABKAsyHC52aWJlc3lzLmFwaS52MS5Ub3BpY0ZhaWx1cmVIAEIOCgVmcmFtZRIFukgCCAEibAoKVG9waWNFbnRyeRIXCgNrZXkYASABKAlCCrpIB3IFEAEogAESNQoNbWFjaGluZV9zdGF0cxgCIAEoCzIcLnZpYmVzeXMuYXBpLnYxLk1hY2hpbmVTdGF0c0gAQg4KBXZhbHVlEgW6SAIIASIICgZTeW5jZWQiCwoJSGVhcnRiZWF0ImQKDFRvcGljRmFpbHVyZRI6CgRjb2RlGAEgASgOMiAudmliZXN5cy5hcGkudjEuVG9waWNGYWlsdXJlQ29kZUIKukgHggEEEAEgABIYCgZkZXRhaWwYAiABKAlCCLpIBXIDKIAgIikKEU1hY2hpbmVTdGF0c1RvcGljOhTi8xgQCJBOELDqARiYdSABMICAASKfAwoMTWFjaGluZVN0YXRzEjYKCnNhbXBsZWRfYXQYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQESLQoJY3B1X3N0YXRzGAIgASgLMhgudmliZXN5cy5hcGkudjEuQ3B1U3RhdHNIABIyCg9jcHVfdW5hdmFpbGFibGUYAyABKAsyFy52aWJlc3lzLmFwaS52MS5BYnNlbmNlSAASMwoMbWVtb3J5X3N0YXRzGAQgASgLMhsudmliZXN5cy5hcGkudjEuTWVtb3J5U3RhdHNIARI1ChJtZW1vcnlfdW5hdmFpbGFibGUYBSABKAsyFy52aWJlc3lzLmFwaS52MS5BYnNlbmNlSAESJwoEZ3B1cxgGIAEoCzIXLnZpYmVzeXMuYXBpLnYxLkdwdUxpc3RIAhIyCg9ncHVfdW5hdmFpbGFibGUYByABKAsyFy52aWJlc3lzLmFwaS52MS5BYnNlbmNlSAJCDAoDY3B1EgW6SAIIAUIPCgZtZW1vcnkSBbpIAggBQgwKA2dwdRIFukgCCAEiQAoIQ3B1U3RhdHMSNAoTdXRpbGl6YXRpb25fcGVyY2VudBgBIAEoAUIXukgUEhIZAAAAAAAAWUApAAAAAAAAAAAiswEKC01lbW9yeVN0YXRzEhIKCnVzZWRfYnl0ZXMYASABKAQSHAoLdG90YWxfYnl0ZXMYAiABKARCB7pIBDICIAA6crpIbxptCh5tZW1vcnlfc3RhdHMudXNlZF93aXRoaW5fdG90YWwSJnVzZWRfYnl0ZXMgbXVzdCBub3QgZXhjZWVkIHRvdGFsX2J5dGVzGiN0aGlzLnVzZWRfYnl0ZXMgPD0gdGhpcy50b3RhbF9ieXRlcyI8CgdHcHVMaXN0EjEKBGdwdXMYASADKAsyGC52aWJlc3lzLmFwaS52MS5HcHVTdGF0c0IJukgGkgEDEIACIrkCCghHcHVTdGF0cxINCgVpbmRleBgBIAEoDRIYCgRuYW1lGAIgASgJQgq6SAdyBRABKIACEjQKE3V0aWxpemF0aW9uX3BlcmNlbnQYAyABKAFCF7pIFBISGQAAAAAAAFlAKQAAAAAAAAAAEhkKEW1lbW9yeV91c2VkX2J5dGVzGAQgASgEEiMKEm1lbW9yeV90b3RhbF9ieXRlcxgFIAEoBEIHukgEMgIgADqNAbpIiQEahgEKG2dwdV9zdGF0cy51c2VkX3dpdGhpbl90b3RhbBI0bWVtb3J5X3VzZWRfYnl0ZXMgbXVzdCBub3QgZXhjZWVkIG1lbW9yeV90b3RhbF9ieXRlcxoxdGhpcy5tZW1vcnlfdXNlZF9ieXRlcyA8PSB0aGlzLm1lbW9yeV90b3RhbF9ieXRlcyJECgdBYnNlbmNlEjkKBnJlYXNvbhgBIAEoDjIdLnZpYmVzeXMuYXBpLnYxLkFic2VuY2VSZWFzb25CCrpIB4IBBBABIAAqzAEKEFRvcGljRmFpbHVyZUNvZGUSIgoeVE9QSUNfRkFJTFVSRV9DT0RFX1VOU1BFQ0lGSUVEEAASIgoeVE9QSUNfRkFJTFVSRV9DT0RFX1VOU1VQUE9SVEVEEAESKQolVE9QSUNfRkFJTFVSRV9DT0RFX1JFU09VUkNFX0VYSEFVU1RFRBACEiQKIFRPUElDX0ZBSUxVUkVfQ09ERV9TT1VSQ0VfRkFJTEVEEAMSHwobVE9QSUNfRkFJTFVSRV9DT0RFX0lOVEVSTkFMEAQq1QEKDUFic2VuY2VSZWFzb24SHgoaQUJTRU5DRV9SRUFTT05fVU5TUEVDSUZJRUQQABIhCh1BQlNFTkNFX1JFQVNPTl9UT09MX05PVF9GT1VORBABEh4KGkFCU0VOQ0VfUkVBU09OX1JFQURfRkFJTEVEEAISHAoYQUJTRU5DRV9SRUFTT05fVElNRURfT1VUEAMSHwobQUJTRU5DRV9SRUFTT05fUEFSU0VfRkFJTEVEEAQSIgoeQUJTRU5DRV9SRUFTT05fVE9PTF9VTlZFUklGSUVEEAU6VAoFdG9waWMSHy5nb29nbGUucHJvdG9idWYuTWVzc2FnZU9wdGlvbnMYvI4DIAEoCzIbLnZpYmVzeXMuYXBpLnYxLlRvcGljUG9saWN5UgV0b3BpYzptChBzdWJzY3JpYmVfdGltaW5nEh8uZ29vZ2xlLnByb3RvYnVmLk1lc3NhZ2VPcHRpb25zGL2OAyABKAsyHy52aWJlc3lzLmFwaS52MS5TdWJzY3JpYmVUaW1pbmdSD3N1YnNjcmliZVRpbWluZ0I9WjtnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL2FwaS92MTthcGl2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_descriptor, file_google_protobuf_timestamp]);
+  fileDesc("Ch52aWJlc3lzL2FwaS92MS9zdWJzY3JpYmUucHJvdG8SDnZpYmVzeXMuYXBpLnYxIrABCgtUb3BpY1BvbGljeRISCgpjYWRlbmNlX21zGAEgASgNEhYKDnN0YWxlX2FmdGVyX21zGAIgASgNEh8KDmZpcnN0X2ZyYW1lX21zGAMgASgNQge6SAQqAiAAEhkKCG1heF9rZXlzGAQgASgNQge6SAQqAiAAEhcKD21pbl9pbnRlcnZhbF9tcxgFIAEoDRIgCg9tYXhfdmFsdWVfYnl0ZXMYBiABKA1CB7pIBCoCIAAiSwoPU3Vic2NyaWJlVGltaW5nEh0KDGhlYXJ0YmVhdF9tcxgBIAEoDUIHukgEKgIgABIZCghsZWFzZV9tcxgCIAEoDUIHukgEKgIgACKWAQoQU3Vic2NyaWJlUmVxdWVzdBI6Cg1tYWNoaW5lX3N0YXRzGAEgASgLMiEudmliZXN5cy5hcGkudjEuTWFjaGluZVN0YXRzVG9waWNIABIpCgRydW5zGAIgASgLMhkudmliZXN5cy5hcGkudjEuUnVuc1RvcGljSAA6C+rzGAcIiCcQsOoBQg4KBXRvcGljEgW6SAIIASL5AQoRU3Vic2NyaWJlUmVzcG9uc2USKwoFZW50cnkYASABKAsyGi52aWJlc3lzLmFwaS52MS5Ub3BpY0VudHJ5SAASHQoHcmVtb3ZlZBgCIAEoCUIKukgHcgUQASiAAUgAEigKBnN5bmNlZBgDIAEoCzIWLnZpYmVzeXMuYXBpLnYxLlN5bmNlZEgAEi4KCWhlYXJ0YmVhdBgEIAEoCzIZLnZpYmVzeXMuYXBpLnYxLkhlYXJ0YmVhdEgAEi4KBmZhaWxlZBgFIAEoCzIcLnZpYmVzeXMuYXBpLnYxLlRvcGljRmFpbHVyZUgAQg4KBWZyYW1lEgW6SAIIASKWAQoKVG9waWNFbnRyeRIXCgNrZXkYASABKAlCCrpIB3IFEAEogAESNQoNbWFjaGluZV9zdGF0cxgCIAEoCzIcLnZpYmVzeXMuYXBpLnYxLk1hY2hpbmVTdGF0c0gAEigKBHJ1bnMYAyABKAsyGC52aWJlc3lzLmFwaS52MS5SdW5FbnRyeUgAQg4KBXZhbHVlEgW6SAIIASIICgZTeW5jZWQiCwoJSGVhcnRiZWF0ImQKDFRvcGljRmFpbHVyZRI6CgRjb2RlGAEgASgOMiAudmliZXN5cy5hcGkudjEuVG9waWNGYWlsdXJlQ29kZUIKukgHggEEEAEgABIYCgZkZXRhaWwYAiABKAlCCLpIBXIDKIAgIikKEU1hY2hpbmVTdGF0c1RvcGljOhTi8xgQCJBOELDqARiYdSABMICAASKfAwoMTWFjaGluZVN0YXRzEjYKCnNhbXBsZWRfYXQYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQESLQoJY3B1X3N0YXRzGAIgASgLMhgudmliZXN5cy5hcGkudjEuQ3B1U3RhdHNIABIyCg9jcHVfdW5hdmFpbGFibGUYAyABKAsyFy52aWJlc3lzLmFwaS52MS5BYnNlbmNlSAASMwoMbWVtb3J5X3N0YXRzGAQgASgLMhsudmliZXN5cy5hcGkudjEuTWVtb3J5U3RhdHNIARI1ChJtZW1vcnlfdW5hdmFpbGFibGUYBSABKAsyFy52aWJlc3lzLmFwaS52MS5BYnNlbmNlSAESJwoEZ3B1cxgGIAEoCzIXLnZpYmVzeXMuYXBpLnYxLkdwdUxpc3RIAhIyCg9ncHVfdW5hdmFpbGFibGUYByABKAsyFy52aWJlc3lzLmFwaS52MS5BYnNlbmNlSAJCDAoDY3B1EgW6SAIIAUIPCgZtZW1vcnkSBbpIAggBQgwKA2dwdRIFukgCCAEiQAoIQ3B1U3RhdHMSNAoTdXRpbGl6YXRpb25fcGVyY2VudBgBIAEoAUIXukgUEhIZAAAAAAAAWUApAAAAAAAAAAAiswEKC01lbW9yeVN0YXRzEhIKCnVzZWRfYnl0ZXMYASABKAQSHAoLdG90YWxfYnl0ZXMYAiABKARCB7pIBDICIAA6crpIbxptCh5tZW1vcnlfc3RhdHMudXNlZF93aXRoaW5fdG90YWwSJnVzZWRfYnl0ZXMgbXVzdCBub3QgZXhjZWVkIHRvdGFsX2J5dGVzGiN0aGlzLnVzZWRfYnl0ZXMgPD0gdGhpcy50b3RhbF9ieXRlcyI8CgdHcHVMaXN0EjEKBGdwdXMYASADKAsyGC52aWJlc3lzLmFwaS52MS5HcHVTdGF0c0IJukgGkgEDEIACIrkCCghHcHVTdGF0cxINCgVpbmRleBgBIAEoDRIYCgRuYW1lGAIgASgJQgq6SAdyBRABKIACEjQKE3V0aWxpemF0aW9uX3BlcmNlbnQYAyABKAFCF7pIFBISGQAAAAAAAFlAKQAAAAAAAAAAEhkKEW1lbW9yeV91c2VkX2J5dGVzGAQgASgEEiMKEm1lbW9yeV90b3RhbF9ieXRlcxgFIAEoBEIHukgEMgIgADqNAbpIiQEahgEKG2dwdV9zdGF0cy51c2VkX3dpdGhpbl90b3RhbBI0bWVtb3J5X3VzZWRfYnl0ZXMgbXVzdCBub3QgZXhjZWVkIG1lbW9yeV90b3RhbF9ieXRlcxoxdGhpcy5tZW1vcnlfdXNlZF9ieXRlcyA8PSB0aGlzLm1lbW9yeV90b3RhbF9ieXRlcyJECgdBYnNlbmNlEjkKBnJlYXNvbhgBIAEoDjIdLnZpYmVzeXMuYXBpLnYxLkFic2VuY2VSZWFzb25CCrpIB4IBBBABIAAiHwoJUnVuc1RvcGljOhLi8xgOGLDqASCAECjIATCAgBAinQIKCFJ1bkVudHJ5EicKBGhlYWQYASABKAsyGS52aWJlc3lzLnN0b3JlLnYxLlJ1bkhlYWQSNwoIbGl2ZW5lc3MYAiABKA4yGy52aWJlc3lzLmFwaS52MS5SdW5MaXZlbmVzc0IIukgFggECEAESKAoMcHJvamVjdF9yb290GAMgASgJQg26SApyCBABKIAgOgEvSACIAQE6dLpIcRpvChtydW5fZW50cnkuaGVhZF9oYXNfbGl2ZW5lc3MSKWEgcnVuIHdpdGggYSBoZWFkIG11c3Qgc3RhdGUgaXRzIGxpdmVuZXNzGiUhaGFzKHRoaXMuaGVhZCkgfHwgdGhpcy5saXZlbmVzcyAhPSAwQg8KDV9wcm9qZWN0X3Jvb3QqzAEKEFRvcGljRmFpbHVyZUNvZGUSIgoeVE9QSUNfRkFJTFVSRV9DT0RFX1VOU1BFQ0lGSUVEEAASIgoeVE9QSUNfRkFJTFVSRV9DT0RFX1VOU1VQUE9SVEVEEAESKQolVE9QSUNfRkFJTFVSRV9DT0RFX1JFU09VUkNFX0VYSEFVU1RFRBACEiQKIFRPUElDX0ZBSUxVUkVfQ09ERV9TT1VSQ0VfRkFJTEVEEAMSHwobVE9QSUNfRkFJTFVSRV9DT0RFX0lOVEVSTkFMEAQq1QEKDUFic2VuY2VSZWFzb24SHgoaQUJTRU5DRV9SRUFTT05fVU5TUEVDSUZJRUQQABIhCh1BQlNFTkNFX1JFQVNPTl9UT09MX05PVF9GT1VORBABEh4KGkFCU0VOQ0VfUkVBU09OX1JFQURfRkFJTEVEEAISHAoYQUJTRU5DRV9SRUFTT05fVElNRURfT1VUEAMSHwobQUJTRU5DRV9SRUFTT05fUEFSU0VfRkFJTEVEEAQSIgoeQUJTRU5DRV9SRUFTT05fVE9PTF9VTlZFUklGSUVEEAUqkgEKC1J1bkxpdmVuZXNzEhwKGFJVTl9MSVZFTkVTU19VTlNQRUNJRklFRBAAEhYKElJVTl9MSVZFTkVTU19BTElWRRABEhwKGFJVTl9MSVZFTkVTU19JTlRFUlJVUFRFRBACEhYKElJVTl9MSVZFTkVTU19FTkRFRBADEhcKE1JVTl9MSVZFTkVTU19QQVJLRUQQBDpUCgV0b3BpYxIfLmdvb2dsZS5wcm90b2J1Zi5NZXNzYWdlT3B0aW9ucxi8jgMgASgLMhsudmliZXN5cy5hcGkudjEuVG9waWNQb2xpY3lSBXRvcGljOm0KEHN1YnNjcmliZV90aW1pbmcSHy5nb29nbGUucHJvdG9idWYuTWVzc2FnZU9wdGlvbnMYvY4DIAEoCzIfLnZpYmVzeXMuYXBpLnYxLlN1YnNjcmliZVRpbWluZ1IPc3Vic2NyaWJlVGltaW5nQj1aO2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2dhdGV3YXkvZ2VuL3ZpYmVzeXMvYXBpL3YxO2FwaXYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_descriptor, file_google_protobuf_timestamp, file_vibesys_store_v1_skeleton]);
 
 /**
  * One topic's fixed cadence and bounds, projected into generated Go and TypeScript tables.
@@ -118,6 +120,12 @@ export type SubscribeRequest = Message<"vibesys.api.v1.SubscribeRequest"> & {
      */
     value: MachineStatsTopic;
     case: "machineStats";
+  } | {
+    /**
+     * @generated from field: vibesys.api.v1.RunsTopic runs = 2;
+     */
+    value: RunsTopic;
+    case: "runs";
   } | { case: undefined; value?: undefined };
 };
 
@@ -210,6 +218,12 @@ export type TopicEntry = Message<"vibesys.api.v1.TopicEntry"> & {
      */
     value: MachineStats;
     case: "machineStats";
+  } | {
+    /**
+     * @generated from field: vibesys.api.v1.RunEntry runs = 3;
+     */
+    value: RunEntry;
+    case: "runs";
   } | { case: undefined; value?: undefined };
 };
 
@@ -479,6 +493,58 @@ export const AbsenceSchema: GenMessage<Absence> = /*@__PURE__*/
   messageDesc(file_vibesys_api_v1_subscribe, 14);
 
 /**
+ * The runs of the host's run index, keyed by run id: each run's head and whether its writer
+ * is alive. Event driven: a rename in the index or a run directory is the only cause of a
+ * change, and a lock probe is the only poll. A run absent from the map is not published.
+ *
+ * @generated from message vibesys.api.v1.RunsTopic
+ */
+export type RunsTopic = Message<"vibesys.api.v1.RunsTopic"> & {
+};
+
+/**
+ * Describes the message vibesys.api.v1.RunsTopic.
+ * Use `create(RunsTopicSchema)` to create a new message.
+ */
+export const RunsTopicSchema: GenMessage<RunsTopic> = /*@__PURE__*/
+  messageDesc(file_vibesys_api_v1_subscribe, 15);
+
+/**
+ * What the host last said of one run. head is absent for a phase 1 run and for a run whose
+ * head cannot be read or is over the topic's bound, so one damaged run never hides the others.
+ *
+ * @generated from message vibesys.api.v1.RunEntry
+ */
+export type RunEntry = Message<"vibesys.api.v1.RunEntry"> & {
+  /**
+   * @generated from field: vibesys.store.v1.RunHead head = 1;
+   */
+  head?: RunHead | undefined;
+
+  /**
+   * UNSPECIFIED is unknown phase 1 liveness.
+   *
+   * @generated from field: vibesys.api.v1.RunLiveness liveness = 2;
+   */
+  liveness: RunLiveness;
+
+  /**
+   * Canonical host-side project directory. A run without one has no address and cannot enter
+   * project-dependent listings.
+   *
+   * @generated from field: optional string project_root = 3;
+   */
+  projectRoot?: string | undefined;
+};
+
+/**
+ * Describes the message vibesys.api.v1.RunEntry.
+ * Use `create(RunEntrySchema)` to create a new message.
+ */
+export const RunEntrySchema: GenMessage<RunEntry> = /*@__PURE__*/
+  messageDesc(file_vibesys_api_v1_subscribe, 16);
+
+/**
  * @generated from enum vibesys.api.v1.TopicFailureCode
  */
 export enum TopicFailureCode {
@@ -572,6 +638,44 @@ export enum AbsenceReason {
  */
 export const AbsenceReasonSchema: GenEnum<AbsenceReason> = /*@__PURE__*/
   enumDesc(file_vibesys_api_v1_subscribe, 1);
+
+/**
+ * @generated from enum vibesys.api.v1.RunLiveness
+ */
+export enum RunLiveness {
+  /**
+   * @generated from enum value: RUN_LIVENESS_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: RUN_LIVENESS_ALIVE = 1;
+   */
+  ALIVE = 1,
+
+  /**
+   * @generated from enum value: RUN_LIVENESS_INTERRUPTED = 2;
+   */
+  INTERRUPTED = 2,
+
+  /**
+   * @generated from enum value: RUN_LIVENESS_ENDED = 3;
+   */
+  ENDED = 3,
+
+  /**
+   * A cleanly drained epoch. The saved run can be relaunched.
+   *
+   * @generated from enum value: RUN_LIVENESS_PARKED = 4;
+   */
+  PARKED = 4,
+}
+
+/**
+ * Describes the enum vibesys.api.v1.RunLiveness.
+ */
+export const RunLivenessSchema: GenEnum<RunLiveness> = /*@__PURE__*/
+  enumDesc(file_vibesys_api_v1_subscribe, 2);
 
 /**
  * Required on every message that is an arm of SubscribeRequest.topic. The

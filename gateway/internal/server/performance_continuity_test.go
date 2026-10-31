@@ -18,7 +18,7 @@ import (
 )
 
 // Generated and retained writers, growing prefixes, checkpoints and reconnect cursors all
-// publish exactly the same canonical facts through WatchRuns, Skeleton and Tail.
+// publish exactly the same canonical facts through the runs topic, Skeleton and Tail.
 func TestEveryLiveReadPathCarriesCanonicalPerformance(t *testing.T) {
 	f, err := os.Open("../../../proto/testdata/fold/cases.json.gz")
 	if err != nil {
@@ -88,7 +88,7 @@ func TestEveryLiveReadPathCarriesCanonicalPerformance(t *testing.T) {
 					write(t, filepath.Join(f.run, "keyframes", fmt.Sprintf("%d.pb", want.GetCommittedSeq())), false, encode(t, state))
 				}
 				watchCtx, cancel := context.WithCancel(f.ctx)
-				watch, err := c.WatchRuns(watchCtx, &apiv1.WatchRunsRequest{})
+				watch, err := watchRuns(watchCtx, c)
 				if err != nil {
 					t.Fatal(err)
 				}

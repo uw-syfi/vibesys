@@ -55,15 +55,12 @@ from vs_proto._generated.vibesys.api.v1.host_pb import (
     GetBlobsResponse,
     HelloRequest,
     HelloResponse,
-    RunLiveness,
     SkeletonRequest,
     SkeletonResponse,
     TailRequest,
     TailResponse,
     TailStreamRequest,
     TailStreamResponse,
-    WatchRunsRequest,
-    WatchRunsResponse,
 )
 from vs_proto._generated.vibesys.api.v1.host_read_generated_pb import (
     ReadRequest,
@@ -74,6 +71,9 @@ from vs_proto._generated.vibesys.api.v1.host_watch_generated_pb import (
     WatchResponse,
 )
 from vs_proto._generated.vibesys.api.v1.subscribe_pb import (
+    RunEntry,
+    RunLiveness,
+    RunsTopic,
     SubscribeRequest,
     SubscribeResponse,
 )
@@ -403,6 +403,7 @@ __all__ = [
     "RunAddress",
     "RunDescription",
     "RunEnded",
+    "RunEntry",
     "RunFailure",
     "RunFailureKind",
     "RunHead",
@@ -410,6 +411,7 @@ __all__ = [
     "RunOutcomePresentation",
     "RunProcess",
     "Running",
+    "RunsTopic",
     "RuntimeType",
     "SearchEnded",
     "SearchRunDescription",
@@ -469,8 +471,6 @@ __all__ = [
     "WaitingOn",
     "WatchRequest",
     "WatchResponse",
-    "WatchRunsRequest",
-    "WatchRunsResponse",
     "WithdrawIntent",
     "WorkstreamAttrs",
     "WorkstreamFailure",

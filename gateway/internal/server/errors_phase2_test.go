@@ -99,7 +99,7 @@ func TestWatchRunsIndexCreatedAfterSubscription(t *testing.T) {
 	if err := os.Remove(filepath.Join(f.root, "runs")); err != nil {
 		t.Fatal(err)
 	}
-	stream, err := client(t, f, false).WatchRuns(f.ctx, &apiv1.WatchRunsRequest{})
+	stream, err := watchRuns(f.ctx, client(t, f, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestWatchRunsDoesNotMistakeAnotherProbeForWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	publishHead(t, f, head(proto.Uint64(0)))
-	stream, err := client(t, f, false).WatchRuns(f.ctx, &apiv1.WatchRunsRequest{})
+	stream, err := watchRuns(f.ctx, client(t, f, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestWatchRunsReadsAnEpochAwaitingItsFirstLifecycle(t *testing.T) {
 	pending.AwaitingLifecycle = true
 	publishHead(t, f, pending)
 	c := client(t, f, false)
-	stream, err := c.WatchRuns(f.ctx, &apiv1.WatchRunsRequest{})
+	stream, err := watchRuns(f.ctx, c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestWatchRunsParkedEpochIsReadableAfterWriterReleasesLock(t *testing.T) {
 			parked.Lifecycle = &storev1.Lifecycle{State: &storev1.Lifecycle_Parked{Parked: &storev1.Parked{}}}
 			publishHead(t, f, parked)
 			c := client(t, f, false)
-			stream, err := c.WatchRuns(f.ctx, &apiv1.WatchRunsRequest{})
+			stream, err := watchRuns(f.ctx, c)
 			if err != nil {
 				t.Fatal(err)
 			}

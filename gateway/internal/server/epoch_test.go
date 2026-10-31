@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
 	"google.golang.org/protobuf/proto"
@@ -34,7 +33,7 @@ func TestWatchRunsDecodesPhase1EpochFromPublishedLog(t *testing.T) {
 				original.Process = process
 				publishHead(t, f, original)
 				originalBytes := encode(t, original)
-				stream, err := client(t, f, false).WatchRuns(f.ctx, &apiv1.WatchRunsRequest{})
+				stream, err := watchRuns(f.ctx, client(t, f, false))
 				if err != nil {
 					t.Fatal(err)
 				}

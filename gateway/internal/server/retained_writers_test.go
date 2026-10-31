@@ -128,13 +128,13 @@ func TestSavedPreviousWritersRetainInputFacts(t *testing.T) {
 				if !checkpoint {
 					pinRetainedResponse(t, directory, response)
 				}
-				watch, err := c.WatchRuns(f.ctx, &apiv1.WatchRunsRequest{})
+				watch, err := watchRuns(f.ctx, c)
 				if err != nil {
 					t.Fatal(err)
 				}
 				observed := watchEntry(t, watch)
 				if !observed.GetHead().GetPerformanceStated() || observed.GetHead().GetObjective().GetBestValue() != want.Best {
-					t.Fatalf("retained WatchRuns lost best: %v", observed)
+					t.Fatalf("retained runs topic lost best: %v", observed)
 				}
 				if want.ProjectRoot != "" {
 					if observed.GetProjectRoot() != project {
@@ -145,7 +145,7 @@ func TestSavedPreviousWritersRetainInputFacts(t *testing.T) {
 						t.Fatalf("retained index: %q, %v", target, err)
 					}
 					if !checkpoint {
-						normalized := proto.Clone(observed).(*apiv1.WatchRunsResponse)
+						normalized := proto.Clone(observed.RunEntry).(*apiv1.RunEntry)
 						normalized.ProjectRoot = proto.String(want.ProjectRoot)
 						pinRetainedWatch(t, directory, normalized)
 					}
@@ -226,14 +226,14 @@ func retainedRecordFact(record *storev1.Record) *storev1.InputMeasurement {
 	return record.ProtoReflect().Get(field).Message().Interface().(*storev1.InputMeasurement)
 }
 
-// The client composes this exact WatchRuns frame through dashboard, Usage and control routing.
-func pinRetainedWatch(t *testing.T, directory string, response *apiv1.WatchRunsResponse) {
+// The client composes this exact run entry through dashboard, Usage and control routing.
+func pinRetainedWatch(t *testing.T, directory string, response *apiv1.RunEntry) {
 	t.Helper()
 	data, err := proto.MarshalOptions{Deterministic: true}.Marshal(response)
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(directory, "watch.response.pb")
+	path := filepath.Join(directory, "run.entry.pb")
 	if os.Getenv("VIBESYS_UPDATE_GOLDEN") != "" {
 		if err := os.WriteFile(path, data, 0644); err != nil {
 			t.Fatal(err)
@@ -244,6 +244,6 @@ func pinRetainedWatch(t *testing.T, directory string, response *apiv1.WatchRunsR
 		t.Fatal(err)
 	}
 	if string(want) != string(data) {
-		t.Fatal("retained WatchRuns changed; if intended, run ./scripts/regenerate_goldens.sh and commit what it rewrites")
+		t.Fatal("retained run entry changed; if intended, run ./scripts/regenerate_goldens.sh and commit what it rewrites")
 	}
 }

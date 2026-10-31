@@ -57,7 +57,7 @@ func TestWatchRunsDetectsBareLockReleaseOnTick(t *testing.T) {
 			}
 			ctx, cancel := context.WithCancel(f.ctx)
 			defer cancel()
-			stream, err := client(t, f, false).WatchRuns(ctx, &apiv1.WatchRunsRequest{})
+			stream, err := watchRuns(ctx, client(t, f, false))
 			if err != nil {
 				t.Fatal(err)
 			}
