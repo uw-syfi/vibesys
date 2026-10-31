@@ -17,6 +17,124 @@ if TYPE_CHECKING:
     from protobuf import DescFile, Oneof
 
 
+_RunStartedFields: TypeAlias = Literal["schema_version", "state"]
+
+class RunStarted(Message[_RunStartedFields]):
+    """
+    RunStarted is the first core record of a run: the state its fold starts from. It holds the
+    inputs the run was built from, so every process that folds the log starts from the same
+    state, the run's deadline included.
+
+    ```proto
+    message vibesys.store.v1.RunStarted
+    ```
+
+    Attributes:
+        schema_version:
+            Version of the canonical encoding of state.
+
+            ```proto
+            uint32 schema_version = 1;
+            ```
+        state:
+            The canonical JSON of the vs_core CoreState the run starts from.
+
+            ```proto
+            bytes state = 2;
+            ```
+    """
+
+    __slots__ = ("schema_version", "state")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            schema_version: int = 0,
+            state: bytes = b"",
+        ) -> None:
+            pass
+
+        schema_version: int
+        state: bytes
+
+_StrategyAdvancedFields: TypeAlias = Literal["schema_version", "proposals", "steps", "checkpoint", "wakes", "delivered", "held"]
+
+class StrategyAdvanced(Message[_StrategyAdvancedFields]):
+    """
+    StrategyAdvanced is one advance of the run's search, appended as one record so that what it
+    proposed and what it kept can never disagree after a crash: the proposals core took, the
+    state change the search made, and the wake-ups it asked for.
+
+    ```proto
+    message vibesys.store.v1.StrategyAdvanced
+    ```
+
+    Attributes:
+        schema_version:
+            Version of the canonical encoding of proposals and held.
+
+            ```proto
+            uint32 schema_version = 1;
+            ```
+        proposals:
+            The canonical JSON of each ProposalSubmitted core took from the search in this advance, in
+            the order core took them.
+
+            ```proto
+            repeated bytes proposals = 2;
+            ```
+        strategy:
+            What the search kept of the advance, in the search driver's own encoding: the steps its
+            journal gained, or the whole state at a checkpoint.
+
+            ```proto
+            oneof strategy
+            ```
+        wakes:
+            Run-clock times the search asked to be woken at in this advance.
+
+            ```proto
+            repeated double wakes = 5 [packed = true];
+            ```
+        delivered:
+            Run-clock times of the wake-ups this advance delivered to the search.
+
+            ```proto
+            repeated double delivered = 6 [packed = true];
+            ```
+        held:
+            The canonical JSON of the decisions core could not take yet, replacing those held before.
+
+            ```proto
+            bytes held = 7;
+            ```
+    """
+
+    __slots__ = ("schema_version", "proposals", "wakes", "delivered", "held", "strategy")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            schema_version: int = 0,
+            proposals: list[bytes] | None = None,
+            strategy: Oneof[Literal["steps"], bytes] | Oneof[Literal["checkpoint"], bytes] | None = None,
+            wakes: list[float] | None = None,
+            delivered: list[float] | None = None,
+            held: bytes = b"",
+        ) -> None:
+            pass
+
+        schema_version: int
+        proposals: list[bytes]
+        strategy: Oneof[Literal["steps"], bytes] | Oneof[Literal["checkpoint"], bytes] | None
+        wakes: list[float]
+        delivered: list[float]
+        held: bytes
+
 _CoreInputFields: TypeAlias = Literal["schema_version", "event"]
 
 class CoreInput(Message[_CoreInputFields]):
@@ -319,11 +437,13 @@ class InterruptionReason(Enum):
 
 
 _DESC = file_desc(
-    b'\n!vibesys/store/v1/core_input.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto"^\n\tCoreInput\x12.\n\x0eschema_version\x18\x01 \x01(\rR\rschemaVersionB\x07\xbaH\x04*\x02(\x01\x12!\n\x05event\x18\x02 \x01(\x0cR\x05eventB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80 "\xd9\x01\n\x0bStepStarted\x12\x1d\n\x03tag\x18\x01 \x01(\tR\x03tagB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12!\n\x07attempt\x18\x02 \x01(\rR\x07attemptB\x07\xbaH\x04*\x02(\x01\x12.\n\x0eschema_version\x18\x03 \x01(\rR\rschemaVersionB\x07\xbaH\x04*\x02(\x01\x12%\n\x07request\x18\x04 \x01(\x0cR\x07requestB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80 \x121\n\x0bdeadline_at\x18\x05 \x01(\x01R\ndeadlineAtB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00"\xb3\x02\n\x0cStepFinished\x12\x1d\n\x03tag\x18\x01 \x01(\tR\x03tagB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12!\n\x07attempt\x18\x02 \x01(\rR\x07attemptB\x07\xbaH\x04*\x02(\x00\x12.\n\x0eschema_version\x18\x03 \x01(\rR\rschemaVersionB\x07\xbaH\x04*\x02(\x01\x12)\n\x08finished\x18\x04 \x01(\x0cH\x00R\x08finishedB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80 \x12%\n\x06failed\x18\x05 \x01(\x0cH\x00R\x06failedB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80 \x12N\n\tcancelled\x18\x06 \x01(\x0e2".vibesys.store.v1.StepCancelReasonH\x00R\tcancelledB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00B\x0f\n\x06result\x12\x05\xbaH\x02\x08\x01"\xa0\x01\n\x12AttemptInterrupted\x12\x1d\n\x03tag\x18\x01 \x01(\tR\x03tagB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12!\n\x07attempt\x18\x02 \x01(\rR\x07attemptB\x07\xbaH\x04*\x02(\x01\x12H\n\x06reason\x18\x03 \x01(\x0e2$.vibesys.store.v1.InterruptionReasonR\x06reasonB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00*\x88\x02\n\x10StepCancelReason\x12"\n\x1eSTEP_CANCEL_REASON_UNSPECIFIED\x10\x00\x12\x1f\n\x1bSTEP_CANCEL_REASON_DEADLINE\x10\x01\x12 \n\x1cSTEP_CANCEL_REASON_PAUSE_NOW\x10\x02\x12$\n STEP_CANCEL_REASON_DRAIN_EXPIRED\x10\x03\x12!\n\x1dSTEP_CANCEL_REASON_RUN_ENDING\x10\x04\x12 \n\x1cSTEP_CANCEL_REASON_WITHDRAWN\x10\x05\x12"\n\x1eSTEP_CANCEL_REASON_INTERRUPTED\x10\x06*\x9a\x01\n\x12InterruptionReason\x12#\n\x1fINTERRUPTION_REASON_UNSPECIFIED\x10\x00\x12\x1d\n\x19INTERRUPTION_REASON_PAUSE\x10\x01\x12 \n\x1cINTERRUPTION_REASON_SHUTDOWN\x10\x02\x12\x1e\n\x1aINTERRUPTION_REASON_RAISED\x10\x03BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
+    b'\n!vibesys/store/v1/core_input.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto"_\n\nRunStarted\x12.\n\x0eschema_version\x18\x01 \x01(\rR\rschemaVersionB\x07\xbaH\x04*\x02(\x01\x12!\n\x05state\x18\x02 \x01(\x0cR\x05stateB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80 "\xda\x02\n\x10StrategyAdvanced\x12.\n\x0eschema_version\x18\x01 \x01(\rR\rschemaVersionB\x07\xbaH\x04*\x02(\x01\x12.\n\tproposals\x18\x02 \x03(\x0cR\tproposalsB\x10\xbaH\r\x92\x01\n"\x08z\x06\x10\x01\x18\x80\x80 \x12#\n\x05steps\x18\x03 \x01(\x0cH\x00R\x05stepsB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80 \x12-\n\ncheckpoint\x18\x04 \x01(\x0cH\x00R\ncheckpointB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80 \x12+\n\x05wakes\x18\x05 \x03(\x01R\x05wakesB\x15\xbaH\x12\x92\x01\x0f"\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x123\n\tdelivered\x18\x06 \x03(\x01R\tdeliveredB\x15\xbaH\x12\x92\x01\x0f"\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12\x1d\n\x04held\x18\x07 \x01(\x0cR\x04heldB\t\xbaH\x06z\x04\x18\x80\x80 B\x11\n\x08strategy\x12\x05\xbaH\x02\x08\x01"^\n\tCoreInput\x12.\n\x0eschema_version\x18\x01 \x01(\rR\rschemaVersionB\x07\xbaH\x04*\x02(\x01\x12!\n\x05event\x18\x02 \x01(\x0cR\x05eventB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80 "\xd9\x01\n\x0bStepStarted\x12\x1d\n\x03tag\x18\x01 \x01(\tR\x03tagB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12!\n\x07attempt\x18\x02 \x01(\rR\x07attemptB\x07\xbaH\x04*\x02(\x01\x12.\n\x0eschema_version\x18\x03 \x01(\rR\rschemaVersionB\x07\xbaH\x04*\x02(\x01\x12%\n\x07request\x18\x04 \x01(\x0cR\x07requestB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80 \x121\n\x0bdeadline_at\x18\x05 \x01(\x01R\ndeadlineAtB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00"\xb3\x02\n\x0cStepFinished\x12\x1d\n\x03tag\x18\x01 \x01(\tR\x03tagB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12!\n\x07attempt\x18\x02 \x01(\rR\x07attemptB\x07\xbaH\x04*\x02(\x00\x12.\n\x0eschema_version\x18\x03 \x01(\rR\rschemaVersionB\x07\xbaH\x04*\x02(\x01\x12)\n\x08finished\x18\x04 \x01(\x0cH\x00R\x08finishedB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80 \x12%\n\x06failed\x18\x05 \x01(\x0cH\x00R\x06failedB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80 \x12N\n\tcancelled\x18\x06 \x01(\x0e2".vibesys.store.v1.StepCancelReasonH\x00R\tcancelledB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00B\x0f\n\x06result\x12\x05\xbaH\x02\x08\x01"\xa0\x01\n\x12AttemptInterrupted\x12\x1d\n\x03tag\x18\x01 \x01(\tR\x03tagB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12!\n\x07attempt\x18\x02 \x01(\rR\x07attemptB\x07\xbaH\x04*\x02(\x01\x12H\n\x06reason\x18\x03 \x01(\x0e2$.vibesys.store.v1.InterruptionReasonR\x06reasonB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00*\x88\x02\n\x10StepCancelReason\x12"\n\x1eSTEP_CANCEL_REASON_UNSPECIFIED\x10\x00\x12\x1f\n\x1bSTEP_CANCEL_REASON_DEADLINE\x10\x01\x12 \n\x1cSTEP_CANCEL_REASON_PAUSE_NOW\x10\x02\x12$\n STEP_CANCEL_REASON_DRAIN_EXPIRED\x10\x03\x12!\n\x1dSTEP_CANCEL_REASON_RUN_ENDING\x10\x04\x12 \n\x1cSTEP_CANCEL_REASON_WITHDRAWN\x10\x05\x12"\n\x1eSTEP_CANCEL_REASON_INTERRUPTED\x10\x06*\x9a\x01\n\x12InterruptionReason\x12#\n\x1fINTERRUPTION_REASON_UNSPECIFIED\x10\x00\x12\x1d\n\x19INTERRUPTION_REASON_PAUSE\x10\x01\x12 \n\x1cINTERRUPTION_REASON_SHUTDOWN\x10\x02\x12\x1e\n\x1aINTERRUPTION_REASON_RAISED\x10\x03BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
     [
         validate_pb.desc(),
     ],
     {
+        "RunStarted": RunStarted,
+        "StrategyAdvanced": StrategyAdvanced,
         "CoreInput": CoreInput,
         "StepStarted": StepStarted,
         "StepFinished": StepFinished,

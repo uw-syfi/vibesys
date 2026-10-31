@@ -157,9 +157,11 @@ from vs_proto._generated.vibesys.store.v1.core_input_pb import (
     AttemptInterrupted,
     CoreInput,
     InterruptionReason,
+    RunStarted,
     StepCancelReason,
     StepFinished,
     StepStarted,
+    StrategyAdvanced,
 )
 from vs_proto._generated.vibesys.store.v1.environment_attrs_pb import (
     CapacityCondition,
@@ -397,6 +399,7 @@ __all__ = [
     "RunLiveness",
     "RunOutcomePresentation",
     "RunProcess",
+    "RunStarted",
     "Running",
     "RuntimeType",
     "SearchEnded",
@@ -428,6 +431,7 @@ __all__ = [
     "StepFinished",
     "StepStarted",
     "Stop",
+    "StrategyAdvanced",
     "StreamKind",
     "StreamOwner",
     "StreamRef",
