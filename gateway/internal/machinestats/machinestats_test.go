@@ -19,10 +19,12 @@ import (
 	"buf.build/go/protovalidate"
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/clock"
+	"github.com/uw-syfi/vibesys/gateway/internal/hostoperations"
 	"github.com/uw-syfi/vibesys/gateway/internal/machinestats"
 	"github.com/uw-syfi/vibesys/gateway/internal/machinestats/machinestatstest"
 	"github.com/uw-syfi/vibesys/gateway/internal/subscription"
 	"github.com/uw-syfi/vibesys/gateway/internal/subscription/subscriptiontest"
+	"google.golang.org/protobuf/proto"
 )
 
 var request = &apiv1.SubscribeRequest{Topic: &apiv1.SubscribeRequest_MachineStats{MachineStats: &apiv1.MachineStatsTopic{}}}
@@ -519,6 +521,49 @@ func TestAnyToolOutputYieldsAValidSample(t *testing.T) {
 	if err := quick.Check(property, &quick.Config{MaxCount: 3000}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// nvidiaRows is output of n GPUs whose names are width bytes long.
+func nvidiaRows(n int, width int) string {
+	var rows strings.Builder
+	for index := range n {
+		fmt.Fprintf(&rows, "%d, GPU-%d, %s, 1024, 40960, 17\n", index, index, strings.Repeat("g", width))
+	}
+	return rows.String()
+}
+
+// Every row can satisfy the schema while the list as a whole outgrows the topic's
+// value bound, and a value over it ends the topic for every subscriber. The
+// sampler holds its own output to the bound: a list that does not fit is an
+// absence, whatever the tool printed.
+func TestAnyToolOutputYieldsAValueThatFitsTheTopic(t *testing.T) {
+	bound := hostoperations.Topics[hostoperations.TopicMachineStats].MaxValueBytes
+	property := func(rows, width uint8) bool {
+		fits := true
+		synctest.Test(t, func(t *testing.T) {
+			host := machinestatstest.Linux()
+			output := nvidiaRows(int(rows), 1+int(width))
+			host.Tools["nvidia-smi"] = func(context.Context, []string) ([]byte, error) { return []byte(output), nil }
+			stats := sample(t, "linux", host)
+			fits = proto.Size(stats) <= bound
+		})
+		return fits
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 300}); err != nil {
+		t.Fatal(err)
+	}
+	// The reported input, and a fleet that does fit and must not be refused.
+	synctest.Test(t, func(t *testing.T) {
+		host := machinestatstest.Linux()
+		host.Tools["nvidia-smi"] = func(context.Context, []string) ([]byte, error) { return []byte(nvidiaRows(100, 200)), nil }
+		if got := gpuReason(sample(t, "linux", host)); got != apiv1.AbsenceReason_ABSENCE_REASON_PARSE_FAILED {
+			t.Fatalf("100 GPUs with 200-byte names: %s", got)
+		}
+		host.Tools["nvidia-smi"] = func(context.Context, []string) ([]byte, error) { return []byte(nvidiaRows(256, 21)), nil }
+		if got := sample(t, "linux", host).GetGpus().GetGpus(); len(got) != 256 {
+			t.Fatalf("256 GPUs with 21-byte names: %d listed", len(got))
+		}
+	})
 }
 
 func TestSystemHostFindsAndRunsATool(t *testing.T) {

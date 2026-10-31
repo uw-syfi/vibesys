@@ -16,6 +16,7 @@ import (
 	"github.com/uw-syfi/vibesys/gateway/internal/clock"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostoperations"
 	"github.com/uw-syfi/vibesys/gateway/internal/subscription"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -24,6 +25,9 @@ const Key = "machine"
 
 // SampleDeadline bounds one sample. A section past it reports TIMED_OUT.
 const SampleDeadline = 5 * time.Second
+
+// maxValueBytes is the topic's bound on one value, which a sample must fit.
+var maxValueBytes = hostoperations.Topics[hostoperations.TopicMachineStats].MaxValueBytes
 
 var (
 	errParse      = errors.New("unexpected tool output")
@@ -104,6 +108,11 @@ func (s *Sampler) Sample(ctx context.Context) (*apiv1.MachineStats, error) {
 	})
 	sections.Wait()
 	stats.SampledAt = timestamppb.New(s.ticks.Now())
+	// Each row can be valid while the list is not: a value over the topic's bound
+	// ends the topic for every subscriber. Only the GPU list varies in size.
+	if proto.Size(stats) > maxValueBytes && stats.GetGpus() != nil {
+		stats.Gpu = &apiv1.MachineStats_GpuUnavailable{GpuUnavailable: &apiv1.Absence{Reason: apiv1.AbsenceReason_ABSENCE_REASON_PARSE_FAILED}}
+	}
 	return stats, nil
 }
 
