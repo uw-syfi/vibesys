@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -81,15 +82,84 @@ func (r *recordedRuns) awaitSynced(t *testing.T, ctx context.Context) {
 	}
 }
 
+// stepTicker is a ticker a test steps one tick at a time and knows the end of. A source asks for
+// its ticks (`Ticks`) each time it waits for its next event, so it has finished a tick exactly
+// when it asks again. Each ask has a channel of its own, so the tick a test hands over is taken by
+// the one ask the test saw, and the next ask is known to be after it.
+type stepTicker struct {
+	mu      sync.Mutex
+	asked   int
+	current chan time.Time
+	// changed wakes a test that waits for an ask. It carries no count: the test reads the count.
+	changed chan struct{}
+	stopped chan struct{}
+}
+
+func newStepTicker() *stepTicker {
+	return &stepTicker{changed: make(chan struct{}, 1), stopped: make(chan struct{})}
+}
+
+func (s *stepTicker) Ticks() <-chan time.Time {
+	s.mu.Lock()
+	s.asked++
+	s.current = make(chan time.Time)
+	ticks := s.current
+	s.mu.Unlock()
+	select {
+	case s.changed <- struct{}{}:
+	default:
+	}
+	return ticks
+}
+
+func (s *stepTicker) Stop() { close(s.stopped) }
+
+func (s *stepTicker) latest() (int, chan time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.asked, s.current
+}
+
+// tick hands the source a tick and returns true once the source has finished it. It returns false
+// if `ctx` ends first: the source took no tick, or never came back for the next. A source busy with
+// something else is not asking yet, and one that asks and then leaves its wait (an event came
+// first) asks again, so the tick waits for the ask that is there.
+func (s *stepTicker) tick(ctx context.Context, at time.Time) bool {
+	for {
+		ask, ticks := s.latest()
+		select {
+		case ticks <- at:
+			return s.awaitAskAfter(ctx, ask)
+		case <-s.changed:
+		case <-ctx.Done():
+			return false
+		}
+	}
+}
+
+func (s *stepTicker) awaitAskAfter(ctx context.Context, ask int) bool {
+	for {
+		if asked, _ := s.latest(); asked > ask {
+			return true
+		}
+		select {
+		case <-s.changed:
+		case <-ctx.Done():
+			return false
+		}
+	}
+}
+
 // runsWorld is one published run on a root whose liveness probes the test drives, and the
-// source reading it. A probe tick is not answered until the source has finished the one
-// before it, so what a tick caused is complete when probe returns.
+// source reading it. A probe tick is handed over, and `probe` returns when the source has
+// finished it, so what a tick caused is complete when probe returns and nothing of the source
+// is still running beside the test.
 type runsWorld struct {
 	t      *testing.T
 	f      fixture
 	ctx    context.Context
 	feed   *server.ScriptedFeed
-	ticker *fakeTicker
+	ticker *stepTicker
 	clock  *fakeClock
 	sink   *recordedRuns
 	lock   *os.File
@@ -97,7 +167,7 @@ type runsWorld struct {
 
 func newRunsWorld(t *testing.T) *runsWorld {
 	t.Helper()
-	ticker := &fakeTicker{ticks: make(chan time.Time), stopped: make(chan struct{})}
+	ticker := newStepTicker()
 	clock := &fakeClock{ticker: ticker}
 	f := startWithClock(t, clock)
 	// An existing free inode makes flock acquisition invisible to a directory watcher.
@@ -132,29 +202,18 @@ func (w *runsWorld) publish(value *storev1.RunHead) {
 func (w *runsWorld) probe(elapsed time.Duration) {
 	w.t.Helper()
 	w.clock.now.Store(int64(elapsed))
-	for range 2 {
-		select {
-		case w.ticker.ticks <- time.Time{}.Add(elapsed):
-		case <-w.ctx.Done():
-			w.t.Fatal("the source did not take a probe tick")
-		}
+	if !w.ticker.tick(w.ctx, time.Time{}.Add(elapsed)) {
+		w.t.Fatal("the source did not finish a probe tick")
 	}
 }
 
-// takeWriterLock locks the run as its writer does. The source probes the lock by taking it shared
-// for an instant, and the probe of the last tick `probe` sent may still be running when it
-// returns, so a writer that did not wait would be refused by a probe that is about to let go. It
-// waits: what it ends up holding does not depend on which came first.
+// takeWriterLock locks the run as its writer does, and fails if the lock is not free. The source
+// takes it shared for an instant to probe it, but only while it handles a tick, and `probe`
+// returns when it has finished one, so the lock is free here and a refusal is a harness fault.
 func (w *runsWorld) takeWriterLock() {
 	w.t.Helper()
-	for {
-		err := syscall.Flock(int(w.lock.Fd()), syscall.LOCK_EX)
-		if err == nil {
-			return
-		}
-		if err != syscall.EINTR {
-			w.t.Fatal(err)
-		}
+	if err := syscall.Flock(int(w.lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		w.t.Fatalf("the writer lock is held while the source is idle: %v", err)
 	}
 }
 

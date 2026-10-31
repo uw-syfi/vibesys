@@ -21,7 +21,7 @@ import (
 
 type fakeClock struct {
 	now      atomic.Int64
-	ticker   *fakeTicker
+	ticker   server.Ticker
 	interval time.Duration
 }
 type fakeTicker struct {
