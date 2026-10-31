@@ -19,7 +19,8 @@ import {openFixture, playLive} from './fixture-world.js';
 /**
  * The rail and the Runs dashboard, checked against their real layout (`checks/screen-check.ts`) at
  * 1440, 1000 and 660 px: one run, many runs, the runs that need the user alone, a run with
- * more ideas than its chart keeps, and the rail on the Run screen and on Settings. `SCREENS_DIR`
+ * more ideas than its chart keeps, machines on their steps to a run list, and the rail on the Run
+ * screen and on Settings. `SCREENS_DIR`
  * also writes each screen's screenshot (the app window only) and a contact sheet of them. Each
  * state is rendered once and resized through the widths in one page session.
  */
@@ -60,6 +61,43 @@ for (const [state, runs] of DASHBOARDS) {
   test(`runs dashboard/${state}`, async ({page}) => {
     await page.setViewportSize({width: WIDTHS[0], height: 900});
     await open(page, dashboardWorld(runs));
+    for (const width of WIDTHS) {
+      await page.setViewportSize({width, height: 900});
+      await check(page, `runs/${state}/${width}`);
+    }
+  });
+}
+
+const MACHINE_LOADS: readonly (readonly [string, readonly unknown[]])[] = [
+  [
+    'one-machine-connecting',
+    [{kind: 'unavailable', host: 'local', step: 'gateway', connection: {kind: 'connecting'}}],
+  ],
+  [
+    'machines-at-each-step',
+    [
+      {kind: 'unavailable', host: 'local', step: 'runs', connection: {kind: 'connecting'}},
+      {
+        kind: 'unavailable',
+        host: 'ssh:host-a',
+        step: 'handshake',
+        connection: {kind: 'reconnecting', attempt: 2},
+      },
+      {
+        kind: 'unavailable',
+        host: 'ssh:host-b',
+        step: 'gateway',
+        connection: {kind: 'offline', detail: 'gateway startup exited: 1'},
+      },
+    ],
+  ],
+];
+
+for (const [state, listings] of MACHINE_LOADS) {
+  test(`runs dashboard/${state}`, async ({page}) => {
+    await page.setViewportSize({width: WIDTHS[0], height: 900});
+    await open(page, {...dashboardWorld([]), listings, recent: []});
+    await expect(page.locator('.vs-step-list').first()).toBeVisible();
     for (const width of WIDTHS) {
       await page.setViewportSize({width, height: 900});
       await check(page, `runs/${state}/${width}`);

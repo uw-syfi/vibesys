@@ -38,6 +38,7 @@ from vs_core.api.recovery import (
     input_message,
     interrupted_message,
     interruption_of,
+    request_interrupt_policy,
     started_message,
 )
 from vs_proto.api import (
@@ -51,6 +52,8 @@ from vs_proto.api import (
     Timestamp,
 )
 from vs_sim.api.testing import examples
+
+from .test_owner_event_precedence import dispatched
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -587,3 +590,39 @@ def test_core_settles_only_with_reasons_that_are_results_and_cancels_with_either
             for action in decide(standing, clock_of(length)):
                 if isinstance(action, Settle) and isinstance(action.result, Cancelled):
                     assert interruption_of(action.result.reason) is None
+
+
+@pytest.mark.parametrize("resume", [False, True], ids=["dispatch", "resume"])
+@pytest.mark.parametrize("policy", list(InterruptPolicy))
+def test_a_turn_declares_what_an_interruption_means_on_its_turn_spec(
+    policy: InterruptPolicy, *, resume: bool
+) -> None:
+    state, request = dispatched()
+    assert request.request_id is not None
+    turn = request.turn.model_copy(update={"on_interrupt": policy})
+    asked: core.DispatchTurn | core.ResumeSessionTurn = request.model_copy(update={"turn": turn})
+    if resume:
+        asked = core.ResumeSessionTurn(
+            **asked.model_dump(exclude={"kind"}),
+            continuation_id=core.ContinuationId(root="continuation"),
+        )
+    assert request_interrupt_policy(asked) is policy
+    records = tuple(
+        row.model_copy(update={"request": asked}) if row.request_id == asked.request_id else row
+        for row in state.records.records
+    )
+    attempts = StepAttempts(tag=request.request_id, started=1, ended=True, uncharged=1)
+    state = state.model_copy(
+        update={
+            "records": state.records.model_copy(update={"records": records}),
+            "steps": StepsState(epoch=1, attempts=(attempts,)),
+        }
+    )
+    (action,) = decide(state, 5.0)
+    if policy is InterruptPolicy.CANCEL:
+        assert action == Settle(
+            tag=request.request_id, result=Cancelled(reason=CancelReason.INTERRUPTED)
+        )
+    else:
+        assert isinstance(action, Run)
+        assert action.attempt == 2

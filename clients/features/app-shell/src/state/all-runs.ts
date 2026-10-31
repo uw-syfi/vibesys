@@ -94,6 +94,19 @@ export function askProjectRuns(
   return {all: {...all, projects, lastToken: token}, requests};
 }
 
+/**
+ * Whether `host` has a project whose runs are being read for the first time. One asked again after
+ * failing has already said why it has no answer.
+ */
+export function projectRunsLoading(all: AllRunsState, host: HostKey): boolean {
+  return Object.entries(all.projects).some(
+    ([key, slot]) =>
+      slot.kind === 'loading' &&
+      slot.refusal === undefined &&
+      (JSON.parse(key) as [HostKey, string])[0] === host,
+  );
+}
+
 /** What the machine said of `project`'s runs asked under `token`; null when it could not say. */
 export function projectRunsListed(
   all: AllRunsState,

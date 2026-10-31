@@ -357,7 +357,7 @@ describe('Recent rows from run digests', () => {
       const {state} = open([recent('r1', '/p/queue-rs', 'mpmc', 1)]);
       const down = sidebarStep(state, {
         type: 'listing',
-        listing: {kind: 'unavailable', host: 'ssh:host-a', connection},
+        listing: {kind: 'unavailable', host: 'ssh:host-a', step: 'gateway', connection},
       }).state;
       const failed = sidebarStep(down, {type: 'digests-read', token: 1, reply: null}).state;
       expect(recentRows(failed, CLOCK).rows[0]?.problem).toEqual({text, retry});

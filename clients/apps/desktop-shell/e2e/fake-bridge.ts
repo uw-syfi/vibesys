@@ -29,6 +29,7 @@ export type CoreMethods =
   | 'setAppearance'
   | 'setNotifications'
   | 'onHostSettingsChanged'
+  | 'retryListing'
   | 'archive'
   | 'runDigests'
   | 'projectRuns'
@@ -186,6 +187,7 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
     notifications: {enabled: true},
     archived: [] as {host: string; runId: string}[],
   };
+  const retried: string[] = [];
   const listings = new Map<string, unknown>(
     seed.listings.map(listing => [(listing as {host: string}).host, listing]),
   );
@@ -227,6 +229,10 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
         store({...preferences, appearance}),
       setNotifications: (enabled: boolean) => store({...preferences, notifications: {enabled}}),
       onHostSettingsChanged: on('hostSettings'),
+      retryListing: (host: string) => {
+        retried.push(host);
+        return ok(null);
+      },
       archive: (run: {host: string; runId: string}, archived: boolean) => {
         const others = preferences.archived.filter(
           each => each.host !== run.host || each.runId !== run.runId,
@@ -253,6 +259,8 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
         listings.set(listing.host, listing);
         push('listing', listing);
       },
+      /** The machines the user asked to list again, in order. */
+      retried,
       /** The host's current listing, as the page last received it. */
       listingOf: (host: string) => listings.get(host),
       recent: (runs: readonly unknown[]) => {

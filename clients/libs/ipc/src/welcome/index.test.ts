@@ -51,6 +51,7 @@ const VALID_ARGUMENTS: Readonly<
   [WELCOME_CHANNELS.setCheckout]: ['local', '/checkout', 1],
   [WELCOME_CHANNELS.cancelCheckout]: [1],
   [WELCOME_CHANNELS.signIn]: ['local'],
+  [WELCOME_CHANNELS.retryListing]: ['local'],
   [WELCOME_CHANNELS.complete]: ['local', '/project/'],
   [WELCOME_CHANNELS.logs]: ['local', '0123456789ab', {kind: 'list'}],
   [WELCOME_CHANNELS.releaseLogs]: [],

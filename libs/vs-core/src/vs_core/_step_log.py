@@ -20,6 +20,7 @@ from vs_proto.api import (
     StepStarted,
 )
 
+from .types.common import Value
 from .types.kernel import CoreEvent
 from .types.records import Request, RequestObserved
 from .types.steps import (
@@ -28,6 +29,7 @@ from .types.steps import (
     Failed,
     Finished,
     Interruption,
+    OwnerEvent,
     StepResult,
 )
 
@@ -39,9 +41,17 @@ if TYPE_CHECKING:
 SCHEMA_VERSION = 1
 """The version of the canonical encoding of every body in the core records."""
 
+
+class _FinishedBody(Value):
+    """What a ``StepFinished`` holds of a finished step: its report and the owner events."""
+
+    report: RequestObserved
+    owner_events: tuple[OwnerEvent, ...] = ()
+
+
 _EVENT = TypeAdapter(CoreEvent)
 _REQUEST = TypeAdapter(Request)
-_OBSERVED = TypeAdapter(RequestObserved)
+_FINISHED = TypeAdapter(_FinishedBody)
 
 _CANCEL_REASONS = {
     CancelReason.DEADLINE: StepCancelReason.DEADLINE,
@@ -80,7 +90,8 @@ def finished_message(tag: RequestId, attempt: int, result: StepResult) -> StepFi
     """The one result of a step: the attempt that produced it, or its last when core settled it."""
     match result:
         case Finished():
-            body = Oneof("finished", result.report.model_dump_json().encode())
+            finished = _FinishedBody(report=result.report, owner_events=result.owner_events)
+            body = Oneof("finished", _FINISHED.dump_json(finished))
         case Failed():
             body = Oneof("failed", result.model_dump_json().encode())
         case Cancelled():
@@ -116,9 +127,13 @@ def decode_result(message: StepFinished, registry: OperationRegistry | None) -> 
     """The result of a ``StepFinished``, refused when written by another encoding."""
     _same_encoding(message.schema_version)
     match message.result:
-        case Oneof(field="finished", value=report):
-            observed = _OBSERVED.validate_json(report, context=_context(registry))
-            return Finished(observation=observed.observation, observed=observed)
+        case Oneof(field="finished", value=stored):
+            body = _FINISHED.validate_json(stored, context=_context(registry))
+            return Finished(
+                observation=body.report.observation,
+                observed=body.report,
+                owner_events=body.owner_events,
+            )
         case Oneof(field="failed", value=failure):
             return Failed.model_validate_json(failure)
         case Oneof(field="cancelled", value=reason):
