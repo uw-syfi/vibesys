@@ -579,6 +579,58 @@ def _recv_exact(connection: Connection, count: int) -> bytes:
     return bytes(received)
 
 
+def _pattern(size: int) -> bytes:
+    """``size`` bytes in which every position differs from its neighbours, so a gap or a swap shows."""
+    return (bytes(range(256)) * (size // 256 + 1))[:size]
+
+
+def _send_to_a_peer_that_reads_nothing(
+    subject: NetworkUnderTest, payload: bytes, timeout: float
+) -> tuple[bool, bytes]:
+    """Send ``payload`` with ``timeout`` to a peer that reads nothing until the send is over.
+
+    Returns whether the send timed out, and every byte the peer then read before EOF. The
+    send runs on its own worker, so a send that ignores its timeout fails the case at the
+    hang guard instead of hanging it, and closing the connection ends that worker.
+    """
+    threads = subject.threads.threads
+    address = subject.address("deaf")
+    listener = subject.network.listen(address)
+    sent = threads.event()
+    received: list[bytes] = []
+    outcome: list[bool] = []
+
+    def serve() -> None:
+        connection = listener.accept(HANG_GUARD_S)
+        _wait(sent, "the client's send ending")
+        chunks = bytearray()
+        while chunk := connection.recv(1 << 16, HANG_GUARD_S):
+            chunks += chunk
+        received.append(bytes(chunks))
+        connection.close()
+
+    def write(client: Connection) -> None:
+        try:
+            client.send(payload, timeout)
+        except TimeoutError:
+            outcome.append(True)
+        else:
+            outcome.append(False)
+        sent.set()
+
+    server = threads.spawn(serve, name="server")
+    client = subject.network.connect(address, HANG_GUARD_S)
+    writer = threads.spawn(lambda: write(client), name="writer")
+    try:
+        _join(writer)
+    finally:
+        client.close()
+        sent.set()
+        _join(server)
+        listener.close()
+    return outcome[0], received[0]
+
+
 class NetworkContract:
     """Cases for :class:`~vs_sim.network.Network`. Implement :meth:`network_under_test`."""
 
@@ -797,37 +849,118 @@ class NetworkContract:
         """A peer that stops reading cannot hold a timed ``send`` past its timeout.
 
         The payload exceeds any socket buffer, so the send must wait for room that
-        never comes; it raises ``TimeoutError`` instead.
+        never comes; it raises ``TimeoutError`` instead. macOS ignores ``MSG_DONTWAIT``
+        on a blocking stream socket, so the real network once blocked here for ever.
         """
         subject = self.network_under_test(0)
-        payload = b"x" * (8 << 20)
+        payload = _pattern(8 << 20)
 
-        def program() -> bool:
+        timed_out, received = _send_to_a_peer_that_reads_nothing(
+            subject, payload, 10 * subject.threads.tick
+        )
+
+        assert timed_out
+        assert payload.startswith(received)
+
+    def test_a_timed_send_delivers_whole_what_it_completes_and_a_prefix_of_what_it_does_not(
+        self,
+    ) -> None:
+        """Part of a send that timed out arrives, in order and with no gap; a send that fits is whole.
+
+        Whether a payload fits depends on the socket buffer, so the case holds for either
+        outcome: a send that returned delivered every byte, and one that timed out left the
+        peer a prefix of the payload.
+        """
+        sizes = (0, 1, 1 << 12, 1 << 16, 1 << 18, 1 << 20, 8 << 20)
+        for seed in range(_CASES):
+            subject = self.network_under_test(seed)
+            size = SeededRandom(seed).choice(sizes)
+            payload = _pattern(size)
+
+            timed_out, received = _send_to_a_peer_that_reads_nothing(
+                subject, payload, 10 * subject.threads.tick
+            )
+
+            assert payload.startswith(received), (seed, size)
+            assert timed_out or received == payload, (seed, size)
+
+    def test_a_timed_send_larger_than_the_buffer_completes_while_the_peer_reads(self) -> None:
+        """A send that waits for room more than once still delivers every byte, in order."""
+        subject = self.network_under_test(0)
+        payload = _pattern(8 << 20)
+
+        def program() -> tuple[bool, bytes]:
             threads = subject.threads.threads
-            address = subject.address("deaf")
+            address = subject.address("late")
             listener = subject.network.listen(address)
-            done = threads.event()
+            received: list[bytes] = []
 
             def serve() -> None:
                 connection = listener.accept(HANG_GUARD_S)
-                _wait(done, "the client giving up")
+                threads.sleep(10 * subject.threads.tick)
+                received.append(_recv_exact(connection, len(payload)))
                 connection.close()
 
             server = threads.spawn(serve, name="server")
             client = subject.network.connect(address, HANG_GUARD_S)
+            try:
+                client.send(payload, HANG_GUARD_S)
+                completed = True
+            except TimeoutError:
+                completed = False
+            _join(server)
+            client.close()
+            listener.close()
+            return completed, received[0] if received else b""
+
+        completed, received = subject.threads.run(program)
+        assert completed
+        assert received == payload
+
+    def test_a_send_that_timed_out_leaves_a_recv_in_another_thread_waiting(self) -> None:
+        """The deadline of one call bounds that call only, never a call another thread made.
+
+        A socket-wide timeout, or a mode change around one call, would fail the blocked
+        ``recv`` here when the ``send`` gives up.
+        """
+        subject = self.network_under_test(0)
+        payload = _pattern(8 << 20)
+
+        def program() -> tuple[bool, bytes]:
+            threads = subject.threads.threads
+            address = subject.address("both")
+            listener = subject.network.listen(address)
+            release = threads.event()
+            reply: list[bytes] = []
+
+            def serve() -> None:
+                connection = listener.accept(HANG_GUARD_S)
+                _wait(release, "the client's send timing out")
+                connection.send(b"ping", HANG_GUARD_S)
+                _wait_closed(connection)
+                connection.close()
+
+            def read(client: Connection) -> None:
+                reply.append(_recv_exact(client, 4))
+
+            server = threads.spawn(serve, name="server")
+            client = subject.network.connect(address, HANG_GUARD_S)
+            reader = threads.spawn(lambda: read(client), name="reader")
+            threads.sleep(10 * subject.threads.tick)
             try:
                 client.send(payload, 10 * subject.threads.tick)
             except TimeoutError:
                 timed_out = True
             else:
                 timed_out = False
-            done.set()
-            _join(server)
+            release.set()
+            _join(reader)
             client.close()
+            _join(server)
             listener.close()
-            return timed_out
+            return timed_out, reply[0] if reply else b""
 
-        assert subject.threads.run(program)
+        assert subject.threads.run(program) == (True, b"ping")
 
     def test_a_peer_that_stops_reading_blocks_an_untimed_writer_until_its_end_closes(
         self,

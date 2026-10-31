@@ -49,7 +49,8 @@ ALLOWED: dict[str, tuple[int, str]] = {
     ),
     "libs/vs-sim/src/vs_sim/network.py": (
         1,
-        "the real Connection.send itself, on its no-timeout path; callers choose the bound",
+        "the non-blocking socket call under Connection.send, whose poll loop enforces the "
+        "caller's timeout (none waits for ever)",
     ),
 }
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 import tempfile
 import threading
 from pathlib import Path
@@ -132,13 +131,6 @@ class TestUnixNetwork(NetworkContract):
             OsThreads(), lambda program: program(), tick=_REAL_TICK_S, exact=False
         )
         return NetworkUnderTest(UnixNetwork(), threads, address)
-
-    @pytest.mark.skipif(
-        sys.platform == "darwin",
-        reason="#3550: macOS ignores MSG_DONTWAIT on a blocking stream send, so the send never times out",
-    )
-    def test_a_send_timeout_bounds_a_send_nobody_reads(self) -> None:
-        super().test_a_send_timeout_bounds_a_send_nobody_reads()
 
     def test_concurrent_connection_close_ends_read_with_eof_or_error(self) -> None:
         network = UnixNetwork()

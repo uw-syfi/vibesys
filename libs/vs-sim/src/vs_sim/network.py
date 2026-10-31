@@ -17,9 +17,16 @@ import errno
 import math
 import select
 import socket
-import time
+import threading
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+from vs_sim.clock import MonotonicClock
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from vs_sim.clock import Clock
 
 
 class Connection(Protocol):
@@ -97,78 +104,119 @@ class DeadlineNetwork(Network, Protocol):
         ...
 
 
-def _poller_for(sock: socket.socket, event: int) -> select.poll:
-    poller = select.poll()
-    try:
-        poller.register(sock, event)
-    except ValueError as error:
-        if sock.fileno() >= 0:
-            raise
-        raise OSError(errno.EBADF, "connection closed") from error
-    return poller
-
-
 class _UnixConnection:
-    def __init__(self, sock: socket.socket) -> None:
+    """One stream socket, held non-blocking: every wait is a ``poll`` bounded by a deadline.
+
+    A blocking socket cannot bound a send. ``MSG_DONTWAIT`` makes one call non-blocking on
+    Linux but not on macOS, which blocks until the peer reads, and a socket timeout is
+    per socket, so it would also bound a ``recv`` or ``send`` made from another thread. A
+    non-blocking socket never blocks in ``send`` or ``recv``: they return what fits or
+    what is there, or raise ``BlockingIOError``, on every host. Waiting for room or for
+    bytes is then ``poll`` with the time left to this call's own deadline.
+
+    ``poll`` does not wake when another thread closes the descriptor it waits on (macOS
+    never wakes it, even after a ``shutdown``). So ``close`` shuts the stream down, which
+    wakes every waiter, and the descriptor is closed by the last call still using it.
+    """
+
+    def __init__(self, sock: socket.socket, clock: Clock) -> None:
+        sock.settimeout(0.0)  # Non-blocking: a call returns at once or raises BlockingIOError.
         self._sock = sock
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._calls_in_flight = 0
+        self._closing = False
 
     def send(self, data: bytes, timeout: float | None = None) -> None:
-        if timeout is None:
-            self._sock.sendall(data)
-            return
-        # As in ``recv``, the socket stays blocking; wait for room instead.
-        deadline = time.monotonic() + timeout
+        deadline = None if timeout is None else self._clock.now() + timeout
         view = memoryview(data)
-        poller = _poller_for(self._sock, select.POLLOUT)
-        while view:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0 or not poller.poll(max(math.ceil(remaining * 1000), 0)):
-                message = f"no room to send within {timeout} s"
-                raise TimeoutError(message)
-            try:
-                sent = self._sock.send(view, socket.MSG_DONTWAIT)
-            except BlockingIOError:
-                continue
-            view = view[sent:]
+        with self._in_use():
+            while view:
+                view = view[self._send_now(view) :]
+                if view and not self._wait(select.POLLOUT, deadline):
+                    message = f"no room to send within {timeout} s"
+                    raise TimeoutError(message)
 
     def recv(self, max_bytes: int, timeout: float | None = None) -> bytes:
-        # The socket stays blocking: a socket timeout would also bound a later ``send``
-        # from any thread, so a slow reader would fail a write. Wait for readability instead.
-        if timeout is not None:
-            poller = _poller_for(self._sock, select.POLLIN)
-            if not poller.poll(max(math.ceil(timeout * 1000), 0)):
-                message = f"nothing arrived within {timeout} s"
-                raise TimeoutError(message)
-        return self._sock.recv(max_bytes)
+        deadline = None if timeout is None else self._clock.now() + timeout
+        with self._in_use():
+            while (chunk := self._recv_now(max_bytes)) is None:
+                if not self._wait(select.POLLIN, deadline):
+                    message = f"nothing arrived within {timeout} s"
+                    raise TimeoutError(message)
+            return chunk
+
+    def _send_now(self, view: memoryview) -> int:
+        """How many bytes the socket took without waiting; 0 when its buffer is full."""
+        try:
+            return self._sock.send(view)
+        except BlockingIOError:
+            return 0
+
+    def _recv_now(self, max_bytes: int) -> bytes | None:
+        """What is there to read without waiting; ``None`` when nothing has arrived."""
+        try:
+            return self._sock.recv(max_bytes)
+        except BlockingIOError:
+            return None
+
+    def _wait(self, event: int, deadline: float | None) -> bool:
+        """Whether ``event`` (or a hang-up or error) arrived before ``deadline``; ``None`` waits for ever."""
+        poller = select.poll()
+        poller.register(self._sock, event)
+        if deadline is None:
+            return bool(poller.poll())
+        remaining = deadline - self._clock.now()
+        return bool(poller.poll(max(math.ceil(remaining * 1000), 0)))
 
     def peer_closed(self) -> bool:
         try:
-            return self._sock.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT) == b""
+            with self._in_use():
+                return self._sock.recv(1, socket.MSG_PEEK) == b""
         except BlockingIOError:
             return False
         except OSError:
             return True
 
     def close(self) -> None:
-        with contextlib.suppress(OSError):
-            # Sends the peer its EOF and wakes a thread blocked in recv, even though the
-            # descriptor stays open until that thread returns.
-            self._sock.shutdown(socket.SHUT_RDWR)
-        self._sock.close()
+        with self._lock:
+            if self._closing:
+                return
+            self._closing = True
+            with contextlib.suppress(OSError):
+                # Sends the peer its EOF and wakes every thread waiting on this end.
+                self._sock.shutdown(socket.SHUT_RDWR)
+            if self._calls_in_flight == 0:
+                self._sock.close()
+
+    @contextlib.contextmanager
+    def _in_use(self) -> Iterator[None]:
+        """Keep the descriptor open for one call; an end already closed raises ``OSError``."""
+        with self._lock:
+            if self._closing:
+                raise OSError(errno.EBADF, "connection closed")
+            self._calls_in_flight += 1
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._calls_in_flight -= 1
+                if self._closing and self._calls_in_flight == 0:
+                    self._sock.close()
 
 
 class _UnixListener:
-    def __init__(self, sock: socket.socket, path: Path) -> None:
+    def __init__(self, sock: socket.socket, path: Path, clock: Clock) -> None:
         self._sock = sock
         self._path = path
+        self._clock = clock
         info = path.stat()
         self._identity = (info.st_dev, info.st_ino)
 
     def accept(self, timeout: float | None = None) -> Connection:
         self._sock.settimeout(timeout)
         client, _ = self._sock.accept()
-        client.settimeout(None)
-        return _UnixConnection(client)
+        return _UnixConnection(client, self._clock)
 
     def close(self) -> None:
         with contextlib.suppress(OSError):
@@ -190,9 +238,13 @@ class _UnixListener:
 class UnixNetwork:
     """``AF_UNIX`` stream sockets; an address is a filesystem path."""
 
+    def __init__(self) -> None:
+        """A network whose timeouts all run on one monotonic clock."""
+        self._clock: Clock = MonotonicClock()
+
     def now(self) -> float:
         """Seconds on the monotonic timeline used to bound socket operations."""
-        return time.monotonic()
+        return self._clock.now()
 
     def listen(self, address: str) -> Listener:
         """Bind and listen on the path; ``OSError`` when a socket file is already there."""
@@ -203,7 +255,7 @@ class UnixNetwork:
         except OSError:
             sock.close()
             raise
-        return _UnixListener(sock, Path(address))
+        return _UnixListener(sock, Path(address), self._clock)
 
     def connect(self, address: str, timeout: float | None = None) -> Connection:
         """Dial the path; a missing or unbound path is ``ConnectionRefusedError``."""
@@ -218,5 +270,4 @@ class UnixNetwork:
         except OSError:
             sock.close()
             raise
-        sock.settimeout(None)
-        return _UnixConnection(sock)
+        return _UnixConnection(sock, self._clock)
