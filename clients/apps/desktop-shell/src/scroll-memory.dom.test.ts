@@ -49,44 +49,65 @@ type Move =
 
 const move: fc.Arbitrary<Move> = fc.oneof(
   {weight: 3, arbitrary: fc.constantFrom(...SCREENS).map((screen): Move => ({kind: 'go', screen}))},
-  {weight: 3, arbitrary: fc.integer({min: 1, max: 900}).map((top): Move => ({kind: 'scroll', top}))},
+  {
+    weight: 3,
+    arbitrary: fc.integer({min: 1, max: 900}).map((top): Move => ({kind: 'scroll', top})),
+  },
   {weight: 2, arbitrary: fc.constantFrom<Move>({kind: 'back'}, {kind: 'forward'})},
 );
+
+/** A walk through the window's history, with the top each entry was left at as the model. */
+class Walk {
+  readonly address = windowAddress(browser, null);
+  readonly entries: {screen: Screen; top: number}[] = [{screen: this.address.screen(), top: 0}];
+  at = 0;
+  body = draw(this.address.screen());
+  readonly stop = this.address.onRestore(screen => {
+    this.body = draw(screen);
+  });
+
+  get top(): number {
+    return this.entries[this.at]?.top ?? -1;
+  }
+
+  async apply(each: Move): Promise<void> {
+    if (each.kind === 'scroll') this.scroll(each.top);
+    else if (each.kind === 'go') this.go(each.screen);
+    else await this.step(each.kind === 'back' ? -1 : 1);
+  }
+
+  private scroll(top: number): void {
+    this.body.scrollTop = top;
+    const shown = this.entries[this.at];
+    if (shown !== undefined) shown.top = top;
+  }
+
+  private go(screen: Screen): void {
+    if (this.entries[this.at]?.screen.kind === screen.kind) return;
+    this.address.push(screen);
+    this.entries.splice(this.at + 1, this.entries.length, {screen, top: 0});
+    this.at += 1;
+    this.body = draw(screen);
+  }
+
+  private async step(by: -1 | 1): Promise<void> {
+    if (this.entries[this.at + by] === undefined) return;
+    if (by === -1) this.address.back();
+    else browser.history.forward();
+    this.at += by;
+    await settled();
+  }
+}
 
 test('property: Back and Forward return the screen shown to where it was left, and a new entry starts at the top', async () => {
   await fc.assert(
     fc.asyncProperty(fc.array(move, {maxLength: 25}), async moves => {
-      const address = windowAddress(browser, null);
-      // The entries this walk made, each with the top it was left at; `at` is the one shown.
-      const entries: {screen: Screen; top: number}[] = [{screen: address.screen(), top: 0}];
-      let at = 0;
-      let body = draw(entries[0]?.screen ?? SCREENS[0] ?? {kind: 'runs'});
-      const stop = address.onRestore(screen => {
-        body = draw(screen);
-      });
+      const walk = new Walk();
       for (const each of moves) {
-        if (each.kind === 'scroll') {
-          body.scrollTop = each.top;
-          const shown = entries[at];
-          if (shown !== undefined) shown.top = each.top;
-        } else if (each.kind === 'go') {
-          const shown = entries[at];
-          if (shown?.screen.kind === each.screen.kind) continue;
-          address.push(each.screen);
-          entries.splice(at + 1, entries.length, {screen: each.screen, top: 0});
-          at += 1;
-          body = draw(each.screen);
-        } else {
-          const to = at + (each.kind === 'back' ? -1 : 1);
-          if (entries[to] === undefined) continue;
-          if (each.kind === 'back') address.back();
-          else browser.history.forward();
-          at = to;
-          await settled();
-        }
-        expect(body.scrollTop).toBe(entries[at]?.top ?? -1);
+        await walk.apply(each);
+        expect(walk.body.scrollTop).toBe(walk.top);
       }
-      stop();
+      walk.stop();
     }),
     {numRuns: 60, seed: 3205},
   );
