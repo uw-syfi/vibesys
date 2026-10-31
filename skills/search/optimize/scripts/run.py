@@ -86,7 +86,11 @@ def status(state: State, now: datetime) -> dict[str, Any]:
     busy = sum(i["state"] in {"dispatched", "judging"} for i in opened)
     free = max(0, state["fanout"] - busy)
     if state["finished"]:
-        action = "finish succeeded"
+        action = (
+            "run aborted"
+            if any(d["kind"] == "abort" for d in state["decisions"])
+            else "finish succeeded"
+        )
     elif now >= parse_date(state["wrap_up_at"]):
         action = "begin wrap-up: close open items, stop owned tasks, measure main, run finish"
     elif any(i["state"] == "returned" for i in opened):
