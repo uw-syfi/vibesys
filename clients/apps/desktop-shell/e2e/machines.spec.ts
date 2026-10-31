@@ -110,7 +110,8 @@ test('machines show their status from their facts, and each problem carries its 
   // A missing checkout is fixed inline: its field is open with the old path.
   await row(page, 'host-b').click();
   await openBanner(page);
-  await expect(page.getByText(/^Nothing is at ~\/vibesys on host-b any more\./)).toBeVisible();
+  // The checkout's path is shown by its last name only.
+  await expect(page.getByText(/^Nothing is at vibesys on host-b any more\./)).toBeVisible();
   const fix = page.getByRole('combobox', {name: 'VibeSys checkout on host-b'});
   await expect(fix).toHaveValue('~/vibesys');
   await shoot(page, 'ink-checkout-not-found');

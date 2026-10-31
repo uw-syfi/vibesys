@@ -1,6 +1,7 @@
 import type {JSX} from 'react';
 import {Button} from './button.js';
 import {DetailsToggle} from './details-toggle.js';
+import {withoutPaths} from './paths.js';
 import {StatusDot} from './status.js';
 import {Text} from './text.js';
 
@@ -24,7 +25,8 @@ const TONE_WORDS: Record<ToastTone, string> = {warn: 'Warning', err: 'Error'};
  * A small notification that stays until it is dismissed: a tone dot, a short title, and a dismiss
  * button. With a `detail` it also has an expand control, which shows the detail under the title;
  * one without has nothing to open. An error is announced at once (`alert`), a warning when the
- * reader is idle (`status`); the tone is never color alone, the dot is named by its word.
+ * reader is idle (`status`); the tone is never color alone, the dot is named by its word. A
+ * filesystem path in the title or the detail is shown by its last name only (`withoutPaths`).
  */
 export function Toast(props: {
   readonly tone: ToastTone;
@@ -43,11 +45,11 @@ export function Toast(props: {
       <div className="vs-toast-main">
         <div className="vs-toast-head">
           <StatusDot tone={props.tone} label={TONE_WORDS[props.tone]} />
-          <span className="vs-toast-title">{props.title}</span>
+          <span className="vs-toast-title">{withoutPaths(props.title)}</span>
         </div>
         {props.detail !== undefined && props.open ? (
           <div className="vs-toast-detail">
-            <Text tone="muted">{props.detail}</Text>
+            <Text tone="muted">{withoutPaths(props.detail)}</Text>
           </div>
         ) : null}
       </div>

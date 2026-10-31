@@ -45,7 +45,11 @@ const SEED: FakeBridgeSeed = {
 const refuseMachines = initScript(() => {
   const bridge = (window as unknown as {vibesysWelcome: Record<string, unknown>}).vibesysWelcome;
   bridge['machines'] = () =>
-    Promise.resolve({ok: false, error: 'hosts.json is unreadable.', authNeeded: false});
+    Promise.resolve({
+      ok: false,
+      error: 'Could not read /var/folders/zz/T/vibesys-ab12/hosts.json: unreadable.',
+      authNeeded: false,
+    });
 }, undefined);
 
 async function open(page: Page, width: number, height = 700, refused = true): Promise<void> {
@@ -78,7 +82,7 @@ for (const width of [1440, 660]) {
     await open(page, width);
     await expect(toast(page)).toHaveCount(1);
     await expect(toast(page)).toContainText('The machines could not be read');
-    await expect(page.getByText('hosts.json is unreadable.')).toHaveCount(0);
+    await expect(page.getByText(/unreadable/)).toHaveCount(0);
     const box = await toast(page).boundingBox();
     const rail = await page.getByRole('navigation', {name: 'VibeSys'}).boundingBox();
     if (box === null || rail === null) throw new Error('the toast and the rail are drawn');
@@ -90,7 +94,9 @@ for (const width of [1440, 660]) {
     expect(box.height).toBeLessThan(80);
     await shoot(page, `toast-collapsed-${width}`);
     await page.getByRole('button', {name: 'Show details'}).click();
-    await expect(page.getByText('hosts.json is unreadable.')).toBeVisible();
+    // The refusal named a temporary folder; the toast shows the file's name only.
+    await expect(page.getByText('Could not read hosts.json: unreadable.')).toBeVisible();
+    await expect(page.getByText(/\/var\/folders/)).toHaveCount(0);
     await shoot(page, `toast-open-${width}`);
     const axe = await new AxeBuilder({page}).analyze();
     expect(axe.violations.map(violation => `${violation.id}: ${violation.help}`)).toEqual([]);
@@ -106,7 +112,7 @@ test('the toast is reachable and operable from the keyboard', async ({page}) => 
   await expand.focus();
   await expect(expand).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(page.getByText('hosts.json is unreadable.')).toBeVisible();
+  await expect(page.getByText('Could not read hosts.json: unreadable.')).toBeVisible();
   await page.keyboard.press('Tab');
   await expect(page.getByRole('button', {name: 'Dismiss'})).toBeFocused();
   await page.keyboard.press('Enter');

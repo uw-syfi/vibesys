@@ -1,5 +1,6 @@
 import {type JSX, type ReactNode, useId, useState} from 'react';
 import {DetailsToggle} from './details-toggle.js';
+import {withoutPaths} from './paths.js';
 import {Text} from './text.js';
 
 /**
@@ -40,12 +41,13 @@ export function Card(props: {
 /**
  * A state its screen is in, on one line: the title, with the actions beside it. The longer account
  * (`body`, then `hint`) is behind a details control at the end of the line; a banner with neither
- * has nothing to open.
+ * has nothing to open. Its text is plain text, and a filesystem path in it is shown by its last
+ * name only (`withoutPaths`).
  */
 export function Banner(props: {
   readonly title: string;
   readonly tone?: BannerTone;
-  readonly body?: ReactNode;
+  readonly body?: string;
   readonly hint?: string;
   readonly actions?: ReactNode;
 }): JSX.Element {
@@ -55,12 +57,12 @@ export function Banner(props: {
     <div className="vs-banner" data-tone={props.tone ?? 'neutral'}>
       <div className="vs-banner-text">
         <span className="vs-banner-title">
-          <Text variant="body-strong">{props.title}</Text>
+          <Text variant="body-strong">{withoutPaths(props.title)}</Text>
         </span>
         {detailed && open ? (
           <>
-            {props.body === undefined ? null : <Text tone="muted">{props.body}</Text>}
-            {props.hint === undefined ? null : <Text tone="muted">{props.hint}</Text>}
+            {props.body === undefined ? null : <Text tone="muted">{withoutPaths(props.body)}</Text>}
+            {props.hint === undefined ? null : <Text tone="muted">{withoutPaths(props.hint)}</Text>}
           </>
         ) : null}
       </div>

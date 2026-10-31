@@ -111,6 +111,7 @@ export {
   type Tradeoff,
 } from './components/pareto-frontier.js';
 export {type Completion, PathInput} from './components/path-input.js';
+export {withoutPaths} from './components/paths.js';
 export {
   type HeaderColumn,
   type ListHeader,
