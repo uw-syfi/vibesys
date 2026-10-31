@@ -4,12 +4,14 @@ A test module subclasses ``StepLogContract``, names the subclass ``Test<Variant>
 ``step_log_under_test``. The cases drive a log only through the interface and the few probes
 ``StepLogUnderTest`` names. They hold a log to what the loop relies on: an append is in the state
 when it returns, a record the fold refuses is never appended, what was appended survives a restart,
-a charged attempt is charged only for a raise, the run clock core asks to have recorded is
-recorded, and a start is checked and stamped at one instant:
-the run clock the log reads when it appends, which is not the one its caller read when it decided.
+a charged attempt is charged only for a raise, and the run clock core asks to have recorded is
+recorded.
 
-A result is judged on the state its own append extends: one that reaches a parked run is not
-recorded as a result and leaves the log as it was (``Interrupted``), whatever the loop last read.
+A start is checked and stamped at one instant, the run clock the log reads when it appends, which
+is not the one its caller read when it decided. A start the rule would not run then is refused
+(``RecordRefusal``) and appends nothing. A result is judged on the state its own append extends:
+one that reaches a parked run is not recorded as a result and leaves the log as it was
+(``Interrupted``), whatever the loop last read.
 """
 
 from __future__ import annotations
