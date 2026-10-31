@@ -11,6 +11,7 @@ from vs_core._actions import (
     Run,
     RunRest,
     Settle,
+    Tick,
     Wait,
     at_rest,
     interruption_of,
@@ -22,8 +23,10 @@ from vs_core._decide import (
     fold,
     fold_run,
     may_start,
+    start_due,
     starts_run,
 )
+from vs_core._refusal import RecordRefusal, RecordRefusedError, RefusalReason
 from vs_core._search_events import Translated
 from vs_core._search_log import (
     CHECKPOINT_GROWTH,
@@ -77,6 +80,9 @@ __all__ = [
     "OpenStep",
     "OwnerEvent",
     "Progress",
+    "RecordRefusal",
+    "RecordRefusedError",
+    "RefusalReason",
     "Run",
     "RunRest",
     "SavedRun",
@@ -85,6 +91,7 @@ __all__ = [
     "StepEffect",
     "StepResult",
     "StepsState",
+    "Tick",
     "Translated",
     "Wait",
     "advance_run_time",
@@ -109,6 +116,7 @@ __all__ = [
     "restore",
     "seed_message",
     "snapshot_message",
+    "start_due",
     "started_message",
     "starts_run",
 ]

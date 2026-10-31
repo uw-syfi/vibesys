@@ -45,6 +45,7 @@ const CHANNELS: Channels = {
   readSpan: 'vibesys:welcome:read-span',
   runDigests: 'vibesys:welcome:run-digests',
   projectRuns: 'vibesys:welcome:project-runs',
+  cancelProjectRuns: 'vibesys:welcome:cancel-project-runs',
   usageWindow: 'vibesys:welcome:usage-window',
   preferences: 'vibesys:welcome:preferences',
   setAppearance: 'vibesys:welcome:set-appearance',
@@ -137,7 +138,8 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     readSpan: (host, project, runId, spanId, fromSequence, max) =>
       call(CHANNELS.readSpan, host, project, runId, spanId, fromSequence, max),
     runDigests: (host, project, runIds) => call(CHANNELS.runDigests, host, project, runIds),
-    projectRuns: (host, project) => call(CHANNELS.projectRuns, host, project),
+    projectRuns: (host, project, token) => call(CHANNELS.projectRuns, host, project, token),
+    cancelProjectRuns: token => call(CHANNELS.cancelProjectRuns, token),
     usageWindow: (host, project, runIds, since, until) =>
       call(CHANNELS.usageWindow, host, project, runIds, since, until),
     connectRun: id => capabilities.connectRun(id),

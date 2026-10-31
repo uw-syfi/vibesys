@@ -46,7 +46,15 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
     from vs_core.api import CoreEvent, CoreState, OperationRegistry, RequestId, Transition
-    from vs_core.api.recovery import End, Folded, Interruption, OpenStep, Run, StepResult
+    from vs_core.api.recovery import (
+        End,
+        Folded,
+        Interruption,
+        OpenStep,
+        RecordRefusal,
+        Run,
+        StepResult,
+    )
     from vs_proto.api import Record, StrategyAdvanced
     from vs_runtime._run_log_step_log import RunLogStepLog
     from vs_runtime._step_loop import StepRecord
@@ -159,7 +167,7 @@ class CoreInputs:
         """The step ``tag`` as the log has it, while it has no result."""
         return self._log.open_step(tag)
 
-    async def step_started(self, run: Run) -> StepRecord:
+    async def step_started(self, run: Run) -> Run | RecordRefusal:
         """Record that an attempt is about to start."""
         return await self._log.step_started(run)
 
@@ -170,6 +178,10 @@ class CoreInputs:
     async def attempt_interrupted(self, tag: RequestId, attempt: int, why: Interruption) -> None:
         """Record that an attempt ended and its step did not."""
         await self._log.attempt_interrupted(tag, attempt, why)
+
+    async def clock_advanced(self, at: float) -> None:
+        """Record that the run clock reached ``at``."""
+        await self._log.clock_advanced(at)
 
     async def run_ended(self, end: End) -> None:
         """Record the end of the run."""

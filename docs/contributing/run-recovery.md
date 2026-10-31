@@ -180,7 +180,7 @@ what `clear` does for each.
 | registered `IDEMPOTENT_WRITE` operations: `render_artifacts`, `retain_revision`, the dynamic handoff write, issue-board `ApplyIssueChanges` and `LogProgress` | content-addressed or keyed writes | safe: each carries a key the tracker or store checks before writing | none | existing key |
 | `capture_command`, `validate_local` | run a command or validation recipe in a workspace | safe after `clear` | kill the process group, reset the workspace to the recorded commit | tag |
 
-The ledger keys a request by a hash of the content the job reads and its spec, not by the tag, so `clear(step, tag)` computes the key from the step: it opens a candidate worktree at the step's revision, hashes it, discards it, and reads the ledger. Two steps of one content therefore share one job, and a step that finds the job another step submitted attaches to it. A job that a pause or drain cancelled is final in the ledger, so the next attempt asks for a new handle of the tag (`-life-n`) and the ledger claims a new job; only an attempt that ended without a cancel attaches. A local evaluation never attaches: each run takes a fresh handle.
+The ledger keys a request by a hash of the content the job reads and its spec, not by the tag, so `clear(step, tag)` computes the key from the step: it opens a candidate worktree at the step's revision, hashes it, discards it, and reads the ledger. Two steps of one content therefore share one job, and a step that finds the job another step submitted attaches to it. A job that was cancelled (its cancel ended the step, or someone else cancelled it) is final in the ledger, so the next attempt asks for a new handle of the tag (`-life-n`) and the ledger claims a new job. A pause or a drain deadline cancels nothing: the job stays queued or running, `clear` adopts it and the next attempt attaches. A local evaluation never attaches: each run takes a fresh handle.
 
 `InspectRequest`, `InspectTurn`, `InspectOwnedJob`, `CancelOwnedResource` and `BlockRequest` are not in the
 table because they exist only to settle unknown outcomes. They are deleted.
@@ -460,6 +460,7 @@ class Run:
     tag: RequestId
     attempt: int            # 1, or n + 1 after n attempts ended without a result
     deadline_at: float      # run-clock seconds; the loop sets a timer for it
+    clear_first: bool       # work of the step may exist: its runner's clear comes before the attempt
 
 @dataclass(frozen=True)
 class Cancel:
@@ -476,10 +477,14 @@ class Wait:
     until: float | None     # next deadline on the run clock, or None to wake on any input
 
 @dataclass(frozen=True)
+class Tick:
+    at: float               # record the run clock: time changes the log only through a record
+
+@dataclass(frozen=True)
 class End:
     result: RunResultProposal
 
-type Action = Run | Cancel | Settle | Wait | End
+type Action = Run | Cancel | Settle | Wait | Tick | End
 
 class CancelReason(StrEnum):   # DEADLINE, PAUSE_NOW, DRAIN_EXPIRED, RUN_ENDING, WITHDRAWN, INTERRUPTED
     ...
@@ -603,16 +608,31 @@ end.
   it is (`drain_in_force`: still draining, or parked in this epoch), so a Pause now still cancels after a
   kill. A drain a kill cut short therefore parks in the next epoch with a park that is older than that
   epoch, and the Resume that follows is admitted there at once instead of being refused.
-- **A drain with only held calls left ends with the process.** A held call ignored its cancel and its
-  task's cancellation, and the loop records nothing about its tag while it runs. The drain cannot finish
-  in that process, so the loop returns `PARKED` as a parked run does; the caller exits, the call dies with
-  the process, and the next process's log ends the attempt, parks the drain and admits the Resume.
+- **A drain that ran out its deadline parks in the log.** Time changes the log only through a record, and
+  the deadline passing writes none: a run that waited only on attempts the loop cancels would stay
+  draining in the log until some unrelated step happened to end, and whether a held attempt was charged
+  would depend on that. `decide` asks for the clock instead (`Tick(at)`), the loop appends it as
+  `ClockAdvanced`, and the fold parks the run. The loop never reports `PARKED` while the log says
+  draining: a pause with no deadline waits for its attempts, and a Pause now or a passed deadline parks.
 - **A run may park with an attempt the loop still runs, and the epoch end ends it.** A drain that cancels
   (a Pause now, or a pause past its deadline) does not wait for the attempt that runs a request
   (`_holds_park`): `decide` cancels it in the parked run, and a call that ignores the cancel dies with the
   process. The first record of the next epoch ends that attempt as interrupted, not charged like a crash
   (`epoch_opened`), because the pause ended it; one a draining run held when it died is charged. A
-  parked run therefore never holds an attempt that nothing will end.
+  parked run therefore never holds an attempt that nothing will end, and the only attempts it holds are
+  those of a call the loop showed held (`StallBoard`), which the process exit ends.
+- **Core says whether work may exist.** `Run.clear_first` is true whenever the log or its seed shows the
+  step was sent: an attempt began, or an earlier version dispatched it. The loop clears exactly then, and
+  never from the attempt number. A seed step in flight has no attempt in this log, so the fold gives it
+  one, the first, ended and uncharged: the step runs next as attempt 2, a re-run that clears what the
+  first left. A seed step that was never sent has nothing to clear and starts as attempt 1.
+- **A settlement reaches a flight as a cancel does.** `decide` gives a step with no running attempt a
+  `Settle`, also while the loop has a flight for it waiting on a `clear` before it starts. The flight
+  takes the reason as it takes a `Cancel` (the first reason is the signal's), so a stop ends a run whose
+  next attempt waits on an unreachable backend: an ending is one fact whichever action carried it.
+- **An adopted result is the step's result.** When `clear` adopts work that ended while no host ran, or the
+  loop's attach to adopted work returns its own result, that result is recorded, not the settlement core
+  decided in its absence.
 - **A step's limit is its own.** A drain caps the request it cannot interrupt at its deadline plus the
   cleanup bound, and the cap belongs to the attempt in flight. `StepAttempts.deadline_at` keeps the limit
   the first attempt started with, and whoever returns the step to unstarted (the fold, on the record of
@@ -640,13 +660,22 @@ end.
   result.
 - **The log is read as strictly as it is written.** A `StepFinished` names the latest attempt the step
   began, a `RunEnded` a run that is over, and an interruption or cancel reason the version knows; the
-  fold refuses the rest with a `ValueError`, never a `KeyError`.
+  fold refuses the rest as a `RecordRefusedError`, never a `KeyError`. It is a `ValueError` that carries a
+  `RecordRefusal`: the closed `RefusalReason` (`NO_SEED`, `STEP_NOT_OPEN`, `START_NOT_DUE`, `ATTEMPT_MISMATCH`,
+  `RUN_NOT_OVER`, `RESULT_MISMATCH`, `UNREADABLE`, `SEED_REPEATED`), the step it names, and the message. No
+  fold module raises a bare `ValueError`.
 
-- **The log holds only starts the rule would run.** A flight that waited for its `clear` while the run
-  paused or parked would record a start into a parked run, leaving an attempt that nothing cancels. The
-  fold refuses a `StepStarted` that `decide` would not `Run`, and `may_start(state, tag, now)` is that
-  predicate for the loop to ask, under its append lock and with the clock it records at, before it
-  records a start. A flight that is refused stands down: its `clear` did no harm and the step stays open.
+- **The log holds only starts the rule would run, checked and stamped at one instant.** A flight that
+  waited for its `clear` or for the writer while the run paused, parked or ran out the step's time would
+  record a start into a run that cannot take it, leaving an attempt that nothing cancels. The fold refuses
+  a `StepStarted` that `decide` would not `Run`. The loop does not ask first with its own clock: that clock
+  reading and the log's stamp are two instants, and a pause or a limit can fall between them.
+  `step_started(run)` reads the run clock once, asks `start_due(state, tag, now)` (the `Run` the rule gives
+  at that instant, or a `RecordRefusal`), and stamps the record with that same `now`. It returns the attempt as recorded,
+  which the loop runs: an unstarted step's limit counts from the stamp, so a start that waited is not born
+  expired. When the rule would not `Run` the step then, it appends nothing and returns the `RecordRefusal`
+  (`STEP_NOT_OPEN` or `START_NOT_DUE`, the two a race explains; an attempt out of order is no race and
+  raises). A flight that is refused stands down: its `clear` did no harm and the step stays open.
 
 `open_step(state, tag)` is the step as the loop runs it while it has no result: its request, its limit
 and the attempts that began. The loop reads it from core instead of rebuilding it from the ledger.
@@ -744,13 +773,14 @@ The loop, `vs_runtime/_step_loop.py`:
 state = fold(log)                      # cache plus suffix, or the whole log
 repeat:
     for action in decide(state, clock.now()):
-        Run:    if attempt > 1: await runner.clear(tag)
+        Run:    if clear_first: await runner.clear(step, tag)
                 append StepStarted(tag, attempt)      # durable before I/O
                 start runner.run(...) as a task
         Cancel: set the signal; on return append StepFinished or AttemptInterrupted
         Settle: await runner.clear(step, tag) if an attempt was interrupted; append StepFinished
                 (step: from the fold, for a step with no attempt in flight)
         Wait:   await the first of: a task ending, a new input (a pause is one), the timer
+        Tick:   append the run clock as an input (a drain's deadline passed)
         End:    append RunEnded; release the lock
     state = fold(state, the records just appended)
 ```
@@ -762,7 +792,9 @@ In code the loop decides with core's own functions, `decide` and `at_rest`, and 
 interface it owns. `StepLog` is the log as the loop uses it: one atomic durable append per method, a
 `state` that is the fold of everything appended (by the loop or by an input from elsewhere), and
 `open_step(tag)`, the step with no result as the fold has it (its request, its limit and its latest
-attempt), which is where `clear` gets the step for a tag with no attempt in flight. `StepLogContract`
+attempt), which is where `clear` gets the step for a tag with no attempt in flight. `step_started(run)` is
+the one append that decides: it returns the attempt as recorded or a `RecordRefusal`. `clock_advanced(at)`
+records the run clock when core asks (`Tick`). `StepLogContract`
 holds a log to what the loop relies on, and a restarted log over the records of a dead process is how the
 tests kill the host. The loop's clock is the run clock, the one `decide` reads and the records carry.
 `at_rest(state)` says the run ended (the loop returns at once, so a restart never records the end twice)

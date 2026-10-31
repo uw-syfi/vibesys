@@ -96,7 +96,6 @@ async function openStep(page: Page, role: RegExp): Promise<void> {
 async function openItem(page: Page, command: string): Promise<void> {
   await settled(page);
   const turn = page.getByRole('region', {name: 'Agent turn'});
-  await turn.getByRole('button', {name: /1 tool/}).click();
   await turn
     .getByRole('button', {name: escaped(command)})
     .last()

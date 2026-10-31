@@ -45,7 +45,34 @@ def transcript_examples() -> dict[str, Message]:
             entry=p.Oneof(
                 "tool_result",
                 p.TranscriptToolResult(
-                    tool="shell", call_id="call-a", content=blob, payload_json=inline
+                    tool="shell",
+                    call_id="call-a",
+                    content=blob,
+                    payload=p.Oneof(
+                        "command",
+                        p.TranscriptCommandResult(
+                            stdout=inline, stderr=blob, exit_code=2, duration_seconds=1.5
+                        ),
+                    ),
+                ),
+            ),
+            at=p.Timestamp(seconds=1_700_000_000, nanos=250_000_000),
+        ),
+        "result_legacy_payload_json": p.TranscriptEntry(
+            entry=p.Oneof(
+                "tool_result",
+                p.TranscriptToolResult(
+                    tool="shell", call_id="call-b", content=inline, payload_json=inline
+                ),
+            )
+        ),
+        "result_json": p.TranscriptEntry(
+            entry=p.Oneof(
+                "tool_result",
+                p.TranscriptToolResult(
+                    tool="search",
+                    content=inline,
+                    payload=p.Oneof("json", p.TranscriptContent(value=p.Oneof("inline", "[1]"))),
                 ),
             )
         ),

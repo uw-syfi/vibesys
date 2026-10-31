@@ -17,8 +17,10 @@ import vs_core.api as core
 from vs_core.api.recovery import (
     Cancel,
     CancelReason,
+    Interruption,
     Run,
     decide,
+    interruption_of,
     started_message,
 )
 from vs_proto.api import Oneof
@@ -55,11 +57,14 @@ def test_a_pause_releases_the_step_that_watches_a_job_and_cancels_no_job(kind: s
     loop, tag = job_world()
     play(loop, (kind, None))
     # The step watches a job the pause lets go of, so nothing holds the park; the loop still runs
-    # the attempt, and a parked run cancels what runs.
+    # the attempt, and a parked run stops what runs. That stop is an interruption of the attempt,
+    # not a cancel of the job: the step stays open (`interruption_of`), and a runner whose work
+    # outlives the host leaves it running for `clear` to adopt (the `StepRunner` contract).
     assert loop.state.run.status is core.RunStatus.PARKED
     assert loop.running() == [tag]
     (cancel,) = [a for a in decide(loop.state, loop.clock) if isinstance(a, Cancel)]
     assert (cancel.tag, cancel.reason) == (tag, CancelReason.PAUSE_NOW)
+    assert interruption_of(cancel.reason) is Interruption.PAUSE
     loop.apply(cancel)
     assert loop.state.run.status is core.RunStatus.PARKED
     assert cancels_of_jobs(loop) == []

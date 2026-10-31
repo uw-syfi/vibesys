@@ -11,6 +11,7 @@ import {
   TailRequestSchema,
   TranscriptChannel,
   TranscriptEntrySchema,
+  TranscriptToolResultSchema,
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {storeRunFixture, withCoreRecords} from '@vibesys/run-fixtures';
@@ -18,6 +19,7 @@ import {foldSkeleton, seedSkeleton} from '@vibesys/run-skeleton';
 import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
 import {gatewayReader} from '@vibesys/run-skeleton/reader';
 import {FakeRunTransport} from '@vibesys/run-skeleton/testing';
+import {appendNativeTranscript, emptyNativeTranscript} from '@vibesys/run-state/transcript';
 import {FakeClock} from '@vibesys/transport/testing';
 import fc from 'fast-check';
 import {getInitialSnapshot, getNextSnapshot, type SnapshotFrom} from 'xstate';
@@ -763,6 +765,60 @@ test('regression: native turn content crosses the real reader for every stream s
     actor.stop();
     expect(clock.pending).toBe(0);
   }
+});
+
+function wireVarint(value: number): number[] {
+  const bytes: number[] = [];
+  let rest = value;
+  while (rest >= 128) {
+    bytes.push((rest & 127) | 128);
+    rest >>>= 7;
+  }
+  return [...bytes, rest];
+}
+const fieldOf = (number: number, body: readonly number[]): number[] => [
+  (number << 3) | 2,
+  ...wireVarint(body.length),
+  ...body,
+];
+/** A framed transcript entry holding a tool result of `display` text and `extra` fields after it. */
+function resultWire(display: string, extra: readonly number[] = []): number[] {
+  const result = toBinary(
+    TranscriptToolResultSchema,
+    create(TranscriptToolResultSchema, {
+      tool: 'Bash',
+      content: {value: {case: 'inline', value: display}},
+    }),
+  );
+  const entry = fieldOf(3, [...result, ...extra]);
+  return [...wireVarint(entry.length), ...entry];
+}
+
+test('regression: a result whose payload this reader cannot use is shown as text, and the run still reads', () => {
+  const text = new TextEncoder();
+  const bytes = (value: string): number[] => [...text.encode(value)];
+  const wire = new Uint8Array([
+    ...resultWire('first result'),
+    // Field 8: a payload case a newer writer added.
+    ...resultWire('newer payload', fieldOf(8, bytes('future'))),
+    // Field 5: the JSON string an earlier writer stored, here of a kind nobody knows.
+    ...resultWire('older payload', fieldOf(5, fieldOf(1, bytes('{"kind":"image"}')))),
+    ...resultWire('last result'),
+  ]);
+  const fixture = storeRunFixture();
+  const skeleton = foldSkeleton(seedSkeleton(), fixture.records);
+  const transcripts = {'turn-0': appendNativeTranscript(emptyNativeTranscript(), wire)};
+  const model = projectSkeleton(skeleton, skeleton.throughSeq ?? 0n, '', {content: {transcripts}});
+  const ui = getInitialSnapshot(gatewayRunMachine, {seed: SEED}).context.ui;
+  const screen = skeletonScreenState(SEED, skeleton, model, ui, undefined, {transcripts});
+  const shown = (screen.run.core?.transcript ?? []).filter(entry => entry.spanId === 'turn-0');
+  expect(shown.map(entry => entry.content)).toEqual([
+    'first result',
+    'newer payload',
+    'older payload',
+    'last result',
+  ]);
+  expect(shown.every(entry => entry.toolResult?.payload === undefined)).toBe(true);
 });
 
 test('an incomplete native transcript releases its reader on close or the first-entry deadline', async () => {

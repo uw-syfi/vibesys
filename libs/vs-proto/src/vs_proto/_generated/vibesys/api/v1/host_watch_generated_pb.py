@@ -18,10 +18,10 @@ if TYPE_CHECKING:
     from protobuf import DescFile, Oneof
 
     from ...host.v1.failure_pb import OperationFailure
-    from ...host.v1.operations_pb import LoginRequest, LoginResponse
+    from ...host.v1.operations_pb import LoginRequest, LoginResponse, StreamSavedRunsRequest, StreamSavedRunsResponse
 
 
-_WatchRequestFields: TypeAlias = Literal["checkout", "login"]
+_WatchRequestFields: TypeAlias = Literal["checkout", "login", "stream_saved_runs"]
 
 class WatchRequest(Message[_WatchRequestFields]):
     """
@@ -51,14 +51,14 @@ class WatchRequest(Message[_WatchRequestFields]):
             self,
             *,
             checkout: str = "",
-            method: Oneof[Literal["login"], LoginRequest] | None = None,
+            method: Oneof[Literal["login"], LoginRequest] | Oneof[Literal["stream_saved_runs"], StreamSavedRunsRequest] | None = None,
         ) -> None:
             pass
 
         checkout: str
-        method: Oneof[Literal["login"], LoginRequest] | None
+        method: Oneof[Literal["login"], LoginRequest] | Oneof[Literal["stream_saved_runs"], StreamSavedRunsRequest] | None
 
-_WatchResponseFields: TypeAlias = Literal["failure", "login"]
+_WatchResponseFields: TypeAlias = Literal["failure", "login", "stream_saved_runs"]
 
 class WatchResponse(Message[_WatchResponseFields]):
     """
@@ -82,15 +82,15 @@ class WatchResponse(Message[_WatchResponseFields]):
         def __init__(
             self,
             *,
-            result: Oneof[Literal["failure"], OperationFailure] | Oneof[Literal["login"], LoginResponse] | None = None,
+            result: Oneof[Literal["failure"], OperationFailure] | Oneof[Literal["login"], LoginResponse] | Oneof[Literal["stream_saved_runs"], StreamSavedRunsResponse] | None = None,
         ) -> None:
             pass
 
-        result: Oneof[Literal["failure"], OperationFailure] | Oneof[Literal["login"], LoginResponse] | None
+        result: Oneof[Literal["failure"], OperationFailure] | Oneof[Literal["login"], LoginResponse] | Oneof[Literal["stream_saved_runs"], StreamSavedRunsResponse] | None
 
 
 _DESC = file_desc(
-    b'\n)vibesys/api/v1/host_watch_generated.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/host/v1/failure.proto\x1a vibesys/host/v1/operations.proto"~\n\x0cWatchRequest\x12&\n\x08checkout\x18\x01 \x01(\tR\x08checkoutB\n\xbaH\x07r\x05\x10\x01(\x80 \x125\n\x05login\x18( \x01(\x0b2\x1d.vibesys.host.v1.LoginRequestH\x00R\x05loginB\x0f\n\x06method\x12\x05\xbaH\x02\x08\x01"\x97\x01\n\rWatchResponse\x12=\n\x07failure\x18\x02 \x01(\x0b2!.vibesys.host.v1.OperationFailureH\x00R\x07failure\x126\n\x05login\x18( \x01(\x0b2\x1e.vibesys.host.v1.LoginResponseH\x00R\x05loginB\x0f\n\x06result\x12\x05\xbaH\x02\x08\x01B=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3',
+    b'\n)vibesys/api/v1/host_watch_generated.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/host/v1/failure.proto\x1a vibesys/host/v1/operations.proto"\xd5\x01\n\x0cWatchRequest\x12&\n\x08checkout\x18\x01 \x01(\tR\x08checkoutB\n\xbaH\x07r\x05\x10\x01(\x80 \x125\n\x05login\x18( \x01(\x0b2\x1d.vibesys.host.v1.LoginRequestH\x00R\x05login\x12U\n\x11stream_saved_runs\x18+ \x01(\x0b2\'.vibesys.host.v1.StreamSavedRunsRequestH\x00R\x0fstreamSavedRunsB\x0f\n\x06method\x12\x05\xbaH\x02\x08\x01"\xef\x01\n\rWatchResponse\x12=\n\x07failure\x18\x02 \x01(\x0b2!.vibesys.host.v1.OperationFailureH\x00R\x07failure\x126\n\x05login\x18( \x01(\x0b2\x1e.vibesys.host.v1.LoginResponseH\x00R\x05login\x12V\n\x11stream_saved_runs\x18+ \x01(\x0b2(.vibesys.host.v1.StreamSavedRunsResponseH\x00R\x0fstreamSavedRunsB\x0f\n\x06result\x12\x05\xbaH\x02\x08\x01B=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3',
     [
         validate_pb.desc(),
         failure_pb.desc(),

@@ -30,7 +30,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 _SLOTS = tuple(host_operations.ADAPTER_OPERATIONS)
-_HANDLERS = tuple(op.name for op in host_operations.OPERATIONS if op.effect == 1)
+_STREAM = 2
+_HANDLERS = tuple(
+    op.name for op in host_operations.OPERATIONS if op.effect == 1 and op.cardinality != _STREAM
+)
 
 
 def _image() -> descriptor_pb2.FileDescriptorSet:
@@ -52,7 +55,6 @@ def _image() -> descriptor_pb2.FileDescriptorSet:
 def _slots() -> tuple[str, ...]:
     return (
         "list_tasks",
-        "list_saved_runs",
         "list_run_digests",
         "usage_window",
         "list_harnesses",
@@ -74,7 +76,7 @@ def _slots() -> tuple[str, ...]:
 
 
 def _watches() -> tuple[str, ...]:
-    return ("login",)
+    return ("login", "stream_saved_runs")
 
 
 def _changed(change: Callable[[object], None], index: int = 0) -> bytes:
@@ -110,6 +112,7 @@ def test_every_method_has_one_typed_handler_and_canonical_budget() -> None:
     ]
     assert [(op.slot, op.policy.cap_ms) for op in compiled if op.is_watch()] == [
         ("login", 600000),
+        ("stream_saved_runs", 600000),
     ]
     assert {op.policy.cap_ms + op.policy.grace_ms for op in compiled} == {
         10000,
@@ -150,6 +153,10 @@ def test_duplicate_identifiers_fail_generation(field: str) -> None:
         ("request_tag", 19000, "request_tag"),
         ("response_tag", 0, "response_tag"),
         ("first_event_ms", 1, "first_event"),
+        ("progress_ms", 1, "progress_ms"),
+        ("operation_id", 37, "retired"),
+        ("request_tag", 37, "retired"),
+        ("response_tag", 37, "retired"),
     ],
 )
 def test_invalid_policies_name_the_method(field: str, value: int, message: str) -> None:
@@ -317,8 +324,9 @@ def test_every_client_budget_exceeds_its_runner_cap() -> None:
             )
             assert f"totalMs: {client}" in typescript
             first = (
-                f", firstEventMs: {op.policy.first_event_ms}"
-                if op.policy.HasField("first_event_ms")
+                f", firstEventMs: {op.policy.first_event_ms if op.policy.HasField('first_event_ms') else 0}"
+                f", progressMs: {op.policy.progress_ms if op.policy.HasField('progress_ms') else 0}"
+                if op.is_watch()
                 else ""
             )
             assert (
@@ -427,12 +435,12 @@ def test_native_reads_keep_typed_routing_without_a_legacy_helper_adapter() -> No
         _image().SerializeToString(), _slots(), _server_sources(root), _watches()
     )
     operations = compile_registry(_image().SerializeToString(), _slots(), _watches())
-    native = next(op for op in operations if op.name == "ListSavedRuns")
+    native = next(op for op in operations if op.name == "ListRunDigests")
     assert native.policy.adapter_method == ""
-    assert "list_saved_runs" in outputs["proto/vibesys/api/v1/host_read_generated.proto"]
-    assert "ListSavedRuns" in outputs["clients/libs/proto/src/generated/host-operations.ts"]
-    assert "ListSavedRuns" not in outputs["src/server/host_operation_types_generated.py"]
+    assert "list_run_digests" in outputs["proto/vibesys/api/v1/host_read_generated.proto"]
+    assert "ListRunDigests" in outputs["clients/libs/proto/src/generated/host-operations.ts"]
+    assert "ListRunDigests" not in outputs["src/server/host_operation_types_generated.py"]
     assert (
-        "'': ListSavedRuns"
+        "'': ListRunDigests"
         not in outputs["libs/vs-proto/src/vs_proto/_generated/host_operations.py"]
     )

@@ -119,12 +119,19 @@ class FakeRunSeed:
     tags: tuple[RequestId, ...]
 
 
-def fake_run_seed(limits_s: Sequence[float], retries: int) -> FakeRunSeed:
+def fake_run_seed(
+    limits_s: Sequence[float],
+    retries: int,
+    *,
+    standing: core.RequestPhase = core.RequestPhase.PREPARED,
+) -> FakeRunSeed:
     """A run with one open step per entry of ``limits_s``, each allowed that many seconds.
 
     ``retries`` is the bound on re-sends of a step after its first attempt (core's
     ``Limits.request_retries``): a step whose charged attempts pass it ends as
-    ``ATTEMPTS_EXHAUSTED``.
+    ``ATTEMPTS_EXHAUSTED``. ``standing`` is how a log of an earlier version leaves each step:
+    ``PREPARED`` has not been sent, and ``DISPATCHED`` or ``RECONCILING`` was in flight with no
+    attempt in this log, so its work may exist.
     """
     descriptor = core.OperationDescriptor(
         kind="test.query",
@@ -162,5 +169,14 @@ def fake_run_seed(limits_s: Sequence[float], retries: int) -> FakeRunSeed:
             expected_revision=state.revision,
         )
         state = core.step(state, submitted).state
+    if standing is not core.RequestPhase.PREPARED:
+        sent = tuple(
+            row.model_copy(
+                update={"phase": standing, "dispatched_at": 0.0, "until": core.Until(at=limit)}
+            )
+            for row, limit in zip(state.records.records, limits_s, strict=True)
+        )
+        records = state.records.model_copy(update={"records": sent})
+        state = state.model_copy(update={"records": records})
     tags = tuple(row.request_id for row in state.records.records if row.request_id is not None)
     return FakeRunSeed(state, registry, tags)
