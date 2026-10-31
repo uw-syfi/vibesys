@@ -657,9 +657,8 @@ class RunEnvironment(CaptureRecoverySource, Protocol):
         """The reaper that ends the agent processes of one step of *run_id*, by the step's tag.
 
         ``reap_orphans`` ends every agent of the run; this ends one step's and leaves the
-        rest. Raises ``StepClearUnsupportedError`` when the environment has no way to find
-        what a step left, so the run refuses to start instead of waiting on a ``clear``
-        that can never answer.
+        rest. Every environment can find what a step left, on every platform, so a run
+        never refuses to start for want of a ``clear``.
         """
         ...
 
