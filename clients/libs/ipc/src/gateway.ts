@@ -7,8 +7,19 @@ import {
   DesktopGatewayRequestSchema,
   validatedExactFromBinary,
 } from '@vibesys/proto';
+import {SUBSCRIBE_METHOD} from '@vibesys/subscription';
 
 export const GATEWAY_CHANNEL = 'vibesys:gateway';
+
+/**
+ * Subscribe is not a generic call. The hub in main shares one stream among every window and
+ * feature, and a stream opened here would share nothing, hold no lease and never retry. Both ends
+ * refuse it: the window before it opens a port, and main again, which cannot trust a renderer.
+ */
+function refuseSubscribe(method: string): void {
+  if (method === SUBSCRIBE_METHOD)
+    throw new Error('Subscribe is served by the subscription port, not the generic gateway');
+}
 export interface GatewayCall<T> {
   readonly result: Promise<T>;
   cancel(): void;
@@ -55,6 +66,7 @@ export function encodeGatewayRequest(request: GatewayRequest): Uint8Array {
       throw new Error(`unknown gateway key: ${key}`);
   }
   hostFromKey(request.host);
+  refuseSubscribe(request.method);
   const kind =
     request.kind === 'unary'
       ? DesktopGatewayKind.UNARY
@@ -70,6 +82,7 @@ export function encodeGatewayRequest(request: GatewayRequest): Uint8Array {
 export function parseGatewayRequest(value: unknown): GatewayRequest {
   if (!(value instanceof Uint8Array)) throw new Error('gateway request must be protobuf bytes');
   const message = validatedExactFromBinary(DesktopGatewayRequestSchema, value);
+  refuseSubscribe(message.method);
   return {
     kind: message.kind === DesktopGatewayKind.UNARY ? 'unary' : 'stream',
     host: message.host,

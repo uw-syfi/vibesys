@@ -4,7 +4,8 @@ import type {RunEvent} from '@vibesys/contracts';
 import {fixtureNamed} from '@vibesys/run-fixtures';
 import {Controls, type Step} from './chat-controls.js';
 import {emitChat} from './chat-events.js';
-import {screenCheck} from './checks/screen-check.js';
+import {KnownLedger} from './checks/known-ledger.js';
+import {SCREEN_CHECKS, screenCheck} from './checks/screen-check.js';
 import {settled} from './checks/settle.js';
 import {openFixture, playLive} from './fixture-world.js';
 
@@ -21,6 +22,7 @@ import {openFixture, playLive} from './fixture-world.js';
 const FIXTURE = 'queue-rs-live';
 const shots = process.env['SCREENS_DIR'] || undefined;
 if (shots !== undefined) mkdirSync(shots, {recursive: true});
+const ledger = new KnownLedger('run-chat');
 
 const THREAD = 'thread-a';
 const CHAT = {agent_kind: 'chat', round_label: 'experiment-chat', chat_thread_id: THREAD} as const;
@@ -122,7 +124,11 @@ async function openPanel(page: Page): Promise<void> {
 }
 
 async function check(page: Page, name: string): Promise<void> {
-  expect(await screenCheck(page), `${name} passes the layout and wording checks`).toEqual([]);
+  const found = await screenCheck(page, SCREEN_CHECKS);
+  expect(
+    ledger.unexplained(`run-chat/${name}`, found),
+    `${name} passes the layout and wording checks`,
+  ).toEqual([]);
   if (shots !== undefined) await page.screenshot({path: `${shots}/run-chat__${name}.png`});
 }
 
@@ -294,3 +300,5 @@ test('a new chat shows the harness picker and an empty thread', async ({page}) =
   await models.focus();
   await check(page, 'picker-open');
 });
+
+ledger.requireEveryFailure(() => ledger.screens >= 19);

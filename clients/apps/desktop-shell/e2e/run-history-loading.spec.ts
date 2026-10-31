@@ -1,8 +1,8 @@
 import {mkdirSync} from 'node:fs';
 import {expect, type Page, test} from '@playwright/test';
 import {fixtureNamed} from '@vibesys/run-fixtures';
-import {KNOWN_FAILURES} from './checks/known-failures.js';
-import {report, screenCheck} from './checks/screen-check.js';
+import {KnownLedger} from './checks/known-ledger.js';
+import {SCREEN_CHECKS, screenCheck} from './checks/screen-check.js';
 import {settled} from './checks/settle.js';
 import {openFixture, releaseHistory} from './fixture-world.js';
 
@@ -19,6 +19,9 @@ const HEADER = ['main h1', 'main button[aria-label="More actions"]'];
 const fixture = fixtureNamed('finished-run');
 const shots = process.env['SCREENS_DIR'] || undefined;
 if (shots !== undefined) mkdirSync(shots, {recursive: true});
+const ledger = new KnownLedger('run-history');
+const WIDTHS = [1000, 1440];
+const PREFIXES = [1, 20];
 
 async function headerPlace(page: Page) {
   return Promise.all(
@@ -30,8 +33,8 @@ async function headerPlace(page: Page) {
   );
 }
 
-for (const width of [1000, 1440]) {
-  for (const prefix of [1, 20]) {
+for (const width of WIDTHS) {
+  for (const prefix of PREFIXES) {
     const name = `finished-run/history-loading/${prefix}-records/${width}`;
     test(name, async ({page}) => {
       await page.setViewportSize({width, height: 900});
@@ -44,10 +47,7 @@ for (const width of [1000, 1440]) {
       await expect(main.getByRole('heading', {level: 1})).toBeVisible();
       await expect(main.getByText(/^History \d+ of \d+$/)).toBeVisible();
       await settled(page);
-      const result = report(name, await screenCheck(page), KNOWN_FAILURES);
-      expect(
-        result.unexplained.map(each => `[${each.check}] ${each.message} (${each.where})`),
-      ).toEqual([]);
+      expect(ledger.unexplained(name, await screenCheck(page, SCREEN_CHECKS))).toEqual([]);
       if (shots !== undefined) {
         await page.screenshot({path: `${shots}/${name.replaceAll('/', '__')}.png`});
       }
@@ -61,3 +61,5 @@ for (const width of [1000, 1440]) {
     });
   }
 }
+
+ledger.requireEveryFailure(() => ledger.screens >= WIDTHS.length * PREFIXES.length);
