@@ -124,6 +124,16 @@ class StepRouter:
         self._routes = MappingProxyType(dict(routes))
         self._operations = MappingProxyType(dict(operations))
 
+    @property
+    def routes(self) -> Mapping[type[Request], StepRunner]:
+        """The runner of each kind of step but a registered operation."""
+        return self._routes
+
+    @property
+    def operations(self) -> Mapping[LifecycleClass, StepRunner]:
+        """The runner of a registered operation of each lifecycle class that has one."""
+        return self._operations
+
     def runner_for(self, step: Request) -> StepRunner:
         """The runner of ``step``: by its kind, or for an operation by its lifecycle class."""
         if isinstance(step, ExecuteRegisteredOperation):

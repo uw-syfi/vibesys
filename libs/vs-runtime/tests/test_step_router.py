@@ -99,8 +99,8 @@ def test_every_live_kind_has_the_runner_of_its_role() -> None:
     }
 
     for kind in LIVE_REQUEST_KINDS - {core.ExecuteRegisteredOperation}:
-        assert router._routes[kind] is named[expected[kind]], kind.__name__  # noqa: SLF001  # test-isolation: the table is the thing under test, and the public way to read it is a step of each kind, which needs a built request for all 18.
-    assert router._operations == {  # noqa: SLF001  # test-isolation: see above.
+        assert router.routes[kind] is named[expected[kind]], kind.__name__
+    assert router.operations == {
         core.LifecycleClass.QUERY: named["operations"],
         core.LifecycleClass.IDEMPOTENT_WRITE: named["operations"],
         core.LifecycleClass.SESSION_TURN: named["turns"],
@@ -118,10 +118,10 @@ def test_a_router_that_leaves_any_live_kind_out_is_refused_naming_it(
 ) -> None:
     built, _ = parts()
     full = build_step_runner(built)
-    routes = {kind: runner for kind, runner in full._routes.items() if kind is not left_out}  # noqa: SLF001  # test-isolation: building a router with one route short needs the table.
+    routes = {kind: runner for kind, runner in full.routes.items() if kind is not left_out}
 
     with pytest.raises(UnroutedKindError, match=left_out.__name__):
-        StepRouter(routes, full._operations)  # noqa: SLF001  # test-isolation: as above.
+        StepRouter(routes, full.operations)
 
 
 @pytest.mark.parametrize("lifecycle", list(core.LifecycleClass), ids=lambda cls: cls.value)
@@ -130,10 +130,10 @@ def test_a_router_that_leaves_an_operation_lifecycle_out_is_refused_naming_it(
 ) -> None:
     built, _ = parts()
     full = build_step_runner(built)
-    operations = {cls: r for cls, r in full._operations.items() if cls is not lifecycle}  # noqa: SLF001  # test-isolation: as above.
+    operations = {cls: r for cls, r in full.operations.items() if cls is not lifecycle}
 
     with pytest.raises(UnroutedKindError, match=lifecycle.value):
-        StepRouter(full._routes, operations)  # noqa: SLF001  # test-isolation: as above.
+        StepRouter(full.routes, operations)
 
 
 def test_a_route_for_a_kind_the_rule_never_issues_is_refused() -> None:
@@ -141,7 +141,7 @@ def test_a_route_for_a_kind_the_rule_never_issues_is_refused() -> None:
     full = build_step_runner(built)
 
     with pytest.raises(UnroutedKindError, match="InspectRequest"):
-        StepRouter({**full._routes, core.InspectRequest: named["executors"]}, full._operations)  # noqa: SLF001  # test-isolation: as above.
+        StepRouter({**full.routes, core.InspectRequest: named["executors"]}, full.operations)
 
 
 def test_an_environment_with_no_evaluation_step_declares_its_measurement_kinds_unserved() -> None:

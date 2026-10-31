@@ -261,13 +261,23 @@ class _Host:
         halted: DispatchCapExceededError | StepLoopStalledError | None = None,
     ) -> Run:
         progress = None if self._search is None else self._search.progress
+        if progress is None:
+            raise SearchNeverAdvancedError
         return Run(
             core=inputs.state,
-            state=None if progress is None else progress.state,  # ty: ignore[invalid-argument-type]  # lint-waiver: LW-731410 [PGH003]; a run that never advanced has no state to report.
+            state=progress.state,
             decisions=self._decisions,
             journal=self._journal,
             halted=halted,
         )
+
+
+class SearchNeverAdvancedError(RuntimeError):
+    """A host reported a run whose search never advanced: its log was opened without hearing it."""
+
+    def __init__(self) -> None:
+        """Say what happened."""
+        super().__init__("the host's search has no progress, though its log is open")
 
 
 class _HostHandle:

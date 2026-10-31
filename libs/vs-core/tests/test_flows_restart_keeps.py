@@ -245,7 +245,8 @@ def test_work_in_flight_that_the_resumed_flow_does_not_ask_for_in_the_restart_st
 
     opened = run.open_workspace(start)  # answered after the restart step: for no one
     (settle,) = _settles(run, "restart-settle")
-    assert settle.request.target == opened  # ty: ignore[unresolved-attribute]
+    assert isinstance(settle.request, core.Withdraw)
+    assert settle.request.target == opened
     assert [item.reason for item in run.state.restart_settled] == [
         core.RestartSettleReason.UNCLAIMED
     ]
@@ -260,7 +261,8 @@ def test_work_in_flight_that_the_resumed_flow_does_not_ask_for_in_the_restart_st
     second = run.open_workspace(again)
     run.reply(run.expect_turn("v2"), Plan(n=1))
     settle = run.expect(core.Withdraw, label="settle")
-    assert settle.request.target == second  # ty: ignore[unresolved-attribute]
+    assert isinstance(settle.request, core.Withdraw)
+    assert settle.request.target == second
     run.close_workspace(settle)
     assert run.driver.published(run.state, Gave) == Gave(result=1)
     assert run.state.live.in_flight == ()
