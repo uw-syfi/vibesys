@@ -98,9 +98,9 @@ def test_the_router_serves_every_step_core_opens_but_the_two_it_never_opens() ->
     """
     steps = request_kinds(core.Request) - COMMAND_KINDS
 
-    assert COMMAND_KINDS == request_kinds(core.ReconciliationRequest)
+    assert request_kinds(core.ReconciliationRequest) == COMMAND_KINDS
     assert steps - LIVE_REQUEST_KINDS == UNSERVED_STEP_KINDS
-    assert UNSERVED_STEP_KINDS == {core.InspectTurn, core.InspectOwnedJob}
+    assert {core.InspectTurn, core.InspectOwnedJob} == UNSERVED_STEP_KINDS
     assert RECOVERY_ONLY_KINDS == COMMAND_KINDS | UNSERVED_STEP_KINDS
 
 

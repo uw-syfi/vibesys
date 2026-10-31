@@ -293,8 +293,10 @@ class CoreInputs:
         return ControlId(root=f"deadline:{self.state.steps.epoch}")
 
     def _deadline_at(self) -> float | None:
-        """When the deadline stops the run, None once it cannot: the run is not live, has its
-        result, or this epoch's deadline control is already in."""
+        """When the deadline stops the run, None once it cannot.
+
+        It cannot once the run is not live, has its result, or has this epoch's deadline control.
+        """
         state = self.state
         identity = self._deadline_control()
         live = state.run.status in (RunStatus.RUNNING, RunStatus.PAUSED)
