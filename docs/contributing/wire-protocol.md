@@ -156,18 +156,20 @@ trace's order. A span that starts and ends within one commit gets a `span_starte
   is not `usage_update`, whose `input_tokens` is the context window's current fill and is
   overwritten, not accumulated. The turn's model is the span's `model` attribute.
   Those fields count the turn's main conversation. Three more say what the library knows of the
-  rest, each absent on a line recorded before it existed (and never inferred for one): `by_model`,
-  one row per model the turn ran (a Claude turn's subagents and advisors run on their own), a
-  superset of the fields above that sums to the whole turn, with exactly one `primary` row, the
-  turn's requests counted on that row only (`turns`) and the library's own price for the row
-  (`recorded_usd`, a list price at the standard tier and not a bill); `cost_basis`, how
-  `total_cost_usd` was reached (`price_table`, `provider_reported` or `unknown_model`, the last
-  with no cost); and `provider_session_id`, the provider's id of the conversation the turn ran in,
-  which names the transcript the CLI wrote. A reader treats absence as unknown. A turn recorded
-  before `cost_basis` is read as `legacy_recorded` (it has a cost) or `legacy_unpriced` by one
-  function (`server.run_usage.legacy_basis`), which goes when no such turn can fall in a window
-  the Usage screen shows. The row type is `vibesys.store.v1.ModelTurnUsage`; `ModelTurnUsageData`
-  mirrors it until the journal retires.
+  rest, each absent only on a line recorded before it existed: `by_model`, one row per model the
+  turn ran (a Claude turn's subagents and advisors run on their own), a superset of the fields
+  above that sums to the whole turn, with exactly one `primary` row, the turn's requests counted
+  on that row only (`turns`) and the library's own price for the row (`recorded_usd`, a list price
+  at the standard tier and not a bill); `cost_basis`, how `total_cost_usd` was reached
+  (`price_table`, `provider_reported`, or `unknown_model` and `not_reported`, which go with no
+  cost); and `provider_session_id`, the provider's id of the conversation the turn ran in, which
+  names the transcript the CLI wrote, absent when it named none. Every line written since
+  `cost_basis` exists records one, so a line without it is an old line, whatever its provider:
+  `server.run_usage.legacy_basis` reads it as `legacy_recorded` (it has a cost) or
+  `legacy_unpriced`, and goes when no such line can fall in a window the Usage screen shows. A
+  per-model split that `agent_attrs.proto` refuses is not written (the sink drops it whole and
+  says why on the diagnostic channel), so a line that is written always projects. The row type is
+  `vibesys.store.v1.ModelTurnUsage`; `ModelTurnUsageData` mirrors it until the journal retires.
 - **Typed replies.** A structured turn ends with the agent's raw JSON text, which stays in
   `agent_execution_finished.data.result`. When that text is a valid reply of the turn's role
   model, `data.reply` carries it as data: `kind` (the reply model's name; a role that may wait
@@ -177,8 +179,11 @@ trace's order. A span that starts and ends within one commit gets a `span_starte
   `reply`. `reply` is optional and additive within `PROTOCOL_VERSION` 1.
 - **Evolution.** The three events, `RunSnapshot.spans`, `RunEvent.span_id`, `TurnUsageData.span_id`,
   `TurnUsageData.by_model`, `cost_basis`, `provider_session_id` and
-  `LogOwner.span_id` are additive within `PROTOCOL_VERSION` 1. A client that predates them counts
-  the events as unknown kinds and ignores the new optional fields.
+  `LogOwner.span_id` are additive within `PROTOCOL_VERSION` 1. A client that predates the three
+  events counts them as unknown kinds. The payload models reject a key they do not declare, so a
+  client that predates `TurnUsageData.by_model`, `cost_basis` or `provider_session_id` refuses a
+  `turn_usage_recorded` line that carries them: client and run process ship together, and a
+  client must be at least as new as the run process it watches.
 
 ## Run overview
 
