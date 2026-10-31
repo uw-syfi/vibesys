@@ -1,7 +1,13 @@
-import {type JSX, type ReactNode, useId} from 'react';
+import {type JSX, type ReactNode, useId, useState} from 'react';
+import {Collapsible} from './collapsible.js';
 import {Text} from './text.js';
 
-export type BannerTone = 'neutral' | 'ok' | 'warn' | 'err';
+/**
+ * The tones of a banner, which describes a state its screen is in. `failed` is a lasting failure
+ * the screen holds, such as a job that ended in failure; a failure that is an event the user passes
+ * through ("could not save") is reported as a problem and shown as a toast, so there is no `err`.
+ */
+export type BannerTone = 'neutral' | 'ok' | 'warn' | 'failed';
 
 /**
  * A flat panel. With `section` it is a titled region headed by that label in the `section` style;
@@ -32,8 +38,9 @@ export function Card(props: {
 }
 
 /**
- * A message in a tone: a title, an optional body, and optional actions beside them. `hint` is the
- * longer account behind a short title or body, for the pointer.
+ * A state its screen is in, on one line: the title, with the actions beside it. The longer account
+ * (`body`, then `hint`) is behind the title, which opens it; a banner with neither has nothing to
+ * open.
  */
 export function Banner(props: {
   readonly title: string;
@@ -42,14 +49,20 @@ export function Banner(props: {
   readonly hint?: string;
   readonly actions?: ReactNode;
 }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const detailed = props.body !== undefined || props.hint !== undefined;
   return (
     <div className="vs-banner" data-tone={props.tone ?? 'neutral'}>
-      <div className="vs-banner-text" title={props.hint}>
-        <Text variant="body-strong">{props.title}</Text>
-        {props.body === undefined ? null : (
-          <div>
-            <Text tone="muted">{props.body}</Text>
-          </div>
+      <div className="vs-banner-text">
+        {detailed ? (
+          <Collapsible label={props.title} open={open} toggle={setOpen}>
+            {props.body === undefined ? null : <Text tone="muted">{props.body}</Text>}
+            {props.hint === undefined ? null : <Text tone="muted">{props.hint}</Text>}
+          </Collapsible>
+        ) : (
+          <span className="vs-banner-title" title={props.title}>
+            <Text variant="body-strong">{props.title}</Text>
+          </span>
         )}
       </div>
       {props.actions === undefined ? null : (

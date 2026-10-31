@@ -27,6 +27,7 @@ import {
   type MachinesState,
   machineCounts,
   machinesAttention,
+  machinesProblems,
 } from '@vibesys/feature-machines/state';
 import {
   createNewRunStore,
@@ -52,10 +53,15 @@ import {
   SettingsScreen,
   type SystemAppearance,
 } from '@vibesys/feature-settings/renderer';
-import {shownTheme} from '@vibesys/feature-settings/state';
+import {
+  machineSettingsProblems,
+  settingsProblems,
+  shownTheme,
+} from '@vibesys/feature-settings/state';
 import {createUsageStore, type SpendRunRef, UsageScreen} from '@vibesys/feature-usage/renderer';
 import {type HostKey, hostFromKey, hostLabel, hostsComeUp, problemWord} from '@vibesys/hosts';
 import {gatewayBridge, settled, type WelcomeBridge} from '@vibesys/ipc';
+import {createProblemBoard, type ProblemBoard, reportProblems} from '@vibesys/problems';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import {sameRun} from '@vibesys/runs';
 import type {Store} from '@vibesys/store';
@@ -84,6 +90,8 @@ export interface ShellStores {
   /** The page a run's live session runs in. */
   readonly page: RunPagePage;
   readonly newRunCompletion: ReturnType<typeof createNewRunStore>['completion'];
+  /** The problems the window's screens report, shown as toasts by `ProblemHost`. */
+  readonly problems: ProblemBoard;
 }
 
 const DEFAULT_APPEARANCE = {mode: 'system', light: 'paper', dark: 'ink'} as const;
@@ -156,6 +164,12 @@ export function createShellStores(
   });
   const machineSettings = createMachineSettingsStore(bridge);
   const machines = createMachinesStore(bridge);
+  const problems = createProblemBoard();
+  reportProblems(problems, 'settings', settings, settingsProblems);
+  reportProblems(problems, 'machines', machines, machinesProblems);
+  reportProblems(problems, 'machine-settings', machineSettings, state =>
+    machineSettingsProblems(state, host => hostLabel(hostFromKey(host))),
+  );
   let listed = '';
   machines.subscribe(() => {
     const hosts = machines.getState().machines.map(machine => machine.host);
@@ -202,6 +216,7 @@ export function createShellStores(
     bridge,
     schedule,
     page,
+    problems,
   };
 }
 
@@ -322,6 +337,7 @@ function RunRoute(props: {
       schedule={stores.schedule}
       address={stores.page.address}
       navigation={place.navigation(run)}
+      problems={stores.problems}
     />
   );
 }

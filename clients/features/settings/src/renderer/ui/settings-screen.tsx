@@ -1,5 +1,4 @@
 import {
-  Banner,
   Button,
   Card,
   EmptyState,
@@ -141,9 +140,6 @@ function AppContent(props: {
         <Text as="h1" variant="title">
           Notifications
         </Text>
-        {state.problem === null ? null : (
-          <Banner tone="err" title="Could not save the change." body={state.problem} />
-        )}
         <Card section="Run notifications">
           <Switch
             label="Notify me when a run finishes, fails or pauses"
@@ -159,9 +155,6 @@ function AppContent(props: {
       <Text as="h1" variant="title">
         Appearance
       </Text>
-      {state.problem === null ? null : (
-        <Banner tone="err" title="Could not save the change." body={state.problem} />
-      )}
       <Card section="Mode">
         <SegmentedControl
           label="Appearance mode"
