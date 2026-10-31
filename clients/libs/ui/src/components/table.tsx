@@ -1,4 +1,4 @@
-import type {JSX, KeyboardEvent, ReactNode} from 'react';
+import type {JSX, KeyboardEvent, ReactNode, SyntheticEvent} from 'react';
 import {Icon} from './icon.js';
 
 /** One column: its header, how a row fills its cell, and how the cell is set. */
@@ -18,6 +18,17 @@ export interface TableColumn<Row> {
    * cell is centred on the text of its row.
    */
   readonly control?: boolean;
+}
+
+/** Whether `event` came from a control inside its row, which acts alone and does not pick the row. */
+function fromControl(event: SyntheticEvent<HTMLTableRowElement>): boolean {
+  const control =
+    event.target instanceof Element
+      ? event.target.closest('button, a, input, select, textarea, label')
+      : null;
+  return (
+    control !== null && control !== event.currentTarget && event.currentTarget.contains(control)
+  );
 }
 
 /** What a row's first cell offers to fold or unfold what the row stands for. */
@@ -51,6 +62,7 @@ export function Table<Row>(props: {
   const {columns, rowKey, select} = props;
   const keyDown = (event: KeyboardEvent<HTMLTableRowElement>, key: string): void => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
+    if (fromControl(event)) return;
     event.preventDefault();
     select?.(key);
   };
@@ -92,7 +104,9 @@ export function Table<Row>(props: {
                 data-selectable={pickable ? true : undefined}
                 aria-current={key === props.selected ? 'true' : undefined}
                 tabIndex={pickable ? 0 : undefined}
-                onClick={pickable ? () => select(key) : undefined}
+                onClick={
+                  pickable ? event => (fromControl(event) ? undefined : select(key)) : undefined
+                }
                 onKeyDown={pickable ? event => keyDown(event, key) : undefined}
               >
                 {columns.map((column, at) => (

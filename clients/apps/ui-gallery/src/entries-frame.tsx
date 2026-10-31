@@ -1,4 +1,5 @@
 import {
+  AreaChart,
   Breadcrumb,
   Button,
   Card,
@@ -26,6 +27,7 @@ import {
   Said,
   Screen,
   SearchBox,
+  ShareBar,
   Sparkline,
   Stack,
   StackedArea,
@@ -775,6 +777,37 @@ export const FRAME_ENTRIES = {
           <Swatch series={1} />
           <Text variant="small">{BUILDER_LOWER}</Text>
         </Row>
+      </Stack>
+    ),
+  },
+  AreaChart: {
+    render: () => (
+      <AreaChart
+        label="Spend over time"
+        unit="US dollars"
+        labels={['Oct 12', 'Oct 13', 'Oct 14', 'Oct 15', 'Oct 16', 'Oct 17', 'Oct 18']}
+        layers={[
+          {key: PLANNER_LOWER, name: PLANNER_LOWER, series: 7, values: [4, 8, 10, 12, 9, 6, 11]},
+          {key: BUILDER_LOWER, name: BUILDER_LOWER, series: 1, values: [6, 18, 38, 47, 30, 22, 35]},
+          {key: REVIEWER_LOWER, name: REVIEWER_LOWER, series: 3, values: [0, 3, 8, 13, 6, 2, 9]},
+        ]}
+        format={value => `$${value}`}
+      />
+    ),
+  },
+  ShareBar: {
+    render: () => (
+      <Stack>
+        <ShareBar
+          label="Cost by kind"
+          parts={[
+            {key: 'input', label: 'Input', value: 12, figure: '$12.00', series: 0},
+            {key: 'read', label: 'Cache read', value: 6, figure: '$6.00', series: 1},
+            {key: 'write', label: 'Cache write', value: 0, figure: '$0.00', series: 2},
+            {key: 'output', label: 'Output', value: 42, figure: '$42.00', series: 3},
+          ]}
+        />
+        <ShareBar label="Nothing yet" parts={[]} />
       </Stack>
     ),
   },
