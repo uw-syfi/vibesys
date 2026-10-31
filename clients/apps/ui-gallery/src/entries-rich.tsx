@@ -671,7 +671,7 @@ export const RICH_ENTRIES = {
   },
   ChartColumns: {
     render: () => (
-      <ChartColumns count={3}>
+      <ChartColumns>
         {['Time to first token', 'Time per output token', 'Completed requests'].map(title => (
           <ChartPanel
             key={title}

@@ -699,18 +699,14 @@ describe('Chart legend, panel and columns', () => {
     expect(container.textContent).toContain('ops/s');
   });
 
-  test('columns hold at most three charts to a row', async () => {
-    const columns = async (count: number) => {
-      const {container} = await mount(
-        <ChartColumns count={count}>
-          <span />
-        </ChartColumns>,
-      );
-      return one(container, '.vs-chart-columns').getAttribute('data-count');
-    };
-    const found: (string | null)[] = [];
-    for (const count of [1, 2, 3, 4, 0]) found.push(await columns(count));
-    expect(found).toEqual(['1', '2', '3', '3', '1']);
+  test('columns hold their charts as children, in order', async () => {
+    const {container} = await mount(
+      <ChartColumns>
+        <span>one</span>
+        <span>two</span>
+      </ChartColumns>,
+    );
+    expect(one(container, '.vs-chart-columns').textContent).toBe('onetwo');
   });
 });
 

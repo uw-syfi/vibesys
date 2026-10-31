@@ -738,16 +738,9 @@ export function ChartPanel(props: {
 }
 
 /**
- * Charts side by side, `count` of them in one row (at most three; more wrap to the next row), each
- * as wide as the others.
+ * Charts side by side, as wide as the others and none narrower than a chart can be read (280 px):
+ * as many to a row as fit, the rest on the rows below.
  */
-export function ChartColumns(props: {
-  readonly count: number;
-  readonly children: ReactNode;
-}): JSX.Element {
-  return (
-    <div className="vs-chart-columns" data-count={Math.min(3, Math.max(1, props.count))}>
-      {props.children}
-    </div>
-  );
+export function ChartColumns(props: {readonly children: ReactNode}): JSX.Element {
+  return <div className="vs-chart-columns">{props.children}</div>;
 }

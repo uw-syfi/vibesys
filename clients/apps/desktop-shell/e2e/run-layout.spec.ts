@@ -113,20 +113,14 @@ test('the Now pane takes what the Ideas list leaves, to the edge of the screen',
   expect(edges.now).toBeGreaterThan(edges.header - 12);
 });
 
-test('at 1000 px the performance chart sits beside the figures, not under them', async ({page}) => {
+test('at 1000 px the performance chart is readable and inside the screen', async ({page}) => {
   await open(page, 'finished-run', 1000);
   const boxes = await page.evaluate(() => {
-    const tile = document.querySelector('.vs-tiles')?.getBoundingClientRect();
     const chart = document.querySelector('svg.vs-chart')?.getBoundingClientRect();
-    return {
-      tileRight: tile?.right ?? 0,
-      chartLeft: chart?.left ?? 0,
-      chartTop: chart?.top ?? 0,
-      tileBottom: tile?.bottom ?? 0,
-    };
+    return {width: chart?.width ?? 0, right: chart?.right ?? 0, screen: window.innerWidth};
   });
-  expect(boxes.chartLeft).toBeGreaterThanOrEqual(boxes.tileRight);
-  expect(boxes.chartTop).toBeLessThan(boxes.tileBottom);
+  expect(boxes.width).toBeGreaterThanOrEqual(280);
+  expect(boxes.right).toBeLessThanOrEqual(boxes.screen);
 });
 
 test('an idea is named in the monospace face in its pane title, its Steps title and the breadcrumb', async ({

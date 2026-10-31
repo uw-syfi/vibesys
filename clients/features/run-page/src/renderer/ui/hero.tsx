@@ -130,7 +130,7 @@ export function Hero(
   const legend = chartLegend(charts);
   return (
     <Stack gap="space-3">
-      <ChartColumns count={charts.length + (pareto === null ? 0 : 1)}>
+      <ChartColumns>
         {charts.map((chart, at) => (
           <ObjectivePanel
             key={chart.id}

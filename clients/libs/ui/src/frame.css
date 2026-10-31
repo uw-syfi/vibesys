@@ -1239,17 +1239,11 @@ button.vs-crumb:focus-visible {
   gap: var(--space-3);
   min-width: 0;
 }
-/* Charts side by side, as many as asked for up to three, equally wide. */
+/* Charts side by side, as many as fit at a readable width, equally wide; the rest wrap below. */
 .vs-chart-columns {
   display: grid;
   gap: var(--space-6);
-  grid-template-columns: repeat(var(--chart-count, 1), minmax(0, 1fr));
-}
-.vs-chart-columns[data-count="2"] {
-  --chart-count: 2;
-}
-.vs-chart-columns[data-count="3"] {
-  --chart-count: 3;
+  grid-template-columns: repeat(auto-fit, minmax(var(--chart-min), 1fr));
 }
 
 /* --- flat lists: a trailing column ("from <parent>") -------------------------------------------- */
