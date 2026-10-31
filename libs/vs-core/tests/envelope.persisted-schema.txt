@@ -338,7 +338,6 @@ ControlInput.artifact optional {"anyOf":[{"$ref":"#/$defs/ArtifactRef"},{"type":
 ControlInput.attempt optional {"anyOf":[{"$ref":"#/$defs/AttemptId"},{"type":"null"}],"default":null}
 ControlInput.capacity_wait_stands optional {"default":false,"type":"boolean"}
 ControlInput.control_id required {"$ref":"#/$defs/ControlId"}
-ControlInput.drain_seconds optional {"anyOf":[{"exclusiveMinimum":0.0,"type":"number"},{"type":"null"}],"default":null}
 ControlInput.fallback optional {"default":false,"type":"boolean"}
 ControlInput.input_mode optional {"anyOf":[{"$ref":"#/$defs/InputMode"},{"type":"null"}],"default":null}
 ControlInput.item optional {"anyOf":[{"$ref":"#/$defs/ItemId"},{"type":"null"}],"default":null}
