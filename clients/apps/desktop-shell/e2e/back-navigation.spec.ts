@@ -175,3 +175,57 @@ test('leaving a zoomed run keeps its zoom from the next run opened', async ({pag
   await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
   await expect(opened(page)).toHaveCount(0);
 });
+
+/** The offsets of every element on the page that scrolls, by its class. */
+const scrolls = (page: Page) =>
+  page.evaluate(() =>
+    Object.fromEntries(
+      [...document.querySelectorAll<HTMLElement>('*')]
+        .filter(
+          element =>
+            element.scrollHeight > element.clientHeight &&
+            ['auto', 'scroll'].includes(getComputedStyle(element).overflowY),
+        )
+        .map(element => [element.className, Math.round(element.scrollTop)]),
+    ),
+  );
+
+const scrollEverything = (page: Page, top: number) =>
+  page.evaluate(offset => {
+    for (const element of document.querySelectorAll<HTMLElement>('*'))
+      if (
+        element.scrollHeight > element.clientHeight &&
+        ['auto', 'scroll'].includes(getComputedStyle(element).overflowY)
+      )
+        element.scrollTop = offset;
+  }, top);
+
+test('Back and Forward return a screen to where it was scrolled, and a new visit starts at the top', async ({
+  page,
+}) => {
+  await page.setViewportSize({width: 1000, height: 420});
+  await openShell(page);
+  const rail = page.getByRole('navigation', {name: 'VibeSys'});
+  await run(page).click();
+  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await scrollEverything(page, 60);
+  const onRun = await scrolls(page);
+  expect(Object.values(onRun).length).toBeGreaterThan(0);
+  await rail.getByRole('button', {name: 'Settings'}).click();
+  await expect(page).toHaveURL(/#settings$/);
+  await scrollEverything(page, 40);
+  const onSettings = await scrolls(page);
+  expect(Object.values(onSettings).length).toBeGreaterThan(0);
+  await press(page, 'back');
+  await expect.poll(() => scrolls(page)).toEqual(onRun);
+  await press(page, 'forward');
+  await expect.poll(() => scrolls(page)).toEqual(onSettings);
+  await rail.getByRole('button', {name: /^Machines/}).click();
+  await press(page, 'back');
+  await expect.poll(() => scrolls(page)).toEqual(onSettings);
+  // Opening a screen anew starts it at the top.
+  await rail.getByRole('button', {name: /^Runs/}).click();
+  await run(page).click();
+  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  expect(Object.values(await scrolls(page)).every(top => top === 0)).toBe(true);
+});

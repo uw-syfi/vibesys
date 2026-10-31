@@ -3,11 +3,13 @@
  * names the location (`fragmentOf`; a run window's query names its run, so there the fragment is
  * the zoom alone), each navigation adds a history entry, Back and Forward restore one, Escape
  * outside a text field goes up a level, and the mouse's back and forward buttons go Back and Forward.
+ * Back and Forward also return each scrolled element to where it was left (`scrollKeeper`).
  */
 import type {WindowAddress} from '@vibesys/feature-app-shell/renderer';
 import {fragmentOf, type Screen, screenOf} from '@vibesys/feature-app-shell/state';
 import type {RunPageAddress} from '@vibesys/feature-run-page/renderer';
 import type {RunRef} from '@vibesys/runs';
+import {scrollKeeper} from './scroll-memory.js';
 
 /** Whether a key press belongs to a text field (its Escape clears or leaves the field). */
 function inTextField(target: EventTarget | null): boolean {
@@ -31,12 +33,14 @@ export function windowAddress(
     if (run === null) return screenOf(named);
     return named === '' ? {kind: 'run', run} : {kind: 'run', run, zoom: named};
   };
+  const scroll = scrollKeeper(window);
   return {
     screen: shown,
     push: screen => {
       const hash = fragment(screen);
       const url = `${window.location.pathname}${window.location.search}${hash === '' ? '' : `#${hash}`}`;
-      window.history.pushState(null, '', url);
+      scroll.leave();
+      window.history.pushState({entry: scroll.advance()}, '', url);
     },
     back: () => window.history.back(),
     onRestore: listener => {
