@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
+from tests.support.light_imports import under
 from tests.support.task_project import write_task
 
 from vs_project.api import Project
@@ -97,6 +98,7 @@ class Group(StrEnum):
     RUN_STREAM = "the run-listing stream"
     RUN_READS = "the readers of a run's digest and usage"
     USAGE = "the usage window's fold"
+    USAGE_SUMMARY = "the usage summary's rollup, pricing and scan of transcripts"
     PROJECT_HOST = "the helper's project adapters and registry"
     WHOLE_HOST = "the helper's whole host"
     EXAMPLES = "the example catalog and project maker"
@@ -133,6 +135,14 @@ GROUPS: dict[Group, tuple[str, ...]] = {
     Group.RUN_STREAM: (f"{_OPERATIONS}.saved_runs", "server.host_saved_runs"),
     Group.RUN_READS: ("server.host_run_reads", "server.host_run_wire"),
     Group.USAGE: ("server.usage_window", "server.run_usage", "server.run_summary"),
+    Group.USAGE_SUMMARY: (
+        "server.usage_scan",
+        "server.usage_rollup",
+        "server.usage_summary",
+        "server.usage_pricing",
+        "server.usage_outside",
+        "server.usage_transcripts",
+    ),
     Group.PROJECT_HOST: ("server.host_helper_os", "server.host_helper_requests", "server.registry"),
     Group.WHOLE_HOST: (
         "entrypoints.host_helper",
@@ -345,6 +355,50 @@ READS: tuple[_Read, ...] = (
         allowed=_PROJECT_READ | {Group.RUN_READS, Group.USAGE},
     ),
     _Read(
+        "usage-summary",
+        lambda project: ReadRequest(
+            checkout=_CHECKOUT,
+            method=Oneof(
+                "usage_summary",
+                pb.UsageSummaryRequest(
+                    request_id="r",
+                    projects=[str(project)],
+                    edges=[Timestamp(seconds=1_790_000_100), Timestamp(seconds=1_790_001_000)],
+                    now=Timestamp(seconds=1_790_001_000),
+                ),
+            ),
+        ),
+        "usage_summary",
+        modules=900,
+        allowed=_PROJECT_READ | {Group.USAGE, Group.USAGE_SUMMARY, Group.AGENT_LIBRARY},
+    ),
+    _Read(
+        "usage-rates-refresh",
+        lambda _project: ReadRequest(
+            checkout=_CHECKOUT,
+            method=Oneof(
+                "usage_rates_refresh",
+                pb.UsageRatesRefreshRequest(request_id="r", now=Timestamp(seconds=1_790_001_000)),
+            ),
+        ),
+        "usage_rates_refresh",
+        modules=1100,
+        # A refresh runs at most once a day, not at launch. It loads the usage summary's modules
+        # because `Priced` lives in `server.usage_summary`, which imports the run fold; splitting
+        # the price list's files into a module of their own would drop the groups after the first
+        # three (a follow-up of the usage parity work).
+        allowed=frozenset(
+            {
+                Group.READ_ADAPTER,
+                Group.USAGE_SUMMARY,
+                Group.AGENT_LIBRARY,
+                Group.USAGE,
+                Group.LOGINS,
+                Group.HOST_MODELS,
+            }
+        ),
+    ),
+    _Read(
         "list-agent-logins",
         lambda _project: ReadRequest(
             checkout=_CHECKOUT,
@@ -461,11 +515,7 @@ def _reply_slot(read: _Read, written: bytes) -> str:
 
 
 def _loaded(probe: _Probe, roots: tuple[str, ...]) -> list[str]:
-    return sorted(
-        name
-        for name in probe.modules
-        if any(name == root or name.startswith(f"{root}.") for root in roots)
-    )
+    return sorted(name for name in probe.modules if under(name, roots))
 
 
 @pytest.mark.parametrize("read", READS, ids=lambda read: read.command)

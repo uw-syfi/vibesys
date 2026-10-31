@@ -60,6 +60,7 @@ export * from './generated/vibesys/desktop/v1/settings_pb.js';
 export * from './generated/vibesys/desktop/v1/subscription_pb.js';
 export * from './generated/vibesys/host/v1/failure_pb.js';
 export * from './generated/vibesys/host/v1/operations_pb.js';
+export * from './generated/vibesys/host/v1/usage_state_pb.js';
 export * from './generated/vibesys/search/v1/attrs_pb.js';
 export * from './generated/vibesys/store/v1/agent_attrs_pb.js';
 export * from './generated/vibesys/store/v1/chat_pb.js';

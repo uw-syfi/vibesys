@@ -1,4 +1,4 @@
-import type {JSX, KeyboardEvent, ReactNode} from 'react';
+import type {JSX, KeyboardEvent, ReactNode, SyntheticEvent} from 'react';
 import {Icon} from './icon.js';
 
 /** One column: its header, how a row fills its cell, and how the cell is set. */
@@ -20,6 +20,17 @@ export interface TableColumn<Row> {
   readonly control?: boolean;
 }
 
+/** Whether `event` came from a control inside its row, which acts alone and does not pick the row. */
+function fromControl(event: SyntheticEvent<HTMLTableRowElement>): boolean {
+  const control =
+    event.target instanceof Element
+      ? event.target.closest('button, a, input, select, textarea, label')
+      : null;
+  return (
+    control !== null && control !== event.currentTarget && event.currentTarget.contains(control)
+  );
+}
+
 /** What a row's first cell offers to fold or unfold what the row stands for. */
 export interface TableFold {
   readonly open: boolean;
@@ -34,7 +45,8 @@ export type TableRowKind = 'sub' | 'total';
 /**
  * A table of `rows` in `columns`, with a sticky header, scrolling sideways in its own box when it is
  * wider than its container. With `select`, a press or Enter on a row selects it, and the row whose
- * key is `selected` is marked current.
+ * key is `selected` is marked current. With `middle`, a row's cells are centered on each other, for
+ * rows that hold a control beside text.
  */
 export function Table<Row>(props: {
   /** The table's accessible name, also naming its scrolling box. */
@@ -43,6 +55,7 @@ export function Table<Row>(props: {
   readonly rows: readonly Row[];
   readonly rowKey: (row: Row) => string;
   readonly selected?: string;
+  readonly middle?: boolean;
   readonly select?: (key: string) => void;
   readonly rowKind?: (row: Row) => TableRowKind | undefined;
   /** A row that folds gets a chevron before its first cell; `'none'` keeps the slot empty. */
@@ -51,6 +64,7 @@ export function Table<Row>(props: {
   const {columns, rowKey, select} = props;
   const keyDown = (event: KeyboardEvent<HTMLTableRowElement>, key: string): void => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
+    if (fromControl(event)) return;
     event.preventDefault();
     select?.(key);
   };
@@ -61,7 +75,7 @@ export function Table<Row>(props: {
       // biome-ignore lint/a11y/noNoninteractiveTabindex: a box that scrolls sideways must take the focus so a keyboard can scroll it (WCAG 2.1.1, axe scrollable-region-focusable); no interactive element scrolls a table.
       tabIndex={0}
     >
-      <table className="vs-table" aria-label={props.label}>
+      <table className="vs-table" aria-label={props.label} data-middle={props.middle || undefined}>
         <thead>
           <tr>
             {columns.map(column => (
@@ -92,7 +106,9 @@ export function Table<Row>(props: {
                 data-selectable={pickable ? true : undefined}
                 aria-current={key === props.selected ? 'true' : undefined}
                 tabIndex={pickable ? 0 : undefined}
-                onClick={pickable ? () => select(key) : undefined}
+                onClick={
+                  pickable ? event => (fromControl(event) ? undefined : select(key)) : undefined
+                }
                 onKeyDown={pickable ? event => keyDown(event, key) : undefined}
               >
                 {columns.map((column, at) => (

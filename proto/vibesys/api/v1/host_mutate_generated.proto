@@ -24,6 +24,7 @@ message MutateRequest {
     vibesys.host.v1.TestClusterRequest test_cluster = 33;
     vibesys.host.v1.StartRunRequest start_run = 36;
     vibesys.host.v1.TerminateRunRequest terminate_run = 38;
+    vibesys.host.v1.UsagePricesSaveRequest usage_prices_save = 46;
   }
 }
 
@@ -39,5 +40,6 @@ message MutateResponse {
     vibesys.host.v1.TestClusterResponse test_cluster = 33;
     vibesys.host.v1.StartRunResponse start_run = 36;
     vibesys.host.v1.TerminateRunResponse terminate_run = 38;
+    vibesys.host.v1.UsagePricesSaveResponse usage_prices_save = 46;
   }
 }

@@ -1,50 +1,131 @@
 /**
- * A Fake of the bridge calls the Usage question makes, for tests: machines with projects with runs,
- * and what each project's helper answers for a window. It records every question it was asked.
+ * A Fake of the bridge calls the Usage page makes, for tests: machines that answer a usage question
+ * in the buckets it names, keep a price book that saves against its revision as a host does, and
+ * can be down, old, or slow. It records every question it was asked.
  */
 import type {
   HostKey,
   HostListing,
-  ListedRun,
-  UsageWindowEntry,
-  UsageWindowOutcome,
+  UsageAliasEntry,
+  UsagePriceBookEntry,
+  UsagePricingEntry,
+  UsageRateOverrideEntry,
+  UsageSeriesEntry,
+  UsageSummaryEntry,
 } from '@vibesys/hosts';
 import type {HarnessListing, WelcomeEvent, WelcomeResult} from '@vibesys/ipc';
 import type {RecentRun} from '@vibesys/runs';
 import type {UsageBridge} from './load.js';
 
-export const ZERO_USAGE: UsageWindowEntry = {
-  since: 0,
-  until: 0,
-  spentUsd: 0,
-  spendPerHourUsd: 0,
-  tokens: {input: null, cache_read: null, cache_write: null, output: null, reasoning: null},
-  turns: 0,
-  unpricedTurns: 0,
-  unpricedItemised: true,
-  untimedTurns: 0,
-  newBests: 0,
-  costPerNewBestUsd: null,
-  byRun: [],
-  byAgent: [],
-  agentsOmitted: 0,
-  missingRuns: [],
+const FRESH_PRICING: UsagePricingEntry = {
+  status: 'fresh',
+  fetchedAt: 1_000,
+  knownModels: 3,
+  refreshDue: false,
+  checkedOn: '2026-10-30',
 };
 
-export interface FakeProject {
+export const EMPTY_BOOK: UsagePriceBookEntry = {revision: 0, overrides: [], aliases: []};
+
+/** A series of `columns` over the buckets it is populated in; every column it leaves out is zero. */
+export function seriesOf(
+  key: Partial<Pick<UsageSeriesEntry, 'origin' | 'provider' | 'model' | 'speed' | 'source'>>,
+  buckets: readonly number[],
+  columns: Partial<
+    Record<
+      Exclude<keyof UsageSeriesEntry, keyof typeof key | 'buckets' | 'usageSource'>,
+      readonly number[]
+    >
+  > = {},
+): UsageSeriesEntry {
+  const zeros = buckets.map(() => 0);
+  const column = (name: keyof typeof columns): readonly number[] => columns[name] ?? zeros;
+  return {
+    origin: key.origin ?? 'run',
+    provider: key.provider ?? 'claude',
+    model: key.model ?? 'model-a',
+    speed: key.speed ?? 'standard',
+    source: key.source ?? 'model',
+    usageSource: 0,
+    buckets,
+    cached: column('cached'),
+    cacheWrite: column('cacheWrite'),
+    uncached: column('uncached'),
+    output: column('output'),
+    reasoning: column('reasoning'),
+    turns: column('turns'),
+    approximateTurns: column('approximateTurns'),
+    recordedUsd: column('recordedUsd'),
+    estimateUsd: column('estimateUsd'),
+    inputUsd: column('inputUsd'),
+    cacheReadUsd: column('cacheReadUsd'),
+    cacheWriteUsd: column('cacheWriteUsd'),
+    outputUsd: column('outputUsd'),
+    speedPremiumUsd: column('speedPremiumUsd'),
+    cacheSavingsUsd: column('cacheSavingsUsd'),
+  };
+}
+
+/** What a host that has seen nothing answers. */
+export function emptySummary(book: UsagePriceBookEntry = EMPTY_BOOK): UsageSummaryEntry {
+  return {
+    series: [],
+    counts: [],
+    bests: [],
+    runs: [],
+    runsOther: [],
+    agents: [],
+    agentsOther: [],
+    recent: [],
+    sources: [
+      {
+        kind: 'journal',
+        sourceId: 'journal',
+        provider: '',
+        root: '',
+        status: 'ok',
+        scanned: 0,
+        skipped: 0,
+        malformed: 0,
+        failed: 0,
+        distinctSessions: 0,
+        excludedExact: 0,
+        excludedApproximate: 0,
+      },
+    ],
+    pricing: FRESH_PRICING,
+    prices: book,
+    pricesStatus: 'ok',
+    rates: [],
+    pendingRuns: 0,
+    pendingFiles: 0,
+    foldedSeries: 0,
+    ratesOmitted: 0,
+    readAt: 0,
+  };
+}
+
+/** What a host answers for a question of that many buckets, given the book it holds. */
+export type FakeAnswer = (buckets: number, book: UsagePriceBookEntry) => UsageSummaryEntry;
+
+interface FakeHost {
   readonly host: HostKey;
-  readonly project: string;
-  /** Newest first. `null`: the machine cannot list the project's runs. */
-  readonly runs: readonly ListedRun[] | null;
-  /** What the helper answers; `null`: the question fails. */
-  readonly answer: UsageWindowOutcome | null;
+  /** The projects the app has met on the machine. */
+  readonly projects?: readonly string[];
+  /** What it answers for a question of that many buckets, that it is old, or that it fails. */
+  readonly answer: FakeAnswer | 'unsupported' | 'fails';
+  readonly book?: UsagePriceBookEntry;
 }
 
 export interface FakeWorld {
-  readonly projects: readonly FakeProject[];
+  readonly hosts: readonly FakeHost[];
   /** Machines the app cannot reach. */
   readonly unavailable?: readonly HostKey[];
+  /** Machines whose connection is still coming up: not failed, and not answering yet. */
+  readonly connecting?: readonly HostKey[];
   readonly harnesses?: Readonly<Record<string, HarnessListing>>;
+  /** How many of the first catalogue questions fail, as a machine just up may not have one ready. */
+  readonly harnessesFailing?: number;
   readonly overviewFails?: boolean;
 }
 
@@ -60,43 +141,52 @@ const listedHost = (host: HostKey): HostListing => ({
   unverified: [],
 });
 
-const unavailableHost = (host: HostKey): HostListing => ({
+const unavailableHost = (host: HostKey, connecting = false): HostListing => ({
   kind: 'unavailable',
   host,
   step: 'gateway',
-  connection: {kind: 'offline', detail: 'unreachable'},
+  connection: connecting ? {kind: 'connecting'} : {kind: 'offline', detail: 'unreachable'},
 });
 
 export class FakeUsageBridge implements UsageBridge {
-  /** Every usage question: where it went, the runs it named and its window. */
+  /** Every usage question: where it went, what it named and the time it asked at. */
   readonly asked: {
     readonly host: HostKey;
-    readonly project: string;
-    readonly runIds: readonly string[];
-    readonly since: number;
-    readonly until: number;
+    readonly projects: readonly string[];
+    readonly edges: readonly number[];
+    readonly now: number;
+  }[] = [];
+  readonly refreshed: {readonly host: HostKey; readonly force: boolean}[] = [];
+  readonly saves: {
+    readonly host: HostKey;
+    readonly baseRevision: number;
+    readonly overrides: readonly UsageRateOverrideEntry[];
+    readonly aliases: readonly UsageAliasEntry[];
   }[] = [];
   readonly overviews: number[] = [];
-  /** The token of every project listing asked, and of every one cancelled. */
-  readonly listed: number[] = [];
-  readonly cancelled: number[] = [];
   /** The machines that cannot be reached now; they answer nothing until `connect`. */
   readonly #down: Set<HostKey>;
+  /** The machines of `#down` that are still connecting, as the app words a connection not yet up. */
+  readonly #connecting: Set<HostKey>;
+  /** The book each host holds, and the saves that fail. */
+  readonly #books = new Map<HostKey, UsagePriceBookEntry>();
+  readonly #saveFails = new Set<HostKey>();
   readonly #listeners: ((event: WelcomeEvent<HostListing>) => void)[] = [];
   #sequence = 0;
-  /** Listings held open until their token is cancelled, as a host that never answers would. */
-  readonly #open = new Map<number, (result: WelcomeResult<readonly ListedRun[]>) => void>();
-  #listingsHeld = false;
   /** Held until released: the questions of a world whose answers the test settles itself. */
   #hold: Promise<void> | null = null;
 
   constructor(readonly world: FakeWorld) {
-    this.#down = new Set(world.unavailable ?? []);
+    this.#harnessesFailing = world.harnessesFailing ?? 0;
+    this.#connecting = new Set(world.connecting ?? []);
+    this.#down = new Set([...(world.unavailable ?? []), ...this.#connecting]);
+    for (const each of world.hosts) this.#books.set(each.host, each.book ?? EMPTY_BOOK);
   }
 
   /** The machine's connection comes up: it answers from now on, and its listing is pushed. */
   connect(host: HostKey): void {
     this.#down.delete(host);
+    this.#connecting.delete(host);
     this.#push(listedHost(host));
   }
 
@@ -104,6 +194,21 @@ export class FakeUsageBridge implements UsageBridge {
   disconnect(host: HostKey): void {
     this.#down.add(host);
     this.#push(unavailableHost(host));
+  }
+
+  /** The book `host` holds now. */
+  bookOf(host: HostKey): UsagePriceBookEntry {
+    return this.#books.get(host) ?? EMPTY_BOOK;
+  }
+
+  /** Save to `host` fails from now on, as a host that is reached but cannot write. */
+  failSaves(host: HostKey): void {
+    this.#saveFails.add(host);
+  }
+
+  /** Another person changes `host`'s book: its revision moves under the page. */
+  edit(host: HostKey, book: Omit<UsagePriceBookEntry, 'revision'>): void {
+    this.#books.set(host, {...book, revision: this.bookOf(host).revision + 1});
   }
 
   #push(listing: HostListing): void {
@@ -115,12 +220,7 @@ export class FakeUsageBridge implements UsageBridge {
     this.#listeners.push(listener);
   };
 
-  /** Hold every project listing open until it is cancelled. */
-  holdListings(): void {
-    this.#listingsHeld = true;
-  }
-
-  /** Hold every usage answer until `release` is called. */
+  /** Hold every answer until the returned function is called. */
   holdAnswers(): () => void {
     let release = (): void => undefined;
     this.#hold = new Promise<void>(resolve => {
@@ -132,50 +232,83 @@ export class FakeUsageBridge implements UsageBridge {
   overview: UsageBridge['overview'] = async () => {
     this.overviews.push(this.overviews.length);
     if (this.world.overviewFails === true) return failed('The machines could not be listed');
-    const hosts = [...new Set(this.world.projects.map(each => each.host))];
-    const listed = hosts.filter(host => !this.#down.has(host)).map(listedHost);
-    const unavailable = [...this.#down].map(unavailableHost);
+    const listed = this.world.hosts.filter(each => !this.#down.has(each.host));
+    const unavailable = [...this.#down].map(host =>
+      unavailableHost(host, this.#connecting.has(host)),
+    );
     // The projects are known from the runs the app opened in them.
-    const recent: RecentRun[] = this.world.projects.map(each => ({
-      host: each.host,
-      hostLabel: each.host,
-      project: each.project,
-      task: null,
-      runId: 'seen',
-      instanceId: null,
-      attachedAt: 1,
-    }));
-    return ok({eventCursor: 0, recent, skippedRecent: [], listings: [...listed, ...unavailable]});
+    const recent: RecentRun[] = this.world.hosts.flatMap(each =>
+      (each.projects ?? ['/p']).map(project => ({
+        host: each.host,
+        hostLabel: each.host,
+        project,
+        task: null,
+        runId: 'seen',
+        instanceId: null,
+        attachedAt: 1,
+      })),
+    );
+    return ok({
+      eventCursor: 0,
+      recent,
+      skippedRecent: [],
+      listings: [...listed.map(each => listedHost(each.host)), ...unavailable],
+    });
   };
 
-  projectRuns: UsageBridge['projectRuns'] = async (host, project, token) => {
-    this.listed.push(token);
-    if (this.#listingsHeld) {
-      return new Promise(resolve => {
-        this.#open.set(token, resolve);
-      });
-    }
-    const found = this.world.projects.find(each => each.host === host && each.project === project);
-    if (this.#down.has(host)) return failed('The connection is down');
-    if (found === undefined || found.runs === null) return failed('Could not list the runs');
-    return ok(found.runs);
-  };
-
-  cancelProjectRuns: UsageBridge['cancelProjectRuns'] = async token => {
-    this.cancelled.push(token);
-    this.#open.get(token)?.(failed('The listing was cancelled'));
-    return ok(null);
-  };
-
-  usageWindow: UsageBridge['usageWindow'] = async (host, project, runIds, since, until) => {
-    this.asked.push({host, project, runIds, since, until});
+  usageSummary: UsageBridge['usageSummary'] = async (host, projects, edges, now) => {
+    this.asked.push({host, projects, edges, now});
     await this.#hold;
     if (this.#down.has(host)) return failed('The connection is down');
-    const found = this.world.projects.find(each => each.host === host && each.project === project);
-    if (found?.answer == null) return failed('Could not read what the runs spent');
-    return ok(found.answer);
+    const found = this.world.hosts.find(each => each.host === host);
+    if (found === undefined || found.answer === 'fails') return failed('Could not read the usage');
+    if (found.answer === 'unsupported') return ok({kind: 'unsupported' as const});
+    const book = this.bookOf(host);
+    const summary = found.answer(Math.max(0, edges.length - 1), book);
+    return ok({kind: 'summary' as const, summary: {...summary, prices: book}});
   };
 
-  harnesses: UsageBridge['harnesses'] = async host =>
-    ok(this.world.harnesses?.[host] ?? {kind: 'unsupported' as const});
+  usageRatesRefresh: UsageBridge['usageRatesRefresh'] = async (host, force) => {
+    this.refreshed.push({host, force});
+    if (this.#down.has(host)) return failed('The connection is down');
+    return ok({kind: 'pricing' as const, pricing: FRESH_PRICING});
+  };
+
+  /** A host saves a book whole against its revision; the same book saved twice is saved once. */
+  usagePricesSave: UsageBridge['usagePricesSave'] = async (
+    host,
+    baseRevision,
+    overrides,
+    aliases,
+  ) => {
+    this.saves.push({host, baseRevision, overrides, aliases});
+    await this.#hold;
+    if (this.#down.has(host) || this.#saveFails.has(host)) return failed('The connection is down');
+    const found = this.world.hosts.find(each => each.host === host);
+    if (found?.answer === 'unsupported') return ok({kind: 'unsupported' as const});
+    const book = this.bookOf(host);
+    if (baseRevision !== book.revision) return ok({kind: 'moved' as const, prices: book});
+    const same =
+      JSON.stringify(book.overrides) === JSON.stringify(overrides) &&
+      JSON.stringify(book.aliases) === JSON.stringify(aliases);
+    const saved = same
+      ? book
+      : {revision: book.revision + 1, overrides: [...overrides], aliases: [...aliases]};
+    this.#books.set(host, saved);
+    return ok({kind: 'saved' as const, prices: saved});
+  };
+
+  #harnessesFailing: number;
+
+  /** Every catalogue question asked, to say how often a page asks. */
+  readonly catalogues: HostKey[] = [];
+
+  harnesses: UsageBridge['harnesses'] = async host => {
+    this.catalogues.push(host);
+    if (this.#harnessesFailing > 0) {
+      this.#harnessesFailing -= 1;
+      return failed('The catalogue is not ready');
+    }
+    return ok(this.world.harnesses?.[host] ?? {kind: 'unsupported' as const});
+  };
 }

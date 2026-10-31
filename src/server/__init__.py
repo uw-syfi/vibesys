@@ -5,7 +5,7 @@ the specific components they need, and importing a protocol or event model
 does not initialize the server runtime.
 
 ``lazy_module`` is defined here rather than in a module of its own for a count. The host helper
-answers ``hello`` within a ceiling on the modules it loads (``tests/e2e/test_host_helper.py``) and
+answers ``hello`` within a backstop on the modules it loads (``tests/e2e/test_host_helper.py``) and
 imports this package anyway, so the primitive costs it no module, while a module of its own
 would cost it one.
 
@@ -51,8 +51,8 @@ def lazy_module(name: str) -> ModuleType:
     the same module and name.
 
     Declare a module lazy only where it is not loaded anyway. A process that builds a thing at
-    start (the host helper's ``real_host``) imports its module statically, so what it loads is
-    what the module ceiling counts: a handle loads through ``importlib``, which ``-X importtime``
-    does not report.
+    start (the host helper's ``real_host``) imports its module statically. A handle loads through
+    ``importlib``, which ``-X importtime`` does not report, so the tests that hold a process to
+    the modules it may load read ``sys.modules`` in that process.
     """
     return _LazyModule(name)

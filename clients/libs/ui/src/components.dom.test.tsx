@@ -1010,3 +1010,45 @@ describe('Table control column', () => {
     expect(container.querySelectorAll('td[data-control]')).toHaveLength(1);
   });
 });
+
+describe('Table rows that pick', () => {
+  test('a control inside a row acts alone: pressing it, by pointer or key, does not pick the row', async () => {
+    const picked: string[] = [];
+    const pressed: string[] = [];
+    const container = await mount(
+      <Table
+        label="Rows"
+        columns={[
+          {key: 'id', header: 'id', cell: row => row.id},
+          {
+            key: 'go',
+            header: 'Go',
+            control: true,
+            cell: row => (
+              <button type="button" onClick={() => pressed.push(row.id)}>
+                Go
+              </button>
+            ),
+          },
+        ]}
+        rows={[{id: 'a'}]}
+        rowKey={row => row.id}
+        select={key => picked.push(key)}
+      />,
+    );
+    const button = container.querySelector('button');
+    const row = container.querySelector('tbody tr');
+    if (button === null || row === null) throw new Error('the table did not render');
+    await act(async () => button.click());
+    await act(async () => {
+      button.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+    });
+    expect({picked, pressed}).toEqual({picked: [], pressed: ['a']});
+    // The row itself still picks, by pointer and by key.
+    await act(async () => (row as HTMLElement).click());
+    await act(async () => {
+      row.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+    });
+    expect(picked).toEqual(['a', 'a']);
+  });
+});

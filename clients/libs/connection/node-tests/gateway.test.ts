@@ -400,6 +400,16 @@ const deadlineInputs = {
     since: {seconds: 1n, nanos: 0},
     until: {seconds: 2n, nanos: 0},
   },
+  usageSummary: {
+    projects: ['/project'],
+    edges: [
+      {seconds: 0n, nanos: 0},
+      {seconds: 900n, nanos: 0},
+    ],
+    now: {seconds: 900n, nanos: 0},
+  },
+  usageRatesRefresh: {force: false, now: {seconds: 900n, nanos: 0}},
+  usagePricesSave: {baseRevision: 0n, overrides: [], aliases: []},
   listHarnesses: {},
   listExamples: {},
   getTaskGoal: {project: '/project', task: 'bench'},

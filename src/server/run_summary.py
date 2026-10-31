@@ -42,6 +42,7 @@ from server.host_run_summary import (
     RUN_SUMMARY_PAGE_MAX_BYTES,
     RUN_TERMINAL_MESSAGE_MAX_CHARS,
     InputGate,
+    RateLimitReading,
     RunTerminal,
     RunTerminalKind,
     SpanTokens,
@@ -58,11 +59,16 @@ from vs_redaction.api import redact_diagnostic_tail
 if TYPE_CHECKING:
     from server.host_run_summary import ReplySchemaDocument, RunOverviewDocument, RunSpanDocument
 
-RUN_SUMMARY_VERSION: Final = 5
+RUN_SUMMARY_VERSION: Final = 6
 """The version of the fold's semantics and of ``SummaryState``'s shape.
 
 A cached state of another version is dropped and recomputed from the journal, so a change to what
-the fold keeps never serves an old fold as the new one: bump it with any such change."""
+the fold keeps never serves an old fold as the new one: bump it with any such change. That
+includes a field a record gains: a cache written by an older reader holds the records it knew,
+without the fields a newer writer put on the journal's lines, and nothing else tells the two apart.
+
+6: the records gained ``cost_basis``, ``by_model`` and ``provider_session_id``, and the fold gained
+the latest rate limit readings (``rate_limit_update`` joined the folded events)."""
 
 _SPAN_EVENTS: Final = frozenset({"span_started", "span_updated", "span_ended"})
 _TERMINAL_KINDS: Final = {
@@ -116,6 +122,8 @@ class SummaryState:
     """Whether a workstream span has begun: a later gate is an idea's, not the input's."""
     terminal: RunTerminal | None
     """The last terminal event folded."""
+    rate_limits: tuple[RateLimitReading, ...] = ()
+    """The latest reading of each rate limit window the run saw, in the order the windows first appeared."""
 
 
 @dataclass(frozen=True)
@@ -180,7 +188,7 @@ class RunSummaryFold:
             _schemas=dict(state.schemas),
             _tokens=state.tokens,
             _usage={entry.span_id: entry.tally for entry in state.usage},
-            _turns=UsageFold.from_state(state.executions, state.records),
+            _turns=UsageFold.from_state(state.executions, state.records, state.rate_limits),
             _gates=list(state.input_gates),
             _gates_settled=state.gates_settled,
             _terminal=state.terminal,
@@ -205,6 +213,7 @@ class RunSummaryFold:
             input_gates=tuple(self._gates),
             gates_settled=self._gates_settled,
             terminal=self._terminal,
+            rate_limits=self._turns.limits,
         )
 
     def consume(self, line: bytes, *, complete: bool = True) -> bool:
