@@ -312,7 +312,7 @@ export function topicContract<S>(each: TopicCase<S>): void {
         runs,
       );
     });
-    test('an observer that returns within the linger finds its stream running, and one that does not dials again', () => {
+    test('an observer that returns within the linger finds its stream running', () => {
       fc.assert(
         fc.property(scenario, value =>
           observerThatReturnsWithinTheLingerFindsItsStream(topic, value),
