@@ -7,7 +7,8 @@
     "layer": "domain",
     "entries": {
       ".": "neutral",
-      "./testing": "neutral"
+      "./testing": "neutral",
+      "./contract": "node"
     }
   },
   "exports": {
@@ -20,6 +21,11 @@
       "@vibesys/source": "./src/testing/index.ts",
       "types": "./dist/testing/index.d.ts",
       "default": "./dist/testing/index.js"
+    },
+    "./contract": {
+      "@vibesys/source": "./src/testing/port-contract.ts",
+      "types": "./dist/testing/port-contract.d.ts",
+      "default": "./dist/testing/port-contract.js"
     }
   },
   "files": [
@@ -27,7 +33,7 @@
     "!dist/.*.tsbuildinfo"
   ],
   "scripts": {
-    "build": "tsc -b tsconfig.lib.json tsconfig.testing.json",
+    "build": "tsc -b tsconfig.lib.json tsconfig.testing.json tsconfig.contract.json",
     "check": "tsc -b",
     "test": "node ../../tools/scripts/run_bun_tests.mjs ./src"
   },

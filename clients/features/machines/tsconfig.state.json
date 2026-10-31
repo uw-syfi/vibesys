@@ -26,6 +26,9 @@
     },
     {
       "path": "../../libs/problems/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/subscription/tsconfig.lib.json"
     }
   ]
 }

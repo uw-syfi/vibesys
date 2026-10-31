@@ -41,6 +41,9 @@ export interface Topic<S> {
   fold(entries: ReadonlyMap<string, TopicEntry>): S | null;
 }
 
+/** The value of the `machineStats` topic: CPU, memory and per-GPU figures of one host. */
+export type {MachineStats};
+
 /** A topic of any value type, as the registry and main's hub hold it. */
 export type AnyTopic = Topic<unknown>;
 

@@ -31,9 +31,15 @@
     {
       "path": "../../features/settings/tsconfig.state.json"
     },
-    {"path": "../../libs/ipc/tsconfig.testing.json"},
-    {"path": "../../libs/transport/tsconfig.testing.json"},
-    {"path": "../../libs/run-state/tsconfig.lib.json"},
+    {
+      "path": "../../libs/ipc/tsconfig.testing.json"
+    },
+    {
+      "path": "../../libs/transport/tsconfig.testing.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.lib.json"
+    },
     {
       "path": "../../libs/ipc/tsconfig.lib.json"
     },
@@ -51,6 +57,9 @@
     },
     {
       "path": "../../libs/run-skeleton/tsconfig.testing.json"
+    },
+    {
+      "path": "../../libs/subscription/tsconfig.lib.json"
     }
   ]
 }

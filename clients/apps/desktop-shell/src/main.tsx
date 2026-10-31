@@ -6,7 +6,7 @@ import '@vibesys/ui/fonts.css';
 import '@vibesys/ui/components.css';
 import {browserDraftMemory, browserMoreOptionsMemory} from '@vibesys/feature-new-run/renderer';
 import {pageAppearance} from '@vibesys/feature-settings/renderer';
-import {runOfWindow, type WelcomeBridge} from '@vibesys/ipc';
+import {runOfWindow, subscriptionBridge, type WelcomeBridge} from '@vibesys/ipc';
 import {Card, EmptyState, LinkOpener, Page} from '@vibesys/ui';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
@@ -54,6 +54,10 @@ if (bridge === undefined) {
       messages: window,
       address: windowAddress(window, run),
       now: () => Date.now(),
+      // The preload's second port: a host's live data reaches the window only through it.
+      ...(window.vibesysSubscription === undefined
+        ? {}
+        : {subscriptions: subscriptionBridge(window.vibesysSubscription)}),
       session: run => shellSessionOptions(run, {document, window, navigator}),
     },
     {

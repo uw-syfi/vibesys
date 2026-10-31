@@ -1,10 +1,11 @@
 import {expect, test} from 'bun:test';
-import {decodeGatewayReply, decodeUpdate, encodeSubscribeCall} from '@vibesys/ipc';
+import {decodeGatewayReply, decodeUpdate, encodeSubscriptionCall} from '@vibesys/ipc';
 import {machineStats, type SubscriptionUpdate} from '@vibesys/subscription';
 import {FakeSubscriptionPort} from '@vibesys/subscription/testing';
 import {subscriptionCall} from './subscription-ipc.js';
 
-const REQUEST = encodeSubscribeCall({
+const REQUEST = encodeSubscriptionCall({
+  kind: 'observe',
   host: 'ssh:host-a',
   request: machineStats.request,
   key: undefined,
@@ -64,4 +65,17 @@ test('the window going away releases the observation, and a request that never p
     subscriptionCall(hub)(new Uint8Array([255]), new AbortController().signal, () => {}),
   ).toThrow();
   expect(hub.calls).toHaveLength(2);
+});
+
+test('a retry asks the hub to retry that host and is over as it is asked; it opens no observation', async () => {
+  const hub = new FakeSubscriptionPort();
+  const sent: Uint8Array[] = [];
+  await subscriptionCall(hub)(
+    encodeSubscriptionCall({kind: 'retry', host: 'ssh:host-b'}),
+    new AbortController().signal,
+    reply => sent.push(reply),
+  );
+  expect(hub.retries).toEqual(['ssh:host-b']);
+  expect(hub.calls).toHaveLength(0);
+  expect(sent).toHaveLength(0);
 });

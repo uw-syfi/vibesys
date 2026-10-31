@@ -13,7 +13,8 @@
     "src/testing/**/*.ts"
   ],
   "exclude": [
-    "src/testing/**/*.test.ts"
+    "src/testing/**/*.test.ts",
+    "src/testing/port-contract.ts"
   ],
   "references": [
     {

@@ -11,7 +11,7 @@
  */
 import {unprovided} from '@vibesys/machine';
 import {subscribeTiming} from '@vibesys/proto';
-import {assign, emit, type SnapshotFrom, setup} from 'xstate';
+import {assign, emit, raise, type SnapshotFrom, setup} from 'xstate';
 import {type DataUpdate, EMPTY_FOLD, type Fold, foldUpdate} from './fold.js';
 import type {StreamEvent} from './frames.js';
 import {
@@ -90,6 +90,13 @@ function lose(context: Context, reason: StaleReason): Loss {
 }
 
 /** Fold a change event and pass the update on. */
+/**
+ * A frame of the stream's data before the stream said it reached the host: the stream is open, so
+ * it is awaiting its snapshot, and the frame is read there. It is never dropped, which would let
+ * a snapshot complete on the entries that followed it.
+ */
+const implied = {target: 'awaiting', actions: ['reached', 'again']} as const;
+
 const changed = [
   {type: 'apply', params: ({event}: {event: ChangeEvent}) => updateOf(event)},
   {type: 'forward', params: ({event}: {event: ChangeEvent}) => updateOf(event)},
@@ -112,6 +119,9 @@ export const subscriptionMachine = setup({
     valued: assign({
       valueAt: ({event}) => (event.type === 'entry' ? event.at : 0),
     }),
+    reached: assign({step: 'stream' as const}),
+    // The event is read again in the state it moved to.
+    again: raise(({event}) => event),
     restart: assign({
       loss: ({context}) => (context.loss === null ? null : {...context.loss, attempt: 0}),
     }),
@@ -121,15 +131,13 @@ export const subscriptionMachine = setup({
     atStream: ({event}) => event.type === 'reached' && event.step === 'stream',
     gaveUp: ({context}) => (context.loss?.attempt ?? 0) >= OFFLINE_AFTER,
     // A heartbeat proves the stream, not the value: a sampled topic must keep sending values.
-    outdated: ({context, event}) =>
-      event.type === 'beat' &&
-      context.topic.policy.staleAfterMs > 0 &&
-      event.at - context.valueAt > context.topic.policy.staleAfterMs,
+    valueBounded: ({context}) => context.topic.policy.staleAfterMs > 0,
     final: ({event}) => event.type === 'refused' && !retryable(event.reason),
   },
   delays: {
     openBudget: ({context}) => context.openBudgetMs,
     firstFrame: ({context}) => context.topic.policy.firstFrameMs,
+    valueBound: ({context}) => context.topic.policy.staleAfterMs,
     lease: subscribeTiming.leaseMs,
     wakeLease: subscribeTiming.heartbeatMs + WAKE_GRACE_MS,
     backoff: ({context}) => backoffMs(context.loss?.attempt ?? 0),
@@ -182,6 +190,10 @@ export const subscriptionMachine = setup({
         actions: assign({halted: 'invalid_frame' as const}),
       },
       on: {
+        // A stream already being opened is the retry: asking again forgets the losses, so the
+        // answer is `connecting` and not the failure that was, and the stream goes on. A stream
+        // that delivers has no losses to forget.
+        retry: {actions: 'restart'},
         refused: [
           {
             guard: 'final',
@@ -214,6 +226,9 @@ export const subscriptionMachine = setup({
               {guard: 'atStream', target: 'awaiting', actions: assign({step: 'stream' as const})},
               {actions: assign({step: ({event}) => event.step})},
             ],
+            entry: implied,
+            removed: implied,
+            synced: implied,
           },
         },
         awaiting: {
@@ -235,44 +250,63 @@ export const subscriptionMachine = setup({
             },
           },
         },
+        // The link and the value are bounded apart: a stream can be alive and its value old.
         live: {
-          initial: 'leased',
+          type: 'parallel',
           states: {
-            leased: {
-              after: {
-                lease: {
-                  target: '#subscription.lost',
-                  actions: assign({loss: ({context}) => lose(context, 'silent')}),
-                },
-              },
-              on: {
-                beat: [
-                  {
-                    guard: 'outdated',
-                    target: '#subscription.lost',
-                    actions: assign({loss: ({context}) => lose(context, 'outdated')}),
+            link: {
+              initial: 'leased',
+              states: {
+                leased: {
+                  after: {
+                    lease: {
+                      target: '#subscription.lost',
+                      actions: assign({loss: ({context}) => lose(context, 'silent')}),
+                    },
                   },
-                  {target: 'leased', reenter: true},
-                ],
-                entry: {target: 'leased', reenter: true, actions: [...changed, 'valued']},
-                removed: {target: 'leased', reenter: true, actions: changed},
-                synced: {target: 'leased', reenter: true, actions: changed},
-                wake: 'suspect',
+                  on: {
+                    beat: {target: 'leased', reenter: true},
+                    entry: {target: 'leased', reenter: true, actions: [...changed, 'valued']},
+                    removed: {target: 'leased', reenter: true, actions: changed},
+                    synced: {target: 'leased', reenter: true, actions: changed},
+                    wake: 'suspect',
+                  },
+                },
+                // The machine woke: the stream may be dead, and a frame within a beat says it is not.
+                suspect: {
+                  after: {
+                    wakeLease: {
+                      target: '#subscription.lost',
+                      actions: assign({loss: ({context}) => lose(context, 'silent')}),
+                    },
+                  },
+                  on: {
+                    beat: 'leased',
+                    entry: {target: 'leased', actions: [...changed, 'valued']},
+                    removed: {target: 'leased', actions: changed},
+                    synced: {target: 'leased', actions: changed},
+                  },
+                },
               },
             },
-            // The machine woke: the stream may be dead, and a frame within a beat says it is not.
-            suspect: {
-              after: {
-                wakeLease: {
-                  target: '#subscription.lost',
-                  actions: assign({loss: ({context}) => lose(context, 'silent')}),
+            // A value older than the topic allows ends the stream whatever its beats say. The
+            // bound is a timer like every other wait, so a clock that steps cannot stretch it.
+            value: {
+              initial: 'judging',
+              states: {
+                judging: {
+                  always: [{guard: 'valueBounded', target: 'fresh'}, {target: 'unbounded'}],
                 },
-              },
-              on: {
-                beat: 'leased',
-                entry: {target: 'leased', actions: [...changed, 'valued']},
-                removed: {target: 'leased', actions: changed},
-                synced: {target: 'leased', actions: changed},
+                fresh: {
+                  after: {
+                    valueBound: {
+                      target: '#subscription.lost',
+                      actions: assign({loss: ({context}) => lose(context, 'outdated')}),
+                    },
+                  },
+                  on: {entry: {target: 'fresh', reenter: true}},
+                },
+                unbounded: {},
               },
             },
           },
@@ -320,7 +354,8 @@ export function controlOf(snapshot: SubscriptionSnapshot): Control {
   const {loss} = context;
   if (loss === null) return {kind: 'connecting', step: context.step, attempt: 0};
   if (loss.attempt >= OFFLINE_AFTER) return {kind: 'failed', reason: loss.reason, retrying: true};
-  if (context.fold.map !== null) return {kind: 'stale', reason: loss.reason, attempt: loss.attempt};
+  if (context.fold.map !== null)
+    return {kind: 'stale', reason: loss.reason, attempt: loss.attempt, valueAt: context.valueAt};
   return {kind: 'connecting', step: context.step, attempt: loss.attempt};
 }
 
