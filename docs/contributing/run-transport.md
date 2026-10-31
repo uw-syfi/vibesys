@@ -277,6 +277,16 @@ frame ends the stream with a typed code. Anything that needs every value, such a
 `Tail`. `internal/subscription` owns the mechanism and `subscriptiontest` the contract each topic
 passes. Server keepalive ends a half-open connection, and with it the streams that hold a producer.
 
+The frame timing is stated once, as `SubscribeRequest`'s `subscribe_timing` option: the hub heartbeats
+at `heartbeat_ms`, and a client counts a stream with no frame for `lease_ms` as lost. The generator
+projects both into Go and TypeScript tables and refuses a lease that cannot hold a beat. The client
+sends no keepalive of its own: the gateway server sets no keepalive enforcement policy, so a client
+ping faster than gRPC's default would be refused, and the lease on frames already finds a silent
+stream. A client reads a stream through `@vibesys/subscription`, in main through `Subscriptions`,
+and never through the generic gateway port, which refuses `Subscribe`. A lost session ends a
+`Subscribe` stream instead of re-issuing it, because a second stream in one call would deliver a
+second snapshot into state the caller already holds; the subscription's machine opens the next one.
+
 ## Versions and upgrades
 
 Two version domains, with different rules.

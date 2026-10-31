@@ -53,6 +53,7 @@ from vs_project._layout import (
     TasksRoot,
     UnsafeProjectPathError,
     canonical_project_root,
+    is_run_id,
     resume_directory,
 )
 from vs_project._logger import LPRINT_LOGGER, RunLogger, strip_ansi
@@ -357,6 +358,7 @@ __all__ = [
     "generate_run_id",
     "git_repositories",
     "is_project_state_path",
+    "is_run_id",
     "load_objectives",
     "open_git_repository",
     "operator_key_path",

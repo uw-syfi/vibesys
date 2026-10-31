@@ -80,12 +80,6 @@
       "stderr": "usage: vibesys host [-h] {convert-run,convert-runs} ...\nvibesys host: error: argument method: invalid choice: 'list-run-digests' (choose from 'convert-run', 'convert-runs')\n"
     },
     {
-      "command": "list-saved-runs",
-      "exit_code": 2,
-      "stdout_bytes": 0,
-      "stderr": "usage: vibesys host [-h] {convert-run,convert-runs} ...\nvibesys host: error: argument method: invalid choice: 'list-saved-runs' (choose from 'convert-run', 'convert-runs')\n"
-    },
-    {
       "command": "list-tasks",
       "exit_code": 2,
       "stdout_bytes": 0,
@@ -120,6 +114,12 @@
       "exit_code": 2,
       "stdout_bytes": 0,
       "stderr": "usage: vibesys host [-h] {convert-run,convert-runs} ...\nvibesys host: error: argument method: invalid choice: 'start-run' (choose from 'convert-run', 'convert-runs')\n"
+    },
+    {
+      "command": "stream-saved-runs",
+      "exit_code": 2,
+      "stdout_bytes": 0,
+      "stderr": "usage: vibesys host [-h] {convert-run,convert-runs} ...\nvibesys host: error: argument method: invalid choice: 'stream-saved-runs' (choose from 'convert-run', 'convert-runs')\n"
     },
     {
       "command": "terminate-run",

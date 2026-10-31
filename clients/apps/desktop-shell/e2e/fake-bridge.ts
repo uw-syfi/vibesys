@@ -33,6 +33,7 @@ export type CoreMethods =
   | 'archive'
   | 'runDigests'
   | 'projectRuns'
+  | 'cancelProjectRuns'
   | 'harnesses'
   | 'onListing'
   | 'onRecent'
@@ -246,6 +247,7 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
       },
       runDigests: () => ok({kind: 'unsupported'}),
       projectRuns: () => ok([]),
+      cancelProjectRuns: () => ok(null),
       // The Run screen names its models from the host's catalogue; a world that offers one (`installFakeNewRun`) replaces this.
       harnesses: () => ok({kind: 'unsupported'}),
       onListing: on('listing'),
