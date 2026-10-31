@@ -29,15 +29,13 @@ from vs_core.api import FlowState, RunEnvelope
 from vs_core.api.recovery import (
     Cancelled,
     CancelReason,
+    Folded,
     Run,
     Settle,
     decide,
     finished_message,
-    fold_run,
     input_message,
-    restore,
     seed_message,
-    snapshot_message,
     started_message,
 )
 from vs_core.api.testing import FAKE_REGISTRY, FakeView
@@ -52,10 +50,13 @@ from vs_proto.api import EpochStarted, Oneof, Record, Timestamp
 from vs_runlog.api import ConfirmedLog
 from vs_runtime.api.core import CoreResumeError, RuntimeRecord
 from vs_runtime.api.core_shell_fixtures import CounterConfig, counter
+from vs_runtime.api.step_runner import fold_log, restore_log, snapshot_message
 from vs_runtime.api.testing import FakeRunRecords
 from vs_sim.api.testing import SimThreads, examples
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from vs_core.api import SearchDriver
     from vs_proto.api import CoreSnapshot
 
@@ -87,6 +88,13 @@ def header(seq: int, epoch: int) -> Record:
     return entry(seq, epoch, Oneof("epoch_started", EpochStarted(epoch=epoch)))
 
 
+def folded(records: Sequence[Record]) -> Folded:
+    """The fold of a log, a snapshot in it read as a resume reads it."""
+    result = fold_log(records, FAKE_REGISTRY)
+    assert result is not None, "the log holds no start of the run"
+    return result
+
+
 def folded_from(record: RuntimeRecord[FlowState], epoch: int) -> core.CoreState:
     """The state a process of the log's ``epoch`` folds from the snapshot of ``record``."""
     snapshot = entry(
@@ -95,7 +103,7 @@ def folded_from(record: RuntimeRecord[FlowState], epoch: int) -> core.CoreState:
         Oneof("core_snapshot", _message(record)),
         clock=record.envelope.core.run.now_at,
     )
-    return fold_run([header(1, epoch), snapshot], registry=FAKE_REGISTRY).state
+    return folded([header(1, epoch), snapshot]).state
 
 
 def _message(record: RuntimeRecord[FlowState]) -> CoreSnapshot:
@@ -149,7 +157,7 @@ def run_to_results(records: list[Record], epoch: int) -> core.CoreState:
     The process of ``epoch`` resumes a run that is paused, and each step it is asked to run ends
     cancelled, which is a result any step can have.
     """
-    state = fold_run(records, registry=FAKE_REGISTRY).state
+    state = folded(records).state
     if state.run.status in (core.RunStatus.PARKED, core.RunStatus.PAUSED):
         resume = core.ControlInput(
             control_id=core.ControlId(root="resume"), action="resume", when="now"
@@ -157,7 +165,7 @@ def run_to_results(records: list[Record], epoch: int) -> core.CoreState:
         event = core.RunControlEvent(control=resume, now_at=state.run.now_at)
         _add(records, epoch, Oneof("core_input", input_message(event)))
     for _ in range(30):
-        state = fold_run(records, registry=FAKE_REGISTRY).state
+        state = folded(records).state
         actions = [a for a in decide(state, state.run.now_at) if isinstance(a, Run | Settle)]
         if not actions:
             return state
@@ -175,13 +183,13 @@ def run_to_results(records: list[Record], epoch: int) -> core.CoreState:
                 last = 0 if attempts is None else attempts.started
                 body = Oneof("step_finished", finished_message(action.tag, last, action.result))
                 _add(records, epoch, body)
-    return fold_run(records, registry=FAKE_REGISTRY).state
+    return folded(records).state
 
 
 def _add(records: list[Record], epoch: int, body: Oneof) -> None:
-    clock = fold_run(records, registry=FAKE_REGISTRY).state.run.now_at
+    clock = folded(records).state.run.now_at
     records.append(entry(len(records) + 1, epoch, body, clock))
-    fold_run(records, registry=FAKE_REGISTRY)  # a record the fold refuses fails the test here
+    folded(records)  # a record the fold refuses fails the test here
 
 
 @pytest.mark.parametrize("path", GOLDENS, ids=lambda p: p.stem)
@@ -207,7 +215,7 @@ def test_decide_asks_for_every_open_request_of_a_golden_once_the_new_epoch_has_o
         entry(2, 2, Oneof("core_snapshot", _message(saved)), 0.0),
         header(3, 3),
     ]
-    state = fold_run(records, registry=FAKE_REGISTRY).state
+    state = folded(records).state
     open_tags = {row.request_id for row in state.records.records if row.phase in OPEN}
     runs = {a.tag for a in decide(state, state.run.now_at) if isinstance(a, Run)}
     if state.run.status is core.RunStatus.PARKED:
@@ -242,9 +250,6 @@ def in_flight(
     return saved.model_copy(update={"envelope": saved.envelope.model_copy(update={"core": state})})
 
 
-@pytest.mark.xfail(
-    strict=True, reason="seams: Run has no clear_first fact yet, and a step in flight needs one"
-)
 @pytest.mark.parametrize("phase", IN_FLIGHT)
 @pytest.mark.parametrize(
     "path", [p for p in GOLDENS if p.stem.endswith("floor")], ids=lambda p: p.stem
@@ -254,10 +259,10 @@ def test_every_step_in_flight_in_a_pre_cutover_run_is_cleared_before_it_runs_aga
 ) -> None:
     saved = in_flight(golden(path), phase)
     snapshot = entry(2, 2, Oneof("core_snapshot", _message(saved)), 0.0)
-    state = fold_run([header(1, 2), snapshot, header(3, 3)], registry=FAKE_REGISTRY).state
+    state = folded([header(1, 2), snapshot, header(3, 3)]).state
     runs = [a for a in decide(state, state.run.now_at) if isinstance(a, Run)]
     assert runs
-    assert all(vars(run)["clear_first"] for run in runs)
+    assert all(run.clear_first for run in runs)
 
 
 # --- the migration of a project's run -------------------------------------------------------------
@@ -374,7 +379,7 @@ def test_a_run_with_no_log_and_a_store_migrates_once(tmp_path: Path) -> None:
     (snapshot,) = snapshots(records)
     assert snapshot.epoch == 1
     expected = saved_counter(saved.run_id).envelope.core
-    state = fold_run(records.records, registry=FAKE_REGISTRY).state
+    state = folded(records.records).state
     assert state.run.run_id == expected.run.run_id
     before = snapshots(records)
     assert resume(saved, records) is Migration.STARTED
@@ -393,7 +398,7 @@ def test_the_search_the_saved_run_left_is_the_search_the_log_restores(tmp_path: 
     saved = saved_project(tmp_path, wakes=wakes)
     records = FakeRunRecords()
     assert resume(saved, records) is Migration.MIGRATED
-    restored = restore(records.records, search(), FAKE_REGISTRY)
+    restored = restore_log(records.records, search(), FAKE_REGISTRY)
     assert restored is not None
     assert restored.wakes == wakes
     assert restored.state == saved_counter(saved.run_id).envelope.strategy
@@ -444,10 +449,7 @@ def test_the_migration_is_idempotent_under_a_crash_at_every_append(
     assert resume(saved, survivors) is Migration.STARTED
     assert len(snapshots(survivors)) == 1
     assert len(survivors.records) == again + 1  # a header, as every process writes
-    assert (
-        fold_run(survivors.records, registry=FAKE_REGISTRY).state.run
-        == fold_run(whole.records, registry=FAKE_REGISTRY).state.run
-    )
+    assert folded(survivors.records).state.run == folded(whole.records).state.run
 
 
 @pytest.mark.parametrize("durable", [False, True], ids=["lost", "durable but unconfirmed"])

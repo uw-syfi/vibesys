@@ -6,7 +6,7 @@ import {
   registrySetup,
   runWatch,
 } from '@vibesys/connection';
-import {FakeLink, FakeRunGateway, olderHost} from '@vibesys/connection/testing';
+import {FakeLink, FakeRunGateway, idleSubscriptions, olderHost} from '@vibesys/connection/testing';
 import {type HostId, type HostListing, hostKey} from '@vibesys/hosts';
 import {SettingsStore, withHostSettings} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
@@ -98,6 +98,7 @@ describe('Hosts on an older v2 host', () => {
       sshConfigPath: '/missing',
       setup: registrySetup({unary: olderHost.read}),
       runs: runWatch(gateway, new FakeClock().schedule),
+      subscriptions: idleSubscriptions(),
       log: message => logged.push(message),
       push: listing => {
         pushed.push(listing);
@@ -337,6 +338,7 @@ describe('Hosts and a held version check', () => {
       sshConfigPath: '/missing',
       setup,
       runs: runWatch(gateway, clock.schedule),
+      subscriptions: idleSubscriptions(),
       log: () => {},
       push: listing => {
         pushed.push(listing);

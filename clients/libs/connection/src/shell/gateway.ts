@@ -22,6 +22,7 @@ import {
   WatchRequestSchema,
   watchBudgets,
 } from '@vibesys/proto';
+import {SUBSCRIBE_METHOD} from '@vibesys/subscription';
 import {GrpcError, registerAbort, type ScheduleTimeout} from '@vibesys/transport';
 import {createActor, fromPromise} from 'xstate';
 import {gatewayMachine} from '../state/gateway.js';
@@ -85,7 +86,11 @@ export class GatewayConnection {
             for (const call of this.#calls) this.#start(call);
           },
           disconnected: () => {
-            for (const call of this.#calls) {
+            for (const call of [...this.#calls]) {
+              // A subscription is not re-issued: a second stream in the same call would deliver
+              // a second snapshot into state the caller already holds. Its machine reopens it.
+              if (call.method === SUBSCRIBE_METHOD)
+                call.finish(new GrpcError(14, 'gateway connection lost'));
               call.abort?.abort();
               call.abort = null;
             }

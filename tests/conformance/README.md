@@ -51,6 +51,7 @@ tests/conformance/
 | server scenario suite | Python (`tests/conformance/test_server_transports.py`) | follow-up to #811 | replays the bootstrap, control-path, and simultaneous two-client scenarios on every transport each declares |
 | relay runner | Python (`tests/e2e/test_relay.py`) | #1785 | replays the Unix bootstrap, control-path, and tail-overflow scenarios through a real host helper's run channel |
 | host helper runner | Python (`tests/conformance/test_host_helper.py`, `tests/e2e/test_host_helper.py`) | #1887 | replays the `helper-*` scenarios against the helper in process and over stdio against a real helper command (`VIBESYS_HOST_HELPER_COMMAND` points it at another implementation) |
+| subscription frame corpus | Go emits it (`gateway/internal/subscription/corpus_test.go`), TypeScript folds it (`clients/libs/subscription/src/corpus.test.ts`) | #3498 | what the real hub sends for scripted producers, in `fixtures/subscription/frames.json`: the client's fold and machine must hold the producer's map after every stream |
 
 The corpus gate, event fold runner, and server scenario suite exist today. The connection-level
 client runner is still outstanding. Do not treat structural validation or event folding as evidence

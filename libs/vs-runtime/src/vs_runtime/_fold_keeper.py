@@ -15,8 +15,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vs_core.api.recovery import Folded, apply_record, fold_run
+from vs_core.api.recovery import Folded
 from vs_runlog.api import CachedFold, CacheMiss, PrefixDigest, judge
+from vs_runtime._saved_run_record import fold_log
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -83,8 +84,7 @@ class FoldKeeper:
             return
         tail = log.records()[self._digest.count :]
         self._digest.extend(tail)
-        for record in tail:
-            self._kept = apply_record(self._kept, record, registry)
+        self._kept = fold_log(tail, registry, self._kept)
         self._written_at = appended
         if self._kept is None:
             return
@@ -109,7 +109,7 @@ def start_fold(
     the whole of ``prefix`` is folded: the result is the same.
     """
     if cache is None:
-        return _whole(prefix, registry), None
+        return fold_log(prefix, registry), None
     digest = PrefixDigest()
     verdict = judge(cache.load(), prefix, digest)
     if isinstance(verdict, CachedFold):
@@ -118,16 +118,8 @@ def start_fold(
         except ValueError:
             verdict = CacheMiss.STATE_REFUSED
         else:
-            folded = fold_run(prefix[verdict.through_seq :], cached, registry=registry)
+            folded = fold_log(prefix[verdict.through_seq :], registry, cached)
             start = CacheUsed(verdict.through_seq)
             return folded, FoldKeeper(cache, digest, folded, start, every=every)
-    folded = _whole(prefix, registry)
+    folded = fold_log(prefix, registry)
     return folded, FoldKeeper(cache, digest, folded, verdict, every=every)
-
-
-def _whole(prefix: Sequence[Record], registry: OperationRegistry) -> Folded | None:
-    """The fold of ``prefix``, None while it holds no seed."""
-    folded: Folded | None = None
-    for record in prefix:
-        folded = apply_record(folded, record, registry)
-    return folded

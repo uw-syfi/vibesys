@@ -45,7 +45,6 @@ from ._step_log import (
     decode_result,
     decode_run_ended,
     decode_seed,
-    decode_snapshot,
     encode_fold,
 )
 from .types.common import (
@@ -66,6 +65,7 @@ if TYPE_CHECKING:
     from vs_proto.api import Record, StepFinished, StepStarted, StrategyAdvanced
 
     from ._registry import OperationRegistry
+    from ._step_log import SavedRun
     from .types.kernel import CoreEvent, CoreState, StrategyEvent
     from .types.records import RequestRecord
     from .types.steps import StepResult
@@ -96,32 +96,32 @@ class Folded:
 
 def fold(
     records: Iterable[Record],
-    seed: CoreState | Folded | None = None,
+    seed: CoreState | None = None,
     *,
     registry: OperationRegistry | None = None,
 ) -> CoreState:
-    """The core state a log leaves, starting from ``seed`` or the log's own seed record.
+    """The core state a log leaves, starting from ``seed`` or the log's ``RunStarted``.
 
     Every record names the epoch it was written in and, when it has one, the run clock, which
     excludes downtime. Records that are not core's (spans, metrics, notices) change nothing
     else. A record the reducers refuse is an error, never skipped: the log was written by
     other code. ``registry`` decodes the outcomes of registered operations.
     """
-    return fold_run(records, seed, registry=registry).state
+    return fold_run(records, None if seed is None else Folded(seed), registry=registry).state
 
 
 def fold_run(
     records: Iterable[Record],
-    seed: CoreState | Folded | None = None,
+    seed: Folded | None = None,
     *,
     registry: OperationRegistry | None = None,
 ) -> Folded:
     """``fold``, and the events the search still has to hear.
 
-    ``seed`` may be the fold of the log's first records (a cache of it), and ``records`` then the
-    ones after: the result is the fold of the whole log.
+    ``seed`` may be the fold of the log's first records (a cache of it, or a saved run's seed), and
+    ``records`` then the ones after: the result is the fold of the whole log.
     """
-    folded = Folded(seed) if seed is not None and not isinstance(seed, Folded) else seed
+    folded = seed
     for record in records:
         folded = apply_record(folded, record, registry)
     if folded is None:
@@ -254,15 +254,23 @@ def _begin(
 ) -> Folded | None:
     """What a record that is, or precedes, the run's seed leaves of the fold."""
     body = record.body
-    if body is not None and body.field in _SEEDS:
-        if prior is not None:
-            message = f"record {record.seq} starts a run the log already started"
-            raise RecordRefusedError(RefusalReason.SEED_REPEATED, message)
-        return _seeded(body, record, registry)
-    if body is not None and body.field in _CORE_RECORDS:
-        message = f"record {record.seq} is core's, and the log holds no seed before it"
-        raise RecordRefusedError(RefusalReason.NO_SEED, message)
-    return None
+    if prior is not None and starts_run(record):
+        message = f"record {record.seq} starts a run the log already started"
+        raise RecordRefusedError(RefusalReason.SEED_REPEATED, message)
+    match body:
+        case Oneof(field="run_started", value=seed):
+            return Folded(_observed(decode_seed(seed, registry), record))
+        case Oneof(field="core_snapshot"):
+            message = (
+                f"record {record.seq} is a snapshot: its run is decoded by the log's reader "
+                "and folded with apply_saved"
+            )
+            raise RecordRefusedError(RefusalReason.UNREADABLE, message)
+        case Oneof(field=field) if field in _CORE_RECORDS:
+            message = f"record {record.seq} is core's, and the log holds no seed before it"
+            raise RecordRefusedError(RefusalReason.NO_SEED, message)
+        case _:
+            return None
 
 
 def _apply(
@@ -363,11 +371,15 @@ def starts_run(record: Record) -> bool:
     return record.body is not None and record.body.field in _SEEDS
 
 
-def _seeded(body: Oneof, record: Record, registry: OperationRegistry | None) -> Folded:
-    """The fold a seed record starts: a snapshot's unapplied inputs are applied, in order."""
-    if body.field == "run_started":
-        return Folded(_observed(decode_seed(body.value, registry), record))
-    saved = decode_snapshot(body.value, registry)
+def apply_saved(prior: Folded | None, saved: SavedRun, record: Record) -> Folded:
+    """The fold a saved run's snapshot ``record`` starts, with its unapplied inputs applied in order.
+
+    ``saved`` is the run the record holds, decoded by the log's reader. The record gives the epoch
+    and the run clock the fold begins in. It is the log's seed, so ``prior`` is None.
+    """
+    if prior is not None:
+        message = f"record {record.seq} starts a run the log already started"
+        raise RecordRefusedError(RefusalReason.SEED_REPEATED, message)
     folded = Folded(_observed(saved.state, record))
     for event in saved.inputs:
         state, published = _stepped(folded.state, event)

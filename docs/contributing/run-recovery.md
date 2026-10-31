@@ -360,7 +360,11 @@ store holds no run, and otherwise reads the store as a resume does (`resolve_cor
 another run or strategy is refused with its diagnostic) and appends one `CoreSnapshot`. The record carries
 the core state and the search's state compressed, the owner events the saved run had not applied (the
 fold applies them in order after the seed, as `CoreInput` records would be) and the search's wake-ups and
-held decisions (`restore` reads them as a checkpoint). One record, so a crash leaves the log with all of
+held decisions (`restore` reads them as a checkpoint). Core takes and returns plain values: it encodes a
+`SavedRun` as canonical JSON bytes (`encode_saved`) and folds one (`apply_saved`, `restore(saved=)`). The
+compression and the `CoreSnapshot` message are `vs_runtime`'s (`_saved_run_record.py`), and so is every
+read of a log that may hold a snapshot (`fold_log`, `restore_log`): core refuses a snapshot record it is
+handed directly. One record, so a crash leaves the log with all of
 it or none, and the migration is idempotent at every append. Dropped: the fence, the event cursor and the
 publications to the display journal the saved run had not delivered. A saved run that does not fit one
 record after compression (a record is at most 1 MiB) is refused by name with `SnapshotTooLargeError`; one
@@ -368,7 +372,7 @@ saved core state measured 708 KB of JSON and 99 KB compressed. The store is left
 
 Deleting the migration seven days after the cutover ships is not enforced: a check on the date would
 depend on real time. The pull request that ships the cutover names the date. What stays for good is the
-fold's reading of `CoreSnapshot`, which every migrated log holds. Until the module is deleted, the cutover's
+log reader's reading of `CoreSnapshot` (`vs_runtime`), which every migrated log holds. Until the module is deleted, the cutover's
 deletion of the old store (PR 6b) must keep what the migration reads: `StateStore.load`,
 `RuntimeRecord`, `resolve_core_resume` and the envelope migrations of `vs_core`.
 

@@ -22,17 +22,18 @@ from vs_proto.api import RUN_LOG_MAX_RECORD_BYTES, StrategyAdvanced
 
 from ._search_run import Advanced, Inbox, SearchHost, advance, begin, deferred
 from ._step import step
-from ._step_log import SCHEMA_VERSION, decode_held, decode_snapshot, encode_event, encode_held
+from ._step_log import SCHEMA_VERSION, decode_held, encode_event, encode_held
 from .types.search import TimeReached
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from vs_proto.api import CoreSnapshot, Record
+    from vs_proto.api import Record
 
     from ._registry import OperationRegistry
     from ._search_events import Translated
     from ._search_run import SearchDriver
+    from ._step_log import SavedRun
     from .types.kernel import CoreEvent, CoreState, Transition
     from .types.strategy import Decision, StrategyState
 
@@ -75,16 +76,23 @@ class Advancing[S: StrategyState]:
 
 
 def restore[S: StrategyState, C](
-    records: Iterable[Record], search: SearchDriver[S, C], registry: OperationRegistry | None
+    records: Iterable[Record],
+    search: SearchDriver[S, C],
+    registry: OperationRegistry | None,
+    *,
+    saved: SavedRun | None = None,
 ) -> Progress[S] | None:
-    """The search the log's advance records leave, None before the first advance."""
-    progress: Progress[S] | None = None
+    """The search the log's advance records leave, None before the first advance.
+
+    ``saved`` is the run the log's snapshot holds, decoded by the log's reader: the search starts
+    from its state as a checkpoint, and the advance records go on from there. A snapshot is the
+    first record of the run, so no advance record precedes it.
+    """
+    progress = None if saved is None else _saved(saved, search)
     for record in records:
         body = record.body
         if body is not None and body.field == "strategy_advanced":
             progress = _read(body.value, progress, search, registry)
-        elif body is not None and body.field == "core_snapshot":
-            progress = _saved(body.value, search, registry)
     return None if progress is None else replace(progress, state=search.resume(progress.state))
 
 
@@ -206,12 +214,10 @@ def _strategy(
 
 
 def _whole_state[S: StrategyState, C](
-    search: SearchDriver[S, C], encoded: bytes, *, max_bytes: int
+    search: SearchDriver[S, C], encoded: bytes, *, source: str, max_bytes: int
 ) -> S:
     """The search's whole state as it is logged: in the search driver's own encoding."""
-    decoded = decode_json(
-        encoded, search.state_model, source="the search checkpoint in the log", max_bytes=max_bytes
-    )
+    decoded = decode_json(encoded, search.state_model, source=source, max_bytes=max_bytes)
     match decoded:
         case Unreadable():
             raise ValueError(str(decoded))
@@ -219,12 +225,14 @@ def _whole_state[S: StrategyState, C](
             return decoded
 
 
-def _saved[S: StrategyState, C](
-    message: CoreSnapshot, search: SearchDriver[S, C], registry: OperationRegistry | None
-) -> Progress[S]:
+def _saved[S: StrategyState, C](saved: SavedRun, search: SearchDriver[S, C]) -> Progress[S]:
     """The search a run an older version saved left: its whole state, as a checkpoint is."""
-    saved = decode_snapshot(message, registry)
-    state = _whole_state(search, saved.strategy, max_bytes=max(len(saved.strategy), 1))
+    state = _whole_state(
+        search,
+        saved.strategy,
+        source="the search state in the log's snapshot",
+        max_bytes=len(saved.strategy),
+    )
     return Progress(
         state,
         tuple(sorted(saved.wakes)),
@@ -243,7 +251,12 @@ def _read[S: StrategyState, C](
 ) -> Progress[S]:
     match message.strategy:
         case Oneof(field="checkpoint", value=whole):
-            state = _whole_state(search, whole, max_bytes=RUN_LOG_MAX_RECORD_BYTES)
+            state = _whole_state(
+                search,
+                whole,
+                source="the search checkpoint in the log",
+                max_bytes=RUN_LOG_MAX_RECORD_BYTES,
+            )
             whole_state = True
         case Oneof(field="steps", value=changes) if progress is not None:
             state = search.extend(progress.state, changes)

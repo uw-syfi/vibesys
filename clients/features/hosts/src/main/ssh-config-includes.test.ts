@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {basename, dirname} from 'node:path';
 import {ConnectionManager} from '@vibesys/connection';
-import {idleRunWatch} from '@vibesys/connection/testing';
+import {idleRunWatch, idleSubscriptions} from '@vibesys/connection/testing';
 import {SettingsStore, SshConfigSyntaxError} from '@vibesys/settings';
 import {FakeClock} from '@vibesys/transport/testing';
 import {Hosts, SshConfigDiscoveryError, type SshConfigFilesystem} from './index.js';
@@ -59,6 +59,7 @@ function fileError(code: string, path: string): Error {
 function subject(filesystem: SshConfigFilesystem): Hosts {
   return new Hosts({
     runs: idleRunWatch(),
+    subscriptions: idleSubscriptions(),
     manager: new ConnectionManager({
       linkFor: () => {
         throw new Error('alias discovery must not open a host connection');
@@ -349,6 +350,7 @@ describe('Hosts.aliases OpenSSH includes', () => {
     });
     const hosts = new Hosts({
       runs: idleRunWatch(),
+      subscriptions: idleSubscriptions(),
       manager: new ConnectionManager({
         linkFor: () => {
           throw new Error('alias discovery must not connect');
