@@ -86,6 +86,7 @@ from .settlement import (
     SettlementEvent,
     SettlementState,
 )
+from .steps import StepsState
 from .strategy import (
     Command,
     DecisionFeedback,
@@ -157,6 +158,8 @@ class CoreState(Value):
     evaluation: EvaluationState = EvaluationState()
     settlement: SettlementState = SettlementState()
     records: RecordsState = RecordsState(hosts=())
+    steps: StepsState = Field(default=StepsState(), exclude_if=lambda value: value == StepsState())
+    """The attempts the log records, which only the recovery rule's fold writes."""
 
 
 class CoreView(Value):

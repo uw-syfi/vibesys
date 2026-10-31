@@ -25,6 +25,7 @@ from .common import (
     ContractValidationError,
     Count,
     ExecuteRegisteredOperation,
+    InterruptPolicy,
     InvocationId,
     LifecycleClass,
     Observation,
@@ -959,6 +960,21 @@ def reply_owed(
         and facts.suspension is None
         and facts.outcome_json is None
     )
+
+
+def request_interrupt_policy(request: Request) -> InterruptPolicy:
+    """What an interrupted attempt of the step means, as its asker declared it.
+
+    Only a turn can ask to be cancelled: its ``TurnSpec`` or, for a registered turn, its
+    operation's schema reference says so. Every other step is run again.
+    """
+    match request:
+        case DispatchTurn() | ResumeSessionTurn():
+            return request.turn.on_interrupt
+        case ExecuteRegisteredOperation():
+            return request.operation.schema_ref.on_interrupt
+        case _:
+            return InterruptPolicy.RERUN
 
 
 def request_lifecycle(request: Request) -> LifecycleClass:
