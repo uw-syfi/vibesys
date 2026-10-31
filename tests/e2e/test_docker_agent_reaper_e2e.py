@@ -19,13 +19,16 @@ import pytest
 
 from vs_core.api import RequestId
 from vs_runtime.api.docker_agent_work_reaper import DockerAgentWorkReaper
+from vs_runtime.api.step_runner import ClearUnavailableError
 from vs_sandbox.api import RUN_ID_LABEL, STEP_TAG_ENV
 from vs_sandbox.fake_docker_engine import FakeDockerEngine
 from vs_sim.api import DISCARD, SubprocessPipedProcessLauncher
 from vs_sim.api.testing import InlineBlockingRunner, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
+
+    from vs_sim.api import OutputSink
 
 pytestmark = pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="the sweep reads /proc inside the container"
@@ -71,3 +74,33 @@ def test_the_sweep_ends_the_processes_of_one_step_and_no_other() -> None:
         assert target.wait(_EXIT_BOUND_S) == -9
         assert longer.poll() is None
         assert other.poll() is None
+
+
+class _EngineWhoseSweepCannotKill(FakeDockerEngine):
+    """A daemon whose ``docker exec`` of the sweep runs with a ``kill`` that fails, as it does for
+    a process that is not the sweep's to signal. The sweep script is the one the reaper sent."""
+
+    def run(
+        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink
+    ) -> subprocess.CompletedProcess[str]:
+        if argv[:2] == ["docker", "exec"] and "-c" in argv:
+            script = argv.index("-c") + 1
+            argv = [*argv[:script], "kill() { return 1; }; " + argv[script], *argv[script + 1 :]]
+        return super().run(argv, timeout_seconds=timeout_seconds, output=output)
+
+
+def test_a_process_the_sweep_cannot_kill_is_never_reported_clear() -> None:
+    """Regression: the sweep counted the kills that worked, so a failed kill read as nothing found."""
+    with tempfile.TemporaryDirectory() as raw, _marked_process("step-a") as target:
+        engine = _EngineWhoseSweepCannotKill(Path(raw), launcher=SubprocessPipedProcessLauncher())
+        engine.run(
+            ["docker", "run", "-d", "--label", f"{RUN_ID_LABEL}={_RUN}", "image"],
+            timeout_seconds=_EXIT_BOUND_S,
+            output=DISCARD,
+        )
+        reaper = DockerAgentWorkReaper(_RUN, engine, InlineBlockingRunner(), lambda _line: None)
+
+        with pytest.raises(ClearUnavailableError):
+            run_virtual(VirtualClock(0.0), reaper.reap(RequestId(root="step-a")))
+
+        assert target.poll() is None
