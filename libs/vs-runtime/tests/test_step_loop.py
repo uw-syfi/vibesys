@@ -16,9 +16,11 @@ resumes after each pause, and returns everything a test asserts on.
 from __future__ import annotations
 
 import asyncio
+import math
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, ClassVar, Literal
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -56,6 +58,7 @@ from vs_runtime.api.step_runner import (
     LoopExit,
     StepLog,
     StepLoopTiming,
+    StepLoopTimingError,
     run_step_loop,
 )
 from vs_runtime.api.testing import (
@@ -517,6 +520,25 @@ def attempts_started(outcome: Outcome, name: str) -> list[int]:
 def result_of(outcome: Outcome, name: str) -> object:
     (found,) = [e.result for e in entries_of(outcome, LoggedFinished) if e.tag.root == name]
     return found
+
+
+@given(
+    field=st.sampled_from(
+        ["cancel_grace_s", "clear_timeout_s", "clear_backoff_s", "clear_backoff_max_s"]
+    ),
+    bad=st.sampled_from([0.0, -1.0, math.inf, math.nan]),
+)
+def test_a_bound_that_is_not_a_positive_finite_number_is_refused_by_name(
+    field: str, bad: float
+) -> None:
+    bounds = {
+        "cancel_grace_s": 1.0,
+        "clear_timeout_s": 1.0,
+        "clear_backoff_s": 1.0,
+        "clear_backoff_max_s": 1.0,
+    }
+    with pytest.raises(StepLoopTimingError, match=field):
+        StepLoopTiming(**{**bounds, field: bad})
 
 
 def test_steps_that_finish_run_once_with_no_clear() -> None:
