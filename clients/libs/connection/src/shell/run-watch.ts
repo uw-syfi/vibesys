@@ -6,13 +6,16 @@ ends. A late frame after cancel is ignored.
 The stream is the host's one source of its runs: `live` counts the runs the host says are alive,
 and `observe` hands every observer the runs and the stream's own phase. An observed host reconnects
 with a growing delay when its stream ends or goes silent for longer than the protocol's lease; an
-unobserved one is retired and reopens on the next `start`, `live` or `observe`.
+unobserved one is retired and reopens on the next `start`, `live` or `observe`. Until the stream
+delivers, the phase names the step it is on, as the gateway reports it.
 */
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
   type HostId,
   type HostKey,
   hostKey,
+  LISTING_STEPS,
+  type ListingStep,
   type RecordedProjectRoot,
   recordedProjectRoot,
 } from '@vibesys/hosts';
@@ -30,6 +33,8 @@ export interface RunWatchPorts {
     bytes: Uint8Array,
     signal: AbortSignal,
     receive: (bytes: Uint8Array) => void,
+    /** Told each step the stream reaches before its first frame. */
+    reached: (step: ListingStep) => void,
   ): Promise<void>;
 }
 
@@ -42,11 +47,19 @@ export interface WatchedRun {
 
 /** Where the host's stream stands, as its observers hear it. */
 export type RunsPhase =
-  /** The initial runs have not all arrived. */
-  | {readonly kind: 'connecting'}
+  /** The initial runs have not all arrived; `step` is how far the stream has come. */
+  | {readonly kind: 'connecting'; readonly step: ListingStep}
   | {readonly kind: 'live'}
-  /** The stream ended or went silent; `attempt` counts the failures since it last delivered. */
-  | {readonly kind: 'reconnecting'; readonly attempt: number; readonly detail: string};
+  /**
+   * The stream ended or went silent at `step`; `attempt` counts the failures since it last
+   * delivered.
+   */
+  | {
+      readonly kind: 'reconnecting';
+      readonly attempt: number;
+      readonly detail: string;
+      readonly step: ListingStep;
+    };
 
 export interface RunsState {
   readonly phase: RunsPhase;
@@ -57,6 +70,8 @@ export interface RunsState {
 export interface RunWatch {
   start(host: HostId): void;
   cancel(host: HostId): void;
+  /** Open a host's stream again now, with no failures counted; a delivering stream is left be. */
+  retry(host: HostId): void;
   close(): void;
   live(host: HostId): Promise<number>;
   /**
@@ -81,6 +96,9 @@ interface HostRuns {
   readonly listeners: Set<(state: RunsState) => void>;
   failures: number;
   detail: string;
+  /** How far the current attempt has come, and how far the last failed one came. */
+  step: ListingStep;
+  failedAt: ListingStep;
   cancelLease: (() => void) | null;
   cancelRetry: (() => void) | null;
 }
@@ -95,6 +113,17 @@ export function runWatch(ports: RunWatchPorts, schedule: ScheduleTimeout): RunWa
     },
     cancel(host) {
       stop(context, hostKey(host));
+    },
+    retry(host) {
+      const key = hostKey(host);
+      const opened = hosts.get(key);
+      if (opened === undefined || opened.ready) return;
+      opened.abort.abort();
+      opened.cancelRetry?.();
+      opened.cancelRetry = null;
+      opened.failures = 0;
+      connect(context, key, opened);
+      notify(opened);
     },
     close() {
       for (const key of [...hosts.keys()]) stop(context, key);
@@ -136,6 +165,8 @@ function open(context: Context, host: HostId): HostRuns {
     listeners: new Set(),
     failures: 0,
     detail: '',
+    step: LISTING_STEPS[0],
+    failedAt: LISTING_STEPS[0],
     cancelLease: null,
     cancelRetry: null,
   };
@@ -148,16 +179,28 @@ function open(context: Context, host: HostId): HostRuns {
 function connect(context: Context, key: HostKey, opened: HostRuns): void {
   const attempt = new AbortController();
   opened.abort = attempt;
+  opened.step = LISTING_STEPS[0];
   const bytes = toBinary(WatchRunsRequestSchema, create(WatchRunsRequestSchema, {}));
   armLease(context, key, opened, attempt);
   void context.ports
-    .stream(opened.host, bytes, attempt.signal, frame =>
-      accept(context, key, opened, attempt, frame),
+    .stream(
+      opened.host,
+      bytes,
+      attempt.signal,
+      frame => accept(context, key, opened, attempt, frame),
+      step => reached(opened, attempt, step),
     )
     .then(
       () => ended(context, key, opened, attempt, 'the run stream ended'),
       (error: unknown) => ended(context, key, opened, attempt, describe(error)),
     );
+}
+
+/** A step reached by a stream still current; a retrying host keeps showing where it failed. */
+function reached(opened: HostRuns, attempt: AbortController, step: ListingStep): void {
+  if (attempt.signal.aborted) return;
+  opened.step = step;
+  if (opened.failures === 0 && !opened.ready) notify(opened);
 }
 
 function describe(error: unknown): string {
@@ -232,6 +275,7 @@ function ended(
   }
   opened.failures += 1;
   opened.detail = detail;
+  opened.failedAt = opened.step;
   opened.ready = false;
   opened.runs.clear();
   for (const waiter of opened.waiters) waiter(0);
@@ -264,10 +308,15 @@ function stop(context: Context, key: HostKey): void {
 function stateOf(opened: HostRuns): RunsState {
   const phase: RunsPhase =
     opened.failures > 0
-      ? {kind: 'reconnecting', attempt: opened.failures, detail: opened.detail}
+      ? {
+          kind: 'reconnecting',
+          attempt: opened.failures,
+          detail: opened.detail,
+          step: opened.failedAt,
+        }
       : opened.ready
         ? {kind: 'live'}
-        : {kind: 'connecting'};
+        : {kind: 'connecting', step: opened.step};
   return {phase, runs: new Map(opened.runs)};
 }
 

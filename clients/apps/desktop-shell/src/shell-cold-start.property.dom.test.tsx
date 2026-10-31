@@ -152,7 +152,7 @@ function coldStartStores(bridge: WelcomeBridge, clock: FakeClock) {
 
 /** What the Runs screen says: it is reading, it holds a run, or it says there is none. */
 function runsScreenSays(container: HTMLElement): 'reading' | 'runs' | 'none' | null {
-  if (container.querySelector('[role="progressbar"]') !== null) return 'reading';
+  if (container.querySelector('.vs-step-list') !== null) return 'reading';
   if (container.textContent?.includes('No runs')) return 'none';
   return container.querySelector('.vs-overview-tile') === null ? null : 'runs';
 }

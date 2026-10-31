@@ -4437,7 +4437,7 @@
     },
     "PauseNowRequest": {
       "additionalProperties": false,
-      "description": "Cancel unfinished work and exit; saved work remains resumable.",
+      "description": "Cancel unfinished work and exit; saved work remains resumable.\n\n``drain_seconds`` is how long requests that cannot be cancelled at once get to finish before\nthey are interrupted; the run's cleanup bound when absent.",
       "properties": {
         "control_id": {
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
@@ -4462,6 +4462,19 @@
           ],
           "default": null,
           "title": "Expected Epoch"
+        },
+        "drain_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Drain Seconds"
         }
       },
       "required": [
@@ -4473,7 +4486,7 @@
     },
     "PauseRequest": {
       "additionalProperties": false,
-      "description": "Finish turns in flight, release evaluation jobs, save and exit for relaunch.",
+      "description": "Finish turns in flight, release evaluation jobs, save and exit for relaunch.\n\n``drain_seconds`` bounds the wait: when it passes, the pause cancels what still runs, as\nPause-now does. Without it the pause waits for its turns' own limits.",
       "properties": {
         "control_id": {
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
@@ -4498,6 +4511,19 @@
           ],
           "default": null,
           "title": "Expected Epoch"
+        },
+        "drain_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Drain Seconds"
         }
       },
       "required": [

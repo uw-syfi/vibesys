@@ -25,8 +25,10 @@ def test_the_current_envelope_version_has_frozen_descriptors_equal_to_the_live_m
         "`uv run --locked python -m tests.vibesys.fact_import.descriptors`"
     )
     assert path.read_text() == render(live_descriptors()), (
-        f"the live models changed {path.name} in place: bump ENVELOPE_SCHEMA_VERSION and "
-        "freeze the new version instead"
+        f"the live models changed {path.name}: if every saved envelope still validates "
+        "(scripts/check_persisted_schema_compat.py), regenerate it with "
+        "`uv run --locked python -m tests.vibesys.fact_import.descriptors`; otherwise bump "
+        "ENVELOPE_SCHEMA_VERSION and freeze the new version instead"
     )
 
 

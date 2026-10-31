@@ -6,7 +6,6 @@ import {
   Chip,
   EmptyState,
   Field,
-  LoadingBar,
   type MenuItem,
   OverviewGroup,
   OverviewTile,
@@ -17,6 +16,8 @@ import {
   Select,
   type SelectOption,
   Stack,
+  type StepItem,
+  StepList,
   Text,
 } from '@vibesys/ui';
 import type {JSX} from 'react';
@@ -77,6 +78,13 @@ function TileOf(props: {
   );
 }
 
+/** One machine's way to its run list; `retry` is set once it has stopped. */
+export interface MachineSteps {
+  readonly machine: string;
+  readonly steps: readonly StepItem[];
+  readonly retry: (() => void) | null;
+}
+
 function Draft(props: {readonly draft: RunsDraft}): JSX.Element {
   const {draft} = props;
   return (
@@ -101,10 +109,10 @@ function Draft(props: {readonly draft: RunsDraft}): JSX.Element {
 /**
  * The Runs dashboard: a header with the title and the chart key, and under it the machine the runs
  * are narrowed to (when one is) and a Group by select, then every run's tile in groups on a grid
- * that fills the width, the runs that need their user first, each run in one group. With no run it
- * says so, with a New run action, or while the machines are still answering (`reading`) that it is
- * reading. Pressing a tile opens its run (`open` is handed the tile's id); `menu` is a tile's row
- * menu.
+ * that fills the width, the runs that need their user first, each run in one group. With no run and
+ * every machine listed it says so, with a New run action; before that each machine still loading or
+ * stopped has a block of its steps (`loads`). Pressing a tile opens its run (`open` is handed the
+ * tile's id); `menu` is a tile's row menu.
  */
 export function RunsScreen(props: {
   readonly tiles: readonly Tile[];
@@ -116,14 +124,15 @@ export function RunsScreen(props: {
   readonly open: (id: string) => void;
   readonly menu: (id: string) => readonly MenuItem[];
   readonly draft: RunsDraft | null;
-  /** Whether the machines have not yet said what runs they hold. */
-  readonly reading: boolean;
+  /** The machines that have not said what runs they hold, each with its steps. */
+  readonly loads: readonly MachineSteps[];
   readonly newRun: () => void;
   /** What to say when saved runs could not be read; none when all were. */
   readonly notice: {readonly title: string; readonly body: string} | null;
 }): JSX.Element {
   const {by, machine} = props;
   const tiles = onMachine(props.tiles, machine);
+  const loads = props.loads.filter(load => machine === null || load.machine === machine);
   const tile = (each: Tile): JSX.Element => (
     <TileOf key={each.id} tile={each} open={props.open} menu={props.menu} />
   );
@@ -173,8 +182,15 @@ export function RunsScreen(props: {
           <Banner tone="warn" title={props.notice.title} body={props.notice.body} />
         )}
         {props.draft === null ? null : <Draft draft={props.draft} />}
-        {tiles.length > 0 ? null : props.reading ? (
-          <LoadingBar label="Reading runs" />
+        {tiles.length > 0 ? null : loads.length > 0 ? (
+          loads.map(load => (
+            <StepList
+              key={load.machine}
+              title={load.machine}
+              steps={load.steps}
+              {...(load.retry === null ? {} : {retry: load.retry})}
+            />
+          ))
         ) : (
           <EmptyState
             title="No runs"

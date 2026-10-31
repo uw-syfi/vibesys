@@ -379,6 +379,16 @@ class SignalCycleError(Exception):
     """A reducer re-emitted a signal already consumed in this transition."""
 
 
+class InterruptPolicy(StrEnum):
+    """What core does with a step whose attempt was interrupted without a result."""
+
+    RERUN = "rerun"
+    """Run it again as the next attempt."""
+
+    CANCEL = "cancel"
+    """Settle it as ``Cancelled(INTERRUPTED)``: a person watched the attempt and decides."""
+
+
 class OperationSchemaRef(Value):
     """Operation schema ref lifecycle contract."""
 
@@ -390,6 +400,20 @@ class OperationSchemaRef(Value):
     request_schema: SchemaRef
     outcome_schema: SchemaRef
     lifecycle: LifecycleClass
+    on_interrupt: InterruptPolicy = Field(
+        default=InterruptPolicy.RERUN, exclude_if=lambda policy: policy is InterruptPolicy.RERUN
+    )
+    """The asker knows whether a person watches the turn; only a session turn may cancel."""
+
+    @model_validator(mode="after")
+    def only_turns_cancel(self) -> Self:
+        """A step that nobody watches is always run again."""
+        if (
+            self.on_interrupt is InterruptPolicy.CANCEL
+            and self.lifecycle != LifecycleClass.SESSION_TURN
+        ):
+            raise ContractValidationError("on_interrupt", "only a session turn may cancel")
+        return self
 
 
 class RevisionAuthority(StrEnum):

@@ -99,7 +99,12 @@ describe('the Runs dashboard', () => {
           [server('r2', '/p/kv', 'completed')],
         ),
         listed('ssh:host-b'),
-        {kind: 'unavailable', host: 'local', connection: {kind: 'offline', detail: 'down'}},
+        {
+          kind: 'unavailable',
+          host: 'local',
+          step: 'gateway',
+          connection: {kind: 'offline', detail: 'down'},
+        },
       ],
       [opened('ssh:host-a', '/p/queue-rs', 'r1'), opened('ssh:host-b', '/p/old', 'r9')],
     );
@@ -607,7 +612,12 @@ class FlakyHost {
       type: 'listing',
       listing: up
         ? listed('ssh:host-a')
-        : {kind: 'unavailable', host: 'ssh:host-a', connection: {kind: 'reconnecting', attempt: 1}},
+        : {
+            kind: 'unavailable',
+            host: 'ssh:host-a',
+            step: 'gateway',
+            connection: {kind: 'reconnecting', attempt: 1},
+          },
     });
   }
 

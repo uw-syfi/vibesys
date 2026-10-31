@@ -2,9 +2,33 @@ import {describe, expect, test} from 'bun:test';
 import type {DashboardRow} from '@vibesys/feature-app-shell/state';
 import {GROUP_BYS, groupTiles, tilesOf} from '@vibesys/feature-runs-dashboard/state';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
-import {runCounts, runInput} from './shell-runs.js';
+import {loadingMachines, runCounts, runInput} from './shell-runs.js';
 
 const HOSTS = ['local', 'ssh:host-a', 'ssh:host-b', 'ssh:host-c'] as const;
+
+test('a listed machine has no block, a loading one its steps, and only a failed one a retry', () => {
+  const retried: string[] = [];
+  const [loading, failed, ...rest] = loadingMachines(
+    [
+      {kind: 'listed', host: 'ssh:host-c'},
+      {kind: 'loading', host: 'local', step: 'handshake', attempt: 2},
+      {kind: 'failed', host: 'ssh:host-a', step: 'gateway', reason: 'helper exited (code 1)'},
+    ],
+    host => retried.push(host),
+  );
+  expect(rest).toEqual([]);
+  expect(loading?.machine).toBe('This Mac');
+  expect(loading?.retry).toBeNull();
+  expect(loading?.steps.map(step => [step.state, step.position, step.note])).toEqual([
+    ['done', '1/3', 'Retry 2'],
+    ['current', '2/3', 'Retry 2'],
+    ['pending', '3/3', 'Retry 2'],
+  ]);
+  expect(failed?.steps.map(step => step.state)).toEqual(['failed', 'pending', 'pending']);
+  expect(failed?.steps[0]?.note).toBe('helper exited (code 1)');
+  failed?.retry?.();
+  expect(retried).toEqual(['ssh:host-a']);
+});
 
 test('each machine is counted its own runs, and the counts add up to every run listed', () => {
   for (const seed of SEEDS) {
