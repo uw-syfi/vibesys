@@ -51,6 +51,8 @@ supply time as event data and use no clocks or Fakes.
 | Real network, ports, services | Use a Fake. Real dependencies belong only in opt-in real-contract or end-to-end tests. |
 | Shared state: working directory, environment, global singletons, static fields, files outside a per-test temp directory | Own the state per test. Tests must pass in any order and in parallel. Serializing tests is a last resort for a truly host-wide resource. |
 | Map, set, or filesystem iteration order, object identity, temp paths in output | Sort or normalize before comparing. |
+| A browser locator that names a row by position (`first()`, `nth()`) in a list the page windows or reorders, kept across an action | A locator re-resolves on every assertion, so after the action it can name another row: a scroll moves the window. Name the row by its text. |
+| Page state that depends on how many times the page drew between two inputs (a block kept open because it was drawn while it was being written) | Send the input, then wait for the state that shows the page drew it (the live marker) before the next input; never rely on the inputs' speed. |
 | Leaked threads, subprocesses, or files from an earlier test | The component that creates a resource owns its cleanup. Use scoped-cleanup constructs or fixtures. |
 
 ## Verify before handing back
