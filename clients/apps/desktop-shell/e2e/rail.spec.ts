@@ -222,11 +222,11 @@ test('saved runs that could not be read are said on the dashboard, and the reada
   ];
   await open(page, {...SEED, skippedRecent});
 
-  const notice = page.getByRole('main').locator('.vs-banner');
-  await expect(notice).toContainText('2 saved runs skipped');
-  await notice.getByRole('button', {name: 'Show details'}).click();
-  await expect(notice).toContainText('runs[16].task must be a task name');
-  await expect(notice).toContainText('runs[17].instanceId');
+  const notice = page.getByRole('main').getByText('2 saved runs skipped', {exact: true});
+  await expect(notice).toBeVisible();
+  // What was skipped is on the pointer.
+  await expect(notice).toHaveAttribute('title', /runs\[16\]\.task must be a task name/);
+  await expect(notice).toHaveAttribute('title', /runs\[17\]\.instanceId/);
   expect(await screenCheck(page)).toEqual([]);
 });
 

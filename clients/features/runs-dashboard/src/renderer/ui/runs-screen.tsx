@@ -1,5 +1,4 @@
 import {
-  Banner,
   Button,
   Card,
   type ChartKeyItem,
@@ -142,9 +141,14 @@ export function RunsScreen(props: {
       header={
         <Stack gap="space-4">
           <Row justify="between" gap="space-4" wrap>
-            <Text as="h1" variant="title">
-              Runs
-            </Text>
+            <Row gap="space-3" align="center" wrap>
+              <Text as="h1" variant="title">
+                Runs
+              </Text>
+              {props.notice === null ? null : (
+                <Chip label={props.notice.title} tone="warn" dot hint={props.notice.body} />
+              )}
+            </Row>
             {tiles.length === 0 ? null : <ResultChartKey label="Chart key" items={CHART_KEY} />}
           </Row>
           {machine === null && tiles.length === 0 ? null : (
@@ -178,9 +182,6 @@ export function RunsScreen(props: {
       }
     >
       <Stack gap="space-5">
-        {props.notice === null ? null : (
-          <Banner tone="warn" title={props.notice.title} body={props.notice.body} />
-        )}
         {props.draft === null ? null : <Draft draft={props.draft} />}
         {tiles.length > 0 ? null : loads.length > 0 ? (
           loads.map(load => (

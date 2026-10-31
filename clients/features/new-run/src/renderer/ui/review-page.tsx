@@ -4,11 +4,11 @@
  */
 import type {HostKey} from '@vibesys/hosts';
 import {
-  Banner,
   Button,
   type CheckItem,
   CheckList,
   type CheckState,
+  Chip,
   Row,
   Stack,
   Text,
@@ -176,7 +176,7 @@ function Summary(props: {
 }
 
 /** Why the last load, fix or start failed, in plain words, with a retry for a load or check. */
-export function ProblemBanner(props: {
+export function ProblemStatus(props: {
   readonly context: NewRunContext;
   readonly dispatch: Dispatch;
 }): JSX.Element | null {
@@ -184,15 +184,15 @@ export function ProblemBanner(props: {
   if (context.problem === null) return null;
   const words = problemWords(context.problem, machineLabel(context.form.machine));
   return (
-    <Banner
-      tone="failed"
-      title={words.title}
-      body={words.body}
-      {...(words.detail === null ? {} : {hint: words.detail})}
-      {...(words.retry
-        ? {actions: <Button text="Try again" press={() => dispatch({type: 'retry'})} />}
-        : {})}
-    />
+    <Row gap="space-3" align="center" wrap>
+      <Chip
+        label={words.title}
+        tone="err"
+        dot
+        hint={words.detail === null ? words.body : `${words.body}\n${words.detail}`}
+      />
+      {words.retry ? <Button text="Try again" press={() => dispatch({type: 'retry'})} /> : null}
+    </Row>
   );
 }
 

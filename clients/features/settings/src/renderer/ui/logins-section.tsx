@@ -4,7 +4,7 @@
  * credential is held, never the credential.
  */
 import type {AgentLogin} from '@vibesys/ipc';
-import {Banner, Button, Card, Chip, Row, Stack, Text} from '@vibesys/ui';
+import {Button, Card, Chip, Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
   type LoginProgress,
@@ -29,9 +29,11 @@ function Progress(props: {
   if (progress.kind === 'failed') return null;
   if (progress.kind === 'unavailable') {
     return (
-      <Banner
+      <Chip
+        label="Cannot sign in"
         tone="warn"
-        title={
+        dot
+        hint={
           progress.reason === 'not_installed'
             ? `${login.provider_name} is not installed on ${machine}.`
             : `${login.provider_name} has no login command to start.`
@@ -40,12 +42,17 @@ function Progress(props: {
     );
   }
   return (
-    <Banner
-      tone="ok"
-      title={`The login started on ${machine}.`}
-      body={progress.instruction ?? `Finish signing in on ${machine}, then check again.`}
-      actions={<Button text="Check again" press={props.check} />}
-    />
+    <Row gap="space-3" align="center" wrap>
+      <Chip
+        label="Login started"
+        tone="ok"
+        dot
+        hint={`The login started on ${machine}. ${
+          progress.instruction ?? `Finish signing in on ${machine}, then check again.`
+        }`}
+      />
+      <Button text="Check again" press={props.check} />
+    </Row>
   );
 }
 

@@ -131,6 +131,14 @@
   visibility: hidden;
   font-weight: var(--text-body-strong-weight);
 }
+/* A mark sits in the segment's top right corner and takes no room of its own. */
+.vs-segment-mark {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  display: flex;
+  pointer-events: none;
+}
 /* The native radio covers its segment, unseen: it takes the presses, the focus and the arrow keys. */
 .vs-segment-input {
   position: absolute;
@@ -394,9 +402,11 @@
 
 /* --- chip and status dot ----------------------------------------------------------------------- */
 
+/* As wide as its label wherever it sits: a chip alone in a column is not stretched into a strip. */
 .vs-chip {
   display: inline-flex;
   flex: none;
+  width: fit-content;
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-3);

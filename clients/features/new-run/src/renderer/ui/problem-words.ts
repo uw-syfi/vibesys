@@ -2,7 +2,7 @@
  * What the New run screen says when a load, fix or start failed: a title that names what failed,
  * the main process's own words when it reported one, else a plain line that something unexpected
  * happened. A raw error (`bridge.x is not a function`) is never shown. A load or check can be tried
- * again from the banner; a fix or start is pressed again where it was pressed.
+ * again from the status; a fix or start is pressed again where it was pressed.
  */
 import {FAILURE_CAUSE_WORDS, UNEXPECTED_FAILURE} from '@vibesys/ipc';
 import type {Problem, Step} from '../../state/index.js';
@@ -15,7 +15,7 @@ export interface ProblemWords {
    * already the whole account.
    */
   readonly detail: string | null;
-  /** Whether the banner offers "Try again" (`retry`). */
+  /** Whether the status offers "Try again" (`retry`). */
   readonly retry: boolean;
 }
 

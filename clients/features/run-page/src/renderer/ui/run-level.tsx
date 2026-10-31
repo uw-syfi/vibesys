@@ -18,6 +18,7 @@ import {
   Row,
   SearchBox,
   SegmentedControl,
+  type SegmentOption,
   Select,
   Stack,
 } from '@vibesys/ui';
@@ -25,6 +26,7 @@ import {type JSX, useState} from 'react';
 import {
   ageWords,
   chipPressed,
+  hasDiagnostic,
   type IdeaEffects,
   type IdeasFilter,
   type ImplementerOutcomes,
@@ -58,7 +60,7 @@ import {UsageView} from './views/usage/usage-view.js';
 
 type Dispatch = (action: RunPageAction) => void;
 
-const MODES: readonly {readonly value: RunMode; readonly label: string}[] = [
+const MODES: readonly SegmentOption<RunMode>[] = [
   {value: 'ideas', label: 'Ideas'},
   {value: 'timeline', label: 'Timeline'},
   {value: 'agents', label: 'Agents'},
@@ -66,9 +68,18 @@ const MODES: readonly {readonly value: RunMode; readonly label: string}[] = [
   {value: 'logs', label: 'Logs'},
 ];
 
+/** The run level's faces; Logs wears a dot while the run's history holds a diagnostic to read there. */
+function runModes(state: RunPageState): readonly SegmentOption<RunMode>[] {
+  return hasDiagnostic(state)
+    ? MODES.map(mode =>
+        mode.value === 'logs' ? {...mode, mark: {tone: 'warn', label: 'Diagnostic'}} : mode,
+      )
+    : MODES;
+}
+
 export function ModeSwitch(props: {
   readonly mode: RunMode;
-  readonly options: readonly {readonly value: RunMode; readonly label: string}[];
+  readonly options: readonly SegmentOption<RunMode>[];
   readonly zoom: Zoom;
 }): JSX.Element {
   return (
@@ -172,7 +183,9 @@ function IdeasFace(props: {
   if (base.model.candidates.candidates.length === 0) {
     return (
       <>
-        {props.modeControls ? <ModeSwitch mode="ideas" options={MODES} zoom={base.zoom} /> : null}
+        {props.modeControls ? (
+          <ModeSwitch mode="ideas" options={runModes(state)} zoom={base.zoom} />
+        ) : null}
         <EmptyState
           title="No ideas yet"
           body={base.emptyLabelsOnly ? '' : 'Each idea the run tries shows here.'}
@@ -182,7 +195,9 @@ function IdeasFace(props: {
   }
   return (
     <>
-      {props.modeControls ? <ModeSwitch mode="ideas" options={MODES} zoom={base.zoom} /> : null}
+      {props.modeControls ? (
+        <ModeSwitch mode="ideas" options={runModes(state)} zoom={base.zoom} />
+      ) : null}
       <IdeasLegend state={state} base={base} dispatch={dispatch} />
       <Row gap="space-3" align="center">
         <Stack gap="space-0" grow>
@@ -396,7 +411,7 @@ export function RunLevel(props: {
         width="fill"
         header={face.header}
       >
-        <ModeSwitch mode={mode} options={MODES} zoom={base.zoom} />
+        <ModeSwitch mode={mode} options={runModes(state)} zoom={base.zoom} />
         {face.body}
       </FramedPane>
       {mode === 'usage' ? null : <NowPane base={base} />}

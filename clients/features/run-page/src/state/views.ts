@@ -1,6 +1,6 @@
 /**
  * What the Run screen shows, as selectors over `RunPageState`: the header's words and actions, the
- * startup timeline, the log streams grouped by owner, and the pause and ended banners. The renderer
+ * startup timeline, the log streams grouped by owner, and the pause question and ended words. The renderer
  * maps these onto `@vibesys/ui` components and decides nothing itself.
  */
 import type {LogOwner, RunEvent, RunOverview, Span} from '@vibesys/contracts';
@@ -9,7 +9,13 @@ import {endedLook, type HostRun, problemWord, RUN_GONE_WORDS, type RunEnd} from 
 import {decodeNarrationLine, type LogView, logViewRecords} from '@vibesys/logs';
 import type {CoreState} from '@vibesys/run-state';
 import {type RunEnding, type RunTrace, traceSpans} from '@vibesys/run-state/trace';
-import {type AdoptedCandidate, adoptedCandidate, endReason, unclipped} from './end-words.js';
+import {
+  type AdoptedCandidate,
+  adoptedCandidate,
+  briefFailure,
+  endReason,
+  unclipped,
+} from './end-words.js';
 import {overviewAt, traceAt} from './live.js';
 import {type ModelNames, NO_MODEL_NAMES} from './model-names.js';
 import {
@@ -42,8 +48,17 @@ export interface HeaderView {
   readonly spent: TokensReading | null;
   /** What ran each role of the run, from its usage records: `Planner` with `model on harness`. */
   readonly agents: readonly {readonly role: string; readonly ran: readonly string[]}[];
+  /**
+   * Why an ended run ended other than by finishing: a few words beside the status, and the whole of
+   * it for the pointer. Null while the run is not over, or when the status says it all.
+   */
+  readonly ended: {readonly brief: string; readonly reason: string} | null;
   readonly pause: Offer;
   readonly pauseNow: Offer;
+  /** Resume an ended run; disabled while its request is on its way. */
+  readonly resume: Offer;
+  /** Start again from an ended run. */
+  readonly runAgain: Offer;
   readonly openWindow: Offer;
   readonly archive: Offer;
 }
@@ -145,6 +160,7 @@ export function headerView(state: RunPageState, names: ModelNames = NO_MODEL_NAM
       role: each.role,
       ran: each.ran.flatMap(who => whoWords(who) ?? []),
     })),
+    ended: endedWords(state),
     pause: offer(
       state.readOnly !== true && phase.kind === 'running' && !phase.pausing,
       commandReason(state),
@@ -156,20 +172,25 @@ export function headerView(state: RunPageState, names: ModelNames = NO_MODEL_NAM
       state.pauseNow.kind === 'idle'
         ? commandReason(state)
         : state.pauseNow.kind === 'confirming'
-          ? 'Confirm or cancel below'
+          ? 'Waiting for your answer'
           : 'Pausing',
     ),
+    resume: offer(
+      state.readOnly !== true && phase.kind === 'ended',
+      state.resumeStatus?.pending ? state.resumeStatus.reason : undefined,
+    ),
+    runAgain: offer(phase.kind === 'ended'),
     openWindow: offer(true, unavailable['open-window']),
     archive: offer(state.readOnly !== true && phase.kind === 'ended'),
   };
 }
 
-/** The banner under the header while Pause now is being confirmed or is under way. */
-export type PauseNowBannerView =
+/** The question asked before Pause now is sent: none, or its title and what it costs. */
+export type PauseNowConfirmView =
   | {readonly kind: 'none'}
   | {readonly kind: 'confirm'; readonly title: string; readonly body: string};
 
-export function pauseNowBannerView(state: RunPageState): PauseNowBannerView {
+export function pauseNowConfirmView(state: RunPageState): PauseNowConfirmView {
   return state.pauseNow.kind === 'confirming'
     ? {
         kind: 'confirm',
@@ -546,11 +567,10 @@ export function unplacedRun(
 
 export interface EndedView {
   readonly title: string;
-  /** A run that failed is `failed`: the banner holds that state; it is not a passing error. */
-  readonly tone: 'neutral' | 'ok' | 'warn' | 'failed';
+  /** Why the run ended, whole: the pointer on the status when `title` does not say it all. */
   readonly reason: string;
-  /** "Resume from round N", only when the end record says the run can resume. */
-  readonly resume: string | null;
+  /** A few words of a failure's message, for beside the status; null when `title` says it all. */
+  readonly brief: string | null;
 }
 
 /**
@@ -564,13 +584,13 @@ function wholeReason(state: RunPageState, registry: string | null): string | nul
   return state.summary.kind === 'ready' ? (state.summary.terminal?.message ?? null) : null;
 }
 
-/** What the ended banner says while the history that settles its verdict is still being read. */
+/** What the ended reason says while the history that settles its verdict is still being read. */
 const HISTORY_PENDING = 'Reading the run’s history…';
 
 /** What the page knows of the adopted candidate while the history is not (all) read: nothing. */
 const NOT_READ: ReturnType<typeof adoptedAtEnd> = [null, undefined];
 
-/** The ended banner, from the end record. */
+/** How the run ended, from the end record. */
 export function endedView(state: RunPageState): EndedView | null {
   const phase = runPhase(state);
   if (phase.kind !== 'ended') return null;
@@ -592,13 +612,18 @@ export function endedView(state: RunPageState): EndedView | null {
             direction,
             end.uncompared === true,
           );
-  const resume = 'Resume';
-  return {
-    title: label,
-    tone: tone === 'live' ? 'neutral' : tone === 'err' ? 'failed' : tone,
-    reason,
-    resume,
-  };
+  // Only a failure's own message needs its words beside the status; the others the status says.
+  const message =
+    end === null
+      ? tone !== 'ok' && phase.run.reason !== null
+      : end.outcome === 'failed' || end.outcome === 'force_stopped';
+  return {title: label, reason, brief: message ? briefFailure(reason) : null};
+}
+
+/** The header's words for an ended run that did not simply finish; see `HeaderView.ended`. */
+function endedWords(state: RunPageState): HeaderView['ended'] {
+  const ended = endedView(state);
+  return ended === null || ended.brief === null ? null : {brief: ended.brief, reason: ended.reason};
 }
 
 /**

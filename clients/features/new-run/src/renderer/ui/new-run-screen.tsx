@@ -31,7 +31,7 @@ import {
 import {GoalPage} from './goal-page.js';
 import {type FolderCompletion, ProjectPage, TaskPage} from './project-pages.js';
 import {Nav, Question} from './question.js';
-import {ProblemBanner, ReviewPage, StartButton} from './review-page.js';
+import {ProblemStatus, ReviewPage, StartButton} from './review-page.js';
 import {progressLine, type StepView, stepViews} from './steps.js';
 import {entriesIn, type MachineOption} from './view.js';
 import {WherePage} from './where-page.js';
@@ -255,7 +255,7 @@ export function NewRunScreen(props: ScreenProps): JSX.Element {
       >
         <Stack gap="space-5">
           {at === 'start' ? <Wordmark art={VIBESYS_WORDMARK} size="compact" /> : null}
-          <ProblemBanner context={context} dispatch={dispatch} />
+          <ProblemStatus context={context} dispatch={dispatch} />
           {at === null || copy === null ? (
             examplesFailed(context, at) ? (
               <ExamplesFailed context={context} dispatch={dispatch} machines={props.machines} />

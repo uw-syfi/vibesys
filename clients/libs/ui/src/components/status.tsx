@@ -1,4 +1,5 @@
 import type {JSX} from 'react';
+import {withoutPaths} from './paths.js';
 
 /**
  * The tones a status reads in. `live` is in progress; it differs from `ok` by the ring of its dot
@@ -18,7 +19,7 @@ export function Chip(props: {
   readonly dot?: boolean;
   /** The label is an identifier a person may copy (a model id), set in the code face. */
   readonly mono?: boolean;
-  /** The longer account behind a short label, for the pointer. */
+  /** The longer account behind a short label, for the pointer; a filesystem path in it is shown by its last name only (`withoutPaths`). */
   readonly hint?: string;
 }): JSX.Element {
   const tone = props.tone ?? 'neutral';
@@ -27,7 +28,7 @@ export function Chip(props: {
       className="vs-chip"
       data-tone={tone}
       data-mono-id={props.mono === true || undefined}
-      title={props.hint}
+      title={props.hint === undefined ? undefined : withoutPaths(props.hint)}
     >
       {props.dot === true ? <span className="vs-dot" data-tone={tone} aria-hidden="true" /> : null}
       {props.label}

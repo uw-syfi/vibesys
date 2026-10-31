@@ -1,6 +1,6 @@
 /**
- * Toasts and compact banners in the window: a failure passed through is a toast at the top right,
- * collapsed, below the title bar and clear of the rail; a state the screen holds is one line.
+ * Toasts in the window: a failure passed through is a toast at the top right, collapsed, below the
+ * title bar and clear of the rail; a problem with one thing is a status word at that thing.
  * `TOASTS_SCREENSHOTS` names a directory for the window screenshots of the app check.
  */
 import {mkdirSync, writeFileSync} from 'node:fs';
@@ -120,7 +120,7 @@ test('the toast is reachable and operable from the keyboard', async ({page}) => 
 });
 
 for (const width of [1440, 660]) {
-  test(`a state the screen holds is one line with its detail behind a button at ${width}px`, async ({
+  test(`a problem with a machine is a status word with its detail on the pointer at ${width}px`, async ({
     page,
   }) => {
     await open(page, 1440, 900, false);
@@ -134,21 +134,16 @@ for (const width of [1440, 660]) {
       .click();
     await page.getByRole('treeitem', {name: 'host-b'}).click();
     await page.setViewportSize({width, height: 900});
-    const banner = page.locator('.vs-banner').filter({hasText: 'Needs an update'});
-    await expect(banner).toBeVisible();
-    const box = await banner.boundingBox();
-    if (box === null) throw new Error('the banner is drawn');
-    expect(box.height).toBeLessThan(56);
+    const status = page.locator('[title="VibeSys on host-b needs an update"]');
+    await expect(status).toHaveText('Needs an update');
+    await expect(page.locator('.vs-banner')).toHaveCount(0);
     await expect(page.getByText('VibeSys on host-b needs an update')).toHaveCount(0);
-    await shoot(page, `banner-collapsed-${width}`);
-    await banner.getByRole('button', {name: 'Show details'}).click();
-    await expect(page.getByText('VibeSys on host-b needs an update')).toBeVisible();
-    await shoot(page, `banner-open-${width}`);
+    await shoot(page, `status-${width}`);
     await expect(toast(page)).toHaveCount(0);
   });
 }
 
-test('toasts and banners app-window contact sheet', async ({page}) => {
+test('toasts app-window contact sheet', async ({page}) => {
   if (SHOTS === undefined || sheet.length === 0) return;
   writeFileSync(join(SHOTS, 'toasts-contact-sheet.html'), contactSheetHtml(sheet, 2));
   await page.goto(`file://${join(SHOTS, 'toasts-contact-sheet.html')}`);

@@ -1,13 +1,14 @@
 /**
  * The Run screen's pure state: its store (`runPageStep`, a reducer with request tokens), the run
  * at the view (`createRunReader`), the zoom (`zoomMachine` over a `Route`), and the selectors the
- * screen renders: header, pause and ended banners, the startup timeline, the run level's
+ * screen renders: header, pause question, ended words, the startup timeline, the run level's
  * hero, chart, ideas and Now, the logs, and the scrubber (`scrubberView`) over the trace log.
  */
 
 export type {UsageRecord} from '@vibesys/contracts/host-helper';
 export {ideaOfAttempt} from './attempt-ideas.js';
 export {type BaselineColumns, baselineColumns} from './baselines.js';
+export {briefFailure} from './end-words.js';
 export {
   type GatewayEvent,
   type GatewayInput,
@@ -102,6 +103,7 @@ export {
   type SpanDetailReply,
 } from './run-page.js';
 export {type SummaryReply, summaryFacts, type WireSummary} from './run-summary.js';
+export {hasDiagnostic} from './scoped-logs.js';
 export {scrubberView, viewAtPosition} from './scrub.js';
 export {
   projectSkeleton,
@@ -164,7 +166,7 @@ export {
   historyProblem,
   machineBlockWords,
   type Offer,
-  pauseNowBannerView,
+  pauseNowConfirmView,
   runEnding,
   runGoneWords,
   streamLines,

@@ -2,7 +2,11 @@ import {expect, test} from 'bun:test';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {type MachineSteps, RunsScreen} from './runs-screen.js';
 
-function screen(loads: readonly MachineSteps[], machine: string | null = null): string {
+function screen(
+  loads: readonly MachineSteps[],
+  machine: string | null = null,
+  notice: {readonly title: string; readonly body: string} | null = null,
+): string {
   return renderToStaticMarkup(
     <RunsScreen
       tiles={[]}
@@ -15,7 +19,7 @@ function screen(loads: readonly MachineSteps[], machine: string | null = null): 
       draft={null}
       loads={loads}
       newRun={() => {}}
-      notice={null}
+      notice={notice}
     />,
   );
 }
@@ -50,4 +54,16 @@ test('a stopped machine offers Retry', () => {
 test('narrowed to a machine, only its block shows', () => {
   const html = screen([load('This Mac', null), load('host-a', null)], 'host-a');
   expect(html.match(/vs-step-list/g)).toHaveLength(1);
+});
+
+test('saved runs that could not be read are a status word beside the title, the detail on the pointer', () => {
+  const html = screen([], null, {
+    title: '2 saved runs skipped',
+    body: 'recent.json: runs[16].task must be a task name',
+  });
+  expect(html).toContain('>2 saved runs skipped<');
+  expect(html).toContain('title="recent.json: runs[16].task must be a task name"');
+  expect(html).not.toContain('>recent.json');
+  expect(html).not.toContain('vs-banner');
+  expect(screen([])).not.toContain('saved runs skipped');
 });

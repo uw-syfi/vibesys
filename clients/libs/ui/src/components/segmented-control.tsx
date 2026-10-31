@@ -1,9 +1,18 @@
 import {type JSX, useId} from 'react';
+import {StatusDot, type StatusTone} from './status.js';
 
 /** One choice: the value it stands for and the text it shows. */
 export interface ChoiceOption<T extends string> {
   readonly value: T;
   readonly label: string;
+}
+
+/**
+ * A segment. A `mark` draws a small dot in its corner, named by its `label` (also on the pointer):
+ * something inside it wants a look. It takes no room, so the segment is as wide marked as not.
+ */
+export interface SegmentOption<T extends string> extends ChoiceOption<T> {
+  readonly mark?: {readonly tone: StatusTone; readonly label: string};
 }
 
 /**
@@ -13,7 +22,7 @@ export interface ChoiceOption<T extends string> {
 export function SegmentedControl<T extends string>(props: {
   /** The group's accessible name. */
   readonly label: string;
-  readonly options: readonly ChoiceOption<T>[];
+  readonly options: readonly SegmentOption<T>[];
   readonly value: T;
   readonly change: (value: T) => void;
   /** `xs` is `sm` with tighter gaps and padding, for a switch in a narrow pane. */
@@ -28,7 +37,12 @@ export function SegmentedControl<T extends string>(props: {
       data-size={props.size ?? 'md'}
     >
       {props.options.map(option => (
-        <label key={option.value} className="vs-segment" data-label={option.label}>
+        <label
+          key={option.value}
+          className="vs-segment"
+          data-label={option.label}
+          title={option.mark?.label}
+        >
           <input
             className="vs-segment-input"
             type="radio"
@@ -38,6 +52,11 @@ export function SegmentedControl<T extends string>(props: {
             onChange={() => props.change(option.value)}
           />
           {option.label}
+          {option.mark === undefined ? null : (
+            <span className="vs-segment-mark">
+              <StatusDot tone={option.mark.tone} label={option.mark.label} />
+            </span>
+          )}
         </label>
       ))}
     </div>

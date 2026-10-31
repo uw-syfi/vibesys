@@ -623,12 +623,8 @@ test('a machine that serves everything but the run trace says Needs an update on
   page,
 }) => {
   await openAt(page, pageNamed('where'), withoutRunTrace());
-  await main(page)
-    .locator('.vs-banner')
-    .filter({hasText: 'VibeSys on host-b'})
-    .getByRole('button', {name: 'Show details'})
-    .click();
-  await expect(main(page).getByText('Needs an update')).toBeVisible();
+  await expect(main(page).getByText('Needs an update', {exact: true})).toBeVisible();
+  await expect(main(page).locator('[title="VibeSys on host-b needs an update"]')).toBeAttached();
 });
 
 test('a machine that serves everything but the run trace says Needs an update on Review and never starts', async ({
@@ -923,10 +919,9 @@ test('Where: a GPU task the agent machine lacks is a misfit only when results ar
   const measured = main(page).getByRole('radiogroup', {name: 'Measured on'});
   const misfit = main(page).getByText('Hardware mismatch', {exact: true});
   await expect(misfit).toBeVisible();
-  // The detail is behind the title until it is opened.
+  // The detail is on the pointer, not on the page.
   await expect(main(page).getByText(/The task targets/)).toHaveCount(0);
-  await main(page).getByRole('button', {name: 'Show details'}).click();
-  await expect(main(page).getByText(/^The task targets .*, but .* has /)).toBeVisible();
+  await expect(misfit).toHaveAttribute('title', /^The task targets .*, but .* has /);
   for (const name of ['Slurm · lab-h100', 'Slurm · campus', 'Modal']) {
     await measured.getByRole('radio', {name: new RegExp(name)}).check();
     await expect(misfit).toHaveCount(0);
@@ -1028,9 +1023,10 @@ test('a bridge call that throws is worded plainly, names what failed, and Try ag
     .getByRole('button', {name: 'New', exact: true})
     .click();
 
-  await expect(page.getByText(/Could not read the agents .* runs\./)).toBeVisible();
-  await page.getByRole('button', {name: 'Show details'}).click();
-  await expect(page.getByText('Something unexpected happened.', {exact: false})).toBeVisible();
+  const failed = page.getByText(/Could not read the agents .* runs\./);
+  await expect(failed).toBeVisible();
+  await expect(failed).toHaveAttribute('title', /Something unexpected happened\./);
+  await expect(failed).not.toHaveAttribute('title', /is not a function/);
   await expect(page.getByText(/is not a function/)).toHaveCount(0);
 
   await page.evaluate(() =>

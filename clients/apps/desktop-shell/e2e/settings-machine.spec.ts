@@ -74,13 +74,14 @@ test('another machine shows its own settings: empty, no Modal token, or too old 
   await expect(card(page, 'Modal').getByText('No token')).toBeVisible();
   await expect(main(page).getByRole('heading', {name: 'lab-h100'})).toHaveCount(0);
   await nav(page).getByRole('combobox', {name: 'Machine'}).selectOption({label: 'host-c'});
-  await expect(main(page).getByText('Needs an update', {exact: true})).toBeVisible();
-  await main(page).getByRole('button', {name: 'Show details'}).click();
-  await expect(main(page).getByText(/^The VibeSys on host-c is too old for this/)).toBeVisible();
+  // The detail is on the status word's pointer, not on the page.
+  const tooOld = main(page).getByText('Needs an update', {exact: true});
+  await expect(tooOld).toBeVisible();
+  await expect(tooOld).toHaveAttribute('title', /^The VibeSys on host-c is too old for this/);
+  await expect(main(page).getByText(/is too old for this/)).toHaveCount(0);
   await nav(page).getByRole('button', {name: 'Agent logins'}).click();
-  await expect(main(page).getByText('Needs an update', {exact: true})).toBeVisible();
-  await main(page).getByRole('button', {name: 'Show details'}).click();
-  await expect(main(page).getByText(/^The VibeSys on host-c is too old for this/)).toBeVisible();
+  await expect(tooOld).toBeVisible();
+  await expect(tooOld).toHaveAttribute('title', /^The VibeSys on host-c is too old for this/);
 });
 
 test('a cluster is saved only after Test connection passes, and is then listed and removable', async ({
@@ -98,7 +99,7 @@ test('a cluster is saved only after Test connection passes, and is then listed a
   await form.getByRole('textbox', {name: 'Workspace on the cluster'}).fill('/scratch/vibesys');
   await form.getByRole('textbox', {name: 'SSH host alias'}).fill('lab-login');
   await form.getByRole('button', {name: 'Test connection'}).click();
-  await expect(form.getByText('The connection works.')).toBeVisible();
+  await expect(form.getByText('Connection works', {exact: true})).toBeVisible();
   // The test fills the hardware the cluster's scheduler lists.
   await expect(form.getByRole('combobox', {name: 'GPU vendor'})).toHaveValue('cuda');
   await expect(form.getByRole('textbox', {name: 'GPU models'})).toHaveValue('nvidia_h100');
@@ -108,9 +109,12 @@ test('a cluster is saved only after Test connection passes, and is then listed a
   // Changing what was tested takes the test back.
   await form.getByRole('textbox', {name: 'Workspace on the cluster'}).fill('/scratch/other');
   await expect(save).toHaveAttribute('aria-disabled', 'true');
-  await expect(form.getByText('Test the connection again.', {exact: true})).toBeVisible();
+  await expect(form.getByText('Test again', {exact: true})).toHaveAttribute(
+    'title',
+    'The settings changed since the last test.',
+  );
   await form.getByRole('button', {name: 'Test connection'}).click();
-  await expect(form.getByText('The connection works.')).toBeVisible();
+  await expect(form.getByText('Connection works', {exact: true})).toBeVisible();
 
   await save.click();
   await expect(main(page).getByRole('heading', {name: 'lab-h100'})).toBeVisible();
@@ -199,12 +203,14 @@ test('Sign in starts the harness’s own login on the chosen machine, and Check 
   });
   await expect(claude.getByText('Not signed in')).toBeVisible();
   await claude.getByRole('button', {name: 'Sign in'}).click();
-  await expect(claude.getByText('The login started on host-b.')).toBeVisible();
-  await claude.getByRole('button', {name: 'Show details'}).click();
-  await expect(
-    claude.getByText('Open https://example.com/device and enter the code AB12'),
-  ).toBeVisible();
+  const started = claude.getByText('Login started', {exact: true});
+  await expect(started).toBeVisible();
+  // What to do next is on the pointer.
+  await expect(started).toHaveAttribute(
+    'title',
+    /Open https:\/\/example\.com\/device and enter the code AB12/,
+  );
   expect((await done(page)).logins).toEqual(['ssh:host-b claude']);
   await claude.getByRole('button', {name: 'Check again'}).click();
-  await expect(claude.getByText('The login started on host-b.')).toHaveCount(0);
+  await expect(started).toHaveCount(0);
 });

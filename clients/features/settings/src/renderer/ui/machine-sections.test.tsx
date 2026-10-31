@@ -1,7 +1,7 @@
 import {expect, test} from 'bun:test';
 import type {AgentLogin, ComputeSettings} from '@vibesys/ipc';
 import {renderToStaticMarkup} from 'react-dom/server';
-import type {MachineView} from '../../state/index.js';
+import {type ClusterForm, type MachineView, NEW_FORM} from '../../state/index.js';
 import {ClustersSection} from './clusters-section.js';
 import {LoginsSection} from './logins-section.js';
 
@@ -90,7 +90,7 @@ test('Clusters and clouds says how a cluster is reached in a few words', () => {
   expect(text).toContain('Login node');
 });
 
-test('a machine too old for a section says Needs an update, with the detail behind it', () => {
+test('a machine too old for a section says Needs an update, with the detail on the pointer', () => {
   const old = view({
     compute: {kind: 'ready', offered: {kind: 'unsupported'}},
     logins: {kind: 'ready', offered: {kind: 'unsupported'}},
@@ -101,8 +101,7 @@ test('a machine too old for a section says Needs an update, with the detail behi
   ]) {
     expect(prose(html)).toEqual([]);
     expect(drawnText(html)).toContain('Needs an update');
-    expect(html).toContain('aria-expanded="false"');
-    expect(html).not.toContain('is too old for this');
+    expect(html).toContain('title="The VibeSys on host-b is too old for this.');
   }
 });
 
@@ -111,4 +110,54 @@ test('Agent logins draws labels, with each harness’s detail on its status', ()
   expect(prose(html)).toEqual([]);
   expect(html).toContain('title="Codex is not installed on host-b."');
   expect(html).toContain('title="Or set an API key on host-b"');
+});
+
+test('a section that could not be read says so as a status word with Try again, the detail on the pointer', () => {
+  const failed = view({
+    compute: {kind: 'failed', error: 'the helper hung up'},
+    logins: {kind: 'failed', error: 'the helper hung up'},
+  });
+  for (const html of [
+    renderToStaticMarkup(<ClustersSection {...props} view={failed} />),
+    renderToStaticMarkup(<LoginsSection {...props} view={failed} />),
+  ]) {
+    expect(prose(html)).toEqual([]);
+    expect(drawnText(html)).toContain('Not read');
+    expect(drawnText(html)).toContain('Try again');
+    expect(html).toContain('the helper hung up');
+    expect(html).not.toContain('>the helper hung up<');
+    expect(html).toContain('data-tone="err"');
+  }
+});
+
+test('a login the helper cannot start, or has started, is a status word on its card', () => {
+  const unavailable = renderToStaticMarkup(
+    <LoginsSection
+      {...props}
+      view={view({starts: {claude: {kind: 'unavailable', reason: 'no_login_command'}}})}
+    />,
+  );
+  expect(drawnText(unavailable)).toContain('Cannot sign in');
+  expect(unavailable).toContain('title="Claude Code has no login command to start."');
+  const started = renderToStaticMarkup(
+    <LoginsSection
+      {...props}
+      view={view({starts: {claude: {kind: 'started', instruction: 'Run claude login.'}}})}
+    />,
+  );
+  expect(drawnText(started)).toContain('Login started');
+  expect(drawnText(started)).toContain('Check again');
+  expect(started).toContain('Run claude login.');
+  expect(prose(started)).toEqual([]);
+});
+
+test('a cluster connection test is a status word in the form, whose settings changed is Test again', () => {
+  const passed: ClusterForm = {
+    ...NEW_FORM,
+    test: {kind: 'passed', sent: 'not what the fields build', partitions: ['gpu']},
+  };
+  const html = renderToStaticMarkup(<ClustersSection {...props} view={view({form: passed})} />);
+  expect(drawnText(html)).toContain('Test again');
+  expect(html).toContain('title="The settings changed since the last test."');
+  expect(html).not.toContain('Connection works');
 });

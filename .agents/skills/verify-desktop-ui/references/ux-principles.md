@@ -114,15 +114,21 @@ can decide it.
 
 ## Messages
 
-20. **A failure passed through is a toast; a state held is one line.** "Could not
-    save", "could not be read" and "did not take the command" are toasts at the
-    top right of the window: a title and a tone, the detail behind a details
-    button, kept until dismissed or cleared, never covering the title bar. A
-    state the screen is in (the run ended, a machine needs an update) or a
-    message with actions beside it stays on the page as one line with the same
-    details button. Enforced for the split of tones by the `Banner` type, which
-    has no `err`, and for the toast stack by the Toasts and banners tests;
-    whether a message is passing or held is Unenforced (judgment).
+20. **No banners: a passing failure is a toast, a problem with a thing is a status
+    word at the thing.** No screen draws a full-width strip, tinted or not, for
+    any state. "Could not save", "could not be read" and "did not take the
+    command" are toasts at the top right of the window: a title and a tone, the
+    detail behind a details button, kept until dismissed or cleared, never
+    covering the title bar. A problem with one thing (a login, a machine, a
+    section that could not be read, a step's transcript) is a chip at that thing
+    with the detail on the pointer and its action beside it. A run's state is the
+    header's status chip with a few words of why beside it, the whole of it on
+    the pointer, and Resume and Run again in the header; a diagnostic is a row
+    of Logs with a dot on the Logs tab. A fact already on screen is not said
+    again. Enforced for the component by its absence from `@vibesys/ui` and by
+    `tone-fills.test.ts`, which keeps the tone fills off any panel but a toast
+    and an attention tile; whether a message is passing or about a thing is
+    Unenforced (judgment).
 
 ## Sizes the checks cover
 

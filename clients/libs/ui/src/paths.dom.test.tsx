@@ -1,11 +1,11 @@
-/** No toast or banner draws a filesystem path: a path is reduced to its last name. */
+/** No toast draws a filesystem path: a path is reduced to its last name. */
 
 import {afterAll, beforeAll, describe, expect, test} from 'bun:test';
 import fc from 'fast-check';
 import {Window} from 'happy-dom';
 import {act, type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Banner, Toast, withoutPaths} from './index.js';
+import {Chip, Toast, withoutPaths} from './index.js';
 
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
@@ -134,15 +134,11 @@ describe('a path is shown by its last name', () => {
     );
   });
 
-  test('property: a banner draws no path in its title, body or hint, opened', async () => {
+  test('property: a chip’s pointer draws no path', async () => {
     await fc.assert(
-      fc.asyncProperty(SENTENCE, SENTENCE, SENTENCE, async (title, body, hint) => {
-        const container = await mount(
-          <Banner tone="warn" title={title.text} body={body.text} hint={hint.text} />,
-        );
-        const open = container.querySelector('button[aria-label="Show details"]');
-        await act(async () => (open as HTMLElement | null)?.click());
-        expect(container.textContent).toBe(`${title.shown}${body.shown}${hint.shown}`);
+      fc.asyncProperty(SENTENCE, async hint => {
+        const container = await mount(<Chip label="Not read" hint={hint.text} />);
+        expect(container.querySelector('.vs-chip')?.getAttribute('title')).toBe(hint.shown);
         container.remove();
       }),
       {numRuns: 60, seed: 5},

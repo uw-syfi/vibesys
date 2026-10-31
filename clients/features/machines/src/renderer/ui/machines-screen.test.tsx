@@ -87,6 +87,27 @@ test('an unreachable machine says its status word, with the connection text behi
     },
   ]);
   const html = screen(state);
-  expect(html).toContain('aria-expanded="false"');
-  expect(html).not.toContain(RAW);
+  expect(html).toContain(`title="The app couldn’t connect: ${RAW}"`);
+  expect(html).not.toContain(`>${RAW}<`);
+  expect(html).not.toContain('vs-banner');
+});
+
+test('a machine that needs a sign-in has its status word, the reason on the pointer, and Sign in beside it', () => {
+  const state = drive([
+    {
+      type: 'listed',
+      token: 1,
+      result: {ok: true, value: [{host: 'ssh:host-a', label: 'host-a', checkout: '~/vibesys'}]},
+    },
+    {
+      type: 'reported',
+      token: 2,
+      host: 'ssh:host-a',
+      result: {ok: true, value: {kind: 'sign-in', detail: RAW}},
+    },
+  ]);
+  const html = screen(state);
+  expect(html).toContain('>Sign in<');
+  expect(html).toContain(`title="The app couldn’t connect: ${RAW}"`);
+  expect(html).not.toContain('vs-banner');
 });
