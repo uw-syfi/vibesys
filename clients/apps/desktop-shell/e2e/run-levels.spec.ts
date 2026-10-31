@@ -5,6 +5,7 @@ import {
   type FakeBridgeSeed,
   type FakeWindows,
   installFakeBridge,
+  installFakeChrome,
   installFakeMachines,
   installFakeProjectRuns,
   installFakeWindows,
@@ -82,6 +83,7 @@ async function check(page: Page, name: string): Promise<void> {
 
 async function openRun(page: Page, live = false, server: RunFixture = SERVER): Promise<void> {
   await addInitScripts(page, [
+    initScript(installFakeChrome, SEED),
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
     initScript(installFakeMachines, SEED),

@@ -184,12 +184,6 @@ export interface FakeNewRun {
 }
 
 export function installFakeBridge(seed: FakeBridgeSeed): void {
-  /** As the preload does: the stored theme, and the room the window's own controls take. */
-  const paintRoot = (root: HTMLElement): void => {
-    const {startWidth, startHeight, endHeight} = seed.chromeInset;
-    root.setAttribute('data-theme', seed.theme);
-    root.style.cssText += `--chrome-start-width:${startWidth}px;--chrome-start-height:${startHeight}px;--chrome-end-height:${endHeight}px`;
-  };
   type Listener = (event: {sequence: number; value: unknown}) => void;
   const listeners: Record<string, Set<Listener>> = {};
   let sequence = 0;
@@ -280,18 +274,26 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
       },
     },
   });
-  // The first paint is as soon as the root element exists.
-  const painted = (): boolean => {
-    if (document.documentElement === null) return false;
-    paintRoot(document.documentElement);
+}
+
+/**
+ * As the preload does, the first paint is in the stored theme and leaves the room the window's own
+ * controls take, as soon as the root element exists: an init script beside `installFakeBridge`.
+ */
+export function installFakeChrome(seed: FakeBridgeSeed): void {
+  const paint = (): boolean => {
+    const root = document.documentElement;
+    if (root === null) return false;
+    const {startWidth, startHeight, endHeight} = seed.chromeInset;
+    root.setAttribute('data-theme', seed.theme);
+    root.style.cssText += `--chrome-start-width:${startWidth}px;--chrome-start-height:${startHeight}px;--chrome-end-height:${endHeight}px`;
     return true;
   };
-  if (!painted()) {
-    const waiting = new MutationObserver(() => {
-      if (painted()) waiting.disconnect();
-    });
-    waiting.observe(document, {childList: true});
-  }
+  if (paint()) return;
+  const waiting = new MutationObserver(() => {
+    if (paint()) waiting.disconnect();
+  });
+  waiting.observe(document, {childList: true});
 }
 
 /**

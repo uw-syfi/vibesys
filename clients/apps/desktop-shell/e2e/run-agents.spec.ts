@@ -3,6 +3,7 @@ import {expect, type Page, test} from '@playwright/test';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
+  installFakeChrome,
   installFakeMachines,
   installFakeProjectRuns,
   MAC_CHROME,
@@ -74,6 +75,7 @@ async function check(page: Page, name: string): Promise<void> {
 
 async function openRun(page: Page): Promise<void> {
   await addInitScripts(page, [
+    initScript(installFakeChrome, SEED),
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
     initScript(installFakeMachines, SEED),

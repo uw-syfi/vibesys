@@ -20,6 +20,7 @@ import {
   type ExampleDestinationMethods,
   type FakeBridgeSeed,
   installFakeBridge,
+  installFakeChrome,
   installFakeExampleDestination,
   installFakeMachineSettings,
   installFakeMachines,
@@ -184,6 +185,7 @@ function seedOf(fixture: RunFixture, theme: 'ink' | 'paper'): FakeBridgeSeed {
 export function fixtureScripts(fixture: RunFixture, options: OpenOptions = {}): readonly string[] {
   const seed = seedOf(fixture, options.theme ?? 'ink');
   const scripts = [
+    script(installFakeChrome, seed),
     script(installFakeBridge, seed),
     script(installFakeMachines, seed),
     script(installFakeMachineSettings, seed),

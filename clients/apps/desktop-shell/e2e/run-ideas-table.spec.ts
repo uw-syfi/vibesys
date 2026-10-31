@@ -6,6 +6,7 @@ import {type Anchor, anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks
 import {
   type FakeBridgeSeed,
   installFakeBridge,
+  installFakeChrome,
   installFakeMachines,
   installFakeProjectRuns,
   MAC_CHROME,
@@ -58,6 +59,7 @@ const SEED: FakeBridgeSeed = {
 
 async function openRun(page: Page, count: number): Promise<void> {
   await addInitScripts(page, [
+    initScript(installFakeChrome, SEED),
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
     initScript(installFakeMachines, SEED),

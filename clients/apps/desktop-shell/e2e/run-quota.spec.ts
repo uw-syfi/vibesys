@@ -4,6 +4,7 @@ import {Controls} from './chat-controls.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
+  installFakeChrome,
   installFakeMachines,
   installFakeProjectRuns,
   MAC_CHROME,
@@ -70,6 +71,7 @@ test('a quota hold stays internal while the operator can cancel the epoch', asyn
   const controls = new Controls(page, journeyFixture('quota'));
   await controls.attach();
   await addInitScripts(page, [
+    initScript(installFakeChrome, SEED),
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
     initScript(installFakeMachines, SEED),

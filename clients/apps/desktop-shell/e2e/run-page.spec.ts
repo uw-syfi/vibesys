@@ -6,6 +6,7 @@ import {intentReplay} from '@vibesys/run-fixtures';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
+  installFakeChrome,
   installFakeMachines,
   installFakeNewRun,
   installFakeProjectRuns,
@@ -66,6 +67,7 @@ const SEED: FakeBridgeSeed = {
 /** The live run's server: a session that opens and answers, with no events to show yet. */
 async function open(page: Page, seed: FakeBridgeSeed): Promise<void> {
   await addInitScripts(page, [
+    initScript(installFakeChrome, seed),
     initScript(installFakeBridge, seed),
     initScript(installFakeMachines, seed),
     initScript(installFakeNewRun, seed),

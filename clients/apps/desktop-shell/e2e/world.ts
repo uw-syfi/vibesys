@@ -12,6 +12,7 @@ import {
   type FakeBridgeSeed,
   type FakeNewRun,
   installFakeBridge,
+  installFakeChrome,
   installFakeExampleDestination,
   installFakeMachineSettings,
   installFakeMachines,
@@ -130,6 +131,7 @@ export const SEED: FakeBridgeSeed = {
 
 export async function open(page: Page, seed: FakeBridgeSeed = SEED): Promise<void> {
   await addInitScripts(page, [
+    initScript(installFakeChrome, seed),
     initScript(installFakeBridge, seed),
     initScript(installFakeMachines, seed),
     initScript(installFakeMachineSettings, seed),

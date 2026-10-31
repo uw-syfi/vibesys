@@ -4,6 +4,7 @@ import {
   type FakeBridgeSeed,
   FULL_SCREEN_CHROME,
   installFakeBridge,
+  installFakeChrome,
   installFakeMachines,
   installFakeProjectRuns,
   MAC_CHROME,
@@ -72,6 +73,7 @@ const WORLD: FakeBridgeSeed = {
 
 async function openRun(page: Page): Promise<void> {
   await addInitScripts(page, [
+    initScript(installFakeChrome, WORLD),
     initScript(installFakeBridge, WORLD),
     initScript(installFakeMachines, WORLD),
     initScript(installFakeProjectRuns, WORLD),

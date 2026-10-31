@@ -4,6 +4,7 @@ import {
   type FakeBridgeSeed,
   type FakeWindows,
   installFakeBridge,
+  installFakeChrome,
   installFakeMachines,
   installFakeNewRun,
   installFakeProjectRuns,
@@ -32,6 +33,7 @@ const WINDOW_SEED: FakeBridgeSeed = {
 /** Every page in `context`, the run windows too, gets the Fake bridge before its scripts. */
 async function install(context: BrowserContext): Promise<void> {
   await addInitScripts(context, [
+    initScript(installFakeChrome, WINDOW_SEED),
     initScript(installFakeBridge, WINDOW_SEED),
     initScript(installFakeMachines, WINDOW_SEED),
     initScript(installFakeNewRun, WINDOW_SEED),
