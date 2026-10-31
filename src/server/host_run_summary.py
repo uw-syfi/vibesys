@@ -15,7 +15,7 @@ these messages into the helper's request and reply unions and gates them behind
 ``HelperFeature.RUN_SUMMARY`` (and ``usage.window`` behind ``HelperFeature.USAGE_WINDOW``).
 
 Public surface: ``RunsSummaryRequest``, ``RunsSummaryReply``, ``TurnReply``, ``TokenTally``,
-``SpanTokens``, ``UsageRecord``, ``NO_TOKENS``, ``add_tokens``, ``InputGate``, ``InputGates``, ``RunTerminal``,
+``SpanTokens``, ``UsageRecord``, ``ModelUsage``, ``RecordedCostBasis``, ``NO_TOKENS``, ``add_tokens``, ``InputGate``, ``InputGates``, ``RunTerminal``,
 ``RunTerminalKind``, ``TraceFormat``, ``trace_format``, the documents they
 pass through (``RunSpanDocument``, ``RunOverviewDocument``, ``ReplySchemaDocument``) and the
 limits and names ``RUN_SUMMARY_FILE``, ``RUN_SUMMARY_PAGE_MAX_BYTES``, ``INPUT_GATES_MAX``,
@@ -241,6 +241,46 @@ class SpanTokens(BaseModel):
     tally: TokenTally
 
 
+RecordedCostBasis = Literal["price_table", "provider_reported", "unknown_model", "not_reported"]
+"""How a turn's cost was reached, as the journal records it: ``vs_agent.contracts.CostBasis``'s
+values and the recordable ones of ``vibesys.store.v1.UsageCostBasis``. Every line written since
+the field exists records one (``not_reported`` when the provider reported no cost); the proto's two
+legacy values are never recorded, and ``server.run_usage.basis_of`` derives them."""
+
+UsageSpeedName = Literal["standard", "fast", "ultrafast"]
+"""The service speed a request ran at: ``vibesys.store.v1.UsageSpeed`` without its unreported."""
+
+
+class ModelUsage(BaseModel):
+    """One model's share of one finished turn: the journal's ``by_model`` row of a usage record.
+
+    The counts are always known: a row exists only for a turn whose increment was measured.
+    ``recorded_usd`` is the price agentshim recorded for these tokens at the standard tier, ``None``
+    when it has no price for the model; it is not a bill, and nothing here recomputes it.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    model: str
+    """The model id as the provider reported it."""
+    input: NonNegativeInt
+    """Input tokens, cached ones included."""
+    cache_read: NonNegativeInt
+    cache_write: NonNegativeInt
+    cache_write_1h: NonNegativeInt
+    """The part of ``cache_write`` written with a one-hour lifetime."""
+    output: NonNegativeInt
+    """Output tokens, reasoning included."""
+    reasoning: NonNegativeInt
+    turns: NonNegativeInt
+    """The turn's requests. Only the primary row counts them, so summing rows counts each once."""
+    recorded_usd: NonNegativeFloat | None
+    speed: UsageSpeedName | None
+    """``None``: the provider reported none, which reads as standard."""
+    primary: bool
+    """The model the turn was run with. Exactly one row of a turn is."""
+
+
 class UsageRecord(BaseModel):
     """What one agent turn spent, and who and when it was: the one definition of a usage record.
 
@@ -280,6 +320,16 @@ class UsageRecord(BaseModel):
     tokens: TokenTally
     cost_usd: NonNegativeFloat | None
     duration_ms: NonNegativeInt | None
+    cost_basis: RecordedCostBasis | None = None
+    """How ``cost_usd`` was reached. ``None`` means one thing: the journal line predates the field
+    (``server.run_usage.basis_of`` reads such a line by its cost). A turn that reported no cost
+    records ``not_reported``."""
+    by_model: tuple[ModelUsage, ...] = ()
+    """Each model the turn ran. ``tokens`` counts the main conversation only, so these rows are a
+    superset of it; empty when the provider reports no split, or the line predates the field."""
+    provider_session_id: str | None = None
+    """The provider's id of the conversation the turn ran in; ``None``: it named none, or the
+    line predates the field."""
 
 
 class RunsSummaryReply(HelperReplyBase):

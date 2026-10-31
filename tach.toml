@@ -483,7 +483,7 @@ depends_on = []
 [[modules]]
 path = "vibesys.run"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys.run.runlog_tee", "vibesys.chat", "vs_runlog", "vs_proto", "vs_core", "vs_decode.api", "vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github", "vs_sandbox", "vs_project", "vs_slurm", "vs_sim.api", "vs_redaction.api"]
+depends_on = ["vibesys.run.runlog_tee", "vibesys.records", "vibesys.chat", "vs_runlog", "vs_proto", "vs_core", "vs_decode.api", "vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github", "vs_sandbox", "vs_project", "vs_slurm", "vs_sim.api", "vs_redaction.api"]
 
 [[modules]]
 path = "vibesys.run.evaluation_identity"

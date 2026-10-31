@@ -1252,7 +1252,37 @@
         "input_tokens": 182400,
         "cache_read_input_tokens": 151000,
         "output_tokens": 9200,
-        "reasoning_output_tokens": 4100
+        "reasoning_output_tokens": 4100,
+        "cost_basis": "unknown_model",
+        "provider_session_id": "claude-session-planner",
+        "by_model": [
+          {
+            "model": "claude-sonnet-5",
+            "input_tokens": 182400,
+            "cache_creation_input_tokens": 0,
+            "cache_creation_1h_input_tokens": 0,
+            "cache_read_input_tokens": 151000,
+            "output_tokens": 9200,
+            "reasoning_output_tokens": 4100,
+            "turns": 9,
+            "recorded_usd": 0.31,
+            "speed": null,
+            "primary": true
+          },
+          {
+            "model": "claude-haiku-x",
+            "input_tokens": 20000,
+            "cache_creation_input_tokens": 0,
+            "cache_creation_1h_input_tokens": 0,
+            "cache_read_input_tokens": 15000,
+            "output_tokens": 800,
+            "reasoning_output_tokens": 0,
+            "turns": 0,
+            "recorded_usd": null,
+            "speed": null,
+            "primary": false
+          }
+        ]
       }
     },
     {
@@ -1306,7 +1336,25 @@
         "input_tokens": 31900,
         "cache_read_input_tokens": 27500,
         "output_tokens": 700,
-        "reasoning_output_tokens": 200
+        "reasoning_output_tokens": 200,
+        "total_cost_usd": 0.01855,
+        "cost_basis": "price_table",
+        "provider_session_id": "codex-thread-judge",
+        "by_model": [
+          {
+            "model": "gpt-6.1-sol",
+            "input_tokens": 31900,
+            "cache_creation_input_tokens": 0,
+            "cache_creation_1h_input_tokens": 0,
+            "cache_read_input_tokens": 27500,
+            "output_tokens": 700,
+            "reasoning_output_tokens": 200,
+            "turns": 1,
+            "recorded_usd": 0.01855,
+            "speed": "standard",
+            "primary": true
+          }
+        ]
       }
     },
     {

@@ -389,8 +389,12 @@ def _run_turn(
     except Exception as error:
         # A turn stopped for its reply fails however the library reports the stop.
         if events.breach is not None:
-            usage = error.usage if isinstance(error, AgentTurnTimeoutError) else None
-            raise AgentOutputSchemaError(events.breach, usage=usage) from error
+            timed_out = error if isinstance(error, AgentTurnTimeoutError) else None
+            raise AgentOutputSchemaError(
+                events.breach,
+                usage=None if timed_out is None else timed_out.usage,
+                provider_session_id=None if timed_out is None else timed_out.provider_session_id,
+            ) from error
         raise
     finally:
         events.observer = None
