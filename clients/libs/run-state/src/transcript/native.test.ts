@@ -229,5 +229,5 @@ test('a result payload that is not a known shape fails by name', () => {
   );
   expect(() => nativeTranscriptEntries('turn-a', withPayload('{"kind":"image"}'))).toThrow('kind');
   const json = nativeTranscriptEntries('turn-a', withPayload('{"kind":"json","value":[1]}'));
-  expect(json.at(0)?.toolResult?.payload).toEqual({kind: 'json', value: [1]});
+  expect(JSON.stringify(json.at(0)?.toolResult?.payload)).toBe('{"kind":"json","value":[1]}');
 });

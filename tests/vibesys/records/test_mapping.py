@@ -178,11 +178,16 @@ _TRANSCRIPT_DATA = st.one_of(
         ),
     ),
 )
-_EVENT_TYPES = {
-    e.AgentOutputChunkData: e.CoreEventType.AGENT_OUTPUT_CHUNK,
-    e.ToolCallData: e.CoreEventType.TOOL_CALL,
-    e.ToolResultData: e.CoreEventType.TOOL_RESULT,
-}
+
+
+def _transcript_event_type(
+    data: e.AgentOutputChunkData | e.ToolCallData | e.ToolResultData,
+) -> e.CoreEventType:
+    if isinstance(data, e.AgentOutputChunkData):
+        return e.CoreEventType.AGENT_OUTPUT_CHUNK
+    if isinstance(data, e.ToolCallData):
+        return e.CoreEventType.TOOL_CALL
+    return e.CoreEventType.TOOL_RESULT
 
 
 @given(
@@ -195,7 +200,7 @@ def test_every_transcript_entry_records_when_its_event_happened(
     at = datetime.fromtimestamp(seconds, UTC)
     observation = e.CoreEvent.model_validate(
         {
-            "type": _EVENT_TYPES[type(data)],
+            "type": _transcript_event_type(data),
             "data": data,
             "timestamp": at,
             "run_id": "run-a",
