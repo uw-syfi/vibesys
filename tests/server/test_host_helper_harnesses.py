@@ -100,11 +100,18 @@ def test_the_list_is_the_hosts_vetted_harnesses() -> None:
 def test_the_list_is_the_catalog_in_its_own_order_whichever_clis_are_installed(
     installed: set[str],
 ) -> None:
-    """Which CLIs a machine has is ``machine.describe``'s answer (``harness_clis``): telling takes a
-    login shell, and a list the app asks for at every launch starts none. A client that wants the
-    installed providers first orders the list with that answer.
+    """``harnesses.list`` is the agent library's catalog in the catalog's own order, whichever CLIs
+    the machine has installed. This is the contract the host promises.
 
-    Regression: the list asked the machine, so every ``harnesses.list`` started a shell.
+    The host asks the machine nothing: telling which CLIs are installed takes a login shell, and
+    the app asks for this list at every launch. Which providers are installed is
+    ``machine.describe``'s ``harness_clis``; putting the installed ones first, and so choosing
+    New run's default, is the client's, and #3545 (``clients/features/new-run``) owns that order.
+    A host that sorted here again would bring the shell back and give the order two owners.
+
+    Regression: a machine without the first provider's CLI defaulted a run to it (the host sorted
+    the list with a shell probe); then the list stopped sorting and every ``harnesses.list`` stopped
+    starting a shell. This test pins the second half: the order does not depend on the machine.
     """
     threads = SimThreads()
     host = replace(

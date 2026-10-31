@@ -10,16 +10,23 @@ whole cost. The probe below runs each read through the console launcher in a fre
 (the import side effects a pytest session has already used up) and reports the modules loaded and
 the processes started, never a time, so the verdict is the same on a busy or an idle machine.
 
-The budgets are what each read loads today with a little room for the interpreter's own version.
-A read that needs more has a reason to name in the PR; a budget is not raised to make a check pass.
+What a read may load is stated by name, in groups of modules (``Group``): each read lists the
+groups it uses and every other group is forbidden to it, so a read that starts importing the
+run-listing stream, the helper's OS adapters or the admission modules fails with the module's name,
+whatever else it loads. The module count of each read stays as a backstop for what no group names;
+it is loose on purpose, because the count moves with the interpreter and the lock file. A read that
+needs a group it does not list has a reason to name in the PR; a list is not widened to make a
+check pass, and a group a read no longer loads is removed from its list.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 import pytest
@@ -77,13 +84,93 @@ _TASK = "default"
 _RUN = "20261001-000000-00000000-proj-20261001-000000"
 _WINDOW_END = datetime(2026, 10, 30, tzinfo=UTC)
 
-# Modules no read has a reason to load: the run engine and its core.
-_ENGINE = ("vs_runtime", "vs_core")
-# The agent library and what it brings. Only a read about harnesses, logins or the whole host
-# (describe-machine, preflight-run) loads it.
-_AGENT_LIBRARY = ("vs_agent", "agentshim", "vs_prompts", "vs_sandbox", "jinja2")
-# The helper channel's whole host: every collaborator of a run start, built for one read.
-_WHOLE_HOST = "entrypoints.host_helper"
+_OPERATIONS = "vibesys.api.host_operations"
+
+
+class Group(StrEnum):
+    """A named set of modules that only some reads have a reason to load."""
+
+    ENGINE = "the run engine and the facades that load it"
+    ADMISSION = "the admission, login and start modules of the host operations"
+    CANDIDATE = "candidate inspection"
+    READ_ADAPTER = "the registered-read adapter and the host facts it builds"
+    RUN_STREAM = "the run-listing stream"
+    RUN_READS = "the readers of a run's digest and usage"
+    USAGE = "the usage window's fold"
+    PROJECT_HOST = "the helper's project adapters and registry"
+    WHOLE_HOST = "the helper's whole host"
+    EXAMPLES = "the example catalog and project maker"
+    COMPUTE = "the compute settings' adapters"
+    AGENT_LIBRARY = "the agent library and what it brings"
+    LOGINS = "the agent logins' models"
+    HOST_MODELS = "the helper's pydantic request and example models"
+
+
+GROUPS: dict[Group, tuple[str, ...]] = {
+    Group.ENGINE: (
+        "vs_runtime",
+        "vs_core",
+        "vibesys.run",
+        "vibesys.orchestration",
+        "vibesys.api.runs",
+        "vibesys.api.session",
+        "vibesys.api.host",
+        "vibesys.api.transport",
+    ),
+    Group.ADMISSION: (
+        f"{_OPERATIONS}.api",
+        f"{_OPERATIONS}._start",
+        f"{_OPERATIONS}._login",
+        f"{_OPERATIONS}._project",
+        f"{_OPERATIONS}._compute",
+    ),
+    Group.CANDIDATE: (f"{_OPERATIONS}.candidate", f"{_OPERATIONS}._candidate"),
+    Group.READ_ADAPTER: (
+        "entrypoints.host_reads",
+        "entrypoints.host_facts",
+        "server.host_operation_reads",
+    ),
+    Group.RUN_STREAM: (f"{_OPERATIONS}.saved_runs", "server.host_saved_runs"),
+    Group.RUN_READS: ("server.host_run_reads", "server.host_run_wire"),
+    Group.USAGE: ("server.usage_window", "server.run_usage", "server.run_summary"),
+    Group.PROJECT_HOST: ("server.host_helper_os", "server.host_helper_requests", "server.registry"),
+    Group.WHOLE_HOST: (
+        "entrypoints.host_helper",
+        "server.host_helper",
+        "server.host_helper_readers",
+        "server.instances",
+    ),
+    Group.EXAMPLES: (
+        "entrypoints.examples",
+        "entrypoints.example_catalog",
+        "entrypoints.host_example_projects",
+    ),
+    Group.COMPUTE: ("server.host_compute_runtime",),
+    Group.AGENT_LIBRARY: ("vs_agent", "agentshim", "vs_prompts", "vs_sandbox", "jinja2"),
+    Group.LOGINS: ("server.host_agent_logins",),
+    Group.HOST_MODELS: ("server.host_api", "server.host_examples", "server.host_run_summary"),
+}
+"""Each group's modules, by name; a package name stands for everything under it."""
+
+_ALWAYS_FORBIDDEN = frozenset({Group.ENGINE, Group.ADMISSION})
+"""No read has a reason to load these: reads go through ``reads``, ``saved_runs`` or ``candidate``,
+never through the facade of the admitted workflows, and never through the engine."""
+
+_PROJECT_READ = frozenset({Group.READ_ADAPTER, Group.PROJECT_HOST, Group.HOST_MODELS, Group.LOGINS})
+"""What a read of a project's files loads: the helper's project adapters and, with them, the
+models and login facts they import (the floor named in the PR, not a use)."""
+_WHOLE_HOST_READ = frozenset(
+    {
+        Group.READ_ADAPTER,
+        Group.PROJECT_HOST,
+        Group.WHOLE_HOST,
+        Group.EXAMPLES,
+        Group.COMPUTE,
+        Group.AGENT_LIBRARY,
+        Group.LOGINS,
+        Group.HOST_MODELS,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -96,11 +183,9 @@ class _Read:
     """The reply slot a successful answer fills (``failure`` where the request is refused). A
     stream's is the slot of its last frame."""
     modules: int
-    """The most modules the command may load, counted in a fresh interpreter."""
-    agent_library: bool = False
-    """Whether the read is about the agent library or the whole host, so loads it."""
-    whole_host: bool = False
-    """Whether the read needs the helper's whole host."""
+    """The most modules the command may load, counted in a fresh interpreter: a backstop."""
+    allowed: frozenset[Group] = frozenset()
+    """The groups the read has a reason to load; every other group is forbidden to it."""
     catalog: bool = False
     """Whether the read is a catalog the app asks for at every launch: it answers from files."""
     stream: bool = False
@@ -152,6 +237,7 @@ READS: tuple[_Read, ...] = (
         "inspect_candidate",
         modules=520,
         catalog=True,
+        allowed=frozenset({Group.CANDIDATE}),
     ),
     _Read(
         "list-tasks",
@@ -162,6 +248,7 @@ READS: tuple[_Read, ...] = (
         "list_tasks",
         modules=540,
         catalog=True,
+        allowed=_PROJECT_READ,
     ),
     _Read(
         "get-task-goal",
@@ -175,6 +262,7 @@ READS: tuple[_Read, ...] = (
         "get_task_goal",
         modules=540,
         catalog=True,
+        allowed=_PROJECT_READ,
     ),
     _Read(
         "list-harnesses",
@@ -184,8 +272,10 @@ READS: tuple[_Read, ...] = (
         ),
         "list_harnesses",
         modules=740,
-        agent_library=True,
         catalog=True,
+        allowed=frozenset(
+            {Group.READ_ADAPTER, Group.AGENT_LIBRARY, Group.HOST_MODELS, Group.LOGINS}
+        ),
     ),
     _Read(
         "list-examples",
@@ -196,6 +286,7 @@ READS: tuple[_Read, ...] = (
         "list_examples",
         modules=540,
         catalog=True,
+        allowed=frozenset({Group.READ_ADAPTER, Group.EXAMPLES, Group.HOST_MODELS, Group.LOGINS}),
     ),
     _Read(
         "list-compute",
@@ -206,6 +297,7 @@ READS: tuple[_Read, ...] = (
         "list_compute",
         modules=480,
         catalog=True,
+        allowed=frozenset({Group.READ_ADAPTER, Group.COMPUTE}),
     ),
     _Read(
         "inspect-destination",
@@ -221,8 +313,16 @@ READS: tuple[_Read, ...] = (
         "inspect_destination",
         modules=560,
         catalog=True,
+        allowed=_PROJECT_READ | {Group.EXAMPLES},
     ),
-    _Read("stream-saved-runs", _watch, "stream_saved_runs", modules=580, stream=True),
+    _Read(
+        "stream-saved-runs",
+        _watch,
+        "stream_saved_runs",
+        modules=580,
+        stream=True,
+        allowed=_PROJECT_READ | {Group.RUN_STREAM},
+    ),
     _Read(
         "list-run-digests",
         lambda project: ReadRequest(
@@ -234,6 +334,7 @@ READS: tuple[_Read, ...] = (
         ),
         "list_run_digests",
         modules=580,
+        allowed=_PROJECT_READ | {Group.RUN_READS},
     ),
     _Read(
         "usage-window",
@@ -242,6 +343,7 @@ READS: tuple[_Read, ...] = (
         ),
         "usage_window",
         modules=590,
+        allowed=_PROJECT_READ | {Group.RUN_READS, Group.USAGE},
     ),
     _Read(
         "list-agent-logins",
@@ -251,7 +353,7 @@ READS: tuple[_Read, ...] = (
         ),
         "list_agent_logins",
         modules=740,
-        agent_library=True,
+        allowed=frozenset({Group.READ_ADAPTER, Group.AGENT_LIBRARY, Group.LOGINS}),
     ),
     _Read(
         "describe-machine",
@@ -261,8 +363,7 @@ READS: tuple[_Read, ...] = (
         ),
         "describe_machine",
         modules=760,
-        agent_library=True,
-        whole_host=True,
+        allowed=_WHOLE_HOST_READ,
     ),
     _Read(
         "preflight-run",
@@ -272,8 +373,7 @@ READS: tuple[_Read, ...] = (
         ),
         "failure",
         modules=760,
-        agent_library=True,
-        whole_host=True,
+        allowed=_WHOLE_HOST_READ,
     ),
 )
 
@@ -358,8 +458,8 @@ def _loaded(probe: _Probe, roots: tuple[str, ...]) -> list[str]:
 
 @pytest.mark.parametrize("read", READS, ids=lambda read: read.command)
 def test_a_read_loads_only_the_modules_it_uses(read: _Read, host_directory: Path) -> None:
-    """Fails on a read that imports the run engine, the agent library or the whole host it does
-    not touch, whose closure grows past its budget, or, for a catalog, that starts a process.
+    """Fails on a read that loads a module of a group it does not list, that grows past its
+    backstop count, or, for a catalog, that starts a process.
 
     The catalogs the app asks for at every launch answer from files and the interpreter alone. A
     shell probe of the user's login environment is the failure the last check catches: it is
@@ -367,14 +467,42 @@ def test_a_read_loads_only_the_modules_it_uses(read: _Read, host_directory: Path
     probe = _probe(read, host_directory)
 
     assert probe.reply == read.reply
-    assert _loaded(probe, _ENGINE) == []
-    if not read.agent_library:
-        assert _loaded(probe, _AGENT_LIBRARY) == []
-    if not read.whole_host:
-        assert _WHOLE_HOST not in probe.modules
+    forbidden = {
+        group.name: modules
+        for group in Group
+        if group in _ALWAYS_FORBIDDEN or group not in read.allowed
+        if (modules := _loaded(probe, GROUPS[group]))
+    }
+    assert forbidden == {}, (
+        f"{read.command} loaded modules it has no reason to: {forbidden}. Import them where the "
+        "read that needs them uses them (a lazy module, or a module of its own), not at load."
+    )
     assert len(probe.modules) <= read.modules
     if read.catalog:
         assert probe.spawned == ()
+
+
+@pytest.mark.parametrize("read", READS, ids=lambda read: read.command)
+def test_a_read_lists_only_the_groups_it_loads(read: _Read, host_directory: Path) -> None:
+    """A group the read lists and does not load is room for a regression: remove it from the list.
+
+    The list is a ban on every other group, so it is only as strong as it is tight."""
+    probe = _probe(read, host_directory)
+
+    unused = sorted(group.name for group in read.allowed if not _loaded(probe, GROUPS[group]))
+    assert unused == [], f"{read.command} no longer loads {unused}: remove them from `allowed`"
+    assert not read.allowed & _ALWAYS_FORBIDDEN
+
+
+def test_every_module_a_group_names_exists() -> None:
+    """A group naming a module that was renamed bans nothing: say which one."""
+    missing = sorted(
+        module
+        for modules in GROUPS.values()
+        for module in modules
+        if importlib.util.find_spec(module) is None
+    )
+    assert missing == [], f"groups name modules that do not exist (renamed?): {missing}"
 
 
 def test_every_registered_read_has_a_probe() -> None:

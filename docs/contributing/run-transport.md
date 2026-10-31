@@ -60,9 +60,12 @@ read path and journal projection from the native core and control work still to 
 
    Because each read is a new Python process, a read's imports are its cost: a catalog read
    does milliseconds of work, and a desktop launch asks for about twenty-five reads at once. A
-   read therefore builds only the host facts it asks for (`entrypoints.host_reads`), a catalog
-   read starts no process, and `tests/e2e/test_host_read_startup.py` counts the
-   modules and processes of every read in a fresh interpreter against a committed budget.
+   read therefore builds only the host facts it asks for (`entrypoints.host_facts`), loads a
+   module only where its read uses it (`server.lazy_modules.lazy_module`, or a module of its own
+   per family), and a catalog read starts no process. `tests/e2e/test_host_read_startup.py` runs
+   every read in a fresh interpreter and fails on a read that loads a named group of modules
+   (the run engine, the admission modules, the run-listing stream, the helper's OS adapters, the
+   agent library) it does not list, or that starts a process.
 
 ## What a run writes
 
