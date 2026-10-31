@@ -6,8 +6,10 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -33,12 +35,17 @@ type recordedRuns struct {
 	puts    chan putRun
 	removed chan string
 	synced  chan struct{}
+	// ended is what the source returned if it stopped without being asked to.
+	ended chan error
+	// alive counts the signs of life the source gave beyond its values.
+	alive atomic.Int64
 }
 
 func newRecordedRuns() *recordedRuns {
-	return &recordedRuns{puts: make(chan putRun, 1024), removed: make(chan string, 1024), synced: make(chan struct{}, 1)}
+	return &recordedRuns{puts: make(chan putRun, 1024), removed: make(chan string, 1024), synced: make(chan struct{}, 1), ended: make(chan error, 1)}
 }
 
+func (r *recordedRuns) Alive()                                { r.alive.Add(1) }
 func (r *recordedRuns) Put(key string, value *apiv1.RunEntry) { r.puts <- putRun{key, value} }
 func (r *recordedRuns) Remove(key string)                     { r.removed <- key }
 func (r *recordedRuns) Synced() {
@@ -67,6 +74,9 @@ func (r *recordedRuns) next(t *testing.T, ctx context.Context) putRun {
 	select {
 	case put := <-r.puts:
 		return put
+	case err := <-r.ended:
+		t.Fatalf("the source ended and put no value: %v", err)
+		return putRun{}
 	case <-ctx.Done():
 		t.Fatal("the source put no value")
 		return putRun{}
@@ -77,6 +87,8 @@ func (r *recordedRuns) awaitSynced(t *testing.T, ctx context.Context) {
 	t.Helper()
 	select {
 	case <-r.synced:
+	case err := <-r.ended:
+		t.Fatalf("the source ended before its snapshot was complete: %v", err)
 	case <-ctx.Done():
 		t.Fatal("the source did not complete its snapshot")
 	}
@@ -184,7 +196,13 @@ func (w *runsWorld) run() (stop func()) {
 	ctx, cancel := context.WithCancel(w.ctx)
 	done := make(chan error, 1)
 	source := server.RunsTopicOver(server.Config{Root: w.f.root, Clock: w.clock, Probes: w.clock}, w.feed).Source
-	go func() { done <- source.Run(ctx, w.sink) }()
+	go func() {
+		err := source.Run(ctx, w.sink)
+		if ctx.Err() == nil {
+			w.sink.ended <- err
+		}
+		done <- err
+	}()
 	return func() {
 		cancel()
 		<-done
@@ -204,6 +222,25 @@ func (w *runsWorld) probe(elapsed time.Duration) {
 	w.clock.now.Store(int64(elapsed))
 	if !w.ticker.tick(w.ctx, time.Time{}.Add(elapsed)) {
 		w.t.Fatal("the source did not finish a probe tick")
+	}
+}
+
+// idle returns once the source is waiting for its next event: it has scanned and asked for a tick.
+func (w *runsWorld) idle() {
+	w.t.Helper()
+	if !w.ticker.awaitAskAfter(w.ctx, 0) {
+		w.t.Fatal("the source did not come to wait for an event")
+	}
+}
+
+// change tells the source a watched directory changed, as a platform watcher does, and returns
+// once the source has scanned again. The source must be idle: it is, after idle, probe and itself.
+func (w *runsWorld) change() {
+	w.t.Helper()
+	before, _ := w.ticker.latest()
+	w.feed.Change()
+	if !w.ticker.awaitAskAfter(w.ctx, before) {
+		w.t.Fatal("the source did not scan after a change")
 	}
 }
 
@@ -423,5 +460,109 @@ func publishHeadIn(t *testing.T, dir string, value *storev1.RunHead) {
 	write(t, filepath.Join(dir, "head.tmp"), false, encode(t, value))
 	if err := os.Rename(filepath.Join(dir, "head.tmp"), filepath.Join(dir, "run.head")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A host with no watches left for some of its runs still lists every run and follows each one's
+// head: a change of a run that is watched is heard at once, and one of a run that is not is found
+// within a probe tick. Whatever the budget, no run is missing and none is left old.
+func TestRunsSourceListsAndFollowsEveryRunWhateverItsWatchBudget(t *testing.T) {
+	const runs = 5
+	// The root, the run index and the address directory are watched first, and a host that cannot
+	// watch those has no source at all (the contract holds that case to a failed topic).
+	const fixed = 3
+	sawWatched, sawPolled := false, false
+	for budget := fixed; budget <= fixed+runs+1; budget++ {
+		t.Run(fmt.Sprintf("budget-%d", budget), func(t *testing.T) {
+			w := newRunsWorld(t)
+			w.feed.Budget = budget
+			dirs := map[string]string{}
+			for index := range runs {
+				id := fmt.Sprintf("r%d", index)
+				project := addProjectRun(t, w, id)
+				dir, err := filepath.EvalSymlinks(filepath.Join(project, ".vibesys", "state", "local", "runs", id, "logs"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				dirs[id] = dir
+				publishHeadIn(t, dir, head(proto.Uint64(1)))
+			}
+			defer w.run()()
+			w.sink.awaitSynced(t, w.ctx)
+			w.idle()
+			state := map[string]uint64{}
+			take := func() {
+				for _, put := range w.sink.drain() {
+					state[put.id] = put.entry.GetHead().GetCommittedSeq()
+				}
+			}
+			take()
+			for id := range dirs {
+				if seq, listed := state[id]; !listed || seq != 1 {
+					t.Fatalf("%s is listed at %d (listed %t) before any change", id, seq, listed)
+				}
+			}
+			watched := w.feed.WatchList()
+			elapsed := time.Duration(0)
+			for id, dir := range dirs {
+				publishHeadIn(t, dir, head(proto.Uint64(2)))
+				if slices.Contains(watched, dir) {
+					sawWatched = true
+					w.change()
+				} else {
+					sawPolled = true
+					// Nothing tells the source of this change, and it is idle: it has seen none.
+					take()
+					if state[id] != 1 {
+						t.Fatalf("%s changed with no watch and the source heard of it", id)
+					}
+					elapsed += server.LivenessProbeInterval
+					w.probe(elapsed)
+				}
+				take()
+				if state[id] != 2 {
+					t.Fatalf("%s is at %d after its change, with budget %d", id, state[id], budget)
+				}
+			}
+			for id := range dirs {
+				if state[id] != 2 {
+					t.Fatalf("%s was left at %d", id, state[id])
+				}
+			}
+		})
+	}
+	if !sawWatched || !sawPolled {
+		t.Fatalf("the budgets did not cover both a watched and an unwatched run (watched %t, unwatched %t)", sawWatched, sawPolled)
+	}
+}
+
+// The runs topic holds its source to a lease, and the source says it is alive on every run it
+// reads and on every probe tick, so a long scan or a quiet index does not end it. The count of
+// signs is what the hub's watchdog reads: it grows with each run of a scan and with each tick.
+func TestRunsSourceGivesASignOfLifeOnEveryRunItReadsAndEveryTick(t *testing.T) {
+	if hostoperations.Topics[hostoperations.TopicRuns].SourceLease <= 0 {
+		t.Fatal("the runs topic holds its source to no lease")
+	}
+	for runs := 1; runs <= 6; runs++ {
+		t.Run(fmt.Sprintf("%d-runs", runs), func(t *testing.T) {
+			w := newRunsWorld(t)
+			for index := range runs {
+				addProjectRun(t, w, fmt.Sprintf("r%d", index))
+			}
+			defer w.run()()
+			w.sink.awaitSynced(t, w.ctx)
+			w.idle()
+			// The world's own run is read too: every run of the index is a sign.
+			if got := w.sink.alive.Load(); got < int64(runs) {
+				t.Fatalf("%d signs after reading %d runs", got, runs)
+			}
+			for tick := 1; tick <= 3; tick++ {
+				before := w.sink.alive.Load()
+				w.probe(time.Duration(tick) * server.LivenessProbeInterval)
+				if w.sink.alive.Load() <= before {
+					t.Fatalf("a probe tick gave no sign of life")
+				}
+			}
+		})
 	}
 }

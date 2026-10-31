@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"buf.build/go/protovalidate"
@@ -219,6 +220,11 @@ func (h *Hub) start(ref producerRef) {
 	self := &running{cancel: cancel, done: make(chan struct{})}
 	h.running[ref] = self
 	topic := h.topics[ref.topic]
+	sign := new(atomic.Int64)
+	sign.Store(h.clock.Now().UnixNano())
+	if lease := topic.policy.SourceLease; lease > 0 {
+		go h.holdToLease(ctx, ref, sign, lease)
+	}
 	go func() {
 		// The end is reported from a defer, so a source that exits its goroutine
 		// without returning (runtime.Goexit) still frees the key and fails its
@@ -232,8 +238,32 @@ func (h *Hub) start(ref producerRef) {
 				return s.ended(ref, failureOf(err))
 			})
 		}()
-		err = runProducer(ctx, topic, producer{hub: h, key: ref.key, at: ref.at})
+		err = runProducer(ctx, topic, producer{hub: h, key: ref.key, at: ref.at, sign: sign})
 	}()
+}
+
+// holdToLease ends the topic when its source has given no sign of life for a lease. The
+// heartbeats are the hub's: they prove the stream and say nothing of the source, so a source
+// stuck in a read would otherwise leave every subscriber a live stream of a state that no longer
+// changes. The check runs four times a lease, so the end comes within a quarter lease after it.
+func (h *Hub) holdToLease(ctx context.Context, ref producerRef, sign *atomic.Int64, lease time.Duration) {
+	checks := h.clock.NewTicker(lease / 4)
+	defer checks.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-checks.Ticks():
+			if h.clock.Now().Sub(time.Unix(0, sign.Load())) <= lease {
+				continue
+			}
+			detail := fmt.Sprintf("the source gave no sign of life for %s", lease)
+			h.apply(func(s *state) effects {
+				return s.fail(ref.key, ref.at, failure(apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_SOURCE_FAILED, detail))
+			})
+			return
+		}
+	}
 }
 
 // stop cancels a producer. A source may ignore that, and a goroutine cannot be
@@ -312,7 +342,12 @@ type producer struct {
 	hub *Hub
 	key string
 	at  generation
+	// sign is when the source last showed it was alive, on the hub's clock in nanoseconds.
+	sign *atomic.Int64
 }
+
+// alive records a sign of life.
+func (p producer) alive() { p.sign.Store(p.hub.clock.Now().UnixNano()) }
 
 // typedSink is where the generic Source meets the type-erased hub. It checks here
 // that an entry can reach a client, so that a bad value fails the topic with a
@@ -323,6 +358,7 @@ type typedSink[V proto.Message] struct {
 }
 
 func (s typedSink[V]) Put(name string, value V) {
+	s.alive()
 	entry := s.entry(name, value)
 	if err := Sendable(entry); err != nil {
 		s.hub.apply(func(state *state) effects {
@@ -347,9 +383,13 @@ func Sendable(message proto.Message) error {
 }
 
 func (s typedSink[V]) Remove(name string) {
+	s.alive()
 	s.hub.apply(func(state *state) effects { return state.remove(s.key, s.at, name) })
 }
 
 func (s typedSink[V]) Synced() {
+	s.alive()
 	s.hub.apply(func(state *state) effects { return state.synced(s.key, s.at) })
 }
+
+func (s typedSink[V]) Alive() { s.alive() }

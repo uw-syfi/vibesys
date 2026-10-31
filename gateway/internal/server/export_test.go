@@ -2,6 +2,7 @@ package server
 
 import (
 	"sync"
+	"syscall"
 
 	"github.com/fsnotify/fsnotify"
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
@@ -19,6 +20,9 @@ type ScriptedFeed struct {
 	watched map[string]bool
 	// AddFails, when set, is what every Add returns: a root the source cannot watch.
 	AddFails error
+	// Budget, when positive, is how many paths the feed holds: each Add past it fails as a host
+	// out of watches does.
+	Budget int
 }
 
 func NewScriptedFeed() *ScriptedFeed {
@@ -40,6 +44,9 @@ func (f *ScriptedFeed) Add(path string) error {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.Budget > 0 && !f.watched[path] && len(f.watched) >= f.Budget {
+		return syscall.ENOSPC
+	}
 	f.watched[path] = true
 	return nil
 }

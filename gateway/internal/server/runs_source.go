@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -73,6 +74,8 @@ rescan:
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		// Whether a run of this scan has no watch, and so no change of its is heard.
+		polled := false
 		// fsnotify drops watches when a directory is removed. Reconcile its live
 		// watch set so a later recreation at the same path is watched again.
 		watched := make(map[string]bool)
@@ -106,6 +109,10 @@ rescan:
 			if err := ctx.Err(); err != nil {
 				return err
 			}
+			// A scan of a large index on a slow filesystem can take longer than the topic's source
+			// lease. Each run read is a sign the scan is moving, and a read that never returns is
+			// the lack of one.
+			sink.Alive()
 			if entry.Type()&os.ModeSymlink == 0 {
 				continue
 			}
@@ -115,10 +122,16 @@ rescan:
 				continue
 			}
 			if err := add(dir); err != nil {
-				if errors.Is(err, os.ErrNotExist) {
+				switch {
+				case errors.Is(err, os.ErrNotExist):
 					continue
+				case watchBudgetSpent(err):
+					// The host has no watch to give this run: it is listed all the same, and read
+					// again on every probe tick instead of on a change.
+					polled = true
+				default:
+					return err
 				}
-				return err
 			}
 			// A run whose data cannot be read is listed by name as a run without a head,
 			// the shape of a phase 1 run. It never ends the topic for the other runs.
@@ -186,6 +199,13 @@ rescan:
 				}
 				return err
 			case <-ticker.Ticks():
+				// The source's own rhythm: a quiet index still shows the source is running.
+				sink.Alive()
+				if polled {
+					// A run without a watch is only seen by reading it again: its next change is
+					// found within a tick, as a watched run's is found at once.
+					continue rescan
+				}
 				now := h.config.Probes.Now()
 				for id, value := range previous {
 					if value.Liveness != apiv1.RunLiveness_RUN_LIVENESS_ALIVE &&
@@ -208,6 +228,13 @@ rescan:
 			}
 		}
 	}
+}
+
+// watchBudgetSpent says whether a watch could not be added because the host has no more to give:
+// the kernel's limit on watches (inotify) or on open descriptors (a kqueue watch holds one).
+// Neither is the run's fault, and neither is a reason to hide the runs the host does hold.
+func watchBudgetSpent(err error) bool {
+	return errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EMFILE) || errors.Is(err, syscall.ENFILE)
 }
 
 // A free lock before this epoch's writer was seen alive may be its boot gap.

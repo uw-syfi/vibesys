@@ -295,6 +295,14 @@ and never through the generic gateway port, which refuses `Subscribe`. A lost se
 `Subscribe` stream instead of re-issuing it, because a second stream in one call would deliver a
 second snapshot into state the caller already holds; the subscription's machine opens the next one.
 
+Heartbeats prove the stream and say nothing of the source, so two more bounds keep a screen from
+showing a stuck source as a live one. A topic's `first_frame_ms` bounds each wait inside the
+snapshot (a frame of it renews the wait, so a large snapshot read slowly is not cut off), and its
+`source_lease_ms` holds the source itself to a sign of life: the hub ends the topic as
+`SOURCE_FAILED` when the source has made no value, removal, snapshot marker or `Sink.Alive` call for
+a lease. A source that can spend longer than its lease between facts, such as the scan of a large run
+index, calls `Alive` as it goes. A topic with no lease is held by `stale_after_ms` alone.
+
 A window asks main for two things on the subscription port, each one validated request on its own
 port: observe a topic of a host, and retry a host, which main hears as `Subscriptions.retry` and
 answers by ending the port. A value is old when the topic's `stale_after_ms` passes with no new

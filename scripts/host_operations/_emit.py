@@ -603,7 +603,7 @@ def go_topics(topics: tuple[Topic, ...], timing: object) -> str:
     for topic in topics:
         p = topic.policy
         lines += [
-            f"Topic{_go_name(topic.name)}: {{Cadence: {p.cadence_ms} * time.Millisecond, StaleAfter: {p.stale_after_ms} * time.Millisecond, FirstFrame: {p.first_frame_ms} * time.Millisecond, MinInterval: {p.min_interval_ms} * time.Millisecond, MaxKeys: {p.max_keys}, MaxValueBytes: {p.max_value_bytes}}},"
+            f"Topic{_go_name(topic.name)}: {{Cadence: {p.cadence_ms} * time.Millisecond, StaleAfter: {p.stale_after_ms} * time.Millisecond, FirstFrame: {p.first_frame_ms} * time.Millisecond, MinInterval: {p.min_interval_ms} * time.Millisecond, MaxKeys: {p.max_keys}, MaxValueBytes: {p.max_value_bytes}, SourceLease: {p.source_lease_ms} * time.Millisecond}},"
         ]
     lines += ["}", ""]
     return "\n".join(lines)
@@ -618,7 +618,7 @@ def typescript_topics(topics: tuple[Topic, ...], timing: object) -> str:
     for topic in topics:
         p = topic.policy
         lines += [
-            f"  {_js_name(topic.name)}: Object.freeze({{cadenceMs: {p.cadence_ms}, staleAfterMs: {p.stale_after_ms}, firstFrameMs: {p.first_frame_ms}, minIntervalMs: {p.min_interval_ms}, maxKeys: {p.max_keys}, maxValueBytes: {p.max_value_bytes}}} as const),",
+            f"  {_js_name(topic.name)}: Object.freeze({{cadenceMs: {p.cadence_ms}, staleAfterMs: {p.stale_after_ms}, firstFrameMs: {p.first_frame_ms}, minIntervalMs: {p.min_interval_ms}, maxKeys: {p.max_keys}, maxValueBytes: {p.max_value_bytes}, sourceLeaseMs: {p.source_lease_ms}}} as const),",
         ]
     lines += ["} as const);", ""]
     return "\n".join(lines)
