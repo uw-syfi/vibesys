@@ -433,6 +433,48 @@ def slowest_files(measured: Mapping[str, float], limit: int = 3) -> str:
     return ", ".join(f"{name} {seconds:.0f}s" for name, seconds in top)
 
 
+def projection_lines(
+    index: int, count: int, files: Iterable[str], durations: Mapping[str, float]
+) -> list[str]:
+    """What the record says shard ``index`` of ``count`` will cost, before its first test runs.
+
+    The end-of-session report comes after the tests, and a job cancelled at its time limit
+    never prints it. These lines are for the top of the log: the projected wall seconds
+    against the budget, how much of the suite the record does not know, and the whole files
+    that weigh most on this shard.
+    """
+    names = sorted(set(files))
+    seconds = projected_shard_seconds(names, durations, count)[index - 1]
+    weight = {name: durations.get(name, fallback_seconds(durations)) for name in names}
+    owned = assign_shards(names, durations, count)
+    heaviest = sorted(
+        (name for name in owned if owned[name] == index), key=lambda n: (-weight[n], n)
+    )
+    unknown = sum(1 for name in names if name not in durations)
+    lines = [
+        f"shard {index}/{count}: projected {seconds:.0f}s of tests across {WORKERS_PER_SHARD} "
+        f"workers (budget {SHARD_BUDGET_SECONDS:.0f}s), from a record of {len(durations)} files "
+        f"and {sum(durations.values()):.0f}s; {unknown} of {len(names)} test files have no "
+        "recorded seconds",
+        "shard heaviest whole files: "
+        + (", ".join(f"{name} {weight[name]:.0f}s" for name in heaviest[:3]) or "none"),
+    ]
+    if seconds > SHARD_BUDGET_SECONDS:
+        lines.append(
+            f"::warning::shard {index}/{count} is projected at {seconds:.0f}s of tests, over the "
+            f"{SHARD_BUDGET_SECONDS:.0f}s budget before it starts: refresh {DEFAULT_DURATIONS.name}"
+        )
+    return lines
+
+
+def pytest_report_header(config: pytest.Config) -> list[str] | None:
+    """Print the shard's projection at the top of the log (the controller prints the header)."""
+    if config.getoption("--shard") is None:
+        return None
+    plan = _plan(config)
+    return projection_lines(plan.index, plan.count, plan.files, plan.durations)
+
+
 def pytest_terminal_summary(terminalreporter: TerminalReporter, config: pytest.Config) -> None:
     """Warn when this shard overran its budget or ran files the record underestimates."""
     spec = config.getoption("--shard")
