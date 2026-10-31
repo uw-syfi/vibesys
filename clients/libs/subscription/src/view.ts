@@ -39,7 +39,13 @@ export function stateOf<S>(topic: Topic<S>, state: WindowState): SubscriptionSta
   if (value === null) return INVALID;
   return control.kind === 'live'
     ? {kind: 'live', value, since: control.since}
-    : {kind: 'stale', value, reason: control.reason, attempt: control.attempt};
+    : {
+        kind: 'stale',
+        value,
+        reason: control.reason,
+        attempt: control.attempt,
+        valueAt: control.valueAt,
+      };
 }
 
 export function sameControl(left: Control, right: Control): boolean {
@@ -52,7 +58,10 @@ export function sameControl(left: Control, right: Control): boolean {
       return right.kind === 'live' && left.since === right.since;
     case 'stale':
       return (
-        right.kind === 'stale' && left.reason === right.reason && left.attempt === right.attempt
+        right.kind === 'stale' &&
+        left.reason === right.reason &&
+        left.attempt === right.attempt &&
+        left.valueAt === right.valueAt
       );
     case 'failed':
       return (

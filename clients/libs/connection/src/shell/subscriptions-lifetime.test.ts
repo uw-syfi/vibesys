@@ -10,6 +10,7 @@ import {
 } from '@vibesys/proto';
 import {type SubscriptionState, type SubscriptionUpdate, TOPICS} from '@vibesys/subscription';
 import {hubRig, settle} from '../testing/hub-rig.js';
+import {SUBSCRIPTION_LINGER_MS} from './subscriptions.js';
 
 const A = 'ssh:host-a';
 const B = 'ssh:host-b';
@@ -45,6 +46,8 @@ test('an observer that throws on its first delivery leaves no stream and no time
     }),
   ).toThrow('screen bug');
   expect(gateway.streams).toHaveLength(1);
+  // The observer was released, so the machine stops once the linger is over.
+  clock.advanceBy(SUBSCRIPTION_LINGER_MS);
   expect(gateway.open).toHaveLength(0);
   expect(clock.pending).toBe(0);
   // The next observer starts a machine of its own rather than joining a dead one.
@@ -66,6 +69,7 @@ test('a relay whose receiver throws on its first delivery is reported, still own
   expect(reported.length).toBeGreaterThan(0);
   expect(gateway.open).toHaveLength(1);
   handle.cancel();
+  clock.advanceBy(SUBSCRIPTION_LINGER_MS);
   expect(gateway.open).toHaveLength(0);
   expect(clock.pending).toBe(0);
 });

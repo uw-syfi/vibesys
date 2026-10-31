@@ -492,8 +492,40 @@ button.vs-crumb:focus-visible {
 .vs-meter[data-tone="ok"] .vs-meter-fill {
   background: var(--ok);
 }
+.vs-meter[data-tone="warn"] .vs-meter-fill {
+  background: var(--warn);
+}
 .vs-meter[data-tone="muted"] .vs-meter-fill {
   background: var(--muted);
+}
+
+.vs-gauge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--text-small-line);
+  white-space: nowrap;
+}
+.vs-gauge[data-dim] .vs-meter {
+  opacity: 0.45;
+}
+/* The room of the widest figure, set in the small face so `ch` is the face's own, and in tabular
+   numerals so a digit takes the room of any other. */
+.vs-gauge-figure {
+  display: inline-block;
+  min-width: var(--gauge-figure-width);
+  text-align: end;
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.vs-readings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-5);
+  min-height: var(--text-small-line);
 }
 
 .vs-new-below {

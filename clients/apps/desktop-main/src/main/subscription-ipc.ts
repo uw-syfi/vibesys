@@ -4,16 +4,28 @@
  * same topic of the same host. The port is the observation: it ends when the window goes away, and
  * the hub stops the stream when the last observation does.
  */
-import {encodeUpdate, gatewayReply, parseSubscribeCall, SUBSCRIPTION_CHANNEL} from '@vibesys/ipc';
+import {
+  encodeUpdate,
+  gatewayReply,
+  parseSubscriptionCall,
+  SUBSCRIPTION_CHANNEL,
+} from '@vibesys/ipc';
 import type {SubscriptionPort} from '@vibesys/subscription';
 import {registerAbort} from '@vibesys/transport';
 import {type PortCall, type PortIpc, servePort} from './port-ipc.js';
 import type {WelcomeInvokeEvent} from './welcome-ipc.js';
 
-/** What one window's request does: observe until the hub or the window ends it. */
+/**
+ * What one window's request does: observe until the hub or the window ends it, or ask the hub to
+ * retry a host, which is over as soon as it is asked.
+ */
 export function subscriptionCall(hub: SubscriptionPort): PortCall {
   return (value, signal, send) => {
-    const call = parseSubscribeCall(value);
+    const call = parseSubscriptionCall(value);
+    if (call.kind === 'retry') {
+      hub.retry(call.host);
+      return Promise.resolve();
+    }
     return new Promise<void>((resolve, reject) => {
       const observation = hub.observe(
         call.host,

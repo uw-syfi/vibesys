@@ -24,7 +24,9 @@
     "src/**/*.test.tsx"
   ],
   "references": [
-    {"path":"../../libs/request-identity/tsconfig.lib.json"},
+    {
+      "path": "../../libs/request-identity/tsconfig.lib.json"
+    },
     {
       "path": "../../features/app-shell/tsconfig.renderer.json"
     },
@@ -111,6 +113,9 @@
     },
     {
       "path": "../../features/run-sessions/tsconfig.renderer.json"
+    },
+    {
+      "path": "../../libs/subscription/tsconfig.lib.json"
     }
   ]
 }

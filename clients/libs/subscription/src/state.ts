@@ -32,7 +32,13 @@ export type FailureReason = StaleReason | (typeof TERMINAL_REASONS)[number];
 export type Control =
   | {readonly kind: 'connecting'; readonly step: ConnectStep; readonly attempt: number}
   | {readonly kind: 'live'; readonly since: Instant}
-  | {readonly kind: 'stale'; readonly reason: StaleReason; readonly attempt: number}
+  | {
+      readonly kind: 'stale';
+      readonly reason: StaleReason;
+      readonly attempt: number;
+      /** When the value shown last arrived, so a screen can say how old it is. */
+      readonly valueAt: Instant;
+    }
   | {readonly kind: 'failed'; readonly reason: FailureReason; readonly retrying: boolean};
 
 export type SubscriptionState<S> =
@@ -43,6 +49,7 @@ export type SubscriptionState<S> =
       readonly value: S;
       readonly reason: StaleReason;
       readonly attempt: number;
+      readonly valueAt: Instant;
     }
   | {readonly kind: 'failed'; readonly reason: FailureReason; readonly retrying: boolean};
 

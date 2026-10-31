@@ -230,6 +230,135 @@ func (x *DesktopSubscribeRequest) GetKey() string {
 	return ""
 }
 
+// A window asks main to try a host's waiting or stopped subscriptions again now.
+// Main answers nothing and ends the port; a stream that is delivering is left be.
+type DesktopRetryRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Host          string                 `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DesktopRetryRequest) Reset() {
+	*x = DesktopRetryRequest{}
+	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DesktopRetryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DesktopRetryRequest) ProtoMessage() {}
+
+func (x *DesktopRetryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DesktopRetryRequest.ProtoReflect.Descriptor instead.
+func (*DesktopRetryRequest) Descriptor() ([]byte, []int) {
+	return file_vibesys_desktop_v1_subscription_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *DesktopRetryRequest) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+// Everything a window can ask of the subscription port, one request per port.
+type DesktopSubscriptionRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Request:
+	//
+	//	*DesktopSubscriptionRequest_Observe
+	//	*DesktopSubscriptionRequest_Retry
+	Request       isDesktopSubscriptionRequest_Request `protobuf_oneof:"request"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DesktopSubscriptionRequest) Reset() {
+	*x = DesktopSubscriptionRequest{}
+	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DesktopSubscriptionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DesktopSubscriptionRequest) ProtoMessage() {}
+
+func (x *DesktopSubscriptionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DesktopSubscriptionRequest.ProtoReflect.Descriptor instead.
+func (*DesktopSubscriptionRequest) Descriptor() ([]byte, []int) {
+	return file_vibesys_desktop_v1_subscription_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *DesktopSubscriptionRequest) GetRequest() isDesktopSubscriptionRequest_Request {
+	if x != nil {
+		return x.Request
+	}
+	return nil
+}
+
+func (x *DesktopSubscriptionRequest) GetObserve() *DesktopSubscribeRequest {
+	if x != nil {
+		if x, ok := x.Request.(*DesktopSubscriptionRequest_Observe); ok {
+			return x.Observe
+		}
+	}
+	return nil
+}
+
+func (x *DesktopSubscriptionRequest) GetRetry() *DesktopRetryRequest {
+	if x != nil {
+		if x, ok := x.Request.(*DesktopSubscriptionRequest_Retry); ok {
+			return x.Retry
+		}
+	}
+	return nil
+}
+
+type isDesktopSubscriptionRequest_Request interface {
+	isDesktopSubscriptionRequest_Request()
+}
+
+type DesktopSubscriptionRequest_Observe struct {
+	Observe *DesktopSubscribeRequest `protobuf:"bytes,1,opt,name=observe,proto3,oneof"`
+}
+
+type DesktopSubscriptionRequest_Retry struct {
+	Retry *DesktopRetryRequest `protobuf:"bytes,2,opt,name=retry,proto3,oneof"`
+}
+
+func (*DesktopSubscriptionRequest_Observe) isDesktopSubscriptionRequest_Request() {}
+
+func (*DesktopSubscriptionRequest_Retry) isDesktopSubscriptionRequest_Request() {}
+
 type DesktopSubscriptionConnecting struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Step          DesktopConnectStep     `protobuf:"varint,1,opt,name=step,proto3,enum=vibesys.desktop.v1.DesktopConnectStep" json:"step,omitempty"`
@@ -240,7 +369,7 @@ type DesktopSubscriptionConnecting struct {
 
 func (x *DesktopSubscriptionConnecting) Reset() {
 	*x = DesktopSubscriptionConnecting{}
-	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[1]
+	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -252,7 +381,7 @@ func (x *DesktopSubscriptionConnecting) String() string {
 func (*DesktopSubscriptionConnecting) ProtoMessage() {}
 
 func (x *DesktopSubscriptionConnecting) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[1]
+	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -265,7 +394,7 @@ func (x *DesktopSubscriptionConnecting) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopSubscriptionConnecting.ProtoReflect.Descriptor instead.
 func (*DesktopSubscriptionConnecting) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_subscription_proto_rawDescGZIP(), []int{1}
+	return file_vibesys_desktop_v1_subscription_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *DesktopSubscriptionConnecting) GetStep() DesktopConnectStep {
@@ -292,7 +421,7 @@ type DesktopSubscriptionLive struct {
 
 func (x *DesktopSubscriptionLive) Reset() {
 	*x = DesktopSubscriptionLive{}
-	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[2]
+	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -304,7 +433,7 @@ func (x *DesktopSubscriptionLive) String() string {
 func (*DesktopSubscriptionLive) ProtoMessage() {}
 
 func (x *DesktopSubscriptionLive) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[2]
+	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -317,7 +446,7 @@ func (x *DesktopSubscriptionLive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopSubscriptionLive.ProtoReflect.Descriptor instead.
 func (*DesktopSubscriptionLive) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_subscription_proto_rawDescGZIP(), []int{2}
+	return file_vibesys_desktop_v1_subscription_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *DesktopSubscriptionLive) GetSince() *timestamppb.Timestamp {
@@ -328,16 +457,18 @@ func (x *DesktopSubscriptionLive) GetSince() *timestamppb.Timestamp {
 }
 
 type DesktopSubscriptionStale struct {
-	state         protoimpl.MessageState    `protogen:"open.v1"`
-	Reason        DesktopSubscriptionReason `protobuf:"varint,1,opt,name=reason,proto3,enum=vibesys.desktop.v1.DesktopSubscriptionReason" json:"reason,omitempty"`
-	Attempt       uint32                    `protobuf:"varint,2,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	state   protoimpl.MessageState    `protogen:"open.v1"`
+	Reason  DesktopSubscriptionReason `protobuf:"varint,1,opt,name=reason,proto3,enum=vibesys.desktop.v1.DesktopSubscriptionReason" json:"reason,omitempty"`
+	Attempt uint32                    `protobuf:"varint,2,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	// When main last received a value; display only, for the age of what is shown.
+	ValueAt       *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=value_at,json=valueAt,proto3" json:"value_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DesktopSubscriptionStale) Reset() {
 	*x = DesktopSubscriptionStale{}
-	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[3]
+	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -349,7 +480,7 @@ func (x *DesktopSubscriptionStale) String() string {
 func (*DesktopSubscriptionStale) ProtoMessage() {}
 
 func (x *DesktopSubscriptionStale) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[3]
+	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -362,7 +493,7 @@ func (x *DesktopSubscriptionStale) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopSubscriptionStale.ProtoReflect.Descriptor instead.
 func (*DesktopSubscriptionStale) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_subscription_proto_rawDescGZIP(), []int{3}
+	return file_vibesys_desktop_v1_subscription_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DesktopSubscriptionStale) GetReason() DesktopSubscriptionReason {
@@ -379,6 +510,13 @@ func (x *DesktopSubscriptionStale) GetAttempt() uint32 {
 	return 0
 }
 
+func (x *DesktopSubscriptionStale) GetValueAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ValueAt
+	}
+	return nil
+}
+
 type DesktopSubscriptionFailed struct {
 	state  protoimpl.MessageState    `protogen:"open.v1"`
 	Reason DesktopSubscriptionReason `protobuf:"varint,1,opt,name=reason,proto3,enum=vibesys.desktop.v1.DesktopSubscriptionReason" json:"reason,omitempty"`
@@ -390,7 +528,7 @@ type DesktopSubscriptionFailed struct {
 
 func (x *DesktopSubscriptionFailed) Reset() {
 	*x = DesktopSubscriptionFailed{}
-	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[4]
+	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -402,7 +540,7 @@ func (x *DesktopSubscriptionFailed) String() string {
 func (*DesktopSubscriptionFailed) ProtoMessage() {}
 
 func (x *DesktopSubscriptionFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[4]
+	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -415,7 +553,7 @@ func (x *DesktopSubscriptionFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopSubscriptionFailed.ProtoReflect.Descriptor instead.
 func (*DesktopSubscriptionFailed) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_subscription_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_desktop_v1_subscription_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *DesktopSubscriptionFailed) GetReason() DesktopSubscriptionReason {
@@ -448,7 +586,7 @@ type DesktopSubscriptionControl struct {
 
 func (x *DesktopSubscriptionControl) Reset() {
 	*x = DesktopSubscriptionControl{}
-	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[5]
+	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -460,7 +598,7 @@ func (x *DesktopSubscriptionControl) String() string {
 func (*DesktopSubscriptionControl) ProtoMessage() {}
 
 func (x *DesktopSubscriptionControl) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[5]
+	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -473,7 +611,7 @@ func (x *DesktopSubscriptionControl) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopSubscriptionControl.ProtoReflect.Descriptor instead.
 func (*DesktopSubscriptionControl) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_subscription_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_desktop_v1_subscription_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *DesktopSubscriptionControl) GetState() isDesktopSubscriptionControl_State {
@@ -557,7 +695,7 @@ type DesktopSubscriptionBegin struct {
 
 func (x *DesktopSubscriptionBegin) Reset() {
 	*x = DesktopSubscriptionBegin{}
-	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[6]
+	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -569,7 +707,7 @@ func (x *DesktopSubscriptionBegin) String() string {
 func (*DesktopSubscriptionBegin) ProtoMessage() {}
 
 func (x *DesktopSubscriptionBegin) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[6]
+	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -582,7 +720,7 @@ func (x *DesktopSubscriptionBegin) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopSubscriptionBegin.ProtoReflect.Descriptor instead.
 func (*DesktopSubscriptionBegin) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_subscription_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_desktop_v1_subscription_proto_rawDescGZIP(), []int{8}
 }
 
 // What a window folds. Entries and removals until synced are one snapshot; later
@@ -603,7 +741,7 @@ type DesktopSubscriptionUpdate struct {
 
 func (x *DesktopSubscriptionUpdate) Reset() {
 	*x = DesktopSubscriptionUpdate{}
-	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[7]
+	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -615,7 +753,7 @@ func (x *DesktopSubscriptionUpdate) String() string {
 func (*DesktopSubscriptionUpdate) ProtoMessage() {}
 
 func (x *DesktopSubscriptionUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[7]
+	mi := &file_vibesys_desktop_v1_subscription_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -628,7 +766,7 @@ func (x *DesktopSubscriptionUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopSubscriptionUpdate.ProtoReflect.Descriptor instead.
 func (*DesktopSubscriptionUpdate) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_subscription_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_desktop_v1_subscription_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *DesktopSubscriptionUpdate) GetUpdate() isDesktopSubscriptionUpdate_Update {
@@ -727,17 +865,24 @@ const file_vibesys_desktop_v1_subscription_proto_rawDesc = "" +
 	"\arequest\x18\x02 \x01(\v2 .vibesys.api.v1.SubscribeRequestB\x06\xbaH\x03\xc8\x01\x01R\arequest\x12!\n" +
 	"\x03key\x18\x03 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80\x01H\x00R\x03key\x88\x01\x01B\x06\n" +
-	"\x04_key\"\x81\x01\n" +
+	"\x04_key\"f\n" +
+	"\x13DesktopRetryRequest\x12O\n" +
+	"\x04host\x18\x01 \x01(\tB;\xbaH8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$R\x04host\"\xb8\x01\n" +
+	"\x1aDesktopSubscriptionRequest\x12G\n" +
+	"\aobserve\x18\x01 \x01(\v2+.vibesys.desktop.v1.DesktopSubscribeRequestH\x00R\aobserve\x12?\n" +
+	"\x05retry\x18\x02 \x01(\v2'.vibesys.desktop.v1.DesktopRetryRequestH\x00R\x05retryB\x10\n" +
+	"\arequest\x12\x05\xbaH\x02\b\x01\"\x81\x01\n" +
 	"\x1dDesktopSubscriptionConnecting\x12F\n" +
 	"\x04step\x18\x01 \x01(\x0e2&.vibesys.desktop.v1.DesktopConnectStepB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04step\x12\x18\n" +
 	"\aattempt\x18\x02 \x01(\rR\aattempt\"S\n" +
 	"\x17DesktopSubscriptionLive\x128\n" +
-	"\x05since\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x05since\"\x87\x01\n" +
+	"\x05since\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x05since\"\xc6\x01\n" +
 	"\x18DesktopSubscriptionStale\x12Q\n" +
 	"\x06reason\x18\x01 \x01(\x0e2-.vibesys.desktop.v1.DesktopSubscriptionReasonB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06reason\x12\x18\n" +
-	"\aattempt\x18\x02 \x01(\rR\aattempt\"\x8a\x01\n" +
+	"\aattempt\x18\x02 \x01(\rR\aattempt\x12=\n" +
+	"\bvalue_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\avalueAt\"\x8a\x01\n" +
 	"\x19DesktopSubscriptionFailed\x12Q\n" +
 	"\x06reason\x18\x01 \x01(\x0e2-.vibesys.desktop.v1.DesktopSubscriptionReasonB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06reason\x12\x1a\n" +
@@ -792,42 +937,47 @@ func file_vibesys_desktop_v1_subscription_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_desktop_v1_subscription_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_vibesys_desktop_v1_subscription_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_vibesys_desktop_v1_subscription_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_vibesys_desktop_v1_subscription_proto_goTypes = []any{
 	(DesktopConnectStep)(0),               // 0: vibesys.desktop.v1.DesktopConnectStep
 	(DesktopSubscriptionReason)(0),        // 1: vibesys.desktop.v1.DesktopSubscriptionReason
 	(*DesktopSubscribeRequest)(nil),       // 2: vibesys.desktop.v1.DesktopSubscribeRequest
-	(*DesktopSubscriptionConnecting)(nil), // 3: vibesys.desktop.v1.DesktopSubscriptionConnecting
-	(*DesktopSubscriptionLive)(nil),       // 4: vibesys.desktop.v1.DesktopSubscriptionLive
-	(*DesktopSubscriptionStale)(nil),      // 5: vibesys.desktop.v1.DesktopSubscriptionStale
-	(*DesktopSubscriptionFailed)(nil),     // 6: vibesys.desktop.v1.DesktopSubscriptionFailed
-	(*DesktopSubscriptionControl)(nil),    // 7: vibesys.desktop.v1.DesktopSubscriptionControl
-	(*DesktopSubscriptionBegin)(nil),      // 8: vibesys.desktop.v1.DesktopSubscriptionBegin
-	(*DesktopSubscriptionUpdate)(nil),     // 9: vibesys.desktop.v1.DesktopSubscriptionUpdate
-	(*v1.SubscribeRequest)(nil),           // 10: vibesys.api.v1.SubscribeRequest
-	(*timestamppb.Timestamp)(nil),         // 11: google.protobuf.Timestamp
-	(*v1.TopicEntry)(nil),                 // 12: vibesys.api.v1.TopicEntry
-	(*v1.Synced)(nil),                     // 13: vibesys.api.v1.Synced
+	(*DesktopRetryRequest)(nil),           // 3: vibesys.desktop.v1.DesktopRetryRequest
+	(*DesktopSubscriptionRequest)(nil),    // 4: vibesys.desktop.v1.DesktopSubscriptionRequest
+	(*DesktopSubscriptionConnecting)(nil), // 5: vibesys.desktop.v1.DesktopSubscriptionConnecting
+	(*DesktopSubscriptionLive)(nil),       // 6: vibesys.desktop.v1.DesktopSubscriptionLive
+	(*DesktopSubscriptionStale)(nil),      // 7: vibesys.desktop.v1.DesktopSubscriptionStale
+	(*DesktopSubscriptionFailed)(nil),     // 8: vibesys.desktop.v1.DesktopSubscriptionFailed
+	(*DesktopSubscriptionControl)(nil),    // 9: vibesys.desktop.v1.DesktopSubscriptionControl
+	(*DesktopSubscriptionBegin)(nil),      // 10: vibesys.desktop.v1.DesktopSubscriptionBegin
+	(*DesktopSubscriptionUpdate)(nil),     // 11: vibesys.desktop.v1.DesktopSubscriptionUpdate
+	(*v1.SubscribeRequest)(nil),           // 12: vibesys.api.v1.SubscribeRequest
+	(*timestamppb.Timestamp)(nil),         // 13: google.protobuf.Timestamp
+	(*v1.TopicEntry)(nil),                 // 14: vibesys.api.v1.TopicEntry
+	(*v1.Synced)(nil),                     // 15: vibesys.api.v1.Synced
 }
 var file_vibesys_desktop_v1_subscription_proto_depIdxs = []int32{
-	10, // 0: vibesys.desktop.v1.DesktopSubscribeRequest.request:type_name -> vibesys.api.v1.SubscribeRequest
-	0,  // 1: vibesys.desktop.v1.DesktopSubscriptionConnecting.step:type_name -> vibesys.desktop.v1.DesktopConnectStep
-	11, // 2: vibesys.desktop.v1.DesktopSubscriptionLive.since:type_name -> google.protobuf.Timestamp
-	1,  // 3: vibesys.desktop.v1.DesktopSubscriptionStale.reason:type_name -> vibesys.desktop.v1.DesktopSubscriptionReason
-	1,  // 4: vibesys.desktop.v1.DesktopSubscriptionFailed.reason:type_name -> vibesys.desktop.v1.DesktopSubscriptionReason
-	3,  // 5: vibesys.desktop.v1.DesktopSubscriptionControl.connecting:type_name -> vibesys.desktop.v1.DesktopSubscriptionConnecting
-	4,  // 6: vibesys.desktop.v1.DesktopSubscriptionControl.live:type_name -> vibesys.desktop.v1.DesktopSubscriptionLive
-	5,  // 7: vibesys.desktop.v1.DesktopSubscriptionControl.stale:type_name -> vibesys.desktop.v1.DesktopSubscriptionStale
-	6,  // 8: vibesys.desktop.v1.DesktopSubscriptionControl.failed:type_name -> vibesys.desktop.v1.DesktopSubscriptionFailed
-	7,  // 9: vibesys.desktop.v1.DesktopSubscriptionUpdate.control:type_name -> vibesys.desktop.v1.DesktopSubscriptionControl
-	8,  // 10: vibesys.desktop.v1.DesktopSubscriptionUpdate.begin:type_name -> vibesys.desktop.v1.DesktopSubscriptionBegin
-	12, // 11: vibesys.desktop.v1.DesktopSubscriptionUpdate.entry:type_name -> vibesys.api.v1.TopicEntry
-	13, // 12: vibesys.desktop.v1.DesktopSubscriptionUpdate.synced:type_name -> vibesys.api.v1.Synced
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	12, // 0: vibesys.desktop.v1.DesktopSubscribeRequest.request:type_name -> vibesys.api.v1.SubscribeRequest
+	2,  // 1: vibesys.desktop.v1.DesktopSubscriptionRequest.observe:type_name -> vibesys.desktop.v1.DesktopSubscribeRequest
+	3,  // 2: vibesys.desktop.v1.DesktopSubscriptionRequest.retry:type_name -> vibesys.desktop.v1.DesktopRetryRequest
+	0,  // 3: vibesys.desktop.v1.DesktopSubscriptionConnecting.step:type_name -> vibesys.desktop.v1.DesktopConnectStep
+	13, // 4: vibesys.desktop.v1.DesktopSubscriptionLive.since:type_name -> google.protobuf.Timestamp
+	1,  // 5: vibesys.desktop.v1.DesktopSubscriptionStale.reason:type_name -> vibesys.desktop.v1.DesktopSubscriptionReason
+	13, // 6: vibesys.desktop.v1.DesktopSubscriptionStale.value_at:type_name -> google.protobuf.Timestamp
+	1,  // 7: vibesys.desktop.v1.DesktopSubscriptionFailed.reason:type_name -> vibesys.desktop.v1.DesktopSubscriptionReason
+	5,  // 8: vibesys.desktop.v1.DesktopSubscriptionControl.connecting:type_name -> vibesys.desktop.v1.DesktopSubscriptionConnecting
+	6,  // 9: vibesys.desktop.v1.DesktopSubscriptionControl.live:type_name -> vibesys.desktop.v1.DesktopSubscriptionLive
+	7,  // 10: vibesys.desktop.v1.DesktopSubscriptionControl.stale:type_name -> vibesys.desktop.v1.DesktopSubscriptionStale
+	8,  // 11: vibesys.desktop.v1.DesktopSubscriptionControl.failed:type_name -> vibesys.desktop.v1.DesktopSubscriptionFailed
+	9,  // 12: vibesys.desktop.v1.DesktopSubscriptionUpdate.control:type_name -> vibesys.desktop.v1.DesktopSubscriptionControl
+	10, // 13: vibesys.desktop.v1.DesktopSubscriptionUpdate.begin:type_name -> vibesys.desktop.v1.DesktopSubscriptionBegin
+	14, // 14: vibesys.desktop.v1.DesktopSubscriptionUpdate.entry:type_name -> vibesys.api.v1.TopicEntry
+	15, // 15: vibesys.desktop.v1.DesktopSubscriptionUpdate.synced:type_name -> vibesys.api.v1.Synced
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_desktop_v1_subscription_proto_init() }
@@ -836,13 +986,17 @@ func file_vibesys_desktop_v1_subscription_proto_init() {
 		return
 	}
 	file_vibesys_desktop_v1_subscription_proto_msgTypes[0].OneofWrappers = []any{}
-	file_vibesys_desktop_v1_subscription_proto_msgTypes[5].OneofWrappers = []any{
+	file_vibesys_desktop_v1_subscription_proto_msgTypes[2].OneofWrappers = []any{
+		(*DesktopSubscriptionRequest_Observe)(nil),
+		(*DesktopSubscriptionRequest_Retry)(nil),
+	}
+	file_vibesys_desktop_v1_subscription_proto_msgTypes[7].OneofWrappers = []any{
 		(*DesktopSubscriptionControl_Connecting)(nil),
 		(*DesktopSubscriptionControl_Live)(nil),
 		(*DesktopSubscriptionControl_Stale)(nil),
 		(*DesktopSubscriptionControl_Failed)(nil),
 	}
-	file_vibesys_desktop_v1_subscription_proto_msgTypes[7].OneofWrappers = []any{
+	file_vibesys_desktop_v1_subscription_proto_msgTypes[9].OneofWrappers = []any{
 		(*DesktopSubscriptionUpdate_Control)(nil),
 		(*DesktopSubscriptionUpdate_Begin)(nil),
 		(*DesktopSubscriptionUpdate_Entry)(nil),
@@ -855,7 +1009,7 @@ func file_vibesys_desktop_v1_subscription_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_desktop_v1_subscription_proto_rawDesc), len(file_vibesys_desktop_v1_subscription_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   8,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

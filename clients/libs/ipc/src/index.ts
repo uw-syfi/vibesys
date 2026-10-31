@@ -40,11 +40,11 @@ export {
 } from './run-logs.js';
 export {
   decodeUpdate,
-  encodeSubscribeCall,
+  encodeSubscriptionCall,
   encodeUpdate,
-  parseSubscribeCall,
+  parseSubscriptionCall,
   SUBSCRIPTION_CHANNEL,
-  type SubscribeCall,
+  type SubscriptionCall,
   subscriptionBridge,
 } from './subscription.js';
 export {

@@ -19,6 +19,12 @@ export {
   subscriptionMachine,
 } from './machine.js';
 export {
+  type GpuReading,
+  type GpuReadings,
+  type MachineReadings,
+  machineReadings,
+} from './readings.js';
+export {
   type SubscriptionPort,
   type SubscriptionSource,
   subscriptionSource,
@@ -40,6 +46,7 @@ export {
 export {
   ALL_TOPICS,
   type AnyTopic,
+  type MachineStats,
   machineStats,
   SUBSCRIBE_METHOD,
   TOPICS,
