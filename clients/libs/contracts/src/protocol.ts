@@ -13,6 +13,10 @@ export type RunEvent = ProtocolDocument['event'];
 export type AgentReply = NonNullable<
   Extract<NonNullable<RunEvent['data']>, {kind: 'agent_execution_finished'}>['reply']
 >;
+/** What a tool returned beside its text: a command's output, or a JSON value. */
+export type ToolResultPayload = NonNullable<
+  Extract<NonNullable<RunEvent['data']>, {kind: 'tool_result'}>['payload']
+>;
 /** Structured status carried by streamed agent output and tool calls. */
 export type AgentStatusData = NonNullable<
   Extract<NonNullable<RunEvent['data']>, {channel: unknown}>['status']

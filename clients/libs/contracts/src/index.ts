@@ -44,6 +44,7 @@ export type {
   RunStatus,
   ServerMessage,
   Span,
+  ToolResultPayload,
 } from './protocol.js';
 export {PROTOCOL_VERSION} from './protocol.js';
 export {
@@ -55,5 +56,6 @@ export {
   validateAgentReply,
   validateRunEvent,
   validateRunSnapshot,
+  validateToolResultPayload,
 } from './protocol-parse.js';
 export {isSynthesizedTask, SYNTHESIZED_TASK_NAME} from './synthesized-task.js';

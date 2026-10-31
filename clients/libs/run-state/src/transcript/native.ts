@@ -1,5 +1,7 @@
 /** Pure decoding and projection of the run log's native transcript stream. */
 import {fromBinary, type MessageShape} from '@bufbuild/protobuf';
+import {timestampMs} from '@bufbuild/protobuf/wkt';
+import {type ToolResultPayload, validateToolResultPayload} from '@vibesys/contracts';
 import {
   RUN_LOG_MAX_RECORD_BYTES,
   TranscriptChannel,
@@ -95,7 +97,7 @@ function argumentsOf(value: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-type Base = Pick<TranscriptEntry, 'id' | 'spanId' | 'turnId' | 'invocationId'>;
+type Base = Pick<TranscriptEntry, 'id' | 'spanId' | 'turnId' | 'invocationId' | 'at'>;
 type EntryBody = NativeEntry['entry'];
 type Blobs = Readonly<Record<string, string>>;
 function textEntry(
@@ -114,6 +116,16 @@ function textEntry(
   const kind = kinds[entry.channel];
   if (!kind) throw new Error('Invalid transcript channel');
   return [{...base, kind, content}];
+}
+/** The typed payload a result carried apart from its display text; unknown shapes fail by name. */
+function payloadOf(text: string): ToolResultPayload {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new Error('Transcript tool payload is not JSON');
+  }
+  return validateToolResultPayload(value);
 }
 function callEntry(
   base: Base,
@@ -140,9 +152,9 @@ function resultEntry(
   blobs: Blobs,
 ): TranscriptEntry[] {
   const content = text(entry.content, blobs);
-  const payload = entry.payloadJson ? text(entry.payloadJson, blobs) : undefined;
-  if (content === undefined || (entry.payloadJson && payload === undefined)) return [];
-  const output = payload ?? content;
+  const payloadText = entry.payloadJson ? text(entry.payloadJson, blobs) : undefined;
+  if (content === undefined || (entry.payloadJson && payloadText === undefined)) return [];
+  const payload = payloadText === undefined ? undefined : payloadOf(payloadText);
   return [
     {
       ...base,
@@ -154,9 +166,10 @@ function resultEntry(
       toolResult: ownProjectionInput({
         kind: 'tool_result',
         tool: entry.tool,
-        content: output,
+        content,
         is_error: entry.isError,
         call_id: entry.callId ?? null,
+        ...(payload === undefined ? {} : {payload}),
       }),
     },
   ];
@@ -174,6 +187,7 @@ export function nativeTranscriptEntries(
       spanId,
       turnId: spanId,
       invocationId: spanId,
+      ...(value.at === undefined ? {} : {at: timestampMs(value.at)}),
     };
     switch (value.entry.case) {
       case 'text':

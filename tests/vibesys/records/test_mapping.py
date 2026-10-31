@@ -151,6 +151,63 @@ def test_transcript_entries_round_trip_and_state_is_pure(text: str) -> None:
     assert entry.entry.value.content.value.value == text
 
 
+def _transcript_entry(wire: bytes) -> p.TranscriptEntry:
+    """The one uvarint-framed entry a transcript stream write holds."""
+    prefix = next(index for index, byte in enumerate(wire) if byte < 128)
+    return p.TranscriptEntry.from_binary(wire[prefix + 1 :])
+
+
+_ANY = st.text(alphabet=st.characters(exclude_categories=("Cs",)), max_size=40)
+_NAME = st.text(alphabet=st.characters(exclude_categories=("Cs",)), min_size=1, max_size=16)
+_TRANSCRIPT_DATA = st.one_of(
+    st.builds(e.AgentOutputChunkData, channel=st.just("analysis"), content=_ANY),
+    st.builds(e.ToolCallData, tool=_NAME, call_id=_NAME, args=st.just({})),
+    st.builds(
+        e.ToolResultData,
+        tool=_NAME,
+        call_id=_NAME,
+        content=_ANY,
+        is_error=st.booleans(),
+        payload=st.none()
+        | st.builds(
+            e.CommandResultPayload,
+            stdout=_ANY,
+            stderr=_ANY,
+            exit_code=st.none() | st.integers(min_value=0, max_value=255),
+            duration=st.none() | st.floats(min_value=0, max_value=1e6),
+        ),
+    ),
+)
+_EVENT_TYPES = {
+    e.AgentOutputChunkData: e.CoreEventType.AGENT_OUTPUT_CHUNK,
+    e.ToolCallData: e.CoreEventType.TOOL_CALL,
+    e.ToolResultData: e.CoreEventType.TOOL_RESULT,
+}
+
+
+@given(
+    data=_TRANSCRIPT_DATA,
+    seconds=st.integers(min_value=1_500_000_000, max_value=2_200_000_000),
+)
+def test_every_transcript_entry_records_when_its_event_happened(
+    data: e.AgentOutputChunkData | e.ToolCallData | e.ToolResultData, seconds: int
+) -> None:
+    at = datetime.fromtimestamp(seconds, UTC)
+    observation = e.CoreEvent.model_validate(
+        {
+            "type": _EVENT_TYPES[type(data)],
+            "data": data,
+            "timestamp": at,
+            "run_id": "run-a",
+            "sequence": 1,
+            "execution_id": "turn-a",
+        }
+    )
+    mapped = map_event(MappingState("run-a"), observation)
+    entry = _transcript_entry(mapped.streams[0].content)
+    assert entry.at == p.Timestamp.from_datetime(at)
+
+
 _TEXT = st.text(alphabet=st.characters(exclude_categories=("Cs",)), min_size=1, max_size=16)
 _COUNT = st.integers(min_value=1, max_value=100)
 _OVERRIDES = {

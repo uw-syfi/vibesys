@@ -3,6 +3,7 @@ syntax = "proto3";
 package vibesys.store.v1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
 import "vibesys/store/v1/content.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
@@ -16,6 +17,8 @@ message TranscriptEntry {
     TranscriptToolCall tool_call = 2;
     TranscriptToolResult tool_result = 3;
   }
+  // When the event this entry records happened. Absent in entries written before the field existed.
+  google.protobuf.Timestamp at = 4;
 }
 
 enum TranscriptChannel {
@@ -55,6 +58,7 @@ message TranscriptToolResult {
   optional string call_id = 2 [(buf.validate.field).string.max_bytes = 65536];
   bool is_error = 3;
   TranscriptContent content = 4 [(buf.validate.field).required = true];
-  // The complete command or JSON payload, independent of the display content.
+  // The complete result as a ToolResultPayload in JSON (a command's stdout, stderr, exit code and
+  // duration, or a JSON value), independent of the display content.
   optional TranscriptContent payload_json = 5;
 }

@@ -238,6 +238,7 @@ def transcript(projection: Projection) -> None:
     else:
         message = "transcript event requires output, tool call or result payload"
         raise TypeError(message)
+    entry.at = p.Timestamp.from_datetime(projection.event.timestamp)
     projection.bound(entry, span_id)
     p.validate(entry)
     if span_id not in projection.spans:

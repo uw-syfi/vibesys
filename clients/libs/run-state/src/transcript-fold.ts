@@ -42,6 +42,12 @@ export interface TranscriptEntry {
    */
   readonly spanId?: string;
   readonly invocationId?: string;
+  /**
+   * When the event this entry records happened, in epoch milliseconds. A text entry glued from
+   * chunks keeps its first chunk's time, and a tool call joined by its result keeps the call's.
+   * Absent for an entry whose source carries no time.
+   */
+  readonly at?: number;
   readonly startsTurn?: boolean;
   readonly toolCall?: string;
   /**
@@ -67,9 +73,14 @@ export interface TranscriptEntry {
 
 export function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
   const entry = projectedEntry(event);
+  if (entry === null) return entry;
   const spanId = event.span_id;
-  if (entry === null || spanId === undefined || spanId === null) return entry;
-  return {...entry, spanId};
+  const at = Date.parse(event.timestamp);
+  return {
+    ...entry,
+    ...(spanId === undefined || spanId === null ? {} : {spanId}),
+    ...(Number.isFinite(at) ? {at} : {}),
+  };
 }
 
 function projectedEntry(event: RunEvent): TranscriptEntry | null {
