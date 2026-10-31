@@ -22,25 +22,28 @@ from vs_core.api.recovery import (
     End,
     Failed,
     Finished,
+    Interruption,
     InterruptPolicy,
     Run,
+    RunRest,
     Settle,
     StepAttempts,
     StepResult,
     StepsState,
     Wait,
+    at_rest,
     decide,
     finished_message,
     fold,
     input_message,
     interrupted_message,
+    interruption_of,
     started_message,
 )
 from vs_proto.api import (
     AttemptInterrupted,
     CoreInput,
-    InterruptionReason,
-    LegacyEvent,
+    EpochStarted,
     Oneof,
     Record,
     StepFinished,
@@ -57,7 +60,7 @@ type Body = (
     | Oneof[Literal["step_started"], StepStarted]
     | Oneof[Literal["step_finished"], StepFinished]
     | Oneof[Literal["attempt_interrupted"], AttemptInterrupted]
-    | Oneof[Literal["legacy_event"], LegacyEvent]
+    | Oneof[Literal["epoch_started"], EpochStarted]
 )
 
 SCHEMA = core.OperationSchemaRef(
@@ -110,7 +113,7 @@ class Step:
 
     request: core.ExecuteRegisteredOperation
     started: int = 0
-    interrupted: int = 0
+    uncharged: int = 0
     running: bool = False
     done: bool = False
 
@@ -121,11 +124,11 @@ class Step:
 
     @property
     def spent(self) -> bool:
-        """Whether its attempts, a dead one included, used the bound; an interruption is no debit."""
-        return self.started - self.interrupted > self.request.retry_limit
+        """Whether its attempts used the bound: a pause is no debit, a crash or a raise is one."""
+        return self.started - self.uncharged > self.request.retry_limit
 
     def snapshot(self) -> Step:
-        return Step(self.request, self.started, self.interrupted, self.running, self.done)
+        return Step(self.request, self.started, self.uncharged, self.running, self.done)
 
 
 @dataclass
@@ -173,12 +176,10 @@ class Builder:
         run = Run(step.request, step.tag, step.started, 100.0)
         self.append(Oneof("step_started", started_message(run)))
 
-    def interrupt(self, step: Step, reason: InterruptionReason) -> None:
+    def interrupt(self, step: Step, why: Interruption) -> None:
         step.running = False
-        step.interrupted += 1
-        self.append(
-            Oneof("attempt_interrupted", interrupted_message(step.tag, step.started, reason))
-        )
+        step.uncharged += 0 if why.charged else 1
+        self.append(Oneof("attempt_interrupted", interrupted_message(step.tag, step.started, why)))
 
     def end(self, step: Step, result: StepResult) -> None:
         step.running = False
@@ -189,7 +190,7 @@ class Builder:
         self.epoch += 1
         for step in self.steps:
             step.running = False
-        self.append(Oneof("legacy_event", LegacyEvent(json="{}")))
+        self.append(Oneof("epoch_started", EpochStarted(epoch=self.epoch)))
 
 
 @st.composite
@@ -208,8 +209,7 @@ def scripts(draw: st.DrawFn) -> Script:
             case "start":
                 build.start(draw(st.sampled_from(idle)))
             case "interrupt":
-                reasons = [InterruptionReason.PAUSE, InterruptionReason.SHUTDOWN]
-                build.interrupt(draw(st.sampled_from(running)), draw(st.sampled_from(reasons)))
+                build.interrupt(draw(st.sampled_from(running)), draw(st.sampled_from(Interruption)))
             case "finish":
                 step = draw(st.sampled_from(running))
                 build.end(step, Finished(observation=success(step.request)))
@@ -229,7 +229,7 @@ def restarted(script: Script, length: int) -> Record:
         epoch=epoch + 1,
         at=Timestamp(seconds=length + 1),
         clock=float(length + 1),
-        body=Oneof("legacy_event", LegacyEvent(json="{}")),
+        body=Oneof("epoch_started", EpochStarted(epoch=epoch + 1)),
     )
 
 
@@ -308,7 +308,7 @@ def test_a_rerun_attempt_is_not_a_debit_of_any_other_budget(script: Script) -> N
     for record in script.records:
         body = record.body
         assert body is not None
-        if body.field in {"attempt_interrupted", "legacy_event"}:
+        if body.field in {"attempt_interrupted", "epoch_started"}:
             continue
         if body.field == "step_started":
             if body.value.tag in started:
@@ -323,7 +323,7 @@ def test_a_rerun_attempt_is_not_a_debit_of_any_other_budget(script: Script) -> N
     assert [row.retry_count for row in full.records.records] == [0] * len(full.records.records)
 
 
-def turn_state(*, attempts: StepAttempts | None, epoch: int) -> tuple[core.CoreState, Step]:
+def turn_state(attempts: StepAttempts | None) -> tuple[core.CoreState, Step]:
     """A state holding one open session turn that asks to be cancelled when interrupted."""
     schema = SCHEMA.model_copy(
         update={
@@ -348,37 +348,47 @@ def turn_state(*, attempts: StepAttempts | None, epoch: int) -> tuple[core.CoreS
     state = SEED.model_copy(
         update={
             "records": SEED.records.model_copy(update={"records": (record,)}),
-            "steps": StepsState(epoch=epoch, attempts=rows),
+            "steps": StepsState(epoch=1, attempts=rows),
         }
     )
     return state, Step(request)
 
 
+def epoch_record(epoch: int) -> Record:
+    return Record(
+        seq=99,
+        epoch=epoch,
+        at=Timestamp(seconds=99),
+        clock=99.0,
+        body=Oneof("epoch_started", EpochStarted(epoch=epoch)),
+    )
+
+
 @settings(max_examples=examples(pr=12, nightly=100))
 @given(
     started=st.integers(1, 4),
-    interrupted=st.integers(0, 4),
+    uncharged=st.integers(0, 4),
     ended=st.booleans(),
-    restarted_=st.booleans(),
+    restarted=st.booleans(),
 )
 def test_a_step_that_asks_to_be_cancelled_settles_as_interrupted_never_runs_again(
-    *, started: int, interrupted: int, ended: bool, restarted_: bool
+    *, started: int, uncharged: int, ended: bool, restarted: bool
 ) -> None:
     tag = core.RequestId(root="turn")
     attempts = StepAttempts(
-        tag=tag, started=started, epoch=1, ended=ended, interrupted=min(interrupted, started)
+        tag=tag, started=started, ended=ended, uncharged=min(uncharged, started)
     )
-    state, _ = turn_state(attempts=attempts, epoch=2 if restarted_ else 1)
+    state, _ = turn_state(attempts)
+    state = fold([epoch_record(2)], state) if restarted else state
     actions = decide(state, 5.0)
-    running = not ended and not restarted_
-    if running:
-        assert not [action for action in actions if isinstance(action, Settle | Run)]
-    else:
+    if ended or restarted:
         assert actions == (Settle(tag=tag, result=Cancelled(reason=CancelReason.INTERRUPTED)),)
+    else:
+        assert not [action for action in actions if isinstance(action, Settle | Run)]
 
 
 def test_a_step_that_asks_to_be_cancelled_still_runs_its_first_attempt() -> None:
-    state, step = turn_state(attempts=None, epoch=1)
+    state, step = turn_state(None)
     assert decide(state, 5.0) == (
         Run(step=step.request, tag=step.tag, attempt=1, deadline_at=100.0),
     )
@@ -500,3 +510,82 @@ def test_a_log_the_rule_did_not_write_is_refused_rather_than_guessed_at() -> Non
         ]
         with pytest.raises(ValueError, match="log"):
             fold(records, SEED)
+
+
+@settings(max_examples=examples(pr=12, nightly=100))
+@given(retries=st.integers(0, 3))
+def test_a_step_whose_runner_always_raises_runs_its_bound_and_then_fails(retries: int) -> None:
+    build = Builder()
+    build.prepare(retries)
+    step = build.steps[0]
+    for attempt in range(1, retries + 2):
+        (action,) = decide(fold(build.script.records, SEED), clock_of(len(build.script.records)))
+        assert isinstance(action, Run)
+        assert action.attempt == attempt
+        build.start(step)
+        build.interrupt(step, Interruption.RAISED)
+    (action,) = decide(fold(build.script.records, SEED), clock_of(len(build.script.records)))
+    assert action == Settle(
+        tag=step.tag, result=Failed(reason=core.FailureReason.ATTEMPTS_EXHAUSTED)
+    )
+
+
+@settings(max_examples=examples(pr=12, nightly=100))
+@given(
+    retries=st.integers(0, 3),
+    why=st.sampled_from([Interruption.PAUSE, Interruption.SHUTDOWN]),
+    cycles=st.integers(1, 8),
+)
+def test_a_pause_or_shutdown_never_wears_a_step_out(
+    retries: int, why: Interruption, cycles: int
+) -> None:
+    build = Builder()
+    build.prepare(retries)
+    step = build.steps[0]
+    for _ in range(cycles):
+        build.start(step)
+        build.interrupt(step, why)
+    (action,) = decide(fold(build.script.records, SEED), clock_of(len(build.script.records)))
+    assert isinstance(action, Run)
+    assert action.attempt == cycles + 1
+
+
+@settings(max_examples=examples(pr=12, nightly=100))
+@given(script=scripts())
+def test_a_later_epoch_ends_every_running_attempt_and_charges_it(script: Script) -> None:
+    state = fold(script.records, SEED)
+    reopened = fold([epoch_record(state.steps.epoch + 1)], state)
+    assert reopened.steps.epoch == state.steps.epoch + 1
+    assert [row.tag for row in reopened.steps.attempts] == [row.tag for row in state.steps.attempts]
+    for before, after in zip(state.steps.attempts, reopened.steps.attempts, strict=True):
+        assert after.ended
+        assert (after.started, after.uncharged) == (before.started, before.uncharged)
+    assert fold([epoch_record(state.steps.epoch)], state).steps == state.steps
+
+
+@pytest.mark.parametrize("status", list(core.RunStatus))
+def test_a_run_is_at_rest_only_when_it_ended_or_parked(status: core.RunStatus) -> None:
+    run = SEED.run.model_copy(update={"status": status})
+    expected = {
+        core.RunStatus.TERMINAL: RunRest.ENDED,
+        core.RunStatus.PARKED: RunRest.PARKED,
+    }.get(status)
+    assert at_rest(SEED.model_copy(update={"run": run})) is expected
+
+
+@pytest.mark.parametrize("reason", list(CancelReason))
+def test_only_a_pause_turns_a_cancelled_attempt_into_an_interruption(reason: CancelReason) -> None:
+    pause = {CancelReason.PAUSE_NOW, CancelReason.DRAIN_EXPIRED}
+    assert interruption_of(reason) is (Interruption.PAUSE if reason in pause else None)
+
+
+@settings(max_examples=examples(pr=12, nightly=200))
+@given(script=scripts(), status=PAUSES)
+def test_core_settles_only_with_reasons_that_are_results_and_cancels_with_either(
+    script: Script, status: core.RunStatus
+) -> None:
+    for length, (state, _) in enumerate(states(script)):
+        for standing in (state, paused(state, status, deadline_at=0.5, immediate=True)):
+            for action in decide(standing, clock_of(length)):
+                if isinstance(action, Settle) and isinstance(action.result, Cancelled):
+                    assert interruption_of(action.result.reason) is None

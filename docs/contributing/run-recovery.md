@@ -245,7 +245,7 @@ New records (one proto envelope, `vibesys/store/v1/core_input.proto`, validated 
 | `CoreInput` | a decision or proposal, an owner event, an operator control, an epoch resume, a clock advance that changed state | the external inputs of `step` |
 | `StepStarted` | tag, attempt, request, deadline | durable intent before any I/O; makes a re-run visible |
 | `StepFinished` | tag, attempt, `Finished`, `Failed` or `Cancelled` with a typed reason | the result; one per step |
-| `AttemptInterrupted` | tag, attempt, reason (`PAUSE`, `SHUTDOWN`) | an attempt that ended without ending the step |
+| `AttemptInterrupted` | tag, attempt, reason (`PAUSE`, `SHUTDOWN`, `RAISED`) | an attempt that ended without ending the step; a `RAISED` one (the runner raised or gave nothing back) is charged to the retry bound, the other two are not |
 | `CoreSnapshot` | an old `RunEnvelope` | the seed of a migrated or imported run only; never written for a new run |
 
 The bodies of decisions, requests and observations are the canonical encoding of today's validated
@@ -340,8 +340,9 @@ kind. The rule is:
 - a running attempt past its deadline is `Cancel(DEADLINE)`; an open step with no running attempt past its
   deadline is `Settle(Cancelled(DEADLINE))`, because there is nothing to cancel;
 - an open step whose attempts are spent is `Settle(Failed(ATTEMPTS_EXHAUSTED))`: attempts that began, less
-  the ones an `AttemptInterrupted` record ended, exceed the step's retry limit (`retry_limit` of the
-  request, else `Limits.request_retries.limit`);
+  the ones a `PAUSE` or `SHUTDOWN` interruption ended, exceed the step's retry limit (`retry_limit` of
+  the request, else `Limits.request_retries.limit`), so an attempt that raised or whose process died is
+  charged and a step that always does ends as a typed failure;
 - an open step marked `on_interrupt = CANCEL` whose attempt ended without a result, by an interruption
   record or by its process, is `Settle(Cancelled(INTERRUPTED))`;
 - an open step whose dependency can never succeed is `Settle(Cancelled(WITHDRAWN))`; one whose dependency is
@@ -353,13 +354,21 @@ kind. The rule is:
   step and `Settle(Cancelled(RUN_ENDING))` for each other open step, and starts none;
 - a run with a committed finish and no open step is `End`.
 
-A step runs now when its latest attempt began in the epoch the log is in and no interruption record ended
-it. The epoch of the log is the largest `Record.epoch` the fold has seen, so an attempt of an earlier epoch
-ended with its process. Cleanup steps that core issues while a cancelling finish is committed are cancelled
+A step runs now when its latest attempt has no record ending it. The first record of a later epoch (the
+epoch header, `EpochStarted`, which the writer appends before anything else) ends every attempt that
+began before it: the run has one writer, so the earlier process is dead. The fold does this, not
+`decide`, so a state cached before the restart and a full fold agree, and `decide` issues `Run` for those
+steps as soon as the header is in the log. The ended attempts are charged, as a raised one is. Cleanup steps that core issues while a cancelling finish is committed are cancelled
 like any other; whether cleanup should instead outlive the finish is left to the cutover.
 
 `decide` is total: it never raises on a validated log, and a log that fails validation is a read error at
 the boundary (a corrupt record stops the reader, as `vs_runlog` does today), never an action.
+
+Two more facts of the rule belong to core, so the loop does not restate them. `at_rest(state)` is `ENDED`
+when the run is `TERMINAL` and `PARKED` when it is `PARKED`, else `None`. `interruption_of(reason)` says
+whether cancelling a running attempt for `reason` is an interruption of the attempt (`PAUSE_NOW` and
+`DRAIN_EXPIRED`, recorded as `AttemptInterrupted(PAUSE)`, the step staying open) or the step's result
+(every other reason).
 
 ### vs-runtime: runner loop and StepRunner
 
@@ -457,8 +466,8 @@ loss costs the most.
 The pause change in #3475 item 1 supplies the drain: it stops `Run` for new steps, waits until each running
 step ends or the drain deadline passes, records `Parked`, and exits. This design asks three things of
 it. A step cancelled by Pause now is recorded as `AttemptInterrupted(PAUSE)`, not as a result, so Resume
-runs it again as the next attempt. An interrupted attempt is neither a policy failure nor a retry debit,
-as [run-transport.md](run-transport.md) already says. The drain deadline is a field of the pause input,
+runs it again as the next attempt. An attempt a pause interrupted is neither a policy failure nor a retry debit,
+as [run-transport.md](run-transport.md) already says; one whose runner raised is charged. The drain deadline is a field of the pause input,
 not a constant in the loop.
 
 ## Alternatives considered

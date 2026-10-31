@@ -7,13 +7,18 @@ hands to a runner whole.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING
+
+from .types.common import RunStatus
+from .types.steps import CancelReason, Interruption
 
 if TYPE_CHECKING:
     from .types.common import RequestId
+    from .types.kernel import CoreState
     from .types.records import Request
     from .types.settlement import RunResultProposal
-    from .types.steps import CancelReason, StepResult
+    from .types.steps import StepResult
 
 
 @dataclass(frozen=True)
@@ -61,3 +66,43 @@ class End:
 
 
 type Action = Run | Cancel | Settle | Wait | End
+
+
+def interruption_of(reason: CancelReason) -> Interruption | None:
+    """How the attempt of a cancelled step ends, or None when the cancellation is its result.
+
+    A pause cancels an attempt without ending its step: the step runs again when the run
+    resumes, so the attempt is recorded as interrupted and the step stays open. Every other
+    reason is the step's result.
+    """
+    match reason:
+        case CancelReason.PAUSE_NOW | CancelReason.DRAIN_EXPIRED:
+            return Interruption.PAUSE
+        case (
+            CancelReason.DEADLINE
+            | CancelReason.RUN_ENDING
+            | CancelReason.WITHDRAWN
+            | CancelReason.INTERRUPTED
+        ):
+            return None
+
+
+class RunRest(StrEnum):
+    """Why the runner loop has nothing more to do for this process."""
+
+    ENDED = "ended"
+    """The run's end is in the log."""
+
+    PARKED = "parked"
+    """The run is paused: it starts nothing, and exits once nothing is in flight."""
+
+
+def at_rest(state: CoreState) -> RunRest | None:
+    """Whether the run ended or parked, else None while it goes on."""
+    match state.run.status:
+        case RunStatus.TERMINAL:
+            return RunRest.ENDED
+        case RunStatus.PARKED:
+            return RunRest.PARKED
+        case _:
+            return None

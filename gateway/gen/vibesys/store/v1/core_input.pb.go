@@ -99,6 +99,9 @@ const (
 	InterruptionReason_INTERRUPTION_REASON_PAUSE InterruptionReason = 1
 	// The run process shut down in an orderly way.
 	InterruptionReason_INTERRUPTION_REASON_SHUTDOWN InterruptionReason = 2
+	// The runner raised, or gave nothing back. Unlike the two above it is charged to the step's
+	// retry bound, as a crash of the attempt is.
+	InterruptionReason_INTERRUPTION_REASON_RAISED InterruptionReason = 3
 )
 
 // Enum value maps for InterruptionReason.
@@ -107,11 +110,13 @@ var (
 		0: "INTERRUPTION_REASON_UNSPECIFIED",
 		1: "INTERRUPTION_REASON_PAUSE",
 		2: "INTERRUPTION_REASON_SHUTDOWN",
+		3: "INTERRUPTION_REASON_RAISED",
 	}
 	InterruptionReason_value = map[string]int32{
 		"INTERRUPTION_REASON_UNSPECIFIED": 0,
 		"INTERRUPTION_REASON_PAUSE":       1,
 		"INTERRUPTION_REASON_SHUTDOWN":    2,
+		"INTERRUPTION_REASON_RAISED":      3,
 	}
 )
 
@@ -410,8 +415,8 @@ func (*StepFinished_Failed) isStepFinished_Result() {}
 
 func (*StepFinished_Cancelled) isStepFinished_Result() {}
 
-// AttemptInterrupted is an attempt that ended without a result. The step stays open and is
-// not charged an attempt of its retry bound.
+// AttemptInterrupted is an attempt that ended without a result. The step stays open. A pause or
+// shutdown is not charged an attempt of its retry bound; a runner that raised is.
 type AttemptInterrupted struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Tag           string                 `protobuf:"bytes,1,opt,name=tag,proto3" json:"tag,omitempty"`
@@ -508,11 +513,12 @@ const file_vibesys_store_v1_core_input_proto_rawDesc = "" +
 	" STEP_CANCEL_REASON_DRAIN_EXPIRED\x10\x03\x12!\n" +
 	"\x1dSTEP_CANCEL_REASON_RUN_ENDING\x10\x04\x12 \n" +
 	"\x1cSTEP_CANCEL_REASON_WITHDRAWN\x10\x05\x12\"\n" +
-	"\x1eSTEP_CANCEL_REASON_INTERRUPTED\x10\x06*z\n" +
+	"\x1eSTEP_CANCEL_REASON_INTERRUPTED\x10\x06*\x9a\x01\n" +
 	"\x12InterruptionReason\x12#\n" +
 	"\x1fINTERRUPTION_REASON_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19INTERRUPTION_REASON_PAUSE\x10\x01\x12 \n" +
-	"\x1cINTERRUPTION_REASON_SHUTDOWN\x10\x02BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
+	"\x1cINTERRUPTION_REASON_SHUTDOWN\x10\x02\x12\x1e\n" +
+	"\x1aINTERRUPTION_REASON_RAISED\x10\x03BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
 
 var (
 	file_vibesys_store_v1_core_input_proto_rawDescOnce sync.Once

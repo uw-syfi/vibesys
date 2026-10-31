@@ -49,6 +49,24 @@ class CancelReason(StrEnum):
     """An attempt was interrupted and the step's policy is ``InterruptPolicy.CANCEL``."""
 
 
+class Interruption(StrEnum):
+    """Why an attempt ended without a result. Closed; the log records the same set."""
+
+    PAUSE = "pause"
+    """The operator paused the run: not a failure and not charged to the step's retry bound."""
+
+    SHUTDOWN = "shutdown"
+    """The run process shut down in an orderly way: not charged."""
+
+    RAISED = "raised"
+    """The runner raised or gave nothing back: charged, as a crash of the attempt is."""
+
+    @property
+    def charged(self) -> bool:
+        """Whether the attempt this ended counts against the step's retry bound."""
+        return self is Interruption.RAISED
+
+
 class Finished(Value):
     """The step ran to the end; ``observation`` is what the executor reported.
 
@@ -89,23 +107,32 @@ class StepAttempts(Value):
     """What the log says about the attempts of one open step.
 
     Attempts are numbered from 1 and run one at a time, so the latest one stands for the rest.
-    It runs now when it began in the epoch the log is in and no interruption ended it; one that
-    began in an earlier epoch ended with its process. ``interrupted`` counts the attempts an
-    interruption record ended: they are not charged to the step's retry bound.
+    It runs now until a record ends it: an interruption of it, or the first record of a later
+    epoch, which proves its process dead. ``uncharged`` counts the attempts a pause or shutdown
+    ended; every other attempt that began, a crashed or a raised one included, counts against
+    the step's retry bound.
     """
 
     tag: RequestId
     started: int = Field(ge=1)
     """The latest attempt that began."""
-    epoch: Count
-    """The epoch it began in."""
     ended: bool = False
-    """Whether an interruption record ended the latest attempt."""
-    interrupted: Count = 0
+    """Whether the latest attempt ended without a result."""
+    uncharged: Count = 0
+    """The attempts a pause or shutdown ended."""
+
+    @property
+    def charged(self) -> int:
+        """The attempts that count against the step's retry bound."""
+        return self.started - self.uncharged
 
 
 class StepsState(Value):
-    """The epoch the log is in and the attempts of the steps still open."""
+    """The epoch the log is in and the attempts of the steps still open.
+
+    A record of a later epoch opens it (see ``vs_core._step_attempts.epoch_opened``): the one
+    writer of a run wrote nothing else in the earlier epoch after its process died.
+    """
 
     epoch: Count = 0
     attempts: tuple[StepAttempts, ...] = ()
@@ -121,6 +148,7 @@ __all__ = [
     "Failed",
     "Finished",
     "InterruptPolicy",
+    "Interruption",
     "StepAttempts",
     "StepResult",
     "StepsState",

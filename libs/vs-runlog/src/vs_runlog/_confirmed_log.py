@@ -7,16 +7,26 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from protobuf import Oneof
 
-from vs_proto.api import AttemptInterrupted, CoreInput, Record, StepFinished, StepStarted
+from vs_proto.api import (
+    AttemptInterrupted,
+    CoreInput,
+    EpochStarted,
+    Record,
+    StepFinished,
+    StepStarted,
+)
 
 if TYPE_CHECKING:
     from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
-type CoreMessage = CoreInput | StepStarted | StepFinished | AttemptInterrupted
-"""The messages core folds into its state, each the body of one record."""
+type CoreMessage = EpochStarted | CoreInput | StepStarted | StepFinished | AttemptInterrupted
+"""The messages core folds into its state, each the body of one record.
+
+The epoch header opens an epoch: its first record proves the earlier epoch's process dead."""
 
 type _CoreBody = (
-    Oneof[Literal["core_input"], CoreInput]
+    Oneof[Literal["epoch_started"], EpochStarted]
+    | Oneof[Literal["core_input"], CoreInput]
     | Oneof[Literal["step_started"], StepStarted]
     | Oneof[Literal["step_finished"], StepFinished]
     | Oneof[Literal["attempt_interrupted"], AttemptInterrupted]
@@ -103,6 +113,8 @@ class ConfirmedLog:
 
 def _body(message: CoreMessage) -> _CoreBody:
     match message:
+        case EpochStarted():
+            return Oneof("epoch_started", message)
         case CoreInput():
             return Oneof("core_input", message)
         case StepStarted():

@@ -17,8 +17,16 @@ from ._request_ledger import dispatch_until, retry_limit
 from ._request_recovery import is_open
 from ._run_park import dispatch_allowed, pause_withdraws
 from ._step import advance_run_time, step
-from ._step_attempts import dispatched, forgotten, interrupted, open_record, report_of, started
-from ._step_log import decode_event, decode_request, decode_result
+from ._step_attempts import (
+    dispatched,
+    epoch_opened,
+    forgotten,
+    interrupted,
+    open_record,
+    report_of,
+    started,
+)
+from ._step_log import decode_event, decode_interruption, decode_request, decode_result
 from .types.common import DependencyStatus, InterruptPolicy, RequestId, RunStatus, StopMode
 from .types.records import request_interrupt_policy
 from .types.steps import Cancelled, CancelReason, Failed
@@ -86,7 +94,8 @@ def _apply(
         case Oneof(field="step_finished", value=message):
             return _finish(state, message, registry)
         case Oneof(field="attempt_interrupted", value=message):
-            return interrupted(state, RequestId(root=message.tag), message.attempt)
+            tag = RequestId(root=message.tag)
+            return interrupted(state, tag, message.attempt, decode_interruption(message))
         case _:
             return state
 
@@ -115,16 +124,14 @@ _CORE_RECORDS = frozenset({"core_input", "step_started", "step_finished", "attem
 
 def _observed(state: CoreState, record: Record) -> CoreState:
     """``state`` in the record's epoch and at its run clock."""
-    if record.epoch > state.steps.epoch:
-        steps = state.steps.model_copy(update={"epoch": record.epoch})
-        state = state.model_copy(update={"steps": steps})
+    state = epoch_opened(state, record.epoch)
     return state if record.clock is None else advance_run_time(state, record.clock)
 
 
 def _of_step(state: CoreState, record: RequestRecord, now: float) -> Action | None:
     tag = record.request_id
     attempts = state.steps.of(tag)
-    running = attempts is not None and attempts.epoch == state.steps.epoch and not attempts.ended
+    running = attempts is not None and not attempts.ended
     if _run_is_ending(state):
         return (
             Cancel(tag=tag, reason=CancelReason.RUN_ENDING)
@@ -165,8 +172,7 @@ def _start_or_settle(state: CoreState, record: RequestRecord, now: float) -> Run
     if attempts is not None:
         if request_interrupt_policy(record.request) is InterruptPolicy.CANCEL:
             return Settle(tag=tag, result=Cancelled(reason=CancelReason.INTERRUPTED))
-        charged = attempts.started - attempts.interrupted
-        if charged > retry_limit(state.run, record.request):
+        if attempts.charged > retry_limit(state.run, record.request):
             return Settle(tag=tag, result=Failed(reason=FailureReason.ATTEMPTS_EXHAUSTED))
     if now >= record.until.at:
         return Settle(tag=tag, result=Cancelled(reason=CancelReason.DEADLINE))
