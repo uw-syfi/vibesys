@@ -24,16 +24,18 @@ function directory(): string {
   return value;
 }
 
-/** The generated replay of a declaration, or undefined when the declaration has none. */
-export function derivedReplayPath(set: DerivedReplaySet, name: string): string | undefined {
-  const path = join(directory(), set, `${name}.pb`);
-  return existsSync(path) ? path : undefined;
+/**
+ * Where the replays of fixtures that differ from their declaration are kept. It sits inside the
+ * set, so the key that names the set also covers them and they are never older than it.
+ */
+export function derivedVariantsDirectory(): string {
+  return join(directory(), 'variants');
 }
 
 /** The bytes of the replay generated for a declaration; throws naming the missing file. */
 export function derivedReplay(set: DerivedReplaySet, name: string): Uint8Array {
-  const path = derivedReplayPath(set, name);
-  if (path === undefined) {
+  const path = join(directory(), set, `${name}.pb`);
+  if (!existsSync(path)) {
     throw new Error(`no derived replay ${set}/${name}.pb in ${directory()}; is ${name} declared?`);
   }
   return readFileSync(path);

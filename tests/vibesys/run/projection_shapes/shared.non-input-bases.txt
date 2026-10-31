@@ -1,0 +1,17 @@
+shared/non-input-bases
+records 55
+blobs 1
+streams 0
+record kinds
+  declaration_amended 1
+  epoch_started 1
+  lifecycle 1
+  metric 11
+  span 41
+span label kinds
+  (no label) 1
+  adoption 1
+  agent_turn 13
+  gate 11
+  planning_call 2
+  workstream 13

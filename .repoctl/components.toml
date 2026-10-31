@@ -128,6 +128,74 @@ job = "clients"
 root = "clients"
 depends_on = ["server_protocol", "server_transport", "bun_fetcher"]
 
+# What the native replays derive from, listed once. `tests/support/derived_replays.py` reads this
+# component to key a replay set and CI selects the client jobs on a change to any root or file, so
+# a set is never read stale and a projector change still runs the client tests that read it.
+# The libraries are every one the generators reach through module-level imports, whole, because a
+# constant or class a traced function uses is defined where the import graph says, not where a
+# call trace says. The two declaration directories also sit under `clients`.
+[[components]]
+id = "derived_replays"
+class = "manual"
+job = "clients"
+roots = [
+  "proto/vibesys",
+  "libs/vs-agent/src",
+  "libs/vs-async-ops/src",
+  "libs/vs-core/src",
+  "libs/vs-decode/src",
+  "libs/vs-evaluation/src",
+  "libs/vs-evaluator-protocol/src",
+  "libs/vs-faults/src",
+  "libs/vs-issue-tracker/src",
+  "libs/vs-mcp/src",
+  "libs/vs-project/src",
+  "libs/vs-prompts/src",
+  "libs/vs-proto/src",
+  "libs/vs-redaction/src",
+  "libs/vs-runlog/src",
+  "libs/vs-runtime/src",
+  "libs/vs-sandbox/src",
+  "libs/vs-sim/src",
+  "libs/vs-slurm/src",
+  "src/vibesys/records",
+  "src/vibesys/search_spans",
+  "clients/libs/run-fixtures/src/data",
+  "clients/apps/desktop-shell/e2e/scenarios",
+]
+files = [
+  "uv.lock",
+  "pyproject.toml",
+  "libs/vs-agent/pyproject.toml",
+  "libs/vs-async-ops/pyproject.toml",
+  "libs/vs-core/pyproject.toml",
+  "libs/vs-decode/pyproject.toml",
+  "libs/vs-evaluation/pyproject.toml",
+  "libs/vs-evaluator-protocol/pyproject.toml",
+  "libs/vs-faults/pyproject.toml",
+  "libs/vs-issue-tracker/pyproject.toml",
+  "libs/vs-mcp/pyproject.toml",
+  "libs/vs-project/pyproject.toml",
+  "libs/vs-prompts/pyproject.toml",
+  "libs/vs-proto/pyproject.toml",
+  "libs/vs-redaction/pyproject.toml",
+  "libs/vs-runlog/pyproject.toml",
+  "libs/vs-runtime/pyproject.toml",
+  "libs/vs-sandbox/pyproject.toml",
+  "libs/vs-sim/pyproject.toml",
+  "libs/vs-slurm/pyproject.toml",
+  "src/vibesys/__init__.py",
+  "src/vibesys/events.py",
+  "src/vibesys/metrics.py",
+  "tests/support/__init__.py",
+  "tests/support/derived_replays.py",
+  "tests/support/journey_fixtures.py",
+  "tests/support/lineage_fixture.py",
+  "tests/support/materialize_replays.py",
+  "tests/support/retained_events.py",
+  "tests/support/shared_scenarios.py",
+]
+
 [[components]]
 id = "stitch"
 class = "manual"

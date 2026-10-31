@@ -116,17 +116,29 @@ checks nothing; do not update it.
 The native replays of the run-fixtures library and the desktop-shell scenarios
 are not goldens, and nothing of them is committed. They are the shipping
 projector applied to a declaration, so `tests.support.derived_replays` stores
-them under the hash of everything they derive from, and the
-`with_derived_replays` wrapper in the clients tools makes the set before a
-client test run (`pnpm test` in `run-page`, `pnpm e2e` in the desktop shell). A
-`.proto` or projector change names a new set, so none is stale and no two pull
-requests conflict. A client test reads one through
+them under a hash of everything they can derive from: every file under the
+roots, and the files, of the `derived_replays` component in the repoctl policy
+(whole source packages, the lock and project files, the generators), and the
+Python version. The key is coarse on purpose: regenerating takes seconds, so it
+errs wide instead of listing what matters, and no trace of what ran can go
+stale. CI selects the client jobs on a change to the same component, so a
+projector change still runs the client tests that read the replays; widen the
+component, never the key alone. The `with_derived_replays` wrapper in the
+clients tools makes the set before a client test run (`pnpm test` in
+`run-page`, `pnpm e2e` and `e2e:linux` in the desktop shell) and needs `uv` and
+a synced Python environment, which a TypeScript-only checkout did not need
+before. A `.proto` or projector change names a new set, so none is stale and no
+two pull requests conflict. A client test reads one through
 `@vibesys/run-fixtures/derived`, which fails naming the script when it was
 skipped; a Python test projects the declaration itself with
-`shared_scenarios.project_shared` or `journey_fixtures.project_scenario`. Code
-that projection starts to run joins `INPUTS` in `derived_replays`; the
-completeness test names the file. Generation is never done inside a test: the
-two 600 idea scenarios take over a minute.
+`shared_scenarios.project_shared` or `journey_fixtures.project_scenario`.
+Generation is never done inside a test.
+
+Because a projector change no longer shows as a changed file, a text snapshot
+of each scenario (record kinds and span label kinds, with counts) is committed
+under the run tests and rewritten by the regeneration script. It changes only
+when what a scenario projects to changes, so two pull requests conflict on it
+only for a real overlap.
 
 Three sets of committed binary goldens remain, each because it pins a contract or
 is read where Python cannot make it: the conversion goldens

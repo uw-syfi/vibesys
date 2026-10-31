@@ -1,0 +1,18 @@
+shared/live-reconnect
+records 46
+blobs 1
+streams 1
+record kinds
+  declaration_amended 1
+  epoch_started 1
+  lifecycle 1
+  metric 7
+  span 35
+  stream 1
+span label kinds
+  (no label) 1
+  adoption 1
+  agent_turn 11
+  gate 9
+  planning_call 2
+  workstream 11

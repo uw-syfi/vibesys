@@ -1,25 +1,30 @@
 """The native replays the clients test against, generated from their declarations, never committed.
 
 A replay is the shipping records projector applied to a declaration, so it is a function of the
-projector, the schemas and the declaration. Committing it made every pull request that touched any
-of them rewrite the same dozens of files, and two such pull requests always conflicted. Here a set is
-stored under the hash of everything it derives from, so a changed input names a different set and a
-stale one cannot be read.
+projector, the schemas, the libraries and interpreter that run it, and the declaration. Committing
+it made every pull request that touched any of them rewrite the same dozens of files, and two such
+pull requests always conflicted. Here a set is stored under a hash of everything it can derive
+from, so a changed input names a different set and a stale one cannot be read.
 
-``INPUTS`` lists the inputs by path. ``test_derived_replay_inputs_cover_every_file_that_runs_while_projecting``
-holds the list complete: it fails, naming the file, when projection runs code outside it. The key is
-computed from file bytes alone, so a CI step can ask for it before any environment exists.
+The key is coarse on purpose. It hashes every file under the roots of the ``derived_replays``
+component in ``.repoctl/components.toml`` (whole source packages the generators reach through
+imports, not the functions a trace saw run), the files that component lists (the lock file, the
+project files, the generators), and the Python version. Regenerating takes seconds, so the key
+errs wide rather than listing what matters. CI selects the client jobs on a change to the same
+component, so there is one list: the key and the selection cannot disagree.
 
 ``materialize`` publishes the set a key names with one rename, so a killed run leaves nothing a
-reader could take for a complete set, and returns its directory. Two layouts live in it:
-``shared/<name>.pb`` from the run-fixtures declarations and ``journeys/<name>.pb`` from the desktop
-shell scenarios. Generation takes minutes for the two 600 idea scenarios, so it runs in a step
-before the tests (``clients/tools/scripts/with_derived_replays.mjs``), never inside one.
+reader could take for a complete set, and refuses to publish when an input changed while it ran.
+It returns the set's directory. The layouts in it: ``shared/<name>.pb`` from the run-fixtures
+declarations, ``journeys/<name>.pb`` from the desktop shell scenarios, and ``variants/``, where
+the desktop e2e keeps the replay of a fixture that differs from its declaration. A run starts
+through ``clients/tools/scripts/with_derived_replays.mjs``, which generates the set before the
+tests, never inside one.
+
 Only the standard library is imported, so the module is cheap to load from a script or a CI step.
 ``materialize_replays`` holds the generators and the command that starts them.
-
 ``python -m tests.support.derived_replays key`` prints the key and the cache directory as
-``name=value`` lines, the GitHub output format. ``path`` prints the directory of the set the
+``name=value`` lines, the GitHub output format; ``path`` prints the directory of the set the
 current inputs name, and exits 1 when it has not been made.
 """
 
@@ -30,76 +35,66 @@ import os
 import shutil
 import sys
 import tempfile
+import tomllib
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[2]
+#: The policy that lists the inputs, and the component in it that does.
+POLICY = ".repoctl/components.toml"
+COMPONENT = "derived_replays"
 #: Overrides the cache directory; otherwise ``$XDG_CACHE_HOME/vibesys/derived-replays``.
 CACHE_VARIABLE = "VIBESYS_DERIVED_REPLAYS_CACHE"
 #: Sets kept per machine, newest use first. A set is 8 MB, and one is made per input change.
 KEEP = 8
-SUFFIXES = frozenset({".py", ".proto", ".json"})
-#: What a replay derives from, as repository paths: a file, or a directory read whole. The
-#: schemas and their bindings, the run log fold, the projector and the code it runs in other
-#: packages, the generators and the declarations they read.
-INPUTS = (
-    "proto/vibesys",
-    "libs/vs-proto/src/vs_proto",
-    "libs/vs-runlog/src/vs_runlog",
-    "libs/vs-decode/src/vs_decode",
-    "libs/vs-redaction/src/vs_redaction",
-    "libs/vs-core/src/vs_core/_values.py",
-    "libs/vs-core/src/vs_core/flows/_spans.py",
-    "libs/vs-core/src/vs_core/types/common.py",
-    "src/vibesys/events.py",
-    "src/vibesys/metrics.py",
-    "src/vibesys/records",
-    "src/vibesys/search_spans",
-    "tests/support/derived_replays.py",
-    "tests/support/journey_fixtures.py",
-    "tests/support/lineage_fixture.py",
-    "tests/support/materialize_replays.py",
-    "tests/support/retained_events.py",
-    "tests/support/shared_scenarios.py",
-    "clients/libs/run-fixtures/src/data",
-    "clients/apps/desktop-shell/e2e/scenarios",
-)
+#: A set used within this many seconds of the newest one is never pruned, so a long run on an
+#: older checkout keeps reading what it started with.
+RETAIN_SECONDS = 24 * 60 * 60
+_JUNK_PARTS = frozenset({"__pycache__", "node_modules"})
+_JUNK_SUFFIXES = frozenset({".pyc", ".pyo", ".so", ".dylib"})
 
 #: Writes a set into an empty directory.
 Produce = Callable[[Path], None]
+#: The key of the set the inputs name now.
+KeyOf = Callable[[], str]
 
 
-def input_files(repository: Path = REPOSITORY, inputs: Sequence[str] = INPUTS) -> list[Path]:
-    """Every file the inputs name, in path order; a missing input is an error naming it."""
+def inputs(repository: Path = REPOSITORY) -> tuple[str, ...]:
+    """The roots and files of the ``derived_replays`` component: the one list of what a set derives from."""
+    components = tomllib.loads((repository / POLICY).read_text()).get("components", [])
+    named = [component for component in components if component.get("id") == COMPONENT]
+    if len(named) != 1:
+        message = (
+            f"{POLICY} must declare exactly one component with id {COMPONENT!r}; found {len(named)}"
+        )
+        raise ValueError(message)
+    return (*named[0].get("roots", ()), *named[0].get("files", ()))
+
+
+def input_files(repository: Path = REPOSITORY, names: Sequence[str] | None = None) -> list[Path]:
+    """Every file under the inputs, in path order; a missing input is an error naming it."""
     files: set[Path] = set()
-    for name in inputs:
+    for name in inputs(repository) if names is None else names:
         path = repository / name
         if path.is_file():
             files.add(path)
         elif path.is_dir():
-            files.update(
-                found
-                for found in path.rglob("*")
-                if found.is_file() and found.suffix in SUFFIXES and "__pycache__" not in found.parts
-            )
+            files.update(found for found in path.rglob("*") if found.is_file() and not _junk(found))
         else:
-            message = f"derived replay input {name} does not exist; fix INPUTS in {__file__}"
+            message = f"derived replay input {name} does not exist; fix the {COMPONENT} component in {POLICY}"
             raise FileNotFoundError(message)
     return sorted(files)
 
 
-def covered(path: Path, repository: Path = REPOSITORY, inputs: Sequence[str] = INPUTS) -> bool:
-    """Whether a change to ``path`` changes the key."""
-    relative = path.resolve().relative_to(repository)
-    if relative.suffix not in SUFFIXES:
-        return False
-    return any(relative == Path(name) or Path(name) in relative.parents for name in inputs)
-
-
-def key(repository: Path = REPOSITORY, inputs: Sequence[str] = INPUTS) -> str:
-    """One hash over the relative name and the bytes of each input file, in path order."""
+def key(
+    repository: Path = REPOSITORY,
+    names: Sequence[str] | None = None,
+    python: Sequence[int] = tuple(sys.version_info[:3]),
+) -> str:
+    """One hash over the Python version and the relative name and bytes of each input file."""
     digest = hashlib.sha256()
-    for path in input_files(repository, inputs):
+    digest.update(f"python {'.'.join(map(str, python))} {sys.implementation.name}\0".encode())
+    for path in input_files(repository, names):
         digest.update(path.relative_to(repository).as_posix().encode())
         digest.update(b"\0")
         digest.update(path.read_bytes())
@@ -124,14 +119,16 @@ def find(*, cache: Path, set_key: str) -> Path | None:
     return published
 
 
-def materialize(*, cache: Path, set_key: str, produce: Produce) -> Path:
-    """The directory of the set ``set_key`` names, generated first when the cache lacks it.
+def materialize(*, cache: Path, current_key: KeyOf, produce: Produce) -> Path:
+    """The directory of the set the inputs name, generated first when the cache lacks it.
 
     The set is written beside its final place and renamed into it, so the directory exists only
-    when it is complete. A producer that raises, or writes no file, publishes nothing. Two
+    when it is complete. A producer that raises, or writes no file, publishes nothing, and neither
+    does a run during which an input changed: the set would mix two versions under one key. Two
     processes that make the same set both succeed; the second discards its copy.
     """
     cache.mkdir(parents=True, exist_ok=True)
+    set_key = current_key()
     if (found := find(cache=cache, set_key=set_key)) is not None:
         return found
     staging = Path(tempfile.mkdtemp(prefix=f".{set_key}-", dir=cache))
@@ -140,6 +137,13 @@ def materialize(*, cache: Path, set_key: str, produce: Produce) -> Path:
         if not any(staging.rglob("*.pb")):
             message = f"generating the derived replays for {set_key} wrote no .pb file"
             raise RuntimeError(message)
+        if (after := current_key()) != set_key:
+            message = (
+                f"an input of the derived replays changed while they were generated "
+                f"({set_key} became {after}); nothing was published, run again"
+            )
+            raise RuntimeError(message)
+        (staging / "variants").mkdir(exist_ok=True)
         published = cache / set_key
         try:
             staging.rename(published)
@@ -152,15 +156,24 @@ def materialize(*, cache: Path, set_key: str, produce: Produce) -> Path:
     return published
 
 
+def _junk(path: Path) -> bool:
+    return (
+        path.suffix in _JUNK_SUFFIXES
+        or path.name == ".DS_Store"
+        or any(part in _JUNK_PARTS or part.endswith(".egg-info") for part in path.parts)
+    )
+
+
 def _prune(cache: Path, *, keep: Path) -> None:
-    """Remove the sets used least recently beyond ``KEEP``, and never ``keep``."""
+    """Remove the sets used least recently beyond ``KEEP``, except ``keep`` and recent ones."""
     sets = sorted(
         (path for path in cache.iterdir() if path.is_dir() and not path.name.startswith(".")),
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
+    now = keep.stat().st_mtime
     for path in sets[KEEP:]:
-        if path != keep:
+        if path != keep and now - path.stat().st_mtime >= RETAIN_SECONDS:
             shutil.rmtree(path, ignore_errors=True)
 
 

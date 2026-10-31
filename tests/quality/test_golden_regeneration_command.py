@@ -24,6 +24,7 @@ GO_FAILURE_SITES = (
 PYTHON_FAILURE_SITES = (
     "tests/vibesys/run/test_runlog_conversion.py",
     "tests/vibesys/run/test_journey_fixtures.py",
+    "tests/vibesys/run/test_projection_shapes.py",
 )
 #: The pieces of the old chain, which only the script and the generators themselves may name.
 CHAIN = (

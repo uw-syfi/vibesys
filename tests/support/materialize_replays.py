@@ -44,7 +44,7 @@ def main() -> int:
     """Make the set the current inputs name, if the cache lacks it, and print its directory."""
     directory = derived_replays.materialize(
         cache=derived_replays.cache_directory(),
-        set_key=derived_replays.key(),
+        current_key=derived_replays.key,
         produce=generate,
     )
     sys.stdout.write(f"{directory}\n")

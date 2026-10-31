@@ -5,6 +5,7 @@
 #   conversion      proto/testdata/conversion (Python converter and writer)
 #   skeleton wire   proto/testdata/skeleton-wire and the retained gateway replies (Go gateway)
 #   queue-rs-live   the committed copy of the desktop journey trace, queue-rs-live.json
+#   shapes          tests/vibesys/run/projection_shapes, what each scenario projects to (text)
 #
 # Not rewritten, because nothing is committed: the native replays the desktop e2e and the run page
 # tests read. They are generated from their declarations under the hash of their inputs (see
@@ -18,10 +19,11 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 goldens=(clients/libs/run-fixtures/src/data/queue-rs-live.json proto/testdata/conversion
-  proto/testdata/skeleton-wire proto/testdata/retained)
+  proto/testdata/skeleton-wire proto/testdata/retained tests/vibesys/run/projection_shapes)
 started=$SECONDS
-echo "regenerate_goldens: queue-rs-live and the conversion goldens"
+echo "regenerate_goldens: queue-rs-live, the projection shapes and the conversion goldens"
 uv run --locked python -m tests.support.shared_scenarios
+uv run --locked python -m tests.support.projection_shapes
 uv run --locked python proto/testdata/conversion/generate.py
 echo "regenerate_goldens: skeleton wire and retained gateway replies"
 (cd gateway && VIBESYS_UPDATE_GOLDEN=1 go test -count=1 ./internal/server/...)
