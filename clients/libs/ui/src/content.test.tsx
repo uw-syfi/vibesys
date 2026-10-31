@@ -139,10 +139,10 @@ describe('Table', () => {
   });
 });
 
-describe('the pointer carries the detail behind a short word', () => {
+describe('the detail behind a short word is a description or a pointer', () => {
   test('a chip carries its hint, and a field error its own', () => {
     expect(renderToStaticMarkup(<Chip label="Token found" hint="Held in a profile." />)).toContain(
-      'title="Held in a profile."',
+      'aria-description="Held in a profile."',
     );
     const field = renderToStaticMarkup(
       <Field label="SSH host" error="Unreachable" errorHint="Connection refused">

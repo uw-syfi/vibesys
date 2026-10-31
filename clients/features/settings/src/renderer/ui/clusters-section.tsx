@@ -6,7 +6,6 @@
 
 import type {ComputeSettings, SlurmClusterSettings} from '@vibesys/ipc';
 import {
-  Banner,
   Button,
   Card,
   Chip,
@@ -273,21 +272,18 @@ function TestResult(props: {
   if (test.kind === 'untested' || test.kind === 'testing') return null;
   if (props.outdated) {
     return (
-      <Banner
-        tone="warn"
-        title="Test the connection again."
-        body="The settings changed since the last test."
-      />
+      <Chip label="Test again" tone="warn" dot hint="The settings changed since the last test." />
     );
   }
   if (test.kind === 'failed') {
     return <FormFailure title={testFailureWords(test.stage)} detail={test.detail} />;
   }
   return (
-    <Banner
+    <Chip
+      label="Connection works"
       tone="ok"
-      title="The connection works."
-      body={
+      dot
+      hint={
         test.partitions.length === 0
           ? 'The hardware above was read from the scheduler where it could be.'
           : `Partitions: ${test.partitions.join(', ')}. The hardware above was read from the scheduler where it could be.`

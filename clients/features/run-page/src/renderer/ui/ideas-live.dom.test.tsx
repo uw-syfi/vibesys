@@ -125,6 +125,7 @@ test('an idea that measured nothing claims no verdict in the idea view, only its
       mode="ideas"
       idea={idea}
       loading={null}
+      problem={null}
       dispatch={() => undefined}
     />,
   );
@@ -145,6 +146,7 @@ test('the idea view says what the idea built on, its effect, and its outcome', a
       mode="ideas"
       idea={idea}
       loading={null}
+      problem={null}
       dispatch={() => undefined}
     />,
   );

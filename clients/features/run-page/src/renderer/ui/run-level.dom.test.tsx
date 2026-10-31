@@ -384,7 +384,7 @@ test('native startup and diagnostics remain visible in Logs without a log stream
   for (const row of recordLog) expect(read).toContain(row.message);
 });
 
-test('the Run screen shows the same native failure diagnostic as Logs', async () => {
+test('a native failure diagnostic is a row in Logs, marked on the Logs tab, and no strip on the screen', async () => {
   const diagnostic = {
     seq: '2',
     epoch: 1,
@@ -413,13 +413,31 @@ test('the Run screen shows the same native failure diagnostic as Logs', async ()
       ),
     );
     expect(container.textContent).not.toContain(diagnostic.message);
-    const open = container.querySelector('button[aria-label="Show details"]');
-    await act(async () => (open as HTMLElement | null)?.click());
-    expect(container.textContent).toContain(diagnostic.message);
+    const logsTab = [...container.querySelectorAll('label.vs-segment')].find(label =>
+      label.textContent?.startsWith('Logs'),
+    );
+    expect(logsTab?.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Diagnostic');
+    expect(container.querySelectorAll('[role="img"][aria-label="Diagnostic"]')).toHaveLength(1);
   } finally {
     await act(async () => root.unmount());
     container.remove();
   }
+});
+
+test('a diagnostic the record log no longer reaches is still a row in Logs', async () => {
+  const diagnostic = {
+    seq: '2',
+    epoch: 1,
+    body: 'notice' as const,
+    event: '',
+    message: 'The input measurement failed',
+    failure: true,
+  };
+  const state = runPageStep(attaching(), SNAPSHOT).state;
+  expect(await face({...state, recordDiagnostic: diagnostic}, 'logs')).toContain(
+    diagnostic.message,
+  );
+  expect(await face(state, 'logs')).not.toContain(diagnostic.message);
 });
 
 test('the selected idea’s line words the objective’s unit, not its metric key', async () => {

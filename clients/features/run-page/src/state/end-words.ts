@@ -99,11 +99,32 @@ export function unclipped(reason: string, full: string | null): string {
     : reason;
 }
 
+/** The longest brief a failure is cut to, in characters. */
+const BRIEF_LENGTH = 60;
+
+/**
+ * A few words of a failure's message, for beside the status: the first clause of its first
+ * non-blank line without a leading exception name (`SomeError: `), cut at a word. Null when the
+ * message says nothing. The whole message stays in the status's description.
+ */
+export function briefFailure(message: string): string | null {
+  const first = message.split('\n').find(each => each.trim() !== '') ?? '';
+  const line = first.trim().replace(/^[\w.]*(?:Error|Exception):\s*/, '');
+  const clause = (line.split(/(?<=[.!?])\s|:\s/)[0] ?? '').trim().replace(/:$/, '');
+  if (clause === '') return null;
+  const space = clause.lastIndexOf(' ', BRIEF_LENGTH);
+  const cut =
+    clause.length <= BRIEF_LENGTH
+      ? clause
+      : `${clause.slice(0, space > 0 ? space : BRIEF_LENGTH).trimEnd()}${ELLIPSIS}`;
+  return `${cut.charAt(0).toUpperCase()}${cut.slice(1)}`;
+}
+
 const UNCOMPARED =
   'The candidate was adopted without an input comparison: the input failed its own measurement, so nothing shows it beats the input.';
 
 /**
- * The ended banner's line, for an end record's `outcome` and `reason`. `adopted` and `direction` come
+ * The ended run's reason, for an end record's `outcome` and `reason`. `adopted` and `direction` come
  * from the run's trace and declared objective; null when the page has not read them. `uncompared`
  * is the record's mark that the adopted candidate was never compared with the input, which holds
  * however the run ended (adopted, the deadline, a stop).

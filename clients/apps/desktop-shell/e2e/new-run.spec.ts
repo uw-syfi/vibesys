@@ -21,7 +21,7 @@ import {installGateway, wire} from './fake-gateway.js';
 import {installFakeRun} from './fake-run.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {choose, main, NEW_RUN_PAGES, openAt, proceed, question, steps} from './new-run-flow.js';
-import {type FakeHostWindow, openNewRun as open, PROJECT, SEED} from './world.js';
+import {type FakeHostWindow, openNewRun as open, PROJECT, SEED, sidebar} from './world.js';
 
 const start = (page: Page) => main(page).getByRole('button', {name: 'Start run'});
 
@@ -624,12 +624,10 @@ test('a machine that serves everything but the run trace says Needs an update on
   page,
 }) => {
   await openAt(page, pageNamed('where'), withoutRunTrace());
-  await main(page)
-    .locator('.vs-banner')
-    .filter({hasText: 'VibeSys on host-b'})
-    .getByRole('button', {name: 'Show details'})
-    .click();
-  await expect(main(page).getByText('Needs an update')).toBeVisible();
+  await expect(main(page).getByText('Needs an update', {exact: true})).toBeVisible();
+  await expect(
+    main(page).locator('[aria-description="VibeSys on host-b needs an update"]'),
+  ).toBeAttached();
 });
 
 test('a machine that serves everything but the run trace says Needs an update on Review and never starts', async ({
@@ -642,6 +640,35 @@ test('a machine that serves everything but the run trace says Needs an update on
   await start(page).click({force: true});
   const {started} = await fakeNewRun(page);
   expect(started).toEqual([]);
+});
+
+test('a start whose reply was lost says on the page that it may have started, and Start waits until Runs was opened', async ({
+  page,
+}) => {
+  await openAt(page, pageNamed('review project'));
+  // The host takes the run and the reply is lost: the call rejects with nothing reported.
+  await page.evaluate(() => {
+    const bridge = (window as unknown as {vibesysWelcome: Record<string, unknown>}).vibesysWelcome;
+    bridge['startRun'] = () => Promise.reject(new Error('the reply was lost'));
+  });
+  await start(page).click();
+  // Without hovering: the words are on the page, Start is closed with its reason beside it, and
+  // there is a way to look.
+  await expect(main(page).getByText('May have started', {exact: true})).toBeVisible();
+  await expect(start(page)).toHaveAttribute('aria-disabled', 'true');
+  await expect(main(page).getByText('Check Runs first', {exact: true})).toBeVisible();
+  await start(page).click({force: true});
+  expect((await fakeNewRun(page)).started).toEqual([]);
+
+  await main(page).getByRole('button', {name: 'Open Runs', exact: true}).click();
+  await expect(sidebar(page).getByRole('button', {name: 'Runs'})).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+  // Back at the form: the person has looked, so Start is open again.
+  await sidebar(page).getByRole('button', {name: 'New', exact: true}).click();
+  await expect(main(page).getByText('May have started', {exact: true})).toHaveCount(0);
+  await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
 });
 
 test('Run again opens Review with the run as it was started', async ({page}) => {
@@ -925,10 +952,9 @@ test('Where: a GPU task the agent machine lacks is a misfit only when results ar
   const measured = main(page).getByRole('radiogroup', {name: 'Measured on'});
   const misfit = main(page).getByText('Hardware mismatch', {exact: true});
   await expect(misfit).toBeVisible();
-  // The detail is behind the title until it is opened.
+  // The detail is the status word's description, not on the page.
   await expect(main(page).getByText(/The task targets/)).toHaveCount(0);
-  await main(page).getByRole('button', {name: 'Show details'}).click();
-  await expect(main(page).getByText(/^The task targets .*, but .* has /)).toBeVisible();
+  await expect(misfit).toHaveAccessibleDescription(/^The task targets .*, but .* has /);
   for (const name of ['Slurm · lab-h100', 'Slurm · campus', 'Modal']) {
     await measured.getByRole('radio', {name: new RegExp(name)}).check();
     await expect(misfit).toHaveCount(0);
@@ -1031,9 +1057,11 @@ test('a bridge call that throws is worded plainly, names what failed, and Try ag
     .getByRole('button', {name: 'New', exact: true})
     .click();
 
-  await expect(page.getByText(/Could not read the agents .* runs\./)).toBeVisible();
-  await page.getByRole('button', {name: 'Show details'}).click();
-  await expect(page.getByText('Something unexpected happened.', {exact: false})).toBeVisible();
+  const failed = page.getByText('Not read', {exact: true});
+  await expect(failed).toBeVisible();
+  await expect(failed).toHaveAccessibleDescription(/^Could not read the agents host-b runs\./);
+  await expect(failed).toHaveAccessibleDescription(/Something unexpected happened\./);
+  await expect(failed).not.toHaveAccessibleDescription(/is not a function/);
   await expect(page.getByText(/is not a function/)).toHaveCount(0);
 
   await page.evaluate(() =>

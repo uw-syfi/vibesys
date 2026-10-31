@@ -92,9 +92,9 @@ const press = (scope: string, label: string): string => `(() => {
   return button !== undefined;
 })()`;
 
-/** What a person can read: the page's text and the labels and tooltips it carries. */
-const SCREEN_TEXT = `document.body.innerText + '\\n' + [...document.querySelectorAll('[title], [aria-label]')]
-  .map(each => \`\${each.getAttribute('title') ?? ''} \${each.getAttribute('aria-label') ?? ''}\`)
+/** What a person can read: the page's text and the labels, descriptions and tooltips it carries. */
+const SCREEN_TEXT = `document.body.innerText + '\\n' + [...document.querySelectorAll('[title], [aria-label], [aria-description]')]
+  .map(each => \`\${each.getAttribute('title') ?? ''} \${each.getAttribute('aria-label') ?? ''} \${each.getAttribute('aria-description') ?? ''}\`)
   .join('\\n')`;
 /** Anything of the host's own: argparse's words, the command names, or the screen's old verdict. */
 const HOST_WORDS =
