@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from collections.abc import Coroutine, Iterator
 
     from vs_core.api import Request
-    from vs_runtime.contracts import (
+    from vs_runtime.api import (
         AccuracyReceipt,
         BenchmarkEvaluation,
         BenchmarkObjective,
