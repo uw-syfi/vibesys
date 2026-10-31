@@ -223,6 +223,7 @@ class _Builder:
         self._bests: dict[int, int] = defaultdict(int)
         self._recent: dict[str, _Costs] = {}
         self._rates: dict[tuple[str, str, int], host_payloads.UsageResolvedRate] = {}
+        self._rates_omitted: set[tuple[str, str, int]] = set()
         self._now_quarter = math.floor(_seconds(now) / QUARTER_SECONDS)
 
     def add_run(self, run: RunInput) -> None:
@@ -273,7 +274,10 @@ class _Builder:
     ) -> None:
         """Remember the rate a row's model is priced at, once per provider, model and speed."""
         key = (provider, model, int(row.speed))
-        if key in self._rates or len(self._rates) >= _MAX_RATES:
+        if key in self._rates:
+            return
+        if len(self._rates) >= _MAX_RATES:
+            self._rates_omitted.add(key)
             return
         rate, source = self._inputs.pricing.resolved(row.provider, priced.model, row.speed)
         message = host_payloads.UsageResolvedRate(
@@ -330,6 +334,7 @@ class _Builder:
             pricing=inputs.pricing.pricing,
             prices=inputs.pricing.book,
             rates=[self._rates[key] for key in sorted(self._rates)],
+            rates_omitted=len(self._rates_omitted),
             pending_runs=inputs.pending_runs,
             pending_files=inputs.pending_files,
             read_at=Timestamp.from_datetime(inputs.now.astimezone(UTC)),

@@ -54,7 +54,14 @@ from vs_agent.api.usage_pricing import (
     read_rate_book,
     refresh_rate_book,
 )
-from vs_proto.api import Timestamp, UsageCostBasis, UsageSpeed, usage_state
+from vs_proto.api import (
+    Timestamp,
+    UsageCostBasis,
+    UsageSpeed,
+    ValidationError,
+    usage_state,
+    validate,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -85,7 +92,7 @@ class PriceBookUnreadableError(PriceBookError):
 def check_book(
     overrides: Sequence[usage_state.UsageRateOverride], aliases: Sequence[usage_state.UsageAlias]
 ) -> None:
-    """Refuse a book with a repeated key, a model mapped to itself, or a chain that loops.
+    """Refuse a book with a repeated key or a ``Map to`` chain that loops (a model mapped to itself is one).
 
     Every name is compared as ``book_key`` makes it, which is also how pricing follows a chain,
     so what is accepted here is exactly what pricing can follow to an end. The check is over the
@@ -105,9 +112,6 @@ def check_book(
         source, target = book_key(alias.from_), book_key(alias.to)
         if source in mapped:
             message = f"aliases: {alias.from_!r} is mapped twice"
-            raise PriceBookError(message)
-        if source == target:
-            message = f"aliases: {alias.from_!r} maps to itself"
             raise PriceBookError(message)
         mapped[source] = target
         spelled[source] = alias.from_
@@ -149,25 +153,37 @@ def saved_book(
     overrides: Sequence[usage_state.UsageRateOverride],
     aliases: Sequence[usage_state.UsageAlias],
 ) -> usage_state.UsagePriceBook:
-    """The book after saving ``overrides`` and ``aliases`` over ``book``: their content, next revision."""
+    """The book after saving ``overrides`` and ``aliases`` over ``book``: their content, next revision.
+
+    Names are saved as ``book_key`` makes them, which can be longer than what was typed (some
+    letters lowercase to more bytes), so the normalized entries are checked against the book's
+    own rules here, and one that cannot be stored is refused naming the key as it was typed.
+    """
     check_book(overrides, aliases)
+    saved_overrides = []
+    for each in overrides:
+        entry = usage_state.UsageRateOverride(model=book_key(each.model), rate=each.rate)
+        _storable(entry, f"overrides: {each.model!r}")
+        saved_overrides.append(entry)
+    saved_aliases = []
+    for each in aliases:
+        entry = usage_state.UsageAlias(from_=book_key(each.from_), to=book_key(each.to))
+        _storable(entry, f"aliases: {each.from_!r} to {each.to!r}")
+        saved_aliases.append(entry)
     return usage_state.UsagePriceBook(
         revision=book.revision + 1,
-        overrides=sorted(
-            (
-                usage_state.UsageRateOverride(model=book_key(each.model), rate=each.rate)
-                for each in overrides
-            ),
-            key=lambda each: each.model,
-        ),
-        aliases=sorted(
-            (
-                usage_state.UsageAlias(from_=book_key(each.from_), to=book_key(each.to))
-                for each in aliases
-            ),
-            key=lambda each: each.from_,
-        ),
+        overrides=sorted(saved_overrides, key=lambda each: each.model),
+        aliases=sorted(saved_aliases, key=lambda each: each.from_),
     )
+
+
+def _storable(entry: usage_state.UsageRateOverride | usage_state.UsageAlias, named: str) -> None:
+    """Raise ``PriceBookError`` for ``named`` when its normalized ``entry`` breaks the book's rules."""
+    try:
+        validate(entry)
+    except ValidationError as exc:
+        message = f"{named} cannot be saved: {exc}"
+        raise PriceBookError(message) from exc
 
 
 def _content(
@@ -243,9 +259,7 @@ class ListPricing:
         self._rates = rates
         self._book = book
         self._status = status
-        self._aliases: Mapping[str, str] = {
-            book_key(each.from_): book_key(each.to) for each in book.aliases
-        }
+        self._views: dict[str, Mapping[str, str]] = {}
         self._overrides: Mapping[str, lists.Rate] = {
             book_key(each.model): _rate_of(each.rate) for each in book.overrides if each.rate
         }
@@ -317,25 +331,51 @@ class ListPricing:
     def _resolve(self, provider: str, model: str) -> _Resolved:
         """The id ``model`` is priced under after ``Map to``, with its list rates and override.
 
-        The chain is followed in ``book_key`` space for at most as many steps as the book has
-        entries, which ends it whatever the book holds.
+        The walk starts at the id the list files ``model`` under (a date snapshot, a vendor prefix
+        and a bracketed variant all start where the bare model does), and follows the book's
+        chain for at most as many steps as the book has entries, which ends it whatever the book
+        holds.
         """
         key = (provider, model)
         found = self._resolved.get(key)
         if found is None:
-            name = book_key(model)
-            for _ in range(len(self._aliases)):
-                target = self._aliases.get(name)
+            view = self._view(provider)
+            start = self._filed(provider, model)
+            name = start
+            for _ in range(len(view)):
+                target = view.get(name)
                 if target is None:
                     break
                 name = target
-            named = model if name == book_key(model) else name
+            named = model if name == start else name
             final = self._rates.canonical(provider, named) or _UNPRICED_NAMES
             found = _Resolved(
                 final, self._rates.lookup(provider, final), self._overrides.get(book_key(final))
             )
             self._resolved[key] = found
         return found
+
+    def _filed(self, provider: str, name: str) -> str:
+        """The key ``name`` is looked up by in the book: the id the list files it under."""
+        return book_key(self._rates.canonical(provider, name))
+
+    def _view(self, provider: str) -> Mapping[str, str]:
+        """The book's ``Map to`` as ``provider``'s rows meet it: every end named by its filed id.
+
+        A person types a name from the table, which shows the list's ids, while a row may carry a
+        date snapshot of it; naming both ends by the id the list files them under makes the two
+        meet. An entry that maps a model to what the list files as the same model does nothing and
+        is left out; of two entries that name one filed id, the first in the book is kept.
+        """
+        view = self._views.get(provider)
+        if view is None:
+            built: dict[str, str] = {}
+            for each in self._book.aliases:
+                source, target = self._filed(provider, each.from_), self._filed(provider, each.to)
+                if source != target:
+                    built.setdefault(source, target)
+            view = self._views[provider] = built
+        return view
 
 
 def _priced(

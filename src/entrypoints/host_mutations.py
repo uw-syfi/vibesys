@@ -6,7 +6,7 @@ Every command is a new process, so a command pays for every module its family im
 reads, the watches and the host calls never import this module: ``entrypoints.host`` loads it
 when a mutation is dispatched, and then it needs all of what it imports.
 
-Public surface: ``serve_mutation``.
+Public surface: ``serve_mutation`` and ``apply_price_save``.
 """
 
 from __future__ import annotations
@@ -42,6 +42,8 @@ from vs_project.api import Project
 from vs_proto.api import host_payloads as pb
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from server import usage_pricing, usage_scan
     from vs_sim.api import Platform
 else:
@@ -65,21 +67,32 @@ def serve_mutation(slot: str, payload: bytes, platform: Platform) -> bytes:
     return _serve_project(payload, platform)
 
 
+def apply_price_save(
+    directory: Path, request: pb.UsagePricesSaveRequest
+) -> pb.UsagePricesSaveResponse:
+    """Save ``request``'s book in ``directory``; a refusal, a damaged book or a write that failed is typed.
+
+    The facade stores a ``PricesRefusedError`` or ``PricesDamagedError`` as the request's outcome
+    and leaves an unknown one unconfirmed; anything else it was not told of would escape after the
+    request was claimed, so each way ``save_prices`` ends is named here.
+    """
+    try:
+        return usage_scan.save_prices(directory, request)
+    except usage_pricing.PriceBookUnreadableError as exc:
+        raise PricesDamagedError(str(exc)) from exc
+    except usage_pricing.PriceBookError as exc:
+        raise PricesRefusedError(str(exc)) from exc
+    except OSError as exc:
+        raise PricesUnknownError from exc
+
+
 def _serve_usage_prices(payload: bytes) -> bytes:
     """Admit one price save, then apply it. Replay does not apply it again."""
-
-    def apply(request: pb.UsagePricesSaveRequest) -> pb.UsagePricesSaveResponse:
-        try:
-            return usage_scan.save_prices(usage_scan.usage_directory(), request)
-        except usage_pricing.PriceBookUnreadableError as exc:
-            raise PricesDamagedError(str(exc)) from exc
-        except usage_pricing.PriceBookError as exc:
-            raise PricesRefusedError(str(exc)) from exc
-        except OSError as exc:
-            raise PricesUnknownError from exc
-
     return serve_usage_prices(
-        payload, store=Project.admissions(), host_user=str(os.getuid()), apply=apply
+        payload,
+        store=Project.admissions(),
+        host_user=str(os.getuid()),
+        apply=lambda request: apply_price_save(usage_scan.usage_directory(), request),
     )
 
 

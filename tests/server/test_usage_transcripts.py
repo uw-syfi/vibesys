@@ -8,6 +8,7 @@ any schedule of appends and budgets equal the rows of one read of the finished f
 
 from __future__ import annotations
 
+import os
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -188,3 +189,62 @@ def test_a_host_with_no_transcript_directory_reports_it_missing_and_has_no_rows(
         scan, rows = _rows(root / "cache", root / "empty-home", budget=10**9)
         assert rows == []
         assert {report.status for report in scan.reports} == {usage_state.UsageSourceStatus.MISSING}
+
+
+_DAY = 1440
+_OPS = st.one_of(
+    st.tuples(st.just("write"), st.integers(0, 7)),
+    st.tuples(st.just("delete"), st.integers(0, 7)),
+    st.tuples(st.just("wait"), st.integers(1, 60)),
+)
+
+
+def _entries(scan_dir: Path) -> set[str]:
+    cache = usage_state.TranscriptScanCache.from_binary((scan_dir / SCAN_FILE).read_bytes())
+    return {each.path for root in cache.roots for each in root.files}
+
+
+@settings(max_examples=25, deadline=None)
+@given(operations=st.lists(_OPS, min_size=1, max_size=30))
+def test_the_cache_holds_no_more_than_the_files_that_exist_and_the_use_of_the_retention(
+    operations: list[tuple[str, int]],
+) -> None:
+    """However many sessions come and go, an entry is a file that exists or one written lately.
+
+    Sessions are written and deleted and days pass, and the host scans after each step. After
+    every scan, each entry in the cache is a file on disk or a deleted one whose last write is
+    within the retention (its rows are still held); none is older than that, and none is of a
+    file nothing remembers.
+    """
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        scan_dir, home = root / "scan", root / "home"
+        written: dict[str, int] = {}
+        today = 0
+        for number, (kind, value) in enumerate(operations):
+            name = f"s{value}"
+            path = session_file(home, name)
+            if kind == "write":
+                path.write_bytes(
+                    line(
+                        Request(name, today * _DAY + 5, "mystery-model", "/work/alpha", 10, 0, 5), 0
+                    )
+                )
+                moment = (START + timedelta(days=today)).timestamp()
+                os.utime(path, (moment, moment))
+                written[str(path)] = today
+            elif kind == "delete":
+                path.unlink(missing_ok=True)
+            else:
+                today += value
+            host_now = START + timedelta(days=today, hours=1)
+            scan_transcripts(
+                scan_dir,
+                {"HOME": str(home)},
+                now=host_now,
+                since=host_now - RETENTION,
+                budget=1 << 30,
+            )
+            for entry in _entries(scan_dir) if (scan_dir / SCAN_FILE).exists() else set():
+                recent = today - written.get(entry, -10_000) <= RETENTION.days
+                assert Path(entry).exists() or recent, (number, operations[: number + 1], entry)

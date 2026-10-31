@@ -21,7 +21,14 @@ from server.run_summary_cache import summarize_journal
 from server.usage_rollup import QUARTER_SECONDS, FoldedJournal, JournalIdentity
 from server.usage_summary import Priced, RunInput
 from vs_project.api import Project
-from vs_proto.api import Timestamp, UsageCostBasis, UsageSpeed, usage_state
+from vs_proto.api import (
+    Timestamp,
+    UsageCostBasis,
+    UsageSpeed,
+    ValidationError,
+    usage_state,
+    validate,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -226,6 +233,11 @@ class MemoryRollupStore:
         return None if self.stored is None else usage_state.RunUsageRollup.from_binary(self.stored)
 
     def write(self, rollup: usage_state.RunUsageRollup) -> None:
+        """Keep ``rollup`` as the file store would: one that breaks its rules is not kept."""
+        try:
+            validate(rollup)
+        except ValidationError:
+            return
         self.stored = rollup.to_binary()
         self.writes += 1
 

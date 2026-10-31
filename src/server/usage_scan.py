@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final, Protocol
 
 from server.host_api import RUN_EVENTS_FILE
@@ -68,12 +69,11 @@ from vs_sim.api import HttpsGetError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
-    from datetime import datetime
     from pathlib import Path
 
     from server.run_summary import Summarized
     from server.usage_summary import Pricing
-    from vs_sim.api import HttpsGet
+    from vs_sim.api import Clock, HttpsGet
 
 COLD_BUDGET_BYTES: Final = 256 * 1024 * 1024
 """The journal bytes one read may fold from nothing. Folding runs at tens to hundreds of
@@ -81,7 +81,8 @@ megabytes a second, so a call stays inside the operation's deadline, and a host 
 again (``pending``)."""
 
 RATES_REFRESH_TIMEOUT_S: Final = 10.0
-"""The longest one fetch of the price list may take."""
+"""The longest the fetch of the price list waits on the connection at a time; the gateway's own
+deadline bounds the whole call."""
 RATES_MAX_BYTES: Final = 16 * 1024 * 1024
 """The most bytes the price list may be: it is about 3 MiB today."""
 
@@ -173,10 +174,14 @@ class FileRollupStore:
         return rollup
 
     def write(self, rollup: usage_state.RunUsageRollup) -> None:
-        """Replace the stored rollup. A write that fails costs only the next read's time."""
+        """Replace the stored rollup. A write that fails costs only the next read's time.
+
+        A rollup that breaks its own rules is not written: the next read would not take it back.
+        """
         try:
+            validate(rollup)
             atomic_write_bytes(self._path, rollup.to_binary())
-        except (OSError, ProjectError):
+        except (OSError, ProjectError, ValidationError):
             return
 
 
@@ -307,6 +312,7 @@ def usage_summary(  # noqa: PLR0913  # lint-waiver: LW-518204 [PLR0913]; one rea
     pricing: Pricing,
     environment: Mapping[str, str],
     *,
+    clock: Clock,
     budget_bytes: int = COLD_BUDGET_BYTES,
 ) -> host_payloads.UsageSummaryResponse:
     """The reply to ``request`` over the runs of ``paths`` (the request's projects, expanded).
@@ -315,6 +321,10 @@ def usage_summary(  # noqa: PLR0913  # lint-waiver: LW-518204 [PLR0913]; one rea
     calls of bounded size and says what is left. A person's own CLI use is the transcript
     sessions that no run of this host made (``server.usage_outside``); it is left partial while
     any run of the host is still waiting, since that run might yet claim a session.
+
+    ``clock`` is the host's own: what the transcript cache forgets for age is decided by it, never
+    by the request's ``now``, so a client with a wrong clock cannot erase history the host cannot
+    read back.
 
     Raises ``ValueError`` when the request's edges do not increase, which the read maps to invalid
     input.
@@ -327,8 +337,18 @@ def usage_summary(  # noqa: PLR0913  # lint-waiver: LW-518204 [PLR0913]; one rea
     budget = Budget(budget_bytes)
     collected = collect_runs(projects, paths, since=edges[0], budget=budget)
     host = collect_host_runs(projects, collected, since=edges[0], budget=budget)
+    if not paths:
+        # No project was named: the runs are every run the host indexed, read for exclusion.
+        collected = CollectedRuns(
+            host.indexed, host.pending, host.scanned, host.skipped, host.failed
+        )
     outside, pending_files = _outside(
-        request, collected, host, environment, now=now, since=edges[0], budget=budget
+        request,
+        host,
+        environment,
+        retained_at=datetime.fromtimestamp(clock.now(), UTC),
+        since=edges[0],
+        budget=budget,
     )
     return summarize(
         SummaryInputs(
@@ -338,7 +358,7 @@ def usage_summary(  # noqa: PLR0913  # lint-waiver: LW-518204 [PLR0913]; one rea
             runs=collected.runs,
             journal=_journal_source(collected),
             pricing=pricing,
-            pending_runs=collected.pending + host.pending,
+            pending_runs=collected.pending + (host.pending if paths else 0),
             pending_files=pending_files,
             outside=outside,
         )
@@ -352,6 +372,11 @@ class HostRuns:
     facts: tuple[RunFacts, ...]
     pending: int
     """Runs whose rollups the budget could not pay for."""
+    indexed: tuple[RunInput, ...] = ()
+    """The rollups of the indexed runs, for a request that named no project (index 0)."""
+    scanned: int = 0
+    skipped: int = 0
+    failed: int = 0
 
 
 def collect_host_runs(
@@ -365,13 +390,16 @@ def collect_host_runs(
     facts: dict[str, RunFacts] = {
         each.run_id: _facts(each.run_id, None, each.rollup) for each in requested.runs
     }
-    pending = 0
+    indexed: list[RunInput] = []
+    pending = scanned = skipped = failed = 0
     for run in Project.indexed_run_addresses():
         journal = run.log_directory / RUN_EVENTS_FILE
         try:
             if journal.stat().st_mtime < since.timestamp():
+                skipped += 1
                 continue
         except OSError:
+            skipped += 1
             continue
         try:
             reading = read_or_build(
@@ -383,11 +411,17 @@ def collect_host_runs(
                 budget,
             )
         except OSError:
+            failed += 1
             continue
+        if reading.outcome is Outcome.MISSING:
+            failed += 1
+            continue
+        scanned += 1
         pending += reading.outcome is Outcome.PENDING
         if reading.rollup is not None:
             facts[run.run_id] = _facts(run.run_id, str(run.project_root), reading.rollup)
-    return HostRuns(tuple(facts.values()), pending)
+            indexed.append(RunInput(0, run.run_id, reading.rollup))
+    return HostRuns(tuple(facts.values()), pending, tuple(indexed), scanned, skipped, failed)
 
 
 def _facts(run_id: str, project_root: str | None, rollup: usage_state.RunUsageRollup) -> RunFacts:
@@ -404,19 +438,20 @@ def _facts(run_id: str, project_root: str | None, rollup: usage_state.RunUsageRo
 
 def _outside(  # noqa: PLR0913  # lint-waiver: LW-518205 [PLR0913]; the stages of one read, each an independent input.
     request: host_payloads.UsageSummaryRequest,
-    collected: CollectedRuns,
     host: HostRuns,
     environment: Mapping[str, str],
     *,
-    now: datetime,
+    retained_at: datetime,
     since: datetime,
     budget: Budget,
 ) -> tuple[list[OutsideInput], int]:
-    """The transcript sources with the runs' own sessions left out, and the files still pending."""
-    del collected
+    """The transcript sources with the runs' own sessions left out, and the files still pending.
+
+    ``retained_at`` is the host's time: rows older than the retention before it are forgotten.
+    """
     directory = usage_directory()
     scanned = scan_transcripts(
-        directory, environment, now=now, since=since, budget=max(1, budget.remaining)
+        directory, environment, now=retained_at, since=since, budget=max(1, budget.remaining)
     )
     window = (int(since.timestamp()), int(request.edges[-1].seconds))
     left = exclude(scanned.rows, host.facts, Project.run_id_for_workspace, counted=window)

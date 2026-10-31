@@ -2009,16 +2009,18 @@ message UsageWindowResponse {
 message UsageSummaryRequest {
   option (buf.validate.message).cel = {
     id: "usage_summary.edges"
-    message: "edges must be whole quarter hours"
-    expression: "this.edges.all(edge, int(edge) % 900 == 0)"
+    message: "edges must be whole quarter hours, to the second"
+    expression: "this.edges.all(edge, int(edge) >= 0 && int(edge) <= 253402300799 && int(edge) % 900 == 0 && edge == timestamp(int(edge)))"
   };
   string request_id = 1 [(buf.validate.field).string = {
     min_len: 1
     max_len: 128
   }];
-  // The project directories to count runs of. The host counts the runs of each.
+  // The project directories to count runs of. The host counts the runs of each. With none, it
+  // counts every run it has indexed (a run is indexed when it starts), whatever its project; a
+  // run that predates the index is then not counted, which a caller that holds more projects
+  // than fit here says to the person.
   repeated string projects = 2 [(buf.validate.field).repeated = {
-    min_items: 1
     max_items: 64
     unique: true
     items: {
@@ -2028,12 +2030,25 @@ message UsageSummaryRequest {
       }
     }
   }];
-  // Bucket `i` is `[edges[i], edges[i + 1])`. Strictly increasing.
+  // Bucket `i` is `[edges[i], edges[i + 1])`. Strictly increasing. Whole seconds between 1970
+  // and the end of year 9999, the range a host's calendar can hold.
   repeated google.protobuf.Timestamp edges = 3 [(buf.validate.field).repeated = {
     min_items: 2
     max_items: 100
+    items: {
+      timestamp: {
+        gte: {seconds: 0}
+        lte: {seconds: 253402300799}
+      }
+    }
   }];
-  google.protobuf.Timestamp now = 4 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp now = 4 [(buf.validate.field) = {
+    required: true
+    timestamp: {
+      gte: {seconds: 0}
+      lte: {seconds: 253402300799}
+    }
+  }];
 }
 
 message UsageSeriesKey {
@@ -2122,7 +2137,7 @@ message UsageProviderCost {
 }
 
 message UsageRunRow {
-  // The index in the request's `projects` of the run's project.
+  // The index in the request's `projects` of the run's project; 0 when the request named none.
   uint32 project = 1;
   string run_id = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
   // The run's task is not here: the caller's list of runs names it, and the host reads no
@@ -2211,6 +2226,9 @@ message UsageSummaryResponse {
     defined_only: true
     not_in: [0]
   }];
+  // How many distinct provider, model and speed rates the reply left out of `rates` because it
+  // holds at most 256: a row's rate for one of them is not shown, though its estimate is right.
+  uint32 rates_omitted = 19;
 }
 
 // Fetch the price list now, if one is due, and say how current the host's rates are. The host
@@ -2224,7 +2242,13 @@ message UsageRatesRefreshRequest {
   }];
   // Fetch even if the document is under a day old.
   bool force = 2;
-  google.protobuf.Timestamp now = 3 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp now = 3 [(buf.validate.field) = {
+    required: true
+    timestamp: {
+      gte: {seconds: 0}
+      lte: {seconds: 253402300799}
+    }
+  }];
 }
 message UsageRatesRefreshResponse {
   string request_id = 1 [(buf.validate.field).string = {

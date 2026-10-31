@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import io
+import urllib.request
+from http.client import HTTPMessage
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_sim.api import HttpsGetError, UrllibHttpsGet
 from vs_sim.api.testing import FakeHttpsGet
+from vs_sim.https_get import HttpsOnlyRedirects
 
 
 @given(address=st.from_regex(r"\A(http|ftp|file|)[:/a-z0-9.]{0,30}\Z", fullmatch=True))
@@ -44,3 +49,25 @@ def test_a_body_over_the_limit_is_an_error_not_a_cut_document(body: bytes, limit
             client.get("https://a", accept="x", timeout=1.0, max_bytes=limit)
     else:
         assert client.get("https://a", accept="x", timeout=1.0, max_bytes=limit) == body
+
+
+@given(
+    target=st.from_regex(r"\A(http|ftp|file)://[a-z0-9.]{1,20}(/[a-z0-9]{0,10})?\Z", fullmatch=True)
+)
+def test_a_redirect_to_anything_but_https_is_refused(target: str) -> None:
+    """A response cannot take the fetch off TLS: the redirect is an error, not followed."""
+    request = urllib.request.Request("https://prices.example/list")
+    with pytest.raises(HttpsGetError, match="non-https"):
+        HttpsOnlyRedirects().redirect_request(
+            request, io.BytesIO(), 302, "Found", HTTPMessage(), target
+        )
+
+
+@given(host=st.from_regex(r"\A[a-z]{1,10}\.example\Z", fullmatch=True))
+def test_a_redirect_to_another_https_address_is_followed(host: str) -> None:
+    request = urllib.request.Request("https://prices.example/list")
+    followed = HttpsOnlyRedirects().redirect_request(
+        request, io.BytesIO(), 302, "Found", HTTPMessage(), f"https://{host}/list"
+    )
+    assert followed is not None
+    assert followed.full_url == f"https://{host}/list"

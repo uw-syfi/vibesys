@@ -18,7 +18,7 @@ from typing import Any
 
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-from tests.server.run_summary_support import RUN_ID, events, journal_lines
+from tests.server.run_summary_support import EXECUTION_IDS, RUN_ID, events, journal_lines
 from tests.server.usage_support import (
     MemoryRollupStore,
     MemoryUsageJournal,
@@ -26,7 +26,14 @@ from tests.server.usage_support import (
     write_run,
 )
 
-from server.events import EventType, RunEvent, TurnUsageData
+from server.events import (
+    AgentExecutionActivityData,
+    AgentExecutionStartedData,
+    EventType,
+    ModelTurnUsageData,
+    RunEvent,
+    TurnUsageData,
+)
 from server.run_summary import RunSummaryFold, SummaryState
 from server.run_summary_cache import summarize_journal
 from server.usage_rollup import (
@@ -345,3 +352,151 @@ def test_a_stale_journal_is_not_opened() -> None:
         )
         assert (collected.scanned, collected.skipped, collected.runs) == (0, 1, ())
         assert not journal.with_name(ROLLUP_FILE).exists()
+
+
+_ONE_DIFFERENCE = st.sampled_from(["none", "version", "boundary", "head", "tail", "rewrite"])
+
+
+@given(
+    lines=st.integers(min_value=1, max_value=400),
+    difference=_ONE_DIFFERENCE,
+    flipped=st.integers(min_value=0, max_value=10_000),
+)
+def test_a_stored_rollup_is_served_only_when_it_describes_this_journal_by_this_writer(
+    lines: int, difference: str, flipped: int
+) -> None:
+    """Any one difference makes a read fold again; the journal as stored is served without a fold.
+
+    The rollup was built from a journal and is read back after one thing changed: the writer's
+    version, the boundary or a digest it holds, or the journal itself rewritten to the same size
+    with other bytes. Freshness is judged by what ``read_or_build`` does (fold or serve), not by
+    ``is_fresh`` itself.
+    """
+    journal = _journal_of(lines * 15)
+    store = MemoryRollupStore()
+    held = journal.identity()
+    changed = {
+        "head": JournalIdentity(held.boundary, "3" * 64, held.tail_sha256),
+        "tail": JournalIdentity(held.boundary, held.head_sha256, "4" * 64),
+        "boundary": JournalIdentity(held.boundary + 15, held.head_sha256, held.tail_sha256),
+    }.get(difference, held)
+    assert journal.state is not None
+    store.write(build_rollup(journal.state, (), changed))
+    if difference == "version":
+        rollup = store.read()
+        assert rollup is not None
+        rollup.version = ROLLUP_VERSION - 1
+        store.stored = rollup.to_binary()
+    if difference == "rewrite":
+        # The same size and the same lines' shape, with one byte of its content different.
+        text = bytearray(journal.text)
+        at = flipped % max(1, len(text) - 1)
+        text[at] = ord("0") if text[at] != ord("0") else ord("1")
+        journal.text = bytes(text)
+
+    read = read_or_build(journal, store, Budget(1 << 30))
+
+    if difference == "none":
+        assert (read.outcome, journal.folds) == (Outcome.FRESH, 0)
+    else:
+        assert (read.outcome, journal.folds) == (Outcome.BUILT, 1), difference
+
+
+# --- the names a journal holds, and the stores that keep a rollup ---
+
+_NAME_BYTES = st.integers(min_value=4, max_value=1500)
+_LETTERS = st.sampled_from(["a", "é", "İ", "中", "\U0001f600"])
+
+
+def _named(letter: str, size: int) -> str:
+    """A name of about ``size`` bytes made of one letter (its encoding may be several bytes)."""
+    return letter * max(0, size // len(letter.encode()))
+
+
+def _journal_with_names(provider: str, model: str, role: str) -> list[RunEvent]:
+    started = RunEvent(
+        sequence=1,
+        run_id=RUN_ID,
+        timestamp=START,
+        type=EventType.AGENT_EXECUTION_STARTED,
+        data=AgentExecutionStartedData(
+            stage="implementer",
+            activity=AgentExecutionActivityData(mode="thinking", summary="working"),
+            provider=provider,
+            model=model,
+        ),
+        execution_id=EXECUTION_IDS[0],
+        agent_kind=role,
+    )
+    turn = RunEvent(
+        sequence=2,
+        run_id=RUN_ID,
+        timestamp=START + timedelta(minutes=3),
+        type=EventType.TURN_USAGE_RECORDED,
+        data=TurnUsageData(
+            input_tokens=10,
+            output_tokens=1,
+            total_cost_usd=0.1,
+            cost_basis="price_table",
+            provider_session_id="session-a",
+            by_model=(
+                ModelTurnUsageData(
+                    model=model,
+                    input_tokens=10,
+                    cache_creation_input_tokens=0,
+                    cache_creation_1h_input_tokens=0,
+                    cache_read_input_tokens=0,
+                    output_tokens=1,
+                    reasoning_output_tokens=0,
+                    turns=1,
+                    recorded_usd=0.1,
+                    speed=None,
+                    primary=True,
+                ),
+            ),
+        ),
+        execution_id=EXECUTION_IDS[0],
+    )
+    return [started, turn]
+
+
+@given(letter=_LETTERS, sizes=st.tuples(_NAME_BYTES, _NAME_BYTES, _NAME_BYTES))
+def test_whatever_names_a_journal_holds_the_rollup_it_gives_is_one_a_store_takes_back(
+    letter: str, sizes: tuple[int, int, int]
+) -> None:
+    """A provider, model or role longer than the rollup's rules are cut, never made unreadable."""
+    provider, model, role = (_named(letter, size) for size in sizes)
+    rollup = build_rollup(_fold(_journal_with_names(provider, model, role)), (), IDENTITY)
+    validate(rollup)
+    for row in rollup.rows:
+        assert len(row.provider.encode()) <= 256
+        assert len(row.model.encode()) <= 512
+        assert len(row.role.encode()) <= 256
+        # A name within the rules is kept whole.
+        assert row.model == model or len(model.encode()) > 512
+
+
+@given(
+    kind=st.sampled_from(["memory", "file"]),
+    letter=_LETTERS,
+    model_bytes=st.integers(min_value=0, max_value=1200),
+)
+def test_every_store_gives_back_what_it_was_given_and_keeps_nothing_that_breaks_the_rules(
+    kind: str, letter: str, model_bytes: int
+) -> None:
+    """The two stores answer alike: a valid rollup reads back whole, an invalid one is not kept."""
+    with tempfile.TemporaryDirectory() as raw:
+        store: Any = (
+            MemoryRollupStore() if kind == "memory" else FileRollupStore(Path(raw) / ROLLUP_FILE)
+        )
+        first = build_rollup(_fold(_journal_with_names("claude", "m", "role")), (), IDENTITY)
+        store.write(first)
+        assert store.read() == first
+
+        broken = build_rollup(_fold(_journal_with_names("claude", "m", "role")), (), IDENTITY)
+        broken.rows[0].model = _named(letter, model_bytes)
+        store.write(broken)
+        if len(broken.rows[0].model.encode()) <= 512:
+            assert store.read() == broken
+        else:
+            assert store.read() == first

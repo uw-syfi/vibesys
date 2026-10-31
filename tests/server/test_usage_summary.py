@@ -36,6 +36,7 @@ from server.usage_summary import (
 )
 from vs_proto.api import (
     Timestamp,
+    UsageCostBasis,
     UsageSpeed,
     ValidationError,
     host_payloads,
@@ -244,9 +245,8 @@ def test_a_reply_folded_to_fit_keeps_every_total(runs: list[RunInput], limit: in
         rel_tol=1e-9,
         abs_tol=1e-6,
     )
-    assert (
-        cut.folded_series == max(0, len(uncut.series) - len(cut.series)) or cut.folded_series >= 0
-    )
+    # Folding merges series, so at least as many were taken as disappeared.
+    assert cut.folded_series >= len(uncut.series) - len(cut.series)
     if len(uncut.to_binary()) > limit:
         assert cut.folded_series > 0 or len(cut.to_binary()) <= limit or len(cut.series) <= 4
 
@@ -397,3 +397,35 @@ def test_a_garbled_provider_is_other_and_at_most_sixteen_are_named(
             "gemini",
         }
         validate(series)
+
+
+@settings(max_examples=25)
+@given(models=st.integers(min_value=0, max_value=600))
+def test_rates_past_the_cap_are_counted_and_every_other_rate_is_listed(models: int) -> None:
+    """A reply lists at most 256 rates and says how many more there were, never fewer silently."""
+    rollup = usage_state.RunUsageRollup(
+        version=1,
+        journal=usage_state.JournalIdentity(boundary=1, head_sha256="0" * 64, tail_sha256="0" * 64),
+        rows=[
+            usage_state.UsageRollupRow(
+                quarter=FIRST_QUARTER + 1,
+                provider="claude",
+                model=f"model-{each}",
+                speed=UsageSpeed.STANDARD,
+                basis=UsageCostBasis.PRICE_TABLE,
+                input=1000,
+                output=10,
+                turns=1,
+            )
+            for each in range(models)
+        ],
+    )
+    edges = [
+        datetime.fromtimestamp(FIRST_QUARTER * QUARTER_SECONDS, UTC),
+        datetime.fromtimestamp((FIRST_QUARTER + 4) * QUARTER_SECONDS, UTC),
+    ]
+
+    reply = _summary([RunInput(0, "run-a", rollup)], edges, max_bytes=1 << 30)
+
+    assert len(reply.rates) == min(models, 256)
+    assert len(reply.rates) + reply.rates_omitted == models

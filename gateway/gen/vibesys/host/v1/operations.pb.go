@@ -10696,9 +10696,13 @@ func (x *UsageWindowResponse) GetMissingRuns() []string {
 type UsageSummaryRequest struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The project directories to count runs of. The host counts the runs of each.
+	// The project directories to count runs of. The host counts the runs of each. With none, it
+	// counts every run it has indexed (a run is indexed when it starts), whatever its project; a
+	// run that predates the index is then not counted, which a caller that holds more projects
+	// than fit here says to the person.
 	Projects []string `protobuf:"bytes,2,rep,name=projects,proto3" json:"projects,omitempty"`
-	// Bucket `i` is `[edges[i], edges[i + 1])`. Strictly increasing.
+	// Bucket `i` is `[edges[i], edges[i + 1])`. Strictly increasing. Whole seconds between 1970
+	// and the end of year 9999, the range a host's calendar can hold.
 	Edges         []*timestamppb.Timestamp `protobuf:"bytes,3,rep,name=edges,proto3" json:"edges,omitempty"`
 	Now           *timestamppb.Timestamp   `protobuf:"bytes,4,opt,name=now,proto3" json:"now,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -11226,7 +11230,7 @@ func (x *UsageProviderCost) GetTokens() uint64 {
 
 type UsageRunRow struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The index in the request's `projects` of the run's project.
+	// The index in the request's `projects` of the run's project; 0 when the request named none.
 	Project uint32 `protobuf:"varint,1,opt,name=project,proto3" json:"project,omitempty"`
 	RunId   string `protobuf:"bytes,2,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
 	// The run's task is not here: the caller's list of runs names it, and the host reads no
@@ -11592,7 +11596,10 @@ type UsageSummaryResponse struct {
 	FoldedSeries uint32                 `protobuf:"varint,16,opt,name=folded_series,json=foldedSeries,proto3" json:"folded_series,omitempty"`
 	ReadAt       *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=read_at,json=readAt,proto3" json:"read_at,omitempty"`
 	// Whether `prices` is what the person set, or the host could not read it and `prices` is empty.
-	PricesStatus  UsagePricesStatus `protobuf:"varint,18,opt,name=prices_status,json=pricesStatus,proto3,enum=vibesys.host.v1.UsagePricesStatus" json:"prices_status,omitempty"`
+	PricesStatus UsagePricesStatus `protobuf:"varint,18,opt,name=prices_status,json=pricesStatus,proto3,enum=vibesys.host.v1.UsagePricesStatus" json:"prices_status,omitempty"`
+	// How many distinct provider, model and speed rates the reply left out of `rates` because it
+	// holds at most 256: a row's rate for one of them is not shown, though its estimate is right.
+	RatesOmitted  uint32 `protobuf:"varint,19,opt,name=rates_omitted,json=ratesOmitted,proto3" json:"rates_omitted,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -11751,6 +11758,13 @@ func (x *UsageSummaryResponse) GetPricesStatus() UsagePricesStatus {
 		return x.PricesStatus
 	}
 	return UsagePricesStatus_USAGE_PRICES_STATUS_UNSPECIFIED
+}
+
+func (x *UsageSummaryResponse) GetRatesOmitted() uint32 {
+	if x != nil {
+		return x.RatesOmitted
+	}
+	return 0
 }
 
 // Fetch the price list now, if one is due, and say how current the host's rates are. The host
@@ -12893,16 +12907,15 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"\bby_agent\x18\r \x03(\v2\x1b.vibesys.host.v1.AgentSpendB\b\xbaH\x05\x92\x01\x02\x10@R\abyAgent\x12%\n" +
 	"\x0eagents_omitted\x18\x0e \x01(\rR\ragentsOmitted\x12+\n" +
 	"\fmissing_runs\x18\x0f \x03(\tB\b\xbaH\x05\x92\x01\x02\x10dR\vmissingRunsB\x18\n" +
-	"\x16_cost_per_new_best_usd\"\xd2\x02\n" +
+	"\x16_cost_per_new_best_usd\"\xcf\x03\n" +
 	"\x13UsageSummaryRequest\x12)\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01\x18\x80\x01R\trequestId\x121\n" +
-	"\bprojects\x18\x02 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\b\x01\x10@\x18\x01\"\ar\x05\x10\x01(\x80 R\bprojects\x12<\n" +
-	"\x05edges\x18\x03 \x03(\v2\x1a.google.protobuf.TimestampB\n" +
-	"\xbaH\a\x92\x01\x04\b\x02\x10dR\x05edges\x124\n" +
-	"\x03now\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x03now:i\xbaHf\x1ad\n" +
-	"\x13usage_summary.edges\x12!edges must be whole quarter hours\x1a*this.edges.all(edge, int(edge) % 900 == 0)\"\xdb\x02\n" +
+	"\xbaH\ar\x05\x10\x01\x18\x80\x01R\trequestId\x12/\n" +
+	"\bprojects\x18\x02 \x03(\tB\x13\xbaH\x10\x92\x01\r\x10@\x18\x01\"\ar\x05\x10\x01(\x80 R\bprojects\x12L\n" +
+	"\x05edges\x18\x03 \x03(\v2\x1a.google.protobuf.TimestampB\x1a\xbaH\x17\x92\x01\x14\b\x02\x10d\"\x0e\xb2\x01\v\"\a\b\xff\x82\xd1\xff\xaf\a2\x00R\x05edges\x12B\n" +
+	"\x03now\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x14\xbaH\x11\xc8\x01\x01\xb2\x01\v\"\a\b\xff\x82\xd1\xff\xaf\a2\x00R\x03now:\xc9\x01\xbaH\xc5\x01\x1a\xc2\x01\n" +
+	"\x13usage_summary.edges\x120edges must be whole quarter hours, to the second\x1aythis.edges.all(edge, int(edge) >= 0 && int(edge) <= 253402300799 && int(edge) % 900 == 0 && edge == timestamp(int(edge)))\"\xdb\x02\n" +
 	"\x0eUsageSeriesKey\x12@\n" +
 	"\x06origin\x18\x01 \x01(\x0e2\x1c.vibesys.host.v1.UsageOriginB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06origin\x12:\n" +
@@ -12979,7 +12992,7 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05speed\x123\n" +
 	"\x04rate\x18\x04 \x01(\v2\x1a.vibesys.host.v1.UsageRateH\x00R\x04rate\x88\x01\x01\x12<\n" +
 	"\x06source\x18\x05 \x01(\x0e2$.vibesys.host.v1.UsageEstimateSourceR\x06sourceB\a\n" +
-	"\x05_rate\"\xf6\b\n" +
+	"\x05_rate\"\x9b\t\n" +
 	"\x14UsageSummaryResponse\x12)\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tB\n" +
@@ -13003,13 +13016,14 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"\rfolded_series\x18\x10 \x01(\rR\ffoldedSeries\x12;\n" +
 	"\aread_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x06readAt\x12S\n" +
 	"\rprices_status\x18\x12 \x01(\x0e2\".vibesys.host.v1.UsagePricesStatusB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\fpricesStatus\"\x91\x01\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\fpricesStatus\x12#\n" +
+	"\rrates_omitted\x18\x13 \x01(\rR\fratesOmitted\"\x9f\x01\n" +
 	"\x18UsageRatesRefreshRequest\x12)\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01\x18\x80\x01R\trequestId\x12\x14\n" +
-	"\x05force\x18\x02 \x01(\bR\x05force\x124\n" +
-	"\x03now\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x03now\"\x87\x01\n" +
+	"\x05force\x18\x02 \x01(\bR\x05force\x12B\n" +
+	"\x03now\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x14\xbaH\x11\xc8\x01\x01\xb2\x01\v\"\a\b\xff\x82\xd1\xff\xaf\a2\x00R\x03now\"\x87\x01\n" +
 	"\x19UsageRatesRefreshResponse\x12)\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tB\n" +

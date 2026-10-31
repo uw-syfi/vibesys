@@ -17,6 +17,7 @@ import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
+from entrypoints.host_mutations import apply_price_save
 from server.usage_pricing import PriceBookError, PriceBookUnreadableError
 from server.usage_scan import (
     FilePriceBook,
@@ -416,3 +417,115 @@ def test_a_save_over_a_damaged_book_is_a_stored_configuration_failure() -> None:
     assert first.result.field == "failure"
     assert first.result.value.category == FailureCategory.CONFIGURATION
     assert second.result == first.result
+
+
+_NAMES = st.text(min_size=1, max_size=64).filter(lambda name: len(name.encode()) <= 128)
+
+
+@settings(max_examples=60, deadline=None)
+@given(
+    names=st.lists(_NAMES, min_size=1, max_size=4, unique=True),
+    letters=st.sampled_from(["", "İ" * 64, "İ" * 3 + "x"]),
+)
+def test_the_real_save_answers_every_name_with_a_stored_outcome_never_an_escape(
+    names: list[str], letters: str
+) -> None:
+    """Whatever names a person types, the request ends saved or refused, and a retry replays it.
+
+    The save is the real one (``apply_price_save`` over ``save_prices`` and the host's file) behind
+    the real facade. A name that is longer once lowercased (``İ`` is two bytes and lowercases
+    to three) once escaped as a validation error after the request was claimed, which left every
+    retry of its id unconfirmed.
+    """
+    typed = [*names, letters] if letters else names
+    with tempfile.TemporaryDirectory() as raw:
+        directory = Path(raw)
+        store = FakeAdmissionStore()
+        request = host_payloads.UsagePricesSaveRequest(
+            request_id="request-real",
+            base_revision=0,
+            overrides=[
+                usage_state.UsageRateOverride(
+                    model=model, rate=usage_state.UsageRate(input=1.0, output=2.0)
+                )
+                for model in dict.fromkeys(typed)
+            ],
+        )
+        try:
+            validate(request)
+        except ValidationError:
+            return  # not a request the wire carries
+
+        def apply(
+            asked: host_payloads.UsagePricesSaveRequest,
+        ) -> host_payloads.UsagePricesSaveResponse:
+            return apply_price_save(directory, asked)
+
+        payload = MutateRequest(
+            checkout="/src/checkout", method=Oneof("usage_prices_save", request)
+        )
+        validate(payload)
+        first = MutateResponse.from_binary(
+            serve_usage_prices(payload.to_binary(), store=store, host_user="host-a", apply=apply)
+        )
+        second = MutateResponse.from_binary(
+            serve_usage_prices(payload.to_binary(), store=store, host_user="host-a", apply=apply)
+        )
+
+        assert first.result is not None
+        assert first.result.field in {"usage_prices_save", "failure"}
+        if first.result.field == "failure":
+            assert first.result.value.category is FailureCategory.INVALID_INPUT
+            assert "cannot be saved" in first.result.value.message
+        assert second.result == first.result
+
+
+_CALENDAR_END = 253_402_300_799
+
+
+@settings(max_examples=60)
+@given(
+    seconds=st.one_of(
+        st.integers(max_value=-1, min_value=-(2**62)),
+        st.integers(min_value=_CALENDAR_END + 1, max_value=2**62),
+    ),
+    where=st.sampled_from(["an edge", "now", "the last edge", "a refresh"]),
+)
+def test_a_time_outside_what_a_host_can_hold_is_refused_at_the_wire(
+    seconds: int, where: str
+) -> None:
+    """A request time past the calendar is an invalid request, never an overflow in the handler."""
+    bad = Timestamp(seconds=seconds, nanos=0)
+    good = [Timestamp(seconds=1_790_000_100, nanos=0), Timestamp(seconds=1_790_001_000, nanos=0)]
+    request: object
+    if where == "a refresh":
+        request = host_payloads.UsageRatesRefreshRequest(request_id="r", now=bad)
+    else:
+        edges = {"an edge": [bad, good[1]], "the last edge": [good[0], bad]}.get(where, good)
+        request = host_payloads.UsageSummaryRequest(
+            request_id="r", edges=edges, now=bad if where == "now" else good[1]
+        )
+    with pytest.raises(ValidationError):
+        validate(request)
+
+
+@given(nanos=st.integers(min_value=1, max_value=999_999_999))
+def test_an_edge_that_is_not_a_whole_second_is_refused_at_the_wire(nanos: int) -> None:
+    """Edges are whole quarter hours: a fraction of a second is not one."""
+    request = host_payloads.UsageSummaryRequest(
+        request_id="r",
+        edges=[Timestamp(seconds=1_790_000_100, nanos=nanos), Timestamp(seconds=1_790_001_000)],
+        now=Timestamp(seconds=1_790_001_000),
+    )
+    with pytest.raises(ValidationError):
+        validate(request)
+
+
+def test_a_request_that_names_no_project_is_one_the_wire_carries() -> None:
+    validate(
+        host_payloads.UsageSummaryRequest(
+            request_id="r",
+            edges=[Timestamp(seconds=1_790_000_100), Timestamp(seconds=1_790_001_000)],
+            now=Timestamp(seconds=1_790_001_000),
+        )
+    )

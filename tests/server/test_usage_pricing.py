@@ -33,6 +33,8 @@ from server.usage_pricing import (
 from vs_proto.api import UsageCostBasis, UsageSpeed, usage_state
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vs_agent.api.usage_pricing import ModelRates, RateStatus
 
 NOW = dt.datetime(2026, 10, 31, 12, tzinfo=dt.UTC)
@@ -66,6 +68,7 @@ def _list() -> bytes:
                 "input_cost_per_token_priority": 1e-5,
                 "output_cost_per_token_priority": 5e-5,
             },
+            "other-model": {"input_cost_per_token": 3e-6, "output_cost_per_token": 15e-6},
             "free-model": {"input_cost_per_token": 0, "output_cost_per_token": 0},
         }
     ).encode()
@@ -181,6 +184,13 @@ def test_a_row_with_no_recorded_cost_that_claims_a_reported_basis_is_priced_by_t
     assert priced.source is SOURCE.MODEL
 
 
+def test_a_date_snapshot_is_priced_as_the_model_a_person_mapped() -> None:
+    """The case the property generalizes: the table names ``tier-model``, a journal a snapshot."""
+    pricing = _pricing(_book(aliases={"tier-model": "other-model"}))
+    for spelling in ["tier-model", "tier-model-20251101", "vendor/tier-model", "TIER-MODEL[1m]"]:
+        assert pricing.price("claude_code", _row(model=spelling)).model == "other-model", spelling
+
+
 def test_map_to_prices_a_model_as_another_and_keys_the_series_by_the_target() -> None:
     pricing = _pricing(_book(aliases={"my-own-model": "tier-model"}))
     priced = pricing.price("claude_code", _row(model="My-Own-Model"))
@@ -250,6 +260,69 @@ def test_a_book_is_accepted_exactly_when_its_map_to_graph_is_acyclic_on_the_name
         _pricing(usage_state.UsagePriceBook(aliases=_aliases(mapping)))
 
 
+_LISTED = ["tier-model", "other-model", "free-model"]
+_MODELS = [*_LISTED, "unlisted-x", "unlisted-y"]
+"""The models a person means: three the list prices and two it does not."""
+
+_SPELLINGS: list[Callable[[str], str]] = [
+    lambda model: model,
+    lambda model: model.upper(),
+    lambda model: f"  {model} ",
+    lambda model: f"{model}[1m]",
+    lambda model: f"{model}-20251101",
+    lambda model: f"vendor/{model}",
+    lambda model: f"Vendor/{model.upper()}-20250929[1m]",
+]
+"""Every way a journal or a person writes one model: case, padding, a bracketed variant, a date
+snapshot, a vendor prefix, and them together. The first four apply to any name; the list can only
+tell a snapshot or a prefix of a model it files."""
+
+
+def _spellings(model: str) -> list[Callable[[str], str]]:
+    return _SPELLINGS if model in _LISTED else _SPELLINGS[:4]
+
+
+@st.composite
+def _maps_over_models(draw: st.DrawFn) -> dict[str, str]:
+    """``Map to`` over the models themselves: each model maps to a later one, so none loops."""
+    order = draw(st.permutations(_MODELS))
+    found: dict[str, str] = {}
+    for at, source in enumerate(order[:-1]):
+        if draw(st.booleans()):
+            found[source] = draw(st.sampled_from(order[at + 1 :]))
+    return found
+
+
+def _ends_at(model: str, maps: dict[str, str]) -> str:
+    """The model ``model`` is priced as, by following the maps as a person means them."""
+    while model in maps:
+        model = maps[model]
+    return model
+
+
+@given(maps=_maps_over_models(), data=st.data())
+def test_map_to_applies_to_every_spelling_of_a_model_the_list_files_as_the_same(
+    maps: dict[str, str], data: st.DataObject
+) -> None:
+    """A date snapshot, a vendor prefix and a variant are priced as the model they extend.
+
+    The expected id is taken from how the book and the rows were built (which model each name
+    stands for), not from the names, so a rule that looked at spellings alone would disagree.
+    """
+    spelled = [
+        usage_state.UsageAlias(
+            from_=data.draw(st.sampled_from(_spellings(source)))(source),
+            to=data.draw(st.sampled_from(_spellings(target)))(target),
+        )
+        for source, target in maps.items()
+    ]
+    pricing = _pricing(usage_state.UsagePriceBook(aliases=spelled))
+    for model in _MODELS:
+        for spelling in _spellings(model):
+            priced = pricing.price("claude_code", _row(model=spelling(model)))
+            assert priced.model == _ends_at(model, maps), (spelling(model), maps, spelled)
+
+
 class _CountingRates:
     """A list that counts how often pricing asks it, wrapping a real one."""
 
@@ -296,7 +369,8 @@ def test_pricing_over_any_accepted_book_ends_in_a_bounded_number_of_steps(
     row.model = name
     pricing.price(row.provider, row)
     pricing.resolved(row.provider, name, row.speed)
-    assert rates.asked <= 4
+    # The book is read once per provider (two names an entry) and a row costs three more.
+    assert rates.asked <= 2 * len(mapping) + 4
 
 
 def test_a_model_or_a_source_named_twice_is_refused_naming_the_key() -> None:

@@ -13,6 +13,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from tests.server.run_summary_support import EXECUTION_IDS, RUN_ID
 from tests.server.transcript_support import START, Request, line, session_file
 
@@ -26,8 +28,10 @@ from server.events import (
 from server.host_api import RUN_EVENTS_FILE
 from server.run_summary_cache import summarize_journal
 from server.usage_scan import stored_pricing, usage_directory, usage_summary
+from server.usage_transcripts import SCAN_FILE
 from vs_project.api import Project
 from vs_proto.api import Timestamp, UsageSpeed, host_payloads, usage_state, validate
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from server.run_summary import Summarized
@@ -107,6 +111,7 @@ def test_a_persons_session_is_outside_and_the_runs_own_is_not_counted_twice() ->
             [project],
             stored_pricing(usage_directory(), now=NOW),
             {"HOME": str(home)},
+            clock=ManualClock(NOW.timestamp()),
         )
 
         validate(reply)
@@ -146,6 +151,7 @@ def test_the_outside_series_carry_the_index_of_the_source_they_were_read_from() 
             [project],
             stored_pricing(usage_directory(), now=NOW),
             {"HOME": str(home)},
+            clock=ManualClock(NOW.timestamp()),
         )
         outside = [
             series
@@ -179,6 +185,7 @@ def test_a_damaged_price_book_is_said_in_the_reply_and_the_figures_still_come() 
             [project],
             stored_pricing(directory, now=NOW),
             {"HOME": str(home)},
+            clock=ManualClock(NOW.timestamp()),
         )
 
         validate(reply)
@@ -186,3 +193,98 @@ def test_a_damaged_price_book_is_said_in_the_reply_and_the_figures_still_come() 
         assert reply.prices == usage_state.UsagePriceBook()
         assert reply.series
         assert (directory / "prices.pb").read_bytes() == b"\xff\xfe damaged"
+
+
+def _cached_rows() -> int:
+    """How many rows of a person's use the host's transcript cache holds."""
+    cache = usage_state.TranscriptScanCache.from_binary(
+        (usage_directory() / SCAN_FILE).read_bytes()
+    )
+    return sum(len(each.rows) for root in cache.roots for each in root.files)
+
+
+@settings(max_examples=12, deadline=None)
+@given(days=st.integers(min_value=-4000, max_value=4000))
+def test_a_wrong_clock_in_the_request_does_not_erase_history_the_host_holds(days: int) -> None:
+    """A client whose clock is years off cannot make the host forget transcripts it cannot reread.
+
+    The host forgets rows for age by its own clock. The request's ``now`` says only when the
+    figures are as of; here it is anywhere within about eleven years of the data.
+    """
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        project, home = root / "project", root / "home"
+        project.mkdir()
+        session_file(home, "sess-person").write_bytes(
+            line(Request("sess-person", 4, "claude-opus-5-5", "/work/alpha", 700, 0, 70), 0)
+        )
+        (usage_directory() / SCAN_FILE).unlink(missing_ok=True)
+        edges = [START - timedelta(hours=1), START + timedelta(hours=3)]
+
+        def ask(client_now: datetime) -> host_payloads.UsageSummaryResponse:
+            request = _request(edges, project)
+            request.now = Timestamp.from_datetime(client_now)
+            return usage_summary(
+                request,
+                _Projects(),
+                [project],
+                stored_pricing(usage_directory(), now=NOW),
+                {"HOME": str(home)},
+                clock=ManualClock(NOW.timestamp()),
+            )
+
+        honest = ask(NOW)
+        held = _cached_rows()
+        assert held > 0
+        wrong = ask(NOW + timedelta(days=days))
+
+        assert _cached_rows() == held
+        assert [list(each.uncached) for each in wrong.series] == [
+            list(each.uncached) for each in honest.series
+        ]
+
+
+def test_a_request_that_names_no_project_counts_every_run_the_host_indexed() -> None:
+    """No list to cut: the runs are the host's own index, and the runs' sessions are still theirs."""
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        project, home = root / "project", root / "home"
+        project.mkdir()
+        journal = Project.log_directory_for(project, RUN_ID) / RUN_EVENTS_FILE
+        journal.parent.mkdir(parents=True)
+        journal.write_bytes(_events())
+        Project.publish_run_for(project, RUN_ID)
+        for index, request in enumerate(
+            (
+                Request("sess-run", 3, "claude-opus-5-5", "/work/alpha", 1000, 0, 100),
+                Request("sess-person", 4, "claude-opus-5-5", "/work/alpha", 700, 0, 70),
+            )
+        ):
+            session_file(home, request.session).write_bytes(line(request, index))
+        request = _request([START - timedelta(hours=1), START + timedelta(hours=3)], project)
+        del request.projects[:]
+        validate(request)
+
+        reply = usage_summary(
+            request,
+            _Projects(),
+            [],
+            stored_pricing(usage_directory(), now=NOW),
+            {"HOME": str(home)},
+            clock=ManualClock(NOW.timestamp()),
+        )
+
+        validate(reply)
+        tokens = {
+            origin: sum(
+                sum(series.uncached) + sum(series.output)
+                for series in reply.series
+                if series.key and series.key.origin == origin
+            )
+            for origin in (usage_state.UsageOrigin.RUN, usage_state.UsageOrigin.OUTSIDE_RUNS)
+        }
+        assert tokens == {
+            usage_state.UsageOrigin.RUN: 1100,
+            usage_state.UsageOrigin.OUTSIDE_RUNS: 770,
+        }
+        assert [each.run_id for each in reply.runs] == [RUN_ID]

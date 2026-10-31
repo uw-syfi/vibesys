@@ -12,7 +12,8 @@ one file (``transcript-scan.pb``) that a later read continues from.
 - A file that changed in place (rewritten, truncated) is read again from the start and the
   rows held for it are dropped. A file that could not be read keeps the rows it had and marks
   its source failed: it is never read as empty.
-- Rows older than 92 days are dropped, whatever the files still hold. The cache is derived data:
+- Rows older than 92 days are dropped, whatever the files still hold, and so is the entry of a
+  file that holds none and is gone or has not been written in that long. The cache is derived data:
   one that fails its rules is rebuilt whole, and two hosts writing it at once lose only the
   loser's progress.
 - The working directory of a session is a path on this host. It stays in the cache and in the
@@ -285,9 +286,21 @@ def _into(
 def _retained(
     roots: list[usage_state.TranscriptRootState], now: datetime
 ) -> list[usage_state.TranscriptRootState]:
-    """``roots`` without the rows older than ``RETENTION``."""
+    """``roots`` without the rows older than ``RETENTION``, and without files that hold none.
+
+    A file keeps its entry while it holds a row, and, rowless, while it exists and was written
+    within the retention (a session still being written has the position its next read resumes
+    from). A rowless entry of a file that is gone, or that nothing has written for longer than a
+    row is kept, is dropped, so the cache is bounded by the files that exist and the use of the
+    last 92 days, however many sessions came and went.
+    """
     oldest = math.floor((now - RETENTION).timestamp() / QUARTER_SECONDS)
+    written_since = (now - RETENTION).timestamp() * 1_000_000_000
     for root in roots:
+        kept: list[usage_state.TranscriptFileState] = []
         for each in root.files:
             each.rows = [row for row in each.rows if row.quarter >= oldest]
+            if each.rows or (each.mtime_ns >= written_since and Path(each.path).exists()):
+                kept.append(each)
+        root.files = kept
     return roots

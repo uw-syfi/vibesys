@@ -245,6 +245,13 @@ def build_rollup(
     return rollup
 
 
+_PROVIDER_BYTES: Final = 256
+_MODEL_BYTES: Final = 512
+_ROLE_BYTES: Final = 256
+_WORDS_BYTES: Final = 256
+"""What ``RunUsageRollup`` allows a name of each kind (``usage_state.proto``)."""
+
+
 @dataclass(frozen=True, order=True)
 class _Key:
     quarter: int
@@ -285,10 +292,10 @@ def _rows_of(record: UsageRecord, ended_at: datetime) -> Iterable[tuple[_Key, _S
     for row in usage_rows(record):
         key = _Key(
             quarter=quarter,
-            provider=record.harness or "",
-            model=row.model or "",
+            provider=_fit(record.harness, _PROVIDER_BYTES),
+            model=_fit(row.model, _MODEL_BYTES),
             speed=_SPEEDS[row.speed],
-            role=record.role or "",
+            role=_fit(record.role, _ROLE_BYTES),
             basis=_BASES[row.basis],
         )
         tokens = row.tokens
@@ -328,18 +335,29 @@ def _row(key: _Key, total: _Sum) -> usage_state.UsageRollupRow:
     return row
 
 
+def _fit(text: str | None, limit: int) -> str:
+    """``text`` (empty when the journal does not say), cut to at most ``limit`` bytes of whole characters.
+
+    The rollup's own rules bound a name, so a journal that holds a longer one still gives a
+    rollup the file store will take back, instead of one it would fold again on every read.
+    """
+    text = text or ""
+    encoded = text.encode()
+    return text if len(encoded) <= limit else encoded[:limit].decode(errors="ignore")
+
+
 def _limit(reading: RateLimitReading) -> usage_state.LimitReading:
     wire = usage_state.LimitReading(
-        provider=reading.provider or "",
+        provider=_fit(reading.provider, _PROVIDER_BYTES),
         exhausted=reading.exhausted,
         observed_at=_timestamp(reading.observed_at),
     )
     if reading.window is not None:
-        wire.window = reading.window
+        wire.window = _fit(reading.window, _WORDS_BYTES)
     if reading.limit is not None:
-        wire.limit = reading.limit
-    if reading.used_fraction is not None:
-        wire.used_fraction = reading.used_fraction
+        wire.limit = _fit(reading.limit, _WORDS_BYTES)
+    if reading.used_fraction is not None and math.isfinite(reading.used_fraction):
+        wire.used_fraction = max(0.0, reading.used_fraction)
     if reading.resets_at is not None:
         wire.resets_at = _timestamp(reading.resets_at)
     if reading.window_minutes is not None:

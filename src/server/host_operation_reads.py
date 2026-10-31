@@ -215,7 +215,9 @@ class HostReadSource:
             usage_scan.usage_directory(), now=request.now.to_datetime()
         )
         paths = [self._path(project) for project in request.projects]
-        return usage_scan.usage_summary(request, self._host.projects, paths, pricing, os.environ)
+        return usage_scan.usage_summary(
+            request, self._host.projects, paths, pricing, os.environ, clock=self._host.clock
+        )
 
     def usage_rates_refresh(
         self, request: pb.UsageRatesRefreshRequest

@@ -120,6 +120,50 @@ def _summary_of(journal: bytes, *, version: int) -> tuple[Any, Any]:
         return summarize_journal(path).fold.state(), _from_scratch(journal).state()
 
 
+def _limit_reading(sequence: int, used: float) -> RunEvent:
+    return RunEvent(
+        sequence=sequence,
+        run_id=RUN_ID,
+        timestamp=datetime(2026, 10, 10, 12, 0, sequence, tzinfo=UTC),
+        type=EventType.RATE_LIMIT_UPDATE,
+        data=RateLimitUpdateData(
+            provider="claude", window="5h", limit="primary", used_fraction=used, exhausted=False
+        ),
+    )
+
+
+@pytest.mark.regression
+@given(
+    used=st.floats(min_value=0.0, max_value=0.9), poison=st.floats(min_value=0.91, max_value=1.0)
+)
+def test_a_cache_the_previous_version_stamped_is_not_served_even_when_it_is_whole(
+    used: float, poison: float
+) -> None:
+    """Only the version keeps a cache of the right shape and the wrong content from being served.
+
+    Version 5 is what hosts stamped before the fold kept the latest limit readings. The cache
+    here has every field of today's shape (so nothing but its stamp is wrong) and a reading the
+    journal does not hold. A reader that took it for its own would serve that reading; the same
+    cache stamped with the current version is served, which shows the reading is observable.
+    """
+    journal = _lines([_limit_reading(1, used)])
+    with tempfile.TemporaryDirectory() as raw:
+        path = Path(raw) / _JOURNAL
+        path.write_bytes(journal)
+        summarize_journal(path)
+        cache = Path(raw) / RUN_SUMMARY_FILE
+        document = json.loads(cache.read_text(encoding="utf-8"))
+        document["state"]["rate_limits"][0]["used_fraction"] = poison
+
+        def served(version: int) -> float | None:
+            document["version"] = version
+            cache.write_text(json.dumps(document), encoding="utf-8")
+            return summarize_journal(path).fold.state().rate_limits[0].used_fraction
+
+        assert served(RUN_SUMMARY_VERSION) == poison
+        assert served(_FIRST_VERSION_WITHOUT_THEM) == used
+
+
 @pytest.mark.regression
 def test_a_cache_an_older_reader_wrote_does_not_hide_the_models_of_a_turn() -> None:
     """A version 5 cache over a journal whose turn names its models serves those models."""
