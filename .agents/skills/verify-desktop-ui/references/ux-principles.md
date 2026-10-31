@@ -70,13 +70,9 @@ can decide it.
     what the user is reading. Unenforced: needs a person watching.
 14. **The sidebar stays a quick navigator.** New run and Settings stay in view while recent runs scroll; run rows and the sidebar toggle are clickable, the column resizes and collapses, and Settings has a way back to the exact prior screen. Enforced by `pnpm --filter @vibesys/app-desktop-shell test:e2e`.
 
-15. **Content fills its pane; cap only prose line length.** A turn, card or
-    log spans its pane's width with normal padding; a paragraph alone is
-    capped (about 105 characters), so text stays readable while code, tables
-    and tool output use the whole width. A list that only opened a wider pane
-    (the steps of an idea, a transcript) is narrow. Enforced by the
-    `pane-fill` check: the column holding wrapped text covers at least 85% of
-    its pane's inner width.
+15. **Layout follows the visual spec.** One left edge, size by depth, spacing by
+    relationship, boxes that fit, small states and labels that earn their place:
+    the laws, and what enforces each, are in [visual-spec.md](visual-spec.md).
 
 ## Show failures, keep figures calm
 

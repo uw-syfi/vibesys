@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
-import {KNOWN_FAILURES} from './checks/known-failures.js';
-import {report, screenCheck} from './checks/screen-check.js';
+import {KnownLedger} from './checks/known-ledger.js';
+import {EVERY_CHECK, screenCheck} from './checks/screen-check.js';
 import {settled} from './checks/settle.js';
 import {
   installFakeBridge,
@@ -24,6 +24,7 @@ import {runFixtureFor, seedFor, USAGE_CASES, type UsageCase} from './usage-world
 const WIDTHS = [1440, 1000, 660] as const;
 const SHOTS = process.env['USAGE_SCREENS_DIR'] || undefined;
 const DAY = 24 * 3_600_000;
+const ledger = new KnownLedger('usage');
 
 interface UsageHost extends Window {
   fakeHost: {usageAsked: {since: number; until: number; runIds: string[]}[]};
@@ -58,11 +59,7 @@ for (const usage of USAGE_CASES) {
       expect(await page.evaluate(() => window.innerWidth)).toBe(width);
       await settled(page);
       const name = `${usage.name}/${width}`;
-      const result = report(`usage/${name}`, await screenCheck(page), KNOWN_FAILURES);
-      expect(
-        result.unexplained.map(each => `[${each.check}] ${each.message} (${each.where})`),
-        name,
-      ).toEqual([]);
+      expect(ledger.unexplained(`usage/${name}`, await screenCheck(page, EVERY_CHECK))).toEqual([]);
       // The page never scrolls sideways: a table that is too wide scrolls in its own box.
       const overflow = await page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -98,6 +95,8 @@ for (const usage of USAGE_CASES) {
     }
   });
 }
+
+ledger.requireEveryFailure(() => ledger.screens >= WIDTHS.length * USAGE_CASES.length);
 
 test('a helper that predates the question reads one word and shows no figures', async ({page}) => {
   const unsupported = USAGE_CASES.find(each => each.name === 'unsupported-helper');

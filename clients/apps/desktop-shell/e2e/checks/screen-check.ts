@@ -1,7 +1,8 @@
 /**
  * `screenCheck(page)`: the layout and wording checks over the screen a page shows now, against its
  * real layout. It returns every violation (`in-page.ts` says what each check reads); `report`
- * separates those a known failure explains (`known-failures.ts`) from the rest. The checks are deterministic: no timing, only the page's layout at the
+ * separates those a known failure explains (`known-failures.ts`) from the rest. A screen suite asks
+ * for `EVERY_CHECK`, which adds the visual spec's laws; a journey's default stays with the defects. The checks are deterministic: no timing, only the page's layout at the
  * moment of the call, so the caller fixes the viewport, theme and fonts and lets the page settle.
  */
 import type {Page} from '@playwright/test';
@@ -15,6 +16,9 @@ import {
   controlRowCheck,
   focusRingCheck,
   HELPERS,
+  headingDepthCheck,
+  hollowBoxCheck,
+  leftEdgeCheck,
   legendCheck,
   numberLabelCheck,
   overflowCheck,
@@ -23,6 +27,7 @@ import {
   rawTextCheck,
   repeatCheck,
   scrollRoomCheck,
+  spacingOrderCheck,
   strikeCheck,
   truncationCheck,
   truncationRoomCheck,
@@ -51,7 +56,23 @@ const CHECKS: Readonly<Record<PageCheckId, (input: CheckInput) => Violation[]>> 
   'column-tops': columnTopsCheck,
   'truncation-room': truncationRoomCheck,
   'focus-ring': focusRingCheck,
+  'left-edge': leftEdgeCheck,
+  'heading-depth': headingDepthCheck,
+  'spacing-order': spacingOrderCheck,
+  'hollow-box': hollowBoxCheck,
 };
+
+/** The laws of the visual spec a page can decide: a suite that owns a screen's look runs these. */
+const VISUAL_CHECKS: readonly PageCheckId[] = [
+  'left-edge',
+  'heading-depth',
+  'spacing-order',
+  'hollow-box',
+];
+
+/** Every check. A screen suite reports these against the known failures. */
+export const EVERY_CHECK = Object.keys(CHECKS) as PageCheckId[];
+const JOURNEY_CHECKS = EVERY_CHECK.filter(id => !VISUAL_CHECKS.includes(id));
 
 /** Enum values that never read as words: the failure reasons spelled with a hyphen or underscore. */
 const RAW_WORDS: readonly string[] = FAILURE_REASONS.filter(reason => /[-_]/.test(reason));
@@ -96,10 +117,10 @@ function script(only: readonly PageCheckId[], input: CheckInput): string {
   return `(() => {\n${sources.join('\n')}\nconst input = ${JSON.stringify(input)};\nreturn [${calls.join(', ')}];\n})()`;
 }
 
-/** Every violation of `only` (every check by default) on the screen `page` shows now. */
+/** Every violation of `only` (the journey checks by default) on the screen `page` shows now. */
 export async function screenCheck(
   page: Page,
-  only: readonly PageCheckId[] = Object.keys(CHECKS) as PageCheckId[],
+  only: readonly PageCheckId[] = JOURNEY_CHECKS,
 ): Promise<Violation[]> {
   return page.evaluate<Violation[]>(
     script(only, {

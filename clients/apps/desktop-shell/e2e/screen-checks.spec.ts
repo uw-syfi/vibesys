@@ -1,8 +1,9 @@
 import {expect, type Page, test} from '@playwright/test';
-import {BAD_SCREENS, CLEAN_SCREEN} from './checks/bad-dom.js';
+import {BAD_SCREENS, CLEAN_PAGE, CLEAN_SCREEN} from './checks/bad-dom.js';
 import {contactSheetHtml} from './checks/contact-sheet.js';
 import {isKnown, KNOWN_FAILURES, type KnownFailure} from './checks/known-failures.js';
-import {report, screenCheck} from './checks/screen-check.js';
+import {KnownLedger} from './checks/known-ledger.js';
+import {EVERY_CHECK, report, screenCheck} from './checks/screen-check.js';
 import {settled} from './checks/settle.js';
 import {anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
 
@@ -20,13 +21,26 @@ async function show(page: Page, html: string): Promise<void> {
 
 test('a clean screen passes every check', async ({page}) => {
   await show(page, CLEAN_SCREEN);
-  expect(await screenCheck(page)).toEqual([]);
+  expect(await screenCheck(page, EVERY_CHECK)).toEqual([]);
+});
+
+test('a page that keeps the visual spec’s laws passes every check', async ({page}) => {
+  await show(page, CLEAN_PAGE);
+  expect(await screenCheck(page, EVERY_CHECK)).toEqual([]);
+});
+
+test('a box partly out of sight is not called hollow for what cannot be seen', async ({page}) => {
+  await show(
+    page,
+    `<div style="height:300px"></div><div style="border:1px solid #888;width:440px;height:60px;padding-top:40px">Machine</div>`,
+  );
+  expect(await screenCheck(page, ['hollow-box'])).toEqual([]);
 });
 
 for (const bad of BAD_SCREENS) {
   test(`${bad.check} fails on ${bad.name}`, async ({page}) => {
     await show(page, bad.html);
-    const violations = await screenCheck(page);
+    const violations = await screenCheck(page, EVERY_CHECK);
     const hits = violations.filter(each => each.check === bad.check);
     expect(
       hits.map(each => each.message),
@@ -96,6 +110,7 @@ test('the known failures are listed with an issue each, and a report separates t
   }
   const failure: KnownFailure = {
     id: 'example',
+    suite: 'run-matrix',
     check: 'raw-text',
     message: /snake_case identifier "total_ops_per_sec"/,
     screens: /\/run\//,
@@ -154,3 +169,34 @@ for (const broken of [false, true]) {
     }
   });
 }
+
+test('a paragraph at the line cap passes pane-fill however wide its pane is', async ({page}) => {
+  await page.setViewportSize({width: 1800, height: 320});
+  const text = 'The judge read the candidate source and found that it matches the outcome. '.repeat(4);
+  await show(
+    page,
+    `<div class="vs-pane-body" style="width:1600px;font:14px/20px monospace"><div style="max-width:735px">${text}</div></div>`,
+  );
+  expect(await screenCheck(page, ['pane-fill'])).toEqual([]);
+});
+
+test('a ledger names a suite’s entries no screen showed, and leaves other suites’ alone', () => {
+  const failure = (id: string, suite: KnownFailure['suite'], text: RegExp): KnownFailure => ({
+    id,
+    suite,
+    check: 'hollow-box',
+    message: text,
+    issue: 'https://github.com/uw-syfi/vibesys/issues/1',
+  });
+  const seen = failure('seen', 'settings', /wide/);
+  const fixed = failure('fixed', 'settings', /narrow/);
+  const elsewhere = failure('elsewhere', 'usage', /narrow/);
+  const ledger = new KnownLedger('settings', [seen, fixed, elsewhere]);
+  const wide = {check: 'hollow-box', message: 'a wide box', where: 'div'} as const;
+  const narrow = {check: 'hollow-box', message: 'a tall box', where: 'div'} as const;
+  expect(ledger.unexplained('settings/logins/1440', [wide, narrow])).toEqual([
+    'settings/logins/1440: [hollow-box] a tall box (div)',
+  ]);
+  expect(ledger.screens).toBe(1);
+  expect(ledger.stale()).toEqual(['fixed']);
+});
