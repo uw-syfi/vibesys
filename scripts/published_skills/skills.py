@@ -32,8 +32,6 @@ A test pins this tuple to the product's own tool-name constants.
 DOMAINS_TREE = "domains"
 MIN_VENDORED_DEPTH = 2
 """A vendored skill sits below its pack folder: ``domains/<pack>/.../<skill>``."""
-MIN_VENDORED_DEPTH = 2
-"""A vendored skill sits below its pack folder: ``domains/<pack>/.../<skill>``."""
 
 
 @dataclass(frozen=True, slots=True)

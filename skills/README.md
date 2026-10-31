@@ -44,3 +44,9 @@ folder or breaks Claude Code's limits (lowercase letters, digits and hyphens; at
 characters; a `description` of at most 1,024 characters), and when a domain skill names a
 tool that only a VibeSys run offers, such as `submit_evaluation`. Vendored packs, which stay
 byte-identical with upstream, are exempt from the tool-name rule.
+
+Bump the marketplace plugin version for every release that changes files under `skills/`
+or its hooks, including fixes to scripts and instructions. Use a patch bump for compatible
+fixes, a minor bump for new capabilities, and a major bump for incompatible contracts.
+The generator preserves this manually chosen release version; CI checks the generated list,
+not release intent. Without a bump, installed Claude Code caches may retain the old payload.
