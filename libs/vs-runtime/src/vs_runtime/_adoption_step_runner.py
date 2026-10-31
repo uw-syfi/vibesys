@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from vs_core.api import (
     AdoptRevision,
@@ -34,7 +34,7 @@ from vs_runtime._core_identity import core_identity
 from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
 from vs_runtime._step_runner import Cleared, ClearUnavailableError
 from vs_runtime._workspace_requests import commit_of
-from vs_runtime.contracts import RuntimeContractError
+from vs_runtime.contracts import RevisionLedger, RuntimeContractError, Workspaces
 
 if TYPE_CHECKING:
     from vs_core.api import Request, RequestId, Selection
@@ -42,13 +42,16 @@ if TYPE_CHECKING:
     from vs_runtime._evidence_ledger import EvidenceLookup
     from vs_runtime._observation_factory import ObservationFactory
     from vs_runtime._step_runner import Adopted, CancelSignal
-    from vs_runtime.contracts import RevisionLedger, Workspaces
     from vs_sim.api import Clock
 
 _BACKEND = "the run's workspace"
 _NOT_RETAINED = "selected revision is not a retained revision of this run"
 _NOT_BASELINE = "selected baseline is not the run's trusted input baseline"
 _PROTECTED = "candidate retained; adoption in a resumed epoch requires project-edit protection"
+
+
+class AdoptionWorkspaces(Workspaces, RevisionLedger, Protocol):
+    """The run's workspaces, which also say which revisions the run retains."""
 
 
 @dataclass(frozen=True)
@@ -61,23 +64,21 @@ class _Refusal:
 class AdoptionStepRunner:
     """Runs ``AdoptRevision`` and ``VerifyAdoption`` steps on the run's workspaces."""
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: LW-5C0002 [PLR0913]; each argument is a separate collaborator of the one runner.
+    def __init__(
         self,
-        workspaces: Workspaces,
-        ledger: RevisionLedger,
+        workspaces: AdoptionWorkspaces,
         evidence: EvidenceLookup,
         observations: ObservationFactory,
         *,
         clock: Clock,
         publishes: bool = True,
     ) -> None:
-        """Adopt on *workspaces*; a revision is the run's when *ledger* retains it.
+        """Adopt on *workspaces*; a revision is the run's when they retain it.
 
         With ``publishes`` false (a run an operator resumed) the operator's tree is kept: a step
         succeeds when the tree already matches the selection, and is refused or fails otherwise.
         """
         self._workspaces = workspaces
-        self._ledger = ledger
         self._evidence = evidence
         self._observations = observations
         self._clock = clock
@@ -131,7 +132,9 @@ class AdoptionStepRunner:
         if isinstance(selection, TrustedBaseline):
             return commit if commit == root.trusted_input_baseline else _Refusal(_NOT_BASELINE)
         known = commit in {root.revision, root.trusted_input_baseline}
-        return commit if known or await self._ledger.retains(commit) else _Refusal(_NOT_RETAINED)
+        return (
+            commit if known or await self._workspaces.retains(commit) else _Refusal(_NOT_RETAINED)
+        )
 
     async def _keep_tree(
         self, request: AdoptRevision | VerifyAdoption, commit: str

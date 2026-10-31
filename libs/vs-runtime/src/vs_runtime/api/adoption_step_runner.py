@@ -1,5 +1,5 @@
 """The step runner that adopts a selected revision."""
 
-from vs_runtime._adoption_step_runner import AdoptionStepRunner
+from vs_runtime._adoption_step_runner import AdoptionStepRunner, AdoptionWorkspaces
 
-__all__ = ["AdoptionStepRunner"]
+__all__ = ["AdoptionStepRunner", "AdoptionWorkspaces"]
