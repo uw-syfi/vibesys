@@ -11,6 +11,33 @@ const json = (value: unknown): Uint8Array =>
 
 /** One body of each core kind; a core kind added to the store schema fails type-checking here. */
 export const CORE_BODIES = {
+  runStarted: {
+    case: 'runStarted',
+    value: {schemaVersion: 1, state: json({run: {run_id: 'run-1'}})},
+  },
+  coreSnapshot: {
+    case: 'coreSnapshot',
+    value: {
+      schemaVersion: 1,
+      envelopeVersion: 1,
+      state: json({run: {run_id: 'run-1'}}),
+      inputs: [json({type: 'clock'})],
+      strategy: json({journal: []}),
+      wakes: [30],
+      held: json([]),
+    },
+  },
+  strategyAdvanced: {
+    case: 'strategyAdvanced',
+    value: {
+      schemaVersion: 1,
+      proposals: [json({type: 'proposal'})],
+      strategy: {case: 'checkpoint', value: json({journal: []})},
+      wakes: [30],
+      delivered: [],
+      held: json([]),
+    },
+  },
   coreInput: {case: 'coreInput', value: {schemaVersion: 1, event: json({type: 'clock'})}},
   stepStarted: {
     case: 'stepStarted',
