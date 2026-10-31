@@ -6,12 +6,13 @@ import {Text} from './text.js';
 import {InSlot, useSlot, useWindowed} from './windowing.js';
 
 /** How wide a column is: the rest of the row, a name's width, or a figure's. */
-export type ColumnSize = 'fill' | 'wide' | 'short';
+export type ColumnSize = 'fill' | 'wide' | 'medium' | 'short';
 
 /** A fill column keeps a readable width while the list has room for every column. */
 const TRACKS: Readonly<Record<ColumnSize, string>> = {
-  fill: 'minmax(var(--column-field), 1fr)',
-  wide: 'var(--column-swatch)',
+  fill: 'minmax(var(--column-tile), 1fr)',
+  wide: 'calc(var(--gantt-figure) + var(--space-8))',
+  medium: 'calc(var(--gantt-figure) + var(--space-3))',
   short: 'var(--gantt-figure)',
 };
 
@@ -36,7 +37,10 @@ export interface ListColumn<Row> {
   /** What the pointer shows over a cell whole, for a cell that may be cut short. */
   readonly hint?: (row: Row) => string | undefined;
   readonly cell: (row: Row) => ReactNode;
-  /** Pressing the header sorts by the column; `marked` draws the arrow on the one it sorts by. */
+  /**
+   * Pressing the header sorts by the column. `marked` draws the arrow on the column the list is
+   * sorted by, whose header is a label: pressing it would change nothing.
+   */
   readonly sort?: {readonly marked: boolean; readonly press: () => void};
 }
 
@@ -62,12 +66,14 @@ function Header<Row>(props: {
           data-optional={column.optional || undefined}
           data-marked={column.sort?.marked || undefined}
         >
-          {column.sort === undefined ? (
-            column.header
+          {column.sort === undefined || column.sort.marked ? (
+            <span className="vs-columnlist-marked">
+              {column.header}
+              {column.sort?.marked ? <Icon name="chevron-down" /> : null}
+            </span>
           ) : (
             <button type="button" onClick={column.sort.press} title={`Sort by ${column.header}`}>
               {column.header}
-              {column.sort.marked ? <Icon name="chevron-down" /> : null}
             </button>
           )}
         </span>
@@ -239,8 +245,16 @@ export function CellLink(props: {readonly label: string}): JSX.Element {
 }
 
 /** A cell's parts in a line, a small gap apart (a mark and its word, a name and its tag). */
-export function CellInline(props: {readonly children: ReactNode}): JSX.Element {
-  return <span className="vs-columnlist-inline">{props.children}</span>;
+export function CellInline(props: {
+  readonly children: ReactNode;
+  /** The parts stay on one line, cut short (with the cell's hint) when there is no room. */
+  readonly nowrap?: boolean;
+}): JSX.Element {
+  return (
+    <span className="vs-columnlist-inline" data-nowrap={props.nowrap || undefined}>
+      {props.children}
+    </span>
+  );
 }
 
 /** A small mark before a cell's figure: filled when `on` (it set a best), else an empty slot of its width. */

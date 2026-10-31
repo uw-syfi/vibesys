@@ -79,19 +79,9 @@ test('ideas stay flat, searchable, sortable and accessible at wide and narrow wi
   await expect(ideas.getByRole('option').first()).toBeVisible();
   await expect(ideas.locator('.vs-guide, .vs-pickrow-fold')).toHaveCount(0);
   await expect(page.getByRole('radiogroup', {name: 'Ideas layout'})).toHaveCount(0);
-  // The list opens sorted by its first objective; a header sorts by its column.
-  const marked = page.locator('.vs-columnlist-headcell[data-marked]');
-  await expect(marked).toHaveCount(1);
-  const objective = page.locator('.vs-columnlist-headcell button').first();
-  await expect(objective).toBeVisible();
-  const first = await ideas.getByRole('option').first().textContent();
-  // Pressing the column the list is sorted by sorts by it alone (running ideas no longer lead); a
-  // second press restores the order. Either way the column stays marked and the best idea leads.
-  await objective.click();
-  await expect(marked).toHaveCount(1);
-  await objective.click();
-  await expect(marked).toHaveCount(1);
-  await expect(ideas.getByRole('option').first()).toHaveText(first ?? '');
+  // The list opens sorted by its first objective, whose header is a label, not a control.
+  await expect(page.locator('.vs-columnlist-headcell[data-marked]')).toHaveCount(1);
+  await expect(page.locator('.vs-columnlist-headcell[data-marked] button')).toHaveCount(0);
   await page.getByRole('searchbox', {name: 'Search ideas'}).fill('Batch the enqueue');
   await expect(ideas.getByRole('option')).toHaveCount(1);
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);

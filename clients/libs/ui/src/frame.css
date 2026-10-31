@@ -962,6 +962,12 @@ button.vs-crumb:focus-visible {
 .vs-columnlist-cell[data-align="end"] {
   text-align: right;
 }
+.vs-columnlist-marked {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text);
+}
 .vs-columnlist-headcell button {
   display: inline-flex;
   align-items: center;
@@ -1012,10 +1018,11 @@ button.vs-crumb:focus-visible {
   animation: vs-pane-flash calc(var(--duration-base) * 8) var(--easing);
 }
 /* A list without room drops its optional columns and keeps the rest on one grid. */
-@container (max-width: 980px) {
+@container (max-width: 1100px) {
   .vs-columnlist-head,
   .vs-columnlist-row {
     grid-template-columns: var(--columns-narrow);
+    column-gap: var(--space-2);
   }
   .vs-columnlist [data-optional] {
     display: none;
@@ -1046,6 +1053,11 @@ button.vs-crumb:focus-visible {
   gap: var(--space-3);
   max-width: 100%;
   min-width: 0;
+}
+.vs-columnlist-inline[data-nowrap] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .vs-columnlist-mark {
   flex: none;

@@ -26,6 +26,7 @@ import {
 import type {JSX} from 'react';
 import {NO_CLEAR_CHANGE} from '../../state/headline.js';
 import {
+  DEFAULT_SORT,
   type IdeaStatus,
   type IdeasFilter,
   type IdeasSort,
@@ -214,13 +215,13 @@ function leadColumns(base: ViewBase): readonly Column[] {
       key: 'status',
       header: 'Status',
       size: 'wide',
-      narrow: 'short',
+      narrow: 'medium',
       wrap: true,
       hint: row => [row.status.word, row.status.cause].filter(part => part !== null).join(' · '),
       cell: row => (
         <CellLines
           main={
-            <CellInline>
+            <CellInline nowrap>
               <StatusDot tone={STATUS_TONES[row.status.status]} label={row.status.word} />
               <Text>{row.status.word}</Text>
             </CellInline>
@@ -235,12 +236,11 @@ function leadColumns(base: ViewBase): readonly Column[] {
 function columnsOf(
   table: IdeasTableView,
   base: ViewBase,
-  sort: IdeasSort | null,
   setSort: (sort: IdeasSort | null) => void,
 ): readonly Column[] {
   const sorted = (by: IdeasSort): Sorting => ({
     marked: sameSort(table.sort, by),
-    press: () => setSort(sort !== null && sameSort(sort, by) ? null : by),
+    press: () => setSort(sameSort(by, DEFAULT_SORT) ? null : by),
   });
   return [
     ...leadColumns(base),
@@ -268,6 +268,8 @@ function Chips(props: {
     tone: chip.status === null ? 'neutral' : STATUS_TONES[chip.status],
     label: `${chip.word} ${chip.count}`,
     on: filter.status === chip.status,
+    // The chip of the status the list already shows has nothing to change.
+    ...(chip.status === null ? {disabled: filter.status === null} : {}),
     toggle: () =>
       dispatch({
         type: 'ideas-filter',
@@ -318,7 +320,7 @@ export function IdeasTable(props: {
       ) : (
         <ColumnList
           label="Ideas"
-          columns={columnsOf(table, base, sort, props.setSort)}
+          columns={columnsOf(table, base, props.setSort)}
           rows={table.rows}
           rowKey={row => row.id}
           selected={props.selected ?? undefined}

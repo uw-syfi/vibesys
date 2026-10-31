@@ -178,19 +178,23 @@ test('a search narrows the list, and one that matches nothing says No matches', 
   await screen.done();
 });
 
-test('a header sorts by its column and the same header again restores the default order', async () => {
+test('a header sorts by its column; the column the list is sorted by is a label, and the first objective restores the order', async () => {
   const screen = await shown();
-  const header = [...screen.container.querySelectorAll('.vs-columnlist-headcell button')].find(
-    each => each.textContent?.startsWith('Agent time'),
-  ) as HTMLElement;
   const marked = (): string[] =>
     [...screen.container.querySelectorAll('.vs-columnlist-headcell[data-marked]')].map(
       each => each.textContent ?? '',
     );
+  const header = (name: string): HTMLElement | undefined =>
+    [...screen.container.querySelectorAll<HTMLElement>('.vs-columnlist-headcell button')].find(
+      each => each.textContent === name,
+    );
   expect(marked()).toEqual(['Metric']);
-  await act(async () => header.click());
+  // The sorted column has nothing to press: it would change nothing.
+  expect(header('Metric')).toBeUndefined();
+  await act(async () => header('Agent time')?.click());
   expect(marked()).toEqual(['Agent time']);
-  await act(async () => header.click());
+  expect(header('Agent time')).toBeUndefined();
+  await act(async () => header('Metric')?.click());
   expect(marked()).toEqual(['Metric']);
   expect(column(screen.container, 'Idea')[0]).toBe('idea 6');
   await screen.done();
