@@ -130,7 +130,7 @@ def test_transcript_entries_round_trip_and_state_is_pure(text: str) -> None:
     second = map_event(state, observation)
     assert first == second
     assert state.sequence == 0
-    assert state.streams == ()
+    assert not state.streams
     assert_valid(first)
     assert len(first.streams) == 1
     wire = first.streams[0].content
