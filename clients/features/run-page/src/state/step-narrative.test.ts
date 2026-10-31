@@ -3,6 +3,7 @@ import type {RunEvent, Span} from '@vibesys/contracts';
 import {event} from '@vibesys/contracts/testing';
 import {initialCoreState, reduceEventBatch} from '@vibesys/run-state';
 import * as fc from 'fast-check';
+import {commandOutput} from './command-output.test-helper.js';
 import {runPageInitial, runPageStep} from './run-page.js';
 import {
   blockStarts,
@@ -438,22 +439,53 @@ describe('a command in the item pane', () => {
     ]);
   });
 
-  test('every line of either stream is kept once, in order, whatever its text', () => {
+  test('both streams, with every line of each kept once and in order, whatever they hold', () => {
+    const lineBreak = /\r?\n/;
     fc.assert(
-      fc.property(fc.string(), fc.string(), (stdout, stderr) => {
-        const lines = itemLines(command({stdout, stderr}));
-        const of = (stream: 'out' | 'err', title: string): string[] => {
-          const at = lines.findIndex(line => line.text === title && line.stream === 'out');
-          if (at < 0) return [];
-          const rest = lines.slice(at + 1);
-          const end = rest.findIndex(line => line.text === '' && line.stream === 'out');
-          return (end < 0 ? rest : rest.slice(0, end))
-            .filter(line => line.stream === stream)
-            .map(line => line.text);
-        };
-        if (stdout !== '') expect(of('out', 'Stdout').join('\n')).toBe(stdout);
-        if (stderr !== '' && stdout === '') expect(of('err', 'Stderr').join('\n')).toBe(stderr);
+      fc.property(commandOutput, commandOutput, (stdout, stderr) => {
+        const shown = itemLines(command({stdout, stderr}));
+        const body = (text: string): string[] => text.replace(/\r?\n$/, '').split(lineBreak);
+        const out = body(stdout);
+        const err = body(stderr);
+        const hasOut = stdout.replace(/\r?\n$/, '') !== '';
+        const hasErr = stderr.replace(/\r?\n$/, '') !== '';
+        // The sections in order, a blank line between them: the whole pane.
+        const sections = [
+          ['Input', '{"command":"ls"}'],
+          ...(hasOut ? [['Stdout', ...out]] : []),
+          ...(hasErr ? [['Stderr', ...err]] : []),
+        ];
+        expect(shown.map(line => line.text)).toEqual(
+          sections.flatMap((section, index) => (index === 0 ? section : ['', ...section])),
+        );
+        // Whatever the text, the error color is stderr's lines and only those.
+        expect(shown.filter(line => line.stream === 'err').map(line => line.text)).toEqual(
+          hasErr ? err : [],
+        );
+        // Both streams are there whenever both hold something.
+        expect(titles(shown)).toEqual([
+          'Input',
+          ...(hasOut ? ['Stdout'] : []),
+          ...(hasErr ? ['Stderr'] : []),
+        ]);
+        // No line carries a break of its own.
+        expect(shown.some(line => lineBreak.test(line.text))).toBe(false);
       }),
     );
+  });
+
+  test('keeps both streams of a command that wrote to each, in a CRLF output too', () => {
+    const lines = itemLines(command({stdout: 'a\r\nb\r\n', stderr: 'warn\r\n'}));
+    expect(lines.map(line => line.text)).toEqual([
+      'Input',
+      '{"command":"ls"}',
+      '',
+      'Stdout',
+      'a',
+      'b',
+      '',
+      'Stderr',
+      'warn',
+    ]);
   });
 });

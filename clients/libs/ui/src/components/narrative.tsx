@@ -1,4 +1,4 @@
-import {Children, type JSX, type ReactNode} from 'react';
+import {Children, type JSX, type ReactNode, useMemo} from 'react';
 import {Collapsible} from './collapsible.js';
 import {Icon, type IconName} from './icon.js';
 import {Markdown} from './markdown.js';
@@ -64,6 +64,24 @@ export function Narrative(props: {
   );
 }
 
+/** How much of a thought the closed line reads: a few hundred characters is far more than a line shows. */
+const PREVIEW_CHARS = 400;
+
+/**
+ * The closed line's preview: the start of the text as plain words, its blocks (a bold title, then a
+ * sentence) told apart by a dot. Only the start is converted, so a long thought costs no more.
+ */
+function previewOf(text: string): string {
+  const cut = text.slice(0, PREVIEW_CHARS);
+  // Do not end on the first half of a character the cut split in two.
+  const whole = /[\ud800-\udbff]$/.test(cut) ? cut.slice(0, -1) : cut;
+  return whole
+    .split(/\n[ \t]*\n/)
+    .map(markdownToPlain)
+    .filter(part => part !== '')
+    .join(' · ');
+}
+
 /**
  * The thinking, as Markdown under a "Thought" line with a brain icon: muted and italic, so it
  * stands apart from what was said. Closed, the line carries a one-line preview of the text. While
@@ -76,7 +94,7 @@ export function Thought(props: {
   readonly open: boolean;
   readonly toggle: (open: boolean) => void;
 }): JSX.Element {
-  const preview = props.open ? '' : markdownToPlain(props.text);
+  const preview = useMemo(() => previewOf(props.text), [props.text]);
   return (
     <div
       ref={useSlot()?.measure}
@@ -90,7 +108,7 @@ export function Thought(props: {
             <Icon name="brain" />
           </span>
         }
-        {...(preview === '' ? {} : {summary: preview})}
+        {...(props.open || preview === '' ? {} : {summary: preview})}
         open={props.open}
         toggle={props.toggle}
       >
@@ -115,8 +133,10 @@ export interface ToolLine {
   readonly name: string;
   readonly line: string;
   readonly outcome?: string;
-  /** How long into the turn the call was made, as the row writes it. */
+  /** When in the turn the call was made, as the row writes it (`+1m 17s`). */
   readonly time?: string;
+  /** What the time means, for a reader who hovers it. */
+  readonly timeTitle?: string;
   readonly state: ToolState;
   readonly selected?: boolean;
   readonly press: () => void;
@@ -153,7 +173,14 @@ function ToolRow(props: {readonly tool: ToolLine}): JSX.Element {
       {tool.outcome === undefined ? null : (
         <span className="vs-toolgroup-outcome">{tool.outcome}</span>
       )}
-      {tool.time === undefined ? null : <span className="vs-toolgroup-time">{tool.time}</span>}
+      {tool.time === undefined ? null : (
+        <span
+          className="vs-toolgroup-time"
+          {...(tool.timeTitle === undefined ? {} : {title: tool.timeTitle})}
+        >
+          {tool.time}
+        </span>
+      )}
     </button>
   );
 }

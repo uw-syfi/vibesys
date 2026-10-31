@@ -120,10 +120,13 @@ function commandOf(entry: TranscriptEntry): CommandOutput | undefined {
   };
 }
 
-/** How a command ended in a word or two: `exit 1 · 2.3s`; undefined when it said neither. */
+/**
+ * How a command ended in a word or two: `exit 1 · 2.3s`. A zero exit is the ordinary end, so it is
+ * not said (the row already reads as done); undefined when there is neither a failure code nor a time.
+ */
 function endingOf(command: CommandOutput): string | undefined {
   const parts = [
-    ...(command.exitCode === null ? [] : [`exit ${command.exitCode}`]),
+    ...(command.exitCode === null || command.exitCode === 0 ? [] : [`exit ${command.exitCode}`]),
     ...(command.seconds === null ? [] : [ranFor(command.seconds)]),
   ];
   return parts.length === 0 ? undefined : parts.join(' · ');
@@ -148,7 +151,21 @@ function metaOf(
   return `${prefix}${size}`;
 }
 
-/** Seconds into the turn at which the entry happened; none when it or the turn has no time. */
+/**
+ * When the turn began, in epoch milliseconds, as the run recorded it for the turn; undefined when
+ * it recorded none (the reader then counts from the turn's first timed entry).
+ */
+function turnStartOf(core: CoreState, span: string): number | undefined {
+  const began = core.usageRecords.find(record => record.span_id === span)?.started_at;
+  const at = began === null || began === undefined ? Number.NaN : Date.parse(began);
+  return Number.isFinite(at) ? at : undefined;
+}
+
+/**
+ * Seconds from the turn's start to the entry's event, never negative: it is the entry's own time, so
+ * where events were stamped in another order than they arrived it can go back along the turn. None
+ * when the entry has no time or the turn has no origin.
+ */
 function elapsedOf(entry: TranscriptEntry, origin: number | undefined): {elapsed?: number} {
   if (entry.at === undefined || origin === undefined) return {};
   return {elapsed: Math.max(0, (entry.at - origin) / 1000)};
@@ -264,8 +281,8 @@ export function turnTranscript(
       title: titleOf(span),
       detail: statusWords(span.status).label,
     });
-    // A turn's clock starts at its first timed entry.
-    const origin = own.find(entry => entry.at !== undefined)?.at;
+    // A turn's clock starts when the run says the turn began, else at its first timed entry.
+    const origin = turnStartOf(core, span.id) ?? own.find(entry => entry.at !== undefined)?.at;
     for (const entry of own) rows.push(rowOf(entry, ended(span), origin));
   }
   return {turns, rows};

@@ -626,7 +626,7 @@ describe('reasoning in a turn', () => {
     const head = one(container, '.vs-thought .vs-collapsible-head');
     expect(one(head, '.vs-collapsible-label').textContent).toBe('Thought');
     expect(one(head, '.vs-collapsible-summary').textContent).toBe(
-      'Looking at the benchmark The head and tail counters share a cache line.',
+      'Looking at the benchmark · The head and tail counters share a cache line.',
     );
     expect(container.querySelector('.vs-thought .vs-collapsible-body')).toBeNull();
     expect(container.querySelector('.vs-thought[data-live]')).toBeNull();
@@ -693,6 +693,47 @@ describe('reasoning in a turn', () => {
   });
 });
 
+describe('a thought left open while it was written', () => {
+  const written = [chunk(10, 'analysis', OVERVIEW)];
+  const bodyOpen = (container: HTMLElement): boolean =>
+    container.querySelector('.vs-thought .vs-collapsible-body') !== null;
+
+  async function turnThatMovesOn(
+    after: (container: HTMLElement) => Promise<void>,
+  ): Promise<HTMLElement> {
+    const before = fixture(written, 'running');
+    const moved = fixture([...written, ...calls(11, 1)], 'running');
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<StepView {...viewProps(before, before.turn, null)} />));
+    expect(bodyOpen(container)).toBe(true);
+    await after(container);
+    await act(async () => root.render(<StepView {...viewProps(moved, moved.turn, null)} />));
+    return container;
+  }
+
+  test('stays open when the turn moves on, so it does not collapse under a reader partway through it', async () => {
+    const container = await turnThatMovesOn(async () => undefined);
+    expect(one(container, '.vs-thought .vs-collapsible-label').textContent).toBe('Thought');
+    expect(bodyOpen(container)).toBe(true);
+  });
+
+  test('closes when the reader presses it, and stays closed when the turn moves on', async () => {
+    const container = await turnThatMovesOn(async each => {
+      await click(one(each, '.vs-thought .vs-collapsible-head'));
+      expect(bodyOpen(each)).toBe(false);
+    });
+    expect(bodyOpen(container)).toBe(false);
+  });
+
+  test('is not made of a thought the turn had already left when it was first drawn', async () => {
+    const fx = fixture([...written, ...calls(11, 1)], 'running');
+    const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
+    expect(bodyOpen(container)).toBe(false);
+  });
+});
+
 describe('tool groups in a turn', () => {
   const states = (container: HTMLElement): (string | null)[] =>
     all(container, '.vs-toolgroup-row').map(row => row.getAttribute('data-state'));
@@ -740,9 +781,13 @@ describe('tool groups in a turn', () => {
   test('each row says when in the turn its call was made', async () => {
     const fx = fixture([chunk(10, 'analysis', 'Hm.'), ...calls(12, 3)]);
     const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
-    expect(
-      all(container, '.vs-toolgroup-row .vs-toolgroup-time').map(each => each.textContent),
-    ).toEqual(['2s', '4s', '6s']);
+    const times = all(container, '.vs-toolgroup-row .vs-toolgroup-time');
+    expect(times.map(each => each.textContent)).toEqual(['+2s', '+4s', '+6s']);
+    expect(times.map(each => each.getAttribute('title'))).toEqual([
+      '2s into the turn',
+      '4s into the turn',
+      '6s into the turn',
+    ]);
   });
 });
 
@@ -773,7 +818,16 @@ describe('a command result in a turn', () => {
       all(container, '.vs-toolgroup-row').map(
         row => row.querySelector('.vs-toolgroup-outcome')?.textContent,
       ),
-    ).toEqual(['exit 0 · 2.3s', 'exit 1 · 0.4s', 'exit 0 · 1m', '5 chars']);
+    ).toEqual(['2.3s', 'exit 1 · 0.4s', '1m', '5 chars']);
+  });
+
+  test('says "exit" only for a code that is not zero', async () => {
+    const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
+    await click(one(container, '.vs-toolgroup-head'));
+    const outcomes = all(container, '.vs-toolgroup-row .vs-toolgroup-outcome').map(
+      each => each.textContent ?? '',
+    );
+    expect(outcomes.filter(each => each.includes('exit'))).toEqual(['exit 1 · 0.4s']);
   });
 
   test('reads its exit code and duration beside the outcome when opened', async () => {

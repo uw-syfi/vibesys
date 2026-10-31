@@ -269,14 +269,14 @@ export function gateView(
 
 /**
  * One tool call in full as the item pane reads it, in order: its input, then its result. A
- * command's result comes as its two streams (without the newline that ends each), each under its
+ * command's result comes as its two streams (without the line break that ends each, LF or CRLF), each under its
  * own title, stderr in the error color; any other result as one section, titled "Error" when the call failed.
  */
 export function itemLines(tool: ToolRow): GateLine[] {
   const section = (title: string, text: string | null, stream: 'out' | 'err'): GateLine[] =>
     text === null || text === ''
       ? []
-      : [{text: title, stream: 'out'}, ...text.split('\n').map(line => ({text: line, stream}))];
+      : [{text: title, stream: 'out'}, ...text.split(/\r?\n/).map(line => ({text: line, stream}))];
   const {command} = tool;
   const sections =
     command === undefined
@@ -290,8 +290,8 @@ export function itemLines(tool: ToolRow): GateLine[] {
         ]
       : [
           section('Input', tool.input, 'out'),
-          section('Stdout', command.stdout.replace(/\n$/, ''), 'out'),
-          section('Stderr', command.stderr.replace(/\n$/, ''), 'err'),
+          section('Stdout', command.stdout.replace(/\r?\n$/, ''), 'out'),
+          section('Stderr', command.stderr.replace(/\r?\n$/, ''), 'err'),
         ];
   return sections
     .filter(each => each.length > 0)

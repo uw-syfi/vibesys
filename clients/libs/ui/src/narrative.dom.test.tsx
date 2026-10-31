@@ -1,6 +1,7 @@
 /** The turn narrative's blocks and the icon set in a DOM, through `.` only. */
 
 import {afterAll, beforeAll, describe, expect, test} from 'bun:test';
+import * as fc from 'fast-check';
 import {Window} from 'happy-dom';
 import {act, type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
@@ -61,7 +62,9 @@ describe('Thought', () => {
     expect(one(head, '.vs-collapsible-label').textContent).toBe('Thought');
     expect(head.querySelector('.vs-thought-icon svg')).not.toBeNull();
     const preview = one(head, '.vs-collapsible-summary').textContent ?? '';
-    expect(preview).toBe('Looking at the benchmark The head and tail counters share a cache line.');
+    expect(preview).toBe(
+      'Looking at the benchmark · The head and tail counters share a cache line.',
+    );
     expect(head.getAttribute('aria-expanded')).toBe('false');
     expect(container.querySelector('.vs-collapsible-body')).toBeNull();
     expect(container.querySelector('.vs-thought[data-live]')).toBeNull();
@@ -91,6 +94,38 @@ describe('Thought', () => {
     const open = await mount(<Thought text={REASONING} open toggle={on => asked.push(on)} />);
     await click(one(open, '.vs-collapsible-head'));
     expect(asked).toEqual([true, false]);
+  });
+
+  test('previews only the start of a long thought, so a long one costs no more than a short one', async () => {
+    const long = `**Title**\n\n${'Words that go on and on. '.repeat(20_000)}`;
+    const container = await mount(<Thought text={long} open={false} toggle={noop} />);
+    const head = one(container, '.vs-collapsible-head');
+    const preview = one(head, '.vs-collapsible-summary').textContent ?? '';
+    expect(preview.startsWith('Title · Words that go on')).toBe(true);
+    expect(preview.length).toBeLessThan(800);
+    expect(head.getAttribute('title')?.length).toBeLessThan(900);
+    expect((container.textContent ?? '').length).toBeLessThan(1000);
+  });
+
+  test('a preview is one line of at most a few hundred characters, whatever the text', () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.string({unit: 'grapheme', maxLength: 60}), {maxLength: 40}),
+        fc.constantFrom('\n', '\n\n', '\r\n\r\n', ' \n \n'),
+        (parts, separator) => {
+          const container = document.createElement('div');
+          document.body.append(container);
+          const root = createRoot(container);
+          act(() =>
+            root.render(<Thought text={parts.join(separator)} open={false} toggle={noop} />),
+          );
+          const preview = container.querySelector('.vs-collapsible-summary')?.textContent ?? '';
+          expect(preview).not.toMatch(/[\r\n]/);
+          expect(preview.length).toBeLessThan(800);
+          act(() => root.unmount());
+        },
+      ),
+    );
   });
 
   test('has no preview for text with no words', async () => {
@@ -141,6 +176,19 @@ describe('ToolGroup rows', () => {
       '14s',
       '20s',
     ]);
+  });
+
+  test('the time says what it is when hovered', async () => {
+    const container = await mount(
+      <ToolGroup
+        tools={[line('a', {time: '+1m 17s', timeTitle: '1m 17s into the turn'})]}
+        open
+        toggle={noop}
+      />,
+    );
+    const time = one(container, '.vs-toolgroup-time');
+    expect(time.textContent).toBe('+1m 17s');
+    expect(time.getAttribute('title')).toBe('1m 17s into the turn');
   });
 
   test('a row with no time draws none', async () => {
