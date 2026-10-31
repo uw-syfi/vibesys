@@ -57,9 +57,9 @@ export function LoadingBar(props: {readonly label: string}): JSX.Element {
 
 /**
  * One reading: its `label`, a meter of how full it is, and its `figure` in words. It is announced
- * as one meter: the label, the share when there is one and the figure in words, so what is drawn
- * is not read three times. With no `share` there is no reading, and the meter is empty and
- * announced as unknown, so a missing reading is never drawn as zero. `dim` shows a reading that is
+ * as one meter: the label, the share and the figure in words, so what is drawn is not read three
+ * times. With no `share` there is no reading, and the meter is empty and announced as unknown,
+ * so a missing reading is never drawn as zero. `dim` shows a reading that is
  * no longer current: still there, and quieter; `note` says why to a listener ("stale 42 s"). Its
  * text stays legible (the muted tone, not a fade), and its meter fades.
  *
@@ -78,20 +78,9 @@ export function Gauge(props: {
 }): JSX.Element {
   const known = props.share !== null && Number.isFinite(props.share);
   const share = known ? Math.max(0, Math.min(1, props.share ?? 0)) : null;
-  const spoken = share === null ? 'unknown' : props.figure;
   const figure: StyleWithVars = {'--gauge-figure-width': `${props.figureWidth}ch`};
-  return (
-    // biome-ignore lint/a11y/useSemanticElements: a native <meter> draws its own shadow tree and shows its children only as a fallback, so the gauge's label, bar and figure could not be its content; the ARIA meter pattern on a span names the same thing. Alternatives: style <meter> with its pseudo-elements (loses the bar's tones, track and fade, and differs by engine), or drop the role (the value would be text only, which is what this replaces).
-    <span
-      className="vs-gauge"
-      role="meter"
-      aria-label={props.label}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={share === null ? undefined : Math.round(share * 100)}
-      aria-valuetext={props.note === undefined ? spoken : `${spoken}, ${props.note}`}
-      data-dim={props.dim === true || undefined}
-    >
+  const drawn = (
+    <>
       <Text variant="small" tone="muted">
         {props.label}
       </Text>
@@ -107,6 +96,36 @@ export function Gauge(props: {
           {props.figure}
         </Text>
       </span>
+    </>
+  );
+  const note = props.note === undefined ? '' : `, ${props.note}`;
+  // A reading that was not made has no value to give a meter, which the pattern requires: it is
+  // announced for what it is, an unknown, and not as a share of zero.
+  if (share === null) {
+    return (
+      <span
+        className="vs-gauge"
+        role="img"
+        aria-label={`${props.label} unknown${note}`}
+        data-dim={props.dim === true || undefined}
+      >
+        {drawn}
+      </span>
+    );
+  }
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: a native <meter> draws its own shadow tree and shows its children only as a fallback, so the gauge's label, bar and figure could not be its content; the ARIA meter pattern on a span names the same thing. Alternatives: style <meter> with its pseudo-elements (loses the bar's tones, track and fade, and differs by engine), or drop the role (the value would be text only, which is what this replaces).
+    <span
+      className="vs-gauge"
+      role="meter"
+      aria-label={props.label}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Number((share * 100).toFixed(0))}
+      aria-valuetext={`${props.figure}${note}`}
+      data-dim={props.dim === true || undefined}
+    >
+      {drawn}
     </span>
   );
 }

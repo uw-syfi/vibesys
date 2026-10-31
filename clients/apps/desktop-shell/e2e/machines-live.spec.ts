@@ -243,9 +243,10 @@ test('a meter is announced with its value, as unknown when unread, and as stale 
     readings: {cpuPercent: 34, memory: null},
   });
   await expect(cpu).toHaveAttribute('aria-valuetext', /^34%, stale \d+ s$/);
-  const memory = card(page, 'This Mac').getByRole('meter', {name: 'Memory'});
-  await expect(memory).toHaveAttribute('aria-valuetext', /^unknown, stale/);
-  await expect(memory).not.toHaveAttribute('aria-valuenow', /.*/);
+  // A reading that was not made is an unknown by name, not a meter at zero, and stale as well.
+  const memory = card(page, 'This Mac').getByRole('img', {name: /^Memory unknown, stale \d+ s$/});
+  await expect(memory).toBeVisible();
+  await expect(card(page, 'This Mac').getByRole('meter', {name: 'Memory'})).toHaveCount(0);
 });
 
 test('hot is the warn tone, and a reading that is not hot is not', async ({page}) => {

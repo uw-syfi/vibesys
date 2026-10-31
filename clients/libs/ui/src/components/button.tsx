@@ -10,7 +10,7 @@ export type ButtonFace =
   | {
       readonly text: string;
       readonly icon?: IconName;
-      /** The accessible name when it says more than the text does ("Retry host-a"); it starts with the text. */
+      /** The accessible name when it says more than the text does ("Retry upload"); it starts with the text. */
       readonly label?: string;
     }
   | {readonly icon: IconName; readonly label: string; readonly text?: never};

@@ -226,8 +226,15 @@ describe('the Machines page reads each host live', () => {
       'GPU–',
       'VRAM–',
     ]);
+    // Not a meter with a value, which would say zero: an unknown, by name.
+    expect(world.gauges(A).map(gauge => gauge.getAttribute('aria-label'))).toEqual([
+      'CPU unknown',
+      'Memory unknown',
+      'GPU unknown',
+      'VRAM unknown',
+    ]);
     for (const gauge of world.gauges(A)) {
-      expect(gauge.getAttribute('aria-valuetext')).toBe('unknown');
+      expect(gauge.getAttribute('role')).toBe('img');
       expect(gauge.hasAttribute('aria-valuenow')).toBe(false);
     }
     await world.stop();
