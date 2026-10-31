@@ -1,10 +1,7 @@
 """The step runner interface and the loop that executes core's actions through it."""
 
 from vs_runtime._step_loop import (
-    Interruption,
-    LoopExit,
     OpenStep,
-    RecoveryRule,
     StepLog,
     StepLoopTiming,
     StepLoopTimingError,
@@ -23,10 +20,7 @@ __all__ = [
     "CancelSignal",
     "ClearUnavailableError",
     "Cleared",
-    "Interruption",
-    "LoopExit",
     "OpenStep",
-    "RecoveryRule",
     "StepLog",
     "StepLoopTiming",
     "StepLoopTimingError",

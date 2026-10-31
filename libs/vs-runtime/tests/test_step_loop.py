@@ -1,24 +1,24 @@
-"""The runner loop never gets stuck, records one result per step, and leaves nothing running.
+"""The runner loop over core's own rule: never stuck, one result per step, nothing left running.
 
-Properties are checked over generated fault schedules (a runner that raises, hangs or ignores its
-cancel signal; a backend that is unreachable; a pause or an ending at any time) with the host
-killed at a generated boundary and restarted over what the log kept. Named scenarios pin the
-loop's individual rules.
+The world is real core: open registered-operation steps with a retry bound, ``decide`` and ``fold``
+from ``vs_core.api.recovery``, the confirmed log's records, and a pause (``pause_now``) and a stop entered through
+core's own control events. Faults are generated: a runner that raises, hangs or ignores its cancel
+signal, a backend that is unreachable, a pause or a stop at any time, and a host killed at any
+boundary (every log append and every runner call) and restarted over the records it left. Named
+scenarios pin the loop's individual rules.
 
-``Model`` is the smallest state with the shape the loop needs: steps with attempts, a pause, an
-ending. ``ModelRule`` decides over it as ``docs/contributing/run-recovery.md`` says (run an open
-step, cancel one past its limit, settle one whose attempts are spent, run nothing while paused).
-``run_world`` drives the loop over a ``FakeStepRunner`` and a ``FakeStepLog``, kills the host at a
-chosen boundary (every log append and runner call is one), restarts it over what the log kept,
-resumes after each pause, and returns everything a test asserts on.
+Two things core has no record for yet are stood in for by ``FakeStepLog`` (the run's end, and an
+operator resuming a parked run). Not generated, because core cannot express it yet: a pause that
+drains (``pause``, not ``pause_now``) never reaches ``PARKED`` once its steps end, and a pause does
+not record the deadline of its drain.
 """
 
 from __future__ import annotations
 
 import asyncio
 import math
-from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, ClassVar, Literal
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given, settings
@@ -26,38 +26,27 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api.recovery import (
-    Action,
-    Cancel,
     Cancelled,
     CancelReason,
     End,
     Failed,
-    Finished,
+    Interruption,
     Run,
-    Settle,
-    StepResult,
-    Wait,
-    decide,
+    RunRest,
     finished_message,
-    interrupted_message,
-    started_message,
-)
-from vs_core.api.recovery import (
-    fold as core_fold,
 )
 from vs_proto.api import (
     AttemptInterrupted,
+    EpochStarted,
     InterruptionReason,
     StepFinished,
     StepStarted,
-    Timestamp,
 )
-from vs_runlog.api import Appended, ConfirmedLog
 from vs_runtime.api.step_runner import (
-    Interruption,
-    LoopExit,
+    Adopted,
+    CancelSignal,
+    Cleared,
     OpenStep,
-    StepLog,
     StepLoopTiming,
     StepLoopTimingError,
     run_step_loop,
@@ -66,222 +55,77 @@ from vs_runtime.api.testing import (
     AttemptHangs,
     AttemptRaises,
     AttemptReturns,
+    FakeRunRecords,
+    FakeRunSeed,
     FakeStepLog,
     FakeStepRunner,
-    LogEntry,
-    LoggedEnded,
-    LoggedFinished,
-    LoggedInterrupted,
-    LoggedStarted,
-    RunnerCall,
     RunnerMethod,
+    fake_run_seed,
 )
-from vs_sim.api.testing import Changes, VirtualClock, examples, run_virtual, swept, wait_for_state
+from vs_sim.api.testing import VirtualClock, examples, run_virtual, swept, wait_for_state
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from vs_proto.api import Record
-    from vs_runtime.api.step_runner import Adopted, CancelSignal, Cleared
+    from vs_core.api.recovery import StepResult
+    from vs_runtime.api.step_runner import StepLog
     from vs_runtime.api.testing import Behavior
+
+type Message = EpochStarted | StepStarted | StepFinished | AttemptInterrupted
 
 TIMING = StepLoopTiming(
     cancel_grace_s=2.0, clear_timeout_s=3.0, clear_backoff_s=1.0, clear_backoff_max_s=4.0
 )
+FINISHES = AttemptReturns(after_s=1.0)
+RAISES = AttemptRaises(OSError("the host lost the process"))
+HANGS = AttemptHangs()
+DEAF = AttemptHangs(ignoring_signal=True)
+UNCHARGED = (InterruptionReason.PAUSE, InterruptionReason.SHUTDOWN)
 
 
 @dataclass(frozen=True)
-class Spec:
-    """A step the scenario asks for."""
+class StepSpec:
+    """A step the scenario opens: how long core lets it run, and what each attempt does."""
 
-    name: str
-    deadline_at: float
-    max_attempts: int
+    limit_s: float
     behaviors: tuple[Behavior, ...]
 
-    @property
-    def tag(self) -> core.RequestId:
-        return core.RequestId(root=self.name)
 
-
-@dataclass(frozen=True)
-class StepState:
-    spec: Spec
-    attempts: int = 0
-    running: bool = False
-    debits: int = 0
-    result: StepResult | None = None
-
-
-@dataclass(frozen=True)
-class Pause:
-    drain_deadline: float
-    now: bool
-
-
-@dataclass(frozen=True)
-class Resume:
-    pass
-
-
-@dataclass(frozen=True)
-class EndRun:
-    pass
-
-
-@dataclass(frozen=True)
-class NewEpoch:
-    """A process started over this log: every attempt still marked running is dead."""
-
-
-type Input = Pause | Resume | EndRun | NewEpoch
-
-
-@dataclass(frozen=True)
-class Model:
-    steps: tuple[StepState, ...]
-    paused: Pause | None = None
-    ending: bool = False
-    ended: bool = False
-
-    def with_step(self, tag: core.RequestId, **changes: object) -> Model:
-        return replace(
-            self,
-            steps=tuple(replace(s, **changes) if s.spec.tag == tag else s for s in self.steps),
-        )
-
-    def step(self, tag: core.RequestId) -> StepState:
-        return next(s for s in self.steps if s.spec.tag == tag)
-
-
-def fold(state: Model, entry: LogEntry | Input) -> Model:
-    match entry:
-        case LoggedStarted() | LoggedFinished() | LoggedInterrupted() | LoggedEnded():
-            return _fold_log(state, entry)
-        case NewEpoch():
-            dead = tuple(
-                replace(s, running=False, debits=s.debits + int(s.running)) for s in state.steps
-            )
-            return replace(state, steps=dead)
-        case Pause():
-            return replace(state, paused=entry)
-        case Resume():
-            return replace(state, paused=None)
-        case EndRun():
-            return replace(state, ending=True)
-    message = f"unhandled entry {entry!r}"
-    raise AssertionError(message)
-
-
-def _fold_log(state: Model, entry: LogEntry) -> Model:
-    match entry:
-        case LoggedStarted(run):
-            return state.with_step(run.tag, attempts=run.attempt, running=True)
-        case LoggedFinished(tag, _attempt, result):
-            return state.with_step(tag, running=False, result=result)
-        case LoggedInterrupted(tag, _attempt, why):
-            debit = 1 if why is Interruption.RAISED else 0
-            return state.with_step(tag, running=False, debits=state.step(tag).debits + debit)
-        case LoggedEnded():
-            return replace(state, ended=True)
-    message = f"unhandled entry {entry!r}"
-    raise AssertionError(message)
-
-
-def model_open_step(model: Model, tag: core.RequestId) -> OpenStep | None:
-    step = model.step(tag)
-    if step.result is not None:
-        return None
-    return OpenStep(a_step(tag), step.spec.deadline_at, step.attempts)
-
-
-def a_step(tag: core.RequestId) -> core.Request:
-    return core.ObserveOwnedJob(
-        request_id=tag,
-        scope=core.Scope(owner=core.RunId(root="run"), generation=0),
-        resource_id=core.ResourceId(root="resource"),
-    )
-
-
-class ModelRule:
-    def decide(self, state: Model, now: float) -> tuple[Action, ...]:
-        actions: list[Action] = []
-        wake: list[float] = []
-        for step in state.steps:
-            if step.result is None:
-                actions.extend(self._for_open(state, step, now, wake))
-        if all(s.result is not None for s in state.steps):
-            actions.append(End(result=core.RunResultProposal(outcome="success", reason="done")))
-        actions.append(Wait(until=min(wake, default=None)))
-        return tuple(actions)
-
-    def _for_open(
-        self, state: Model, step: StepState, now: float, wake: list[float]
-    ) -> list[Action]:
-        tag = step.spec.tag
-        drain = state.paused.drain_deadline if state.paused else None
-        if step.running:
-            reason = self._cancellation(state, step, now, drain)
-            if reason is not None:
-                return [Cancel(tag, reason)]
-            wake.extend(t for t in (step.spec.deadline_at, drain) if t is not None)
-            return []
-        settled = self._settlement(state, step, now)
-        if settled is not None:
-            return [Settle(tag, settled)]
-        if state.paused:
-            return []
-        return [Run(a_step(tag), tag, step.attempts + 1, step.spec.deadline_at)]
-
-    @staticmethod
-    def _settlement(state: Model, step: StepState, now: float) -> StepResult | None:
-        if state.ending:
-            return Cancelled(reason=CancelReason.RUN_ENDING)
-        if step.debits >= step.spec.max_attempts:
-            return Failed(reason=core.FailureReason.ATTEMPTS_EXHAUSTED)
-        if now >= step.spec.deadline_at:
-            return Cancelled(reason=CancelReason.DEADLINE)
-        return None
-
-    @staticmethod
-    def _cancellation(
-        state: Model, step: StepState, now: float, drain: float | None
-    ) -> CancelReason | None:
-        if state.ending:
-            return CancelReason.RUN_ENDING
-        if state.paused and state.paused.now:
-            return CancelReason.PAUSE_NOW
-        if drain is not None and now >= drain:
-            return CancelReason.DRAIN_EXPIRED
-        if now >= step.spec.deadline_at:
-            return CancelReason.DEADLINE
-        return None
-
-    def settled(self, state: Model) -> LoopExit | None:
-        if state.ended:
-            return LoopExit.ENDED
-        return LoopExit.PARKED if state.paused is not None else None
+def step(*behaviors: Behavior, limit_s: float = 30.0) -> StepSpec:
+    return StepSpec(limit_s, behaviors)
 
 
 @dataclass(frozen=True)
 class Scenario:
-    steps: tuple[Spec, ...]
+    steps: tuple[StepSpec, ...]
+    retries: int = 2
     adopts: bool = False
     clear_takes_s: float = 0.0
     unavailable: int = 0
     pause_at: float | None = None
-    pause: Pause = Pause(drain_deadline=4.0, now=False)
-    end_run_at: float | None = None
+    """When the operator pauses the run now (core's ``pause_now``)."""
+    stop_at: float | None = None
+    """When the operator stops the run; ``None`` waits until every step has its result."""
 
 
-class _Switch:
+@dataclass
+class World:
+    scenario: Scenario
+    seed: FakeRunSeed
+    records: FakeRunRecords
+    runner: FakeStepRunner
+    boundaries: int = 0
+    exits: list[RunRest] = field(default_factory=list)
+
+
+class Switch:
     """Counts the loop's boundaries and kills the host at one of them."""
 
     def __init__(self, kill_at: int | None) -> None:
         self.ticks = 0
         self.kill_at = kill_at
         self.dead = False
-        self.loop: asyncio.Task[LoopExit] | None = None
+        self.loop: asyncio.Task[RunRest] | None = None
 
     def tick(self) -> None:
         if self.dead:
@@ -294,13 +138,13 @@ class _Switch:
         self.ticks += 1
 
 
-class _CrashingLog[S]:
-    def __init__(self, inner: StepLog[S], switch: _Switch) -> None:
+class CrashingLog:
+    def __init__(self, inner: StepLog, switch: Switch) -> None:
         self._inner = inner
         self._switch = switch
 
     @property
-    def state(self) -> S:
+    def state(self) -> core.CoreState:
         return self._inner.state
 
     async def _around(self, write: Callable[[], Awaitable[None]]) -> None:
@@ -329,8 +173,8 @@ class _CrashingLog[S]:
         await self._inner.next_input()
 
 
-class _CrashingRunner:
-    def __init__(self, inner: FakeStepRunner, switch: _Switch) -> None:
+class CrashingRunner:
+    def __init__(self, inner: FakeStepRunner, switch: Switch) -> None:
         self._inner = inner
         self._switch = switch
 
@@ -354,193 +198,211 @@ class _CrashingRunner:
         return outcome
 
 
-@dataclass
-class Outcome:
-    entries: list[LogEntry | Input]
-    calls: tuple[RunnerCall, ...]
-    runner: FakeStepRunner
-    boundaries: int
-    epochs: int
-    exits: list[LoopExit] = field(default_factory=list)
+def pause_event(clock: VirtualClock) -> core.RunControlEvent:
+    control = core.ControlInput(
+        control_id=core.ControlId(root="operator-pause"), action="pause_now"
+    )
+    return core.RunControlEvent(control=control, now_at=clock.now())
 
 
-def run_world(scenario: Scenario, kill_at: int | None = None) -> Outcome:
-    """Run the scenario to the end of the run, killing the host once at boundary ``kill_at``."""
+def stop_event(clock: VirtualClock) -> core.RunControlEvent:
+    control = core.ControlInput(
+        control_id=core.ControlId(root="operator-stop"),
+        action="stop",
+        mode=core.StopMode.CANCEL,
+    )
+    result = core.RunResultProposal(outcome="cancelled", reason="the operator stopped the run")
+    return core.RunControlEvent(control=control, now_at=clock.now(), result=result)
+
+
+async def operator(
+    world: World, log: FakeStepLog, clock: VirtualClock, delivered: set[str]
+) -> None:
+    """The person at the controls: pause, then stop. What was delivered is in the log already.
+
+    A stop that meets a pause waits for the resume, which is the next process: this operator
+    ends and the next one tries again.
+    """
+    scenario = world.scenario
+    if scenario.pause_at is not None and "pause" not in delivered:
+        await clock.sleep(max(0.0, scenario.pause_at - clock.now()))
+        delivered.add("pause")
+        log.push(pause_event(clock))
+    if "stop" in delivered:
+        return
+    if scenario.stop_at is not None:
+        await clock.sleep(max(0.0, scenario.stop_at - clock.now()))
+    else:
+        every = len(scenario.steps)
+        await wait_for_state(
+            lambda: world.records.count("step_finished"),
+            lambda n: n == every,
+            world.records.changes,
+        )
+    if log.state.run.status in (core.RunStatus.PARKED, core.RunStatus.DRAINING):
+        return
+    log.push(stop_event(clock))
+    delivered.add("stop")
+
+
+def run_world(scenario: Scenario, kill_at: int | None = None) -> World:
+    """Run the scenario until the run ends, killing the host once at boundary ``kill_at``."""
     clock = VirtualClock()
-    scripts = {s.tag: s.behaviors for s in scenario.steps}
+    seed = fake_run_seed([spec.limit_s for spec in scenario.steps], scenario.retries)
+    specs = dict(zip(seed.tags, scenario.steps, strict=True))
 
     def behave(_step: core.Request, tag: core.RequestId, attempt: int) -> Behavior:
-        behaviors = scripts[tag]
+        behaviors = specs[tag].behaviors
         return behaviors[min(attempt, len(behaviors)) - 1]
 
     runner = FakeStepRunner(
         clock, adopts=scenario.adopts, clear_takes_s=scenario.clear_takes_s, behave=behave
     )
     runner.clears_unavailable(scenario.unavailable)
-    seed = Model(tuple(StepState(s) for s in scenario.steps))
-    return run_virtual(clock, _epochs(scenario, clock, runner, seed, kill_at))
+    world = World(scenario, seed, FakeRunRecords(), runner)
+    return run_virtual(clock, run_epochs(world, clock, kill_at))
 
 
-async def _epochs(
-    scenario: Scenario,
-    clock: VirtualClock,
-    runner: FakeStepRunner,
-    seed: Model,
-    kill_at: int | None,
-) -> Outcome:
-    entries: list[LogEntry | Input] = []
-    inputs = _timeline(scenario)
-    outcome = Outcome(entries, (), runner, 0, 0)
+async def run_epochs(world: World, clock: VirtualClock, kill_at: int | None) -> World:
+    delivered: set[str] = set()
+    parked = False
+    killed = False
     while True:
-        log = FakeStepLog(seed, fold, model_open_step, entries)
-        log.push(NewEpoch())
-        switch = _Switch(kill_at if outcome.epochs == 0 else None)
+        log = FakeStepLog(world.records, world.seed.state, world.seed.registry, clock)
+        if parked:
+            log.resume_run()
+        switch = Switch(None if killed else kill_at)
         loop = asyncio.ensure_future(
             run_step_loop(
-                _CrashingLog(log, switch),
-                ModelRule(),
-                _CrashingRunner(runner, switch),
-                clock,
-                TIMING,
+                CrashingLog(log, switch), CrashingRunner(world.runner, switch), clock, TIMING
             )
         )
         switch.loop = loop
-        driver = asyncio.ensure_future(_deliver(inputs, log, clock))
-        (result,) = await asyncio.gather(loop, return_exceptions=True)
+        driver = asyncio.ensure_future(operator(world, log, clock, delivered))
+        (outcome,) = await asyncio.gather(loop, return_exceptions=True)
         driver.cancel()
-        await asyncio.gather(driver, return_exceptions=True)
-        outcome.boundaries += switch.ticks
-        outcome.epochs += 1
-        entries = log.entries
-        if isinstance(result, asyncio.CancelledError):
+        (operated,) = await asyncio.gather(driver, return_exceptions=True)
+        if isinstance(operated, Exception):
+            raise operated
+        world.boundaries += switch.ticks
+        killed = True
+        if isinstance(outcome, asyncio.CancelledError):
+            parked = False
             continue
-        if isinstance(result, BaseException):
-            raise result
-        outcome.exits.append(result)
-        if result is LoopExit.ENDED:
-            break
-        entries.append(Resume())
-    outcome.entries = entries
-    outcome.calls = runner.calls
-    return outcome
+        if isinstance(outcome, BaseException):
+            raise outcome
+        world.exits.append(outcome)
+        if outcome is RunRest.ENDED:
+            return world
+        parked = True
 
 
-def _timeline(scenario: Scenario) -> list[tuple[float, Input, list[bool]]]:
-    """The operator's inputs and when they arrive; the flag records that one was delivered."""
-    inputs: list[tuple[float, Input, list[bool]]] = []
-    if scenario.pause_at is not None:
-        inputs.append((scenario.pause_at, scenario.pause, [False]))
-    if scenario.end_run_at is not None:
-        inputs.append((scenario.end_run_at, EndRun(), [False]))
-    return sorted(inputs, key=lambda item: item[0])
-
-
-async def _deliver(
-    inputs: list[tuple[float, Input, list[bool]]],
-    log: FakeStepLog[Model, Input],
-    clock: VirtualClock,
-) -> None:
-    for at, entry, delivered in inputs:
-        if delivered[0]:
-            continue
-        await clock.sleep(max(0.0, at - clock.now()))
-        delivered[0] = True
-        log.push(entry)
-
-
-FINISHES = AttemptReturns(after_s=1.0)
-RAISES = AttemptRaises(OSError("the host lost the process"))
-HANGS = AttemptHangs()
-DEAF = AttemptHangs(ignoring_signal=True)
-
-
-def step(name: str, *behaviors: Behavior, deadline_at: float = 30.0, attempts: int = 3) -> Spec:
-    return Spec(name, deadline_at, attempts, behaviors)
-
-
-def entries_of[T](outcome: Outcome, kind: type[T]) -> list[T]:
-    return [e for e in outcome.entries if isinstance(e, kind)]
-
-
-def check_invariants(outcome: Outcome, scenario: Scenario) -> None:
-    ended = entries_of(outcome, LoggedEnded)
-    assert len(ended) == 1, "the run did not end exactly once"
-    finished = [e.tag for e in entries_of(outcome, LoggedFinished)]
-    assert sorted(t.root for t in finished) == sorted(s.name for s in scenario.steps)
-    for spec in scenario.steps:
-        check_attempts_follow_interruptions(outcome, spec)
-    check_clear_precedes_every_rerun(outcome)
-    check_runs_carry_the_step_deadline(outcome, scenario)
-    assert outcome.runner.running() == (), "work was left running"
-    assert outcome.runner.violations == ()
-
-
-def concerns(entry: LogEntry | Input, tag: core.RequestId) -> bool:
-    match entry:
-        case LoggedStarted(run):
-            return run.tag == tag
-        case LoggedInterrupted(other, _, _) | LoggedFinished(other, _, _):
-            return other == tag
-        case NewEpoch():
-            return True
-        case _:
-            return False
-
-
-def check_attempts_follow_interruptions(outcome: Outcome, spec: Spec) -> None:
-    attempt = 0
-    ended_since_start = True
-    finished = False
-    for entry in (e for e in outcome.entries if concerns(e, spec.tag)):
-        assert not finished or isinstance(entry, NewEpoch), (
-            f"{spec.name} has entries after its result"
-        )
-        match entry:
-            case LoggedStarted(run):
-                assert run.attempt == attempt + 1, f"{spec.name} skipped an attempt"
-                assert ended_since_start, f"{spec.name} started attempt {run.attempt} uninterrupted"
-                attempt, ended_since_start = run.attempt, False
-            case LoggedInterrupted(_, number, _):
-                assert number == attempt
-                ended_since_start = True
-            case LoggedFinished(_, named, _):
-                assert named == attempt, (
-                    f"{spec.name} finished naming attempt {named}, not {attempt}"
-                )
-                finished = True
-            case NewEpoch():
-                ended_since_start = True
-
-
-def check_runs_carry_the_step_deadline(outcome: Outcome, scenario: Scenario) -> None:
-    deadlines = {spec.name: spec.deadline_at for spec in scenario.steps}
-    for call in outcome.calls:
-        if call.kind is RunnerMethod.RUN:
-            assert call.deadline_at == deadlines[call.tag.root]
-
-
-def check_clear_precedes_every_rerun(outcome: Outcome) -> None:
-    cleared_since_last_run: dict[str, bool] = {}
-    for call in outcome.calls:
-        name = call.tag.root
-        if call.kind is RunnerMethod.CLEAR:
-            cleared_since_last_run[name] = True
-        elif call.kind is RunnerMethod.RUN:
-            assert call.attempt is not None
-            if call.attempt > 1:
-                assert cleared_since_last_run.get(name), (
-                    f"{name} attempt {call.attempt} had no clear"
-                )
-            cleared_since_last_run[name] = False
-
-
-def attempts_started(outcome: Outcome, name: str) -> list[int]:
-    return [e.run.attempt for e in entries_of(outcome, LoggedStarted) if e.run.tag.root == name]
-
-
-def result_of(outcome: Outcome, name: str) -> object:
-    (found,) = [e.result for e in entries_of(outcome, LoggedFinished) if e.tag.root == name]
+def messages(world: World) -> list[Message]:
+    """The core records of the log, as typed messages in order."""
+    found: list[Message] = []
+    for record in world.records.records:
+        body = record.body
+        if body is not None and isinstance(
+            body.value, EpochStarted | StepStarted | StepFinished | AttemptInterrupted
+        ):
+            found.append(body.value)
     return found
+
+
+def result_matches(world: World, index: int, expected: StepResult) -> bool:
+    """Whether the ``index``th step's one recorded result is ``expected``."""
+    tag = world.seed.tags[index]
+    found = [m for m in messages(world) if isinstance(m, StepFinished) and m.tag == tag.root]
+    return len(found) == 1 and found[0] == finished_message(tag, found[0].attempt, expected)
+
+
+def was_finished(world: World, index: int) -> bool:
+    """Whether the ``index``th step ended with the work's own report, not a decision of core."""
+    tag = world.seed.tags[index].root
+    return any(
+        isinstance(m, StepFinished)
+        and m.tag == tag
+        and m.result is not None
+        and m.result.field == "finished"
+        for m in messages(world)
+    )
+
+
+def attempts_started(world: World, index: int) -> list[int]:
+    tag = world.seed.tags[index].root
+    return [m.attempt for m in messages(world) if isinstance(m, StepStarted) and m.tag == tag]
+
+
+def interruption_reasons(world: World) -> list[InterruptionReason]:
+    return [m.reason for m in messages(world) if isinstance(m, AttemptInterrupted)]
+
+
+def check_log_of(world: World, tag: core.RequestId) -> None:
+    """One step's records: attempts in order, each after an end of the last, one result."""
+    last = 0
+    over = True
+    finished = False
+    charged = 0
+    for message in messages(world):
+        if isinstance(message, EpochStarted):
+            over = True
+        elif message.tag != tag.root:
+            continue
+        else:
+            assert not finished, f"{tag.root} has records after its result"
+            if isinstance(message, StepStarted):
+                assert message.attempt == last + 1, f"{tag.root} skipped an attempt"
+                assert over, f"{tag.root} started attempt {message.attempt} over a running one"
+                last, over = message.attempt, False
+                charged += 1
+            elif isinstance(message, AttemptInterrupted):
+                assert message.attempt == last
+                over = True
+                charged -= int(message.reason in UNCHARGED)
+            else:
+                assert message.attempt == last, f"{tag.root} finished naming {message.attempt}"
+                finished = True
+    assert finished, f"{tag.root} has no result"
+    assert charged <= world.scenario.retries + 1, f"{tag.root} ran past its retry bound"
+
+
+def check_world(world: World) -> None:
+    assert world.exits[-1] is RunRest.ENDED
+    assert len(world.records.ends) <= 1, "the run's end was recorded twice"
+    for tag in world.seed.tags:
+        check_log_of(world, tag)
+    check_clear_precedes_every_rerun(world)
+    check_runs_carry_the_step_limit(world)
+    assert world.runner.running() == (), "work was left running"
+    assert world.runner.violations == ()
+
+
+def check_clear_precedes_every_rerun(world: World) -> None:
+    cleared: dict[core.RequestId, bool] = {}
+    for call in world.runner.calls:
+        if call.kind is RunnerMethod.CLEAR:
+            cleared[call.tag] = True
+        else:
+            assert call.attempt is not None
+            assert call.attempt == 1 or cleared.get(call.tag), (
+                f"attempt {call.attempt} had no clear"
+            )
+            cleared[call.tag] = False
+
+
+def check_runs_carry_the_step_limit(world: World) -> None:
+    """The limit a runner gets for an attempt is the one made durable in its ``StepStarted``."""
+    recorded = {
+        (m.tag, m.attempt): m.deadline_at for m in messages(world) if isinstance(m, StepStarted)
+    }
+    for call in world.runner.calls:
+        key = (call.tag.root, call.attempt or 0)
+        if call.kind is RunnerMethod.RUN and key in recorded:
+            assert call.deadline_at == recorded[key]
+
+
+def clear_calls(world: World) -> int:
+    return sum(1 for call in world.runner.calls if call.kind is RunnerMethod.CLEAR)
 
 
 @given(
@@ -563,117 +425,100 @@ def test_a_bound_that_is_not_a_positive_finite_number_is_refused_by_name(
 
 
 def test_steps_that_finish_run_once_with_no_clear() -> None:
-    scenario = Scenario((step("a", FINISHES), step("b", FINISHES)))
-    outcome = run_world(scenario)
-    check_invariants(outcome, scenario)
-    assert attempts_started(outcome, "a") == [1]
-    assert all(isinstance(result_of(outcome, n), Finished) for n in "ab")
-    assert not [c for c in outcome.calls if c.kind is RunnerMethod.CLEAR]
+    world = run_world(Scenario((step(FINISHES), step(FINISHES))))
+    check_world(world)
+    assert attempts_started(world, 0) == [1]
+    assert clear_calls(world) == 0
+    assert all(was_finished(world, index) for index in range(2))
 
 
-def test_a_runner_that_raises_is_cleared_and_run_again_as_the_next_attempt() -> None:
-    scenario = Scenario((step("a", RAISES, FINISHES),))
-    outcome = run_world(scenario)
-    check_invariants(outcome, scenario)
-    assert attempts_started(outcome, "a") == [1, 2]
-    (interrupted,) = entries_of(outcome, LoggedInterrupted)
-    assert interrupted.why is Interruption.RAISED
-    assert isinstance(result_of(outcome, "a"), Finished)
+def test_a_runner_that_raises_is_cleared_and_run_again_charged_as_a_try() -> None:
+    world = run_world(Scenario((step(RAISES, FINISHES),)))
+    check_world(world)
+    assert attempts_started(world, 0) == [1, 2]
+    assert interruption_reasons(world) == [InterruptionReason.RAISED]
 
 
-def test_a_step_whose_attempts_are_spent_ends_as_failed() -> None:
-    scenario = Scenario((step("a", RAISES, attempts=2),))
-    outcome = run_world(scenario)
-    check_invariants(outcome, scenario)
-    assert attempts_started(outcome, "a") == [1, 2]
-    assert isinstance(result_of(outcome, "a"), Failed)
+def test_a_step_that_raises_past_its_retry_bound_ends_as_failed() -> None:
+    world = run_world(Scenario((step(RAISES),), retries=1))
+    check_world(world)
+    assert attempts_started(world, 0) == [1, 2]
+    assert result_matches(world, 0, Failed(reason=core.FailureReason.ATTEMPTS_EXHAUSTED))
 
 
-def test_a_step_past_its_deadline_ends_cancelled_for_that_reason() -> None:
-    scenario = Scenario((step("a", HANGS, deadline_at=5.0),))
-    outcome = run_world(scenario)
-    check_invariants(outcome, scenario)
-    assert result_of(outcome, "a") == Cancelled(reason=CancelReason.DEADLINE)
+def test_a_step_past_its_limit_ends_cancelled_for_that_reason() -> None:
+    world = run_world(Scenario((step(HANGS, limit_s=5.0),)))
+    check_world(world)
+    assert result_matches(world, 0, Cancelled(reason=CancelReason.DEADLINE))
 
 
 def test_a_runner_that_ignores_its_cancel_signal_is_cancelled_cleared_and_ended() -> None:
     for adopts in (False, True):
-        scenario = Scenario((step("a", DEAF, deadline_at=5.0),), adopts=adopts)
-        outcome = run_world(scenario)
-        check_invariants(outcome, scenario)
-        assert result_of(outcome, "a") == Cancelled(reason=CancelReason.DEADLINE)
+        world = run_world(Scenario((step(DEAF, limit_s=5.0),), adopts=adopts))
+        check_world(world)
+        assert result_matches(world, 0, Cancelled(reason=CancelReason.DEADLINE))
 
 
-def test_a_pause_drains_then_parks_and_resume_runs_the_interrupted_step_again() -> None:
-    scenario = Scenario(
-        (step("a", HANGS, FINISHES), step("b", FINISHES)), pause_at=0.5, end_run_at=None
-    )
-    outcome = run_world(scenario)
-    check_invariants(outcome, scenario)
-    assert outcome.exits == [LoopExit.PARKED, LoopExit.ENDED]
-    assert attempts_started(outcome, "a") == [1, 2]
-    (interrupted,) = entries_of(outcome, LoggedInterrupted)
-    assert interrupted.why is Interruption.PAUSE
-    assert isinstance(result_of(outcome, "a"), Finished)
+def test_a_pause_now_interrupts_uncharged_parks_and_resume_runs_the_step_again() -> None:
+    world = run_world(Scenario((step(HANGS, FINISHES),), pause_at=0.5, retries=0))
+    check_world(world)
+    assert world.exits == [RunRest.PARKED, RunRest.ENDED]
+    assert attempts_started(world, 0) == [1, 2]
+    assert interruption_reasons(world) == [InterruptionReason.PAUSE]
+    assert was_finished(world, 0)
 
 
-def test_a_cancelled_attempt_and_a_late_return_leave_one_result() -> None:
-    scenario = Scenario((step("a", DEAF, FINISHES, deadline_at=50.0),), pause_at=1.0)
-    outcome = run_world(scenario)
-    check_invariants(outcome, scenario)
-    assert len(entries_of(outcome, LoggedFinished)) == 1
+def test_a_runner_that_returns_late_from_a_pause_leaves_one_result_and_one_clear() -> None:
+    world = run_world(Scenario((step(DEAF, FINISHES, limit_s=50.0),), pause_at=1.0))
+    check_world(world)
+    assert attempts_started(world, 0) == [1, 2]
 
 
 def test_an_unreachable_backend_is_retried_and_the_step_then_runs_again() -> None:
-    scenario = Scenario((step("a", RAISES, FINISHES),), unavailable=3)
-    outcome = run_world(scenario)
-    check_invariants(outcome, scenario)
-    assert [c.kind for c in outcome.calls].count(RunnerMethod.CLEAR) >= 4
-    assert isinstance(result_of(outcome, "a"), Finished)
+    world = run_world(Scenario((step(RAISES, FINISHES),), unavailable=3))
+    check_world(world)
+    assert clear_calls(world) >= 4
 
 
 def test_a_pause_does_not_wait_for_an_unreachable_backend() -> None:
-    scenario = Scenario((step("a", RAISES, FINISHES),), unavailable=50, pause_at=0.5)
-    outcome = run_world(scenario)
-    assert outcome.exits[0] is LoopExit.PARKED
+    scenario = Scenario((step(RAISES, FINISHES),), unavailable=50, pause_at=0.5)
+    world = run_world(scenario)
+    assert world.exits[0] is RunRest.PARKED
 
 
 def test_the_run_ends_even_when_the_backend_stays_unreachable() -> None:
-    scenario = Scenario((step("a", RAISES, FINISHES),), unavailable=1000, end_run_at=20.0)
-    outcome = run_world(scenario)
-    assert entries_of(outcome, LoggedEnded)
-    assert result_of(outcome, "a") == Cancelled(reason=CancelReason.RUN_ENDING)
-    assert outcome.runner.running() != ()
+    world = run_world(Scenario((step(RAISES, FINISHES),), unavailable=1000, stop_at=20.0))
+    assert world.exits[-1] is RunRest.ENDED
+    assert result_matches(world, 0, Cancelled(reason=CancelReason.RUN_ENDING))
+    assert world.runner.running() != ()
 
 
-def test_a_kill_at_any_boundary_of_a_one_step_run_still_ends_it_once() -> None:
-    scenario = Scenario((step("a", RAISES, FINISHES),))
+def test_a_stop_cancels_what_runs_and_ends_the_run_once() -> None:
+    world = run_world(Scenario((step(HANGS), step(DEAF), step(FINISHES)), stop_at=3.0))
+    check_world(world)
+
+
+def test_a_kill_at_every_boundary_of_a_one_step_run_still_ends_it_once() -> None:
+    scenario = Scenario((step(RAISES, FINISHES),))
     for kill_at in range(run_world(scenario).boundaries):
-        check_invariants(run_world(scenario, kill_at), scenario)
+        check_world(run_world(scenario, kill_at))
 
 
-def test_a_pause_at_any_moment_parks_and_resumes_to_the_same_end() -> None:
-    steps = (step("a", RAISES, FINISHES), step("b", HANGS, FINISHES), step("c", FINISHES))
-    for pause_at in (moment / 2 for moment in range(20)):
-        for now in (False, True):
-            scenario = Scenario(steps, pause_at=pause_at, pause=Pause(pause_at + 1.0, now=now))
-            check_invariants(run_world(scenario), scenario)
-
-
-def test_every_boundary_of_a_rich_scenario_survives_a_kill() -> None:
+def test_a_kill_at_swept_boundaries_of_a_rich_run_ends_it_once() -> None:
     scenario = Scenario(
-        (
-            step("a", RAISES, FINISHES),
-            step("b", HANGS, FINISHES),
-            step("c", DEAF, FINISHES, deadline_at=9.0),
-        ),
+        (step(RAISES, FINISHES), step(HANGS, FINISHES), step(DEAF, FINISHES, limit_s=9.0)),
         adopts=True,
         unavailable=1,
         pause_at=2.0,
     )
-    boundaries = run_world(scenario).boundaries
-    for kill_at in swept(boundaries, sample=6):
-        check_invariants(run_world(scenario, kill_at), scenario)
+    for kill_at in swept(run_world(scenario).boundaries, sample=8):
+        check_world(run_world(scenario, kill_at))
+
+
+def test_a_pause_at_any_moment_parks_and_resumes_to_the_same_end() -> None:
+    steps = (step(RAISES, FINISHES), step(HANGS, FINISHES), step(FINISHES))
+    for pause_at in (moment / 2 for moment in range(20)):
+        check_world(run_world(Scenario(steps, pause_at=pause_at)))
 
 
 behaviors = st.one_of(
@@ -686,27 +531,22 @@ behaviors = st.one_of(
 
 @st.composite
 def scenarios(draw: st.DrawFn) -> Scenario:
-    count = draw(st.integers(1, 3))
     steps = tuple(
-        Spec(
-            f"s{i}",
+        StepSpec(
             draw(st.sampled_from([6.0, 20.0, 60.0])),
-            draw(st.integers(1, 3)),
             tuple(draw(st.lists(behaviors, min_size=1, max_size=3))),
         )
-        for i in range(count)
+        for _ in range(draw(st.integers(1, 3)))
     )
-    ending = draw(st.sampled_from([None, 3.0, 8.0]))
-    pause_at = draw(st.sampled_from([None, 0.0, 0.5, 1.0, 2.0, 3.5, 5.0, 8.0]))
-    drain = draw(st.sampled_from([0.0, 1.0, 5.0]))
+    stop_at = draw(st.sampled_from([None, None, 3.0, 8.0]))
     return Scenario(
         steps,
+        retries=draw(st.integers(1, 3)),
         adopts=draw(st.booleans()),
         clear_takes_s=draw(st.sampled_from([0.0, 0.5])),
-        unavailable=0 if ending is not None else draw(st.sampled_from([0, 0, 1, 2])),
-        pause_at=pause_at,
-        pause=Pause(drain_deadline=(pause_at or 0.0) + drain, now=draw(st.booleans())),
-        end_run_at=ending,
+        unavailable=0 if stop_at is not None else draw(st.sampled_from([0, 0, 1, 2])),
+        pause_at=draw(st.sampled_from([None, 0.0, 0.5, 1.0, 2.0, 3.5, 5.0, 8.0])),
+        stop_at=stop_at,
     )
 
 
@@ -716,277 +556,6 @@ def test_any_fault_schedule_with_a_kill_at_any_boundary_ends_with_every_step_fin
     scenario: Scenario, data: st.DataObject
 ) -> None:
     clean = run_world(scenario)
-    check_invariants(clean, scenario)
+    check_world(clean)
     kill_at = data.draw(st.integers(0, max(0, clean.boundaries - 1)))
-    check_invariants(run_world(scenario, kill_at), scenario)
-
-
-# --- The loop over core's own rule: real fold, real decide, real records -----------------------
-
-
-class QueryOutcome(core.Value):
-    status: Literal["succeeded"] = "succeeded"
-
-
-class Query(core.OperationRequest):
-    kind: Literal["test.query"] = "test.query"
-    lifecycle: Literal[core.LifecycleClass.QUERY] = core.LifecycleClass.QUERY
-    outcome_model: ClassVar[type[QueryOutcome]] = QueryOutcome
-    value: int
-
-
-def query_registry() -> core.OperationRegistry:
-    descriptor = core.OperationDescriptor(
-        kind="test.query",
-        lifecycle=core.LifecycleClass.QUERY,
-        request_schema=core.SchemaRef(name="query", version=1),
-        outcome_schema=core.SchemaRef(name="outcome", version=1),
-    )
-    return core.OperationRegistry(
-        (
-            core.OperationRegistration(
-                descriptor=descriptor, request_model=Query, outcome_model=QueryOutcome
-            ),
-        )
-    )
-
-
-def state_with_open_steps(count: int, registry: core.OperationRegistry) -> core.CoreState:
-    state = core.initial_state()
-    state = state.model_copy(
-        update={
-            "registry": registry.descriptors,
-            "run": state.run.model_copy(
-                update={"capabilities": core.Capabilities(operations=registry.descriptors)}
-            ),
-        }
-    )
-    scope = core.Scope(owner=state.run.run_id, generation=0)
-    for index in range(count):
-        decision = registry.validate_decision(
-            core.Operation(
-                decision_id=core.DecisionId(root=f"d:{index}"),
-                scope=scope,
-                request=Query(value=index),
-            )
-        )
-        state = core.step(
-            state,
-            core.DecisionSubmitted(
-                decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
-                expected_revision=state.revision,
-            ),
-        ).state
-    return state
-
-
-class MemoryRecords:
-    """The writer surface of the confirmed log, kept in memory: what survives a host death."""
-
-    def __init__(self) -> None:
-        self.records: list[Record] = []
-        self.changes = Changes()
-
-    def append(self, record: Record) -> None:
-        self.records.append(record)
-
-    def commit(self) -> None:
-        self.changes.notify()
-
-    def read(self) -> tuple[Record, ...]:
-        return tuple(self.records)
-
-    def count(self, field: str) -> int:
-        return sum(1 for r in self.records if r.body is not None and r.body.field == field)
-
-    def attempts_started(self) -> dict[str, list[int]]:
-        by_tag: dict[str, list[int]] = {}
-        for record in self.records:
-            if record.body is not None and record.body.field == "step_started":
-                message = record.body.value
-                by_tag.setdefault(message.tag, []).append(message.attempt)
-        return by_tag
-
-
-OPEN_PHASES = (
-    core.RequestPhase.PREPARED,
-    core.RequestPhase.DISPATCHED,
-    core.RequestPhase.RECONCILING,
-)
-
-
-class CoreStepLog:
-    """A ``StepLog`` over core's records: each method appends one and folds it into the state."""
-
-    def __init__(
-        self,
-        records: MemoryRecords,
-        seed: core.CoreState,
-        registry: core.OperationRegistry,
-        clock: VirtualClock,
-        epoch: int,
-    ) -> None:
-        self._log = ConfirmedLog(records)
-        self._registry = registry
-        self._clock = clock
-        self._epoch = epoch
-        folded = core_fold(records.read(), seed, registry=registry)
-        steps = folded.steps.model_copy(update={"epoch": epoch})
-        self._state = folded.model_copy(update={"steps": steps})
-
-    @property
-    def state(self) -> core.CoreState:
-        return self._state
-
-    def open_step(self, tag: core.RequestId) -> OpenStep | None:
-        record = self._state.records.record(tag)
-        if record is None or record.phase not in OPEN_PHASES:
-            return None
-        attempts = self._state.steps.of(tag)
-        return OpenStep(
-            record.request, record.until.at, 0 if attempts is None else attempts.started
-        )
-
-    async def step_started(self, run: Run) -> None:
-        self._append(started_message(run))
-
-    async def step_finished(self, tag: core.RequestId, attempt: int, result: StepResult) -> None:
-        self._append(finished_message(tag, attempt, result))
-
-    async def attempt_interrupted(
-        self, tag: core.RequestId, attempt: int, why: Interruption
-    ) -> None:
-        assert why is Interruption.PAUSE, "core's records have no reason for a runner that raised"
-        self._append(interrupted_message(tag, attempt, InterruptionReason.PAUSE))
-
-    async def run_ended(self, end: End) -> None:
-        raise NotImplementedError
-
-    async def next_input(self) -> None:
-        await asyncio.Event().wait()
-
-    def _append(self, message: StepStarted | StepFinished | AttemptInterrupted) -> None:
-        appended = self._log.append(
-            message, epoch=self._epoch, at=Timestamp(), clock=self._clock.now()
-        )
-        assert isinstance(appended, Appended)
-        self._state = core_fold([appended.record], self._state, registry=self._registry)
-
-
-class CoreRule:
-    def decide(self, state: core.CoreState, now: float) -> tuple[Action, ...]:
-        return decide(state, now)
-
-    def settled(self, state: core.CoreState) -> LoopExit | None:
-        match state.run.status:
-            case core.RunStatus.TERMINAL:
-                return LoopExit.ENDED
-            case core.RunStatus.PARKED:
-                return LoopExit.PARKED
-            case _:
-                return None
-
-
-def a_report(step: core.Request, tag: core.RequestId) -> Finished:
-    return Finished(
-        observation=core.Observation(
-            event_id=core.EventId(root=f"{tag.root}-done"),
-            request_id=tag,
-            scope=step.scope,
-            sequence=0,
-            observed_at=0.0,
-            status=core.ObservationStatus.SUCCEEDED,
-            terminal=True,
-            accepted=True,
-            released=True,
-            children_complete=True,
-        )
-    )
-
-
-@dataclass
-class CoreWorld:
-    records: MemoryRecords
-    runner: FakeStepRunner
-    boundaries: int
-
-
-def run_core_world(count: int, behaviors: tuple[Behavior, ...], kill_at: int | None) -> CoreWorld:
-    """Run ``count`` open steps through the loop over core's rule until each has its result.
-
-    Core ends a run only when a strategy proposes its result, and there is none here, so the
-    loop idles once every step has finished and the host stops it.
-    """
-    clock = VirtualClock()
-    registry = query_registry()
-    seed = state_with_open_steps(count, registry)
-    records = MemoryRecords()
-
-    def behave(step: core.Request, tag: core.RequestId, attempt: int) -> Behavior:
-        behavior = behaviors[min(attempt, len(behaviors)) - 1]
-        if isinstance(behavior, AttemptReturns) and behavior.result is None:
-            return AttemptReturns(result=a_report(step, tag), after_s=behavior.after_s)
-        return behavior
-
-    runner = FakeStepRunner(clock, behave=behave)
-
-    async def main() -> int:
-        epoch = 0
-        while True:
-            switch = _Switch(kill_at if epoch == 0 else None)
-            log = CoreStepLog(records, seed, registry, clock, epoch + 1)
-            loop = asyncio.ensure_future(
-                run_step_loop(
-                    _CrashingLog(log, switch),
-                    CoreRule(),
-                    _CrashingRunner(runner, switch),
-                    clock,
-                    TIMING,
-                )
-            )
-            switch.loop = loop
-            done = asyncio.ensure_future(
-                wait_for_state(
-                    lambda: records.count("step_finished"), lambda n: n == count, records.changes
-                )
-            )
-            await asyncio.wait({loop, done}, return_when=asyncio.FIRST_COMPLETED)
-            loop.cancel()
-            done.cancel()
-            outcomes = await asyncio.gather(loop, done, return_exceptions=True)
-            raised = [o for o in outcomes if isinstance(o, Exception)]
-            if raised:
-                raise raised[0]
-            epoch += 1
-            if records.count("step_finished") == count:
-                return switch.ticks
-
-    return CoreWorld(records, runner, run_virtual(clock, main()))
-
-
-def check_core_world(world: CoreWorld, count: int) -> None:
-    assert world.records.count("step_finished") == count
-    started = world.records.attempts_started()
-    assert len(started) == count
-    for attempts in started.values():
-        assert attempts == list(range(1, len(attempts) + 1))
-    check_clear_precedes_every_rerun(Outcome([], world.runner.calls, world.runner, 0, 0))
-    assert world.runner.running() == ()
-    assert world.runner.violations == ()
-
-
-def test_core_open_steps_run_to_their_results_through_the_loop() -> None:
-    world = run_core_world(3, (FINISHES,), None)
-    check_core_world(world, 3)
-    assert world.records.count("step_started") == 3
-
-
-def test_a_step_past_its_limit_ends_cancelled_through_the_loop() -> None:
-    world = run_core_world(2, (HANGS,), None)
-    check_core_world(world, 2)
-
-
-def test_every_boundary_of_a_run_over_core_rule_survives_a_kill() -> None:
-    boundaries = run_core_world(2, (FINISHES,), None).boundaries
-    for kill_at in swept(boundaries, sample=8):
-        check_core_world(run_core_world(2, (FINISHES,), kill_at), 2)
+    check_world(run_world(scenario, kill_at))
