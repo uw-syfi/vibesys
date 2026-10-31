@@ -3,6 +3,7 @@ syntax = "proto3";
 package vibesys.store.v1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
 import "vibesys/store/v1/content.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
@@ -16,6 +17,10 @@ message TranscriptEntry {
     TranscriptToolCall tool_call = 2;
     TranscriptToolResult tool_result = 3;
   }
+  // When the event this entry records happened. Absent in entries written before the field existed.
+  // A simulated run's clock starts at the epoch, so no floor is enforced here; a reader treats the
+  // epoch itself as no time.
+  google.protobuf.Timestamp at = 4;
 }
 
 enum TranscriptChannel {
@@ -54,7 +59,30 @@ message TranscriptToolResult {
   string tool = 1 [(buf.validate.field).string.max_bytes = 65536];
   optional string call_id = 2 [(buf.validate.field).string.max_bytes = 65536];
   bool is_error = 3;
+  // The text the agent was shown.
   TranscriptContent content = 4 [(buf.validate.field).required = true];
-  // The complete command or JSON payload, independent of the display content.
-  optional TranscriptContent payload_json = 5;
+  // Written before `payload`: the whole result as a Pydantic JSON string. No longer written. A
+  // reader ignores it and shows `content`; it stays declared so records already stored keep
+  // decoding (the breaking-change check refuses to delete a field, reserved or not).
+  optional TranscriptContent payload_json = 5 [deprecated = true];
+  // What the tool returned beside its text. Absent for a result with none and for one written before
+  // this field existed. A reader that does not know the case shows `content` alone.
+  oneof payload {
+    TranscriptCommandResult command = 6;
+    // A JSON object or array, as JSON text.
+    TranscriptContent json = 7;
+  }
+}
+
+// A command's result in parts, as the tool reported them.
+message TranscriptCommandResult {
+  TranscriptContent stdout = 1 [(buf.validate.field).required = true];
+  TranscriptContent stderr = 2 [(buf.validate.field).required = true];
+  // Absent when the tool has no exit status.
+  optional int32 exit_code = 3;
+  // Absent when the tool did not time itself.
+  optional double duration_seconds = 4 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
 }

@@ -131,6 +131,15 @@ export function duration(seconds: number): string {
   return `${hours}h ${String(minutes % 60).padStart(2, '0')}m`;
 }
 
+/** Time into a turn as a row writes it, to the second: `42s`, `1m 04s`, `2h 05m`. */
+export function elapsedWords(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(whole / 60);
+  if (minutes === 0) return `${whole}s`;
+  if (minutes < 60) return `${minutes}m ${String(whole % 60).padStart(2, '0')}s`;
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
+}
+
 /**
  * A metric value as the screen writes it everywhere: grouped, one decimal below a thousand (so a
  * rate of 385.4 reads as the 385.4 the comparison stated, never as 385 or 390), fewer above and

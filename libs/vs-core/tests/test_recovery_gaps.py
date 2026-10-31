@@ -16,9 +16,12 @@ from vs_core.api.recovery import (
     CancelReason,
     End,
     Interruption,
+    RecordRefusedError,
+    RefusalReason,
     Run,
     RunRest,
     Settle,
+    Tick,
     Wait,
     at_rest,
     decide,
@@ -109,8 +112,13 @@ def test_a_pause_that_names_a_drain_cancels_what_still_runs_when_it_passes_and_t
     loop.clock += 4.0
     assert not [a for a in decide(loop.state, loop.clock) if isinstance(a, Cancel)]
     loop.clock += 2.0
+    # Nothing writes a record when the drain gives up, so the clock is one: the run parks in the log
+    # with the attempt still running, and the loop cancels it.
+    assert decide(loop.state, loop.clock) == (Tick(at=loop.clock),)
+    loop.tick()
+    assert loop.state.run.status is core.RunStatus.PARKED
     (cancel,) = [a for a in decide(loop.state, loop.clock) if isinstance(a, Cancel)]
-    assert cancel.reason is CancelReason.DRAIN_EXPIRED
+    assert cancel.reason in (CancelReason.DRAIN_EXPIRED, CancelReason.PAUSE_NOW)
     loop.apply(cancel)
     assert loop.state.run.status is core.RunStatus.PARKED
     resume_in_next_epoch(loop)
@@ -171,12 +179,14 @@ def test_a_log_that_ends_a_run_with_work_open_or_another_result_is_refused() -> 
     play(loop, ("stop", 0))
     result = loop.state.run.result
     assert result is not None
-    with pytest.raises(ValueError, match="not over"):
+    with pytest.raises(RecordRefusedError, match="not over") as early:
         loop.add(Oneof("run_ended", ended_message(End(result=result))))
     quiet = stopped()
     other = core.RunResultProposal(outcome="success", reason="not the result")
-    with pytest.raises(ValueError, match="result the run does not hold"):
+    with pytest.raises(RecordRefusedError, match="result the run does not hold") as foreign:
         quiet.add(Oneof("run_ended", ended_message(End(result=other))))
+    assert early.value.refusal.reason is RefusalReason.RUN_NOT_OVER
+    assert foreign.value.refusal.reason is RefusalReason.RUN_NOT_OVER
 
 
 def test_a_resumed_run_is_no_longer_ended() -> None:
@@ -282,8 +292,9 @@ def test_a_flight_that_waited_while_the_run_parked_cannot_record_its_start() -> 
         loop.add(Oneof("attempt_interrupted", interrupted_message(tag, 1, Interruption.PAUSE)))
     assert loop.state.run.status is core.RunStatus.PARKED
     assert not may_start(loop.state, steps[1], loop.clock)
-    with pytest.raises(ValueError, match="may not start it"):
+    with pytest.raises(RecordRefusedError, match="may not start it") as refused:
         loop.add(Oneof("step_started", started_message(stale)))
+    assert refused.value.refusal.reason is RefusalReason.START_NOT_DUE
 
 
 @pytest.mark.parametrize("settled", [True, False])

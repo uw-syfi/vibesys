@@ -25,6 +25,7 @@ from vs_proto.api import (
     RunEnded as RunEndedRecord,
 )
 
+from ._refusal import RecordRefusedError, RefusalReason
 from .types.common import Value
 from .types.kernel import CoreEvent, CoreState
 from .types.records import Request, RequestObserved
@@ -168,7 +169,7 @@ def _known[S, T](names: dict[S, T], stored: S, what: str) -> T:
         return names[stored]
     except KeyError:
         message = f"the log holds {what} ({stored!r}) this version does not know"
-        raise ValueError(message) from None
+        raise RecordRefusedError(RefusalReason.UNREADABLE, message) from None
 
 
 def ended_message(end: End) -> RunEndedRecord:
@@ -211,13 +212,13 @@ def decode_result(message: StepFinished, registry: OperationRegistry | None) -> 
             return Cancelled(reason=_known(_CANCEL_NAMES, reason, "a cancel reason"))
         case _:
             message_ = "a step result names finished, failed or cancelled"
-            raise ValueError(message_)
+            raise RecordRefusedError(RefusalReason.UNREADABLE, message_)
 
 
 def _same_encoding(version: int) -> None:
     if version != SCHEMA_VERSION:
         message = f"core record encoding version {version} is not {SCHEMA_VERSION}"
-        raise ValueError(message)
+        raise RecordRefusedError(RefusalReason.UNREADABLE, message)
 
 
 def _context(registry: OperationRegistry | None) -> dict[str, object]:

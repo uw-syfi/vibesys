@@ -15,7 +15,7 @@ import {
 } from '@vibesys/hosts';
 import {exactResumeRunId, type ResumeRunId} from '@vibesys/runs';
 import type {WelcomeResult} from './types.js';
-import {type ChannelOf, instance, project} from './values.js';
+import {type ChannelOf, instance, operationToken, project} from './values.js';
 
 export const RUN_CONTROL_CHANNELS = {
   attach: 'vibesys:welcome:attach',
@@ -28,6 +28,7 @@ export const RUN_CONTROL_CHANNELS = {
   readSpan: 'vibesys:welcome:read-span',
   runDigests: 'vibesys:welcome:run-digests',
   projectRuns: 'vibesys:welcome:project-runs',
+  cancelProjectRuns: 'vibesys:welcome:cancel-project-runs',
   usageWindow: 'vibesys:welcome:usage-window',
 } as const;
 
@@ -225,8 +226,17 @@ export interface RunControlWelcomeBridge {
     project: string,
     runIds: readonly string[],
   ): Promise<WelcomeResult<RunDigestsReply>>;
-  /** Every run of `project` on `host`, newest first, before any digest is read. */
-  projectRuns(host: HostKey, project: string): Promise<WelcomeResult<readonly ListedRun[]>>;
+  /**
+   * Every run of `project` on `host`, newest first, before any digest is read. `token` names the
+   * listing (`nextOperationToken`), so `cancelProjectRuns` can end it while it is read.
+   */
+  projectRuns(
+    host: HostKey,
+    project: string,
+    token: number,
+  ): Promise<WelcomeResult<readonly ListedRun[]>>;
+  /** End the listing `token` named, which the view no longer wants; one that answered is a no-op. */
+  cancelProjectRuns(token: number): Promise<WelcomeResult<null>>;
   /**
    * What `runIds` of `project` on `host` spent in `[since, until)`, both in milliseconds
    * (`usage.window`, feature `usage_window`); or that this host's VibeSys does not offer it.
@@ -294,7 +304,13 @@ export type RunControlRequest =
       readonly project: string;
       readonly runIds: readonly string[];
     }
-  | {readonly kind: 'project-runs'; readonly host: HostId; readonly project: string}
+  | {
+      readonly kind: 'project-runs';
+      readonly host: HostId;
+      readonly project: string;
+      readonly token: number;
+    }
+  | {readonly kind: 'cancel-project-runs'; readonly token: number}
   | {
       readonly kind: 'usage-window';
       readonly host: HostId;
@@ -414,7 +430,14 @@ export function parseRunControlRequest(
         runIds: runIds(third),
       };
     case RUN_CONTROL_CHANNELS.projectRuns:
-      return {kind: 'project-runs', host: hostFromKey(first), project: project(second)};
+      return {
+        kind: 'project-runs',
+        host: hostFromKey(first),
+        project: project(second),
+        token: operationToken(third, 'project listing'),
+      };
+    case RUN_CONTROL_CHANNELS.cancelProjectRuns:
+      return {kind: 'cancel-project-runs', token: operationToken(first, 'project listing')};
     case RUN_CONTROL_CHANNELS.usageWindow: {
       const ids = runIds(third);
       const since = instant(fourth, 'start');

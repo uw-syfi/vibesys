@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from tests.support.example_checkout import example_checkout, example_task
 from tests.support.example_materializer import FakeExampleMaterializer
 
 from entrypoints.examples import HelperExampleProjects
@@ -24,24 +25,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _task(project: Path, name: str) -> None:
-    task = project / ".vibesys" / "tasks" / name
-    task.mkdir(parents=True)
-    (task / "OBJECTIVE.md").write_text("Make it fast.\n", encoding="utf-8")
-    (task / "vibesys.input.toml").write_text("version = 1\n", encoding="utf-8")
-
-
-def _checkout(root: Path) -> Path:
-    example = root / "examples" / "structures" / "stack"
-    example.mkdir(parents=True)
-    (example / "src.txt").write_text("candidate\n", encoding="utf-8")
-    _task(example, "spsc")
-    (root / "examples" / "registry.toml").write_text(
-        'version = 1\n\n[[example]]\npath = "examples/structures/stack"\n', encoding="utf-8"
-    )
-    return root
-
-
 def _projects(checkout: Path | None, *, fail_after: int | None = None) -> HelperExampleProjects:
     return HelperExampleProjects(checkout, FakeExampleMaterializer(fail_after=fail_after))
 
@@ -51,7 +34,7 @@ def _code(error: pytest.ExceptionInfo[ProjectLookupError]) -> tuple[HelperErrorC
 
 
 def test_the_catalog_lists_each_example_with_its_tasks(tmp_path: Path) -> None:
-    checkout = _checkout(tmp_path / "vibesys")
+    checkout = example_checkout(tmp_path / "vibesys")
 
     assert _projects(checkout).list() == ExampleList(
         checkout=str(checkout.resolve()),
@@ -64,7 +47,7 @@ def test_the_catalog_lists_each_example_with_its_tasks(tmp_path: Path) -> None:
 
 
 def test_an_example_becomes_its_own_project_with_its_tasks(tmp_path: Path) -> None:
-    checkout = _checkout(tmp_path / "vibesys")
+    checkout = example_checkout(tmp_path / "vibesys")
     destination = tmp_path / "work" / "stack"
 
     created = _projects(checkout).create("stack", destination)
@@ -84,7 +67,7 @@ def test_an_example_becomes_its_own_project_with_its_tasks(tmp_path: Path) -> No
 def test_a_refused_example_says_why(
     tmp_path: Path, example: str, destination: str, code: HelperErrorCode
 ) -> None:
-    checkout = _checkout(tmp_path / "vibesys")
+    checkout = example_checkout(tmp_path / "vibesys")
     (tmp_path / "occupied").mkdir()
     (tmp_path / "occupied" / "file").write_text("x", encoding="utf-8")
 
@@ -105,7 +88,7 @@ def test_a_helper_without_a_checkout_has_no_examples(tmp_path: Path) -> None:
 
 
 def test_a_failed_copy_leaves_nothing_behind(tmp_path: Path) -> None:
-    checkout = _checkout(tmp_path / "vibesys")
+    checkout = example_checkout(tmp_path / "vibesys")
     destination = tmp_path / "work" / "stack"
 
     with pytest.raises(ProjectLookupError) as error:
@@ -120,7 +103,7 @@ def _monorepo(root: Path) -> Path:
     folder = root / "services" / "queue"
     folder.mkdir(parents=True)
     (folder / "queue.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
-    _task(folder, "spsc")
+    example_task(folder, "spsc")
     return folder
 
 
@@ -211,10 +194,10 @@ def _destination_cases(tmp_path: Path) -> dict[str, Path]:
     own = base / "own"
     own.mkdir()
     (own / "src.txt").write_text("candidate\n", encoding="utf-8")
-    _task(own, "spsc")
+    example_task(own, "spsc")
     other = base / "other"
     other.mkdir()
-    _task(other, "different")
+    example_task(other, "different")
     (base / "junk").mkdir()
     (base / "junk" / "notes.txt").write_text("x", encoding="utf-8")
     (base / "file").write_text("x", encoding="utf-8")
@@ -235,7 +218,7 @@ def _destination_cases(tmp_path: Path) -> dict[str, Path]:
 def test_a_destination_is_what_creating_there_would_find(
     tmp_path: Path, name: str, state: ExampleDestination
 ) -> None:
-    checkout = _checkout(tmp_path / "vibesys")
+    checkout = example_checkout(tmp_path / "vibesys")
     destination = _destination_cases(tmp_path)[name]
 
     found, project = _projects(checkout).destination("stack", destination)
@@ -247,7 +230,7 @@ def test_a_destination_is_what_creating_there_would_find(
 def test_creating_succeeds_exactly_where_the_destination_is_absent_or_empty(
     tmp_path: Path,
 ) -> None:
-    checkout = _checkout(tmp_path / "vibesys")
+    checkout = example_checkout(tmp_path / "vibesys")
 
     for name, destination in _destination_cases(tmp_path).items():
         state, _ = _projects(checkout).destination("stack", destination)
@@ -263,7 +246,7 @@ def test_creating_succeeds_exactly_where_the_destination_is_absent_or_empty(
 def test_a_destination_for_an_unknown_example_or_without_a_checkout_is_refused(
     tmp_path: Path,
 ) -> None:
-    checkout = _checkout(tmp_path / "vibesys")
+    checkout = example_checkout(tmp_path / "vibesys")
     with pytest.raises(ProjectLookupError) as unknown:
         _projects(checkout).destination("nope", tmp_path / "x")
     with pytest.raises(ProjectLookupError) as unavailable:

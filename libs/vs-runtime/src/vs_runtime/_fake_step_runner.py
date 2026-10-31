@@ -17,14 +17,14 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from vs_core.api import EventId, Observation, ObservationStatus, RequestId, RunId, Scope
-from vs_core.api.recovery import Cancelled, Finished
+from vs_core.api.recovery import Cancelled, Finished, interruption_of
 from vs_runtime._step_runner import Adopted, CancelSignal, Cleared, ClearUnavailableError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
     from vs_core.api import Request
-    from vs_core.api.recovery import StepResult
+    from vs_core.api.recovery import CancelReason, StepResult
     from vs_sim.api import SleepingClock
 
 
@@ -173,6 +173,8 @@ class FakeStepRunner:
         """Run on ``clock``; with ``adopts``, ``clear`` adopts work that survives, as Slurm's does.
 
         Without ``adopts`` every ``clear`` ends all work of the tag, as an agent turn's does.
+        Work that is adopted survives the host, so a cancel that only interrupts the attempt (a
+        pause) leaves it running for ``clear`` to adopt; a cancel that ends the step ends it.
         ``clear_takes_s`` is how long each ``clear`` takes. ``behave`` chooses what an attempt
         does for a tag with no script; without it the attempt returns ``finished_result``.
         The first ``cancel_needs_polls`` times a cancel ends a call, the work is still alive and
@@ -185,6 +187,8 @@ class FakeStepRunner:
         self._scripts: dict[RequestId, tuple[Behavior, ...]] = {}
         self._work: dict[RequestId, _Work] = {}
         self._attached: set[RequestId] = set()
+        self._cancel_ended: list[tuple[RequestId, CancelReason]] = []
+        self._adopted: dict[RequestId, StepResult] = {}
         self._pending: dict[RequestId, list[str]] = {}
         self._resisting: set[RequestId] = set()
         self._threads: set[asyncio.Future[None]] = set()
@@ -193,6 +197,7 @@ class FakeStepRunner:
         self._clear_errors: list[Exception] = []
         self._unavailable = 0
         self._unreachable = False
+        self._unreachable_tags: frozenset[RequestId] = frozenset()
         self._calls: list[RunnerCall] = []
         self._violations: list[Exception] = []
 
@@ -213,13 +218,21 @@ class FakeStepRunner:
         self._clear_errors = [error] * times
 
     @contextmanager
-    def unreachable(self) -> Iterator[None]:
-        """Make every ``clear`` raise ``ClearUnavailableError`` while the context is open."""
-        self._unreachable = True
+    def unreachable(self, *tags: RequestId) -> Iterator[None]:
+        """Make ``clear`` raise ``ClearUnavailableError`` while the context is open.
+
+        For the ``tags`` named, or for every tag when none is: a backend can be reachable for
+        one step's work and not for another's.
+        """
+        before = (self._unreachable, self._unreachable_tags)
+        if tags:
+            self._unreachable_tags = before[1] | frozenset(tags)
+        else:
+            self._unreachable = True
         try:
             yield
         finally:
-            self._unreachable = False
+            self._unreachable, self._unreachable_tags = before
 
     @property
     def calls(self) -> tuple[RunnerCall, ...]:
@@ -230,6 +243,16 @@ class FakeStepRunner:
     def violations(self) -> tuple[Exception, ...]:
         """The ways the caller broke the contract; a faithful loop leaves none."""
         return tuple(self._violations)
+
+    @property
+    def ended_by_cancel(self) -> tuple[tuple[RequestId, CancelReason], ...]:
+        """The work a cancel signal ended, with the reason, in order; work a pause left is not here."""
+        return tuple(self._cancel_ended)
+
+    @property
+    def adopted_results(self) -> dict[RequestId, StepResult]:
+        """The result each tag's ended work handed to ``clear``: the step's one true result."""
+        return dict(self._adopted)
 
     def running(self) -> tuple[RequestId, ...]:
         """The tags whose work is still going."""
@@ -311,7 +334,7 @@ class FakeStepRunner:
             await self._clock.sleep(self._clear_takes_s)
         if self._clear_errors:
             raise self._clear_errors.pop(0)
-        if self._unreachable or self._unavailable:
+        if self._unreachable or tag in self._unreachable_tags or self._unavailable:
             self._unavailable = max(0, self._unavailable - 1)
             raise ClearUnavailableError(tag, "the fake backend")
         work = self._work.get(tag)
@@ -321,11 +344,12 @@ class FakeStepRunner:
             del self._work[tag]
             return Cleared()
         result = work.ended(self._clock.now())
+        self._attached.add(tag)
         if result is None:
-            self._attached.add(tag)
             return Adopted(None)
-        del self._work[tag]
-        self._attached.discard(tag)
+        # Ended work keeps its result until a run returns it: a crash before the loop records
+        # it must find it again, as a job's end on a cluster is found again.
+        self._adopted[tag] = result
         return Adopted(result)
 
     def _enter(self, tag: RequestId, method: str) -> None:
@@ -403,9 +427,14 @@ class FakeStepRunner:
         if cancel_won and self._cancel_polls > 0:
             self._cancel_polls -= 1
             raise StillRunningAfterCancelError(tag)
-        self._work.pop(tag, None)
         self._attached.discard(tag)
-        return next(wait.result() for wait in waits if wait in done)
+        result = next(wait.result() for wait in waits if wait in done)
+        if cancel_won and isinstance(result, Cancelled):
+            if self._adopts and interruption_of(result.reason) is not None:
+                return result
+            self._cancel_ended.append((tag, result.reason))
+        self._work.pop(tag, None)
+        return result
 
     async def _ends_by_itself(self, work: _Work) -> StepResult:
         if work.ends_at is None or work.result is None:

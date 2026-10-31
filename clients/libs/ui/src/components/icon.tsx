@@ -1,3 +1,4 @@
+import {Bot, Brain, FileText, Globe, Pencil, Terminal, Wrench} from 'lucide-react';
 import type {JSX} from 'react';
 
 /** Each icon's strokes on a 24 unit grid, drawn in the current text color. */
@@ -30,9 +31,27 @@ const PATHS = {
   sidebar: 'M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM9 4v16',
 } as const;
 
+/**
+ * The icons drawn by the `lucide-react` library, imported by name so the bundle holds only these.
+ * They share the stroke width and size of the hand-drawn set above, so the two read as one.
+ */
+const GLYPHS = {
+  brain: Brain,
+  terminal: Terminal,
+  file: FileText,
+  pencil: Pencil,
+  globe: Globe,
+  bot: Bot,
+  wrench: Wrench,
+} as const;
+
 /** The closed set of icons. */
-export type IconName = keyof typeof PATHS;
-export const ICON_NAMES = Object.keys(PATHS) as readonly IconName[];
+export type IconName = keyof typeof PATHS | keyof typeof GLYPHS;
+export const ICON_NAMES = [...Object.keys(PATHS), ...Object.keys(GLYPHS)] as readonly IconName[];
+
+function isGlyph(name: IconName): name is keyof typeof GLYPHS {
+  return name in GLYPHS;
+}
 
 /**
  * A stroke icon at the `icon` size. Decorative (hidden from assistive technology) unless it has a
@@ -40,6 +59,19 @@ export const ICON_NAMES = Object.keys(PATHS) as readonly IconName[];
  */
 export function Icon(props: {readonly name: IconName; readonly label?: string}): JSX.Element {
   const named = props.label !== undefined;
+  if (isGlyph(props.name)) {
+    const Glyph = GLYPHS[props.name];
+    return (
+      <Glyph
+        className="vs-icon"
+        strokeWidth={1.8}
+        role={named ? 'img' : undefined}
+        aria-label={props.label}
+        aria-hidden={named ? undefined : true}
+        focusable="false"
+      />
+    );
+  }
   return (
     <svg
       className="vs-icon"

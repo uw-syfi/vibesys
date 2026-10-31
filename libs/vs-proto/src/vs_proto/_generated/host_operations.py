@@ -23,6 +23,7 @@ ListTasks = Operation(
     1,
     1,
     None,
+    None,
     pb.ListTasksRequest,
     pb.ListTasksResponse,
     ((("request_id",), ("request_id",)),),
@@ -44,6 +45,7 @@ ListHarnesses = Operation(
     2,
     1,
     1,
+    None,
     None,
     pb.ListHarnessesRequest,
     pb.ListHarnessesResponse,
@@ -69,6 +71,7 @@ ListExamples = Operation(
     1,
     1,
     None,
+    None,
     pb.ListExamplesRequest,
     pb.ListExamplesResponse,
     ((("request_id",), ("request_id",)),),
@@ -93,6 +96,7 @@ GetTaskGoal = Operation(
     1,
     1,
     None,
+    None,
     pb.GetTaskGoalRequest,
     pb.GetTaskGoalResponse,
     ((("request_id",), ("request_id",)),),
@@ -114,6 +118,7 @@ DescribeMachine = Operation(
     2,
     1,
     1,
+    None,
     None,
     pb.DescribeMachineRequest,
     pb.DescribeMachineResponse,
@@ -139,6 +144,7 @@ ListCompute = Operation(
     1,
     1,
     None,
+    None,
     pb.ListComputeRequest,
     pb.ListComputeResponse,
     ((("request_id",), ("request_id",)),),
@@ -160,6 +166,7 @@ PreflightRun = Operation(
     2,
     1,
     1,
+    None,
     None,
     pb.PreflightRunRequest,
     pb.PreflightRunResponse,
@@ -185,6 +192,7 @@ InspectDestination = Operation(
     1,
     1,
     None,
+    None,
     pb.InspectDestinationRequest,
     pb.InspectDestinationResponse,
     ((("request_id",), ("request_id",)),),
@@ -195,30 +203,6 @@ def accept_inspect_destination(
     request: pb.InspectDestinationRequest,
 ) -> AcceptedRequest[pb.InspectDestinationRequest]:
     return InspectDestination.accept(request)
-
-
-ListSavedRuns = Operation(
-    "ListSavedRuns",
-    37,
-    37,
-    37,
-    10000,
-    5000,
-    1,
-    2,
-    1,
-    1,
-    None,
-    pb.ListSavedRunsRequest,
-    pb.ListSavedRunsResponse,
-    ((("request_id",), ("request_id",)),),
-)
-
-
-def accept_list_saved_runs(
-    request: pb.ListSavedRunsRequest,
-) -> AcceptedRequest[pb.ListSavedRunsRequest]:
-    return ListSavedRuns.accept(request)
 
 
 ListAgentLogins = Operation(
@@ -232,6 +216,7 @@ ListAgentLogins = Operation(
     2,
     1,
     1,
+    None,
     None,
     pb.ListAgentLoginsRequest,
     pb.ListAgentLoginsResponse,
@@ -257,6 +242,7 @@ ListRunDigests = Operation(
     1,
     1,
     None,
+    None,
     pb.ListRunDigestsRequest,
     pb.ListRunDigestsResponse,
     ((("request_id",), ("request_id",)),),
@@ -281,6 +267,7 @@ UsageWindow = Operation(
     1,
     1,
     None,
+    None,
     pb.UsageWindowRequest,
     pb.UsageWindowResponse,
     ((("request_id",), ("request_id",)),),
@@ -302,6 +289,7 @@ CreateExample = Operation(
     3,
     1,
     1,
+    None,
     None,
     pb.CreateExampleRequest,
     pb.CreateExampleResponse,
@@ -327,6 +315,7 @@ CopyProject = Operation(
     1,
     1,
     None,
+    None,
     pb.CopyProjectRequest,
     pb.CopyProjectResponse,
     ((("request_id",), ("request_id",)),),
@@ -349,6 +338,7 @@ PutCluster = Operation(
     1,
     1,
     None,
+    None,
     pb.PutClusterRequest,
     pb.PutClusterResponse,
     ((("request_id",), ("request_id",)),),
@@ -370,6 +360,7 @@ RemoveCluster = Operation(
     3,
     1,
     1,
+    None,
     None,
     pb.RemoveClusterRequest,
     pb.RemoveClusterResponse,
@@ -395,6 +386,7 @@ TestCluster = Operation(
     1,
     1,
     None,
+    None,
     pb.TestClusterRequest,
     pb.TestClusterResponse,
     ((("request_id",), ("request_id",)),),
@@ -417,6 +409,7 @@ StartRun = Operation(
     1,
     1,
     None,
+    None,
     pb.StartRunRequest,
     pb.StartRunResponse,
     ((("request_id",), ("request_id",)),),
@@ -438,6 +431,7 @@ TerminateRun = Operation(
     3,
     1,
     1,
+    None,
     None,
     pb.TerminateRunRequest,
     pb.TerminateRunResponse,
@@ -463,6 +457,7 @@ Login = Operation(
     1,
     2,
     25000,
+    None,
     pb.LoginRequest,
     pb.LoginResponse,
     ((("request_id",), ("request_id",)),),
@@ -471,6 +466,31 @@ Login = Operation(
 
 def accept_login(request: pb.LoginRequest) -> AcceptedRequest[pb.LoginRequest]:
     return Login.accept(request)
+
+
+StreamSavedRuns = Operation(
+    "StreamSavedRuns",
+    43,
+    43,
+    43,
+    600000,
+    5000,
+    1,
+    2,
+    1,
+    2,
+    60000,
+    25000,
+    pb.StreamSavedRunsRequest,
+    pb.StreamSavedRunsResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_stream_saved_runs(
+    request: pb.StreamSavedRunsRequest,
+) -> AcceptedRequest[pb.StreamSavedRunsRequest]:
+    return StreamSavedRuns.accept(request)
 
 
 ADAPTER_OPERATIONS: dict[str, Operation] = {
@@ -493,7 +513,6 @@ OPERATIONS: tuple[Operation, ...] = (
     ListCompute,
     PreflightRun,
     InspectDestination,
-    ListSavedRuns,
     ListAgentLogins,
     ListRunDigests,
     UsageWindow,
@@ -505,6 +524,7 @@ OPERATIONS: tuple[Operation, ...] = (
     StartRun,
     TerminateRun,
     Login,
+    StreamSavedRuns,
 )
 
 
@@ -520,7 +540,6 @@ class Handlers:
     list_compute: Callable[[pb.ListComputeRequest], pb.ListComputeResponse]
     preflight_run: Callable[[pb.PreflightRunRequest], pb.PreflightRunResponse]
     inspect_destination: Callable[[pb.InspectDestinationRequest], pb.InspectDestinationResponse]
-    list_saved_runs: Callable[[pb.ListSavedRunsRequest], pb.ListSavedRunsResponse]
     list_agent_logins: Callable[[pb.ListAgentLoginsRequest], pb.ListAgentLoginsResponse]
     list_run_digests: Callable[[pb.ListRunDigestsRequest], pb.ListRunDigestsResponse]
     usage_window: Callable[[pb.UsageWindowRequest], pb.UsageWindowResponse]
@@ -558,10 +577,6 @@ class Handlers:
             case 23:
                 return InspectDestination.validate_response(
                     request, self.inspect_destination(InspectDestination.request_value(request))
-                )
-            case 37:
-                return ListSavedRuns.validate_response(
-                    request, self.list_saved_runs(ListSavedRuns.request_value(request))
                 )
             case 19:
                 return ListAgentLogins.validate_response(
@@ -734,7 +749,6 @@ READS: dict[str, Operation] = {
     "list_compute": ListCompute,
     "preflight_run": PreflightRun,
     "inspect_destination": InspectDestination,
-    "list_saved_runs": ListSavedRuns,
     "list_agent_logins": ListAgentLogins,
     "list_run_digests": ListRunDigests,
     "usage_window": UsageWindow,
@@ -748,7 +762,6 @@ READ_CALLS: tuple[HostCall, ...] = (
     HostCall("list_compute", "list-compute", 15, 15, 10000, 5000),
     HostCall("preflight_run", "preflight-run", 16, 16, 65000, 5000),
     HostCall("inspect_destination", "inspect-destination", 23, 23, 10000, 5000),
-    HostCall("list_saved_runs", "list-saved-runs", 37, 37, 10000, 5000),
     HostCall("list_agent_logins", "list-agent-logins", 19, 19, 25000, 5000),
     HostCall("list_run_digests", "list-run-digests", 41, 41, 25000, 5000),
     HostCall("usage_window", "usage-window", 42, 42, 25000, 5000),
@@ -771,7 +784,10 @@ MUTATION_CALLS: tuple[HostCall, ...] = (
     HostCall("start_run", "start-run", 36, 36, 60000, 5000),
     HostCall("terminate_run", "terminate-run", 38, 38, 10000, 5000),
 )
-WATCHES: dict[str, Operation] = {"login": Login}
-WATCH_CALLS: tuple[HostCall, ...] = (HostCall("login", "login", 40, 40, 600000, 5000),)
+WATCHES: dict[str, Operation] = {"login": Login, "stream_saved_runs": StreamSavedRuns}
+WATCH_CALLS: tuple[HostCall, ...] = (
+    HostCall("login", "login", 40, 40, 600000, 5000),
+    HostCall("stream_saved_runs", "stream-saved-runs", 43, 43, 600000, 5000),
+)
 
 MIN_CHECKOUT_VERSION = "0.1.1"

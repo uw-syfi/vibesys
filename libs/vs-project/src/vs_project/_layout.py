@@ -501,9 +501,14 @@ def external_project_state_directory(state_home: Path, project_root: Path) -> Pa
     return destination
 
 
+def is_run_id(run_id: str) -> bool:
+    """Whether ``run_id`` is a path-safe run identity. An id off the wire may not be one."""
+    return re.fullmatch(_IDENTIFIER_PATTERN, run_id) is not None
+
+
 def validate_run_id(run_id: str, *, source: Path | None = None) -> str:
     """Validate a path-safe run identity before project I/O."""
-    if re.fullmatch(_IDENTIFIER_PATTERN, run_id) is None:
+    if not is_run_id(run_id):
         raise ProjectStateError.invalid_run_id(run_id, source)
     return run_id
 

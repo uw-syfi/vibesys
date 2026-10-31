@@ -77,10 +77,16 @@ export class FakeUsageBridge implements UsageBridge {
     readonly until: number;
   }[] = [];
   readonly overviews: number[] = [];
+  /** The token of every project listing asked, and of every one cancelled. */
+  readonly listed: number[] = [];
+  readonly cancelled: number[] = [];
   /** The machines that cannot be reached now; they answer nothing until `connect`. */
   readonly #down: Set<HostKey>;
   readonly #listeners: ((event: WelcomeEvent<HostListing>) => void)[] = [];
   #sequence = 0;
+  /** Listings held open until their token is cancelled, as a host that never answers would. */
+  readonly #open = new Map<number, (result: WelcomeResult<readonly ListedRun[]>) => void>();
+  #listingsHeld = false;
   /** Held until released: the questions of a world whose answers the test settles itself. */
   #hold: Promise<void> | null = null;
 
@@ -108,6 +114,11 @@ export class FakeUsageBridge implements UsageBridge {
   onListing: UsageBridge['onListing'] = listener => {
     this.#listeners.push(listener);
   };
+
+  /** Hold every project listing open until it is cancelled. */
+  holdListings(): void {
+    this.#listingsHeld = true;
+  }
 
   /** Hold every usage answer until `release` is called. */
   holdAnswers(): () => void {
@@ -137,11 +148,23 @@ export class FakeUsageBridge implements UsageBridge {
     return ok({eventCursor: 0, recent, skippedRecent: [], listings: [...listed, ...unavailable]});
   };
 
-  projectRuns: UsageBridge['projectRuns'] = async (host, project) => {
+  projectRuns: UsageBridge['projectRuns'] = async (host, project, token) => {
+    this.listed.push(token);
+    if (this.#listingsHeld) {
+      return new Promise(resolve => {
+        this.#open.set(token, resolve);
+      });
+    }
     const found = this.world.projects.find(each => each.host === host && each.project === project);
     if (this.#down.has(host)) return failed('The connection is down');
     if (found === undefined || found.runs === null) return failed('Could not list the runs');
     return ok(found.runs);
+  };
+
+  cancelProjectRuns: UsageBridge['cancelProjectRuns'] = async token => {
+    this.cancelled.push(token);
+    this.#open.get(token)?.(failed('The listing was cancelled'));
+    return ok(null);
   };
 
   usageWindow: UsageBridge['usageWindow'] = async (host, project, runIds, since, until) => {

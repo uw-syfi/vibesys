@@ -14,6 +14,8 @@ import {
   type ReadRequest,
   ReadRequestSchema,
   TailRequestSchema,
+  type WatchRequest,
+  WatchRequestSchema,
 } from '@vibesys/proto';
 import {GrpcError} from '@vibesys/transport';
 import {
@@ -22,6 +24,7 @@ import {
   MUTATE_METHOD,
   READ_METHOD,
   TAIL_METHOD,
+  WATCH_METHOD,
 } from '../shell/gateway.js';
 import {GrpcDecoder, grpcFrame} from '../shell/grpc.js';
 
@@ -48,6 +51,14 @@ export interface FakeMutate {
   end(code?: number, detail?: string): void;
 }
 
+export interface FakeWatch {
+  readonly request: WatchRequest;
+  /** Settles when the client has ended this stream: cancelled it, run out of patience, or closed. */
+  readonly closed: Promise<void>;
+  send(bytes: Uint8Array): void;
+  end(code?: number, detail?: string): void;
+}
+
 export class FakeGateway implements GatewayDialer {
   readonly forces: boolean[] = [];
   schemaHash = API_SCHEMA_HASH;
@@ -62,6 +73,8 @@ export class FakeGateway implements GatewayDialer {
   readonly #hostWaiters: Array<(call: FakeHostCall) => void> = [];
   readonly #mutations: FakeMutate[] = [];
   readonly #mutateWaiters: Array<(call: FakeMutate) => void> = [];
+  readonly #watches: FakeWatch[] = [];
+  readonly #watchWaiters: Array<(watch: FakeWatch) => void> = [];
   readonly #reads: FakeRead[] = [];
   readonly #readWaiters: Array<(call: FakeRead) => void> = [];
   readonly #waiters: Array<(tail: FakeTail) => void> = [];
@@ -128,6 +141,10 @@ export class FakeGateway implements GatewayDialer {
       this.#read(stream, bytes);
       return true;
     }
+    if (method === WATCH_METHOD) {
+      this.#watch(stream, bytes);
+      return true;
+    }
     return false;
   }
 
@@ -149,6 +166,21 @@ export class FakeGateway implements GatewayDialer {
     const waiter = this.#mutateWaiters.shift();
     if (waiter === undefined) this.#mutations.push(call);
     else waiter(call);
+  }
+
+  #watch(stream: ServerHttp2Stream, bytes: Uint8Array): void {
+    const closed = new Promise<void>(resolve => stream.once('close', () => resolve()));
+    const watch: FakeWatch = {
+      request: fromBinary(WatchRequestSchema, bytes),
+      closed,
+      send: frame => {
+        stream.write(grpcFrame(frame));
+      },
+      end: (code, detail) => end(stream, code, detail),
+    };
+    const waiter = this.#watchWaiters.shift();
+    if (waiter === undefined) this.#watches.push(watch);
+    else waiter(watch);
   }
 
   #read(stream: ServerHttp2Stream, bytes: Uint8Array): void {
@@ -225,6 +257,13 @@ export class FakeGateway implements GatewayDialer {
     return call === undefined
       ? new Promise(resolve => this.#mutateWaiters.push(resolve))
       : Promise.resolve(call);
+  }
+
+  nextWatch(): Promise<FakeWatch> {
+    const watch = this.#watches.shift();
+    return watch === undefined
+      ? new Promise(resolve => this.#watchWaiters.push(resolve))
+      : Promise.resolve(watch);
   }
 
   nextRead(): Promise<FakeRead> {
