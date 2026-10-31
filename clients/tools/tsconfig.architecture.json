@@ -73,6 +73,7 @@
       "@vibesys/settings/testing": ["libs/settings/src/testing/index.ts"],
       "@vibesys/store": ["libs/store/src/index.ts"],
       "@vibesys/store/testing": ["libs/store/src/testing/index.ts"],
+      "@vibesys/subscription": ["libs/subscription/src/index.ts"],
       "@vibesys/transport": ["libs/transport/src/index.ts"],
       "@vibesys/transport/testing": ["libs/transport/src/testing/index.ts"],
       "@vibesys/transport/websocket": ["libs/transport/src/websocket.ts"],

@@ -891,6 +891,9 @@ importers:
       '@vibesys/request-identity':
         specifier: workspace:*
         version: link:../request-identity
+      '@vibesys/subscription':
+        specifier: workspace:*
+        version: link:../subscription
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../transport
@@ -1255,6 +1258,40 @@ importers:
       '@types/bun':
         specifier: 1.4.2
         version: 1.4.2
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  libs/subscription:
+    dependencies:
+      '@bufbuild/protobuf':
+        specifier: 2.16.0
+        version: 2.16.0
+      '@vibesys/hosts':
+        specifier: workspace:*
+        version: link:../hosts
+      '@vibesys/machine':
+        specifier: workspace:*
+        version: link:../machine
+      '@vibesys/proto':
+        specifier: workspace:*
+        version: link:../proto
+      xstate:
+        specifier: 5.33.2
+        version: 5.33.2
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      '@vibesys/store':
+        specifier: workspace:*
+        version: link:../store
+      '@vibesys/transport':
+        specifier: workspace:*
+        version: link:../transport
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
