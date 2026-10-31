@@ -28,9 +28,10 @@ import {
   STATUS_WORDS,
 } from './idea-status.js';
 import {ideaAncestry} from './ideas-tree.js';
-import {type IdeasFilter, matchesIdeaQuery} from './ideas-view.js';
+import {ageWords, type IdeasFilter, matchesIdeaQuery} from './ideas-view.js';
 import {metricLabel} from './metric-words.js';
 import {type ObjectiveSeries, objectiveSeriesOf} from './objective-reading.js';
+import {type IdeaDoing, ideaDoing} from './run-level.js';
 import type {RunModel} from './run-model.js';
 import type {RunPosition} from './time-position.js';
 
@@ -72,6 +73,8 @@ export interface IdeaTableRow {
   readonly baselines: readonly string[];
   /** The gain it added and its share of the whole gain (a whole percent); null without one. */
   readonly share: {readonly gain: number; readonly percent: number} | null;
+  /** What it is doing and for how long (`Builder · Agent turn · 2m`) while it runs; null otherwise. */
+  readonly doing: string | null;
   /** The time its agents worked on it, in seconds. */
   readonly agentSeconds: number;
   /** An idea built the selected idea on its way: the rows of its lineage carry a bar. */
@@ -226,6 +229,7 @@ interface RowContext {
   readonly lit: ReadonlySet<string>;
   readonly selected: string | null;
   readonly now: number | null;
+  readonly doing: ReadonlyMap<string, IdeaDoing>;
 }
 
 /** What an idea built on: the idea it started from, its own work, or the input. */
@@ -234,6 +238,13 @@ function builtOnOf(item: Candidate, context: RowContext): IdeaTableRow['builtOn'
   const parent = base?.parent ?? null;
   if (parent !== null) return {label: context.titles.get(parent) ?? '…', parent};
   return {label: base?.kind === 'own work' ? 'Own work' : 'Input', parent: null};
+}
+
+/** What a running idea is doing, with how long ago that began; null for an idea that is not running. */
+function doingWords(running: IdeaDoing | undefined, now: number | null): string | null {
+  if (running === undefined) return null;
+  const age = ageWords(running.since, now);
+  return age === '' ? running.doing : `${running.doing} · ${age}`;
 }
 
 function rowOf(item: Candidate, context: RowContext): IdeaTableRow {
@@ -255,6 +266,7 @@ function rowOf(item: Candidate, context: RowContext): IdeaTableRow {
     baselines: context.comparisons.cells.get(item.id) ?? [],
     share:
       gain !== null && fraction !== undefined ? {gain, percent: Math.round(fraction * 100)} : null,
+    doing: doingWords(context.doing.get(item.id), context.now),
     agentSeconds: workedSeconds(item, context.now),
     lineage: context.lit.has(item.id) && item.id !== context.selected,
     selected: item.id === context.selected,
@@ -264,15 +276,15 @@ function rowOf(item: Candidate, context: RowContext): IdeaTableRow {
 
 /**
  * `rows` in the order of `sort`; null is the default: the first objective's best, with the ideas
- * still running first at the run's live end (`pinRunning`; in a replay they sort with the rest, as
- * they were not running then). Ties keep the newest first.
+ * still running first, at the live end and in a replay alike (the ones running at the time bar's
+ * place). A sort the reader chose is theirs: running ideas sort with the rest. Ties keep the
+ * newest first.
  */
 function sorted(
   rows: readonly IdeaTableRow[],
   order: ReadonlyMap<string, number>,
   sort: IdeasSort | null,
   fallback: IdeasSort,
-  pinRunning: boolean,
   directions: (index: number) => Direction,
 ): readonly IdeaTableRow[] {
   const by = sort ?? fallback;
@@ -282,7 +294,7 @@ function sorted(
   const value = (row: IdeaTableRow): number | null =>
     by.by === 'objective' ? (row.readings[by.index] ?? null) : null;
   return [...rows].sort((a, b) => {
-    const pinned = sort === null && pinRunning ? running(b) - running(a) : 0;
+    const pinned = sort === null ? running(b) - running(a) : 0;
     if (pinned !== 0) return pinned;
     const ordered =
       by.by === 'agent-time'
@@ -304,7 +316,7 @@ export function ideasTable(
   options: {
     readonly position: RunPosition;
     readonly filter: IdeasFilter;
-    /** Null: the default order, running first at the live end, then the first objective's best. */
+    /** Null: the default order, running first, then the first objective's best. */
     readonly sort: IdeasSort | null;
     readonly selected: string | null;
     readonly now: number | null;
@@ -334,6 +346,7 @@ export function ideasTable(
     lit: ideaAncestry(model, options.selected),
     selected: options.selected,
     now: options.now,
+    doing: ideaDoing(model),
   };
   const {query, status} = options.filter;
   const shown = tree.candidates
@@ -353,7 +366,6 @@ export function ideasTable(
       order,
       options.sort,
       defaultSort,
-      scrub === null,
       index => impact.columns[index]?.direction ?? whole.direction,
     ),
     total: tree.candidates.length,

@@ -24,7 +24,7 @@ import {
 } from '../../state/index.js';
 import {statusWords} from '../../state/span-words.js';
 import {FramedPane} from './framed-pane.js';
-import {agentFolds, IdeasList, IdeasPane, ModeSwitch, NowPane} from './run-level.js';
+import {agentFolds, IdeasList, IdeasPane, ModeSwitch} from './run-level.js';
 import {
   AgentPane,
   type AgentPaneProps,
@@ -117,9 +117,7 @@ export function IdeasWorkspace(props: LevelProps & {readonly idea: Candidate | n
         selected={idea?.id ?? null}
         dispatch={dispatch}
       />
-      {idea === null || view === null || logs === null ? (
-        <NowPane base={base} />
-      ) : (
+      {idea === null || view === null || logs === null ? null : (
         <FramedPane
           kicker="idea"
           title={markdownToPlain(idea.title)}

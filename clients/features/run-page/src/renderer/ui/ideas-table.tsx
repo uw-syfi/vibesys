@@ -23,7 +23,7 @@ import {
   Text,
   type TextTone,
 } from '@vibesys/ui';
-import type {JSX} from 'react';
+import type {JSX, ReactNode} from 'react';
 import {
   compactValue,
   endOf,
@@ -129,14 +129,20 @@ function ObjectiveFigure(props: {
   );
 }
 
+/** The idea's name with its tags, and what it is doing under them while it runs. */
 function IdeaName(props: {readonly row: IdeaTableRow}): JSX.Element {
   const {row} = props;
   return (
-    <CellInline>
-      <Text variant="code">{markdownToPlain(row.title)}</Text>
-      {row.adopted ? <Chip label="Adopted" tone="ok" /> : null}
-      {row.best ? <Chip label="Best" tone="ok" /> : null}
-    </CellInline>
+    <CellLines
+      main={
+        <CellInline>
+          <Text variant="code">{markdownToPlain(row.title)}</Text>
+          {row.adopted ? <Chip label="Adopted" tone="ok" /> : null}
+          {row.best ? <Chip label="Best" tone="ok" /> : null}
+        </CellInline>
+      }
+      note={row.doing}
+    />
   );
 }
 
@@ -167,7 +173,7 @@ function objectiveColumns(
     (column, at): Column => ({
       key: `objective-${column.index}`,
       header: column.title,
-      size: table.form === 'multiple' ? 'short' : 'wide',
+      size: table.form === 'multiple' ? 'short' : 'medium',
       narrow: 'short',
       tight: 'compact',
       hint: row => {
@@ -223,7 +229,7 @@ function singleColumns(table: IdeasTableView): readonly Column[] {
   const share: Column = {
     key: 'share',
     header: 'Share of gain',
-    size: 'wide',
+    size: 'medium',
     optional: true,
     cell: row =>
       row.share === null ? (
@@ -250,7 +256,7 @@ function leadColumns(base: ViewBase): readonly Column[] {
     {
       key: 'built-on',
       header: 'Built on',
-      size: 'wide',
+      size: 'shrink',
       optional: true,
       hint: row => markdownToPlain(row.builtOn.label),
       act: row => openParent(base, row),
@@ -264,8 +270,7 @@ function leadColumns(base: ViewBase): readonly Column[] {
     {
       key: 'status',
       header: 'Status',
-      size: 'wide',
-      narrow: 'medium',
+      size: 'medium',
       tight: 'dot',
       hint: row => [row.status.word, row.status.cause].filter(part => part !== null).join(' · '),
       cell: row => (
@@ -349,6 +354,8 @@ export function IdeasTable(props: {
   readonly setSort: (sort: IdeasSort | null) => void;
   readonly selected: string | null;
   readonly dispatch: (action: RunPageAction) => void;
+  /** What leads the row of chips and search (the face switcher), so the table starts higher. */
+  readonly lead?: ReactNode;
 }): JSX.Element {
   const {base, filter, sort} = props;
   const table = ideasTable(base.model, {
@@ -360,9 +367,12 @@ export function IdeasTable(props: {
   });
   const shown = table.rows.length;
   return (
-    <Stack gap="space-2">
-      <Row gap="space-1" align="center" wrap justify="between">
-        <Chips table={table} filter={filter} dispatch={props.dispatch} />
+    <Stack gap="space-2" grow>
+      <Row gap="space-3" align="center" wrap justify="between">
+        <Row gap="space-5" align="center" wrap>
+          {props.lead}
+          <Chips table={table} filter={filter} dispatch={props.dispatch} />
+        </Row>
         <SearchBox
           label="Search ideas"
           placeholder="Search ideas"

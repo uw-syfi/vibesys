@@ -6,7 +6,7 @@ import {heroView} from './headline.js';
 import {bestLine} from './ideas-tree.js';
 import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {EMPTY_TRACE_LOG, type TraceLog, traceAt, traceLog, traceStep} from './live.js';
-import {clockStart, logStreamToFollow, nowView, resolveZoom, shownLogScope} from './run-level.js';
+import {clockStart, ideaDoing, logStreamToFollow, resolveZoom, shownLogScope} from './run-level.js';
 import {createRunReader} from './run-model.js';
 import {type RunPageState, runPageInitial, runPageStep} from './run-page.js';
 import {scopedLogs} from './scoped-logs.js';
@@ -317,19 +317,11 @@ describe('the run level', () => {
     }
   });
 
-  test('Now jumps to the running idea’s live step', () => {
-    expect(nowView(model)).toEqual([
-      {
-        id: 'flow:w4/turn/#1',
-        doing: 'Builder',
-        context: 'arena',
-        since: 241,
-        open: {kind: 'step', idea: 'flow:w4/#1', step: 'flow:w4/turn/#1'},
-      },
-    ]);
+  test('a running idea says what it is doing, and since when', () => {
+    expect([...ideaDoing(model)]).toEqual([['flow:w4/#1', {doing: 'Builder', since: 241}]]);
   });
 
-  test('Now says a running idea waits between steps, and when its running attempt started', () => {
+  test('a running idea says it waits between steps, and when its running attempt started', () => {
     // ring tries again (the same hypothesis): its implementer runs, finishes and yields to an
     // evaluation, as the host-b run's round 4 did.
     const again = {...workstream(A, 'running'), id: 'flow:w1/#2', started_at: 600};
@@ -347,9 +339,9 @@ describe('the run level', () => {
       ],
     };
     const rows = (versions: readonly Span[]) =>
-      nowView(
+      ideaDoing(
         createRunReader().read(logOf(events([ROOT, ...finished(A), ...versions])), null),
-      ).find(row => row.context === 'ring');
+      ).get('flow:w1/#1');
     expect(rows([again])).toMatchObject({doing: 'Starting', since: 600});
     expect(rows([again, implement])).toMatchObject({
       doing: 'Builder',
@@ -359,7 +351,6 @@ describe('the run level', () => {
     expect(rows([again, implement, done, yielded])).toMatchObject({
       doing: 'Waiting after Builder',
       since: 640,
-      open: {kind: 'step', idea: 'flow:w1/#1', step: 'flow:w1/#2/turn'},
     });
     // Without a wait it has said, it waits since its last step ended.
     expect(rows([again, implement, done])).toMatchObject({

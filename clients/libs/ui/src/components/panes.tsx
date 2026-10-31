@@ -32,6 +32,11 @@ export function Pane(props: {
   readonly fixed?: boolean;
   /** The title is a name (an idea's), drawn in the mono face names use everywhere. */
   readonly mono?: boolean;
+  /**
+   * No header: the body brings its own controls (tabs, filters), and `kicker` and `title` only name
+   * the region for assistive technology.
+   */
+  readonly bare?: boolean;
   readonly children: ReactNode;
 }): JSX.Element {
   const headingId = useId();
@@ -52,8 +57,10 @@ export function Pane(props: {
       data-width={props.width}
       data-entering={enterKey === undefined ? undefined : ''}
       key={enterKey}
-      aria-labelledby={headingId}
+      aria-labelledby={props.bare === true ? undefined : headingId}
+      aria-label={props.bare === true ? `${props.kicker} ${props.title}` : undefined}
     >
+      {props.bare === true ? null : (
       <header className="vs-pane-header">
         <div className="vs-pane-titles">
           <Text variant="section">{props.kicker}</Text>
@@ -72,6 +79,7 @@ export function Pane(props: {
           <div className="vs-pane-actions">{props.actions}</div>
         )}
       </header>
+      )}
       <div className="vs-pane-body" data-fixed={props.fixed || undefined}>
         {props.children}
       </div>

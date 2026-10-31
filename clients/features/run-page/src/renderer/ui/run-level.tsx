@@ -1,17 +1,14 @@
 /**
- * The run level's panes (the performance row above them is `Hero`, drawn by the screen at every
- * level): the left one switches between Ideas, Timeline, Agents and Logs (`state.zoom` mode), the
- * right one is Now, what runs at this moment, each row a shortcut to its live step.
+ * The run level's pane (the performance row above it is `Hero`, drawn by the screen at every
+ * level): it switches between Ideas, Timeline, Agents, Usage and Logs (`state.zoom` mode). What runs
+ * at this moment is in the Ideas table, the running ideas first.
  */
 
 import type {CoreState} from '@vibesys/run-state';
 import {
   EmptyState,
-  markdownToPlain,
-  Pane,
   Panes,
   PickList,
-  PickRow,
   SegmentedControl,
   type SegmentOption,
   Stack,
@@ -19,15 +16,12 @@ import {
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import {
-  ageWords,
   hasDiagnostic,
   type IdeasFilter,
   type IdeasSort,
   type ImplementerOutcomes,
   ideasView,
   NO_MODEL_NAMES,
-  type NowItem,
-  nowView,
   predatesTraceWords,
   type RunMode,
   type RunPageAction,
@@ -36,7 +30,6 @@ import {
   traceArrival,
   usageContext,
   usageRecords,
-  type ZoomEvent,
 } from '../../state/index.js';
 import {FramedPane} from './framed-pane.js';
 import {IdeaPickRow} from './idea-pick-row.js';
@@ -144,17 +137,15 @@ function IdeasFace(props: {
   ) : null;
   if (base.model.candidates.candidates.length === 0) return <>{modes}</>;
   return (
-    <>
-      {modes}
-      <IdeasTable
-        base={base}
-        filter={state.ideas}
-        sort={sort}
-        setSort={setSort}
-        selected={props.selected}
-        dispatch={dispatch}
-      />
-    </>
+    <IdeasTable
+      base={base}
+      filter={state.ideas}
+      sort={sort}
+      setSort={setSort}
+      selected={props.selected}
+      dispatch={dispatch}
+      lead={modes}
+    />
   );
 }
 
@@ -173,47 +164,10 @@ export function IdeasPane(props: {
       width="master"
       header={{}}
       fixed
+      bare
     >
       <IdeasFace {...props} modeControls />
     </FramedPane>
-  );
-}
-
-/** Where a Now row jumps: its live step, its idea, or its agent. */
-function nowZoom(item: NowItem): ZoomEvent {
-  switch (item.open.kind) {
-    case 'step':
-      return {type: 'open-step', idea: item.open.idea, step: item.open.step};
-    case 'idea':
-      return {type: 'open-idea', idea: item.open.idea};
-    case 'agent':
-      return {type: 'open-agent', agent: item.open.agent};
-  }
-}
-
-export function NowPane(props: {readonly base: ViewBase}): JSX.Element | null {
-  const {base} = props;
-  const items = nowView(base.model);
-  if (items.length === 0) return null;
-  return (
-    <Pane kicker="now" title={`${items.length}`} width="list">
-      <PickList label="Running now" size="fill">
-        {items.map(item => (
-          <PickRow
-            key={item.id}
-            id={item.id}
-            title={markdownToPlain(item.context)}
-            mono
-            stacked
-            summary={item.doing}
-            figure={ageWords(item.since, base.clock.now)}
-            figureTone="muted"
-            state={{tone: 'live', label: 'running'}}
-            select={() => base.zoom(nowZoom(item))}
-          />
-        ))}
-      </PickList>
-    </Pane>
   );
 }
 
@@ -302,7 +256,7 @@ const KICKERS: Readonly<Record<RunMode, string>> = {
   logs: 'logs',
 };
 
-/** The run level: the chosen face and Now. */
+/** The run level: the chosen face. A face that adds nothing to the pane's header has none drawn. */
 export function RunLevel(props: {
   readonly state: RunPageState;
   readonly base: ViewBase;
@@ -326,11 +280,11 @@ export function RunLevel(props: {
         title={mode === 'logs' ? 'run' : `${total}`}
         width="fill"
         header={face.header}
+        bare={Object.keys(face.header).length === 0}
       >
         <ModeSwitch mode={mode} options={runModes(state)} zoom={base.zoom} />
         {face.body}
       </FramedPane>
-      {mode === 'usage' ? null : <NowPane base={base} />}
     </Panes>
   );
 }

@@ -1,11 +1,11 @@
 /**
- * The stats row of the dashboard: the ideas the run tried, its measurements, the time its agents
- * worked within the time it ran, and its tokens. The figures are the state's (`runStats`); this
- * draws them under the time bar and above the charts.
+ * The stats of the dashboard on one line: the ideas the run tried, its measurements, the time its
+ * agents worked within the time it ran, and its tokens. The figures are the state's (`runStats`);
+ * this draws them under the time bar and above the charts.
  */
 import type {TokenLedger} from '@vibesys/run-state';
 import {Row, Stat} from '@vibesys/ui';
-import type {JSX} from 'react';
+import type {JSX, ReactNode} from 'react';
 import {type RunModel, type RunPosition, runStats, statTiles} from '../../state/index.js';
 
 export function RunStats(props: {
@@ -17,13 +17,16 @@ export function RunStats(props: {
   readonly start: number;
   /** What the run's turns spent, to its end. */
   readonly ledger: TokenLedger;
+  /** More facts of the run for the same line (the models that built it). */
+  readonly more?: ReactNode;
 }): JSX.Element {
   const tiles = statTiles(runStats(props.model, props.position, props.start, props.ledger));
   return (
-    <Row gap="space-8" wrap align="start">
+    <Row gap="space-6" wrap align="baseline">
       {tiles.map(tile => (
         <Stat
           key={tile.id}
+          inline
           label={tile.label}
           value={tile.figure}
           quiet={tile.quiet}
@@ -31,6 +34,7 @@ export function RunStats(props: {
           {...(tile.note === '' ? {} : {sub: tile.note})}
         />
       ))}
+      {props.more}
     </Row>
   );
 }

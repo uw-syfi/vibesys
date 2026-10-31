@@ -363,18 +363,16 @@ function expectSortedByEveryColumn(each: ShapedRun, {whole, viewed, table, scrub
 }
 
 /**
- * The rows in the order of the default sort by definition: the first column's readings best first
- * in its direction, ideas with none last, ties newest first; at the live end (`pinRunning`) the
- * ideas still running before them all, and in a replay sorted with the rest.
+ * The rows in the order of the default sort by definition: the ideas still running before them all
+ * (at the live end and in a replay alike), then the first column's readings best first in its
+ * direction, ideas with none last, ties newest first.
  */
 function defaultOrder(
   rows: readonly IdeaTableRow[],
   direction: ObjectiveSpec['direction'],
-  pinRunning: boolean,
 ): string[] {
   const value = (row: IdeaTableRow): number | null => row.cells[0]?.value ?? null;
-  const pinned = (row: IdeaTableRow): number =>
-    pinRunning && row.status.status === 'running' ? 0 : 1;
+  const pinned = (row: IdeaTableRow): number => (row.status.status === 'running' ? 0 : 1);
   const better = (a: number | null, b: number | null): number => {
     if (a === null || b === null) return Number(a === null) - Number(b === null);
     return direction === 'max' ? b - a : a - b;
@@ -386,15 +384,17 @@ function defaultOrder(
     .map(row => row.id);
 }
 
-/** The rows are in the default order of the first column, the ideas still running pinned at the live end only. */
-function expectDefaultOrder(each: ShapedRun, {table, scrub}: Reading): void {
+/** The rows are in the default order of the first column, the ideas still running before them all. */
+function expectDefaultOrder(each: ShapedRun, {table}: Reading): void {
   const first = table.columns[0];
   if (first === undefined) return;
   expect(table.defaultSort).toEqual({by: 'objective', index: first.index});
   const direction = directionOf(each, first.index);
-  expect(table.rows.map(row => row.id)).toEqual(
-    defaultOrder(table.rows, direction, scrub === null),
-  );
+  expect(table.rows.map(row => row.id)).toEqual(defaultOrder(table.rows, direction));
+  // Every running idea leads, and only a running idea says what it is doing.
+  const running = table.rows.map(row => row.status.status === 'running');
+  expect(running).toEqual([...running].sort((a, b) => Number(b) - Number(a)));
+  for (const row of table.rows) expect(row.doing !== null).toBe(row.status.status === 'running');
 }
 
 describe('the Ideas table of a run of one to six objectives, read as the app reads it at a position', () => {
@@ -440,14 +440,14 @@ describe('the Ideas table of a run of one to six objectives, read as the app rea
     );
   });
 
-  test('by default the first column runs best first, and in a replay the ideas still running sort with the rest', () => {
+  test('by default the first column runs best first, the ideas still running before them, at every position', () => {
     fc.assert(
       fc.property(shapedRuns, each => atEveryPosition(each, at => expectDefaultOrder(each, at))),
       SETTINGS,
     );
   });
 
-  test('at the live end the ideas still running come first, and they do not in a replay of the same run', () => {
+  test('the ideas still running come first at the live end and in a replay of the same run', () => {
     fc.assert(
       fc.property(shapedRuns, each => {
         if (each.ideas.length < 2) return;
@@ -456,10 +456,24 @@ describe('the Ideas table of a run of one to six objectives, read as the app rea
           const {rows, columns} = tableOf(live, live, scrub);
           const first = columns[0];
           if (first === undefined) continue;
-          const order = defaultOrder(rows, directionOf(each, first.index), scrub === null);
-          expect(rows.map(row => row.id)).toEqual(order);
+          expect(rows.map(row => row.id)).toEqual(
+            defaultOrder(rows, directionOf(each, first.index)),
+          );
           if (scrub === null) expect(rows[0]?.status.status).toBe('running');
         }
+      }),
+      SETTINGS,
+    );
+  });
+
+  test('a sort the reader chose is theirs: a running idea sorts with the rest', () => {
+    fc.assert(
+      fc.property(shapedRuns, each => {
+        if (each.ideas.length < 2) return;
+        const live = lastIdeaRunning(wholeOf(each));
+        const sorted = tableOf(live, live, null, {sort: {by: 'agent-time'}});
+        const seconds = sorted.rows.map(row => row.agentSeconds);
+        expect(seconds).toEqual([...seconds].sort((a, b) => b - a));
       }),
       SETTINGS,
     );

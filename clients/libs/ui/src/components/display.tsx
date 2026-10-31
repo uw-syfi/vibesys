@@ -100,7 +100,28 @@ export function Stat(props: {
   readonly sub?: string;
   /** A value that is a word, not a number (`Not reported`): body size and muted. */
   readonly quiet?: boolean;
+  /** On one line: the label, the value in the code face, then its unit and sub-label. */
+  readonly inline?: boolean;
 }): JSX.Element {
+  if (props.inline === true) {
+    return (
+      <div className="vs-stat" data-inline="">
+        <Text variant="section">{props.label}</Text>
+        {props.quiet === true ? (
+          <Text tone="muted">{props.value}</Text>
+        ) : (
+          <span className="vs-stat-figure">
+            <Text variant="code">{props.unit === undefined ? props.value : `${props.value} ${props.unit}`}</Text>
+          </span>
+        )}
+        {props.sub === undefined ? null : (
+          <Text variant="small" tone="muted">
+            {`· ${props.sub}`}
+          </Text>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="vs-stat">
       <Text variant="section">{props.label}</Text>

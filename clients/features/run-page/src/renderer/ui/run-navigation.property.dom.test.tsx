@@ -24,7 +24,7 @@ afterAll(async () => {
   await window.happyDOM.close();
 });
 
-test('property: run-level spacing creates no inert or unnamed button on any face', async () => {
+test('property: the way up to the runs is one named button on every face, and none in a window of its own', async () => {
   await fc.assert(
     fc.asyncProperty(
       fc.constantFrom('ideas', 'timeline', 'agents', 'usage', 'logs'),
@@ -77,8 +77,7 @@ test('property: run-level spacing creates no inert or unnamed button on any face
               />,
             ),
           );
-          const crumbs = container.querySelector('nav[aria-label="Zoom"]');
-          const runs = [...(crumbs?.querySelectorAll('button') ?? [])].filter(
+          const runs = [...container.querySelectorAll('button')].filter(
             button => button.textContent === 'Runs',
           );
           expect(runs).toHaveLength(1);
@@ -99,7 +98,7 @@ test('property: run-level spacing creates no inert or unnamed button on any face
             ),
           );
           expect(
-            [...container.querySelectorAll('nav[aria-label="Zoom"] button')].filter(
+            [...container.querySelectorAll('button')].filter(
               button => button.textContent === 'Runs',
             ),
           ).toEqual([]);

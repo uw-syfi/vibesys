@@ -77,6 +77,8 @@ export {
   type ChartMoment,
   type ChartReadingView,
   chartLegend,
+  chartsAcross,
+  inLastChartRow,
   type ObjectiveChartView,
   objectiveCharts,
 } from './objective-chart.js';
@@ -109,9 +111,8 @@ export {createFactsReader} from './run-facts.js';
 export {
   clockAt,
   clockStart,
+  ideaDoing,
   logStreamToFollow,
-  type NowItem,
-  nowView,
   type ResolvedZoom,
   resolveZoom,
 } from './run-level.js';

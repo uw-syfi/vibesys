@@ -10,7 +10,7 @@ import {
   clockAt,
   createRunReader,
   headerView,
-  nowView,
+  ideaDoing,
   pauseNowConfirmView,
   type ReaderReply,
   type RunPageAction,
@@ -462,11 +462,11 @@ test('an open step keeps aging while the run says nothing, on the window clock',
   app.wallMs = 1_000_000;
   app.observer?.session(LIVE_VIEW);
   app.observer?.data({kind: 'snapshot', snapshot: snapshotWith(10)});
-  // How long the step Now shows has run, as its row reads it.
+  // How long the idea has been doing what it does, as its row in the table words it.
   const age = (): string | undefined => {
     const state = store.getState();
     const model = createRunReader().read(state.run.trace, null);
-    const [item] = nowView(model);
+    const [item] = ideaDoing(model).values();
     return item === undefined ? undefined : ageWords(item.since, clockAt(model, runNow(state)));
   };
   expect(age()).toBe('0s');

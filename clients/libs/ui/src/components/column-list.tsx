@@ -1,24 +1,14 @@
 import {type CSSProperties, type FocusEvent, type JSX, type ReactNode, useId} from 'react';
+import {type ColumnSize, columnTier, tracksOf} from './column-tracks.js';
 import {SIZE} from '../tokens/index.js';
 import {Icon} from './icon.js';
+import {useInlineSize} from './label-fit.js';
 import {navigationKeys, pickKeys} from './listbox.js';
 import {Text} from './text.js';
 import {InSlot, useSlot, useWindowed} from './windowing.js';
 
-/** How wide a column is: the rest of the row, a name's width, a figure's, or a mark and a few digits. */
-export type ColumnSize = 'fill' | 'wide' | 'medium' | 'short' | 'compact' | 'dot';
-
-/** A fill column keeps a readable width while the list has room for every column. */
-const TRACKS: Readonly<Record<ColumnSize, string>> = {
-  fill: 'minmax(var(--column-tile), 1fr)',
-  wide: 'calc(var(--gantt-figure) + var(--space-8))',
-  medium: 'calc(var(--gantt-figure) + var(--space-3))',
-  short: 'var(--gantt-figure)',
-  compact: 'calc(var(--gantt-figure) * 0.7)',
-  dot: 'calc(var(--dot) + var(--space-6))',
-};
-
 /** One column of a `ColumnList`: its header, how a row fills its cell, and how the header sorts. */
+export type {ColumnSize};
 export interface ListColumn<Row> {
   readonly key: string;
   readonly header: string;
@@ -188,27 +178,20 @@ export function ColumnList<Row>(props: {
     if (event.target !== event.currentTarget) return;
     win.reveal(selectedIndex >= 0 ? selectedIndex : 0, row => row.focus());
   };
-  const tracksOf = (
-    columns: readonly ListColumn<Row>[],
-    tier: 'wide' | 'narrow' | 'tight',
-  ): string =>
-    columns
-      .map(column => {
-        const size =
-          tier === 'wide'
-            ? column.size
-            : ((tier === 'tight' ? column.tight : undefined) ?? column.narrow ?? column.size);
-        return tier !== 'wide' && column.size === 'fill' ? 'minmax(0, 1fr)' : TRACKS[size];
-      })
-      .join(' ');
-  const kept = props.columns.filter(column => column.optional !== true);
+  const [measure, width] = useInlineSize();
+  const tier = columnTier(width, props.columns, props.crowded === true);
   const tracks = {
     '--columns': tracksOf(props.columns, 'wide'),
-    '--columns-narrow': tracksOf(kept, 'narrow'),
-    '--columns-tight': tracksOf(kept, 'tight'),
+    '--columns-narrow': tracksOf(props.columns, 'narrow'),
+    '--columns-tight': tracksOf(props.columns, 'tight'),
   } as CSSProperties;
   return (
-    <div className="vs-columnlist" style={tracks} data-crowded={props.crowded || undefined}>
+    <div
+      className="vs-columnlist"
+      ref={measure}
+      style={tracks}
+      data-tier={tier}
+    >
       <Header columns={props.columns} id={headerId} />
       <div
         ref={win.scroller}
