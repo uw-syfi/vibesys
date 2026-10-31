@@ -94,6 +94,7 @@ class RunProcess:
         """Read reports until one matches; fail if the process ends or stalls first."""
         while True:
             try:
+                # test-isolation: only guards a hang; a run that reports nothing for the guard is stuck, and no event can say so.
                 line = self.lines.get(timeout=SILENCE_GUARD_S)
             except queue.Empty:
                 message = (

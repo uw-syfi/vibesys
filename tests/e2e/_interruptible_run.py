@@ -22,6 +22,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pydantic import BaseModel
 from tests.e2e.dynamic_loop_harness import LoopInput, resume_request, run_request
 from tests.e2e.scripted_value_run import NoAgents, scripted_setup
 
@@ -45,6 +46,7 @@ if TYPE_CHECKING:
         ScriptedClientSetup,
         ScriptedTurn,
     )
+    from vs_agent.fake_client import ResponseSource, ResponseValue
     from vs_sim.api import Threads
 
 ROUNDS = 1
@@ -133,12 +135,10 @@ def _held_client_factory(
     return build
 
 
-def _held_responder(
-    gate: _Gate, kind: str, responder: Callable[[ScriptedTurn], dict[str, object]]
-) -> Callable[[ScriptedTurn], dict[str, object]]:
-    def answer(turn: ScriptedTurn) -> dict[str, object]:
+def _held_responder(gate: _Gate, kind: str, responder: ResponseSource) -> ResponseSource:
+    def answer(turn: ScriptedTurn) -> ResponseValue:
         gate.reach(TURN, kind)
-        return responder(turn)
+        return responder if isinstance(responder, BaseModel | dict) else responder(turn)
 
     return answer
 
