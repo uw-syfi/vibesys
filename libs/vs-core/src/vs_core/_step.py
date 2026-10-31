@@ -1411,7 +1411,7 @@ def _soft_stop(state: CoreState, event: RunControlEvent) -> Transition:
     refusal = control_refusal(state, event.control)
     if refusal is not None:
         raise refusal
-    state = _advance_run_time(state, event.now_at)
+    state = advance_run_time(state, event.now_at)
     run = state.run.model_copy(update={"controls": (*state.run.controls, event.control)})
     return Transition(
         state=state.model_copy(update={"run": run}),
@@ -1469,7 +1469,7 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
         "park": RunStatus.DRAINING,
         "resume": state.run.status if waits else RunStatus.RUNNING,
     }
-    state = _advance_run_time(state, event.now_at)
+    state = advance_run_time(state, event.now_at)
     run = state.run.model_copy(
         update={
             "controls": (*state.run.controls, event.control),
@@ -1824,10 +1824,10 @@ def _advance_event_time(state: CoreState, event: CoreEvent) -> CoreState:
     target = getattr(event, "target", None)
     if target is not None and hasattr(target, "observation"):
         supplied_times.append(target.observation.observed_at)
-    return _advance_run_time(state, max(supplied_times))
+    return advance_run_time(state, max(supplied_times))
 
 
-def _advance_run_time(state: CoreState, now_at: float) -> CoreState:
+def advance_run_time(state: CoreState, now_at: float) -> CoreState:
     """``state`` at run time ``now_at``, which never moves back (see ``credit_quota_pause``)."""
     now_at = max(now_at, state.run.now_at)
     if now_at == state.run.now_at:
