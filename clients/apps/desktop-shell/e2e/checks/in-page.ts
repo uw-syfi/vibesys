@@ -27,6 +27,11 @@ export type CheckId =
   | 'chrome-clear'
   | 'drag-region'
   | 'bundled-font'
+  | 'left-edge'
+  | 'heading-depth'
+  | 'spacing-order'
+  | 'hollow-box'
+  | 'title-strip'
   | 'stability';
 
 export interface Violation {
@@ -623,12 +628,17 @@ function columnOf(body: Element, element: Element): Element | null {
   return column;
 }
 
+/** The widest a paragraph may run at `fontSize`: the line cap, about 105 characters of half an em. */
+function proseCap(fontSize: number): number {
+  return 105 * 0.5 * fontSize;
+}
+
 /**
- * A pane (`.vs-pane-body`) whose content column is narrower than the pane while its text wraps:
- * the user sees a block of text with dead space beside it. The column is the body's own child
- * that holds the wrapped text (a narrative, a card, a log); it must cover 85% of the body's inner
- * width. Text that fits on single lines wants no more room, and a paragraph inside a full-width
- * column may still be capped by its own line length: only the column is checked.
+ * A pane (`.vs-pane-body`) whose content column squeezes its text: the text wraps while room beside
+ * it is empty, and the column is shorter than a full line of prose. The column is the body's own
+ * child that holds the wrapped text (a narrative, a card, a log); it must cover 85% of the body's
+ * inner width or reach the line cap (`proseCap`), so a card that fits its content or a paragraph
+ * at the cap passes however wide the pane is. Text that fits on single lines wants no more room.
  */
 export function paneFillCheck(): Violation[] {
   const found: Violation[] = [];
@@ -642,7 +652,8 @@ export function paneFillCheck(): Violation[] {
       const column = columnOf(body, box.element);
       if (column === null || reported.has(column)) continue;
       const used = column.getBoundingClientRect().width;
-      if (inner <= 0 || used >= inner * share) continue;
+      const cap = proseCap(Number.parseFloat(getComputedStyle(box.element).fontSize));
+      if (inner <= 0 || used >= Math.min(inner * share, cap)) continue;
       reported.add(column);
       found.push({
         check: 'pane-fill',
@@ -925,6 +936,365 @@ export function columnTopsCheck(): Violation[] {
   return found;
 }
 
+/** Whether a `style` draws its border on `side`. */
+function drawsSide(style: CSSStyleDeclaration, side: 'Top' | 'Right' | 'Bottom' | 'Left'): boolean {
+  return (
+    Number.parseFloat(style[`border${side}Width`]) > 0 &&
+    style[`border${side}Style`] !== 'none' &&
+    toRgb(style[`border${side}Color`])[3] > 40
+  );
+}
+
+/** The color drawn behind `element`: the nearest fill among what holds it. */
+function backdropOf(element: Element): string {
+  for (let up = element.parentElement; up !== null; up = up.parentElement) {
+    const fill = getComputedStyle(up).backgroundColor;
+    if (toRgb(fill)[3] > 40) return fill;
+  }
+  return 'rgb(255, 255, 255)';
+}
+
+/** Whether `element` draws a box a person sees: a border on three sides or more, or its own fill. */
+function drawsBox(element: Element): boolean {
+  const style = getComputedStyle(element);
+  const sides = (['Top', 'Right', 'Bottom', 'Left'] as const).filter(each =>
+    drawsSide(style, each),
+  );
+  if (sides.length >= 3) return true;
+  const fill = style.backgroundColor;
+  return (
+    fill !== 'rgba(0, 0, 0, 0)' && toRgb(fill)[3] > 40 && !sameColor(fill, backdropOf(element))
+  );
+}
+
+interface Ink {
+  readonly element: Element;
+  readonly box: Box;
+}
+
+/** What the screen draws: its text lines, its pictures and controls, and its boxes. */
+function screenInk(texts: readonly TextBox[]): Ink[] {
+  const ink: Ink[] = texts.flatMap(({element, lines}) => lines.map(box => ({element, box})));
+  const pictures = 'svg, img, canvas, input, select, textarea, [role="progressbar"]';
+  for (const element of document.body.querySelectorAll('*')) {
+    if (!(element.matches(pictures) || drawsBox(element)) || !isShown(element)) continue;
+    const box = boxOf(element.getBoundingClientRect());
+    if (box.right > box.left && box.bottom > box.top) ink.push({element, box});
+  }
+  return ink;
+}
+
+/** What `root` holds of `ink`, itself not included. */
+function inkIn(root: Element, ink: readonly Ink[]): Box[] {
+  return ink.filter(each => each.element !== root && root.contains(each.element)).map(e => e.box);
+}
+
+/** The smallest box around `boxes`. */
+function extentOf(boxes: readonly Box[]): Box | null {
+  if (boxes.length === 0) return null;
+  return {
+    left: Math.min(...boxes.map(box => box.left)),
+    top: Math.min(...boxes.map(box => box.top)),
+    right: Math.max(...boxes.map(box => box.right)),
+    bottom: Math.max(...boxes.map(box => box.bottom)),
+  };
+}
+
+interface PageParts {
+  readonly head: Element;
+  readonly body: Element;
+  /** What holds them both: a child of it sits under the page's title. */
+  readonly page: Element;
+}
+
+/** Each page on screen: its header (title, back) and the body under it. */
+function pagesOnScreen(): PageParts[] {
+  const parts: PageParts[] = [];
+  for (const page of document.body.querySelectorAll('.vs-screen, .vs-page-content')) {
+    const head = page.querySelector(':scope > .vs-screen-header, :scope > .vs-page-header');
+    const body = page.querySelector(
+      ':scope > .vs-screen-body, :scope > .vs-page-scroll > .vs-page-body',
+    );
+    if (head !== null && body !== null && isShown(head)) parts.push({head, body, page});
+  }
+  return parts;
+}
+
+/** The title of a page's header: its heading, else the first text in it. */
+function titleOf(head: Element, texts: readonly TextBox[]): TextBox | null {
+  const inside = texts.filter(each => head.contains(each.element));
+  const heading = inside.find(each => each.element.closest('h1, h2, h3') !== null);
+  return heading ?? inside[0] ?? null;
+}
+
+/**
+ * Law 1 of the visual spec: a screen has one left edge. The back control, the title and the
+ * content start at one x, to within 1 px. What is compared is what is drawn, so a borderless back
+ * button counts from its icon, not from the padding around it, on the title's line or above it,
+ * and a title counts from where it starts even with a back control before it.
+ */
+export function leftEdgeCheck(): Violation[] {
+  const found: Violation[] = [];
+  const texts = textBoxes();
+  const ink = screenInk(texts);
+  for (const {head, body} of pagesOnScreen()) {
+    const title = titleOf(head, texts);
+    const line = title?.lines[0];
+    const content = extentOf(inkIn(body, ink));
+    if (title === null || line === undefined || content === null) continue;
+    const onLine = inkIn(head, ink).filter(box => box.top < line.bottom && box.bottom > line.top);
+    const back = [...head.querySelectorAll('[aria-label^="Back"]')].flatMap(each =>
+      inkIn(each, ink),
+    );
+    const first = extentOf(back.length > 0 ? back : onLine)?.left ?? line.left;
+    const edges: readonly [string, number][] = [
+      ['back control', first],
+      ['title', line.left],
+    ];
+    for (const [name, edge] of edges) {
+      if (Math.abs(edge - content.left) <= 1 || (name === 'back control' && edge === line.left)) {
+        continue;
+      }
+      found.push({
+        check: 'left-edge',
+        message: `the ${name} of "${title.text.slice(0, 30)}" starts at x ${Math.round(edge)} and the content at x ${Math.round(content.left)}: one left edge is shared`,
+        where: describe(head),
+      });
+    }
+  }
+  return found;
+}
+
+/** The size text is drawn at. */
+function textSize(box: TextBox): number {
+  return Number.parseFloat(getComputedStyle(box.element).fontSize);
+}
+
+/** The level of a heading: the number of its tag, or its `aria-level`. */
+function headingLevel(element: Element): number {
+  const level = element.getAttribute('aria-level') ?? element.tagName.slice(1);
+  return Number.parseInt(level, 10) || 2;
+}
+
+/** The headings on screen under one that outranks them and is drawn smaller. */
+function headingsLargerThanParent(texts: readonly TextBox[]): Violation[] {
+  const found: Violation[] = [];
+  const open: {level: number; size: number; text: string}[] = [];
+  for (const box of texts) {
+    if (!box.element.matches('h1, h2, h3, h4, h5, h6, [role="heading"]')) continue;
+    const level = headingLevel(box.element);
+    const size = textSize(box);
+    while ((open.at(-1)?.level ?? 0) >= level) open.pop();
+    const parent = open.at(-1);
+    if (parent !== undefined && size > parent.size) {
+      found.push({
+        check: 'heading-depth',
+        message: `the heading "${box.text.slice(0, 30)}" is ${size} px, larger than the ${parent.size} px of "${parent.text.slice(0, 30)}" above it`,
+        where: describe(box.element),
+      });
+    }
+    open.push({level, size, text: box.text});
+  }
+  return found;
+}
+
+/**
+ * Law 2 of the visual spec: size follows depth. A page's title is its one largest text, so nothing
+ * under it is as large as it is; and a heading is never larger than the heading that outranks it.
+ * A label set small over larger rows inside a section is not read as a level here: the title
+ * and the headings are what the page declares its depth with.
+ */
+export function headingDepthCheck(): Violation[] {
+  const found: Violation[] = [];
+  const texts = textBoxes();
+  for (const {head, page} of pagesOnScreen()) {
+    const title = titleOf(head, texts);
+    if (title === null) continue;
+    const others = texts.filter(box => page.contains(box.element) && box !== title);
+    const largest = [...others].sort((a, b) => textSize(b) - textSize(a))[0];
+    if (largest === undefined || textSize(largest) < textSize(title)) continue;
+    found.push({
+      check: 'heading-depth',
+      message: `the title "${title.text.slice(0, 30)}" is ${textSize(title)} px and a text under it is ${textSize(largest)} px: "${largest.text.slice(0, 30)}"`,
+      where: describe(title.element),
+    });
+  }
+  return [...found, ...headingsLargerThanParent(texts)];
+}
+
+interface Row {
+  readonly element: Element;
+  readonly rect: DOMRect;
+}
+
+/** The children of `element` when they stack top to bottom, in order; null when they do not. */
+function stackedRows(element: Element): Row[] | null {
+  const rows = drawnChildren(element)
+    .filter(child => {
+      const position = getComputedStyle(child).position;
+      return position !== 'absolute' && position !== 'fixed' && isShown(child);
+    })
+    .map(child => ({element: child, rect: child.getBoundingClientRect()}))
+    .filter(row => row.rect.width > 0 && row.rect.height > 0)
+    .sort((a, b) => a.rect.top - b.rect.top);
+  if (rows.length < 2) return null;
+  const stacked = rows.every((row, at) => {
+    const before = rows[at - 1];
+    return before === undefined || row.rect.top >= before.rect.bottom - 1;
+  });
+  return stacked ? rows : null;
+}
+
+/** The widest gap between the rows of the group `element` is, seen through a lone wrapper; else 0. */
+function gapInside(element: Element): number {
+  if (drawsBox(element)) return 0;
+  const rows = stackedRows(element);
+  if (rows === null) {
+    const [only, ...rest] = drawnChildren(element);
+    return only !== undefined && rest.length === 0 ? gapInside(only) : 0;
+  }
+  const gaps = rows.slice(1).map((row, at) => row.rect.top - (rows[at]?.rect.bottom ?? 0));
+  return Math.max(0, ...gaps);
+}
+
+/** What is wrong with the gap between two stacked neighbours, or null when it shows their groups. */
+function spacingFault(before: Row, row: Row): string | null {
+  if (
+    drawsSide(getComputedStyle(before.element), 'Bottom') ||
+    drawsSide(getComputedStyle(row.element), 'Top')
+  ) {
+    return null;
+  }
+  const gap = row.rect.top - before.rect.bottom;
+  const inside = Math.max(gapInside(before.element), gapInside(row.element));
+  if (inside <= 0 || gap > inside) return null;
+  return `${Math.round(gap)} px between groups is not more than the ${Math.round(inside)} px inside one: "${(before.element.textContent ?? '').trim().slice(0, 24)}" and "${(row.element.textContent ?? '').trim().slice(0, 24)}"`;
+}
+
+/**
+ * Law 3 of the visual spec: spacing shows relationships. Two neighbours stacked in a column, one of
+ * them a group of rows: the gap between them is larger than the gap inside the group, or the eye
+ * reads the wrong grouping. A group with a drawn box, or a line drawn between the two, has its edge
+ * to show that. A page's header and body are the page, not groups of it, and an agent's own rendered
+ * prose is not the app's layout.
+ */
+export function spacingOrderCheck(): Violation[] {
+  const found: Violation[] = [];
+  for (const parent of document.body.querySelectorAll('*')) {
+    if (parent.closest('.vs-markdown, svg, code, pre') !== null) continue;
+    if (parent.matches('.vs-screen, .vs-page-content')) continue;
+    const rows = stackedRows(parent);
+    if (rows === null || !isShown(parent)) continue;
+    const pairs = rows.slice(1).map((row, at) => [rows[at] ?? row, row] as const);
+    for (const [before, row] of pairs) {
+      const message = spacingFault(before, row);
+      if (message !== null) found.push({check: 'spacing-order', message, where: describe(parent)});
+    }
+  }
+  return found;
+}
+
+/**
+ * Whether `element` is a box that may be hollow: a drawn box wide enough for its width to show,
+ * holding text. Not a control or a row of a navigator (what they hold is a label and they are as wide as their
+ * list); not a pane or a log, which the frame sizes; not a table or a data grid, which fill.
+ */
+function canBeHollow(element: Element, width: number): boolean {
+  const never =
+    'button, a, label, input, select, textarea, nav, dialog, svg, pre, [role="option"], [role="tab"], .vs-pane';
+  const grid = 'table, [role="grid"], [role="table"]';
+  const waiting = element.matches('[role="progressbar"]:not([aria-valuenow])');
+  return (
+    width >= 400 &&
+    element.closest(never) === null &&
+    element.closest(grid) === null &&
+    element.querySelector(grid) === null &&
+    isShown(element) &&
+    (waiting || ((element.textContent ?? '').trim() !== '' && drawsBox(element)))
+  );
+}
+
+/** Whether all of `element` is drawn: what is scrolled or clipped away cannot be measured. */
+function fullyDrawn(element: Element, rect: DOMRect): boolean {
+  const window: Box = {left: 0, top: 0, right: innerWidth, bottom: innerHeight};
+  const box = boxOf(rect);
+  const drawn = [cut(box, window), cut(box, clipArea(element.parentElement ?? element) ?? box)];
+  return drawn.every(
+    each =>
+      each !== null &&
+      each.bottom - each.top >= rect.height - 1 &&
+      each.right - each.left >= rect.width - 1,
+  );
+}
+
+/** The width `element` keeps for content: inside its border and padding. */
+function contentWidth(element: Element): number {
+  const style = getComputedStyle(element);
+  const insets = [
+    style.paddingLeft,
+    style.paddingRight,
+    style.borderLeftWidth,
+    style.borderRightWidth,
+  ];
+  const used = insets.reduce((sum, inset) => sum + Number.parseFloat(inset), 0);
+  return element.getBoundingClientRect().width - used;
+}
+
+/**
+ * Law 4 of the visual spec: a box fits its content, and law 5: a state is no larger than what it
+ * stands in for. A drawn box whose content, from its first mark to its last, spans under 40% of the
+ * width inside it: three short lines in a full-width card. A row with a name at one end and an
+ * action at the other spans its width. Height is not read: a box's neighbours set it. A box cut by
+ * the window or a scroller is left out, since what it holds out of sight cannot be measured.
+ */
+export function hollowBoxCheck(): Violation[] {
+  const found: Violation[] = [];
+  const share = 0.4;
+  const ink = screenInk(textBoxes());
+  for (const element of document.body.querySelectorAll('*')) {
+    const rect = element.getBoundingClientRect();
+    if (!canBeHollow(element, rect.width) || !fullyDrawn(element, rect)) continue;
+    const room = contentWidth(element);
+    const extent = extentOf(inkIn(element, ink));
+    const used = extent === null ? 0 : extent.right - extent.left;
+    if (room <= 0 || used >= room * share) continue;
+    found.push({
+      check: 'hollow-box',
+      message: `a box ${Math.round(rect.width)} px wide holds ${Math.round(used)} px of content (${Math.round((100 * used) / room)}%), under the ${100 * share}% a box fits: "${(element.textContent || element.getAttribute('aria-label') || '').trim().slice(0, 40)}"`,
+      where: describe(element),
+    });
+  }
+  return found;
+}
+
+/**
+ * Law 7 of the visual spec: a band earns its height. The window's own controls (the traffic lights)
+ * are not in the page; `--chrome-inset-height` says how much room they take. When the page draws
+ * nothing in the top 24 px of the window (a control is a 12 px disc, so 24 px is its row with room
+ * to spare), that strip carries only the window's controls and the room is spent for nothing: the
+ * first text, picture, control or box starts lower. A window with no controls has no such strip.
+ */
+export function titleStripCheck(): Violation[] {
+  const controls = Number.parseFloat(
+    getComputedStyle(document.documentElement).getPropertyValue('--chrome-inset-height'),
+  );
+  const row = 24;
+  if (!(controls > 0)) return [];
+  const tops = screenInk(textBoxes())
+    .filter(each => each.box.bottom > 0 && each.box.top < innerHeight)
+    .map(each => Math.max(0, each.box.top));
+  if (tops.length === 0) return [];
+  const first = Math.min(...tops);
+  if (first <= row) return [];
+  return [
+    {
+      check: 'title-strip',
+      message: `the top ${Math.round(first)} px of the window carry only its own controls: the first text, picture or control starts at y ${Math.round(first)}, past the ${row} px a row of controls needs`,
+      where: 'window',
+    },
+  ];
+}
+
 /**
  * The resolved colors of the status fills: the tone washes (`--chip-*-bg`, `--banner-*-bg`) and the
  * solid status colors. Read from the page's own tokens, so a fill is known by its color whatever
@@ -1142,4 +1512,22 @@ export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
   controlsOf,
   dragRegions,
   dragsAt,
+  proseCap,
+  drawsSide,
+  backdropOf,
+  drawsBox,
+  screenInk,
+  inkIn,
+  extentOf,
+  pagesOnScreen,
+  titleOf,
+  textSize,
+  headingLevel,
+  headingsLargerThanParent,
+  stackedRows,
+  gapInside,
+  spacingFault,
+  canBeHollow,
+  fullyDrawn,
+  contentWidth,
 ];
