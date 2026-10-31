@@ -5,21 +5,12 @@
  */
 import {Button, Gauge, Row, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
-import {ageWord, type StatsView} from '../../state/index.js';
-import {type LiveStats, useNow} from '../effects/live.js';
-
-function Age(props: {readonly live: LiveStats; readonly valueAt: number}): JSX.Element {
-  const now = useNow(props.live);
-  return (
-    <Text variant="small" tone="muted">
-      {`Stale ${ageWord(now, props.valueAt)}`}
-    </Text>
-  );
-}
+import type {StatsView} from '../../state/index.js';
 
 export function MachineStats(props: {
   readonly view: StatsView;
-  readonly live: LiveStats;
+  /** How old a stale value is, as words; null while the value is current. */
+  readonly age: string | null;
   readonly retry: () => void;
 }): JSX.Element {
   const {view} = props;
@@ -48,7 +39,11 @@ export function MachineStats(props: {
               dim={view.stale !== null}
             />
           ))}
-          {view.stale === null ? null : <Age live={props.live} valueAt={view.stale.valueAt} />}
+          {props.age === null ? null : (
+            <Text variant="small" tone="muted">
+              {`Stale ${props.age}`}
+            </Text>
+          )}
         </Row>
       );
   }

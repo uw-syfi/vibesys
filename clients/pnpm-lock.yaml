@@ -383,9 +383,6 @@ importers:
       '@vibesys/problems':
         specifier: workspace:*
         version: link:../../libs/problems
-      '@vibesys/proto':
-        specifier: workspace:*
-        version: link:../../libs/proto
       '@vibesys/settings':
         specifier: workspace:*
         version: link:../../libs/settings

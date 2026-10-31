@@ -10,6 +10,7 @@ import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {initialMachines, type MachinesState, machinesStep} from '../../state/index.js';
 import {createLiveStats} from '../effects/live.js';
+import {HostStats} from '../host-stats.js';
 import {MachinesPage} from './machines-page.js';
 
 const window = new Window();
@@ -77,7 +78,7 @@ function rig() {
           dispatch={() => undefined}
           runCounts={new Map()}
           liveRuns={new Map()}
-          live={live}
+          stats={host => <HostStats live={live} host={host} />}
           showRuns={() => undefined}
           openSettings={() => undefined}
         />,

@@ -43,7 +43,6 @@
     "@vibesys/ipc": "workspace:*",
     "@vibesys/machine": "workspace:*",
     "@vibesys/problems": "workspace:*",
-    "@vibesys/proto": "workspace:*",
     "@vibesys/settings": "workspace:*",
     "@vibesys/store": "workspace:*",
     "@vibesys/subscription": "workspace:*",

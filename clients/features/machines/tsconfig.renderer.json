@@ -34,9 +34,6 @@
       "path": "../../libs/machine/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/proto/tsconfig.lib.json"
-    },
-    {
       "path": "../../libs/store/tsconfig.lib.json"
     },
     {

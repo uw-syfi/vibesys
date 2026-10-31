@@ -4,7 +4,7 @@ import type {Page} from '@playwright/test';
 import {buildSync} from 'esbuild';
 import type {HostFeed, SubscriptionSeed} from './subscription-preload.js';
 
-export type {HostFeed, SubscriptionSeed};
+export type {SubscriptionSeed};
 
 let preload: string | undefined;
 

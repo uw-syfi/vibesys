@@ -32,8 +32,6 @@ import {
   placeRows,
   placesReading,
 } from '../../state/index.js';
-import {type LiveStats, useHostStats} from '../effects/live.js';
-import {MachineStats} from './machine-stats.js';
 import {AddMachine} from './machines-screen.js';
 
 type Dispatch = (action: MachinesAction) => void;
@@ -147,21 +145,11 @@ function Fix(props: {
   );
 }
 
-/** A card's live stats row: the host's stats while its subscription runs, or why there are none. */
-function Stats(props: {
-  readonly live: LiveStats | undefined;
-  readonly host: HostKey;
-}): JSX.Element | null {
-  const {view, retry} = useHostStats(props.live, props.host);
-  if (view === null || props.live === undefined) return null;
-  return <MachineStats view={view} live={props.live} retry={retry} />;
-}
-
 function MachineCard(props: {
   readonly state: MachinesState;
   readonly machine: Machine;
   readonly dispatch: Dispatch;
-  readonly live: LiveStats | undefined;
+  readonly stats: ((host: HostKey) => JSX.Element) | undefined;
   readonly liveRuns: number | null;
   readonly runs: number;
   readonly incomplete: boolean;
@@ -198,7 +186,7 @@ function MachineCard(props: {
             )}
           </Row>
         )}
-        <Stats live={props.live} host={machine.host} />
+        {props.stats?.(machine.host)}
         <Places state={state} machine={machine} dispatch={dispatch} />
       </Stack>
     </Card>
@@ -215,8 +203,8 @@ export function MachinesPage(props: {
   readonly runCounts: ReadonlyMap<HostKey, number>;
   /** The runs live on each machine whose run list is read. */
   readonly liveRuns: ReadonlyMap<HostKey, number>;
-  /** The machines' live stats; without it the cards show none. */
-  readonly live?: LiveStats;
+  /** A machine's live stats, drawn on its card; without it the cards show none. */
+  readonly stats?: (host: HostKey) => JSX.Element;
   readonly incompleteHosts?: ReadonlySet<HostKey>;
   readonly showRuns: (host: HostKey) => void;
   readonly openSettings: (host: HostKey) => void;
@@ -241,7 +229,7 @@ export function MachinesPage(props: {
             state={state}
             machine={machine}
             dispatch={dispatch}
-            live={props.live}
+            stats={props.stats}
             liveRuns={props.liveRuns.get(machine.host) ?? null}
             runs={props.runCounts.get(machine.host) ?? 0}
             incomplete={props.incompleteHosts?.has(machine.host) ?? false}

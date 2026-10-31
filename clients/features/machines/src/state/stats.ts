@@ -3,8 +3,14 @@
  * a stale value or a status word. Labels, numbers and status words only; each is a function of the
  * subscription's state and never stored.
  */
-import {AbsenceReason, type MachineStats} from '@vibesys/proto';
-import type {FailureReason, Instant, SubscriptionState} from '@vibesys/subscription';
+import {
+  type FailureReason,
+  type Instant,
+  type MachineReadings,
+  type MachineStats,
+  machineReadings,
+  type SubscriptionState,
+} from '@vibesys/subscription';
 
 /** A reading is drawn hot from here: the share of its capacity in use. */
 const HOT_SHARE = 0.9;
@@ -65,39 +71,38 @@ function share(used: number, total: number): number {
   return total > 0 ? Math.min(1, used / total) : 0;
 }
 
-function cpuGauge(stats: MachineStats): GaugeView {
-  if (stats.cpu.case !== 'cpuStats')
-    return {label: 'CPU', share: null, figure: UNREADABLE, tone: 'ok'};
-  const used = stats.cpu.value.utilizationPercent;
-  return {label: 'CPU', share: used / 100, figure: percent(used), tone: tone(used / 100)};
+function cpuGauge({cpuPercent}: MachineReadings): GaugeView {
+  if (cpuPercent === null) return {label: 'CPU', share: null, figure: UNREADABLE, tone: 'ok'};
+  return {
+    label: 'CPU',
+    share: cpuPercent / 100,
+    figure: percent(cpuPercent),
+    tone: tone(cpuPercent / 100),
+  };
 }
 
-function memoryGauge(stats: MachineStats): GaugeView {
-  if (stats.memory.case !== 'memoryStats')
-    return {label: 'Memory', share: null, figure: UNREADABLE, tone: 'ok'};
-  const used = Number(stats.memory.value.usedBytes);
-  const total = Number(stats.memory.value.totalBytes);
+function memoryGauge({memory}: MachineReadings): GaugeView {
+  if (memory === null) return {label: 'Memory', share: null, figure: UNREADABLE, tone: 'ok'};
+  const full = share(memory.usedBytes, memory.totalBytes);
   return {
     label: 'Memory',
-    share: share(used, total),
-    figure: gigabytes(used, total),
-    tone: tone(share(used, total)),
+    share: full,
+    figure: gigabytes(memory.usedBytes, memory.totalBytes),
+    tone: tone(full),
   };
 }
 
 /** The GPUs as one gauge of their mean use and one of their memory; none for a host without. */
-function gpuGauges(stats: MachineStats): readonly GaugeView[] {
-  if (stats.gpu.case === 'gpuUnavailable') {
-    // A host that has no such tool has no GPU to read; any other absence is a reading missed.
-    return stats.gpu.value.reason === AbsenceReason.TOOL_NOT_FOUND
-      ? []
-      : [{label: 'GPU', share: null, figure: UNREADABLE, tone: 'ok'}];
-  }
-  const gpus = stats.gpu.case === 'gpus' ? stats.gpu.value.gpus : [];
+function gpuGauges({gpus: reading}: MachineReadings): readonly GaugeView[] {
+  // A host with no such tool has no GPU to read; any other absence is a reading missed.
+  if (reading.kind === 'no-tool') return [];
+  if (reading.kind === 'unreadable')
+    return [{label: 'GPU', share: null, figure: UNREADABLE, tone: 'ok'}];
+  const {gpus} = reading;
   if (gpus.length === 0) return [];
   const mean = gpus.reduce((sum, gpu) => sum + gpu.utilizationPercent, 0) / gpus.length;
-  const used = gpus.reduce((sum, gpu) => sum + Number(gpu.memoryUsedBytes), 0);
-  const total = gpus.reduce((sum, gpu) => sum + Number(gpu.memoryTotalBytes), 0);
+  const used = gpus.reduce((sum, gpu) => sum + gpu.usedBytes, 0);
+  const total = gpus.reduce((sum, gpu) => sum + gpu.totalBytes, 0);
   return [
     {label: 'GPU', share: mean / 100, figure: percent(mean), tone: tone(mean / 100)},
     {
@@ -111,7 +116,8 @@ function gpuGauges(stats: MachineStats): readonly GaugeView[] {
 
 /** The gauges of one sample: CPU, memory, and the GPUs when the host has any. */
 export function statsGauges(stats: MachineStats): readonly GaugeView[] {
-  return [cpuGauge(stats), memoryGauge(stats), ...gpuGauges(stats)];
+  const readings = machineReadings(stats);
+  return [cpuGauge(readings), memoryGauge(readings), ...gpuGauges(readings)];
 }
 
 /** How a screen shows `state`. */

@@ -1,5 +1,4 @@
 import {expect, test} from 'bun:test';
-import {AbsenceReason} from '@vibesys/proto';
 import {
   CONNECT_STEPS,
   type FailureReason,
@@ -105,19 +104,16 @@ test('a sample is its gauges: CPU, memory, and the GPUs when the host has any', 
 test('a host without GPUs shows none, and no reading is never drawn as zero', () => {
   expect(statsGauges(sample({})).map(gauge => gauge.label)).toEqual(['CPU', 'Memory']);
   const unreadable = statsGauges(sample({cpuPercent: null, memory: null, gpus: null}));
-  // The GPU tool is missing: this host has no GPU to read. The CPU and memory ones are misses.
+  // Every section that failed to read is a miss, never a zero.
   expect(unreadable.map(gauge => [gauge.label, gauge.share, gauge.figure])).toEqual([
     ['CPU', null, '–'],
     ['Memory', null, '–'],
     ['GPU', null, '–'],
   ]);
-  const withoutTool = sample({});
-  expect(
-    statsGauges({
-      ...withoutTool,
-      gpu: {case: 'gpuUnavailable', value: {reason: AbsenceReason.TOOL_NOT_FOUND}},
-    } as never).map(gauge => gauge.label),
-  ).toEqual(['CPU', 'Memory']);
+  expect(statsGauges(sample({gpus: 'no-tool'})).map(gauge => gauge.label)).toEqual([
+    'CPU',
+    'Memory',
+  ]);
 });
 
 test('a reading that is nearly full is drawn hot, and shares stay inside the meter', () => {

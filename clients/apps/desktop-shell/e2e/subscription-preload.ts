@@ -17,7 +17,7 @@ import type {
   StaleReason,
   SubscriptionUpdate,
 } from '@vibesys/subscription';
-import {machineEntry, type Readings} from '@vibesys/subscription/testing';
+import {machineEntry, type Readings} from './machine-entry.js';
 
 /** What a scripted host is doing, as a window should see it. */
 export type HostFeed =

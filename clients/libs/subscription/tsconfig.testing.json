@@ -4,9 +4,7 @@
     "lib": [
       "ES2022"
     ],
-    "types": [
-      "bun"
-    ],
+    "types": [],
     "rootDir": "src",
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.testing.tsbuildinfo"
@@ -15,7 +13,8 @@
     "src/testing/**/*.ts"
   ],
   "exclude": [
-    "src/testing/**/*.test.ts"
+    "src/testing/**/*.test.ts",
+    "src/testing/port-contract.ts"
   ],
   "references": [
     {

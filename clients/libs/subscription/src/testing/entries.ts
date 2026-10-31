@@ -3,7 +3,7 @@ import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {AbsenceReason, MachineStatsSchema, type TopicEntry, TopicEntrySchema} from '@vibesys/proto';
 
-export interface GpuReading {
+export interface GpuSample {
   readonly name: string;
   readonly utilizationPercent: number;
   readonly usedBytes: number;
@@ -14,7 +14,8 @@ export interface GpuReading {
 export interface Readings {
   readonly cpuPercent?: number | null;
   readonly memory?: {readonly usedBytes: number; readonly totalBytes: number} | null;
-  readonly gpus?: readonly GpuReading[] | null;
+  /** `null`: a read that failed; `'no-tool'`: the host has no tool that reports GPUs. */
+  readonly gpus?: readonly GpuSample[] | null | 'no-tool';
 }
 
 const UNREADABLE = {reason: AbsenceReason.READ_FAILED};
@@ -44,20 +45,22 @@ export function machineEntry(key: string, sampledMs: number, readings: Readings 
                 value: {usedBytes: BigInt(memory.usedBytes), totalBytes: BigInt(memory.totalBytes)},
               },
         gpu:
-          gpus === null
-            ? {case: 'gpuUnavailable', value: UNREADABLE}
-            : {
-                case: 'gpus',
-                value: {
-                  gpus: gpus.map((gpu, index) => ({
-                    index,
-                    name: gpu.name,
-                    utilizationPercent: gpu.utilizationPercent,
-                    memoryUsedBytes: BigInt(gpu.usedBytes),
-                    memoryTotalBytes: BigInt(gpu.totalBytes),
-                  })),
+          gpus === 'no-tool'
+            ? {case: 'gpuUnavailable', value: {reason: AbsenceReason.TOOL_NOT_FOUND}}
+            : gpus === null
+              ? {case: 'gpuUnavailable', value: UNREADABLE}
+              : {
+                  case: 'gpus',
+                  value: {
+                    gpus: gpus.map((gpu, index) => ({
+                      index,
+                      name: gpu.name,
+                      utilizationPercent: gpu.utilizationPercent,
+                      memoryUsedBytes: BigInt(gpu.usedBytes),
+                      memoryTotalBytes: BigInt(gpu.totalBytes),
+                    })),
+                  },
                 },
-              },
       }),
     },
   });

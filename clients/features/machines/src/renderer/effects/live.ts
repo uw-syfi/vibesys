@@ -6,10 +6,9 @@
  */
 import type {HostKey} from '@vibesys/hosts';
 import {actorStore, clockFrom, type ScheduleTimeout} from '@vibesys/machine';
-import type {MachineStats} from '@vibesys/proto';
 import {
-  CONNECTING,
   type Instant,
+  type MachineStats,
   machineStats,
   type SubscriptionPort,
   type SubscriptionSource,
@@ -17,7 +16,7 @@ import {
 } from '@vibesys/subscription';
 import {useMemo, useSyncExternalStore} from 'react';
 import {assign, createActor} from 'xstate';
-import {clockMachine, type StatsView, statsView} from '../../state/index.js';
+import {ageWord, clockMachine, type StatsView, statsView} from '../../state/index.js';
 
 /** The live stats the page reads: a source for each host, and the clock ages are counted on. */
 export interface LiveStats {
@@ -54,25 +53,28 @@ export function createLiveStats(
   };
 }
 
-const UNWATCHED_STATE = CONNECTING;
-const NOT_WATCHED: SubscriptionSource<MachineStats> = {
-  getSnapshot: () => UNWATCHED_STATE,
-  subscribe: () => () => {},
-  retry: () => {},
-};
-
-/** A host's live stats as its card shows them, and the press that asks it to try again. */
+/**
+ * A host's live stats as its card shows them: what to draw, how old a stale value is (the clock
+ * is watched only while there is one), and the press that asks the host to try again.
+ */
 export function useHostStats(
-  live: LiveStats | undefined,
+  live: LiveStats,
   host: HostKey,
-): {readonly view: StatsView | null; readonly retry: () => void} {
-  const source = useMemo(() => live?.source(host) ?? NOT_WATCHED, [live, host]);
+): {readonly view: StatsView; readonly age: string | null; readonly retry: () => void} {
+  const source = useMemo(() => live.source(host), [live, host]);
   const state = useSyncExternalStore(source.subscribe, source.getSnapshot, source.getSnapshot);
-  // A page with no subscriptions shows no stats, not a status it never asked for.
-  return {view: live === undefined ? null : statsView(state), retry: source.retry};
+  const view = statsView(state);
+  const watching = view.kind === 'values' && view.stale !== null;
+  const now = useSyncExternalStore(
+    watching ? live.clock.subscribe : noSubscription,
+    live.clock.getState,
+    live.clock.getState,
+  );
+  return {
+    view,
+    age: view.kind === 'values' && view.stale !== null ? ageWord(now, view.stale.valueAt) : null,
+    retry: source.retry,
+  };
 }
 
-/** The viewer's time now, ticking while the caller is mounted. */
-export function useNow(live: LiveStats): Instant {
-  return useSyncExternalStore(live.clock.subscribe, live.clock.getState, live.clock.getState);
-}
+const noSubscription = (): (() => void) => () => {};

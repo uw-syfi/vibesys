@@ -8,7 +8,7 @@
     "entries": {
       ".": "neutral",
       "./testing": "neutral",
-      "./contract": "neutral"
+      "./contract": "node"
     }
   },
   "exports": {
@@ -33,7 +33,7 @@
     "!dist/.*.tsbuildinfo"
   ],
   "scripts": {
-    "build": "tsc -b tsconfig.lib.json tsconfig.testing.json",
+    "build": "tsc -b tsconfig.lib.json tsconfig.testing.json tsconfig.contract.json",
     "check": "tsc -b",
     "test": "node ../../tools/scripts/run_bun_tests.mjs ./src"
   },

@@ -26,6 +26,7 @@ import {
 import {
   createLiveStats,
   createMachinesStore,
+  HostStats,
   type LiveStats,
   MachinesPage,
   MachinesScreen,
@@ -530,13 +531,14 @@ function MachinesRoute(props: {
   readonly select: (screen: Screen) => void;
 }): JSX.Element {
   const {stores, select} = props;
+  const {live} = stores;
   return (
     <MachinesPage
       state={props.machines}
       dispatch={stores.machines.dispatch}
       runCounts={props.counts}
       liveRuns={props.liveRuns}
-      {...(stores.live === null ? {} : {live: stores.live})}
+      {...(live === null ? {} : {stats: host => <HostStats live={live} host={host} />})}
       incompleteHosts={
         new Set(projectRunGaps(useStore(stores.sidebar.store).allRuns).map(gap => gap.host))
       }
