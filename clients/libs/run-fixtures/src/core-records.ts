@@ -38,15 +38,50 @@ export const CORE_BODIES = {
   runEnded: {case: 'runEnded', value: {schemaVersion: 1, result: json({outcome: 'finished'})}},
 } as const satisfies Record<CoreBodyCase, Body>;
 
+/** A step whose first attempt a pause interrupted and whose second attempt finished it. */
+export const INTERRUPTED_THEN_RERUN: readonly Body[] = [
+  {
+    case: 'stepStarted',
+    value: {
+      tag: 'plan-1',
+      attempt: 1,
+      schemaVersion: 1,
+      request: json({tag: 'plan-1'}),
+      deadlineAt: 60,
+    },
+  },
+  CORE_BODIES.attemptInterrupted,
+  {
+    case: 'stepStarted',
+    value: {
+      tag: 'plan-1',
+      attempt: 2,
+      schemaVersion: 1,
+      request: json({tag: 'plan-1'}),
+      deadlineAt: 60,
+    },
+  },
+  {
+    case: 'stepFinished',
+    value: {
+      tag: 'plan-1',
+      attempt: 2,
+      schemaVersion: 1,
+      result: {case: 'finished', value: json({type: 'observation'})},
+    },
+  },
+];
+
 /**
  * The records with `core[i]` core records written before the i-th of them, and the rest after the
- * last, the whole log renumbered 1, 2, 3, ... as a writer numbers it. Core kinds are taken in turn.
+ * last, the whole log renumbered 1, 2, 3, ... as a writer numbers it. The core bodies are taken in
+ * turn, from every kind unless `bodies` says which.
  */
 export function withCoreRecords(
   records: readonly StoreRecord[],
   core: readonly number[],
+  bodies: readonly Body[] = Object.values(CORE_BODIES),
 ): readonly StoreRecord[] {
-  const kinds = Object.values(CORE_BODIES);
   const log: StoreRecord[] = [];
   let next = 0;
   const push = (record: StoreRecord | undefined, body: Body | undefined): void => {
@@ -56,10 +91,10 @@ export function withCoreRecords(
   };
   records.forEach((record, index) => {
     for (let count = core[index] ?? 0; count > 0; count -= 1)
-      push(undefined, kinds[next++ % kinds.length]);
+      push(undefined, bodies[next++ % bodies.length]);
     push(record, undefined);
   });
   for (let count = core[records.length] ?? 0; count > 0; count -= 1)
-    push(undefined, kinds[next++ % kinds.length]);
+    push(undefined, bodies[next++ % bodies.length]);
   return log;
 }
