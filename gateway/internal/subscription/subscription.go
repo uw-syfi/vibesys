@@ -58,11 +58,16 @@ func detailBound() int {
 
 // Sink receives a producer's facts. It never blocks on a subscriber. Put takes
 // ownership of value, so a source must not change it afterwards. Synced says the
-// state so far is one complete snapshot; calling it again has no effect.
+// state so far is one complete snapshot; calling it again has no effect. Alive says
+// the source is running and not stuck, and publishes nothing: a source that can
+// spend longer between facts than its topic's source lease (a long scan, a quiet
+// stretch) calls it on its own rhythm, because the lease ends a source that gives
+// no sign at all. A Put, Remove or Synced is a sign too.
 type Sink[V proto.Message] interface {
 	Put(key string, value V)
 	Remove(key string)
 	Synced()
+	Alive()
 }
 
 // Source produces one topic's facts. Run returns when ctx ends, within

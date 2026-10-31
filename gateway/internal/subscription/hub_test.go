@@ -3,6 +3,8 @@ package subscription_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math/rand"
 	"runtime"
 	"strings"
 	"sync"
@@ -997,4 +999,129 @@ func TestDuplicateTopicIsAWiringDefect(t *testing.T) {
 		}
 	}()
 	subscription.New(clock.System{}, topic(nil), topic(nil))
+}
+
+// leased is topic with a source lease: the source is held to a sign of life.
+func leased(source subscription.Source[stats], lease time.Duration) subscription.Topic[stats] {
+	held := topic(source)
+	held.Policy.SourceLease = lease
+	return held
+}
+
+// failed reports the failure the stream ended with, if it has ended with one.
+func failed(stream *subscriptiontest.Stream) *apiv1.TopicFailure {
+	for _, frame := range stream.Frames() {
+		if frame.GetFailed() != nil {
+			return frame.GetFailed()
+		}
+	}
+	return nil
+}
+
+// The heartbeats are the hub's, so they go on whatever the source does. A source stuck in a read
+// shows only in what it stopped saying: at its lease the stream ends, typed, and until then the
+// subscriber has heard the hub's beats and no failure.
+func TestAStuckSourceBehindHeartbeatsIsEndedAtItsLease(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const lease = 20 * time.Second
+		stuck := make(chan struct{})
+		source := script(func(ctx context.Context, sink subscription.Sink[stats]) error {
+			sink.Put("machine", value(1))
+			sink.Synced()
+			<-stuck
+			return ctx.Err()
+		})
+		stream := subscriptiontest.Open(subscription.New(clock.System{}, leased(source, lease)), 1, request)
+		defer stream.Stop()
+		defer close(stuck)
+		time.Sleep(lease)
+		synctest.Wait()
+		if failure := failed(stream); failure != nil {
+			t.Fatalf("ended at the lease, not past it: %v", failure)
+		}
+		beats := 0
+		for _, frame := range stream.Frames() {
+			if frame.GetHeartbeat() != nil {
+				beats++
+			}
+		}
+		if beats < 3 {
+			t.Fatalf("%d heartbeats in a lease of silence: the beats did not hide the source", beats)
+		}
+		time.Sleep(lease / 4)
+		synctest.Wait()
+		failure := failed(stream)
+		if failure == nil || failure.GetCode() != apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_SOURCE_FAILED {
+			t.Fatalf("a quarter lease past the lease the stream is %v, want SOURCE_FAILED", failure)
+		}
+		if err := protovalidate.Validate(failure); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+// A source is ended when it goes a lease and a check (a quarter lease) without a sign of life, and
+// never before it has gone a lease. Whatever its signs are (a value, a removal, the snapshot
+// marker, its own word), and however its gaps fall, the first gap past that ends the stream, and
+// no gap within the lease does. A schedule that never has such a gap ends in silence, which is one.
+func TestASourceIsHeldToItsLeaseByItsSignsOfLife(t *testing.T) {
+	const lease = 20 * time.Second
+	signs := []func(subscription.Sink[stats], int64){
+		func(sink subscription.Sink[stats], at int64) { sink.Alive() },
+		func(sink subscription.Sink[stats], at int64) { sink.Put("machine", value(at)) },
+		func(sink subscription.Sink[stats], at int64) { sink.Remove("machine") },
+		func(sink subscription.Sink[stats], at int64) { sink.Synced() },
+	}
+	for seed := int64(1); seed <= 40; seed++ {
+		t.Run(fmt.Sprint(seed), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				random := rand.New(rand.NewSource(seed))
+				gaps := make([]time.Duration, 2+random.Intn(8))
+				// silent is when the source first goes without a sign for longer than its lease.
+				silent, at := time.Duration(-1), time.Duration(0)
+				for index := range gaps {
+					if silent < 0 && random.Intn(4) == 0 {
+						// Past the lease by more than a check, so a check falls inside the gap.
+						gaps[index] = lease + lease/4 + time.Duration(1+random.Intn(10))*time.Second
+						silent = at
+					} else {
+						gaps[index] = time.Duration(1+random.Intn(int(lease/time.Second))) * time.Second
+					}
+					at += gaps[index]
+				}
+				if silent < 0 {
+					silent = at
+				}
+				source := script(func(ctx context.Context, sink subscription.Sink[stats]) error {
+					for index, gap := range gaps {
+						// A pause that the hub's stop ends, as a source that is merely quiet allows.
+						select {
+						case <-time.After(gap):
+						case <-ctx.Done():
+							return ctx.Err()
+						}
+						signs[random.Intn(len(signs))](sink, int64(index+1))
+					}
+					return wait(ctx)
+				})
+				stream := subscriptiontest.Open(subscription.New(clock.System{}, leased(source, lease)), 1, request)
+				defer stream.Stop()
+				end := silent + lease + lease/4 + time.Second
+				for elapsed := time.Duration(0); elapsed < end; elapsed += time.Second {
+					time.Sleep(time.Second)
+					synctest.Wait()
+					if failed(stream) != nil && elapsed < silent+lease {
+						t.Fatalf("ended at %s, with the source silent only since %s (lease %s)", elapsed, silent, lease)
+					}
+				}
+				failure := failed(stream)
+				if failure == nil {
+					t.Fatalf("a source silent from %s was not ended by %s", silent, end)
+				}
+				if failure.GetCode() != apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_SOURCE_FAILED {
+					t.Fatalf("ended with %v", failure)
+				}
+			})
+		})
+	}
 }

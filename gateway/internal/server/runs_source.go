@@ -109,6 +109,10 @@ rescan:
 			if err := ctx.Err(); err != nil {
 				return err
 			}
+			// A scan of a large index on a slow filesystem can take longer than the topic's source
+			// lease. Each run read is a sign the scan is moving, and a read that never returns is
+			// the lack of one.
+			sink.Alive()
 			if entry.Type()&os.ModeSymlink == 0 {
 				continue
 			}
@@ -195,6 +199,8 @@ rescan:
 				}
 				return err
 			case <-ticker.Ticks():
+				// The source's own rhythm: a quiet index still shows the source is running.
+				sink.Alive()
 				if polled {
 					// A run without a watch is only seen by reading it again: its next change is
 					// found within a tick, as a watched run's is found at once.

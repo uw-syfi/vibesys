@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -36,12 +37,15 @@ type recordedRuns struct {
 	synced  chan struct{}
 	// ended is what the source returned if it stopped without being asked to.
 	ended chan error
+	// alive counts the signs of life the source gave beyond its values.
+	alive atomic.Int64
 }
 
 func newRecordedRuns() *recordedRuns {
 	return &recordedRuns{puts: make(chan putRun, 1024), removed: make(chan string, 1024), synced: make(chan struct{}, 1), ended: make(chan error, 1)}
 }
 
+func (r *recordedRuns) Alive()                                { r.alive.Add(1) }
 func (r *recordedRuns) Put(key string, value *apiv1.RunEntry) { r.puts <- putRun{key, value} }
 func (r *recordedRuns) Remove(key string)                     { r.removed <- key }
 func (r *recordedRuns) Synced() {
@@ -529,5 +533,36 @@ func TestRunsSourceListsAndFollowsEveryRunWhateverItsWatchBudget(t *testing.T) {
 	}
 	if !sawWatched || !sawPolled {
 		t.Fatalf("the budgets did not cover both a watched and an unwatched run (watched %t, unwatched %t)", sawWatched, sawPolled)
+	}
+}
+
+// The runs topic holds its source to a lease, and the source says it is alive on every run it
+// reads and on every probe tick, so a long scan or a quiet index does not end it. The count of
+// signs is what the hub's watchdog reads: it grows with each run of a scan and with each tick.
+func TestRunsSourceGivesASignOfLifeOnEveryRunItReadsAndEveryTick(t *testing.T) {
+	if hostoperations.Topics[hostoperations.TopicRuns].SourceLease <= 0 {
+		t.Fatal("the runs topic holds its source to no lease")
+	}
+	for runs := 1; runs <= 6; runs++ {
+		t.Run(fmt.Sprintf("%d-runs", runs), func(t *testing.T) {
+			w := newRunsWorld(t)
+			for index := range runs {
+				addProjectRun(t, w, fmt.Sprintf("r%d", index))
+			}
+			defer w.run()()
+			w.sink.awaitSynced(t, w.ctx)
+			w.idle()
+			// The world's own run is read too: every run of the index is a sign.
+			if got := w.sink.alive.Load(); got < int64(runs) {
+				t.Fatalf("%d signs after reading %d runs", got, runs)
+			}
+			for tick := 1; tick <= 3; tick++ {
+				before := w.sink.alive.Load()
+				w.probe(time.Duration(tick) * server.LivenessProbeInterval)
+				if w.sink.alive.Load() <= before {
+					t.Fatalf("a probe tick gave no sign of life")
+				}
+			}
+		})
 	}
 }
