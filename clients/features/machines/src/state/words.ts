@@ -147,3 +147,14 @@ export function machineProblem(machine: Machine): string | null {
       return `The app couldn’t connect: ${report.detail}`;
   }
 }
+
+/**
+ * What a failed machine action says: the toast's title, and the status word the machine's card keeps
+ * until an action succeeds (the report behind either is the machine's own text).
+ */
+export const ACTION_FAILURE: Readonly<
+  Record<'remove' | 'sign-in', {readonly title: string; readonly word: string}>
+> = {
+  remove: {title: 'The machine was not removed.', word: 'Not removed'},
+  'sign-in': {title: 'The sign-in did not finish.', word: 'Sign-in failed'},
+};
