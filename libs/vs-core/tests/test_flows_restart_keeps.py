@@ -223,14 +223,17 @@ def verifier(label: str, *, opens: bool = True) -> Worker:
     return run
 
 
-@pytest.mark.parametrize("opens", [True, False], ids=["asks-again", "never-asks"])
-def test_a_workspace_that_opens_before_the_resumed_flow_asks_again_waits_for_it(
+@pytest.mark.parametrize("opens", [True, False], ids=["asks-later", "never-asks"])
+def test_work_in_flight_that_the_resumed_flow_does_not_ask_for_in_the_restart_step_is_let_go(
     *, opens: bool
 ) -> None:
-    """Core may open the workspace before the resumed flow, redone from its start, asks again.
+    """The new code decides what it needs, and the restart step is where it says so.
 
-    The opening is kept for the flow: it takes the workspace when it asks, so the workspace
-    opens once; a flow that ends without asking has it settled, never leaked.
+    The flow is redone from its start and asks ``verify`` first, so it has not asked for the
+    workspace when the restart step ends. What was in flight then has no owner: the workspace that
+    opens for it is settled as unclaimed (through core, which carries it out), never kept for a
+    flow that may ask later. A flow that does ask later gets new work, and the old attempt is not
+    its own: the narrowing is deliberate, and it costs one more workspace, never a hung slot.
     """
     run = FlowRun.start(parent(verifier("v1")), Config())
     run.reply(run.expect_turn("verify"), Plan(n=1))
@@ -238,26 +241,28 @@ def test_a_workspace_that_opens_before_the_resumed_flow_asks_again_waits_for_it(
     run.swap(code_changed(parent(verifier("v2", opens=opens))))
     run.advance_to(1.0)  # the first event the new code sees: the flows restart
     verify = run.expect_turn("verify")
-    opened = run.open_workspace(start)  # answered before the resumed flow asks again
+    assert run.state.live.in_flight == ()  # nothing waits for a flow that may ask later
 
-    assert not _settles(run, "restart-settle")
+    opened = run.open_workspace(start)  # answered after the restart step: for no one
+    (settle,) = _settles(run, "restart-settle")
+    assert settle.request.target == opened  # ty: ignore[unresolved-attribute]
+    assert [item.reason for item in run.state.restart_settled] == [
+        core.RestartSettleReason.UNCLAIMED
+    ]
+    run.close_workspace(settle)
     run.reply(verify, Plan(n=1))
-    assert len([d for d in run.decisions if _starts(d)]) == 1  # never opened twice
     if not opens:
-        (settle,) = _settles(run, "restart-settle")
-        assert settle.request.target == opened  # ty: ignore[unresolved-attribute]
-        assert [item.reason for item in run.state.restart_settled] == [
-            core.RestartSettleReason.UNCLAIMED
-        ]
-        run.close_workspace(settle)
-        assert run.state.live.in_flight == ()
+        assert len([d for d in run.decisions if _starts(d)]) == 1
         return
+    assert len([d for d in run.decisions if _starts(d)]) == 2  # asked again later: new work
+    again = run.expect(core.StartAttempt)
+    assert again.decision != start.decision
+    second = run.open_workspace(again)
     run.reply(run.expect_turn("v2"), Plan(n=1))
     settle = run.expect(core.Withdraw, label="settle")
-    assert settle.request.target == opened  # ty: ignore[unresolved-attribute]
+    assert settle.request.target == second  # ty: ignore[unresolved-attribute]
     run.close_workspace(settle)
     assert run.driver.published(run.state, Gave) == Gave(result=1)
-    assert run.state.restart_settled == ()
     assert run.state.live.in_flight == ()
 
 

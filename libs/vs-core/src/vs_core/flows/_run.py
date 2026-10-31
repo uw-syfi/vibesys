@@ -223,7 +223,28 @@ class _Run:
             else:
                 self._settle_held(path, held, RestartSettleReason.NOT_RESTARTED)
         self._carried = {}
+        self._drop_unasked()
         return self._end()
+
+    def _drop_unasked(self) -> None:
+        """End the restart step: work in flight that the resumed flows did not ask for has no owner.
+
+        The new code decides what it needs, and it has asked for that by now, in this step: a
+        request it asked again took over the old one (``issue``). What is left was in flight at the
+        change and the new code does not want it, so it is let go: a workspace opening for it is
+        settled as unclaimed when it arrives (or now, if it already has), which core carries out
+        through the steps of the attempt, so nothing is freed on the record alone. A flow that
+        asks for the same work later gets new work. A settlement in flight is not asked for: it
+        finishes what the dead flows began, and stays.
+        """
+        kept: list[InFlight] = []
+        for entry in self._in_flight:
+            if isinstance(entry.request, Withdraw):
+                kept.append(entry)
+            elif isinstance(entry.answer, WorkspaceOpened):
+                held = Held(attempt=entry.answer.attempt)
+                self._settle_held(entry.path, held, RestartSettleReason.UNCLAIMED)
+        self._in_flight = kept
 
     def feed(
         self,
