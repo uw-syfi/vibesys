@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 
 import vibesys.events as e
 import vs_proto.api as p
@@ -169,6 +170,30 @@ def content(projection: Projection, span: str, role: str, text: str) -> p.Transc
     return p.TranscriptContent(value=p.Oneof("blob", blob))
 
 
+def _result_payload(
+    projection: Projection, span: str, payload: e.CommandResultPayload | e.JsonResultPayload | None
+) -> p.Oneof | None:
+    """A tool result's typed payload, with the numbers a provider reported made safe to store."""
+    if payload is None:
+        return None
+    if isinstance(payload, e.JsonResultPayload):
+        text = json.dumps(payload.value, ensure_ascii=False)
+        return p.Oneof("json", content(projection, span, "tool.payload", text))
+    duration = payload.duration
+    return p.Oneof(
+        "command",
+        p.TranscriptCommandResult(
+            stdout=content(projection, span, "tool.stdout", payload.stdout),
+            stderr=content(projection, span, "tool.stderr", payload.stderr),
+            exit_code=payload.exit_code,
+            # A negative or non-finite time is a provider's mistake, not a duration: drop it.
+            duration_seconds=duration
+            if duration is not None and 0 <= duration < math.inf
+            else None,
+        ),
+    )
+
+
 def transcript(projection: Projection) -> None:
     data = projection.event.data
     if isinstance(data, e.AgentOutputChunkData) and data.channel == "tool":
@@ -227,17 +252,14 @@ def transcript(projection: Projection) -> None:
                     call_id=data.call_id,
                     is_error=data.is_error,
                     content=content(projection, span_id, "tool.content", data.content),
-                    payload_json=None
-                    if data.payload is None
-                    else content(
-                        projection, span_id, "tool.payload", data.payload.model_dump_json()
-                    ),
+                    payload=_result_payload(projection, span_id, data.payload),
                 ),
             )
         )
     else:
         message = "transcript event requires output, tool call or result payload"
         raise TypeError(message)
+    entry.at = p.Timestamp.from_datetime(projection.event.timestamp)
     projection.bound(entry, span_id)
     p.validate(entry)
     if span_id not in projection.spans:

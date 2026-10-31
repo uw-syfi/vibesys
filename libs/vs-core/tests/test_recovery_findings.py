@@ -15,6 +15,8 @@ from vs_core.api.recovery import (
     CancelReason,
     End,
     Interruption,
+    RecordRefusedError,
+    RefusalReason,
     Run,
     RunRest,
     Settle,
@@ -215,8 +217,9 @@ def test_an_interruption_this_version_does_not_know_is_refused_as_a_log_it_canno
             "attempt_interrupted", AttemptInterrupted(tag=tag.root, attempt=1, reason=reason)
         ),
     )
-    with pytest.raises(ValueError, match="does not know"):
+    with pytest.raises(RecordRefusedError, match="does not know") as refused:
         fold([record], loop.state, registry=loop.registry)
+    assert refused.value.refusal.reason is RefusalReason.UNREADABLE
 
 
 def test_an_end_the_run_is_not_over_for_is_refused() -> None:
@@ -225,8 +228,9 @@ def test_an_end_the_run_is_not_over_for_is_refused() -> None:
     play(loop, ("stop", 0))
     result = loop.state.run.result
     assert result is not None
-    with pytest.raises(ValueError, match="not over"):
+    with pytest.raises(RecordRefusedError, match="not over") as refused:
         loop.add(Oneof("run_ended", ended_message(End(result=result))))
+    assert refused.value.refusal.reason is RefusalReason.RUN_NOT_OVER
 
 
 # --- a step core ended itself is concluded the way any step ends --------------------------------

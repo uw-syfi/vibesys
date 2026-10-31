@@ -2,8 +2,12 @@ import {describe, expect, test} from 'bun:test';
 import type {RunEvent, Span} from '@vibesys/contracts';
 import {event} from '@vibesys/contracts/testing';
 import {initialCoreState, reduceEventBatch} from '@vibesys/run-state';
+import * as fc from 'fast-check';
+import {commandOutput} from './command-output.test-helper.js';
 import {runPageInitial, runPageStep} from './run-page.js';
 import {
+  blockStarts,
+  GROUP_OPEN_LIMIT,
   gateView,
   itemLines,
   narrativeOf,
@@ -316,6 +320,172 @@ describe('a gate', () => {
       {text: 'accuracy: 93/100', stream: 'out'},
       {text: 'retrying', stream: 'out'},
       {text: 'warn', stream: 'err'},
+    ]);
+  });
+});
+
+describe('how thoughts and tool groups start', () => {
+  const TURN_ROWS = fc.array(
+    fc.oneof(
+      fc.constant('thought' as const),
+      fc.constant('said' as const),
+      fc.constant('tool' as const),
+      fc.constant('failed' as const),
+      fc.constant('reply' as const),
+    ),
+    {maxLength: 60},
+  );
+
+  const rowsOf = (kinds: readonly string[]): TurnRow[] =>
+    kinds.map((kind, index) => {
+      if (kind === 'thought') return say(`m${index}`, 'reasoning', `thought ${index}`);
+      if (kind === 'said') return say(`m${index}`, 'reply', `said ${index}`);
+      if (kind === 'reply') return {...reply, id: `r${index}`};
+      return tool(`t${index}`, kind === 'failed' ? 'failed' : 'ok');
+    });
+
+  test('a finished turn starts every thought closed, whatever its blocks', () => {
+    fc.assert(
+      fc.property(TURN_ROWS, kinds => {
+        const starts = blockStarts(narrativeOf(rowsOf(kinds)), false);
+        for (const [id, start] of starts) {
+          expect(start.live, id).toBe(false);
+          if (id.startsWith('m')) expect(start.open, id).toBe(false);
+        }
+      }),
+    );
+  });
+
+  test('a live turn has at most one thought open as live, and only the one it ends with', () => {
+    fc.assert(
+      fc.property(TURN_ROWS, kinds => {
+        const narrative = narrativeOf(rowsOf(kinds));
+        const starts = blockStarts(narrative, true);
+        const live = [...starts].filter(([, start]) => start.live);
+        const last = narrative.blocks.at(-1);
+        if (last?.kind === 'thought') {
+          expect(live.map(([id]) => id)).toEqual([last.id]);
+          expect(starts.get(last.id)?.open).toBe(true);
+        } else {
+          expect(live).toEqual([]);
+        }
+        for (const [id, start] of starts) {
+          if (id.startsWith('m') && !start.live) expect(start.open, id).toBe(false);
+        }
+      }),
+    );
+  });
+
+  test('a group starts open exactly when it holds no more than the limit', () => {
+    fc.assert(
+      fc.property(TURN_ROWS, fc.boolean(), (kinds, live) => {
+        const narrative = narrativeOf(rowsOf(kinds));
+        const starts = blockStarts(narrative, live);
+        for (const block of narrative.blocks) {
+          if (block.kind !== 'tools') continue;
+          expect(starts.get(block.id), block.id).toEqual({
+            live: false,
+            open: block.tools.length <= GROUP_OPEN_LIMIT,
+          });
+        }
+      }),
+    );
+  });
+
+  test('says nothing of blocks that are neither a thought nor a group', () => {
+    const narrative = narrativeOf([say('a', 'reply', 'x'), reply]);
+    expect([...blockStarts(narrative, true).keys()]).toEqual([]);
+  });
+});
+
+describe('a command in the item pane', () => {
+  const command = (patch: Partial<NonNullable<ToolRow['command']>> = {}): ToolRow => ({
+    ...tool('t', 'ok'),
+    input: '{"command":"ls"}',
+    output: 'a\nb',
+    command: {exitCode: 0, seconds: 1.2, stdout: 'a\nb', stderr: '', ...patch},
+  });
+  const titles = (lines: readonly {text: string}[]): string[] =>
+    lines.map(line => line.text).filter(text => ['Input', 'Stdout', 'Stderr'].includes(text));
+
+  test('reads input, then stdout, then stderr, stderr in the error color', () => {
+    const lines = itemLines(command({stderr: 'warn'}));
+    expect(titles(lines)).toEqual(['Input', 'Stdout', 'Stderr']);
+    expect(lines.filter(line => line.stream === 'err').map(line => line.text)).toEqual(['warn']);
+    expect(lines.filter(line => line.text === '')).toHaveLength(2);
+  });
+
+  test('leaves out a stream with nothing in it, and has no "Result" title of its own', () => {
+    expect(titles(itemLines(command()))).toEqual(['Input', 'Stdout']);
+    expect(titles(itemLines(command({stdout: '', stderr: 'x'})))).toEqual(['Input', 'Stderr']);
+    expect(titles(itemLines(command({stdout: '', stderr: ''})))).toEqual(['Input']);
+    for (const patch of [{}, {stderr: 'x'}, {stdout: ''}]) {
+      expect(itemLines(command(patch)).map(line => line.text)).not.toContain('Result');
+    }
+  });
+
+  test('shows no blank line for the newline that ends a stream', () => {
+    const lines = itemLines(command({stdout: 'a\nb\n', stderr: 'warn\n'}));
+    expect(lines.map(line => line.text)).toEqual([
+      'Input',
+      '{"command":"ls"}',
+      '',
+      'Stdout',
+      'a',
+      'b',
+      '',
+      'Stderr',
+      'warn',
+    ]);
+  });
+
+  test('both streams, with every line of each kept once and in order, whatever they hold', () => {
+    const lineBreak = /\r?\n/;
+    fc.assert(
+      fc.property(commandOutput, commandOutput, (stdout, stderr) => {
+        const shown = itemLines(command({stdout, stderr}));
+        const body = (text: string): string[] => text.replace(/\r?\n$/, '').split(lineBreak);
+        const out = body(stdout);
+        const err = body(stderr);
+        const hasOut = stdout.replace(/\r?\n$/, '') !== '';
+        const hasErr = stderr.replace(/\r?\n$/, '') !== '';
+        // The sections in order, a blank line between them: the whole pane.
+        const sections = [
+          ['Input', '{"command":"ls"}'],
+          ...(hasOut ? [['Stdout', ...out]] : []),
+          ...(hasErr ? [['Stderr', ...err]] : []),
+        ];
+        expect(shown.map(line => line.text)).toEqual(
+          sections.flatMap((section, index) => (index === 0 ? section : ['', ...section])),
+        );
+        // Whatever the text, the error color is stderr's lines and only those.
+        expect(shown.filter(line => line.stream === 'err').map(line => line.text)).toEqual(
+          hasErr ? err : [],
+        );
+        // Both streams are there whenever both hold something.
+        expect(titles(shown)).toEqual([
+          'Input',
+          ...(hasOut ? ['Stdout'] : []),
+          ...(hasErr ? ['Stderr'] : []),
+        ]);
+        // No line carries a break of its own.
+        expect(shown.some(line => lineBreak.test(line.text))).toBe(false);
+      }),
+    );
+  });
+
+  test('keeps both streams of a command that wrote to each, in a CRLF output too', () => {
+    const lines = itemLines(command({stdout: 'a\r\nb\r\n', stderr: 'warn\r\n'}));
+    expect(lines.map(line => line.text)).toEqual([
+      'Input',
+      '{"command":"ls"}',
+      '',
+      'Stdout',
+      'a',
+      'b',
+      '',
+      'Stderr',
+      'warn',
     ]);
   });
 });

@@ -121,6 +121,12 @@ def test_an_adopting_runner_hands_back_the_result_of_work_that_ended_while_unatt
         assert await runner.clear(a_step(tag), tag) == Adopted(None)
         await clock.sleep(5.0)
         assert await runner.clear(a_step(tag), tag) == Adopted(finished_result(tag))
+        # The ended work keeps its result until a run returns it, so a crash before the loop
+        # records it finds it again.
+        assert await runner.clear(a_step(tag), tag) == Adopted(finished_result(tag))
+        assert await runner.run(
+            a_step(tag), tag, 2, DEADLINE_AT, CancelSignal()
+        ) == finished_result(tag)
         assert runner.left_behind() == ()
 
     run_virtual(clock, main())

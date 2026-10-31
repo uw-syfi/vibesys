@@ -19,7 +19,9 @@ outcome. Pause-now also cancels what can be cancelled at once (turns, an executo
 may carry a drain deadline (``RunPark.deadline_at``, from the event's ``drain_seconds``; Pause-now
 has the run's cleanup bound when it names none). At the deadline the drain stops waiting: a request
 recovery would send again goes back to PREPARED the same way; the rest is cancelled and ends at
-its limit, a cleanup bound after the deadline.
+its limit, a cleanup bound after the deadline. Time changes the log only through a record, and the
+deadline passing writes none, so ``decide`` asks for the clock (``Tick``) and the fold parks the
+drain on it: whether a run is parked never depends on an unrelated step ending later.
 """
 
 from __future__ import annotations
