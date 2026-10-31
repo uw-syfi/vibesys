@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Claude Code Stop hook: keep a `vibesys:optimize` run going until its deadline.
 
-Does nothing unless the session's working directory holds ``.vibesys-optimize/active``. That
-file names the active run; the run's ``run.json`` holds the ``deadline`` (ISO 8601 with a
+Finds the project from CLAUDE_PROJECT_DIR or the nearest ancestor holding
+``.vibesys-optimize/``. Its ``active`` file names the active run; the run's ``run.json`` holds the ``deadline`` (ISO 8601 with a
 timezone). Before the deadline the hook blocks the stop and tells the lead to continue; at or
 after it, or once the file is gone, the stop goes through.
 
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,12 +39,13 @@ _FAIL_OPEN = (OSError, ValueError, KeyError, TypeError, AttributeError)
 
 def block_reason(cwd: Path, now: datetime) -> str | None:
     """The reason to keep the session going, or None when the stop should go through."""
-    active = cwd / STATE_DIR / ACTIVE_FILE
     try:
+        root = next((p for p in (cwd, *cwd.parents) if (p / STATE_DIR).is_dir()), cwd)
+        active = root / STATE_DIR / ACTIVE_FILE
         run_id = active.read_text(encoding="utf-8").strip()
         if not run_id or "/" in run_id or "\\" in run_id or run_id in (".", ".."):
             return None
-        run_dir = cwd / STATE_DIR / run_id
+        run_dir = root / STATE_DIR / run_id
         stated = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))["deadline"]
         # Python 3.10 does not read a trailing Z; 3.11 and later do.
         deadline = datetime.fromisoformat(
@@ -62,7 +64,14 @@ def block_reason(cwd: Path, now: datetime) -> str | None:
     )
 
 
-def main(stdin: TextIO, out: TextIO, *, now: Callable[[], datetime], fallback_cwd: Path) -> int:
+def main(
+    stdin: TextIO,
+    out: TextIO,
+    *,
+    now: Callable[[], datetime],
+    fallback_cwd: Path,
+    project_dir: Path | None = None,
+) -> int:
     """Answer one Stop event; always returns 0 (an error allows the stop)."""
     try:
         event = json.loads(stdin.read() or "{}")
@@ -73,7 +82,7 @@ def main(stdin: TextIO, out: TextIO, *, now: Callable[[], datetime], fallback_cw
         ):
             return 0
         cwd = Path(event["cwd"]) if isinstance(event.get("cwd"), str) else fallback_cwd
-        reason = block_reason(cwd, now())
+        reason = block_reason(project_dir if project_dir is not None else cwd, now())
     except _FAIL_OPEN:
         return 0
     if reason is not None:
@@ -88,5 +97,8 @@ if __name__ == "__main__":
             sys.stdout,
             now=lambda: datetime.now(timezone.utc),
             fallback_cwd=Path.cwd(),
+            project_dir=Path(os.environ["CLAUDE_PROJECT_DIR"])
+            if os.environ.get("CLAUDE_PROJECT_DIR")
+            else None,
         )
     )

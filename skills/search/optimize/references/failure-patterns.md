@@ -32,11 +32,10 @@ hypotheses that can each succeed or fail alone.
 too large. Name the exact blocker and give the narrower step it proposed. Two tries in a row
 without convergence: park the direction and say why.
 
-**Idle slots.** A free slot while hypotheses remain. Fill it with work that does not conflict
-with what runs, or write down in `decisions.md` why nothing is worth running.
+**Idle slots.** A free slot before wrap-up. Apply the refill step in the optimize loop,
+including new hypotheses from the winner.
 
-**Long measurements in the foreground.** A 25-minute benchmark loop in your own turn. Start it
-in the background and go back to the other slots.
+**Long measurements in the foreground.** A 25-minute benchmark loop in your own turn. Use the tracked Bash recipe in `vibesys:measure` and go back to the other slots.
 
 **Trusting a handoff.** "Tests pass" without a command, "measured" without a record. Run
 `measurements.py show --commit <SHA>` and read it.

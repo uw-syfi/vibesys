@@ -29,10 +29,15 @@ before you plan and again at each wrap-up.
 2. Create the run: id, directory, `run.json` with the deadline, the exclude line, the branch
    `vibesys/<run-id>` and its worktree, and `.vibesys-optimize/active`. Commands are in
    run-state.md.
-3. Schedule a session wakeup at the wrap-up time and another at the deadline using Claude
-   Code's scheduling tools. Record their IDs. If scheduling or background agents are unavailable,
-   remove this run's `active` marker, cancel any wakeups already created, and explain the blocker.
-4. Measure the base with `vibesys:measure`, at least 5 samples, in the background. No comparison
+3. Keep exactly one pending wakeup, for the next milestone: wrap-up first, then the deadline.
+   For a normal skill invocation use `CronCreate` with `recurring: false`, and record its ID.
+   Only a self-paced `/loop` uses `ScheduleWakeup`; each call replaces its pending wakeup,
+   so never schedule wrap-up and deadline together. Re-arm after every wake, checking the
+   actual clock before advancing phases (cron may fire early or after a busy turn).
+   Use `CronList` to reconcile on resume and `CronDelete` to cancel obsolete run-owned tasks.
+   If scheduling or background agents are unavailable, remove this run's `active` marker,
+   cancel any wakeup already created, and explain the blocker.
+4. Measure the base with `vibesys:measure`, at least 5 samples, as a tracked background Bash command with `run_in_background: true`. No comparison
    means anything until it lands. Plan while it runs.
 
 ## Loop
@@ -58,9 +63,17 @@ before you plan and again at each wrap-up.
    decisions; compare what happened with the note. Park or abandon a direction with a stated
    reason. A direction that fails to converge after two tries is parked. A step that ended
    without a candidate is narrowed, never reassigned unchanged.
-5. **Simplify**: drop work that no longer changes the outcome.
+5. **Refill until wrap-up**: every free slot gets new work. When a direction wins, branch new
+   hypotheses from the winner: tune it, combine compatible gains, or profile the next bottleneck.
+   Drop work that no longer changes the outcome and replace it; exhausted initial ideas are
+   a reason to inspect the winner, not to end the search early.
 
-Never poll or use Bash `sleep` to wait for subagents. Claude Code delivers background results as
+Run each measurement as a tracked background Bash command (`run_in_background: true`),
+never detached with `nohup`, `setsid`, shell `&` or `disown`. Serialize measurements by starting
+the next only when the previous command's completion notification arrives; do not make a
+home-made chain script that launches multiple measurements.
+
+Never poll or use foreground Bash `sleep` to wait for subagents or the clock. Claude Code delivers background results as
 completion notifications. When all useful work is dispatched, yield the turn to those
 notifications and the scheduled wakeups; keep the session open. The optional Stop hook is a
 reminder, not a deadline guarantee: it fails open on repeated continuations and lets pending
@@ -71,7 +84,7 @@ background tasks or scheduled wakeups resume the lead. See the official
 
 ## Wrap-up
 
-Use the wrap-up time defined in run-state.md. Dispatch no new hypotheses; judges, combinations
+Start only at the computed wrap-up time defined in run-state.md, never because ideas feel exhausted. Dispatch no new hypotheses; judges, combinations
 and final measurements may still run within the remaining budget. Merge judged winners into main
 with `vibesys:combine-candidates`. Stop or collect outstanding workers before the deadline.
 Never merge an unjudged combination. Re-measure the final main against the base with

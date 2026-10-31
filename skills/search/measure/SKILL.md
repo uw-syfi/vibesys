@@ -42,6 +42,9 @@ both constant, or samples of a different metric or task version. Add samples onl
 brief's budget; identical readings on both sides remain inconclusive even after repeats. Exit
 code 2 means the input was invalid and the message says which part.
 
-A long measurement blocks you. If you are the lead, put the steps in one shell script that ends
-with the `record` call and run it in the background; a subagent measuring its own commit can run
-the steps directly.
+Run each measurement's build/check/benchmark/record sequence as one tracked background Bash
+command with `run_in_background: true`. Never detach with `nohup`, `setsid`, shell `&` or
+`disown`: Claude Code must track completion and notify the lead. Serialize by starting the
+next measurement only when the previous command's completion notification arrives. Do not
+launch a home-made chain script of measurements. While it runs, do other useful work or yield
+for its notification; never wait with foreground `sleep`.

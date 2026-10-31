@@ -19,6 +19,10 @@ measurement does. Load `vibesys:measure`.
 Start from the diff against the parent (`git diff <parent> <candidate>`) and the claim. Answer:
 
 1. **Correct?** Does the code do what the claim says, and does it still do everything it did?
+   Confirm the worker's correctness-check evidence names this exact commit and task version.
+   If evidence is missing or stale, rerun the correctness check in the candidate worktree
+   (coordinate the measurement slot with the lead). If the budget cannot cover it, return
+   `unmeasured`; never pass without current evidence.
 2. **Active?** Is the change on the path the benchmark runs? A change that the benchmark never
    reaches cannot explain a gain.
 3. **Honest?** Does it special-case the benchmark's inputs, cache on its seed, skip or weaken a
@@ -31,7 +35,7 @@ Start from the diff against the parent (`git diff <parent> <candidate>`) and the
    measurement in the judge; the lead supplies its result before requesting a new judgment.
 
 Source reading decides correctness and rule violations. Only a recorded measurement decides a
-claim about speed. Do not run other benchmarks or commands that take more than a few seconds.
+claim about speed. Do not run other benchmarks. The required correctness check is the exception to the short-command budget.
 
 Passing the check is not enough: reject a candidate that violates a rule in `OBJECTIVE.md`.
 
