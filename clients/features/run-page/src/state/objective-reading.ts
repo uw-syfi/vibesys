@@ -183,7 +183,7 @@ function bestOf(point: PerformancePoint): BestReading {
 /**
  * The best of the whole run: what the run decided, or its writer states, else the last reading that
  * set a new best; null when the input stands. A stated best is placed at the reading that has its
- * value (one that set a best first), else where the last best was set.
+ * value (one that set a best first), else at the last reading.
  */
 function wholeBest(
   reading: ObjectiveReading,
@@ -197,7 +197,15 @@ function wholeBest(
     flagged.filter(point => point.value === value).at(-1) ??
     reading.fold.points.filter(point => point.value === value).at(-1);
   if (holder !== undefined) return bestOf(holder);
-  return {value, idea: null, key: null, at: last?.at ?? 0};
+  return {value, idea: null, key: null, at: reading.fold.points.at(-1)?.at ?? 0};
+}
+
+/** Whether the run says nothing beat the input: it decided for it, or its writer states it as the best. */
+function inputStands(reading: ObjectiveReading): boolean {
+  return (
+    reading.decided === null ||
+    (reading.decided === undefined && reading.stated !== null && reading.stated === reading.input)
+  );
 }
 
 /**
@@ -205,10 +213,11 @@ function wholeBest(
  * up to the best of the whole run, which is the line's last value whatever states it: the run's
  * decision, its writer's statement, or its last new best. A decision for an idea (or a statement of
  * a value) its readings did not flag as a new best adds that reading as the last step, and the steps
- * after it are not on the line; a run whose own decision keeps the input has no step. This is the
- * one place the line and the headline are decided: `bestSoFar` is the last of these steps by a time.
+ * after it are not on the line; a run that keeps the input has no step. This is the one place the
+ * line and the headline are decided: `bestSoFar` is the last of these steps by a time.
  */
 export function bestSteps(reading: ObjectiveReading): readonly BestReading[] {
+  if (inputStands(reading)) return [];
   const flagged = reading.fold.points.filter(point => point.best);
   const end = wholeBest(reading, flagged);
   if (end === null) return [];
@@ -219,11 +228,17 @@ export function bestSteps(reading: ObjectiveReading): readonly BestReading[] {
 /**
  * The best of `reading` as of run-clock time `until` (null: the whole run): the last step of its
  * line by then (`bestSteps`), so the headline, the line and the tip name one best. Null when none
- * has been set, so the input stands.
+ * has been set, so the input stands; but a writer that states the input as the run's best says so
+ * for the whole run: that is the best, with no step.
  */
 export function bestSoFar(reading: ObjectiveReading, until: number | null): BestReading | null {
-  const steps = bestSteps(reading);
-  return steps.filter(step => until === null || step.at <= until).at(-1) ?? null;
+  const last = bestSteps(reading)
+    .filter(step => until === null || step.at <= until)
+    .at(-1);
+  if (last !== undefined || until !== null) return last ?? null;
+  return reading.decided === undefined && reading.stated !== null
+    ? {value: reading.stated, idea: null, key: null, at: 0}
+    : null;
 }
 
 /**

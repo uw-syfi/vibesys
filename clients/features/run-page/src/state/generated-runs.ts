@@ -62,12 +62,16 @@ export const generatedRuns: fc.Arbitrary<Run> = fc
     ),
     cursor: fc.double({min: 0, max: 1, noNaN: true}),
     // A writer states its best as it likes: the best of the readings (null), or any value.
-    stated: fc.option(fc.integer({min: 1, max: 12000}), {nil: null}),
+    stated: fc.option(fc.oneof(fc.integer({min: 1, max: 12000}), fc.constant('input' as const)), {
+      nil: null,
+    }),
   })
   .map(each => ({
     ...each,
     // The first session's re-measure is the run's input.
     sessionInputs: [each.input, ...each.sessionInputs.slice(1)],
+    // A writer may state the input itself as its best: nothing beat it.
+    stated: each.stated === 'input' ? each.input : each.stated,
     // The run states its input through at least one idea's ratio to it: the input gate ran before
     // any idea, and only a session resumed later measures its ideas without one.
     ideas: each.ideas.map((idea, at) => (at === 0 ? {...idea, compared: true} : idea)),
