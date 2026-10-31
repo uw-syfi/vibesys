@@ -239,8 +239,11 @@ export const subscriptionMachine = setup({
             },
           },
           on: {
-            entry: {actions: changed},
-            removed: {actions: changed},
+            // The bound is on each wait inside the snapshot: a frame of it renews the wait, so a
+            // snapshot of many entries, read slowly, is not cut off at the bound of a first frame.
+            // It stays bounded: the snapshot has at most `maxKeys` entries, each within the bound.
+            entry: {target: 'awaiting', reenter: true, actions: changed},
+            removed: {target: 'awaiting', reenter: true, actions: changed},
             synced: {
               target: 'live',
               actions: [

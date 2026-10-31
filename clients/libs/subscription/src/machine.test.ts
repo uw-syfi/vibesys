@@ -66,6 +66,60 @@ test('a stream that says nothing is lost at the open budget, then at the first-f
   expect(harness.control).toEqual({kind: 'connecting', step: 'stream', attempt: 2});
 });
 
+const SNAPSHOT_KEYS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] as const;
+
+/** Entries of one snapshot, each after a wait inside the first-frame bound but never a short one. */
+async function slowSnapshot(
+  seed: number,
+): Promise<{harness: Harness; frames: number; took: number}> {
+  const random = new Seeded(seed);
+  const bound = LEASE_ONLY.policy.firstFrameMs;
+  const harness = new Harness(LEASE_ONLY);
+  await settle();
+  harness.latest.reach('stream');
+  const frames = 1 + random.int(SNAPSHOT_KEYS.length);
+  let took = 0;
+  for (const key of SNAPSHOT_KEYS.slice(0, frames)) {
+    const gap = Math.floor(bound / 2) + random.int(Math.ceil(bound / 2) - 1);
+    harness.clock.advanceBy(gap);
+    took += gap;
+    // Each wait was inside the bound, so the stream is still being waited on.
+    expect(harness.control).toEqual({kind: 'connecting', step: 'stream', attempt: 0});
+    harness.latest.entry(statsEntry(key, harness.clock.now()));
+  }
+  return {harness, frames, took};
+}
+
+test('property: a snapshot read slowly is not cut off while each frame comes inside the first-frame bound', async () => {
+  const bound = LEASE_ONLY.policy.firstFrameMs;
+  let beyond = 0;
+  for (const seed of SEEDS.slice(0, 40)) {
+    const {harness, took} = await slowSnapshot(seed);
+    if (took > bound) beyond += 1;
+    harness.clock.advanceBy(bound - 1);
+    harness.latest.send({type: 'synced', at: harness.clock.now()});
+    await settle();
+    expect(harness.control.kind).toBe('live');
+    expect(harness.streams).toHaveLength(1);
+  }
+  // The property is about snapshots that take longer than one bound in all; most of them do.
+  expect(beyond).toBeGreaterThan(10);
+});
+
+test('property: a snapshot that goes quiet for the bound is lost whatever came before, and then it is lost', async () => {
+  const bound = LEASE_ONLY.policy.firstFrameMs;
+  for (const seed of SEEDS.slice(0, 40)) {
+    const {harness} = await slowSnapshot(seed);
+    // Heartbeats prove the stream and not the snapshot: they do not renew the wait.
+    harness.latest.beat();
+    harness.clock.advanceBy(bound - 1);
+    expect(harness.control).toMatchObject({kind: 'connecting', attempt: 0});
+    harness.clock.advanceBy(1);
+    expect(harness.control).toMatchObject({kind: 'connecting', attempt: 1});
+    expect(harness.open).toHaveLength(0);
+  }
+});
+
 test('every frame renews the lease, and silence past it makes the value stale', async () => {
   const harness = new Harness(LEASE_ONLY);
   await live(harness, ['a', 'b']);
