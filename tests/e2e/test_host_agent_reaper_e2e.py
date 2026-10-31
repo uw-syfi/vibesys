@@ -65,7 +65,9 @@ class _Unconfined:
 def _end_what_a_test_left() -> Iterator[None]:
     yield
     while _LEFT_RUNNING:
-        with contextlib.suppress(ProcessLookupError):
+        # A group of only zombies (the reaper killed it, its parent has not collected it yet) is
+        # nothing left to signal: ESRCH on Linux, EPERM on macOS.
+        with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(_LEFT_RUNNING.pop(), signal.SIGKILL)
 
 

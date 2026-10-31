@@ -108,7 +108,9 @@ _LEFT_RUNNING: list[int] = []
 def _end_what_a_test_left() -> Iterator[None]:
     yield
     while _LEFT_RUNNING:
-        with contextlib.suppress(ProcessLookupError):
+        # A group of only zombies (the reaper killed it, its parent has not collected it yet) is
+        # nothing left to signal: ESRCH on Linux, EPERM on macOS.
+        with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(_LEFT_RUNNING.pop(), signal.SIGKILL)
 
 
@@ -196,7 +198,7 @@ def test_the_members_of_a_group_whose_leader_died_first_are_found_on_linux_only(
         found_on_linux = sys.platform.startswith("linux")
         assert (_running_in_group(pgid) == 0) == found_on_linux
     finally:
-        with contextlib.suppress(ProcessLookupError):
+        with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(pgid, signal.SIGKILL)
 
 
