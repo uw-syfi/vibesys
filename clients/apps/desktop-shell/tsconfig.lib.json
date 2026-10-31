@@ -74,6 +74,9 @@
       "path": "../../libs/runs/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/problems/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/store/tsconfig.lib.json"
     },
     {

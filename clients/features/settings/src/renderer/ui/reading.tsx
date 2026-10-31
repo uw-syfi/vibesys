@@ -24,7 +24,7 @@ export function Reading<T>(props: {
   if (reading.kind === 'failed') {
     return (
       <Banner
-        tone="err"
+        tone="failed"
         title={`Could not read ${props.what} on ${machine}.`}
         {...failureWords(reading)}
         actions={<Button text="Try again" press={props.retry} />}

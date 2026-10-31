@@ -28,15 +28,6 @@ gofmt -w "${gofmt_paths[@]}"
 uv run --locked --group proto python scripts/generate_proto_framing.py
 uv run --locked --group proto buf generate --template buf.gen.core.yaml
 uv run --locked --group proto buf generate --template scripts/corevalue/tests/buf.gen.yaml
-uv run --locked --group proto buf generate libs/vs-core/tests/proto \
-  --config '{"version":"v2","modules":[{"path":"proto"},{"path":"libs/vs-core/tests/proto"}]}' \
-  --template libs/vs-core/tests/buf.gen.yaml
-uv run --locked --group proto buf generate libs/vs-runtime/tests/proto \
-  --config '{"version":"v2","modules":[{"path":"proto"},{"path":"libs/vs-runtime/tests/proto"}]}' \
-  --template libs/vs-runtime/tests/buf.gen.yaml
-uv run --locked --group proto buf generate libs/vs-runtime/tests/proto_prior \
-  --config '{"version":"v2","modules":[{"path":"proto"},{"path":"libs/vs-runtime/tests/proto_prior"}]}' \
-  --template libs/vs-runtime/tests/buf.prior.gen.yaml
 uv run --locked ruff check --select I --fix libs/vs-core/src/vs_core/_generated libs/vs-runtime/src/vs_runtime/_core_values
 uv run --locked ruff format libs/vs-core/src/vs_core/_generated libs/vs-runtime/src/vs_runtime/_core_values
 # Normalize the plugin's extra EOF blank lines without editing generated code by hand.

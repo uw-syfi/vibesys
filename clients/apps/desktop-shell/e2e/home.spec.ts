@@ -79,6 +79,66 @@ test('a configured machine with a live run lists it on a fresh profile with no r
   await expect(page.getByRole('heading', {name: 'Runs', level: 1})).toBeVisible();
 });
 
+test('a machine still connecting keeps the mark on Runs until it answers', async ({page}) => {
+  await open(page, {
+    ...NO_RUNS,
+    machines: [
+      {host: 'local', label: 'This Mac', checkout: '/bundled'},
+      {host: 'ssh:host-a', label: 'host-a', checkout: '/checkout'},
+    ],
+    listings: [
+      {kind: 'listed', host: 'local', live: [], ended: [], unreadable: [], unverified: []},
+      {
+        kind: 'unavailable',
+        host: 'ssh:host-a',
+        step: 'handshake',
+        connection: {kind: 'connecting'},
+      },
+    ],
+  });
+  await rail(page, 'VibeSys').click();
+  await expect(page.getByRole('heading', {name: 'Runs', level: 1})).toBeVisible();
+  await page.evaluate(() =>
+    (window as unknown as FakeHostWindow).fakeHost.listing({
+      kind: 'listed',
+      host: 'ssh:host-a',
+      live: [],
+      ended: [],
+      unreadable: [],
+      unverified: [],
+    }),
+  );
+  await rail(page, 'VibeSys').click();
+  await expectNewRun(page);
+});
+
+test('with runs shown a stopped machine keeps a line with its reason and a Retry', async ({
+  page,
+}) => {
+  await open(page, {
+    ...SEED,
+    machines: [...(SEED.machines ?? []), {host: 'ssh:host-a', label: 'host-a', checkout: '/c'}],
+    listings: [
+      ...(SEED.listings ?? []),
+      {
+        kind: 'unavailable',
+        host: 'ssh:host-a',
+        step: 'gateway',
+        connection: {kind: 'offline', detail: 'gateway startup exited: 1'},
+      },
+    ],
+  });
+  await expect(page.getByRole('heading', {name: 'Runs', level: 1})).toBeVisible();
+  await expect(page.locator('.vs-step-list')).toHaveCount(0);
+  const line = page.getByText('host-a', {exact: true}).locator('..');
+  await expect(line).toContainText('gateway exited (code 1)');
+  await expect(line.getByRole('img', {name: 'Failed'})).toBeVisible();
+  await line.getByRole('button', {name: 'Retry'}).click();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as FakeHostWindow).fakeHost.retried))
+    .toEqual(['ssh:host-a']);
+});
+
 test('a machine that has not answered shows its steps, and a stopped one can be retried', async ({
   page,
 }) => {

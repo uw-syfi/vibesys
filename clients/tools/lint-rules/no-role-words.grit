@@ -1,0 +1,29 @@
+// A role's name on a screen comes from the catalog (`roleName` in `@vibesys/contracts`, generated
+// from the `title` each Python `Role` declares), so renaming a role changes it in one place. A
+// string, template or JSX text that spells a role's name itself (Planner, Builder, Reviewer, or an
+// old name such as Implementer or Judge) drifts at the next rename: take the name from `roleName`.
+// A role id (`judge`, `multi-implementer`) is not a name, so an id with no space stays allowed;
+// lowercase words are an error only in text that holds a space, which is a sentence. A Grit regex
+// must match the whole text, hence the `.*` on both sides; `(?s)` lets a template chunk span
+// lines. `tools/scripts/check_role_words.test.mjs` fails when this list lacks a catalog title.
+language js;
+
+or {
+  JsStringLiteralExpression(),
+  JsTemplateChunkElement(),
+  JsxString(),
+  JsxText()
+} as $literal where {
+  or {
+    $literal <: r"(?s).*\b(?:Planner|Orchestrator|Builder|Implementer|Reviewer|Judge|Profiler|Mutator|Router|Merger|Outliner|Perf evaluator)\b.*",
+    and {
+      $literal <: r"(?s).*\b(?:planner|orchestrator|builder|implementer|reviewer|judge|profiler|mutator|router|merger|outliner|perf evaluator)\b.*",
+      $literal <: r"(?s).*\s.*"
+    }
+  },
+  register_diagnostic(
+    span = $literal,
+    message = "no-role-words: a role's name spelled in text. Take it from the catalog: `roleName(roleId)` from `@vibesys/contracts`, so a rename of the role in Python changes it here too.",
+    severity = "error"
+  )
+}

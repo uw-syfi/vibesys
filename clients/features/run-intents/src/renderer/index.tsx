@@ -121,7 +121,7 @@ export function useRunIntents(props: RunIntentsProps) {
       status={writer.status}
       epoch={epoch}
       busy={busy}
-      entries={snapshot ? intentRows(snapshot.context, epoch) : []}
+      entries={snapshot ? intentRows(snapshot.context) : []}
       error={snapshot?.context.error ?? null}
       warning={snapshot?.context.warning ?? null}
       guidanceOpen={guidanceOpen}

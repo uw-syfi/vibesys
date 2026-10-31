@@ -90,7 +90,7 @@ test('Clusters and clouds says how a cluster is reached in a few words', () => {
   expect(text).toContain('Login node');
 });
 
-test('a machine too old for a section says Needs an update, with the detail on the pointer', () => {
+test('a machine too old for a section says Needs an update, with the detail behind it', () => {
   const old = view({
     compute: {kind: 'ready', offered: {kind: 'unsupported'}},
     logins: {kind: 'ready', offered: {kind: 'unsupported'}},
@@ -101,7 +101,8 @@ test('a machine too old for a section says Needs an update, with the detail on t
   ]) {
     expect(prose(html)).toEqual([]);
     expect(drawnText(html)).toContain('Needs an update');
-    expect(html).toContain('title="The VibeSys on host-b is too old for this.');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain('is too old for this');
   }
 });
 

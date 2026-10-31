@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
+from functools import cache
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -870,9 +871,15 @@ def _envelope_codecs(
     return lines
 
 
+@cache
+def _parsed(source: str) -> ast.Module:
+    """Parse each server source once; the trees are only read."""
+    return ast.parse(source)
+
+
 def helper_types(sources: tuple[str, ...], operations: tuple[Operation, ...]) -> str:
     """Derive temporary adapter type narrowing from its existing closed request union."""
-    trees = [ast.parse(source) for source in sources]
+    trees = [_parsed(source) for source in sources]
     requests = next(
         node.value.slice.elts[0]
         for node in trees[0].body

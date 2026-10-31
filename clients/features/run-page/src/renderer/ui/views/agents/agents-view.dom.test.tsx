@@ -166,9 +166,9 @@ describe('AgentsView', () => {
     expect(view.textContent).toContain('agent · what it is doing');
     expect(options(view).map(each => each.textContent)).toEqual([
       expect.stringMatching(/^Planner/),
-      expect.stringMatching(/Implementer.*ring padding/),
+      expect.stringMatching(/Builder.*ring padding/),
       expect.stringMatching(
-        /Judge.*ring padding · Padding keeps its gain.*also started by Implementer/,
+        /Reviewer.*ring padding · Padding keeps its gain.*also started by Builder/,
       ),
     ]);
   });
@@ -178,7 +178,7 @@ describe('AgentsView', () => {
     const view = await mount(
       <AgentsView {...base(modelOf(FAN_IN), sent)} {...folds()} selected={null} compact={false} />,
     );
-    await click(option(view, 'Judge'));
+    await click(option(view, 'Reviewer'));
     expect(sent).toEqual([{type: 'open-agent', agent: 'judge'}]);
   });
 
@@ -188,8 +188,8 @@ describe('AgentsView', () => {
     );
     expect(view.textContent).not.toContain('what it is doing');
     expect(view.textContent).not.toContain('ring padding');
-    expect(option(view, 'Judge').textContent).toContain('+1 parent');
-    expect(option(view, 'Implementer').getAttribute('aria-selected')).toBe('true');
+    expect(option(view, 'Reviewer').textContent).toContain('+1 parent');
+    expect(option(view, 'Builder').getAttribute('aria-selected')).toBe('true');
   });
 
   test('finished subtrees fold, active agents stay, and a press asks the page to unfold', async () => {
@@ -388,7 +388,7 @@ describe('token usage', () => {
     );
     expect(view.textContent).toContain('in (cached)');
     expect(view.textContent).toContain('out');
-    const row = option(view, 'Implementer');
+    const row = option(view, 'Builder');
     const [input, output] = [...row.querySelectorAll('.vs-pickrow-measure')];
     expect(input?.textContent).toBe('48k 24k cached');
     expect(output?.textContent).toBe('3k');
@@ -472,14 +472,14 @@ describe('token usage', () => {
         ),
       );
     await draw(ledgerOf([{span: 'turn:impl:2', input: 1_000}]));
-    expect(option(container, 'Implementer').textContent).toContain('1k');
+    expect(option(container, 'Builder').textContent).toContain('1k');
     await draw(
       ledgerOf([
         {span: 'turn:impl:2', input: 1_000},
         {span: 'turn:impl:100', input: 1_500},
       ]),
     );
-    expect(option(container, 'Implementer').textContent).toContain('2.5k');
+    expect(option(container, 'Builder').textContent).toContain('2.5k');
   });
 });
 
@@ -500,9 +500,9 @@ describe('who ran the agents', () => {
       />,
     );
     expect(option(view, 'Planner').textContent).toContain('gpt-6-luna on codex');
-    expect(option(view, 'Implementer').textContent).toContain('sonnet-5 on claude');
+    expect(option(view, 'Builder').textContent).toContain('sonnet-5 on claude');
     // The judge's turn has no record: its row names nothing it does not know.
-    expect(option(view, 'Judge').textContent).not.toContain(' on ');
+    expect(option(view, 'Reviewer').textContent).not.toContain(' on ');
   });
 
   test('the agent pane names the harness and the model', async () => {
