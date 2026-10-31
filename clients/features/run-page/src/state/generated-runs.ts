@@ -21,6 +21,8 @@ export interface Generated {
   readonly passed: boolean;
   /** Which session measured it; each session measured the input again, to its own value. */
   readonly session: number;
+  /** Whether its measurement states its own ratio to the input (a resumed session may not). */
+  readonly compared: boolean;
 }
 
 export interface Run {
@@ -43,7 +45,7 @@ export function candidateOf(item: Generated, at: number, run: Run): Candidate {
     span: `i${at}-g`,
     at: item.at + 5,
     metricValue: item.value,
-    vsBaseline: item.value / input,
+    vsBaseline: item.compared ? item.value / input : null,
     against: null,
     readings: [{name: NAME, value: item.value, unit: null, direction: run.direction}],
     inputReadings: [{name: NAME, value: input, unit: null, direction: run.direction}],

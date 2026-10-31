@@ -37,6 +37,7 @@ const run: fc.Arbitrary<Run> = fc
         at: fc.integer({min: 1, max: 600}),
         passed: fc.boolean(),
         session: fc.nat(2),
+        compared: fc.boolean(),
       }),
       {minLength: 0, maxLength: 16},
     ),
@@ -46,6 +47,9 @@ const run: fc.Arbitrary<Run> = fc
     ...each,
     // The first session's re-measure is the run's input.
     sessionInputs: [each.input, ...each.sessionInputs.slice(1)],
+    // The run states its input through at least one idea's ratio to it: the input gate ran before
+    // any idea, and only a session resumed later measures its ideas without one.
+    ideas: each.ideas.map((idea, at) => (at === 0 ? {...idea, compared: true} : idea)),
   }));
 
 const SETTINGS = {numRuns: 300} as const;
