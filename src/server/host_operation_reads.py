@@ -187,6 +187,13 @@ class HostReadSource:
         reply = requests.usage_window_reply(legacy, self._host, self._path(request.project))
         return import_module("server.host_run_wire").usage_response(request.request_id, reply)
 
+    def usage_summary(self, request: pb.UsageSummaryRequest) -> pb.UsageSummaryResponse:
+        """Cut the host's runs into the request's buckets, through the owners of the rollup and the summary."""
+        scan = import_module("server.usage_scan")
+        pricing = import_module("server.usage_pricing")
+        paths = [self._path(project) for project in request.projects]
+        return scan.usage_summary(request, self._host.projects, paths, pricing.RecordedPricing())
+
     def tasks(self, project: str) -> pb.TaskList:
         """Read through the existing project's task owner."""
         return _wire().from_mapping(

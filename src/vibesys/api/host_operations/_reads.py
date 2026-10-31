@@ -25,6 +25,10 @@ class ReadSource(Protocol):
         """What the requested runs spent in the window."""
         ...
 
+    def usage_summary(self, request: pb.UsageSummaryRequest) -> pb.UsageSummaryResponse:
+        """What the host's runs and its people's CLI use cost, in the buckets the request cuts."""
+        ...
+
     def tasks(self, project: str) -> pb.TaskList:
         """The canonical project's task catalog."""
         ...

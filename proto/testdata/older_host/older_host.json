@@ -134,6 +134,12 @@
       "stderr": "usage: vibesys host [-h] {convert-run,convert-runs} ...\nvibesys host: error: argument method: invalid choice: 'test-cluster' (choose from 'convert-run', 'convert-runs')\n"
     },
     {
+      "command": "usage-summary",
+      "exit_code": 2,
+      "stdout_bytes": 0,
+      "stderr": "usage: vibesys host [-h] {convert-run,convert-runs} ...\nvibesys host: error: argument method: invalid choice: 'usage-summary' (choose from 'convert-run', 'convert-runs')\n"
+    },
+    {
       "command": "usage-window",
       "exit_code": 2,
       "stdout_bytes": 0,

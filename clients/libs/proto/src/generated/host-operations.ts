@@ -21,6 +21,7 @@ export const operationPolicies = Object.freeze({
   ListAgentLogins: Object.freeze({name: 'ListAgentLogins', id: 19, requestTag: 19, responseTag: 19, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   ListRunDigests: Object.freeze({name: 'ListRunDigests', id: 41, requestTag: 41, responseTag: 41, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   UsageWindow: Object.freeze({name: 'UsageWindow', id: 42, requestTag: 42, responseTag: 42, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  UsageSummary: Object.freeze({name: 'UsageSummary', id: 44, requestTag: 44, responseTag: 44, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   CreateExample: Object.freeze({name: 'CreateExample', id: 34, requestTag: 34, responseTag: 34, capMs: 120000, graceMs: 5000, totalMs: 125000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   CopyProject: Object.freeze({name: 'CopyProject', id: 35, requestTag: 35, responseTag: 35, capMs: 120000, graceMs: 5000, totalMs: 125000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   PutCluster: Object.freeze({name: 'PutCluster', id: 31, requestTag: 31, responseTag: 31, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
@@ -115,6 +116,12 @@ export function acceptUsageWindow(input: MessageInitShape<typeof pb.UsageWindowR
 export async function callUsageWindow(transport: OperationTransport, request: Accepted<"UsageWindow">, signal: OperationSignal): Promise<pb.UsageWindowResponse> {
   return call(transport, {policy: operationPolicies.UsageWindow, requestSchema: pb.UsageWindowRequestSchema, responseSchema: pb.UsageWindowResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
 }
+export function acceptUsageSummary(input: MessageInitShape<typeof pb.UsageSummaryRequestSchema>): Accepted<"UsageSummary"> {
+  return accept(operationPolicies.UsageSummary, pb.UsageSummaryRequestSchema, input);
+}
+export async function callUsageSummary(transport: OperationTransport, request: Accepted<"UsageSummary">, signal: OperationSignal): Promise<pb.UsageSummaryResponse> {
+  return call(transport, {policy: operationPolicies.UsageSummary, requestSchema: pb.UsageSummaryRequestSchema, responseSchema: pb.UsageSummaryResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
+}
 export function acceptCreateExample(input: MessageInitShape<typeof pb.CreateExampleRequestSchema>): Accepted<"CreateExample"> {
   return accept(operationPolicies.CreateExample, pb.CreateExampleRequestSchema, input);
 }
@@ -208,6 +215,7 @@ export const readBudgets = Object.freeze({
   listAgentLogins: Object.freeze({capMs: 25000, graceMs: 5000, totalMs: 30000} as const),
   listRunDigests: Object.freeze({capMs: 25000, graceMs: 5000, totalMs: 30000} as const),
   usageWindow: Object.freeze({capMs: 25000, graceMs: 5000, totalMs: 30000} as const),
+  usageSummary: Object.freeze({capMs: 25000, graceMs: 5000, totalMs: 30000} as const),
 } as const);
 export function encodeHostRead(checkout: string, name: string, payload: Uint8Array): Uint8Array {
   switch (name) {
@@ -237,6 +245,8 @@ export function encodeHostRead(checkout: string, name: string, payload: Uint8Arr
       return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'listRunDigests', value: fromBinary(pb.ListRunDigestsRequestSchema, payload)}}));
     case 'UsageWindow':
       return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'usageWindow', value: fromBinary(pb.UsageWindowRequestSchema, payload)}}));
+    case 'UsageSummary':
+      return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'usageSummary', value: fromBinary(pb.UsageSummaryRequestSchema, payload)}}));
     default: throw new Error("unknown read");
   }
 }
@@ -285,6 +295,9 @@ export function decodeHostRead(name: string, payload: Uint8Array): Uint8Array {
     case 'UsageWindow':
       if (result.case !== 'usageWindow') throw new Error('response correlation mismatch');
       return toBinary(pb.UsageWindowResponseSchema, result.value);
+    case 'UsageSummary':
+      if (result.case !== 'usageSummary') throw new Error('response correlation mismatch');
+      return toBinary(pb.UsageSummaryResponseSchema, result.value);
     default: throw new Error("unknown read");
   }
 }

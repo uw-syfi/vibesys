@@ -15,7 +15,7 @@ these messages into the helper's request and reply unions and gates them behind
 ``HelperFeature.RUN_SUMMARY`` (and ``usage.window`` behind ``HelperFeature.USAGE_WINDOW``).
 
 Public surface: ``RunsSummaryRequest``, ``RunsSummaryReply``, ``TurnReply``, ``TokenTally``,
-``SpanTokens``, ``UsageRecord``, ``ModelUsage``, ``RecordedCostBasis``, ``NO_TOKENS``, ``add_tokens``, ``InputGate``, ``InputGates``, ``RunTerminal``,
+``SpanTokens``, ``UsageRecord``, ``ModelUsage``, ``RateLimitReading``, ``RecordedCostBasis``, ``NO_TOKENS``, ``add_tokens``, ``InputGate``, ``InputGates``, ``RunTerminal``,
 ``RunTerminalKind``, ``TraceFormat``, ``trace_format``, the documents they
 pass through (``RunSpanDocument``, ``RunOverviewDocument``, ``ReplySchemaDocument``) and the
 limits and names ``RUN_SUMMARY_FILE``, ``RUN_SUMMARY_PAGE_MAX_BYTES``, ``INPUT_GATES_MAX``,
@@ -330,6 +330,27 @@ class UsageRecord(BaseModel):
     provider_session_id: str | None = None
     """The provider's id of the conversation the turn ran in; ``None``: it named none, or the
     line predates the field."""
+
+
+class RateLimitReading(BaseModel):
+    """The latest reading of one limit window a provider reported during a run's turns.
+
+    A projection of the journal's ``rate_limit_update`` events (``server.run_usage``): the words
+    are the provider's own, kept as reported, because turning ``five_hour`` or ``primary`` into a
+    label is agentshim's, not the host's. A reading the journal gave no readable time is not kept:
+    it could not be aged.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    provider: str | None
+    window: str | None
+    limit: str | None
+    used_fraction: NonNegativeFloat | None
+    resets_at: AwareDatetime | None
+    window_minutes: PositiveInt | None
+    exhausted: bool
+    observed_at: AwareDatetime
 
 
 class RunsSummaryReply(HelperReplyBase):

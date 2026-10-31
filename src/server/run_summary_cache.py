@@ -30,7 +30,8 @@ append-only journal contract; the on-disk cache has the same limit.
 
 Light like the helper: the standard library, ``vs_project.api`` and the light ``server`` modules.
 
-Public surface: ``summarize_journal``, ``HEAD_BYTES``, ``TAIL_BYTES``.
+Public surface: ``summarize_journal``, ``SummaryReader``, ``JournalFingerprint``, ``journal_fingerprint``,
+``HEAD_BYTES``, ``TAIL_BYTES``.
 """
 
 from __future__ import annotations
@@ -52,6 +53,7 @@ from pydantic import (
 from server.host_run_summary import (
     RUN_SUMMARY_FILE,
     InputGate,
+    RateLimitReading,
     RunTerminal,
     SpanTokens,
     TokenTally,
@@ -108,6 +110,7 @@ class _CachedState(BaseModel):
     input_gates: tuple[InputGate, ...]
     gates_settled: bool
     terminal: RunTerminal | None
+    rate_limits: tuple[RateLimitReading, ...]
 
     @model_validator(mode="after")
     def _is_a_fold(self) -> _CachedState:
@@ -174,6 +177,53 @@ def summarize_journal(journal: Path) -> Summarized:
     """
     summarized, _ = _summarize_journal(journal, None)
     return summarized
+
+
+@dataclass(frozen=True)
+class JournalFingerprint:
+    """Which prefix of a journal something derived from it describes: its complete lines, digested."""
+
+    boundary: int
+    head_sha256: str
+    tail_sha256: str
+
+
+def journal_fingerprint(journal: Path, boundary: int | None = None) -> JournalFingerprint | None:
+    """The fingerprint of ``journal`` up to ``boundary``, by default the end of its last complete line.
+
+    The same digests the summary cache records, so a file derived from the fold can say which
+    prefix it describes. ``None`` when the journal cannot be read, is shorter than ``boundary``,
+    or ``boundary`` does not end a line.
+    """
+    try:
+        with journal.open("rb") as stream:
+            end = _last_line_end(stream) if boundary is None else boundary
+            if end is None:
+                return None
+            if end > 0:
+                stream.seek(end - 1)
+                if stream.read(1) != b"\n":
+                    return None
+            fingerprints = _fingerprints(stream, end)
+    except OSError:
+        return None
+    if fingerprints is None:
+        return None
+    return JournalFingerprint(end, *fingerprints)
+
+
+def _last_line_end(journal: BinaryIO) -> int:
+    """The offset just past the journal's last newline; 0 when it holds no complete line."""
+    size = journal.seek(0, 2)
+    end = size
+    while end > 0:
+        start = max(0, end - TAIL_BYTES)
+        journal.seek(start)
+        found = journal.read(end - start).rfind(b"\n")
+        if found >= 0:
+            return start + found + 1
+        end = start
+    return 0
 
 
 def _cache_identity(cache: Path) -> tuple[int, int, int, int, int] | None:
@@ -262,6 +312,7 @@ def _restore(cache: Path, journal: BinaryIO) -> tuple[RunSummaryFold, int] | Non
                 input_gates=state.input_gates,
                 gates_settled=state.gates_settled,
                 terminal=state.terminal,
+                rate_limits=state.rate_limits,
             )
         ),
         covered.boundary,
@@ -296,6 +347,7 @@ def _keep(cache: Path, journal: BinaryIO, fold: RunSummaryFold, boundary: int, c
             "input_gates": [gate.model_dump(mode="json") for gate in state.input_gates],
             "gates_settled": state.gates_settled,
             "terminal": None if state.terminal is None else state.terminal.model_dump(mode="json"),
+            "rate_limits": [reading.model_dump(mode="json") for reading in state.rate_limits],
         },
     }
     contents = json.dumps(document, separators=(",", ":"), ensure_ascii=False).encode()

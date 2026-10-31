@@ -1,0 +1,238 @@
+syntax = "proto3";
+package vibesys.host.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/store/v1/agent_attrs.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1";
+
+// What the Usage screen reads and a host keeps about usage: the values the `UsageSummary` reply
+// and the host's own files (`run-usage.pb` beside a run's journal, `rates.pb`, `prices.pb` and
+// `source-id` in the host's usage state directory) share. A file here is a cache of the journals,
+// the transcripts and the price document it was built from, except `prices.pb` and `source-id`,
+// which are the only copy of what a person set.
+
+// How the estimate of one series was reached, in the order the host tries them: an override the
+// person set, the cost the provider reported, the cost recorded for an older turn, the rate of the
+// model at today's list price, else none.
+enum UsageEstimateSource {
+  USAGE_ESTIMATE_SOURCE_UNSPECIFIED = 0;
+  USAGE_ESTIMATE_SOURCE_OVERRIDE = 1;
+  USAGE_ESTIMATE_SOURCE_REPORTED = 2;
+  // A turn recorded before its cost basis was: its recorded cost, marked approximate.
+  USAGE_ESTIMATE_SOURCE_RECORDED = 3;
+  USAGE_ESTIMATE_SOURCE_MODEL = 4;
+  USAGE_ESTIMATE_SOURCE_UNPRICED = 5;
+}
+
+// Whose work a series counts.
+enum UsageOrigin {
+  USAGE_ORIGIN_UNSPECIFIED = 0;
+  // A turn of a VibeSys run, from the run's journal.
+  USAGE_ORIGIN_RUN = 1;
+  // A person's CLI use on the host outside any run, from the provider's transcripts.
+  USAGE_ORIGIN_OUTSIDE_RUNS = 2;
+}
+
+enum UsageSourceKind {
+  USAGE_SOURCE_KIND_UNSPECIFIED = 0;
+  USAGE_SOURCE_KIND_JOURNAL = 1;
+  USAGE_SOURCE_KIND_TRANSCRIPTS = 2;
+}
+
+// How completely a source was read.
+enum UsageSourceStatus {
+  USAGE_SOURCE_STATUS_UNSPECIFIED = 0;
+  USAGE_SOURCE_STATUS_OK = 1;
+  // There is nothing to read: no runs, or no transcript directory.
+  USAGE_SOURCE_STATUS_MISSING = 2;
+  // Read in part: work is left for a later call, or a file was left out.
+  USAGE_SOURCE_STATUS_PARTIAL = 3;
+  USAGE_SOURCE_STATUS_FAILED = 4;
+}
+
+// Where the rates behind the estimates came from.
+enum UsagePricingStatus {
+  USAGE_PRICING_STATUS_UNSPECIFIED = 0;
+  // Fetched within the last day.
+  USAGE_PRICING_STATUS_FRESH = 1;
+  // Older, or the latest refresh failed: the last good document.
+  USAGE_PRICING_STATUS_CACHED = 2;
+  // No usable document: the table pinned in the release.
+  USAGE_PRICING_STATUS_BUNDLED = 3;
+}
+
+// US dollars per million tokens for one model at one speed. Zero is a price: a free model.
+message UsageRate {
+  double input = 1 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+    lte: 1000000
+  }];
+  double output = 2 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+    lte: 1000000
+  }];
+  double cache_read = 3 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+    lte: 1000000
+  }];
+  double cache_write = 4 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+    lte: 1000000
+  }];
+  // Writes with a one-hour lifetime; absent when the price of `cache_write` applies.
+  optional double cache_write_1h = 5 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+    lte: 1000000
+  }];
+}
+
+// A price a person set for one model id. It prices the model at every speed.
+message UsageRateOverride {
+  string model = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 512
+  }];
+  UsageRate rate = 2 [(buf.validate.field).required = true];
+}
+
+// `from` is priced as `to`: a model the price list does not know, named after one it does.
+message UsageAlias {
+  string from = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 512
+  }];
+  string to = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 512
+  }];
+}
+
+// What a person set about prices, shared by every client of the host. Persisted as `prices.pb`.
+message UsagePriceBook {
+  // Counts up with each save; a save names the revision it was made against.
+  uint64 revision = 1;
+  repeated UsageRateOverride overrides = 2 [(buf.validate.field).repeated.max_items = 512];
+  repeated UsageAlias aliases = 3 [(buf.validate.field).repeated.max_items = 512];
+}
+
+// How current the price list is.
+message UsagePricing {
+  UsagePricingStatus status = 1;
+  optional google.protobuf.Timestamp fetched_at = 2;
+  uint32 known_models = 3;
+  // Whether a refresh would fetch now.
+  bool refresh_due = 4;
+  // The day the table was read, as `YYYY-MM-DD`.
+  string checked_on = 5 [(buf.validate.field).string.max_bytes = 16];
+}
+
+// The last document the host fetched, as fetched, and when. Persisted as `rates.pb`.
+message UsageRateSnapshot {
+  option (buf.validate.message).cel = {
+    id: "usage_rate_snapshot.fetched"
+    message: "a snapshot has a fetch time exactly when it has a document"
+    expression: "has(this.document) == has(this.fetched_at)"
+  };
+  optional bytes document = 1 [(buf.validate.field).bytes.max_len = 33554432];
+  optional google.protobuf.Timestamp fetched_at = 2;
+  optional google.protobuf.Timestamp last_attempt_at = 3;
+}
+
+// A random identity written once into a host's usage state directory, so two profiles over one
+// state home, or two machines on one shared file system, report the same source. Persisted as
+// `source-id`.
+message UsageSourceIdentity {
+  string id = 1 [(buf.validate.field).string.pattern = "^[0-9a-f]{32}$"];
+}
+
+// One limit window a provider reported during a turn, as the run's journal recorded it.
+message LimitReading {
+  string provider = 1 [(buf.validate.field).string.max_bytes = 256];
+  // The provider's own window words (for example `five_hour`), kept as reported.
+  optional string window = 2 [(buf.validate.field).string.max_bytes = 256];
+  optional string limit = 3 [(buf.validate.field).string.max_bytes = 256];
+  optional double used_fraction = 4 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  optional google.protobuf.Timestamp resets_at = 5;
+  optional uint32 window_minutes = 6;
+  bool exhausted = 7;
+  // When the journal recorded the reading.
+  google.protobuf.Timestamp observed_at = 8;
+}
+
+// One run's usage, rolled up from its journal to the quarter hour. A cache beside the journal,
+// persisted as `run-usage.pb`: it is valid when its version is the writer's and its journal
+// identity is the journal's now, and any other file is rebuilt.
+message RunUsageRollup {
+  uint32 version = 1;
+  JournalIdentity journal = 2 [(buf.validate.field).required = true];
+  repeated UsageRollupRow rows = 3;
+  // The providers' ids of the conversations the run's turns ran in, sorted and distinct.
+  repeated string provider_session_ids = 4;
+  // Whether every turn of the run named its conversation. A run that did not may have turns
+  // whose transcripts the ids cannot exclude.
+  bool session_ids_complete = 5;
+  optional google.protobuf.Timestamp first_turn_at = 6;
+  optional google.protobuf.Timestamp last_turn_at = 7;
+  // The latest reading of each window the run saw, in order of first sight.
+  repeated LimitReading last_limits = 8;
+  // When each kept idea landed as the best so far, in order.
+  repeated google.protobuf.Timestamp new_bests = 9;
+  // Turns the journal gave no end time, which no window can place.
+  uint32 untimed_turns = 10;
+}
+
+// Which prefix of a journal a derived file describes: the bytes up to the end of its last
+// complete line, and the digests of its first and last bytes before that end.
+message JournalIdentity {
+  uint64 boundary = 1;
+  string head_sha256 = 2 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  string tail_sha256 = 3 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+}
+
+// The usage of one run's turns that ended in one quarter hour, for one model.
+//
+// A row never mixes turns priced in different ways (`basis`), so its cost is linear in its tokens
+// and a reader can price a sum of rows as it would each turn.
+message UsageRollupRow {
+  // The index of the quarter hour the turns ended in: epoch seconds over 900.
+  int64 quarter = 1;
+  // The provider that ran the turn; empty when the journal does not say.
+  string provider = 2 [(buf.validate.field).string.max_bytes = 256];
+  // The model id as the provider reported it, raw; empty when the journal does not say.
+  string model = 3 [(buf.validate.field).string.max_bytes = 512];
+  vibesys.store.v1.UsageSpeed speed = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The role of the agent that ran the turn; empty when the journal does not say.
+  string role = 5 [(buf.validate.field).string.max_bytes = 256];
+  vibesys.store.v1.UsageCostBasis basis = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Input counts cache reads and writes, as everywhere; reasoning is part of output.
+  uint64 input = 7;
+  uint64 cache_read = 8;
+  uint64 cache_write = 9;
+  uint64 cache_write_1h = 10;
+  uint64 output = 11;
+  uint64 reasoning = 12;
+  // The cost recorded for the row's tokens: the sum over its turns that have one. Absent when
+  // none does.
+  optional double recorded_usd = 13 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  // The turns the row counts: a turn counts once, on its primary model's row.
+  uint32 turns = 14;
+}

@@ -46,6 +46,7 @@ const (
 	HostOperationsService_CreateChatSession_FullMethodName  = "/vibesys.api.v1.HostOperationsService/CreateChatSession"
 	HostOperationsService_ListRunDigests_FullMethodName     = "/vibesys.api.v1.HostOperationsService/ListRunDigests"
 	HostOperationsService_UsageWindow_FullMethodName        = "/vibesys.api.v1.HostOperationsService/UsageWindow"
+	HostOperationsService_UsageSummary_FullMethodName       = "/vibesys.api.v1.HostOperationsService/UsageSummary"
 )
 
 // HostOperationsServiceClient is the client API for HostOperationsService service.
@@ -97,6 +98,8 @@ type HostOperationsServiceClient interface {
 	// the saved-run listing.
 	ListRunDigests(ctx context.Context, in *v1.ListRunDigestsRequest, opts ...grpc.CallOption) (*v1.ListRunDigestsResponse, error)
 	UsageWindow(ctx context.Context, in *v1.UsageWindowRequest, opts ...grpc.CallOption) (*v1.UsageWindowResponse, error)
+	// The Usage screen's read: one call per host, for every project, in the buckets the caller cuts.
+	UsageSummary(ctx context.Context, in *v1.UsageSummaryRequest, opts ...grpc.CallOption) (*v1.UsageSummaryResponse, error)
 }
 
 type hostOperationsServiceClient struct {
@@ -385,6 +388,16 @@ func (c *hostOperationsServiceClient) UsageWindow(ctx context.Context, in *v1.Us
 	return out, nil
 }
 
+func (c *hostOperationsServiceClient) UsageSummary(ctx context.Context, in *v1.UsageSummaryRequest, opts ...grpc.CallOption) (*v1.UsageSummaryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.UsageSummaryResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_UsageSummary_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // HostOperationsServiceServer is the server API for HostOperationsService service.
 // All implementations must embed UnimplementedHostOperationsServiceServer
 // for forward compatibility.
@@ -434,6 +447,8 @@ type HostOperationsServiceServer interface {
 	// the saved-run listing.
 	ListRunDigests(context.Context, *v1.ListRunDigestsRequest) (*v1.ListRunDigestsResponse, error)
 	UsageWindow(context.Context, *v1.UsageWindowRequest) (*v1.UsageWindowResponse, error)
+	// The Usage screen's read: one call per host, for every project, in the buckets the caller cuts.
+	UsageSummary(context.Context, *v1.UsageSummaryRequest) (*v1.UsageSummaryResponse, error)
 	mustEmbedUnimplementedHostOperationsServiceServer()
 }
 
@@ -521,6 +536,9 @@ func (UnimplementedHostOperationsServiceServer) ListRunDigests(context.Context, 
 }
 func (UnimplementedHostOperationsServiceServer) UsageWindow(context.Context, *v1.UsageWindowRequest) (*v1.UsageWindowResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UsageWindow not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) UsageSummary(context.Context, *v1.UsageSummaryRequest) (*v1.UsageSummaryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UsageSummary not implemented")
 }
 func (UnimplementedHostOperationsServiceServer) mustEmbedUnimplementedHostOperationsServiceServer() {}
 func (UnimplementedHostOperationsServiceServer) testEmbeddedByValue()                               {}
@@ -997,6 +1015,24 @@ func _HostOperationsService_UsageWindow_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _HostOperationsService_UsageSummary_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.UsageSummaryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).UsageSummary(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_UsageSummary_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).UsageSummary(ctx, req.(*v1.UsageSummaryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // HostOperationsService_ServiceDesc is the grpc.ServiceDesc for HostOperationsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1099,6 +1135,10 @@ var HostOperationsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UsageWindow",
 			Handler:    _HostOperationsService_UsageWindow_Handler,
+		},
+		{
+			MethodName: "UsageSummary",
+			Handler:    _HostOperationsService_UsageSummary_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

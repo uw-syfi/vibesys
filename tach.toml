@@ -298,6 +298,45 @@ path = "server.host_run_dashboard"
 depends_on = []
 
 [[modules]]
+# A run's usage rolled up to the quarter hour, and the one path from a journal to a rollup: pure,
+# over the journal and the file behind two interfaces. Light, loaded on the first usage read.
+path = "server.usage_rollup"
+depends_on = ["server.host_run_summary", "server.run_summary", "server.run_usage", "vs_proto"]
+
+[[interfaces]]
+from = ["server.usage_rollup"]
+expose = ["QUARTER_SECONDS", "ROLLUP_FILE", "ROLLUP_VERSION", "Budget", "FoldedJournal", "JournalIdentity", "Outcome", "RollupRead", "RollupStore", "UsageJournal", "build_rollup", "is_fresh", "quarter_of", "read_or_build"]
+
+[[modules]]
+# What the Usage screen shows for one host: rollups cut into the caller's buckets, priced, and
+# folded to fit the reply's bound. A pure function. Light, loaded on the first usage read.
+path = "server.usage_summary"
+depends_on = ["server.usage_rollup", "vs_proto"]
+
+[[interfaces]]
+from = ["server.usage_summary"]
+expose = ["MAX_AGENT_ROWS", "MAX_PROVIDERS", "MAX_RUN_ROWS", "OTHER", "USAGE_REPLY_MAX_BYTES", "Priced", "Pricing", "RunInput", "SummaryInputs", "summarize"]
+
+[[modules]]
+# What a row's tokens would cost, in the estimate order. Pure. Light, loaded on the first usage read.
+path = "server.usage_pricing"
+depends_on = ["server.usage_summary", "vs_proto"]
+
+[[interfaces]]
+from = ["server.usage_pricing"]
+expose = ["RecordedPricing"]
+
+[[modules]]
+# Reading a host's usage from disk: the journals behind the rollups and the byte budget that
+# bounds a read. Light, loaded on the first usage read.
+path = "server.usage_scan"
+depends_on = ["server.host_api", "server.host_run_dashboard", "server.run_summary", "server.run_summary_cache", "server.usage_rollup", "server.usage_summary", "vs_project", "vs_proto"]
+
+[[interfaces]]
+from = ["server.usage_scan"]
+expose = ["COLD_BUDGET_BYTES", "CollectedRuns", "FileRollupStore", "JsonlUsageJournal", "UsageProjects", "collect_runs", "source_identity", "usage_summary"]
+
+[[modules]]
 # What runs spent in a window, summed from their usage records: a pure function. Light, and
 # loaded by the host helper on the first usage.window request, not for hello.
 path = "server.usage_window"
@@ -2200,7 +2239,7 @@ expose = ["pause_now", "serve_terminate", "terminate_run"]
 
 [[modules]]
 path = "server.host_operation_reads"
-depends_on = ["server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_machine_facts", "vs_proto", "vibesys.api.host_operations", "server.host_run_reads", "server.host_run_wire", "server.host_run_summary", "server.registry", "server.run_summary", "vs_sim.api"]
+depends_on = ["server.usage_pricing", "server.usage_scan", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_machine_facts", "vs_proto", "vibesys.api.host_operations", "server.host_run_reads", "server.host_run_wire", "server.host_run_summary", "server.registry", "server.run_summary", "vs_sim.api"]
 
 [[interfaces]]
 from = ["server.host_operation_reads"]

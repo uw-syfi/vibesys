@@ -278,6 +278,31 @@ def accept_usage_window(request: pb.UsageWindowRequest) -> AcceptedRequest[pb.Us
     return UsageWindow.accept(request)
 
 
+UsageSummary = Operation(
+    "UsageSummary",
+    44,
+    44,
+    44,
+    25000,
+    5000,
+    1,
+    2,
+    1,
+    1,
+    None,
+    None,
+    pb.UsageSummaryRequest,
+    pb.UsageSummaryResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_usage_summary(
+    request: pb.UsageSummaryRequest,
+) -> AcceptedRequest[pb.UsageSummaryRequest]:
+    return UsageSummary.accept(request)
+
+
 CreateExample = Operation(
     "CreateExample",
     34,
@@ -516,6 +541,7 @@ OPERATIONS: tuple[Operation, ...] = (
     ListAgentLogins,
     ListRunDigests,
     UsageWindow,
+    UsageSummary,
     CreateExample,
     CopyProject,
     PutCluster,
@@ -543,6 +569,7 @@ class Handlers:
     list_agent_logins: Callable[[pb.ListAgentLoginsRequest], pb.ListAgentLoginsResponse]
     list_run_digests: Callable[[pb.ListRunDigestsRequest], pb.ListRunDigestsResponse]
     usage_window: Callable[[pb.UsageWindowRequest], pb.UsageWindowResponse]
+    usage_summary: Callable[[pb.UsageSummaryRequest], pb.UsageSummaryResponse]
 
     def dispatch(self, request: AcceptedRequest) -> bytes:
         match request.operation.operation_id:
@@ -589,6 +616,10 @@ class Handlers:
             case 42:
                 return UsageWindow.validate_response(
                     request, self.usage_window(UsageWindow.request_value(request))
+                )
+            case 44:
+                return UsageSummary.validate_response(
+                    request, self.usage_summary(UsageSummary.request_value(request))
                 )
             case _:
                 raise ValueError("unknown operation id")
@@ -752,6 +783,7 @@ READS: dict[str, Operation] = {
     "list_agent_logins": ListAgentLogins,
     "list_run_digests": ListRunDigests,
     "usage_window": UsageWindow,
+    "usage_summary": UsageSummary,
 }
 READ_CALLS: tuple[HostCall, ...] = (
     HostCall("list_tasks", "list-tasks", 10, 10, 10000, 5000),
@@ -765,6 +797,7 @@ READ_CALLS: tuple[HostCall, ...] = (
     HostCall("list_agent_logins", "list-agent-logins", 19, 19, 25000, 5000),
     HostCall("list_run_digests", "list-run-digests", 41, 41, 25000, 5000),
     HostCall("usage_window", "usage-window", 42, 42, 25000, 5000),
+    HostCall("usage_summary", "usage-summary", 44, 44, 25000, 5000),
 )
 MUTATIONS: dict[str, Operation] = {
     "create_example": CreateExample,

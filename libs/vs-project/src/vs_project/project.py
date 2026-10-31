@@ -262,6 +262,17 @@ class Project:
         return publish_run_link(_state_home() / "runs" / run_id, directory)
 
     @staticmethod
+    def usage_state_directory() -> Path:
+        """The host's directory for what the Usage screen keeps.
+
+        It holds the price documents, the prices a person set, the transcript scan and the host's
+        source identity. It lies in the state home beside the run index, so it follows the home a
+        profile or a shared file system selects. Nothing is created: the caller creates it when it
+        writes.
+        """
+        return _state_home() / "usage"
+
+    @staticmethod
     def indexed_run_directories() -> tuple[Path, ...]:
         """List all host discovery entries, including damaged and dangling entries.
 

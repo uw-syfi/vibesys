@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
@@ -234,8 +234,28 @@ _REQUESTS: dict[str, Callable[[str], ReadRequest]] = {
             ),
         )
     ),
+    "usage_summary": lambda project: ReadRequest(
+        method=Oneof(
+            "usage_summary",
+            pb.UsageSummaryRequest(
+                request_id="r",
+                projects=[project],
+                edges=[
+                    Timestamp.from_seconds(1_790_000_100),
+                    Timestamp.from_seconds(1_790_086_500),
+                ],
+                now=Timestamp.from_seconds(1_790_086_400),
+            ),
+        )
+    ),
 }
 
+
+_LISTING_READS = {"usage_summary"}
+"""The reads whose answer is a sum over a project's runs, so they list the runs' log directories.
+
+They ask git nothing, so their git work still does not grow with the project: only the
+listing of log directories, which every other read is refused, is allowed them."""
 
 _STREAMS = {"login", "stream_saved_runs"}
 """The registered streams: login asks git nothing, and the listing is held to one pass below."""
@@ -268,7 +288,7 @@ def _git_work(tmp_path: Path, slot: str, runs: int) -> tuple[_GitWork, ReadRespo
     catalog = example_checkout(tmp_path / f"catalog-{runs}")
     work = _GitWork()
     request = _envelope(_REQUESTS[slot](str(project)))
-    with _unlistable_run_directories(project):
+    with _unlistable_run_directories(project) if slot not in _LISTING_READS else nullcontext():
         reply = answer_registered_read(
             slot.replace("_", "-"),
             request.to_binary(),

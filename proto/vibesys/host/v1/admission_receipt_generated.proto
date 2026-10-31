@@ -24,6 +24,7 @@ message AcceptedOperation {
     ListAgentLoginsRequest list_agent_logins = 19;
     ListRunDigestsRequest list_run_digests = 41;
     UsageWindowRequest usage_window = 42;
+    UsageSummaryRequest usage_summary = 44;
     CreateExampleRequest create_example = 34;
     CopyProjectRequest copy_project = 35;
     PutClusterRequest put_cluster = 31;
@@ -52,6 +53,7 @@ message OperationResult {
     ListAgentLoginsResponse list_agent_logins = 19;
     ListRunDigestsResponse list_run_digests = 41;
     UsageWindowResponse usage_window = 42;
+    UsageSummaryResponse usage_summary = 44;
     CreateExampleResponse create_example = 34;
     CopyProjectResponse copy_project = 35;
     PutClusterResponse put_cluster = 31;
