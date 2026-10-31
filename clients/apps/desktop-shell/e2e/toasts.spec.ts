@@ -3,8 +3,11 @@
  * collapsed, below the title bar and clear of the rail; a state the screen holds is one line.
  * `TOASTS_SCREENSHOTS` names a directory for the window screenshots of the app check.
  */
+import {mkdirSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
+import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
@@ -56,8 +59,14 @@ async function open(page: Page, width: number, height = 700, refused = true): Pr
   await page.goto('./shell.html');
 }
 
+const sheet: SheetEntry[] = [];
+
+/** The app window only, never the screen: the page is the window's content. */
 async function shoot(page: Page, name: string): Promise<void> {
-  if (SHOTS !== undefined) await page.screenshot({path: `${SHOTS}/${name}.png`});
+  if (SHOTS === undefined) return;
+  mkdirSync(SHOTS, {recursive: true});
+  await page.screenshot({path: join(SHOTS, `${name}.png`)});
+  sheet.push({name, file: `${name}.png`});
 }
 
 const toast = (page: Page) => page.getByRole('alert');
@@ -132,3 +141,11 @@ for (const width of [1440, 660]) {
     await expect(toast(page)).toHaveCount(0);
   });
 }
+
+test('toasts and banners app-window contact sheet', async ({page}) => {
+  if (SHOTS === undefined || sheet.length === 0) return;
+  writeFileSync(join(SHOTS, 'toasts-contact-sheet.html'), contactSheetHtml(sheet, 2));
+  await page.goto(`file://${join(SHOTS, 'toasts-contact-sheet.html')}`);
+  await page.setViewportSize({width: 1500, height: 900});
+  await page.screenshot({path: join(SHOTS, 'toasts-contact-sheet.png'), fullPage: true});
+});

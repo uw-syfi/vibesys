@@ -510,6 +510,7 @@ test('the scrubber replays the run’s ideas at an earlier event and returns to 
     ],
   );
   await transitionJourney(page, 'trace', 'stopped');
+  await page.locator('.vs-banner').getByRole('button', {name: 'Show details'}).click();
   await expect(page.getByText('Stopped by you.')).toBeVisible();
   await check(page, 'ink-run-ended');
   // The banner's View logs is a zoom the address follows too.
