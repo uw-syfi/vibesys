@@ -1,5 +1,6 @@
 /** A fake `SubscriptionPort`: the test plays main, sending updates and ending the port. */
 export {type GpuReading, machineEntry, type Readings} from './entries.js';
+
 import type {HostKey} from '@vibesys/hosts';
 import type {SubscribeRequest} from '@vibesys/proto';
 import type {SubscriptionPort, SubscriptionUpdate} from '../index.js';

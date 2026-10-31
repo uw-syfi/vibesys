@@ -1,5 +1,5 @@
-import {type FarSide, subscriptionPortContract} from './testing/port-contract.js';
 import {FakeSubscriptionPort} from './testing/index.js';
+import {type FarSide, subscriptionPortContract} from './testing/port-contract.js';
 
 /** The Fake as a rig: the test is main, and speaks for a host by sending to its held calls. */
 subscriptionPortContract('FakeSubscriptionPort', () => {
