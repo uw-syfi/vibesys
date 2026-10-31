@@ -165,6 +165,57 @@ def test_a_recorded_basis_is_never_replaced_by_a_legacy_one(basis: str, cost: fl
     assert all(row.basis is UsageCostBasis(basis) for row in usage_rows(record))
 
 
+_UNPRICED_ROW = {
+    "model": "gpt-0-unpriced",
+    "input_tokens": 10,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "cache_creation_1h_input_tokens": 0,
+    "output_tokens": 1,
+    "reasoning_output_tokens": 0,
+    "turns": 1,
+    "recorded_usd": None,
+    "speed": None,
+    "primary": True,
+}
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        pytest.param(
+            {"cost_basis": "provider_reported", "total_cost_usd": 0.5},
+            UsageCostBasis.PROVIDER_REPORTED,
+            id="opencode reports a cost",
+        ),
+        pytest.param(
+            {"cost_basis": "not_reported", "input_tokens": 3},
+            UsageCostBasis.NOT_REPORTED,
+            id="gemini reports none",
+        ),
+        pytest.param(
+            {"cost_basis": "unknown_model", "by_model": [_UNPRICED_ROW]},
+            UsageCostBasis.UNKNOWN_MODEL,
+            id="codex on a model with no price",
+        ),
+        pytest.param(
+            {"cost_basis": "not_reported", "total_cost_usd": 0.5},
+            UsageCostBasis.NOT_REPORTED,
+            id="a cost the library gave no source for",
+        ),
+    ],
+)
+def test_a_new_line_is_never_read_as_an_old_one_whatever_its_provider_reported(
+    data: dict[str, Any], expected: UsageCostBasis
+) -> None:
+    """Each of these once recorded a null basis, which reads as a line from before the field."""
+    record = _record(usage_line(data))
+
+    assert basis_of(record) is expected
+    assert all(row.basis is expected for row in usage_rows(record))
+    assert expected not in {UsageCostBasis.LEGACY_RECORDED, UsageCostBasis.LEGACY_UNPRICED}
+
+
 def test_the_basis_vocabulary_is_the_protos_by_name() -> None:
     proto = {member.name for member in p.UsageCostBasis if member != p.UsageCostBasis.UNSPECIFIED}
 

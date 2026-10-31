@@ -1,5 +1,5 @@
 {
- "description": "Five turns of a synthetic run, values chosen by hand: a Claude turn with a subagent on another model at fast speed, a turn with a model the price table does not know, a turn whose cost the CLI reported with no split, a Codex turn with its one row, and a line recorded before by_model, cost_basis and provider_session_id existed. usage_records(events) returns exactly records.",
+ "description": "Six turns of a synthetic run, values chosen by hand: a Claude turn with a subagent on another model at fast speed, a turn with a model the price table does not know, a turn whose cost the CLI reported with no split, a Codex turn with its one row, a Gemini turn that reported no cost, and a line recorded before by_model, cost_basis and provider_session_id existed. usage_records(events) returns exactly records.",
  "events": [
   {
    "sequence": 1,
@@ -357,6 +357,56 @@
     "total_cost_usd": 0.01,
     "duration_ms": 9000
    }
+  },
+  {
+   "sequence": 12,
+   "run_id": "20261030-090000-0a1b2c3d-queue-rs-20261030-090000",
+   "timestamp": "2026-10-30T09:11:00Z",
+   "type": "agent_execution_started",
+   "text": "",
+   "status": "active",
+   "round_label": "reviewer-turn",
+   "agent_kind": "reviewer",
+   "execution_id": "inv:reviewer:000001:0",
+   "data": {
+    "kind": "agent_execution_started",
+    "stage": "reviewer",
+    "attempt": null,
+    "system_prompt": "",
+    "user_prompt": "",
+    "activity": {
+     "kind": "agent_execution_activity_changed",
+     "mode": "thinking",
+     "summary": "reviewer is working",
+     "tool": null
+    },
+    "provider": "gemini",
+    "model": "gemini-3-pro"
+   }
+  },
+  {
+   "sequence": 13,
+   "run_id": "20261030-090000-0a1b2c3d-queue-rs-20261030-090000",
+   "timestamp": "2026-10-30T09:12:00Z",
+   "type": "turn_usage_recorded",
+   "text": "",
+   "status": null,
+   "round_label": "reviewer-turn",
+   "agent_kind": "reviewer",
+   "execution_id": "inv:reviewer:000001:0",
+   "data": {
+    "kind": "turn_usage_recorded",
+    "span_id": null,
+    "input_tokens": 4000,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 1000,
+    "output_tokens": 250,
+    "reasoning_output_tokens": 0,
+    "duration_ms": 20000,
+    "cost_basis": "not_reported",
+    "provider_session_id": "gemini-session-1",
+    "by_model": []
+   }
   }
  ],
  "records": [
@@ -557,6 +607,32 @@
    "cost_basis": null,
    "by_model": [],
    "provider_session_id": null
+  },
+  {
+   "run_id": "20261030-090000-0a1b2c3d-queue-rs-20261030-090000",
+   "execution_id": "inv:reviewer:000001:0",
+   "span_id": null,
+   "round_label": "reviewer-turn",
+   "role": "reviewer",
+   "harness": "gemini",
+   "model": "gemini-3-pro",
+   "client": null,
+   "reasoning_effort": null,
+   "harness_version": null,
+   "started_at": "2026-10-30T09:11:00Z",
+   "ended_at": "2026-10-30T09:12:00Z",
+   "tokens": {
+    "input": 4000,
+    "cache_read": 1000,
+    "cache_write": 0,
+    "output": 250,
+    "reasoning": 0
+   },
+   "cost_usd": null,
+   "duration_ms": 20000,
+   "cost_basis": "not_reported",
+   "by_model": [],
+   "provider_session_id": "gemini-session-1"
   }
  ]
 }

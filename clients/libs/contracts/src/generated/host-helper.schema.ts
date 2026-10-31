@@ -8246,7 +8246,8 @@ const hostHelperSchema: Record<string, unknown> = {
               "enum": [
                 "price_table",
                 "provider_reported",
-                "unknown_model"
+                "unknown_model",
+                "not_reported"
               ],
               "type": "string"
             },

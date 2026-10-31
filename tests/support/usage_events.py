@@ -8,7 +8,7 @@ from hypothesis import strategies as st
 
 MODELS = ("opus", "opus[1m]", "haiku", "sonnet", "gpt-6.1-sol", "vendor/odd", "mystery")
 SPEEDS = (None, "standard", "fast", "ultrafast")
-BASES = ("price_table", "provider_reported", "unknown_model")
+BASES = ("price_table", "provider_reported", "unknown_model", "not_reported")
 
 
 @st.composite

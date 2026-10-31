@@ -22,7 +22,7 @@ dependencies = [
     "protobuf-py==0.6.0",
     "protobuf==6.33.5",
     "protovalidate==2.0.0",
-    "agentshim>=0.24.1,<0.25",
+    "agentshim>=0.24.2,<0.25",
     "cbor2<6",
     "cryptography<50",
     "jinja2>=3.1",

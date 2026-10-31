@@ -59,6 +59,7 @@ def _details(draw: st.DrawFn) -> p.TurnUsageDetail:
                     p.UsageCostBasis.PRICE_TABLE,
                     p.UsageCostBasis.PROVIDER_REPORTED,
                     p.UsageCostBasis.UNKNOWN_MODEL,
+                    p.UsageCostBasis.NOT_REPORTED,
                 ]
             )
         ),
@@ -203,4 +204,5 @@ def test_the_vocabulary_is_closed_over_the_members_the_journal_writes() -> None:
         "UNKNOWN_MODEL",
         "LEGACY_RECORDED",
         "LEGACY_UNPRICED",
+        "NOT_REPORTED",
     }
