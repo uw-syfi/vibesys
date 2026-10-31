@@ -3232,7 +3232,6 @@ dependencies = [
     { name = "protobuf-py" },
     { name = "pydantic" },
     { name = "vs-proto" },
-    { name = "vs-runlog" },
 ]
 
 [package.metadata]
@@ -3240,7 +3239,6 @@ requires-dist = [
     { name = "protobuf-py", specifier = "==0.6.0" },
     { name = "pydantic", specifier = ">=2" },
     { name = "vs-proto", editable = "libs/vs-proto" },
-    { name = "vs-runlog", editable = "libs/vs-runlog" },
 ]
 
 [[package]]
