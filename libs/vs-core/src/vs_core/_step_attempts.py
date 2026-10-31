@@ -7,7 +7,14 @@ from typing import TYPE_CHECKING
 from ._request_recovery import is_open
 from .types.common import EventId, Observation, ObservationStatus
 from .types.records import RequestObserved, RequestPhase, RequestRecord
-from .types.steps import Cancelled, Failed, Finished, StepAttempts
+from .types.steps import (
+    Cancelled,
+    Failed,
+    Finished,
+    Interruption,
+    StepAttempts,
+    StepsState,
+)
 
 if TYPE_CHECKING:
     from .types.common import RequestId
@@ -25,6 +32,19 @@ def open_record(state: CoreState, tag: RequestId) -> RequestRecord:
     return rows[0]
 
 
+def epoch_opened(state: CoreState, epoch: int) -> CoreState:
+    """``state`` in epoch ``epoch``, with every attempt of an earlier epoch ended.
+
+    A run has one writer, so a record of a later epoch proves the process that ran the earlier
+    epoch's attempts dead. They end without a result and count against the retry bound: the
+    attempt may have run, and a step that kills its process every time must end as a typed failure.
+    """
+    if epoch <= state.steps.epoch:
+        return state
+    rows = tuple(row.model_copy(update={"ended": True}) for row in state.steps.attempts)
+    return state.model_copy(update={"steps": StepsState(epoch=epoch, attempts=rows)})
+
+
 def started(
     state: CoreState, tag: RequestId, attempt: int, request: object, deadline: Until
 ) -> CoreState:
@@ -32,7 +52,7 @@ def started(
     record = open_record(state, tag)
     previous = state.steps.of(tag)
     expected = 1 if previous is None else previous.started + 1
-    if attempt != expected or record.request != request:
+    if attempt != expected or record.request != request or (previous and not previous.ended):
         message = f"the log starts attempt {attempt} of step {tag.root}, not its attempt {expected}"
         raise ValueError(message)
     if record.phase is RequestPhase.PREPARED:
@@ -44,24 +64,20 @@ def started(
             }
         )
     row = StepAttempts(
-        tag=tag,
-        started=attempt,
-        epoch=state.steps.epoch,
-        interrupted=0 if previous is None else previous.interrupted,
+        tag=tag, started=attempt, uncharged=0 if previous is None else previous.uncharged
     )
     return _with(_replaced(state, record), tag, row)
 
 
-def interrupted(state: CoreState, tag: RequestId, attempt: int) -> CoreState:
-    """``state`` with the running attempt of ``tag`` ended by an interruption, not charged."""
+def interrupted(state: CoreState, tag: RequestId, attempt: int, why: Interruption) -> CoreState:
+    """``state`` with the running attempt of ``tag`` ended by ``why``, charged only if it raised."""
     open_record(state, tag)
     row = state.steps.of(tag)
     if row is None or row.started != attempt or row.ended:
         message = f"the log interrupts attempt {attempt} of step {tag.root}, which is not running"
         raise ValueError(message)
-    return _with(
-        state, tag, row.model_copy(update={"ended": True, "interrupted": row.interrupted + 1})
-    )
+    uncharged = row.uncharged + (0 if why.charged else 1)
+    return _with(state, tag, row.model_copy(update={"ended": True, "uncharged": uncharged}))
 
 
 def dispatched(state: CoreState, tag: RequestId) -> CoreState:

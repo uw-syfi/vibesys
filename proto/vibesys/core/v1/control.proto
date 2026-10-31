@@ -185,11 +185,6 @@ message ControlInput {
     message: "capacity_wait_stands fallback ends wait"
     expression: "!(this.fallback && this.capacity_wait_stands)"
   };
-  option (buf.validate.message).cel = {
-    id: "ControlInput.drain_seconds"
-    message: "drain_seconds only for a pause"
-    expression: "!has(this.drain_seconds) || this.action in [1, 9, 10]"
-  };
   ControlId control_id = 1 [(buf.validate.field).required = true];
   ControlAction action = 2 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
   StopMode mode = 3 [(buf.validate.field).enum.defined_only = true];
@@ -204,9 +199,6 @@ message ControlInput {
   AttemptId attempt = 12;
   ItemId item = 13;
   optional string max_parallel = 14 [(buf.validate.field).string.pattern = "^[1-9][0-9]*$", (core_field).integer = true];
-  // Seconds a pause waits for running requests before it interrupts them; the run's cleanup
-  // bound when a Pause-now does not say.
-  optional double drain_seconds = 15 [(buf.validate.field).double = {gt: 0, finite: true}];
 }
 
 // Durable drain authority. A parked run can resume only in a later host epoch.
