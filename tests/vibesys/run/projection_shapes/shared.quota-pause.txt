@@ -1,0 +1,17 @@
+shared/quota-pause
+records 30
+blobs 1
+streams 0
+record kinds
+  epoch_started 1
+  lifecycle 3
+  metric 4
+  span 22
+span label kinds
+  (no label) 1
+  agent_turn 4
+  capacity_wait 2
+  comparison 2
+  gate 7
+  planning_call 2
+  workstream 4

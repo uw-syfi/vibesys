@@ -1,8 +1,8 @@
 import {expect, test} from 'bun:test';
-import {readFileSync} from 'node:fs';
 import {fromBinary} from '@bufbuild/protobuf';
 import {ClientReplaySchema, RecordSchema} from '@vibesys/proto';
 import {fixtureNamed} from '@vibesys/run-fixtures';
+import {derivedReplay} from '@vibesys/run-fixtures/derived';
 import {foldSkeleton, seedSkeleton} from '@vibesys/run-skeleton';
 import {placeLabels} from '@vibesys/ui';
 import {projectSkeleton, runPageInitial, scrubberView, skeletonScreenState} from './index.js';
@@ -32,12 +32,7 @@ test('every planning call of a long run is labelled on the track, in order, at a
 });
 
 test('native dense planning calls fit every numeric label across track widths', () => {
-  const replay = fromBinary(
-    ClientReplaySchema,
-    readFileSync(
-      new URL('../../../../libs/run-fixtures/src/native/weeks-600-ideas.pb', import.meta.url),
-    ),
-  );
+  const replay = fromBinary(ClientReplaySchema, derivedReplay('shared', 'weeks-600-ideas'));
   const records = replay.batches.flatMap(batch =>
     batch.records.map(bytes => fromBinary(RecordSchema, bytes)),
   );

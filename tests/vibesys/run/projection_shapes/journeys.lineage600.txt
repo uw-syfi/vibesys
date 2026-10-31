@@ -1,0 +1,16 @@
+journeys/lineage600
+records 2407
+blobs 1
+streams 0
+record kinds
+  declaration_amended 1
+  epoch_started 1
+  lifecycle 1
+  metric 601
+  span 1803
+span label kinds
+  (no label) 1
+  adoption 1
+  agent_turn 600
+  gate 601
+  workstream 600

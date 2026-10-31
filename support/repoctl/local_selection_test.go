@@ -136,16 +136,16 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 			wantTargets: 0,
 		},
 		{
-			name:        "proto source selects only the contract check",
+			name:        "proto source selects the contract check and the client checks that read its replays",
 			paths:       []string{"proto/vibesys/store/v1/record.proto"},
-			wantCI:      []string{"proto"},
-			wantGroups:  []string{"always_on", "proto"},
-			wantSkipped: []string{},
+			wantCI:      []string{"clients", "proto"},
+			wantGroups:  []string{"always_on", "clients_build", "clients_quality", "clients_tests", "proto"},
+			wantSkipped: []string{"clients_e2e"},
 			wantTargets: -1,
 		},
 		{
 			name:        "python only selects the python quality groups",
-			paths:       []string{"src/vibesys/records/api.py"},
+			paths:       []string{"libs/vs-dst/src/vs_dst/__init__.py"},
 			wantCI:      []string{"python"},
 			wantGroups:  []string{"always_on", "python_architecture", "python_guards", "python_quality", "python_tests", "python_types"},
 			wantSkipped: []string{},
@@ -219,11 +219,17 @@ func TestEveryProtoPathSelectsChecksOnlyVerification(t *testing.T) {
 	} {
 		t.Run(path, func(t *testing.T) {
 			groups, skipped, targets := localSelection(t, []string{path}, true)
-			if want := []string{"always_on", "proto"}; !reflect.DeepEqual(groups, want) {
+			want, wantSkipped := []string{"always_on", "proto"}, []string{}
+			// A schema under proto/vibesys also keys the native replays the client tests read.
+			if strings.HasPrefix(path, "proto/vibesys/") {
+				want = []string{"always_on", "clients_build", "clients_quality", "proto"}
+				wantSkipped = []string{"clients_e2e"}
+			}
+			if !reflect.DeepEqual(groups, want) {
 				t.Fatalf("checks-only groups = %v, want %v", groups, want)
 			}
-			if len(skipped) != 0 || len(targets) != 0 {
-				t.Fatalf("unexpected skipped groups %v or native targets %v", skipped, targets)
+			if !reflect.DeepEqual(skipped, wantSkipped) || len(targets) != 0 {
+				t.Fatalf("skipped groups = %v, want %v, or native targets %v", skipped, wantSkipped, targets)
 			}
 		})
 	}
@@ -235,9 +241,9 @@ func TestChecksOnlyExcludesTestGroups(t *testing.T) {
 		paths []string
 		want  []string
 	}{
-		{"python", []string{"src/vibesys/records/api.py"}, []string{"always_on", "python_architecture", "python_guards", "python_quality", "python_types"}},
+		{"python", []string{"libs/vs-dst/src/vs_dst/__init__.py"}, []string{"always_on", "python_architecture", "python_guards", "python_quality", "python_types"}},
 		{"clients", []string{"clients/features/run-intents/src/state/machine.ts"}, []string{"always_on", "clients_build", "clients_quality"}},
-		{"proto", []string{"proto/vibesys/store/v1/record.proto"}, []string{"always_on", "proto"}},
+		{"proto", []string{"proto/vibesys/store/v1/record.proto"}, []string{"always_on", "clients_build", "clients_quality", "proto"}},
 		{"docs", []string{"docs/contributing/development.md"}, []string{"always_on"}},
 	}
 	for _, tc := range cases {
