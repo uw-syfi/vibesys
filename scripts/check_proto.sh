@@ -35,13 +35,12 @@ fi
 # Generation is the only writer. Once it passes, these checks read its outputs.
 wait "$warm"
 warm=
-rm -rf clients/libs/proto/dist
 pids=()
 breaking() { ./scripts/tests/test_proto_breaking.sh && ./scripts/check_proto_breaking.sh; }
 stage breaking breaking &
 pids+=("$!")
 # 1,000 small tests with no dominant one: spread across the cores the checks beside it leave, not one.
-stage pytest uv run --locked pytest libs/vs-proto/tests libs/vs-runlog/tests scripts/corevalue/tests scripts/host_operations/tests -n auto --no-cov -q --durations=15 &
+stage pytest uv run --locked pytest libs/vs-proto/tests libs/vs-runlog/tests scripts/corevalue/tests scripts/host_operations/tests -n auto --no-cov -q &
 pids+=("$!")
 go_gen() { (cd gateway && go build ./gen/... && go vet ./gen/...); }
 stage go go_gen &
