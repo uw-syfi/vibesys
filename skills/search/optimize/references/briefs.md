@@ -52,7 +52,9 @@ Add:
 ```
 Candidate: <full SHA>      Parent: <full SHA>
 Claim: <the implementer's claim>      Recorded verdict: <from vibesys:measure compare, or none>
-Read only. Edit nothing. Return pass, fail or unmeasured with reasons.
+Read only. Edit nothing. Run the task correctness command yourself in this worktree,
+on your allocated port. Save service PIDs and stop only those PIDs.
+Return pass, fail or unmeasured with the command, port, exit status and reasons.
 ```
 
 Give the judge a detached worktree of the candidate: `git worktree add --detach <path> <SHA>`.

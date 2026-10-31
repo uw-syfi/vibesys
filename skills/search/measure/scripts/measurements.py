@@ -42,7 +42,9 @@ if TYPE_CHECKING:
 __all__ = [
     "Comparison",
     "InvalidInputError",
+    "compare_commit",
     "compare_samples",
+    "load_records",
     "main",
     "task_fingerprint",
 ]
@@ -265,7 +267,8 @@ def validate_record(record: object) -> dict[str, Any]:
     return record
 
 
-def _load(run: Path) -> list[dict[str, Any]]:
+def load_records(run: Path) -> list[dict[str, Any]]:
+    """Read validated records; malformed lines name their file and line."""
     path = run / MEASUREMENTS_FILE
     if not path.exists():
         return []
@@ -351,7 +354,8 @@ def _commit_check(records: list[dict[str, Any]]) -> str:
     return "pass" if "pass" in checks else "unknown"
 
 
-def _compare_commit(records: list[dict[str, Any]], commit: str, base: str | None) -> dict[str, Any]:
+def compare_commit(records: list[dict[str, Any]], commit: str, base: str | None) -> dict[str, Any]:
+    """Compare recorded commits, rejecting missing evidence."""
     base_commit = base or next((r["commit"] for r in records if r["role"] == "base"), None)
     if base_commit is None:
         raise InvalidInputError("no base measurement is recorded: measure the base first")
@@ -448,7 +452,7 @@ def _cmd_record(args: argparse.Namespace, env: _Env) -> None:
     run = Path(args.run)
     record = _record_from(args, run, env.host, env.now)
     validate_record(record)
-    _check_against_history(record, _load(run))
+    _check_against_history(record, load_records(run))
     with (run / MEASUREMENTS_FILE).open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, sort_keys=False) + "\n")
     env.out.write(
@@ -457,17 +461,17 @@ def _cmd_record(args: argparse.Namespace, env: _Env) -> None:
 
 
 def _cmd_compare(args: argparse.Namespace, env: _Env) -> None:
-    records = _load(Path(args.run))
-    result = _compare_commit(records, _validate_commit(args.commit), args.base)
+    records = load_records(Path(args.run))
+    result = compare_commit(records, _validate_commit(args.commit), args.base)
     _emit(env, result, _format_comparison(result), as_json=args.json)
 
 
 def _cmd_best(args: argparse.Namespace, env: _Env) -> None:
-    records = _load(Path(args.run))
+    records = load_records(Path(args.run))
     candidates = list(dict.fromkeys(r["commit"] for r in records if r["role"] == "candidate"))
     won = []
     for commit in candidates:
-        result = _compare_commit(records, commit, None)
+        result = compare_commit(records, commit, None)
         if result["verdict"] == "better" and result["check"] == "pass":
             won.append(result)
     if not won:
@@ -494,7 +498,7 @@ def _format_record(record: dict[str, Any]) -> str:
 
 
 def _cmd_show(args: argparse.Namespace, env: _Env) -> None:
-    records = _load(Path(args.run))
+    records = load_records(Path(args.run))
     if args.commit:
         records = [r for r in records if r["commit"] == _validate_commit(args.commit)]
     _emit(

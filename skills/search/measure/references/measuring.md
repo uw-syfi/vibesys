@@ -61,7 +61,7 @@ samples fit, record what completed and report `inconclusive` when there are too 
 verdict.
 
 A commit whose build or check fails has no samples to record. Record nothing for it; put the
-output in a file under the run directory and write the failure in the ledger and the handoff.
+output in a file under the run directory and return the failure in the handoff so the lead records a controller transition.
 Use `--check fail` only when a later re-check of a commit that already has samples fails, with
 the samples that commit was measured with: `best` skips any commit that has a failed check.
 
