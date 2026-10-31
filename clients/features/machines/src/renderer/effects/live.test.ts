@@ -22,7 +22,7 @@ test('nothing is scheduled until a screen watches the clock, and nothing after t
 
 test('a watched clock reads the viewer’s time every second, for every watcher', () => {
   const {clock, live} = rig();
-  const heard: number[] = [];
+  const heard: (number | null)[] = [];
   const first = live.clock.subscribe(() => heard.push(live.clock.getState()));
   const second = live.clock.subscribe(() => {});
   clock.advanceBy(3_000);

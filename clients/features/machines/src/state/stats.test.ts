@@ -127,10 +127,10 @@ test('property: a value is shown exactly while the subscription holds one, and s
 });
 
 /** The labels a sample's gauges carry: CPU and memory, and the GPU pair when the host reports GPUs. */
-function labelsOf(readings: Readings): string[] {
+function labelsOf(readings: Readings): GaugeView['label'][] {
   const reported =
     readings.gpus === null || (Array.isArray(readings.gpus) && readings.gpus.length > 0);
-  return ['CPU', 'Memory', ...(reported ? ['GPU', 'VRAM'] : [])];
+  return reported ? ['CPU', 'Memory', 'GPU', 'VRAM'] : ['CPU', 'Memory'];
 }
 
 function checkGauge(gauge: GaugeView): void {

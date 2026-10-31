@@ -1,6 +1,7 @@
 import {expect, test} from 'bun:test';
 import {SUBSCRIPTION_LINGER_MS} from '@vibesys/connection';
 import {hubRig, settle} from '@vibesys/connection/testing';
+import type {MachineDescription} from '@vibesys/hosts';
 import {machineEntry} from '@vibesys/subscription/testing';
 import fc from 'fast-check';
 import {
@@ -44,7 +45,7 @@ function readyMachine(): Machine {
   }).state;
   const [machine] = state.machines;
   if (machine === undefined) throw new Error('no machine');
-  const facts = {
+  const facts: MachineDescription = {
     checkout: null,
     hardware: {cpu_cores: 8, gpus: [], accelerator: 'cpu'},
     docker: {reachable: true, version: '29.1'},
