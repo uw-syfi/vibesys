@@ -18,7 +18,17 @@ from vs_runlog._file import (
     install_run_log,
     open_run_log,
 )
+from vs_runlog._file_fold_cache import FileFoldCache
 from vs_runlog._fold import fold_skeleton
+from vs_runlog._fold_cache import (
+    CachedFold,
+    CacheMiss,
+    FoldCache,
+    MemoryFoldCache,
+    PrefixDigest,
+    judge,
+)
+from vs_runlog._fold_cache_contract import CacheUnderTest, FoldCacheContract
 from vs_runlog._framing import ReadStop, RunLogStopReason, encode_frame
 from vs_runlog._head import project_head
 from vs_runlog._lock import (
@@ -35,15 +45,23 @@ from vs_runlog._upgrade import upgrade_skeleton
 
 __all__ = [
     "Appended",
+    "CacheMiss",
+    "CacheUnderTest",
+    "CachedFold",
     "ConfirmedLog",
     "CoreMessage",
     "CurrentEpoch",
     "FakeFileSync",
+    "FileFoldCache",
     "FileRunContent",
     "FileRunLogWriter",
     "FileSync",
+    "FoldCache",
+    "FoldCacheContract",
     "HeadObserver",
+    "MemoryFoldCache",
     "OsFileSync",
+    "PrefixDigest",
     "ProjectionWriter",
     "ReadStop",
     "RunLaunchLockedError",
@@ -62,6 +80,7 @@ __all__ = [
     "exclusive_run_launch",
     "fold_skeleton",
     "install_run_log",
+    "judge",
     "observe_writer_identity",
     "open_run_log",
     "project_head",

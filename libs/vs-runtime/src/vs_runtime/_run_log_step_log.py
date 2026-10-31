@@ -9,6 +9,10 @@ state its own append extends, not on the one the loop read earlier.
 After each append the search hears what core published and answers (``SearchHearing``), still
 inside the same step, so the loop never sees a state the search has not caught up with. A run
 that parks or ends gets its search state logged whole.
+
+A start reads ``state.pb`` if it is given a cache and folds only the records after it; the log
+writes it again when the run comes to rest and now and then (``FoldKeeper``). The cache changes
+no result: ``cache_start`` says whether it was used, or why the whole log was folded.
 """
 
 from __future__ import annotations
@@ -36,7 +40,8 @@ from vs_core.api.recovery import (
     start_due,
     started_message,
 )
-from vs_runlog.api import Appended
+from vs_runlog.api import Appended, CacheMiss
+from vs_runtime._fold_keeper import CACHE_EVERY, FoldKeeper, start_fold
 from vs_runtime._step_loop import Interrupted, Recorded, running_attempt
 
 if TYPE_CHECKING:
@@ -45,7 +50,8 @@ if TYPE_CHECKING:
     from vs_core.api import CoreEvent, CoreState, OperationRegistry, RequestId
     from vs_core.api.recovery import End, Folded, OpenStep, Run, StepResult
     from vs_proto.api import Record, StrategyAdvanced
-    from vs_runlog.api import ConfirmedLog, CoreMessage
+    from vs_runlog.api import ConfirmedLog, CoreMessage, FoldCache
+    from vs_runtime._fold_keeper import CacheUsed
     from vs_runtime._step_loop import StepRecord
     from vs_sim.api import Clock
 
@@ -93,10 +99,12 @@ class RunLogStepLog:
         epoch: int,
         search: SearchHearing | None,
         stamp: Callable[[], Timestamp] = Timestamp,
+        keeper: FoldKeeper | None = None,
     ) -> None:
         """Hold ``folded``, the fold of everything ``log`` confirmed, and append as ``epoch``."""
         self._log = log
         self._folded = folded
+        self._keeper = keeper
         self._registry = registry
         self._clock = clock
         self._epoch = epoch
@@ -120,28 +128,33 @@ class RunLogStepLog:
         clock: Clock,
         search: SearchHearing | None = None,
         stamp: Callable[[], Timestamp] = Timestamp,
+        cache: FoldCache | None = None,
+        cache_every: int = CACHE_EVERY,
     ) -> RunLogStepLog:
         """Take over the run ``log`` holds, in ``epoch``, whose header the writer already appended.
 
         A log that holds no start of the run gets ``seed`` as its first record: the state every
         later process folds from, with the run's deadline in it. The search then hears whatever
         the dead process left it owed, and a run still to begin starts here.
+
+        With a ``cache`` the start folds only the records after it, if it is the cache of this
+        log's own first records; the log goes on writing it, every ``cache_every`` core records
+        and when the run comes to rest.
         """
         with log.transaction():
-            prefix = log.records()
-            started = any(r.body is not None and r.body.field == "run_started" for r in prefix)
-            if started:
-                first = None
-                folded = fold_run(prefix, registry=registry)
-            elif seed is None:
-                message = "a log with no start of the run needs the state to start it from"
-                raise ValueError(message)
-            else:
+            folded, keeper = start_fold(cache, log.records(), registry, every=cache_every)
+            first = None
+            if folded is None:
+                if seed is None:
+                    message = "a log with no start of the run needs the state to start it from"
+                    raise ValueError(message)
                 first = log.next_record(
                     seed_message(seed), epoch=epoch, at=stamp(), clock=clock.now()
                 )
                 folded = fold_run((first,), registry=registry)
-            opened = cls(log, folded, registry, clock, epoch=epoch, search=search, stamp=stamp)
+            opened = cls(
+                log, folded, registry, clock, epoch=epoch, search=search, stamp=stamp, keeper=keeper
+            )
             if first is not None:
                 opened._confirm(first)
         opened._settle()
@@ -151,6 +164,11 @@ class RunLogStepLog:
     def state(self) -> CoreState:
         """The fold of everything appended, by this process or an earlier one."""
         return self._folded.state
+
+    @property
+    def cache_start(self) -> CacheUsed | CacheMiss:
+        """Whether the start used ``state.pb``, or why it folded the whole log."""
+        return CacheMiss.ABSENT if self._keeper is None else self._keeper.start
 
     def open_step(self, tag: RequestId) -> OpenStep | None:
         """The step ``tag`` as the state has it, while it has no result."""
@@ -223,6 +241,7 @@ class RunLogStepLog:
         with self._log.transaction():
             before = self._appended
             self._settle()
+            self._keep()
             heard = self._appended != before
             self._arrived += int(heard)
         if heard:
@@ -252,6 +271,17 @@ class RunLogStepLog:
         """
         self._record(message, clock=clock)
         self._settle()
+        self._keep()
+
+    def _keep(self) -> None:
+        """Write the cache if it is due."""
+        if self._keeper is not None:
+            self._keeper.keep(
+                self._log,
+                self._registry,
+                appended=self._appended,
+                resting=at_rest(self.state) is not None,
+            )
 
     def _record(self, message: CoreMessage, *, clock: float | None = None) -> None:
         """Fold the next record, and only then append it: a record the fold refuses stays out."""

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 import vs_core.api as core
-from vs_core.api.recovery import fold_run
+from vs_core.api.recovery import Folded, fold_run
 from vs_proto.api import EpochStarted, Record, Timestamp
 from vs_runlog.api import ConfirmedLog
 from vs_runtime._run_log_step_log import RunLogStepLog
@@ -71,7 +71,7 @@ class FakeStepLog(RunLogStepLog):
         confirmed = ConfirmedLog(records, threads)
         epoch = (records.records[-1].epoch if records.records else 0) + 1
         confirmed.append(EpochStarted(epoch=epoch), epoch=epoch, at=Timestamp(), clock=clock.now())
-        folded = fold_run(confirmed.records(), seed, registry=registry)
+        folded = fold_run(confirmed.records(), Folded(seed), registry=registry)
         super().__init__(confirmed, folded, registry, clock, epoch=epoch, search=None)
         self._operator = 0
 
