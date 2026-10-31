@@ -36,6 +36,20 @@ test('Tab reaches the chip, which then draws its hint', async ({page}) => {
   expect(await drawn(page)).toBe('none');
 });
 
+test('the hint is on screen, not clipped by the row that holds the chip', async ({page}) => {
+  const box = await chip(page).boundingBox();
+  if (box === null) throw new Error('the status chip has no box');
+  // Where the hint is drawn: just under the chip, over what the page shows there.
+  const clip = {x: box.x, y: box.y + box.height + 2, width: 300, height: 48};
+  const before = await page.screenshot({clip});
+  await chip(page).focus();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Tab');
+  expect(await drawn(page)).not.toBe('none');
+  const after = await page.screenshot({clip});
+  expect(after.equals(before), 'nothing was drawn under the chip: its hint is clipped').toBe(false);
+});
+
 test('the hint is drawn on hover and only while hovered', async ({page}) => {
   expect(await drawn(page)).toBe('none');
   await chip(page).hover();
