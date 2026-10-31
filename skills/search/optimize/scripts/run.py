@@ -12,6 +12,7 @@ import argparse
 import copy
 import fcntl
 import json
+import math
 import os
 import re
 import shutil
@@ -157,6 +158,8 @@ def finishable(
 def read_state(run: Path) -> State:
     """Read the controller schema, rejecting unknown keys before consuming state."""
     state = json.loads((run / "run.json").read_text())
+    if isinstance(state, dict) and state.get("schema") == 1 and "session_id" not in state:
+        state["session_id"] = None
     fields = {
         "schema",
         "run_id",
@@ -545,7 +548,7 @@ class HostGit:
 
     def pid_file(self, path: Path, timeout: float) -> int:
         """Wait within a deadline for the background Bash PID handoff."""
-        if timeout <= 0:
+        if not math.isfinite(timeout) or timeout <= 0:
             raise ValueError("PID handoff timeout must be positive")
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:

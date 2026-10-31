@@ -685,3 +685,13 @@ def test_task_hash_ignores_generated_results_and_environment(new_run: NewRun) ->
     assert script.task_fingerprint(run.task) == before
     (run.task / "OBJECTIVE.md").write_text("changed objective")
     assert script.task_fingerprint(run.task) != before
+
+
+def test_first_base_record_must_match_controller_base(new_run: NewRun) -> None:
+    run = new_run()
+    (run.dir / "run.json").write_text(json.dumps({"task": "demo", "base_commit": SHA_B}))
+    code, _, err = run.record(SHA_A, [1, 2, 3], role="base")
+    assert code == 2
+    assert "base_commit" in err
+    assert run.lines == []
+    assert run.record(SHA_B, [1, 2, 3], role="base")[0] == 0

@@ -14,6 +14,8 @@ the newest files in `notes/` before acting.
 Arguments: `<task>`, `--time <duration>` (`90m`, `2h`, `1h30m`), and `--fanout N`, the most
 subagents running at once (default 3).
 
+Requires Claude Code on POSIX (Linux or macOS), git and Python 3.10+.
+
 File formats are in [run-state.md](references/run-state.md). Brief templates are in
 [briefs.md](references/briefs.md). Read [failure-patterns.md](references/failure-patterns.md)
 before you plan and again at each wrap-up.
