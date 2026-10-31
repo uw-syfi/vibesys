@@ -569,11 +569,22 @@ describe('the run page store', () => {
       expect(view.ended?.brief === null, outcome).toBe(!failed);
       expect(view.status.label, outcome).not.toBe('Resuming');
 
+      // Whatever the run's record words its lifecycle as, a Resume on its way reads Resuming.
+      for (const lifecycleWord of [undefined, 'Stopped', 'Failed']) {
+        const resuming = headerView({
+          ...state,
+          lifecycleWord,
+          resumeStatus: {pending: true, reason: 'Waiting for the run to start'},
+        });
+        expect(resuming.status, `${outcome} ${lifecycleWord}`).toEqual({
+          label: 'Resuming',
+          tone: 'live',
+        });
+      }
       const resuming = headerView({
         ...state,
         resumeStatus: {pending: true, reason: 'Waiting for the run to start'},
       });
-      expect(resuming.status, outcome).toEqual({label: 'Resuming', tone: 'live'});
       expect(resuming.resume, outcome).toEqual({
         shown: true,
         disabledReason: 'Waiting for the run to start',

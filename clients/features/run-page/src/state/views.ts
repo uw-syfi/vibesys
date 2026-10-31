@@ -125,11 +125,18 @@ function status(state: RunPageState): {label: string; tone: Tone} {
     case 'stopping':
       return {label: 'Pausing', tone: 'warn'};
     case 'ended':
-      // A Resume on its way is the run's state: it is not shown as it ended until it starts or fails.
-      return state.resumeStatus?.pending === true
-        ? {label: 'Resuming', tone: 'live'}
-        : endedStatus(phase.run.phase, phase.end);
+      return endedStatus(phase.run.phase, phase.end);
   }
+}
+
+/**
+ * The status of an ended run whose Resume is on its way: the one word for it, ahead of how the run
+ * ended and ahead of the lifecycle word the run's record gives. Null for any other run.
+ */
+function resumingStatus(state: RunPageState): {label: string; tone: Tone} | null {
+  return state.resumeStatus?.pending === true && runPhase(state).kind === 'ended'
+    ? {label: 'Resuming', tone: 'live'}
+    : null;
 }
 
 /** Why a live pause command cannot be sent now, or undefined when they can. */
@@ -151,7 +158,7 @@ export function headerView(state: RunPageState, names: ModelNames = NO_MODEL_NAM
   return {
     title: task === null ? name : `${name} · ${task}`,
     subtitle: `${state.hostLabel} · ${state.identity.runId}`,
-    status: {
+    status: resumingStatus(state) ?? {
       ...status(state),
       ...(state.lifecycleWord === undefined ? {} : {label: state.lifecycleWord}),
     },
@@ -626,7 +633,7 @@ export function endedView(state: RunPageState): EndedView | null {
 
 /** The header's words for an ended run; see `HeaderView.ended`. */
 function endedWords(state: RunPageState): HeaderView['ended'] {
-  const ended = state.resumeStatus?.pending === true ? null : endedView(state);
+  const ended = resumingStatus(state) === null ? endedView(state) : null;
   return ended === null ? null : {brief: ended.brief, reason: ended.reason};
 }
 
