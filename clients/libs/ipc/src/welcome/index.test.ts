@@ -74,6 +74,19 @@ const VALID_ARGUMENTS: Readonly<
   [WELCOME_CHANNELS.projectRuns]: ['local', '/srv/project', 1],
   [WELCOME_CHANNELS.cancelProjectRuns]: [1],
   [WELCOME_CHANNELS.usageWindow]: ['local', '/srv/project', ['run-1'], 1_000, 2_000],
+  [WELCOME_CHANNELS.usageSummary]: ['local', ['/srv/project'], [0, 900_000], 1_000],
+  [WELCOME_CHANNELS.usageRatesRefresh]: ['local', false, 1_000],
+  [WELCOME_CHANNELS.usagePricesSave]: [
+    'local',
+    0,
+    [
+      {
+        model: 'a-model',
+        rate: {input: 1, output: 2, cacheRead: 0, cacheWrite: 1, cacheWrite1h: null},
+      },
+    ],
+    [{from: 'mine', to: 'a-model'}],
+  ],
   [WELCOME_CHANNELS.preferences]: [],
   [WELCOME_CHANNELS.setAppearance]: [{mode: 'dark', light: 'mist', dark: 'midnight'}],
   [WELCOME_CHANNELS.setNotifications]: [false],
@@ -173,6 +186,37 @@ describe('parseWelcomeRequest', () => {
     expect(() => ask('0', 2_000)).toThrow('start');
     expect(() => ask(0, Number.NaN)).toThrow('end');
     expect(() => ask(0, 2_000, 'run-1')).toThrow('at most 100 runs');
+  });
+
+  test('a usage summary is refused when the host would refuse it, before any request', () => {
+    const ask = (projects: unknown, edges: unknown, now: unknown = 1_000) =>
+      parseWelcomeRequest(WELCOME_CHANNELS.usageSummary, ['local', projects, edges, now]);
+    expect(ask(['/p'], [0, 900_000, 1_800_000])).toMatchObject({
+      kind: 'usage-summary',
+      edges: [0, 900_000, 1_800_000],
+    });
+    expect(() => ask([], [0, 900_000])).toThrow('1 to 64 projects');
+    expect(() => ask(['/p'], [0])).toThrow('2 to 100 edges');
+    expect(() => ask(['/p'], [0, 901_000])).toThrow('whole quarter hours');
+    expect(() => ask(['/p'], [900_000, 0])).toThrow('increase');
+    expect(() => ask(['/p'], [0, 900_000], 'now')).toThrow('now');
+    expect(() => ask('/p', [0, 900_000])).toThrow('projects');
+  });
+
+  test('a price book is refused when the host would refuse a part of it', () => {
+    const save = (overrides: unknown, aliases: unknown = [], base: unknown = 0) =>
+      parseWelcomeRequest(WELCOME_CHANNELS.usagePricesSave, ['local', base, overrides, aliases]);
+    const rate = {input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1, cacheWrite1h: null};
+    expect(save([{model: 'm', rate}])).toMatchObject({kind: 'usage-prices-save', baseRevision: 0});
+    expect(() => save([{model: '', rate}])).toThrow('1 to 128 bytes');
+    expect(() => save([{model: 'é'.repeat(65), rate}])).toThrow('1 to 128 bytes');
+    expect(() => save([{model: 'm', rate: {...rate, input: -1}}])).toThrow('input');
+    expect(() => save([{model: 'm', rate: {...rate, output: Number.NaN}}])).toThrow('output');
+    expect(() => save([], [{from: 'a'}])).toThrow('model name');
+    expect(() => save(Array.from({length: 257}, () => ({model: 'm', rate})))).toThrow(
+      'at most 256',
+    );
+    expect(() => save([], [], -1)).toThrow('non-negative');
   });
 
   test('a span read names one trace span and starts at a positive sequence', () => {

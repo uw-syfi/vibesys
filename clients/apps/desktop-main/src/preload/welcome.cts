@@ -47,6 +47,9 @@ const CHANNELS: Channels = {
   projectRuns: 'vibesys:welcome:project-runs',
   cancelProjectRuns: 'vibesys:welcome:cancel-project-runs',
   usageWindow: 'vibesys:welcome:usage-window',
+  usageSummary: 'vibesys:welcome:usage-summary',
+  usageRatesRefresh: 'vibesys:welcome:usage-rates-refresh',
+  usagePricesSave: 'vibesys:welcome:usage-prices-save',
   preferences: 'vibesys:welcome:preferences',
   setAppearance: 'vibesys:welcome:set-appearance',
   setNotifications: 'vibesys:welcome:set-notifications',
@@ -144,6 +147,11 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     cancelProjectRuns: token => call(CHANNELS.cancelProjectRuns, token),
     usageWindow: (host, project, runIds, since, until) =>
       call(CHANNELS.usageWindow, host, project, runIds, since, until),
+    usageSummary: (host, projects, edges, now) =>
+      call(CHANNELS.usageSummary, host, projects, edges, now),
+    usageRatesRefresh: (host, force, now) => call(CHANNELS.usageRatesRefresh, host, force, now),
+    usagePricesSave: (host, baseRevision, overrides, aliases) =>
+      call(CHANNELS.usagePricesSave, host, baseRevision, overrides, aliases),
     connectRun: id => capabilities.connectRun(id),
     onWake: listener => capabilities.on(WAKE_CHANNEL, () => listener()),
     preferences: () => call(CHANNELS.preferences),

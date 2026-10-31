@@ -86,6 +86,12 @@ export {
   registryStart,
 } from './shell/registry-start.js';
 export {
+  type RegistryUsage,
+  type RegistryUsagePorts,
+  registryUsage,
+  usageSummaryEntry,
+} from './shell/registry-usage.js';
+export {
   RUN_WATCH_LEASE_MS,
   type RunsPhase,
   type RunsState,
