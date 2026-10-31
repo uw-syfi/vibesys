@@ -65,11 +65,11 @@ VALUE_WORKLOAD = Workload(
 )
 
 
-def scripted_client(
-    *, spec: AgentSpec, events: AgentEventSink, log_dir: Path | None = None, **_services: object
-) -> AgentClientProtocol:
-    """The scripted client over this scenario's workload, as the launcher's factory builds it."""
-    setup = ScriptedClientSetup(
+def scripted_setup(
+    *, spec: AgentSpec, events: AgentEventSink, log_dir: Path | None = None
+) -> ScriptedClientSetup:
+    """What this scenario's scripted agents answer with, as the launcher's factory builds it."""
+    return ScriptedClientSetup(
         responders=ScriptedDynamicAgents(
             seed=spec.scripted_seed, sink=events, workloads=(VALUE_WORKLOAD,)
         ).responders(),
@@ -79,6 +79,13 @@ def scripted_client(
         event_sink=events,
         log_dir=log_dir,
     )
+
+
+def scripted_client(
+    *, spec: AgentSpec, events: AgentEventSink, log_dir: Path | None = None, **_services: object
+) -> AgentClientProtocol:
+    """The scripted client over this scenario's workload, as the launcher's factory builds it."""
+    setup = scripted_setup(spec=spec, events=events, log_dir=log_dir)
     return ScriptedAgentClient(setup, threads=OsThreads())
 
 
