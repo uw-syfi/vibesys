@@ -36,11 +36,8 @@ from tests.support.crash_harness import (
     run,
     straight_run,
 )
+from tests.system.crash._flow_worlds import WORLDS
 from tests.vibesys.dynamic_world import DynamicWorld
-from tests.vibesys.evolve_world import EvolveWorld
-from tests.vibesys.orchestration.issue_queue._replies import evaluated, implemented, judged
-from tests.vibesys.orchestration.issue_queue.world import IssueQueueWorld
-from tests.vibesys.serial_world import SerialWorld
 
 from vs_core.api import RunStatus
 from vs_dst.api import CrashKind, CrashPoint, simulate
@@ -48,9 +45,9 @@ from vs_faults.api import FaultPlan
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
 
-    from vs_dst.api import SimulatedRun, World
+    from vs_dst.api import SimulatedRun
     from vs_faults.api import Crossing, FaultRule
 
 _RECOVERY = 4
@@ -130,21 +127,6 @@ def _ends_and_owes_nothing(walked: SimulatedRun, why: object) -> None:
     assert walked.no_effect_ran_twice(), why
 
 
-_WORLDS: dict[str, Callable[[], World]] = {
-    "dynamic": DynamicWorld,
-    "dynamic-parallel": lambda: DynamicWorld(max_in_flight=2),
-    "evolve": EvolveWorld,
-    "single": lambda: SerialWorld("single", max_rounds=2),
-    "multi": lambda: SerialWorld("multi", max_rounds=2),
-    "issue-queue": lambda: IssueQueueWorld(
-        implementer=[implemented(f"turn {n}") for n in range(12)],
-        judge=[judged(passed=False), *[judged() for _ in range(11)]],
-        perf=[evaluated("first", "second"), evaluated("third"), *[evaluated() for _ in range(6)]],
-    ),
-}
-"""Each walked search; the issue queue files three issues, and the judge rejects one attempt."""
-
-
 @settings(_WALK, max_examples=examples(pr=1, nightly=15))
 @given(
     draw=st.data(),
@@ -168,7 +150,7 @@ def test_a_flow_run_that_dies_several_times_ends_and_owes_nothing(
 
 
 def _flow_walk(world: str, draw: st.DataObject, deaths: int) -> None:
-    normal = simulate(_WORLDS[world]())
+    normal = simulate(WORLDS[world]())
     walked, path = _walk(draw, normal, deaths)
     _ends_and_owes_nothing(walked, path)
     path.append(CrashPoint(CrashKind.AFTER_COMMIT, walked.commits - 1))
@@ -187,7 +169,7 @@ def test_a_limit_does_not_pass_while_a_dead_hosts_lease_runs_out() -> None:
     and the run stalled closing on the block of it.
     """
     path = [CrashPoint(CrashKind.AFTER_COMMIT, 135), CrashPoint(CrashKind.AFTER_COMMIT, 146)]
-    walked = simulate(_WORLDS["multi"]())
+    walked = simulate(WORLDS["multi"]())
     for point in path:
         walked = walked.rerun_with_crash(point)
     _ends_and_owes_nothing(walked, path)
