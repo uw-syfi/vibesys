@@ -540,6 +540,59 @@ describe('Chart tip', () => {
     });
     expect(container.querySelector('.vs-chart-tip')).toBeNull();
   });
+
+  /** The tip a point with a `tip` of `lead` and `detail` draws on hover, and the plot it must stay in. */
+  async function tipOf(lead: string, detail: string) {
+    const {container} = await mount(
+      <Chart
+        label="Series"
+        points={[{id: 'a', label: `${lead} · ${detail}`, tip: {lead, detail}, x: 0, y: 1}]}
+        pick={noop}
+      />,
+    );
+    const [first] = all(container, '[role="button"]') as [HTMLElement];
+    await act(async () => {
+      first.dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));
+    });
+    const box = one(container, '.vs-chart-tip-box');
+    const [axis] = all(container, '.vs-chart-axis');
+    const x = Number(box.getAttribute('x'));
+    return {
+      words: one(container, '.vs-chart-tip-text').textContent ?? '',
+      left: x,
+      right: x + Number(box.getAttribute('width')),
+      plotLeft: Number(axis?.getAttribute('x1')),
+      plotRight: Number(one(container, 'svg').getAttribute('width')) - 10,
+    };
+  }
+
+  test('a long name is cut with an ellipsis, and the figures are never cut', async () => {
+    const detail = '8.7 ms · 1.43×';
+    for (const length of [0, 1, 5, 28, 60, 90, 200, 1000]) {
+      const lead = 'Keep a free list per core '.repeat(40).slice(0, length);
+      const tip = await tipOf(lead, detail);
+      expect(tip.words.endsWith(detail)).toBe(true);
+      // The box stays inside the plot, so nothing of it is clipped by the drawing.
+      expect(tip.left).toBeGreaterThanOrEqual(tip.plotLeft);
+      expect(tip.right).toBeLessThanOrEqual(tip.plotRight);
+      if (length > 90) expect(tip.words).toContain('…');
+      if (length <= 28) expect(tip.words).toBe(length === 0 ? detail : `${lead} · ${detail}`);
+    }
+  });
+
+  test('a point with no tip says its label, cut to the plot', async () => {
+    const label = 'a name that goes on '.repeat(40);
+    const {container} = await mount(
+      <Chart label="Series" points={[{id: 'a', label, x: 0, y: 1}]} pick={noop} />,
+    );
+    const [first] = all(container, '[role="button"]') as [HTMLElement];
+    await act(async () => {
+      first.dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));
+    });
+    const words = one(container, '.vs-chart-tip-text').textContent ?? '';
+    expect(words.endsWith('…')).toBe(true);
+    expect(label.startsWith(words.slice(0, -1))).toBe(true);
+  });
 });
 
 describe('Chart cursor', () => {

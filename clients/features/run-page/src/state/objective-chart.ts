@@ -28,8 +28,10 @@ export interface ChartReadingView {
   /** The idea it belongs to, which opens; absent for a reading with no idea. */
   readonly id?: string;
   readonly key: string;
-  /** What hovering it says: `Keep a free list per core · 8.7 ms · 1.43×`. */
+  /** What names it for assistive technology, whole: `Keep a free list per core · 8,700 ms · 1.43×`. */
   readonly label: string;
+  /** What hovering it says: its idea (cut to the room there is) and the short figures `8.7 ms · 1.43×`. */
+  readonly tip: {readonly lead: string; readonly detail: string};
   /** Minutes of running time from the run's start. */
   readonly x: number;
   readonly y: number;
@@ -136,8 +138,16 @@ function unitOf(model: RunModel, reading: ObjectiveReading, alone: boolean): str
   return unit == null ? '' : unit;
 }
 
-function readingLabel(title: string, value: number, unit: string, multiple: number | null): string {
-  return [title, `${formatValue(value)}${unit === '' ? '' : ` ${unit}`}`]
+/** A value in the short form a tip says it in: `6.05M`, `385.4`, `8.7`. */
+const SHORT = new Intl.NumberFormat('en-US', {notation: 'compact', maximumSignificantDigits: 3});
+
+function shortValue(value: number): string {
+  return Math.abs(value) < 1000 ? formatValue(value) : SHORT.format(value);
+}
+
+/** The figures of a reading: its value with the unit, then its multiple of the input when it has one. */
+function figuresOf(value: string, unit: string, multiple: number | null): string {
+  return [`${value}${unit === '' ? '' : ` ${unit}`}`]
     .concat(multiple === null ? [] : [ratio(multiple)])
     .join(' · ');
 }
@@ -160,6 +170,18 @@ function onePerIdea(
       stepKeys.has(readingKey(point)) ||
       (!stepped.has(point.id) && last.get(point.id) === point),
   );
+}
+
+/** What a reading says: its whole name for assistive technology, and its short tip. */
+function tipOf(
+  point: PerformancePoint,
+  unit: string,
+  multiple: number | null,
+): Pick<ChartReadingView, 'label' | 'tip'> {
+  return {
+    label: [point.title, figuresOf(formatValue(point.value), unit, multiple)].join(' · '),
+    tip: {lead: point.title, detail: figuresOf(shortValue(point.value), unit, multiple)},
+  };
 }
 
 /** What an objective's chart draws once its axes are known. */
@@ -186,12 +208,7 @@ function chartOf(
   const readings = onePerIdea(reading.fold.points, stepKeys).map(point => ({
     ...(point.unowned === true ? {} : {id: point.id}),
     key: readingKey(point),
-    label: readingLabel(
-      point.title,
-      point.value,
-      unit,
-      multipleOver(point.value, reading.input, reading.direction),
-    ),
+    ...tipOf(point, unit, multipleOver(point.value, reading.input, reading.direction)),
     x: minutes(point.at),
     y: point.value,
     selected: focus !== null && point.id === focus,

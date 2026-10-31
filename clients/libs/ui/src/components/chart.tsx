@@ -4,14 +4,24 @@ import {useInlineSize} from './label-fit.js';
 import {Text} from './text.js';
 
 /**
+ * What hovering a point says, short enough to stay inside the plot: its `detail` (the figures) is
+ * always whole, led by `lead` (what the point is), which is cut with an ellipsis to the room left.
+ */
+export interface ChartTip {
+  readonly lead: string;
+  readonly detail: string;
+}
+
+/**
  * A reading of a series: a dot at (`x`, `y`). A point with an `id` can be picked; `label` names it
- * for assistive technology and is what hovering it says (its `id` if absent).
+ * for assistive technology and is what hovering it says (its `id` if absent) unless it has a `tip`.
  */
 export interface ChartPoint {
   /** Stable sample identity when several samples open the same item. */
   readonly key?: string;
   readonly id?: string;
   readonly label?: string;
+  readonly tip?: ChartTip;
   readonly x: number;
   readonly y: number;
   /** Singled out: ringed in the text color. */
@@ -373,7 +383,7 @@ export function Chart(props: ChartProps): JSX.Element {
   const yTicks = props.yTicks ?? [];
   const marks = props.marks ?? [];
   const [measure, measured] = useInlineSize();
-  const [tip, setTip] = useState<{readonly text: string; readonly x: number; readonly y: number}>();
+  const [tip, setTip] = useState<Told>();
   const clip = useId().replaceAll(':', '');
   const width = Math.max(MIN_WIDTH, measured ?? FALLBACK_WIDTH);
   const {plot, at, stop} = layoutOf(props, width);
@@ -518,17 +528,16 @@ function Point(props: {
   readonly dense: boolean;
   readonly pick: ((id: string) => void) | undefined;
   readonly hover: ((id: string | null) => void) | undefined;
-  readonly tell: (
-    tip: {readonly text: string; readonly x: number; readonly y: number} | undefined,
-  ) => void;
+  readonly tell: (tip: Told | undefined) => void;
 }): JSX.Element {
   const {point, at, pick, hover} = props;
   const id = point.id;
   const cx = at.x(point.x);
   const cy = at.y(point.y);
   const text = point.label ?? id;
+  const said = point.tip ?? (text === undefined ? undefined : {lead: text, detail: ''});
   const enter = (): void => {
-    if (text !== undefined) props.tell({text, x: cx, y: cy});
+    if (said !== undefined) props.tell({...said, x: cx, y: cy});
     if (id !== undefined) hover?.(id);
   };
   const leave = (): void => {
@@ -617,14 +626,38 @@ function Rings(props: {
 const TIP_PAD = 8;
 const TIP_HEIGHT = 26;
 const TIP_GAP = 12;
+const TIP_SEPARATOR = ' · ';
+
+/** What a hovered point says and where: the words (`ChartTip`) and the point they belong to. */
+interface Told extends ChartTip {
+  readonly x: number;
+  readonly y: number;
+}
+
+/** `text` in at most `chars` characters, the end cut with an ellipsis when it does not fit. */
+function cut(text: string, chars: number): string {
+  return text.length <= chars ? text : `${text.slice(0, Math.max(0, chars - 1)).trimEnd()}…`;
+}
+
+/**
+ * The words of a tip in at most `chars` characters: the detail whole, and the lead before it as far
+ * as it fits (cut with an ellipsis; left out when there is no room for more than a letter).
+ */
+function tipWords(tip: ChartTip, chars: number): string {
+  if (tip.detail === '') return cut(tip.lead, chars);
+  const room = chars - tip.detail.length - TIP_SEPARATOR.length;
+  return room < 2 || tip.lead === ''
+    ? tip.detail
+    : `${cut(tip.lead, room)}${TIP_SEPARATOR}${tip.detail}`;
+}
 
 /** What a hovered point says, in a small box by it kept inside the plot. */
-function Tip(props: {
-  readonly tip: {readonly text: string; readonly x: number; readonly y: number};
-  readonly plot: Plot;
-}): JSX.Element {
+function Tip(props: {readonly tip: Told; readonly plot: Plot}): JSX.Element {
   const {tip, plot} = props;
-  const width = Math.ceil(tip.text.length * TYPE.section.size * MONO_ADVANCE) + 2 * TIP_PAD;
+  const glyph = TYPE.section.size * MONO_ADVANCE;
+  const room = Math.floor((plot.right - plot.left - 2 * TIP_PAD) / glyph);
+  const words = tipWords(tip, room);
+  const width = Math.ceil(words.length * glyph) + 2 * TIP_PAD;
   const left = Math.max(plot.left, Math.min(plot.right - width, tip.x - width / 2));
   const above = tip.y - TIP_GAP - TIP_HEIGHT >= plot.top;
   const top = above ? tip.y - TIP_GAP - TIP_HEIGHT : tip.y + TIP_GAP;
@@ -644,7 +677,7 @@ function Tip(props: {
         y={top + TIP_HEIGHT / 2}
         dominantBaseline="middle"
       >
-        {tip.text}
+        {words}
       </text>
     </g>
   );

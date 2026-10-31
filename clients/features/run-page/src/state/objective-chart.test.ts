@@ -81,6 +81,17 @@ describe('the performance chart', () => {
     expect(chart?.readings.find(point => point.id === 'b')?.label).toBe('b · 30 · 3.00×');
   });
 
+  test('a reading’s tip is its idea and the short figures; its name for assistive technology is whole', () => {
+    const chart = chartOf(
+      modelOf([result('a', 60, 6_054_154, 'passed', 4), result('b', 120, 756_769, 'slower', 0.5)]),
+      300,
+    );
+    const [first, second] = chart?.readings ?? [];
+    expect(first?.tip).toEqual({lead: 'a', detail: '6.05M · 4.00×'});
+    expect(first?.label).toBe('a · 6,054,154 · 4.00×');
+    expect(second?.tip).toEqual({lead: 'b', detail: '757K · 0.50×'});
+  });
+
   test('with no input there is no start to name', () => {
     const chart = chartOf(modelOf([result('a', 60, 20, 'passed')]), 300);
     expect(chart?.start).toBeNull();
