@@ -64,8 +64,8 @@ export type NewRunMethods =
   | 'copyOut'
   | 'startRun';
 
-/** What `installFakeUsage` provides: what a project's runs spent in a window. */
-export type UsageMethods = 'usageWindow';
+/** What `installFakeUsage` provides: what a machine made of its usage, its prices, and saving them. */
+export type UsageMethods = 'usageWindow' | 'usageSummary' | 'usageRatesRefresh' | 'usagePricesSave';
 
 /** What `installFakeExampleDestination` provides: what an example's destination holds. */
 export type ExampleDestinationMethods = 'exampleDestination';
@@ -110,10 +110,10 @@ export interface FakeBridgeSeed {
    */
   readonly projectRuns?: Readonly<Record<string, readonly unknown[]>>;
   /**
-   * What each project's helper answers a usage question with (`usage.window`), by `<host>|<project>`:
-   * the figures as the app reads them (`UsageWindowEntry`), `'unsupported'` for a helper that
-   * predates the question, or `'failed'` for one that cannot answer. A project not named, and a
-   * world without `usage`, answer as a helper that predates it.
+   * What each machine answers the Usage page with (`usage.summary`), by host: a description of its
+   * series that the Fake cuts into the buckets of each question (`UsageHostSeed` in the usage
+   * world), `'unsupported'` for a host that predates the question, or `'failed'` for one that
+   * cannot answer. A host not named, and a world without `usage`, answer as a host that predates it.
    */
   readonly usage?: Readonly<Record<string, unknown>>;
   /** The saved machines, as `hosts.json` and This Mac list them. */
@@ -395,33 +395,175 @@ export function installFakeProjectRuns(seed: FakeBridgeSeed): void {
   });
 }
 
+/** One series as the world describes it: each column's base value per bucket, ramped over the buckets. */
+interface UsagePattern {
+  origin?: string;
+  provider: string;
+  model: string;
+  speed?: string;
+  source?: string;
+  columns: Record<string, number>;
+  rate?: unknown;
+}
+
+/** What a machine answers the Usage page with, before it is cut into the buckets of a question. */
+interface UsageHostSeed {
+  series: UsagePattern[];
+  runs?: unknown[];
+  agents?: unknown[];
+  recent?: unknown[];
+  bests?: number;
+  pricing?: Record<string, unknown>;
+}
+
+/** The prices a machine holds, as the app reads them. */
+interface UsageBook {
+  revision: number;
+  overrides: {model: string; rate: unknown}[];
+  aliases: unknown[];
+}
+
 /**
- * The usage part of the Fake, as a further init script after `installFakeBridge`: each project's
- * answer to what its runs spent (`seed.usage`), and the questions asked, in `fakeHost.usageAsked`.
+ * The usage part of the Fake, as a further init script after `installFakeBridge`: each machine's
+ * answer to what it made of its usage (`seed.usage`), cut into the buckets the question names,
+ * priced by the book `installFakeUsagePrices` keeps; and the questions asked, in
+ * `fakeHost.usageAsked`.
  */
 export function installFakeUsage(seed: FakeBridgeSeed): void {
-  const answers = seed.usage ?? {};
+  const answers = (seed.usage ?? {}) as Record<string, UsageHostSeed | string>;
   const asked: unknown[] = [];
-  Object.assign((window as unknown as {fakeHost: object}).fakeHost, {usageAsked: asked});
+  const fakeHost = (window as unknown as {fakeHost: Record<string, unknown>}).fakeHost;
+  fakeHost['usageAsked'] = asked;
+  const fields =
+    'cached cacheWrite uncached output reasoning turns approximateTurns recordedUsd estimateUsd inputUsd cacheReadUsd cacheWriteUsd outputUsd speedPremiumUsd cacheSavingsUsd'.split(
+      ' ',
+    );
+  const zeros = ['skipped', 'malformed', 'failed', 'excludedExact', 'excludedApproximate'];
+  const source = (kind: string, host: string, provider: string, sessions: number) => ({
+    ...Object.fromEntries(zeros.map(key => [key, 0])),
+    kind,
+    sourceId: `${host}-${kind}`,
+    provider,
+    root: '',
+    status: 'ok',
+    scanned: sessions,
+    distinctSessions: sessions,
+  });
+  const summaryOf = (host: string, own: UsageHostSeed, edges: number[]) => {
+    const at = Array.from({length: Math.max(0, edges.length - 1)}, (_, bucket) => bucket);
+    // A ramp, so the chart has a shape: bucket b holds 1 to 5 times the base.
+    const ramp = (bucket: number): number => 1 + ((bucket * 7) % 5);
+    const books = (fakeHost['usageBooks'] ?? {}) as Record<string, UsageBook>;
+    const book = books[host] ?? {revision: 0, overrides: [], aliases: []};
+    const outside = own.series.some(each => each.origin === 'outside');
+    return {
+      series: own.series.map(each => ({
+        origin: each.origin ?? 'run',
+        provider: each.provider,
+        model: each.model,
+        speed: each.speed ?? 'standard',
+        source: each.source ?? 'model',
+        usageSource: each.origin === 'outside' ? 1 : 0,
+        buckets: at,
+        ...Object.fromEntries(
+          fields.map(field => [field, at.map(bucket => (each.columns[field] ?? 0) * ramp(bucket))]),
+        ),
+      })),
+      counts: at.flatMap(bucket =>
+        [...new Set(own.series.map(each => each.provider))].map(provider => ({
+          bucket,
+          provider,
+          runs: 1 + (bucket % 2),
+          outsideSessions: outside ? 1 : 0,
+        })),
+      ),
+      bests: own.bests === undefined ? [] : at.map(bucket => ({bucket, count: own.bests})),
+      runs: own.runs ?? [],
+      runsOther: [],
+      agents: own.agents ?? [],
+      agentsOther: [],
+      recent: own.recent ?? [],
+      sources: [
+        source('journal', host, '', 3),
+        ...(outside ? [source('transcripts', host, 'claude', 4)] : []),
+      ],
+      pricing: {...(fakeHost['usagePricing'] as object), ...own.pricing},
+      prices: book,
+      pricesStatus: 'ok',
+      rates: own.series.map(each => {
+        const set = book.overrides.find(entry => entry.model === each.model);
+        const rate = set === undefined ? (each.rate ?? null) : set.rate;
+        return {
+          provider: each.provider,
+          model: each.model,
+          speed: 'standard',
+          rate,
+          source: set !== undefined ? 'override' : rate === null ? 'unpriced' : 'model',
+        };
+      }),
+      ...Object.fromEntries(['pendingRuns', 'pendingFiles', 'foldedSeries'].map(key => [key, 0])),
+      readAt: 1,
+    };
+  };
   Object.assign((window as unknown as {vibesysWelcome: object}).vibesysWelcome, {
-    usageWindow: (
-      host: string,
-      project: string,
-      runIds: readonly string[],
-      since: number,
-      until: number,
-    ) => {
-      asked.push({host, project, runIds, since, until});
-      const answer = answers[`${host}|${project}`] ?? 'unsupported';
-      if (answer === 'failed') {
-        return Promise.resolve({ok: false, error: 'Could not read usage', authNeeded: false});
-      }
-      return Promise.resolve({
-        ok: true,
-        value: answer === 'unsupported' ? {kind: 'unsupported'} : {kind: 'usage', usage: answer},
-      });
+    // The question this page replaced: no screen asks it any more.
+    usageWindow: () => Promise.resolve({ok: true, value: {kind: 'unsupported'}}),
+    usageSummary: (host: string, projects: unknown, edges: number[], now: number) => {
+      asked.push({host, projects, edges, now});
+      const own = answers[host];
+      if (own === 'failed') return Promise.resolve({ok: false, error: 'Could not read usage'});
+      const value =
+        own === undefined || typeof own === 'string'
+          ? {kind: 'unsupported'}
+          : {kind: 'summary', summary: summaryOf(host, own, edges)};
+      return Promise.resolve({ok: true, value});
     },
-  } satisfies FakeProvides<UsageMethods>);
+  } satisfies FakeProvides<'usageWindow' | 'usageSummary'>);
+}
+
+/**
+ * The prices part of the Usage Fake, a further init script: each machine's price book, which saves
+ * against its revision as a host does (`fakeHost.usageBooks`), and the refreshes and saves asked
+ * in `fakeHost.usageRefreshed` and `fakeHost.usageSaved`.
+ */
+export function installFakeUsagePrices(): void {
+  const books: Record<string, UsageBook> = {};
+  const refreshed: unknown[] = [];
+  const saved: unknown[] = [];
+  const pricing = {
+    status: 'fresh',
+    fetchedAt: 1_000,
+    knownModels: 3,
+    refreshDue: false,
+    checkedOn: '2026-10-30',
+  };
+  Object.assign((window as unknown as {fakeHost: object}).fakeHost, {
+    usageBooks: books,
+    usageRefreshed: refreshed,
+    usageSaved: saved,
+    usagePricing: pricing,
+  });
+  Object.assign((window as unknown as {vibesysWelcome: object}).vibesysWelcome, {
+    usageRatesRefresh: (host: string, force: boolean) => {
+      refreshed.push({host, force});
+      return Promise.resolve({ok: true, value: {kind: 'pricing', pricing}});
+    },
+    usagePricesSave: (
+      host: string,
+      baseRevision: number,
+      overrides: UsageBook['overrides'],
+      aliases: unknown[],
+    ) => {
+      saved.push({host, baseRevision, overrides, aliases});
+      const book = books[host] ?? {revision: 0, overrides: [], aliases: []};
+      if (baseRevision !== book.revision) {
+        return Promise.resolve({ok: true, value: {kind: 'moved', prices: book}});
+      }
+      const next = {revision: book.revision + 1, overrides: [...overrides], aliases: [...aliases]};
+      books[host] = next;
+      return Promise.resolve({ok: true, value: {kind: 'saved', prices: next}});
+    },
+  } satisfies FakeProvides<'usageRatesRefresh' | 'usagePricesSave'>);
 }
 
 /**

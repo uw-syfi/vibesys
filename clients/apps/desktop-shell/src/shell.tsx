@@ -222,10 +222,7 @@ export function createShellStores(
     machines,
     usage: createUsageStore(bridge, {
       schedule,
-      clock: () => {
-        const now = page.now();
-        return {now, midnight: new Date(now).setHours(0, 0, 0, 0)};
-      },
+      clock: () => ({now: page.now(), zone: Intl.DateTimeFormat().resolvedOptions().timeZone}),
     }),
     newRun: newRun.store,
     newRunCompletion: newRun.completion,
