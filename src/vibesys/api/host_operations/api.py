@@ -20,6 +20,11 @@ from vibesys.api.host_operations._project import (
     serve_project,
 )
 from vibesys.api.host_operations._reads import ReadSource
+from vibesys.api.host_operations._saved_runs import (
+    host_watch_failure,
+    saved_run_frames,
+    serve_saved_runs,
+)
 from vibesys.api.host_operations._start import StartRefusedError, StartUnknownError, serve_start
 from vs_proto.api import (
     AcceptedRequest,
@@ -47,9 +52,12 @@ __all__ = [
     "execute_inspect_candidate",
     "execute_read",
     "host_read_failure",
+    "host_watch_failure",
+    "saved_run_frames",
     "serve_cluster",
     "serve_login",
     "serve_project",
+    "serve_saved_runs",
     "serve_start",
 ]
 

@@ -31,6 +31,7 @@ import {
   ALL_RUNS_EMPTY,
   type AllRunsState,
   askProjectRuns,
+  type CancelProjectRuns,
   type ListProjectRuns,
   projectRunGaps,
   projectRunsListed,
@@ -196,6 +197,8 @@ export type SidebarRequest =
       readonly runIds: readonly string[];
     }
   | ListProjectRuns
+  /** Stop reading a project's runs: the screen asked again, or no longer waits for them. */
+  | CancelProjectRuns
   /** Add an entry to the window's history naming `screen`. */
   | {readonly kind: 'push-address'; readonly screen: Screen};
 
@@ -224,22 +227,30 @@ export function initialSidebar(selection: Screen = SIDEBAR_EMPTY.selection): Sid
   return same({...SIDEBAR_EMPTY, selection});
 }
 
-/** The window at `screen`. */
-function shown(state: SidebarState, screen: Screen): SidebarState {
+/**
+ * The window at `screen`. Entering the Runs screen asks every project again, so the listings still
+ * being read are cancelled: their replies would be dropped.
+ */
+function shown(state: SidebarState, screen: Screen): SidebarStep {
   const entering = screen.kind === 'runs' && state.selection.kind !== 'runs';
+  const asked = entering ? refreshed(state.allRuns) : null;
   return {
-    ...state,
-    selection: screen,
-    ...(entering ? {allRuns: refreshed(state.allRuns)} : {}),
+    state: {
+      ...state,
+      selection: screen,
+      ...(asked === null ? {} : {allRuns: asked.all}),
+    },
+    requests: asked?.requests ?? [],
   };
 }
 
 /** The user at `screen`: the address follows, in one entry, unless it already names `screen`. */
 function selected(state: SidebarState, screen: Screen): SidebarStep {
   const moved = fragmentOf(screen) !== fragmentOf(state.selection);
+  const shownStep = shown(state, screen);
   return {
-    state: shown(state, screen),
-    requests: moved ? [{kind: 'push-address', screen}] : [],
+    state: shownStep.state,
+    requests: [...shownStep.requests, ...(moved ? [{kind: 'push-address' as const, screen}] : [])],
   };
 }
 
@@ -546,7 +557,7 @@ function baseStep(state: SidebarState, action: SidebarAction): SidebarStep {
     case 'select':
       return selected(state, action.screen);
     case 'restored':
-      return same(shown(state, action.screen));
+      return shown(state, action.screen);
   }
 }
 

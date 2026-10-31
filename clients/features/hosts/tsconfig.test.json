@@ -51,6 +51,9 @@
       "path": "../../libs/transport/tsconfig.testing.json"
     },
     {
+      "path": "../../libs/subscription/tsconfig.lib.json"
+    },
+    {
       "path": "./tsconfig.main.json"
     }
   ]

@@ -2,7 +2,7 @@
 import {type ClientHttp2Session, connect, constants, type IncomingHttpHeaders} from 'node:http2';
 import type {Duplex} from 'node:stream';
 import {HOST_API_MAX_MESSAGE_BYTES as MAX_MESSAGE} from '@vibesys/proto';
-import {GrpcError, registerAbort, type ScheduleTimeout} from '@vibesys/transport';
+import {GrpcCode, GrpcError, registerAbort, type ScheduleTimeout} from '@vibesys/transport';
 
 export function grpcFrame(bytes: Uint8Array): Buffer {
   if (bytes.byteLength > MAX_MESSAGE)
@@ -36,6 +36,35 @@ export class GrpcDecoder {
   }
 }
 
+/** How long a call may take. A unary call has a total only; a stream may also bound its silence. */
+export interface CallBound {
+  /** The longest the call may run, answered or not. */
+  readonly totalMs: number;
+  /** The longest wait for the first frame; `silenceMs` when unset. */
+  readonly firstFrameMs?: number;
+  /** The longest wait between frames, from the first on. Unset: frames may be any distance apart. */
+  readonly silenceMs?: number;
+}
+
+/** The part of a call's bound that ran out. */
+export type TimedOutBound = 'total' | 'first-frame' | 'silence';
+
+/** A call that outlasted its bound: a gRPC deadline that names the part of the bound that ran out. */
+export class CallTimedOut extends GrpcError {
+  constructor(
+    readonly bound: TimedOutBound,
+    readonly ms: number,
+  ) {
+    super(
+      GrpcCode.DEADLINE_EXCEEDED,
+      bound === 'total'
+        ? 'gRPC deadline exceeded'
+        : `gRPC deadline exceeded: no ${bound === 'first-frame' ? 'first ' : ''}frame for ${ms / 1000}s`,
+    );
+    this.name = 'CallTimedOut';
+  }
+}
+
 /** The session owns its duplex and multiplexes every call for this host. */
 export class GatewaySession {
   readonly #session: ClientHttp2Session;
@@ -66,7 +95,7 @@ export class GatewaySession {
         if (response !== undefined) throw new GrpcError(13, 'unary returned multiple messages');
         response = message;
       },
-      15_000,
+      {totalMs: 15_000},
     );
     if (response === undefined) throw new GrpcError(13, 'unary returned no message');
     return response;
@@ -77,7 +106,7 @@ export class GatewaySession {
     bytes: Uint8Array,
     signal: AbortSignal,
     receive: (bytes: Uint8Array) => void,
-    deadlineMs?: number,
+    bound?: CallBound,
   ): Promise<void> {
     if (!/^\/[A-Za-z][\w.]*\/[A-Za-z]\w*$/.test(method)) {
       return Promise.reject(new Error(`invalid gRPC method: ${method}`));
@@ -102,11 +131,13 @@ export class GatewaySession {
       let settled = false;
       let cancelAbort = (): void => {};
       let cancelDeadline = (): void => {};
+      let cancelSilence = (): void => {};
       const finish = (error?: unknown): void => {
         if (settled) return;
         settled = true;
         cancelAbort();
         cancelDeadline();
+        cancelSilence();
         if (error !== undefined) {
           stream.close(constants.NGHTTP2_CANCEL);
           reject(error);
@@ -122,9 +153,19 @@ export class GatewaySession {
       stream.on('response', headers);
       stream.on('trailers', headers);
       stream.on('error', finish);
+      // Waiting for a frame: the quiet that may pass before the next one, restarted by each. A call
+      // its consumer ended while taking a frame is settled and waits for nothing.
+      const awaitFrame = (waitMs: number | undefined, bound: TimedOutBound): void => {
+        cancelSilence();
+        if (settled || waitMs === undefined) return;
+        cancelSilence = this.schedule(() => finish(new CallTimedOut(bound, waitMs)), waitMs);
+      };
       stream.on('data', (chunk: Buffer) => {
         try {
-          for (const message of decoder.push(chunk)) receive(message);
+          for (const message of decoder.push(chunk)) {
+            receive(message);
+            awaitFrame(bound?.silenceMs, 'silence');
+          }
         } catch (error) {
           finish(error);
         }
@@ -147,11 +188,10 @@ export class GatewaySession {
       );
       cancelAbort = registration.detach;
       if (registration.aborted) finish(signal.reason ?? new Error('cancelled'));
-      if (!settled && deadlineMs !== undefined) {
-        cancelDeadline = this.schedule(
-          () => finish(new Error('gRPC deadline exceeded')),
-          deadlineMs,
-        );
+      if (!settled && bound !== undefined) {
+        const {totalMs} = bound;
+        cancelDeadline = this.schedule(() => finish(new CallTimedOut('total', totalMs)), totalMs);
+        awaitFrame(bound.firstFrameMs ?? bound.silenceMs, 'first-frame');
       }
       if (!settled) stream.end(frame);
     });

@@ -25,6 +25,7 @@ import {
   registryStart,
   runWatch,
   SshLink,
+  Subscriptions,
   WATCH_METHOD,
   WATCH_RUNS_METHOD,
 } from '@vibesys/connection';
@@ -62,6 +63,7 @@ import {createGatewayCalls, installGatewayIpc} from './gateway-ipc.js';
 import {type LaunchPlan, userDataOverride} from './launch-args.js';
 import {planFromSecondInstance, prepareLaunchHandoff} from './launch-handoff.js';
 import {RunWindows} from './run-windows.js';
+import {installSubscriptionIpc} from './subscription-ipc.js';
 import {WelcomeFeed} from './welcome-feed.js';
 import {rendererGeneration} from './welcome-ipc.js';
 import {AppWindow} from './window.js';
@@ -81,12 +83,12 @@ function log(message: string): void {
   console.error(`vibesys-desktop: ${message}`);
 }
 
-/** Report the network coming back (offline to online) to every host connection. */
-function watchNetwork(manager: ConnectionManager): void {
+/** Report the network coming back (offline to online) to everything that holds a connection. */
+function watchNetwork(wake: () => void): void {
   let online = true;
   const poll = (): void => {
     const now = net.isOnline();
-    if (now && !online) manager.wake();
+    if (now && !online) wake();
     online = now;
     realTimers(poll, NETWORK_POLL_MS);
   };
@@ -181,6 +183,36 @@ function installGateway(manager: ConnectionManager) {
   );
 }
 
+/** The hub of live subscriptions, over the gateway, closed with the connections it rides. */
+function startSubscriptions(
+  gateway: ReturnType<typeof installGateway>,
+  manager: ConnectionManager,
+): Subscriptions {
+  const subscriptions = new Subscriptions(
+    gateway,
+    realTimers,
+    () => Date.now(),
+    error => log(`a subscription observer failed: ${String(error)}`),
+  );
+  manager.onDisposing(() => subscriptions.close());
+  return subscriptions;
+}
+
+/** The two ports a window reaches hosts through: the generic gateway, and subscriptions. */
+function installPorts(parts: {
+  readonly gateway: ReturnType<typeof installGateway>;
+  readonly subscriptions: Subscriptions;
+  readonly settings: SettingsStore;
+  readonly admits: Parameters<typeof installGatewayIpc>[1]['admits'];
+}): void {
+  installGatewayIpc(ipcMain, {
+    calls: parts.gateway,
+    checkout: effectiveCheckout(parts.settings, REPOSITORY_ROOT),
+    admits: parts.admits,
+  });
+  installSubscriptionIpc(ipcMain, {hub: parts.subscriptions.port, admits: parts.admits});
+}
+
 async function openWindow(
   manager: ConnectionManager,
   fatal: (error: Error) => void,
@@ -196,6 +228,7 @@ async function openWindow(
     log,
   });
   const gateway = installGateway(manager);
+  const subscriptions = startSubscriptions(gateway, manager);
   const watchedRuns = watchHostRuns(gateway, manager);
   const welcome = new WelcomeFeed();
   const preferences = new PreferencesMain({
@@ -227,6 +260,7 @@ async function openWindow(
     broadcast: listing => windows.broadcast(WELCOME_EVENTS.listing, welcome.listing(listing)),
     endLogin: id => held.logins?.cancelHost(id),
     runs: watchedRuns,
+    subscriptions,
   });
   const logins = startLogins(hosts, gateway, manager);
   held.logins = logins;
@@ -270,14 +304,14 @@ async function openWindow(
     log,
   });
   // A machine that slept has dead connections nobody has noticed yet: check them now.
-  powerMonitor.on('resume', () => manager.wake());
-  watchNetwork(manager);
+  const wake = (): void => {
+    manager.wake();
+    subscriptions.wake();
+  };
+  powerMonitor.on('resume', wake);
+  watchNetwork(wake);
   const admits = desktop.admitsRenderer.bind(desktop);
-  installGatewayIpc(ipcMain, {
-    calls: gateway,
-    checkout: effectiveCheckout(settings, REPOSITORY_ROOT),
-    admits,
-  });
+  installPorts({gateway, subscriptions, settings, admits});
   return desktop;
 }
 
@@ -329,8 +363,11 @@ function listedHosts(parts: {
   readonly broadcast: (listing: HostListing) => void;
   readonly endLogin?: (id: HostId) => void;
   readonly runs: ReturnType<typeof runWatch>;
+  /** Removing a host ends the subscriptions on it (`Hosts.remove`). */
+  readonly subscriptions: Pick<Subscriptions, 'closeHost'>;
 }): {readonly hosts: Hosts; readonly setup: ReturnType<typeof registrySetup>} {
   const {manager, settings, gateway, history, notifier, welcome, broadcast, endLogin, runs} = parts;
+  const {subscriptions} = parts;
   const setup = registrySetup({
     unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
   });
@@ -344,13 +381,15 @@ function listedHosts(parts: {
       setup,
       ...(endLogin === undefined ? {} : {endLogin}),
       runs,
+      subscriptions,
       catalog: registryRunCatalog({
         checkout: effectiveCheckout(settings, REPOSITORY_ROOT),
         unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
       }),
       savedRuns: registrySavedRuns({
         checkout: effectiveCheckout(settings, REPOSITORY_ROOT),
-        unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
+        stream: (id, bytes, signal, receive) =>
+          gateway.stream(hostKey(id), WATCH_METHOD, bytes, signal, receive),
       }),
       runReads: registryRunReads({
         checkout: effectiveCheckout(settings, REPOSITORY_ROOT),

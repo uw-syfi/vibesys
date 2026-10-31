@@ -45,6 +45,7 @@ const CHANNELS: Channels = {
   readSpan: 'vibesys:welcome:read-span',
   runDigests: 'vibesys:welcome:run-digests',
   projectRuns: 'vibesys:welcome:project-runs',
+  cancelProjectRuns: 'vibesys:welcome:cancel-project-runs',
   usageWindow: 'vibesys:welcome:usage-window',
   preferences: 'vibesys:welcome:preferences',
   setAppearance: 'vibesys:welcome:set-appearance',
@@ -86,6 +87,8 @@ const CHROME_INSET_CHANNEL: typeof import('@vibesys/ipc').CHROME_INSET_CHANNEL =
   'vibesys:welcome:chrome-inset';
 const CONNECT_CHANNEL: typeof import('@vibesys/ipc').CONNECT_CHANNEL = 'vibesys:connect';
 const WAKE_CHANNEL: typeof import('@vibesys/ipc').WAKE_CHANNEL = 'vibesys:wake';
+const SUBSCRIPTION_CHANNEL: typeof import('@vibesys/ipc').SUBSCRIPTION_CHANNEL =
+  'vibesys:subscription';
 const OPEN_SETTINGS_CHANNEL: typeof import('@vibesys/ipc').OPEN_SETTINGS_CHANNEL =
   'vibesys:open-settings';
 const RUN_PORT_MESSAGE: typeof import('@vibesys/ipc').RUN_PORT_MESSAGE = 'vibesys:run-port';
@@ -137,7 +140,8 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     readSpan: (host, project, runId, spanId, fromSequence, max) =>
       call(CHANNELS.readSpan, host, project, runId, spanId, fromSequence, max),
     runDigests: (host, project, runIds) => call(CHANNELS.runDigests, host, project, runIds),
-    projectRuns: (host, project) => call(CHANNELS.projectRuns, host, project),
+    projectRuns: (host, project, token) => call(CHANNELS.projectRuns, host, project, token),
+    cancelProjectRuns: token => call(CHANNELS.cancelProjectRuns, token),
     usageWindow: (host, project, runIds, since, until) =>
       call(CHANNELS.usageWindow, host, project, runIds, since, until),
     connectRun: id => capabilities.connectRun(id),
@@ -203,21 +207,26 @@ if (process.type === 'renderer') {
       },
     }),
   );
+  // Two byte-only capabilities over the same kind of port: the generic gateway, which refuses
+  // Subscribe, and the subscription port, which only Subscribe's hub in main answers.
+  const portTo = (channel: string) => (): GatewayPreloadChannel => {
+    const {port1, port2} = new MessageChannel();
+    return {
+      listen: (receive, failed) => {
+        port1.onmessage = event => receive(event.data);
+        port1.onmessageerror = failed;
+      },
+      send: request => electron.ipcRenderer.postMessage(channel, request, [port2]),
+      close: () => port1.close(),
+    };
+  };
   electron.contextBridge.exposeInMainWorld(
     'vibesysGateway',
-    createGatewayPreload({
-      channel: () => {
-        const {port1, port2} = new MessageChannel();
-        return {
-          listen: (receive, failed) => {
-            port1.onmessage = event => receive(event.data);
-            port1.onmessageerror = failed;
-          },
-          send: request => electron.ipcRenderer.postMessage('vibesys:gateway', request, [port2]),
-          close: () => port1.close(),
-        };
-      },
-    }),
+    createGatewayPreload({channel: portTo('vibesys:gateway')}),
+  );
+  electron.contextBridge.exposeInMainWorld(
+    'vibesysSubscription',
+    createGatewayPreload({channel: portTo(SUBSCRIPTION_CHANNEL)}),
   );
   prepareFirstPaint(electron.ipcRenderer.sendSync(FIRST_PAINT_CHANNEL));
   electron.ipcRenderer.on(CHROME_INSET_CHANNEL, (_event, inset: ChromeInset) =>

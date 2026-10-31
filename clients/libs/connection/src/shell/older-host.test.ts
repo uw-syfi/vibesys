@@ -73,7 +73,7 @@ const setup = registrySetup({unary});
 const clusters = registryClusters({checkout, unary: olderHost.mutate});
 const projects = registryProjects({checkout, read: olderHost.read, mutate: olderHost.mutate});
 const starts = registryStart({checkout, unary: olderHost.mutate});
-const savedRuns = registrySavedRuns({checkout, unary});
+const savedRuns = registrySavedRuns({checkout, stream: olderHost.watch});
 const logins = new LoginActor({checkout, stream: olderHost.watch});
 
 /** What a real older checkout wrote for every host command the gateway runs. */
@@ -97,7 +97,7 @@ const CALLS: readonly (readonly [string, string, () => Promise<unknown>])[] = [
     () => setup.inspectCandidate(HOST, '/src/checkout', 1n, signal()),
   ],
   ['complete paths', 'complete-paths', () => setup.completePaths(HOST, '/work/', signal())],
-  ['saved runs', 'list-saved-runs', () => savedRuns.list(HOST, '/work/p', signal())],
+  ['saved runs', 'stream-saved-runs', () => savedRuns.list(HOST, '/work/p', signal())],
   ['put cluster', 'put-cluster', () => clusters.put(HOST, cluster, signal())],
   ['remove cluster', 'remove-cluster', () => clusters.remove(HOST, 'lab', signal())],
   ['test cluster', 'test-cluster', () => clusters.test(HOST, cluster, signal())],

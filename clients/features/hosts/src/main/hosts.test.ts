@@ -6,12 +6,15 @@ import {
   type RegistryRunReads,
   registrySetup,
   runWatch,
+  Subscriptions,
 } from '@vibesys/connection';
 import {
   FakeLink,
   FakeReadCatalog,
   FakeRunGateway,
+  FakeSubscribeStreams,
   idleRunWatch,
+  idleSubscriptions,
   olderHost,
   record,
 } from '@vibesys/connection/testing';
@@ -28,6 +31,7 @@ import {
   withHostSettings,
 } from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
+import {machineStats, type SubscriptionState} from '@vibesys/subscription';
 import {FakeClock} from '@vibesys/transport/testing';
 import fc from 'fast-check';
 import {Hosts, type SshConfigFilesystem} from './index.js';
@@ -282,8 +286,8 @@ function completionSubject(
 
 /** Native setup facts shared by checkout-race scenarios; helper leases remain separate. */
 function hostsInWorld(
-  deps: Omit<ConstructorParameters<typeof Hosts>[0], 'runs'> &
-    Partial<Pick<ConstructorParameters<typeof Hosts>[0], 'runs'>>,
+  deps: Omit<ConstructorParameters<typeof Hosts>[0], 'runs' | 'subscriptions'> &
+    Partial<Pick<ConstructorParameters<typeof Hosts>[0], 'runs' | 'subscriptions'>>,
   peer = new FakeReadCatalog(),
 ): Hosts {
   for (const path of [
@@ -300,6 +304,7 @@ function hostsInWorld(
   return new Hosts({
     setup: registrySetup(peer),
     runs: runWatch(new FakeRunGateway(), new FakeClock().schedule),
+    subscriptions: idleSubscriptions(),
     ...deps,
   });
 }
@@ -333,6 +338,9 @@ async function gatewayWorld(options: WorldOptions) {
   await configuredSettings(settings, options.configured ?? []);
   const gateway = new FakeRunGateway();
   const clock = new FakeClock();
+  const subscriptions = new Subscriptions(new FakeSubscribeStreams(), clock.schedule, () =>
+    clock.now(),
+  );
   const watch = runWatch(gateway, clock.schedule);
   let stopFailed = false;
   const runs = {
@@ -381,6 +389,7 @@ async function gatewayWorld(options: WorldOptions) {
         if (options.failingCallbacks) throw new Error('retire failed');
       },
       runs,
+      subscriptions,
     },
     peer,
   );
@@ -392,6 +401,7 @@ async function gatewayWorld(options: WorldOptions) {
     hosts,
     settings,
     gateway,
+    subscriptions,
     clock,
     pushed,
     retired,
@@ -503,6 +513,7 @@ describe('Hosts.complete', () => {
     });
     const hosts = new Hosts({
       runs: idleRunWatch(),
+      subscriptions: idleSubscriptions(),
       manager,
       settings: new SettingsStore({
         settingsPath: '/settings/hosts.json',
@@ -1233,6 +1244,41 @@ describe('Hosts checkout changes', () => {
     await removing;
     expect(settingsFor((await settings.hosts()).settings, ALPHA)).toBeNull();
     expect(manager.existing('ssh:alpha')).toBeNull();
+  });
+
+  test('removing a host ends the subscriptions on it, and leaving the desired set does not', async () => {
+    const world = await gatewayWorld({configured: [ALPHA, BETA]});
+    const seen = new Map<string, SubscriptionState<unknown>>();
+    for (const host of [ALPHA, BETA])
+      world.subscriptions.observe(hostKey(host), machineStats, state => {
+        seen.set(hostKey(host), state);
+      });
+    // Showing beta retires alpha from the bounded recent set, though alpha is still listed.
+    await world.hosts.host(ALPHA, '10:100');
+    await world.hosts.host(BETA, '10:100');
+    expect(world.retired).toEqual(['ssh:alpha']);
+    expect(seen.get('ssh:alpha')?.kind).toBe('connecting');
+
+    await world.hosts.remove(ALPHA);
+    expect(seen.get('ssh:alpha')).toEqual({kind: 'failed', reason: 'closed', retrying: false});
+    // Another host's subscriptions are its own.
+    expect(seen.get('ssh:beta')?.kind).toBe('connecting');
+  });
+
+  test('a removal that did not persist leaves the subscriptions on the host', async () => {
+    const filesystem = new FakeSettingsFilesystem();
+    const world = await gatewayWorld({filesystem, configured: [ALPHA]});
+    let state: SubscriptionState<unknown> | undefined;
+    world.subscriptions.observe(
+      hostKey(ALPHA),
+      machineStats,
+      (each: SubscriptionState<unknown>) => {
+        state = each;
+      },
+    );
+    filesystem.failNextDirectorySync(settingsBinaryPath('/settings/hosts.json'), new Error('sync'));
+    await expect(world.hosts.remove(ALPHA)).rejects.toThrow('sync');
+    expect(state?.kind).toBe('connecting');
   });
 
   test('an ambiguous removal write still retires the watcher matching its visible result', async () => {
@@ -2187,8 +2233,75 @@ test('saved-run discovery always uses the registry', async () => {
     },
   });
   await using _manager = subject.manager;
-  const rows = await subject.hosts.projectRuns(LOCAL, '/srv/project');
+  const rows = await subject.hosts.projectRuns(LOCAL, '/srv/project', {owner: 'doc', token: 1});
   expect(calls).toBe(1);
   expect(link.helper.requests).toHaveLength(0);
   expect(rows[0]?.runId).toBe('native-run');
+});
+
+/** A saved-run registry whose listings stay open until their signal ends them. */
+function openListings() {
+  const link = new FakeLink();
+  const signals: AbortSignal[] = [];
+  const subject = completionSubject(link, {
+    list: (_host, _project, signal) =>
+      new Promise((_resolve, reject) => {
+        signals.push(signal);
+        signal.addEventListener('abort', () => reject(signal.reason), {once: true});
+      }),
+  });
+  return {subject, signals};
+}
+
+/** What a call ended with, so a test can end it first and look at it after. */
+const outcomeOf = (call: Promise<unknown>): Promise<unknown> =>
+  call.then(
+    () => 'answered',
+    (error: unknown) => (error instanceof Error ? error.message : error),
+  );
+
+test('cancelling a project listing ends the host scan and rejects only that listing', async () => {
+  const {subject, signals} = openListings();
+  await using _manager = subject.manager;
+  const first = outcomeOf(subject.hosts.projectRuns(LOCAL, '/srv/a', {owner: 'doc', token: 1}));
+  const second = outcomeOf(subject.hosts.projectRuns(LOCAL, '/srv/b', {owner: 'doc', token: 2}));
+  subject.hosts.cancelProjectRuns({owner: 'doc', token: 1});
+  expect(await first).toBe('the project listing was cancelled');
+  expect(signals.map(signal => signal.aborted)).toEqual([true, false]);
+  subject.hosts.cancelProjectRuns({owner: 'doc', token: 2});
+  expect(await second).toBe('the project listing was cancelled');
+});
+
+test("a renderer document going away ends its listings and no other document's", async () => {
+  const {subject, signals} = openListings();
+  await using _manager = subject.manager;
+  const gone = outcomeOf(subject.hosts.projectRuns(LOCAL, '/srv/a', {owner: 'old', token: 1}));
+  const kept = outcomeOf(subject.hosts.projectRuns(LOCAL, '/srv/a', {owner: 'new', token: 1}));
+  subject.hosts.cancelProjectRunsOwner('old');
+  expect(await gone).toBe('the project listing was cancelled');
+  expect(signals.map(signal => signal.aborted)).toEqual([true, false]);
+  subject.hosts.cancelProjectRunsOwner('new');
+  expect(await kept).toBe('the project listing was cancelled');
+});
+
+test('a listing that answered is released: cancelling it is a no-op and its token can be named again', async () => {
+  const link = new FakeLink();
+  const subject = completionSubject(link, {list: async () => []});
+  await using _manager = subject.manager;
+  const listing = {owner: 'doc', token: 1};
+  expect(await subject.hosts.projectRuns(LOCAL, '/srv/a', listing)).toEqual([]);
+  subject.hosts.cancelProjectRuns(listing);
+  expect(await subject.hosts.projectRuns(LOCAL, '/srv/a', listing)).toEqual([]);
+});
+
+test('a listing token already in flight is refused, not shared', async () => {
+  const {subject} = openListings();
+  await using _manager = subject.manager;
+  const listing = {owner: 'doc', token: 1};
+  const first = outcomeOf(subject.hosts.projectRuns(LOCAL, '/srv/a', listing));
+  expect(await outcomeOf(subject.hosts.projectRuns(LOCAL, '/srv/b', listing))).toBe(
+    'the project listing is already active',
+  );
+  subject.hosts.cancelProjectRunsOwner('doc');
+  expect(await first).toBe('the project listing was cancelled');
 });
