@@ -38,7 +38,7 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
    it is the only writer. Nothing else proves a process dead, and nothing needs to: the lock proves that
    no other process writes the log, and `clear` (rule 3) handles what the dead process left running.
 3. **No result means run again.** Core never asks whether an open step happened. The runner of the
-   step first calls `clear(tag)`, which removes or adopts what an earlier attempt left, and then runs the
+   step first calls `clear(step, tag)`, which removes or adopts what an earlier attempt left, and then runs the
    next attempt. The attempt number is recorded and shown.
 4. **Pause is not a crash.** Pause stops starting steps, lets running steps finish or cancels them
    within a deadline, records that the run is parked, and exits. A clean pause leaves no open attempt.
@@ -163,7 +163,7 @@ unreachable. The first case is #3458, a completed `EnsureSession` whose session 
 acceptance. The table below marks `EnsureSession` safe to run twice. It keeps the four classes and adds
 what `clear` does for each.
 
-| Steps | Effect | After a crash | `clear(tag)` | Key |
+| Steps | Effect | After a crash | `clear(step, tag)` | Key |
 |---|---|---|---|---|
 | `ObserveOwnedJob`, `CollectEvidence`, `VerifyAdoption`; registered `QUERY` operations (`interpret_evidence`, `verify_revision`, board reads) | read only | safe | none | none |
 | `EnsureWorkspace`, `RestoreRevision` | create or reset an attempt's workspace to a recorded revision | safe: the end state is fixed by the request | none | tag (workspace is keyed by attempt and generation) |
@@ -246,7 +246,7 @@ New records (one proto envelope, `vibesys/store/v1/core_input.proto`, validated 
 | `CoreInput` | a decision or proposal, an owner event, an operator control, an epoch resume, a clock advance that changed state | the external inputs of `step` |
 | `StepStarted` | tag, attempt, request, deadline | durable intent before any I/O; makes a re-run visible |
 | `StepFinished` | tag, attempt, `Finished`, `Failed` or `Cancelled` with a typed reason | the result; one per step |
-| `AttemptInterrupted` | tag, attempt, reason (`PAUSE`, `SHUTDOWN`, `RAISED`) | an attempt that ended without ending the step; `RAISED` is a runner that raised, the one reason that is charged to the retry bound. The loop writes `PAUSE` and `RAISED`; an orderly stop of the process (`SHUTDOWN`) is not built, and a cancelled loop is a crash |
+| `AttemptInterrupted` | tag, attempt, reason (`PAUSE`, `SHUTDOWN`, `RAISED`) | an attempt that ended without ending the step; a `RAISED` one (the runner raised or gave nothing back) is charged to the retry bound, the other two are not. The loop writes `PAUSE` and `RAISED`; an orderly stop of the process (`SHUTDOWN`) is not built, and a cancelled loop is a crash |
 | `CoreSnapshot` | an old `RunEnvelope` | the seed of a migrated or imported run only; never written for a new run |
 
 The bodies of decisions, requests and observations are the canonical encoding of today's validated
@@ -274,9 +274,13 @@ reverses it, and the run-transport page changes to match when the cutover lands.
   Deleting `state.pb`, keyframes and `run.head` changes no result.
 - `committed_seq` in `run.head` keeps its meaning: the gateway serves records up to the last durable one.
 
-A cost to measure in the fold PR: a fold over the whole log grows with run length. The cache bounds it to
-the records since the last keyframe; a property test fixes that a cached start and a full fold give equal
-states.
+A fold over the whole log grows with run length. The cache bounds it to the records since the last
+keyframe, and a property test fixes that a cached start and a full fold give equal states. Measured on a
+laptop (a `StepStarted` and `AttemptInterrupted` pair: 17 microseconds per record up to 4,000 records;
+a `CoreInput` that prepares a request: 0.3 to 0.6 milliseconds, the cost of `step` itself, which grows
+with the ledger): a log of 4,000 attempt records folds in 70 milliseconds, and `decide` takes 0.04
+milliseconds. A start that folds the whole log of a run with thousands of inputs is a second or more,
+which is why the cache exists; the keyframe interval is the cutover's to choose.
 
 ## Interfaces
 
@@ -341,8 +345,9 @@ kind. The rule is:
 - a running attempt past its deadline is `Cancel(DEADLINE)`; an open step with no running attempt past its
   deadline is `Settle(Cancelled(DEADLINE))`, because there is nothing to cancel;
 - an open step whose attempts are spent is `Settle(Failed(ATTEMPTS_EXHAUSTED))`: attempts that began, less
-  the ones an `AttemptInterrupted` record ended, exceed the step's retry limit (`retry_limit` of the
-  request, else `Limits.request_retries.limit`);
+  the ones a `PAUSE` or `SHUTDOWN` interruption ended, exceed the step's retry limit (`retry_limit` of
+  the request, else `Limits.request_retries.limit`), so an attempt that raised or whose process died is
+  charged and a step that always does ends as a typed failure;
 - an open step marked `on_interrupt = CANCEL` whose attempt ended without a result, by an interruption
   record or by its process, is `Settle(Cancelled(INTERRUPTED))`;
 - an open step whose dependency can never succeed is `Settle(Cancelled(WITHDRAWN))`; one whose dependency is
@@ -354,13 +359,21 @@ kind. The rule is:
   step and `Settle(Cancelled(RUN_ENDING))` for each other open step, and starts none;
 - a run with a committed finish and no open step is `End`.
 
-A step runs now when its latest attempt began in the epoch the log is in and no interruption record ended
-it. The epoch of the log is the largest `Record.epoch` the fold has seen, so an attempt of an earlier epoch
-ended with its process. Cleanup steps that core issues while a cancelling finish is committed are cancelled
+A step runs now when its latest attempt has no record ending it. The first record of a later epoch (the
+epoch header, `EpochStarted`, which the writer appends before anything else) ends every attempt that
+began before it: the run has one writer, so the earlier process is dead. The fold does this, not
+`decide`, so a state cached before the restart and a full fold agree, and `decide` issues `Run` for those
+steps as soon as the header is in the log. The ended attempts are charged, as a raised one is. Cleanup steps that core issues while a cancelling finish is committed are cancelled
 like any other; whether cleanup should instead outlive the finish is left to the cutover.
 
 `decide` is total: it never raises on a validated log, and a log that fails validation is a read error at
 the boundary (a corrupt record stops the reader, as `vs_runlog` does today), never an action.
+
+Two more facts of the rule belong to core, so the loop does not restate them. `at_rest(state)` is `ENDED`
+when the run is `TERMINAL` and `PARKED` when it is `PARKED`, else `None`. `interruption_of(reason)` says
+whether cancelling a running attempt for `reason` is an interruption of the attempt (`PAUSE_NOW` and
+`DRAIN_EXPIRED`, recorded as `AttemptInterrupted(PAUSE)`, the step staying open) or the step's result
+(every other reason).
 
 ### vs-runtime: runner loop and StepRunner
 
@@ -384,19 +397,32 @@ class Cleared:
 
 class StepRunner(Protocol):
     async def run(
-        self, step: Request, tag: RequestId, attempt: int, cancel: CancelSignal
+        self,
+        step: Request,
+        tag: RequestId,
+        attempt: int,
+        deadline_at: float,     # run-clock seconds; the limit of the work the runner starts
+        cancel: CancelSignal,
     ) -> StepResult: ...
 
-    async def clear(self, tag: RequestId) -> Adopted | Cleared: ...
+    async def clear(self, step: Request, tag: RequestId) -> Adopted | Cleared: ...
 ```
+
+`clear` takes the step, not only the tag, so a runner finds what an attempt left from the request itself
+and keeps no index from tag back to step (an agent runner needs no persisted receipt of which turn a tag
+was, an evaluation runner no table of handles). The loop always has the step: it is in the `Run` action,
+and after a restart the fold of the log holds the request of every open step, including one whose attempt
+ran in an earlier epoch. `deadline_at` is the `Run` action's, so a runner builds the limit of its work from
+it and needs no wiring of its own to learn the step's limit.
 
 Contract, which every implementation passes in `vs_runtime.api.testing.StepRunnerContract`, a class a test
 module subclasses with one factory method, as the `vs_sim` contracts are:
 
-1. `run` returns a result, or raises. A raise is "no result": the loop treats it like a crash.
+1. `run` returns a result, or raises. A raise is "no result": the loop treats it like a crash. A `run` that
+   never returns fails the suite: every `run` in it carries the hang guard.
 2. After `clear`, a second `run` with the same tag and a higher attempt starts clean.
 3. `clear` is idempotent, returns `Cleared` for a tag that never started, and returns only when nothing
-   carrying the tag runs or will start.
+   carrying the tag runs or will start. It is given the step the attempt ran.
 4. `Adopted` means the runner took over what an earlier attempt left. With `result` set the step had
    ended, and `run` returns that result. With `result` unset the work is still going, and `run` attaches
    to it instead of starting new work. Agent turns never adopt. Slurm jobs adopt, because they survive
@@ -416,11 +442,12 @@ The loop, `vs_runtime/_step_loop.py`:
 state = fold(log)                      # cache plus suffix, or the whole log
 repeat:
     for action in decide(state, clock.now()):
-        Run:    if attempt > 1: await runner.clear(tag)
+        Run:    if attempt > 1: await runner.clear(step, tag)
                 append StepStarted(tag, attempt)      # durable before I/O
-                start runner.run(...) as a task
+                start runner.run(step, tag, attempt, deadline_at, signal) as a task
         Cancel: set the signal; on return append StepFinished or AttemptInterrupted
-        Settle: await runner.clear(tag) if an attempt was interrupted; append StepFinished
+        Settle: await runner.clear(step, tag) if an attempt was interrupted; append StepFinished
+                (step: from the fold, for a step with no attempt in flight)
         Wait:   await the first of: a task ending, a new input (a pause is one), the timer
         End:    append Ended; release the lock
     state = fold(state, the records just appended)
@@ -431,7 +458,7 @@ deadline passed. No `if isinstance(step, ...)` appears in either.
 
 In code the loop sees the world through two interfaces it owns. `StepLog` is the log as the loop uses it:
 one atomic durable append per method, a `state` that is the fold of everything appended (by the loop or by
-an input from elsewhere), and `latest_run(tag)`, the request of the last recorded attempt. `RecoveryRule`
+an input from elsewhere), and `open_step(tag)`, the step with no result as the fold has it (its request, its limit and its latest attempt), which is where `clear` gets the step for a tag with no attempt in flight. `RecoveryRule`
 is core's pure surface: `decide`, and `settled`, which says the log already holds the end of the run
 (`ENDED`) or the run is paused (`PARKED`). A restarted loop over a log that holds `Ended` returns at once
 instead of recording it twice. Each running attempt is a flight, one task that owns the attempt from
@@ -482,8 +509,8 @@ loss costs the most.
 The pause change in #3475 item 1 supplies the drain: it stops `Run` for new steps, waits until each running
 step ends or the drain deadline passes, records `Parked`, and exits. This design asks three things of
 it. A step cancelled by Pause now is recorded as `AttemptInterrupted(PAUSE)`, not as a result, so Resume
-runs it again as the next attempt. An interrupted attempt is neither a policy failure nor a retry debit,
-as [run-transport.md](run-transport.md) already says. The drain deadline is a field of the pause input,
+runs it again as the next attempt. An attempt a pause interrupted is neither a policy failure nor a retry debit,
+as [run-transport.md](run-transport.md) already says; one whose runner raised is charged. The drain deadline is a field of the pause input,
 not a constant in the loop.
 
 ## Alternatives considered
@@ -625,7 +652,7 @@ These are facts the implementation must settle, found while checking the design 
 - **Provider session id of a killed turn.** `forget_unfinished` does not touch the provider conversation. A
   provider that rewrites its session id mid-turn makes the retry's expected-checkpoint check fail loudly
   (`SessionResumeError`) instead of resuming; the fix belongs to that provider's contract case.
-- **Fold cost.** See [state.pb is a cache](#statepb-is-a-cache).
+- **Fold cost.** Measured, see [state.pb is a cache](#statepb-is-a-cache); the keyframe interval is open.
 - **Interim bodies.** Request and event bodies in the new records are not yet proto messages. Until phase 3
   generates them, schema evolution of those bodies follows today's envelope migration chain, which is
   deleted at phase 3.

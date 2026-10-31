@@ -22,7 +22,14 @@ from vs_proto.api import (
 
 from .types.kernel import CoreEvent
 from .types.records import Request, RequestObserved
-from .types.steps import Cancelled, CancelReason, Failed, Finished, StepResult
+from .types.steps import (
+    Cancelled,
+    CancelReason,
+    Failed,
+    Finished,
+    Interruption,
+    StepResult,
+)
 
 if TYPE_CHECKING:
     from ._actions import Run
@@ -45,6 +52,12 @@ _CANCEL_REASONS = {
     CancelReason.INTERRUPTED: StepCancelReason.INTERRUPTED,
 }
 _CANCEL_NAMES = {stored: reason for reason, stored in _CANCEL_REASONS.items()}
+_INTERRUPTIONS = {
+    Interruption.PAUSE: InterruptionReason.PAUSE,
+    Interruption.SHUTDOWN: InterruptionReason.SHUTDOWN,
+    Interruption.RAISED: InterruptionReason.RAISED,
+}
+_INTERRUPTION_NAMES = {stored: why for why, stored in _INTERRUPTIONS.items()}
 
 
 def input_message(event: CoreEvent) -> CoreInput:
@@ -77,11 +90,14 @@ def finished_message(tag: RequestId, attempt: int, result: StepResult) -> StepFi
     return StepFinished(tag=tag.root, attempt=attempt, schema_version=SCHEMA_VERSION, result=body)
 
 
-def interrupted_message(
-    tag: RequestId, attempt: int, reason: InterruptionReason
-) -> AttemptInterrupted:
+def interrupted_message(tag: RequestId, attempt: int, why: Interruption) -> AttemptInterrupted:
     """An attempt that ended without a result: its step stays open."""
-    return AttemptInterrupted(tag=tag.root, attempt=attempt, reason=reason)
+    return AttemptInterrupted(tag=tag.root, attempt=attempt, reason=_INTERRUPTIONS[why])
+
+
+def decode_interruption(message: AttemptInterrupted) -> Interruption:
+    """Why the attempt of an ``AttemptInterrupted`` ended."""
+    return _INTERRUPTION_NAMES[message.reason]
 
 
 def decode_event(message: CoreInput, registry: OperationRegistry | None) -> CoreEvent:

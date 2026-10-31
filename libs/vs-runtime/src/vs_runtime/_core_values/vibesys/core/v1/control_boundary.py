@@ -205,7 +205,6 @@ def encode_ControlInput(v: values.ControlInput) -> pb.ControlInput:
         attempt=None if v.attempt is None else encode_AttemptId(v.attempt),
         item=None if v.item is None else encode_ItemId(v.item),
         max_parallel=None if v.max_parallel is None else str(v.max_parallel),
-        drain_seconds=v.drain_seconds,
     )
 
 
@@ -225,7 +224,6 @@ def decode_ControlInput(m: pb.ControlInput) -> values.ControlInput:
         attempt=None if m.attempt is None else decode_AttemptId(m.attempt),
         item=None if m.item is None else decode_ItemId(m.item),
         max_parallel=int(m.max_parallel) if m.has_field("max_parallel") else None,
-        drain_seconds=m.drain_seconds if m.has_field("drain_seconds") else None,
     )
 
 

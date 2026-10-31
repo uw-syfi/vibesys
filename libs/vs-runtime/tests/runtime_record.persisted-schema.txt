@@ -1482,6 +1482,7 @@ RunJobsCancelRequested.scope required {"$ref":"#/$defs/Scope"}
 RunPark {"additionalProperties":false,"type":"object"}
 RunPark.admitted_turns optional {"default":[],"items":{"$ref":"#/$defs/InvocationRef"},"type":"array"}
 RunPark.control_id required {"$ref":"#/$defs/ControlId"}
+RunPark.deadline_at optional {"anyOf":[{"type":"number"},{"type":"null"}],"default":null}
 RunPark.epoch required {"minimum":0,"type":"integer"}
 RunPark.immediate optional {"default":false,"type":"boolean"}
 RunResultProposal {"additionalProperties":false,"type":"object"}

@@ -83,21 +83,30 @@ class StepRunner(Protocol):
     """Executes steps by tag, and removes or adopts what an earlier attempt left."""
 
     async def run(
-        self, step: Request, tag: RequestId, attempt: int, cancel: CancelSignal
+        self,
+        step: Request,
+        tag: RequestId,
+        attempt: int,
+        deadline_at: float,
+        cancel: CancelSignal,
     ) -> StepResult:
         """Run attempt ``attempt`` of ``step`` and return its result, or raise.
 
-        A raise is "no result": the loop treats it like a crash of the attempt. Once
-        ``cancel`` is set the runner returns ``Cancelled`` within the loop's grace
-        period; the loop cancels the task otherwise and calls ``clear``.
+        ``deadline_at`` is the run-clock second at which core cancels the attempt; a runner
+        passes it on as the limit of the work it starts. A raise is "no result": the loop
+        treats it like a crash of the attempt. Once ``cancel`` is set the runner returns
+        ``Cancelled`` within the loop's grace period; the loop cancels the task otherwise and
+        calls ``clear``.
         """
         ...
 
-    async def clear(self, tag: RequestId) -> Adopted | Cleared:
-        """Remove or adopt everything an earlier attempt of ``tag`` left behind.
+    async def clear(self, step: Request, tag: RequestId) -> Adopted | Cleared:
+        """Remove or adopt everything an earlier attempt of ``step`` left behind.
 
-        Idempotent. Returns ``Cleared`` for a tag that never started. Returns only when
-        nothing carrying the tag runs or will start. Raises ``ClearUnavailableError``
-        when the backend cannot be reached.
+        ``step`` is the request the attempt ran, as the log holds it, so the runner finds
+        its leftovers from the step itself and keeps no index from tag to step. Idempotent.
+        Returns ``Cleared`` for a step that never started. Returns only when nothing carrying
+        the tag runs or will start. Raises ``ClearUnavailableError`` when the backend cannot
+        be reached.
         """
         ...
