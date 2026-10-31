@@ -8,6 +8,7 @@ import {
   installFakeBridge,
   installFakeMachines,
   installFakeProjectRuns,
+  MAC_CHROME,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyScript} from './journey-world.js';
@@ -18,7 +19,7 @@ const INSTANCE = '00000000000a';
 const RUN = '20261017-120000';
 const SEED: FakeBridgeSeed = {
   theme: 'ink',
-  chromeInset: {width: 84, height: 40},
+  chromeInset: MAC_CHROME,
   appearance: {mode: 'dark', light: 'paper', dark: 'ink'},
   listings: [
     {

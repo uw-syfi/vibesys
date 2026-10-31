@@ -1,4 +1,5 @@
 import {type BrowserContext, expect, type Page, test} from '@playwright/test';
+import {pressMovesWindow, screenCheck} from './checks/screen-check.js';
 import {
   type FakeBridgeSeed,
   type FakeWindows,
@@ -7,11 +8,12 @@ import {
   installFakeNewRun,
   installFakeProjectRuns,
   installFakeWindows,
+  MAC_CHROME,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyScript} from './journey-world.js';
 import {installGatewayOnly} from './retired-run-bridge.js';
-import {drawnUnderWindowControls, listed, SEED, server} from './world.js';
+import {listed, SEED, server} from './world.js';
 
 /**
  * Open in new window: the Run screen's "⋯" and the tile's menu ask main to show the run in a
@@ -75,15 +77,21 @@ test('a run opens in a window of its own, shown alone and live there', async ({p
   await expect(runWindow.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
   await expect(runWindow.getByText(`host-b · ${RUN_ID}`)).toBeVisible();
   await expect(sidebar(runWindow)).toHaveCount(0);
-  // Its title is clear of the window controls, below the same title-bar row as the main window's,
-  // and the row drags the window.
-  expect(await drawnUnderWindowControls(runWindow)).toEqual([]);
-  expect(await drawnUnderWindowControls(page)).toEqual([]);
-  const row = await runWindow.locator('.vs-app-strip').evaluate(element => ({
-    height: element.getBoundingClientRect().height,
-    drag: getComputedStyle(element).getPropertyValue('-webkit-app-region'),
-  }));
-  expect(row).toEqual({height: 40, drag: 'drag'});
+  // Its page is clear of the window controls: it starts at the top of the window, beside an empty
+  // column as wide as the main window's rail, which holds the lights and moves the window.
+  expect(await screenCheck(runWindow, ['chrome-clear', 'drag-region'])).toEqual([]);
+  expect(await screenCheck(page, ['chrome-clear', 'drag-region'])).toEqual([]);
+  const place = await runWindow.locator('.vs-app-content').evaluate(element => {
+    const {top, left} = element.getBoundingClientRect();
+    return {top, left};
+  });
+  expect(place).toEqual({top: 0, left: MAC_CHROME.startWidth});
+  expect(
+    await pressMovesWindow(runWindow, [
+      [10, 10],
+      [MAC_CHROME.startWidth / 2, 300],
+    ]),
+  ).toEqual([true, true]);
   // The run is live in its window (it attached there), and the main window let it go.
   expect(await commands(runWindow)).toEqual([]);
   await expect

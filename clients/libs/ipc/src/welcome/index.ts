@@ -231,6 +231,8 @@ export {
   type SummaryTokens,
 } from './run-control.js';
 export {
+  CHROME_INSET_CHANNEL,
+  type ChromeInset,
   FIRST_PAINT_CHANNEL,
   type FirstPaint,
   type PreferencesView,

@@ -9,6 +9,7 @@ import {
   installFakeMachines,
   installFakeNewRun,
   installFakeProjectRuns,
+  MAC_CHROME,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyScript, type NativeJourney, transitionJourney} from './journey-world.js';
@@ -45,7 +46,7 @@ function listed(live: unknown[], ended: unknown[]): Record<string, unknown> {
 
 const SEED: FakeBridgeSeed = {
   theme: 'ink',
-  chromeInset: {width: 84, height: 40},
+  chromeInset: MAC_CHROME,
   appearance: {mode: 'dark', light: 'paper', dark: 'ink'},
   listings: [listed([server('starting')], [])],
   recent: [

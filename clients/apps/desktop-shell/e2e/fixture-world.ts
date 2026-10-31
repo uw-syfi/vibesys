@@ -28,6 +28,7 @@ import {
   installFakeUsage,
   installFakeWindows,
   installRequestBound,
+  MAC_CHROME,
   type MachineSettingsMethods,
   type MachinesMethods,
   type NewRunMethods,
@@ -157,7 +158,7 @@ function seedOf(fixture: RunFixture, theme: 'ink' | 'paper'): FakeBridgeSeed {
   ];
   return {
     theme,
-    chromeInset: {width: 84, height: 40},
+    chromeInset: MAC_CHROME,
     appearance: {mode: theme === 'ink' ? 'dark' : 'light', light: 'paper', dark: 'ink'},
     listings: [listing],
     recent,

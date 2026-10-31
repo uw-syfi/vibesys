@@ -6,6 +6,7 @@ import {
   installFakeBridge,
   installFakeMachines,
   installFakeNewRun,
+  MAC_CHROME,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 
@@ -23,7 +24,7 @@ const FOUND = {
 
 const SEED: FakeBridgeSeed = {
   theme: 'ink',
-  chromeInset: {width: 84, height: 40},
+  chromeInset: MAC_CHROME,
   appearance: {mode: 'dark', light: 'paper', dark: 'ink'},
   listings: [],
   recent: [],

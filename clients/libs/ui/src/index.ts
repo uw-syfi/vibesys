@@ -6,7 +6,7 @@
  */
 export {applyTheme, type ThemeTarget} from './apply-theme.js';
 export {ActionPanel} from './components/action-panel.js';
-export {AppFrame, WindowFrame} from './components/app-frame.js';
+export {AppFrame} from './components/app-frame.js';
 export {BRAND_MARK_NAMES, BrandMark, type BrandMarkName} from './components/brand-mark.js';
 export {
   Button,
@@ -156,6 +156,7 @@ export {type Stage, type StageState, Timeline} from './components/timeline.js';
 export {Checkbox, Switch} from './components/toggle.js';
 export {type RowChip, Tree, TreeRow} from './components/tree.js';
 export {TurnResult} from './components/turn-result.js';
+export {WindowFrame} from './components/window-frame.js';
 export type {
   ColorRole,
   ElevationLevel,

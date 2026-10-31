@@ -96,21 +96,27 @@ function inspectWelcomeContents(contents) {
   return requiredContents(contents, 'shell').executeJavaScript(
     `(() => {
       const style = getComputedStyle(document.documentElement);
-      const width = Number.parseFloat(style.getPropertyValue('--chrome-inset-width')) || 0;
-      const height = Number.parseFloat(style.getPropertyValue('--chrome-inset-height')) || 0;
+      const fact = name => Number.parseFloat(style.getPropertyValue(name)) || 0;
+      const page = document.querySelector('.vs-app-main')?.getBoundingClientRect();
+      // What the window's own controls cover (the inset the preload set): the top-left corner, and
+      // the strip across the top of the page.
+      const rooms = [
+        {right: fact('--chrome-start-width'), bottom: fact('--chrome-start-height'), left: 0},
+        ...(page === undefined ? [] : [{left: page.left, right: innerWidth, bottom: fact('--chrome-end-height')}]),
+      ];
       const visible = element => {
         const box = element.getBoundingClientRect();
         const computed = getComputedStyle(element);
         return computed.display !== 'none' && computed.visibility !== 'hidden' && box.width > 0 && box.height > 0;
       };
-      // Controls and text drawn under the window's own controls (the inset the preload set).
+      // Controls and text drawn under the window's own controls.
       const drawn = Array.from(document.querySelectorAll('body *')).filter(element =>
         element.matches('a, button, input, select, textarea, [tabindex]:not([tabindex="-1"])') ||
         Array.from(element.childNodes).some(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== ''));
       return {
         underChrome: drawn.flatMap(element => {
           const box = element.getBoundingClientRect();
-          return visible(element) && box.left < width && box.top < height
+          return visible(element) && rooms.some(room => box.left < room.right && box.right > room.left && box.top < room.bottom)
             ? [element.tagName + ' ' + (element.textContent ?? '').trim().slice(0, 20)]
             : [];
         }),
