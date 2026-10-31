@@ -26,7 +26,7 @@ test('the idea, the turn and the clock stop where the run did', async ({page}) =
   await page.getByRole('radiogroup', {name: 'Show'}).getByText('Agents').click();
   const implementer = page
     .getByRole('listbox', {name: 'Agents'})
-    .getByRole('option', {name: /Implementer/});
+    .getByRole('option', {name: /Builder/});
   await expect(implementer).toContainText(/2[89]m/);
   await expect(implementer).not.toContainText('0s');
   await shot(page, 'agents');

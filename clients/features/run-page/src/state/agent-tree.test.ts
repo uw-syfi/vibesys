@@ -62,7 +62,7 @@ describe('agentTree', () => {
       turn('judge', 3, {startedBy: ['boss', 'impl'], status: 'running', role: 'judge'}),
     ]);
     const judge = rows.find(row => row.kind === 'agent' && row.agent.id === 'judge');
-    expect(judge?.kind === 'agent' && judge.alsoUnder).toEqual(['Implementer']);
+    expect(judge?.kind === 'agent' && judge.alsoUnder).toEqual(['Builder']);
     expect(rows.filter(row => row.kind === 'agent' && row.agent.id === 'judge')).toHaveLength(1);
     expect(names(rows)).toEqual(['boss', 'impl', 'judge']);
   });

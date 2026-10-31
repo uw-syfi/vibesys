@@ -65,7 +65,7 @@ for (const kind of ['short', 'live', 'blobs'] as const)
       await capture('idea');
       await page
         .getByRole('listbox', {name: /steps$/})
-        .getByRole('option', {name: /Implementer/i})
+        .getByRole('option', {name: /builder/i})
         .first()
         .click();
       await expect(page.getByRole('region', {name: 'Implement', exact: true})).toBeVisible();

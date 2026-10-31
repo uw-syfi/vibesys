@@ -15,6 +15,7 @@ import {
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import type {ComponentName, GalleryEntry} from './gallery-entry.js';
+import {PLANNER, REVIEWER} from './role-words.js';
 
 const noop = (): void => undefined;
 
@@ -190,8 +191,8 @@ const THREAD: readonly ThreadItem[] = [
   {
     kind: 'reply',
     id: 'r1',
-    author: 'Judge',
-    title: 'Judge response',
+    author: REVIEWER,
+    title: `${REVIEWER} response`,
     fields: REPLY_FIELDS,
     raw: '{}',
   },
@@ -227,8 +228,8 @@ function StructuredReplyDemo(): JSX.Element {
   const [open, setOpen] = useState(true);
   return (
     <StructuredReply
-      author="Judge"
-      title="Judge response"
+      author={REVIEWER}
+      title={`${REVIEWER} response`}
       fields={REPLY_FIELDS}
       raw={'{\n  "verdict": "pass"\n}'}
       open={open}
@@ -242,7 +243,7 @@ function TurnResultDemo(): JSX.Element {
     <Stack>
       <TurnResult
         label="Plan"
-        author="Orchestrator"
+        author={PLANNER}
         headline="Preallocate fixed-size queue slots"
         context={{prefix: 'builds on', label: 'Batch the producer handoff', press: noop}}
         sections={[
@@ -277,8 +278,8 @@ function TurnResultDemo(): JSX.Element {
         raw={'{\n  "title": "Preallocate fixed-size queue slots"\n}'}
       />
       <TurnResult
-        label="Judge response"
-        author="Judge"
+        label={`${REVIEWER} response`}
+        author={REVIEWER}
         chips={[{label: 'pass', tone: 'ok'}]}
         context={{prefix: 'builds on', label: 'input'}}
         sections={[
