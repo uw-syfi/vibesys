@@ -28,7 +28,7 @@ import type {
 import {unprovided} from '@vibesys/machine';
 import type {RecentRun, RunStart} from '@vibesys/runs';
 import {and, assign, raise, type SnapshotFrom, setup} from 'xstate';
-import {roleProviders} from './agents.js';
+import {installedFirst, roleProviders} from './agents.js';
 import type {AnswerChange, Answers, StepId} from './answers.js';
 import type {CatalogueEntry} from './catalogue.js';
 import {type Draft, flowOfDraft} from './draft.js';
@@ -52,6 +52,7 @@ import {
   type ChecksFor,
   checksPass,
   type DestinationFor,
+  defaultAgent,
   defaultRole,
   destinationKey,
   type FactsFor,
@@ -60,6 +61,7 @@ import {
   goalKey,
   type HelperFor,
   inputsKey,
+  installedHarnesses,
   lastRun,
   missingFeatures,
   offers,
@@ -67,6 +69,7 @@ import {
   projectPath,
   type RoleChoice,
   recordedAgent,
+  recordedHarnessOffered,
   runInputs,
 } from './form.js';
 import {type Compute, formWithMeasure} from './measure.js';
@@ -97,7 +100,20 @@ export interface NewRunContext {
   readonly facts: FactsFor | null;
   /** What the machine's helper agreed to: New run asks only what it takes. */
   readonly helper: HelperFor | null;
-  readonly harnesses: {readonly for: HostKey; readonly list: readonly HarnessOffer[]} | null;
+  /**
+   * The harness offers of a machine: as the host `listed` them, and as the form offers them
+   * (`list`: the ones installed on the machine first, once it has said which they are).
+   */
+  readonly harnesses: {
+    readonly for: HostKey;
+    readonly listed: readonly HarnessOffer[];
+    readonly list: readonly HarnessOffer[];
+  } | null;
+  /**
+   * Whether the form's agent is the machine's own pick, not the person's, a past run's or a
+   * kept draft's: only that one follows what the machine reports installed.
+   */
+  readonly agentDefaulted: boolean;
   readonly examples: ExamplesFor | null;
   readonly tasks: {readonly for: string; readonly list: readonly string[]} | null;
   /** What the destination of the example chosen held, once read (feature `example_destination`). */
@@ -268,6 +284,7 @@ function freshParts(machine: HostKey, recent: readonly RecentRun[]) {
     facts: null,
     helper: null,
     harnesses: null,
+    agentDefaulted: false,
     examples: null,
     tasks: null,
     goal: null,
@@ -389,6 +406,66 @@ function readsTasks(context: NewRunContext): boolean {
   return context.answers.from === 'project' && projectPath(context.form) !== null;
 }
 
+/**
+ * The context's parts once the host listed its harnesses: the offers with the installed ones
+ * first (when the machine has said which), and the agent the form starts with. An agent already
+ * in the form stays while still offered; a past run's stays when offered; else the first offer,
+ * which is the first installed one.
+ */
+function withHarnesses(
+  context: NewRunContext,
+  listed: readonly HarnessOffer[],
+): Partial<NewRunContext> {
+  const machine = context.form.machine;
+  const list = installedFirst(listed, installedHarnesses(context.facts, machine));
+  const kept = context.form.agent;
+  const keeps =
+    kept !== null &&
+    list.some(offer => offer.provider === kept.provider && offer.model === kept.model);
+  const agent = keeps ? kept : recordedAgent(context.rerun, list);
+  const flow = {...flowOf(context), form: {...context.form, agent}};
+  return {
+    harnesses: {for: machine, listed, list},
+    agentDefaulted: keeps ? context.agentDefaulted : !recordedHarnessOffered(context.rerun, list),
+    ...fromFlow(flowSettled(flow, catalogueFor(context.examples, machine))),
+  };
+}
+
+/**
+ * The context's parts once the machine described itself: the harness offers reordered, and the
+ * agent moved to the first installed one when the form's is the machine's own pick, is not
+ * installed, and another offered harness is. `moved` says the form's agent changed.
+ */
+function withFacts(
+  context: NewRunContext,
+  facts: FactsFor,
+): {readonly parts: Partial<NewRunContext>; readonly moved: boolean} {
+  const machine = context.form.machine;
+  const harnesses = context.harnesses;
+  if (harnesses === null || harnesses.for !== machine) return {parts: {facts}, moved: false};
+  const installed = installedHarnesses(facts, machine);
+  const list = installedFirst(harnesses.listed, installed);
+  const reordered = {...context, facts, harnesses: {...harnesses, list}};
+  const agent = context.form.agent;
+  const first = list[0];
+  const chosen =
+    context.agentDefaulted &&
+    agent !== null &&
+    installed !== null &&
+    !installed.includes(agent.provider) &&
+    first !== undefined &&
+    installed.includes(first.provider)
+      ? defaultAgent(list, [], first.provider)
+      : null;
+  if (chosen === null) return {parts: {facts, harnesses: reordered.harnesses}, moved: false};
+  const form = withInput(reordered, {
+    type: 'agent',
+    provider: chosen.provider,
+    model: chosen.model,
+  });
+  return {parts: {facts, harnesses: reordered.harnesses, form}, moved: true};
+}
+
 export const newRunMachine = setup({
   types: {
     context: {} as NewRunContext,
@@ -474,6 +551,8 @@ export const newRunMachine = setup({
     input: assign(({context, event}) => ({
       form: withInput(context, event as InputEvent),
       problem: null,
+      // A harness the person picked stays whatever the machine reports installed.
+      ...(event.type === 'agent' ? {agentDefaulted: false} : {}),
     })),
     // What the machine has set up changed: a target it no longer offers is dropped.
     compute: assign(({context, event}) => {
@@ -603,12 +682,30 @@ export const newRunMachine = setup({
                 id: 'describe',
                 src: 'describe',
                 input: ({context}) => ({host: context.form.machine}),
-                onDone: {
-                  target: 'ready',
-                  actions: assign(({context, event}) => ({
-                    facts: {for: context.form.machine, value: event.output},
-                  })),
-                },
+                onDone: [
+                  {
+                    // The first installed harness replaces the machine's own pick of an
+                    // uninstalled one: the inputs changed, so check them again.
+                    guard: ({context, event}) =>
+                      withFacts(context, {for: context.form.machine, value: event.output}).moved,
+                    target: 'ready',
+                    actions: [
+                      assign(
+                        ({context, event}) =>
+                          withFacts(context, {for: context.form.machine, value: event.output})
+                            .parts,
+                      ),
+                      raise({type: 'recheck'}),
+                    ],
+                  },
+                  {
+                    target: 'ready',
+                    actions: assign(
+                      ({context, event}) =>
+                        withFacts(context, {for: context.form.machine, value: event.output}).parts,
+                    ),
+                  },
+                ],
                 onError: {
                   target: 'ready',
                   actions: {
@@ -640,22 +737,7 @@ export const newRunMachine = setup({
                   // The default agent is part of the inputs: check them again.
                   target: 'ready',
                   actions: [
-                    assign(({context, event}) => {
-                      const kept = context.form.agent;
-                      const offered =
-                        kept !== null &&
-                        event.output.some(
-                          offer => offer.provider === kept.provider && offer.model === kept.model,
-                        );
-                      const agent = offered ? kept : recordedAgent(context.rerun, event.output);
-                      const flow = {...flowOf(context), form: {...context.form, agent}};
-                      return {
-                        harnesses: {for: context.form.machine, list: event.output},
-                        ...fromFlow(
-                          flowSettled(flow, catalogueFor(context.examples, context.form.machine)),
-                        ),
-                      };
-                    }),
+                    assign(({context, event}) => withHarnesses(context, event.output)),
                     raise({type: 'recheck'}),
                   ],
                 },

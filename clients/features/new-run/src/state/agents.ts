@@ -35,6 +35,25 @@ export interface ModelTier {
   readonly offers: readonly HarnessOffer[];
 }
 
+/**
+ * `offers` with the harnesses installed on the machine first, each group in the order the host
+ * gave. Only the machine knows what it has (`installed`, its description's `harness_clis`), and a
+ * host may list its catalog in any order: an older one put the installed harnesses first, a newer
+ * one lists the catalog as is. Ordering here is right against both, and what is first is what
+ * the form starts with. `null` is a machine that has not said: the host's order stands.
+ */
+export function installedFirst(
+  offers: readonly HarnessOffer[],
+  installed: readonly string[] | null,
+): readonly HarnessOffer[] {
+  if (installed === null) return offers;
+  const has = new Set(installed);
+  return [
+    ...offers.filter(offer => has.has(offer.provider)),
+    ...offers.filter(offer => !has.has(offer.provider)),
+  ];
+}
+
 /** The card an offer belongs to: its maker when the host names one, else its family, else its harness alone. */
 function groupIdOf(offer: HarnessOffer): string {
   const {maker, family} = offer.display ?? {};
