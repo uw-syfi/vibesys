@@ -86,6 +86,18 @@ export function settled<T>(call: Promise<WelcomeResult<T>>): Promise<WelcomeResu
   );
 }
 
+let lastOperationToken = 0;
+
+/**
+ * A token no earlier request of this view carried, to name an operation the view may cancel
+ * (a project listing). The main process checks that it is a positive integer and keys the operation
+ * by it, so every screen that names operations draws its tokens here and none collides.
+ */
+export function nextOperationToken(): number {
+  lastOperationToken += 1;
+  return lastOperationToken;
+}
+
 /** What a screen says of a bridge call that failed for a reason the main process did not report. */
 export const UNEXPECTED_FAILURE =
   'Something unexpected happened. Try again; if it keeps happening, restart VibeSys.';

@@ -394,7 +394,6 @@ const cluster = {
 };
 const deadlineInputs = {
   listTasks: {project: '/project'},
-  listSavedRuns: {project: '/project'},
   listRunDigests: {project: '/project'},
   usageWindow: {
     project: '/project',

@@ -2187,8 +2187,75 @@ test('saved-run discovery always uses the registry', async () => {
     },
   });
   await using _manager = subject.manager;
-  const rows = await subject.hosts.projectRuns(LOCAL, '/srv/project');
+  const rows = await subject.hosts.projectRuns(LOCAL, '/srv/project', {owner: 'doc', token: 1});
   expect(calls).toBe(1);
   expect(link.helper.requests).toHaveLength(0);
   expect(rows[0]?.runId).toBe('native-run');
+});
+
+/** A saved-run registry whose listings stay open until their signal ends them. */
+function openListings() {
+  const link = new FakeLink();
+  const signals: AbortSignal[] = [];
+  const subject = completionSubject(link, {
+    list: (_host, _project, signal) =>
+      new Promise((_resolve, reject) => {
+        signals.push(signal);
+        signal.addEventListener('abort', () => reject(signal.reason), {once: true});
+      }),
+  });
+  return {subject, signals};
+}
+
+/** What a call ended with, so a test can end it first and look at it after. */
+const outcomeOf = (call: Promise<unknown>): Promise<unknown> =>
+  call.then(
+    () => 'answered',
+    (error: unknown) => (error instanceof Error ? error.message : error),
+  );
+
+test('cancelling a project listing ends the host scan and rejects only that listing', async () => {
+  const {subject, signals} = openListings();
+  await using _manager = subject.manager;
+  const first = outcomeOf(subject.hosts.projectRuns(LOCAL, '/srv/a', {owner: 'doc', token: 1}));
+  const second = outcomeOf(subject.hosts.projectRuns(LOCAL, '/srv/b', {owner: 'doc', token: 2}));
+  subject.hosts.cancelProjectRuns({owner: 'doc', token: 1});
+  expect(await first).toBe('the project listing was cancelled');
+  expect(signals.map(signal => signal.aborted)).toEqual([true, false]);
+  subject.hosts.cancelProjectRuns({owner: 'doc', token: 2});
+  expect(await second).toBe('the project listing was cancelled');
+});
+
+test("a renderer document going away ends its listings and no other document's", async () => {
+  const {subject, signals} = openListings();
+  await using _manager = subject.manager;
+  const gone = outcomeOf(subject.hosts.projectRuns(LOCAL, '/srv/a', {owner: 'old', token: 1}));
+  const kept = outcomeOf(subject.hosts.projectRuns(LOCAL, '/srv/a', {owner: 'new', token: 1}));
+  subject.hosts.cancelProjectRunsOwner('old');
+  expect(await gone).toBe('the project listing was cancelled');
+  expect(signals.map(signal => signal.aborted)).toEqual([true, false]);
+  subject.hosts.cancelProjectRunsOwner('new');
+  expect(await kept).toBe('the project listing was cancelled');
+});
+
+test('a listing that answered is released: cancelling it is a no-op and its token can be named again', async () => {
+  const link = new FakeLink();
+  const subject = completionSubject(link, {list: async () => []});
+  await using _manager = subject.manager;
+  const listing = {owner: 'doc', token: 1};
+  expect(await subject.hosts.projectRuns(LOCAL, '/srv/a', listing)).toEqual([]);
+  subject.hosts.cancelProjectRuns(listing);
+  expect(await subject.hosts.projectRuns(LOCAL, '/srv/a', listing)).toEqual([]);
+});
+
+test('a listing token already in flight is refused, not shared', async () => {
+  const {subject} = openListings();
+  await using _manager = subject.manager;
+  const listing = {owner: 'doc', token: 1};
+  const first = outcomeOf(subject.hosts.projectRuns(LOCAL, '/srv/a', listing));
+  expect(await outcomeOf(subject.hosts.projectRuns(LOCAL, '/srv/b', listing))).toBe(
+    'the project listing is already active',
+  );
+  subject.hosts.cancelProjectRunsOwner('doc');
+  expect(await first).toBe('the project listing was cancelled');
 });

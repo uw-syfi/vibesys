@@ -21,6 +21,7 @@ import {
   registryReads,
   registrySavedRuns,
   registrySetup,
+  WATCH_METHOD,
 } from '@vibesys/connection';
 import {Hosts} from '@vibesys/feature-hosts/main';
 import {MachinesMain} from '@vibesys/feature-machines/main';
@@ -118,7 +119,8 @@ const started = app.whenReady().then(async () => {
     runs: {start() {}, cancel() {}},
     savedRuns: registrySavedRuns({
       checkout: id => hosts.checkout(id),
-      unary: (id, bytes, signal) => calls.unary(hostKey(id), READ_METHOD, bytes, signal),
+      stream: (id, bytes, signal, receive) =>
+        calls.stream(hostKey(id), WATCH_METHOD, bytes, signal, receive),
     }),
     log,
     push: listing => appWindow.sendWelcome(WELCOME_EVENTS.listing, welcome.listing(listing)),

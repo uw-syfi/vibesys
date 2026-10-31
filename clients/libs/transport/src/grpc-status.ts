@@ -2,6 +2,7 @@
 
 /** The codes clients branch on. Other codes still travel as their number. */
 export const GrpcCode = Object.freeze({
+  DEADLINE_EXCEEDED: 4,
   NOT_FOUND: 5,
   FAILED_PRECONDITION: 9,
   UNIMPLEMENTED: 12,
