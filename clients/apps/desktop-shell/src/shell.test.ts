@@ -441,7 +441,7 @@ function storesOver(bridge: WelcomeBridge) {
     () => () => undefined,
     {
       messages: {addEventListener: ignore, removeEventListener: ignore},
-      address: NO_ADDRESS,
+      address: new FakeWindowAddress(),
       now: () => 0,
       session: () => {
         throw new Error('this test opens no run');
