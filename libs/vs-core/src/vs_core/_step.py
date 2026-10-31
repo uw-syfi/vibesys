@@ -52,7 +52,7 @@ from ._quota_pause_clock import credit_quota_pause
 from ._registry import ContractError
 from ._request_recovery import is_open
 from ._routing import SIGNAL_ORDER, event_area
-from ._run_pause import EpochFacts, control_refusal, reopened, stop_standing
+from ._run_pause import EpochFacts, control_refusal, pause_outlived, reopened, stop_standing
 from ._session_inputs import check_declared_target, may_have_been_read
 from ._session_inputs import mid_turn_offers as _mid_turn_offers
 from ._validation import validate_decision
@@ -1439,7 +1439,7 @@ def _lifted(state: CoreState, control: ControlInput) -> tuple[CoreState, bool]:
         return state, False
     stopped = stop_standing(state.run)
     terminal = state.run.status == RunStatus.TERMINAL
-    lifting = stopped or terminal or state.run.status == RunStatus.PARKED
+    lifting = stopped or terminal or pause_outlived(state)
     if terminal:
         state = state.model_copy(update={"run": reopened(state.run)})
     if stopped or terminal:

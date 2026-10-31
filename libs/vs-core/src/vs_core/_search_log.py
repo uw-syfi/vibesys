@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from ._registry import OperationRegistry
     from ._search_events import Translated
     from ._search_run import SearchDriver
+    from ._step_log import SavedRun
     from .types.kernel import CoreEvent, CoreState, Transition
     from .types.strategy import Decision, StrategyState
 
@@ -75,10 +76,19 @@ class Advancing[S: StrategyState]:
 
 
 def restore[S: StrategyState, C](
-    records: Iterable[Record], search: SearchDriver[S, C], registry: OperationRegistry | None
+    records: Iterable[Record],
+    search: SearchDriver[S, C],
+    registry: OperationRegistry | None,
+    *,
+    saved: SavedRun | None = None,
 ) -> Progress[S] | None:
-    """The search the log's advance records leave, None before the first advance."""
-    progress: Progress[S] | None = None
+    """The search the log's advance records leave, None before the first advance.
+
+    ``saved`` is the run the log's snapshot holds, decoded by the log's reader: the search starts
+    from its state as a checkpoint, and the advance records go on from there. A snapshot is the
+    first record of the run, so no advance record precedes it.
+    """
+    progress = None if saved is None else _saved(saved, search)
     for record in records:
         body = record.body
         if body is not None and body.field == "strategy_advanced":
@@ -203,6 +213,36 @@ def _strategy(
     return Oneof("steps", changes)
 
 
+def _whole_state[S: StrategyState, C](
+    search: SearchDriver[S, C], encoded: bytes, *, source: str, max_bytes: int
+) -> S:
+    """The search's whole state as it is logged: in the search driver's own encoding."""
+    decoded = decode_json(encoded, search.state_model, source=source, max_bytes=max_bytes)
+    match decoded:
+        case Unreadable():
+            raise ValueError(str(decoded))
+        case _:
+            return decoded
+
+
+def _saved[S: StrategyState, C](saved: SavedRun, search: SearchDriver[S, C]) -> Progress[S]:
+    """The search a run an older version saved left: its whole state, as a checkpoint is."""
+    state = _whole_state(
+        search,
+        saved.strategy,
+        source="the search state in the log's snapshot",
+        max_bytes=len(saved.strategy),
+    )
+    return Progress(
+        state,
+        tuple(sorted(saved.wakes)),
+        saved.held,
+        advances=1,
+        checkpoint_at=1,
+        checkpointed=True,
+    )
+
+
 def _read[S: StrategyState, C](
     message: StrategyAdvanced,
     progress: Progress[S] | None,
@@ -211,17 +251,12 @@ def _read[S: StrategyState, C](
 ) -> Progress[S]:
     match message.strategy:
         case Oneof(field="checkpoint", value=whole):
-            decoded = decode_json(
+            state = _whole_state(
+                search,
                 whole,
-                search.state_model,
                 source="the search checkpoint in the log",
                 max_bytes=RUN_LOG_MAX_RECORD_BYTES,
             )
-            match decoded:
-                case Unreadable():
-                    raise ValueError(str(decoded))
-                case _:
-                    state = decoded
             whole_state = True
         case Oneof(field="steps", value=changes) if progress is not None:
             state = search.extend(progress.state, changes)

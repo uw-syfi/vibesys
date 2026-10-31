@@ -35,7 +35,7 @@ from vs_core.api.recovery import (
     Run,
     RunRest,
     finished_message,
-    fold_run,
+    fold,
 )
 from vs_proto.api import (
     AttemptInterrupted,
@@ -620,7 +620,7 @@ def cooperative(scenario: Scenario) -> bool:
 
 def check_every_accepted_control_is_effective(world: World) -> None:
     """A control the log took is in the run's controls once the log is folded: none is swallowed."""
-    state = fold_run(world.records.read(), world.seed.state, registry=world.seed.registry).state
+    state = fold(world.records.read(), world.seed.state, registry=world.seed.registry)
     held = {control.control_id.root for control in state.run.controls}
     assert world.accepted <= held, f"controls taken and not effective: {world.accepted - held}"
 

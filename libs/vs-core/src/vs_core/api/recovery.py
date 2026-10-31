@@ -19,11 +19,13 @@ from vs_core._actions import (
 from vs_core._decide import (
     Folded,
     apply_record,
+    apply_saved,
     decide,
     fold,
     fold_run,
     may_start,
     start_due,
+    starts_run,
 )
 from vs_core._refusal import RecordRefusal, RecordRefusedError, RefusalReason
 from vs_core._search_events import Translated
@@ -38,7 +40,11 @@ from vs_core._search_log import (
 from vs_core._step import advance_run_time
 from vs_core._step_attempts import open_step
 from vs_core._step_log import (
+    EncodedSavedRun,
+    SavedRun,
+    decode_saved,
     decode_seed,
+    encode_saved,
     ended_message,
     finished_message,
     input_message,
@@ -67,6 +73,7 @@ __all__ = [
     "Cancel",
     "CancelReason",
     "Cancelled",
+    "EncodedSavedRun",
     "End",
     "Failed",
     "Finished",
@@ -81,6 +88,7 @@ __all__ = [
     "RefusalReason",
     "Run",
     "RunRest",
+    "SavedRun",
     "Settle",
     "StepAttempts",
     "StepEffect",
@@ -92,10 +100,13 @@ __all__ = [
     "advance_run_time",
     "advance_search",
     "apply_record",
+    "apply_saved",
     "at_rest",
     "checkpoint_search",
     "decide",
+    "decode_saved",
     "decode_seed",
+    "encode_saved",
     "ended_message",
     "finished_message",
     "fold",
@@ -111,4 +122,5 @@ __all__ = [
     "seed_message",
     "start_due",
     "started_message",
+    "starts_run",
 ]
