@@ -23,6 +23,9 @@
     },
     {
       "path": "../../libs/ipc/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/problems/tsconfig.lib.json"
     }
   ]
 }

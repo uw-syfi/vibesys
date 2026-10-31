@@ -70,7 +70,8 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
       await openSection(page, 'Clusters and clouds', 'host-b');
       await openForm(page);
       await fillForm(page, 'no-workspace');
-      await expect(main(page).getByText('The workspace is not usable')).toBeVisible();
+      // The failed test is a toast over the page.
+      await expect(page.getByRole('alert').getByText('The workspace is not usable')).toBeVisible();
     },
   },
   {

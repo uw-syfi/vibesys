@@ -69,7 +69,7 @@ PROFILER = Role(
 
 IMPLEMENTER = Role(
     name="implementer",
-    title="Implementer",
+    title="Builder",
     prompt="implement.j2",
     reply=ImplementerResponse,
     workspace=WorkspaceMode.ISOLATED_CHILD,
@@ -86,7 +86,7 @@ IMPLEMENTER = Role(
 
 JUDGE = Role(
     name="judge",
-    title="Judge",
+    title="Reviewer",
     prompt="judge.j2",
     reply=JudgeResponse,
     workspace=WorkspaceMode.READ_ONLY_REVISION,

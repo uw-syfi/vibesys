@@ -495,7 +495,7 @@ describe('the turn’s layout', () => {
     expect(container.textContent).not.toContain('Show all fields');
     expect(container.textContent).toContain('src/lib.rs');
     const lead = one(container, '.vs-button');
-    expect(lead.textContent).toBe('Implementer reply: done · Padded the counters.');
+    expect(lead.textContent).toBe('Builder reply: done · Padded the counters.');
     expect(container.firstElementChild?.contains(lead)).toBe(true);
     expect(one(container, '.vs-narrative').contains(lead)).toBe(false);
   });
@@ -527,10 +527,10 @@ describe('the turn’s layout', () => {
     const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
     expect(all(container, '.vs-turn-result')).toHaveLength(1);
     expect(all(container, '.vs-button').map(each => each.textContent)).not.toContain(
-      'Implementer reply: done · Padded the counters.',
+      'Builder reply: done · Padded the counters.',
     );
-    expect(one(container, '.vs-turn-result').textContent).toContain('Implementer');
-    expect(one(container, '.vs-turn-result').textContent).not.toContain('Implementer reply');
+    expect(one(container, '.vs-turn-result').textContent).toContain('Builder');
+    expect(one(container, '.vs-turn-result').textContent).not.toContain('Builder reply');
   });
 
   test('the plan card ends the orchestrator’s turn, and its base opens that idea', async () => {

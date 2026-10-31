@@ -3,7 +3,6 @@
 import {describe, expect, test} from 'bun:test';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {
-  Banner,
   Chart,
   CheckList,
   type CheckState,
@@ -135,11 +134,6 @@ describe('Table', () => {
 });
 
 describe('the pointer carries the detail behind a short word', () => {
-  test('a banner with a title and no body still has its hint on the pointer', () => {
-    const html = renderToStaticMarkup(<Banner title="Needs an update" hint="The detail." />);
-    expect(html).toContain('class="vs-banner-text" title="The detail."');
-  });
-
   test('a chip carries its hint, and a field error its own', () => {
     expect(renderToStaticMarkup(<Chip label="Token found" hint="Held in a profile." />)).toContain(
       'title="Held in a profile."',

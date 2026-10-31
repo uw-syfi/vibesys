@@ -148,7 +148,7 @@ function replyRow(entry: TranscriptEntry, author: string): TurnRow {
     author,
     role: entry.agentKind ?? null,
     replyKind: reply.kind,
-    title: replyTitle(reply.kind),
+    title: replyTitle(reply.kind, entry.agentKind ?? null),
     fields: replyFields(reply.json_schema as Readonly<Record<string, unknown>>, value),
     value,
     raw: JSON.stringify(value, null, 2),

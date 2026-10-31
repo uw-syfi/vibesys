@@ -242,15 +242,16 @@ test('Pause escalates to Pause now in the same epoch and waits for journal outco
     },
   });
   await outcome(0, 'applied');
-  await expect(page.getByText('Pause · Applied', {exact: true})).toBeVisible();
   await expect(page.getByText('Pausing', {exact: true}).first()).toBeVisible();
+  // An applied request has no row, and the pending one is gone.
+  await expect(page.getByText(/^Pause · /)).toHaveCount(0);
   await page.getByRole('button', {name: 'Pause now', exact: true}).click();
   await expect(page.getByText('Pause now · Pending', {exact: true})).toBeVisible();
   expect(requests[1]?.request.intent.case).toBe('pauseNow');
   expect(requests[1]?.request.requestId).not.toBe(requests[0]?.request.requestId);
   await outcome(1, 'applied');
-  await expect(page.getByText('Pause now · Applied', {exact: true})).toBeVisible();
   await expect(page.getByText('Paused', {exact: true}).first()).toBeVisible();
+  await expect(page.getByText(/^Pause now · /)).toHaveCount(0);
   expect(
     await page.evaluate(() =>
       (window as unknown as GatewayWindow).fakeHost.calls.filter(call => call[0] === 'resume'),
@@ -274,9 +275,10 @@ for (const kind of INTENT_REPLAYS) {
         await expect(page.getByText(`${action} · Pending`, {exact: true})).toBeVisible();
         await outcome(0, kind === 'park-applied' ? 'applied' : kind);
       }
-      const status = kind === 'pending' ? 'Pending' : kind === 'refused' ? 'Refused' : 'Applied';
-      const result = page.getByText(`${action} · ${status}`, {exact: true});
-      await expect(result).toBeVisible();
+      // A request still on its way, or refused, keeps its row; an applied one has none.
+      const status = kind === 'pending' ? 'Pending' : kind === 'refused' ? 'Refused' : null;
+      if (status === null) await expect(page.getByText(`${action} · `)).toHaveCount(0);
+      else await expect(page.getByText(`${action} · ${status}`, {exact: true})).toBeVisible();
       expect(requests).toHaveLength(1);
       if (kind === 'park-applied') {
         expect(requests[0]?.request.intent.case).toBe('pause');
@@ -352,9 +354,8 @@ test('live controls remain reachable and history follows pause, resume and finis
     }),
   ]);
   await observe(2, RunLiveness.ALIVE);
-  await expect(page.getByText('Resume · Applied', {exact: true})).toHaveCount(1);
-  await expect(page.getByText('Pause · Applied · Earlier epoch', {exact: true})).toBeVisible();
   await expect(pauseNow).toBeEnabled();
+  await expect(page.getByText(/ · Applied/)).toHaveCount(0);
   await capture(page, 'controls-resumed');
   await append([
     ...finishOpenSpans(fixture.records, next),
@@ -411,9 +412,9 @@ test('a pause drain confirmation survives the run reader reconnecting', async ({
     world.fakeHost.recent([]);
   });
   await outcome(0, 'applied');
-  await expect(page.getByText('Pause · Applied', {exact: true})).toBeVisible();
   expect(requests).toHaveLength(1);
   await expect(page.getByText('Pausing', {exact: true}).first()).toBeVisible();
+  await expect(page.getByText(/^Pause · /)).toHaveCount(0);
 });
 
 test('a catalog-addressed historical run offers Resume without optional epoch context', async ({

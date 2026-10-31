@@ -25,8 +25,8 @@ def test_every_role_name_reads_as_words() -> None:
 
 def test_a_role_is_named_by_its_bare_name_and_by_its_id_in_each_search() -> None:
     roles = display_names().roles
-    assert roles["judge"] == "Judge"
-    assert roles["dynamic-judge"] == "Judge"
+    assert roles["judge"] == "Reviewer"
+    assert roles["dynamic-judge"] == "Reviewer"
     assert roles["perf-evaluator"] == "Perf evaluator"
     for search in (dynamic, issue_queue):
         for role in search.roles:
