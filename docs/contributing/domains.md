@@ -142,7 +142,7 @@ The bundle also supplies its objective, candidate contract, reference material,
 accuracy checker, and benchmark. This domain provides role guidance; those task
 files define the actual API, supported inputs, tolerances, and score.
 
-The preset `resources/skills/` root includes `kernel-correctness`,
+The preset `skills/domains/` root includes `kernel-correctness`,
 `kernel-performance`, `kernel-ncu-analysis` and `kernel-timeline-analysis` on
 CUDA, and `kernel-rocprof-analysis` on ROCm. Their sidecar metadata
 loads them only for `kernel-writing`. To add task-specific skills while keeping

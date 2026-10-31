@@ -46,7 +46,7 @@ def test_reviewer_alias_to_pruned_platform_is_rejected_and_removed(
     (skill / "alias.md").symlink_to(skill / target if absolute else target)
     workspace = tmp_path / "workspace"
     materialize_skills(workspace, [skill], selection=platform_skill_selection(ComputeBackend.ROCM))
-    citation = "resources/skills/demo/alias.md"
+    citation = "skills/domains/demo/alias.md"
     with pytest.raises(ValueError, match="excluded from this run"):
         resolve_agent_resource_paths(
             citation,
@@ -62,7 +62,7 @@ def test_reviewer_absolute_internal_link_resolves_in_actual_copied_tree(tmp_path
     (skill / "absolute.md").symlink_to(skill / target)
     workspace = tmp_path / "workspace"
     materialize_skills(workspace, [skill])
-    citation = "resources/skills/demo/absolute.md"
+    citation = "skills/domains/demo/absolute.md"
     resolved = resolve_agent_resource_paths(citation, [skill])
     assert resolved == ".agents/skills/demo/references/rocm-note.md"
     assert _resolves_inside(workspace / resolved, workspace)
@@ -97,7 +97,7 @@ def test_link_chains_only_advertise_resources_inside_materialized_skill(
         materialize_skills(
             workspace, [skill], selection=platform_skill_selection(ComputeBackend.ROCM)
         )
-        citation = f"resources/skills/demo/{previous}"
+        citation = f"skills/domains/demo/{previous}"
         if excluded:
             with pytest.raises(ValueError, match="excluded from this run"):
                 resolve_agent_resource_paths(
@@ -123,7 +123,7 @@ def test_generic_exclusions_apply_to_resolved_alias_targets(tmp_path: Path, targ
     (skill / "alias.md").symlink_to(target)
     materialize_skills(tmp_path / "workspace", [skill])
     with pytest.raises(ValueError, match="outside agent-visible"):
-        resolve_agent_resource_paths("resources/skills/demo/alias.md", [skill])
+        resolve_agent_resource_paths("skills/domains/demo/alias.md", [skill])
     assert not (tmp_path / "workspace/.agents/skills/demo/alias.md").is_symlink()
 
 
@@ -156,7 +156,7 @@ def test_directory_aliases_resolve_only_to_copied_resources(
         materialize_skills(
             workspace, [skill], selection=platform_skill_selection(ComputeBackend.ROCM)
         )
-        citation = "resources/skills/demo/alias/reference.md"
+        citation = "skills/domains/demo/alias/reference.md"
         if excluded:
             with pytest.raises(ValueError, match="excluded from this run"):
                 resolve_agent_resource_paths(

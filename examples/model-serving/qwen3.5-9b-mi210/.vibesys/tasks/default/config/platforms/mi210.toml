@@ -18,7 +18,7 @@ bf16_tflops_sustained_high = 122  # (power-limited, not compute-limited); isolat
 fp8_native = false
 notes = """
 Older than the MI300 family (gfx942) the serving-systems knowledge tree
-(resources/skills/serving-systems/references/platforms/rocm/) targets. gfx90a
+(skills/domains/serving-systems/references/platforms/rocm/) targets. gfx90a
 has no native FP8 and lacks the AITER/CK paths documented there; treat that
 tree's AITER recipes as unverified on gfx90a. The floor.md continuous batching,
 paged-KV, prefix-caching, and chunked-prefill contracts still apply

@@ -1,11 +1,11 @@
 # vLLM source-code lookup
 
-Short reference pointing into `repos/vllm/` for common vLLM development tasks. The v0 engine is legacy; everything here refers to **v1** (the current default) unless stated otherwise.
+Short reference pointing into `$SERVE_REPOS/vllm/` for common vLLM development tasks. The v0 engine is legacy; everything here refers to **v1** (the current default) unless stated otherwise.
 
 ## Setup
 
 ```bash
-export SERVE_REPOS=<vibesys-root>/skills/serving-systems/repos
+export SERVE_REPOS=<vibesys-root>/third_party/serving-repos
 # or substitute $SERVE_REPOS inline in commands below.
 ```
 
@@ -19,7 +19,7 @@ git fetch --depth 1 origin 0210024ae796446a121f96d2d31053668ac0fd85
 git checkout -q FETCH_HEAD
 ```
 
-(From the vibesys repo root the equivalent is `git submodule update --init --checkout resources/skills/serving-systems/repos/vllm`.)
+(From the vibesys repo root the equivalent is `git submodule update --init --checkout third_party/serving-repos/vllm`.)
 
 ## Directory map
 

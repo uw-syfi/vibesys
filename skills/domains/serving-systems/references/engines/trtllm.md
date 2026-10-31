@@ -1,11 +1,11 @@
 # TensorRT-LLM source-code lookup
 
-Short reference into `repos/TensorRT-LLM/`. Two runtimes — know which you're targeting before navigating.
+Short reference into `$SERVE_REPOS/TensorRT-LLM/`. Two runtimes — know which you're targeting before navigating.
 
 ## Setup
 
 ```bash
-export SERVE_REPOS=<vibesys-root>/skills/serving-systems/repos
+export SERVE_REPOS=<vibesys-root>/third_party/serving-repos
 ```
 
 If `$SERVE_REPOS/TensorRT-LLM/` is missing (e.g. running inside a fresh agent sandbox where the submodule isn't mounted), fetch only the pinned commit this skill was authored against — the paths and line numbers in the tables below assume it:
@@ -18,7 +18,7 @@ git fetch --depth 1 origin 0d2bea7c3c99b734a8e09c4c767820e03136a15b
 git checkout -q FETCH_HEAD
 ```
 
-(From the vibesys repo root the equivalent is `git submodule update --init --checkout resources/skills/serving-systems/repos/TensorRT-LLM`.)
+(From the vibesys repo root the equivalent is `git submodule update --init --checkout third_party/serving-repos/TensorRT-LLM`.)
 
 ## Runtimes
 

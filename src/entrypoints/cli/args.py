@@ -330,7 +330,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
             "Skill source that REPLACES the built-in preset roots (can be "
             "repeated). Each entry is a skill directory (containing a top-level "
             "`SKILL.md`), a parent directory of many skills, or a single "
-            "`SKILL.md` file. When omitted, the preset `resources/skills/` is "
+            "`SKILL.md` file. When omitted, the preset `skills/domains/` is "
             "used. To keep the presets and add your own, use --extra-skills."
         ),
     )

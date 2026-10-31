@@ -53,7 +53,7 @@ New tests go next to the package they test. The top-level `tests/` holds only cr
 layers (system, vibesys product wiring, e2e, architecture, quality, and the real tiers) and
 is not to grow: no new top-level directories, and no new files there for a single package's
 tests or helpers. Tests never go inside a tree that ships wholesale: `resources/profilers`,
-`resources/evaluators` and `resources/skills` are grafted into the wheel and staged for
+`resources/evaluators` and `skills/domains` are grafted into the wheel and staged for
 agents, so a test, conftest or test helper there would ship.
 
 1. A rule about a pure function or a core step (a limit, an ordering, a state transition):

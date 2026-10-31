@@ -12,6 +12,7 @@ on:
       - 'src/**'
       - 'libs/**'
       - 'resources/**'
+      - 'skills/**'
       - 'sdk/**'
       - '.github/workflows/publish.yml'
   release:

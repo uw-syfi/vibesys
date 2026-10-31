@@ -430,7 +430,7 @@ def render_packaged_prompts(installed: Path) -> int:
     workspace, resource_roots = stage_prompt_workspace(installed)
     source_objective = (
         "Improve throughput. Read "
-        "`resources/skills/serving-systems/references/platforms/rocm/floor.md`."
+        "`skills/domains/serving-systems/references/platforms/rocm/floor.md`."
     )
     context["objective"] = resolve_agent_resource_paths(
         source_objective, list(resource_roots.values())
@@ -812,7 +812,7 @@ def stage_prompt_workspace(
     input_dir.mkdir()
     (input_dir / "OBJECTIVE.md").write_text("Improve throughput.")
     (input_dir / "agent.toml").write_text("# private agent settings")
-    skill_sources = discover_skill_dirs(installed / "vibesys" / "_resources" / "skills")
+    skill_sources = discover_skill_dirs(installed / "vibesys" / "_skills")
     materializer = ProjectMaterializer(
         workspace,
         effects=FakeProjectMaterializationEffects(),
@@ -903,12 +903,12 @@ def assert_resource_citations(
     """Check packaged skill/profiler inputs and explicit runtime file receipts."""
     names = "|".join(re.escape(name) for name in resource_roots)
     for citation in re.findall(
-        rf"(?<![\w./-])(?:resources/skills/|\.agents/skills/)?(?:{names})/[\w./-]+",
+        rf"(?<![\w./-])(?:skills/domains/|\.agents/skills/)?(?:{names})/[\w./-]+",
         rendered,
     ):
         relative = Path(citation.rstrip("."))
         resource = relative
-        for prefix in (Path("resources/skills"), Path(".agents/skills")):
+        for prefix in (Path("skills/domains"), Path(".agents/skills")):
             if resource.is_relative_to(prefix):
                 resource = resource.relative_to(prefix)
                 break
@@ -936,7 +936,7 @@ def assert_citations_survive_pruning(rendered: str, template: Path, common: Path
     backend = ComputeBackend(template.relative_to(common / "backend").parts[0])
     excluded = tuple(Path(item) for item in platform_skill_excluded_paths(backend))
     for citation in re.findall(
-        r"(?:resources/skills/|\.agents/skills/)?serving-systems/[\w./-]+", rendered
+        r"(?:skills/domains/|\.agents/skills/)?serving-systems/[\w./-]+", rendered
     ):
         inside = Path(citation.rstrip(".")).parts
         inside = inside[inside.index("serving-systems") + 1 :]
