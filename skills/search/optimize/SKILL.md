@@ -34,7 +34,8 @@ before you plan and again at each wrap-up.
 3. Create exactly one one-shot wrap-up wakeup with `CronCreate`, `recurring: false`.
    Reconcile with `CronList` on resume, cancel obsolete owned wakeups with `CronDelete`.
 4. Measure the base with `vibesys:measure`, at least 5 samples, as a tracked background Bash command with `run_in_background: true`. No comparison
-   means anything until it lands. Plan while it runs.
+   means anything until it lands. Plan while it runs. When the evidence is thin, dispatch read-only planners (briefs.md) instead of
+   guessing hypotheses yourself, then merge, deconflict and choose.
 
 ## Loop
 

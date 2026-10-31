@@ -19,7 +19,7 @@ Measurement script: <absolute installed path to measure/scripts/measurements.py;
 Service owner: <absolute installed path to measure/scripts/service.py>
 Every benchmark, even unrecorded sanity load, uses the measurement script run -- wrapper.
 Task: .vibesys/tasks/<task>/ (read OBJECTIVE.md). Run directory: <abs path of $RUN>
-Load these skills first: <vibesys:implement-hypothesis | judge-candidate | combine-candidates |
+Load these skills first: <vibesys:implement-hypothesis | plan-hypotheses | judge-candidate | combine-candidates |
   profile-revision>, vibesys:measure, and <domain skills>.
 Rules:
 - Never edit anything under .vibesys/, the task's checker or its benchmark.
@@ -79,6 +79,19 @@ Hand back: the commit, the parts you could not apply and why, the checks you ran
 ```
 
 A merge is a combine whose result may become main. The lead decides that after measuring it.
+
+## Plan
+
+Planners propose; the lead merges duplicates, checks that picked ideas touch disjoint files,
+and chooses. Give each planner a lens, the evidence paths and the measured peaks, and list what
+is already in flight and already rejected. Load `vibesys:plan-hypotheses`. Read-only worktree of
+the revision, as for the judge.
+
+```
+Lens: <the part of the system this planner covers>      Revision: <SHA>
+Evidence: <profiles, records, logs, ledger paths>       In flight / rejected: <ids and reasons>
+Change no code. Hand back ranked ideas in the idea template.
+```
 
 ## Profile
 
