@@ -153,6 +153,24 @@ function SelectDemo(props: {
   );
 }
 
+function LabelInsideDemo(): JSX.Element {
+  const [value, setValue] = useState<'status' | 'machine'>('status');
+  return (
+    <Field label="Group by" hideLabel>
+      <Select
+        labelInside
+        size="sm"
+        value={value}
+        change={setValue}
+        options={[
+          {value: 'status', label: 'Status'},
+          {value: 'machine', label: 'Machine'},
+        ]}
+      />
+    </Field>
+  );
+}
+
 function PathDemo(): JSX.Element {
   const [value, setValue] = useState('~/src/');
   return (
@@ -375,6 +393,7 @@ export const BASIC_ENTRIES = {
         <SelectDemo mono={false} note={{help: 'Only tested options are listed.'}} />
         <SelectDemo mono note={{help: 'Shown in mono.'}} />
         <SelectDemo mono={false} note={{error: 'Pick a size that fits.'}} />
+        <LabelInsideDemo />
       </Grid>
     ),
   },
