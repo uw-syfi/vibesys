@@ -21,13 +21,13 @@ from vs_proto.api import StrategyAdvanced
 
 from ._search_run import Advanced, Inbox, SearchHost, advance, begin, deferred
 from ._step import step
-from ._step_log import SCHEMA_VERSION, decode_held, encode_event, encode_held
+from ._step_log import SCHEMA_VERSION, decode_held, decode_snapshot, encode_event, encode_held
 from .types.search import TimeReached
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from vs_proto.api import Record
+    from vs_proto.api import CoreSnapshot, Record
 
     from ._registry import OperationRegistry
     from ._search_events import Translated
@@ -82,6 +82,8 @@ def restore[S: StrategyState, C](
         body = record.body
         if body is not None and body.field == "strategy_advanced":
             progress = _read(body.value, progress, search, registry)
+        elif body is not None and body.field == "core_snapshot":
+            progress = _saved(body.value, search, registry)
     return None if progress is None else replace(progress, state=search.resume(progress.state))
 
 
@@ -198,6 +200,27 @@ def _strategy(
     return Oneof("steps", changes)
 
 
+def _whole_state[S: StrategyState, C](search: SearchDriver[S, C], encoded: bytes) -> S:
+    """The search's whole state as it is logged: in the search driver's own encoding."""
+    return search.state_model.model_validate_json(encoded)
+
+
+def _saved[S: StrategyState, C](
+    message: CoreSnapshot, search: SearchDriver[S, C], registry: OperationRegistry | None
+) -> Progress[S]:
+    """The search a run an older version saved left: its whole state, as a checkpoint is."""
+    saved = decode_snapshot(message, registry)
+    state = _whole_state(search, saved.strategy)
+    return Progress(
+        state,
+        tuple(sorted(saved.wakes)),
+        saved.held,
+        advances=1,
+        checkpoint_at=1,
+        checkpointed=True,
+    )
+
+
 def _read[S: StrategyState, C](
     message: StrategyAdvanced,
     progress: Progress[S] | None,
@@ -206,7 +229,7 @@ def _read[S: StrategyState, C](
 ) -> Progress[S]:
     match message.strategy:
         case Oneof(field="checkpoint", value=whole):
-            state = search.state_model.model_validate_json(whole)
+            state = _whole_state(search, whole)
             whole_state = True
         case Oneof(field="steps", value=changes) if progress is not None:
             state = search.extend(progress.state, changes)

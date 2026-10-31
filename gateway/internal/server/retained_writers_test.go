@@ -214,7 +214,7 @@ func pinRetainedResponse(t *testing.T, directory string, response *apiv1.Skeleto
 		t.Fatal(err)
 	}
 	if string(want) != string(data) {
-		t.Fatal("retained RPC response changed; rerun with VIBESYS_UPDATE_GOLDEN=1")
+		t.Fatal("retained RPC response changed; if intended, run ./scripts/regenerate_goldens.sh and commit what it rewrites")
 	}
 }
 
@@ -244,6 +244,6 @@ func pinRetainedWatch(t *testing.T, directory string, response *apiv1.WatchRunsR
 		t.Fatal(err)
 	}
 	if string(want) != string(data) {
-		t.Fatal("retained WatchRuns changed; rerun with VIBESYS_UPDATE_GOLDEN=1")
+		t.Fatal("retained WatchRuns changed; if intended, run ./scripts/regenerate_goldens.sh and commit what it rewrites")
 	}
 }

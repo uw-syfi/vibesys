@@ -24,6 +24,43 @@ message RunStarted {
   }];
 }
 
+// CoreSnapshot is the seed of a run that an older version saved in store.json: its core state,
+// the inputs that version had not applied yet, and the search it left, appended once as one
+// record so a crash can never leave one of them without the others. It is the only way a run
+// that began before its log held core's state enters the log, and it is never written for a new
+// run (RunStarted is). It folds as RunStarted does, then applies the inputs in order.
+message CoreSnapshot {
+  // Version of the canonical encoding of state, inputs and held.
+  uint32 schema_version = 1 [(buf.validate.field).uint32.gte = 1];
+  // Version of the saved run envelope the snapshot was read from, after its own upgrades.
+  uint32 envelope_version = 2 [(buf.validate.field).uint32.gte = 1];
+  // The zlib-compressed canonical JSON of the vs_core CoreState the saved run held. A saved
+  // state is megabytes of JSON and a record holds one, so the encoding is compressed.
+  bytes state = 3 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 1048576
+  }];
+  // The canonical JSON of each owner event the saved run had received and not yet applied, in
+  // the order it would have applied them.
+  repeated bytes inputs = 4 [(buf.validate.field).repeated.items.bytes = {
+    min_len: 1
+    max_len: 524288
+  }];
+  // The zlib-compressed whole state of the search, in the search driver's own encoding, as a
+  // StrategyAdvanced checkpoint holds it.
+  bytes strategy = 5 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 1048576
+  }];
+  // Run-clock times the search had asked to be woken at.
+  repeated double wakes = 6 [(buf.validate.field).repeated.items.double = {
+    gte: 0
+    finite: true
+  }];
+  // The canonical JSON of the decisions the search had made that core could not take yet.
+  bytes held = 7 [(buf.validate.field).bytes.max_len = 524288];
+}
+
 // StrategyAdvanced is one advance of the run's search, appended as one record so that what it
 // proposed and what it kept can never disagree after a crash: the proposals core took, the
 // state change the search made, and the wake-ups it asked for.

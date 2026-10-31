@@ -22,6 +22,7 @@ export const RECORD_FACTS = {
   attemptInterrupted: 'window',
   runEnded: 'window',
   runStarted: 'window',
+  coreSnapshot: 'window',
   strategyAdvanced: 'window',
 } as const satisfies Record<NonNullable<StoreRecord['body']['case']>, string>;
 

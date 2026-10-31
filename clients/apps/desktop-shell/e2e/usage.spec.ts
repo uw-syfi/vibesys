@@ -233,7 +233,7 @@ test('the window select asks over that window, and a run opens from its row', as
   await expect(page.getByText('Loading')).toHaveCount(0);
 });
 
-/** The run the shell shows, from the window's address: its Usage face is `#mode=usage`. */
+/** The run the shell shows, from the window's address: its Usage face ends `&mode=usage`. */
 const faceOf = (page: Page) => page.evaluate(() => window.location.hash);
 
 test('a run opens on its Usage face from its row', async ({page}) => {
@@ -243,9 +243,20 @@ test('a run opens on its Usage face from its row', async ({page}) => {
   const row = page.getByRole('table', {name: 'Cost by run'}).getByRole('row').nth(1);
   await row.click();
   await expect(page.getByRole('heading', {name: 'Usage', level: 1})).toHaveCount(0);
-  expect(await faceOf(page)).toBe('#mode=usage');
+  expect(await faceOf(page)).toMatch(/^#run=[^&]+&mode=usage$/);
   // The run screen names the run opened: the first the world lists.
   await expect(page.getByRole('main')).toContainText(/host-b · 2026101\d-\d{6}/);
+});
+
+test('one Back leaves a run opened from its row for Usage', async ({page}) => {
+  const many = USAGE_CASES.find(each => each.name === 'many-runs');
+  if (many === undefined) throw new Error('the cases changed');
+  await open(page, many, 1440);
+  await page.getByRole('table', {name: 'Cost by run'}).getByRole('row').nth(1).click();
+  await expect(page.getByRole('heading', {name: 'Usage', level: 1})).toHaveCount(0);
+  await page.goBack();
+  await expect(page.getByRole('heading', {name: 'Usage', level: 1})).toBeVisible();
+  expect(await faceOf(page)).toBe('#usage');
 });
 
 test('a run row is titled as the run is everywhere, by its project, and never by its id', async ({
@@ -269,7 +280,7 @@ test('the rows open with the keyboard too', async ({page}) => {
   await row.focus();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('heading', {name: 'Usage', level: 1})).toHaveCount(0);
-  expect(await faceOf(page)).toBe('#mode=usage');
+  expect(await faceOf(page)).toMatch(/^#run=[^&]+&mode=usage$/);
 });
 
 test('Usage asks nothing until it is shown, and again each time it is shown', async ({page}) => {

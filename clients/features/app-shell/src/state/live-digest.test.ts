@@ -131,7 +131,9 @@ describe('the digest of a live run', () => {
   test('a refresh asks again, the row keeps the last figures meanwhile, and the answer replaces them', () => {
     const first = digest({ideas: 2, bestSoFarRatio: 1.2, durationSeconds: 60});
     const played = play(OVERVIEW('r1'), answer(1, 'r1', first), {type: 'refresh-live-digests'});
-    expect(played.requests.map(request => request.token)).toEqual([1, 2]);
+    expect(
+      played.requests.map(request => request.kind === 'read-digests' && request.token),
+    ).toEqual([1, 2]);
     expect(trailOf(played.state)).toEqual(['2 ideas · 1.20× best so far · 1m']);
 
     const again = sidebarStep(played.state, {type: 'refresh-live-digests'});

@@ -26,6 +26,7 @@ export const RECORD_BODY_KIND = {
   attemptInterrupted: 'core',
   runEnded: 'core',
   runStarted: 'core',
+  coreSnapshot: 'core',
   strategyAdvanced: 'core',
 } as const satisfies Record<RecordBodyCase, 'row' | 'core'>;
 
