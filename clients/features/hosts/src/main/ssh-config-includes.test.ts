@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {basename, dirname} from 'node:path';
 import {ConnectionManager} from '@vibesys/connection';
-import {idleRunWatch, idleSubscriptions} from '@vibesys/connection/testing';
+import {idleHostRuns, idleSubscriptions} from '@vibesys/connection/testing';
 import {SettingsStore, SshConfigSyntaxError} from '@vibesys/settings';
 import {FakeClock} from '@vibesys/transport/testing';
 import {Hosts, SshConfigDiscoveryError, type SshConfigFilesystem} from './index.js';
@@ -58,7 +58,7 @@ function fileError(code: string, path: string): Error {
 /** The public feature over a deterministic config graph; discovery must never open a connection. */
 function subject(filesystem: SshConfigFilesystem): Hosts {
   return new Hosts({
-    runs: idleRunWatch(),
+    runs: idleHostRuns(),
     subscriptions: idleSubscriptions(),
     manager: new ConnectionManager({
       linkFor: () => {
@@ -349,7 +349,7 @@ describe('Hosts.aliases OpenSSH includes', () => {
       [included]: 'Host home-relative',
     });
     const hosts = new Hosts({
-      runs: idleRunWatch(),
+      runs: idleHostRuns(),
       subscriptions: idleSubscriptions(),
       manager: new ConnectionManager({
         linkFor: () => {

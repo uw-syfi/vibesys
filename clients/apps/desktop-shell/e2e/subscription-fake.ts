@@ -2,9 +2,9 @@
 import {fileURLToPath} from 'node:url';
 import type {Page} from '@playwright/test';
 import {buildSync} from 'esbuild';
-import type {HostFeed, SubscriptionSeed} from './subscription-preload.js';
+import type {HostFeed, RunsFeed, SubscriptionSeed} from './subscription-preload.js';
 
-export type {SubscriptionSeed};
+export type {HostFeed, RunsFeed, SubscriptionSeed};
 
 let preload: string | undefined;
 
@@ -26,8 +26,9 @@ export function subscriptionScript(seed: SubscriptionSeed): string {
 
 interface FakeSubscriptions {
   set(host: string, feed: HostFeed): void;
+  setRuns(host: string, feed: RunsFeed): void;
   retried(): string[];
-  observing(host: string): number;
+  observing(host: string, arm?: 'machineStats' | 'runs'): number;
 }
 
 /** The scripted hosts, as a test drives them. */
@@ -41,16 +42,27 @@ export const hosts = {
         ),
       [host, feed] as const,
     ),
+  /** What a host says of its runs from now on: the counts on its card. */
+  setRuns: (page: Page, host: string, feed: RunsFeed) =>
+    page.evaluate(
+      ([name, next]) =>
+        (window as unknown as {fakeSubscriptions: FakeSubscriptions}).fakeSubscriptions.setRuns(
+          name as string,
+          next as RunsFeed,
+        ),
+      [host, feed] as const,
+    ),
   retried: (page: Page) =>
     page.evaluate(() =>
       (window as unknown as {fakeSubscriptions: FakeSubscriptions}).fakeSubscriptions.retried(),
     ),
-  observing: (page: Page, host: string) =>
+  observing: (page: Page, host: string, arm: 'machineStats' | 'runs' = 'machineStats') =>
     page.evaluate(
-      name =>
+      ([name, topic]) =>
         (window as unknown as {fakeSubscriptions: FakeSubscriptions}).fakeSubscriptions.observing(
-          name,
+          name as string,
+          topic as 'machineStats' | 'runs',
         ),
-      host,
+      [host, arm] as const,
     ),
 };

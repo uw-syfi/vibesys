@@ -21,8 +21,11 @@ const (
 	KeepaliveTimeout = 10 * time.Second
 )
 
-func newTopics(config Config) *subscription.Hub {
-	return subscription.New(config.Clock, machinestats.Topic(runtime.GOOS, config.Clock, config.Machine))
+func newTopics(h *host) *subscription.Hub {
+	return subscription.New(h.config.Clock,
+		machinestats.Topic(runtime.GOOS, h.config.Clock, h.config.Machine),
+		runsTopic(h, newRunWatch),
+	)
 }
 
 // Subscribe is the wire end of the hub. A failed frame ends the stream normally,

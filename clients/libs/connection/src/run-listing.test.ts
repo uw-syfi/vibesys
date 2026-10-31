@@ -3,11 +3,17 @@ import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {
   hostListingFromRuns,
-  type RunsState,
-  type WatchedRun,
+  LISTING_FAILURE_WORDS,
+  listingStep,
   watchedListing,
 } from '@vibesys/connection';
-import {type HostKey, LISTING_STEPS, recordedProjectRoot} from '@vibesys/hosts';
+import {
+  type HostKey,
+  LISTING_STEPS,
+  type ListingStep,
+  machineLoad,
+  recordedProjectRoot,
+} from '@vibesys/hosts';
 import {
   DrainGoal,
   LifecycleSchema,
@@ -17,6 +23,16 @@ import {
   StageState,
   StartupStage,
 } from '@vibesys/proto';
+import {
+  CONNECT_STEPS,
+  type FailureReason,
+  type HostRunFacts,
+  RETRYABLE_REASONS,
+  type RunFacts,
+  type StaleReason,
+  type SubscriptionState,
+  TERMINAL_REASONS,
+} from '@vibesys/subscription';
 import fc from 'fast-check';
 
 const HOST = 'ssh:host-a' as HostKey;
@@ -53,22 +69,24 @@ const LIFECYCLE = fc.constantFrom(
   }),
 );
 
-const WATCHED = fc.record({
-  head: fc.option(
-    fc.record({
-      lifecycle: fc.option(LIFECYCLE, {nil: undefined}),
-      started: fc.option(fc.integer({min: 1, max: 4_000_000_000}), {nil: undefined}),
-    }),
-    {nil: undefined},
-  ),
-  liveness: fc.constantFrom(
-    RunLiveness.UNSPECIFIED,
-    RunLiveness.ALIVE,
-    RunLiveness.INTERRUPTED,
-    RunLiveness.ENDED,
-    RunLiveness.PARKED,
-  ),
+/** A run as the schema lets a gateway send it: a run with a head states its liveness. */
+const STATED = fc.constantFrom(
+  RunLiveness.ALIVE,
+  RunLiveness.INTERRUPTED,
+  RunLiveness.ENDED,
+  RunLiveness.PARKED,
+);
+const HEAD = fc.record({
+  lifecycle: fc.option(LIFECYCLE, {nil: undefined}),
+  started: fc.option(fc.integer({min: 1, max: 4_000_000_000}), {nil: undefined}),
 });
+const WATCHED = fc.oneof(
+  fc.record({head: HEAD, liveness: STATED}),
+  fc.record({
+    head: fc.constant(undefined),
+    liveness: fc.oneof(fc.constant(RunLiveness.UNSPECIFIED), STATED),
+  }),
+);
 
 function watched(input: {
   head:
@@ -78,7 +96,7 @@ function watched(input: {
       }
     | undefined;
   liveness: RunLiveness;
-}): WatchedRun {
+}): RunFacts {
   const head = input.head;
   return {
     projectRoot: recordedProjectRoot('/project'),
@@ -95,7 +113,7 @@ function watched(input: {
   };
 }
 
-const RUNS = fc
+const RUNS: fc.Arbitrary<HostRunFacts> = fc
   .uniqueArray(fc.tuple(fc.stringMatching(/^[a-z][a-z0-9-]{0,11}$/), WATCHED), {
     selector: ([id]) => id,
     maxLength: 12,
@@ -161,30 +179,82 @@ test('a writer that is dead without an ending reads as failed with a reason, a p
   ]);
 });
 
-test('property: a host lists runs only once its stream has delivered them all, whatever else is up', () => {
+const STEP = fc.constantFrom(...LISTING_STEPS);
+const REASON = fc.constantFrom<FailureReason>(...RETRYABLE_REASONS, ...TERMINAL_REASONS);
+const STALE_REASON = fc.constantFrom<StaleReason>(...RETRYABLE_REASONS);
+
+const STATE: fc.Arbitrary<SubscriptionState<HostRunFacts>> = fc.oneof(
+  fc.record({
+    kind: fc.constant('connecting' as const),
+    step: fc.constantFrom(...CONNECT_STEPS),
+    attempt: fc.nat({max: 4}),
+  }),
+  fc.record({kind: fc.constant('live' as const), value: RUNS, since: fc.nat()}),
+  fc.record({
+    kind: fc.constant('stale' as const),
+    value: RUNS,
+    reason: STALE_REASON,
+    attempt: fc.integer({min: 1, max: 4}),
+    valueAt: fc.nat(),
+  }),
+  fc.record({kind: fc.constant('failed' as const), reason: REASON, retrying: fc.boolean()}),
+);
+
+test('property: a host lists runs only once its subscription is live, and says why otherwise', () => {
   fc.assert(
-    fc.property(
-      RUNS,
-      fc.oneof(
-        fc.constantFrom(...LISTING_STEPS).map(step => ({kind: 'connecting' as const, step})),
-        fc.constant({kind: 'live' as const}),
-        fc.integer({min: 1, max: 12}).map(attempt => ({
-          kind: 'reconnecting' as const,
-          attempt,
-          detail: 'network loss',
-          step: 'runs' as const,
-        })),
-      ),
-      (runs, phase) => {
-        const state: RunsState = {phase, runs};
-        const listing = hostListingFromRuns(HOST, state);
-        expect(listing.kind).toBe(phase.kind === 'live' ? 'listed' : 'unavailable');
-        if (listing.kind === 'unavailable' && phase.kind === 'reconnecting')
-          expect(listing.connection.kind).toBe(phase.attempt >= 5 ? 'offline' : 'reconnecting');
-        if (listing.kind === 'unavailable' && phase.kind === 'connecting')
-          expect(listing).toMatchObject({connection: {kind: 'connecting'}, step: phase.step});
-      },
-    ),
-    {numRuns: 60},
+    fc.property(STATE, STEP, (state, step) => {
+      const listing = hostListingFromRuns(HOST, state, step);
+      expect(listing.kind).toBe(state.kind === 'live' ? 'listed' : 'unavailable');
+      if (listing.kind !== 'unavailable') return;
+      switch (state.kind) {
+        case 'connecting':
+          expect(listing.connection).toEqual(
+            state.attempt === 0
+              ? {kind: 'connecting'}
+              : {kind: 'reconnecting', attempt: state.attempt},
+          );
+          break;
+        case 'stale':
+          expect(listing.connection).toEqual({kind: 'reconnecting', attempt: state.attempt});
+          break;
+        case 'failed':
+          // A failure is worded from its closed reason, never from text.
+          expect(listing).toMatchObject({
+            step,
+            connection: {kind: 'offline', detail: LISTING_FAILURE_WORDS[state.reason]},
+          });
+          break;
+      }
+    }),
+    {numRuns: 100},
+  );
+});
+
+test('property: a failed machine says the word of its reason, whole, whatever step it stopped at', () => {
+  fc.assert(
+    fc.property(REASON, STEP, (reason, step) => {
+      const listing = hostListingFromRuns(HOST, {kind: 'failed', reason, retrying: true}, step);
+      expect(machineLoad(HOST, listing)).toEqual({
+        kind: 'failed',
+        host: HOST,
+        step,
+        reason: LISTING_FAILURE_WORDS[reason],
+      });
+    }),
+  );
+});
+
+test('property: the step a failure names is the furthest the subscription came', () => {
+  fc.assert(
+    fc.property(fc.array(STATE, {minLength: 1, maxLength: 12}), states => {
+      let step: ListingStep = LISTING_STEPS[0];
+      let furthest: ListingStep = LISTING_STEPS[0];
+      for (const state of states) {
+        step = listingStep(step, state);
+        if (state.kind === 'connecting' || state.kind === 'live') furthest = step;
+        expect(step).toBe(furthest);
+      }
+    }),
+    {numRuns: 100},
   );
 });

@@ -268,6 +268,7 @@ func oneofArms(message protoreflect.ProtoMessage, oneof protoreflect.Name) []str
 // contractCases holds one contract per topic. A generated topic missing here
 // fails TestEveryGeneratedTopicPassesTheContract.
 var contractCases = map[string]func(*testing.T){
+	hostoperations.TopicRuns: runsContract,
 	hostoperations.TopicMachineStats: func(t *testing.T) {
 		for _, goos := range []string{"linux", "darwin"} {
 			t.Run(goos, func(t *testing.T) {
@@ -318,7 +319,6 @@ func TestStreamingMethodsAreTheAllowedOnes(t *testing.T) {
 		"Tail":       "every record matters, so values cannot conflate",
 		"TailStream": "a byte stream, where a skipped byte corrupts the output",
 		"Watch":      "a Python operation's progress stream, ending with the operation",
-		"WatchRuns":  "remove in PR4: the run list moves onto Subscribe",
 	}
 	methods := apiv1.File_vibesys_api_v1_host_proto.Services().ByName("HostService").Methods()
 	found := map[string]bool{}

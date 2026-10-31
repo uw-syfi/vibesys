@@ -20,7 +20,6 @@ import {
   SkeletonRequestSchema,
   TailRequestSchema,
   TailStreamRequestSchema,
-  WatchRunsRequestSchema,
 } from '@vibesys/proto';
 import {SettingsStore, withHostSettings} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
@@ -38,7 +37,7 @@ function encode<T extends DescMessage>(schema: T, init: MessageInitShape<T>): Ui
 }
 const method = (name: keyof typeof HostService.method): string =>
   `/${HostService.typeName}/${HostService.method[name].name}`;
-/** Every gateway call the page makes: its unary reads and its streams (history, logs, liveness). */
+/** Every gateway call the page makes: its unary reads and its streams (history and logs; liveness is a subscription). */
 const UNARY = [
   [method('skeleton'), encode(SkeletonRequestSchema, {runId: 'a'})],
   [method('getBlobs'), encode(GetBlobsRequestSchema, {runId: 'a'})],
@@ -46,7 +45,6 @@ const UNARY = [
 const STREAMS = [
   [method('tail'), encode(TailRequestSchema, {runId: 'a'})],
   [method('tailStream'), encode(TailStreamRequestSchema, {runId: 'a', streamId: 'out'})],
-  [method('watchRuns'), encode(WatchRunsRequestSchema, {})],
 ] as const;
 /** gRPC status codes 1 to 16: every code but OK, which is not a refusal. */
 const REFUSALS = Array.from({length: 16}, (_, index) => index + 1);

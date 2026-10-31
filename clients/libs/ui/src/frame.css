@@ -506,6 +506,7 @@ button.vs-crumb:focus-visible {
   height: var(--text-small-line);
   white-space: nowrap;
 }
+.vs-meter[data-dim],
 .vs-gauge[data-dim] .vs-meter {
   opacity: 0.45;
 }

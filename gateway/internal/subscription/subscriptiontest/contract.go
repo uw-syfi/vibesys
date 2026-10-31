@@ -147,8 +147,8 @@ func (c putCounter[V]) Put(key string, value V) {
 	c.Sink.Put(key, value)
 }
 
-// arms counts the frames of each kind on a stream.
-func arms(received []Received) (entries, synced, heartbeats, failed int) {
+// Arms counts the frames of each kind on a stream.
+func Arms(received []Received) (entries, synced, heartbeats, failed int) {
 	for _, each := range received {
 		switch each.Frame.Frame.(type) {
 		case *apiv1.SubscribeResponse_Entry:
@@ -203,7 +203,7 @@ func requireSnapshot(received []Received, name string) error {
 	if synced < 0 {
 		return fmt.Errorf("no synced frame in %v", frames)
 	}
-	if entries, _, _, _ := arms(received[:synced]); entries == 0 {
+	if entries, _, _, _ := Arms(received[:synced]); entries == 0 {
 		return fmt.Errorf("synced before any entry: %v", frames)
 	}
 	for _, frame := range frames {
@@ -358,7 +358,7 @@ func heartbeatsUnderSilence[V proto.Message](subject Subject[V], _ hostoperation
 	const beats = 4
 	time.Sleep(beats * subscription.HeartbeatInterval)
 	synctest.Wait()
-	if entries, synced, heartbeats, failed := arms(stream.Received()); entries+synced+failed != 0 || heartbeats != beats {
+	if entries, synced, heartbeats, failed := Arms(stream.Received()); entries+synced+failed != 0 || heartbeats != beats {
 		return fmt.Errorf("want %d heartbeats and nothing else, got %v", beats, stream.Frames())
 	}
 	return nil

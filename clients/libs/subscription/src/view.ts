@@ -33,7 +33,26 @@ const INVALID: SubscriptionState<never> = {
 export function stateOf<S>(topic: Topic<S>, state: WindowState): SubscriptionState<S> {
   const {control, fold} = state;
   if (fold.broken) return INVALID;
-  if (control.kind !== 'live' && control.kind !== 'stale') return control;
+  switch (control.kind) {
+    case 'connecting':
+      return control;
+    case 'failed': {
+      // While another attempt is coming, what the host last said stays with the failure, so a
+      // screen can keep showing it as old. A failure with none to come has nothing to wait for.
+      const held = control.retrying ? snapshotValue(topic, fold) : null;
+      return held === null ? control : {...control, held};
+    }
+    case 'live':
+    case 'stale':
+      return valued(topic, control, fold);
+  }
+}
+
+function valued<S>(
+  topic: Topic<S>,
+  control: Extract<Control, {readonly kind: 'live' | 'stale'}>,
+  fold: Fold,
+): SubscriptionState<S> {
   const value = snapshotValue(topic, fold);
   // Main publishes a snapshot before it says `live`, so a value is there unless the data broke.
   if (value === null) return INVALID;

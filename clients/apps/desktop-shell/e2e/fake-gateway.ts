@@ -6,20 +6,20 @@ import {
   GetBlobsResponseSchema,
   HostService,
   RecordSchema,
+  RunEntrySchema,
   type RunHead,
   RunLiveness,
   SkeletonResponseSchema,
   TailRequestSchema,
   TailResponseSchema,
   TailStreamResponseSchema,
-  WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import type {StoreRunFixture} from '@vibesys/run-fixtures';
 import {epochHasEnded} from '@vibesys/run-skeleton';
 import {buildSync} from 'esbuild';
 
 export interface WireFixture {
-  methods: Record<'skeleton' | 'tail' | 'blobs' | 'log' | 'hostCall' | 'watchRuns', string>;
+  methods: Record<'skeleton' | 'tail' | 'blobs' | 'log' | 'hostCall', string>;
   skeleton: number[];
   tail: number[];
   blobs: Record<string, number[]>;
@@ -27,7 +27,10 @@ export interface WireFixture {
   streams?: Record<string, number[]>;
   chatRequest: number[];
   chat: number[];
-  watchRuns: number[];
+  /** The run this world is about, which the host's liveness is stated for. */
+  runId: string;
+  /** What the host says of the run: a `RunEntry`. */
+  run: number[];
   behavior?: GatewayBehavior;
 }
 
@@ -60,8 +63,8 @@ export function wire(
   const stream = (data: Uint8Array) =>
     encode(TailStreamResponseSchema, {data, nextOffset: BigInt(data.length)});
   return {
-    watchRuns: encode(WatchRunsResponseSchema, {
-      runId,
+    runId,
+    run: encode(RunEntrySchema, {
       projectRoot: epochRecord.body.value.projectRoot ?? '/project',
       liveness: liveness ?? (epochHasEnded(lifecycle) ? RunLiveness.ENDED : RunLiveness.ALIVE),
       head: head ?? {
@@ -77,7 +80,6 @@ export function wire(
       blobs: method('getBlobs'),
       log: method('tailStream'),
       hostCall: method('hostCall'),
-      watchRuns: method('watchRuns'),
     },
     skeleton: encode(SkeletonResponseSchema, {
       records: encoded.slice(0, fixture.initialCount),

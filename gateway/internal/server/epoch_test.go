@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
 	"google.golang.org/protobuf/proto"
@@ -15,7 +14,7 @@ import (
 
 // Retained phase-1 heads lack a canonical epoch. Informational process epochs
 // may disagree, and a complete successor beyond committed_seq is unpublished.
-func TestWatchRunsDecodesPhase1EpochFromPublishedLog(t *testing.T) {
+func TestRunsDecodesPhase1EpochFromPublishedLog(t *testing.T) {
 	for _, committed := range []*uint64{nil, proto.Uint64(0), proto.Uint64(5)} {
 		for _, process := range []*storev1.RunProcess{nil, {Epoch: 99, Pid: 1, StartedAt: &timestamppb.Timestamp{Seconds: 1}}} {
 			t.Run("published-prefix", func(t *testing.T) {
@@ -34,7 +33,7 @@ func TestWatchRunsDecodesPhase1EpochFromPublishedLog(t *testing.T) {
 				original.Process = process
 				publishHead(t, f, original)
 				originalBytes := encode(t, original)
-				stream, err := client(t, f, false).WatchRuns(f.ctx, &apiv1.WatchRunsRequest{})
+				stream, err := subscribeRuns(f.ctx, client(t, f, false))
 				if err != nil {
 					t.Fatal(err)
 				}

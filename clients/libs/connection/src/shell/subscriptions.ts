@@ -307,15 +307,22 @@ export class Subscriptions {
     return release;
   }
 
-  /** The topic's value once the host says it is live, or the reason it will not. */
-  first<S>(host: HostKey, topic: Topic<S>, signal: AbortSignal): Promise<S> {
+  /**
+   * The topic's value once the host says it is live, or the reason it will not. A read has an end
+   * of its own: `boundMs` after the call the host has given no value, whatever its stream is still
+   * trying, and the read fails `no_first_frame`. The subscription goes on retrying for the screens
+   * that watch it, and a one-time reader does not wait for its attempts to run out.
+   */
+  first<S>(host: HostKey, topic: Topic<S>, signal: AbortSignal, boundMs: number): Promise<S> {
     return new Promise<S>((resolve, reject) => {
       let release: (() => void) | undefined;
+      let stopBound: () => void = () => undefined;
       let settled = false;
       const settle = (outcome: () => void): void => {
         if (settled) return;
         settled = true;
         registration.detach();
+        stopBound();
         // The watch is released after the delivery that settled it, never inside it.
         queueMicrotask(() => release?.());
         outcome();
@@ -327,6 +334,10 @@ export class Subscriptions {
         settle(() => reject(signal.reason ?? new Error('cancelled')));
         return;
       }
+      stopBound = this.schedule(
+        () => settle(() => reject(new SubscriptionFailed('no_first_frame', true))),
+        boundMs,
+      );
       release = this.observe(host, topic, state => {
         if (state.kind === 'live') settle(() => resolve(state.value));
         else if (state.kind === 'failed')

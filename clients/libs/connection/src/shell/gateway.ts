@@ -39,7 +39,7 @@ export interface GatewayDialer {
 interface LiveCall {
   readonly method: string;
   readonly unary: boolean;
-  /** Undefined for a stream the registry gives no budget (Tail, WatchRuns). */
+  /** Undefined for a stream the registry gives no budget (Tail, Subscribe). */
   readonly bound: CallBound | undefined;
   bytes: Uint8Array;
   readonly receive: (bytes: Uint8Array) => void;
@@ -234,7 +234,6 @@ export const HOST_CALL_METHOD = `/${HostService.typeName}/${HostService.method.h
 export const MUTATE_METHOD = `/${HostService.typeName}/${HostService.method.mutate.name}`;
 export const READ_METHOD = `/${HostService.typeName}/${HostService.method.read.name}`;
 export const WATCH_METHOD = `/${HostService.typeName}/${HostService.method.watch.name}`;
-export const WATCH_RUNS_METHOD = `/${HostService.typeName}/${HostService.method.watchRuns.name}`;
 
 /** Unary RPCs that are not host calls or registered reads. Those budgets come from the registry. */
 const UNARY_DEADLINE_MS = 15_000;

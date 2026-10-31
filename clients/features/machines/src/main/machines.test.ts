@@ -1,14 +1,18 @@
 import {describe, expect, test} from 'bun:test';
 import {
   ConnectionManager,
+  hostRuns,
   registryClusters,
   registryReads,
   registrySetup,
+  SubscriptionFailed,
 } from '@vibesys/connection';
-import {FakeLink, olderHost} from '@vibesys/connection/testing';
+import {FakeLink, hubRig, olderHost, settle} from '@vibesys/connection/testing';
 import {type HostId, hostKey} from '@vibesys/hosts';
+import type {MachineReport} from '@vibesys/ipc';
 import {SettingsStore, withHostSettings, withoutHost} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
+import {runs} from '@vibesys/subscription';
 import {FakeClock} from '@vibesys/transport/testing';
 import {MachinesMain, type MachinesMainDeps} from './index.js';
 
@@ -174,7 +178,7 @@ describe('MachinesMain', () => {
           },
           listCompute: async () => settings,
         },
-        runs: {live: async () => 0},
+        runs: {alive: async () => 0},
       });
       await using _ = manager;
       expect(await machines.report(HOST_B, '/mnt/data/vibesys')).toEqual({
@@ -185,17 +189,56 @@ describe('MachinesMain', () => {
       expect(await machines.compute(HOST_B)).toEqual({kind: 'offered', value: settings});
     });
 
-    test('an on switch counts live runs from WatchRuns', async () => {
+    test('an on switch counts live runs from the runs subscription', async () => {
       const {machines, manager} = await subject(new Map(), {
         registry: {
           describeMachine: async () => facts,
           listCompute: async () => settings,
         },
-        runs: {live: async () => 2},
+        runs: {alive: async () => 2},
       });
       await using _ = manager;
       const report = await machines.report(HOST_B);
       expect(report.kind === 'ready' && report.facts?.runs.live).toBe(2);
+    });
+
+    test('a host that did not say how many runs it holds is unavailable, never a count of none', async () => {
+      const {machines, manager} = await subject(new Map(), {
+        registry: {
+          describeMachine: async () => facts,
+          listCompute: async () => settings,
+        },
+        runs: {
+          alive: async () => {
+            throw new SubscriptionFailed('unsupported', false);
+          },
+        },
+      });
+      await using _ = manager;
+      expect((await machines.report(HOST_B)).kind).toBe('unavailable');
+    });
+
+    test('a host whose runs stream never answers is unavailable at the topic’s first-frame bound, not after its attempts run out', async () => {
+      const rig = hubRig();
+      const {machines, manager} = await subject(new Map(), {
+        registry: {
+          describeMachine: async () => facts,
+          listCompute: async () => settings,
+        },
+        runs: hostRuns(rig.subscriptions),
+      });
+      await using _ = manager;
+      let report: MachineReport | undefined;
+      void machines.report(HOST_B).then(reported => (report = reported));
+      await settle();
+      // The stream opens and the host says nothing, as every attempt after it would.
+      rig.gateway.streams[0]?.reached('handshake');
+      rig.clock.advanceBy(runs.policy.firstFrameMs - 1);
+      await settle();
+      expect(report).toBeUndefined();
+      rig.clock.advanceBy(1);
+      await settle();
+      expect(report?.kind).toBe('unavailable');
     });
 
     test('an on switch changes clusters through the registry and does not open the helper', async () => {
@@ -244,7 +287,7 @@ describe('MachinesMain', () => {
         registry: registryReads({checkout, unary: olderHost.read}),
         setup: registrySetup({unary: olderHost.read}),
         clusters: registryClusters({checkout, unary: olderHost.mutate}),
-        runs: {live: async () => 0},
+        runs: {alive: async () => 0},
       });
       await using _ = manager;
       const cluster = {
@@ -278,7 +321,7 @@ describe('MachinesMain', () => {
       };
       const {machines, manager} = await subject(new Map(), {
         registry: registryReads({checkout, unary: counting}),
-        runs: {live: async () => 0},
+        runs: {alive: async () => 0},
       });
       await using _ = manager;
       expect(await machines.report(HOST_B)).toEqual({kind: 'needs-update', facts: null});

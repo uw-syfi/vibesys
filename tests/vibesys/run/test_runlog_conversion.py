@@ -65,6 +65,9 @@ from vs_runlog.api import (
 )
 from vs_sim.api.testing import ManualClock, SimThreads
 
+#: The fixed part of a gzip header (RFC 1952): magic, method, flags, time, extra flags, system.
+GZIP_HEADER_BYTES = 10
+
 
 def journal_at(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock_start: float = 100
@@ -700,6 +703,11 @@ def test_gateway_conversion_fixture_regenerates_identically(
         )
         if name.endswith(".gz"):
             assert gzip.decompress(saved) == gzip.decompress(payload), message
+            # The header is the one the committed file has, on any machine that regenerates it.
+            assert saved[:GZIP_HEADER_BYTES] == payload[:GZIP_HEADER_BYTES], (
+                f"proto/testdata/conversion/{name} has a different gzip header: the writer must "
+                f"not state the machine's system byte; regenerate with: {REGENERATE}"
+            )
         else:
             assert saved == payload, message
 

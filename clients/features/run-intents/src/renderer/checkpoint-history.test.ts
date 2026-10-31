@@ -112,7 +112,7 @@ async function exercise(records: StoreRecord[], keyframe: Uint8Array | undefined
   // The public pure intent machine supplies the full-log oracle; no direct record publisher.
   const outcomes = intentOutcomes(records.map(record => toBinary(RecordSchema, record)));
   const expected = foldOutcomes([], outcomes);
-  const reader = gatewayReader(peer, new FakeSkeletonCache(), clock.schedule);
+  const reader = gatewayReader(peer, new FakeSkeletonCache(), clock.schedule, peer.host.feed);
   const failed = Promise.withResolvers<void>();
   const stop = reader.watch(
     'run-a',
@@ -207,7 +207,7 @@ test('the captured previous writer recovers history through the shared reader', 
     schedule: clock.schedule,
     records: fanout.subscribe,
   }).start();
-  const stop = gatewayReader(peer, new FakeSkeletonCache(), clock.schedule).watch(
+  const stop = gatewayReader(peer, new FakeSkeletonCache(), clock.schedule, peer.host.feed).watch(
     'run-a',
     () => {},
     fanout.publish,
@@ -244,7 +244,7 @@ test('an invalid checkpoint publishes no semantic facts before the reader reject
     schedule: clock.schedule,
     records: fanout.subscribe,
   }).start();
-  const stop = gatewayReader(peer, new FakeSkeletonCache(), clock.schedule).watch(
+  const stop = gatewayReader(peer, new FakeSkeletonCache(), clock.schedule, peer.host.feed).watch(
     'run-a',
     observation => {
       if (observation.terminal && observation.failure?.kind === 'data') rejected.resolve();

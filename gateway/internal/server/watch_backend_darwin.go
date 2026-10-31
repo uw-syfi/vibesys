@@ -26,7 +26,7 @@ type runWatcher struct {
 	files     map[string]*os.File
 }
 
-func newRunWatcher() (*runWatcher, error) {
+func newRunWatch() (runWatch, error) {
 	queue, err := unix.Kqueue()
 	if err != nil {
 		return nil, err
@@ -49,6 +49,9 @@ func newRunWatcher() (*runWatcher, error) {
 	go w.readEvents()
 	return w, nil
 }
+
+func (w *runWatcher) Changes() <-chan fsnotify.Event { return w.Events }
+func (w *runWatcher) Failures() <-chan error         { return w.Errors }
 
 func (w *runWatcher) Add(path string) error {
 	if _, ok := w.files[path]; ok {

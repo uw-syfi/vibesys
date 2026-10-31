@@ -1,9 +1,19 @@
 import {expect, test} from 'bun:test';
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
-import {create, toBinary} from '@bufbuild/protobuf';
-import {hostListingFromRuns, RUN_WATCH_LEASE_MS, runWatch} from '@vibesys/connection';
-import {FakeRunGateway} from '@vibesys/connection/testing';
+import {create, fromBinary} from '@bufbuild/protobuf';
+import {
+  GATEWAY_FIRST_CONNECT_BUDGET_MS,
+  hostRuns,
+  LISTING_FAILURE_WORDS,
+} from '@vibesys/connection';
+import {
+  announce,
+  announceChange,
+  announceEntries,
+  hubRig,
+  settle,
+} from '@vibesys/connection/testing';
 import {
   dashboardRows,
   liveRows,
@@ -22,12 +32,13 @@ import {
 } from '@vibesys/hosts';
 import {
   acceptListRunDigests,
+  RunEntrySchema,
   RunHeadSchema,
   RunLiveness,
-  WatchRunsResponseSchema,
+  TopicEntrySchema,
 } from '@vibesys/proto';
 import {knownProjects} from '@vibesys/runs';
-import {FakeClock} from '@vibesys/transport/testing';
+import {backoffMs, failureBoundMs, OFFLINE_AFTER, runs as runsTopic} from '@vibesys/subscription';
 import fc from 'fast-check';
 
 const HOST: HostId = {kind: 'ssh', alias: 'host-a'};
@@ -39,12 +50,10 @@ test('property: an unvisited run keeps its project through the wire and all list
     const project = `/projects/${seed % 2 ? 'space in name' : 'project'}/${seed}`;
     const runId = `run-${seed}`;
     const liveness = seed % 3 === 0 ? RunLiveness.ENDED : RunLiveness.ALIVE;
-    const gateway = new FakeRunGateway();
-    const watch = runWatch(gateway, new FakeClock().schedule);
+    const {gateway, subscriptions} = hubRig();
     let state = SIDEBAR_EMPTY;
     const requests: ReturnType<typeof sidebarStep>['requests'][number][] = [];
-    watch.observe(HOST, observed => {
-      const listing = hostListingFromRuns(hostKey(HOST), observed);
+    const release = hostRuns(subscriptions).observe(hostKey(HOST), listing => {
       const step = sidebarStep(state, {
         type: 'overview',
         listings: [listing],
@@ -72,8 +81,9 @@ test('property: an unvisited run keeps its project through the wire and all list
         },
       }),
     };
-    gateway.announce(HOST, [run]);
-    for (let replay = 0; replay < seed % 4; replay += 1) gateway.update(HOST, run);
+    announce(gateway, hostKey(HOST), [run]);
+    for (let replay = 0; replay < seed % 4; replay += 1)
+      announceChange(gateway, hostKey(HOST), run);
     expect(dashboardRows(state, {now: 1700000000000})).toHaveLength(1);
     expect(runProjectRoot(state, {host: hostKey(HOST), runId})).toBe(recordedProjectRoot(project));
     expect(
@@ -93,76 +103,83 @@ test('property: an unvisited run keeps its project through the wire and all list
       ).not.toThrow();
     }
     if (liveness === RunLiveness.ALIVE) expect(liveRows(state)[0]?.title).toBe(String(seed));
-    watch.close();
+    release();
   }
 });
 
-test('missing or invalid projects stay listed as typed unknown projects', () => {
-  for (const projectRoot of [undefined, '', 'relative']) {
-    const gateway = new FakeRunGateway();
-    const watch = runWatch(gateway, new FakeClock().schedule);
-    let delivered = false;
-    watch.observe(HOST, observed => {
-      if (observed.phase.kind !== 'live') return;
-      delivered = true;
-      const listing = hostListingFromRuns(hostKey(HOST), observed);
-      const {state} = sidebarStep(SIDEBAR_EMPTY, {
-        type: 'overview',
-        listings: [listing],
-        recent: [],
-        skippedRecent: [],
-      });
-      const rows = dashboardRows(state, {now: 1700000000000});
-      expect(rows).toHaveLength(1);
-      expect(runsKnown(state, [hostKey(HOST)])).toBe('some');
-      expect(rows[0]).toMatchObject({
-        project: null,
-        row: {title: 'Unknown project', status: 'live', detail: 'host-a · starting'},
-      });
-      expect(runProjectRoot(state, {host: hostKey(HOST), runId: 'run-a'})).toBeUndefined();
-      const remembered = {
-        ...state,
-        recent: [
-          {
-            host: hostKey(HOST),
-            hostLabel: 'host-a',
-            project: '/projects/stale',
-            task: null,
-            runId: 'run-a',
-            instanceId: null,
-            attachedAt: 0,
-          },
-        ],
-      };
-      expect(runProjectRoot(remembered, {host: hostKey(HOST), runId: 'run-a'})).toBeUndefined();
-      expect(listing).toMatchObject({
-        live: [],
-        ended: [],
-        unverified: [],
-        unknownProject: [{runId: 'run-a', phase: 'starting', alive: true}],
-      });
+test('a run without a project stays listed as a typed unknown project', () => {
+  const {gateway, subscriptions} = hubRig();
+  let delivered = false;
+  const release = hostRuns(subscriptions).observe(hostKey(HOST), listing => {
+    if (listing.kind !== 'listed') return;
+    delivered = true;
+    const {state} = sidebarStep(SIDEBAR_EMPTY, {
+      type: 'overview',
+      listings: [listing],
+      recent: [],
+      skippedRecent: [],
     });
-    const stream = gateway.open(HOST)[0];
-    if (stream === undefined) throw new Error('missing gateway stream');
-    stream.receive(
-      toBinary(
-        WatchRunsResponseSchema,
-        create(WatchRunsResponseSchema, {
+    const rows = dashboardRows(state, {now: 1700000000000});
+    expect(rows).toHaveLength(1);
+    expect(runsKnown(state, [hostKey(HOST)])).toBe('some');
+    expect(rows[0]).toMatchObject({
+      project: null,
+      row: {title: 'Unknown project', status: 'live', detail: 'host-a · starting'},
+    });
+    expect(runProjectRoot(state, {host: hostKey(HOST), runId: 'run-a'})).toBeUndefined();
+    const remembered = {
+      ...state,
+      recent: [
+        {
+          host: hostKey(HOST),
+          hostLabel: 'host-a',
+          project: '/projects/stale',
+          task: null,
           runId: 'run-a',
-          projectRoot,
-          liveness: RunLiveness.ALIVE,
-        }),
-      ),
+          instanceId: null,
+          attachedAt: 0,
+        },
+      ],
+    };
+    expect(runProjectRoot(remembered, {host: hostKey(HOST), runId: 'run-a'})).toBeUndefined();
+    expect(listing).toMatchObject({
+      live: [],
+      ended: [],
+      unverified: [],
+      unknownProject: [{runId: 'run-a', phase: 'starting', alive: true}],
+    });
+  });
+  announceEntries(gateway, hostKey(HOST), [
+    create(TopicEntrySchema, {
+      key: 'run-a',
+      value: {case: 'runs', value: {liveness: RunLiveness.ALIVE}},
+    }),
+  ]);
+  expect(delivered).toBe(true);
+  release();
+});
+
+// An address the schema refuses never reaches a listing: the stream carrying it fails as invalid.
+test('an empty or relative project address is refused, and the host is not listed', () => {
+  for (const projectRoot of ['', 'relative']) {
+    const {gateway, subscriptions} = hubRig();
+    const listings: string[] = [];
+    const release = hostRuns(subscriptions).observe(hostKey(HOST), listing =>
+      listings.push(listing.kind),
     );
-    stream.receive(
-      toBinary(WatchRunsResponseSchema, create(WatchRunsResponseSchema, {initialComplete: true})),
-    );
-    expect(delivered).toBe(true);
-    watch.close();
+    announceEntries(gateway, hostKey(HOST), [
+      create(TopicEntrySchema, {
+        key: 'run-a',
+        value: {case: 'runs', value: {projectRoot, liveness: RunLiveness.ALIVE}},
+      }),
+    ]);
+    expect(listings).not.toContain('listed');
+    expect(gateway.open).toHaveLength(0);
+    release();
   }
 });
 
-// The response is pinned by the Go test over this previous writer's addressless index/head.
+// The entry is pinned by the Go test over this previous writer's addressless index/head.
 test('retained addressless publisher reaches dashboard, Usage projects and control address', () => {
   const corpus = new URL('../../../../../proto/testdata/retained/', import.meta.url);
   const manifest = JSON.parse(readFileSync(new URL('manifest.json', corpus), 'utf8')) as Record<
@@ -172,11 +189,9 @@ test('retained addressless publisher reaches dashboard, Usage projects and contr
   for (const [name, facts] of Object.entries(manifest)) {
     const project = facts.project_root;
     if (project === undefined) continue;
-    const gateway = new FakeRunGateway();
-    const watch = runWatch(gateway, new FakeClock().schedule);
+    const {gateway, subscriptions} = hubRig();
     let state = SIDEBAR_EMPTY;
-    watch.observe(HOST, observed => {
-      const listing = hostListingFromRuns(hostKey(HOST), observed);
+    const release = hostRuns(subscriptions).observe(hostKey(HOST), listing => {
       state = sidebarStep(state, {
         type: 'overview',
         listings: [listing],
@@ -186,17 +201,18 @@ test('retained addressless publisher reaches dashboard, Usage projects and contr
       if (listing.kind === 'listed')
         expect(knownProjects(listing, [], hostKey(HOST))).toEqual([project]);
     });
-    const stream = gateway.open(HOST)[0];
-    if (stream === undefined) throw new Error('missing gateway stream');
-    stream.receive(readFileSync(fileURLToPath(new URL(`${name}/watch.response.pb`, corpus))));
-    stream.receive(
-      toBinary(WatchRunsResponseSchema, create(WatchRunsResponseSchema, {initialComplete: true})),
+    const entry = fromBinary(
+      RunEntrySchema,
+      readFileSync(fileURLToPath(new URL(`${name}/run.entry.pb`, corpus))),
     );
+    announceEntries(gateway, hostKey(HOST), [
+      create(TopicEntrySchema, {key: 'run-1', value: {case: 'runs', value: entry}}),
+    ]);
     expect(dashboardRows(state, {now: 1700000000000})[0]?.project).toBe(project);
     expect(runProjectRoot(state, {host: hostKey(HOST), runId: 'run-1'})).toBe(
       recordedProjectRoot(project),
     );
-    watch.close();
+    release();
   }
 });
 
@@ -214,33 +230,23 @@ const HOST_EVENT: fc.Arbitrary<HostEvent> = fc.oneof(
   fc.constant({kind: 'exit'} as const),
   fc.constant({kind: 'error'} as const),
   fc.constant({kind: 'list'} as const),
-  fc.integer({min: 1, max: 2 * RUN_WATCH_LEASE_MS}).map(ms => ({kind: 'silence', ms}) as const),
+  fc.integer({min: 1, max: 120_000}).map(ms => ({kind: 'silence', ms}) as const),
 );
 
-/**
- * The longest a host that never answers can leave its machine unnamed as stopped: one lease per try
- * until the views call it offline, with the doubling delays between them.
- */
-const NEVER_ANSWERS_BOUND_STEPS: readonly number[] = [
-  ...[1_000, 2_000, 4_000, 8_000, 16_000].flatMap(delay => [RUN_WATCH_LEASE_MS, delay]),
-  RUN_WATCH_LEASE_MS,
-];
+/** The longest a host that sends nothing at all can leave its machine unnamed as stopped. */
+const NEVER_ANSWERS_BOUND_MS = failureBoundMs(runsTopic, GATEWAY_FIRST_CONNECT_BUDGET_MS);
 
 /** Machines watched as the app watches them, folded as the Runs screen reads them. */
 function runsScreenWorld() {
-  const gateway = new FakeRunGateway();
-  const clock = new FakeClock();
-  const watch = runWatch(gateway, clock.schedule);
+  const rig = hubRig();
+  const runs = hostRuns(rig.subscriptions);
   let state = SIDEBAR_EMPTY;
   const hosts = MACHINES.map(hostKey);
-  for (const host of MACHINES) {
-    watch.observe(host, observed => {
-      state = sidebarStep(state, {
-        type: 'listing',
-        listing: hostListingFromRuns(hostKey(host), observed),
-      }).state;
-    });
-  }
+  const releases = MACHINES.map(host =>
+    runs.observe(hostKey(host), listing => {
+      state = sidebarStep(state, {type: 'listing', listing}).state;
+    }),
+  );
   state = sidebarStep(state, {
     type: 'overview',
     listings: state.listings,
@@ -248,16 +254,13 @@ function runsScreenWorld() {
     skippedRecent: [],
   }).state;
   return {
-    gateway,
-    clock,
-    watch,
+    ...rig,
+    runs,
+    release: () => {
+      for (const release of releases) release();
+    },
     loads: (): MachineLoad[] => machineLoads(state, hosts),
   };
-}
-
-/** Every stream's promise settling reaches the watch only after the microtasks it queued. */
-async function settle(): Promise<void> {
-  for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
 }
 
 function expectNamed(load: MachineLoad): void {
@@ -267,11 +270,11 @@ function expectNamed(load: MachineLoad): void {
 }
 
 function happen(world: ReturnType<typeof runsScreenWorld>, host: HostId, event: HostEvent): void {
-  const stream = world.gateway.open(host).at(-1);
+  const stream = world.gateway.open.filter(each => each.host === hostKey(host)).at(-1);
   if (event.kind === 'step') stream?.reached(event.step);
   else if (event.kind === 'exit') stream?.end();
   else if (event.kind === 'error') stream?.fail(new Error('gateway startup exited: 1'));
-  else if (event.kind === 'list') world.gateway.announce(host, []);
+  else if (event.kind === 'list') announce(world.gateway, hostKey(host), []);
   else world.clock.advanceBy(event.ms);
 }
 
@@ -286,60 +289,60 @@ test('property: at every moment of any host event sequence each machine is at a 
           await settle();
           for (const load of world.loads()) expectNamed(load);
         }
-        // From wherever the sequence left it, a host that says nothing more stops being waited on.
-        for (const each of NEVER_ANSWERS_BOUND_STEPS) {
-          world.clock.advanceBy(each);
+        // From wherever the sequence left it, a host that says nothing more stops being waited on,
+        // unless it has listed: what it said is then a fact until its stream is lost.
+        for (let elapsed = 0; elapsed < NEVER_ANSWERS_BOUND_MS; elapsed += 30_000) {
+          world.clock.advanceBy(30_000);
           await settle();
         }
         expect(world.loads().map(load => load.kind)).not.toContain('loading');
-        world.watch.close();
+        world.release();
       },
     ),
     {numRuns: 64},
   );
 });
 
-test('a host that never answers ends failed at the step it reached, with a reason', async () => {
+test('a host that never answers ends failed at the step it reached, with the word of its reason', async () => {
   const world = runsScreenWorld();
   expect(world.loads().map(load => load.kind)).toEqual(['loading', 'loading', 'loading']);
-  for (const stream of world.gateway.open(HOST)) stream.reached('handshake');
-  for (const each of NEVER_ANSWERS_BOUND_STEPS) {
-    for (const stream of world.gateway.open(HOST)) stream.reached('handshake');
-    world.clock.advanceBy(each);
+  for (let elapsed = 0; elapsed < NEVER_ANSWERS_BOUND_MS; elapsed += 30_000) {
+    for (const stream of world.gateway.open.filter(each => each.host === hostKey(HOST)))
+      stream.reached('handshake');
+    world.clock.advanceBy(30_000);
     await settle();
   }
   expect(world.loads()[1]).toEqual({
     kind: 'failed',
     host: hostKey(HOST),
     step: 'handshake',
-    reason: 'no answer',
+    reason: LISTING_FAILURE_WORDS.unreachable,
   });
-  world.watch.close();
+  world.release();
 });
 
 test('a helper that exits at once fails its machine, and retry starts the steps over', async () => {
   const world = runsScreenWorld();
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    for (const stream of world.gateway.open(HOST)) {
+  for (let attempt = 1; attempt <= OFFLINE_AFTER; attempt += 1) {
+    for (const stream of world.gateway.open.filter(each => each.host === hostKey(HOST)))
       stream.fail(new Error('Error: gateway startup exited: 1'));
-    }
     await settle();
-    world.clock.advanceBy(RUN_WATCH_LEASE_MS);
+    world.clock.advanceBy(backoffMs(attempt));
     await settle();
   }
   expect(world.loads()[1]).toMatchObject({
     kind: 'failed',
     step: 'gateway',
-    reason: 'gateway exited (code 1)',
+    reason: LISTING_FAILURE_WORDS.unreachable,
   });
-  world.watch.retry(HOST);
+  world.runs.retry(hostKey(HOST));
   expect(world.loads()[1]).toEqual({
     kind: 'loading',
     host: hostKey(HOST),
     step: 'gateway',
     attempt: 0,
   });
-  world.gateway.announce(HOST, []);
+  announce(world.gateway, hostKey(HOST), []);
   expect(world.loads()[1]).toEqual({kind: 'listed', host: hostKey(HOST)});
-  world.watch.close();
+  world.release();
 });

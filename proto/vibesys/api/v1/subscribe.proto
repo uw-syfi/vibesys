@@ -5,6 +5,7 @@ package vibesys.api.v1;
 import "buf/validate/validate.proto";
 import "google/protobuf/descriptor.proto";
 import "google/protobuf/timestamp.proto";
+import "vibesys/store/v1/skeleton.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1";
 
@@ -29,7 +30,8 @@ message TopicPolicy {
   uint32 first_frame_ms = 3 [(buf.validate.field).uint32.gt = 0];
   // A breach ends the stream with RESOURCE_EXHAUSTED. Nothing is ever truncated.
   uint32 max_keys = 4 [(buf.validate.field).uint32.gt = 0];
-  // Smallest gap between flushes of one stream. Changed keys wait and conflate.
+  // Smallest gap between the flushes of one stream after its snapshot, which is never
+  // held back. Changed keys wait and conflate.
   uint32 min_interval_ms = 5;
   // A breach ends the stream with RESOURCE_EXHAUSTED.
   uint32 max_value_bytes = 6 [(buf.validate.field).uint32.gt = 0];
@@ -55,6 +57,7 @@ message SubscribeRequest {
   oneof topic {
     option (buf.validate.oneof).required = true;
     MachineStatsTopic machine_stats = 1;
+    RunsTopic runs = 2;
   }
 }
 
@@ -90,6 +93,7 @@ message TopicEntry {
   oneof value {
     option (buf.validate.oneof).required = true;
     MachineStats machine_stats = 2;
+    RunEntry runs = 3;
   }
 }
 
@@ -216,4 +220,45 @@ enum AbsenceReason {
   ABSENCE_REASON_PARSE_FAILED = 4;
   // The tool is present, and no recording of its output backs a parser yet.
   ABSENCE_REASON_TOOL_UNVERIFIED = 5;
+}
+
+// The runs of the host's run index, keyed by run id: each run's head and whether its writer
+// is alive. Event driven: a rename in the index or a run directory is the only cause of a
+// change, and a lock probe is the only poll. A run absent from the map is not published.
+message RunsTopic {
+  option (vibesys.api.v1.topic) = {
+    first_frame_ms: 30000
+    max_keys: 2048
+    min_interval_ms: 200
+    max_value_bytes: 262144
+  };
+}
+
+// What the host last said of one run. head is absent for a phase 1 run and for a run whose
+// head cannot be read or is over the topic's bound, so one damaged run never hides the others.
+message RunEntry {
+  option (buf.validate.message).cel = {
+    id: "run_entry.head_has_liveness"
+    message: "a run with a head must state its liveness"
+    expression: "!has(this.head) || this.liveness != 0"
+  };
+  vibesys.store.v1.RunHead head = 1;
+  // UNSPECIFIED is unknown phase 1 liveness.
+  RunLiveness liveness = 2 [(buf.validate.field).enum.defined_only = true];
+  // Canonical host-side project directory. A run without one has no address and cannot enter
+  // project-dependent listings.
+  optional string project_root = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+    prefix: "/"
+  }];
+}
+
+enum RunLiveness {
+  RUN_LIVENESS_UNSPECIFIED = 0;
+  RUN_LIVENESS_ALIVE = 1;
+  RUN_LIVENESS_INTERRUPTED = 2;
+  RUN_LIVENESS_ENDED = 3;
+  // A cleanly drained epoch. The saved run can be relaunched.
+  RUN_LIVENESS_PARKED = 4;
 }

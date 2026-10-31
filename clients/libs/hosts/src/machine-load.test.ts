@@ -85,8 +85,6 @@ test('what a connection left behind reads in a few words', () => {
       'host not found',
     ],
     ['ConnectionError: the connection to host-a is down: Connection refused', 'connection down'],
-    ['the run stream went silent', 'no answer'],
-    ['the run stream ended', 'stream ended'],
     ['', 'no reason given'],
   ] as const) {
     expect(failureWords(detail)).toBe(words);

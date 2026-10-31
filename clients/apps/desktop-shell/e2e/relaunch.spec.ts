@@ -11,9 +11,10 @@ import {
   Outcome,
   RecordSchema,
   RelaunchRefusal,
+  RunEntrySchema,
+  RunFailureKind,
   RunLiveness,
   TailResponseSchema,
-  WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {fixtureNamed, type StoreRunFixture, storeRunFixture} from '@vibesys/run-fixtures';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
@@ -46,6 +47,10 @@ function replay(state: RunState): StoreRunFixture {
                     : state === 'failed'
                       ? Outcome.FAILED
                       : Outcome.STOPPED,
+                // A failed ending says why, as every ending the host states does.
+                ...(state === 'failed'
+                  ? {failure: {kind: RunFailureKind.CONFIGURATION, reason: 'build failed'}}
+                  : {}),
               },
             },
     });
@@ -130,9 +135,8 @@ async function newEpoch(page: Page, fixture: StoreRunFixture): Promise<void> {
   ];
   const watch = [
     ...toBinary(
-      WatchRunsResponseSchema,
-      create(WatchRunsResponseSchema, {
-        runId: 'run-a',
+      RunEntrySchema,
+      create(RunEntrySchema, {
         liveness: RunLiveness.ALIVE,
         head: {
           strategy: 'fixture',

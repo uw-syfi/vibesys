@@ -27,7 +27,6 @@ const (
 	HostService_ListChatSessions_FullMethodName = "/vibesys.api.v1.HostService/ListChatSessions"
 	HostService_Tail_FullMethodName             = "/vibesys.api.v1.HostService/Tail"
 	HostService_Skeleton_FullMethodName         = "/vibesys.api.v1.HostService/Skeleton"
-	HostService_WatchRuns_FullMethodName        = "/vibesys.api.v1.HostService/WatchRuns"
 	HostService_GetBlobs_FullMethodName         = "/vibesys.api.v1.HostService/GetBlobs"
 	HostService_TailStream_FullMethodName       = "/vibesys.api.v1.HostService/TailStream"
 	HostService_Subscribe_FullMethodName        = "/vibesys.api.v1.HostService/Subscribe"
@@ -57,7 +56,6 @@ type HostServiceClient interface {
 	// (inclusive). Record bytes pass through unchanged; only seq is decoded.
 	Tail(ctx context.Context, in *TailRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TailResponse], error)
 	Skeleton(ctx context.Context, in *SkeletonRequest, opts ...grpc.CallOption) (*SkeletonResponse, error)
-	WatchRuns(ctx context.Context, in *WatchRunsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchRunsResponse], error)
 	GetBlobs(ctx context.Context, in *GetBlobsRequest, opts ...grpc.CallOption) (*GetBlobsResponse, error)
 	TailStream(ctx context.Context, in *TailStreamRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TailStreamResponse], error)
 	// Subscribe sends one topic's keyed state, then conflated changes, until the
@@ -172,25 +170,6 @@ func (c *hostServiceClient) Skeleton(ctx context.Context, in *SkeletonRequest, o
 	return out, nil
 }
 
-func (c *hostServiceClient) WatchRuns(ctx context.Context, in *WatchRunsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchRunsResponse], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[2], HostService_WatchRuns_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[WatchRunsRequest, WatchRunsResponse]{ClientStream: stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type HostService_WatchRunsClient = grpc.ServerStreamingClient[WatchRunsResponse]
-
 func (c *hostServiceClient) GetBlobs(ctx context.Context, in *GetBlobsRequest, opts ...grpc.CallOption) (*GetBlobsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetBlobsResponse)
@@ -203,7 +182,7 @@ func (c *hostServiceClient) GetBlobs(ctx context.Context, in *GetBlobsRequest, o
 
 func (c *hostServiceClient) TailStream(ctx context.Context, in *TailStreamRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TailStreamResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[3], HostService_TailStream_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[2], HostService_TailStream_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +201,7 @@ type HostService_TailStreamClient = grpc.ServerStreamingClient[TailStreamRespons
 
 func (c *hostServiceClient) Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SubscribeResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[4], HostService_Subscribe_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[3], HostService_Subscribe_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +242,6 @@ type HostServiceServer interface {
 	// (inclusive). Record bytes pass through unchanged; only seq is decoded.
 	Tail(*TailRequest, grpc.ServerStreamingServer[TailResponse]) error
 	Skeleton(context.Context, *SkeletonRequest) (*SkeletonResponse, error)
-	WatchRuns(*WatchRunsRequest, grpc.ServerStreamingServer[WatchRunsResponse]) error
 	GetBlobs(context.Context, *GetBlobsRequest) (*GetBlobsResponse, error)
 	TailStream(*TailStreamRequest, grpc.ServerStreamingServer[TailStreamResponse]) error
 	// Subscribe sends one topic's keyed state, then conflated changes, until the
@@ -303,9 +281,6 @@ func (UnimplementedHostServiceServer) Tail(*TailRequest, grpc.ServerStreamingSer
 }
 func (UnimplementedHostServiceServer) Skeleton(context.Context, *SkeletonRequest) (*SkeletonResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Skeleton not implemented")
-}
-func (UnimplementedHostServiceServer) WatchRuns(*WatchRunsRequest, grpc.ServerStreamingServer[WatchRunsResponse]) error {
-	return status.Error(codes.Unimplemented, "method WatchRuns not implemented")
 }
 func (UnimplementedHostServiceServer) GetBlobs(context.Context, *GetBlobsRequest) (*GetBlobsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetBlobs not implemented")
@@ -467,17 +442,6 @@ func _HostService_Skeleton_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
-func _HostService_WatchRuns_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(WatchRunsRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(HostServiceServer).WatchRuns(m, &grpc.GenericServerStream[WatchRunsRequest, WatchRunsResponse]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type HostService_WatchRunsServer = grpc.ServerStreamingServer[WatchRunsResponse]
-
 func _HostService_GetBlobs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetBlobsRequest)
 	if err := dec(in); err != nil {
@@ -563,11 +527,6 @@ var HostService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Tail",
 			Handler:       _HostService_Tail_Handler,
-			ServerStreams: true,
-		},
-		{
-			StreamName:    "WatchRuns",
-			Handler:       _HostService_WatchRuns_Handler,
 			ServerStreams: true,
 		},
 		{

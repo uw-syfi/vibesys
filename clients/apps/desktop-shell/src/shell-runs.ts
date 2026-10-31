@@ -9,7 +9,6 @@ import type {MachineSteps} from '@vibesys/feature-runs-dashboard/renderer';
 import type {RunInput, StatusKind} from '@vibesys/feature-runs-dashboard/state';
 import {
   type HostKey,
-  type HostListing,
   hostFromKey,
   hostLabel,
   type LoadStep,
@@ -62,22 +61,6 @@ export function loadingMachines(
             retry: load.kind === 'failed' ? () => retry(load.host) : null,
           },
         ],
-  );
-}
-
-/** How many runs the dashboard lists on each machine: what the Machines page says of each. */
-export function runCounts(rows: readonly {readonly host: HostKey}[]): ReadonlyMap<HostKey, number> {
-  const counts = new Map<HostKey, number>();
-  for (const {host} of rows) counts.set(host, (counts.get(host) ?? 0) + 1);
-  return counts;
-}
-
-/** The runs live on each machine whose run list is read; a machine not read has no entry. */
-export function liveRunCounts(listings: readonly HostListing[]): ReadonlyMap<HostKey, number> {
-  return new Map(
-    listings.flatMap(listing =>
-      listing.kind === 'listed' ? [[listing.host, listing.live.length] as const] : [],
-    ),
   );
 }
 

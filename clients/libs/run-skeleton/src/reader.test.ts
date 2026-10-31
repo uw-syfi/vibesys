@@ -10,7 +10,6 @@ import {
   SkeletonResponseSchema,
   TailRequestSchema,
   TailResponseSchema,
-  WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {foldSkeleton, observeRun, type RunLivenessHint, seedSkeleton} from '@vibesys/run-skeleton';
 import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
@@ -32,7 +31,12 @@ test('UTF-8 text offsets cover decoded bytes across every possible codepoint spl
       streamChunkBytes: size,
     });
     transport.close(METHOD);
-    const reader = gatewayReader(transport, new FakeSkeletonCache(), new FakeClock().schedule);
+    const reader = gatewayReader(
+      transport,
+      new FakeSkeletonCache(),
+      new FakeClock().schedule,
+      transport.host.feed,
+    );
     const chunks: {text: string; offset: number; next: number}[] = [];
     await reader.log('run-a', 'output', new AbortController().signal, chunk => chunks.push(chunk));
     expect(chunks.map(chunk => chunk.text).join('')).toBe(text);
@@ -52,7 +56,12 @@ test('a finite UTF-8 stream rejects a torn final codepoint instead of silently l
     streams: {output: new Uint8Array([0xf0, 0x9f])},
   });
   transport.close(METHOD);
-  const reader = gatewayReader(transport, new FakeSkeletonCache(), new FakeClock().schedule);
+  const reader = gatewayReader(
+    transport,
+    new FakeSkeletonCache(),
+    new FakeClock().schedule,
+    transport.host.feed,
+  );
   await expect(
     reader.log('run-a', 'output', new AbortController().signal, () => {}),
   ).rejects.toThrow();
@@ -70,10 +79,13 @@ for (const epoch of [1, 7, 4294967295])
         committedSeq: 2n,
         objective: {bestValue: 321},
       });
-      transport.observe(
-        create(WatchRunsResponseSchema, {runId: 'run-a', head, liveness: RunLiveness.INTERRUPTED}),
+      transport.observe({runId: 'run-a', head, liveness: RunLiveness.INTERRUPTED});
+      const reader = gatewayReader(
+        transport,
+        new FakeSkeletonCache(),
+        new FakeClock().schedule,
+        transport.host.feed,
       );
-      const reader = gatewayReader(transport, new FakeSkeletonCache(), new FakeClock().schedule);
       let stop = () => {};
       try {
         const hint = await new Promise<RunLivenessHint>(resolve => {
@@ -137,7 +149,12 @@ test('UTF-8 tails preserve absolute byte offsets when reopened at any decoded bo
       streamChunkBytes: 1,
     });
     transport.close(METHOD);
-    const reader = gatewayReader(transport, new FakeSkeletonCache(), new FakeClock().schedule);
+    const reader = gatewayReader(
+      transport,
+      new FakeSkeletonCache(),
+      new FakeClock().schedule,
+      transport.host.feed,
+    );
     const chunks: {text: string; offset: number; next: number}[] = [];
     await reader.log(
       'run-a',
@@ -189,68 +206,55 @@ test('the retained conversion corpus obeys gateway byte bounds and continues thr
   expect(transport.activeStreams).toBe(0);
 });
 
-test('property: the public reader expires silent channels after the last frame even while history is cached', async () => {
+test('property: the host losing its stream makes the reader forget its last word, and restoring it brings the word back', async () => {
   await fc.assert(
     fc.asyncProperty(
       fc.integer({min: 1, max: 50}),
-      fc.array(fc.integer({min: 1, max: 20000}), {minLength: 1, maxLength: 5}),
-      async (start, intervals) => {
+      fc.array(fc.boolean(), {minLength: 1, maxLength: 6}),
+      async (start, losses) => {
         const transport = new FakeRunTransport({records: []});
         const clock = new FakeClock();
-        const reader = gatewayReader(transport, new FakeSkeletonCache(), clock.schedule);
-        let hint: RunLivenessHint | undefined;
-        let failed = false;
-        let notify = () => {};
+        const reader = gatewayReader(
+          transport,
+          new FakeSkeletonCache(),
+          clock.schedule,
+          transport.host.feed,
+        );
+        let latest: GatewayObservation | undefined;
         const stop = reader.watch(
           'run-a',
           observation => {
-            hint = observation.hint;
-            failed = observation.failure !== undefined;
-            notify();
+            latest = observation;
           },
           () => {},
         );
-        const watch = '/vibesys.api.v1.HostService/WatchRuns';
         try {
-          let epoch = start;
-          for (const interval of intervals) {
-            const current = ++epoch;
-            const received = Promise.withResolvers<void>();
-            notify = () => {
-              if (hint?.epoch === current) received.resolve();
-            };
-            transport.observe(
-              create(WatchRunsResponseSchema, {
-                runId: 'run-a',
-                liveness: RunLiveness.ALIVE,
-                head: {epoch: current},
-              }),
-            );
-            await received.promise;
-            clock.advanceBy(interval);
-            expect(hint?.epoch).toBe(current);
+          transport.observe({runId: 'run-a', liveness: RunLiveness.ALIVE, head: {epoch: start}});
+          await transport.host.watched();
+          expect(latest?.hint?.epoch).toBe(start);
+          expect(latest?.fresh).toBe(true);
+          for (const lose of losses) {
+            if (lose) transport.host.lose();
+            // A lost host's last word is no fact.
+            expect(latest?.fresh).toBe(!lose);
+            expect(latest?.hint === undefined).toBe(lose);
+            transport.host.restore();
+            expect(latest?.fresh).toBe(true);
+            expect(latest?.hint?.epoch).toBe(start);
           }
-          // Freeze new subscriptions too; reconnect cannot turn a cached observation into a frame.
-          transport.held.add(watch);
-          clock.advanceBy(30000);
-          expect(hint).toBeUndefined();
-          expect(failed).toBe(true);
         } finally {
           stop();
         }
-        expect(
-          transport.calls
-            .filter(call => call.method.endsWith('/WatchRuns'))
-            .every(call => call.signal.aborted),
-        ).toBe(true);
+        // The reader holds no timer of its own for liveness: the host's subscription holds the lease.
         expect(clock.pending).toBe(0);
+        expect(transport.host.watching).toBe(0);
       },
     ),
-    {numRuns: 12, seed: 34371, examples: [[1, [5000, 5000, 5000]]]},
+    {numRuns: 12, seed: 34371},
   );
 });
 
-test('property: a lock probe of a successor epoch is unconfirmed until its writer was seen alive, and the one lease expires with silence', async () => {
+test('property: a lock probe of a successor epoch is unconfirmed until its writer was seen alive', async () => {
   const frames = fc.array(
     fc.record({
       epoch: fc.integer({min: 0, max: 2}),
@@ -267,7 +271,12 @@ test('property: a lock probe of a successor epoch is unconfirmed until its write
     fc.asyncProperty(fc.integer({min: 1, max: 5}), frames, async (base, steps) => {
       const transport = new FakeRunTransport({records: []});
       const clock = new FakeClock();
-      const reader = gatewayReader(transport, new FakeSkeletonCache(), clock.schedule);
+      const reader = gatewayReader(
+        transport,
+        new FakeSkeletonCache(),
+        clock.schedule,
+        transport.host.feed,
+      );
       let latest: GatewayObservation | undefined;
       let notify = () => {};
       const stop = reader.watch(
@@ -289,22 +298,18 @@ test('property: a lock probe of a successor epoch is unconfirmed until its write
             if (latest?.fresh && latest.hint?.head?.committedSeq === BigInt(index))
               received.resolve();
           };
-          transport.observe(
-            create(WatchRunsResponseSchema, {
-              runId: 'run-a',
-              liveness: step.liveness,
-              head: {epoch, committedSeq: BigInt(index)},
-            }),
-          );
+          transport.observe({
+            runId: 'run-a',
+            liveness: step.liveness,
+            head: {epoch, committedSeq: BigInt(index)},
+          });
           await received.promise;
           if (step.liveness === RunLiveness.ALIVE) alive = Math.max(alive, epoch);
           const pending =
             step.liveness === RunLiveness.INTERRUPTED && epoch > base && alive < epoch;
           expect(latest?.hint?.value).toBe(pending ? RunLiveness.UNSPECIFIED : step.liveness);
         }
-        clock.advanceBy(29999);
-        expect(latest?.fresh).toBe(true);
-        clock.advanceBy(1);
+        transport.host.lose();
         expect(latest?.fresh).toBe(false);
         expect(latest?.hint).toBeUndefined();
       } finally {

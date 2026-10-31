@@ -9,6 +9,7 @@ export {gpuLine, gpuName} from './hardware.js';
 export {
   type ActionProblem,
   type FormName,
+  hostsToRecheck,
   initialMachines,
   type Machine,
   type MachineStatus,
@@ -45,6 +46,8 @@ export {
   FAILURE_WORDS,
   type GaugeView,
   type HostLive,
+  type RunsView,
+  runsView,
   type StatsView,
   statsGauges,
   statsView,

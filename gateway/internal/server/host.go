@@ -29,12 +29,32 @@ const batchBytes = 1 << 20
 
 // Config is process wiring; the API hash comes only from generated code.
 type Config struct {
-	Root       string
-	Version    string
-	Clock      Clock
+	Root    string
+	Version string
+	Clock   Clock
+	// Probes times the run index's liveness probes and their lease. A test that drives
+	// them by hand sets it, apart from the Clock that paces the hub. Nil means Clock.
+	Probes     Clock
 	HostRunner hostcommand.Runner
 	// Machine is what machine_stats samples.
 	Machine machinestats.Host
+}
+
+// withDefaults fills what the caller left to the process: real time, real commands, this machine.
+func (c Config) withDefaults() Config {
+	if c.HostRunner == nil {
+		c.HostRunner = hostcommand.ExecRunner{}
+	}
+	if c.Clock == nil {
+		c.Clock = SystemClock{}
+	}
+	if c.Probes == nil {
+		c.Probes = c.Clock
+	}
+	if c.Machine == nil {
+		c.Machine = machinestats.SystemHost{}
+	}
+	return c
 }
 
 type host struct {
@@ -162,15 +182,7 @@ func rpcError(err error) error {
 // Serve owns the gRPC server until listener closure or context cancellation.
 // The caller owns socket publication and connection/idle accounting.
 func Serve(ctx context.Context, listener net.Listener, config Config) error {
-	if config.HostRunner == nil {
-		config.HostRunner = hostcommand.ExecRunner{}
-	}
-	if config.Clock == nil {
-		config.Clock = SystemClock{}
-	}
-	if config.Machine == nil {
-		config.Machine = machinestats.SystemHost{}
-	}
+	config = config.withDefaults()
 	server := grpc.NewServer(
 		grpc.MaxSendMsgSize(gen.HostAPIMaxMessageBytes),
 		grpc.UnaryInterceptor(validateUnary),
@@ -178,7 +190,9 @@ func Serve(ctx context.Context, listener net.Listener, config Config) error {
 		grpc.KeepaliveParams(keepalive.ServerParameters{Time: KeepaliveTime, Timeout: KeepaliveTimeout}),
 		grpc.StatsHandler(&connections{}),
 	)
-	apiv1.RegisterHostServiceServer(server, &host{config: config, topics: newTopics(config)})
+	service := &host{config: config}
+	service.topics = newTopics(service)
+	apiv1.RegisterHostServiceServer(server, service)
 	stop := context.AfterFunc(ctx, server.Stop)
 	defer stop()
 	defer server.Stop()

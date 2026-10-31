@@ -7,16 +7,14 @@ import {
   HostService,
   TailStreamRequestSchema,
   TailStreamResponseSchema,
-  WatchRunsRequestSchema,
-  type WatchRunsResponse,
-  WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import type {AbortSignalLike} from '@vibesys/transport';
-import {createActor, fromCallback, fromPromise} from 'xstate';
+import {createActor, fromCallback} from 'xstate';
 import {DescriptorCache} from './descriptors.js';
 import {
   type LoadProgress,
   loadProgress,
+  type RunLivenessFeed,
   type RunLivenessHint,
   type RunTransport,
   type SkeletonCache,
@@ -50,7 +48,7 @@ export interface GatewayObservation {
   /** The reader gave up on this failure; a new observation is the only retry. */
   readonly terminal: boolean;
   readonly hint: RunLivenessHint | undefined;
-  /** The liveness lease is held: the host spoke within the lease. The one lease of the run. */
+  /** The host is delivering. Its subscription holds the one lease of the run, not the reader. */
   readonly fresh: boolean;
 }
 export interface GatewayReader {
@@ -169,10 +167,15 @@ async function log(
   if (!signal.aborted) decoder.decode();
 }
 
+/** How long the history loader waits for a reply before it counts the attempt failed. */
+const LOADER_TIMEOUT_MS = 30_000;
+
 export function gatewayReader(
   transport: RunTransport,
   cache: ContentCache,
   schedule: ScheduleTimeout,
+  /** What the host says of one run: its liveness, from the host's subscription. */
+  liveness: (runId: string) => RunLivenessFeed,
 ): GatewayReader {
   const descriptors = new DescriptorCache();
   return {
@@ -195,25 +198,18 @@ export function gatewayReader(
                 loader.stop();
               };
             }),
-            watch: fromPromise<void, ObservationOperation>(async ({input, signal}) => {
-              for await (const bytes of transport.stream(
-                `${SERVICE}${HostService.method.watchRuns.name}`,
-                toBinary(WatchRunsRequestSchema, create(WatchRunsRequestSchema)),
-                signal,
-              )) {
-                if (signal.aborted) return;
-                const response = fromBinary(WatchRunsResponseSchema, bytes);
-                input.receive({type: 'ready'});
-                if (response.runId !== input.runId) continue;
-                input.receive({
-                  type: 'hint',
-                  hint: livenessHint(response),
-                });
-              }
+            watch: fromCallback<ObservationEvent, ObservationOperation>(({input}) => {
+              const feed = liveness(input.runId);
+              const report = () => input.receive({type: 'liveness', state: feed.getSnapshot()});
+              const release = feed.subscribe(report);
+              // What the host already says reaches the reader after the watch has begun, as a
+              // host that answers later would, so a reader never hears of it while it starts.
+              queueMicrotask(report);
+              return release;
             }),
           },
         }),
-        {input: {runId, timeoutMs: 30000}, clock: clockFrom(schedule)},
+        {input: {runId, timeoutMs: LOADER_TIMEOUT_MS}, clock: clockFrom(schedule)},
       ).start();
       const subscription = actor.subscribe(snapshot => {
         const {context} = snapshot;
@@ -241,10 +237,4 @@ export function gatewayReader(
     log: (runId, streamId, signal, receive, fromOffset) =>
       log(transport, runId, streamId, signal, receive, fromOffset),
   };
-}
-
-/** Project only the gateway's canonical epoch; removed runs clear their hint. */
-function livenessHint(response: WatchRunsResponse): RunLivenessHint | undefined {
-  if (response.removed) return undefined;
-  return {epoch: response.head?.epoch ?? 0, value: response.liveness, head: response.head};
 }

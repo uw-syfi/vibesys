@@ -37,5 +37,6 @@ export {
   seekSkeleton,
   transcriptStreamFor,
 } from './model.js';
+export type {RunLivenessFeed, RunLivenessState} from './observation.js';
 export {RECORD_FACTS} from './record-facts.js';
 export {type LoadRefusal, refusalOf} from './status.js';

@@ -40,8 +40,10 @@ func start(t *testing.T) fixture {
 	return startWithClock(t, nil)
 }
 
+// startWithClock runs the host with a clock the test drives for the run index's liveness
+// probes. The hub keeps real time: its heartbeats and flushes pace frames and decide no result.
 func startWithClock(t *testing.T, clock server.Clock) fixture {
-	return startWithConfig(t, server.Config{Clock: clock})
+	return startWithConfig(t, server.Config{Probes: clock})
 }
 
 func startWithConfig(t *testing.T, config server.Config) fixture {

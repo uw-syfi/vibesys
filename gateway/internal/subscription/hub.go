@@ -78,30 +78,55 @@ func (h *Hub) Serve(ctx context.Context, connection uint64, request *apiv1.Subsc
 	heartbeat := h.clock.NewTicker(HeartbeatInterval)
 	defer heartbeat.Stop()
 	wake := make(chan struct{}, 1)
-	var woken <-chan struct{}
-	var flush <-chan time.Time
-	if topic.policy.MinInterval > 0 {
-		ticker := h.clock.NewTicker(topic.policy.MinInterval)
-		defer ticker.Stop()
-		flush = ticker.Ticks()
-	} else {
-		woken = wake
-	}
 	id, refusal := h.join(connection, key, topic, wake)
 	if refusal != nil {
 		return send(&apiv1.SubscribeResponse{Frame: &apiv1.SubscribeResponse_Failed{Failed: refusal}})
 	}
 	defer h.leave(id)
 	beat := &apiv1.SubscribeResponse{Frame: &apiv1.SubscribeResponse_Heartbeat{Heartbeat: &apiv1.Heartbeat{}}}
+	// A flush is due at once, unless the last one was less than the topic's minimum
+	// interval ago: a quiet stream is answered without delay, and a busy one never
+	// faster than the floor. The snapshot is exempt, so a subscriber is never held back
+	// from the state it asked for; the floor spaces the changes after it.
+	var last time.Time
+	snapshotted := false
+	counted := func(frame *apiv1.SubscribeResponse) error {
+		snapshotted = snapshotted || frame.GetSynced() != nil
+		return send(frame)
+	}
 	for {
-		if ended, err := h.flush(id, send); ended || err != nil {
+		if wait := topic.policy.MinInterval - h.clock.Now().Sub(last); snapshotted && !last.IsZero() && wait > 0 {
+			pause := h.clock.NewTicker(wait)
+			select {
+			case <-ctx.Done():
+				pause.Stop()
+				return ctx.Err()
+			case <-pause.Ticks():
+			case <-heartbeat.Ticks():
+				if err := send(beat); err != nil {
+					pause.Stop()
+					return err
+				}
+			}
+			pause.Stop()
+			continue
+		}
+		// What changes from here on signals again, so a wake is never lost.
+		select {
+		case <-wake:
+		default:
+		}
+		sent, ended, err := h.flush(id, counted)
+		if ended || err != nil {
 			return err
+		}
+		if sent && snapshotted {
+			last = h.clock.Now()
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-woken:
-		case <-flush:
+		case <-wake:
 		case <-heartbeat.Ticks():
 			if err := send(beat); err != nil {
 				return err
@@ -113,22 +138,23 @@ func (h *Hub) Serve(ctx context.Context, connection uint64, request *apiv1.Subsc
 // flush sends what the subscriber is owed when it starts, and no more: a client
 // slower than the producer finds its keys changed again as it reads, and a flush
 // that chased them would never end, so neither the interval nor a heartbeat could
-// apply. What changes meanwhile waits for the next flush. ended reports a terminal
-// frame, after which Serve returns.
-func (h *Hub) flush(id subscriberID, send func(*apiv1.SubscribeResponse) error) (ended bool, err error) {
+// apply. What changes meanwhile waits for the next flush. sent reports whether any
+// frame went, and ended a terminal frame, after which Serve returns.
+func (h *Hub) flush(id subscriberID, send func(*apiv1.SubscribeResponse) error) (sent, ended bool, err error) {
 	for range h.owed(id) {
 		frame, terminal := h.next(id)
 		if frame == nil {
-			return false, nil
+			return sent, false, nil
 		}
 		if err := send(frame); err != nil {
-			return true, err
+			return sent, true, err
 		}
+		sent = true
 		if terminal {
-			return true, nil
+			return sent, true, nil
 		}
 	}
-	return false, nil
+	return sent, false, nil
 }
 
 // unknownField names the first field a message, or a message inside it, holds

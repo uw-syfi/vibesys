@@ -1,10 +1,14 @@
 import {expect, test} from 'bun:test';
+import fc from 'fast-check';
 import {
   CONNECTING,
+  type Control,
   machineStats,
+  RETRYABLE_REASONS,
   type SubscriptionState,
   type SubscriptionUpdate,
   subscriptionSource,
+  TERMINAL_REASONS,
 } from './index.js';
 import {statsEntry} from './testing/harness.js';
 import {FakeSubscriptionPort} from './testing/index.js';
@@ -63,8 +67,55 @@ test("it is live only once the snapshot and main's word agree, and stale keeps t
   const stale = source.getSnapshot();
   expect(stale).toEqual({kind: 'stale', value, reason: 'silent', attempt: 1, valueAt: 9});
   call()?.send({kind: 'control', control: {kind: 'failed', reason: 'unreachable', retrying: true}});
-  expect(source.getSnapshot()).toEqual({kind: 'failed', reason: 'unreachable', retrying: true});
+  // The failure keeps what the host last said, to be shown as old; it is not a value gone.
+  expect(source.getSnapshot()).toEqual({
+    kind: 'failed',
+    reason: 'unreachable',
+    retrying: true,
+    held: value,
+  });
   expect(states.map(each => each.kind)).toEqual(['live', 'stale', 'failed']);
+});
+
+test('a host that never spoke fails holding nothing', () => {
+  const {source, call} = watched();
+  call()?.send({kind: 'control', control: {kind: 'failed', reason: 'unreachable', retrying: true}});
+  expect(source.getSnapshot()).toEqual({kind: 'failed', reason: 'unreachable', retrying: true});
+});
+
+/** What a state holds of the host's value: current, stale or held through a failure. */
+function heldBy<S>(state: SubscriptionState<S>): S | undefined {
+  if (state.kind === 'failed') return state.held;
+  return state.kind === 'connecting' ? undefined : state.value;
+}
+
+test('property: through any run of losses and recoveries the value a host last said is the one held', () => {
+  const CONTROLS: fc.Arbitrary<Control> = fc.oneof(
+    fc.nat({max: 20}).map(since => ({kind: 'live', since}) as const),
+    fc
+      .tuple(fc.constantFrom(...RETRYABLE_REASONS), fc.nat({max: 40}), fc.nat({max: 20}))
+      .map(([reason, attempt, valueAt]) => ({kind: 'stale', reason, attempt, valueAt}) as const),
+    fc
+      .tuple(fc.constantFrom(...RETRYABLE_REASONS, ...TERMINAL_REASONS), fc.boolean())
+      .map(([reason, retrying]) => ({kind: 'failed', reason, retrying}) as const),
+  );
+  fc.assert(
+    fc.property(fc.array(CONTROLS, {minLength: 1, maxLength: 60}), controls => {
+      const {source, call} = watched();
+      for (const update of DATA) call()?.send(update);
+      call()?.send({kind: 'control', control: {kind: 'live', since: 0}});
+      const said = source.getSnapshot();
+      if (said.kind !== 'live') throw new Error('expected live');
+      for (const control of controls) {
+        call()?.send({kind: 'control', control});
+        // The value is the one said, in whatever state the losses left the subscription; a failure
+        // with no attempt to come holds nothing.
+        expect(heldBy(source.getSnapshot())).toEqual(
+          control.kind === 'failed' && !control.retrying ? undefined : said.value,
+        );
+      }
+    }),
+  );
 });
 
 test('a snapshot still being built, and a repeated control, change nothing a screen can see', () => {

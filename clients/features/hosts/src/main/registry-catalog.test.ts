@@ -1,6 +1,6 @@
 import {expect, test} from 'bun:test';
 import {ConnectionManager, registryRunCatalog} from '@vibesys/connection';
-import {FakeReadCatalog, idleRunWatch, idleSubscriptions} from '@vibesys/connection/testing';
+import {FakeReadCatalog, idleHostRuns, idleSubscriptions} from '@vibesys/connection/testing';
 import {SettingsStore} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
 import {FakeClock} from '@vibesys/transport/testing';
@@ -25,7 +25,7 @@ function subject(peer: FakeReadCatalog) {
     log: () => {},
   });
   const hosts = new Hosts({
-    runs: idleRunWatch(),
+    runs: idleHostRuns(),
     subscriptions: idleSubscriptions(),
     manager,
     settings,

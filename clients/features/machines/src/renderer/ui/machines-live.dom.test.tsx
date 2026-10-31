@@ -2,15 +2,25 @@ import {afterAll, beforeAll, describe, expect, test} from 'bun:test';
 import {SUBSCRIPTION_LINGER_MS} from '@vibesys/connection';
 import {type FakeSubscribeStream, hubRig, settle} from '@vibesys/connection/testing';
 import type {MachineDescription} from '@vibesys/hosts';
-import type {MachineEntry} from '@vibesys/ipc';
-import {backoffMs, failureBoundMs, machineStats, OFFLINE_AFTER} from '@vibesys/subscription';
-import {machineEntry} from '@vibesys/subscription/testing';
+import type {MachineEntry, MachineReport} from '@vibesys/ipc';
+import {
+  backoffMs,
+  CONNECTING,
+  failureBoundMs,
+  type HostRunFacts,
+  machineStats,
+  OFFLINE_AFTER,
+  runs as runsTopic,
+  type SubscriptionSource,
+  type TopicArm,
+} from '@vibesys/subscription';
+import {machineEntry, runEntryOf} from '@vibesys/subscription/testing';
 import {Window} from 'happy-dom';
 import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {initialMachines, type MachinesState, machinesStep} from '../../state/index.js';
 import {createLiveStats} from '../effects/live.js';
-import {WithHostLive} from '../host-stats.js';
+import {useDeliveringHosts, WithHostLive} from '../host-stats.js';
 import {MachinesPage} from './machines-page.js';
 
 const window = new Window();
@@ -48,7 +58,10 @@ const FACTS: MachineDescription = {
 };
 
 /** The Machines store with `hosts` listed and each reported ready. */
-function listed(hosts: readonly string[]): MachinesState {
+function listed(
+  hosts: readonly string[],
+  report: MachineReport = {kind: 'ready', facts: FACTS},
+): MachinesState {
   const entries: MachineEntry[] = hosts.map(host => ({host, label: host, checkout: '~/vibesys'}));
   let {state} = initialMachines();
   state = machinesStep(state, {type: 'listed', token: 1, result: {ok: true, value: entries}}).state;
@@ -57,27 +70,36 @@ function listed(hosts: readonly string[]): MachinesState {
       type: 'reported',
       token: machine.checking ?? 0,
       host: machine.host,
-      result: {ok: true, value: {kind: 'ready', facts: FACTS}},
+      result: {ok: true, value: report},
     }).state;
   }
   return state;
 }
 
-/** The page over the real hub: fake time, a scripted gateway, and a window's source per card. */
-function rig() {
+/** A runs source that never opens a stream: for the tests whose subject is the stats stream. */
+const NO_RUNS: SubscriptionSource<HostRunFacts> = {
+  subscribe: () => () => {},
+  getSnapshot: () => CONNECTING,
+  retry: () => {},
+};
+
+/**
+ * The page over the real hub: fake time, a scripted gateway, and a window's source per card. Its
+ * run counts come from the `runs` topic when `withRuns`, and otherwise nothing opens that stream.
+ */
+function rig(withRuns = false) {
   const {clock, gateway, subscriptions} = hubRig();
-  const live = createLiveStats(subscriptions.port, clock.schedule, () => clock.now());
+  const real = createLiveStats(subscriptions.port, clock.schedule, () => clock.now());
+  const live = withRuns ? real : {...real, runs: () => NO_RUNS};
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
-  const show = (shown: readonly string[]) =>
+  const show = (shown: readonly string[], report?: MachineReport) =>
     act(async () =>
       root.render(
         <MachinesPage
-          state={listed(shown)}
+          state={listed(shown, report)}
           dispatch={() => undefined}
-          runCounts={new Map()}
-          liveRuns={new Map()}
           live={(host, render) => <WithHostLive live={live} host={host} render={render} />}
           showRuns={() => undefined}
           openSettings={() => undefined}
@@ -90,9 +112,11 @@ function rig() {
     if (!(found instanceof window.HTMLElement)) throw new Error(`no card for ${host}`);
     return found as unknown as HTMLElement;
   };
-  const streamOf = (host: string): FakeSubscribeStream => {
-    const open = gateway.streams.filter(each => each.host === host && each.open).at(-1);
-    if (open === undefined) throw new Error(`no stream open for ${host}`);
+  const streamOf = (host: string, arm: TopicArm = 'machineStats'): FakeSubscribeStream => {
+    const open = gateway.streams
+      .filter(each => each.host === host && each.open && each.request.topic.case === arm)
+      .at(-1);
+    if (open === undefined) throw new Error(`no ${arm} stream open for ${host}`);
     return open;
   };
   /** Time passes for the hub and the page together; the page renders what that did. */
@@ -102,11 +126,25 @@ function rig() {
       await settle();
     });
   /** The host's gateway speaks; the page renders what it said. */
-  const send = (host: string, speak: (stream: FakeSubscribeStream) => void) =>
+  const send = (host: string, speak: (stream: FakeSubscribeStream) => void, arm?: TopicArm) =>
     act(async () => {
-      speak(streamOf(host));
+      speak(streamOf(host, arm));
       await settle();
     });
+  /** The host says which of its runs are alive and which ended: a whole snapshot. */
+  const runs = (host: string, alive: number, ended: number) =>
+    send(
+      host,
+      stream => {
+        for (let each = 0; each < alive + ended; each += 1)
+          stream.send({
+            case: 'entry',
+            value: runEntryOf(`run-${each}`, each < alive ? 'alive' : 'ended'),
+          });
+        stream.send({case: 'synced', value: {}});
+      },
+      'runs',
+    );
   const snapshot = (host: string, readings?: Parameters<typeof machineEntry>[2]) =>
     send(host, stream => {
       stream.reached('runs');
@@ -122,16 +160,38 @@ function rig() {
       button.click();
       await settle();
     });
+  /** The rail's reading: which hosts deliver, as `useDeliveringHosts` says it, in its own root. */
+  const rail = (shown: readonly string[], watching: boolean) => {
+    const seen: ReadonlySet<string>[] = [];
+    const reports: (readonly string[])[] = [];
+    const report = (hosts: readonly string[]): void => void reports.push([...hosts].sort());
+    const {machines} = listed(shown);
+    const Reading = (): null => {
+      seen.push(useDeliveringHosts(live, machines, watching, report));
+      return null;
+    };
+    const place = document.createElement('div');
+    document.body.append(place);
+    const hosts = createRoot(place);
+    return {
+      mount: () => act(async () => hosts.render(<Reading />)),
+      latest: () => [...(seen.at(-1) ?? [])].sort(),
+      reported: () => reports,
+      unmount: () => act(async () => hosts.unmount()),
+    };
+  };
   return {
     clock,
     gateway,
     subscriptions,
+    rail,
     container,
     show,
     card,
     advance,
     send,
     snapshot,
+    runs,
     press,
     gauges: (host: string) => [...card(host).querySelectorAll('.vs-gauge')],
     /** The card's one status: exactly one chip, whatever the state. */
@@ -147,6 +207,19 @@ function rig() {
     dimmed: (host: string) =>
       [...card(host).querySelectorAll('.vs-gauge')].every(each => each.hasAttribute('data-dim')),
     text: (host: string) => card(host).textContent ?? '',
+    pressable: (host: string, name: string) =>
+      [...card(host).querySelectorAll('button')].some(each => each.textContent === name),
+    /** The hardware and run cells of the card's summary line, in order, and whether its meter is dimmed. */
+    summary: (host: string) => {
+      const meter = card(host).querySelector('.vs-meter[role="img"]');
+      const row = meter?.parentElement?.parentElement;
+      if (meter === null || meter === undefined || row === null || row === undefined)
+        throw new Error(`${host} has no live meter in its summary`);
+      return {
+        cells: [...row.children].map(each => each.textContent ?? ''),
+        dim: meter.hasAttribute('data-dim'),
+      };
+    },
     stop: () => act(async () => root.unmount()),
   };
 }
@@ -384,5 +457,86 @@ describe('the Machines page reads each host live', () => {
       expect(world.gauges(A)[0]?.textContent).toBe('CPU40%');
       await world.stop();
     }
+  });
+
+  test('a check that timed out never makes a delivering host Unreachable: one status, and no Reconnect beside live readings', async () => {
+    const world = rig();
+    await world.show([A], {kind: 'unavailable', detail: 'timed out'});
+    // Before the host has said anything, the check is all there is to go on.
+    expect(world.status(A)).toBe('Unreachable');
+    expect(world.pressable(A, 'Reconnect')).toBe(true);
+    await liveWith(world, A, 40);
+    expect(world.status(A)).toBe('Online');
+    expect(world.pressable(A, 'Reconnect')).toBe(false);
+    expect(world.gauges(A)[0]?.textContent).toBe('CPU40%');
+    // A host that stops delivering is no longer vouched for: the check's word and its fix return,
+    // over readings that are dimmed.
+    await world.advance(AGE + 1);
+    expect(world.dimmed(A)).toBe(true);
+    expect(world.status(A)).toBe('Unreachable');
+    expect(world.pressable(A, 'Reconnect')).toBe(true);
+    await world.stop();
+  });
+
+  test('when the host stops delivering the summary keeps its place: the live meter and the run count stay, dimmed, with the same numbers', async () => {
+    const world = rig(true);
+    await world.show([A]);
+    await liveWith(world, A, 40);
+    await world.runs(A, 3, 4);
+    const live = world.summary(A);
+    expect(live.cells).toEqual(['16 CPU', '3 live', '7 runs']);
+    expect(live.dim).toBe(false);
+    // Both hosts' streams lapse; nothing is removed, nothing moves, and nothing is said twice.
+    await world.advance(Math.max(AGE, runsTopic.policy.staleAfterMs) + 1);
+    const stale = world.summary(A);
+    expect(stale.cells).toEqual(live.cells);
+    expect(stale.dim).toBe(true);
+    // The host answers the next attempt: the same cells, current.
+    await world.advance(backoffMs(1));
+    await world.runs(A, 3, 4);
+    expect(world.summary(A)).toEqual(live);
+    await world.stop();
+  });
+
+  test('a card’s run count is the runs topic’s, whatever the machine check said', async () => {
+    for (const report of [
+      {kind: 'ready', facts: {...FACTS, runs: {live: 9, ended_today: 9}}},
+      {kind: 'unavailable', detail: 'timed out'},
+    ] as const) {
+      const world = rig(true);
+      await world.show([A], report);
+      await liveWith(world, A, 10);
+      await world.runs(A, 2, 5);
+      expect(world.text(A)).toContain('7 runs');
+      expect(world.text(A)).not.toContain('18 runs');
+      await world.stop();
+    }
+  });
+
+  test('the rail reads which hosts deliver from the cards’ own streams, and holds none while it is not watching', async () => {
+    const world = rig();
+    await world.show([A, B]);
+    const watching = world.rail([A, B], true);
+    await watching.mount();
+    expect(watching.latest()).toEqual([]);
+    await world.snapshot(A);
+    expect(watching.latest()).toEqual([A]);
+    // The store is told each change of who delivers, and nothing in between.
+    await world.advance(BEAT);
+    await world.send(A, stream => stream.send({case: 'heartbeat', value: {}}));
+    expect(watching.reported()).toEqual([[], [A]]);
+    // One stream per host serves the card and the rail alike.
+    expect(world.gateway.open.map(each => each.host).sort()).toEqual([A, B]);
+    await world.advance(AGE + 1);
+    expect(watching.latest()).toEqual([]);
+    expect(watching.reported()).toEqual([[], [A], []]);
+    await watching.unmount();
+    await world.stop();
+    await world.advance(SUBSCRIPTION_LINGER_MS);
+    const idle = world.rail([A, B], false);
+    await idle.mount();
+    expect(idle.latest()).toEqual([]);
+    expect(world.gateway.open).toHaveLength(0);
+    await idle.unmount();
   });
 });
