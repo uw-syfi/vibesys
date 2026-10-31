@@ -1,45 +1,135 @@
 /**
  * The Usage page's control state, as a machine (docs/contributing/clients-architecture.md,
- * "State"): it asks for the figures of a window, shows them, and decides what a late answer means.
- * Choosing another window leaves `loading` and enters it again, which stops the question being
- * asked, so an answer for a window the user left never arrives. The question is the operation
- * `load`, provided by `renderer/effects`; a deadline ends it when the helper never answers.
+ * "State"). It asks every connected host for the figures of a period, shows what came back, and
+ * decides what a late answer means:
+ *
+ * - Choosing another period leaves the question being asked and enters it again, which stops it,
+ *   so an answer for a period the person left never arrives. The question is the operation `read`,
+ *   provided by `renderer/effects`; a deadline ends it when a host never answers.
+ * - While a host reports runs or transcript files it has not read yet (`pending`), the machine asks
+ *   again as soon as the reply is shown, and the status says `Scanning`; figures already shown stay
+ *   on screen, dimmed by the screen, until the next arrive.
+ * - A shown page asks again every minute, only after the last question returned.
+ * - Prices are saved per destination: the operation `save` answers one result per host, so one
+ *   host failing or having moved never hides another's. A saved price asks the figures again.
+ *
+ * What the person chose to look at (tab, source, hidden providers) filters answers already held, so
+ * it asks nothing. Time and zone arrive on the events: the machine reads no clock.
  */
+import type {HostKey, UsagePriceBookEntry, UsagePricingEntry} from '@vibesys/hosts';
 import {unprovided} from '@vibesys/machine';
 import {assign, setup} from 'xstate';
-import {type UsageLoaded, type UsageView, usageView} from './usage-view.js';
-import {spanOf, type UsageSpan, type UsageWindowChoice, type WindowClock} from './window.js';
+import {type PeriodEdges, periodEdges, type UsagePeriod} from './edges.js';
+import type {HostReply} from './merge.js';
+import {changedBook, checkRate, type PriceDraft} from './price-drafts.js';
+import type {ModelName, UsageSourceChoice, UsageTab} from './usage-view.js';
 
-/** What a question about the window came back with. */
-export type UsageOutcome =
-  | {readonly kind: 'usage'; readonly loaded: UsageLoaded}
-  /** Every machine's VibeSys predates the question. */
-  | {readonly kind: 'unsupported'};
+/** What a question about the period came back with. */
+export interface ReadAnswer {
+  readonly replies: readonly HostReply[];
+  /** Hosts that could not be read. */
+  readonly unreachable: readonly HostKey[];
+  /** Hosts whose VibeSys does not offer the question. */
+  readonly unsupported: readonly HostKey[];
+  readonly names: readonly ModelName[];
+}
+
+/** One destination's result of a save. */
+export type SaveResult =
+  | {readonly host: HostKey; readonly outcome: 'saved'; readonly prices: UsagePriceBookEntry}
+  /** The host's book had moved: nothing changed; this is its book. */
+  | {readonly host: HostKey; readonly outcome: 'moved'; readonly prices: UsagePriceBookEntry}
+  | {readonly host: HostKey; readonly outcome: 'failed'; readonly reason: string}
+  | {readonly host: HostKey; readonly outcome: 'unsupported'};
+
+/** A save the person asked for: the same change made to each destination's own book. */
+export interface SaveRequest {
+  readonly draft: PriceDraft;
+  /** Each destination and the book the change is made to (read at `prices.revision`). */
+  readonly destinations: readonly {readonly host: HostKey; readonly book: UsagePriceBookEntry}[];
+}
+
+export type Dialog =
+  | null
+  | {readonly kind: 'model'; readonly key: string}
+  | {
+      readonly kind: 'prices';
+      readonly key: string;
+      readonly draft: PriceDraft;
+      readonly apply: readonly HostKey[];
+      /** Each destination's result of the last save; empty before one. */
+      readonly results: readonly SaveResult[];
+      /** Why the draft cannot be saved yet, in a word; null when it can. */
+      readonly problem: string | null;
+    };
+
+export interface UsageClock {
+  readonly now: number;
+  readonly zone: string;
+}
 
 export interface UsageContext {
-  readonly window: UsageWindowChoice;
-  readonly span: UsageSpan;
-  /** The figures last read, for the window shown; null before any, or after the window changed. */
-  readonly view: UsageView | null;
+  readonly period: UsagePeriod;
+  readonly edges: PeriodEdges;
+  readonly tab: UsageTab;
+  readonly source: UsageSourceChoice;
+  readonly hidden: readonly string[];
+  readonly hostsOff: readonly HostKey[];
+  /** The figures last read, for the period shown; null before any, or after the period changed. */
+  readonly answer: ReadAnswer | null;
   /** Why the last question failed. */
   readonly problem: string | null;
+  readonly dialog: Dialog;
+  /** The price lists the hosts last reported, by host. */
+  readonly pricing: Readonly<Record<string, UsagePricingEntry>>;
+  /** Hosts a fresh price list was already asked of this visit, so a failed fetch is not retried in a loop. */
+  readonly ratesAsked: readonly HostKey[];
 }
 
 export type UsageEvent =
+  | {readonly type: 'period'; readonly period: UsagePeriod; readonly clock: UsageClock}
+  | {readonly type: 'tab'; readonly tab: UsageTab}
+  | {readonly type: 'source'; readonly source: UsageSourceChoice}
+  | {readonly type: 'provider'; readonly provider: string}
+  | {readonly type: 'host'; readonly host: HostKey}
+  | {readonly type: 'refresh'; readonly clock: UsageClock}
+  | {readonly type: 'model'; readonly key: string}
   | {
-      readonly type: 'choose';
-      readonly window: UsageWindowChoice;
-      readonly clock: WindowClock;
+      readonly type: 'prices';
+      readonly key: string;
+      readonly draft: PriceDraft;
+      readonly apply: readonly HostKey[];
     }
-  | {readonly type: 'refresh'; readonly clock: WindowClock};
+  | {readonly type: 'edit'; readonly draft: PriceDraft}
+  | {readonly type: 'apply'; readonly host: HostKey}
+  | {readonly type: 'save'; readonly request: SaveRequest}
+  | {readonly type: 'close'};
 
 export interface UsageInput {
-  readonly window: UsageWindowChoice;
-  readonly clock: WindowClock;
+  readonly period: UsagePeriod;
+  readonly clock: UsageClock;
+  readonly tab?: UsageTab;
+  readonly source?: UsageSourceChoice;
+  readonly hidden?: readonly string[];
 }
 
 /** How long a question may take, in milliseconds. */
 export const USAGE_DEADLINE_MS = 60_000;
+/** How often a shown page asks again, in milliseconds. */
+export const USAGE_REFRESH_MS = 60_000;
+
+function toggle<T>(list: readonly T[], item: T): readonly T[] {
+  return list.includes(item) ? list.filter(each => each !== item) : [...list, item];
+}
+
+/** Whether the answer still has work a host left for a later call. */
+export function pendingWork(answer: ReadAnswer | null): boolean {
+  return (
+    answer?.replies.some(
+      reply => reply.summary.pendingRuns > 0 || reply.summary.pendingFiles > 0,
+    ) === true
+  );
+}
 
 export const usageMachine = setup({
   types: {
@@ -47,49 +137,76 @@ export const usageMachine = setup({
     events: {} as UsageEvent,
     input: {} as UsageInput,
   },
-  actors: {load: unprovided<UsageOutcome, {readonly span: UsageSpan}>('load')},
+  actors: {
+    read: unprovided<
+      ReadAnswer,
+      {readonly edges: PeriodEdges; readonly hostsOff: readonly HostKey[]}
+    >('read'),
+    save: unprovided<readonly SaveResult[], SaveRequest>('save'),
+    refreshRates: unprovided<null, {readonly hosts: readonly HostKey[]}>('refreshRates'),
+  },
   actions: {
-    ask: assign((_, params: {readonly window: UsageWindowChoice; readonly clock: WindowClock}) => ({
-      window: params.window,
-      span: spanOf(params.window, params.clock),
+    ask: assign((_, params: {readonly period: UsagePeriod; readonly clock: UsageClock}) => ({
+      period: params.period,
+      edges: periodEdges(params.period, params.clock.now, params.clock.zone),
       problem: null,
     })),
-    forget: assign({view: null}),
-    show: assign((_, params: {readonly outcome: UsageOutcome}) => ({
-      view: params.outcome.kind === 'usage' ? usageView(params.outcome.loaded) : null,
+    reask: assign((_, params: {readonly clock: UsageClock}) => ({
+      problem: null,
+      clockNow: params.clock.now,
+    })),
+    forget: assign({answer: null}),
+    show: assign((_, params: {readonly answer: ReadAnswer}) => ({
+      answer: params.answer,
+      pricing: Object.fromEntries(
+        params.answer.replies.map(reply => [reply.host, reply.summary.pricing]),
+      ),
     })),
     fail: assign((_, params: {readonly problem: string}) => ({problem: params.problem})),
   },
   guards: {
-    isUnsupported: (_, params: {readonly outcome: UsageOutcome}) =>
-      params.outcome.kind === 'unsupported',
+    isUnsupported: (_, params: {readonly answer: ReadAnswer}) =>
+      params.answer.replies.length === 0 &&
+      params.answer.unreachable.length === 0 &&
+      params.answer.unsupported.length > 0,
+    isPending: (_, params: {readonly answer: ReadAnswer}) => pendingWork(params.answer),
+    ratesDue: ({context}) => hostsDue(context).length > 0,
+    holdsAnswer: ({context}) => context.answer !== null,
   },
-  delays: {deadline: USAGE_DEADLINE_MS},
+  delays: {deadline: USAGE_DEADLINE_MS, refresh: USAGE_REFRESH_MS},
 }).createMachine({
   id: 'usage',
   context: ({input}) => ({
-    window: input.window,
-    span: spanOf(input.window, input.clock),
-    view: null,
+    period: input.period,
+    edges: periodEdges(input.period, input.clock.now, input.clock.zone),
+    tab: input.tab ?? 'cost',
+    source: input.source ?? 'all',
+    hidden: input.hidden ?? [],
+    hostsOff: [],
+    answer: null,
     problem: null,
+    dialog: null,
+    pricing: {},
+    ratesAsked: [],
   }),
   initial: 'loading',
   states: {
+    // The first question, or the first after the period changed: nothing to show yet.
     loading: {
       invoke: {
-        id: 'load',
-        src: 'load',
-        input: ({context}) => ({span: context.span}),
+        src: 'read',
+        input: ({context}) => ({edges: context.edges, hostsOff: context.hostsOff}),
         onDone: [
           {
-            guard: {type: 'isUnsupported', params: ({event}) => ({outcome: event.output})},
+            guard: {type: 'isUnsupported', params: ({event}) => ({answer: event.output})},
             target: 'unsupported',
-            actions: {type: 'show', params: ({event}) => ({outcome: event.output})},
           },
           {
-            target: 'ready',
-            actions: {type: 'show', params: ({event}) => ({outcome: event.output})},
+            guard: {type: 'isPending', params: ({event}) => ({answer: event.output})},
+            target: 'scanning',
+            actions: {type: 'show', params: ({event}) => ({answer: event.output})},
           },
+          {target: 'ready', actions: {type: 'show', params: ({event}) => ({answer: event.output})}},
         ],
         onError: {
           target: 'failed',
@@ -105,29 +222,214 @@ export const usageMachine = setup({
         deadline: {target: 'failed', actions: {type: 'fail', params: {problem: 'timed out'}}},
       },
     },
-    ready: {},
+    // Asking again with figures on screen: a host had work left, or the minute passed.
+    scanning: {
+      invoke: {
+        src: 'read',
+        input: ({context}) => ({edges: context.edges, hostsOff: context.hostsOff}),
+        onDone: [
+          {
+            guard: {type: 'isPending', params: ({event}) => ({answer: event.output})},
+            target: 'scanning',
+            reenter: true,
+            actions: {type: 'show', params: ({event}) => ({answer: event.output})},
+          },
+          {target: 'ready', actions: {type: 'show', params: ({event}) => ({answer: event.output})}},
+        ],
+        onError: {
+          target: 'ready',
+          actions: {
+            type: 'fail',
+            params: ({event}) => ({
+              problem: event.error instanceof Error ? event.error.message : String(event.error),
+            }),
+          },
+        },
+      },
+      after: {deadline: {target: 'ready', actions: {type: 'fail', params: {problem: 'timed out'}}}},
+    },
+    refreshing: {
+      invoke: {
+        src: 'read',
+        input: ({context}) => ({edges: context.edges, hostsOff: context.hostsOff}),
+        onDone: [
+          {
+            guard: {type: 'isPending', params: ({event}) => ({answer: event.output})},
+            target: 'scanning',
+            actions: {type: 'show', params: ({event}) => ({answer: event.output})},
+          },
+          {target: 'ready', actions: {type: 'show', params: ({event}) => ({answer: event.output})}},
+        ],
+        // Figures already shown stay; with none to keep, the page says it cannot read them.
+        onError: [
+          {
+            guard: 'holdsAnswer',
+            target: 'ready',
+            actions: {
+              type: 'fail',
+              params: ({event}) => ({
+                problem: event.error instanceof Error ? event.error.message : String(event.error),
+              }),
+            },
+          },
+          {
+            target: 'failed',
+            actions: {
+              type: 'fail',
+              params: ({event}) => ({
+                problem: event.error instanceof Error ? event.error.message : String(event.error),
+              }),
+            },
+          },
+        ],
+      },
+      after: {
+        deadline: [
+          {
+            guard: 'holdsAnswer',
+            target: 'ready',
+            actions: {type: 'fail', params: {problem: 'timed out'}},
+          },
+          {target: 'failed', actions: {type: 'fail', params: {problem: 'timed out'}}},
+        ],
+      },
+    },
+    ready: {
+      always: {guard: 'ratesDue', target: 'rating'},
+      after: {refresh: {target: 'refreshing'}},
+    },
+    // Asking the hosts whose price list is due to fetch it, once a visit, before pricing again.
+    rating: {
+      entry: assign({ratesAsked: ({context}) => [...context.ratesAsked, ...hostsDue(context)]}),
+      invoke: {
+        src: 'refreshRates',
+        input: ({context}) => ({
+          hosts: context.ratesAsked.filter(host => context.pricing[host]?.refreshDue === true),
+        }),
+        onDone: 'refreshing',
+        onError: 'ready',
+      },
+      after: {deadline: 'ready'},
+    },
+    saving: {
+      invoke: {
+        src: 'save',
+        input: ({event}) => {
+          if (event.type !== 'save') throw new Error('saving starts from a save');
+          return event.request;
+        },
+        onDone: {
+          target: 'refreshing',
+          actions: assign({
+            dialog: ({context, event}) =>
+              context.dialog?.kind === 'prices'
+                ? {...context.dialog, results: event.output}
+                : context.dialog,
+          }),
+        },
+        onError: {
+          target: 'ready',
+          actions: assign({
+            dialog: ({context, event}) =>
+              context.dialog?.kind === 'prices'
+                ? {
+                    ...context.dialog,
+                    results: context.dialog.apply.map(host => ({
+                      host,
+                      outcome: 'failed' as const,
+                      reason:
+                        event.error instanceof Error ? event.error.message : String(event.error),
+                    })),
+                  }
+                : context.dialog,
+          }),
+        },
+      },
+    },
     unsupported: {},
     failed: {},
   },
   on: {
-    choose: {
+    period: {
       target: '.loading',
       reenter: true,
       actions: [
-        {
-          type: 'ask',
-          params: ({event}) => ({window: event.window, clock: event.clock}),
-        },
+        {type: 'ask', params: ({event}) => ({period: event.period, clock: event.clock})},
         'forget',
       ],
     },
     refresh: {
-      target: '.loading',
+      target: '.refreshing',
       reenter: true,
       actions: {
         type: 'ask',
-        params: ({context, event}) => ({window: context.window, clock: event.clock}),
+        params: ({context, event}) => ({period: context.period, clock: event.clock}),
       },
     },
+    tab: {actions: assign({tab: ({event}) => event.tab})},
+    source: {actions: assign({source: ({event}) => event.source})},
+    provider: {
+      actions: assign({hidden: ({context, event}) => toggle(context.hidden, event.provider)}),
+    },
+    host: {
+      target: '.loading',
+      reenter: true,
+      actions: [
+        assign({hostsOff: ({context, event}) => toggle(context.hostsOff, event.host)}),
+        'forget',
+      ],
+    },
+    model: {actions: assign({dialog: ({event}) => ({kind: 'model' as const, key: event.key})})},
+    prices: {
+      actions: assign({
+        dialog: ({event}) => ({
+          kind: 'prices' as const,
+          key: event.key,
+          draft: event.draft,
+          apply: event.apply,
+          results: [],
+          problem: checkRate(event.draft.rate).ok || event.draft.automatic ? null : 'invalid',
+        }),
+      }),
+    },
+    edit: {
+      actions: assign({
+        dialog: ({context, event}) => {
+          if (context.dialog?.kind !== 'prices') return context.dialog;
+          const checked = checkRate(event.draft.rate);
+          return {
+            ...context.dialog,
+            draft: event.draft,
+            results: [],
+            problem: event.draft.automatic || checked.ok ? null : checked.field,
+          };
+        },
+      }),
+    },
+    apply: {
+      actions: assign({
+        dialog: ({context, event}) =>
+          context.dialog?.kind === 'prices'
+            ? {...context.dialog, apply: toggle(context.dialog.apply, event.host), results: []}
+            : context.dialog,
+      }),
+    },
+    save: {target: '.saving', reenter: true},
+    close: {actions: assign({dialog: null})},
   },
 });
+
+/** The hosts whose price list is due and was not asked this visit. */
+export function hostsDue(context: UsageContext): readonly HostKey[] {
+  return Object.entries(context.pricing).flatMap(([host, pricing]) =>
+    pricing.refreshDue && !context.ratesAsked.includes(host) ? [host] : [],
+  );
+}
+
+/** The book a draft makes of `book` for a save, or why it cannot be made; the page's own check. */
+export function draftProblem(draft: PriceDraft, book: UsagePriceBookEntry): string | null {
+  const checked = checkRate(draft.rate);
+  if (!draft.automatic && !checked.ok) return checked.field;
+  const changed = changedBook(book, draft, checked.ok ? checked.rate : null);
+  return changed.ok ? null : changed.reason;
+}
