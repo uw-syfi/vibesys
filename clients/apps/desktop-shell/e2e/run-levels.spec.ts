@@ -668,6 +668,13 @@ test('a live turn keeps its scroll position and its element as events arrive', a
     turn.evaluate(element => element.scrollHeight - element.scrollTop - element.clientHeight);
   await expect.poll(gap).toBeLessThan(2);
   await more(12, 1);
+  // The reader watches this thought being written: the page draws it as "Thinking" and keeps it
+  // open from then on. Name it by its title, never by position: the turn draws only the thoughts
+  // near the visible part, so "the first" is whichever one the window starts at, and a press that
+  // scrolls moves the window. Only a thought drawn while it was written stays open, so the test
+  // waits for this one to be drawn so, whatever the page's speed.
+  const watched = turn.locator('.vs-thought', {hasText: /Thought title 12(?!\d)/});
+  await expect(watched.and(turn.locator('[data-live]'))).toBeVisible();
   await expect.poll(gap).toBeLessThan(2);
 
   // Scrolled away, it stays where it is: the same element, and no scroll event moved it. (The
@@ -710,14 +717,14 @@ test('a live turn keeps its scroll position and its element as events arrive', a
   await expect(turn).toContainText('Padded both counters');
   await expect(turn.getByRole('button', {name: /Show all fields/})).toHaveCount(0);
 
-  // The turn is over. The reader had its first thought in view while it was written, so it stays
-  // open rather than collapsing under them; its bold title is a title, never markup.
-  const line = turn.locator('.vs-thought').first().getByRole('button');
+  // The turn is over. The reader had that thought in view while it was written, so it stays open
+  // rather than collapsing under them; its bold title is a title, never markup.
+  const line = watched.getByRole('button');
   await expect(line).toHaveAttribute('aria-expanded', 'true');
-  await expect(turn.locator('.vs-thought strong').first()).toBeVisible();
+  await expect(watched.locator('strong').first()).toBeVisible();
   // A press closes it to a one-line preview, and it stays closed.
   await line.click();
   await expect(line).toHaveAttribute('aria-expanded', 'false');
-  await expect(turn.locator('.vs-thought .vs-collapsible-summary').first()).toBeVisible();
+  await expect(watched.locator('.vs-collapsible-summary')).toBeVisible();
   expect(await turn.evaluate(element => element.textContent?.includes('**'))).toBe(false);
 });
