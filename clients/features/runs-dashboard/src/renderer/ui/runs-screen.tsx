@@ -209,7 +209,13 @@ export function RunsScreen(props: {
         )}
         {props.draft === null ? null : <Draft draft={props.draft} />}
         {tiles.length > 0 ? (
-          loads.map(load => <MachineLine key={load.machine} load={load} />)
+          loads.length > 0 ? (
+            <Stack gap="space-1">
+              {loads.map(load => (
+                <MachineLine key={load.machine} load={load} />
+              ))}
+            </Stack>
+          ) : null
         ) : loads.length > 0 ? (
           loads.map(load => (
             <StepList
