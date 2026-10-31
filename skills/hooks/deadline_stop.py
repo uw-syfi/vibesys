@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Stop gate for optimization runs. Unreadable state fails open.
 
-Running tasks, a current recorded idle reason or full slots release search turns.
+A current idle reason or full slots release search turns. Running tasks do not
+excuse unexplained free slots. Other sessions release after session ownership binds.
 Crons and stop_hook_active never bypass the gate. The run deadline bounds blocking;
 Claude Code additionally caps consecutive tool-free continuations at eight.
 """
