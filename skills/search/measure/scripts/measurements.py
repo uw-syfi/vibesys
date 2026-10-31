@@ -561,7 +561,7 @@ def _cmd_record(args: argparse.Namespace, env: _Env) -> None:
     record = _record_from(args, run, env.host, env.now)
     validate_record(record)
     meta = json.loads((run / "run.json").read_text())
-    if args.role == "base" and meta.get("base_commit", args.commit) != args.commit:
+    if args.role == "base" and meta.get("base_commit") != args.commit:
         raise InvalidInputError("--role base must match run.json base_commit")
     _check_against_history(record, load_records(run))
     with (run / MEASUREMENTS_FILE).open("a", encoding="utf-8") as handle:
@@ -747,7 +747,7 @@ def main(
         with (run / "run.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             _COMMANDS[args.command_name](args, _Env(out=out, now=now, host=host))
-    except InvalidInputError as error:
+    except (InvalidInputError, OSError, ValueError) as error:
         err.write(f"error: {error}\n")
         return 2
     return 0
