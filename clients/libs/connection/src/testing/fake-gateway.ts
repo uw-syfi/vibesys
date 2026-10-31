@@ -17,8 +17,8 @@ import {
   SubscribeRequestSchema,
   SubscribeResponseSchema,
   TailRequestSchema,
-  type WatchRequest,
   validatedFromBinary,
+  type WatchRequest,
   WatchRequestSchema,
 } from '@vibesys/proto';
 import {SUBSCRIBE_METHOD} from '@vibesys/subscription';
