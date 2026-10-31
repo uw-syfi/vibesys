@@ -32,7 +32,6 @@ graft resources/profilers
 graft skills/domains
 graft resources/chat-skills
 prune resources/evaluators/*/native_runner/target
-prune third_party/serving-repos
 
 # Bundle the installable input SDK source without its tests or local artifacts.
 include sdk/vs-bench/pyproject.toml

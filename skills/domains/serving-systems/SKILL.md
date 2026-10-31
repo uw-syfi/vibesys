@@ -145,3 +145,7 @@ Kernel implementation (writing CUDA / Triton / CUTLASS / HIP). For that, use the
 ## Reference repos
 
 The `third_party/serving-repos/` directory at the repository root (outside this skill, never materialized to agents) holds full source trees of vLLM, SGLang, and TensorRT-LLM as git submodules. Engine-source-map references cite paths like `$SERVE_REPOS/<engine>/...`; export `SERVE_REPOS=$(git rev-parse --show-toplevel)/third_party/serving-repos` or substitute inline.
+
+The `SERVE_REPOS=<vibesys-root>/third_party/serving-repos` layout exists only
+in a VibeSys checkout. In another repository, set `SERVE_REPOS` to your own
+reference-engine checkout directory; installing the skill does not install engines.

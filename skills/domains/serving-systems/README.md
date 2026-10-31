@@ -96,3 +96,7 @@ vibesys-skills/
 ## Authoring
 
 See [CLAUDE.md](CLAUDE.md) for skill-authoring conventions used in this repo.
+
+The `SERVE_REPOS=<vibesys-root>/third_party/serving-repos` layout exists only
+in a VibeSys checkout. In another repository, set `SERVE_REPOS` to your own
+reference-engine checkout directory; installing the skill does not install engines.
