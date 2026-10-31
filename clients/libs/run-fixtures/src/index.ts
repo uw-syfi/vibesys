@@ -23,6 +23,7 @@ export {
   operatorCluster,
   sshCluster,
 } from './compute.js';
+export {CORE_BODIES, withCoreRecords} from './core-records.js';
 export {exampleCatalogue, exampleCatalogueWithoutDetails, queueRsCatalogue} from './examples.js';
 export {
   END_OUTCOMES,

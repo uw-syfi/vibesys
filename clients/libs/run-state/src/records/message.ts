@@ -1,12 +1,6 @@
 /** Presentation of recorded values only; lifecycle and measurement authority stay in their folds. */
-import {
-  type ChatRecord,
-  type Lifecycle,
-  Outcome,
-  StageState,
-  StartupStage,
-  type Record as StoreRecord,
-} from '@vibesys/proto';
+import {type ChatRecord, type Lifecycle, Outcome, StageState, StartupStage} from '@vibesys/proto';
+import type {RowBody} from './kinds.js';
 
 function chatMessage(chat: ChatRecord): string {
   const event = chat.event;
@@ -48,7 +42,7 @@ function lifecycleMessage(lifecycle: Lifecycle): string {
   }
 }
 
-export function recordMessage(body: StoreRecord['body']): string {
+export function recordMessage(body: RowBody): string {
   switch (body.case) {
     case 'epochStarted':
       return `Epoch ${body.value.epoch} started`;
@@ -79,21 +73,5 @@ export function recordMessage(body: StoreRecord['body']): string {
       return body.value.message;
     case 'chat':
       return chatMessage(body.value);
-    case 'coreInput':
-      return 'Core input';
-    case 'stepStarted':
-      return `Step ${body.value.tag}: attempt ${body.value.attempt} started`;
-    case 'stepFinished':
-      return `Step ${body.value.tag} finished`;
-    case 'attemptInterrupted':
-      return `Step ${body.value.tag}: attempt ${body.value.attempt} interrupted`;
-    case 'runEnded':
-      return 'Run ended';
-    case 'runStarted':
-      return 'Run started';
-    case 'strategyAdvanced':
-      return 'Search advanced';
-    case undefined:
-      throw new Error('record.body required');
   }
 }

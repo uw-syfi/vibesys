@@ -9,7 +9,16 @@ import {
   TailRequestSchema,
   TailResponseSchema,
 } from '@vibesys/proto';
+import {isCoreBody, type RowBodyCase} from './kinds.js';
 import {recordMessage} from './message.js';
+
+export {
+  type CoreBodyCase,
+  isCoreBody,
+  RECORD_BODY_KIND,
+  type RecordBodyCase,
+  type RowBodyCase,
+} from './kinds.js';
 export const TAIL_RECORDS_METHOD = `/${HostService.typeName}/${HostService.method.tail.name}`;
 export function tailRecordsRequest(runId: string, fromSeq = 1n): Uint8Array {
   return toBinary(TailRequestSchema, create(TailRequestSchema, {runId, fromSeq}));
@@ -21,7 +30,7 @@ export function tailRecordRows(bytes: Uint8Array): readonly RecordRow[] {
 export interface RecordRow {
   readonly seq: string;
   readonly epoch: number;
-  readonly body: NonNullable<StoreRecord['body']['case']>;
+  readonly body: RowBodyCase;
   readonly event: string;
   readonly message: string;
   readonly failure: boolean;
@@ -59,22 +68,27 @@ export function rowsOfRecords(records: readonly StoreRecord[]): readonly RecordR
   return decodeRecordRows(records.map(record => toBinary(RecordSchema, record)));
 }
 
+/** The rows of the records a user reads. Core's bookkeeping records (`isCoreBody`) make no row. */
 export function decodeRecordRows(bytes: readonly Uint8Array[]): readonly RecordRow[] {
-  return bytes.map(value => {
+  return bytes.flatMap(value => {
     const record = fromBinary(RecordSchema, value);
-    if (record.body.case === undefined) throw new Error(`record ${record.seq}: body required`);
-    return {
-      ...(record.body.case === 'blob' ? {attachment: record.body.value} : {}),
-      seq: String(record.seq),
-      epoch: record.epoch,
-      body: record.body.case,
-      event: record.body.case === 'legacyEvent' ? legacyType(record.body.value.json) : '',
-      message: recordMessage(record.body),
-      failure:
-        (record.body.case === 'notice' && record.body.value.severity >= Severity.ERROR) ||
-        (record.body.case === 'lifecycle' &&
-          record.body.value.state.case === 'ended' &&
-          record.body.value.state.value.failure !== undefined),
-    };
+    const {body} = record;
+    if (body.case === undefined) throw new Error(`record ${record.seq}: body required`);
+    if (isCoreBody(body)) return [];
+    return [
+      {
+        ...(body.case === 'blob' ? {attachment: body.value} : {}),
+        seq: String(record.seq),
+        epoch: record.epoch,
+        body: body.case,
+        event: body.case === 'legacyEvent' ? legacyType(body.value.json) : '',
+        message: recordMessage(body),
+        failure:
+          (body.case === 'notice' && body.value.severity >= Severity.ERROR) ||
+          (body.case === 'lifecycle' &&
+            body.value.state.case === 'ended' &&
+            body.value.state.value.failure !== undefined),
+      },
+    ];
   });
 }
