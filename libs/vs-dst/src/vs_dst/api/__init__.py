@@ -22,10 +22,12 @@ from vs_dst._crash_points import (
     crash_point_policy,
 )
 from vs_dst._effects import Effects, RecoverableExecutors
+from vs_dst._host import Hosting, ShellHosting
 from vs_dst._interrupt import MAX_RESUMES, Interrupted, Outcome
 from vs_dst._interruptions import Action, Interruption, Moment
 from vs_dst._simulate import SimulatedRun, simulate
 from vs_dst._snapshots import NondeterministicWorldError, WorldNotCopyableError
+from vs_dst._step_host import StepLoopHosting
 from vs_dst._world import Enact, HostedWorld, RunSetup, World
 
 __all__ = [
@@ -40,6 +42,7 @@ __all__ = [
     "Effects",
     "Enact",
     "HostedWorld",
+    "Hosting",
     "Interrupted",
     "Interruption",
     "Moment",
@@ -47,7 +50,9 @@ __all__ = [
     "Outcome",
     "RecoverableExecutors",
     "RunSetup",
+    "ShellHosting",
     "SimulatedRun",
+    "StepLoopHosting",
     "World",
     "WorldNotCopyableError",
     "crash_point_policy",
