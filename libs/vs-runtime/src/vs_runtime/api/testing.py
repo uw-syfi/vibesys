@@ -31,6 +31,7 @@ from vs_runtime._fake_step_runner import (
     StillRunningAfterCancelError,
     finished_result,
 )
+from vs_runtime._holding_step_runner import HoldAt, HoldingStepRunner
 from vs_runtime._run_clocks import CrashableRunClock, ProbedRunClock
 from vs_runtime._run_environment import HostEnvironment
 from vs_runtime._runs import FakeRunHandle, FakeRuns
@@ -50,7 +51,6 @@ from vs_runtime._shell_kit import (
     request_executors,
     scripted_host,
 )
-from vs_runtime._holding_step_runner import HoldAt, HoldingStepRunner
 from vs_runtime._validation_passes import MemoryValidationPasses
 from vs_runtime.api.stage_work_contracts import (
     StageWorkPlace,

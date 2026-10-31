@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.e2e._interruptible_run import START, TURN, RunSpec, run_process
+from tests.e2e._interruptible_run import ENSURE, ENSURED, START, TURN, RunSpec, run_process
 from tests.e2e.dynamic_loop_harness import _AGENT_CONFIG, LoopInput
 from tests.e2e.scripted_value_run import SEED
 from tests.support.scratch_tree import remove_scratch_tree
@@ -348,6 +348,36 @@ def test_a_run_paused_in_an_agent_turn_resumes_to_the_uninterrupted_result(
     _pause(scenario, first)
     first.release()
     assert first.finish()["status"] == _PARKED
+
+    resumed = scenario.resume(first.run_id)
+
+    _assert_ends_as_uninterrupted(scenario, resumed.finish(), uninterrupted)
+
+
+@pytest.mark.parametrize("at", [ENSURE, ENSURED], ids=["before-the-session", "after-the-session"])
+def test_a_run_paused_as_a_session_is_ensured_resumes_to_the_uninterrupted_result(
+    scenario: Scenario, uninterrupted: dict[str, object], at: str
+) -> None:
+    first = scenario.hold(at, PLANNER_KIND)
+    first.wait_for(lambda line: line.get("held") == f"{at}:{PLANNER_KIND}")
+    _pause(scenario, first)
+    first.release()
+    assert first.finish()["status"] == _PARKED
+
+    resumed = scenario.resume(first.run_id)
+
+    _assert_ends_as_uninterrupted(scenario, resumed.finish(), uninterrupted)
+
+
+@pytest.mark.parametrize("at", [ENSURE, ENSURED], ids=["before-the-session", "after-the-session"])
+def test_a_run_killed_as_a_session_is_ensured_resumes_to_the_uninterrupted_result(
+    scenario: Scenario, uninterrupted: dict[str, object], at: str
+) -> None:
+    """After the session is ensured and before core hears of it is the worst window: the effect
+    happened and nothing records it, so the step runs again on the same tag."""
+    first = scenario.hold(at, PLANNER_KIND)
+    first.wait_for(lambda line: line.get("held") == f"{at}:{PLANNER_KIND}")
+    first.kill()
 
     resumed = scenario.resume(first.run_id)
 

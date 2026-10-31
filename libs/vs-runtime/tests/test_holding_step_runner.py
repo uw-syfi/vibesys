@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -20,6 +21,9 @@ from vs_runtime.api.testing import (
     finished_result,
 )
 from vs_sim.api.testing import VirtualClock, examples, run_virtual
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 DEADLINE_AT = 1_000.0
 HELD = frozenset({core.ObserveOwnedJob})
@@ -74,9 +78,13 @@ class TestHoldingStepRunnerAfterEffect(StepRunnerContract):
 
 
 @settings(max_examples=examples(pr=6, nightly=40), deadline=None)
-@given(where=st.sampled_from(HoldAt), held=st.booleans(), attempt=st.integers(1, 4))
+@given(
+    where=st.sampled_from(HoldAt),
+    build=st.sampled_from([observe, collect]),
+    attempt=st.integers(1, 4),
+)
 def test_a_step_is_held_at_its_window_only_when_its_kind_is_held(
-    where: HoldAt, held: bool, attempt: int
+    where: HoldAt, build: Callable[[core.RequestId], core.Request], attempt: int
 ) -> None:
     clock = VirtualClock()
     runner = FakeStepRunner(clock)
@@ -89,7 +97,8 @@ def test_a_step_is_held_at_its_window_only_when_its_kind_is_held(
         held_at.append((held_attempt, runs))
 
     holding = HoldingStepRunner(runner, HELD, where, hold)
-    step = observe(tag) if held else collect(tag)
+    step = build(tag)
+    held = build is observe
 
     async def main() -> None:
         for earlier in range(1, attempt):

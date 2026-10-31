@@ -88,6 +88,7 @@ if TYPE_CHECKING:
     from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionStore, SkillSelection
     from vs_agent.api.testing import FakeInvocation
     from vs_runtime.api.infrastructure import StopTimer
+    from vs_runtime.api.step_runner import StepRunnerDecorator
     from vs_sandbox.api import ComputeBackendImpl
     from vs_sim.api import Processes
 
@@ -655,6 +656,7 @@ def run_request(  # noqa: PLR0913
     clock: CrashableRunClock | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     slurm_processes: Processes | None = None,
+    step_runner_decorator: StepRunnerDecorator | None = None,
 ) -> LoopRun:
     """Execute a built request through the production host composition.
 
@@ -685,6 +687,7 @@ def run_request(  # noqa: PLR0913
             piped_processes=SubprocessPipedProcessLauncher(),
             git_repository=None,
             slurm_processes=slurm_processes,
+            step_runner_decorator=step_runner_decorator,
         )
     )
     events: list[CoreEvent] = []

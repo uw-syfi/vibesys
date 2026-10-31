@@ -96,7 +96,7 @@ if TYPE_CHECKING:
         RuntimeWorkspaces,
         TrustedEvaluationPlan,
     )
-    from vs_runtime.api.step_runner import StepRunner
+    from vs_runtime.api.step_runner import StepRunner, StepRunnerDecorator
     from vs_sim.api import BlockingRunner, Network, SleepingClock, Threads
 
 
@@ -221,6 +221,8 @@ class CoreResources:
     (a composition test that only reads the services)."""
     run_clock: RunClock | None = None
     """The run's clock, which the loop and the log run on; started when the run's log is open."""
+    step_runner_decorator: StepRunnerDecorator | None = None
+    """Wraps the run's step runner as it is built; a test holds or faults steps through it."""
 
     def __post_init__(self) -> None:
         """Reject a role declaration whose session capability bundle disagrees."""
@@ -344,8 +346,9 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         catalog=catalog,
         steering=None if bound.sessions is None else bound.sessions.turns,
         commit_observer=resources.commit_observer,
-        runner=lambda clock, epoch: build_run_runner(
-            runner_services, _seams(resources), clock=clock, epoch=epoch
+        runner=lambda clock, epoch: _decorated(
+            build_run_runner(runner_services, _seams(resources), clock=clock, epoch=epoch),
+            resources.step_runner_decorator,
         ),
         evaluation=resources.evaluation,
         artifacts=artifacts,
@@ -355,6 +358,11 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         control_inbox=resources.project.state.control_inbox(run_id),
         cancellation_bound_seconds=resources.environment.cancellation_bound_seconds,
     )
+
+
+def _decorated(runner: StepRunner, decorator: StepRunnerDecorator | None) -> StepRunner:
+    """The run's runner, wrapped by the decorator a composition supplied."""
+    return runner if decorator is None else decorator(runner)
 
 
 def _run_clock(resources: CoreResources) -> RunClock:

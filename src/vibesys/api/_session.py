@@ -72,6 +72,7 @@ if TYPE_CHECKING:
         ScopedAgentEnvironment,
         StopTimer,
     )
+    from vs_runtime.api.step_runner import StepRunnerDecorator
     from vs_sandbox.api import ComputeBackendImpl, HostResource
     from vs_sim.api import BlockingRunner, Network, Released, Threads
 
@@ -111,6 +112,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
     blocking: BlockingRunner,
     network: Network,
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore],
+    step_runner_decorator: StepRunnerDecorator | None = None,
 ) -> RunEnd:
     """Compose the private runtime host and run one validated plugin.
 
@@ -136,6 +138,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
         blocking=blocking,
         network=network,
         invocation_store_factory=invocation_store_factory,
+        step_runner_decorator=step_runner_decorator,
     ) as core_host:
         return await drive_core_run(core_host, integration)
 
@@ -347,6 +350,7 @@ class _LocalRunSession:
                 blocking=self._implementations.blocking,
                 network=self._implementations.network,
                 invocation_store_factory=self._implementations.invocation_store_factory,
+                step_runner_decorator=self._implementations.step_runner_decorator,
             )
             succeeded = outcome.status.value == "succeeded"
         except OperatorPaused:

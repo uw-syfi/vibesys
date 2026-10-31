@@ -95,6 +95,7 @@ if TYPE_CHECKING:
         StopTimer,
         WorkspaceRuntime,
     )
+    from vs_runtime.api.step_runner import StepRunnerDecorator
     from vs_sandbox.api import ComputeBackendImpl, DockerSandbox
     from vs_sim.api import BlockingRunner, Network, ReleaseStack
 
@@ -167,6 +168,7 @@ class _ProductHostFactory:
     options: BaseModel
     profiler_preflight: ProfilerPreflight
     stateless_tool_servers: Mapping[str, StatelessToolServer] | None = None
+    step_runner_decorator: StepRunnerDecorator | None = None
     core_services: CoreServices | None = field(default=None, init=False)
     local_evaluation: Evaluation | None = field(default=None, init=False)
     facts: RunFacts | None = field(default=None, init=False)
@@ -424,6 +426,7 @@ class _ProductHostFactory:
                 network=self.network,
                 evaluation_diagnostics=self._evaluation_diagnostic,
                 stateless_tool_servers=stateless_servers,
+                step_runner_decorator=self.step_runner_decorator,
                 commands=agent_runtime.commands,
                 capture_commands=agent_runtime.capture_commands,
                 # No round_label: this instance is built once for the run and
@@ -768,6 +771,7 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore]
     | None = None,
     stateless_tool_servers: Mapping[str, StatelessToolServer] | None = None,
+    step_runner_decorator: StepRunnerDecorator | None = None,
 ) -> AsyncIterator[CoreHost]:
     """Open the host of a plugin whose ``core`` policy the runtime drives.
 
@@ -796,6 +800,7 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
         resume_policy=resume_policy,
         options=options,
         stateless_tool_servers=stateless_tool_servers,
+        step_runner_decorator=step_runner_decorator,
     )
     async with open_run_host(factory.prepare, runner=blocking) as host:
         try:
