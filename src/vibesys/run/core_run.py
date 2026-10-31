@@ -10,6 +10,7 @@ returns. It chooses no policy: the strategy, limits and deadline were fixed by c
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -19,6 +20,7 @@ from vibesys.events import CoreEventType, RunEndingData, RunFailure, RunFailureK
 from vibesys.run.commit_view import ObservedInputs, RecordView
 from vibesys.run.run_clock import start_clock_from
 from vibesys.run.run_controls import OperatorControls, StoredSteerArtifacts
+from vibesys.run.stall_report import StallReporter
 from vibesys.run.store_migration import migrate_saved_run
 from vs_core.api import (
     AttemptPhase,
@@ -185,6 +187,8 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         _unacknowledged_notes(bridge),
         clock,
     )
+    board = StallBoard()
+    stalls = asyncio.ensure_future(StallReporter(board, integration.events).run(clock))
     run_error: BaseException | None = None
     try:
         _resume_operator(log, controls, clock.now(), epoch=epoch, resumed=resumed)
@@ -203,12 +207,14 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
                 clear_backoff_s=CLEAR_BACKOFF_SECONDS,
                 clear_backoff_max_s=CLEAR_BACKOFF_MAX_SECONDS,
             ),
-            StallBoard(),
+            board,
         )
     except BaseException as error:
         run_error = error
         raise
     finally:
+        stalls.cancel()
+        await asyncio.gather(stalls, return_exceptions=True)
         await _leave(bridge, controls, inputs, log.state, run_error)
         _record_ending(log.state, integration)
     return _run_end(rest, log.state, integration.environment_failure.reason)
