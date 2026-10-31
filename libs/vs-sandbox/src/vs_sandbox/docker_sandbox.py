@@ -42,6 +42,7 @@ from vs_sandbox.lifecycle import SandboxLifecycle, SandboxLifecycleHooks
 from vs_sandbox.operator_root import exposed_grant, exposure_message
 from vs_sandbox.operator_root import operator_root as default_operator_root
 from vs_sandbox.process_execution import KILL, PipedStoppableProcess, RemoteProcesses
+from vs_sandbox.step_marks import STEP_TAG_ENV, STEP_TAG_LABEL
 from vs_sim.api import DISCARD, NotReleasedError, ProcessTimeoutError
 
 if TYPE_CHECKING:
@@ -631,8 +632,11 @@ class DockerSandbox(WorkspaceSandbox):
         return cmd
 
     def _label_arguments(self) -> list[str]:
-        """Return the ``docker run`` flags that label the container with its run."""
-        return [] if self._run_id is None else ["--label", f"{RUN_ID_LABEL}={self._run_id}"]
+        """Return the ``docker run`` flags that label the container with its run and its step."""
+        labels = [] if self._run_id is None else [f"{RUN_ID_LABEL}={self._run_id}"]
+        if STEP_TAG_ENV in self._env:
+            labels.append(f"{STEP_TAG_LABEL}={self._env[STEP_TAG_ENV]}")
+        return [flag for label in labels for flag in ("--label", label)]
 
     def _memory_arguments(self) -> list[str]:
         """Return the flags that cap the container's memory, swap included, when it has a cap."""

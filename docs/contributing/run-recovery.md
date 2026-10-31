@@ -53,7 +53,7 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
 | `fold(log)` and `decide(state, now) -> actions` in `vs_core` | built, dormant (#3475 item 4a) |
 | Runner loop, `StepRunner` Protocol, `FakeStepRunner`, contract suite | built and dormant: `vs_runtime.api.step_runner` and `vs_runtime.api.testing`; no run selects it (#3475 item 4b) |
 | Runners: agent turn, workspace, registered operation, adoption | unbuilt; `libs/vs-slurm/src/vs_slurm/ledger.py` is the model |
-| Runners: Slurm and local evaluation (`SlurmJobStepRunner`, `LocalJobStepRunner`) | built and dormant; the local runner reaps what a dead process left through a `StageWorkReaper`; `MarkedStageWorkReaper` finds the host processes of a local evaluation by the `VIBESYS_STEP_TAG` mark its candidate session sets (Linux), and Docker candidate containers are not yet reaped by tag |
+| Runners: Slurm and local evaluation (`SlurmJobStepRunner`, `LocalJobStepRunner`) | built and dormant; the local runner reaps what a dead process left through a `StageWorkReaper`: `ProcessStageWorkReaper` ends the stage processes and `ContainerStageWorkReaper` the Docker candidate containers of the tag, both found by the step mark (see [Marks](#marks-on-local-stage-work)) |
 | Pause drains within a deadline and records `Parked` | in progress (#3475 item 1) |
 | `vs-dst` kills and pauses at every log write and every await | in progress (#3475 item 2) |
 | `state.pb` as a cache, one-append commit | unbuilt |
@@ -179,6 +179,18 @@ The ledger keys a request by a hash of the content the job reads, and `clear(tag
 
 `InspectRequest`, `InspectTurn`, `InspectOwnedJob`, `CancelOwnedResource` and `BlockRequest` are not in the
 table because they exist only to settle unknown outcomes. They are deleted.
+
+### Marks on local stage work
+
+A local evaluation runs its stages in a throwaway candidate session opened under `<run id>:<evaluation handle>`. Every stage command carries that mark as `VIBESYS_STEP_TAG` in its environment, and its process group leader carries it as an argument; a Docker candidate container also carries it as the `vibesys.step-tag` label. The run id is part of the mark because two runs on one host can use the same request id. What `clear` can find depends on what the host shows:
+
+| Host | Shown | Ends | Guarantee against pid reuse |
+|---|---|---|---|
+| Linux | the environment of every process (`/proc`) | each marked process, including a `setsid` descendant | a pidfd is opened before the process's start time is checked, so a reused pid is never signalled |
+| macOS | only arguments, so only the group leader | the leader's whole group | none atomic: the pid and its start second are checked, then the group is signalled; a wrong kill needs the pid space to wrap within that second and a new group leader to take the pid |
+| Docker | the container label, read from the daemon | the container, listed again afterwards to confirm | the container id |
+
+Not found on macOS: the members of a group whose leader died first, and a `setsid` child, because nothing visible carries the mark any more. `clear` then reports a clean host although they run. The leader is a shell that waits for its command and never replaces itself, so it dies before its group only by an outside `SIGKILL`. A durable record of the group, kept through `Project`, would close this; it is not built. Partial output is never reset: each open of a stage stream is a new stream with a new id, so a re-run starts empty and the dead attempt's bytes stay as its history.
 
 ### What fits none
 

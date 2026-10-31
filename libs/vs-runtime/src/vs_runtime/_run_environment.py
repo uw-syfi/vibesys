@@ -93,6 +93,7 @@ from vs_runtime._run_environment_facts import (
     RunEnvironmentPresentationFacts,
     SkyPilotEnvironmentFacts,
 )
+from vs_runtime._stage_marks import stage_mark
 from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
 from vs_runtime._trusted_evaluation_preparation import (
@@ -892,7 +893,9 @@ def _starting_container(
 
 def _step_mark(request: RunEnvironmentRequest) -> dict[str, str]:
     """The environment that marks the session's commands as its step's, or none."""
-    return {} if request.step_tag is None else step_tag_env(request.step_tag)
+    if request.step_tag is None:
+        return {}
+    return step_tag_env(stage_mark(request.run_id, request.step_tag))
 
 
 def _reporting_tool_builds(request: RunEnvironmentRequest) -> ToolBuildOutputOpener | None:
