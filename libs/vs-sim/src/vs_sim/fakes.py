@@ -498,6 +498,27 @@ NO_PROCESSES = RefusingProcesses()
 """Shared :class:`RefusingProcesses`; it holds no state."""
 
 
+class RefusingExitWaiter:
+    """An :class:`~vs_sim.exit_wait.ExitWaiter` whose every call fails with ``error``.
+
+    For a test of what a process group's owner does when it cannot watch its leader exit.
+    """
+
+    def __init__(self, error: OSError) -> None:
+        """Raise ``error`` from every wait."""
+        self._error = error
+
+    def wait(self, pid: int) -> None:
+        """Fail: this waiter cannot watch ``pid``."""
+        del pid
+        raise self._error
+
+    def has_exited(self, pid: int) -> bool:
+        """Fail: this waiter cannot tell whether ``pid`` exited."""
+        del pid
+        raise self._error
+
+
 @dataclass(frozen=True)
 class PipedStart:
     """One request a :class:`FakePipedProcessLauncher` received."""
