@@ -511,3 +511,20 @@ def test_unmeasured_judge_releases_for_measurement_then_rejudge(tmp_path: Path) 
     assert not run.state()["items"]["x"]["judge_pass"]
     assert run.call("transition", "--id", "x", "--to", "won", "--reason", "claim") == 2
     assert run.call("transition", "--id", "x", "--to", "returned", "--reason", "measure next") == 0
+
+
+def test_early_flag_after_wrap_up_does_not_log_early_completion(tmp_path: Path) -> None:
+    run = Run(tmp_path)
+    run.record(BASE, [10, 11, 12], 1)
+    assert run.call("finish", "--early", "--reason", "work complete", seconds=1350) == 0
+    assert run.state()["decisions"] == []
+
+
+def test_legacy_run_can_be_closed_after_a_crash(tmp_path: Path) -> None:
+    run = Run(tmp_path)
+    state = run.state()
+    del state["session_id"]
+    (run.path / "run.json").write_text(json.dumps(state))
+    assert run.call("abort", "--reason", "recover old lead") == 0
+    assert run.state()["session_id"] is None
+    assert not (run.path.parent / "active").exists()

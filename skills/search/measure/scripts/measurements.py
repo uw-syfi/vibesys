@@ -212,8 +212,11 @@ def task_fingerprint(task_dir: Path) -> str:
         p
         for p in task_dir.rglob("*")
         if p.is_file()
+        and p.suffix not in {".pyc", ".pyo"}
+        and p.relative_to(task_dir).parts[:2] != (".vibesys", "state")
         and not any(
-            part in _SKIPPED_PARTS or part == ".env" or part.startswith(".env.") for part in p.parts
+            part in _SKIPPED_PARTS or part == ".env" or part.startswith(".env.")
+            for part in p.relative_to(task_dir).parts
         )
     )
     for path in files:

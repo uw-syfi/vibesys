@@ -82,3 +82,7 @@ An `unmeasured` judge records no pass. Transition judging -> returned, measure, 
 | Search | No free slots, or current reason | Release |
 | Wrap-up | Any | Block with exact status.next |
 | Deadline / finished / other session | Any | Release |
+
+Legacy schema-1 runs without `session_id` remain readable: the next transaction writes
+the new field, and the first Stop binds the lead session. This allows `abort` to recover
+a run created before session ownership was added. Other missing or unknown fields fail.

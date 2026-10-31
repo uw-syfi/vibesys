@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import signal
 import subprocess
@@ -61,9 +62,13 @@ def serve(
 ) -> int:
     """Execute client only after readiness; always stop and verify the owned group."""
     attempts = 50
-    if timeout <= 0 or not all(
-        isinstance(argv, list) and argv and all(isinstance(v, str) for v in argv)
-        for argv in (service, probe, client)
+    if (
+        not math.isfinite(timeout)
+        or timeout <= 0
+        or not all(
+            isinstance(argv, list) and argv and all(isinstance(v, str) for v in argv)
+            for argv in (service, probe, client)
+        )
     ):
         raise ServiceError(Reason.INVALID)
     handle = host.start(service)
