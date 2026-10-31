@@ -202,9 +202,12 @@ graph TD
     vs_agent --> vs_sandbox
     vs_agent --> vs_sim
     vs_async_ops --> vs_sim
+    vs_core --> vs_decode
     vs_core --> vs_proto
     vs_dst --> vs_core
     vs_dst --> vs_project
+    vs_dst --> vs_proto
+    vs_dst --> vs_runlog
     vs_dst --> vs_runtime
     vs_dst --> vs_sim
     vs_evaluation --> vs_decode

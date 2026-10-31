@@ -8,7 +8,13 @@ import pytest
 from google.protobuf import descriptor_pool, json_format, message_factory
 from hypothesis import given
 from hypothesis import strategies as st
-from protobuf import DescFieldValueEnum, DescFieldValueScalar, Message, ScalarType
+from protobuf import (
+    DescFieldValueEnum,
+    DescFieldValueList,
+    DescFieldValueScalar,
+    Message,
+    ScalarType,
+)
 from protobuf.wkt.google.protobuf.any_pb import Any as ProtoAny
 from protobuf.wkt.google.protobuf.descriptor_pb import FileDescriptorSet
 from protovalidate import validate as schema_validate
@@ -692,9 +698,18 @@ def test_all_new_enums_are_closed_and_text_is_bounded(name: str) -> None:
             assert rule_value(string, "max_bytes") == 65536 or field.name.endswith("sha256")
 
 
+_INVALID_ITEMS = {ScalarType.STRING: "", ScalarType.BYTES: b"", ScalarType.DOUBLE: -1.0}
+"""An item each kind of constrained list rejects: empty text or bytes, a negative time."""
+
+
 @pytest.mark.parametrize(("name", "field"), constrained_fields("repeated"))
-def test_identifier_lists_reject_empty_items(name: str, field: str) -> None:
-    assert_invalid(changed(_MESSAGES[name], **{field: [""]}), field)
+def test_constrained_lists_reject_an_invalid_item(name: str, field: str) -> None:
+    descriptor = next(f for f in _MESSAGES[name].desc().fields if f.name == field)
+    assert isinstance(descriptor.value, DescFieldValueList)
+    element = descriptor.value.element
+    assert isinstance(element, ScalarType)
+    item = _INVALID_ITEMS[element]
+    assert_invalid(changed(_MESSAGES[name], **{field: [item]}), field)
 
 
 @given(

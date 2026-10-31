@@ -5,7 +5,9 @@ from vs_runlog._confirmed_log import (
     Appended,
     ConfirmedLog,
     CoreMessage,
+    ProjectionWriter,
     RunLogRecords,
+    SharedWriter,
     Uncertain,
 )
 from vs_runlog._epoch import CurrentEpoch, current_epoch, epoch_has_ended
@@ -42,6 +44,7 @@ __all__ = [
     "FileSync",
     "HeadObserver",
     "OsFileSync",
+    "ProjectionWriter",
     "ReadStop",
     "RunLaunchLockedError",
     "RunLock",
@@ -49,6 +52,7 @@ __all__ = [
     "RunLogReader",
     "RunLogRecords",
     "RunLogStopReason",
+    "SharedWriter",
     "Uncertain",
     "WriterIdentityState",
     "assert_run_unlocked",

@@ -11,8 +11,8 @@ import {
   Chip,
   Row,
   Stack,
+  type StatusTone,
   Text,
-  type TextTone,
 } from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
@@ -91,10 +91,11 @@ function fixPress(
 }
 
 const RANK: Readonly<Record<CheckState, number>> = {fail: 0, warn: 1, pending: 2, ok: 3};
-const TONES: Readonly<Record<CheckState, TextTone>> = {
+/** The tone the one-line state of the checks is drawn in: a check being made is in progress. */
+const TONES: Readonly<Record<CheckState, StatusTone>> = {
   fail: 'err',
   warn: 'warn',
-  pending: 'muted',
+  pending: 'live',
   ok: 'ok',
 };
 
@@ -232,10 +233,10 @@ function Checks(props: {
   const status = readinessStatus(checks);
   return (
     <Stack gap="space-3">
-      <Text variant="section">Ready to start</Text>
-      <Text tone={TONES[status.state]} variant="body-strong">
-        {status.text}
-      </Text>
+      <Row gap="space-3" align="center" wrap>
+        <Text variant="section">Ready to start</Text>
+        <Chip label={status.text} tone={TONES[status.state]} dot />
+      </Row>
       <CheckList items={items} />
     </Stack>
   );
