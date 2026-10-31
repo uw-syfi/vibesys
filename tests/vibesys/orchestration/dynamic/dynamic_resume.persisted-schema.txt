@@ -144,7 +144,7 @@ Failure.superseded_by optional {"anyOf":[{"type":"string"},{"type":"null"}],"def
 Failure.turn_failure optional {"anyOf":[{"$ref":"#/$defs/TurnFailureKind"},{"type":"null"}],"default":null}
 Failure.turns optional {"anyOf":[{"type":"integer"},{"type":"null"}],"default":null}
 FailureKind {"enum":["stopped","parent-unverified","refused","ended","out-of-budget","turn-failed","invalid-reply","render-failed","wait-refused","checkpoint-declined","no-changed-candidate","implementation-failed","review-rejected","no-trusted-evidence","evidence-refused","evidence-undecodable","profile-capture-unavailable","turn-limit","repeated-turn","not-measured","merge-refused","merge-unsound","merge-regressed"],"type":"string"}
-FailureReason {"enum":["timed-out","workspace-closed","owner-gone","refused","lost","invalid-reply","render-failed","turn-failed","wait-refused","queue-budget-spent","out-of-budget","measurement-untrusted"],"type":"string"}
+FailureReason {"enum":["timed-out","workspace-closed","owner-gone","refused","lost","invalid-reply","render-failed","turn-failed","wait-refused","queue-budget-spent","out-of-budget","measurement-untrusted","attempts-exhausted"],"type":"string"}
 FinishedWork {"additionalProperties":false,"type":"object"}
 FinishedWork.failure optional {"anyOf":[{"$ref":"#/$defs/Failure"},{"type":"null"}],"default":null}
 FinishedWork.main_base optional {"anyOf":[{"$ref":"#/$defs/RevisionRef"},{"type":"null"}],"default":null}

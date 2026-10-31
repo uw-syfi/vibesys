@@ -109,6 +109,7 @@ def _failed_facts() -> dict[FailureReason, st.SearchStrategy[Failed]]:
                 FailureReason.RENDER_FAILED,
                 FailureReason.OUT_OF_BUDGET,
                 FailureReason.MEASUREMENT_UNTRUSTED,
+                FailureReason.ATTEMPTS_EXHAUSTED,
             )
         },
     }

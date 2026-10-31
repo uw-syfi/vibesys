@@ -7,6 +7,7 @@ import "google/protobuf/descriptor.proto";
 import "google/protobuf/timestamp.proto";
 import "vibesys/store/v1/chat.proto";
 import "vibesys/store/v1/content.proto";
+import "vibesys/store/v1/core_input.proto";
 import "vibesys/store/v1/epoch.proto";
 import "vibesys/store/v1/intent.proto";
 import "vibesys/store/v1/lifecycle.proto";
@@ -44,6 +45,11 @@ message Record {
     message: "an input measurement amendment must match its metric body"
     expression: "!has(this.input_measurement) || (has(this.metric) && has(this.input_measurement.measured) && this.input_measurement.measured.series == this.metric.series && this.input_measurement.measured.value == this.metric.value && this.input_measurement.measured.span == this.metric.span)"
   };
+  option (buf.validate.message).cel = {
+    id: "record.core_records"
+    message: "core records require seq, epoch, at and clock"
+    expression: "!(has(this.core_input) || has(this.step_started) || has(this.step_finished) || has(this.attempt_interrupted)) || (this.seq > 0u && this.epoch > 0u && has(this.at) && has(this.clock))"
+  };
   uint64 seq = 1;
   google.protobuf.Timestamp at = 2;
   uint32 epoch = 3;
@@ -72,6 +78,11 @@ message Record {
     ChatRecord chat = 19;
     // A declaration grows inside the current epoch; this never opens an epoch.
     EpochStarted declaration_amended = 20;
+    // The records core folds into its state; see docs/contributing/run-recovery.md.
+    CoreInput core_input = 23;
+    StepStarted step_started = 24;
+    StepFinished step_finished = 25;
+    AttemptInterrupted attempt_interrupted = 26;
   }
 }
 
