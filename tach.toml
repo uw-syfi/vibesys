@@ -2135,7 +2135,7 @@ depends_on = ["vs_proto", "vibesys.api.host_operations._candidate", "vibesys.api
 
 [[interfaces]]
 from = ["vibesys.api.host_operations"]
-expose = ["api", "api\\..*"]
+expose = ["api", "api\\..*", "reads"]
 
 [[modules]]
 path = "vibesys.api.host_operations._candidate"

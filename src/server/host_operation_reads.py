@@ -4,6 +4,10 @@ The adapter translates probe/catalog results into generated messages. It owns
 neither the helper channel nor a live run. Read refusals retain their closed
 category; callers receive a validated registry response.
 
+``vibesys host <read>`` is a new process per read, so every module this one loads at
+import is paid by every read. It therefore names the host models only for type checking and
+loads each at the read or refusal that needs it.
+
 Public surface: HostReadFacts, HostReadSource, ReadRefusedError,
 read_failure_category, answer_registered_read and stream_saved_runs.
 """
@@ -14,19 +18,21 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from server.host_api import HelperError, RunPreflightRequest
-from server.host_compute import ComputeError
-from server.host_envelope import HelperErrorCode
-from server.host_examples import ProjectLookupError
-from server.host_run_summary import UsageWindowRequest
-
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
     from types import ModuleType
 
     from server.host_agent_logins import AgentLogin
-    from server.host_api import HarnessOption, RunDigest, RunDigestUnreadable, RunPreflightReply
+    from server.host_api import (
+        HarnessOption,
+        HelperError,
+        RunDigest,
+        RunDigestUnreadable,
+        RunPreflightReply,
+        RunPreflightRequest,
+    )
     from server.host_compute import ComputeSettings
+    from server.host_envelope import HelperErrorCode
     from server.host_examples import ExampleDestination, ExampleList, TaskGoal, TaskList
     from server.host_machine_facts import MachineDescription
     from server.host_run_reads import ProjectRun
@@ -66,10 +72,6 @@ class _ReadCompute(Protocol):
     def settings(self) -> ComputeSettings: ...
 
 
-class _ReadMachine(Protocol):
-    def harness_clis(self) -> tuple[str, ...]: ...
-
-
 class _ReadLogins(Protocol):
     def list(self) -> tuple[AgentLogin, ...]: ...
 
@@ -105,11 +107,6 @@ class HostReadFacts(Protocol):
     @property
     def clock(self) -> Clock:
         """Wall-clock epoch seconds."""
-        ...
-
-    @property
-    def machine(self) -> _ReadMachine:
-        """Installed provider probes."""
         ...
 
     @property
@@ -175,7 +172,7 @@ class HostReadSource:
         if request.since is None or request.until is None:
             message = "since and until: a window needs both ends"
             raise ValueError(message)
-        legacy = UsageWindowRequest(
+        legacy = import_module("server.host_run_summary").UsageWindowRequest(
             request_id=request.request_id,
             deadline_ms=_wire().host_operations.UsageWindow.total_ms,
             project=request.project,
@@ -202,17 +199,13 @@ class HostReadSource:
         ]
 
     def harnesses(self) -> list[pb.HarnessOption]:
-        """Project vetted harness facts; ordering belongs to the product handler."""
+        """Project vetted harness facts; the catalog's order is the answer's order."""
         return [
             _wire().from_mapping(
                 _wire().host_payloads.HarnessOption, option.model_dump(mode="json")
             )
             for option in self._host.harnesses()
         ]
-
-    def installed_harnesses(self) -> tuple[str, ...]:
-        """Observe the installed providers once for display ordering."""
-        return self._host.machine.harness_clis()
 
     def inspect_destination(self, example: str, destination: str) -> pb.InspectDestinationResponse:
         """What creating ``example`` would find at ``destination``."""
@@ -260,6 +253,7 @@ class HostReadSource:
 
     def preflight(self, request: pb.PreflightRunRequest) -> pb.PreflightRunResponse:
         """Revalidate the temporary legacy projection before invoking its probe owner."""
+        models = import_module("server.host_api")
         payload = _wire().to_mapping(request)
         # Legacy diagnostics choose the first role in insertion order. Protobuf
         # maps have no ordering, so retain only that display preference here.
@@ -269,11 +263,11 @@ class HostReadSource:
                 message = "agents: expected a projected role mapping"
                 raise TypeError(message)
             payload["agents"] = {role: agents[role] for role in self._role_order}
-        legacy = RunPreflightRequest.model_validate(
+        legacy = models.RunPreflightRequest.model_validate(
             {**payload, "deadline_ms": _wire().host_operations.PreflightRun.total_ms}
         )
         result = self._preflight(legacy)
-        if isinstance(result, HelperError):
+        if isinstance(result, models.HelperError):
             raise ReadRefusedError(result)
         return _wire().from_mapping(
             _wire().host_payloads.PreflightRunResponse,
@@ -293,45 +287,46 @@ def read_failure_category(code: HelperErrorCode) -> FailureCategory:
     the file's owner is not this helper.
     """
     failure = _wire().FailureCategory
+    codes = import_module("server.host_envelope").HelperErrorCode
     categories = {
-        HelperErrorCode.INVALID_REQUEST: failure.INVALID_INPUT,
-        HelperErrorCode.TASK_INVALID: failure.INVALID_INPUT,
-        HelperErrorCode.PATH_NOT_DIRECTORY: failure.INVALID_INPUT,
-        HelperErrorCode.UNVETTED_HARNESS: failure.INVALID_INPUT,
-        HelperErrorCode.CLUSTER_INVALID: failure.INVALID_INPUT,
-        HelperErrorCode.INCOMPATIBLE: failure.CONFIGURATION,
-        HelperErrorCode.EXAMPLES_UNAVAILABLE: failure.CONFIGURATION,
-        HelperErrorCode.COMPUTE_CONFIG_UNREADABLE: failure.CONFIGURATION,
-        HelperErrorCode.MODAL_NOT_CONFIGURED: failure.CONFIGURATION,
-        HelperErrorCode.DUPLICATE_REQUEST_ID: failure.CONFLICT,
-        HelperErrorCode.DESTINATION_EXISTS: failure.CONFLICT,
-        HelperErrorCode.DESTINATION_NESTED: failure.CONFLICT,
-        HelperErrorCode.NOT_NESTED: failure.CONFLICT,
-        HelperErrorCode.CLUSTER_EXISTS: failure.CONFLICT,
-        HelperErrorCode.UNKNOWN_WATCH: failure.NOT_FOUND,
-        HelperErrorCode.PROJECT_MISSING: failure.NOT_FOUND,
-        HelperErrorCode.PROJECT_UNINITIALIZED: failure.NOT_FOUND,
-        HelperErrorCode.PATH_MISSING: failure.NOT_FOUND,
-        HelperErrorCode.RUN_GONE: failure.NOT_FOUND,
-        HelperErrorCode.UNKNOWN_INSTANCE: failure.NOT_FOUND,
-        HelperErrorCode.UNKNOWN_LOG_STREAM: failure.NOT_FOUND,
-        HelperErrorCode.UNKNOWN_EXAMPLE: failure.NOT_FOUND,
-        HelperErrorCode.UNKNOWN_RUN: failure.NOT_FOUND,
-        HelperErrorCode.UNKNOWN_CLUSTER: failure.NOT_FOUND,
-        HelperErrorCode.UNKNOWN_PROVIDER: failure.NOT_FOUND,
-        HelperErrorCode.PERMISSION_DENIED: failure.PERMISSION_DENIED,
-        HelperErrorCode.CONNECT_DENIED: failure.PERMISSION_DENIED,
-        HelperErrorCode.CLUSTER_READ_ONLY: failure.PERMISSION_DENIED,
-        HelperErrorCode.HANDSHAKE_REQUIRED: failure.UNSUPPORTED,
-        HelperErrorCode.FEATURE_NOT_NEGOTIATED: failure.UNSUPPORTED,
-        HelperErrorCode.CHANNEL_BUSY: failure.RESOURCE_EXHAUSTED,
-        HelperErrorCode.CONNECT_FAILED: failure.TRANSIENT,
-        HelperErrorCode.DEADLINE_EXCEEDED: failure.DEADLINE_EXCEEDED,
-        HelperErrorCode.LOG_STORE_CORRUPT: failure.INTERNAL,
-        HelperErrorCode.PROJECT_CREATE_FAILED: failure.INTERNAL,
-        HelperErrorCode.CLUSTER_TEST_FAILED: failure.INTERNAL,
-        HelperErrorCode.READER_FAILED: failure.INTERNAL,
-        HelperErrorCode.INTERNAL: failure.INTERNAL,
+        codes.INVALID_REQUEST: failure.INVALID_INPUT,
+        codes.TASK_INVALID: failure.INVALID_INPUT,
+        codes.PATH_NOT_DIRECTORY: failure.INVALID_INPUT,
+        codes.UNVETTED_HARNESS: failure.INVALID_INPUT,
+        codes.CLUSTER_INVALID: failure.INVALID_INPUT,
+        codes.INCOMPATIBLE: failure.CONFIGURATION,
+        codes.EXAMPLES_UNAVAILABLE: failure.CONFIGURATION,
+        codes.COMPUTE_CONFIG_UNREADABLE: failure.CONFIGURATION,
+        codes.MODAL_NOT_CONFIGURED: failure.CONFIGURATION,
+        codes.DUPLICATE_REQUEST_ID: failure.CONFLICT,
+        codes.DESTINATION_EXISTS: failure.CONFLICT,
+        codes.DESTINATION_NESTED: failure.CONFLICT,
+        codes.NOT_NESTED: failure.CONFLICT,
+        codes.CLUSTER_EXISTS: failure.CONFLICT,
+        codes.UNKNOWN_WATCH: failure.NOT_FOUND,
+        codes.PROJECT_MISSING: failure.NOT_FOUND,
+        codes.PROJECT_UNINITIALIZED: failure.NOT_FOUND,
+        codes.PATH_MISSING: failure.NOT_FOUND,
+        codes.RUN_GONE: failure.NOT_FOUND,
+        codes.UNKNOWN_INSTANCE: failure.NOT_FOUND,
+        codes.UNKNOWN_LOG_STREAM: failure.NOT_FOUND,
+        codes.UNKNOWN_EXAMPLE: failure.NOT_FOUND,
+        codes.UNKNOWN_RUN: failure.NOT_FOUND,
+        codes.UNKNOWN_CLUSTER: failure.NOT_FOUND,
+        codes.UNKNOWN_PROVIDER: failure.NOT_FOUND,
+        codes.PERMISSION_DENIED: failure.PERMISSION_DENIED,
+        codes.CONNECT_DENIED: failure.PERMISSION_DENIED,
+        codes.CLUSTER_READ_ONLY: failure.PERMISSION_DENIED,
+        codes.HANDSHAKE_REQUIRED: failure.UNSUPPORTED,
+        codes.FEATURE_NOT_NEGOTIATED: failure.UNSUPPORTED,
+        codes.CHANNEL_BUSY: failure.RESOURCE_EXHAUSTED,
+        codes.CONNECT_FAILED: failure.TRANSIENT,
+        codes.DEADLINE_EXCEEDED: failure.DEADLINE_EXCEEDED,
+        codes.LOG_STORE_CORRUPT: failure.INTERNAL,
+        codes.PROJECT_CREATE_FAILED: failure.INTERNAL,
+        codes.CLUSTER_TEST_FAILED: failure.INTERNAL,
+        codes.READER_FAILED: failure.INTERNAL,
+        codes.INTERNAL: failure.INTERNAL,
     }
     found = categories.get(code)
     if found is None:
@@ -340,15 +335,33 @@ def read_failure_category(code: HelperErrorCode) -> FailureCategory:
     return found
 
 
+class _DomainRefusalError(Exception):
+    """The shape of the errors ``_domain_refusals`` names: one carrying its helper code."""
+
+    code: HelperErrorCode
+
+
+def _domain_refusals() -> tuple[type[_DomainRefusalError], ...]:
+    """The errors a host fact raises to refuse a read, each carrying its helper code.
+
+    An ``except`` clause evaluates its types only once an error is raised, so a read that
+    succeeds never loads the modules that define them.
+    """
+    return (
+        import_module("server.host_examples").ProjectLookupError,
+        import_module("server.host_compute").ComputeError,
+    )
+
+
 def answer_registered_read(cli: str, payload: bytes, source: HostReadSource) -> bytes:
     """Run one registered read for ``vibesys host`` and return the envelope bytes."""
-    operations = import_module("vibesys.api.host_operations.api")
+    operations = import_module("vibesys.api.host_operations.reads")
     try:
         return operations.execute_host_read(payload, source, cli=cli)
     except ReadRefusedError as error:
         category = read_failure_category(error.refusal.code)
         return operations.host_read_failure(category, error.refusal.message)
-    except (ProjectLookupError, ComputeError) as error:
+    except _domain_refusals() as error:
         return operations.host_read_failure(read_failure_category(error.code), str(error))
 
 
