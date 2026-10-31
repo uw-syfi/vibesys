@@ -271,8 +271,9 @@ function Body(props: UsageScreenProps): JSX.Element {
 export function UsageScreen(props: UsageScreenProps): JSX.Element {
   const {state, actions} = props;
   return (
-    <Page width="wide">
-      <Stack gap="space-5">
+    <Page
+      width="wide"
+      header={
         <Row justify="between" align="center" wrap>
           <Text as="h1" variant="title">
             Usage
@@ -294,8 +295,9 @@ export function UsageScreen(props: UsageScreenProps): JSX.Element {
             <Button text="Refresh" variant="secondary" size="sm" press={actions.refresh} />
           </Row>
         </Row>
-        <Body {...props} />
-      </Stack>
+      }
+    >
+      <Body {...props} />
     </Page>
   );
 }

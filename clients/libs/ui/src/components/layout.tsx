@@ -69,7 +69,8 @@ export function Reserve(props: {readonly children: ReactNode}): JSX.Element {
  * scrolls: the `header` (a title, a logo, the page's actions) and the `footer` (the page's primary
  * action) stay fully in view and the body between them scrolls on its own, with a faint hint at
  * its bottom edge while more lies below. A header or footer is for a page whose body can outgrow
- * the window.
+ * the window. The header is also the page's header row for the window's toasts, which sit just
+ * below it: put the title row and its actions there, not in the body.
  */
 export function Page(props: {
   readonly width?: PageWidth;
