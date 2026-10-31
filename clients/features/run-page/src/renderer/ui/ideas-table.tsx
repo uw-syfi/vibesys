@@ -1,158 +1,391 @@
-/** A flat, windowed list of ideas. Ordering and filtering are presentation-only. */
-import {EmptyState, markdownToPlain, PickList, PickRow, type RowBadge, Stack} from '@vibesys/ui';
-import {type JSX, useMemo} from 'react';
-import {vsInputCell} from '../../state/idea-words.js';
+/**
+ * The ideas of the run as a table: what each built on, its status and cause, what it did to each
+ * objective, its multiple of the input, its share of the gain and its agent time, under the status
+ * chips and the search. Every figure is the state's (`ideasTable`); this draws them. A row pressed
+ * is the idea the charts single out, and the rows that built it carry a bar.
+ */
 import {
-  ageWords,
-  baselineColumns,
-  effectWords,
-  type IdeaEffects,
-  type IdeaRow,
+  CellInline,
+  CellLines,
+  CellLink,
+  CellMark,
+  Chip,
+  ColumnList,
+  DotLegend,
+  type LegendItem,
+  type ListColumn,
+  markdownToPlain,
+  Row,
+  SearchBox,
+  Stack,
+  StatusDot,
+  type StatusTone,
+  Text,
+  type TextTone,
+} from '@vibesys/ui';
+import type {JSX} from 'react';
+import {
+  compactValue,
+  endOf,
+  formatValue,
+  type IdeaStatus,
   type IdeasFilter,
-  type ImplementerOutcomes,
-  ideasView,
-  noIdeasWords,
-  type RunModel,
+  type IdeasSort,
+  type IdeasTable as IdeasTableView,
+  type IdeaTableRow,
+  ideasTable,
+  NO_CLEAR_CHANGE,
+  type ObjectiveCell,
   type RunPageAction,
+  ratio,
+  runningWords,
+  type TableColumn,
 } from '../../state/index.js';
 import type {ViewBase} from './views/props.js';
 
-export type IdeasSort = 'newest' | 'oldest' | 'result';
+const STATUS_TONES: Readonly<Record<IdeaStatus, StatusTone>> = {
+  running: 'live',
+  faster: 'ok',
+  'no-gain': 'neutral',
+  'not-measured': 'warn',
+  dropped: 'neutral',
+  failed: 'err',
+};
 
-const capitalized = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
+const CHANGE_TONES: Readonly<Record<NonNullable<ObjectiveCell['change']>, TextTone>> = {
+  faster: 'ok',
+  slower: 'err',
+  same: 'muted',
+};
 
-/** What an idea built on, as the line under its title words it; empty while it is planned. */
-function fromWords(row: IdeaRow): string {
-  const {kind, label} = row.trail;
-  if (kind === 'own work') return 'from its own work';
-  return label === '…' ? '' : `from ${label}`;
-}
+/** What an empty cell says. */
+const NONE = '–';
 
-function effectOf(id: string, effects: IdeaEffects): string {
-  const effect = effects.get(id);
-  return effect === undefined ? '' : effectWords(effect);
+/**
+ * How a multiple within noise of the input reads: the muted multiple (`ratio`), `No clear change`
+ * (`words`), or the words where the cell has room and the multiple where it has not (`both`).
+ */
+type FlatReading = 'ratio' | 'words' | 'both';
+
+/** A reading's multiple as a cell says it: the multiple in its tone, and a flat one as `flat` says. */
+function Multiple(props: {
+  readonly cell: ObjectiveCell;
+  readonly flat: FlatReading;
+}): JSX.Element | null {
+  const {multiple, change} = props.cell;
+  if (multiple === null || change === null) return null;
+  const figure = (
+    <Text variant="code" tone={CHANGE_TONES[change]}>
+      {ratio(multiple)}
+    </Text>
+  );
+  if (change !== 'same' || props.flat === 'ratio') return figure;
+  const words = (
+    <Text variant="code" tone="muted">
+      {NO_CLEAR_CHANGE}
+    </Text>
+  );
+  if (props.flat === 'words') return words;
+  return (
+    <>
+      <span data-optional>{words}</span>
+      <span data-narrow-only>{figure}</span>
+    </>
+  );
 }
 
 /**
- * The line under an idea's title: what its status badge does not say. What it built on (`from
- * best`), the framework's verdict on its effect against that base (`within noise of its base`),
- * why it failed when the span says, and what the implementer reported.
+ * The cell of one objective: a dot where the reading set a best, the value, the multiple. The value
+ * is compact (`6.05M`), its exact figure the cell's hint. While the list is narrow the cell keeps the
+ * multiple alone, for every objective: a run of one objective draws it here, where the `vs input`
+ * column that states it while the list is wide has given way.
  */
-export function subtitleOf(
-  row: IdeaRow,
-  outcomes: ImplementerOutcomes,
-  effects: IdeaEffects,
-): string {
-  const why = row.state.label.replace(/^failed(?:\s*·\s*)?/i, '').trim();
-  const reported = outcomes.get(row.id)?.outcome?.label ?? '';
-  const parts = [
-    fromWords(row),
-    effectOf(row.id, effects),
-    row.outcome === 'failed' ? why : '',
-    reported,
-  ];
-  return capitalized(parts.filter(part => part !== '').join(' · '));
-}
-
-function badgeOf(row: IdeaRow): readonly RowBadge[] {
-  if (row.badges.some(badge => badge.label === 'adopted')) return [{label: 'Adopted', tone: 'ok'}];
-  if (row.badges.some(badge => badge.label === 'best')) return [{label: 'Best', tone: 'ok'}];
-  if (row.outcome === 'failed') return [{label: 'Failed', tone: 'err'}];
-  if (row.outcome === 'running') return [{label: 'Running', tone: 'live'}];
-  return [{label: 'Passed', tone: 'ok'}];
-}
-
-function byResult(
-  a: IdeaRow,
-  b: IdeaRow,
-  values: ReadonlyMap<string, number | null>,
-  order: ReadonlyMap<string, number>,
-  direction: RunModel['direction'],
-): number {
-  const av = values.get(a.id) ?? null;
-  const bv = values.get(b.id) ?? null;
-  const newest = (order.get(b.id) ?? 0) - (order.get(a.id) ?? 0);
-  if (av === null) return bv === null ? newest : 1;
-  if (bv === null) return -1;
-  return (direction === 'min' ? av - bv : bv - av) || newest;
-}
-
-function sortedIdeas(model: RunModel, filter: IdeasFilter, sort: IdeasSort) {
-  const rows = ideasView(model, filter).rows;
-  const order = new Map(model.candidates.candidates.map((item, index) => [item.id, index]));
-  if (sort === 'newest')
-    return [...rows].sort((a, b) => (order.get(b.id) ?? 0) - (order.get(a.id) ?? 0));
-  if (sort === 'oldest')
-    return [...rows].sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
-  const values = new Map(
-    model.candidates.candidates.map(item => [
-      item.id,
-      item.measurement?.vsBaseline ?? item.measurement?.against?.ratio ?? null,
-    ]),
+function ObjectiveFigure(props: {
+  readonly cell: ObjectiveCell;
+  readonly column: TableColumn;
+  readonly form: IdeasTableView['form'];
+}): JSX.Element {
+  const {cell, column, form} = props;
+  if (cell.value === null) return <Text tone="muted">{NONE}</Text>;
+  const unit = form === 'value' && column.unit !== '' ? ` ${column.unit}` : '';
+  // A reading with no multiple (no input) keeps its value when the list is narrow.
+  const gives = cell.multiple !== null;
+  return (
+    <CellInline>
+      <CellMark on={cell.setBest} />
+      {form === 'multiple' ? null : (
+        <span data-optional={gives || undefined}>
+          <Text variant="code">{`${compactValue(cell.value)}${unit}`}</Text>
+        </span>
+      )}
+      {form === 'value' ? (
+        <span data-narrow-only>
+          <Multiple cell={cell} flat="ratio" />
+        </span>
+      ) : (
+        <Multiple cell={cell} flat={form === 'value-multiple' ? 'both' : 'ratio'} />
+      )}
+    </CellInline>
   );
-  return [...rows].sort((a, b) => byResult(a, b, values, order, model.direction));
+}
+
+function IdeaName(props: {readonly row: IdeaTableRow}): JSX.Element {
+  const {row} = props;
+  return (
+    <CellInline>
+      <Text variant="code">{markdownToPlain(row.title)}</Text>
+      {row.adopted ? <Chip label="Adopted" tone="ok" /> : null}
+      {row.best ? <Chip label="Best" tone="ok" /> : null}
+    </CellInline>
+  );
+}
+
+function sameSort(a: IdeasSort, b: IdeasSort): boolean {
+  if (a.by === 'objective' && b.by === 'objective') return a.index === b.index;
+  return a.by === b.by;
+}
+
+/** A press on the idea a row was built on opens that idea; the input has none to open. */
+function openParent(base: ViewBase, row: IdeaTableRow): boolean {
+  if (row.builtOn.parent === null) return false;
+  base.zoom({type: 'open-idea', idea: row.builtOn.parent});
+  return true;
+}
+
+type Column = ListColumn<IdeaTableRow>;
+type Sorting = NonNullable<Column['sort']>;
+
+function quiet(text: string): JSX.Element {
+  return <Text tone="muted">{text}</Text>;
+}
+
+function objectiveColumns(
+  table: IdeasTableView,
+  sorted: (by: IdeasSort) => Sorting,
+): readonly Column[] {
+  return table.columns.map(
+    (column, at): Column => ({
+      key: `objective-${column.index}`,
+      header: column.title,
+      size: table.form === 'multiple' ? 'short' : 'wide',
+      narrow: 'short',
+      tight: 'compact',
+      hint: row => {
+        const cell = row.cells[at];
+        return cell?.value == null ? undefined : `${formatValue(cell.value)} ${column.unit}`.trim();
+      },
+      ...(at === table.columns.length - 1 && table.more > 0
+        ? {note: {label: `+${table.more}`, hint: `${table.more} more objectives`}}
+        : {}),
+      sort: sorted({by: 'objective', index: column.index}),
+      cell: row => {
+        const cell = row.cells[at];
+        return cell === undefined ? (
+          quiet(NONE)
+        ) : (
+          <ObjectiveFigure cell={cell} column={column} form={table.form} />
+        );
+      },
+    }),
+  );
+}
+
+/** A gain with its sign: a line that ended below its best has a negative one. */
+function signed(gain: number): string {
+  return gain < 0 ? `−${compactValue(-gain)}` : `+${compactValue(gain)}`;
+}
+
+/** The columns of a run with one objective: the multiple of the input, each comparison, the share. */
+function singleColumns(table: IdeasTableView): readonly Column[] {
+  const vsInput: Column = {
+    key: 'vs-input',
+    header: 'vs input',
+    size: 'short',
+    optional: true,
+    cell: row => {
+      const cell = row.cells[0];
+      return cell === undefined || cell.multiple === null ? (
+        quiet(NONE)
+      ) : (
+        <Multiple cell={cell} flat="words" />
+      );
+    },
+  };
+  const comparisons = table.baselines.map(
+    (label, at): Column => ({
+      key: `baseline-${at}`,
+      header: label,
+      size: 'short',
+      optional: true,
+      cell: row => <Text variant="code">{row.baselines[at] ?? NONE}</Text>,
+    }),
+  );
+  const share: Column = {
+    key: 'share',
+    header: 'Share of gain',
+    size: 'wide',
+    optional: true,
+    cell: row =>
+      row.share === null ? (
+        quiet(NONE)
+      ) : (
+        <Text variant="code">{`${signed(row.share.gain)} ${row.share.percent}%`}</Text>
+      ),
+  };
+  // A run with no input has no multiple to state: its column would read a dash on every row.
+  const known = table.columns[0]?.input != null;
+  return [...(known ? [vsInput] : []), ...comparisons, ...(table.shares ? [share] : [])];
+}
+
+function leadColumns(base: ViewBase): readonly Column[] {
+  return [
+    {
+      key: 'idea',
+      header: 'Idea',
+      size: 'fill',
+      wrap: true,
+      hint: row => markdownToPlain(row.title),
+      cell: row => <IdeaName row={row} />,
+    },
+    {
+      key: 'built-on',
+      header: 'Built on',
+      size: 'wide',
+      optional: true,
+      hint: row => markdownToPlain(row.builtOn.label),
+      act: row => openParent(base, row),
+      cell: row =>
+        row.builtOn.parent === null ? (
+          quiet(row.builtOn.label)
+        ) : (
+          <CellLink label={markdownToPlain(row.builtOn.label)} lit={row.lineage || row.selected} />
+        ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      size: 'wide',
+      narrow: 'medium',
+      tight: 'dot',
+      hint: row => [row.status.word, row.status.cause].filter(part => part !== null).join(' · '),
+      cell: row => (
+        <CellLines
+          main={
+            <CellInline nowrap>
+              <StatusDot tone={STATUS_TONES[row.status.status]} label={row.status.word} />
+              <span data-tight-hide>
+                <Text>{row.status.word}</Text>
+              </span>
+            </CellInline>
+          }
+          note={row.status.cause}
+        />
+      ),
+    },
+  ];
+}
+
+function columnsOf(
+  table: IdeasTableView,
+  base: ViewBase,
+  setSort: (sort: IdeasSort | null) => void,
+): readonly Column[] {
+  const sorted = (by: IdeasSort): Sorting => ({
+    marked: sameSort(table.sort, by),
+    press: () => setSort(sameSort(by, table.defaultSort) ? null : by),
+  });
+  return [
+    ...leadColumns(base),
+    ...objectiveColumns(table, sorted),
+    ...(table.form === 'value' ? singleColumns(table) : []),
+    {
+      key: 'agent-time',
+      header: 'Agent time',
+      size: 'short',
+      align: 'end',
+      optional: true,
+      sort: sorted({by: 'agent-time'}),
+      cell: row => <Text variant="code">{runningWords(row.agentSeconds)}</Text>,
+    },
+  ];
+}
+
+function Chips(props: {
+  readonly table: IdeasTableView;
+  readonly filter: IdeasFilter;
+  readonly dispatch: (action: RunPageAction) => void;
+}): JSX.Element {
+  const {table, filter, dispatch} = props;
+  const items: LegendItem[] = table.chips.map(chip => ({
+    tone: chip.status === null ? 'neutral' : STATUS_TONES[chip.status],
+    label: `${chip.word} ${chip.count}`,
+    on: filter.status === chip.status,
+    // The chip of the status the list already shows has nothing to change.
+    ...(chip.status === null ? {disabled: filter.status === null} : {}),
+    toggle: () =>
+      dispatch({
+        type: 'ideas-filter',
+        filter: {...filter, status: filter.status === chip.status ? null : chip.status},
+      }),
+  }));
+  return <DotLegend items={items} />;
+}
+
+/** The exact figures of a row, each under its objective's name: the cells show them compact. */
+function describeFigures(table: IdeasTableView, row: IdeaTableRow): string | undefined {
+  const figures = table.columns.flatMap((column, at) => {
+    const value = row.cells[at]?.value;
+    return value == null
+      ? []
+      : [`${column.title} ${`${formatValue(value)} ${column.unit}`.trim()}`];
+  });
+  return figures.length === 0 ? undefined : figures.join(', ');
 }
 
 export function IdeasTable(props: {
   readonly base: ViewBase;
   readonly filter: IdeasFilter;
-  readonly sort: IdeasSort;
+  readonly sort: IdeasSort | null;
+  readonly setSort: (sort: IdeasSort | null) => void;
   readonly selected: string | null;
-  readonly outcomes: ImplementerOutcomes;
-  readonly effects: IdeaEffects;
   readonly dispatch: (action: RunPageAction) => void;
 }): JSX.Element {
   const {base, filter, sort} = props;
-  const rows = useMemo(() => sortedIdeas(base.model, filter, sort), [base.model, filter, sort]);
-  const columns = useMemo(() => baselineColumns(base.model), [base.model]);
-  if (rows.length === 0) {
-    const words = noIdeasWords(filter);
-    return <EmptyState title={words.title} body={words.body} />;
-  }
+  const table = ideasTable(base.model, {
+    position: base.position ?? endOf(base.model),
+    filter,
+    sort,
+    selected: props.selected,
+    now: base.clock.now,
+  });
+  const shown = table.rows.length;
   return (
-    <Stack grow>
-      <PickList
-        wrapSummary
-        size="fill"
-        label="Ideas"
-        {...(props.selected === null ? {} : {selected: props.selected})}
-        header={{
-          start: 'idea',
-          end: [
-            {label: 'vs input', fixed: 'figure'},
-            ...columns.labels.map(label => ({label, fixed: 'measure'}) as const),
-          ],
-        }}
-      >
-        {rows.map(row => {
-          const subtitle = subtitleOf(row, props.outcomes, props.effects);
-          const cell = vsInputCell({figure: row.figure, tone: row.figureTone});
-          return (
-            <PickRow
-              key={row.id}
-              id={row.id}
-              title={markdownToPlain(row.title)}
-              {...(subtitle === '' ? {} : {summary: subtitle})}
-              stacked
-              mono
-              badges={badgeOf(row)}
-              figure={
-                row.runningSince === null ? cell.figure : ageWords(row.runningSince, base.clock.now)
-              }
-              {...(row.runningSince === null &&
-              cell.figure === row.figure &&
-              row.figureTitle !== undefined
-                ? {figureTitle: row.figureTitle}
-                : {})}
-              figureTone={cell.tone}
-              measure={(columns.cells.get(row.id) ?? []).map(label => ({label}))}
-              fresh={row.fresh}
-              hover={on => props.dispatch({type: 'ideas-hover', idea: on ? row.id : null})}
-              select={() => base.zoom({type: 'open-idea', idea: row.id})}
-            />
-          );
-        })}
-      </PickList>
+    <Stack gap="space-2">
+      <Row gap="space-1" align="center" wrap justify="between">
+        <Chips table={table} filter={filter} dispatch={props.dispatch} />
+        <SearchBox
+          label="Search ideas"
+          placeholder="Search ideas"
+          value={filter.query}
+          change={query => props.dispatch({type: 'ideas-filter', filter: {...filter, query}})}
+        />
+      </Row>
+      {shown === 0 ? (
+        <Text tone="muted">No matches</Text>
+      ) : (
+        <ColumnList
+          label="Ideas"
+          columns={columnsOf(table, base, props.setSort)}
+          rows={table.rows}
+          rowKey={row => row.id}
+          selected={props.selected ?? undefined}
+          select={id => base.zoom({type: 'open-idea', idea: id})}
+          hover={id => props.dispatch({type: 'ideas-hover', idea: id})}
+          marks={row => ({lineage: row.lineage, fresh: row.fresh})}
+          describe={row => describeFigures(table, row)}
+          crowded={table.columns.length > 1}
+        />
+      )}
     </Stack>
   );
 }

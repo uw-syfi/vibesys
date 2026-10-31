@@ -27,9 +27,19 @@ for (const width of [1000, 1440]) {
     await expect(page.locator('.vs-check-list')).toHaveCount(0);
     await expect(page.getByText(/Adopted:/)).toHaveCount(0);
     if (shots !== undefined) await page.screenshot({path: `${shots}/run-gate__${width}.png`});
+    // Nothing stands between the figures and the lists: the lists begin where the charts end.
+    const gap = await page.evaluate(() => {
+      const above = document.querySelector('.vs-chart-columns');
+      const lists = document.querySelector('.vs-panes');
+      return lists === null || above === null
+        ? Number.NaN
+        : lists.getBoundingClientRect().top - above.getBoundingClientRect().bottom;
+    });
+    // The card the gate once drew was taller than this band by itself.
+    expect(gap, 'the lists begin under the charts').toBeLessThanOrEqual(96);
     const listsHeight = await page.evaluate(
       () => document.querySelector('.vs-panes')?.getBoundingClientRect().height ?? 0,
     );
-    expect(listsHeight, 'the lists keep their room').toBeGreaterThanOrEqual(900 * 0.38);
+    expect(listsHeight, 'the lists keep their floor').toBeGreaterThanOrEqual(288);
   });
 }

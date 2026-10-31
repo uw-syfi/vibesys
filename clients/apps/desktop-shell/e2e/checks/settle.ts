@@ -45,3 +45,15 @@ export async function settled(page: Page): Promise<void> {
   );
   if (!stable) throw new Error(`the screen did not settle in ${LIMIT} frames`);
 }
+
+/**
+ * Scrolls the run screen's body to its end, where the Ideas table sits under the charts: its rows
+ * are then in view, so a click on one scrolls nothing and a layout check does not read the page
+ * moving under a pointer.
+ */
+export async function scrolledToEnd(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const body = document.querySelector('.vs-screen-body');
+    body?.scrollTo(0, body.scrollHeight);
+  });
+}

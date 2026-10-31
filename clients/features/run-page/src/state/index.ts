@@ -17,17 +17,33 @@ export {
   type GatewayTranscriptInput,
   gatewayRunMachine,
 } from './gateway-machine.js';
-export {type HeroView, heroView, type ObjectiveHeadline} from './headline.js';
+export {
+  type HeroView,
+  heroView,
+  NO_CLEAR_CHANGE,
+  type ObjectiveHeadline,
+} from './headline.js';
 export {type HistoryLoadingView, historyLoadingView} from './history-words.js';
 export {type IdeaBase, type IdeaBases, ideaBases} from './idea-bases.js';
 export {effectWords, type IdeaEffect, type IdeaEffects, ideaEffects} from './idea-effects.js';
 export {ideaOutcomeLine, openIdeaId} from './idea-focus.js';
+export {type Impact, impactOf, type ObjectiveCell} from './idea-impact.js';
 export {
   type ImplementerOutcome,
   type ImplementerOutcomes,
   implementerOutcomes,
 } from './idea-outcomes.js';
+export {IDEA_STATUSES, type IdeaStatus, STATUS_WORDS} from './idea-status.js';
 export {outcomeWords} from './idea-words.js';
+export {
+  type CellForm,
+  type IdeasSort,
+  type IdeasTable,
+  type IdeaTableRow,
+  ideasTable,
+  type StatusChip,
+  type TableColumn,
+} from './ideas-table-view.js';
 export {
   type BestLine,
   bestLine,
@@ -40,12 +56,10 @@ export {
 } from './ideas-tree.js';
 export {
   ageWords,
-  chipPressed,
+  IDEAS_FILTER_DEFAULT,
   type IdeaRow,
   type IdeasFilter,
   ideasView,
-  noIdeasWords,
-  pressChip,
 } from './ideas-view.js';
 export type {GateFailure} from './input-gates.js';
 export {
@@ -119,6 +133,7 @@ export {
   runWallNow,
   type SpanDetailReply,
 } from './run-page.js';
+export {type RunStats, runStats, type StatTile, statTiles} from './run-stats.js';
 export {type SummaryReply, summaryFacts, type WireSummary} from './run-summary.js';
 export {type RunningTime, runningTimeOf, runningWords} from './running-time.js';
 export {hasDiagnostic} from './scoped-logs.js';
@@ -129,8 +144,10 @@ export {
   skeletonPositions,
   skeletonScreenState,
 } from './skeleton-projection.js';
+export {compactValue, formatValue, ratio} from './span-reading.js';
 export {adoptionTitles} from './span-words.js';
-export {spendOf, tokensByAgent, turnTokens} from './token-usage.js';
+export {endOf, positionOf, type RunPosition} from './time-position.js';
+export {spendOf, tokensAt, tokensByAgent, turnTokens} from './token-usage.js';
 export {
   type TokensCell,
   type TokensCells,

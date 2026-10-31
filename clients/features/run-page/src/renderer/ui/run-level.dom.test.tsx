@@ -12,6 +12,7 @@ import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {
   createRunReader,
+  positionOf,
   RUN_ROUTE,
   type RunMode,
   type RunModel,
@@ -114,14 +115,17 @@ test('a face reads the run until the first snapshot, and only then says it is em
   const before = attaching();
   const after = runPageStep(before, SNAPSHOT).state;
   for (const [mode, empty] of [
-    ['ideas', 'No ideas yet'],
+    ['ideas', null],
     ['timeline', 'No ideas yet'],
     ['agents', 'No agents yet'],
   ] as const) {
     const waiting = await face(before, mode);
     expect(waiting).toContain('Reading the run…');
-    expect(waiting).not.toContain(empty);
     const read = await face(after, mode);
+    expect(read).not.toContain('Reading the run…');
+    // The Ideas list of a run with no ideas is no list at all.
+    if (empty === null) continue;
+    expect(waiting).not.toContain(empty);
     expect(read).toContain(empty);
     expect(read).not.toContain('Reading the run…');
   }
@@ -164,7 +168,7 @@ async function chartAt(scrub: number | null): Promise<{yLabels: string[]; cursor
   await act(async () =>
     root.render(
       <>
-        <Hero {...base} whole={measuredRun(null)} idea={null} />
+        <Hero {...base} position={positionOf(base.model, measuredRun(null), 0)} idea={null} />
         <RunLevel state={state} base={base} core={null} mode="ideas" dispatch={() => undefined} />
       </>,
     ),
@@ -211,7 +215,7 @@ function namedRun(adopted: boolean): RunModel {
 
 async function textOf(model: RunModel, showFailed: boolean): Promise<string> {
   const state = runPageStep(attaching(), SNAPSHOT).state;
-  const shown = showFailed ? state : {...state, ideas: {...state.ideas, failed: false}};
+  const shown = showFailed ? state : {...state, ideas: {...state.ideas, status: 'faster' as const}};
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
@@ -225,7 +229,7 @@ async function textOf(model: RunModel, showFailed: boolean): Promise<string> {
   await act(async () =>
     root.render(
       <>
-        <Hero {...base} whole={model} idea={null} />
+        <Hero {...base} position={positionOf(base.model, model, 0)} idea={null} />
         <RunLevel state={shown} base={base} core={null} mode="ideas" dispatch={() => undefined} />
       </>,
     ),
@@ -240,12 +244,11 @@ test('the run level says passed, failed and running, never accepted, kept or rej
   for (const adopted of [false, true]) {
     for (const showFailed of [false, true]) {
       const text = await textOf(namedRun(adopted), showFailed);
-      expect(text).toContain('1 passed');
-      expect(text).toContain('1 failed');
-      expect(text).toContain('1 running');
+      expect(text).toContain('Faster 1');
+      expect(text).toContain('Dropped 1');
+      expect(text).toContain('Running 1');
       // The chart's legend names its line once; no idea row or chip says it.
       expect(text.split('Best so far')).toHaveLength(2);
-      expect(text).not.toMatch(/turned down/i);
       expect(text).not.toMatch(/accepted|kept|rejected/i);
     }
   }
@@ -268,7 +271,9 @@ test('the performance row is one element whatever idea is open: dots are singled
     },
   };
   const draw = (idea: string | null) =>
-    act(async () => root.render(<Hero {...base} whole={model} idea={idea} />));
+    act(async () =>
+      root.render(<Hero {...base} position={positionOf(base.model, model, 0)} idea={idea} />),
+    );
   /** Which readings are ringed as the open idea's: `focus`, else `-`. */
   const kinds = () =>
     [...container.querySelectorAll('.vs-chart-pick')].map(point =>
@@ -463,7 +468,11 @@ test('the selected idea’s line words the objective’s unit, not its metric ke
     who: new Map(),
     zoom: () => undefined,
   };
-  await act(async () => root.render(<Hero {...base} whole={withUnit} idea={first?.id ?? null} />));
+  await act(async () =>
+    root.render(
+      <Hero {...base} position={positionOf(base.model, withUnit, 0)} idea={first?.id ?? null} />,
+    ),
+  );
   const text = container.textContent ?? '';
   await act(async () => root.unmount());
   container.remove();

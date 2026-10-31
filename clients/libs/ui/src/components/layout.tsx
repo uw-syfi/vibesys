@@ -20,6 +20,12 @@ interface FlexProps {
   /** Take the free space of the `Row` or `Stack` this sits in. */
   readonly grow?: boolean;
   /**
+   * Set apart from the groups around it by a step more than the gap they keep, so that the gap
+   * between this group and its neighbours is wider than the gap inside it, and a reader sees where
+   * it begins and ends.
+   */
+  readonly apart?: boolean;
+  /**
    * A fixed width, whatever the content: a figure's block (`figure`), so what shares its row never moves; or
    * a chart (`chart`), which takes the rest of its row and drops to a row of its own, full width, when the
    * row leaves it less than a readable width.
@@ -34,6 +40,7 @@ function gapStyle(gap: SpaceToken): CSSProperties {
 
 function Flex(props: FlexProps & {readonly direction: 'row' | 'column'}): JSX.Element {
   const {direction, gap = 'space-3', align, justify, wrap = false, grow = false} = props;
+  const {apart = false} = props;
   return (
     <div
       className="vs-flex"
@@ -42,6 +49,7 @@ function Flex(props: FlexProps & {readonly direction: 'row' | 'column'}): JSX.El
       data-justify={justify}
       data-wrap={wrap || undefined}
       data-grow={grow || undefined}
+      data-apart={apart || undefined}
       data-width={props.width}
       style={gapStyle(gap)}
     >
