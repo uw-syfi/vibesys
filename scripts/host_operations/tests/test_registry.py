@@ -226,7 +226,7 @@ def test_topic_policies_compile_from_the_descriptor() -> None:
     topics = compile_topics(_image().SerializeToString())
     assert [(topic.name, topic.policy.cadence_ms, topic.policy.max_keys) for topic in topics] == [
         ("machine_stats", 10000, 1),
-        ("runs", 0, 2048),
+        ("runs", 0, 16384),
     ]
 
 

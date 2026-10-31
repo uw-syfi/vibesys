@@ -211,7 +211,8 @@ type TopicPolicy struct {
 	// Client bound on the age of a value, separate from the lease on frames. Zero
 	// means the lease alone decides.
 	StaleAfterMs uint32 `protobuf:"varint,2,opt,name=stale_after_ms,json=staleAfterMs,proto3" json:"stale_after_ms,omitempty"`
-	// Client bound on the wait for the first frame once the stream is open.
+	// Client bound on each wait inside the snapshot once the stream is open: the wait for the first
+	// frame, and for each frame after it until `synced`. A frame renews the wait.
 	FirstFrameMs uint32 `protobuf:"varint,3,opt,name=first_frame_ms,json=firstFrameMs,proto3" json:"first_frame_ms,omitempty"`
 	// A breach ends the stream with RESOURCE_EXHAUSTED. Nothing is ever truncated.
 	MaxKeys uint32 `protobuf:"varint,4,opt,name=max_keys,json=maxKeys,proto3" json:"max_keys,omitempty"`
@@ -1283,6 +1284,11 @@ func (x *Absence) GetReason() AbsenceReason {
 // The runs of the host's run index, keyed by run id: each run's head and whether its writer
 // is alive. Event driven: a rename in the index or a run directory is the only cause of a
 // change, and a lock probe is the only poll. A run absent from the map is not published.
+//
+// max_keys is far above any index in use (a heavily used host holds some tens of runs a day, and a
+// head is about half a kilobyte), because a breach fails the topic for every reader: the whole run
+// list is gone until runs are removed from the host's run index. A host that has no more watches
+// to give still lists every run, reading the ones it cannot watch on each probe tick.
 type RunsTopic struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1490,8 +1496,8 @@ const file_vibesys_api_v1_subscribe_proto_rawDesc = "" +
 	"\x1bgpu_stats.used_within_total\x124memory_used_bytes must not exceed memory_total_bytes\x1a1this.memory_used_bytes <= this.memory_total_bytes\"L\n" +
 	"\aAbsence\x12A\n" +
 	"\x06reason\x18\x01 \x01(\x0e2\x1d.vibesys.api.v1.AbsenceReasonB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06reason\"\x1f\n" +
-	"\tRunsTopic:\x12\xe2\xf3\x18\x0e\x18\xb0\xea\x01 \x80\x10(\xc8\x010\x80\x80\x10\"\xba\x02\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06reason\" \n" +
+	"\tRunsTopic:\x13\xe2\xf3\x18\x0f\x18\xb0\xea\x01 \x80\x80\x01(\xc8\x010\x80\x80\x10\"\xba\x02\n" +
 	"\bRunEntry\x12-\n" +
 	"\x04head\x18\x01 \x01(\v2\x19.vibesys.store.v1.RunHeadR\x04head\x12A\n" +
 	"\bliveness\x18\x02 \x01(\x0e2\x1b.vibesys.api.v1.RunLivenessB\b\xbaH\x05\x82\x01\x02\x10\x01R\bliveness\x125\n" +

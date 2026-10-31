@@ -26,7 +26,8 @@ message TopicPolicy {
   // Client bound on the age of a value, separate from the lease on frames. Zero
   // means the lease alone decides.
   uint32 stale_after_ms = 2;
-  // Client bound on the wait for the first frame once the stream is open.
+  // Client bound on each wait inside the snapshot once the stream is open: the wait for the first
+  // frame, and for each frame after it until `synced`. A frame renews the wait.
   uint32 first_frame_ms = 3 [(buf.validate.field).uint32.gt = 0];
   // A breach ends the stream with RESOURCE_EXHAUSTED. Nothing is ever truncated.
   uint32 max_keys = 4 [(buf.validate.field).uint32.gt = 0];
@@ -225,10 +226,15 @@ enum AbsenceReason {
 // The runs of the host's run index, keyed by run id: each run's head and whether its writer
 // is alive. Event driven: a rename in the index or a run directory is the only cause of a
 // change, and a lock probe is the only poll. A run absent from the map is not published.
+//
+// max_keys is far above any index in use (a heavily used host holds some tens of runs a day, and a
+// head is about half a kilobyte), because a breach fails the topic for every reader: the whole run
+// list is gone until runs are removed from the host's run index. A host that has no more watches
+// to give still lists every run, reading the ones it cannot watch on each probe tick.
 message RunsTopic {
   option (vibesys.api.v1.topic) = {
     first_frame_ms: 30000
-    max_keys: 2048
+    max_keys: 16384
     min_interval_ms: 200
     max_value_bytes: 262144
   };
