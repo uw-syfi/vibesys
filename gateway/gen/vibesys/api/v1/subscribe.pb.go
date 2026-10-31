@@ -238,6 +238,64 @@ func (x *TopicPolicy) GetMaxValueBytes() uint32 {
 	return 0
 }
 
+// How often the gateway speaks and how long a client waits for it, whatever the
+// topic. The generator projects both into Go and TypeScript tables, so neither
+// language repeats the numbers.
+type SubscribeTiming struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The longest gap between frames on a healthy stream.
+	HeartbeatMs uint32 `protobuf:"varint,1,opt,name=heartbeat_ms,json=heartbeatMs,proto3" json:"heartbeat_ms,omitempty"`
+	// A client counts a stream with no frame for this long as lost, even when the
+	// transport looks alive. It must exceed heartbeat_ms.
+	LeaseMs       uint32 `protobuf:"varint,2,opt,name=lease_ms,json=leaseMs,proto3" json:"lease_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubscribeTiming) Reset() {
+	*x = SubscribeTiming{}
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubscribeTiming) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubscribeTiming) ProtoMessage() {}
+
+func (x *SubscribeTiming) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubscribeTiming.ProtoReflect.Descriptor instead.
+func (*SubscribeTiming) Descriptor() ([]byte, []int) {
+	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *SubscribeTiming) GetHeartbeatMs() uint32 {
+	if x != nil {
+		return x.HeartbeatMs
+	}
+	return 0
+}
+
+func (x *SubscribeTiming) GetLeaseMs() uint32 {
+	if x != nil {
+		return x.LeaseMs
+	}
+	return 0
+}
+
 // A closed set of topics. Each stream carries one topic's keyed state.
 type SubscribeRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -251,7 +309,7 @@ type SubscribeRequest struct {
 
 func (x *SubscribeRequest) Reset() {
 	*x = SubscribeRequest{}
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[1]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -263,7 +321,7 @@ func (x *SubscribeRequest) String() string {
 func (*SubscribeRequest) ProtoMessage() {}
 
 func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[1]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -276,7 +334,7 @@ func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeRequest.ProtoReflect.Descriptor instead.
 func (*SubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{1}
+	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *SubscribeRequest) GetTopic() isSubscribeRequest_Topic {
@@ -324,7 +382,7 @@ type SubscribeResponse struct {
 
 func (x *SubscribeResponse) Reset() {
 	*x = SubscribeResponse{}
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[2]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -336,7 +394,7 @@ func (x *SubscribeResponse) String() string {
 func (*SubscribeResponse) ProtoMessage() {}
 
 func (x *SubscribeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[2]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -349,7 +407,7 @@ func (x *SubscribeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeResponse.ProtoReflect.Descriptor instead.
 func (*SubscribeResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{2}
+	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *SubscribeResponse) GetFrame() isSubscribeResponse_Frame {
@@ -458,7 +516,7 @@ type TopicEntry struct {
 
 func (x *TopicEntry) Reset() {
 	*x = TopicEntry{}
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[3]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -470,7 +528,7 @@ func (x *TopicEntry) String() string {
 func (*TopicEntry) ProtoMessage() {}
 
 func (x *TopicEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[3]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -483,7 +541,7 @@ func (x *TopicEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopicEntry.ProtoReflect.Descriptor instead.
 func (*TopicEntry) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{3}
+	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *TopicEntry) GetKey() string {
@@ -527,7 +585,7 @@ type Synced struct {
 
 func (x *Synced) Reset() {
 	*x = Synced{}
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[4]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -539,7 +597,7 @@ func (x *Synced) String() string {
 func (*Synced) ProtoMessage() {}
 
 func (x *Synced) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[4]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -552,7 +610,7 @@ func (x *Synced) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Synced.ProtoReflect.Descriptor instead.
 func (*Synced) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{5}
 }
 
 type Heartbeat struct {
@@ -563,7 +621,7 @@ type Heartbeat struct {
 
 func (x *Heartbeat) Reset() {
 	*x = Heartbeat{}
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[5]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -575,7 +633,7 @@ func (x *Heartbeat) String() string {
 func (*Heartbeat) ProtoMessage() {}
 
 func (x *Heartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[5]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -588,7 +646,7 @@ func (x *Heartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
 func (*Heartbeat) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{6}
 }
 
 // What the producer or the hub refused. A gRPC status means the transport failed
@@ -604,7 +662,7 @@ type TopicFailure struct {
 
 func (x *TopicFailure) Reset() {
 	*x = TopicFailure{}
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[6]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -616,7 +674,7 @@ func (x *TopicFailure) String() string {
 func (*TopicFailure) ProtoMessage() {}
 
 func (x *TopicFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[6]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -629,7 +687,7 @@ func (x *TopicFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopicFailure.ProtoReflect.Descriptor instead.
 func (*TopicFailure) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *TopicFailure) GetCode() TopicFailureCode {
@@ -656,7 +714,7 @@ type MachineStatsTopic struct {
 
 func (x *MachineStatsTopic) Reset() {
 	*x = MachineStatsTopic{}
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[7]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -668,7 +726,7 @@ func (x *MachineStatsTopic) String() string {
 func (*MachineStatsTopic) ProtoMessage() {}
 
 func (x *MachineStatsTopic) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[7]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -681,7 +739,7 @@ func (x *MachineStatsTopic) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MachineStatsTopic.ProtoReflect.Descriptor instead.
 func (*MachineStatsTopic) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{8}
 }
 
 // Each section is present or says why it is not, so "no reading" can never be
@@ -711,7 +769,7 @@ type MachineStats struct {
 
 func (x *MachineStats) Reset() {
 	*x = MachineStats{}
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[8]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -723,7 +781,7 @@ func (x *MachineStats) String() string {
 func (*MachineStats) ProtoMessage() {}
 
 func (x *MachineStats) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[8]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -736,7 +794,7 @@ func (x *MachineStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MachineStats.ProtoReflect.Descriptor instead.
 func (*MachineStats) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *MachineStats) GetSampledAt() *timestamppb.Timestamp {
@@ -879,7 +937,7 @@ type CpuStats struct {
 
 func (x *CpuStats) Reset() {
 	*x = CpuStats{}
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[9]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -891,7 +949,7 @@ func (x *CpuStats) String() string {
 func (*CpuStats) ProtoMessage() {}
 
 func (x *CpuStats) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[9]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -904,7 +962,7 @@ func (x *CpuStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CpuStats.ProtoReflect.Descriptor instead.
 func (*CpuStats) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{9}
+	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *CpuStats) GetUtilizationPercent() float64 {
@@ -924,7 +982,7 @@ type MemoryStats struct {
 
 func (x *MemoryStats) Reset() {
 	*x = MemoryStats{}
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[10]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -936,7 +994,7 @@ func (x *MemoryStats) String() string {
 func (*MemoryStats) ProtoMessage() {}
 
 func (x *MemoryStats) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[10]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -949,7 +1007,7 @@ func (x *MemoryStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemoryStats.ProtoReflect.Descriptor instead.
 func (*MemoryStats) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{10}
+	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *MemoryStats) GetUsedBytes() uint64 {
@@ -975,7 +1033,7 @@ type GpuList struct {
 
 func (x *GpuList) Reset() {
 	*x = GpuList{}
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[11]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -987,7 +1045,7 @@ func (x *GpuList) String() string {
 func (*GpuList) ProtoMessage() {}
 
 func (x *GpuList) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[11]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1000,7 +1058,7 @@ func (x *GpuList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GpuList.ProtoReflect.Descriptor instead.
 func (*GpuList) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{11}
+	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GpuList) GetGpus() []*GpuStats {
@@ -1024,7 +1082,7 @@ type GpuStats struct {
 
 func (x *GpuStats) Reset() {
 	*x = GpuStats{}
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[12]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1036,7 +1094,7 @@ func (x *GpuStats) String() string {
 func (*GpuStats) ProtoMessage() {}
 
 func (x *GpuStats) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[12]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1049,7 +1107,7 @@ func (x *GpuStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GpuStats.ProtoReflect.Descriptor instead.
 func (*GpuStats) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{12}
+	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *GpuStats) GetIndex() uint32 {
@@ -1097,7 +1155,7 @@ type Absence struct {
 
 func (x *Absence) Reset() {
 	*x = Absence{}
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[13]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1109,7 +1167,7 @@ func (x *Absence) String() string {
 func (*Absence) ProtoMessage() {}
 
 func (x *Absence) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[13]
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1122,7 +1180,7 @@ func (x *Absence) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Absence.ProtoReflect.Descriptor instead.
 func (*Absence) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{13}
+	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *Absence) GetReason() AbsenceReason {
@@ -1141,6 +1199,14 @@ var file_vibesys_api_v1_subscribe_proto_extTypes = []protoimpl.ExtensionInfo{
 		Tag:           "bytes,51004,opt,name=topic",
 		Filename:      "vibesys/api/v1/subscribe.proto",
 	},
+	{
+		ExtendedType:  (*descriptorpb.MessageOptions)(nil),
+		ExtensionType: (*SubscribeTiming)(nil),
+		Field:         51005,
+		Name:          "vibesys.api.v1.subscribe_timing",
+		Tag:           "bytes,51005,opt,name=subscribe_timing",
+		Filename:      "vibesys/api/v1/subscribe.proto",
+	},
 }
 
 // Extension fields to descriptorpb.MessageOptions.
@@ -1150,6 +1216,10 @@ var (
 	//
 	// optional vibesys.api.v1.TopicPolicy topic = 51004;
 	E_Topic = &file_vibesys_api_v1_subscribe_proto_extTypes[0]
+	// Required on SubscribeRequest: the frame timing the hub and every client share.
+	//
+	// optional vibesys.api.v1.SubscribeTiming subscribe_timing = 51005;
+	E_SubscribeTiming = &file_vibesys_api_v1_subscribe_proto_extTypes[1]
 )
 
 var File_vibesys_api_v1_subscribe_proto protoreflect.FileDescriptor
@@ -1164,9 +1234,12 @@ const file_vibesys_api_v1_subscribe_proto_rawDesc = "" +
 	"\x0efirst_frame_ms\x18\x03 \x01(\rB\a\xbaH\x04*\x02 \x00R\ffirstFrameMs\x12\"\n" +
 	"\bmax_keys\x18\x04 \x01(\rB\a\xbaH\x04*\x02 \x00R\amaxKeys\x12&\n" +
 	"\x0fmin_interval_ms\x18\x05 \x01(\rR\rminIntervalMs\x12/\n" +
-	"\x0fmax_value_bytes\x18\x06 \x01(\rB\a\xbaH\x04*\x02 \x00R\rmaxValueBytes\"l\n" +
+	"\x0fmax_value_bytes\x18\x06 \x01(\rB\a\xbaH\x04*\x02 \x00R\rmaxValueBytes\"a\n" +
+	"\x0fSubscribeTiming\x12*\n" +
+	"\fheartbeat_ms\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\vheartbeatMs\x12\"\n" +
+	"\blease_ms\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\aleaseMs\"y\n" +
 	"\x10SubscribeRequest\x12H\n" +
-	"\rmachine_stats\x18\x01 \x01(\v2!.vibesys.api.v1.MachineStatsTopicH\x00R\fmachineStatsB\x0e\n" +
+	"\rmachine_stats\x18\x01 \x01(\v2!.vibesys.api.v1.MachineStatsTopicH\x00R\fmachineStats:\v\xea\xf3\x18\a\b\x88'\x10\xb0\xea\x01B\x0e\n" +
 	"\x05topic\x12\x05\xbaH\x02\b\x01\"\xa4\x02\n" +
 	"\x11SubscribeResponse\x122\n" +
 	"\x05entry\x18\x01 \x01(\v2\x1a.vibesys.api.v1.TopicEntryH\x00R\x05entry\x12&\n" +
@@ -1235,7 +1308,8 @@ const file_vibesys_api_v1_subscribe_proto_rawDesc = "" +
 	"\x18ABSENCE_REASON_TIMED_OUT\x10\x03\x12\x1f\n" +
 	"\x1bABSENCE_REASON_PARSE_FAILED\x10\x04\x12\"\n" +
 	"\x1eABSENCE_REASON_TOOL_UNVERIFIED\x10\x05:T\n" +
-	"\x05topic\x12\x1f.google.protobuf.MessageOptions\x18\xbc\x8e\x03 \x01(\v2\x1b.vibesys.api.v1.TopicPolicyR\x05topicB=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3"
+	"\x05topic\x12\x1f.google.protobuf.MessageOptions\x18\xbc\x8e\x03 \x01(\v2\x1b.vibesys.api.v1.TopicPolicyR\x05topic:m\n" +
+	"\x10subscribe_timing\x12\x1f.google.protobuf.MessageOptions\x18\xbd\x8e\x03 \x01(\v2\x1f.vibesys.api.v1.SubscribeTimingR\x0fsubscribeTimingB=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3"
 
 var (
 	file_vibesys_api_v1_subscribe_proto_rawDescOnce sync.Once
@@ -1250,50 +1324,53 @@ func file_vibesys_api_v1_subscribe_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_api_v1_subscribe_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_vibesys_api_v1_subscribe_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_vibesys_api_v1_subscribe_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_vibesys_api_v1_subscribe_proto_goTypes = []any{
 	(TopicFailureCode)(0),               // 0: vibesys.api.v1.TopicFailureCode
 	(AbsenceReason)(0),                  // 1: vibesys.api.v1.AbsenceReason
 	(*TopicPolicy)(nil),                 // 2: vibesys.api.v1.TopicPolicy
-	(*SubscribeRequest)(nil),            // 3: vibesys.api.v1.SubscribeRequest
-	(*SubscribeResponse)(nil),           // 4: vibesys.api.v1.SubscribeResponse
-	(*TopicEntry)(nil),                  // 5: vibesys.api.v1.TopicEntry
-	(*Synced)(nil),                      // 6: vibesys.api.v1.Synced
-	(*Heartbeat)(nil),                   // 7: vibesys.api.v1.Heartbeat
-	(*TopicFailure)(nil),                // 8: vibesys.api.v1.TopicFailure
-	(*MachineStatsTopic)(nil),           // 9: vibesys.api.v1.MachineStatsTopic
-	(*MachineStats)(nil),                // 10: vibesys.api.v1.MachineStats
-	(*CpuStats)(nil),                    // 11: vibesys.api.v1.CpuStats
-	(*MemoryStats)(nil),                 // 12: vibesys.api.v1.MemoryStats
-	(*GpuList)(nil),                     // 13: vibesys.api.v1.GpuList
-	(*GpuStats)(nil),                    // 14: vibesys.api.v1.GpuStats
-	(*Absence)(nil),                     // 15: vibesys.api.v1.Absence
-	(*timestamppb.Timestamp)(nil),       // 16: google.protobuf.Timestamp
-	(*descriptorpb.MessageOptions)(nil), // 17: google.protobuf.MessageOptions
+	(*SubscribeTiming)(nil),             // 3: vibesys.api.v1.SubscribeTiming
+	(*SubscribeRequest)(nil),            // 4: vibesys.api.v1.SubscribeRequest
+	(*SubscribeResponse)(nil),           // 5: vibesys.api.v1.SubscribeResponse
+	(*TopicEntry)(nil),                  // 6: vibesys.api.v1.TopicEntry
+	(*Synced)(nil),                      // 7: vibesys.api.v1.Synced
+	(*Heartbeat)(nil),                   // 8: vibesys.api.v1.Heartbeat
+	(*TopicFailure)(nil),                // 9: vibesys.api.v1.TopicFailure
+	(*MachineStatsTopic)(nil),           // 10: vibesys.api.v1.MachineStatsTopic
+	(*MachineStats)(nil),                // 11: vibesys.api.v1.MachineStats
+	(*CpuStats)(nil),                    // 12: vibesys.api.v1.CpuStats
+	(*MemoryStats)(nil),                 // 13: vibesys.api.v1.MemoryStats
+	(*GpuList)(nil),                     // 14: vibesys.api.v1.GpuList
+	(*GpuStats)(nil),                    // 15: vibesys.api.v1.GpuStats
+	(*Absence)(nil),                     // 16: vibesys.api.v1.Absence
+	(*timestamppb.Timestamp)(nil),       // 17: google.protobuf.Timestamp
+	(*descriptorpb.MessageOptions)(nil), // 18: google.protobuf.MessageOptions
 }
 var file_vibesys_api_v1_subscribe_proto_depIdxs = []int32{
-	9,  // 0: vibesys.api.v1.SubscribeRequest.machine_stats:type_name -> vibesys.api.v1.MachineStatsTopic
-	5,  // 1: vibesys.api.v1.SubscribeResponse.entry:type_name -> vibesys.api.v1.TopicEntry
-	6,  // 2: vibesys.api.v1.SubscribeResponse.synced:type_name -> vibesys.api.v1.Synced
-	7,  // 3: vibesys.api.v1.SubscribeResponse.heartbeat:type_name -> vibesys.api.v1.Heartbeat
-	8,  // 4: vibesys.api.v1.SubscribeResponse.failed:type_name -> vibesys.api.v1.TopicFailure
-	10, // 5: vibesys.api.v1.TopicEntry.machine_stats:type_name -> vibesys.api.v1.MachineStats
+	10, // 0: vibesys.api.v1.SubscribeRequest.machine_stats:type_name -> vibesys.api.v1.MachineStatsTopic
+	6,  // 1: vibesys.api.v1.SubscribeResponse.entry:type_name -> vibesys.api.v1.TopicEntry
+	7,  // 2: vibesys.api.v1.SubscribeResponse.synced:type_name -> vibesys.api.v1.Synced
+	8,  // 3: vibesys.api.v1.SubscribeResponse.heartbeat:type_name -> vibesys.api.v1.Heartbeat
+	9,  // 4: vibesys.api.v1.SubscribeResponse.failed:type_name -> vibesys.api.v1.TopicFailure
+	11, // 5: vibesys.api.v1.TopicEntry.machine_stats:type_name -> vibesys.api.v1.MachineStats
 	0,  // 6: vibesys.api.v1.TopicFailure.code:type_name -> vibesys.api.v1.TopicFailureCode
-	16, // 7: vibesys.api.v1.MachineStats.sampled_at:type_name -> google.protobuf.Timestamp
-	11, // 8: vibesys.api.v1.MachineStats.cpu_stats:type_name -> vibesys.api.v1.CpuStats
-	15, // 9: vibesys.api.v1.MachineStats.cpu_unavailable:type_name -> vibesys.api.v1.Absence
-	12, // 10: vibesys.api.v1.MachineStats.memory_stats:type_name -> vibesys.api.v1.MemoryStats
-	15, // 11: vibesys.api.v1.MachineStats.memory_unavailable:type_name -> vibesys.api.v1.Absence
-	13, // 12: vibesys.api.v1.MachineStats.gpus:type_name -> vibesys.api.v1.GpuList
-	15, // 13: vibesys.api.v1.MachineStats.gpu_unavailable:type_name -> vibesys.api.v1.Absence
-	14, // 14: vibesys.api.v1.GpuList.gpus:type_name -> vibesys.api.v1.GpuStats
+	17, // 7: vibesys.api.v1.MachineStats.sampled_at:type_name -> google.protobuf.Timestamp
+	12, // 8: vibesys.api.v1.MachineStats.cpu_stats:type_name -> vibesys.api.v1.CpuStats
+	16, // 9: vibesys.api.v1.MachineStats.cpu_unavailable:type_name -> vibesys.api.v1.Absence
+	13, // 10: vibesys.api.v1.MachineStats.memory_stats:type_name -> vibesys.api.v1.MemoryStats
+	16, // 11: vibesys.api.v1.MachineStats.memory_unavailable:type_name -> vibesys.api.v1.Absence
+	14, // 12: vibesys.api.v1.MachineStats.gpus:type_name -> vibesys.api.v1.GpuList
+	16, // 13: vibesys.api.v1.MachineStats.gpu_unavailable:type_name -> vibesys.api.v1.Absence
+	15, // 14: vibesys.api.v1.GpuList.gpus:type_name -> vibesys.api.v1.GpuStats
 	1,  // 15: vibesys.api.v1.Absence.reason:type_name -> vibesys.api.v1.AbsenceReason
-	17, // 16: vibesys.api.v1.topic:extendee -> google.protobuf.MessageOptions
-	2,  // 17: vibesys.api.v1.topic:type_name -> vibesys.api.v1.TopicPolicy
-	18, // [18:18] is the sub-list for method output_type
-	18, // [18:18] is the sub-list for method input_type
-	17, // [17:18] is the sub-list for extension type_name
-	16, // [16:17] is the sub-list for extension extendee
+	18, // 16: vibesys.api.v1.topic:extendee -> google.protobuf.MessageOptions
+	18, // 17: vibesys.api.v1.subscribe_timing:extendee -> google.protobuf.MessageOptions
+	2,  // 18: vibesys.api.v1.topic:type_name -> vibesys.api.v1.TopicPolicy
+	3,  // 19: vibesys.api.v1.subscribe_timing:type_name -> vibesys.api.v1.SubscribeTiming
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	18, // [18:20] is the sub-list for extension type_name
+	16, // [16:18] is the sub-list for extension extendee
 	0,  // [0:16] is the sub-list for field type_name
 }
 
@@ -1302,20 +1379,20 @@ func file_vibesys_api_v1_subscribe_proto_init() {
 	if File_vibesys_api_v1_subscribe_proto != nil {
 		return
 	}
-	file_vibesys_api_v1_subscribe_proto_msgTypes[1].OneofWrappers = []any{
+	file_vibesys_api_v1_subscribe_proto_msgTypes[2].OneofWrappers = []any{
 		(*SubscribeRequest_MachineStats)(nil),
 	}
-	file_vibesys_api_v1_subscribe_proto_msgTypes[2].OneofWrappers = []any{
+	file_vibesys_api_v1_subscribe_proto_msgTypes[3].OneofWrappers = []any{
 		(*SubscribeResponse_Entry)(nil),
 		(*SubscribeResponse_Removed)(nil),
 		(*SubscribeResponse_Synced)(nil),
 		(*SubscribeResponse_Heartbeat)(nil),
 		(*SubscribeResponse_Failed)(nil),
 	}
-	file_vibesys_api_v1_subscribe_proto_msgTypes[3].OneofWrappers = []any{
+	file_vibesys_api_v1_subscribe_proto_msgTypes[4].OneofWrappers = []any{
 		(*TopicEntry_MachineStats)(nil),
 	}
-	file_vibesys_api_v1_subscribe_proto_msgTypes[8].OneofWrappers = []any{
+	file_vibesys_api_v1_subscribe_proto_msgTypes[9].OneofWrappers = []any{
 		(*MachineStats_CpuStats)(nil),
 		(*MachineStats_CpuUnavailable)(nil),
 		(*MachineStats_MemoryStats)(nil),
@@ -1329,8 +1406,8 @@ func file_vibesys_api_v1_subscribe_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_api_v1_subscribe_proto_rawDesc), len(file_vibesys_api_v1_subscribe_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   14,
-			NumExtensions: 1,
+			NumMessages:   15,
+			NumExtensions: 2,
 			NumServices:   0,
 		},
 		GoTypes:           file_vibesys_api_v1_subscribe_proto_goTypes,

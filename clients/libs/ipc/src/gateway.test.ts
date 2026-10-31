@@ -1,6 +1,8 @@
 import {expect, test} from 'bun:test';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {DesktopGatewayKind, DesktopGatewayRequestSchema} from '@vibesys/proto';
+import {SUBSCRIBE_METHOD} from '@vibesys/subscription';
+import fc from 'fast-check';
 import {
   decodeGatewayReply,
   encodeGatewayRequest,
@@ -190,4 +192,47 @@ test('a refusal keeps its gRPC status through the protobuf end, for a unary and 
   ports.last().reply(gatewayEnd('gone', 5));
   expect(ended).toEqual([['gone', 5]]);
   expect(() => decodeGatewayReply(gatewayEnd('x', 17))).toThrow();
+});
+
+test('the generic bridge refuses Subscribe at both ends, for any host and either kind', async () => {
+  const subscribe = SUBSCRIBE_METHOD;
+  fc.assert(
+    fc.property(
+      fc.constantFrom('local', 'ssh:host-a', 'ssh:user@host-b'),
+      fc.constantFrom('unary', 'stream'),
+      fc.uint8Array({maxLength: 8}),
+      (host, kind, bytes) => {
+        const refused = {kind, host, method: subscribe, bytes};
+        // The window refuses before it asks for a port.
+        expect(() => encodeGatewayRequest(refused)).toThrow('subscription port');
+        // Main refuses what a hostile renderer sent without going through the window's bridge.
+        const sent = toBinary(
+          DesktopGatewayRequestSchema,
+          create(DesktopGatewayRequestSchema, {
+            kind: kind === 'unary' ? DesktopGatewayKind.UNARY : DesktopGatewayKind.STREAM,
+            host,
+            method: subscribe,
+            bytes,
+          }),
+        );
+        expect(() => parseGatewayRequest(sent)).toThrow('subscription port');
+      },
+    ),
+  );
+  const ports = new Ports();
+  const bridge = gatewayBridge(ports);
+  // Like any request it can never send, it fails before a port is asked for.
+  expect(() =>
+    bridge.stream(
+      'local',
+      subscribe,
+      new Uint8Array(),
+      () => undefined,
+      () => undefined,
+    ),
+  ).toThrow('subscription port');
+  await expect(bridge.unary('local', subscribe, new Uint8Array()).result).rejects.toThrow(
+    'subscription port',
+  );
+  expect(ports.calls).toHaveLength(0);
 });

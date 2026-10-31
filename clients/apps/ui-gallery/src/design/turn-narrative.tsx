@@ -44,7 +44,16 @@ export function TurnNarrative(props: {
   return (
     <Narrative label="Turn transcript" start={props.start ?? 'top'}>
       {turn.beats.map(beat => {
-        if (beat.kind === 'thinking') return <Thought key={beat.id} text={beat.text} />;
+        if (beat.kind === 'thinking') {
+          return (
+            <Thought
+              key={beat.id}
+              text={beat.text}
+              open={opened.has(beat.id)}
+              toggle={on => toggle(beat.id, on)}
+            />
+          );
+        }
         if (beat.kind === 'text') return <Said key={beat.id} text={beat.text} />;
         const tools: ToolLine[] = beat.tools.flatMap(id => {
           const e = byId.get(id);

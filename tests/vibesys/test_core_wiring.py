@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given, settings
@@ -17,6 +18,12 @@ from vibesys.core_roles import (
 )
 from vibesys.core_wiring import agent_evaluation_policy, require_candidate_sandboxes
 from vibesys.errors import ConfigurationError
+from vibesys.orchestration.dynamic.search.api import OPERATIONS as DYNAMIC
+from vibesys.orchestration.evolve.search.api import OPERATIONS as EVOLVE
+from vibesys.orchestration.input_check.operations import OPERATIONS as INPUT_CHECK
+from vibesys.orchestration.issue_queue.search.api import OPERATIONS as ISSUE_QUEUE
+from vibesys.orchestration.multi.search.api import OPERATIONS as MULTI
+from vibesys.orchestration.single.search.api import OPERATIONS as SINGLE
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
@@ -27,8 +34,15 @@ from vs_core.api import (
     StageBudget,
 )
 from vs_runtime.api import AgentCapability, WorkspaceAccess
+from vs_runtime.api.core import build_operation_catalog, operation_roles
 from vs_runtime.api.infrastructure import ParallelCandidateObstacle
 from vs_sim.api.testing import examples
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
+
+    from vs_core.api import OperationRequest
+    from vs_runtime.api.core import Cancelled, ExecutionContext, Inspection
 
 CANDIDATE = RevisionRef(revision_id=RevisionId(root="c"), digest="d")
 
@@ -107,3 +121,38 @@ def test_role_kinds_grow_from_reading_to_measuring_and_writing() -> None:
     assert MEASURING_READER.tools == MEASURING_WRITER.tools
     assert MEASURING_READER.access is WorkspaceAccess.READ_ONLY
     assert MEASURING_WRITER.access is WorkspaceAccess.READ_WRITE
+
+
+class _AnyOwner:
+    """An owner that does nothing: only the catalog's declaration of its operation is under test."""
+
+    async def execute(self, request: OperationRequest, context: ExecutionContext) -> BaseModel:
+        raise NotImplementedError
+
+    async def inspect(self, request: OperationRequest, context: ExecutionContext) -> Inspection:
+        raise NotImplementedError
+
+    async def cancel(self, request: OperationRequest, context: ExecutionContext) -> Cancelled:
+        raise NotImplementedError
+
+
+PRODUCTION_OPERATIONS = {
+    "dynamic": DYNAMIC,
+    "evolve": EVOLVE,
+    "issue_queue": ISSUE_QUEUE,
+    "multi": MULTI,
+    "single": SINGLE,
+    "input_check": INPUT_CHECK,
+}
+
+
+@pytest.mark.parametrize("name", PRODUCTION_OPERATIONS)
+def test_every_operation_a_production_strategy_registers_declares_a_rerun_its_lifecycle_allows(
+    name: str,
+) -> None:
+    """Owning an operation without a policy that fits its lifecycle is refused at the entry."""
+    registrations = operation_roles(PRODUCTION_OPERATIONS[name])
+    owners = {role: _AnyOwner() for role in registrations}
+    catalog = build_operation_catalog(registrations, owners)
+    for entry in catalog.entries:
+        assert entry.rerun is not None, entry.schema.kind

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import vibesys.events as e
 import vs_proto.api as p
 from vibesys.records._common import Projection, enum_value, measured_input
+from vibesys.records._span_table import SpanKey
 from vibesys.records._spans import gate_stage, subject
 
 if TYPE_CHECKING:
@@ -72,7 +73,9 @@ def unattributed(projection: Projection, attrs: Message) -> None:
 
 def _workstream_owner(projection: Projection) -> tuple[p.Span, p.WorkstreamAttrs] | None:
     label = projection.event.round_label
-    for span in projection.spans.values():
+    if label is None:
+        return None
+    for span in projection.spans.matching(SpanKey.round_named(label)):
         if span.label is None or span.label.kind != "workstream" or span.label.attrs is None:
             continue
         attrs = p.WorkstreamAttrs.from_binary(span.label.attrs.value)
@@ -149,7 +152,7 @@ def adoption(projection: Projection) -> None:
     wanted = data.revision if data.selection == "candidate" else None
     matches = [
         span
-        for span in projection.spans.values()
+        for span in projection.spans.matching(SpanKey.adoption_of(wanted))
         if span.label is not None
         and span.label.kind == "adoption"
         and span.label.attrs is not None
@@ -187,7 +190,7 @@ def _legacy_round_benchmark_repeat(
     dropped here, by name. The input's own measurement is the first reading at that identity;
     the typed ``InputMeasurement`` is written from it alone.
     """
-    return (metric, span_id) in projection.metric_values
+    return metric is not None and (metric, span_id) in projection.metric_values
 
 
 def _spanless_subject(projection: Projection) -> p.GateSubject:
@@ -202,9 +205,10 @@ def _spanless_subject(projection: Projection) -> p.GateSubject:
     """
     if projection.event.execution_id is None:
         return p.GateSubject.INPUT
-    labels = [span.label.kind for span in projection.spans.values() if span.label is not None]
     measured = measured_input(projection.input_measurement) is not None
-    started = "workstream" in labels or (measured and "agent_turn" in labels)
+    started = projection.spans.has(SpanKey.of_kind("workstream")) or (
+        measured and projection.spans.has(SpanKey.of_kind("agent_turn"))
+    )
     return p.GateSubject.CANDIDATE if started else p.GateSubject.INPUT
 
 
@@ -307,7 +311,7 @@ def comparison(projection: Projection) -> None:
     )
     links = []
     for rel, revision in (("candidate", data.candidate_commit), ("base", data.base_commit)):
-        for candidate in projection.spans.values():
+        for candidate in projection.spans.matching(SpanKey.revision_of(revision)):
             label = candidate.label
             if (
                 label is not None

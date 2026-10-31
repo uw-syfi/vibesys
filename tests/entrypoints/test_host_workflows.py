@@ -9,9 +9,20 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support.task_project import write_task
 
-from entrypoints.host import main
+from entrypoints.host import _WATCH_SERVERS, main
+from server.host_api import RUN_EVENTS_FILE
 from vs_project.api import Project
-from vs_proto.api import MutateRequest, MutateResponse, Oneof, ReadRequest, ReadResponse, validate
+from vs_proto.api import (
+    MutateRequest,
+    MutateResponse,
+    Oneof,
+    ReadRequest,
+    ReadResponse,
+    WatchRequest,
+    WatchResponse,
+    host_operations,
+    validate,
+)
 from vs_proto.api import host_payloads as pb
 from vs_sim.api.testing import FakeProcesses, FakeProcessSignaller, ProcessScript
 
@@ -316,3 +327,66 @@ def test_native_cluster_put_and_remove_persist_without_the_helper(
     assert settings is not None
     assert list(settings.clusters) == []
     assert len(processes.ran) == 3
+
+
+class _FlushCounter(BytesIO):
+    """A stdout that counts flushes, since the gateway's progress bound sees only what was flushed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.flushes = 0
+
+    def flush(self) -> None:
+        self.flushes += 1
+        super().flush()
+
+
+def test_the_run_listing_streams_one_flushed_frame_per_batch_and_ends_complete(
+    host_root: Path, sim: Sim
+) -> None:
+    folder = host_root / "projects"
+    folder.mkdir()
+    Project.open(folder).state.create_project("example", now=datetime(2026, 1, 1, tzinfo=UTC))
+    for index in range(450):
+        journal = Project.log_directory_for(folder.resolve(), f"run-{index:04d}") / RUN_EVENTS_FILE
+        journal.parent.mkdir(parents=True)
+        journal.write_text('{"sequence": 1, "timestamp": "2026-10-01T00:00:00+00:00"}\n')
+    request = WatchRequest(
+        checkout="/src/checkout",
+        method=Oneof(
+            "stream_saved_runs",
+            pb.StreamSavedRunsRequest(request_id="listing-a", project=str(folder)),
+        ),
+    )
+    validate(request)
+    threads = sim.threads()
+    output = _FlushCounter()
+
+    assert (
+        main(
+            ["stream-saved-runs"],
+            stdin=BytesIO(request.to_binary()),
+            stdout=output,
+            platform=sim.platform(
+                threads,
+                processes=FakeProcesses(lambda _: ProcessScript(), pass_time=threads.sleep),
+                signaller=FakeProcessSignaller(set()),
+            ),
+        )
+        == 0
+    )
+
+    written, frames = output.getvalue(), []
+    while written:
+        length = int.from_bytes(written[:4], "big")
+        frames.append(WatchResponse.from_binary(written[4 : 4 + length]))
+        written = written[4 + length :]
+    results = [frame.result.value for frame in frames]
+    assert [len(result.runs) for result in results] == [200, 200, 50]
+    assert [result.complete for result in results] == [False, False, True]
+    assert output.flushes >= len(frames)
+    assert len({row.run_id for result in results for row in result.runs}) == 450
+
+
+def test_every_registered_watch_has_a_command_to_run() -> None:
+    assert set(_WATCH_SERVERS) == set(host_operations.WATCHES)

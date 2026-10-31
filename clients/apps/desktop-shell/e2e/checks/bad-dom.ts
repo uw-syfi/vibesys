@@ -18,6 +18,9 @@ export interface BadScreen {
 
 const PAGE = 'font: 16px/20px monospace; margin: 0; padding: 8px;';
 
+/** The opening of a page whose header is a borderless back button and a small title, as Settings has. */
+const SETTINGS_HEADER = `<div class="vs-page-content"><div class="vs-page-header" style="display:flex;gap:4px;align-items:center"><button aria-label="Back" style="all:unset;display:flex;padding:0 9px"><svg width="16" height="16"><path d="M10 3 5 8l5 5"/></svg></button><span style="font-size:11.5px">Settings</span></div>`;
+
 /** A page that every check passes: labelled numbers, a legend, tooltips, nothing overlapping. */
 export const CLEAN_SCREEN = `
   <div style="${PAGE}">
@@ -61,6 +64,24 @@ export const CLEAN_SCREEN = `
     </div>
     <div class="vs-pane-body" style="width:440px">
       <div style="max-width:100ch">The judge read the candidate source and found that it matches the declared outcome, so the idea passed.</div>
+    </div>
+  </div>`;
+
+/**
+ * A page the visual spec's laws pass: back, title and content on one edge, a title larger than all
+ * under it, groups further apart than their rows, boxes that fit or span their content.
+ */
+export const CLEAN_PAGE = `
+  <div style="${PAGE}">
+    <div class="vs-page-content" style="width:440px">
+      <div class="vs-page-header" style="display:flex;flex-direction:column"><button aria-label="Back" style="all:unset;display:flex"><svg width="16" height="16"><path d="M10 3 5 8l5 5"/></svg></button><h1 style="font-size:24px;line-height:28px;margin:0">Agent logins</h1></div>
+      <div class="vs-page-scroll"><div class="vs-page-body" style="display:flex;flex-direction:column;gap:24px">
+        <div style="display:flex;flex-direction:column;gap:4px"><span>Machine</span><span>This Mac</span></div>
+        <div style="display:flex;flex-direction:column;gap:4px"><span>Logins</span><span>Codex</span></div>
+        <div style="border:1px solid #888;box-sizing:border-box;display:flex;justify-content:space-between"><span>Codex</span><button>Sign in</button></div>
+        <div style="border:1px solid #888;width:fit-content"><span>Starting gateway</span></div>
+        <table style="border:1px solid #888;width:440px"><tr><td>Run</td></tr></table>
+      </div></div>
     </div>
   </div>`;
 
@@ -262,6 +283,74 @@ export const BAD_SCREENS: readonly BadScreen[] = [
     check: 'column-tops',
     message: /the side column starts \d+ px from the top of the main column/,
     html: `<div style="${PAGE}"><div class="vs-page-content" style="position:relative;width:440px;height:200px"><div class="vs-page-scroll" style="width:300px"><div class="vs-page-body" style="padding-top:60px"><div>Machine</div></div></div><div class="vs-page-footer" style="position:absolute;left:320px;top:0;width:100px"><div>Ready</div></div></div></div>`,
+  },
+  {
+    name: 'F11: a back control inset by its padding, off the content’s edge',
+    check: 'left-edge',
+    message: /the back control of "Settings" starts at x 17 and the content at x 8/,
+    html: `<div style="${PAGE}">${SETTINGS_HEADER}<div class="vs-page-scroll"><div class="vs-page-body"><div>Machine</div></div></div></div></div>`,
+  },
+  {
+    name: 'F11: a title after its back control, off the content’s edge',
+    check: 'left-edge',
+    message: /the title of "Settings" starts at x 46 and the content at x 8/,
+    html: `<div style="${PAGE}">${SETTINGS_HEADER}<div class="vs-page-scroll"><div class="vs-page-body"><div>Machine</div></div></div></div></div>`,
+  },
+  {
+    name: 'F11: a page title smaller than the menu under it',
+    check: 'heading-depth',
+    message: /the title "Settings" is 11.5 px and a text under it is 14 px: "Clusters and clouds"/,
+    html: `<div style="${PAGE}">${SETTINGS_HEADER}<div class="vs-page-scroll"><div class="vs-page-body" style="font-size:14px"><div>Clusters and clouds</div></div></div></div></div>`,
+  },
+  {
+    name: 'F5: a run title smaller than a figure under it',
+    check: 'heading-depth',
+    message: /the title "queue-rs · mpmc" is 18 px and a text under it is 34 px: "3.83×"/,
+    html: `<div style="${PAGE}"><main class="vs-screen"><div class="vs-screen-header"><h1 style="font-size:18px;margin:0">queue-rs · mpmc</h1></div><div class="vs-screen-body"><span style="font-size:34px">3.83×</span> faster than input</div></main></div>`,
+  },
+  {
+    name: 'a subheading larger than the heading above it',
+    check: 'heading-depth',
+    message: /the heading "Logins" is 24 px, larger than the 16 px of "Machine" above it/,
+    html: `<div style="${PAGE}"><h1 style="font-size:16px;margin:0">Machine</h1><h2 style="font-size:24px;margin:0">Logins</h2></div>`,
+  },
+  {
+    name: 'F11: a group label as close to the rows above it as to its own',
+    check: 'spacing-order',
+    message:
+      /2 px between groups is not more than the 2 px inside one: "Agent logins" and "This appAppearance"/,
+    html: `<div style="${PAGE}"><div style="display:flex;flex-direction:column;gap:2px"><div>Clusters and clouds</div><div>Agent logins</div><section style="display:flex;flex-direction:column;gap:2px"><span>This app</span><div>Appearance</div></section></div></div>`,
+  },
+  {
+    name: 'two groups no further apart than the rows inside them',
+    check: 'spacing-order',
+    message: /12 px between groups is not more than the 12 px inside one/,
+    html: `<div style="${PAGE}"><div style="display:flex;flex-direction:column;gap:12px"><div style="display:flex;flex-direction:column;gap:12px"><span>Name</span><span>Host</span></div><div style="display:flex;flex-direction:column;gap:12px"><span>Slurm</span><span>Partition</span></div></div></div>`,
+  },
+  {
+    name: 'F12: a card that fits only a third of its width, whichever line is longest',
+    check: 'hollow-box',
+    message: /under the 40% a box fits: "Starting gateway/,
+    html: `<div style="${PAGE}"><div style="border:1px solid #888;width:460px;box-sizing:border-box"><div>Starting gateway</div></div></div>`,
+  },
+  {
+    name: 'F2: a bar that says it is waiting across the whole page',
+    check: 'hollow-box',
+    message: /holds 0 px of content \(0%\), under the 40% a box fits: "Reading runs"/,
+    html: `<div style="${PAGE}"><span role="progressbar" aria-label="Reading runs" style="display:block;height:4px;width:460px;background:#888"></span></div>`,
+  },
+  {
+    name: 'F12: three short lines in a full-width card',
+    check: 'hollow-box',
+    message:
+      /a box 440 px wide holds \d+ px of content \(\d+%\), under the 40% a box fits: "This Mac/,
+    html: `<div style="${PAGE}"><div style="border:1px solid #888;width:440px;box-sizing:border-box;padding:12px"><div>This Mac</div><div>Connecting</div><div>Loading runs</div></div></div>`,
+  },
+  {
+    name: 'F13: a strip across the window, as high as its controls, with nothing beside them',
+    check: 'title-strip',
+    message: /^the top \d+ px of the window carry only its own controls/,
+    html: `<style>:root{--chrome-inset-height:40px}</style><div style="${PAGE}padding-top:0"><div style="height:40px"></div><h1 style="font-size:20px;margin:0">Runs</h1></div>`,
   },
   {
     name: 'a full-width strip tinted by a warn fill under a new class name, with its text and a button',

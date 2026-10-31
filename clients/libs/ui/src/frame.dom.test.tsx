@@ -873,13 +873,18 @@ describe('Narrative', () => {
   test('keeps thinking, text and tool lines in the order given', async () => {
     const {container} = await mount(
       <Narrative label="Turn">
-        <Thought text="first" />
+        <Thought text="first" open toggle={noop} />
         <Said text="second" />
         <ToolGroup tools={tools()} open={false} toggle={noop} />
       </Narrative>,
     );
     expect(one(container, 'section').getAttribute('aria-label')).toBe('Turn');
-    expect(container.textContent?.startsWith('firstsecond2 tools')).toBe(true);
+    expect(
+      all(container, '.vs-thought, .vs-said, .vs-toolgroup').map(block => block.className),
+    ).toEqual(['vs-thought', 'vs-said', 'vs-toolgroup']);
+    expect(container.textContent).toContain('first');
+    expect(container.textContent).toContain('second');
+    expect(container.textContent).toContain('2 tools');
   });
 
   test('a closed group is one line that still shows a failed call, and opens to every call', async () => {
@@ -972,7 +977,7 @@ describe('Narrative', () => {
   test('draws a title in bold and keeps paragraphs and code marks, never as markup', async () => {
     const {container} = await mount(
       <Narrative label="Turn">
-        <Thought text={'**Inspecting history**\n\nRead `git log` first.'} />
+        <Thought text={'**Inspecting history**\n\nRead `git log` first.'} open toggle={noop} />
         <Said text="Use *both* <b>counters</b>." />
       </Narrative>,
     );
@@ -1261,7 +1266,7 @@ describe('at scale: windowed lists draw a bounded number of rows', () => {
           block.said ? (
             <Said key={block.id} text={block.id} />
           ) : (
-            <Thought key={block.id} text={block.id} />
+            <Thought key={block.id} text={block.id} open={false} toggle={noop} />
           ),
         )}
       </Narrative>,

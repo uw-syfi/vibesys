@@ -131,7 +131,11 @@ from vs_proto._generated.vibesys.store.v1 import replay_pb as replay
 from vs_proto._generated.vibesys.store.v1.agent_attrs_pb import (
     AgentClient,
     AgentTurnAttrs,
+    ModelTurnUsage,
     TokenUsage,
+    TurnUsageDetail,
+    UsageCostBasis,
+    UsageSpeed,
 )
 from vs_proto._generated.vibesys.store.v1.chat_pb import (
     ChatMessage,
@@ -258,6 +262,7 @@ from vs_proto._generated.vibesys.store.v1.span_pb import (
 )
 from vs_proto._generated.vibesys.store.v1.transcript_pb import (
     TranscriptChannel,
+    TranscriptCommandResult,
     TranscriptContent,
     TranscriptEntry,
     TranscriptText,
@@ -366,6 +371,7 @@ __all__ = [
     "MetricPoint",
     "MetricSeriesDecl",
     "MetricVersion",
+    "ModelTurnUsage",
     "MutateRequest",
     "MutateResponse",
     "Notice",
@@ -447,12 +453,16 @@ __all__ = [
     "Timestamp",
     "TokenUsage",
     "TranscriptChannel",
+    "TranscriptCommandResult",
     "TranscriptContent",
     "TranscriptEntry",
     "TranscriptText",
     "TranscriptToolCall",
     "TranscriptToolResult",
+    "TurnUsageDetail",
     "UnmeasuredInput",
+    "UsageCostBasis",
+    "UsageSpeed",
     "ValidationError",
     "WaitCondition",
     "WaitKind",

@@ -165,4 +165,36 @@ describe('loadUsage', () => {
     release();
     await expect(pending).rejects.toThrow();
   });
+
+  test('a question nobody wants any more cancels the listings it still waits for', async () => {
+    const bridge = new FakeUsageBridge({
+      projects: [
+        {host: 'local', project: '/a', runs: runs(1), answer: {kind: 'usage', usage: spent(1)}},
+        {host: 'local', project: '/b', runs: runs(1), answer: {kind: 'usage', usage: spent(1)}},
+      ],
+    });
+    bridge.holdListings();
+    const stop = new AbortController();
+    const pending = loadUsage(bridge, SPAN, stop.signal);
+    for (let turn = 0; turn < 16 && bridge.listed.length < 2; turn += 1)
+      await new Promise(resolve => queueMicrotask(() => resolve(0)));
+    expect(bridge.listed).toHaveLength(2);
+    expect(new Set(bridge.listed).size).toBe(2);
+    expect(bridge.cancelled).toEqual([]);
+    stop.abort();
+    await expect(pending).rejects.toThrow();
+    expect([...bridge.cancelled].sort()).toEqual([...bridge.listed].sort());
+  });
+
+  test('a listing that answered is not cancelled by a later abort', async () => {
+    const bridge = new FakeUsageBridge({
+      projects: [
+        {host: 'local', project: '/a', runs: runs(1), answer: {kind: 'usage', usage: spent(1)}},
+      ],
+    });
+    const stop = new AbortController();
+    await loadUsage(bridge, SPAN, stop.signal);
+    stop.abort();
+    expect(bridge.cancelled).toEqual([]);
+  });
 });

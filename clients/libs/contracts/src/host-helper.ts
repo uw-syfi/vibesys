@@ -89,6 +89,7 @@ export type {
   Message as HelperMessage,
   ModalStatus,
   ModalTarget,
+  ModelUsage,
   PathEntry,
   PathsCompleteReply,
   Request as HelperRequest,

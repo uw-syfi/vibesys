@@ -34,7 +34,8 @@
   "devDependencies": {
     "@types/bun": "1.4.2",
     "@vibesys/store": "workspace:*",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "fast-check": "4.10.2"
   },
   "dependencies": {
     "@vibesys/contracts": "workspace:*",
@@ -43,6 +44,7 @@
     "@vibesys/runs": "workspace:*",
     "@vibesys/ui": "workspace:*",
     "@vibesys/proto": "workspace:*",
-    "@bufbuild/protobuf": "2.16.0"
+    "@bufbuild/protobuf": "2.16.0",
+    "@vibesys/subscription": "workspace:*"
   }
 }

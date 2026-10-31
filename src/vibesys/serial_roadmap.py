@@ -27,7 +27,13 @@ from vs_issue_tracker.api import (
     RoadmapSnapshot,
     roadmap_operation_registrations,
 )
-from vs_runtime.api.core import Applied, Inspection, NotApplied, OperationEntry
+from vs_runtime.api.core import (
+    Applied,
+    Inspection,
+    NotApplied,
+    OperationEntry,
+    read_or_keyed,
+)
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -39,6 +45,8 @@ if TYPE_CHECKING:
 
 ROADMAP_NAMESPACE = "roadmap"
 """The run-state namespace that holds the roadmap."""
+
+_ROADMAP_KEY = "the items of the put, which the roadmap holds"
 
 
 class RoadmapOwner:
@@ -96,7 +104,7 @@ def roadmap_entries(resources: OwnedOperationResources) -> tuple[OperationEntry,
     namespace = resources.project.state.portable_namespace(resources.run_id, ROADMAP_NAMESPACE)
     owner = RoadmapOwner(DocumentRoadmap(namespace))
     return tuple(
-        OperationEntry.owned(registration, owner)
+        OperationEntry.owned(registration, owner, read_or_keyed(registration, _ROADMAP_KEY))
         for registration in roadmap_operation_registrations()
     )
 

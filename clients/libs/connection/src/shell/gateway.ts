@@ -19,11 +19,14 @@ import {
   TailResponseSchema,
   validatedFromBinary,
   validateHostPayload,
+  WatchRequestSchema,
+  watchBudgets,
 } from '@vibesys/proto';
+import {SUBSCRIBE_METHOD} from '@vibesys/subscription';
 import {GrpcError, registerAbort, type ScheduleTimeout} from '@vibesys/transport';
 import {createActor, fromPromise} from 'xstate';
 import {gatewayMachine} from '../state/gateway.js';
-import {GatewaySession} from './grpc.js';
+import {type CallBound, GatewaySession} from './grpc.js';
 
 export const HELLO_METHOD = `/${HostService.typeName}/${HostService.method.hello.name}`;
 export const TAIL_METHOD = `/${HostService.typeName}/${HostService.method.tail.name}`;
@@ -36,7 +39,8 @@ export interface GatewayDialer {
 interface LiveCall {
   readonly method: string;
   readonly unary: boolean;
-  readonly deadlineMs: number | undefined;
+  /** Undefined for a stream the registry gives no budget (Tail, WatchRuns). */
+  readonly bound: CallBound | undefined;
   bytes: Uint8Array;
   readonly receive: (bytes: Uint8Array) => void;
   /** Told each step the session reaches on the way to this call. */
@@ -82,7 +86,11 @@ export class GatewayConnection {
             for (const call of this.#calls) this.#start(call);
           },
           disconnected: () => {
-            for (const call of this.#calls) {
+            for (const call of [...this.#calls]) {
+              // A subscription is not re-issued: a second stream in the same call would deliver
+              // a second snapshot into state the caller already holds. Its machine reopens it.
+              if (call.method === SUBSCRIBE_METHOD)
+                call.finish(new GrpcError(14, 'gateway connection lost'));
               call.abort?.abort();
               call.abort = null;
             }
@@ -162,7 +170,7 @@ export class GatewayConnection {
       const call: LiveCall = {
         method,
         unary,
-        deadlineMs: unary ? unaryDeadline(method, bytes) : undefined,
+        bound: unary ? {totalMs: unaryDeadline(method, bytes)} : streamBound(method, bytes),
         bytes,
         receive,
         reached,
@@ -206,7 +214,7 @@ export class GatewayConnection {
           if (call.abort !== abort) return;
           acceptResponse(call, bytes);
         },
-        call.deadlineMs,
+        call.bound,
       )
       .then(
         () => {
@@ -249,6 +257,26 @@ function unaryDeadline(method: string, bytes: Uint8Array): number {
     return mutateBudgets[slot].totalMs;
   }
   return UNARY_DEADLINE_MS;
+}
+
+/**
+ * What the registry lets a watch stream take. The gateway answers at `capMs` (the whole stream) and
+ * at the silence it was told to guard, each with a typed failure; the client waits `graceMs` longer
+ * for that answer and then ends the call itself, so a gateway that stopped serving cannot leave a
+ * listing pending.
+ */
+function streamBound(method: string, bytes: Uint8Array): CallBound | undefined {
+  if (method !== WATCH_METHOD) return undefined;
+  const slot = fromBinary(WatchRequestSchema, bytes).method.case;
+  if (slot === undefined || !(slot in watchBudgets)) throw new Error('host watch has no method');
+  const {totalMs, graceMs, firstEventMs, progressMs} = watchBudgets[slot];
+  const silence = progressMs > 0 ? progressMs + graceMs : undefined;
+  const first = firstEventMs > 0 ? firstEventMs + graceMs : silence;
+  return {
+    totalMs,
+    ...(first === undefined ? {} : {firstFrameMs: first}),
+    ...(silence === undefined ? {} : {silenceMs: silence}),
+  };
 }
 
 async function hello(session: GatewaySession, signal: AbortSignal): Promise<void> {

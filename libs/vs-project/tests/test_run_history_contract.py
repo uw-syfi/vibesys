@@ -239,6 +239,29 @@ def test_reads_change_nothing_a_later_read_sees(
 
 
 @EACH
+@_SETTINGS
+@given(runs=_runs(), data=st.data())
+def test_a_scan_delivers_each_run_once_and_a_named_read_only_what_was_asked(
+    implementation: str,
+    tmp_path_factory: pytest.TempPathFactory,
+    runs: list[RecordedRun],
+    data: st.DataObject,
+) -> None:
+    history = IMPLEMENTATIONS[implementation](tmp_path_factory.mktemp("h") / "p", runs)
+    held = [run.run_id for run in runs]
+    asked = data.draw(st.lists(st.sampled_from([*held, "absent", "Upper", "a/b", "-x", ""])))
+
+    named = history.named(asked)
+
+    assert sorted(manifest.run_id for manifest in history.scan()) == sorted(held)
+    assert sorted(manifest.run_id for manifest in named.runs) == sorted(set(asked) & set(held))
+    assert named.unreadable == ()
+    assert [manifest.run_id for manifest in named.runs] == [
+        run_id for run_id in _expected_order(runs) if run_id in asked
+    ]
+
+
+@EACH
 def test_a_run_never_recorded_has_no_manifest_and_no_files(
     implementation: str, tmp_path: Path
 ) -> None:
@@ -294,3 +317,7 @@ def test_an_unreadable_manifest_is_reported_and_others_still_read(
     assert [run_id for run_id, _error in recorded.unreadable] == ["damaged"]
     with pytest.raises(ProjectStateError):
         history.manifest("damaged")
+    assert [manifest.run_id for manifest in history.scan()] == ["good"]
+    named = history.named(["damaged", "good"])
+    assert [manifest.run_id for manifest in named.runs] == ["good"]
+    assert [run_id for run_id, _error in named.unreadable] == ["damaged"]

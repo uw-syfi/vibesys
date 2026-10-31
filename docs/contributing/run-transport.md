@@ -277,6 +277,16 @@ frame ends the stream with a typed code. Anything that needs every value, such a
 `Tail`. `internal/subscription` owns the mechanism and `subscriptiontest` the contract each topic
 passes. Server keepalive ends a half-open connection, and with it the streams that hold a producer.
 
+The frame timing is stated once, as `SubscribeRequest`'s `subscribe_timing` option: the hub heartbeats
+at `heartbeat_ms`, and a client counts a stream with no frame for `lease_ms` as lost. The generator
+projects both into Go and TypeScript tables and refuses a lease that cannot hold a beat. The client
+sends no keepalive of its own: the gateway server sets no keepalive enforcement policy, so a client
+ping faster than gRPC's default would be refused, and the lease on frames already finds a silent
+stream. A client reads a stream through `@vibesys/subscription`, in main through `Subscriptions`,
+and never through the generic gateway port, which refuses `Subscribe`. A lost session ends a
+`Subscribe` stream instead of re-issuing it, because a second stream in one call would deliver a
+second snapshot into state the caller already holds; the subscription's machine opens the next one.
+
 ## Versions and upgrades
 
 Two version domains, with different rules.
@@ -401,7 +411,7 @@ How to read the table:
 | `tool_result` | `run.agent_events` | stream (`transcript`), blob | turn rows | L | Entry: tool, call id, error flag, summary. `content` and `payload` (command stdout and stderr, JSON) are a blob when over the cap. |
 | `todo_update` | `run.agent_events` | delete | none | S | No consumer. Re-adding an entry kind later is additive. |
 | `usage_update` | `run.agent_events` | delete | none (`CoreState.usage` is unread) | S | Context fill per tool call. High rate, no consumer. A `context_fill` metric series can return when a screen needs it. |
-| `turn_usage_recorded` | `run.agent_events` | span:`agent_turn` end attrs | usage view, run summary, global Usage page, workstream usage | S | `TokenUsage` attrs: input, cache read, cache creation, output, reasoning, cost, duration; unreported is absent, never zero. Summing over spans gives the run's spend. The `span_id` stamping on events is gone. |
+| `turn_usage_recorded` | `run.agent_events` | span:`agent_turn` end attrs | usage view, run summary, global Usage page, workstream usage | S | `TokenUsage` attrs: input, cache read, cache creation, output, reasoning, cost, duration; unreported is absent, never zero. Summing over spans gives the run's spend. The `span_id` stamping on events is gone. One `TurnUsageDetail` per turn on the span's `usage_details`: the provider session id, the cost basis and the per-model rows (`ModelTurnUsage`), so the main-conversation totals keep their meaning. |
 | `phase_started` | server execution, `run.integration` | delete | run map only; the Run screen reads no phase | S | Each phase is an agent turn or a workstream span. |
 | `phase_finished` | server execution, `run.integration` | delete | same | S | |
 | `subprocess_output` | `run.evaluation`, `measurement_events` | stream (`log`) | transcript "subprocess" rows | L | One stream per process, owner the span that ran it, redacted at write time. |
@@ -579,6 +589,12 @@ defined in
 [`transcript.proto`](https://github.com/uw-syfi/vibesys/blob/main/proto/vibesys/store/v1/transcript.proto).
 Each text, tool-call or tool-result entry holds inline content or a `BlobRef`. The turn's
 whole-span replacement seals the stream's final byte length when the turn ends.
+Every entry carries `at`, the time of the event it records; entries written before the field
+existed have none, and a reader shows no time for them. A tool result holds the text the agent
+was shown (`content`) and, when the tool reported more, a typed `payload`: a command's stdout and
+stderr (each inline or a blob), its exit code and its run time, or a JSON value. A reader that
+does not know a payload case shows `content` alone. The earlier `payload_json` field is
+deprecated: it is no longer written, and a reader ignores a record's copy and shows `content`.
 For older string attrs without a blob alternative, the bridge writes `blob:<sha256>`
 and a `BlobAttached` whose role names the field path; an oversized interim reply instead
 omits its inline JSON and uses the `reply` attachment.

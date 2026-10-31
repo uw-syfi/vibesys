@@ -44,7 +44,34 @@ def transcript_examples() -> dict[str, Message]:
             entry=p.Oneof(
                 "tool_result",
                 p.TranscriptToolResult(
-                    tool="shell", call_id="call-a", content=blob, payload_json=inline
+                    tool="shell",
+                    call_id="call-a",
+                    content=blob,
+                    payload=p.Oneof(
+                        "command",
+                        p.TranscriptCommandResult(
+                            stdout=inline, stderr=blob, exit_code=2, duration_seconds=1.5
+                        ),
+                    ),
+                ),
+            ),
+            at=p.Timestamp(seconds=1_700_000_000, nanos=250_000_000),
+        ),
+        "result_legacy_payload_json": p.TranscriptEntry(
+            entry=p.Oneof(
+                "tool_result",
+                p.TranscriptToolResult(
+                    tool="shell", call_id="call-b", content=inline, payload_json=inline
+                ),
+            )
+        ),
+        "result_json": p.TranscriptEntry(
+            entry=p.Oneof(
+                "tool_result",
+                p.TranscriptToolResult(
+                    tool="search",
+                    content=inline,
+                    payload=p.Oneof("json", p.TranscriptContent(value=p.Oneof("inline", "[1]"))),
                 ),
             )
         ),
@@ -89,6 +116,28 @@ def attrs_examples() -> dict[str, Message]:
                 cost_usd=0.25,
                 duration_ms=500,
             ),
+            usage_details=[
+                p.TurnUsageDetail(
+                    provider_session_id="session-a",
+                    cost_basis=p.UsageCostBasis.PRICE_TABLE,
+                    by_model=[
+                        p.ModelTurnUsage(
+                            model="model-a",
+                            input=100,
+                            cache_read=10,
+                            cache_creation=20,
+                            cache_creation_1h=5,
+                            output=30,
+                            reasoning=5,
+                            turns=3,
+                            recorded_usd=0.25,
+                            speed=p.UsageSpeed.FAST,
+                            primary=True,
+                        ),
+                        p.ModelTurnUsage(model="model-b", input=40, output=8, recorded_usd=0.01),
+                    ],
+                )
+            ],
         ),
         "planning_call": p.PlanningAttrs(call=1),
         "workstream": p.WorkstreamAttrs(

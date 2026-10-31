@@ -25,7 +25,7 @@ var File_vibesys_api_v1_host_operations_proto protoreflect.FileDescriptor
 
 const file_vibesys_api_v1_host_operations_proto_rawDesc = "" +
 	"\n" +
-	"$vibesys/api/v1/host_operations.proto\x12\x0evibesys.api.v1\x1a\x1evibesys/api/v1/host_call.proto\x1a'vibesys/host/v1/operation_options.proto\x1a vibesys/host/v1/operations.proto2\xf4\x1c\n" +
+	"$vibesys/api/v1/host_operations.proto\x12\x0evibesys.api.v1\x1a\x1evibesys/api/v1/host_call.proto\x1a'vibesys/host/v1/operation_options.proto\x1a vibesys/host/v1/operations.proto2\x85\x1d\n" +
 	"\x15HostOperationsService\x12\x80\x01\n" +
 	"\tListTasks\x12!.vibesys.host.v1.ListTasksRequest\x1a\".vibesys.host.v1.ListTasksResponse\",\xca\xf3\x18(\b\n" +
 	"\x10\x90N\x18\x88' \x01(\x020\x018\x01J\x06\n" +
@@ -73,9 +73,9 @@ const file_vibesys_api_v1_host_operations_proto_rawDesc = "" +
 	"\bRelaunch\x12\x1f.vibesys.api.v1.RelaunchRequest\x1a .vibesys.api.v1.RelaunchResponse\"#\xca\xf3\x18\x1f\b\x15\x10\xb0\xea\x01\x18\x88' \x03(\x030\x018\x01P\x03X\x03b\brelaunch\x12\x8e\x01\n" +
 	"\vChatMessage\x12\".vibesys.api.v1.ChatMessageRequest\x1a#.vibesys.api.v1.ChatMessageResponse\"6\xca\xf3\x182\b\x16\x10\x90N\x18\x88' \x03(\x030\x018\x01J\x06\n" +
 	"\x01\x04\x12\x01\x02J\x06\n" +
-	"\x01\x03\x12\x01\x01P\x04X\x04b\fchat.message\x12\x80\x01\n" +
-	"\rListSavedRuns\x12%.vibesys.host.v1.ListSavedRunsRequest\x1a&.vibesys.host.v1.ListSavedRunsResponse\" \xca\xf3\x18\x1c\b%\x10\x90N\x18\x88' \x01(\x020\x018\x01J\x06\n" +
-	"\x01\x01\x12\x01\x01P%X%\x12}\n" +
+	"\x01\x03\x12\x01\x01P\x04X\x04b\fchat.message\x12\x91\x01\n" +
+	"\x0fStreamSavedRuns\x12'.vibesys.host.v1.StreamSavedRunsRequest\x1a(.vibesys.host.v1.StreamSavedRunsResponse\")\xca\xf3\x18%\b+\x10\xc0\xcf$\x18\x88' \x01(\x020\x028\x01@\xe0\xd4\x03J\x06\n" +
+	"\x01\x01\x12\x01\x01P+X+h\xa8\xc3\x010\x01\x12}\n" +
 	"\fTerminateRun\x12$.vibesys.host.v1.TerminateRunRequest\x1a%.vibesys.host.v1.TerminateRunResponse\" \xca\xf3\x18\x1c\b&\x10\x90N\x18\x88' \x02(\x030\x018\x01J\x06\n" +
 	"\x01\x01\x12\x01\x01P&X&\x12\x9a\x01\n" +
 	"\x0fListAgentLogins\x12'.vibesys.host.v1.ListAgentLoginsRequest\x1a(.vibesys.host.v1.ListAgentLoginsResponse\"4\xca\xf3\x180\b\x13\x10\xa8\xc3\x01\x18\x88' \x01(\x020\x018\x01J\x06\n" +
@@ -108,7 +108,7 @@ var file_vibesys_api_v1_host_operations_proto_goTypes = []any{
 	(*PostIntentRequest)(nil),             // 17: vibesys.api.v1.PostIntentRequest
 	(*RelaunchRequest)(nil),               // 18: vibesys.api.v1.RelaunchRequest
 	(*ChatMessageRequest)(nil),            // 19: vibesys.api.v1.ChatMessageRequest
-	(*v1.ListSavedRunsRequest)(nil),       // 20: vibesys.host.v1.ListSavedRunsRequest
+	(*v1.StreamSavedRunsRequest)(nil),     // 20: vibesys.host.v1.StreamSavedRunsRequest
 	(*v1.TerminateRunRequest)(nil),        // 21: vibesys.host.v1.TerminateRunRequest
 	(*v1.ListAgentLoginsRequest)(nil),     // 22: vibesys.host.v1.ListAgentLoginsRequest
 	(*CreateChatSessionRequest)(nil),      // 23: vibesys.api.v1.CreateChatSessionRequest
@@ -134,7 +134,7 @@ var file_vibesys_api_v1_host_operations_proto_goTypes = []any{
 	(*PostIntentResponse)(nil),            // 43: vibesys.api.v1.PostIntentResponse
 	(*RelaunchResponse)(nil),              // 44: vibesys.api.v1.RelaunchResponse
 	(*ChatMessageResponse)(nil),           // 45: vibesys.api.v1.ChatMessageResponse
-	(*v1.ListSavedRunsResponse)(nil),      // 46: vibesys.host.v1.ListSavedRunsResponse
+	(*v1.StreamSavedRunsResponse)(nil),    // 46: vibesys.host.v1.StreamSavedRunsResponse
 	(*v1.TerminateRunResponse)(nil),       // 47: vibesys.host.v1.TerminateRunResponse
 	(*v1.ListAgentLoginsResponse)(nil),    // 48: vibesys.host.v1.ListAgentLoginsResponse
 	(*CreateChatSessionResponse)(nil),     // 49: vibesys.api.v1.CreateChatSessionResponse
@@ -162,7 +162,7 @@ var file_vibesys_api_v1_host_operations_proto_depIdxs = []int32{
 	17, // 17: vibesys.api.v1.HostOperationsService.PostIntent:input_type -> vibesys.api.v1.PostIntentRequest
 	18, // 18: vibesys.api.v1.HostOperationsService.Relaunch:input_type -> vibesys.api.v1.RelaunchRequest
 	19, // 19: vibesys.api.v1.HostOperationsService.ChatMessage:input_type -> vibesys.api.v1.ChatMessageRequest
-	20, // 20: vibesys.api.v1.HostOperationsService.ListSavedRuns:input_type -> vibesys.host.v1.ListSavedRunsRequest
+	20, // 20: vibesys.api.v1.HostOperationsService.StreamSavedRuns:input_type -> vibesys.host.v1.StreamSavedRunsRequest
 	21, // 21: vibesys.api.v1.HostOperationsService.TerminateRun:input_type -> vibesys.host.v1.TerminateRunRequest
 	22, // 22: vibesys.api.v1.HostOperationsService.ListAgentLogins:input_type -> vibesys.host.v1.ListAgentLoginsRequest
 	23, // 23: vibesys.api.v1.HostOperationsService.CreateChatSession:input_type -> vibesys.api.v1.CreateChatSessionRequest
@@ -188,7 +188,7 @@ var file_vibesys_api_v1_host_operations_proto_depIdxs = []int32{
 	43, // 43: vibesys.api.v1.HostOperationsService.PostIntent:output_type -> vibesys.api.v1.PostIntentResponse
 	44, // 44: vibesys.api.v1.HostOperationsService.Relaunch:output_type -> vibesys.api.v1.RelaunchResponse
 	45, // 45: vibesys.api.v1.HostOperationsService.ChatMessage:output_type -> vibesys.api.v1.ChatMessageResponse
-	46, // 46: vibesys.api.v1.HostOperationsService.ListSavedRuns:output_type -> vibesys.host.v1.ListSavedRunsResponse
+	46, // 46: vibesys.api.v1.HostOperationsService.StreamSavedRuns:output_type -> vibesys.host.v1.StreamSavedRunsResponse
 	47, // 47: vibesys.api.v1.HostOperationsService.TerminateRun:output_type -> vibesys.host.v1.TerminateRunResponse
 	48, // 48: vibesys.api.v1.HostOperationsService.ListAgentLogins:output_type -> vibesys.host.v1.ListAgentLoginsResponse
 	49, // 49: vibesys.api.v1.HostOperationsService.CreateChatSession:output_type -> vibesys.api.v1.CreateChatSessionResponse

@@ -106,7 +106,6 @@ async function openStep(page: Page, role: RegExp): Promise<void> {
 async function openItem(page: Page, command: string): Promise<void> {
   await settled(page);
   const turn = page.getByRole('region', {name: 'Agent turn'});
-  await turn.getByRole('button', {name: /1 tool/}).click();
   await turn
     .getByRole('button', {name: escaped(command)})
     .last()
@@ -114,10 +113,10 @@ async function openItem(page: Page, command: string): Promise<void> {
   await expect(turn.locator('[aria-current="true"]')).toBeVisible();
 }
 
-/** The idea level again, by its crumb (the second), from a step or item. */
+/** The idea level again, by its crumb (the third, after Runs and Run), from a step or item. */
 async function backToIdea(page: Page): Promise<void> {
   await settled(page);
-  await page.getByRole('navigation', {name: 'Zoom'}).getByRole('button').nth(1).click();
+  await page.getByRole('navigation', {name: 'Zoom'}).getByRole('button').nth(2).click();
   await expect(page.getByRole('listbox', {name: /steps$/})).toBeVisible();
 }
 
@@ -127,7 +126,10 @@ async function backToRun(page: Page): Promise<void> {
   const close = page.getByRole('button', {name: 'Close idea'});
   if (await close.isVisible()) await close.click();
   else
-    await page.getByRole('navigation', {name: 'Zoom'}).getByRole('button', {name: 'Run'}).click();
+    await page
+      .getByRole('navigation', {name: 'Zoom'})
+      .getByRole('button', {name: 'Run', exact: true})
+      .click();
   await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
 }
 
@@ -184,7 +186,10 @@ export async function walkScreens(
   await show.getByText('Agents').click();
   await openAgent(page);
   await walk.at('agent');
-  await page.getByRole('navigation', {name: 'Zoom'}).getByRole('button', {name: 'Run'}).click();
+  await page
+    .getByRole('navigation', {name: 'Zoom'})
+    .getByRole('button', {name: 'Run', exact: true})
+    .click();
   await show.getByText('Ideas').click();
   await page.getByRole('slider', {name: 'Run position'}).focus();
   await page.keyboard.press('Home');

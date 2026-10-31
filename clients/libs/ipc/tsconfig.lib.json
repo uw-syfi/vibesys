@@ -37,6 +37,9 @@
     },
     {
       "path": "../proto/tsconfig.lib.json"
+    },
+    {
+      "path": "../subscription/tsconfig.lib.json"
     }
   ]
 }
