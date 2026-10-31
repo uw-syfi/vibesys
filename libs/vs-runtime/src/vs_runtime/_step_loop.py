@@ -14,39 +14,31 @@ from __future__ import annotations
 import asyncio
 import math
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, assert_never
 
-from vs_core.api.recovery import Cancel, Cancelled, CancelReason, End, Run, Settle, Wait
+from vs_core.api.recovery import (
+    Cancel,
+    Cancelled,
+    CancelReason,
+    End,
+    Interruption,
+    Run,
+    RunRest,
+    Settle,
+    Wait,
+    at_rest,
+    decide,
+    interruption_of,
+)
 from vs_runtime._step_runner import Adopted, CancelSignal, Cleared, ClearUnavailableError
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Coroutine
 
-    from vs_core.api import Request, RequestId
+    from vs_core.api import CoreState, Request, RequestId
     from vs_core.api.recovery import Action, StepResult
     from vs_runtime._step_runner import StepRunner
     from vs_sim.api import SleepingClock
-
-
-class Interruption(StrEnum):
-    """Why an attempt ended without ending its step."""
-
-    PAUSE = "pause"
-    """The run is pausing: not a failure and not a retry."""
-
-    RAISED = "raised"
-    """The runner raised, or gave nothing back: the same as a crash of the attempt."""
-
-
-class LoopExit(StrEnum):
-    """How the loop returned."""
-
-    ENDED = "ended"
-    """``End`` was recorded."""
-
-    PARKED = "parked"
-    """The run is paused and nothing is in flight."""
 
 
 @dataclass(frozen=True)
@@ -60,7 +52,7 @@ class OpenStep:
     """The latest attempt that began; 0 before the first."""
 
 
-class StepLog[S](Protocol):
+class StepLog(Protocol):
     """The run's log as the loop uses it: each method is one atomic durable append.
 
     ``state`` is the fold of everything appended, by the loop or by an input from elsewhere,
@@ -68,7 +60,7 @@ class StepLog[S](Protocol):
     """
 
     @property
-    def state(self) -> S:
+    def state(self) -> CoreState:
         """The state to decide on."""
         ...
 
@@ -85,7 +77,11 @@ class StepLog[S](Protocol):
         ...
 
     async def attempt_interrupted(self, tag: RequestId, attempt: int, why: Interruption) -> None:
-        """Record that an attempt ended and its step did not."""
+        """Record that an attempt ended and its step did not.
+
+        ``why`` says whether the attempt is charged to the step's retry bound
+        (``Interruption.charged``).
+        """
         ...
 
     async def run_ended(self, end: End) -> None:
@@ -94,21 +90,6 @@ class StepLog[S](Protocol):
 
     async def next_input(self) -> None:
         """Return once an input has been appended since this last returned."""
-        ...
-
-
-class RecoveryRule[S](Protocol):
-    """What core decides: pure functions of the folded state."""
-
-    def decide(self, state: S, now: float) -> tuple[Action, ...]:
-        """The actions the loop must take now."""
-        ...
-
-    def settled(self, state: S) -> LoopExit | None:
-        """``ENDED`` if the log already holds the end of the run, ``PARKED`` if the run is paused.
-
-        The loop returns at once for ``ENDED``, and for ``PARKED`` once nothing is in flight.
-        """
         ...
 
 
@@ -140,27 +121,6 @@ class StepLoopTiming:
                 raise StepLoopTimingError(name, value)
 
 
-class _Fate(StrEnum):
-    INTERRUPT = "interrupt"
-    """Record an interruption; leftovers wait for the next epoch's ``clear``."""
-    END_NOW = "end-now"
-    """Record the result at once; an unreachable backend is a named residual."""
-    SETTLE = "settle"
-    """Record the result after ``clear`` succeeded."""
-
-
-def _fate(reason: CancelReason) -> _Fate:
-    match reason:
-        case CancelReason.PAUSE_NOW | CancelReason.DRAIN_EXPIRED:
-            return _Fate.INTERRUPT
-        case CancelReason.RUN_ENDING:
-            return _Fate.END_NOW
-        case CancelReason.DEADLINE | CancelReason.WITHDRAWN | CancelReason.INTERRUPTED:
-            return _Fate.SETTLE
-        case _:
-            assert_never(reason)
-
-
 class _Flight:
     """One attempt, or one conclusion of a step with no attempt running."""
 
@@ -180,36 +140,32 @@ class _Flight:
     def abandons_clear(self) -> bool:
         """Whether an unreachable backend ends the wait for ``clear``."""
         reason = self.signal.reason
-        settles = reason is None or _fate(reason) is _Fate.SETTLE
-        return self.ending or self.parked or not settles
+        interrupts = reason is not None and interruption_of(reason) is not None
+        return self.ending or self.parked or interrupts
 
 
-async def run_step_loop[S](
-    log: StepLog[S],
-    rule: RecoveryRule[S],
-    runner: StepRunner,
-    clock: SleepingClock,
-    timing: StepLoopTiming,
-) -> LoopExit:
-    """Execute the actions ``rule`` decides until the run ends or parks.
+async def run_step_loop(
+    log: StepLog, runner: StepRunner, clock: SleepingClock, timing: StepLoopTiming
+) -> RunRest:
+    """Execute the actions ``vs_core.api.recovery.decide`` asks for until the run ends or parks.
 
-    Cancelling this call, or an exception out of it, is a crash: running attempts are
-    abandoned with no record, and the next loop over the same log runs them again.
+    ``clock`` is the run clock, the one ``decide`` reads and the log's records carry: it
+    excludes the time the run was not running. Cancelling this call, or an exception out of
+    it, is a crash: running attempts are abandoned with no record, and the next loop over
+    the same log runs them again.
     """
-    return await _StepLoop(log, rule, runner, clock, timing).run()
+    return await _StepLoop(log, runner, clock, timing).run()
 
 
-class _StepLoop[S]:
+class _StepLoop:
     def __init__(
         self,
-        log: StepLog[S],
-        rule: RecoveryRule[S],
+        log: StepLog,
         runner: StepRunner,
         clock: SleepingClock,
         timing: StepLoopTiming,
     ) -> None:
         self._log = log
-        self._rule = rule
         self._runner = runner
         self._clock = clock
         self._timing = timing
@@ -217,7 +173,7 @@ class _StepLoop[S]:
         self._appending = asyncio.Lock()
         self._input: asyncio.Task[None] | None = None
 
-    async def run(self) -> LoopExit:
+    async def run(self) -> RunRest:
         try:
             while True:
                 exit_ = await self._turn()
@@ -226,20 +182,32 @@ class _StepLoop[S]:
         finally:
             await self._abandon_flights()
 
-    async def _turn(self) -> LoopExit | None:
-        if self._rule.settled(self._log.state) is LoopExit.ENDED:
-            return LoopExit.ENDED
-        actions = self._rule.decide(self._log.state, self._clock.now())
+    async def _turn(self) -> RunRest | None:
+        rest = at_rest(self._log.state)
+        if rest is RunRest.ENDED:
+            return RunRest.ENDED
+        actions = decide(self._log.state, self._clock.now())
+        if rest is RunRest.PARKED:
+            return await self._park(actions)
         end = next((a for a in actions if isinstance(a, End)), None)
         if end is not None and not self._flights:
             await self._record_ended(end)
-            return LoopExit.ENDED
-        wake_at = self._dispatch(actions)
-        if self._rule.settled(self._log.state) is LoopExit.PARKED:
-            self._release_unstarted()
-            if not self._flights:
-                return LoopExit.PARKED
-        await self._wake(wake_at)
+            return RunRest.ENDED
+        await self._wake(self._dispatch(actions))
+        return None
+
+    async def _park(self, actions: tuple[Action, ...]) -> RunRest | None:
+        """A parked run starts nothing and takes no result: it only stops what still runs.
+
+        Core drops a result in a parked epoch, so a ``Settle`` it still decides (a step
+        past its limit) waits for the resume instead of being dispatched over and over.
+        """
+        stops = tuple(a for a in actions if isinstance(a, Cancel) and a.tag in self._flights)
+        self._dispatch(stops)
+        self._release_unstarted()
+        if not self._flights:
+            return RunRest.PARKED
+        await self._wake(None)
         return None
 
     def _dispatch(self, actions: tuple[Action, ...]) -> float | None:
@@ -277,7 +245,7 @@ class _StepLoop[S]:
         flight = self._flights.get(action.tag)
         ending = action.reason is CancelReason.RUN_ENDING
         if flight is None:
-            if _fate(action.reason) is not _Fate.INTERRUPT:
+            if interruption_of(action.reason) is None:
                 self._conclude(action.tag, Cancelled(reason=action.reason), ending=ending)
             return
         flight.signal.set(action.reason)
@@ -365,49 +333,61 @@ class _StepLoop[S]:
     async def _finish_unstarted(self, flight: _Flight) -> None:
         """The wait for ``clear`` ended by a cancel: no attempt of this try ever started."""
         reason = flight.signal.reason
-        if reason is not None and _fate(reason) is not _Fate.INTERRUPT:
+        if reason is not None and interruption_of(reason) is None and not self._parked():
             await self._record_finished(
                 flight.tag, self._last_attempt(flight.tag), Cancelled(reason=reason)
             )
 
     async def _finish_attempt(self, run: Run, flight: _Flight, outcome: StepResult | None) -> None:
         reason = flight.signal.reason
+        pause = None if reason is None else interruption_of(reason)
         if outcome is None:
             await self._finish_without_result(run, flight)
-        elif (
-            isinstance(outcome, Cancelled)
-            and reason is not None
-            and _fate(reason) is _Fate.INTERRUPT
-        ):
-            await self._record_interrupted(run.tag, run.attempt, Interruption.PAUSE)
+        elif pause is not None and isinstance(outcome, Cancelled):
+            await self._record_interrupted(run.tag, run.attempt, pause)
         else:
-            await self._record_finished(run.tag, run.attempt, outcome)
+            await self._record_outcome(run, outcome)
 
     async def _finish_without_result(self, run: Run, flight: _Flight) -> None:
         """The attempt raised or was given up on: clear what it left, then say how it ended."""
         cleared = await self._clear(flight)
         reason = flight.signal.reason
+        pause = None if reason is None else interruption_of(reason)
         if isinstance(cleared, Adopted) and cleared.result is not None:
-            await self._record_finished(run.tag, run.attempt, cleared.result)
-        elif reason is None or _fate(reason) is _Fate.INTERRUPT:
-            why = Interruption.RAISED if reason is None else Interruption.PAUSE
-            await self._record_interrupted(run.tag, run.attempt, why)
+            await self._record_outcome(run, cleared.result)
+        elif reason is None or pause is not None:
+            await self._record_interrupted(run.tag, run.attempt, pause or Interruption.RAISED)
         elif isinstance(cleared, Adopted):
             outcome = await self._run_bounded(run, flight.signal)
             if outcome is None:
-                await self._record_finished(run.tag, run.attempt, Cancelled(reason=reason))
+                await self._record_outcome(run, Cancelled(reason=reason))
             else:
                 await self._finish_attempt(run, flight, outcome)
         else:
-            await self._record_finished(run.tag, run.attempt, Cancelled(reason=reason))
+            await self._record_outcome(run, Cancelled(reason=reason))
 
     async def _clear_then_finish(self, flight: _Flight, result: StepResult) -> None:
         cleared = await self._clear(flight)
-        if cleared is None and not flight.ending:
+        if (cleared is None and not flight.ending) or self._parked():
             return
         if isinstance(cleared, Adopted) and cleared.result is None:
             await self._end_adopted(flight)
         await self._record_finished(flight.tag, self._last_attempt(flight.tag), result)
+
+    def _parked(self) -> bool:
+        """Whether the run is paused: a parked epoch takes no result into its state."""
+        return at_rest(self._log.state) is RunRest.PARKED
+
+    async def _record_outcome(self, run: Run, result: StepResult) -> None:
+        """Record how a running attempt ended.
+
+        Core drops the result of a step in a parked epoch, so the attempt is interrupted
+        instead and the step runs again after the resume.
+        """
+        if self._parked():
+            await self._record_interrupted(run.tag, run.attempt, Interruption.PAUSE)
+        else:
+            await self._record_finished(run.tag, run.attempt, result)
 
     async def _end_adopted(self, flight: _Flight) -> None:
         """Attach to work ``clear`` adopted and still going, with the signal set, so it ends."""
@@ -490,10 +470,7 @@ def _drop[T](task: asyncio.Future[T]) -> None:
 
 
 __all__ = [
-    "Interruption",
-    "LoopExit",
     "OpenStep",
-    "RecoveryRule",
     "StepLog",
     "StepLoopTiming",
     "StepLoopTimingError",

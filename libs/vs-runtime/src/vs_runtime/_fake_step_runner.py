@@ -38,7 +38,10 @@ def finished_result(tag: RequestId) -> Finished:
             sequence=0,
             observed_at=0.0,
             status=ObservationStatus.SUCCEEDED,
+            accepted=True,
             terminal=True,
+            released=True,
+            children_complete=True,
         )
     )
 

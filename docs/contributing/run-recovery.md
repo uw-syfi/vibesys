@@ -592,14 +592,17 @@ repeat:
 The loop owns timers, tasks, cancellation and recording. `decide` owns every decision, including that a
 deadline passed. No `if isinstance(step, ...)` appears in either.
 
-In code the loop sees the world through two interfaces it owns. `StepLog` is the log as the loop uses it:
-one atomic durable append per method, a `state` that is the fold of everything appended (by the loop or by
-an input from elsewhere), and `open_step(tag)`, the step with no result as the fold has it (its request, its limit and its latest attempt), which is where `clear` gets the step for a tag with no attempt in flight. `RecoveryRule`
-is core's pure surface: `decide`, and `settled`, which says the log already holds the end of the run
-(`ENDED`) or the run is paused (`PARKED`). A restarted loop over a log that holds `Ended` returns at once
-instead of recording it twice. Each running attempt is a flight, one task that owns the attempt from
-`clear` to the record of how it ended, so a `clear` that waits on an unreachable backend never blocks the
-loop or an ending. How an attempt ends depends on why it was cancelled:
+In code the loop decides with core's own functions, `decide` and `at_rest`, and sees the log through one
+interface it owns. `StepLog` is the log as the loop uses it: one atomic durable append per method, a
+`state` that is the fold of everything appended (by the loop or by an input from elsewhere), and
+`open_step(tag)`, the step with no result as the fold has it (its request, its limit and its latest
+attempt), which is where `clear` gets the step for a tag with no attempt in flight. `StepLogContract`
+holds a log to what the loop relies on, and a restarted log over the records of a dead process is how the
+tests kill the host. The loop's clock is the run clock, the one `decide` reads and the records carry.
+`at_rest(state)` says the run ended (the loop returns at once, so a restart never records the end twice)
+or parked (it returns once nothing is in flight). Each running attempt is a flight, one task that owns the
+attempt from `clear` to the record of how it ended, so a `clear` that waits on an unreachable backend never
+blocks the loop or an ending. How an attempt ends depends on why it was cancelled:
 
 | Cancel reason | Recorded | `clear` unreachable |
 |---|---|---|
@@ -607,7 +610,10 @@ loop or an ending. How an attempt ends depends on why it was cancelled:
 | `RUN_ENDING` | `StepFinished(Cancelled)` | give up; the leftovers are a named residual |
 | `DEADLINE`, `WITHDRAWN`, `INTERRUPTED` | `StepFinished(Cancelled)` | keep retrying with backoff |
 
-An attempt that returned a result on its own is recorded as that result even when a cancel was set. An
+An attempt that returned a result on its own is recorded as that result even when a cancel was set, unless
+the run is parked: core drops a result in a parked epoch, so the attempt is recorded as
+`AttemptInterrupted(PAUSE)` and the step runs again after the resume. A parked run also takes no `Settle`: it
+waits for the resume, so a step past its limit is not settled over and over. An
 attempt the loop gave up on (it ignored the signal through the grace period, or raised) is cleared before
 its end is recorded, so a paused or ended run leaves nothing running. A parked run starts nothing, so
 flights still waiting on `clear` stop waiting. `Settle` and a `Cancel` with no flight (the host restarted)
@@ -693,7 +699,7 @@ Each pull request below is dormant until the cutover: test-reachable, not select
 | PR | Write set | Deletes |
 |---|---|---|
 | 4a. Inputs and decide | `proto/vibesys/store/v1/core_input.proto` and its generated code; `libs/vs-runlog/src/vs_runlog/` (input append, read, the log-prefix rule moved from `_replay_store.py`); `libs/vs-core/src/vs_core/api/recovery.py` and `_decide.py` (`fold`, `decide`, `Action`); `libs/vs-core/tests` (properties over generated logs: fold twice equals once, cached start equals full fold, crash at every record prefix yields `Run` for every open step and never a blocked action) | nothing |
-| 4b. Loop and Protocol | `libs/vs-runtime/src/vs_runtime/_step_loop.py`, `_step_runner.py`, `api/step_runner.py`, `api/step_runner_contracts.py`, `api/testing.py` (`FakeStepRunner`, `FakeStepLog`, `StepRunnerContract`); `tach.toml`; `libs/vs-dst` hooks (#3475 item 2 owns the points) | nothing |
+| 4b. Loop and Protocol | `libs/vs-runtime/src/vs_runtime/_step_loop.py`, `_step_runner.py`, `api/step_runner.py`, `api/step_runner_contracts.py`, `api/step_log_contracts.py`, `api/testing.py` (`FakeStepRunner`, `FakeStepLog`, `StepRunnerContract`, `StepLogContract`); `tach.toml`; `libs/vs-dst` hooks (#3475 item 2 owns the points) | nothing |
 | 5a. Agent turn and workspace runners | `libs/vs-runtime/src/vs_runtime/_agent_turn_step_runner.py`, `_workspace_step_runner.py`; `libs/vs-agent/src/vs_agent/orphans.py` gains reap by step tag beside reap by run | nothing |
 | 5b. Evaluation runners | `libs/vs-runtime/src/vs_runtime/_slurm_job_step_runner.py`, `_local_job_step_runner.py`; Slurm tier case | nothing |
 | 5c. Operation, adoption and environment runners | `libs/vs-runtime/src/vs_runtime/_operation_step_runner.py`, `_adoption_step_runner.py`; per-environment `clear` in `_run_environment.py` (Docker, SkyPilot, Modal, Host) | nothing |
