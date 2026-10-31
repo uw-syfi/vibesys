@@ -6,7 +6,8 @@ A test module subclasses ``StepLogContract``, names the subclass ``Test<Variant>
 when it returns, a record the fold refuses is never appended, what was appended survives a restart,
 and a charged attempt is charged only for a raise.
 
-The end of a run is not here: core has no record for it yet, so no log can promise its durability.
+A result is judged on the state its own append extends: one that reaches a parked run is not
+recorded as a result and leaves the log as it was (``Interrupted``), whatever the loop last read.
 """
 
 from __future__ import annotations
@@ -16,7 +17,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from vs_core.api import RequestId
-from vs_core.api.recovery import Cancelled, CancelReason, Interruption, Run
+from vs_core.api.recovery import Cancelled, CancelReason, Interruption, Run, RunRest, at_rest
+from vs_runtime._step_loop import Interrupted, Recorded
 from vs_sim.api import yield_now
 from vs_sim.api.testing import HANG_GUARD_S
 
@@ -171,5 +173,65 @@ class StepLogContract:
             subject.push_input()
             done, _ = await asyncio.wait({waiter}, timeout=HANG_GUARD_S)
             assert done, "next_input did not return after an input"
+
+        subject.drive(main())
+
+    def test_a_result_that_reaches_a_parked_run_is_not_recorded_and_leaves_the_log_unchanged(
+        self,
+    ) -> None:
+        """A pause lands, the attempt is interrupted, the run parks; the runner's result comes late.
+
+        Core drops the result of a step in a parked epoch, so the log must not hold one: it
+        answers ``Interrupted`` and appends nothing. A loop that had decided on a state from before
+        the pause is corrected by this answer, not by its own check.
+        """
+        subject = self.step_log_under_test()
+        run = subject.runs[0]
+
+        async def main() -> None:
+            await subject.log.step_started(run)
+            subject.push_input()
+            await subject.log.attempt_interrupted(run.tag, run.attempt, Interruption.PAUSE)
+            assert at_rest(subject.log.state) is RunRest.PARKED
+            before = subject.log.state
+            late = Cancelled(reason=CancelReason.WITHDRAWN)
+            assert isinstance(
+                await subject.log.step_finished(run.tag, run.attempt, late), Interrupted
+            )
+            assert subject.log.state == before
+            assert subject.reopen().open_step(run.tag) is not None
+
+        subject.drive(main())
+
+    def test_a_pause_that_lands_while_the_attempt_runs_does_not_refuse_its_result(self) -> None:
+        """Pausing is not parking: the attempt still runs, so its result is a result."""
+        subject = self.step_log_under_test()
+        run = subject.runs[0]
+
+        async def main() -> None:
+            await subject.log.step_started(run)
+            assert at_rest(subject.log.state) is None
+            subject.push_input()
+            result = Cancelled(reason=CancelReason.WITHDRAWN)
+            assert isinstance(
+                await subject.log.step_finished(run.tag, run.attempt, result), Recorded
+            )
+            assert subject.log.open_step(run.tag) is None
+
+        subject.drive(main())
+
+    def test_an_attempt_the_run_does_not_let_start_is_not_recorded(self) -> None:
+        """A start the rule forbids (the run is parked) answers ``Interrupted`` and appends nothing."""
+        subject = self.step_log_under_test()
+        run = subject.runs[0]
+
+        async def main() -> None:
+            await subject.log.step_started(run)
+            subject.push_input()
+            await subject.log.attempt_interrupted(run.tag, run.attempt, Interruption.PAUSE)
+            before = subject.log.state
+            again = Run(run.step, run.tag, run.attempt + 1, run.deadline_at)
+            assert isinstance(await subject.log.step_started(again), Interrupted)
+            assert subject.log.state == before
 
         subject.drive(main())

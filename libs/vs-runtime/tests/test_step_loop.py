@@ -107,6 +107,8 @@ class Scenario:
     """When the operator pauses the run now (core's ``pause_now``)."""
     stop_at: float | None = None
     """When the operator stops the run; ``None`` waits until every step has its result."""
+    race: bool = False
+    """Whether a pause lands, and the run parks, just before the first result is recorded."""
 
 
 @dataclass
@@ -140,9 +142,15 @@ class Switch:
 
 
 class CrashingLog:
-    def __init__(self, inner: StepLog, switch: Switch) -> None:
+    def __init__(
+        self,
+        inner: StepLog,
+        switch: Switch,
+        before_result: Callable[[core.RequestId, int], Awaitable[None]] | None = None,
+    ) -> None:
         self._inner = inner
         self._switch = switch
+        self._before_result = before_result
 
     @property
     def state(self) -> core.CoreState:
@@ -163,6 +171,8 @@ class CrashingLog:
     async def step_finished(
         self, tag: core.RequestId, attempt: int, result: StepResult
     ) -> StepRecord:
+        if self._before_result is not None:
+            await self._before_result(tag, attempt)
         return await self._around(lambda: self._inner.step_finished(tag, attempt, result))
 
     async def attempt_interrupted(
@@ -270,6 +280,27 @@ def run_world(scenario: Scenario, kill_at: int | None = None) -> World:
     return run_virtual(clock, run_epochs(world, clock, kill_at))
 
 
+def racing(
+    scenario: Scenario, log: FakeStepLog, clock: VirtualClock, delivered: set[str]
+) -> Callable[[core.RequestId, int], Awaitable[None]] | None:
+    """The pause that lands between the loop's last look at the state and its append, once.
+
+    The pause is appended and the attempt the result belongs to is interrupted, which parks the
+    run: the loop's own check of the state, made before, said the run goes on.
+    """
+    if not scenario.race or "raced" in delivered:
+        return None
+
+    async def land(tag: core.RequestId, attempt: int) -> None:
+        if "raced" in delivered:
+            return
+        delivered.add("raced")
+        log.push(pause_event(clock))
+        await log.attempt_interrupted(tag, attempt, Interruption.PAUSE)
+
+    return land
+
+
 async def run_epochs(world: World, clock: VirtualClock, kill_at: int | None) -> World:
     delivered: set[str] = set()
     parked = False
@@ -281,7 +312,10 @@ async def run_epochs(world: World, clock: VirtualClock, kill_at: int | None) -> 
         switch = Switch(None if killed else kill_at)
         loop = asyncio.ensure_future(
             run_step_loop(
-                CrashingLog(log, switch), CrashingRunner(world.runner, switch), clock, TIMING
+                CrashingLog(log, switch, racing(world.scenario, log, clock, delivered)),
+                CrashingRunner(world.runner, switch),
+                clock,
+                TIMING,
             )
         )
         switch.loop = loop
@@ -520,6 +554,14 @@ def test_a_kill_at_swept_boundaries_of_a_rich_run_ends_it_once() -> None:
     )
     for kill_at in swept(run_world(scenario).boundaries, sample=8):
         check_world(run_world(scenario, kill_at))
+
+
+def test_a_pause_that_lands_between_the_loops_look_and_its_append_parks_the_run_and_loses_nothing() -> (
+    None
+):
+    world = run_world(Scenario((step(FINISHES), step(FINISHES)), race=True))
+    check_world(world)
+    assert world.exits == [RunRest.PARKED, RunRest.ENDED]
 
 
 def test_a_pause_at_any_moment_parks_and_resumes_to_the_same_end() -> None:

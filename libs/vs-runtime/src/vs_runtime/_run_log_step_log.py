@@ -138,11 +138,12 @@ class RunLogStepLog:
 
     def _start(self, seed: CoreState) -> None:
         """Append the seed as the first record of the run; the fold begins at it."""
-        record = self._log.next_record(
-            seed_message(seed), epoch=self._epoch, at=self._stamp(), clock=self._clock.now()
-        )
-        self._folded = apply_record(None, record, self._registry)
-        self._confirm(record)
+        with self._log.transaction():
+            record = self._log.next_record(
+                seed_message(seed), epoch=self._epoch, at=self._stamp(), clock=self._clock.now()
+            )
+            self._folded = apply_record(None, record, self._registry)
+            self._confirm(record)
 
     @property
     def state(self) -> CoreState:
@@ -154,24 +155,35 @@ class RunLogStepLog:
         return open_step(self.state, tag)
 
     async def step_started(self, run: Run) -> StepRecord:
-        """Append ``StepStarted`` if the run still lets the step start."""
-        if not may_start(self.state, run.tag, self._clock.now()):
-            return Interrupted()
-        self._commit(started_message(run))
-        return Recorded()
+        """Append ``StepStarted`` if the run still lets the step start.
+
+        The verdict is made on the state the append extends: a pause that landed since the loop
+        last looked is already in it.
+        """
+        with self._log.transaction():
+            if not may_start(self.state, run.tag, self._clock.now()):
+                return Interrupted()
+            self._commit(started_message(run))
+            return Recorded()
 
     async def step_finished(self, tag: RequestId, attempt: int, result: StepResult) -> StepRecord:
-        """Append ``StepFinished``; for a parked run, ``AttemptInterrupted`` for its attempt."""
-        if at_rest(self.state) is RunRest.PARKED:
-            if running_attempt(self.state, tag, attempt):
-                self._commit(interrupted_message(tag, attempt, Interruption.PAUSE))
-            return Interrupted()
-        self._commit(finished_message(tag, attempt, result))
-        return Recorded()
+        """Append ``StepFinished``; for a parked run, ``AttemptInterrupted`` for its attempt.
+
+        Core drops the result of a step in a parked epoch, so it is never appended there. The
+        verdict is made on the state the append extends, under the lock every append takes.
+        """
+        with self._log.transaction():
+            if at_rest(self.state) is RunRest.PARKED:
+                if running_attempt(self.state, tag, attempt):
+                    self._commit(interrupted_message(tag, attempt, Interruption.PAUSE))
+                return Interrupted()
+            self._commit(finished_message(tag, attempt, result))
+            return Recorded()
 
     async def attempt_interrupted(self, tag: RequestId, attempt: int, why: Interruption) -> None:
         """Append ``AttemptInterrupted``."""
-        self._commit(interrupted_message(tag, attempt, why))
+        with self._log.transaction():
+            self._commit(interrupted_message(tag, attempt, why))
 
     async def run_ended(self, end: End) -> None:
         """Log the search whole, then append the end of the run.
@@ -179,13 +191,15 @@ class RunLogStepLog:
         The whole state comes first, so the end is the last record of the run and a log that
         ends cleanly always holds the search as it finished.
         """
-        self._rest()
-        self._commit(ended_message(end))
+        with self._log.transaction():
+            self._rest()
+            self._commit(ended_message(end))
 
     def input(self, event: CoreEvent) -> None:
         """Append an input from outside the loop (an operator control, the clock) and wake it."""
-        self._commit(input_message(event))
-        self._arrived += 1
+        with self._log.transaction():
+            self._commit(input_message(event))
+            self._arrived += 1
         self._wake.set()
 
     @property
@@ -195,10 +209,12 @@ class RunLogStepLog:
 
     def hear(self) -> None:
         """Let the search hear what is due now (a wake-up) and answer, though nothing was appended."""
-        before = self._appended
-        self._settle()
-        if self._appended != before:
-            self._arrived += 1
+        with self._log.transaction():
+            before = self._appended
+            self._settle()
+            heard = self._appended != before
+            self._arrived += int(heard)
+        if heard:
             self._wake.set()
 
     async def changed(self) -> None:
@@ -224,11 +240,12 @@ class RunLogStepLog:
 
     def _record(self, message: CoreMessage) -> None:
         """Fold the next record, and only then append it: a record the fold refuses stays out."""
-        record = self._log.next_record(
-            message, epoch=self._epoch, at=self._stamp(), clock=self._clock.now()
-        )
-        self._folded = apply_record(self._folded, record, self._registry)
-        self._confirm(record)
+        with self._log.transaction():
+            record = self._log.next_record(
+                message, epoch=self._epoch, at=self._stamp(), clock=self._clock.now()
+            )
+            self._folded = apply_record(self._folded, record, self._registry)
+            self._confirm(record)
 
     def _confirm(self, record: Record) -> None:
         confirmed = self._log.extend(record)
