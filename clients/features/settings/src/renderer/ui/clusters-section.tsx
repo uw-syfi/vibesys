@@ -35,6 +35,7 @@ import {
   modalWords,
   type ReachKind,
   reachWords,
+  sentenceCase,
   stale,
   statedHardware,
   testFailureWords,
@@ -237,16 +238,19 @@ function ClusterFormCard(props: FormProps): JSX.Element {
   );
 }
 
-/** A failure the form holds, inline above the actions that try again; announced when it appears. */
-function FormFailure(props: {readonly title: string; readonly detail?: string}): JSX.Element {
+/**
+ * A failure the form holds, above the actions that try again: its status word, and beside it what
+ * the person must read to act, at the weight of the rest of the form. The whole is announced when it
+ * appears, so a screen reader hears the detail with the word. The word is as wide as its label, so
+ * the row says it in a few words and a long detail wraps beside it.
+ */
+function FormFailure(props: {readonly label: string; readonly detail?: string}): JSX.Element {
   return (
     <div role="alert">
-      <Stack gap="space-1">
-        <Text variant="body-strong" tone="err">
-          {props.title}
-        </Text>
-        {props.detail === undefined ? null : <Text tone="muted">{props.detail}</Text>}
-      </Stack>
+      <Row gap="space-3" align="center" wrap>
+        <Chip label={props.label} tone="err" dot />
+        {props.detail === undefined ? null : <Text>{sentenceCase(props.detail)}</Text>}
+      </Row>
     </div>
   );
 }
@@ -257,7 +261,7 @@ function FormResult(props: {readonly form: ClusterForm}): JSX.Element {
   return (
     <>
       {form.problem === null || form.problem.field !== null ? null : (
-        <FormFailure title={form.problem.text} />
+        <FormFailure label={form.problem.word ?? 'Failed'} detail={form.problem.text} />
       )}
       <TestResult form={form} outdated={stale(form)} />
     </>
@@ -276,7 +280,7 @@ function TestResult(props: {
     );
   }
   if (test.kind === 'failed') {
-    return <FormFailure title={testFailureWords(test.stage)} detail={test.detail} />;
+    return <FormFailure label={testFailureWords(test.stage)} detail={test.detail} />;
   }
   return (
     <Chip
