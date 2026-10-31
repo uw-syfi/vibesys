@@ -56,6 +56,7 @@ from vs_core.api import (
     translate,
     validate_startup,
 )
+from vs_core.api.recovery import OwnerEvent
 from vs_project.api import Committed, StateStore, StoredEnvelope, StoreFence, Unknown
 from vs_runtime._core_preflight import resolve_core_resume
 from vs_runtime._core_record import (
@@ -67,7 +68,6 @@ from vs_runtime._core_record import (
 from vs_runtime._core_requests import (
     ExecutionContext,
     ExecutorRefusal,
-    OwnerEvent,
     RequestExecutors,
     counts_toward_concurrency,
 )

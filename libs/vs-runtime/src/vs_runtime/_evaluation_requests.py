@@ -100,9 +100,10 @@ from vs_runtime._observation_factory import (
 from vs_runtime._receipt_store import Conflict, Declined, Performed, Replayed, owner_key
 
 if TYPE_CHECKING:
+    from vs_core.api.recovery import OwnerEvent
     from vs_evaluation.api import PollingEvaluationExecutor
     from vs_runtime._core_identity import CoreRequestId
-    from vs_runtime._core_requests import EvaluationRoleRequest, OwnerEvent
+    from vs_runtime._core_requests import EvaluationRoleRequest
     from vs_runtime._receipt_store import ReceiptStore, Settled, Transient
     from vs_runtime._run_control import RunControlChannel
 

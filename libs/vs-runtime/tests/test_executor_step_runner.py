@@ -39,6 +39,7 @@ from vs_core.api import (
     HostId,
     InvocationId,
     InvocationRef,
+    JobObserved,
     ObservationStatus,
     ObserveOwnedJob,
     RequestId,
@@ -343,6 +344,33 @@ async def test_an_executor_that_cannot_conclude_gives_the_step_no_result(
     tag = tag_named("undecided")
     with pytest.raises(StepWithoutResultError):
         await runner.run(step_of(kind, tag, hangs=False), tag, 1, DEADLINE, CancelSignal())
+
+
+class Eventful:
+    """An executor that tells the owner of the job something the report does not say."""
+
+    async def execute(self, request: Request, context: ExecutionContext) -> ExecutionResult:
+        del context
+        assert request.request_id is not None
+        observation = finished_result(request.request_id).observation
+        event = JobObserved(resource_id=ResourceId(root="job"), observation=observation)
+        return ExecutionResult(
+            observation=RequestObserved(observation=observation), owner_events=(event,)
+        )
+
+
+@pytest.mark.asyncio
+async def test_the_owner_events_an_executor_returns_beside_the_report_are_in_the_result() -> None:
+    eventful = Eventful()
+    runner = runner_over(
+        RequestExecutors(workspaces=eventful, sessions=eventful, evaluation=eventful)
+    )
+    tag = tag_named("eventful")
+    done = await runner.run(
+        step_of(CollectEvidence, tag, hangs=False), tag, 1, DEADLINE, CancelSignal()
+    )
+    assert isinstance(done, Finished)
+    assert [event.kind for event in done.owner_events] == ["job_observed"]
 
 
 @pytest.mark.asyncio

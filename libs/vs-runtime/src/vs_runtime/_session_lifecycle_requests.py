@@ -105,7 +105,8 @@ if TYPE_CHECKING:
 
     from vs_agent.api import AgentInvocationRecord, AgentSessionCheckpoint, AgentSessions
     from vs_core.api import RequestBase, SessionId, SnapshotAndRetainRun
-    from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
+    from vs_core.api.recovery import OwnerEvent
+    from vs_runtime._core_requests import SessionRoleRequest
     from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._workspace_requests import RunInvocationProof
     from vs_sim.api import BlockingRunner

@@ -128,8 +128,9 @@ if TYPE_CHECKING:
         Observation,
         RequestBase,
     )
+    from vs_core.api.recovery import OwnerEvent
     from vs_prompts.api import RenderedPrompt
-    from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
+    from vs_runtime._core_requests import SessionRoleRequest
     from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._workspace_access import AccessGrant, AccessGuardedWorkspace
     from vs_sim.api import BlockingRunner

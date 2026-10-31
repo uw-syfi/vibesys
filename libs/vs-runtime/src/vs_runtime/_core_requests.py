@@ -11,13 +11,12 @@ import hashlib
 from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Annotated, Protocol, assert_never, cast
+from typing import TYPE_CHECKING, Protocol, assert_never, cast
 
 from pydantic import BaseModel, ConfigDict, Field, SkipValidation
 
 from vs_core.api import (
     AdoptRevision,
-    AttemptsEvent,
     BlockRequest,
     CancelOwnedJob,
     CancelOwnedResource,
@@ -30,7 +29,6 @@ from vs_core.api import (
     DispatchTurn,
     EnsureSession,
     EnsureWorkspace,
-    EvaluationEvent,
     ExecuteRegisteredOperation,
     HostFence,
     InspectOwnedJob,
@@ -45,8 +43,6 @@ from vs_core.api import (
     RestoreRevision,
     ResumeSessionTurn,
     RetainRevision,
-    SessionsEvent,
-    SettlementEvent,
     SnapshotAndRetain,
     SnapshotAndRetainRun,
     SubmitMeasurement,
@@ -54,6 +50,7 @@ from vs_core.api import (
     Until,
     VerifyAdoption,
 )
+from vs_core.api.recovery import OwnerEvent
 from vs_runtime._receipt_store import Settled, Transient
 
 if TYPE_CHECKING:
@@ -118,12 +115,6 @@ class ExecutionContext(BaseModel):
 def payload_digest_of(request: RequestBase) -> str:
     """The digest that names *request*'s payload in an ``ExecutionContext``."""
     return hashlib.sha256(request.model_dump_json().encode()).hexdigest()
-
-
-type OwnerEvent = Annotated[
-    AttemptsEvent | SessionsEvent | EvaluationEvent | SettlementEvent,
-    Field(discriminator="kind"),
-]
 
 
 class ExecutionResult(BaseModel):

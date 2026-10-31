@@ -59,7 +59,6 @@ from vs_runtime._core_requests import (
     ExecutionContext,
     ExecutionOutcome,
     ExecutionResult,
-    OwnerEvent,
 )
 from vs_runtime._effect_fence import (
     EffectFences,
@@ -99,6 +98,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from vs_core.api import Request
+    from vs_core.api.recovery import OwnerEvent
     from vs_runtime._evidence_ledger import EvidenceLookup
     from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces

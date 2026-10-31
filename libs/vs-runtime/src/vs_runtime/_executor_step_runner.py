@@ -198,10 +198,12 @@ def _check_repeats(repeats: Mapping[type[Request], Repeat]) -> None:
 
 
 def _finished(outcome: ExecutionOutcome, tag: RequestId) -> Finished:
-    """The step's result: what the executor observed, which must be final."""
+    """The step's result: what the executor observed, which must be final, and its owner events."""
     if isinstance(outcome, ExecutorRefusal):
         raise ExecutorRefusedError(outcome)
     observed = outcome.observation
     if not observed.observation.terminal:
         raise StepWithoutResultError(tag, observed.observation)
-    return Finished(observation=observed.observation, observed=observed)
+    return Finished(
+        observation=observed.observation, observed=observed, owner_events=outcome.owner_events
+    )
