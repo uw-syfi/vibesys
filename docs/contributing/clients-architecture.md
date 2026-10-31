@@ -436,6 +436,16 @@ any difference; `scripts/check_clients.sh` runs it (see "Client checks before a 
 When the job fails on a screenshot, it uploads the actual and the diff as the
 `ui-gallery-test-results-1` artifact.
 
+Every glyph the UI draws comes from a bundled font. The body face has no check mark, bullet or
+cross, so a symbol set in it is drawn by whatever font the machine falls back to, and the same
+screen differs between operating systems (the gallery's baselines are the one place it showed
+first). Set a symbol in `var(--font-mono)`, whose bundled face has it, or use an icon. Enforced:
+the gallery's `every glyph the gallery draws comes from a bundled font` test and the
+`bundled-font` check in the desktop shell's `screenCheck` ask Chromium which font drew each text
+(`CSS.getPlatformFontsForNode`) and fail on any family `fonts.css` does not declare. One fixture
+writes run titles in other scripts and emoji on purpose, to test wrapping, and is exempt
+(`OTHER_SCRIPTS` in `screens.spec.ts`).
+
 ## Where a Run screen change goes
 
 The Run screen is `clients/features/run-page`. Paths below are relative to its `src/`; a

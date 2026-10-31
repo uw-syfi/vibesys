@@ -68,6 +68,18 @@ class End:
 type Action = Run | Cancel | Settle | Wait | End
 
 
+@dataclass(frozen=True)
+class OpenStep:
+    """A step with no result, as the loop starts an attempt of it."""
+
+    step: Request
+    """The request to run."""
+    deadline_at: float
+    """The run-clock limit of the step, once it has started."""
+    started: int
+    """The latest attempt that began; 0 before the first."""
+
+
 def interruption_of(reason: CancelReason) -> Interruption | None:
     """How the attempt of a cancelled step ends, or None when the cancellation is its result.
 
@@ -98,11 +110,11 @@ class RunRest(StrEnum):
 
 
 def at_rest(state: CoreState) -> RunRest | None:
-    """Whether the run ended or parked, else None while it goes on."""
-    match state.run.status:
-        case RunStatus.TERMINAL:
-            return RunRest.ENDED
-        case RunStatus.PARKED:
-            return RunRest.PARKED
-        case _:
-            return None
+    """Whether the run ended or parked, else None while it goes on.
+
+    A run has ended when its end is recorded, not when the kernel reaches its terminal status: a
+    stop with nothing open reaches it at once, and the result is still to be published.
+    """
+    if state.run.result is not None and state.steps.ended == state.run.result:
+        return RunRest.ENDED
+    return RunRest.PARKED if state.run.status is RunStatus.PARKED else None
