@@ -1,0 +1,16 @@
+shared/continuation-rounds
+records 45
+blobs 1
+streams 0
+record kinds
+  declaration_amended 1
+  epoch_started 1
+  lifecycle 1
+  metric 9
+  span 33
+span label kinds
+  (no label) 1
+  adoption 1
+  agent_turn 11
+  gate 9
+  workstream 11

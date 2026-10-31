@@ -29,7 +29,7 @@
   "scripts": {
     "build": "tsc -b tsconfig.state.json tsconfig.renderer.json",
     "check": "tsc -b",
-    "test": "node ../../tools/scripts/run_bun_tests.mjs ./src"
+    "test": "node ../../tools/scripts/with_derived_replays.mjs node ../../tools/scripts/run_bun_tests.mjs ./src"
   },
   "dependencies": {
     "@vibesys/contracts": "workspace:*",

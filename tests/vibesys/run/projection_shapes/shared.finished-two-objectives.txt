@@ -1,0 +1,17 @@
+shared/finished-two-objectives
+records 121
+blobs 1
+streams 0
+record kinds
+  declaration_amended 1
+  epoch_started 1
+  lifecycle 2
+  metric 38
+  span 79
+span label kinds
+  (no label) 2
+  adoption 2
+  agent_turn 26
+  gate 21
+  planning_call 2
+  workstream 26

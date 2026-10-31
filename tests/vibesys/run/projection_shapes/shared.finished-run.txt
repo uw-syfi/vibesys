@@ -1,0 +1,19 @@
+shared/finished-run
+records 71
+blobs 2
+streams 2
+record kinds
+  blob 1
+  declaration_amended 1
+  epoch_started 1
+  lifecycle 2
+  metric 11
+  span 53
+  stream 2
+span label kinds
+  (no label) 2
+  adoption 2
+  agent_turn 18
+  gate 13
+  planning_call 4
+  workstream 14

@@ -1,0 +1,9 @@
+journeys/startup
+records 9
+blobs 1
+streams 4
+record kinds
+  epoch_started 1
+  lifecycle 4
+  stream 4
+span label kinds

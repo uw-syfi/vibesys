@@ -714,17 +714,37 @@ def continues_admitted_work(run: RunState) -> bool:
     turn that resume asks for is a decision the shell holds until the run is resumed. A gate
     that refused these while paused would drop them for good, because a resume re-sends
     only held decisions and nothing else re-delivers a fact that came while paused.
+
+    A run that is draining an operator's pause (``RunStatus.DRAINING``) is not in this set: a
+    gate that reads it admits that run's work only through its own narrower rule (a permit, a
+    scope in flight). ``admitted_work_proceeds`` is the broader question the session gates ask.
     """
     return run.status in (RunStatus.RUNNING, RunStatus.PAUSED)
 
 
-def draining(run: RunState) -> bool:
+def admitted_work_proceeds(run: RunState) -> bool:
+    """Whether work the run already admitted goes on: it runs, is paused for quota, or drains a pause.
+
+    The one answer for the session gates (a scope's ownership, a continuation's liveness). The
+    drain of an operator's pause (``RunStatus.DRAINING``) lets admitted work finish: a turn that
+    was requested before the pause still gets its input reserved, and a turn the pause admitted
+    as a successor is still admitted. A gate that refused them would end the turn for good, since
+    nothing re-requests it. What starts is the drain's decision, not this predicate's:
+    ``dispatch_allowed`` holds an effect back, and ``takes_command`` holds a new decision.
+
+    Not ``stop_draining``, which is the drain of a stop (``RunStatus.CLOSING``).
+    """
+    return continues_admitted_work(run) or run.status is RunStatus.DRAINING
+
+
+def stop_draining(run: RunState) -> bool:
     """Whether the run is CLOSING under a proved Finish and its stop is a drain.
 
-    The one definition of the drain rule: a drain starts no new requests, but
+    The one definition of the drain rule of a stop: it starts no new requests, but
     the already accepted queue still starts and runs to completion (legacy
     FinishSearch). A cancel starts nothing. Scheduling admits under this
-    rule and Attempts accepts those admissions under the same predicate.
+    rule and Attempts accepts those admissions under the same predicate. It is not the
+    drain of an operator's pause (``RunStatus.DRAINING``), which ``admitted_work_proceeds`` admits.
     """
     match committed_stop(run):
         case Proven():

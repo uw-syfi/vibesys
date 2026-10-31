@@ -1,15 +1,12 @@
 """Native desktop journeys: declarative core events interpreted by the shipping projector.
 
-Regenerate with ``./scripts/regenerate_goldens.sh``, which runs this module beside the shared
-scenarios. The golden check compares the same projection byte for byte, including blobs and
-streams.
+The replays are generated from the declarations by ``tests.support.materialize_replays`` and are
+not committed; the tests project the same declarations, including blobs and streams.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
-import sys
 from pathlib import Path
 
 from tests.support.lineage_fixture import lineage_fixture
@@ -109,41 +106,3 @@ def live_artifacts() -> dict[str, bytes]:
         output[f"live.{events[index]['sequence']}.pb"] = delta.to_binary()
         previous = current
     return output
-
-
-def fingerprint() -> str:
-    """Invalidate goldens when their declarations, projector, adapter or schemas change."""
-    repository = ROOT.parents[4]
-    paths = sorted(ROOT.glob("*.json"))
-    paths += sorted((repository / "src/vibesys/records").glob("*.py"))
-    paths += sorted((repository / "libs/vs-runlog/src/vs_runlog").glob("*.py"))
-    paths += sorted((repository / "proto/vibesys").rglob("*.proto"))
-    paths += [
-        Path(__file__),
-        Path(__file__).with_name("retained_events.py"),
-        Path(__file__).with_name("lineage_fixture.py"),
-    ]
-    digest = hashlib.sha256()
-    for path in paths:
-        digest.update(path.read_bytes())
-    return digest.hexdigest()
-
-
-if __name__ == "__main__":
-    for path in sorted(ROOT.glob("*.json")):
-        target = path.with_suffix(".pb")
-        target.write_bytes(project_scenario(path.stem).to_binary())
-        sys.stdout.write(f"wrote {target.name}\n")
-        sys.stdout.flush()
-    for path in sorted(ROOT.glob("*.json")):
-        for name, replay in scenario_variants(path.stem).items():
-            (ROOT / f"{name}.pb").write_bytes(replay.to_binary())
-    (ROOT / "source.sha256").write_text(fingerprint() + "\n")
-    for name, payload in live_artifacts().items():
-        (ROOT / name).write_bytes(payload)
-    (ROOT / "goldens.sha256").write_text(
-        "".join(
-            f"{path.name} {hashlib.sha256(path.read_bytes()).hexdigest()}\n"
-            for path in sorted(ROOT.glob("*.pb"))
-        )
-    )
