@@ -190,6 +190,12 @@ interface CheckoutChangeId {
   readonly sequence: number;
 }
 
+/** One project listing, unique across renderer-document lifetimes: its owner and the view's token. */
+export interface ProjectListingId {
+  readonly owner: string;
+  readonly token: number;
+}
+
 /** One inspection intent, unique within the renderer document that issued it. */
 export interface InspectionChangeId {
   readonly owner: string;
@@ -229,6 +235,8 @@ export class Hosts {
   readonly #checkoutRevisions = new Map<HostKey, CheckoutRevision>();
   /** The logs channel each renderer document's inspector holds, on one host at a time. */
   readonly #logs = new Map<string, InspectorLogs>();
+  /** Project listings in flight, each with the stop that ends it, by `listingKey`. */
+  readonly #listings = new Map<string, AbortController>();
   /** Latest inspection lease admitted for each renderer document. */
   readonly #inspectionChanges = new Map<string, InspectionLease>();
   /** Renderer documents whose outstanding inspection writes have been revoked. */
@@ -597,10 +605,38 @@ export class Hosts {
     }
   }
 
-  /** Every run of `project` on `id`, newest first (`runs.list`); a digest is asked for separately. */
-  async projectRuns(id: HostId, project: string): Promise<readonly ListedRun[]> {
+  /**
+   * Every run of `project` on `id`, newest first (`runs.list`); a digest is asked for separately.
+   * The listing runs until `listing` is cancelled (`cancelProjectRuns`, or its owner going away),
+   * which stops the host's scan and rejects the call.
+   */
+  async projectRuns(
+    id: HostId,
+    project: string,
+    listing: ProjectListingId,
+  ): Promise<readonly ListedRun[]> {
     if (!this.#deps.savedRuns) throw new Error('saved-run registry is missing');
-    return this.#deps.savedRuns.list(id, project, new AbortController().signal);
+    const key = listingKey(listing);
+    if (this.#listings.has(key)) throw new Error('the project listing is already active');
+    const stop = new AbortController();
+    this.#listings.set(key, stop);
+    try {
+      return await this.#deps.savedRuns.list(id, project, stop.signal);
+    } finally {
+      if (this.#listings.get(key) === stop) this.#listings.delete(key);
+    }
+  }
+
+  /** End one project listing its view no longer wants; one that has answered is a no-op. */
+  cancelProjectRuns(listing: ProjectListingId): void {
+    this.#listings.get(listingKey(listing))?.abort(new Error('the project listing was cancelled'));
+  }
+
+  /** End every project listing a renderer document that went away still holds. */
+  cancelProjectRunsOwner(owner: string): void {
+    for (const [key, stop] of this.#listings) {
+      if (key.startsWith(`${owner}\0`)) stop.abort(new Error('the project listing was cancelled'));
+    }
   }
 
   /** The vetted provider and model pairs runs on `id` may start with; `unsupported` on an older helper. */
@@ -1177,6 +1213,10 @@ class CheckoutChange {
 
 function checkoutChangeKey(change: CheckoutChangeId): string {
   return `${change.owner}\0${change.sequence}`;
+}
+
+function listingKey(listing: ProjectListingId): string {
+  return `${listing.owner}\0${listing.token}`;
 }
 
 /** A helper's refusal in plain words: what failed, and the helper's own reason. */

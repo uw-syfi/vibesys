@@ -52,6 +52,8 @@ message OperationPolicy {
     not_in: [2]
     lte: 536870911
   }];
+  // The longest a finite stream may stay silent, before its first frame or between two.
+  optional uint32 progress_ms = 13 [(buf.validate.field).uint32.gt = 0];
 }
 message Correlation {
   repeated uint32 request_path = 1 [(buf.validate.field).repeated = {

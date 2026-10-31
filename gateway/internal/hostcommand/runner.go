@@ -191,8 +191,11 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 
 // FakeRunner executes an in-memory program under the same output and context
 // bounds as ExecRunner. Calls are synchronous; tests control cancellation in Program.
+// Frames, when set, stands in for a streamed command: it emits each payload as the
+// command would write it and may wait between them, so a test decides the gaps.
 type FakeRunner struct {
 	Program func(context.Context, Command) (Result, error)
+	Frames  func(context.Context, Command, func([]byte) error) error
 }
 
 func (r FakeRunner) Run(ctx context.Context, command Command) (Result, error) {
@@ -215,6 +218,13 @@ func (r FakeRunner) Run(ctx context.Context, command Command) (Result, error) {
 
 func (r FakeRunner) Stream(ctx context.Context, command Command, emit func([]byte) error) error {
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if r.Frames != nil {
+		err := r.Frames(ctx, command, emit)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return err
 	}
 	result, err := r.Program(ctx, command)

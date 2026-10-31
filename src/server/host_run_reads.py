@@ -4,8 +4,8 @@ The helper's ``runs.list`` and ``usage.window`` and the registered ``ListRunDige
 ``UsageWindow`` answer from these functions, so one definition says what a digest and a window
 hold. Nothing here knows which transport asked.
 
-Public surface: ``ProjectRun``, ``RunProjects``, ``RunFacts``, ``run_summaries``, ``project_runs``
-and ``usage_window_reply``.
+Public surface: ``ProjectRun``, ``RunProjects``, ``RunFacts``, ``run_summaries``, ``project_runs``,
+``named_run_digests`` and ``usage_window_reply``.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from server.host_run_dashboard import IdeaVerdict
 from server.run_digest import run_attention
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Iterable, Iterator, Mapping
     from datetime import datetime
     from pathlib import Path
 
@@ -50,8 +50,14 @@ class ProjectRun:
 class RunProjects(Protocol):
     """The part of a project catalog the reads of a project's runs need."""
 
-    def runs(self, project: Path) -> tuple[Path, tuple[ProjectRun, ...]]:
-        """The project's resolved root and its runs, oldest first."""
+    def stream_runs(self, project: Path) -> tuple[Path, Iterator[ProjectRun]]:
+        """The project's resolved root and one lazy scan of its runs, in discovery order."""
+        ...
+
+    def named_runs(
+        self, project: Path, run_ids: Iterable[str]
+    ) -> tuple[Path, tuple[ProjectRun, ...]]:
+        """The project's resolved root and those of ``run_ids`` it holds, oldest first."""
         ...
 
     def run_digest(self, project_root: Path, run_id: str) -> RunDigest | RunDigestUnreadable | None:
@@ -85,16 +91,46 @@ class RunFacts(Protocol):
 def project_runs(
     host: RunFacts, project: Path, digest_runs: Iterable[str], *, with_dashboard: bool
 ) -> RunList:
-    """A project's runs, each of ``digest_runs`` with the digest its journal gives.
+    """A project's runs, oldest first, each of ``digest_runs`` with the digest its journal gives.
 
     The tile's data (``with_dashboard``) and the attention it judges are included only when asked.
     """
-    root, runs = host.projects.runs(project)
+    root, scan = host.projects.stream_runs(project)
+    runs = tuple(sorted(scan, key=lambda run: (run.created_at, run.run_id)))
     known = {run.run_id for run in runs}
+    return _digested(
+        host,
+        root,
+        runs,
+        (run_id for run_id in dict.fromkeys(digest_runs) if run_id in known),
+        with_dashboard=with_dashboard,
+    )
+
+
+def named_run_digests(
+    host: RunFacts, project: Path, run_ids: Iterable[str], *, with_dashboard: bool
+) -> RunList:
+    """Those of ``run_ids`` the project holds, each with its digest, at a cost set by ``run_ids``.
+
+    Unlike ``project_runs``, this leaves every other run out, so a project's size costs it
+    nothing: the tiles ask for this every few seconds while a run is live.
+    """
+    root, runs = host.projects.named_runs(project, run_ids)
+    return _digested(host, root, runs, (run.run_id for run in runs), with_dashboard=with_dashboard)
+
+
+def _digested(
+    host: RunFacts,
+    root: Path,
+    runs: tuple[ProjectRun, ...],
+    digest_runs: Iterable[str],
+    *,
+    with_dashboard: bool,
+) -> RunList:
     digests = {
         run_id: digest
-        for run_id in dict.fromkeys(digest_runs)
-        if run_id in known and (digest := host.projects.run_digest(root, run_id)) is not None
+        for run_id in digest_runs
+        if (digest := host.projects.run_digest(root, run_id)) is not None
     }
     if not with_dashboard:
         digests = {
@@ -168,7 +204,7 @@ def usage_window_reply(
     # > it; the request and reply messages stay with the other messages so `host_api` can name them.
     from server.usage_window import RunUsage, usage_window  # noqa: PLC0415
 
-    root, known = host.projects.runs(project)
+    root, known = host.projects.named_runs(project, request.run_ids)
     tasks = {run.run_id: run.task for run in known}
     found: list[RunUsage] = []
     missing: list[str] = []

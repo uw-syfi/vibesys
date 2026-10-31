@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
     from pathlib import PurePosixPath
 
     from vs_project._manifests import OrchestrationRunManifest
@@ -43,6 +44,24 @@ class RunHistory(Protocol):
 
     def recorded(self) -> RecordedRuns:
         """Every recorded run."""
+        ...
+
+    def scan(self) -> Iterator[OrchestrationRunManifest]:
+        """Every readable run's manifest as it is read, each once, in no promised order.
+
+        One pass: the runs are listed when the iteration begins and each is then read once, so
+        a caller hears of a run as soon as it is read. A run removed since the listing is left
+        out, and a run added since may be. Neither fails the pass, and a run it cannot read is
+        left out, since this reports no reason (``recorded`` does).
+        """
+        ...
+
+    def named(self, run_ids: Iterable[str]) -> RecordedRuns:
+        """The records of ``run_ids``, at a cost that follows them and not the run count.
+
+        An id no run has, a valid id or not, is simply absent: asking about a set of runs is
+        how a caller finds out which of them exist.
+        """
         ...
 
     def manifest(self, run_id: str) -> OrchestrationRunManifest:

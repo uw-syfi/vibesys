@@ -154,7 +154,11 @@ function cases(random: Seeded): Case[] {
       bridge => bridge.runDigests(key, path, [name]),
       {kind: 'run-digests', host, project: path, runIds: [name]},
     ],
-    [bridge => bridge.projectRuns(key, path), {kind: 'project-runs', host, project: path}],
+    [
+      bridge => bridge.projectRuns(key, path, token),
+      {kind: 'project-runs', host, project: path, token},
+    ],
+    [bridge => bridge.cancelProjectRuns(token), {kind: 'cancel-project-runs', token}],
     [
       bridge => bridge.usageWindow(key, path, [name], 1_000, 2_000),
       {kind: 'usage-window', host, project: path, runIds: [name], since: 1_000, until: 2_000},
