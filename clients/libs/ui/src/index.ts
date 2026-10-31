@@ -16,7 +16,7 @@ export {
   type ButtonSize,
   type ButtonVariant,
 } from './components/button.js';
-export {Banner, type BannerTone, Card} from './components/card.js';
+export {Card} from './components/card.js';
 export {
   Chart,
   ChartColumns,
@@ -129,7 +129,11 @@ export {RailFrame, RailItem} from './components/rail.js';
 export {Breadcrumb, type Crumb, type Density, Screen} from './components/screen.js';
 export {Scrubber, type ScrubberTick} from './components/scrubber.js';
 export {SearchBox} from './components/search-box.js';
-export {type ChoiceOption, SegmentedControl} from './components/segmented-control.js';
+export {
+  type ChoiceOption,
+  SegmentedControl,
+  type SegmentOption,
+} from './components/segmented-control.js';
 export {Select, type SelectOption} from './components/select.js';
 export {useSideActionLayout} from './components/side-action-layout.js';
 export {

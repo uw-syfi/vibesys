@@ -43,6 +43,7 @@ export const CLEAN_SCREEN = `
       <span style="display:inline-block;width:10px;height:10px;background:rgb(40, 90, 200)"></span> passed
     </div>
     <p>The planner explained <code>total_ops_per_sec</code> and <code>0123456789abcdef0123</code>.</p>
+    <ul style="width:150px;margin:0;padding-left:16px"><li>Served by <code>engine/server.py</code>, echo and logprobs, then more words after them</li></ul>
     <div style="width:80px">we will pad and re-measure the queue</div>
     <div><span>Claude Code · Opus 5.5 · Judge</span> <span>Perf evaluator</span> <span>Planner</span></div>
     <div>Lock-free ring with per-slot sequence numbers</div>
@@ -261,6 +262,13 @@ export const BAD_SCREENS: readonly BadScreen[] = [
     check: 'column-tops',
     message: /the side column starts \d+ px from the top of the main column/,
     html: `<div style="${PAGE}"><div class="vs-page-content" style="position:relative;width:440px;height:200px"><div class="vs-page-scroll" style="width:300px"><div class="vs-page-body" style="padding-top:60px"><div>Machine</div></div></div><div class="vs-page-footer" style="position:absolute;left:320px;top:0;width:100px"><div>Ready</div></div></div></div>`,
+  },
+  {
+    name: 'a full-width strip tinted by a warn fill under a new class name, with its text and a button',
+    check: 'banner',
+    message:
+      /a strip 100% of the main pane wide is tinted by a status color: "Login started Check again"/,
+    html: `<style>:root{--chip-warn-bg:#f3e6c8;--chip-err-bg:#f6dad6}</style><main style="display:block;width:440px"><div class="vs-notice" style="display:flex;gap:8px;background:var(--chip-warn-bg)">Login started <button>Check again</button></div></main>`,
   },
   {
     name: 'text drawn outside the window',

@@ -114,15 +114,28 @@ can decide it.
 
 ## Messages
 
-20. **A failure passed through is a toast; a state held is one line.** "Could not
-    save", "could not be read" and "did not take the command" are toasts at the
-    top right of the window: a title and a tone, the detail behind a details
-    button, kept until dismissed or cleared, never covering the title bar. A
-    state the screen is in (the run ended, a machine needs an update) or a
-    message with actions beside it stays on the page as one line with the same
-    details button. Enforced for the split of tones by the `Banner` type, which
-    has no `err`, and for the toast stack by the Toasts and banners tests;
-    whether a message is passing or held is Unenforced (judgment).
+20. **No banners: a passing failure is a toast, a problem with a thing is a status
+    word at the thing.** No screen draws a full-width strip, tinted or not, for
+    any state. "Could not save", "could not be read" and "did not take the
+    command" are toasts at the top right of the window: a title and a tone, the
+    detail behind a details button, kept until dismissed or cleared, never
+    covering the title bar. A problem with one thing (a login, a machine, a
+    section that could not be read, a step's transcript) is a chip at that thing
+    with the detail as its hint and its action beside it. A hint is the chip's
+    accessible description (read on hover, on keyboard focus and by a screen
+    reader), so what a person must read to act, such as a login's link and code
+    or a start that may have happened, is text on the page and never only a
+    hint. A run's state is the header's status chip with a few words of why
+    beside it, the whole of it as its hint, and Resume and Run again in the
+    header; a diagnostic is a row of Logs with a dot on the Logs tab. A fact
+    already on screen is not said again. Enforced for the component by its
+    absence from `@vibesys/ui`, by the stylesheet test of the tone fills (only
+    listed selectors may be washed with a tone, whatever they are called), by
+    the `banner` screen check (no element at least half the main pane's width is
+    filled with a status color, by color rather than by class name) and by the
+    no-banners journey of the desktop shell's end-to-end suite; whether a
+    message is passing or about a thing, and whether a hint holds something a
+    person must act on, is Unenforced (judgment).
 
 ## Sizes the checks cover
 
