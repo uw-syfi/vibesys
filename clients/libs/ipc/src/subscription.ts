@@ -71,7 +71,7 @@ function staleReason(reason: FailureReason): Extract<Control, {kind: 'stale'}>['
 
 type Init = MessageInitShape<typeof DesktopSubscriptionUpdateSchema>;
 
-function controlInit(control: Control): MessageInitShape<typeof DesktopSubscriptionUpdateSchema> {
+function controlInit(control: Control): Init {
   switch (control.kind) {
     case 'connecting':
       return {
