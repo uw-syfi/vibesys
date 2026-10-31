@@ -13,7 +13,6 @@ next handle of the tag, and the ledger, which holds a withdrawn attempt final, c
 
 from __future__ import annotations
 
-from itertools import count
 from typing import TYPE_CHECKING
 
 from vs_core.api import SubmitMeasurement
@@ -90,13 +89,13 @@ class SlurmJobStepRunner:
     async def _current(self, tag: RequestId) -> tuple[str, ExecutorPoll]:
         """The handle of the tag's current job and its poll: the first one not ended cancelled."""
         base = handle_for(tag)
-        for life in count():
+        life = 0
+        while True:
             handle = base if life == 0 else f"{base}-life-{life}"
             polled = await self._executor.poll(handle)
             if not _ended_cancelled(polled):
                 return handle, polled
-        message = "count() never ends"
-        raise AssertionError(message)
+            life += 1
 
 
 def _ended_cancelled(polled: ExecutorPoll) -> bool:

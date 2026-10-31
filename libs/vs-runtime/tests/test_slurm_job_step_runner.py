@@ -153,6 +153,19 @@ class World:
         """How many jobs the cluster has accepted, read from the cluster."""
         return len(self.cluster.submissions)
 
+    async def live(self) -> int:
+        """How many jobs the scheduler holds, read from the scheduler."""
+        return self.cluster.live_jobs()
+
+    async def pause(self, process: Process, tag: RequestId, attempt: int) -> None:
+        """Cancel the step's job through its own run, as a Pause does, and see it end."""
+        cancel = CancelSignal()
+        step = self.step(tag, ends=False)
+        task = asyncio.ensure_future(process.runner.run(step, tag, attempt, cancel))
+        await yield_until(self.live, lambda jobs: jobs > 0 or task.done(), str(tag))
+        cancel.set(CancelReason.PAUSE_NOW)
+        assert await task == Cancelled(reason=CancelReason.PAUSE_NOW)
+
     async def die_mid_run(self, process: Process, tag: RequestId, attempt: int) -> None:
         """Submit the step's job, then lose the process: only the task awaiting it is cancelled."""
         step = self.step(tag, ends=False)
@@ -260,22 +273,30 @@ def test_a_cancelled_job_is_never_attached_to_so_the_next_attempt_submits_a_new_
     assert world.cluster.live_jobs() == 0
 
 
-def test_any_order_of_kills_restarts_clears_and_runs_submits_the_step_once(tmp_path: Path) -> None:
-    """Without a cancel, one tag is one job however often the process dies or clears."""
+def test_any_order_of_kills_pauses_restarts_and_clears_leaves_one_job_that_was_not_cancelled(
+    tmp_path: Path,
+) -> None:
+    """One tag is one live job: every other job it ever had was cancelled, never duplicated."""
     for seed in range(examples(pr=6, nightly=40)):
         world = World(tmp_path / f"world-{seed}")
-        world.run(_a_sequence_ends_with_one_submission(world, seed))
-        assert len(world.cluster.submissions) == 1, seed
+        world.run(_a_sequence_ends_with_a_result(world, seed))
+        submitted = set(world.cluster.submissions)
+        cancelled = set(world.cluster.cancelled)
+        assert cancelled <= submitted, seed
+        assert len(submitted - cancelled) == 1, seed
 
 
-async def _a_sequence_ends_with_one_submission(world: World, seed: int) -> None:
+async def _a_sequence_ends_with_a_result(world: World, seed: int) -> None:
+    """Run a generated sequence, then finish the step."""
     tag = tag_of(f"sequence-{seed}")
     rng = SeededRandom(seed)
     current = world.first
-    for attempt in range(1, rng.randint(2, 6)):
-        match rng.choice(("kill", "restart", "clear")):
+    for attempt in range(1, rng.randint(2, 7)):
+        match rng.choice(("kill", "pause", "restart", "clear")):
             case "kill":
                 await world.die_mid_run(current, tag, attempt)
+            case "pause":
+                await world.pause(current, tag, attempt)
             case "restart":
                 current = await world.spawn()
             case _:
