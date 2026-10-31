@@ -393,12 +393,15 @@ class Workspaces(Protocol):
         """
         ...
 
-    async def create_measured_candidate(self, revision: str) -> CandidateWorkspace:
+    async def create_measured_candidate(
+        self, revision: str, *, step_tag: str | None = None
+    ) -> CandidateWorkspace:
         """Create an isolated candidate of *revision* to evaluate, as its measured input reads it.
 
         It holds *revision*'s files less the paths the task declares unread, so its files are
         exactly what ``Workspace.measured_input`` digests: an evaluation reads nothing the
-        digest does not cover. Errors as :meth:`create_candidate`.
+        digest does not cover. Every command run in it carries the mark of *step_tag* when given,
+        so the work of a host that died is found by the tag alone. Errors as :meth:`create_candidate`.
         """
         ...
 
