@@ -191,7 +191,7 @@ func TestTheSixtyFifthStreamOnAConnectionIsRefusedAndAnotherConnectionIsNot(t *t
 		defer cancel()
 		running := serve(t, machinestatstest.Recorded(runtime.GOOS))
 		client := running.connect()
-		for range subscription.MaxPerConnection {
+		for range 64 {
 			subscribe(ctx, t, client)
 		}
 		synctest.Wait()

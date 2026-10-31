@@ -13,10 +13,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
+	"buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/clock"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostoperations"
@@ -33,12 +35,25 @@ const HeartbeatInterval = 5 * time.Second
 // frame bound, so a subscriber hears the failure before it would give up.
 const StopGrace = 5 * time.Second
 
+// MaxPerConnection and MaxPerGateway cap open subscriptions.
 const (
-	// MaxPerConnection and MaxPerGateway cap open subscriptions.
 	MaxPerConnection = 64
 	MaxPerGateway    = 1024
-	maxDetailBytes   = 4096
 )
+
+// maxDetailBytes is TopicFailure.detail's bound, read once from the schema that
+// states it, so that the truncation below cannot drift from the rule it meets.
+var maxDetailBytes = detailBound()
+
+func detailBound() int {
+	field := (&apiv1.TopicFailure{}).ProtoReflect().Descriptor().Fields().ByName("detail")
+	rules, _ := proto.GetExtension(field.Options(), validate.E_Field).(*validate.FieldRules)
+	bound := int(rules.GetString().GetMaxBytes())
+	if bound <= 0 {
+		panic("TopicFailure.detail has no max_bytes rule")
+	}
+	return bound
+}
 
 // Sink receives a producer's facts. It never blocks on a subscriber. Put takes
 // ownership of value, so a source must not change it afterwards. Synced says the
@@ -98,37 +113,55 @@ func (t Topic[V]) registration() registered {
 	}}
 }
 
-// Sampled adapts a sampling function to a Source for a one-key topic. Samples
-// never overlap, so a slow one lowers the rate and cannot stack. sample should
-// return by the deadline of its context, reporting anything it could not read
-// inside its value; an error ends the topic.
+// Sampled adapts a sampling function to a Source for a one-key topic. begin runs
+// at the start of each producer run and returns that run's sample function, which
+// may keep state between its samples; the state of an earlier run is gone, so a
+// reading that spans a long gap is never taken for a short one. An error from
+// begin ends the run at once, as UNSUPPORTED does for a host that cannot sample.
+// A sample function should return by the deadline of its context, reporting
+// anything it could not read inside its value; an error ends the topic.
+//
+// The source outlives its producers, so the cadence is a floor on the rate the
+// topic costs its host, however often it is subscribed: a run that starts within
+// a cadence of the last sample waits out the rest of it before its first. Samples
+// never overlap, so a slow one lowers the rate and cannot stack.
 //
 // A sample that ignores its context cannot be killed. Once it has overrun by
 // StopGrace the topic fails with a typed failure, and the source runs no other
 // sample until that one returns, however often the topic is subscribed again, so
 // it costs one goroutine and no more.
-func Sampled[V proto.Message](key string, cadence, deadline time.Duration, ticks clock.Clock, sample func(context.Context) (V, error)) Source[V] {
+func Sampled[V proto.Message](key string, cadence, deadline time.Duration, ticks clock.Clock, begin func() (func(context.Context) (V, error), error)) Source[V] {
 	if cadence <= 0 || deadline <= 0 {
 		panic(fmt.Sprintf("sampled topic %s needs a positive cadence and deadline, got %s and %s", key, cadence, deadline))
 	}
-	return &sampled[V]{key: key, cadence: cadence, deadline: deadline, ticks: ticks, sample: sample}
+	return &sampled[V]{key: key, cadence: cadence, deadline: deadline, ticks: ticks, begin: begin}
 }
 
 type sampled[V proto.Message] struct {
 	key               string
 	cadence, deadline time.Duration
 	ticks             clock.Clock
-	sample            func(context.Context) (V, error)
-	// inflight is held from a sample's start until it returns. It belongs to the
-	// source, which outlives each producer run.
-	inflight atomic.Bool
+	begin             func() (func(context.Context) (V, error), error)
+	// inflight is held from a sample's start until it returns, and lastStart is
+	// when the latest sample began. Both belong to the source, which outlives each
+	// producer run.
+	inflight  atomic.Bool
+	mu        sync.Mutex
+	lastStart time.Time
 }
 
 func (s *sampled[V]) Run(ctx context.Context, sink Sink[V]) error {
+	sample, err := s.begin()
+	if err != nil {
+		return err
+	}
+	if err := s.waitForCadence(ctx); err != nil {
+		return err
+	}
 	ticker := s.ticks.NewTicker(s.cadence)
 	defer ticker.Stop()
 	for {
-		value, err := s.once(ctx)
+		value, err := s.once(ctx, sample)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -145,28 +178,53 @@ func (s *sampled[V]) Run(ctx context.Context, sink Sink[V]) error {
 	}
 }
 
+// waitForCadence holds a run that starts within a cadence of the last sample
+// until that cadence has passed. A topic's first frame bound is above its cadence,
+// so a subscriber still hears from it in time.
+func (s *sampled[V]) waitForCadence(ctx context.Context) error {
+	s.mu.Lock()
+	last := s.lastStart
+	s.mu.Unlock()
+	if last.IsZero() {
+		return nil
+	}
+	remaining := s.cadence - s.ticks.Now().Sub(last)
+	if remaining <= 0 {
+		return nil
+	}
+	wait := s.ticks.NewTicker(remaining)
+	defer wait.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-wait.Ticks():
+		return nil
+	}
+}
+
+type outcome[V proto.Message] struct {
+	value V
+	err   error
+}
+
 // once takes one sample, ending its context at the deadline or when ctx ends.
-func (s *sampled[V]) once(ctx context.Context) (V, error) {
+func (s *sampled[V]) once(ctx context.Context, sample func(context.Context) (V, error)) (V, error) {
 	var none V
 	if !s.inflight.CompareAndSwap(false, true) {
 		return none, &Failure{Code: apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_SOURCE_FAILED, Detail: "an earlier sample has not returned"}
 	}
+	s.mu.Lock()
+	s.lastStart = s.ticks.Now()
+	s.mu.Unlock()
 	sampleCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	type outcome struct {
-		value V
-		err   error
-	}
-	done := make(chan outcome, 1)
+	done := make(chan outcome[V], 1)
 	go func() {
-		defer s.inflight.Store(false)
-		defer func() {
-			if failed := recover(); failed != nil {
-				done <- outcome{err: &Failure{Code: apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_INTERNAL, Detail: fmt.Sprintf("panic: %v", failed)}}
-			}
-		}()
-		value, err := s.sample(sampleCtx)
-		done <- outcome{value, err}
+		result := guarded(sampleCtx, sample)
+		// Free the source before the outcome is sent, so that a run started the
+		// moment this one is answered finds it free.
+		s.inflight.Store(false)
+		done <- result
 	}()
 	deadline := s.ticks.NewTicker(s.deadline)
 	defer deadline.Stop()
@@ -186,6 +244,17 @@ func (s *sampled[V]) once(ctx context.Context) (V, error) {
 		return none, &Failure{Code: apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_SOURCE_FAILED,
 			Detail: fmt.Sprintf("sample did not return within %s of its deadline", StopGrace)}
 	}
+}
+
+// guarded runs one sample, turning a panic into the topic's INTERNAL failure.
+func guarded[V proto.Message](ctx context.Context, sample func(context.Context) (V, error)) (result outcome[V]) {
+	defer func() {
+		if failed := recover(); failed != nil {
+			result = outcome[V]{err: &Failure{Code: apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_INTERNAL, Detail: fmt.Sprintf("panic: %v", failed)}}
+		}
+	}()
+	value, err := sample(ctx)
+	return outcome[V]{value, err}
 }
 
 // failedFrame sanitizes a code and a detail, which may be a source's own choice,

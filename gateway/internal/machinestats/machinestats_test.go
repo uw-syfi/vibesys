@@ -566,6 +566,95 @@ func TestAnyToolOutputYieldsAValueThatFitsTheTopic(t *testing.T) {
 	})
 }
 
+// The rules of a section live in the schema and nowhere else: the sampler holds
+// each parsed section to them, and a parser copies none. A section that breaks one
+// is that section's absence. Sent as it is, it would end the topic for every
+// subscriber. Each input below is one a parser alone reads without complaint.
+func TestASectionThatBreaksTheSchemasRulesIsAParseFailure(t *testing.T) {
+	row := func(name string, used, total, busy int) string {
+		return fmt.Sprintf("0, GPU-0, %s, %d, %d, %d\n", name, used, total, busy)
+	}
+	for name, each := range map[string]struct {
+		output string
+		listed bool
+	}{
+		"257 GPUs":                  {nvidiaRows(257, 1), false},
+		"256 GPUs":                  {nvidiaRows(256, 1), true},
+		"a name of 257 bytes":       {row(strings.Repeat("g", 257), 1, 2, 3), false},
+		"a name of 256 bytes":       {row(strings.Repeat("g", 256), 1, 2, 3), true},
+		"no name":                   {row("", 1, 2, 3), false},
+		"a name of invalid UTF-8":   {row("\xff", 1, 2, 3), false},
+		"101 percent busy":          {row("n", 1, 2, 101), false},
+		"100 percent busy":          {row("n", 1, 2, 100), true},
+		"more memory used than has": {row("n", 3, 2, 3), false},
+		"all memory used":           {row("n", 2, 2, 3), true},
+		"no memory":                 {row("n", 0, 0, 3), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				host := machinestatstest.Linux()
+				host.Tools["nvidia-smi"] = func(context.Context, []string) ([]byte, error) { return []byte(each.output), nil }
+				stats := sample(t, "linux", host)
+				if each.listed != (stats.GetGpus() != nil) || (!each.listed && gpuReason(stats) != apiv1.AbsenceReason_ABSENCE_REASON_PARSE_FAILED) {
+					t.Fatalf("listed=%t, want %t: %v", stats.GetGpus() != nil, each.listed, stats.Gpu)
+				}
+			})
+		})
+	}
+	t.Run("a machine with no memory", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			host := machinestatstest.Linux()
+			host.Files["/proc/meminfo"] = [][]byte{[]byte("MemTotal: 0 kB\nMemAvailable: 0 kB\n")}
+			if got := sample(t, "linux", host).GetMemoryUnavailable().GetReason(); got != apiv1.AbsenceReason_ABSENCE_REASON_PARSE_FAILED {
+				t.Fatalf("memory %s", got)
+			}
+		})
+	})
+	t.Run("a CPU idle for more than all of the time", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			host := machinestatstest.MacOS()
+			host.Tools["/usr/bin/top"] = func(context.Context, []string) ([]byte, error) {
+				return []byte("CPU usage: 1.00% user, 1.00% sys, 101.00% idle \n"), nil
+			}
+			if got := sample(t, "darwin", host).GetCpuUnavailable().GetReason(); got != apiv1.AbsenceReason_ABSENCE_REASON_PARSE_FAILED {
+				t.Fatalf("cpu %s", got)
+			}
+		})
+	})
+}
+
+// A client that leaves and comes back must not cost the host a sample each time:
+// the cadence is the whole rate limit on a shared login node, and a Machines page
+// that remounts, or a retry loop, subscribes again and again. The host's own count
+// of calls is the load, with every tool and file the sampler touches.
+func TestSubscribingAgainAndAgainCostsTheHostOneSamplePerCadence(t *testing.T) {
+	cadence := hostoperations.Topics[hostoperations.TopicMachineStats].Cadence
+	for _, goos := range []string{"linux", "darwin"} {
+		t.Run(goos, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				perSample := func() int64 {
+					host := machinestatstest.Recorded(goos)
+					sample(t, goos, host)
+					return host.Calls.Load()
+				}()
+				host := machinestatstest.Recorded(goos)
+				hub := subscription.New(clock.System{}, machinestats.Topic(goos, clock.System{}, host))
+				const cycles, stay = 100, 1500 * time.Millisecond
+				for range cycles {
+					stream := subscriptiontest.Open(hub, 1, request)
+					time.Sleep(stay)
+					synctest.Wait()
+					stream.Stop()
+					synctest.Wait()
+				}
+				if allowed := perSample * (int64(cycles*stay/cadence) + 1); host.Calls.Load() > allowed {
+					t.Fatalf("%d host calls in %s at a %s cadence, at most %d", host.Calls.Load(), cycles*stay, cadence, allowed)
+				}
+			})
+		})
+	}
+}
+
 func TestSystemHostFindsAndRunsATool(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	directory := t.TempDir()

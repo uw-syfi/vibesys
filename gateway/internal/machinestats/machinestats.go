@@ -120,7 +120,7 @@ func (s *Sampler) Sample(ctx context.Context) (*apiv1.MachineStats, error) {
 // section's typed absence. It returns when they do or when ctx ends, whichever is
 // first; in flight is held until they do, so a call that never returns is
 // abandoned once and never repeated.
-func read[T any](ctx context.Context, inflight *atomic.Bool, section func() (T, error)) (T, *apiv1.Absence) {
+func read[T proto.Message](ctx context.Context, inflight *atomic.Bool, section func() (T, error)) (T, *apiv1.Absence) {
 	var none T
 	if !inflight.CompareAndSwap(false, true) {
 		return none, &apiv1.Absence{Reason: apiv1.AbsenceReason_ABSENCE_REASON_TIMED_OUT}
@@ -131,8 +131,10 @@ func read[T any](ctx context.Context, inflight *atomic.Bool, section func() (T, 
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		defer inflight.Store(false)
 		value, absence := attempt(ctx, section)
+		// Free the section before the outcome is sent, so a sample started the
+		// moment this one is answered finds it free.
+		inflight.Store(false)
 		done <- outcome{value, absence}
 	}()
 	select {
@@ -143,13 +145,19 @@ func read[T any](ctx context.Context, inflight *atomic.Bool, section func() (T, 
 	}
 }
 
-func attempt[T any](ctx context.Context, section func() (T, error)) (value T, absence *apiv1.Absence) {
+// attempt runs one section. What a parser returns must pass the schema that states
+// what a section may hold, so no parser copies one of its limits. A failure is
+// PARSE_FAILED, and its text is dropped, because it can quote the tool's output.
+func attempt[T proto.Message](ctx context.Context, section func() (T, error)) (value T, absence *apiv1.Absence) {
 	defer func() {
 		if recover() != nil {
 			absence = &apiv1.Absence{Reason: apiv1.AbsenceReason_ABSENCE_REASON_PARSE_FAILED}
 		}
 	}()
 	value, err := section()
+	if err == nil && subscription.Sendable(value) != nil {
+		err = errParse
+	}
 	if err != nil {
 		return value, &apiv1.Absence{Reason: reason(ctx, err)}
 	}
@@ -170,35 +178,29 @@ func reason(ctx context.Context, err error) apiv1.AbsenceReason {
 	return apiv1.AbsenceReason_ABSENCE_REASON_READ_FAILED
 }
 
-// Topic is the machine_stats topic. Each producer run gets a fresh Sampler.
+// Topic is the machine_stats topic. The source is built once and outlives each
+// producer run, so the cadence holds however often the topic is subscribed; each
+// run gets a fresh Sampler, so its CPU is never measured across a gap.
 func Topic(goos string, ticks clock.Clock, host Host) subscription.Topic[*apiv1.MachineStats] {
 	policy := hostoperations.Topics[hostoperations.TopicMachineStats]
+	// calls outlives each run, because a call left stuck by one still holds its
+	// section when the next subscription starts.
+	shared := &calls{}
+	begin := func() (func(context.Context) (*apiv1.MachineStats, error), error) {
+		sampler, err := newSampler(goos, ticks, host, shared)
+		if err != nil {
+			return nil, err
+		}
+		return sampler.Sample, nil
+	}
 	return subscription.Topic[*apiv1.MachineStats]{
 		Name:   hostoperations.TopicMachineStats,
 		Policy: policy,
-		Source: source{goos: goos, ticks: ticks, host: host, policy: policy, calls: &calls{}},
+		Source: subscription.Sampled(Key, policy.Cadence, SampleDeadline, ticks, begin),
 		Entry: func(key string, value *apiv1.MachineStats) *apiv1.TopicEntry {
 			return &apiv1.TopicEntry{Key: key, Value: &apiv1.TopicEntry_MachineStats{MachineStats: value}}
 		},
 	}
-}
-
-type source struct {
-	goos   string
-	ticks  clock.Clock
-	host   Host
-	policy hostoperations.TopicPolicy
-	// calls outlives each producer run, because a call left stuck by one still
-	// holds its section when the next subscription starts.
-	calls *calls
-}
-
-func (s source) Run(ctx context.Context, sink subscription.Sink[*apiv1.MachineStats]) error {
-	sampler, err := newSampler(s.goos, s.ticks, s.host, s.calls)
-	if err != nil {
-		return err
-	}
-	return subscription.Sampled(Key, s.policy.Cadence, SampleDeadline, s.ticks, sampler.Sample).Run(ctx, sink)
 }
 
 func parseFailure(format string, args ...any) error {

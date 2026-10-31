@@ -95,6 +95,10 @@ func TestEveryWayASourceCanEndIsATypedFailure(t *testing.T) {
 			func(context.Context, subscription.Sink[stats]) error { panic("broken") },
 			apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_INTERNAL,
 		},
+		"exits its goroutine without returning": {
+			func(context.Context, subscription.Sink[stats]) error { runtime.Goexit(); return nil },
+			apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_SOURCE_FAILED,
+		},
 		"unsupported host": {
 			func(context.Context, subscription.Sink[stats]) error { return subscription.Unsupported("no sampler") },
 			apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_UNSUPPORTED,
@@ -148,26 +152,44 @@ func TestEveryWayASourceCanEndIsATypedFailure(t *testing.T) {
 	}
 }
 
-func TestAnyFailureDetailBecomesAValidFrame(t *testing.T) {
+// failsOverTheWire serves a source that fails with text the way gRPC sends it, and
+// says whether the one frame it got is a failure that marshals and passes the
+// schema. A detail is a source's own error text, a panic value or a tool's
+// output, so it can be any bytes, and a frame that does not marshal ends the
+// stream with a transport error that a client reading the code never sees.
+func failsOverTheWire(t *testing.T, text string) bool {
+	var typed atomic.Bool
+	synctest.Test(t, func(t *testing.T) {
+		hub := subscription.New(clock.System{}, topic(script(func(context.Context, subscription.Sink[stats]) error {
+			return errors.New(text)
+		})))
+		frames, transport := serveAsTransport(hub)
+		typed.Store(transport == nil && len(frames) == 1 && frames[0].GetFailed() != nil && protovalidate.Validate(frames[0]) == nil)
+	})
+	return typed.Load()
+}
+
+func TestAnyFailureDetailBecomesAFrameThatMarshals(t *testing.T) {
 	property := func(detail []byte, repeat uint8) bool {
-		text := strings.Repeat(string(detail), int(repeat)+1)
-		var valid atomic.Bool
-		synctest.Test(t, func(t *testing.T) {
-			failed := fail(t, script(func(context.Context, subscription.Sink[stats]) error { return errors.New(text) }))
-			valid.Store(failed != nil)
-		})
-		return valid.Load()
+		return failsOverTheWire(t, strings.Repeat(string(detail), int(repeat)+1))
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 40}); err != nil {
 		t.Fatal(err)
 	}
-	synctest.Test(t, func(t *testing.T) {
-		long := strings.Repeat("é", 8192)
-		failed := fail(t, script(func(context.Context, subscription.Sink[stats]) error { return errors.New(long) }))
-		if failed == nil {
-			t.Fatal("a detail over the schema bound produced no failure frame")
-		}
-	})
+	// The reported inputs: a byte no UTF-8 string holds, a detail over the schema's
+	// bound, and both together.
+	for name, text := range map[string]string{
+		"invalid UTF-8":          "exec /usr/bin/tool: \xff",
+		"over the bound":         strings.Repeat("é", 8192),
+		"invalid and over bound": strings.Repeat("\xff", 5000),
+		"cut inside a rune":      strings.Repeat("a", 4095) + "é",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !failsOverTheWire(t, text) {
+				t.Fatalf("a detail of %d bytes did not become a typed failure frame that marshals", len(text))
+			}
+		})
+	}
 }
 
 // serveAsTransport serves one subscription the way gRPC sends it: every frame
@@ -332,20 +354,40 @@ func TestARequestWithAnUnknownFieldIsRefusedAndStartsNoProducer(t *testing.T) {
 	})
 }
 
-func TestTheConnectionCapRefusesOnlyThatConnection(t *testing.T) {
+// idle is a source that holds its instance open and says nothing.
+func idle() subscription.Source[stats] {
+	return script(func(ctx context.Context, _ subscription.Sink[stats]) error { return wait(ctx) })
+}
+
+// refusedAsExhausted says whether a stream got one frame, a RESOURCE_EXHAUSTED
+// failure, and ended.
+func refusedAsExhausted(stream *subscriptiontest.Stream) bool {
+	frames := stream.Frames()
+	_, ended := stream.Ended()
+	return ended && len(frames) == 1 && frames[0].GetFailed().GetCode() == apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_RESOURCE_EXHAUSTED
+}
+
+// The limits are written as numbers, not as the constants that name them: a test
+// that follows its constant passes whatever the constant is changed to.
+
+func TestTheConnectionCapRefusesTheSixtyFifthAndOnlyThatConnection(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		hub := subscription.New(clock.System{}, topic(script(func(ctx context.Context, _ subscription.Sink[stats]) error { return wait(ctx) })))
+		hub := subscription.New(clock.System{}, topic(idle()))
 		var streams []*subscriptiontest.Stream
-		for range subscription.MaxPerConnection {
+		for range 64 {
 			streams = append(streams, subscriptiontest.Open(hub, 1, request))
 		}
 		synctest.Wait()
+		for number, stream := range streams {
+			if _, ended := stream.Ended(); ended {
+				t.Fatalf("subscription %d of 64 on one connection was refused: %v", number+1, stream.Frames())
+			}
+		}
 		refused := subscriptiontest.Open(hub, 1, request)
 		defer refused.Stop()
 		synctest.Wait()
-		frames := refused.Frames()
-		if len(frames) != 1 || frames[0].GetFailed().GetCode() != apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_RESOURCE_EXHAUSTED {
-			t.Fatalf("frames %v", frames)
+		if !refusedAsExhausted(refused) {
+			t.Fatalf("the 65th subscription on a connection was not refused: %v", refused.Frames())
 		}
 		other := subscriptiontest.Open(hub, 2, request)
 		synctest.Wait()
@@ -355,6 +397,66 @@ func TestTheConnectionCapRefusesOnlyThatConnection(t *testing.T) {
 		other.Stop()
 		for _, stream := range streams {
 			stream.Stop()
+		}
+	})
+}
+
+// The gateway cap is the sum over connections, so it is reached by sixteen
+// connections at their own cap, and the next connection, with nothing of its own,
+// is the one refused.
+func TestTheGatewayCapRefusesTheThousandAndTwentyFifthSubscription(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		hub := subscription.New(clock.System{}, topic(idle()))
+		var streams []*subscriptiontest.Stream
+		for connection := uint64(1); connection <= 16; connection++ {
+			for range 64 {
+				streams = append(streams, subscriptiontest.Open(hub, connection, request))
+			}
+		}
+		synctest.Wait()
+		for _, stream := range streams {
+			if _, ended := stream.Ended(); ended {
+				t.Fatalf("a subscription within 1024 was refused: %v", stream.Frames())
+			}
+		}
+		refused := subscriptiontest.Open(hub, 17, request)
+		defer refused.Stop()
+		synctest.Wait()
+		if !refusedAsExhausted(refused) {
+			t.Fatalf("the 1025th subscription on the gateway was not refused: %v", refused.Frames())
+		}
+		streams[0].Stop()
+		again := subscriptiontest.Open(hub, 17, request)
+		defer again.Stop()
+		synctest.Wait()
+		if _, ended := again.Ended(); ended {
+			t.Fatalf("a freed slot was not reusable: %v", again.Frames())
+		}
+		for _, stream := range streams[1:] {
+			stream.Stop()
+		}
+	})
+}
+
+// A client counts a stream quiet for 30 s as lost, so every healthy stream must be
+// heard from at least every five seconds whatever its topic does. Six beats fit a
+// lease, and the first must not wait for a second interval.
+func TestAQuietStreamIsHeardFromEveryFiveSeconds(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		stream := subscriptiontest.Open(subscription.New(clock.System{}, topic(idle())), 1, request)
+		defer stream.Stop()
+		for beat := 1; beat <= 6; beat++ {
+			time.Sleep(5 * time.Second)
+			synctest.Wait()
+			heartbeats := 0
+			for _, frame := range stream.Frames() {
+				if frame.GetHeartbeat() != nil {
+					heartbeats++
+				}
+			}
+			if heartbeats < beat {
+				t.Fatalf("%d heartbeats after %d s of silence, want at least %d", heartbeats, 5*beat, beat)
+			}
 		}
 	})
 }
@@ -399,18 +501,50 @@ func TestABlockedClientHoldsUpNothingAndResumesAtTheNewestValue(t *testing.T) {
 	})
 }
 
+// The contract relies on the drop: a client reads a topic whose value never
+// changes as stale, so a sampler that returns the same value for ever must look
+// stale and not healthy. Each Put is settled before the next, so that dropping the
+// equal value is what leaves the count at one, not the conflation of values that
+// no subscriber has been sent yet.
 func TestAnEqualValueSendsNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		stream := subscriptiontest.Open(subscription.New(clock.System{}, topic(script(func(ctx context.Context, sink subscription.Sink[stats]) error {
-			for range 5 {
-				sink.Put("machine", value(1))
+		puts := make(chan stats)
+		hub := subscription.New(clock.System{}, topic(script(func(ctx context.Context, sink subscription.Sink[stats]) error {
+			for {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case next := <-puts:
+					sink.Put("machine", next)
+				}
 			}
-			return wait(ctx)
-		}))), 1, request)
+		})))
+		stream := subscriptiontest.Open(hub, 1, request)
 		defer stream.Stop()
-		synctest.Wait()
-		if frames := stream.Frames(); len(frames) != 1 {
-			t.Fatalf("frames %v", frames)
+		entries := func() (count int) {
+			for _, frame := range stream.Frames() {
+				if frame.GetEntry() != nil {
+					count++
+				}
+			}
+			return count
+		}
+		for step, each := range []struct {
+			put  stats
+			want int
+		}{
+			{value(1), 1},
+			{value(1), 1},
+			{value(1), 1},
+			{value(2), 2},
+			{value(2), 2},
+			{value(1), 3},
+		} {
+			puts <- each.put
+			synctest.Wait()
+			if got := entries(); got != each.want {
+				t.Fatalf("after put %d (second %d) the subscriber has been sent %d entries, want %d", step, each.put.SampledAt.Seconds, got, each.want)
+			}
 		}
 	})
 }
@@ -559,14 +693,14 @@ func TestSampledNeverOverlapsAndKeepsTheCadence(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var running, overlap, samples atomic.Int64
 		source := subscription.Sampled("machine", time.Second, 500*time.Millisecond, clock.System{},
-			func(ctx context.Context) (stats, error) {
+			each(func(ctx context.Context) (stats, error) {
 				if running.Add(1) > 1 {
 					overlap.Add(1)
 				}
 				defer running.Add(-1)
 				<-ctx.Done()
 				return value(samples.Add(1)), nil
-			})
+			}))
 		stream := subscriptiontest.Open(subscription.New(clock.System{}, topic(source)), 1, request)
 		defer stream.Stop()
 		time.Sleep(10*time.Second + 600*time.Millisecond)
@@ -580,10 +714,10 @@ func TestSampledNeverOverlapsAndKeepsTheCadence(t *testing.T) {
 func TestSampledDeadlineBoundsASlowSample(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		source := subscription.Sampled("machine", time.Hour, 5*time.Second, clock.System{},
-			func(ctx context.Context) (stats, error) {
+			each(func(ctx context.Context) (stats, error) {
 				<-ctx.Done()
 				return value(1), nil
-			})
+			}))
 		stream := subscriptiontest.Open(subscription.New(clock.System{}, topic(source)), 1, request)
 		defer stream.Stop()
 		time.Sleep(5*time.Second - time.Nanosecond)
@@ -725,11 +859,11 @@ func TestASampleThatIgnoresItsContextFailsTheTopicOnceAndIsNeverRepeated(t *test
 		release := make(chan struct{})
 		var calls atomic.Int64
 		source := subscription.Sampled("machine", time.Second, time.Second, clock.System{},
-			func(context.Context) (stats, error) {
+			each(func(context.Context) (stats, error) {
 				calls.Add(1)
 				<-release
 				return value(1), nil
-			})
+			}))
 		hub := subscription.New(clock.System{}, topic(source))
 		first := subscriptiontest.Open(hub, 1, request)
 		defer first.Stop()
@@ -766,7 +900,7 @@ func TestASampleThatIgnoresItsContextFailsTheTopicOnceAndIsNeverRepeated(t *test
 func TestAPanickingSampleIsATypedFailureNotACrash(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		source := subscription.Sampled("machine", time.Second, time.Second, clock.System{},
-			func(context.Context) (stats, error) { panic("broken") })
+			each(func(context.Context) (stats, error) { panic("broken") }))
 		if got := fail(t, source); got.GetCode() != apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_INTERNAL {
 			t.Fatalf("failure %v", got)
 		}
@@ -776,7 +910,7 @@ func TestAPanickingSampleIsATypedFailureNotACrash(t *testing.T) {
 func TestSampledErrorEndsTheTopic(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		source := subscription.Sampled("machine", time.Second, time.Second, clock.System{},
-			func(context.Context) (stats, error) { return nil, subscription.Unsupported("nope") })
+			each(func(context.Context) (stats, error) { return nil, subscription.Unsupported("nope") }))
 		if got := fail(t, source); got.GetCode() != apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_UNSUPPORTED {
 			t.Fatalf("failure %v", got)
 		}

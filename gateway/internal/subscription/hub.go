@@ -194,13 +194,19 @@ func (h *Hub) start(ref producerRef) {
 	h.running[ref] = self
 	topic := h.topics[ref.topic]
 	go func() {
-		err := runProducer(ctx, topic, producer{hub: h, key: ref.key, at: ref.at})
-		cancel()
-		h.apply(func(s *state) effects {
-			delete(h.running, ref)
-			close(self.done)
-			return s.ended(ref, failureOf(err))
-		})
+		// The end is reported from a defer, so a source that exits its goroutine
+		// without returning (runtime.Goexit) still frees the key and fails its
+		// subscribers, instead of leaving them heartbeats and nothing else.
+		err := errors.New("source exited without returning")
+		defer func() {
+			cancel()
+			h.apply(func(s *state) effects {
+				delete(h.running, ref)
+				close(self.done)
+				return s.ended(ref, failureOf(err))
+			})
+		}()
+		err = runProducer(ctx, topic, producer{hub: h, key: ref.key, at: ref.at})
 	}()
 }
 
@@ -209,9 +215,6 @@ func (h *Hub) start(ref producerRef) {
 // which stops waiting for it.
 func (h *Hub) stop(ref producerRef) {
 	self := h.running[ref]
-	if self == nil {
-		return
-	}
 	self.cancel()
 	go func() {
 		grace := h.clock.NewTicker(StopGrace)
@@ -295,7 +298,7 @@ type typedSink[V proto.Message] struct {
 
 func (s typedSink[V]) Put(name string, value V) {
 	entry := s.entry(name, value)
-	if err := sendable(entry); err != nil {
+	if err := Sendable(entry); err != nil {
 		s.hub.apply(func(state *state) effects {
 			return state.fail(s.key, s.at, failedFrame(apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_SOURCE_FAILED, err.Error()))
 		})
@@ -305,14 +308,15 @@ func (s typedSink[V]) Put(name string, value V) {
 	s.hub.apply(func(state *state) effects { return state.put(s.key, s.at, name, entry, size) })
 }
 
-// sendable says whether an entry passes the schema's rules and marshals. The
+// Sendable says whether a message passes the schema's rules and marshals. The
 // rules do not see invalid UTF-8 in a string, and marshalling refuses it, which
-// on the wire ends a stream with a transport error for every subscriber.
-func sendable(entry *apiv1.TopicEntry) error {
-	if err := protovalidate.Validate(entry); err != nil {
+// on the wire ends a stream with a transport error for every subscriber. The
+// error's text can quote the message.
+func Sendable(message proto.Message) error {
+	if err := protovalidate.Validate(message); err != nil {
 		return err
 	}
-	_, err := proto.Marshal(entry)
+	_, err := proto.Marshal(message)
 	return err
 }
 

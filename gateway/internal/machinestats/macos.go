@@ -5,7 +5,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 )
@@ -55,7 +54,7 @@ func parseTop(output []byte) (*apiv1.CpuStats, error) {
 		return nil, parseFailure("top has no CPU usage line")
 	}
 	idle, err := strconv.ParseFloat(match[1], 64)
-	if err != nil || idle < 0 || idle > 100 {
+	if err != nil {
 		return nil, parseFailure("top idle percentage")
 	}
 	return &apiv1.CpuStats{UtilizationPercent: 100 - idle}, nil
@@ -67,7 +66,7 @@ func physicalMemory(ctx context.Context, host Host) (uint64, error) {
 		return 0, err
 	}
 	total, err := strconv.ParseUint(strings.TrimSpace(string(output)), 10, 63)
-	if err != nil || total == 0 {
+	if err != nil {
 		return 0, parseFailure("sysctl hw.memsize")
 	}
 	return total, nil
@@ -143,17 +142,11 @@ func parseIORegistry(output []byte, total uint64) (*apiv1.GpuList, error) {
 		}
 		percent, busyErr := strconv.ParseUint(busy[1], 10, 8)
 		bytes, usedErr := strconv.ParseUint(used[1], 10, 64)
-		name := model[1]
-		switch {
-		case busyErr != nil, usedErr != nil, percent > 100:
-			return nil, parseFailure("ioreg statistic is out of range")
-		case name == "", len(name) > maxGpuNameSize, !utf8.ValidString(name):
-			return nil, parseFailure("ioreg model")
-		case len(gpus.Gpus) == maxGpus:
-			return nil, parseFailure("ioreg lists over %d GPUs", maxGpus)
+		if busyErr != nil || usedErr != nil {
+			return nil, parseFailure("ioreg statistic is not a number")
 		}
 		gpus.Gpus = append(gpus.Gpus, &apiv1.GpuStats{
-			Index: uint32(len(gpus.Gpus)), Name: name, UtilizationPercent: float64(percent),
+			Index: uint32(len(gpus.Gpus)), Name: model[1], UtilizationPercent: float64(percent),
 			MemoryUsedBytes: min(bytes, total), MemoryTotalBytes: total,
 		})
 	}

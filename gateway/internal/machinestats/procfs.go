@@ -132,7 +132,7 @@ func parseMeminfo(data []byte) (*apiv1.MemoryStats, error) {
 			available, availableFound = value*1024, true
 		}
 	}
-	if !totalFound || !availableFound || total == 0 {
+	if !totalFound || !availableFound {
 		return nil, parseFailure("%s has no MemTotal or MemAvailable", procMeminfo)
 	}
 	return &apiv1.MemoryStats{UsedBytes: total - min(available, total), TotalBytes: total}, nil

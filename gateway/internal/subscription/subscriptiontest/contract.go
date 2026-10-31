@@ -114,24 +114,37 @@ type Script[V proto.Message] func(context.Context, subscription.Sink[V]) error
 // Run calls the function.
 func (s Script[V]) Run(ctx context.Context, sink subscription.Sink[V]) error { return s(ctx, sink) }
 
-// Counted reports how often a source started and how many instances run now.
+// Counted reports how often a source started, how many instances run now, and
+// how many values it produced. A sampled topic puts one value per sample, so Puts
+// is the load it put on its host.
 type Counted[V proto.Message] struct {
 	Source  subscription.Source[V]
 	Starts  *atomic.Int64
 	Running *atomic.Int64
+	Puts    *atomic.Int64
 }
 
 // Count wraps a source.
 func Count[V proto.Message](source subscription.Source[V]) Counted[V] {
-	return Counted[V]{source, &atomic.Int64{}, &atomic.Int64{}}
+	return Counted[V]{source, &atomic.Int64{}, &atomic.Int64{}, &atomic.Int64{}}
 }
 
-// Run counts one start of the wrapped source.
+// Run counts one start of the wrapped source, and each value it puts.
 func (c Counted[V]) Run(ctx context.Context, sink subscription.Sink[V]) error {
 	c.Starts.Add(1)
 	c.Running.Add(1)
 	defer c.Running.Add(-1)
-	return c.Source.Run(ctx, sink)
+	return c.Source.Run(ctx, putCounter[V]{sink, c.Puts})
+}
+
+type putCounter[V proto.Message] struct {
+	subscription.Sink[V]
+	puts *atomic.Int64
+}
+
+func (c putCounter[V]) Put(key string, value V) {
+	c.puts.Add(1)
+	c.Sink.Put(key, value)
 }
 
 // arms counts the frames of each kind on a stream.
@@ -224,8 +237,10 @@ type scenario[V proto.Message] struct {
 }
 
 // Violations runs every case against a fresh subject, each in its own bubble,
-// and returns what each found wrong. It is how the contract itself is tested: a
-// wrong topic must have a violation in the case that names its defect.
+// and returns what each found wrong. build must make a new source for each call,
+// because a bubble has its own time and a sampled source remembers when it last
+// sampled. It is how the contract itself is tested: a wrong topic must have a
+// violation in the case that names its defect.
 func Violations[V proto.Message](t *testing.T, build func() Subject[V]) map[string]error {
 	t.Helper()
 	found := map[string]error{}
@@ -254,7 +269,8 @@ func run[V proto.Message](subject Subject[V], each scenario[V]) error {
 	return each.check(subject, policy)
 }
 
-// Contract runs every case against a fresh subject, built inside each bubble.
+// Contract runs every case against a fresh subject, built inside each bubble. For
+// the same reason as Violations, build makes a new source each time.
 func Contract[V proto.Message](t *testing.T, build func() Subject[V]) {
 	t.Helper()
 	for _, each := range scenarios[V]() {
@@ -279,6 +295,7 @@ func scenarios[V proto.Message]() []scenario[V] {
 		{"a failing source ends every stream with its typed failure", false, failureIsTyped[V]},
 		{"a healthy run never fails and never goes quiet", false, healthyRunStaysUp[V]},
 		{"values refresh inside the stale bound and no faster than the cadence", true, valuesKeepTheCadence[V]},
+		{"subscribing again and again samples no faster than the cadence", true, resubscribingKeepsTheCadence[V]},
 		{"a stuck sampler is a typed absence or failure and costs nothing per retry", true, stuckSamplerIsBounded[V]},
 	}
 }
@@ -476,8 +493,48 @@ func valuesKeepTheCadence[V proto.Message](subject Subject[V], policy hostoperat
 	return nil
 }
 
+// resubscribingKeepsTheCadence holds the same rate limit against a client that
+// subscribes, leaves and subscribes again: a Machines page that remounts, or a
+// retry loop. Each subscription starts a producer, and a producer that sampled at
+// once would cost the host a sample per subscription however short, because the
+// subscription's own wait ends with its producer. Each stay is a fifth of the
+// cadence, long enough for a first sample on a working topic.
+func resubscribingKeepsTheCadence[V proto.Message](subject Subject[V], policy hostoperations.TopicPolicy) error {
+	source := Count(subject.Topic.Source)
+	shared := hub(subject.Topic, subscription.Source[V](source))
+	const cycles = 100
+	stay := policy.Cadence / 5
+	for range cycles {
+		stream := Open(shared, 1, subject.Request)
+		time.Sleep(stay)
+		synctest.Wait()
+		stream.Stop()
+		synctest.Wait()
+	}
+	window := cycles * stay
+	if most := int(window/policy.Cadence) + 1; source.Puts.Load() > int64(most) {
+		return fmt.Errorf("%d samples over %d subscriptions in %s at a %s cadence, at most %d",
+			source.Puts.Load(), cycles, window, policy.Cadence, most)
+	}
+	last := Open(shared, 1, subject.Request)
+	defer last.Stop()
+	time.Sleep(policy.FirstFrame)
+	synctest.Wait()
+	if err := requireSnapshot(last.Received(), subject.Topic.Name); err != nil {
+		return fmt.Errorf("the topic stopped serving after %d subscriptions: %w", cycles, err)
+	}
+	return nil
+}
+
 // stuckSamplerIsBounded is the sample deadline's contract. Calls that never
 // return must cost the topic a typed answer, and the gateway one resource at most.
+// A typed answer is either values with the stuck section absent or a typed failure
+// of the whole topic. A topic that fails whole where it could have reported one
+// section absent passes here, because a generic contract cannot know its sections;
+// the topic's own tests hold that.
+//
+// The goroutine count is the process's, which only this bubble changes while no
+// gateway test runs in parallel.
 func stuckSamplerIsBounded[V proto.Message](subject Subject[V], policy hostoperations.TopicPolicy) error {
 	stuck, release := subject.Stuck()
 	released := false

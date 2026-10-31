@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 )
@@ -17,10 +16,8 @@ var nvidiaQuery = []string{
 }
 
 const (
-	nvidiaColumns  = 6
-	mebibyte       = 1 << 20
-	maxGpus        = 256
-	maxGpuNameSize = 256
+	nvidiaColumns = 6
+	mebibyte      = 1 << 20
 )
 
 // smiGpus reads NVIDIA GPUs. rocm-smi is reported as present but unread: no
@@ -45,7 +42,8 @@ func smiGpus(ctx context.Context, host Host) (*apiv1.GpuList, error) {
 
 // parseNvidia refuses the whole output on any bad row. Python's run-side picker
 // drops such rows because it only needs a usable GPU. A meter that silently
-// loses one would read as a machine with fewer GPUs.
+// loses one would read as a machine with fewer GPUs. It parses and does not
+// bound: whether the list may be sent is the schema's rule, applied to the section.
 func parseNvidia(output []byte) (*apiv1.GpuList, error) {
 	gpus := &apiv1.GpuList{}
 	for line := range strings.Lines(strings.TrimSpace(string(output))) {
@@ -60,19 +58,11 @@ func parseNvidia(output []byte) (*apiv1.GpuList, error) {
 		used, usedErr := strconv.ParseUint(columns[3], 10, 44)
 		total, totalErr := strconv.ParseUint(columns[4], 10, 44)
 		busy, busyErr := strconv.ParseUint(columns[5], 10, 8)
-		name := columns[2]
-		switch {
-		case indexErr != nil, usedErr != nil, totalErr != nil, busyErr != nil:
+		if indexErr != nil || usedErr != nil || totalErr != nil || busyErr != nil {
 			return nil, parseFailure("nvidia-smi row has a non-numeric column")
-		case total == 0, used > total, busy > 100:
-			return nil, parseFailure("nvidia-smi row is out of range")
-		case name == "", len(name) > maxGpuNameSize, !utf8.ValidString(name):
-			return nil, parseFailure("nvidia-smi row has a bad name")
-		case len(gpus.Gpus) == maxGpus:
-			return nil, parseFailure("nvidia-smi lists over %d GPUs", maxGpus)
 		}
 		gpus.Gpus = append(gpus.Gpus, &apiv1.GpuStats{
-			Index: uint32(index), Name: name, UtilizationPercent: float64(busy),
+			Index: uint32(index), Name: columns[2], UtilizationPercent: float64(busy),
 			MemoryUsedBytes: used * mebibyte, MemoryTotalBytes: total * mebibyte,
 		})
 	}
