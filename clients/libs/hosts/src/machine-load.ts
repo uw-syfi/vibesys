@@ -43,6 +43,8 @@ const FAILURE_WORDS: readonly (readonly [RegExp, (code: string) => string])[] = 
   [/API hash mismatch/, () => 'version mismatch'],
   [/run stream went silent/, () => 'no answer'],
   [/run stream ended/, () => 'stream ended'],
+  // A system call's failure: its message, without the path it names.
+  [/\bE[A-Z]+: ([^,]+),/, message => message],
 ];
 
 /** `detail`, what a failed connection left behind, in a few words. */
@@ -55,7 +57,8 @@ export function failureWords(detail: string): string {
     detail
       .replace(/^(?:Error: )+/, '')
       .split('\n')[0]
-      ?.trim() ?? '';
+      ?.replaceAll(/(?:^|\s)['"]?(?:~|\.{0,2})\/\S*/g, '')
+      .trim() ?? '';
   if (line === '') return 'no reason given';
   return line.length <= FAILURE_WORDS_MAX ? line : `${line.slice(0, FAILURE_WORDS_MAX - 1)}…`;
 }

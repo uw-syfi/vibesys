@@ -88,6 +88,29 @@ test('what a connection left behind reads in a few words', () => {
   }
 });
 
+test('property: failure words never carry a path', () => {
+  const name = fc.stringMatching(/^[a-z0-9._-]{1,12}$/);
+  const path = fc
+    .tuple(fc.constantFrom('/', '~/', './', '../'), fc.array(name, {minLength: 1, maxLength: 6}))
+    .map(([root, parts]) => `${root}${parts.join('/')}`);
+  fc.assert(
+    fc.property(
+      path,
+      fc.constantFrom(
+        (each: string) => `Error: ENOTDIR: not a directory, mkdir '${each}'`,
+        (each: string) => `EACCES: permission denied, open "${each}"`,
+        (each: string) => `spawn ${each} failed`,
+        (each: string) => `${each}: no such file`,
+      ),
+      (each, detail) => {
+        expect(failureWords(detail(each))).not.toContain(each);
+      },
+    ),
+  );
+  expect(failureWords("Error: ENOTDIR: not a directory, mkdir '/a/b'")).toBe('not a directory');
+  expect(failureWords('and/or either')).toBe('and/or either');
+});
+
 test('property: failure words are one short line, whatever the connection left behind', () => {
   fc.assert(
     fc.property(fc.string({maxLength: 400}), detail => {

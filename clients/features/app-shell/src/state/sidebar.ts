@@ -142,7 +142,7 @@ export interface ShellActions {
 }
 
 /** The overview's one read: waited on, heard, or failed with what the bridge said. */
-export type OverviewRead =
+type OverviewRead =
   | {readonly kind: 'waiting'}
   | {readonly kind: 'heard'}
   | {readonly kind: 'failed'; readonly reason: string};

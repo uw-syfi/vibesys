@@ -39,6 +39,23 @@ function randomAppearance(random: () => number): Appearance {
   };
 }
 
+/** The reply to `request`, as it succeeded or failed. */
+function replyTo(
+  request: SettingsRequest,
+  ok: boolean,
+  preferences: PreferencesView,
+): SettingsAction {
+  const {token} = request;
+  if (request.kind === 'load') {
+    return ok
+      ? {type: 'loaded', token, preferences}
+      : {type: 'load-failed', token, error: 'unreadable'};
+  }
+  return ok
+    ? {type: 'saved', token, preferences}
+    : {type: 'save-failed', token, error: 'disk full'};
+}
+
 /** One action: a user change, a reply to any request ever made (stale or not), a push, or the OS. */
 function randomAction(random: () => number, issued: readonly SettingsRequest[]): SettingsAction {
   const roll = random();
@@ -53,17 +70,7 @@ function randomAction(random: () => number, issued: readonly SettingsRequest[]):
       ? {type: 'change', change: {kind: 'appearance', appearance: randomAppearance(random)}}
       : {type: 'change', change: {kind: 'notifications', enabled: random() < 0.5}};
   }
-  if (roll < 0.7 && request !== undefined) {
-    const ok = random() < 0.8;
-    if (request.kind === 'load') {
-      return ok
-        ? {type: 'loaded', token: request.token, preferences}
-        : {type: 'load-failed', token: request.token, error: 'unreadable'};
-    }
-    return ok
-      ? {type: 'saved', token: request.token, preferences}
-      : {type: 'save-failed', token: request.token, error: 'disk full'};
-  }
+  if (roll < 0.7 && request !== undefined) return replyTo(request, random() < 0.8, preferences);
   if (roll < 0.8) return {type: 'retry'};
   if (roll < 0.85) return {type: 'pushed', preferences};
   return {type: 'os', mode: random() < 0.5 ? 'light' : 'dark'};
