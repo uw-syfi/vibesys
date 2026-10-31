@@ -15,17 +15,22 @@ from ._actions import Action, Cancel, End, Run, RunRest, Settle, Wait, at_rest
 from ._proofs import request_dependency_status, stop_mode
 from ._request_ledger import dispatch_until, retry_limit
 from ._request_recovery import is_open
-from ._run_park import dispatch_allowed, pause_cancels
-from ._scope_order import holds_back
-from ._step import advance_run_time, settle_park, step, step_recorded
+from ._run_park import pause_cancels, starts
+from ._step import advance_run_time, settle_end, settle_park, step, step_recorded
 from ._step_attempts import (
+    commands_lapsed,
+    concluded,
     dispatched,
+    end_lifted,
     ended,
+    ended_by_core,
+    ended_unconcluded,
     epoch_opened,
     finish,
     forgotten,
     interrupted,
     open_record,
+    reported_by,
     started,
 )
 from ._step_log import (
@@ -35,8 +40,15 @@ from ._step_log import (
     decode_result,
     decode_run_ended,
 )
-from .types.common import DependencyStatus, InterruptPolicy, RequestId, RunStatus, StopMode
-from .types.records import request_interrupt_policy
+from .types.common import (
+    DependencyStatus,
+    InterruptPolicy,
+    LifecycleClass,
+    RequestId,
+    RunStatus,
+    StopMode,
+)
+from .types.records import request_interrupt_policy, request_lifecycle
 from .types.steps import Cancelled, CancelReason, Failed
 from .types.until import FailureReason, Until
 
@@ -48,6 +60,7 @@ if TYPE_CHECKING:
     from ._registry import OperationRegistry
     from .types.kernel import CoreState
     from .types.records import RequestRecord
+    from .types.steps import StepResult
 
 
 def fold(
@@ -86,16 +99,20 @@ def decide(state: CoreState, now: float) -> tuple[Action, ...]:
         return (Wait(until=None),)
     open_steps = tuple(record for record in state.records.records if is_open(record))
     if rest is RunRest.PARKED:
-        stops = tuple(
-            Cancel(tag=record.request_id, reason=CancelReason.PAUSE_NOW)
-            for record in open_steps
-            if _running(state, record)
+        stops = (
+            *(
+                Cancel(tag=record.request_id, reason=CancelReason.PAUSE_NOW)
+                for record in open_steps
+                if _running(state, record)
+            ),
+            *(action for action in _stopped_by_core(state, now) if isinstance(action, Cancel)),
         )
         return stops or (Wait(until=None),)
-    if state.run.result is not None and not open_steps:
+    if state.run.result is not None and not open_steps and state.run.status is RunStatus.TERMINAL:
         return (End(result=state.run.result),)
-    actions = tuple(
-        action for record in open_steps if (action := _of_step(state, record, now)) is not None
+    actions = (
+        *_stopped_by_core(state, now),
+        *(action for record in open_steps if (action := _of_step(state, record, now)) is not None),
     )
     return actions or (Wait(until=_wake_at(state, open_steps, now)),)
 
@@ -130,7 +147,7 @@ def _apply(
     state = _observed(state, record)
     match body:
         case Oneof(field="core_input", value=message):
-            state = step(state, decode_event(message, registry)).state
+            state = commands_lapsed(end_lifted(step(state, decode_event(message, registry)).state))
         case Oneof(field="step_started", value=message):
             state = _start(state, message, registry)
         case Oneof(field="step_finished", value=message):
@@ -142,7 +159,7 @@ def _apply(
             )
         case Oneof(field="run_ended", value=message):
             state = ended(state, decode_run_ended(message))
-    return state
+    return settle_end(state)
 
 
 def _start(state: CoreState, message: StepStarted, registry: OperationRegistry | None) -> CoreState:
@@ -159,6 +176,9 @@ def _finish(
     state: CoreState, message: StepFinished, registry: OperationRegistry | None
 ) -> CoreState:
     tag = RequestId(root=message.tag)
+    if ended_by_core(state, tag):
+        return settle_park(_concluded_by_core(state, tag, decode_result(message, registry)))
+    reported_by(state, tag, message.attempt)
     state = dispatched(state, tag)
     report, owner_events = finish(state, tag, decode_result(message, registry))
     state = step_recorded(state, report).state
@@ -167,6 +187,18 @@ def _finish(
     if any(is_open(row) for row in state.records.find(tag)):
         problem = f"the log finishes step {tag.root} with an observation that does not end it"
         raise ValueError(problem)
+    return settle_park(forgotten(state, tag))
+
+
+def _concluded_by_core(state: CoreState, tag: RequestId, result: StepResult) -> CoreState:
+    """``state`` once the end of an attempt of a step core ended is recorded.
+
+    What the runner reports is not applied: core ended the step. A step core blocked is concluded
+    by the cancel it asked for, whose reason it keeps.
+    """
+    if any(record.request_id == tag for record in ended_unconcluded(state)):
+        reason = result.reason if isinstance(result, Cancelled) else CancelReason.DEADLINE
+        state = step_recorded(state, concluded(state, tag, reason)).state
     return forgotten(state, tag)
 
 
@@ -181,6 +213,31 @@ def _observed(state: CoreState, record: Record) -> CoreState:
     if opened is not state:
         opened = settle_park(opened)
     return opened if record.clock is None else advance_run_time(opened, record.clock)
+
+
+def _stopped_by_core(state: CoreState, now: float) -> tuple[Cancel | Settle, ...]:
+    """The steps core ended itself (at their limit, say) that the loop has to end for good.
+
+    A flight still runs for such a step: the cancel ends the attempt. The runner takes the reason
+    as it takes any other (a limit that passed, or the asker no longer wanting the result). A step
+    core ended that still holds the run's closure (a job it owns is not yet released) and has no
+    flight is settled, and either record concludes the step, so the run can close.
+    """
+    stopped: list[Cancel | Settle] = []
+    for record in ended_unconcluded(state):
+        reason = CancelReason.DEADLINE if now >= record.until.at else CancelReason.WITHDRAWN
+        if _running(state, record):
+            stopped.append(Cancel(tag=record.request_id, reason=reason))
+        else:
+            stopped.append(Settle(tag=record.request_id, result=Cancelled(reason=reason)))
+    stopped.extend(
+        Cancel(tag=row.tag, reason=CancelReason.WITHDRAWN)
+        for row in state.steps.attempts
+        if not row.ended
+        and ended_by_core(state, row.tag)
+        and all(row.tag != record.request_id for record in ended_unconcluded(state))
+    )
+    return tuple(stopped)
 
 
 def _of_step(state: CoreState, record: RequestRecord, now: float) -> Action | None:
@@ -210,7 +267,10 @@ def _stop_running(state: CoreState, record: RequestRecord, now: float) -> Cancel
     if now >= record.until.at:
         return Cancel(tag=tag, reason=CancelReason.DEADLINE)
     if park is not None and pause_cancels(state, record.request):
-        reason = CancelReason.PAUSE_NOW if park.immediate else CancelReason.DRAIN_EXPIRED
+        released = request_lifecycle(record.request) is LifecycleClass.OWNED_JOB
+        reason = (
+            CancelReason.PAUSE_NOW if park.immediate or released else CancelReason.DRAIN_EXPIRED
+        )
         return Cancel(tag=tag, reason=reason)
     return None
 
@@ -229,11 +289,7 @@ def _start_or_settle(state: CoreState, record: RequestRecord, now: float) -> Run
             return Settle(tag=tag, result=Failed(reason=FailureReason.ATTEMPTS_EXHAUSTED))
     if now >= record.until.at:
         return Settle(tag=tag, result=Cancelled(reason=CancelReason.DEADLINE))
-    if (
-        dependencies is DependencyStatus.PENDING
-        or not _may_start(state, record)
-        or holds_back(state, record)
-    ):
+    if not starts(state, record, dependencies):
         return None
     deadline = (
         record.until
@@ -246,17 +302,6 @@ def _start_or_settle(state: CoreState, record: RequestRecord, now: float) -> Run
         attempt=1 if attempts is None else attempts.started + 1,
         deadline_at=deadline.at,
     )
-
-
-def _may_start(state: CoreState, record: RequestRecord) -> bool:
-    """Whether the run's status lets a step start: a paused run starts none but drain work."""
-    match state.run.status:
-        case RunStatus.RUNNING | RunStatus.CLOSING:
-            return True
-        case RunStatus.DRAINING:
-            return dispatch_allowed(state, record.request)
-        case _:
-            return False
 
 
 def _wake_at(state: CoreState, open_steps: tuple[RequestRecord, ...], now: float) -> float | None:

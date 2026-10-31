@@ -53,14 +53,18 @@ def _reject(
     return Rejected(decision_id=decision.decision_id, code=code, path=path, detail=detail)
 
 
-def takes_command(run: RunState, command: Command) -> bool:
+def takes_command(run: RunState, command: Command, *, stopping: bool = False) -> bool:
     """Whether the run's status lets core take ``command`` now.
 
     An open run takes any command. A run that is not open (paused, closing, blocked, or with
-    its result proposed) still takes a ``Finish`` and a ``Withdraw`` until it is terminal.
+    its result proposed) still takes a ``Finish`` and a ``Withdraw`` until it is terminal, except
+    that a run in a pause (draining or parked) holds its search still: only the operator's stop
+    (``stopping``) ends it, and a stop ends the run whatever it is doing.
     """
     if run.status == RunStatus.RUNNING and run.result is None:
         return True
+    if stopping and isinstance(command, Finish):
+        return run.status != RunStatus.TERMINAL
     return isinstance(command, Finish | Withdraw) and run.status not in (
         RunStatus.TERMINAL,
         RunStatus.DRAINING,
@@ -69,7 +73,11 @@ def takes_command(run: RunState, command: Command) -> bool:
 
 
 def validate_decision(
-    state: CoreState, event: DecisionSubmitted, *, check_revision: bool = True
+    state: CoreState,
+    event: DecisionSubmitted,
+    *,
+    check_revision: bool = True,
+    stopping: bool = False,
 ) -> Rejected | None:
     submission = event.decision
     decision = event.command
@@ -77,7 +85,9 @@ def validate_decision(
         return _reject(
             decision, RejectionCode.STALE_VIEW, ("expected_revision",), "view revision changed"
         )
-    if not takes_command(state.run, decision) and drain_bound(state, decision) is None:
+    if not takes_command(state.run, decision, stopping=stopping) and (
+        drain_bound(state, decision) is None
+    ):
         return _reject(
             decision, RejectionCode.CLOSED_SCOPE, ("scope",), "run not accepting decisions"
         )

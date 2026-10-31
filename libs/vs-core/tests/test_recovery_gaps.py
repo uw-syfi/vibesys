@@ -33,7 +33,8 @@ from vs_core.api.recovery import (
 )
 from vs_proto.api import Oneof
 
-from .test_recovery_progress import Loop, Move, play, seeded, settle
+from .recovery_loop import Loop, Move, play, settle
+from .recovery_worlds import seeded
 
 
 def started(limits: tuple[float, ...], retries: int = 3) -> Loop:
@@ -170,7 +171,7 @@ def test_a_log_that_ends_a_run_with_work_open_or_another_result_is_refused() -> 
     play(loop, ("stop", 0))
     result = loop.state.run.result
     assert result is not None
-    with pytest.raises(ValueError, match="step open"):
+    with pytest.raises(ValueError, match="not over"):
         loop.add(Oneof("run_ended", ended_message(End(result=result))))
     quiet = stopped()
     other = core.RunResultProposal(outcome="success", reason="not the result")
