@@ -76,10 +76,10 @@ function ObjectivePanel(props: {
       {...(chart.better === null ? {} : {note: BETTER_WORDS[chart.better]})}
       {...(headline === undefined ? {} : {figure: headline.words, tone: headline.tone})}
       {...(headline === undefined || headline.hint === '' ? {} : {hint: headline.hint})}
-      {...(chart.unit === '' ? {} : {unit: chart.unit})}
     >
       <Chart
         label={chart.label}
+        {...(chart.unit === '' ? {} : {unit: chart.unit})}
         points={chart.readings}
         steps={chart.steps}
         {...(chart.start === null ? {} : {start: chart.start})}

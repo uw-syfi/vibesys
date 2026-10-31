@@ -277,15 +277,9 @@ function perfChart(page: Page): Locator {
 /** Where the performance row is and what its axes read: all of it must be the same at every level. */
 async function perfRow(page: Page) {
   return perfChart(page).evaluate(chart => {
-    // Where it is on the page: opening an idea may scroll the page to the row that was pressed.
     const box = (element: Element) => {
       const {x, y, width, height} = element.getBoundingClientRect();
-      return {
-        x,
-        y: y + window.scrollY + (element.closest('.vs-screen-body')?.scrollTop ?? 0),
-        width,
-        height,
-      };
+      return {x, y, width, height};
     };
     const row = chart.closest('.vs-chart-columns');
     return {

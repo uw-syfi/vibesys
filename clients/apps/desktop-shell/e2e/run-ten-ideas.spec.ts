@@ -57,8 +57,6 @@ test('failed ideas are listed in the flat table and a chip lists only them', asy
   }
   await shot(page, 'ten-ideas-table');
 
-  // Tall enough for the charts and every row: the list draws the rows its pane has room for.
-  await page.setViewportSize({width: 1440, height: 2000});
   await failedChip(page).click();
   await expect(failedRows(page)).toHaveCount(4);
   await expect(ideas(page).getByRole('option')).toHaveCount(4);

@@ -1,7 +1,7 @@
 import {expect, test} from '@playwright/test';
 import {fixtureNamed} from '@vibesys/run-fixtures';
 import {settled} from './checks/settle.js';
-import {anchorsOf, pageBox, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
+import {anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
 import {openFixture} from './fixture-world.js';
 
 /**
@@ -66,7 +66,8 @@ test('regression: opening a step moves neither pane, the chart nor the time bar'
   await expect(steps).toBeVisible();
   await settled(page);
   const before = await anchorsOf(page, RUN_ANCHORS);
-  const panesTop = async () => (await pageBox(page.locator('.vs-panes'))).y;
+  const panesTop = () =>
+    page.locator('.vs-panes').evaluate(panes => panes.getBoundingClientRect().y);
   const top = await panesTop();
   const columns = () =>
     page.locator('.vs-panes > .vs-pane').evaluateAll(panes =>

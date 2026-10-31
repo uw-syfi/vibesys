@@ -46,12 +46,14 @@ export interface ChartTick {
  */
 const FALLBACK_WIDTH = 1000;
 const MIN_WIDTH = 240;
-const HEIGHT = {default: 300, strip: 150} as const;
+const HEIGHT = {default: 260, strip: 150} as const;
 export type ChartSize = keyof typeof HEIGHT;
 /** The x labels sit in the band below the plot; a caption adds a line under them. */
-const X_BAND = 34;
+const X_BAND = 20;
 const CAPTION_BAND = 20;
 const PLOT_TOP = 12;
+/** The room above the plot for the unit the y axis reads in, written at the drawing's left edge. */
+const UNIT_BAND = 24;
 const MARGIN_RIGHT = 10;
 /** The gap between a y label and the axis, and the margin left of the longest label. */
 const LABEL_GAP = 8;
@@ -76,12 +78,13 @@ function plotFor(
   size: ChartSize,
   width: number,
   captioned: boolean,
+  united: boolean,
 ): Plot {
   const longest = Math.max(0, ...yTicks.map(tick => tick.label.length));
   const glyph = TYPE.section.size * MONO_ADVANCE;
   return {
     right: width - MARGIN_RIGHT,
-    top: PLOT_TOP,
+    top: united ? UNIT_BAND : PLOT_TOP,
     bottom: HEIGHT[size] - X_BAND - (captioned ? CAPTION_BAND : 0),
     left: EDGE + Math.ceil(longest * glyph) + LABEL_GAP,
   };
@@ -321,6 +324,8 @@ interface ChartProps {
   readonly markLabel?: string;
   /** What the x axis measures, under its labels. */
   readonly caption?: string;
+  /** The unit the y axis reads in, written above its top. */
+  readonly unit?: string;
   readonly xTicks?: readonly ChartTick[];
   readonly yTicks?: readonly ChartTick[];
   /** The x-axis range, fixed by the caller; without it the range fits the points, steps and ticks. */
@@ -344,6 +349,7 @@ function layoutOf(
     props.size ?? 'default',
     width,
     props.caption !== undefined,
+    props.unit !== undefined,
   );
   const at = scale(
     plot,
@@ -400,6 +406,11 @@ export function Chart(props: ChartProps): JSX.Element {
         role={props.pick === undefined ? 'img' : 'group'}
         aria-label={props.label}
       >
+        {props.unit === undefined ? null : (
+          <text className="vs-chart-label" x={0} y={UNIT_BAND - 9}>
+            {props.unit}
+          </text>
+        )}
         <Axes plot={plot} at={at} width={width} xTicks={xTicks} yTicks={yTicks} />
         <Footer
           plot={plot}
@@ -721,8 +732,6 @@ export function ChartPanel(props: {
   readonly figure?: string;
   readonly tone?: 'ok' | 'err' | 'muted';
   readonly hint?: string;
-  /** The unit the y axis reads in, above its top. */
-  readonly unit?: string;
   readonly children: ReactNode;
 }): JSX.Element {
   return (
@@ -746,11 +755,6 @@ export function ChartPanel(props: {
           </Text>
         )}
       </div>
-      {props.unit === undefined ? null : (
-        <Text variant="small" tone="muted">
-          {props.unit}
-        </Text>
-      )}
       {props.children}
     </section>
   );

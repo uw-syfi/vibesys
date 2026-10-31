@@ -648,10 +648,10 @@ export const RICH_ENTRIES = {
           figure="3.83× faster"
           tone="ok"
           hint="6,054,154 ops/s · input 1,581,539 ops/s"
-          unit="ops/s"
         >
           <Chart
             label="Throughput"
+            unit="ops/s"
             size="strip"
             points={PICK_POINTS}
             steps={[
