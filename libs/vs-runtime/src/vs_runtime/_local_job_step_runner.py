@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from vs_core.api import Request, RequestId
     from vs_core.api.recovery import StepResult
     from vs_evaluation.api import PollingEvaluationExecutor
+    from vs_runtime._job_registry import JobRegistry
     from vs_runtime._step_runner import Adopted, CancelSignal
     from vs_sim.api import Clock, ProcessTable
 
@@ -49,27 +50,31 @@ class LocalJobStepRunner:
         cls,
         executor: PollingEvaluationExecutor,
         processes: ProcessTable,
+        registry: JobRegistry,
         *,
         clock: Clock,
         poll_interval_s: float,
     ) -> LocalJobStepRunner:
-        """Run on *executor*; leave to the marked processes of *processes* what a dead process left."""
-        return cls(
-            executor, MarkedStageWorkReaper(processes), clock=clock, poll_interval_s=poll_interval_s
-        )
+        """Run on *executor*, registering its jobs in *registry*.
+
+        What a dead process left is found by the marks in the process table *processes*.
+        """
+        job = JobStepRun(executor, registry, clock=clock, poll_interval_s=poll_interval_s)
+        return cls(executor, MarkedStageWorkReaper(processes), job)
 
     def __init__(
         self,
         executor: PollingEvaluationExecutor,
         reaper: StageWorkReaper,
-        *,
-        clock: Clock,
-        poll_interval_s: float,
+        job: JobStepRun,
     ) -> None:
-        """Run on *executor*; leave to *reaper* what a dead process left on the host."""
+        """Run on *executor*; leave to *reaper* what a dead process left on the host.
+
+        *job* follows each evaluation to its end, on the same *executor*.
+        """
         self._executor = executor
         self._reaper = reaper
-        self._job = JobStepRun(executor, clock=clock, poll_interval_s=poll_interval_s)
+        self._job = job
         self._lives: dict[RequestId, int] = {}
 
     async def run(

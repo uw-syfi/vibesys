@@ -30,7 +30,6 @@ the repeat of such a step reaches the same state, which is the one residual.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING
@@ -54,7 +53,7 @@ from vs_core.api import (
 )
 from vs_core.api.recovery import Finished
 from vs_runtime._cancel_wait import cancelled_for, finished_before_cancel
-from vs_runtime._core_requests import ExecutionContext, ExecutorRefusal
+from vs_runtime._core_requests import ExecutionContext, ExecutorRefusal, payload_digest_of
 from vs_runtime._operation_step_runner import ReadOnly
 from vs_runtime._step_runner import Cleared
 
@@ -167,7 +166,7 @@ class ExecutorStepRunner:
             fence=self._fence,
             now_at=self._clock.now(),
             until=Until(at=deadline_at),
-            payload_digest=hashlib.sha256(step.model_dump_json().encode()).hexdigest(),
+            payload_digest=payload_digest_of(step),
             lease=self._lease,
             repeat=attempt > 1,
         )

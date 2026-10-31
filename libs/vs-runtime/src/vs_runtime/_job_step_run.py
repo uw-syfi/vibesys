@@ -6,6 +6,10 @@ terms: the handle is a pure function of the step's tag, and an executor that alr
 the handle attaches to its work instead of starting more (the Slurm executor through its
 ledger key, the local one through its task table). So a second run of one tag never starts
 a second copy of the job, and a run that returns has left nothing running.
+
+A run registers its job before it contacts the executor, as ``MeasurementRequests`` does: core
+collects a job's evidence and closes its scope through that executor, which answers only for a
+job in the registry.
 """
 
 from __future__ import annotations
@@ -24,17 +28,20 @@ from vs_core.api import (
 from vs_core.api.recovery import Cancelled, Finished
 from vs_evaluation.api import EvaluationState, ExecutorRejectedError, PollPhase
 from vs_runtime._core_identity import core_named
+from vs_runtime._core_requests import payload_digest_of
 from vs_runtime._evaluation_jobs import (
     RejectedPlanError,
     job_view,
     measurement_request,
 )
+from vs_runtime._job_registry import JobRecord
 from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
 
 if TYPE_CHECKING:
     from vs_core.api import Request, RequestId
     from vs_core.api.recovery import StepResult
     from vs_evaluation.api import EvaluationRequest, ExecutorPoll, PollingEvaluationExecutor
+    from vs_runtime._job_registry import JobRegistry
     from vs_runtime._step_runner import CancelSignal
     from vs_sim.api import Clock
 
@@ -57,13 +64,22 @@ class JobStepRun:
     """Submits a step's evaluation once and follows it to an end, or to a cancel."""
 
     def __init__(
-        self, executor: PollingEvaluationExecutor, *, clock: Clock, poll_interval_s: float
+        self,
+        executor: PollingEvaluationExecutor,
+        registry: JobRegistry,
+        *,
+        clock: Clock,
+        poll_interval_s: float,
     ) -> None:
-        """Run on *executor*; stamp observations with *clock*; re-poll at least every interval."""
+        """Run on *executor*, registering each job in *registry*; stamp observations with *clock*.
+
+        A job is polled at least every *poll_interval_s*.
+        """
         if poll_interval_s <= 0:
             message = f"poll_interval_s must be positive, got {poll_interval_s}"
             raise ValueError(message)
         self._executor = executor
+        self._registry = registry
         self._clock = clock
         self._poll_interval_s = poll_interval_s
 
@@ -78,10 +94,12 @@ class JobStepRun:
         submission = submission_of(step)
         try:
             request = evaluation_request(submission, handle, deadline_at=deadline_at)
+            self._registry.register(JobRecord.of(submission, tag, handle, payload_digest_of(step)))
             await self._executor.submit(request, handle_id=handle)
         except RejectedPlanError as error:
             return self._refused(submission, tag, str(error), MeasurementFailure.WORKLOAD)
         except ExecutorRejectedError as error:
+            self._registry.unindex(submission.scope, submission.admission_id, handle)
             return self._refused(submission, tag, str(error), None)
         while True:
             polled = await self._executor.poll(handle)

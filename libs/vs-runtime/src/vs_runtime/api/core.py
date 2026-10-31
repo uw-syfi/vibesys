@@ -131,7 +131,7 @@ from vs_runtime._effect_fence import (
     Unrecorded,
 )
 from vs_runtime._evaluation_jobs import handle_for
-from vs_runtime._evaluation_requests import JobRecord, MeasurementRequests
+from vs_runtime._evaluation_requests import MeasurementRequests
 from vs_runtime._evidence_ledger import (
     EvidenceEntry,
     EvidenceLookup,
@@ -141,6 +141,7 @@ from vs_runtime._evidence_ledger import (
 from vs_runtime._evidence_operations import InterpretEvidenceOwner, RetainRevisionOwner
 from vs_runtime._export_patch_operation import ExportPatchOwner
 from vs_runtime._issue_board_operations import BoardTexts, IssueBoardOwner
+from vs_runtime._job_registry import JobRecord, JobRegistry
 from vs_runtime._measurement_progress import (
     IgnoreMeasurement,
     MeasurementDecisions,
@@ -332,6 +333,7 @@ __all__ = [
     "InterpretEvidenceOwner",
     "IssueBoardOwner",
     "JobRecord",
+    "JobRegistry",
     "JournalPublicationDelivery",
     "JournalRunInvocations",
     "JournalSemanticEvents",

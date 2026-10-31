@@ -14,9 +14,24 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from vs_core.api import MeasurementFailure, ObservationStatus, RequestId
+from vs_core.api import (
+    AttemptId,
+    AttemptRef,
+    CloseAttemptScope,
+    CollectEvidence,
+    HostFence,
+    HostId,
+    MeasurementFailure,
+    ObservationStatus,
+    ObserveOwnedJob,
+    RequestId,
+    ResourceId,
+)
 from vs_core.api.recovery import Cancelled, CancelReason, Finished
-from vs_runtime.api.evaluation_step_runners import SlurmJobStepRunner
+from vs_runtime.api.core import JobRegistry, MeasurementRequests, RequestExecutors
+from vs_runtime.api.evaluation_step_runners import JobStepRun, SlurmJobStepRunner
+from vs_runtime.api.executor_contexts import RevocableLease, receipt_store_in
+from vs_runtime.api.executor_step_runner import DECLARED_REPEATS, ExecutorStepRunner
 from vs_runtime.api.slurm_evaluation_stack import (
     ScenarioCluster,
     Stack,
@@ -101,13 +116,8 @@ class Process:
 
     def __init__(self, world: World, stack: Stack) -> None:
         self.stack = stack
-        self.runner = SlurmJobStepRunner(
-            stack.executor,
-            world.ledger,
-            InlineBlockingRunner(),
-            clock=world.clock,
-            poll_interval_s=POLL_S,
-        )
+        job = JobStepRun(stack.executor, world.registry, clock=world.clock, poll_interval_s=POLL_S)
+        self.runner = SlurmJobStepRunner(stack.executor, world.ledger, InlineBlockingRunner(), job)
 
 
 class World:
@@ -122,6 +132,8 @@ class World:
         self.clock = VirtualClock(1000.0)
         self.ledger = FlakyLedger(project=PROJECT, clock=ManualClock())
         self.cluster = FlakyCluster()
+        self.store = receipt_store_in(root / "receipts")
+        self.registry = JobRegistry(self.store)
         self.processes: list[Process] = []
         self.first = self.run(self.spawn())
 
@@ -385,3 +397,89 @@ def test_a_step_that_reuses_a_submission_not_seen_ended_is_refused(tmp_path: Pat
 
     world.run(main())
     assert world.cluster.submissions == []
+
+
+# The evaluation kinds on the ExecutorStepRunner serve the job this runner submitted
+
+
+class Served:
+    """The evaluation executor core's other job requests reach, over the world's own cluster."""
+
+    def __init__(self, world: World) -> None:
+        evaluation = MeasurementRequests(world.first.stack.executor, world.store)
+        self.runner = ExecutorStepRunner(
+            RequestExecutors(evaluation=evaluation),
+            DECLARED_REPEATS,
+            fence=HostFence(host_id=HostId(root="host"), epoch=1),
+            lease=RevocableLease(),
+            clock=world.clock,
+        )
+
+    async def run(self, request: Request) -> Finished:
+        assert request.request_id is not None
+        done = await self.runner.run(request, request.request_id, 1, DEADLINE_AT, CancelSignal())
+        assert isinstance(done, Finished)
+        return done
+
+
+def job_request(
+    kind: type[ObserveOwnedJob] | type[CollectEvidence], step: Request, resource: str
+) -> ObserveOwnedJob | CollectEvidence:
+    return kind(
+        request_id=RequestId(root=f"{kind.__name__}-of-{resource}"),
+        scope=step.scope,
+        admission_id=step.admission_id,
+        resource_id=ResourceId(root=resource),
+    )
+
+
+def test_a_job_the_runner_submitted_is_collected_and_observed_through_the_executor_runner(
+    tmp_path: Path,
+) -> None:
+    """Core asks to collect the evidence of an ended job that brought none, and to poll a live one."""
+    world = World(tmp_path / "world")
+    tag = tag_of("submitted")
+
+    async def main() -> None:
+        served = Served(world)
+        step = world.step(tag, ends=True)
+        ended = await world.first.runner.run(step, tag, 1, DEADLINE_AT, CancelSignal())
+        assert isinstance(ended, Finished)
+        resource = ended.observation.resource_id
+        assert resource is not None
+        for kind in (CollectEvidence, ObserveOwnedJob):
+            done = await served.run(job_request(kind, step, resource.root))
+            assert done.observation.status is ObservationStatus.SUCCEEDED, kind.__name__
+            assert done.observation.terminal
+        await world.close()
+
+    world.run(main())
+
+
+def test_a_scope_closed_over_a_running_job_the_runner_submitted_cancels_it_and_lists_it(
+    tmp_path: Path,
+) -> None:
+    world = World(tmp_path / "world")
+    tag = tag_of("running")
+
+    async def main() -> None:
+        served = Served(world)
+        step = world.step(tag, ends=False)
+        run = asyncio.ensure_future(
+            world.first.runner.run(step, tag, 1, DEADLINE_AT, CancelSignal())
+        )
+        await yield_until(world.live, lambda jobs: jobs > 0 or run.done(), str(tag))
+        close = CloseAttemptScope(
+            request_id=RequestId(root="close"),
+            scope=step.scope,
+            admission_id=step.admission_id,
+            attempt=AttemptRef(attempt_id=AttemptId(root="attempt"), generation=0),
+        )
+        done = await served.run(close)
+        assert len(done.observation.children) == 1
+        assert world.cluster.live_jobs() == 0
+        run.cancel()
+        await asyncio.gather(run, return_exceptions=True)
+        await world.close()
+
+    world.run(main())

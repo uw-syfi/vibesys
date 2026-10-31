@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 from vs_evaluation.api import EvaluationState, ExecutorRejectedError, PollPhase
 from vs_runtime._evaluation_jobs import RejectedPlanError, handle_for
-from vs_runtime._job_step_run import JobStepRun, evaluation_request, submission_of
+from vs_runtime._job_step_run import evaluation_request, submission_of
 from vs_runtime._step_runner import Adopted, Cleared, ClearUnavailableError
 from vs_slurm.api import LedgerError, LedgerState
 
@@ -30,9 +30,10 @@ if TYPE_CHECKING:
     from vs_core.api import Request, RequestId, SubmitMeasurement
     from vs_core.api.recovery import StepResult
     from vs_evaluation.api import ExecutorPoll
+    from vs_runtime._job_step_run import JobStepRun
     from vs_runtime._semantic_slurm_evaluation import SemanticSlurmEvaluationExecutor
     from vs_runtime._step_runner import CancelSignal
-    from vs_sim.api import BlockingRunner, Clock
+    from vs_sim.api import BlockingRunner
     from vs_slurm.api import EvaluationLedger
 
 _BACKEND = "slurm"
@@ -46,18 +47,17 @@ class SlurmJobStepRunner:
         executor: SemanticSlurmEvaluationExecutor,
         ledger: EvaluationLedger,
         blocking: BlockingRunner,
-        *,
-        clock: Clock,
-        poll_interval_s: float,
+        job: JobStepRun,
     ) -> None:
-        """Run on *executor*, which attaches through *ledger*; poll its jobs every interval.
+        """Run on *executor*, which attaches through *ledger*; *job* follows each job to its end.
 
-        *blocking* carries the ledger's blocking reads off the event loop.
+        *blocking* carries the ledger's blocking reads off the event loop. *job* runs on the
+        same *executor*.
         """
         self._executor = executor
         self._ledger = ledger
         self._blocking = blocking
-        self._job = JobStepRun(executor, clock=clock, poll_interval_s=poll_interval_s)
+        self._job = job
 
     async def run(
         self,

@@ -7,6 +7,7 @@ unbound roles return an explicit refusal without fabricating lifecycle facts.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
@@ -112,6 +113,11 @@ class ExecutionContext(BaseModel):
     proves an earlier one may have started. A repeat must reach the end a first run reaches
     without doing twice what the earlier attempt may have done.
     """
+
+
+def payload_digest_of(request: RequestBase) -> str:
+    """The digest that names *request*'s payload in an ``ExecutionContext``."""
+    return hashlib.sha256(request.model_dump_json().encode()).hexdigest()
 
 
 type OwnerEvent = Annotated[
