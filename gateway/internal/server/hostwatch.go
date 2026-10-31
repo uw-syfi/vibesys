@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"sync/atomic"
-	"time"
 
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	hostv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1"
@@ -36,17 +34,11 @@ func (h *host) Watch(request *apiv1.WatchRequest, stream apiv1.HostService_Watch
 	}
 	callCtx, cancel := context.WithTimeout(stream.Context(), dispatched.Deadline)
 	defer cancel()
-	var sent atomic.Bool
-	var firstExpired atomic.Bool
-	if dispatched.FirstEvent > 0 {
-		timer := time.AfterFunc(dispatched.FirstEvent, func() {
-			if !sent.Load() {
-				firstExpired.Store(true)
-				cancel()
-			}
-		})
-		defer timer.Stop()
-	}
+	// A stream is bounded by its silence: FirstEvent before its first frame, then Progress
+	// between two. The cap above is only the bound on a stream that never ends.
+	guard := guardSilence(cancel, dispatched.FirstEvent, dispatched.Progress)
+	defer guard.stop()
+	sent := false
 	var rejected *apiv1.WatchResponse
 	err = h.config.HostRunner.Stream(callCtx, hostcommand.Command{
 		Executable: filepath.Join(checkout, ".venv", "bin", "vibesys"),
@@ -64,21 +56,23 @@ func (h *host) Watch(request *apiv1.WatchRequest, stream apiv1.HostService_Watch
 		if sendErr := stream.Send(response); sendErr != nil {
 			return sendErr
 		}
-		sent.Store(true)
+		sent = true
+		guard.frame()
 		return nil
 	})
 	if rejected != nil {
 		return stream.Send(rejected)
 	}
-	if sent.Load() {
+	// A stream that declares Progress is finite and ends with a frame of its own saying so, so
+	// any other end is a failure the client must hear, after the frames it already holds.
+	if sent && (dispatched.Progress == 0 || err == nil) {
 		return nil
 	}
-	if firstExpired.Load() || errors.Is(err, context.DeadlineExceeded) {
-		budget := dispatched.Deadline
-		if firstExpired.Load() {
-			budget = dispatched.FirstEvent
-		}
-		return stream.Send(watchFailure(hostv1.FailureCategory_FAILURE_CATEGORY_DEADLINE_EXCEEDED, deadlineMessage("watch", dispatched.CLI, budget)))
+	if silent := guard.silentFor(); silent > 0 {
+		return stream.Send(watchFailure(hostv1.FailureCategory_FAILURE_CATEGORY_DEADLINE_EXCEEDED, silenceMessage("watch", dispatched.CLI, silent)))
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return stream.Send(watchFailure(hostv1.FailureCategory_FAILURE_CATEGORY_DEADLINE_EXCEEDED, deadlineMessage("watch", dispatched.CLI, dispatched.Deadline)))
 	}
 	if errors.Is(err, context.Canceled) {
 		return stream.Send(watchFailure(hostv1.FailureCategory_FAILURE_CATEGORY_CANCELLED, "host watch cancelled"))

@@ -74,6 +74,7 @@ export {
   type MachinesWelcomeBridge,
   type MeasureTarget,
   type NewRunWelcomeBridge,
+  nextOperationToken,
   type Offered,
   type PathCompletion,
   type PreferencesView,

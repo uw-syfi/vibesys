@@ -4,7 +4,7 @@
  * (`SidebarRequest`).
  */
 import type {HostKey} from '@vibesys/hosts';
-import {settled, type WelcomeBridge} from '@vibesys/ipc';
+import {nextOperationToken, settled, type WelcomeBridge} from '@vibesys/ipc';
 import {sameRun} from '@vibesys/runs';
 import {createStore, type Store} from '@vibesys/store';
 import {
@@ -27,6 +27,7 @@ export type ShellBridge = Pick<
   | 'openRunWindow'
   | 'runDigests'
   | 'projectRuns'
+  | 'cancelProjectRuns'
   | 'onListing'
   | 'onRecent'
   | 'onPreferences'
@@ -39,16 +40,31 @@ export type ScheduleRefresh = (callback: () => void, delayMs: number) => () => v
 /** How long a live run's digest is left before it is read again, in milliseconds. */
 export const LIVE_DIGEST_REFRESH_MS = 15_000;
 
+/**
+ * The IPC token of each project listing in flight, by the sidebar's token for it: the main process
+ * names a listing by the first, so the second can stop it.
+ */
+type Listings = Map<number, number>;
+
 /** Ask what `request` names; its reply is dispatched as the action that carries its token. */
 function perform(
   bridge: ShellBridge,
   request: SidebarRequest,
   dispatch: (action: SidebarAction) => void,
+  listings: Listings,
 ): void {
   const {token} = request;
+  if (request.kind === 'cancel-project-runs') {
+    const named = listings.get(token);
+    if (named !== undefined) void settled(bridge.cancelProjectRuns(named));
+    return;
+  }
   if (request.kind === 'list-project-runs') {
     const {host, project} = request;
-    void settled(bridge.projectRuns(host, project)).then(result =>
+    const named = nextOperationToken();
+    listings.set(token, named);
+    void settled(bridge.projectRuns(host, project, named)).then(result => {
+      listings.delete(token);
       dispatch({
         type: 'project-runs-listed',
         token,
@@ -56,8 +72,8 @@ function perform(
         project,
         runs: result.ok ? result.value : null,
         ...(result.ok ? {} : {error: result.error}),
-      }),
-    );
+      });
+    });
     return;
   }
   void settled(bridge.runDigests(request.host, request.project, request.runIds)).then(result =>
@@ -77,12 +93,13 @@ export function createSidebarStore(
   readonly actions: ShellActions;
 } {
   const initial = initialSidebar();
+  const listings: Listings = new Map();
   const store = createStore<SidebarState, SidebarAction, SidebarRequest>(
     sidebarStep,
     initial.state,
-    (request, dispatch) => perform(bridge, request, dispatch),
+    (request, dispatch) => perform(bridge, request, dispatch, listings),
   );
-  for (const request of initial.requests) perform(bridge, request, store.dispatch);
+  for (const request of initial.requests) perform(bridge, request, store.dispatch, listings);
   // While any run is live its digest is due again after each interval; the next waits on this one.
   let refreshing = false;
   const keepLiveDigestsFresh = (): void => {

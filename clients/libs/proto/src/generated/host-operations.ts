@@ -8,28 +8,28 @@ import {FailureCategory, type OperationFailure} from './vibesys/host/v1/failure_
 import {OperationFailed} from '../operation-failure.js';
 import {accept, call, type Accepted, type OperationTransport, type OperationSignal} from '../operations.js';
 export const operationPolicies = Object.freeze({
-  ListTasks: Object.freeze({name: 'ListTasks', id: 10, requestTag: 10, responseTag: 10, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
-  ListHarnesses: Object.freeze({name: 'ListHarnesses', id: 11, requestTag: 11, responseTag: 11, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
-  ListExamples: Object.freeze({name: 'ListExamples', id: 12, requestTag: 12, responseTag: 12, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
-  GetTaskGoal: Object.freeze({name: 'GetTaskGoal', id: 13, requestTag: 13, responseTag: 13, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
-  DescribeMachine: Object.freeze({name: 'DescribeMachine', id: 14, requestTag: 14, responseTag: 14, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
-  ListCompute: Object.freeze({name: 'ListCompute', id: 15, requestTag: 15, responseTag: 15, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
-  PreflightRun: Object.freeze({name: 'PreflightRun', id: 16, requestTag: 16, responseTag: 16, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
-  InspectCandidate: Object.freeze({name: 'InspectCandidate', id: 17, requestTag: 17, responseTag: 17, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 2, cardinality: 1, firstEventMs: undefined} as const),
-  CompletePaths: Object.freeze({name: 'CompletePaths', id: 18, requestTag: 18, responseTag: 18, capMs: 5000, graceMs: 5000, totalMs: 10000, effect: 1, retry: 2, executor: 3, cardinality: 1, firstEventMs: undefined} as const),
-  InspectDestination: Object.freeze({name: 'InspectDestination', id: 23, requestTag: 23, responseTag: 23, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
-  ListSavedRuns: Object.freeze({name: 'ListSavedRuns', id: 37, requestTag: 37, responseTag: 37, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
-  ListAgentLogins: Object.freeze({name: 'ListAgentLogins', id: 19, requestTag: 19, responseTag: 19, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
-  ListRunDigests: Object.freeze({name: 'ListRunDigests', id: 41, requestTag: 41, responseTag: 41, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
-  UsageWindow: Object.freeze({name: 'UsageWindow', id: 42, requestTag: 42, responseTag: 42, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
-  CreateExample: Object.freeze({name: 'CreateExample', id: 34, requestTag: 34, responseTag: 34, capMs: 120000, graceMs: 5000, totalMs: 125000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
-  CopyProject: Object.freeze({name: 'CopyProject', id: 35, requestTag: 35, responseTag: 35, capMs: 120000, graceMs: 5000, totalMs: 125000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
-  PutCluster: Object.freeze({name: 'PutCluster', id: 31, requestTag: 31, responseTag: 31, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
-  RemoveCluster: Object.freeze({name: 'RemoveCluster', id: 32, requestTag: 32, responseTag: 32, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
-  TestCluster: Object.freeze({name: 'TestCluster', id: 33, requestTag: 33, responseTag: 33, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
-  StartRun: Object.freeze({name: 'StartRun', id: 36, requestTag: 36, responseTag: 36, capMs: 60000, graceMs: 5000, totalMs: 65000, effect: 3, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
-  TerminateRun: Object.freeze({name: 'TerminateRun', id: 38, requestTag: 38, responseTag: 38, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
-  Login: Object.freeze({name: 'Login', id: 40, requestTag: 40, responseTag: 40, capMs: 600000, graceMs: 5000, totalMs: 605000, effect: 3, retry: 3, executor: 1, cardinality: 2, firstEventMs: 25000} as const),
+  ListTasks: Object.freeze({name: 'ListTasks', id: 10, requestTag: 10, responseTag: 10, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  ListHarnesses: Object.freeze({name: 'ListHarnesses', id: 11, requestTag: 11, responseTag: 11, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  ListExamples: Object.freeze({name: 'ListExamples', id: 12, requestTag: 12, responseTag: 12, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  GetTaskGoal: Object.freeze({name: 'GetTaskGoal', id: 13, requestTag: 13, responseTag: 13, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  DescribeMachine: Object.freeze({name: 'DescribeMachine', id: 14, requestTag: 14, responseTag: 14, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  ListCompute: Object.freeze({name: 'ListCompute', id: 15, requestTag: 15, responseTag: 15, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  PreflightRun: Object.freeze({name: 'PreflightRun', id: 16, requestTag: 16, responseTag: 16, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  InspectCandidate: Object.freeze({name: 'InspectCandidate', id: 17, requestTag: 17, responseTag: 17, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 2, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  CompletePaths: Object.freeze({name: 'CompletePaths', id: 18, requestTag: 18, responseTag: 18, capMs: 5000, graceMs: 5000, totalMs: 10000, effect: 1, retry: 2, executor: 3, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  InspectDestination: Object.freeze({name: 'InspectDestination', id: 23, requestTag: 23, responseTag: 23, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  ListAgentLogins: Object.freeze({name: 'ListAgentLogins', id: 19, requestTag: 19, responseTag: 19, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  ListRunDigests: Object.freeze({name: 'ListRunDigests', id: 41, requestTag: 41, responseTag: 41, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  UsageWindow: Object.freeze({name: 'UsageWindow', id: 42, requestTag: 42, responseTag: 42, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  CreateExample: Object.freeze({name: 'CreateExample', id: 34, requestTag: 34, responseTag: 34, capMs: 120000, graceMs: 5000, totalMs: 125000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  CopyProject: Object.freeze({name: 'CopyProject', id: 35, requestTag: 35, responseTag: 35, capMs: 120000, graceMs: 5000, totalMs: 125000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  PutCluster: Object.freeze({name: 'PutCluster', id: 31, requestTag: 31, responseTag: 31, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  RemoveCluster: Object.freeze({name: 'RemoveCluster', id: 32, requestTag: 32, responseTag: 32, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  TestCluster: Object.freeze({name: 'TestCluster', id: 33, requestTag: 33, responseTag: 33, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  StartRun: Object.freeze({name: 'StartRun', id: 36, requestTag: 36, responseTag: 36, capMs: 60000, graceMs: 5000, totalMs: 65000, effect: 3, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  TerminateRun: Object.freeze({name: 'TerminateRun', id: 38, requestTag: 38, responseTag: 38, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  Login: Object.freeze({name: 'Login', id: 40, requestTag: 40, responseTag: 40, capMs: 600000, graceMs: 5000, totalMs: 605000, effect: 3, retry: 3, executor: 1, cardinality: 2, firstEventMs: 25000, progressMs: undefined} as const),
+  StreamSavedRuns: Object.freeze({name: 'StreamSavedRuns', id: 43, requestTag: 43, responseTag: 43, capMs: 600000, graceMs: 5000, totalMs: 605000, effect: 1, retry: 2, executor: 1, cardinality: 2, firstEventMs: 60000, progressMs: 25000} as const),
 });
 export const hostCallBudgets = Object.freeze({
   postIntent: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
@@ -97,12 +97,6 @@ export function acceptInspectDestination(input: MessageInitShape<typeof pb.Inspe
 export async function callInspectDestination(transport: OperationTransport, request: Accepted<"InspectDestination">, signal: OperationSignal): Promise<pb.InspectDestinationResponse> {
   return call(transport, {policy: operationPolicies.InspectDestination, requestSchema: pb.InspectDestinationRequestSchema, responseSchema: pb.InspectDestinationResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
 }
-export function acceptListSavedRuns(input: MessageInitShape<typeof pb.ListSavedRunsRequestSchema>): Accepted<"ListSavedRuns"> {
-  return accept(operationPolicies.ListSavedRuns, pb.ListSavedRunsRequestSchema, input);
-}
-export async function callListSavedRuns(transport: OperationTransport, request: Accepted<"ListSavedRuns">, signal: OperationSignal): Promise<pb.ListSavedRunsResponse> {
-  return call(transport, {policy: operationPolicies.ListSavedRuns, requestSchema: pb.ListSavedRunsRequestSchema, responseSchema: pb.ListSavedRunsResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
-}
 export function acceptListAgentLogins(input: MessageInitShape<typeof pb.ListAgentLoginsRequestSchema>): Accepted<"ListAgentLogins"> {
   return accept(operationPolicies.ListAgentLogins, pb.ListAgentLoginsRequestSchema, input);
 }
@@ -166,6 +160,9 @@ export async function callTerminateRun(transport: OperationTransport, request: A
 export function acceptLogin(input: MessageInitShape<typeof pb.LoginRequestSchema>): Accepted<"Login"> {
   return accept(operationPolicies.Login, pb.LoginRequestSchema, input);
 }
+export function acceptStreamSavedRuns(input: MessageInitShape<typeof pb.StreamSavedRunsRequestSchema>): Accepted<"StreamSavedRuns"> {
+  return accept(operationPolicies.StreamSavedRuns, pb.StreamSavedRunsRequestSchema, input);
+}
 export interface FailureVisitor<T> {
   invalid_input(failure: OperationFailure): T;
   configuration(failure: OperationFailure): T;
@@ -208,7 +205,6 @@ export const readBudgets = Object.freeze({
   inspectCandidate: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
   completePaths: Object.freeze({capMs: 5000, graceMs: 5000, totalMs: 10000} as const),
   inspectDestination: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
-  listSavedRuns: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
   listAgentLogins: Object.freeze({capMs: 25000, graceMs: 5000, totalMs: 30000} as const),
   listRunDigests: Object.freeze({capMs: 25000, graceMs: 5000, totalMs: 30000} as const),
   usageWindow: Object.freeze({capMs: 25000, graceMs: 5000, totalMs: 30000} as const),
@@ -235,8 +231,6 @@ export function encodeHostRead(checkout: string, name: string, payload: Uint8Arr
       return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'completePaths', value: fromBinary(pb.CompletePathsRequestSchema, payload)}}));
     case 'InspectDestination':
       return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'inspectDestination', value: fromBinary(pb.InspectDestinationRequestSchema, payload)}}));
-    case 'ListSavedRuns':
-      return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'listSavedRuns', value: fromBinary(pb.ListSavedRunsRequestSchema, payload)}}));
     case 'ListAgentLogins':
       return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'listAgentLogins', value: fromBinary(pb.ListAgentLoginsRequestSchema, payload)}}));
     case 'ListRunDigests':
@@ -282,9 +276,6 @@ export function decodeHostRead(name: string, payload: Uint8Array): Uint8Array {
     case 'InspectDestination':
       if (result.case !== 'inspectDestination') throw new Error('response correlation mismatch');
       return toBinary(pb.InspectDestinationResponseSchema, result.value);
-    case 'ListSavedRuns':
-      if (result.case !== 'listSavedRuns') throw new Error('response correlation mismatch');
-      return toBinary(pb.ListSavedRunsResponseSchema, result.value);
     case 'ListAgentLogins':
       if (result.case !== 'listAgentLogins') throw new Error('response correlation mismatch');
       return toBinary(pb.ListAgentLoginsResponseSchema, result.value);
@@ -351,6 +342,8 @@ export function encodeHostWatch(checkout: string, name: string, payload: Uint8Ar
   switch (name) {
     case 'Login':
       return toBinary(WatchRequestSchema, create(WatchRequestSchema, {checkout, method: {case: 'login', value: fromBinary(pb.LoginRequestSchema, payload)}}));
+    case 'StreamSavedRuns':
+      return toBinary(WatchRequestSchema, create(WatchRequestSchema, {checkout, method: {case: 'streamSavedRuns', value: fromBinary(pb.StreamSavedRunsRequestSchema, payload)}}));
     default: throw new Error('unknown watch');
   }
 }
@@ -363,6 +356,9 @@ export function decodeHostWatch(name: string, payload: Uint8Array): Uint8Array {
     case 'Login':
       if (result.case !== 'login') throw new Error('response correlation mismatch');
       return toBinary(pb.LoginResponseSchema, result.value);
+    case 'StreamSavedRuns':
+      if (result.case !== 'streamSavedRuns') throw new Error('response correlation mismatch');
+      return toBinary(pb.StreamSavedRunsResponseSchema, result.value);
     default: throw new Error('unknown watch');
   }
 }
@@ -376,7 +372,8 @@ export const mutateBudgets = Object.freeze({
   terminateRun: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
 } as const);
 export const watchBudgets = Object.freeze({
-  login: Object.freeze({capMs: 600000, graceMs: 5000, totalMs: 605000, firstEventMs: 25000} as const),
+  login: Object.freeze({capMs: 600000, graceMs: 5000, totalMs: 605000, firstEventMs: 25000, progressMs: 0} as const),
+  streamSavedRuns: Object.freeze({capMs: 600000, graceMs: 5000, totalMs: 605000, firstEventMs: 60000, progressMs: 25000} as const),
 } as const);
 export const subscribeTiming = Object.freeze({heartbeatMs: 5000, leaseMs: 30000} as const);
 export const topicPolicies = Object.freeze({

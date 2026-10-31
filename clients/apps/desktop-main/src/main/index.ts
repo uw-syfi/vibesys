@@ -383,7 +383,8 @@ function listedHosts(parts: {
       }),
       savedRuns: registrySavedRuns({
         checkout: effectiveCheckout(settings, REPOSITORY_ROOT),
-        unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
+        stream: (id, bytes, signal, receive) =>
+          gateway.stream(hostKey(id), WATCH_METHOD, bytes, signal, receive),
       }),
       runReads: registryRunReads({
         checkout: effectiveCheckout(settings, REPOSITORY_ROOT),
