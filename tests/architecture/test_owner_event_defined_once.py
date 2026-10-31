@@ -45,6 +45,7 @@ def test_owner_event_is_defined_once_and_in_vs_core() -> None:
         for root in (_ROOT / "libs", _ROOT / "src")
         for path in sorted(root.rglob("*.py"))
         if "tests" not in path.relative_to(root).parts and "_generated" not in path.parts
-        for line in _aliases_named(path.read_text(encoding="utf-8"), "OwnerEvent")
+        if "OwnerEvent" in (text := path.read_text(encoding="utf-8"))
+        for line in _aliases_named(text, "OwnerEvent")
     ]
     assert [item.split(":")[0] for item in found] == [str(_CORE_TYPES.relative_to(_ROOT))], found
