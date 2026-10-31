@@ -90,7 +90,6 @@ if TYPE_CHECKING:
         upgrade_envelope,
         validate_startup,
     )
-    from vs_core._run_park import pause_withdraws
     from vs_core._run_pause import (
         DEADLINE_STOP,
         ENVIRONMENT_STOP,
@@ -839,7 +838,6 @@ _MODULES: dict[str, str] = {
                 "decode_stored operation_result upgrade_envelope validate_startup "
             ),
         ),
-        ("vs_core._run_park", "pause_withdraws "),
         ("vs_core._turn_permit", "TurnPermit admitted_work_remains permit_for_request "),
         (
             "vs_core._run_pause",
@@ -1816,7 +1814,6 @@ __all__ = [
     "owned_job_subject",
     "parallel_limit",
     "pause_after",
-    "pause_withdraws",
     "pending_requests",
     "permit_for_request",
     "phase_waits",

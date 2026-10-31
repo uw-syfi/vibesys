@@ -2,7 +2,6 @@
 
 from typing import Literal
 
-import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -113,7 +112,13 @@ def test_unfinished_interruption_claims_fence_terminal_publication(
     assert bool(result.events) == (phase == "completed")
 
 
-def test_terminal_transition_cannot_hide_new_outbox_work_not_yet_registered() -> None:
+def test_a_run_ends_after_the_work_its_own_step_publishes_never_in_the_same_transition() -> None:
+    """A step that drains the run and publishes work leaves the run closing: it cannot end around it.
+
+    The work is not in the state yet, so the closure check cannot see it. Ending in the same
+    transition would publish work from a terminal run (a ``ContractError``); the run instead waits,
+    and a later tick finds the work registered and keeps waiting for it.
+    """
     state = closing_state()
     scope = core.Scope(owner=state.run.run_id, generation=0)
     request = core.EnsureWorkspace(
@@ -124,20 +129,25 @@ def test_terminal_transition_cannot_hide_new_outbox_work_not_yet_registered() ->
         ),
     )
     clock = core.ClockAdvanced(now_at=5.0)
-    with pytest.raises(core.ContractError, match="terminal transition"):
-        core.trace_step(
-            state,
-            clock,
-            core.ReducerTrace(
-                frames=(
-                    core.TraceFrame(
-                        signal=clock,
-                        change=core.SchedulingChange(
-                            state=state.scheduling,
-                            requests=(core.within(request, 60.0),),
-                            signals=(core.RunDrained(),),
-                        ),
+    result = core.trace_step(
+        state,
+        clock,
+        core.ReducerTrace(
+            frames=(
+                core.TraceFrame(
+                    signal=clock,
+                    change=core.SchedulingChange(
+                        state=state.scheduling,
+                        requests=(core.within(request, 60.0),),
+                        signals=(core.RunDrained(),),
                     ),
-                )
-            ),
-        )
+                ),
+            )
+        ),
+    )
+    assert result.state.run.status == core.RunStatus.CLOSING
+    assert [row.kind for row in result.requests] == ["ensure_workspace"]
+    assert not any(isinstance(event, core.RunEnded) for event in result.events)
+    later = core.step(result.state, core.ClockAdvanced(now_at=6.0))
+    assert later.state.run.status == core.RunStatus.CLOSING
+    assert not any(isinstance(event, core.RunEnded) for event in later.events)

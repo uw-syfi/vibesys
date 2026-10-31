@@ -33,7 +33,10 @@ from .types.sessions import (
 from .types.strategy import Command, Operation, RequestTurn
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .types.kernel import CoreState, RunState
+    from .types.records import RequestRecord
 
 
 class TurnPermit(BaseModel):
@@ -87,27 +90,42 @@ def cap_scheduled(state: CoreState, scheduled: Scheduled) -> Scheduled:
 
 def cap_to_permits(state: CoreState) -> CoreState:
     """Cap open records and the agent handles that name them at their permit."""
+    facts = _facts(state)
+
+    def permit_deadline(row: RequestRecord) -> float | None:
+        permit = _for_request(facts, row.request, live=False)
+        return None if permit is None else permit.deadline_at
+
+    return cap_open_records(state, permit_deadline)
+
+
+def cap_open_records(
+    state: CoreState, deadline_of: Callable[[RequestRecord], float | None]
+) -> CoreState:
+    """Cap each open record, and the agent handle that names it, at the deadline ``deadline_of`` gives.
+
+    A record whose deadline is None, or already no later, keeps its own.
+    """
     capped: dict[object, float] = {}
     records = []
     changed = False
-    facts = _facts(state)
     for row in state.records.records:
         if row.phase in (RequestPhase.COMPLETED, RequestPhase.BLOCKED):
             records.append(row)
             continue
-        permit = _for_request(facts, row.request, live=False)
-        if permit is None or row.until.at <= permit.deadline_at:
+        deadline = deadline_of(row)
+        if deadline is None or row.until.at <= deadline:
             records.append(row)
             continue
         changed = True
-        capped[row.request_id] = permit.deadline_at
+        capped[row.request_id] = deadline
         limit = row.limit_from_dispatch
         if limit is not None:
-            limit = min(limit, max(permit.deadline_at - state.run.now_at, 0.0))
+            limit = min(limit, max(deadline - state.run.now_at, 0.0))
         records.append(
             row.model_copy(
                 update={
-                    "until": row.until.model_copy(update={"at": permit.deadline_at}),
+                    "until": row.until.model_copy(update={"at": deadline}),
                     "limit_from_dispatch": limit,
                 }
             )
@@ -225,6 +243,24 @@ def _own_ref(request: DispatchTurn | ResumeSessionTurn) -> InvocationRef:
         session_id=request.turn.session.session_id,
         invocation_id=request.turn.invocation_id,
         generation=request.scope.generation,
+    )
+
+
+def scope_in_flight(sessions: SessionsState, records: RecordsState, scope: Scope) -> bool:
+    """An admitted turn of this owner has crossed core's dispatch boundary."""
+    return any(
+        turn.scope == scope and turn_executing(turn, records) for turn in sessions.invocations
+    )
+
+
+def turn_executing(turn: Invocation, records: RecordsState) -> bool:
+    """Whether the turn runs and its dispatch has been authorized, so its I/O may have begun."""
+    return turn.phase in (SessionPhase.EXECUTING, SessionPhase.UNKNOWN) and any(
+        isinstance(row.request, DispatchTurn | ResumeSessionTurn)
+        and row.request.turn == turn.turn
+        and row.request.scope == turn.scope
+        and row.phase != RequestPhase.PREPARED
+        for row in records.records
     )
 
 
