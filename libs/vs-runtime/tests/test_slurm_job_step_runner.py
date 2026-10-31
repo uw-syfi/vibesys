@@ -390,6 +390,76 @@ def test_a_cancel_that_ends_the_step_cancels_the_job_and_the_next_attempt_submit
     assert world.cluster.live_jobs() == 0
 
 
+def listed(world: World, step: Request) -> tuple[str, ...]:
+    """The jobs a close of the step's scope lists as its children: every handle indexed under it."""
+    return world.books_of("run-1").registry.handles(step.scope, step.admission_id)
+
+
+@pytest.mark.parametrize(
+    "reason", [reason for reason in CancelReason if not interruption_of(reason)]
+)
+def test_a_step_a_cancel_ended_leaves_its_scope_no_job_to_list(
+    tmp_path: Path, reason: CancelReason
+) -> None:
+    """The step ends `Cancelled` with no job in its report: a close that listed it names a job
+    core never heard of, and the scope would wait for a release nothing proves."""
+    world = World(tmp_path)
+    runner = world.first.runner
+    tag = tag_of("ended")
+    step = world.step(tag, ends=False)
+
+    async def main() -> None:
+        cancel = CancelSignal()
+        task = asyncio.ensure_future(runner.run(step, tag, 1, DEADLINE_AT, cancel))
+        await yield_until(world.submitted, lambda jobs: jobs == 1, "the first job")
+        assert len(listed(world, step)) == 1
+        cancel.set(reason)
+        assert await task == Cancelled(reason=reason)
+        assert listed(world, step) == ()
+        await world.close()
+
+    world.run(main())
+
+
+@pytest.mark.parametrize("reason", [CancelReason.PAUSE_NOW, CancelReason.DRAIN_EXPIRED])
+def test_a_pause_leaves_the_job_listed_for_the_next_attempt_to_adopt(
+    tmp_path: Path, reason: CancelReason
+) -> None:
+    world = World(tmp_path)
+    runner = world.first.runner
+    tag = tag_of("paused")
+    step = world.step(tag, ends=False)
+
+    async def main() -> None:
+        cancel = CancelSignal()
+        task = asyncio.ensure_future(runner.run(step, tag, 1, DEADLINE_AT, cancel))
+        await yield_until(world.submitted, lambda jobs: jobs == 1, "the first job")
+        cancel.set(reason)
+        assert await task == Cancelled(reason=reason)
+        assert len(listed(world, step)) == 1
+        await world.close()
+
+    world.run(main())
+
+
+def test_a_step_cleared_of_every_job_lists_none(tmp_path: Path) -> None:
+    """A withdrawn request whose job ended left a handle indexed, and nothing of it lives."""
+    world = World(tmp_path)
+    left = tag_of("left")
+    step = world.submission(left)
+
+    async def main() -> None:
+        await world.die_mid_run(world.first, left, attempt=1)
+        assert len(listed(world, step)) == 1
+        _withdrawn(world, left)
+        second = await world.spawn()
+        assert await second.runner.clear(step, left) == Cleared()
+        assert listed(world, step) == ()
+        await world.close()
+
+    world.run(main())
+
+
 @pytest.mark.parametrize("reason", list(CancelReason))
 def test_a_step_cancelled_before_its_run_began_submits_nothing(
     tmp_path: Path, reason: CancelReason

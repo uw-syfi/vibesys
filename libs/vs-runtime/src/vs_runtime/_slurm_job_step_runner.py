@@ -119,6 +119,17 @@ class SlurmJobStepRunner:
         return await self._job.run(step, tag, handle, deadline_at, cancel)
 
     async def clear(self, step: Request, tag: RequestId) -> Adopted | Cleared:
+        """Adopt the job an earlier attempt left, or report that it left none and forget its handle.
+
+        A step cleared of every job lists none for its scope's close: a handle an earlier attempt
+        registered and never submitted (or whose job ended withdrawn) is no child core owns.
+        """
+        cleared = await self._clear(step, tag)
+        if isinstance(cleared, Cleared):
+            self._job.forget(submission_of(step), tag)
+        return cleared
+
+    async def _clear(self, step: Request, tag: RequestId) -> Adopted | Cleared:
         """Adopt the job an earlier attempt left, or report that it left none.
 
         The tag's own handle is asked first: a job this step submitted is on record under it,

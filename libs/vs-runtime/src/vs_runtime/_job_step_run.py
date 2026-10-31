@@ -105,7 +105,10 @@ class JobStepRun:
         """
         submission = submission_of(step)
         if cancel.is_set() and (await self._executor.poll(handle)).phase is PollPhase.UNSUBMITTED:
-            return Cancelled(reason=_reason_of(cancel))
+            reason = _reason_of(cancel)
+            if not interruption_of(reason):
+                self.forget(submission, tag)
+            return Cancelled(reason=reason)
         try:
             request = evaluation_request(submission, handle, deadline_at=deadline_at)
             self._registry.register(JobRecord.of(submission, tag, handle, payload_digest_of(step)))
@@ -124,6 +127,18 @@ class JobStepRun:
             if cancel.is_set():
                 return await self._cancelled(submission, tag, handle, cancel)
             await self._until_change_or_cancel(handle, cancel)
+
+    def forget(self, step: SubmitMeasurement, tag: RequestId) -> None:
+        """Take every handle of ``tag``'s step out of its scope's index: nothing of them lives.
+
+        Call it once the job of each handle has ended (a cancel confirmed it) or none was
+        started. A step that holds a job, running or finished, keeps its handle: core owns that
+        job and the close lists it.
+        """
+        for handle in self._registry.handles(step.scope, step.admission_id):
+            record = self._registry.record(handle)
+            if record is not None and record.request_id == tag.root:
+                self._registry.unindex(step.scope, step.admission_id, handle)
 
     async def read_ended(self, step: Request, tag: RequestId, source: str) -> StepResult:
         """The result of ``step`` read from the ended job of ``source``, which it reuses.
@@ -165,6 +180,7 @@ class JobStepRun:
             raise StillRunningAfterCancelError(handle)
         if polled.terminal is not None and polled.terminal.state is not EvaluationState.CANCELED:
             return self._finished(polled, step, tag, handle)
+        self.forget(step, tag)
         return Cancelled(reason=reason)
 
     def _finished(

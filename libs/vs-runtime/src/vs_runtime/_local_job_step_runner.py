@@ -101,8 +101,11 @@ class LocalJobStepRunner:
         return await self._job.run(step, tag, self._handle(tag), deadline_at, cancel)
 
     async def clear(self, step: Request, tag: RequestId) -> Adopted | Cleared:
-        """End every evaluation of ``tag`` this process runs, then what a dead process left."""
-        del step  # the work of a local evaluation is found by the tag alone
+        """End every evaluation of ``tag`` this process runs, then what a dead process left.
+
+        Nothing of the step lives afterwards, so its handles leave its scope's index: the next
+        run registers a handle of its own, and a close lists only what a step still owns.
+        """
         handle = self._handle(tag)
         polled = await self._executor.poll(handle)
         if polled.phase is not PollPhase.UNSUBMITTED:
@@ -110,6 +113,8 @@ class LocalJobStepRunner:
                 await self._executor.cancel(handle)
             self._lives[tag] = self._lives.get(tag, 0) + 1
         await self._reaper.reap(tag)
+        if isinstance(step, SubmitMeasurement):
+            self._job.forget(step, tag)
         return Cleared()
 
     def _handle(self, tag: RequestId) -> str:

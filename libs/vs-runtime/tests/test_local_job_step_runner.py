@@ -167,12 +167,11 @@ class World:
         self.evidence = ReceiptEvidenceLedger(store)
         self.heard = StagesHeard()
         self.decisions = MeasurementDecisions()
+        self.registry = JobRegistry(store)
         self.runner = LocalJobStepRunner(
             self.executor,
             self.reaper,
-            JobBooks(
-                JobRegistry(store), self.evidence, MeasurementProgress(self.heard), self.decisions
-            ),
+            JobBooks(self.registry, self.evidence, MeasurementProgress(self.heard), self.decisions),
             clock=self.clock,
             poll_interval_s=POLL_S,
         )
@@ -185,6 +184,11 @@ class World:
         """A step that ends by itself (an accuracy stage) or runs until cancelled (a benchmark)."""
         stages = ("accuracy",) if ends else ("benchmark",)
         return submission(tag.root, override=plan(stages=stages, candidate=self.snapshot))
+
+    def listed(self, step: Request) -> tuple[str, ...]:
+        """The jobs a close of the step's scope lists as its children."""
+        assert isinstance(step, SubmitMeasurement)
+        return self.registry.handles(step.scope, step.admission_id)
 
     async def left_running(self, tag: RequestId) -> int:
         """Evaluation work the executor still runs, or stage commands a dead process left."""
@@ -270,6 +274,32 @@ def test_a_killed_attempt_is_cancelled_by_clear_and_the_next_attempt_runs_a_new_
     assert isinstance(first.workspace, FakeCandidateWorkspace)
     assert first.workspace.discarded
     assert len(world.evaluation.accuracy_calls) == 1
+
+
+def test_a_step_with_no_evaluation_left_lists_no_job_for_its_scope_to_close(
+    tmp_path: Path,
+) -> None:
+    """A cleared attempt and a cancel that ended the step leave nothing a close could list."""
+    world = World(tmp_path)
+    tag = tag_of("killed")
+    step = world.step(tag, ends=False)
+
+    async def main() -> None:
+        await world.die_mid_run(tag, attempt=1)
+        assert len(world.listed(step)) == 1
+        assert await world.runner.clear(step, tag) == Cleared()
+        assert world.listed(step) == ()
+        cancel = CancelSignal()
+        task = asyncio.ensure_future(world.runner.run(step, tag, 2, DEADLINE_AT, cancel))
+        await yield_until(
+            lambda: world.left_running(tag), lambda running: running == 1, "the evaluation"
+        )
+        assert len(world.listed(step)) == 1
+        cancel.set(CancelReason.WITHDRAWN)
+        assert await task == Cancelled(reason=CancelReason.WITHDRAWN)
+        assert world.listed(step) == ()
+
+    world.run(main())
 
 
 def test_clear_reaps_the_stage_work_a_dead_process_left_by_the_tag_alone(tmp_path: Path) -> None:
