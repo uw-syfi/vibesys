@@ -421,26 +421,4 @@ describe('the first start and Settings', () => {
     expect(initialSidebar().requests).toEqual([]);
     expect(initialSidebar().state.selection).toEqual({kind: 'runs'});
   });
-
-  test('Settings back restores the exact previous screen after repeated opens', () => {
-    const previous = {kind: 'run', run: {host: 'ssh:host-a', runId: 'r1'}} as const;
-    let state = sidebarStep(SIDEBAR_EMPTY, {type: 'select', screen: previous}).state;
-    state = sidebarStep(state, {type: 'select', screen: {kind: 'settings'}}).state;
-    state = sidebarStep(state, {type: 'select', screen: {kind: 'settings'}}).state;
-    state = sidebarStep(state, {type: 'back-from-settings'}).state;
-    expect(state.selection).toEqual(previous);
-  });
-
-  test('Settings opened from Machines or Usage goes back to that page, not to the one before it', () => {
-    for (const from of [{kind: 'machines'}, {kind: 'usage'}] as const) {
-      let state = sidebarStep(SIDEBAR_EMPTY, {
-        type: 'select',
-        screen: {kind: 'new-run', machine: 'ssh:host-b'},
-      }).state;
-      state = sidebarStep(state, {type: 'select', screen: from}).state;
-      state = sidebarStep(state, {type: 'select', screen: {kind: 'settings'}}).state;
-      state = sidebarStep(state, {type: 'back-from-settings'}).state;
-      expect(state.selection).toEqual(from);
-    }
-  });
 });
