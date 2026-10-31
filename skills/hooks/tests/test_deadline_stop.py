@@ -211,3 +211,33 @@ def test_pending_work_can_wake_the_lead_without_a_block(new_repo: NewRepo, pendi
     repo = new_repo()
     start_run(repo, deadline=at(600))
     assert stop(repo, payload=json.dumps({"cwd": str(repo), pending: [{"id": "task"}]})) == (0, "")
+
+
+@given(parts=st.lists(st.sampled_from(["worktrees", "candidate", "src"]), max_size=8))
+@example(parts=[])
+@example(parts=["worktrees", "candidate", "src"])
+@pytest.mark.regression
+def test_nested_run_directories_find_the_project(new_repo: NewRepo, parts: list[str]) -> None:
+    repo = new_repo()
+    start_run(repo, deadline=at(600))
+    nested = repo / ".vibesys-optimize" / "run-1"
+    for part in parts:
+        nested /= part
+    nested.mkdir(parents=True, exist_ok=True)
+    assert json.loads(stop(nested)[1])["decision"] == "block"
+    assert json.loads(stop(repo)[1])["decision"] == "block"
+    assert stop(new_repo()) == (0, "")
+
+
+def test_project_directory_overrides_an_unrelated_event_cwd(new_repo: NewRepo) -> None:
+    repo, outside = new_repo(), new_repo()
+    start_run(repo, deadline=at(600))
+    out = io.StringIO()
+    hook.main(
+        io.StringIO(json.dumps({"cwd": str(outside)})),
+        out,
+        now=lambda: NOW,
+        fallback_cwd=outside,
+        project_dir=repo,
+    )
+    assert json.loads(out.getvalue())["decision"] == "block"

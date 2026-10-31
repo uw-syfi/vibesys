@@ -72,6 +72,7 @@ def test_discovery_lists_nested_skills_and_stops_inside_a_skill(tmp_path: Path) 
     (tmp_path / "skills/domains/.hidden/hid").mkdir(parents=True)
     (tmp_path / "skills/domains/.hidden/hid/SKILL.md").write_text("x")
     _skill(tmp_path, "other/not-published")
+    _skill(tmp_path, "hooks/not-a-skill")
 
     assert [skill.path for skill in discover(tmp_path)] == [
         "./domains/pack/skills/pack-runtime",

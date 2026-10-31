@@ -65,7 +65,7 @@ turned down. Add one for every park, abandon, merge and change of plan.
 `notes/<work-id>.md`: written when you dispatch the item. What you expect it to show, what you
 will do on each outcome. After a compaction these are how you know what you meant.
 
-`wakeups.json`: the scheduling tool IDs for this run, canceled at wrap-up.
+`wakeups.json`: the single next wakeup ID and milestone for this run; replace after each wake and cancel at exit.
 
 `report.md`: written at wrap-up.
 
