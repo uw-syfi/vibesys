@@ -303,7 +303,7 @@ def _finish(
 ) -> tuple[CoreState, tuple[StrategyEvent, ...]]:
     tag = RequestId(root=message.tag)
     by_core = ended_by_core(state, tag)
-    reported_by(state, tag, message.attempt)
+    reported_by(state, tag, message.attempt)  # core ending the step excuses no stale attempt
     if by_core:
         state, published = _concluded_by_core(state, tag, decode_result(message, registry))
         return settle_park(state), published

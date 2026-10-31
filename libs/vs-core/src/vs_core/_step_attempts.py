@@ -198,7 +198,10 @@ def started(
 
 
 def interrupted(state: CoreState, tag: RequestId, attempt: int, why: Interruption) -> CoreState:
-    """``state`` with the running attempt of ``tag`` ended by ``why``, charged only if it raised."""
+    """``state`` with the running attempt of ``tag`` ended by ``why``, charged only if it raised.
+
+    The attempt is the step's latest even when core ended the step itself.
+    """
     by_core = ended_by_core(state, tag)
     row = state.steps.of(tag)
     if row is None or row.started != attempt or row.ended:
