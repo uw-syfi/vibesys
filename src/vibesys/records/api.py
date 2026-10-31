@@ -17,7 +17,14 @@ Anonymous legacy controls use ``journal:<source sequence>`` as a local identity.
 from vibesys.records._agents import usage_split_refusals
 from vibesys.records._lifecycle import epoch_header
 from vibesys.records._mapping import DISPOSITIONS, map_event
-from vibesys.records._types import BlobWrite, MappedEvent, MappingState, StreamWrite
+from vibesys.records._span_table import build_span_table
+from vibesys.records._types import (
+    BlobWrite,
+    MappedEvent,
+    MappingState,
+    StreamWrite,
+    build_intents,
+)
 
 __all__ = [
     "DISPOSITIONS",
@@ -25,6 +32,8 @@ __all__ = [
     "MappedEvent",
     "MappingState",
     "StreamWrite",
+    "build_intents",
+    "build_span_table",
     "epoch_header",
     "map_event",
     "usage_split_refusals",

@@ -4,6 +4,7 @@ import vibesys.events as e
 import vs_proto.api as p
 from vibesys.records._agents import owner
 from vibesys.records._common import Projection, enum_value
+from vibesys.records._span_table import SpanKey
 from vibesys.records._strategy import labelled
 
 
@@ -78,7 +79,7 @@ def capacity(projection: Projection) -> None:
 def _provider_waits(projection: Projection, provider: str) -> list[str]:
     return [
         span.id
-        for span in projection.spans.values()
+        for span in projection.spans.matching(SpanKey.capacity_on(provider))
         if span.label is not None
         and span.label.kind == "capacity_wait"
         and span.label.attrs is not None

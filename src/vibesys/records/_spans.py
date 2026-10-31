@@ -133,14 +133,7 @@ def _metric_rows(projection: Projection, source: CoreSpan, span: p.Span) -> None
         raise TypeError(attrs.details("gate attrs"))
     rows = attrs.metrics
     if not rows and attrs.metric_value is not None and projection.primary_series is not None:
-        declaration = next(
-            (
-                series
-                for series in (projection.header.series if projection.header else [])
-                if series.name == projection.primary_series
-            ),
-            None,
-        )
+        declaration = projection.series_declaration(projection.primary_series)
         rows = (
             search.MetricRow(
                 name=projection.primary_series,
