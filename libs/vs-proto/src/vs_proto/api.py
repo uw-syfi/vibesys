@@ -262,6 +262,7 @@ from vs_proto._generated.vibesys.store.v1.span_pb import (
 from vs_proto._generated.vibesys.store.v1.state_cache_pb import StateCache
 from vs_proto._generated.vibesys.store.v1.transcript_pb import (
     TranscriptChannel,
+    TranscriptCommandResult,
     TranscriptContent,
     TranscriptEntry,
     TranscriptText,
@@ -455,6 +456,7 @@ __all__ = [
     "Timestamp",
     "TokenUsage",
     "TranscriptChannel",
+    "TranscriptCommandResult",
     "TranscriptContent",
     "TranscriptEntry",
     "TranscriptText",

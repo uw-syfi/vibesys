@@ -2183,11 +2183,11 @@ expose = ["MIN_CHECKOUT_VERSION"]
 
 [[modules]]
 path = "server.host_saved_runs"
-depends_on = ["vibesys.api.transport", "vs_project", "vs_proto", "vs_runlog", "vs_sim.api"]
+depends_on = ["server.host_run_reads", "vibesys.api.transport", "vs_project", "vs_proto", "vs_runlog", "vs_sim.api"]
 
 [[interfaces]]
 from = ["server.host_saved_runs"]
-expose = ["page_saved_runs"]
+expose = ["saved_run_rows"]
 
 [[modules]]
 path = "vibesys.api.host_terminate"
@@ -2214,7 +2214,7 @@ depends_on = ["server.host_api", "server.host_envelope", "server.host_examples",
 
 [[interfaces]]
 from = ["server.host_run_reads"]
-expose = ["ProjectRun", "RunProjects", "RunFacts", "run_summaries", "project_runs", "usage_window_reply"]
+expose = ["ProjectRun", "RunProjects", "RunFacts", "run_summaries", "project_runs", "named_run_digests", "usage_window_reply"]
 
 [[modules]]
 # The digests and the usage window restated as the registered reads' messages.

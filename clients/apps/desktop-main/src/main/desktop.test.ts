@@ -196,6 +196,8 @@ function desktopWorld(cleanups: RetirementCleanups = {}, skipped: SkippedRecent[
       return String(path);
     },
     cancelCheckout: async () => undefined,
+    cancelProjectRuns: () => undefined,
+    cancelProjectRunsOwner: () => undefined,
     retryListing: () => undefined,
     cancelCheckoutOwner: async owner => {
       events.push(`cancel-checkout:${owner}`);

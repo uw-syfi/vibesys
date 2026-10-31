@@ -4,7 +4,9 @@ A test module subclasses ``StepLogContract``, names the subclass ``Test<Variant>
 ``step_log_under_test``. The cases drive a log only through the interface and the few probes
 ``StepLogUnderTest`` names. They hold a log to what the loop relies on: an append is in the state
 when it returns, a record the fold refuses is never appended, what was appended survives a restart,
-and a charged attempt is charged only for a raise.
+a charged attempt is charged only for a raise, the run clock core asks to have recorded is
+recorded, and a start is checked and stamped at one instant:
+the run clock the log reads when it appends, which is not the one its caller read when it decided.
 
 A result is judged on the state its own append extends: one that reaches a parked run is not
 recorded as a result and leaves the log as it was (``Interrupted``), whatever the loop last read.
@@ -17,13 +19,23 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from vs_core.api import RequestId
-from vs_core.api.recovery import Cancelled, CancelReason, Interruption, Run, RunRest, at_rest
+from vs_core.api.recovery import (
+    Cancelled,
+    CancelReason,
+    Interruption,
+    RecordRefusal,
+    RecordRefusedError,
+    RefusalReason,
+    Run,
+    RunRest,
+    at_rest,
+)
 from vs_runtime._step_loop import Interrupted
 from vs_sim.api import yield_now
 from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
+    from collections.abc import Awaitable, Callable, Coroutine
 
     from vs_runtime._step_loop import StepLog
 
@@ -40,6 +52,10 @@ class StepLogUnderTest:
     """A new process's log over everything the first one made durable."""
     push_input: Callable[[], None]
     """Append an input from outside the loop, which wakes ``next_input``."""
+    pause: Callable[[], None]
+    """Append an input that pauses the run now, so that it lets no step start."""
+    elapse: Callable[[float], Awaitable[None]]
+    """Let run-clock seconds pass."""
     drive: Drive
     runs: tuple[Run, ...]
     """The first attempt of each open step, as ``decide`` asks for it."""
@@ -70,6 +86,75 @@ class StepLogContract:
             attempts = subject.log.state.steps.of(run.tag)
             assert attempts is not None
             assert (attempts.started, attempts.ended) == (run.attempt, False)
+
+        subject.drive(main())
+
+    def test_a_start_is_recorded_with_the_limit_of_the_instant_it_is_stamped_at(self) -> None:
+        """A start that waited gets its limit from the stamp, and the caller runs that attempt."""
+        subject = self.step_log_under_test()
+        run = subject.runs[0]
+
+        async def main() -> None:
+            await subject.elapse(5.0)
+            started = await subject.log.step_started(run)
+            assert isinstance(started, Run)
+            assert (started.step, started.tag, started.attempt) == (run.step, run.tag, run.attempt)
+            assert started.deadline_at == run.deadline_at + 5.0
+            open_step = subject.log.open_step(run.tag)
+            assert open_step is not None
+            assert open_step.deadline_at == started.deadline_at
+
+        subject.drive(main())
+
+    def test_a_start_the_run_no_longer_lets_happen_is_refused_and_appends_nothing(self) -> None:
+        """A pause that came after the caller decided is in the log before the start would be."""
+        subject = self.step_log_under_test()
+        run = subject.runs[0]
+
+        async def main() -> None:
+            subject.pause()
+            before = subject.log.state
+            refused = await subject.log.step_started(run)
+            assert isinstance(refused, RecordRefusal)
+            assert (refused.reason, refused.tag) == (RefusalReason.START_NOT_DUE, run.tag)
+            assert subject.log.state == before
+            after = subject.reopen().open_step(run.tag)
+            assert after is not None
+            assert after.started == 0
+
+        subject.drive(main())
+
+    def test_a_retry_whose_step_time_ran_out_while_it_waited_is_refused(self) -> None:
+        """Past the limit that its first start fixed, no further attempt of the step starts."""
+        subject = self.step_log_under_test()
+        run = subject.runs[0]
+
+        async def main() -> None:
+            first = await subject.log.step_started(run)
+            assert isinstance(first, Run)
+            await subject.log.attempt_interrupted(run.tag, run.attempt, Interruption.RAISED)
+            await subject.elapse(first.deadline_at + 1.0)
+            retry = Run(run.step, run.tag, run.attempt + 1, first.deadline_at)
+            refused = await subject.log.step_started(retry)
+            assert isinstance(refused, RecordRefusal)
+            assert (refused.reason, refused.tag) == (RefusalReason.START_NOT_DUE, run.tag)
+            open_step = subject.log.open_step(run.tag)
+            assert open_step is not None
+            assert open_step.started == run.attempt
+
+        subject.drive(main())
+
+    def test_the_clock_core_asks_to_have_recorded_is_in_the_state_and_survives_a_restart(
+        self,
+    ) -> None:
+        """Time changes the log only through a record: a drain's deadline passing is one."""
+        subject = self.step_log_under_test()
+
+        async def main() -> None:
+            assert subject.log.state.run.now_at < 7.5
+            await subject.log.clock_advanced(7.5)
+            assert subject.log.state.run.now_at >= 7.5
+            assert subject.reopen().state.run.now_at >= 7.5
 
         subject.drive(main())
 
@@ -122,8 +207,8 @@ class StepLogContract:
             refused = False
             try:
                 await subject.log.step_started(skipped)
-            except ValueError:
-                refused = True
+            except RecordRefusedError as error:
+                refused = error.refusal.reason is RefusalReason.ATTEMPT_MISMATCH
             assert refused, "a log accepted an attempt out of order"
             assert subject.log.state == before
             after = subject.reopen().open_step(run.tag)
@@ -231,7 +316,7 @@ class StepLogContract:
         subject.drive(main())
 
     def test_an_attempt_the_run_does_not_let_start_is_not_recorded(self) -> None:
-        """A start the rule forbids (the run is parked) answers ``Interrupted`` and appends nothing."""
+        """A start the rule forbids (the run is parked) is refused as not due and appends nothing."""
         subject = self.step_log_under_test()
         run = subject.runs[0]
 
@@ -241,7 +326,9 @@ class StepLogContract:
             await subject.log.attempt_interrupted(run.tag, run.attempt, Interruption.PAUSE)
             before = subject.log.state
             again = Run(run.step, run.tag, run.attempt + 1, run.deadline_at)
-            assert isinstance(await subject.log.step_started(again), Interrupted)
+            refused = await subject.log.step_started(again)
+            assert isinstance(refused, RecordRefusal)
+            assert (refused.reason, refused.tag) == (RefusalReason.START_NOT_DUE, run.tag)
             assert subject.log.state == before
 
         subject.drive(main())

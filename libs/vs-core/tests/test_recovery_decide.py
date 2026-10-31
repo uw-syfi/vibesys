@@ -24,12 +24,15 @@ from vs_core.api.recovery import (
     Finished,
     Interruption,
     InterruptPolicy,
+    RecordRefusedError,
+    RefusalReason,
     Run,
     RunRest,
     Settle,
     StepAttempts,
     StepResult,
     StepsState,
+    Tick,
     Wait,
     at_rest,
     decide,
@@ -415,6 +418,22 @@ def paused(
     return state.model_copy(update={"run": run})
 
 
+STOPS_AT_THE_DEADLINE = {CancelReason.DRAIN_EXPIRED, CancelReason.PAUSE_NOW}
+"""How an attempt is stopped once the drain gives up on it: while the run still drains, or parked."""
+
+
+def after_the_clock(state: core.CoreState, now: float) -> tuple[Action, ...]:
+    """What ``decide`` asks for at ``now``, once the clock it asks to have recorded is recorded.
+
+    A drain that gave up on its attempts parks, and nothing writes a record at that instant, so
+    ``decide`` asks for the clock (``Tick``) first; the fold applies it as an input.
+    """
+    actions = decide(state, now)
+    if actions == (Tick(at=now),):
+        return decide(core.step(state, core.ClockAdvanced(now_at=now)).state, now)
+    return actions
+
+
 @settings(max_examples=examples(pr=12, nightly=200))
 @given(script=scripts(), status=PAUSES)
 def test_a_paused_run_starts_no_step_and_stops_what_runs_only_at_its_drain_deadline(
@@ -426,9 +445,9 @@ def test_a_paused_run_starts_no_step_and_stops_what_runs_only_at_its_drain_deadl
         draining = paused(state, status, deadline_at=now + 10.0)
         assert not [a for a in decide(draining, now) if isinstance(a, Run)]
         assert not [a for a in decide(draining, now + 5.0) if isinstance(a, Cancel)]
-        expired = decide(draining, now + 10.0)
+        expired = after_the_clock(draining, now + 10.0)
         assert {a.tag for a in expired if isinstance(a, Cancel)} == running
-        assert {a.reason for a in expired if isinstance(a, Cancel)} <= {CancelReason.DRAIN_EXPIRED}
+        assert {a.reason for a in expired if isinstance(a, Cancel)} <= STOPS_AT_THE_DEADLINE
         unbounded = paused(state, status)
         assert not [a for a in decide(unbounded, now + 1e3) if isinstance(a, Cancel | Run)] or {
             a.reason for a in decide(unbounded, now + 1e3) if isinstance(a, Cancel)
@@ -440,11 +459,11 @@ def test_a_paused_run_starts_no_step_and_stops_what_runs_only_at_its_drain_deadl
 def test_a_pause_now_cancels_every_running_step_and_starts_none(script: Script) -> None:
     for length, (state, open_steps) in enumerate(states(script)):
         now = clock_of(length)
-        actions = decide(paused(state, core.RunStatus.DRAINING, immediate=True), now)
+        actions = after_the_clock(paused(state, core.RunStatus.DRAINING, immediate=True), now)
         assert {a.tag for a in actions if isinstance(a, Cancel)} == {
             step.tag for step in open_steps if step.running
         }
-        assert {a.reason for a in actions if isinstance(a, Cancel)} <= {CancelReason.PAUSE_NOW}
+        assert {a.reason for a in actions if isinstance(a, Cancel)} <= STOPS_AT_THE_DEADLINE
         assert not [a for a in actions if isinstance(a, Run)]
 
 
@@ -547,6 +566,23 @@ def test_every_result_core_settles_ends_its_step_and_keeps_its_reason(
     assert closed.observation.terminal
 
 
+def refused_start(build: Builder, bad: Run) -> RefusalReason:
+    """The reason the fold gives for a start ``bad`` appended after ``build``'s records."""
+    records = [
+        *build.script.records,
+        Record(
+            seq=len(build.script.records) + 1,
+            epoch=1,
+            at=Timestamp(seconds=9),
+            clock=9.0,
+            body=Oneof("step_started", started_message(bad)),
+        ),
+    ]
+    with pytest.raises(RecordRefusedError, match="log") as refused:
+        fold(records, SEED)
+    return refused.value.refusal.reason
+
+
 def test_a_log_the_rule_did_not_write_is_refused_rather_than_guessed_at() -> None:
     build = Builder()
     build.prepare(1)
@@ -554,20 +590,14 @@ def test_a_log_the_rule_did_not_write_is_refused_rather_than_guessed_at() -> Non
     build.start(step)
     skipped = Run(step.request, step.tag, step.started + 2, 100.0)
     ghost = Run(request_of("ghost", 0), core.RequestId(root="ghost"), 1, 100.0)
-    next_while_running = Run(step.request, step.tag, step.started + 1, 100.0)
-    for bad in (skipped, ghost, Run(step.request, step.tag, 1, 100.0), next_while_running):
-        records = [
-            *build.script.records,
-            Record(
-                seq=len(build.script.records) + 1,
-                epoch=1,
-                at=Timestamp(seconds=9),
-                clock=9.0,
-                body=Oneof("step_started", started_message(bad)),
-            ),
-        ]
-        with pytest.raises(ValueError, match="log"):
-            fold(records, SEED)
+    running = Run(step.request, step.tag, step.started + 1, 100.0)
+    again = Run(step.request, step.tag, 1, 100.0)
+    for bad in (skipped, again, running):
+        assert refused_start(build, bad) is RefusalReason.START_NOT_DUE
+    assert refused_start(build, ghost) is RefusalReason.STEP_NOT_OPEN
+    build.interrupt(step, Interruption.PAUSE)
+    assert refused_start(build, skipped) is RefusalReason.ATTEMPT_MISMATCH
+    assert refused_start(build, again) is RefusalReason.ATTEMPT_MISMATCH
 
 
 @settings(max_examples=examples(pr=12, nightly=100))

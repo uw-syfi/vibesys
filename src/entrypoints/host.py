@@ -62,6 +62,7 @@ class LoginLibrary(Protocol):
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from typing import BinaryIO
 
     from vs_sim.api import Processes, SignalRelay, SleepingClock, Threads
@@ -153,7 +154,9 @@ def main(
         parser.parse_args(arguments[1:])
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
-        _serve_login(source.read((1 << 20) + 1), destination, threads)
+        _WATCH_SERVERS[_WATCH_COMMANDS[arguments[0]]](
+            source.read((1 << 20) + 1), destination, threads
+        )
         return 0
     if arguments and arguments[0] in _MUTATION_COMMANDS:
         parser = argparse.ArgumentParser(
@@ -197,11 +200,31 @@ def main(
     return code
 
 
+def _serve_saved_runs(payload: bytes, destination: BinaryIO, threads: Threads) -> None:
+    """Stream one project's runs: one scan in this process, a frame as each batch is read."""
+    host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
+    facts = import_module("server.host_helper_requests").registry_read_source(host)
+
+    def write(chunk: bytes) -> None:
+        destination.write(chunk)
+        # The gateway's progress bound counts what reached it, not what this process buffered.
+        destination.flush()
+
+    import_module("server.host_operation_reads").stream_saved_runs(payload, facts, write)
+
+
 def _serve_login(payload: bytes, destination: BinaryIO, threads: Threads) -> None:
     """Wire the native login watch without constructing unrelated helper resources."""
     launcher = import_module("vs_sim.api").SubprocessPipedProcessLauncher()
     logins = import_module("server.host_agent_logins").host_logins(launcher, threads)
     watch_login(payload, destination, logins, threads, WakeupFdSignalRelay(threads))
+
+
+_WATCH_SERVERS: dict[str, Callable[[bytes, BinaryIO, Threads], None]] = {
+    "login": _serve_login,
+    "stream_saved_runs": _serve_saved_runs,
+}
+"""What serves each registered watch, by slot: a watch with no entry has no command to run."""
 
 
 def watch_login(

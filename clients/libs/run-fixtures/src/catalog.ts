@@ -1,4 +1,5 @@
 /** Canonical scenario declarations, validated on first use. Python pins their native output. */
+import agentTurnRich from './data/agent-turn-rich.json' with {type: 'json'};
 import basesAndEffects from './data/bases-and-effects.json' with {type: 'json'};
 import comparisonBaselines from './data/comparison-baselines.json' with {type: 'json'};
 import continuation from './data/continuation-rounds.json' with {type: 'json'};
@@ -19,6 +20,7 @@ import {weeksRun} from './weeks.js';
 
 const SOURCES: readonly unknown[] = [
   queue,
+  agentTurnRich,
   longTitles,
   failures,
   retried,
@@ -46,6 +48,7 @@ export function committedFixtures(): readonly RunFixture[] {
 /** The names of every fixture `fixtureNamed` knows: the committed ones, and the 14-day run. */
 export const FIXTURE_NAMES: readonly string[] = [
   'queue-rs-live',
+  'agent-turn-rich',
   'long-titles',
   'failure-reasons',
   'retries',

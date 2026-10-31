@@ -88,3 +88,8 @@ func readFailure(category hostv1.FailureCategory, message string) *apiv1.ReadRes
 func deadlineMessage(kind, command string, budget time.Duration) string {
 	return fmt.Sprintf("host %s %s deadline exceeded after %s", kind, command, budget)
 }
+
+// silenceMessage words a stream that sent nothing for a whole window; the total cap was not reached.
+func silenceMessage(kind, command string, window time.Duration) string {
+	return fmt.Sprintf("host %s %s deadline exceeded: silent for %s", kind, command, window)
+}

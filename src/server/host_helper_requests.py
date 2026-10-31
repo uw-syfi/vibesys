@@ -155,7 +155,7 @@ from server.relay import (
 from vs_decode.api import Unreadable, decode_json
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
+    from collections.abc import Callable, Iterable, Iterator, Mapping
     from datetime import tzinfo
     from types import ModuleType
 
@@ -232,8 +232,12 @@ class Projects(Protocol):
     ``task_invalid`` (what it found does not parse).
     """
 
-    def saved_runs(self, request: pb.ListSavedRunsRequest) -> pb.ListSavedRunsResponse:
-        """The native metadata listing, importing readable retained runs."""
+    def stream_runs(self, project: Path) -> tuple[Path, Iterator[ProjectRun]]:
+        """The project's resolved root and one lazy scan of its runs, in discovery order.
+
+        The iterator raises ``ProjectLookupError`` as these methods do. A run removed while it
+        runs is left out and a run added may be; neither fails the scan.
+        """
         ...
 
     def tasks(self, project: Path) -> TaskList:
@@ -248,14 +252,19 @@ class Projects(Protocol):
         """
         ...
 
-    def runs(self, project: Path) -> tuple[Path, tuple[ProjectRun, ...]]:
-        """The project's resolved root and its runs, oldest first."""
+    def named_runs(
+        self, project: Path, run_ids: Iterable[str]
+    ) -> tuple[Path, tuple[ProjectRun, ...]]:
+        """The project's resolved root and those of ``run_ids`` it holds, oldest first.
+
+        The cost follows ``run_ids``, not the project's size. An id it does not hold is left out.
+        """
         ...
 
     def run_digest(self, project_root: Path, run_id: str) -> RunDigest | RunDigestUnreadable | None:
         """What run ``run_id``'s journal says at a glance; ``None`` when this machine holds none.
 
-        ``project_root`` is a root ``runs`` returned. Never raises: a journal that exists and
+        ``project_root`` is a root ``named_runs`` returned. Never raises: a journal that exists and
         cannot be read is ``RunDigestUnreadable``. A run recorded in the checkout whose journal
         is not in the log store of ``project_root`` has no digest: an empty one would say the
         run recorded nothing and stopped.

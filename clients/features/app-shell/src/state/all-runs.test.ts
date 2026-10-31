@@ -70,6 +70,8 @@ const listsOf = (requests: readonly SidebarRequest[]) =>
   requests.flatMap(request =>
     request.kind === 'list-project-runs' ? [[request.host, request.project, request.token]] : [],
   );
+const cancelsOf = (requests: readonly SidebarRequest[]) =>
+  requests.flatMap(request => (request.kind === 'cancel-project-runs' ? [request.token] : []));
 const digestsOf = (requests: readonly SidebarRequest[]) =>
   requests.flatMap(request => (request.kind === 'read-digests' ? [request] : []));
 
@@ -376,6 +378,33 @@ describe('the Runs dashboard', () => {
     expect(dashboardRows(failed, CLOCK).map(each => each.row.run.runId)).toEqual(['x']);
   });
 
+  test('asking again cancels each listing still being read and no other', () => {
+    const projects = ['/p/a', '/p/b', '/p/c'];
+    const {state, requests} = open(
+      [listed('ssh:host-a')],
+      projects.map((project, index) => opened('ssh:host-a', project, `r${index}`)),
+    );
+    const [first, second, third] = listsOf(requests);
+    // One listing answered, one failed, one is still being read.
+    const mixed = apply(state, [
+      listedAction(first?.[2] as number, 'ssh:host-a', first?.[1] as string, [run('x', 1)]),
+      listedAction(second?.[2] as number, 'ssh:host-a', second?.[1] as string, null),
+    ]);
+    const away = sidebarStep(mixed, {type: 'select', screen: {kind: 'new-run'}});
+    expect(cancelsOf(away.requests)).toEqual([]);
+
+    const back = sidebarStep(away.state, {type: 'select', screen: {kind: 'runs'}});
+    expect(cancelsOf(back.requests)).toEqual([third?.[2] as number]);
+    // The cancelled token names nothing now, and the three projects are asked again under new ones.
+    expect(listsOf(back.requests)).toHaveLength(3);
+    for (const [, , token] of listsOf(back.requests)) {
+      expect(cancelsOf(back.requests)).not.toContain(token);
+    }
+    // Staying on the screen asks nothing and cancels nothing.
+    const stay = sidebarStep(back.state, {type: 'select', screen: {kind: 'runs'}});
+    expect(stay.requests).toEqual([]);
+  });
+
   test('newest first holds for any creation times, and every listed run appears once', () => {
     for (let seed = 1; seed <= 40; seed += 1) {
       const times = Array.from(
@@ -589,7 +618,13 @@ class FlakyHost {
   answer(at: number): void {
     const request = this.pending.splice(at, 1)[0];
     if (!request || request.kind === 'push-address') return;
-    if (request.kind === 'list-project-runs') {
+    if (request.kind === 'cancel-project-runs') {
+      // The host stops reading that listing, so its reply never comes.
+      const reading = this.pending.findIndex(
+        each => each.kind === 'list-project-runs' && each.token === request.token,
+      );
+      if (reading >= 0) this.pending.splice(reading, 1);
+    } else if (request.kind === 'list-project-runs') {
       const runs = this.up ? (this.hostRuns.get(request.project) ?? []) : null;
       this.#dispatch({
         type: 'project-runs-listed',

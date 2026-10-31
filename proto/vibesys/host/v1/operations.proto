@@ -1644,12 +1644,7 @@ enum SavedRunImport {
   SAVED_RUN_IMPORT_AVAILABLE = 1;
   SAVED_RUN_IMPORT_UNAVAILABLE = 2;
 }
-message ListSavedRunsRequest {
-  option (buf.validate.message).cel = {
-    id: "saved_runs.revision"
-    message: "revision is required after the first page"
-    expression: "this.offset == 0u || this.revision != ''"
-  };
+message StreamSavedRunsRequest {
   string request_id = 1 [(buf.validate.field).string = {
     min_len: 1
     max_len: 128
@@ -1658,10 +1653,10 @@ message ListSavedRunsRequest {
     min_len: 1
     max_bytes: 4096
   }];
-  uint32 offset = 3;
-  string revision = 4 [(buf.validate.field).string = {max_bytes: 64}];
 }
-message ListSavedRunsResponse {
+// One frame of one scan, in no promised order. Only the last frame says complete; a stream
+// that ends without it is a partial listing, whatever frames came first.
+message StreamSavedRunsResponse {
   string request_id = 1 [(buf.validate.field).string = {
     min_len: 1
     max_len: 128
@@ -1671,8 +1666,7 @@ message ListSavedRunsResponse {
     max_bytes: 4096
   }];
   repeated SavedRun runs = 3 [(buf.validate.field).repeated.max_items = 200];
-  string revision = 4 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
-  optional uint32 next_offset = 5;
+  bool complete = 4;
 }
 
 // Internal Pause-now escalation, never another operator control.
