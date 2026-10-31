@@ -1,0 +1,118 @@
+syntax = "proto3";
+package vibesys.desktop.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/api/v1/subscribe.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1";
+
+// A window asks Electron's main process to watch one topic of one host. Main
+// keeps the stream, the clock and the retries, and sends back updates for this
+// window to fold. The generic gateway port refuses Subscribe, so this is the only way in.
+message DesktopSubscribeRequest {
+  string host = 1 [(buf.validate.field).string.pattern = "^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$"];
+  vibesys.api.v1.SubscribeRequest request = 2 [(buf.validate.field).required = true];
+  // When set, only this key's entries and removals are sent.
+  optional string key = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+}
+
+// How far a stream has come toward its first frame.
+enum DesktopConnectStep {
+  DESKTOP_CONNECT_STEP_UNSPECIFIED = 0;
+  DESKTOP_CONNECT_STEP_GATEWAY = 1;
+  DESKTOP_CONNECT_STEP_HANDSHAKE = 2;
+  DESKTOP_CONNECT_STEP_STREAM = 3;
+}
+
+// Why a subscription has no live stream. One closed set serves a stale value and a
+// failure, and the text of an error never decides anything.
+enum DesktopSubscriptionReason {
+  DESKTOP_SUBSCRIPTION_REASON_UNSPECIFIED = 0;
+  // The stream could not be opened.
+  DESKTOP_SUBSCRIPTION_REASON_UNREACHABLE = 1;
+  // The stream ended or failed in transport.
+  DESKTOP_SUBSCRIPTION_REASON_ENDED = 2;
+  // No frame arrived within the lease.
+  DESKTOP_SUBSCRIPTION_REASON_SILENT = 3;
+  // Heartbeats arrived and no value did, for longer than the topic allows.
+  DESKTOP_SUBSCRIPTION_REASON_OUTDATED = 4;
+  // The stream opened and no snapshot arrived in time.
+  DESKTOP_SUBSCRIPTION_REASON_NO_FIRST_FRAME = 5;
+  // The topic reported TOPIC_FAILURE_CODE_SOURCE_FAILED.
+  DESKTOP_SUBSCRIPTION_REASON_SOURCE_FAILED = 6;
+  // The topic reported TOPIC_FAILURE_CODE_RESOURCE_EXHAUSTED.
+  DESKTOP_SUBSCRIPTION_REASON_RESOURCE_EXHAUSTED = 7;
+  // The topic reported TOPIC_FAILURE_CODE_INTERNAL.
+  DESKTOP_SUBSCRIPTION_REASON_INTERNAL = 8;
+  // The host cannot produce the topic. No retry follows.
+  DESKTOP_SUBSCRIPTION_REASON_UNSUPPORTED = 9;
+  // A frame broke the protocol. No retry follows.
+  DESKTOP_SUBSCRIPTION_REASON_INVALID_FRAME = 10;
+  // The subscription was closed from this side. No retry follows.
+  DESKTOP_SUBSCRIPTION_REASON_CLOSED = 11;
+}
+
+message DesktopSubscriptionConnecting {
+  DesktopConnectStep step = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  uint32 attempt = 2;
+}
+
+message DesktopSubscriptionLive {
+  // When main saw the snapshot complete; display only.
+  google.protobuf.Timestamp since = 1 [(buf.validate.field).required = true];
+}
+
+message DesktopSubscriptionStale {
+  DesktopSubscriptionReason reason = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  uint32 attempt = 2;
+}
+
+message DesktopSubscriptionFailed {
+  DesktopSubscriptionReason reason = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Whether main keeps trying.
+  bool retrying = 2;
+}
+
+// Main's control state for one subscription, sent whenever it changes.
+message DesktopSubscriptionControl {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+    DesktopSubscriptionConnecting connecting = 1;
+    DesktopSubscriptionLive live = 2;
+    DesktopSubscriptionStale stale = 3;
+    DesktopSubscriptionFailed failed = 4;
+  }
+}
+
+// A new stream's entries follow. The window starts a fresh snapshot and keeps the
+// last complete one on screen until the stream's synced replaces it.
+message DesktopSubscriptionBegin {}
+
+// What a window folds. Entries and removals until synced are one snapshot; later
+// ones change it. Heartbeats and failed frames stay in main: they become control.
+message DesktopSubscriptionUpdate {
+  oneof update {
+    option (buf.validate.oneof).required = true;
+    DesktopSubscriptionControl control = 1;
+    DesktopSubscriptionBegin begin = 2;
+    vibesys.api.v1.TopicEntry entry = 3;
+    string removed = 4 [(buf.validate.field).string = {
+      min_len: 1
+      max_bytes: 128
+    }];
+    vibesys.api.v1.Synced synced = 5;
+  }
+}
