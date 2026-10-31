@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from tests.e2e.dynamic_loop_harness import _AGENT_CONFIG, LoopInput, run_request
-from tests.e2e.test_scripted_run_e2e import VALUE_WORKLOAD, _NoAgents
+from tests.e2e.scripted_value_run import VALUE_WORKLOAD, NoAgents
 
 from launch.scripted_agents import ScriptedDynamicAgents
 from vibesys.api import vetted_models
@@ -66,7 +66,7 @@ def test_each_role_starts_its_agent_on_the_provider_and_model_its_own_entry_chos
 
     run = run_request(
         request,
-        _NoAgents(),
+        NoAgents(),
         client_factory=_scripted_client,
         slurm_processes=loop_input.connector,
         state_stores=loop_input.state_stores,
