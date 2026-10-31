@@ -30,6 +30,8 @@ export interface TopicPolicy {
   readonly minIntervalMs: number;
   readonly maxKeys: number;
   readonly maxValueBytes: number;
+  /** What the gateway holds a source to; no client waits on it. */
+  readonly sourceLeaseMs: number;
 }
 
 /** The `SubscribeRequest.topic` case of each topic, which is also its `TopicEntry.value` case. */

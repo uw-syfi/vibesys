@@ -36,6 +36,13 @@ message TopicPolicy {
   uint32 min_interval_ms = 5;
   // A breach ends the stream with RESOURCE_EXHAUSTED.
   uint32 max_value_bytes = 6 [(buf.validate.field).uint32.gt = 0];
+  // The longest the gateway lets a source go without a sign of life: a value, a removal, the
+  // snapshot marker, or its own word that it is running. A source that is stuck (in a read that
+  // never returns) leaves the heartbeats going, because they prove the stream and not the source,
+  // so a topic with no value bound would show its last state as current for as long as it lasted.
+  // At the bound the stream ends with SOURCE_FAILED. Zero means no bound: a sampled topic is held
+  // by stale_after_ms alone.
+  uint32 source_lease_ms = 7;
 }
 
 // How often the gateway speaks and how long a client waits for it, whatever the
@@ -237,6 +244,7 @@ message RunsTopic {
     max_keys: 16384
     min_interval_ms: 200
     max_value_bytes: 262144
+    source_lease_ms: 30000
   };
 }
 

@@ -221,6 +221,13 @@ type TopicPolicy struct {
 	MinIntervalMs uint32 `protobuf:"varint,5,opt,name=min_interval_ms,json=minIntervalMs,proto3" json:"min_interval_ms,omitempty"`
 	// A breach ends the stream with RESOURCE_EXHAUSTED.
 	MaxValueBytes uint32 `protobuf:"varint,6,opt,name=max_value_bytes,json=maxValueBytes,proto3" json:"max_value_bytes,omitempty"`
+	// The longest the gateway lets a source go without a sign of life: a value, a removal, the
+	// snapshot marker, or its own word that it is running. A source that is stuck (in a read that
+	// never returns) leaves the heartbeats going, because they prove the stream and not the source,
+	// so a topic with no value bound would show its last state as current for as long as it lasted.
+	// At the bound the stream ends with SOURCE_FAILED. Zero means no bound: a sampled topic is held
+	// by stale_after_ms alone.
+	SourceLeaseMs uint32 `protobuf:"varint,7,opt,name=source_lease_ms,json=sourceLeaseMs,proto3" json:"source_lease_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -293,6 +300,13 @@ func (x *TopicPolicy) GetMinIntervalMs() uint32 {
 func (x *TopicPolicy) GetMaxValueBytes() uint32 {
 	if x != nil {
 		return x.MaxValueBytes
+	}
+	return 0
+}
+
+func (x *TopicPolicy) GetSourceLeaseMs() uint32 {
+	if x != nil {
+		return x.SourceLeaseMs
 	}
 	return 0
 }
@@ -1426,7 +1440,7 @@ var File_vibesys_api_v1_subscribe_proto protoreflect.FileDescriptor
 
 const file_vibesys_api_v1_subscribe_proto_rawDesc = "" +
 	"\n" +
-	"\x1evibesys/api/v1/subscribe.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1fvibesys/store/v1/skeleton.proto\"\xfe\x01\n" +
+	"\x1evibesys/api/v1/subscribe.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1fvibesys/store/v1/skeleton.proto\"\xa6\x02\n" +
 	"\vTopicPolicy\x12\x1d\n" +
 	"\n" +
 	"cadence_ms\x18\x01 \x01(\rR\tcadenceMs\x12$\n" +
@@ -1434,7 +1448,8 @@ const file_vibesys_api_v1_subscribe_proto_rawDesc = "" +
 	"\x0efirst_frame_ms\x18\x03 \x01(\rB\a\xbaH\x04*\x02 \x00R\ffirstFrameMs\x12\"\n" +
 	"\bmax_keys\x18\x04 \x01(\rB\a\xbaH\x04*\x02 \x00R\amaxKeys\x12&\n" +
 	"\x0fmin_interval_ms\x18\x05 \x01(\rR\rminIntervalMs\x12/\n" +
-	"\x0fmax_value_bytes\x18\x06 \x01(\rB\a\xbaH\x04*\x02 \x00R\rmaxValueBytes\"a\n" +
+	"\x0fmax_value_bytes\x18\x06 \x01(\rB\a\xbaH\x04*\x02 \x00R\rmaxValueBytes\x12&\n" +
+	"\x0fsource_lease_ms\x18\a \x01(\rR\rsourceLeaseMs\"a\n" +
 	"\x0fSubscribeTiming\x12*\n" +
 	"\fheartbeat_ms\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\vheartbeatMs\x12\"\n" +
 	"\blease_ms\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\aleaseMs\"\xaa\x01\n" +
@@ -1496,8 +1511,8 @@ const file_vibesys_api_v1_subscribe_proto_rawDesc = "" +
 	"\x1bgpu_stats.used_within_total\x124memory_used_bytes must not exceed memory_total_bytes\x1a1this.memory_used_bytes <= this.memory_total_bytes\"L\n" +
 	"\aAbsence\x12A\n" +
 	"\x06reason\x18\x01 \x01(\x0e2\x1d.vibesys.api.v1.AbsenceReasonB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06reason\" \n" +
-	"\tRunsTopic:\x13\xe2\xf3\x18\x0f\x18\xb0\xea\x01 \x80\x80\x01(\xc8\x010\x80\x80\x10\"\xba\x02\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06reason\"$\n" +
+	"\tRunsTopic:\x17\xe2\xf3\x18\x13\x18\xb0\xea\x01 \x80\x80\x01(\xc8\x010\x80\x80\x108\xb0\xea\x01\"\xba\x02\n" +
 	"\bRunEntry\x12-\n" +
 	"\x04head\x18\x01 \x01(\v2\x19.vibesys.store.v1.RunHeadR\x04head\x12A\n" +
 	"\bliveness\x18\x02 \x01(\x0e2\x1b.vibesys.api.v1.RunLivenessB\b\xbaH\x05\x82\x01\x02\x10\x01R\bliveness\x125\n" +
