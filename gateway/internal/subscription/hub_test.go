@@ -18,6 +18,7 @@ import (
 	"github.com/uw-syfi/vibesys/gateway/internal/hostoperations"
 	"github.com/uw-syfi/vibesys/gateway/internal/subscription"
 	"github.com/uw-syfi/vibesys/gateway/internal/subscription/subscriptiontest"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -243,6 +244,36 @@ func TestAValueThatCannotBeMarshalledIsATypedFailureAndNeverRetained(t *testing.
 	}
 }
 
+// A source picks its own failure code, and the frame must still validate: a code
+// the schema does not define would reach the client as a transport error.
+func TestAnyFailureCodeBecomesAValidFrame(t *testing.T) {
+	property := func(code int32) bool {
+		var valid atomic.Bool
+		synctest.Test(t, func(t *testing.T) {
+			failed := fail(t, script(func(context.Context, subscription.Sink[stats]) error {
+				return &subscription.Failure{Code: apiv1.TopicFailureCode(code), Detail: "x"}
+			}))
+			_, defined := apiv1.TopicFailureCode_name[code]
+			chosen := defined && code != 0
+			valid.Store(failed != nil && (!chosen || failed.GetCode() == apiv1.TopicFailureCode(code)))
+		})
+		return valid.Load()
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []int32{0, 99, -1} {
+		synctest.Test(t, func(t *testing.T) {
+			failed := fail(t, script(func(context.Context, subscription.Sink[stats]) error {
+				return &subscription.Failure{Code: apiv1.TopicFailureCode(code), Detail: "x"}
+			}))
+			if failed.GetCode() != apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_INTERNAL {
+				t.Fatalf("code %d gave %v", code, failed)
+			}
+		})
+	}
+}
+
 func TestARequestWithoutAProducerIsRefusedAsUnsupported(t *testing.T) {
 	for name, each := range map[string]*apiv1.SubscribeRequest{"no topic": {}, "no producer": request} {
 		t.Run(name, func(t *testing.T) {
@@ -257,6 +288,48 @@ func TestARequestWithoutAProducerIsRefusedAsUnsupported(t *testing.T) {
 			})
 		})
 	}
+}
+
+// withUnknown is the request with an unknown field, on the request itself or
+// inside its topic message, as a client built from another schema would send.
+func withUnknown(number protowire.Number, inTopic bool) *apiv1.SubscribeRequest {
+	cloned := proto.Clone(request).(*apiv1.SubscribeRequest)
+	raw := protowire.AppendVarint(protowire.AppendTag(nil, number, protowire.VarintType), 1)
+	if inTopic {
+		cloned.GetMachineStats().ProtoReflect().SetUnknown(raw)
+	} else {
+		cloned.ProtoReflect().SetUnknown(raw)
+	}
+	return cloned
+}
+
+// An unknown routing key is refused, not folded into the request's identity: a
+// key built from the marshalled request would give each variant its own producer.
+func TestARequestWithAnUnknownFieldIsRefusedAndStartsNoProducer(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		source := subscriptiontest.Count(script(func(ctx context.Context, sink subscription.Sink[stats]) error {
+			sink.Put("machine", value(1))
+			sink.Synced()
+			return wait(ctx)
+		}))
+		hub := subscription.New(clock.System{}, topic(source))
+		var streams []*subscriptiontest.Stream
+		for index, inTopic := range []bool{false, true, false, true, false} {
+			streams = append(streams, subscriptiontest.Open(hub, uint64(index), withUnknown(protowire.Number(1000+index), inTopic)))
+		}
+		synctest.Wait()
+		for _, stream := range streams {
+			frames := stream.Frames()
+			if len(frames) != 1 || frames[0].GetFailed().GetCode() != apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_UNSUPPORTED ||
+				!strings.Contains(frames[0].GetFailed().GetDetail(), "unknown field") {
+				t.Fatalf("frames %v", frames)
+			}
+			stream.Stop()
+		}
+		if starts := source.Starts.Load(); starts != 0 {
+			t.Fatalf("%d producers started for requests no client of this schema sends", starts)
+		}
+	})
 }
 
 func TestTheConnectionCapRefusesOnlyThatConnection(t *testing.T) {

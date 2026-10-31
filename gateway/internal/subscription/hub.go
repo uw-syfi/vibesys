@@ -10,7 +10,9 @@ import (
 	"buf.build/go/protovalidate"
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/clock"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // Hub is the thin shell around state: it runs producers and senders, and every
@@ -63,6 +65,11 @@ func (h *Hub) Serve(ctx context.Context, connection uint64, request *apiv1.Subsc
 		return send(&apiv1.SubscribeResponse{Frame: &apiv1.SubscribeResponse_Failed{Failed: failureOf(err)}})
 	}
 	// Equal requests share an instance, including when a topic gains parameters.
+	// A field this schema does not know is no routing key, and would split an
+	// instance, so a request that carries one is refused.
+	if unknown := unknownField(request.ProtoReflect()); unknown != "" {
+		return send(&apiv1.SubscribeResponse{Frame: &apiv1.SubscribeResponse_Failed{Failed: failureOf(Unsupported("request has an unknown field " + unknown))}})
+	}
 	encoded, err := proto.MarshalOptions{Deterministic: true}.Marshal(request)
 	if err != nil {
 		return err
@@ -122,6 +129,36 @@ func (h *Hub) flush(id subscriberID, send func(*apiv1.SubscribeResponse) error) 
 		}
 	}
 	return false, nil
+}
+
+// unknownField names the first field a message, or a message inside it, holds
+// that its schema does not define, or returns "" if there is none.
+func unknownField(message protoreflect.Message) string {
+	if raw := message.GetUnknown(); len(raw) > 0 {
+		number, _, _ := protowire.ConsumeTag(raw)
+		return fmt.Sprintf("%d of %s", number, message.Descriptor().FullName())
+	}
+	var found string
+	within := func(inner protoreflect.Message) bool {
+		found = unknownField(inner)
+		return found == ""
+	}
+	message.Range(func(field protoreflect.FieldDescriptor, value protoreflect.Value) bool {
+		switch {
+		case field.IsList() && field.Message() != nil:
+			for index := range value.List().Len() {
+				if !within(value.List().Get(index).Message()) {
+					return false
+				}
+			}
+		case field.IsMap() && field.MapValue().Message() != nil:
+			value.Map().Range(func(_ protoreflect.MapKey, entry protoreflect.Value) bool { return within(entry.Message()) })
+		case !field.IsMap() && field.Message() != nil:
+			within(value.Message())
+		}
+		return found == ""
+	})
+	return found
 }
 
 func (h *Hub) topicOf(request *apiv1.SubscribeRequest) (registered, error) {
