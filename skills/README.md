@@ -11,7 +11,8 @@ claude plugin marketplace add uw-syfi/vibesys
 claude plugin install vibesys@vibesys
 ```
 
-The plugin needs only Claude Code. It does not need the VibeSys Python package.
+The optimize loop needs Claude Code with background Bash/Agent execution and session scheduling,
+and Python 3.10 or newer for its standard-library measurement and hook scripts. It does not need the VibeSys Python package.
 
 ## Layout
 
@@ -19,8 +20,11 @@ The plugin needs only Claude Code. It does not need the VibeSys Python package.
   Neuron. Both the plugin and VibeSys runs use them: a run reads only this tree, and the
   sidecar in it decides which skills a run installs for its backend and domain
   ([skill metadata](../docs/contributing/skill-metadata.md)).
+- `hooks/`: the automatically loaded Stop hook and its tests. The hook finds run state
+  from `CLAUDE_PROJECT_DIR` or ancestors of the event directory, including run worktrees.
 - `search/`: the optimization loop for the plugin alone. VibeSys runs never install it,
-  because they read only `domains/`. The tree appears with the loop skills.
+  because they read only `domains/`. Invoke `/vibesys:optimize <task> --time 90m` to run a portfolio of hypotheses,
+  measure exact commits, judge gains and leave a report.
 
 Assets that only the VibeSys app uses (evaluators, profilers, the chat agent's skills) stay in
 `resources/`. The reference engine repositories the serving skill cites are submodules in

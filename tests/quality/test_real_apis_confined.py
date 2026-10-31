@@ -99,7 +99,7 @@ pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
 REPO = Path(__file__).resolve().parents[2]
 BASELINE = Path(__file__).with_name("real_api_baseline.jsonl")
-TEST_ROOTS = ("tests", "libs/*/tests", "sdk/*/tests")
+TEST_ROOTS = ("tests", "libs/*/tests", "sdk/*/tests", "skills/search/*/tests", "skills/hooks/tests")
 PRODUCT_ROOTS = ("src", "libs/*/src")
 # The owner of the real adapters; its own tests exercise them directly.
 EXEMPT_PREFIXES = ("libs/vs-sim/",)
