@@ -145,6 +145,9 @@ importers:
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../../libs/machine
+      '@vibesys/problems':
+        specifier: workspace:*
+        version: link:../../libs/problems
       '@vibesys/request-identity':
         specifier: workspace:*
         version: link:../../libs/request-identity
@@ -365,6 +368,9 @@ importers:
       '@vibesys/ipc':
         specifier: workspace:*
         version: link:../../libs/ipc
+      '@vibesys/problems':
+        specifier: workspace:*
+        version: link:../../libs/problems
       '@vibesys/settings':
         specifier: workspace:*
         version: link:../../libs/settings
@@ -616,6 +622,9 @@ importers:
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../../libs/machine
+      '@vibesys/problems':
+        specifier: workspace:*
+        version: link:../../libs/problems
       '@vibesys/request-identity':
         specifier: workspace:*
         version: link:../../libs/request-identity
@@ -772,6 +781,9 @@ importers:
       '@vibesys/ipc':
         specifier: workspace:*
         version: link:../../libs/ipc
+      '@vibesys/problems':
+        specifier: workspace:*
+        version: link:../../libs/problems
       '@vibesys/settings':
         specifier: workspace:*
         version: link:../../libs/settings
@@ -1010,6 +1022,22 @@ importers:
       '@types/bun':
         specifier: 1.4.2
         version: 1.4.2
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  libs/problems:
+    dependencies:
+      '@vibesys/store':
+        specifier: workspace:*
+        version: link:../store
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -1274,6 +1302,9 @@ importers:
       '@types/react-dom':
         specifier: 19.1.9
         version: 19.1.9(@types/react@19.1.13)
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       happy-dom:
         specifier: 20.14.5
         version: 20.14.5

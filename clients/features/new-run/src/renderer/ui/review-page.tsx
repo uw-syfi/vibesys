@@ -185,7 +185,7 @@ export function ProblemBanner(props: {
   const words = problemWords(context.problem, machineLabel(context.form.machine));
   return (
     <Banner
-      tone="err"
+      tone="failed"
       title={words.title}
       body={words.body}
       {...(words.detail === null ? {} : {hint: words.detail})}

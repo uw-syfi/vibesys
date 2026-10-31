@@ -31,6 +31,9 @@ import {
   TextInput,
   type TextStyle,
   type TextTone,
+  Toast,
+  type ToastItem,
+  ToastStack,
   Wordmark,
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
@@ -192,6 +195,78 @@ function SliderDemo(): JSX.Element {
 }
 
 /** The layout, text and form components (batch 1 of the design system). */
+const noop = (): void => undefined;
+
+const SAMPLE_TOASTS: readonly ToastItem[] = [
+  {
+    id: 'read',
+    tone: 'warn',
+    title: 'The machines could not be read',
+    detail: 'Connection refused.',
+    open: false,
+  },
+  {
+    id: 'save',
+    tone: 'err',
+    title: 'Could not save the change',
+    detail: 'The settings file is read-only.',
+    open: false,
+  },
+];
+
+function ToastDemo(): JSX.Element {
+  const [open, setOpen] = useState(true);
+  return (
+    <Stack>
+      <Toast
+        tone="err"
+        title="Could not save the change"
+        detail="The settings file is read-only."
+        open={open}
+        toggle={setOpen}
+        dismiss={noop}
+      />
+      <Toast
+        tone="warn"
+        title="The machines could not be read"
+        detail="Connection refused."
+        open={false}
+        toggle={noop}
+        dismiss={noop}
+      />
+      <Toast
+        tone="err"
+        title="The command was not taken"
+        open={false}
+        toggle={noop}
+        dismiss={noop}
+      />
+    </Stack>
+  );
+}
+
+/** The stack sits over the window at its top right, so it is shown on request, not over the page. */
+function ToastStackDemo(): JSX.Element {
+  const [toasts, setToasts] = useState<readonly ToastItem[]>([]);
+  return (
+    <Stack>
+      <Button
+        text="Show notifications"
+        press={() => setToasts(SAMPLE_TOASTS)}
+        {...(toasts.length > 0 ? {disabledReason: 'Shown at the top right of the window'} : {})}
+      />
+      <ToastStack
+        label="Notifications"
+        toasts={toasts}
+        toggle={(id, open) =>
+          setToasts(list => list.map(toast => (toast.id === id ? {...toast, open} : toast)))
+        }
+        dismiss={id => setToasts(list => list.filter(toast => toast.id !== id))}
+      />
+    </Stack>
+  );
+}
+
 export const BASIC_ENTRIES = {
   Page: {
     render: () => (
@@ -504,7 +579,7 @@ export const BASIC_ENTRIES = {
           actions={<Button text="Copy it out" press={() => undefined} />}
         />
         <Banner
-          tone="err"
+          tone="failed"
           title="It stopped with an error."
           body="The log has the details."
           actions={
@@ -517,4 +592,6 @@ export const BASIC_ENTRIES = {
       </Stack>
     ),
   },
+  Toast: {render: () => <ToastDemo />},
+  ToastStack: {render: () => <ToastStackDemo />},
 } satisfies Partial<Record<ComponentName, GalleryEntry>>;

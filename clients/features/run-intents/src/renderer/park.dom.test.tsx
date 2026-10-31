@@ -114,6 +114,7 @@ test('Pause is enabled on the new path and sends the typed host intent', async (
       ),
     );
     expect(container.textContent).toContain('Pause · Pending');
+    expect(container.textContent).not.toContain('Request history');
   } finally {
     await act(async () => root.unmount());
     container.remove();
@@ -164,7 +165,25 @@ test('live, draining, parked, resumed and finished observations keep the right c
         }),
       ]),
     );
-    expect(container.textContent).toContain('Pause · Applied');
+    expect(container.textContent).not.toContain('Pause · Applied');
+    await act(async () =>
+      feed.publish([
+        create(RecordSchema, {
+          seq: 2n,
+          epoch: 1,
+          body: {
+            case: 'intent',
+            value: {
+              controlId: 'remote-guidance',
+              action: IntentAction.STEER,
+              step: IntentStep.REFUSED,
+              reason: 'Run ended',
+            },
+          },
+        }),
+      ]),
+    );
+    expect(container.textContent).toContain('Guidance · Refused');
     await render(1n, create(LifecycleSchema, {state: {case: 'draining', value: {}}}));
     expect(labels()).toContain('Pause now');
     expect(labels()).not.toContain('Pause');
@@ -188,8 +207,8 @@ test('live, draining, parked, resumed and finished observations keep the right c
       ),
     );
     await render(2n, create(LifecycleSchema, {state: {case: 'running', value: {}}}));
-    expect(container.textContent).toContain('Resume · Applied');
-    expect(container.textContent).toContain('Request history');
+    expect(container.textContent).toContain('Guidance · Refused · Earlier epoch');
+    expect(container.textContent).not.toContain('Request history');
     expect(labels()).toContain('Pause now');
     await render(2n, create(LifecycleSchema, {state: {case: 'ended', value: {resumable: false}}}));
     expect(labels()).not.toContain('Pause');
