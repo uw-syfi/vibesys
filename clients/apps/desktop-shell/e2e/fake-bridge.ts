@@ -81,7 +81,7 @@ export type MachineSettingsMethods =
 export type WindowsMethods = 'openRunWindow' | 'showMainWindow' | 'openSettings' | 'openExternal';
 
 /** What the desktop app's window chrome reports (`chromeInset`) on each platform, and in full screen. */
-export const MAC_CHROME: ChromeInset = {startWidth: 80, startHeight: 40, endHeight: 0};
+export const MAC_CHROME: ChromeInset = {startWidth: 84, startHeight: 40, endHeight: 0};
 export const WINDOWS_CHROME: ChromeInset = {startWidth: 0, startHeight: 0, endHeight: 40};
 export const FULL_SCREEN_CHROME: ChromeInset = {startWidth: 0, startHeight: 0, endHeight: 0};
 

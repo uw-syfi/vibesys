@@ -2,8 +2,9 @@ import {describe, expect, test} from 'bun:test';
 import fc from 'fast-check';
 import {chromeInset, OVERLAY_HEIGHT, windowChrome} from './window-chrome.js';
 
-const LIGHT = 12;
-const LIGHTS_WIDTH = 3 * LIGHT + 2 * 8;
+/** The largest the system draws the lights: three 14px discs 23px apart. */
+const LIGHT = 14;
+const LIGHTS_WIDTH = 60;
 
 const named = fc.constantFrom('darwin', 'win32', 'linux', 'freebsd');
 /** Any `process.platform` value: a known one, or whatever a future Electron reports. */
@@ -40,11 +41,11 @@ describe('windowChrome', () => {
 });
 
 describe('chromeInset', () => {
-  test('on macOS the lights sit inside the reserved corner, with the same margin on both sides and centered in its height', () => {
+  test('on macOS the lights, at their largest, sit inside the reserved corner with at least the left margin after them, and centered in its height', () => {
     const inset = chromeInset('darwin');
     const lights = windowChrome('darwin').trafficLightPosition ?? {x: Number.NaN, y: Number.NaN};
     expect(lights.x).toBeGreaterThan(0);
-    expect(inset.startWidth - (lights.x + LIGHTS_WIDTH)).toBe(lights.x);
+    expect(inset.startWidth - (lights.x + LIGHTS_WIDTH)).toBeGreaterThanOrEqual(lights.x);
     expect(lights.y).toBeGreaterThan(0);
     expect(inset.startHeight - (lights.y + LIGHT)).toBe(lights.y);
     expect(inset.endHeight).toBe(0);

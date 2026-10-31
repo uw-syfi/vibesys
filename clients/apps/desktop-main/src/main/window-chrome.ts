@@ -17,15 +17,16 @@ const PAGE_FOREGROUND = THEMES[DEFAULT_THEMES.dark].colors.text;
 export const OVERLAY_HEIGHT = 40;
 
 /**
- * macOS traffic lights are three 12px discs 8px apart. The rail holds them in a row at its top,
- * `LIGHTS_ROW` high, with the same margin before the first light and after the last, and the lights
- * centered vertically in the row.
+ * The rail holds the macOS traffic lights in a row at its top, `LIGHTS_ROW` high, the lights
+ * centered vertically in it, with `TRAFFIC_LIGHT_MARGIN` before the first light and at least as
+ * much after the last. The system draws the lights at its own size and offers no way to read it:
+ * the largest is three 14px discs 23px apart, and earlier systems draw 12px discs 20px apart,
+ * which leave a little more room after the last light.
  */
-const TRAFFIC_LIGHT_SIZE = 12;
-const TRAFFIC_LIGHT_GAP = 8;
-const TRAFFIC_LIGHT_MARGIN = 14;
+const TRAFFIC_LIGHT_SIZE = 14;
+const TRAFFIC_LIGHTS_WIDTH = 60;
+const TRAFFIC_LIGHT_MARGIN = 12;
 const LIGHTS_ROW = 40;
-const LIGHTS_WIDTH = 3 * TRAFFIC_LIGHT_SIZE + 2 * TRAFFIC_LIGHT_GAP;
 
 export interface WindowChrome {
   readonly backgroundColor: string;
@@ -49,7 +50,7 @@ export function chromeInset(platform: string, fullScreen = false): ChromeInset {
   if (fullScreen) return NO_INSET;
   if (platform === 'darwin') {
     return {
-      startWidth: 2 * TRAFFIC_LIGHT_MARGIN + LIGHTS_WIDTH,
+      startWidth: 2 * TRAFFIC_LIGHT_MARGIN + TRAFFIC_LIGHTS_WIDTH,
       startHeight: LIGHTS_ROW,
       endHeight: 0,
     };
