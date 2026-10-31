@@ -71,6 +71,8 @@ export type FormTest =
 export interface FormProblem {
   readonly field: FormField | null;
   readonly text: string;
+  /** The status word of a failure of the form as a whole (`field` null); its `text` is the detail. */
+  readonly word?: string;
 }
 
 export interface ClusterForm {
@@ -245,8 +247,11 @@ const KEYS: readonly (readonly [RegExp, FormField])[] = [
   [/already set up/, 'name'],
 ];
 
-/** `error` as a problem, under the field it names when it names one. */
-export function problemOf(error: string): FormProblem {
+/**
+ * `error` as a problem, under the field it names when it names one; otherwise it is the form's,
+ * with `word` as its status.
+ */
+export function problemOf(error: string, word: string): FormProblem {
   const field = KEYS.find(([pattern]) => pattern.test(error))?.[1] ?? null;
-  return {field, text: error};
+  return field === null ? {field, text: error, word} : {field, text: error};
 }

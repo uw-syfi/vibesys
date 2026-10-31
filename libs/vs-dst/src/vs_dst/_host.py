@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from vs_core.api import ContractError, FlowCodeChanged, RunStatus
+from vs_core.api.recovery import RunRest, at_rest
 from vs_dst._effects import Effects, RecoverableExecutors
 from vs_dst._interruptions import Moment
+from vs_dst._snapshots import RecordingStore
 from vs_dst._world import HostedWorld
 from vs_runtime.api.core import (
     DispatchCapExceededError,
@@ -17,7 +19,7 @@ from vs_runtime.api.core import (
     start_core,
 )
 from vs_runtime.api.infrastructure import RunStopped
-from vs_runtime.api.testing import Run, scripted_host
+from vs_runtime.api.testing import LEASE, Run, scripted_host
 from vs_sim.api.testing import run_virtual
 
 if TYPE_CHECKING:
@@ -25,9 +27,9 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import CoreState, OperationRegistry, Request, SchemaRef
+    from vs_core.api import CoreEvent, CoreState, Decision, OperationRegistry, Request, SchemaRef
     from vs_core.api.testing import Journal
-    from vs_dst._snapshots import OutsideWorld, Watcher
+    from vs_dst._snapshots import OutsideWorld, Store, Watcher
     from vs_dst._world import Enact, World
     from vs_runtime.api.core import CoreRuntime, ExecutionResult
     from vs_runtime.api.testing import HostOptions, Script, ScriptedHost, TranslatorFactory
@@ -45,6 +47,60 @@ cannot be restored from its journal, the runtime refusing to commit. Anything el
 in the test, and propagates."""
 
 
+def has_ended(core: CoreState) -> bool:
+    """Whether the run is over: terminal on the shell, or its end recorded in the log."""
+    return core.run.status == RunStatus.TERMINAL or at_rest(core) is RunRest.ENDED
+
+
+class Hosting(Protocol):
+    """How a run is hosted: what its durable side is, and how a host runs over it."""
+
+    def new_store(self) -> Store:
+        """The durable side of a new run."""
+        ...
+
+    def run(
+        self,
+        outside: OutsideWorld,
+        options: HostOptions,
+        clock_at: float,
+        watcher: Watcher | None = None,
+        patience: float | None = None,
+    ) -> Hosted:
+        """A new host over ``outside``, run to the end of its run, its failure, or ``patience``."""
+        ...
+
+    def restart_at(self, first_clock_at: float, store: Store) -> float:
+        """When the host that takes over a dead one starts, on the first host's timeline."""
+        ...
+
+
+@dataclass(frozen=True)
+class HostPlan:
+    """How hosts of one run are made: on which hosting, and arranged as the options say."""
+
+    hosting: Hosting
+    options: HostOptions
+
+    def run(
+        self,
+        outside: OutsideWorld,
+        clock_at: float,
+        watcher: Watcher | None = None,
+        patience: float | None = None,
+    ) -> Hosted:
+        """A new host over ``outside``, run to the end of its run, its failure, or ``patience``."""
+        return self.hosting.run(outside, self.options, clock_at, watcher, patience)
+
+    def resuming(self, *, resumed: bool) -> HostPlan:
+        """The plan for hosts the operator starts to resume the run (or, with none, to start it)."""
+        return replace(self, options=replace(self.options, resumed=resumed))
+
+    def restart_at(self, first_clock_at: float, store: Store) -> float:
+        """When the host that takes over a dead one starts."""
+        return self.hosting.restart_at(first_clock_at, store)
+
+
 @dataclass(frozen=True)
 class Hosted:
     """How one host ended, and when (on its own virtual clock)."""
@@ -57,7 +113,7 @@ class Hosted:
     @property
     def finished(self) -> bool:
         """Whether the host ended the run itself: it returned with the run terminal."""
-        return isinstance(self.ended, Run) and self.ended.core.run.status == RunStatus.TERMINAL
+        return isinstance(self.ended, Run) and has_ended(self.ended.core)
 
     @property
     def how(self) -> str:
@@ -75,7 +131,7 @@ class Hosted:
         return self.ended
 
 
-def run_host(
+def _run_shell_host(
     outside: OutsideWorld,
     options: HostOptions,
     clock_at: float,
@@ -89,11 +145,15 @@ def run_host(
     host is given up on that many virtual seconds after it starts, leaving its run open as a
     host that is stopped does.
     """
+    store = outside.store
+    if not isinstance(store, RecordingStore):
+        raise WrongStoreError(store)
     world = outside.world
     setup = world.setup
     enactment = _Enactment(world)
+    resumed = options.resumed and setup.upgrade is not None
     host = scripted_host(
-        setup.new_launch(),
+        setup.upgrade() if resumed and setup.upgrade is not None else setup.new_launch(),
         world,
         setup.harness,
         setup.schemas,
@@ -102,12 +162,12 @@ def run_host(
             translator=_translator(outside.effects, enactment, watcher),
             attach=enactment.attach,
         ),
-        store=outside.store,
+        store=store,
         delivery=outside.delivery,
         clock_at=clock_at,
     )
     if watcher is not None:
-        watcher.watch(outside.store, host)
+        watcher.watch(store, _ShellHost(host))
     ended: Run | Exception
     try:
         ended = host.run() if patience is None else _run_within(host, patience)
@@ -116,6 +176,58 @@ def run_host(
     now = host.clock.now()
     host.shell.release_lease(now_at=now)
     return Hosted(now, ended, _committed(host))
+
+
+class WrongStoreError(TypeError):
+    """A host was given the durable side of another kind of host."""
+
+    def __init__(self, store: object) -> None:
+        """Name the store that does not fit."""
+        super().__init__(f"this host cannot run over a {type(store).__name__}")
+
+
+class _ShellHost:
+    """What an interruption needs of a ``CoreRuntime`` host: its clock, decisions and an input."""
+
+    def __init__(self, host: ScriptedHost) -> None:
+        self._host = host
+
+    @property
+    def clock(self) -> VirtualClock:
+        return self._host.clock
+
+    @property
+    def decisions(self) -> list[Decision]:
+        return self._host.decisions
+
+    def submit(self, event: CoreEvent) -> None:
+        now = self._host.clock.now()
+        self._host.shell.submit(event, now_at=now)
+
+
+class ShellHosting:
+    """Hosts on ``CoreRuntime``, the shell production runs: a lease, a fence, a CAS store."""
+
+    def new_store(self) -> Store:
+        """An in-memory state store that tells its watcher about each commit."""
+        return RecordingStore()
+
+    def run(
+        self,
+        outside: OutsideWorld,
+        options: HostOptions,
+        clock_at: float,
+        watcher: Watcher | None = None,
+        patience: float | None = None,
+    ) -> Hosted:
+        """A new shell and strategy instance over ``outside``, run to the end of its run."""
+        return _run_shell_host(outside, options, clock_at, watcher, patience)
+
+    def restart_at(self, first_clock_at: float, store: Store) -> float:
+        """After the dead host's lease has expired, however far its clock had run."""
+        if not isinstance(store, RecordingStore):
+            raise WrongStoreError(store)
+        return max(first_clock_at + LEASE, store.lease_ends_at) + 1
 
 
 def _run_within(host: ScriptedHost, patience: float) -> Run:

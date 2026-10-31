@@ -22,6 +22,8 @@ class RefusalReason(StrEnum):
 
     NO_SEED = "no_seed"
     """A core record, or a fold, with no seed state before it."""
+    SEED_REPEATED = "seed_repeated"
+    """A second start of a run the log already started."""
     STEP_NOT_OPEN = "step_not_open"
     """The record names a step that has its result, is ambiguous, or the run never held."""
     START_NOT_DUE = "start_not_due"

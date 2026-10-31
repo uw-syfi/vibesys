@@ -33,6 +33,7 @@ from vs_core.api.recovery import (
     CancelReason,
     End,
     Interruption,
+    OpenStep,
     RecordRefusal,
     Run,
     RunRest,
@@ -55,14 +56,22 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class OpenStep:
-    """A step with no result, as the fold of the log has it, so ``clear`` has the request."""
+class Recorded:
+    """The result of a step is in the log."""
 
-    step: Request
-    deadline_at: float
-    """Run-clock seconds at which core cancels an attempt of it."""
-    started: int
-    """The latest attempt that began; 0 before the first."""
+
+@dataclass(frozen=True)
+class Interrupted:
+    """The run was parked when the result reached the log, so it was not recorded as one.
+
+    A running attempt is recorded as ``AttemptInterrupted(PAUSE)`` instead and its step runs
+    again after the resume: core drops the result of a step in a parked epoch. The log decides
+    this under the lock that orders its appends, so a pause that lands after the loop last
+    read the state is still judged.
+    """
+
+
+type StepRecord = Recorded | Interrupted
 
 
 class StepLog(Protocol):
@@ -95,8 +104,11 @@ class StepLog(Protocol):
         """
         ...
 
-    async def step_finished(self, tag: RequestId, attempt: int, result: StepResult) -> None:
-        """Record the one result of a step and the attempt that produced it (0 if none ran)."""
+    async def step_finished(self, tag: RequestId, attempt: int, result: StepResult) -> StepRecord:
+        """Record the one result of a step and the attempt that produced it (0 if none ran).
+
+        ``Interrupted`` when the run is parked: see there.
+        """
         ...
 
     async def attempt_interrupted(self, tag: RequestId, attempt: int, why: Interruption) -> None:
@@ -122,6 +134,23 @@ class StepLog(Protocol):
     async def next_input(self) -> None:
         """Return once an input has been appended since this last returned."""
         ...
+
+    def stalled(self) -> str | None:
+        """Why nothing but a runner can move the run, or None while something still can.
+
+        The loop asks when no flight runs and no timer is set. Anything that can still append
+        an input (the operator, a wake-up of the search, a clock the log ticks) makes the run
+        not stalled. A run that waits on nothing is reported, never left silent.
+        """
+        ...
+
+
+class StepLoopStalledError(RuntimeError):
+    """The run waits on nothing: no runner is in flight, no timer is set and no input can come."""
+
+    def __init__(self, why: str) -> None:
+        """Say what the run waits on."""
+        super().__init__(why)
 
 
 class StepLoopTimingError(ValueError):
@@ -444,6 +473,8 @@ class _StepLoop:
         now = self._clock.now()
         deadlines = [f.deadline_at for f in self._flights.values() if f.deadline_at is not None]
         pending = [t for t in (*deadlines, wake_at) if t is not None and t > now]
+        if not self._flights and not pending and (why := self._log.stalled()) is not None:
+            raise StepLoopStalledError(why)
         timer = None
         if pending:
             timer = asyncio.ensure_future(self._clock.sleep(min(pending) - now))
@@ -477,9 +508,11 @@ class _StepLoop:
             started = await self._log.step_started(run)
         return None if isinstance(started, RecordRefusal) else started
 
-    async def _record_finished(self, tag: RequestId, attempt: int, result: StepResult) -> None:
+    async def _record_finished(
+        self, tag: RequestId, attempt: int, result: StepResult
+    ) -> StepRecord:
         async with self._appending:
-            await self._log.step_finished(tag, attempt, result)
+            return await self._log.step_finished(tag, attempt, result)
 
     def _last_attempt(self, tag: RequestId) -> int:
         open_step = self._log.open_step(tag)
@@ -513,7 +546,7 @@ class _StepLoop:
     async def _finish_unstarted(self, flight: _Flight) -> None:
         """The wait for ``clear`` ended by a cancel: no attempt of this try ever started."""
         reason = flight.signal.reason
-        if reason is not None and interruption_of(reason) is None and not self._parked():
+        if reason is not None and interruption_of(reason) is None:
             await self._record_finished(
                 flight.tag, self._last_attempt(flight.tag), Cancelled(reason=reason)
             )
@@ -574,15 +607,8 @@ class _StepLoop:
         return at_rest(self._log.state) is RunRest.PARKED
 
     async def _record_outcome(self, run: Run, result: StepResult) -> None:
-        """Record how a running attempt ended.
-
-        Core drops the result of a step in a parked epoch, so the attempt is interrupted
-        instead and the step runs again after the resume.
-        """
-        if self._parked():
-            await self._record_interrupted(run.tag, run.attempt, Interruption.PAUSE)
-        else:
-            await self._record_finished(run.tag, run.attempt, result)
+        """Record how a running attempt ended; the log turns it into an interruption if parked."""
+        await self._record_finished(run.tag, run.attempt, result)
 
     async def _end_alive(self, flight: _Flight, run: Run) -> StepResult | Cleared | None:
         """``clear`` found work still going: attach to it, cancel set, until it ends.
@@ -718,13 +744,22 @@ def _drop[T](task: asyncio.Future[T]) -> None:
         task.exception()
 
 
+def running_attempt(state: CoreState, tag: RequestId, attempt: int) -> bool:
+    """Whether attempt ``attempt`` of step ``tag`` is the one running in ``state``."""
+    attempts = state.steps.of(tag)
+    return attempts is not None and attempts.started == attempt and not attempts.ended
+
+
 __all__ = [
-    "OpenStep",
+    "Interrupted",
+    "Recorded",
     "Stall",
     "StallBoard",
     "StallKind",
     "StepLog",
+    "StepLoopStalledError",
     "StepLoopTiming",
     "StepLoopTimingError",
+    "StepRecord",
     "run_step_loop",
 ]

@@ -11,7 +11,114 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/store/v1/core_input.proto.
  */
 export const file_vibesys_store_v1_core_input: GenFile = /*@__PURE__*/
-  fileDesc("CiF2aWJlc3lzL3N0b3JlL3YxL2NvcmVfaW5wdXQucHJvdG8SEHZpYmVzeXMuc3RvcmUudjEiSAoJQ29yZUlucHV0Eh8KDnNjaGVtYV92ZXJzaW9uGAEgASgNQge6SAQqAigBEhoKBWV2ZW50GAIgASgMQgu6SAh6BhABGICAICKnAQoLU3RlcFN0YXJ0ZWQSGAoDdGFnGAEgASgJQgu6SAhyBhABKICABBIYCgdhdHRlbXB0GAIgASgNQge6SAQqAigBEh8KDnNjaGVtYV92ZXJzaW9uGAMgASgNQge6SAQqAigBEhwKB3JlcXVlc3QYBCABKAxCC7pICHoGEAEYgIAgEiUKC2RlYWRsaW5lX2F0GAUgASgBQhC6SA0SC0ABKQAAAAAAAAAAIvkBCgxTdGVwRmluaXNoZWQSGAoDdGFnGAEgASgJQgu6SAhyBhABKICABBIYCgdhdHRlbXB0GAIgASgNQge6SAQqAigAEh8KDnNjaGVtYV92ZXJzaW9uGAMgASgNQge6SAQqAigBEh8KCGZpbmlzaGVkGAQgASgMQgu6SAh6BhABGICAIEgAEh0KBmZhaWxlZBgFIAEoDEILukgIegYQARiAgCBIABJDCgljYW5jZWxsZWQYBiABKA4yIi52aWJlc3lzLnN0b3JlLnYxLlN0ZXBDYW5jZWxSZWFzb25CCrpIB4IBBBABIABIAEIPCgZyZXN1bHQSBbpIAggBIooBChJBdHRlbXB0SW50ZXJydXB0ZWQSGAoDdGFnGAEgASgJQgu6SAhyBhABKICABBIYCgdhdHRlbXB0GAIgASgNQge6SAQqAigBEkAKBnJlYXNvbhgDIAEoDjIkLnZpYmVzeXMuc3RvcmUudjEuSW50ZXJydXB0aW9uUmVhc29uQgq6SAeCAQQQASAAIkgKCFJ1bkVuZGVkEh8KDnNjaGVtYV92ZXJzaW9uGAEgASgNQge6SAQqAigBEhsKBnJlc3VsdBgCIAEoDEILukgIegYQARiAgCAqiAIKEFN0ZXBDYW5jZWxSZWFzb24SIgoeU1RFUF9DQU5DRUxfUkVBU09OX1VOU1BFQ0lGSUVEEAASHwobU1RFUF9DQU5DRUxfUkVBU09OX0RFQURMSU5FEAESIAocU1RFUF9DQU5DRUxfUkVBU09OX1BBVVNFX05PVxACEiQKIFNURVBfQ0FOQ0VMX1JFQVNPTl9EUkFJTl9FWFBJUkVEEAMSIQodU1RFUF9DQU5DRUxfUkVBU09OX1JVTl9FTkRJTkcQBBIgChxTVEVQX0NBTkNFTF9SRUFTT05fV0lUSERSQVdOEAUSIgoeU1RFUF9DQU5DRUxfUkVBU09OX0lOVEVSUlVQVEVEEAYqmgEKEkludGVycnVwdGlvblJlYXNvbhIjCh9JTlRFUlJVUFRJT05fUkVBU09OX1VOU1BFQ0lGSUVEEAASHQoZSU5URVJSVVBUSU9OX1JFQVNPTl9QQVVTRRABEiAKHElOVEVSUlVQVElPTl9SRUFTT05fU0hVVERPV04QAhIeChpJTlRFUlJVUFRJT05fUkVBU09OX1JBSVNFRBADQkFaP2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2dhdGV3YXkvZ2VuL3ZpYmVzeXMvc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_buf_validate_validate]);
+  fileDesc("CiF2aWJlc3lzL3N0b3JlL3YxL2NvcmVfaW5wdXQucHJvdG8SEHZpYmVzeXMuc3RvcmUudjEiSQoKUnVuU3RhcnRlZBIfCg5zY2hlbWFfdmVyc2lvbhgBIAEoDUIHukgEKgIoARIaCgVzdGF0ZRgCIAEoDEILukgIegYQARiAgCAilQIKEFN0cmF0ZWd5QWR2YW5jZWQSHwoOc2NoZW1hX3ZlcnNpb24YASABKA1CB7pIBCoCKAESIwoJcHJvcG9zYWxzGAIgAygMQhC6SA2SAQoiCHoGEAEYgIAgEhwKBXN0ZXBzGAMgASgMQgu6SAh6BhABGICAIEgAEiEKCmNoZWNrcG9pbnQYBCABKAxCC7pICHoGEAEYgIAgSAASJAoFd2FrZXMYBSADKAFCFbpIEpIBDyINEgtAASkAAAAAAAAAABIoCglkZWxpdmVyZWQYBiADKAFCFbpIEpIBDyINEgtAASkAAAAAAAAAABIXCgRoZWxkGAcgASgMQgm6SAZ6BBiAgCBCEQoIc3RyYXRlZ3kSBbpIAggBIkgKCUNvcmVJbnB1dBIfCg5zY2hlbWFfdmVyc2lvbhgBIAEoDUIHukgEKgIoARIaCgVldmVudBgCIAEoDEILukgIegYQARiAgCAipwEKC1N0ZXBTdGFydGVkEhgKA3RhZxgBIAEoCUILukgIcgYQASiAgAQSGAoHYXR0ZW1wdBgCIAEoDUIHukgEKgIoARIfCg5zY2hlbWFfdmVyc2lvbhgDIAEoDUIHukgEKgIoARIcCgdyZXF1ZXN0GAQgASgMQgu6SAh6BhABGICAIBIlCgtkZWFkbGluZV9hdBgFIAEoAUIQukgNEgtAASkAAAAAAAAAACL5AQoMU3RlcEZpbmlzaGVkEhgKA3RhZxgBIAEoCUILukgIcgYQASiAgAQSGAoHYXR0ZW1wdBgCIAEoDUIHukgEKgIoABIfCg5zY2hlbWFfdmVyc2lvbhgDIAEoDUIHukgEKgIoARIfCghmaW5pc2hlZBgEIAEoDEILukgIegYQARiAgCBIABIdCgZmYWlsZWQYBSABKAxCC7pICHoGEAEYgIAgSAASQwoJY2FuY2VsbGVkGAYgASgOMiIudmliZXN5cy5zdG9yZS52MS5TdGVwQ2FuY2VsUmVhc29uQgq6SAeCAQQQASAASABCDwoGcmVzdWx0EgW6SAIIASKKAQoSQXR0ZW1wdEludGVycnVwdGVkEhgKA3RhZxgBIAEoCUILukgIcgYQASiAgAQSGAoHYXR0ZW1wdBgCIAEoDUIHukgEKgIoARJACgZyZWFzb24YAyABKA4yJC52aWJlc3lzLnN0b3JlLnYxLkludGVycnVwdGlvblJlYXNvbkIKukgHggEEEAEgACJICghSdW5FbmRlZBIfCg5zY2hlbWFfdmVyc2lvbhgBIAEoDUIHukgEKgIoARIbCgZyZXN1bHQYAiABKAxCC7pICHoGEAEYgIAgKogCChBTdGVwQ2FuY2VsUmVhc29uEiIKHlNURVBfQ0FOQ0VMX1JFQVNPTl9VTlNQRUNJRklFRBAAEh8KG1NURVBfQ0FOQ0VMX1JFQVNPTl9ERUFETElORRABEiAKHFNURVBfQ0FOQ0VMX1JFQVNPTl9QQVVTRV9OT1cQAhIkCiBTVEVQX0NBTkNFTF9SRUFTT05fRFJBSU5fRVhQSVJFRBADEiEKHVNURVBfQ0FOQ0VMX1JFQVNPTl9SVU5fRU5ESU5HEAQSIAocU1RFUF9DQU5DRUxfUkVBU09OX1dJVEhEUkFXThAFEiIKHlNURVBfQ0FOQ0VMX1JFQVNPTl9JTlRFUlJVUFRFRBAGKpoBChJJbnRlcnJ1cHRpb25SZWFzb24SIwofSU5URVJSVVBUSU9OX1JFQVNPTl9VTlNQRUNJRklFRBAAEh0KGUlOVEVSUlVQVElPTl9SRUFTT05fUEFVU0UQARIgChxJTlRFUlJVUFRJT05fUkVBU09OX1NIVVRET1dOEAISHgoaSU5URVJSVVBUSU9OX1JFQVNPTl9SQUlTRUQQA0JBWj9naXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_buf_validate_validate]);
+
+/**
+ * RunStarted is the first core record of a run: the state its fold starts from. It holds the
+ * inputs the run was built from, so every process that folds the log starts from the same
+ * state, the run's deadline included.
+ *
+ * @generated from message vibesys.store.v1.RunStarted
+ */
+export type RunStarted = Message<"vibesys.store.v1.RunStarted"> & {
+  /**
+   * Version of the canonical encoding of state.
+   *
+   * @generated from field: uint32 schema_version = 1;
+   */
+  schemaVersion: number;
+
+  /**
+   * The canonical JSON of the vs_core CoreState the run starts from.
+   *
+   * @generated from field: bytes state = 2;
+   */
+  state: Uint8Array;
+};
+
+/**
+ * Describes the message vibesys.store.v1.RunStarted.
+ * Use `create(RunStartedSchema)` to create a new message.
+ */
+export const RunStartedSchema: GenMessage<RunStarted> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_core_input, 0);
+
+/**
+ * StrategyAdvanced is one advance of the run's search, appended as one record so that what it
+ * proposed and what it kept can never disagree after a crash: the proposals core took, the
+ * state change the search made, and the wake-ups it asked for.
+ *
+ * @generated from message vibesys.store.v1.StrategyAdvanced
+ */
+export type StrategyAdvanced = Message<"vibesys.store.v1.StrategyAdvanced"> & {
+  /**
+   * Version of the canonical encoding of proposals and held.
+   *
+   * @generated from field: uint32 schema_version = 1;
+   */
+  schemaVersion: number;
+
+  /**
+   * The canonical JSON of each ProposalSubmitted core took from the search in this advance, in
+   * the order core took them.
+   *
+   * @generated from field: repeated bytes proposals = 2;
+   */
+  proposals: Uint8Array[];
+
+  /**
+   * What the search kept of the advance, in the search driver's own encoding: the steps its
+   * journal gained, or the whole state at a checkpoint.
+   *
+   * @generated from oneof vibesys.store.v1.StrategyAdvanced.strategy
+   */
+  strategy: {
+    /**
+     * The steps the state gained.
+     *
+     * @generated from field: bytes steps = 3;
+     */
+    value: Uint8Array;
+    case: "steps";
+  } | {
+    /**
+     * The whole state, written at a restart, at a doubling of the advance count, and when the
+     * run parks or ends.
+     *
+     * @generated from field: bytes checkpoint = 4;
+     */
+    value: Uint8Array;
+    case: "checkpoint";
+  } | { case: undefined; value?: undefined };
+
+  /**
+   * Run-clock times the search asked to be woken at in this advance.
+   *
+   * @generated from field: repeated double wakes = 5;
+   */
+  wakes: number[];
+
+  /**
+   * Run-clock times of the wake-ups this advance delivered to the search.
+   *
+   * @generated from field: repeated double delivered = 6;
+   */
+  delivered: number[];
+
+  /**
+   * The canonical JSON of the decisions core could not take yet, replacing those held before.
+   *
+   * @generated from field: bytes held = 7;
+   */
+  held: Uint8Array;
+};
+
+/**
+ * Describes the message vibesys.store.v1.StrategyAdvanced.
+ * Use `create(StrategyAdvancedSchema)` to create a new message.
+ */
+export const StrategyAdvancedSchema: GenMessage<StrategyAdvanced> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_core_input, 1);
 
 /**
  * CoreInput is one external input core consumed: a decision or proposal, an owner event,
@@ -40,7 +147,7 @@ export type CoreInput = Message<"vibesys.store.v1.CoreInput"> & {
  * Use `create(CoreInputSchema)` to create a new message.
  */
 export const CoreInputSchema: GenMessage<CoreInput> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_core_input, 0);
+  messageDesc(file_vibesys_store_v1_core_input, 2);
 
 /**
  * StepStarted is the durable intent to run one attempt of a step. It is appended before any
@@ -90,7 +197,7 @@ export type StepStarted = Message<"vibesys.store.v1.StepStarted"> & {
  * Use `create(StepStartedSchema)` to create a new message.
  */
 export const StepStartedSchema: GenMessage<StepStarted> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_core_input, 1);
+  messageDesc(file_vibesys_store_v1_core_input, 3);
 
 /**
  * StepFinished is the one result of a step: its last attempt ended with a result, or core
@@ -153,7 +260,7 @@ export type StepFinished = Message<"vibesys.store.v1.StepFinished"> & {
  * Use `create(StepFinishedSchema)` to create a new message.
  */
 export const StepFinishedSchema: GenMessage<StepFinished> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_core_input, 2);
+  messageDesc(file_vibesys_store_v1_core_input, 4);
 
 /**
  * AttemptInterrupted is an attempt that ended without a result. The step stays open. A pause or
@@ -183,7 +290,7 @@ export type AttemptInterrupted = Message<"vibesys.store.v1.AttemptInterrupted"> 
  * Use `create(AttemptInterruptedSchema)` to create a new message.
  */
 export const AttemptInterruptedSchema: GenMessage<AttemptInterrupted> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_core_input, 3);
+  messageDesc(file_vibesys_store_v1_core_input, 5);
 
 /**
  * RunEnded is the end of a run: its result, published once nothing is open. The loop appends it
@@ -213,7 +320,7 @@ export type RunEnded = Message<"vibesys.store.v1.RunEnded"> & {
  * Use `create(RunEndedSchema)` to create a new message.
  */
 export const RunEndedSchema: GenMessage<RunEnded> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_core_input, 4);
+  messageDesc(file_vibesys_store_v1_core_input, 6);
 
 /**
  * Why core cancelled a step. Closed; vs_core.api.recovery.CancelReason names the same set.

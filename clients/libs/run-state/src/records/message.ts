@@ -89,6 +89,10 @@ export function recordMessage(body: StoreRecord['body']): string {
       return `Step ${body.value.tag}: attempt ${body.value.attempt} interrupted`;
     case 'runEnded':
       return 'Run ended';
+    case 'runStarted':
+      return 'Run started';
+    case 'strategyAdvanced':
+      return 'Search advanced';
     case undefined:
       throw new Error('record.body required');
   }

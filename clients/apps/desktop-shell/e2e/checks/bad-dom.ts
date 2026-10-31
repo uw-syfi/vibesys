@@ -360,6 +360,39 @@ export const BAD_SCREENS: readonly BadScreen[] = [
     html: `<style>:root{--chip-warn-bg:#f3e6c8;--chip-err-bg:#f6dad6}</style><main style="display:block;width:440px"><div class="vs-notice" style="display:flex;gap:8px;background:var(--chip-warn-bg)">Login started <button>Check again</button></div></main>`,
   },
   {
+    name: 'an alert sentence across the pane, not tinted and with no chevron',
+    check: 'status-row',
+    message:
+      /a status row \d+% of the main pane wide \(alert\): "Could not read the runs of this machine,"/,
+    html: `<main style="display:block;width:440px"><div role="alert" style="border:1px solid #ccc">Could not read the runs of this machine, try again</div></main>`,
+  },
+  {
+    name: 'a status sentence in the error tone on a line of its own in a column',
+    check: 'status-row',
+    message: /a status row \d+% of the main pane wide \(err text\): "1 check needs attention/,
+    html: `<main style="display:block;width:440px"><div style="display:flex;flex-direction:column"><span class="vs-text" data-tone="err">1 check needs attention before the run can start, see the list</span></div></main>`,
+  },
+  {
+    name: 'a status line under a new class name that a screen reader announces as a status',
+    check: 'status-row',
+    message:
+      /a status row \d+% of the main pane wide \(status\): "Reading runs 3\/3 on this machine/,
+    html: `<main style="display:block;width:440px"><div class="vs-notice" role="status"><span>Reading runs 3/3 on this machine, this can take a while</span></div></main>`,
+  },
+  {
+    name: 'a chip stretched to the width of the pane by a long label',
+    check: 'status-row',
+    message:
+      /a chip \d+% of the main pane wide \(chip\): "Failed: the workspace is not usable, che"/,
+    html: `<main style="display:block;width:440px"><span class="vs-chip" style="display:block">Failed: the workspace is not usable, check the path and try again</span></main>`,
+  },
+  {
+    name: 'a chip that a flex column stretches across the pane, whatever its label',
+    check: 'status-row',
+    message: /a chip 100% of the main pane wide \(chip\): "Unavailable"/,
+    html: `<main style="display:block;width:440px"><div style="display:flex;flex-direction:column"><span class="vs-chip" data-tone="err">Unavailable</span></div></main>`,
+  },
+  {
     name: 'text drawn outside the window',
     check: 'overflow',
     message: /text runs outside the window/,

@@ -10,7 +10,6 @@ from vs_runtime._fake_core_execution import (
 )
 from vs_runtime._fake_stage_work_reaper import FakeStageWorkReaper
 from vs_runtime._fake_step_log import (
-    FakeLogUncertainError,
     FakeQuery,
     FakeRunRecords,
     FakeRunSeed,
@@ -139,7 +138,6 @@ __all__ = [
     "FakeEvidenceLedger",
     "FakeGitRunner",
     "FakeLocalValidationCall",
-    "FakeLogUncertainError",
     "FakeModelVolumeProvisioner",
     "FakeModelVolumeRequest",
     "FakeProjectMaterializationEffects",

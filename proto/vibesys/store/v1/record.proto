@@ -48,7 +48,7 @@ message Record {
   option (buf.validate.message).cel = {
     id: "record.core_records"
     message: "core records require seq, epoch, at and clock"
-    expression: "!(has(this.core_input) || has(this.step_started) || has(this.step_finished) || has(this.attempt_interrupted) || has(this.run_ended)) || (this.seq > 0u && this.epoch > 0u && has(this.at) && has(this.clock))"
+    expression: "!(has(this.core_input) || has(this.step_started) || has(this.step_finished) || has(this.attempt_interrupted) || has(this.run_ended) || has(this.run_started) || has(this.strategy_advanced)) || (this.seq > 0u && this.epoch > 0u && has(this.at) && has(this.clock))"
   };
   uint64 seq = 1;
   google.protobuf.Timestamp at = 2;
@@ -84,6 +84,8 @@ message Record {
     StepFinished step_finished = 25;
     AttemptInterrupted attempt_interrupted = 26;
     RunEnded run_ended = 27;
+    RunStarted run_started = 28;
+    StrategyAdvanced strategy_advanced = 29;
   }
 }
 
