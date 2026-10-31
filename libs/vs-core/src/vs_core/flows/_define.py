@@ -38,7 +38,7 @@ from ._labels import SpanKind, declared
 from ._resource import kit_of
 from ._roles import Role, with_models
 from ._run import Wiring, _Run
-from ._state import FlowState, Step, Waiting, digest, key, recorded
+from ._state import FlowChanges, FlowState, Step, Waiting, digest, key, recorded
 from ._winner import NoWinner, Uncompared, conclude
 
 if TYPE_CHECKING:
@@ -279,6 +279,60 @@ class FlowDriver[C]:
         )
         self._cached = (key(new), run)
         return new, [*restarted, *decisions]
+
+    def changes(self, before: FlowState, after: FlowState) -> bytes | None:
+        """What ``after`` adds to ``before``, for the log; None when it does not continue it.
+
+        A restart rebuilds the journal from a checkpoint, so its state is not a continuation
+        and the log keeps all of it.
+        """
+        seen = len(before.journal)
+        continues = (
+            len(after.journal) >= seen
+            and after.journal[seen - 1].digest == before.journal[-1].digest
+            and (after.base is before.base or after.base == before.base)
+        )
+        if not continues:
+            return None
+        gained = FlowChanges(
+            steps=after.journal[seen:],
+            dropped=after.dropped,
+            restart_settled=after.restart_settled,
+        )
+        return gained.model_dump_json().encode()
+
+    def extend(self, state: FlowState, changes: bytes) -> FlowState:
+        """``state`` with ``changes`` (from ``changes``) applied. ``live`` is left as it was."""
+        gained = FlowChanges.model_validate_json(changes)
+        return state.model_copy(
+            update={
+                "journal": (*state.journal, *gained.steps),
+                "dropped": gained.dropped,
+                "restart_settled": gained.restart_settled,
+            }
+        )
+
+    def resume(self, state: FlowState) -> FlowState:
+        """``state`` as the process that logged it left it: where the flows are now.
+
+        The log keeps ``live`` only at checkpoints, so the journal is replayed (with its digest
+        guard) and the flows' snapshots are read from the replay. A journal the code cannot
+        replay any more is returned as it is: the next ``update`` restarts the flows from the
+        checkpoint ``live`` still holds.
+        """
+        try:
+            run = self._runtime(state)
+        except FlowCodeChanged:
+            return state
+        resumed = state.model_copy(
+            update={
+                "live": run.checkpoint(),
+                "dropped": tuple(run.dropped),
+                "restart_settled": tuple(run.restart_settled),
+            }
+        )
+        self._cached = (key(resumed), run)
+        return resumed
 
     @staticmethod
     def published[M: BaseModel](state: FlowState, model: type[M]) -> M | None:

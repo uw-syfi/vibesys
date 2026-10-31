@@ -15,13 +15,15 @@ from vs_proto.api import (
     AttemptInterrupted,
     CoreInput,
     InterruptionReason,
+    RunStarted,
     StepCancelReason,
     StepFinished,
     StepStarted,
+    StrategyAdvanced,
 )
 
 from .types.common import Value
-from .types.kernel import CoreEvent
+from .types.kernel import CoreEvent, CoreState
 from .types.records import Request, RequestObserved
 from .types.steps import (
     Cancelled,
@@ -32,6 +34,7 @@ from .types.steps import (
     OwnerEvent,
     StepResult,
 )
+from .types.strategy import Decision
 
 if TYPE_CHECKING:
     from ._actions import Run
@@ -50,6 +53,8 @@ class _FinishedBody(Value):
 
 
 _EVENT = TypeAdapter(CoreEvent)
+_STATE = TypeAdapter(CoreState)
+_DECISIONS = TypeAdapter(tuple[Decision, ...])
 _REQUEST = TypeAdapter(Request)
 _FINISHED = TypeAdapter(_FinishedBody)
 
@@ -73,6 +78,47 @@ _INTERRUPTION_NAMES = {stored: why for why, stored in _INTERRUPTIONS.items()}
 def input_message(event: CoreEvent) -> CoreInput:
     """The record body of one external input core consumed."""
     return CoreInput(schema_version=SCHEMA_VERSION, event=_EVENT.dump_json(event))
+
+
+def seed_message(state: CoreState) -> RunStarted:
+    """The record body that starts a run's log: the state its fold begins from."""
+    return RunStarted(schema_version=SCHEMA_VERSION, state=_STATE.dump_json(state))
+
+
+def decode_seed(message: RunStarted, registry: OperationRegistry | None) -> CoreState:
+    """The state a ``RunStarted`` begins the fold from, refused when written by another encoding."""
+    _same_encoding(message.schema_version)
+    return _STATE.validate_json(message.state, context=_context(registry))
+
+
+def encode_event(event: CoreEvent) -> bytes:
+    """The canonical JSON of one core event."""
+    return _EVENT.dump_json(event)
+
+
+def encode_held(decisions: tuple[Decision, ...]) -> bytes:
+    """The canonical JSON of the decisions a search holds."""
+    return _DECISIONS.dump_json(decisions)
+
+
+def decode_held(
+    message: StrategyAdvanced, registry: OperationRegistry | None
+) -> tuple[Decision, ...]:
+    """The decisions an advance record says the search holds."""
+    _same_encoding(message.schema_version)
+    if not message.held:
+        return ()
+    return _DECISIONS.validate_json(message.held, context=_context(registry))
+
+
+def decode_proposals(
+    message: StrategyAdvanced, registry: OperationRegistry | None
+) -> tuple[CoreEvent, ...]:
+    """The proposals core took in an advance, in the order it took them."""
+    _same_encoding(message.schema_version)
+    return tuple(
+        _EVENT.validate_json(proposal, context=_context(registry)) for proposal in message.proposals
+    )
 
 
 def started_message(run: Run) -> StepStarted:

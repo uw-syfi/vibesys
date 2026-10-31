@@ -268,6 +268,18 @@ class FlowState(StrategyState):
     """The workspaces the restarts since this journal began settled themselves, with why."""
 
 
+class FlowChanges(Value):
+    """What one advance added to a ``FlowState``.
+
+    The journal steps, and the two fields every update replaces. The log keeps this between
+    checkpoints, so it grows with the steps and not with the state.
+    """
+
+    steps: tuple[Step, ...]
+    dropped: tuple[Dropped, ...] = ()
+    restart_settled: tuple[RestartSettled, ...] = ()
+
+
 _DECISIONS = TypeAdapter(list[Decision])
 
 

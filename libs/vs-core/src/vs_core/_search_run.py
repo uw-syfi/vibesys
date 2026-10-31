@@ -116,6 +116,18 @@ class SearchDriver[S: StrategyState, C](Protocol):
         """Deliver one event."""
         ...
 
+    def changes(self, before: S, after: S) -> bytes | None:
+        """What ``after`` adds to ``before``, for the log; None when it does not continue it."""
+        ...
+
+    def extend(self, state: S, changes: bytes) -> S:
+        """``state`` with ``changes`` applied, as a process that reads the log builds it."""
+        ...
+
+    def resume(self, state: S) -> S:
+        """``state`` as the process that logged it left it, rebuilding what the log does not keep."""
+        ...
+
 
 @dataclass(frozen=True)
 class Inbox:

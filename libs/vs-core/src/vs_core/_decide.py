@@ -7,6 +7,7 @@ request the loop hands to a runner whole, so nothing here names a step kind. The
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from protobuf import Oneof
@@ -17,6 +18,7 @@ from ._request_ledger import dispatch_until, retry_limit
 from ._request_recovery import is_open
 from ._run_park import dispatch_allowed, pause_withdraws
 from ._scope_order import holds_back
+from ._search_events import Translated, translate
 from ._step import advance_run_time, step
 from ._step_attempts import (
     dispatched,
@@ -27,7 +29,14 @@ from ._step_attempts import (
     open_record,
     started,
 )
-from ._step_log import decode_event, decode_interruption, decode_request, decode_result
+from ._step_log import (
+    decode_event,
+    decode_interruption,
+    decode_proposals,
+    decode_request,
+    decode_result,
+    decode_seed,
+)
 from .types.common import DependencyStatus, InterruptPolicy, RequestId, RunStatus, StopMode
 from .types.records import request_interrupt_policy
 from .types.steps import Cancelled, CancelReason, Failed
@@ -36,11 +45,24 @@ from .types.until import FailureReason, Until
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from vs_proto.api import Record, StepFinished, StepStarted
+    from vs_proto.api import Record, StepFinished, StepStarted, StrategyAdvanced
 
     from ._registry import OperationRegistry
-    from .types.kernel import CoreState
+    from .types.kernel import CoreState, StrategyEvent
     from .types.records import RequestRecord
+
+
+@dataclass(frozen=True)
+class Folded:
+    """A log's fold: core's state, and what the search still has to hear.
+
+    ``owed`` is what core published, as the search receives it, since the last advance record
+    (or since the run began): events whose advance a crash may have cut off. The search hears
+    them before anything else when a process takes the log over.
+    """
+
+    state: CoreState
+    owed: Translated = field(default_factory=Translated)
 
 
 def fold(
@@ -49,20 +71,49 @@ def fold(
     *,
     registry: OperationRegistry | None = None,
 ) -> CoreState:
-    """The core state a log leaves, starting from ``seed``.
+    """The core state a log leaves, starting from ``seed`` or the log's ``RunStarted``.
 
     Every record names the epoch it was written in and, when it has one, the run clock, which
     excludes downtime. Records that are not core's (spans, metrics, notices) change nothing
     else. A record the reducers refuse is an error, never skipped: the log was written by
     other code. ``registry`` decodes the outcomes of registered operations.
     """
-    state = seed
+    return fold_run(records, seed, registry=registry).state
+
+
+def fold_run(
+    records: Iterable[Record],
+    seed: CoreState | None = None,
+    *,
+    registry: OperationRegistry | None = None,
+) -> Folded:
+    """``fold``, and the events the search still has to hear."""
+    folded = None if seed is None else Folded(seed)
     for record in records:
-        state = _apply(state, record, registry)
-    if state is None:
+        folded = apply_record(folded, record, registry)
+    if folded is None:
         message = "a log folds from a seed state; it holds no record of the run's start"
         raise ValueError(message)
-    return state
+    return folded
+
+
+def apply_record(
+    prior: Folded | None, record: Record, registry: OperationRegistry | None = None
+) -> Folded | None:
+    """``prior`` with one more record folded in; None while the log has not started the run."""
+    state = None if prior is None else prior.state
+    body = record.body
+    if body is not None and body.field == "strategy_advanced" and state is not None:
+        # The search heard everything owed before it answered, and what its proposals caused.
+        return Folded(_advanced(_observed(state, record), body.value, registry))
+    state, published = _apply(state, record, registry)
+    if state is None:
+        return None
+    owed = Translated() if prior is None else prior.owed
+    heard = translate(state, published)
+    return Folded(
+        state, Translated((*owed.events, *heard.events), (*owed.discarded, *heard.discarded))
+    )
 
 
 def decide(state: CoreState, now: float) -> tuple[Action, ...]:
@@ -79,26 +130,49 @@ def decide(state: CoreState, now: float) -> tuple[Action, ...]:
 
 def _apply(
     state: CoreState | None, record: Record, registry: OperationRegistry | None
-) -> CoreState | None:
+) -> tuple[CoreState | None, tuple[StrategyEvent, ...]]:
     body = record.body
-    if state is None:
-        if body is not None and body.field in _CORE_RECORDS:
-            message = f"record {record.seq} is core's, and the log holds no seed before it"
-            raise ValueError(message)
-        return None
+    if state is None or (body is not None and body.field == "run_started"):
+        return _begin(state, record, registry), ()
     state = _observed(state, record)
     match body:
         case Oneof(field="core_input", value=message):
-            return step(state, decode_event(message, registry)).state
+            transition = step(state, decode_event(message, registry))
+            return transition.state, transition.events
         case Oneof(field="step_started", value=message):
-            return _start(state, message, registry)
+            return _start(state, message, registry), ()
         case Oneof(field="step_finished", value=message):
             return _finish(state, message, registry)
         case Oneof(field="attempt_interrupted", value=message):
             tag = RequestId(root=message.tag)
-            return interrupted(state, tag, message.attempt, decode_interruption(message))
+            return interrupted(state, tag, message.attempt, decode_interruption(message)), ()
         case _:
-            return state
+            return state, ()
+
+
+def _begin(
+    state: CoreState | None, record: Record, registry: OperationRegistry | None
+) -> CoreState | None:
+    """The state a record that precedes the run's seed, or is the seed, leaves."""
+    body = record.body
+    if body is not None and body.field == "run_started":
+        if state is not None:
+            message = f"record {record.seq} starts a run the log already started"
+            raise ValueError(message)
+        return _observed(decode_seed(body.value, registry), record)
+    if body is not None and body.field in _CORE_RECORDS:
+        message = f"record {record.seq} is core's, and the log holds no seed before it"
+        raise ValueError(message)
+    return None
+
+
+def _advanced(
+    state: CoreState, message: StrategyAdvanced, registry: OperationRegistry | None
+) -> CoreState:
+    """``state`` after the proposals core took in an advance."""
+    for proposal in decode_proposals(message, registry):
+        state = step(state, proposal).state
+    return state
 
 
 def _start(state: CoreState, message: StepStarted, registry: OperationRegistry | None) -> CoreState:
@@ -109,20 +183,24 @@ def _start(state: CoreState, message: StepStarted, registry: OperationRegistry |
 
 def _finish(
     state: CoreState, message: StepFinished, registry: OperationRegistry | None
-) -> CoreState:
+) -> tuple[CoreState, tuple[StrategyEvent, ...]]:
     tag = RequestId(root=message.tag)
     state = dispatched(state, tag)
     report, owner_events = finish(state, tag, decode_result(message, registry))
-    state = step(state, report).state
+    transition = step(state, report)
+    state, published = transition.state, transition.events
     for event in owner_events:
-        state = step(state, event).state
+        transition = step(state, event)
+        state, published = transition.state, (*published, *transition.events)
     if any(is_open(row) for row in state.records.find(tag)):
         problem = f"the log finishes step {tag.root} with an observation that does not end it"
         raise ValueError(problem)
-    return forgotten(state, tag)
+    return forgotten(state, tag), published
 
 
-_CORE_RECORDS = frozenset({"core_input", "step_started", "step_finished", "attempt_interrupted"})
+_CORE_RECORDS = frozenset(
+    {"core_input", "strategy_advanced", "step_started", "step_finished", "attempt_interrupted"}
+)
 
 
 def _observed(state: CoreState, record: Record) -> CoreState:

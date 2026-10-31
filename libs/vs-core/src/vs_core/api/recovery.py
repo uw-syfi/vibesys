@@ -14,11 +14,22 @@ from vs_core._actions import (
     at_rest,
     interruption_of,
 )
-from vs_core._decide import decide, fold
+from vs_core._decide import Folded, apply_record, decide, fold, fold_run
+from vs_core._search_events import Translated
+from vs_core._search_log import (
+    CHECKPOINT_GROWTH,
+    Advancing,
+    Progress,
+    advance_search,
+    checkpoint_search,
+    restore,
+)
 from vs_core._step_log import (
+    decode_seed,
     finished_message,
     input_message,
     interrupted_message,
+    seed_message,
     started_message,
 )
 from vs_core.types.records import StepEffect, request_effect, request_interrupt_policy
@@ -35,15 +46,19 @@ from vs_core.types.steps import (
 )
 
 __all__ = [
+    "CHECKPOINT_GROWTH",
     "Action",
+    "Advancing",
     "Cancel",
     "CancelReason",
     "Cancelled",
     "End",
     "Failed",
     "Finished",
+    "Folded",
     "InterruptPolicy",
     "Interruption",
+    "Progress",
     "Run",
     "RunRest",
     "Settle",
@@ -51,15 +66,23 @@ __all__ = [
     "StepEffect",
     "StepResult",
     "StepsState",
+    "Translated",
     "Wait",
+    "advance_search",
+    "apply_record",
     "at_rest",
+    "checkpoint_search",
     "decide",
+    "decode_seed",
     "finished_message",
     "fold",
+    "fold_run",
     "input_message",
     "interrupted_message",
     "interruption_of",
     "request_effect",
     "request_interrupt_policy",
+    "restore",
+    "seed_message",
     "started_message",
 ]
