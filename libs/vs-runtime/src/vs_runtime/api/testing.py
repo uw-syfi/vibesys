@@ -18,14 +18,17 @@ from vs_runtime._fake_step_log import (
 )
 from vs_runtime._fake_step_runner import (
     AttemptHangs,
+    AttemptHolds,
     AttemptRaises,
     AttemptReturns,
     Behavior,
     FakeStepRunner,
     LeftoverWorkError,
+    OverlappingCallError,
     RunnerCall,
     RunnerMethod,
     StepTagMismatchError,
+    StillRunningAfterCancelError,
     finished_result,
 )
 from vs_runtime._run_clocks import CrashableRunClock, ProbedRunClock
@@ -110,6 +113,7 @@ __all__ = [
     "LEASE",
     "Admitting",
     "AttemptHangs",
+    "AttemptHolds",
     "AttemptRaises",
     "AttemptReturns",
     "Behavior",
@@ -155,6 +159,7 @@ __all__ = [
     "Launch",
     "LeftoverWorkError",
     "MemoryValidationPasses",
+    "OverlappingCallError",
     "ProbedRunClock",
     "RecordingSearch",
     "Run",
@@ -168,6 +173,7 @@ __all__ = [
     "StepRunnerContract",
     "StepRunnerUnderTest",
     "StepTagMismatchError",
+    "StillRunningAfterCancelError",
     "TranslatorFactory",
     "UnsafeControlSchemaError",
     "control_schema_fields",
