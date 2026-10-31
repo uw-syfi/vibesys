@@ -13,7 +13,6 @@ readable there.
 from __future__ import annotations
 
 import hashlib
-import os
 
 #: Operands (or their ``repr``) up to this many characters keep pytest's own diff.
 LARGE_OPERAND = 8_000
@@ -49,7 +48,7 @@ def describe_difference(
         "so only their first difference is shown"
     )
     lines = [summary, f"  sha256 {_digest(left)} against {_digest(right)}"]
-    offset = len(os.path.commonprefix([left, right]))
+    offset = _common_prefix_length(left, right)
     if left == right:
         lines.append("  the printed forms are identical; the objects differ in a value they hide")
         return lines
@@ -58,6 +57,18 @@ def describe_difference(
         window = value[max(0, offset - CONTEXT) : offset + CONTEXT]
         lines.append(f"  {side}: {'...' if offset > CONTEXT else ''}{window!r}")
     return lines
+
+
+def _common_prefix_length(left: str | bytes, right: str | bytes) -> int:
+    """How many leading characters the two values share, by bisection over slice equality."""
+    low, high = 0, min(len(left), len(right))
+    while low < high:
+        middle = (low + high + 1) // 2
+        if left[:middle] == right[:middle]:
+            low = middle
+        else:
+            high = middle - 1
+    return low
 
 
 def _comparable_forms(left: object, right: object) -> tuple[str | bytes, str | bytes]:
