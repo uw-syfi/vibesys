@@ -17,6 +17,7 @@ from protobuf import Oneof
 from vs_proto.api import (
     AttemptInterrupted,
     CoreInput,
+    CoreSnapshot,
     EpochStarted,
     Record,
     RunEnded,
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
 type CoreMessage = (
     EpochStarted
     | RunStarted
+    | CoreSnapshot
     | CoreInput
     | StrategyAdvanced
     | StepStarted
@@ -52,6 +54,7 @@ The epoch header opens an epoch: its first record proves the earlier epoch's pro
 type _CoreBody = (
     Oneof[Literal["epoch_started"], EpochStarted]
     | Oneof[Literal["run_started"], RunStarted]
+    | Oneof[Literal["core_snapshot"], CoreSnapshot]
     | Oneof[Literal["core_input"], CoreInput]
     | Oneof[Literal["strategy_advanced"], StrategyAdvanced]
     | Oneof[Literal["step_started"], StepStarted]
@@ -197,6 +200,8 @@ def _body(message: CoreMessage) -> _CoreBody:
             return Oneof("epoch_started", message)
         case RunStarted():
             return Oneof("run_started", message)
+        case CoreSnapshot():
+            return Oneof("core_snapshot", message)
         case CoreInput():
             return Oneof("core_input", message)
         case StrategyAdvanced():

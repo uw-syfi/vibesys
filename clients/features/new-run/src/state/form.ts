@@ -211,6 +211,18 @@ function recordedRoles(start: RunStart | null): RoleChoice[] {
   }));
 }
 
+/** Whether `offers` still vet the harness and model `start` recorded. */
+export function recordedHarnessOffered(
+  start: RunStart | null,
+  offers: readonly HarnessOffer[],
+): boolean {
+  const harness = start?.harness ?? null;
+  return (
+    harness !== null &&
+    offers.some(offer => offer.provider === harness.provider && offer.model === harness.model)
+  );
+}
+
 /**
  * The agent a run was started with, among what `offers` vets: its harness and model when the
  * machine still offers them (else the default), with the role settings it recorded.
@@ -219,15 +231,12 @@ export function recordedAgent(
   start: RunStart | null,
   offers: readonly HarnessOffer[],
 ): AgentChoice | null {
-  const harness = start?.harness ?? null;
-  const offered =
-    harness !== null &&
-    offers.some(offer => offer.provider === harness.provider && offer.model === harness.model);
+  const harness = recordedHarnessOffered(start, offers) ? (start?.harness ?? null) : null;
   // The roles the run reports are not known yet: keep the recorded ones, which the run's own
   // roles replace once reported (`formWithRoles`).
-  const base = defaultAgent(offers, [], offered ? harness.provider : undefined);
+  const base = defaultAgent(offers, [], harness?.provider);
   if (base === null) return null;
-  const agent = offered ? {...base, model: harness.model} : base;
+  const agent = harness === null ? base : {...base, model: harness.model};
   return {...agent, roles: recordedRoles(start)};
 }
 
@@ -412,6 +421,19 @@ export interface ChecksFor {
 export interface FactsFor {
   readonly for: HostKey;
   readonly value: Offered<MachineDescription>;
+}
+
+/**
+ * The harnesses the machine says it has installed (its description's `harness_clis`), or null when
+ * it has not said: not described yet, a helper that cannot describe, or a description that failed.
+ */
+export function installedHarnesses(
+  facts: FactsFor | null,
+  machine: HostKey,
+): readonly string[] | null {
+  return facts?.for === machine && facts.value.kind === 'offered'
+    ? facts.value.value.harness_clis
+    : null;
 }
 
 /** Whether `checks` are for the form's inputs now and none fails: then Start is enabled. */

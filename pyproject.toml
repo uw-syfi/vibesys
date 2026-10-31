@@ -351,6 +351,7 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "server.control_envelope
 "libs/vs-sim/src/vs_sim/concurrency_contracts.py" = ["S101", "PLR2004"]
 "libs/vs-sim/src/vs_sim/signal_relay_contracts.py" = ["S101", "PLR2004"]
 "libs/vs-logs/src/vs_logs/_contracts.py" = ["S101", "PLR2004"]
+"libs/vs-runlog/src/vs_runlog/_fold_cache_contract.py" = ["S101", "PLR2004"]
 "libs/vs-sim/src/vs_sim/output_contracts.py" = ["S101", "PLR2004"]
 "libs/vs-runtime/src/vs_runtime/api/*_contracts.py" = ["S101", "PLR2004"]
 # Scenario and fixture builders for the runtime's own test suites, moved out of tests/support

@@ -165,6 +165,7 @@ from vs_proto._generated.vibesys.store.v1.content_pb import (
 from vs_proto._generated.vibesys.store.v1.core_input_pb import (
     AttemptInterrupted,
     CoreInput,
+    CoreSnapshot,
     InterruptionReason,
     RunEnded,
     RunStarted,
@@ -263,6 +264,7 @@ from vs_proto._generated.vibesys.store.v1.span_pb import (
     WaitingOn,
     WaitKind,
 )
+from vs_proto._generated.vibesys.store.v1.state_cache_pb import StateCache
 from vs_proto._generated.vibesys.store.v1.transcript_pb import (
     TranscriptChannel,
     TranscriptCommandResult,
@@ -323,6 +325,7 @@ __all__ = [
     "ComparisonVerdict",
     "ConfigurationFailed",
     "CoreInput",
+    "CoreSnapshot",
     "CreateChatSessionRequest",
     "CreateChatSessionResponse",
     "DescriptorSet",
@@ -436,6 +439,7 @@ __all__ = [
     "StageState",
     "Starting",
     "StartupStage",
+    "StateCache",
     "SteerIntent",
     "SteerMode",
     "SteerTarget",
