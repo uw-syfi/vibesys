@@ -176,7 +176,6 @@ describe('renderTokensCss', () => {
       'error',
       'warn',
       'ok',
-      'titlebar',
     ];
     for (const name of OLD_NAMES) {
       const named = css.includes(`--${name}:`);

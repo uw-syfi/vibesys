@@ -12,8 +12,10 @@ import {
   type CheckId,
   type CheckInput,
   chartSizeCheck,
+  chromeClearCheck,
   columnTopsCheck,
   controlRowCheck,
+  dragRegionCheck,
   focusRingCheck,
   HELPERS,
   legendCheck,
@@ -55,6 +57,8 @@ const CHECKS: Readonly<Record<PageCheckId, (input: CheckInput) => Violation[]>> 
   'column-tops': columnTopsCheck,
   'truncation-room': truncationRoomCheck,
   'focus-ring': focusRingCheck,
+  'chrome-clear': chromeClearCheck,
+  'drag-region': dragRegionCheck,
 };
 
 /** Enum values that never read as words: the failure reasons spelled with a hyphen or underscore. */
@@ -135,6 +139,17 @@ export async function screenCheck(
   return only.includes('bundled-font')
     ? [...violations, ...(await bundledFontCheck(page))]
     : violations;
+}
+
+/** Whether pressing each of `points` (x, y) on the screen `page` shows moves the window, by its drag regions. */
+export async function pressMovesWindow(
+  page: Page,
+  points: readonly (readonly [number, number])[],
+): Promise<boolean[]> {
+  const sources = HELPERS.map(each => each.toString());
+  return page.evaluate<boolean[]>(
+    `(() => {\n${sources.join('\n')}\nconst regions = dragRegions();\nreturn ${JSON.stringify(points)}.map(([x, y]) => dragsAt(regions, x, y));\n})()`,
+  );
 }
 
 /** One screen's violations that no known failure explains, and the known ones it matched. */

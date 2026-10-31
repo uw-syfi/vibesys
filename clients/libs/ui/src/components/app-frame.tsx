@@ -16,18 +16,15 @@ const COLLAPSE_WIDTH = 120;
  * The app window's layout, filling its container: a navigation column at the sidebar width (`nav`
  * at the top, `footer` at the bottom) and the main area beside it, which holds a `Page`; each
  * scrolls on its own. On a narrow window (under 800 px) the column floats over the rail and the
- * start of the main area, which keeps its place beside the rail. The column starts
- * below the window's own controls (`--chrome-inset-height`, which the desktop app sets before the
- * first paint) and its background drags the window.
+ * start of the main area, which keeps its place beside the rail. The column starts below the
+ * window's own controls (`--chrome-start-height`, which the desktop app sets before the first
+ * paint) and its background drags the window.
  *
- * The title-bar row is the top strip of the window, as high as the window's own controls
- * (`--chrome-inset-height`) and at least a control tall. `control` sits in it, vertically centered
- * and after the window's controls (`--chrome-inset-width`), and stays in the same place whether the
- * column is shown or not. With `navHidden` the column takes no width at all and is gone for
- * assistive technology and the keyboard, and the `rail`, if any, takes its place. The rail is wide
- * enough to hold the window's controls and the toggle, so the page starts at the same place whether
- * the column is shown or not. The column changes size over the `--duration-fast` token, and not at
- * all when the user prefers reduced motion.
+ * With `navHidden` the column takes no width at all and is gone for assistive technology and the
+ * keyboard, and the `rail`, if any, takes its place. The rail is wide enough to hold the window's
+ * controls (`--chrome-start-width`) and a button after them, so the page starts at the same place
+ * whether the column is shown or not. The column changes size over the `--duration-fast` token,
+ * and not at all when the user prefers reduced motion.
  */
 export function AppFrame(props: {
   /** The navigation column's accessible name. */
@@ -38,8 +35,6 @@ export function AppFrame(props: {
   readonly footer?: ReactNode;
   /** Hide the navigation column completely. */
   readonly navHidden?: boolean;
-  /** The title-bar row's control (the sidebar toggle), shown whether the column is hidden or not. */
-  readonly control?: ReactNode;
   /**
    * What stays reachable while the column is hidden: a narrow rail of icon buttons in its place,
    * named `label` for assistive technology. The first child sits at the top, the last at the bottom.
@@ -69,9 +64,6 @@ export function AppFrame(props: {
       data-nav-hidden={hidden || undefined}
       style={{'--sidebar-width': `${width}px`} as CSSProperties}
     >
-      {props.control === undefined ? null : (
-        <div className="vs-app-titlebar-control">{props.control}</div>
-      )}
       <nav
         className="vs-app-nav"
         aria-label={props.label}
@@ -125,20 +117,6 @@ export function AppFrame(props: {
       <div className="vs-app-main">
         <div className="vs-app-content">{props.children}</div>
       </div>
-    </div>
-  );
-}
-
-/**
- * A window that is only a page (no navigation column): the same title-bar row as
- * `AppFrame`, empty and draggable, clear of the window's own controls, with `children` below it
- * filling the window.
- */
-export function WindowFrame(props: {readonly children: ReactNode}): JSX.Element {
-  return (
-    <div className="vs-window-frame">
-      <div className="vs-app-strip" />
-      <div className="vs-app-content">{props.children}</div>
     </div>
   );
 }

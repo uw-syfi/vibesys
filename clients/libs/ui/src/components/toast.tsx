@@ -64,10 +64,11 @@ export function Toast(props: {
 }
 
 /**
- * The window's toasts, in the order given (the newest first), at the top right below the title bar,
- * over the page and out of the way of its controls. The stack itself is always present, so a toast
- * added to it is announced; it holds no state: the caller owns which toasts there are and which
- * are open.
+ * The window's toasts, in the order given (the newest first), at the top right a small gap below the
+ * header row of the page or screen on show (`Page`'s or `Screen`'s `header`, whatever its height; at
+ * the page's top edge where it has none), over the page and out of the way of its header's controls.
+ * The stack itself is always present, so a toast added to it is announced; it holds no state: the
+ * caller owns which toasts there are and which are open.
  */
 export function ToastStack(props: {
   readonly label: string;

@@ -1,11 +1,12 @@
 """Real-process proof that a scripted run survives a pause or a kill at any step, and resumes.
 
-The run is a real process (``tests.e2e._interruptible_run``): the production host composition
-over the product's on-disk ``.vibesys``, scripted agents, and the executing Fake Slurm cluster
-as real files. Nothing is simulated about the interruption. A pause is the operator's
-``vibesys control RUN pause`` (or ``pause-now``) written to the run's control inbox; a kill is a
-real SIGKILL of the run's process; a resume is a new process that relaunches the saved run
-as a new epoch, as ``vibesys --resume`` does.
+The run is a real process (``tests.e2e._interruptible_run``, forked from a fork server that
+imports the product once): the production host composition over the product's on-disk
+``.vibesys``, scripted agents, and the executing Fake Slurm cluster as real files. Nothing is
+simulated about the interruption. A pause is the operator's ``vibesys control RUN pause`` (or
+``pause-now``) written to the run's control inbox; a kill is a real SIGKILL of the run's
+process; a resume is a new process that relaunches the saved run as a new epoch, as
+``vibesys --resume`` does.
 
 The interruption lands inside a step the run process itself announces it holds (an agent turn
 before its session exists, an agent turn at work, an evaluation job pending on the cluster), so
@@ -16,22 +17,24 @@ nothing left running (no process in the run's group, no job on the cluster).
 
 from __future__ import annotations
 
-import json
+import contextlib
+import multiprocessing
 import os
 import queue
 import signal
-import subprocess
-import sys
+import tempfile
 import threading
 import uuid
 from dataclasses import dataclass, field
 from io import StringIO
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.e2e._interruptible_run import START, TURN
+from tests.e2e._interruptible_run import START, TURN, RunSpec, run_process
 from tests.e2e.dynamic_loop_harness import _AGENT_CONFIG, LoopInput
 from tests.e2e.scripted_value_run import SEED
+from tests.support.scratch_tree import remove_scratch_tree
 
 from entrypoints.control import control_main, time_ordered_id
 from vibesys.events import CoreEventType
@@ -42,7 +45,15 @@ from vs_slurm.fake_connector import active_jobs, pending_jobs, release_jobs
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
-    from pathlib import Path
+    from multiprocessing.connection import Connection
+    from multiprocessing.process import BaseProcess
+
+pytestmark = pytest.mark.xdist_group("pause-kill-resume")
+"""The file's cases share one worker: one fork server, and one run of the uninterrupted script."""
+
+_FORK_SERVER = multiprocessing.get_context("forkserver")
+_FORK_SERVER.set_forkserver_preload(["tests.e2e._interruptible_run"])
+"""Imports the product once; every run process below is a fork of that image."""
 
 _Line = dict[str, object]
 
@@ -61,33 +72,44 @@ class RunProcess:
     """One run process: its reports so far, and the means to hold, release, signal and wait."""
 
     base: Path
-    process: subprocess.Popen[str]
+    process: BaseProcess
+    pid: int
+    reports: Connection
+    releases: Connection
     errors: Path
     seen: list[_Line] = field(default_factory=list)
     lines: queue.Queue[_Line | None] = field(default_factory=queue.Queue)
 
     @classmethod
-    def start(cls, base: Path, *flags: str) -> RunProcess:
-        # > A real interpreter in its own session: the test signals it, and checks nothing of its
+    def start(cls, base: Path, *, resume: str | None = None, hold: str | None = None) -> RunProcess:
+        # > A real process in its own session: the test signals it, and checks nothing of its
         # > process group outlives it.
         errors = base / f"run-{uuid.uuid4().hex[:6]}.err"
-        process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-190301 [S603]; the test runs its own fixed child module.
-            [sys.executable, "-m", "tests.e2e._interruptible_run", str(base), *flags],
-            env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=errors.open("w"),
-            text=True,
-            start_new_session=True,
+        reports_in, reports_out = _FORK_SERVER.Pipe(duplex=False)
+        releases_in, releases_out = _FORK_SERVER.Pipe(duplex=False)
+        process = _FORK_SERVER.Process(
+            target=run_process,
+            args=(
+                RunSpec(str(base), resume, hold, str(errors), dict(os.environ), str(Path.cwd())),
+                reports_out,
+                releases_in,
+            ),
+            daemon=True,
         )
-        started = cls(base, process, errors)
+        process.start()
+        reports_out.close()
+        releases_in.close()
+        assert process.pid is not None
+        started = cls(base, process, process.pid, reports_in, releases_out, errors)
         threading.Thread(target=started._read, daemon=True).start()
         return started
 
     def _read(self) -> None:
-        assert self.process.stdout is not None
-        for text in self.process.stdout:
-            self.lines.put(json.loads(text))
+        while True:
+            try:
+                self.lines.put(self.reports.recv())
+            except (EOFError, OSError):
+                break
         self.lines.put(None)
 
     def wait_for(self, matches: Callable[[_Line], bool]) -> _Line:
@@ -123,36 +145,35 @@ class RunProcess:
 
     def release(self) -> None:
         """Let the held turn go on."""
-        assert self.process.stdin is not None
-        self.process.stdin.write("\n")
-        self.process.stdin.flush()
+        self.releases.send(None)
 
     def kill(self) -> None:
         """SIGKILL the run's process alone, as an out-of-memory kill or a lost host does."""
         self.process.kill()
-        self.process.wait(timeout=HANG_GUARD_S)
+        self.process.join(HANG_GUARD_S)
 
     def finish(self) -> _Line:
         """Wait for the process to end on its own; its outcome report."""
         outcome = self.wait_for(lambda line: "outcome" in line)
-        assert self.process.wait(timeout=HANG_GUARD_S) == 0, self.seen[-5:]
+        self.process.join(HANG_GUARD_S)
+        assert self.process.exitcode == 0, self.seen[-5:]
         outcome_fields = outcome["outcome"]
         assert isinstance(outcome_fields, dict)
         return outcome_fields
 
     def group_is_empty(self) -> bool:
         try:
-            os.killpg(self.process.pid, 0)
+            os.killpg(self.pid, 0)
         except ProcessLookupError:
             return True
         return False
 
     def reap_group(self) -> None:
-        try:
-            os.killpg(self.process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            return
-        self.process.wait(timeout=HANG_GUARD_S)
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(self.pid, signal.SIGKILL)
+        if self.process.is_alive():
+            self.process.kill()
+        self.process.join(HANG_GUARD_S)
 
 
 class Scenario:
@@ -168,16 +189,16 @@ class Scenario:
         )
         self.processes: list[RunProcess] = []
 
-    def start(self, *flags: str) -> RunProcess:
-        started = RunProcess.start(self.base, *flags)
+    def start(self, *, resume: str | None = None, hold: str | None = None) -> RunProcess:
+        started = RunProcess.start(self.base, resume=resume, hold=hold)
         self.processes.append(started)
         return started
 
     def hold(self, at: str, kind: str) -> RunProcess:
-        return self.start("--hold", f"{at}:{kind}")
+        return self.start(hold=f"{at}:{kind}")
 
-    def resume(self, run_id: str, *flags: str) -> RunProcess:
-        return self.start("--resume", run_id, *flags)
+    def resume(self, run_id: str, *, hold: str | None = None) -> RunProcess:
+        return self.start(resume=run_id, hold=hold)
 
     def post(self, run_id: str, action: str, out: StringIO, err: StringIO) -> int:
         """``vibesys control RUN ACTION`` against this project's run."""
@@ -209,11 +230,7 @@ class Scenario:
 
     def leftovers(self) -> list[str]:
         """What still runs after every run process ended: group members and cluster jobs."""
-        found = [
-            f"process group of pid {p.process.pid}"
-            for p in self.processes
-            if not p.group_is_empty()
-        ]
+        found = [f"process group of pid {p.pid}" for p in self.processes if not p.group_is_empty()]
         return [*found, *(f"cluster job {job}" for job in active_jobs(self.loop_input.cluster))]
 
     def close(self) -> None:
@@ -221,25 +238,47 @@ class Scenario:
             each.reap_group()
 
 
+@pytest.fixture(scope="module")
+def cases_root(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    """Where every scenario of this file keeps its files: in memory where the host has it.
+
+    A run makes about 5,000 ``fsync`` calls, 2 ms each on a disk and most of the run's wall time,
+    and a disk is what they are for: surviving the loss of the machine. Every interruption here is
+    the death or the pause of a process, and the files a dead process wrote are in the kernel
+    whether or not they were synced, so a memory filesystem changes nothing these cases observe.
+    """
+    try:
+        root = Path(tempfile.mkdtemp(prefix="pause-kill-resume-", dir="/dev/shm"))
+    except OSError:
+        yield tmp_path_factory.mktemp("cases")
+        return
+    try:
+        yield root
+    finally:
+        remove_scratch_tree(root)
+
+
 @pytest.fixture
-def scenario(tmp_path: Path) -> Iterator[Scenario]:
-    created = Scenario(tmp_path)
+def scenario(cases_root: Path) -> Iterator[Scenario]:
+    created = Scenario(Path(tempfile.mkdtemp(prefix="case-", dir=cases_root)))
     try:
         yield created
     finally:
         created.close()
+        remove_scratch_tree(created.base)
 
 
 @pytest.fixture(scope="module")
-def uninterrupted(tmp_path_factory: pytest.TempPathFactory) -> dict[str, object]:
+def uninterrupted(cases_root: Path) -> dict[str, object]:
     """What the script ends as when nothing interrupts it."""
-    reference = Scenario(tmp_path_factory.mktemp("uninterrupted"))
+    reference = Scenario(Path(tempfile.mkdtemp(prefix="uninterrupted-", dir=cases_root)))
     try:
         outcome = reference.start().finish()
         assert outcome["status"] == _COMPLETED, outcome
         return {**without_run_id(outcome), "adopted": reference.adopted_project_file()}
     finally:
         reference.close()
+        remove_scratch_tree(reference.base)
 
 
 def without_run_id(outcome: dict[str, object]) -> dict[str, object]:
@@ -354,7 +393,7 @@ def test_a_run_paused_again_after_it_resumed_still_resumes_to_the_uninterrupted_
     first.release()
     assert first.finish()["status"] == _PARKED
 
-    second = scenario.resume(first.run_id, "--hold", f"{TURN}:{IMPLEMENTER_KIND}")
+    second = scenario.resume(first.run_id, hold=f"{TURN}:{IMPLEMENTER_KIND}")
     second.wait_for(lambda line: line.get("held") == f"{TURN}:{IMPLEMENTER_KIND}")
     _pause(scenario, second)
     second.release()
