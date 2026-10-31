@@ -16,6 +16,7 @@ import {
   Select,
   type SelectOption,
   Stack,
+  StatusDot,
   type StepItem,
   StepList,
   Text,
@@ -85,6 +86,30 @@ export interface MachineSteps {
   readonly retry: (() => void) | null;
 }
 
+/**
+ * One machine that has not listed, as a line among the tiles: where it stands (the step it is on,
+ * or the one it stopped at, with the reason) and, once stopped, a way to ask again.
+ */
+function MachineLine(props: {readonly load: MachineSteps}): JSX.Element {
+  const {load} = props;
+  const at = load.steps.find(step => step.state === 'current' || step.state === 'failed');
+  const failed = at?.state === 'failed';
+  return (
+    <Row gap="space-2" wrap>
+      <StatusDot tone={failed ? 'err' : 'live'} label={failed ? 'Failed' : 'Loading'} />
+      <Text variant="body-strong">{load.machine}</Text>
+      {at === undefined ? null : (
+        <Text variant="small" tone="muted">
+          {[at.label, at.position, at.note].filter(each => each !== undefined).join(' ')}
+        </Text>
+      )}
+      {load.retry === null ? null : (
+        <Button variant="quiet" size="sm" text="Retry" press={load.retry} />
+      )}
+    </Row>
+  );
+}
+
 function Draft(props: {readonly draft: RunsDraft}): JSX.Element {
   const {draft} = props;
   return (
@@ -111,8 +136,9 @@ function Draft(props: {readonly draft: RunsDraft}): JSX.Element {
  * are narrowed to (when one is) and a Group by select, then every run's tile in groups on a grid
  * that fills the width, the runs that need their user first, each run in one group. With no run and
  * every machine listed it says so, with a New run action; before that each machine still loading or
- * stopped has a block of its steps (`loads`). Pressing a tile opens its run (`open` is handed the
- * tile's id); `menu` is a tile's row menu.
+ * stopped has a block of its steps (`loads`), and once tiles show it keeps a line of where it
+ * stands, so a machine that is missing is not silently absent. Pressing a tile opens its run
+ * (`open` is handed the tile's id); `menu` is a tile's row menu.
  */
 export function RunsScreen(props: {
   readonly tiles: readonly Tile[];
@@ -182,7 +208,9 @@ export function RunsScreen(props: {
           <Banner tone="warn" title={props.notice.title} body={props.notice.body} />
         )}
         {props.draft === null ? null : <Draft draft={props.draft} />}
-        {tiles.length > 0 ? null : loads.length > 0 ? (
+        {tiles.length > 0 ? (
+          loads.map(load => <MachineLine key={load.machine} load={load} />)
+        ) : loads.length > 0 ? (
           loads.map(load => (
             <StepList
               key={load.machine}
