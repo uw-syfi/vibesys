@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vs_proto.api import (
@@ -14,9 +14,11 @@ from vs_proto.api import (
     CoreInput,
     EpochStarted,
     InterruptionReason,
+    Lifecycle,
     Oneof,
     Record,
     RunEnded,
+    Running,
     StepCancelReason,
     StepFinished,
     StepStarted,
@@ -28,10 +30,11 @@ from vs_runlog.api import (
     ConfirmedLog,
     CoreMessage,
     FileRunLogWriter,
+    SharedWriter,
     Uncertain,
     open_run_log,
 )
-from vs_sim.api.testing import ManualClock, SimThreads, examples
+from vs_sim.api.testing import HANG_GUARD_S, ManualClock, SimThreads, VirtualClock, examples
 
 _TAG = st.text("abc", min_size=1, max_size=3)
 _BYTES = st.binary(min_size=1, max_size=8)
@@ -171,3 +174,92 @@ def test_an_uncertain_append_forgets_the_prefix_so_the_log_says_what_happened(
     assert confirmed == tuple(storage.durable)
     assert isinstance(stamp(after, log, 1, 0.0), Appended)
     assert [record.seq for record in log.records()] == list(range(1, len(confirmed) + 2))
+
+
+def _projection_record() -> Record:
+    """A record of the display projection: numbered by whoever appends it."""
+    return Record(
+        seq=1,
+        epoch=1,
+        at=Timestamp(seconds=1),
+        body=Oneof("lifecycle", Lifecycle(state=Oneof("running", Running()))),
+    )
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(
+    order=st.lists(st.booleans(), min_size=1, max_size=24),
+    core=st.lists(MESSAGES, min_size=24, max_size=24),
+)
+def test_core_and_the_projection_share_one_dense_sequence_in_whatever_order_they_append(
+    order: list[bool], core: list[CoreMessage]
+) -> None:
+    """The projection staging a record and core appending one never collide on a number."""
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "run.log"
+        with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as writer:
+            log = ConfirmedLog(writer)
+            shared = SharedWriter(log, writer)
+            messages = iter(core)
+            for by_core in order:
+                if by_core:
+                    assert isinstance(stamp(next(messages), log, 1, 0.0), Appended)
+                else:
+                    shared.append(_projection_record())
+            shared.commit()
+            written = log.records()
+        with open_run_log(path) as reader:
+            assert tuple(reader) == written
+        assert [record.seq for record in written] == list(range(1, len(order) + 1))
+        projected = [r.body is not None and r.body.field == "lifecycle" for r in written]
+        assert projected == [not by_core for by_core in order]
+
+
+@pytest.mark.regression
+@given(
+    projection=st.integers(1, 12),
+    core=st.integers(1, 12),
+    seed=st.integers(0, 2**32 - 1),
+)
+@example(projection=4, core=4, seed=0)
+def test_two_threads_appending_at_once_never_collide_on_a_sequence_number(
+    projection: int, core: int, seed: int
+) -> None:
+    """The display projection and core's loop run on different threads and append to one run.log.
+
+    Before the projection appended through the run's one appender, each stamped its next number
+    from its own count, so the second to append found a number already taken.
+    """
+    with TemporaryDirectory() as temporary:
+        path = Path(temporary) / "run.log"
+        clock = VirtualClock()
+        threads = SimThreads(clock, schedule_seed=seed)
+
+        def exercise() -> None:
+            with FileRunLogWriter(path, clock=clock, threads=threads) as writer:
+                log = ConfirmedLog(writer, threads)
+                shared = SharedWriter(log, writer)
+
+                def project() -> None:
+                    for _ in range(projection):
+                        shared.append(_projection_record())
+                    shared.commit()
+
+                worker = threads.spawn(project, name="projection")
+                for index in range(core):
+                    with log.transaction():
+                        record = log.next_record(
+                            CoreInput(schema_version=1, event=b"x"),
+                            epoch=1,
+                            at=Timestamp(seconds=index),
+                            clock=0.0,
+                        )
+                        assert isinstance(log.extend(record), Appended)
+                worker.join(HANG_GUARD_S)
+                assert not worker.is_alive()
+                total = projection + core
+                assert [r.seq for r in log.records()] == list(range(1, total + 1))
+
+        threads.run(exercise)
+        with open_run_log(path) as reader:
+            assert [record.seq for record in reader] == list(range(1, projection + core + 1))
