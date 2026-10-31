@@ -201,11 +201,52 @@ export const WORLDS: readonly MachinesWorld[] = [
     live: {hosts: {local: {kind: 'stale', readings: BUSY, reason: 'silent', ageMs: 42_000}}},
   },
   {
+    name: 'a connecting machine',
+    seed: seeded([LOCAL], {local: FULL}, {local: 3}),
+    live: {hosts: {local: {kind: 'connecting', step: 'handshake', attempt: 0}}},
+  },
+  {
+    name: 'a reconnecting machine',
+    seed: seeded([LOCAL], {local: FULL}, {local: 3}),
+    live: {
+      hosts: {
+        local: {kind: 'stale', readings: BUSY, reason: 'ended', ageMs: 95_000, attempt: 0},
+      },
+    },
+  },
+  {
     name: 'a failed machine',
     seed: seeded([LOCAL], {local: FULL}, {local: 3}),
     live: {
       hosts: {local: {kind: 'failed', reason: 'unreachable', retrying: true}},
-      afterRetry: {local: {kind: 'live', readings: BUSY}},
+      afterRetry: {
+        local: {kind: 'stale', readings: BUSY, reason: 'ended', ageMs: 95_000, attempt: 0},
+      },
+    },
+  },
+  {
+    name: 'a closed machine',
+    seed: seeded([LOCAL], {local: FULL}, {local: 3}),
+    live: {hosts: {local: {kind: 'failed', reason: 'closed', retrying: false}}},
+  },
+  {
+    name: 'a machine with unread gauges',
+    seed: seeded([LOCAL], {local: FULL}, {local: 3}),
+    live: {hosts: {local: {kind: 'live', readings: {cpuPercent: null, memory: null, gpus: null}}}},
+  },
+  {
+    name: 'an older machine',
+    seed: seeded(
+      [LOCAL, HOST_C],
+      {local: FULL, 'ssh:host-c': OLD},
+      {local: 3},
+      {'ssh:host-c': {kind: 'needs-update', facts: FACTS}},
+    ),
+    live: {
+      hosts: {
+        local: {kind: 'live', readings: BUSY},
+        'ssh:host-c': {kind: 'failed', reason: 'unsupported', retrying: false},
+      },
     },
   },
   {
@@ -216,7 +257,7 @@ export const WORLDS: readonly MachinesWorld[] = [
     },
   },
   {
-    name: 'machines in every live state',
+    name: 'four machines in every state',
     seed: seeded(
       [LOCAL, HOST_A, HOST_B, HOST_C],
       {local: FULL, 'ssh:host-a': HELD, 'ssh:host-b': EMPTY, 'ssh:host-c': OLD},

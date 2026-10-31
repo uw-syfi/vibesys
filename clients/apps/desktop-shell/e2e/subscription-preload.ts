@@ -22,12 +22,16 @@ import {machineEntry, type Readings} from './machine-entry.js';
 /** What a scripted host is doing, as a window should see it. */
 export type HostFeed =
   | {readonly kind: 'live'; readonly readings?: Readings}
-  /** The last value is `ageMs` old at the time the window opens. */
+  /**
+   * The last value is `ageMs` old at the time the window opens. `attempt` 0 is a stream being opened
+   * right now (after a Retry), and from 1 one that was lost and is waited for.
+   */
   | {
       readonly kind: 'stale';
       readonly readings?: Readings;
       readonly reason: StaleReason;
       readonly ageMs: number;
+      readonly attempt?: number;
     }
   | {readonly kind: 'failed'; readonly reason: FailureReason; readonly retrying: boolean}
   | {readonly kind: 'connecting'; readonly step: ConnectStep; readonly attempt: number};
@@ -54,7 +58,12 @@ function updatesOf(feed: HostFeed, now: number): readonly SubscriptionUpdate[] {
         ...sample(feed.readings),
         {
           kind: 'control',
-          control: {kind: 'stale', reason: feed.reason, attempt: 1, valueAt: now - feed.ageMs},
+          control: {
+            kind: 'stale',
+            reason: feed.reason,
+            attempt: feed.attempt ?? 1,
+            valueAt: now - feed.ageMs,
+          },
         },
       ];
     case 'failed':
