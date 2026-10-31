@@ -38,10 +38,7 @@ class _Reads:
         )
 
     def list_harnesses(self, request: pb.ListHarnessesRequest) -> pb.ListHarnessesResponse:
-        installed = self._source.installed_harnesses()
-        listed = sorted(
-            self._source.harnesses(), key=lambda option: option.provider not in installed
-        )
+        listed = self._source.harnesses()
         if not request.with_generations:
             for option in listed:
                 if option.display is not None:

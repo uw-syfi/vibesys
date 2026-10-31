@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from server.host_compatibility_generated import MIN_CHECKOUT_VERSION
-from vibesys.api.host_operations.api import execute_inspect_candidate
+from vibesys.api.host_operations.candidate import execute_inspect_candidate
 from vs_proto.api import (
     API_SCHEMA_HASH,
     FailureCategory,

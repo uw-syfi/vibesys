@@ -8,6 +8,7 @@ ending; the caller ends the wait on cancel or when the login process exits.
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from vibesys.api.host_operations._frames import frame
 from vs_proto.api import (
     FailureCategory,
     Oneof,
@@ -45,14 +46,6 @@ class LoginRefusedFact:
     reason: str
     command: str | None = None
     detail: str = ""
-
-
-def frame(payload: bytes) -> bytes:
-    """One length-delimited payload, at most 1 MiB."""
-    if len(payload) > _MAX_BYTES:
-        message = "login frame exceeds 1 MiB"
-        raise ValueError(message)
-    return len(payload).to_bytes(4, "big") + payload
 
 
 def serve_login(

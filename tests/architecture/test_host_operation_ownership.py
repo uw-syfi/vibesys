@@ -45,10 +45,12 @@ def _helper_dependencies(tree: ast.AST) -> set[str]:
             imported.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module is not None:
             imported.add(node.module)
+            # ``from entrypoints import host_helper`` imports the module ``host_helper``.
+            imported.update(f"{node.module}.{alias.name}" for alias in node.names)
         elif (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
-            and node.func.id == "import_module"
+            and node.func.id in {"import_module", "lazy_module"}
             and node.args
             and isinstance(node.args[0], ast.Constant)
             and isinstance(node.args[0].value, str)
@@ -67,7 +69,7 @@ def test_native_read_adapter_does_not_depend_on_the_helper() -> None:
 
 
 def test_native_cluster_dispatch_does_not_depend_on_the_helper() -> None:
-    tree = ast.parse((ROOT / "src/entrypoints/host.py").read_text())
+    tree = ast.parse((ROOT / "src/entrypoints/host_mutations.py").read_text())
     dispatch = next(
         node
         for node in tree.body
