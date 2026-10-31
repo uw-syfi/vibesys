@@ -141,7 +141,7 @@ def trajectories() -> st.SearchStrategy[Trajectory]:
 
 
 @pinned
-@settings(max_examples=examples(pr=10, nightly=300), deadline=None)
+@settings(max_examples=examples(pr=50, nightly=300), deadline=None)
 @given(case=trajectories())
 def test_every_action_core_returns_can_be_recorded_and_moves_the_run(case: Trajectory) -> None:
     world, moves, lag = case
@@ -157,7 +157,7 @@ def test_every_action_core_returns_can_be_recorded_and_moves_the_run(case: Traje
 
 
 @pinned
-@settings(max_examples=examples(pr=10, nightly=300), deadline=None)
+@settings(max_examples=examples(pr=50, nightly=300), deadline=None)
 @given(case=trajectories())
 def test_a_run_left_to_cooperative_runners_comes_to_rest_and_records_each_end(
     case: Trajectory,
