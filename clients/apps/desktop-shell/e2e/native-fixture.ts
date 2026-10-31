@@ -17,6 +17,7 @@ import {
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {parseFixture, type RunFixture, type StoreRunFixture} from '@vibesys/run-fixtures';
+import {type DerivedReplaySet, derivedReplayPath} from '@vibesys/run-fixtures/derived';
 import {gatewayScript, wire} from './fake-gateway.js';
 
 export interface NativeFixtureOptions {
@@ -64,22 +65,16 @@ function ensure(fixtures: readonly RunFixture[]): void {
     timeout: 120000,
   });
 }
-/** Canonical scenarios use checked native goldens; custom variants use the same real projector. */
+/** Canonical scenarios use the replays generated from their declarations; custom variants use the same real projector. */
 function replayFor(fixture: RunFixture) {
-  const sources = [
-    {
-      data: join(root, 'clients/libs/run-fixtures/src/data'),
-      native: join(root, 'clients/libs/run-fixtures/src/native'),
-    },
-    {
-      data: join(root, 'clients/apps/desktop-shell/e2e/scenarios'),
-      native: join(root, 'clients/apps/desktop-shell/e2e/scenarios'),
-    },
+  const sources: readonly {data: string; set: DerivedReplaySet}[] = [
+    {data: join(root, 'clients/libs/run-fixtures/src/data'), set: 'shared'},
+    {data: join(root, 'clients/apps/desktop-shell/e2e/scenarios'), set: 'journeys'},
   ];
   for (const source of sources) {
     const declaration = join(source.data, `${fixture.name}.json`);
-    const golden = join(source.native, `${fixture.name}.pb`);
-    if (!existsSync(declaration) || !existsSync(golden)) continue;
+    const golden = derivedReplayPath(source.set, fixture.name);
+    if (!existsSync(declaration) || golden === undefined) continue;
     const {
       lineage: _lineage,
       nativeLifecycles: _lifecycles,

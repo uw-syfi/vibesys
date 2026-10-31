@@ -113,21 +113,36 @@ goldens is in the `write-agent-prompt` skill.
 An old directory of prompt snapshots is read by no test, so regenerating it
 checks nothing; do not update it.
 
-The binary goldens a `.proto` file or the records projector invalidates are the
-native replays of the run-fixtures library and the desktop-shell scenarios, the
-conversion goldens and the gateway's Skeleton wire golden (with its retained RPC
-replies). After such a change run
+The native replays of the run-fixtures library and the desktop-shell scenarios
+are not goldens, and nothing of them is committed. They are the shipping
+projector applied to a declaration, so `tests.support.derived_replays` stores
+them under the hash of everything they derive from, and the
+`with_derived_replays` wrapper in the clients tools makes the set before a
+client test run (`pnpm test` in `run-page`, `pnpm e2e` in the desktop shell). A
+`.proto` or projector change names a new set, so none is stale and no two pull
+requests conflict. A client test reads one through
+`@vibesys/run-fixtures/derived`, which fails naming the script when it was
+skipped; a Python test projects the declaration itself with
+`shared_scenarios.project_shared` or `journey_fixtures.project_scenario`. Code
+that projection starts to run joins `INPUTS` in `derived_replays`; the
+completeness test names the file. Generation is never done inside a test: the
+two 600 idea scenarios take over a minute.
+
+Three sets of committed binary goldens remain, each because it pins a contract or
+is read where Python cannot make it: the conversion goldens
+(which the gateway and TypeScript tests read), the
+gateway's Skeleton wire golden with its retained RPC replies, and the frozen
+retained corpus. After a converter or gateway change run
 `./scripts/regenerate_goldens.sh` and commit every file it rewrites; it is the
 only regeneration command, and each stale-golden failure names it. It does not
 touch the UI gallery screenshot baselines, which need Docker and depend on the
 UI, not the schema (`update:screenshots`, in
 [clients-architecture.md](../../../../docs/contributing/clients-architecture.md)).
-Each golden set records the hash of its inputs beside it, so
-`./scripts/check_proto.sh` fails a stale one from hashes alone before any golden
-test runs. A test compares a native replay through `assert_replay_golden` in
-`tests.support.replay_golden`, which names the first differing record and the
-command. A new golden set joins `tests.support.wire_goldens` and the script, not
-a second command.
+These carry no hash of their inputs, because a byte comparison already fails a
+stale one: `test_gateway_conversion_fixture_regenerates_identically` runs in the
+proto check group, and the gateway tests compare the wire golden and the replies;
+a change to any committed golden selects both jobs. A new committed golden joins
+`tests.support.golden_regeneration` and the script, not a second command.
 
 ## Isolation and timeout verdicts
 

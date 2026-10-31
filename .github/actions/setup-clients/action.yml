@@ -1,8 +1,9 @@
 name: Set up the client workspace
 description: >-
   Node, a cached pnpm binary and store, the cached Electron binary, verified
-  Bun, uv with the Python dev environment, the `clients/` workspace install,
-  and Go for repoctl. Every client job of test.yml starts from this, so the
+  Bun, uv with the Python dev environment, the cached native replays the tests
+  read, the `clients/` workspace install, and Go for repoctl. Every client job
+  of test.yml starts from this, so the
   legs cannot drift apart. Set `playwright` to install cached Chromium using
   the runner-provided system libraries for end-to-end jobs.
 
@@ -88,6 +89,22 @@ runs:
       run: |
         bash "$GITHUB_WORKSPACE/.github/actions/setup-clients/retry-download.sh" \
           uv sync --dev
+
+    # The native replays that the run page tests and the desktop e2e read are generated from their
+    # declarations, not committed (tests/support/derived_replays.py). The key is the hash of every
+    # file they derive from, computed by the module that owns that list, so none is repeated here.
+    # A job that restores the set pays seconds; the first job to see a new key generates it in its
+    # test step (about 90 s) and saves it for the runs after.
+    - name: Key the derived replays
+      id: derived-replays
+      shell: bash
+      run: python3 -m tests.support.derived_replays key >> "$GITHUB_OUTPUT"
+
+    - name: Cache the derived replays
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.derived-replays.outputs.path }}
+        key: derived-replays-${{ runner.os }}-${{ steps.derived-replays.outputs.key }}
 
     - name: Resolve the Electron version
       id: electron
