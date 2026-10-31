@@ -1,0 +1,18 @@
+shared/finished-ten-ideas
+records 118
+blobs 2
+streams 0
+record kinds
+  blob 20
+  declaration_amended 1
+  epoch_started 1
+  lifecycle 2
+  metric 13
+  span 81
+span label kinds
+  (no label) 2
+  adoption 2
+  agent_turn 40
+  gate 15
+  planning_call 2
+  workstream 20

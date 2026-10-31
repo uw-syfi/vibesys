@@ -1,0 +1,10 @@
+journeys/quota
+records 5
+blobs 1
+streams 0
+record kinds
+  epoch_started 1
+  lifecycle 3
+  span 1
+span label kinds
+  capacity_wait 1

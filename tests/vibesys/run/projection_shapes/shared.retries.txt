@@ -1,0 +1,17 @@
+shared/retries
+records 44
+blobs 1
+streams 0
+record kinds
+  declaration_amended 1
+  epoch_started 1
+  lifecycle 1
+  metric 7
+  span 34
+span label kinds
+  (no label) 1
+  adoption 1
+  agent_turn 14
+  gate 7
+  planning_call 2
+  workstream 9

@@ -50,7 +50,7 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
 |---|---|
 | Core inputs as log records: `CoreInput`, `StepStarted`, `StepFinished`, `AttemptInterrupted`, and the confirmed append in `vs_runlog` | built, dormant (#3475 item 4a) |
 | `RunStarted` (the seed of a fold) and `StrategyAdvanced` (one advance of the search) records, `RunLogStepLog`, `CoreInputs`, `StepRouter`, one appender and one lock for the run's records | built and dormant, run in simulation by `vs_dst.StepLoopHosting` (PR 6a-2) |
-| `CoreSnapshot` record, the seed of a migrated run | unbuilt (PR 6a) |
+| `CoreSnapshot` record, the seed of a migrated run, and `vibesys.run.store_migration`, the one-time migration of a run's `store.json` into it | built and dormant (PR 6a-3m); the migration is deleted seven days after the cutover ships |
 | `fold(log)` and `decide(state, now) -> actions` in `vs_core` | built, dormant (#3475 item 4a) |
 | Parked, draining, ended and resumed runs in the fold: the `RunEnded` record, `open_step`, the park advance (#3475, core gaps) | built, dormant |
 | Runner loop, `StepRunner` Protocol, `FakeStepRunner`, contract suite | built and dormant: `vs_runtime.api.step_runner` and `vs_runtime.api.testing`; no run selects it (#3475 item 4b) |
@@ -60,8 +60,8 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
 | Runner of the 13 executor kinds: `ExecutorStepRunner` | built and dormant: `vs_runtime.api.executor_step_runner`, in the contract suite for every kind (#3475 item 5d) |
 | Per-environment `clear` (Docker, SkyPilot, Modal, Slurm, Host) | built, dormant: `RunEnvironment.agent_work_reaper` (#3475 item 5e); every environment clears an agent step, the Host environment on macOS through a leader that carries the mark, see [open risks](#open-risks) |
 | Pause drains within a deadline and records `Parked` | in progress (#3475 item 1) |
-| `vs-dst` kills and pauses at every log write and every await | built; `StepLoopHosting` runs the production loop for all five searches (PR 6a-2). Every kill resumes to the uninterrupted result, and so does a resumed host paused again (`interrupt(point, then=...)`); the pause groups that still fail on a core finding are named in `tests/system/crash/test_never_stuck.py` |
-| `state.pb` as a cache, one-append commit | unbuilt |
+| `vs-dst` kills and pauses at every log write and every await | built; `StepLoopHosting` runs the production loop for all five searches (PR 6a-2). Every kill resumes to the uninterrupted result, and so does every pause, and a resumed host paused again (`interrupt(point, then=...)`); a pause's drain lets the turns it admitted go on (`admitted_work_proceeds`) |
+| `state.pb` as a cache of the fold: `FoldCache` in `vs_runlog`, the start from it and its writes in `RunLogStepLog` | built and dormant (PR 6a-3m); the one-append commit is the log's `ConfirmedLog` |
 | Prove-or-block layer ([inventory](#consumer-inventory)) | built; deleted at the cutover |
 | Keyed replay, parts 1 to 7a | deleted (the `vs_runtime` driver, the `vs_core` flows and `api/replay.py`, `serial_replay.py` and their tests); the protos and `RunLogReplayStore` stay until 6b (see [what of keyed replay stays](#what-of-keyed-replay-stays)) |
 | Keyed replay, parts 7b to 9 | not built, and not needed by this design |
@@ -341,7 +341,7 @@ New records (one proto envelope, `vibesys/store/v1/core_input.proto`, validated 
 | `StepFinished` | tag, attempt, `Finished` (the report and the owner events), `Failed` or `Cancelled` with a typed reason | the result; one per step, and one atomic record, so a crash loses no owner event |
 | `AttemptInterrupted` | tag, attempt, reason (`PAUSE`, `SHUTDOWN`, `RAISED`) | an attempt that ended without ending the step; a `RAISED` one (the runner raised or gave nothing back) is charged to the retry bound, the other two are not. The loop writes `PAUSE` and `RAISED`; an orderly stop of the process (`SHUTDOWN`) is not built, and a cancelled loop is a crash |
 | `RunEnded` | the run's result | the end of the run, published once nothing is open; a run has ended when this is in the log, not when the kernel reaches its terminal status |
-| `CoreSnapshot` | an old `RunEnvelope` | the seed of a migrated or imported run only; never written for a new run |
+| `CoreSnapshot` | an old `RunEnvelope`: its core state, the owner events it had not applied, the search it left (state, wake-ups, held decisions) | the seed of a migrated or imported run only; never written for a new run |
 
 The bodies of decisions, requests and observations are the canonical encoding of today's validated
 `CoreEvent` and `Request` values in a bytes field with a schema version, the same interim form
@@ -352,6 +352,29 @@ prerequisite of this design. A migration from
 an existing run's `store.json` writes one `CoreSnapshot` record holding the old envelope as the seed of
 the fold, with its recovery fields dropped and its open requests becoming open steps. The migration code
 is deleted seven days after it ships.
+
+As built (PR 6a-3m), the migration is `vibesys.run.store_migration.migrate_saved_run`, called by a
+resuming process after it opened its epoch and before it opens the step log. It appends nothing if the
+log already holds a start of the run (`vs_core.api.recovery.starts_run`), returns `NOTHING_SAVED` if the
+store holds no run, and otherwise reads the store as a resume does (`resolve_core_resume`, so a store of
+another run or strategy is refused with its diagnostic) and appends one `CoreSnapshot`. The record carries
+the core state and the search's state compressed, the owner events the saved run had not applied (the
+fold applies them in order after the seed, as `CoreInput` records would be) and the search's wake-ups and
+held decisions (`restore` reads them as a checkpoint). Core takes and returns plain values: it encodes a
+`SavedRun` as canonical JSON bytes (`encode_saved`) and folds one (`apply_saved`, `restore(saved=)`). The
+compression and the `CoreSnapshot` message are `vs_runtime`'s (`_saved_run_record.py`), and so is every
+read of a log that may hold a snapshot (`fold_log`, `restore_log`): core refuses a snapshot record it is
+handed directly. One record, so a crash leaves the log with all of
+it or none, and the migration is idempotent at every append. Dropped: the fence, the event cursor and the
+publications to the display journal the saved run had not delivered. A saved run that does not fit one
+record after compression (a record is at most 1 MiB) is refused by name with `SnapshotTooLargeError`; one
+saved core state measured 708 KB of JSON and 99 KB compressed. The store is left as it was.
+
+Deleting the migration seven days after the cutover ships is not enforced: a check on the date would
+depend on real time. The pull request that ships the cutover names the date. What stays for good is the
+log reader's reading of `CoreSnapshot` (`vs_runtime`), which every migrated log holds. Until the module is deleted, the cutover's
+deletion of the old store (PR 6b) must keep what the migration reads: `StateStore.load`,
+`RuntimeRecord`, `resolve_core_resume` and the envelope migrations of `vs_core`.
 
 ### The search in the log
 
@@ -406,6 +429,27 @@ a `CoreInput` that prepares a request: 0.3 to 0.6 milliseconds, the cost of `ste
 with the ledger): a log of 4,000 attempt records folds in 70 milliseconds, and `decide` takes 0.04
 milliseconds. A start that folds the whole log of a run with thousands of inputs is a second or more,
 which is why the cache exists; the keyframe interval is the cutover's to choose.
+
+As built (PR 6a-3m):
+
+- `vs_runlog.FoldCache` is the interface (`load`, `store`). `FileFoldCache` writes `state.pb`, a
+  `StateCache` message, with a temporary file, an fsync and a rename. `MemoryFoldCache` is the Fake, as
+  strict as the file, and both pass `FoldCacheContract`. The cache holds the bytes of a fold (the
+  `Folded` of `vs_core`, encoded by `Folded.encode`: core's state and the events the search has yet to
+  hear), the number of records it covers and the SHA-256 of those records.
+- A start (`start_fold`) uses the cache only if its digest is that of the log's own first records.
+  Otherwise it folds the whole log and says why in a typed `CacheMiss`: `ABSENT`, `UNREADABLE`,
+  `AHEAD_OF_LOG`, `DIGEST_MISMATCH` or `STATE_REFUSED` (the fold in the cache cannot be read by this
+  code). `RunLogStepLog.cache_start` reports which. The cost that remains is hashing the log's records
+  (about 4 microseconds each) and the search's restore, which still reads the log's advance records.
+- `RunLogStepLog` writes the cache when the run comes to rest (parked or ended) and every `CACHE_EVERY`
+  (1,024) core records its process appended. The keeper folds the log itself from where its cache stopped
+  and does not copy the step log's state: the step log folds only the records it appends, and the display
+  projection's records, which a fold reads for their epoch and clock, are in the log between them. A cache
+  written from the fold a later start computes cannot differ from it. A failed write leaves the cache
+  before it, which is only older.
+- Not covered: a process that changes the fold's code between the write and the read. The cache is read
+  as the code that reads it decodes it, and a state it cannot decode is `STATE_REFUSED`.
 
 ## Interfaces
 

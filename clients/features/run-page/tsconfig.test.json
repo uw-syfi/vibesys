@@ -29,6 +29,9 @@
       "path": "../../libs/run-fixtures/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/run-fixtures/tsconfig.derived.json"
+    },
+    {
       "path": "../../libs/store/tsconfig.testing.json"
     },
     {

@@ -5,6 +5,9 @@ for one), let it settle on leaving the block, and return after the last item, so
 adopts the input and ends the run. The
 world answers a workspace request with a resource named by how many workspaces it has handed
 out, so the position of the world shows in the state of the run.
+
+A retaining search keeps the work of each workspace, so its settlement asks for a snapshot
+and a retention beside the close of the scope: the effects a drain lets through.
 """
 
 from __future__ import annotations
@@ -12,17 +15,21 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vs_core.api import (
+    Assessment,
     AttemptBudget,
     AttemptId,
     EnsureWorkspace,
     Flow,
     FlowState,
     ItemId,
+    NotOpened,
     OperationRegistry,
     ResourceId,
+    RetainRevision,
     RevisionRef,
     RunEnvelope,
     RunFacts,
+    SnapshotAndRetain,
     Value,
     Wait,
     WakeAt,
@@ -43,6 +50,7 @@ if TYPE_CHECKING:
     from vs_core.api.testing import Answer
 
 BASELINE = RevisionRef.of_git_commit("abc123")
+KEPT = Assessment(outcome="succeeded", eligible=True)
 FACTS = RunFacts(
     objective="settle every item",
     baseline=BASELINE,
@@ -60,6 +68,7 @@ class TinyConfig(Value):
 
     items: int
     patience: float = PATIENCE
+    retain: bool = False
 
 
 @search("tiny", config=TinyConfig)
@@ -73,14 +82,17 @@ async def tiny(ctx: Flow, config: TinyConfig) -> None:
             plan=plan,
             budget=AttemptBudget(),
             within=Within(limit=config.patience),
-        ):
-            pass
+        ) as workspace:
+            if config.retain and not isinstance(workspace, NotOpened):
+                ctx.workspaces.keep(workspace, BASELINE, KEPT)
 
 
-def tiny_setup(items: int, max_concurrent: int = 1, patience: float = PATIENCE) -> RunSetup:
+def tiny_setup(
+    items: int, max_concurrent: int = 1, patience: float = PATIENCE, *, retain: bool = False
+) -> RunSetup:
     """The tiny search over ``items`` items, hosted with no operations."""
     return RunSetup(
-        new_launch=lambda: Launch(tiny, TinyConfig(items=items, patience=patience)),
+        new_launch=lambda: Launch(tiny, TinyConfig(items=items, patience=patience, retain=retain)),
         harness=Harness(
             registry=OperationRegistry(()),
             facts=FACTS,
@@ -100,8 +112,15 @@ def tiny_setup(items: int, max_concurrent: int = 1, patience: float = PATIENCE) 
 class TinyWorld:
     """Executors that hand out workspaces, one numbered resource after another."""
 
-    def __init__(self, items: int = 2, max_concurrent: int = 1, patience: float = PATIENCE) -> None:
-        self.setup = tiny_setup(items, max_concurrent, patience)
+    def __init__(
+        self,
+        items: int = 2,
+        max_concurrent: int = 1,
+        patience: float = PATIENCE,
+        *,
+        retain: bool = False,
+    ) -> None:
+        self.setup = tiny_setup(items, max_concurrent, patience, retain=retain)
         self.workspaces_handed_out = 0
         self.seen: list[str] = []
 
@@ -114,6 +133,8 @@ class TinyWorld:
             return Succeeded(
                 resource_id=ResourceId(root=f"workspace:{number}"), revision=request.plan.base
             )
+        if isinstance(request, SnapshotAndRetain | RetainRevision):
+            return Succeeded(revision=BASELINE)
         return Succeeded()
 
 

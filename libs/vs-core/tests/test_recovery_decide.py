@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -225,6 +225,18 @@ def scripts(draw: st.DrawFn) -> Script:
     return build.script
 
 
+def as_first_attempt(finish: Record) -> Record:
+    """A step's finish as the log of a run that never interrupted it holds: the step ran once.
+
+    A finish names the latest attempt the step began, so a log without the later starts has the
+    finish name the first.
+    """
+    copy = Record.from_binary(finish.to_binary())
+    assert copy.body is not None
+    copy.body.value.attempt = 1
+    return copy
+
+
 def restarted(script: Script, length: int) -> Record:
     """The first record of the epoch after a crash at ``length`` records."""
     epoch = script.epochs[length - 1] if length else 1
@@ -303,8 +315,21 @@ def test_folding_a_cached_state_forward_equals_folding_the_whole_log(
     assert fold(script.records, SEED) == whole
 
 
+def interrupted_then_finished() -> Script:
+    """One step that began twice, the first attempt ended by a pause, and finished on the second."""
+    build = Builder()
+    build.prepare(1)
+    step = build.steps[0]
+    build.start(step)
+    build.interrupt(step, Interruption.PAUSE)
+    build.start(step)
+    build.end(step, Finished(observation=success(step.request)))
+    return build.script
+
+
 @settings(max_examples=examples(pr=12, nightly=200))
 @given(script=scripts())
+@example(script=interrupted_then_finished())
 def test_a_rerun_attempt_is_not_a_debit_of_any_other_budget(script: Script) -> None:
     """Interruptions and later attempts change the step's own record, never the round's accounts."""
     started: set[str] = set()
@@ -318,7 +343,7 @@ def test_a_rerun_attempt_is_not_a_debit_of_any_other_budget(script: Script) -> N
             if body.value.tag in started:
                 continue
             started.add(body.value.tag)
-        kept.append(record)
+        kept.append(as_first_attempt(record) if body.field == "step_finished" else record)
     reduced = fold(kept, SEED)
     full = fold(script.records, SEED)
     for area in ("attempts", "sessions", "scheduling", "evaluation", "settlement"):
