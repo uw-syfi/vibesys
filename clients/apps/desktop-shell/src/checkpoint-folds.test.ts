@@ -253,6 +253,7 @@ test('shared-reader fold inventory is exhaustive', () => {
     'blob',
     'chat',
     'coreInput',
+    'coreSnapshot',
     'declarationAmended',
     'epochStarted',
     'intent',
@@ -261,9 +262,11 @@ test('shared-reader fold inventory is exhaustive', () => {
     'metric',
     'notice',
     'runEnded',
+    'runStarted',
     'span',
     'stepFinished',
     'stepStarted',
+    'strategyAdvanced',
     'stream',
   ]);
 });

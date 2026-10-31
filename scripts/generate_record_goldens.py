@@ -6,6 +6,7 @@ local output, generated in tests so independent schema changes never rewrite a
 shared binary. Tests decode the committed Any attrs using that embedded schema.
 """
 
+import zlib
 from pathlib import Path
 
 from protobuf import DescFile, Message
@@ -378,6 +379,38 @@ def record_examples() -> dict[str, p.Record]:
             clock=2,
             body=p.Oneof(
                 "core_input", p.CoreInput(schema_version=1, event=b'{"kind":"epoch_resumed"}')
+            ),
+        ),
+        "run_started": p.Record(
+            clock=0,
+            body=p.Oneof("run_started", p.RunStarted(schema_version=1, state=b'{"revision":0}')),
+        ),
+        "core_snapshot": p.Record(
+            clock=12.5,
+            body=p.Oneof(
+                "core_snapshot",
+                p.CoreSnapshot(
+                    schema_version=1,
+                    envelope_version=43,
+                    state=zlib.compress(b'{"revision":0}'),
+                    inputs=[b'{"kind":"epoch_resumed"}'],
+                    strategy=zlib.compress(b"{}"),
+                    wakes=[30.0],
+                    held=b"[]",
+                ),
+            ),
+        ),
+        "strategy_advanced": p.Record(
+            clock=2,
+            body=p.Oneof(
+                "strategy_advanced",
+                p.StrategyAdvanced(
+                    schema_version=1,
+                    proposals=[b'{"kind":"proposal_submitted"}'],
+                    strategy=p.Oneof("steps", b'[{"digest":"a"}]'),
+                    wakes=[30.0],
+                    delivered=[10.0],
+                ),
             ),
         ),
         "step_started": p.Record(

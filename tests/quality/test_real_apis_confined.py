@@ -1229,6 +1229,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         EdgeKind.LOG,
         "the run.lock lifetime descriptor",
     ),
+    "libs/vs-runlog/src/vs_runlog/_file_fold_cache.py": (
+        EdgeKind.LOG,
+        "state.pb, the cache of the fold, read and replaced atomically; its judgment stays pure",
+    ),
     "libs/vs-runlog/src/vs_runlog/_file.py": (
         EdgeKind.LOG,
         "the run.log file sink and recovery reader; framing stays in the pure _framing module",
