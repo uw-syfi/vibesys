@@ -375,3 +375,6 @@ export const watchBudgets = Object.freeze({
   login: Object.freeze({capMs: 600000, graceMs: 5000, totalMs: 605000, firstEventMs: 25000, progressMs: 0} as const),
   streamSavedRuns: Object.freeze({capMs: 600000, graceMs: 5000, totalMs: 605000, firstEventMs: 60000, progressMs: 25000} as const),
 } as const);
+export const topicPolicies = Object.freeze({
+  machineStats: Object.freeze({cadenceMs: 10000, staleAfterMs: 30000, firstFrameMs: 15000, minIntervalMs: 0, maxKeys: 1, maxValueBytes: 16384} as const),
+} as const);

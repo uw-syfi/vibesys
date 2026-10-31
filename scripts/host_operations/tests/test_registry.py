@@ -10,10 +10,21 @@ import pytest
 from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
 from hypothesis import example, given
 from hypothesis import strategies as st
-from scripts.host_operations.api import GenerationError, compile_outputs, compile_registry
+from scripts.generate_proto_framing import HOST_API_MAX_MESSAGE_BYTES
+from scripts.host_operations.api import (
+    GenerationError,
+    compile_outputs,
+    compile_registry,
+    compile_topics,
+)
 from scripts.host_operations.generate import generate
 
-from vs_proto.api import OperationFailure, host_operation_descriptors, host_operations
+from vs_proto.api import (
+    OperationFailure,
+    SubscribeRequest,
+    host_operation_descriptors,
+    host_operations,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -37,6 +48,7 @@ def _image() -> descriptor_pb2.FileDescriptorSet:
 
     add(host_operation_descriptors.desc())
     add(OperationFailure.desc().file)
+    add(SubscribeRequest.desc().file)
     return descriptor_pb2.FileDescriptorSet(file=list(seen.values()))
 
 
@@ -188,11 +200,94 @@ def test_the_descriptor_pass_compiles_all_language_outputs_before_publication() 
     root = Path(__file__).resolve().parents[3]
     image = _image().SerializeToString()
     outputs = compile_outputs(image, _slots(), _server_sources(root), _watches())
-    assert len(outputs) == 13
+    assert len(outputs) == 14
     for path, content in outputs.items():
         if path.endswith(".py"):
             ast.parse(content)
     assert compile_outputs(image, _slots(), _server_sources(root), _watches()) == outputs
+
+
+def _topic_image(
+    change: Callable[[descriptor_pb2.DescriptorProto, descriptor_pb2.DescriptorProto], None],
+) -> bytes:
+    """Rewrite the policy option of `MachineStatsTopic`, and the file holding `TopicEntry`."""
+    image = _image()
+    file = next(f for f in image.file if f.name == "vibesys/api/v1/subscribe.proto")
+    messages = {message.name: message for message in file.message_type}
+    change(messages["MachineStatsTopic"], messages["TopicEntry"])
+    return image.SerializeToString()
+
+
+def test_topic_policies_compile_from_the_descriptor() -> None:
+    topics = compile_topics(_image().SerializeToString())
+    assert [(topic.name, topic.policy.cadence_ms, topic.policy.max_keys) for topic in topics] == [
+        ("machine_stats", 10000, 1)
+    ]
+
+
+def test_a_topic_without_a_policy_fails_generation() -> None:
+    def change(topic: descriptor_pb2.DescriptorProto, _: object) -> None:
+        topic.options.Clear()
+
+    with pytest.raises(GenerationError, match="MachineStatsTopic: missing topic policy"):
+        compile_topics(_topic_image(change))
+
+
+def test_a_topic_without_its_value_arm_fails_generation() -> None:
+    def change(_: object, entry: descriptor_pb2.DescriptorProto) -> None:
+        for field in entry.field:
+            if field.name == "machine_stats":
+                field.name = "renamed"
+
+    with pytest.raises(GenerationError, match=r"no TopicEntry\.value arm"):
+        compile_topics(_topic_image(change))
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("first_frame_ms", 0, "first_frame_ms"),
+        ("max_keys", 0, "max_keys"),
+        ("max_value_bytes", 0, "max_value_bytes"),
+        # A value of exactly the transport cap leaves no room for its key and framing.
+        ("max_value_bytes", HOST_API_MAX_MESSAGE_BYTES, "exceeds the transport cap"),
+        ("max_value_bytes", HOST_API_MAX_MESSAGE_BYTES + 1, "exceeds the transport cap"),
+        ("stale_after_ms", 10000, "stale_after_ms must exceed cadence_ms"),
+    ],
+)
+def test_invalid_topic_policies_name_the_topic(field: str, value: int, message: str) -> None:
+    number = {"stale_after_ms": 2, "first_frame_ms": 3, "max_keys": 4, "max_value_bytes": 6}[field]
+
+    def change(topic: descriptor_pb2.DescriptorProto, _: object) -> None:
+        # A later occurrence of a scalar wins, so appending overrides the checked-in policy.
+        raw = topic.options.SerializeToString()
+        topic.options.ParseFromString(raw + _append_to_policy(number, value))
+
+    with pytest.raises(GenerationError, match=f"MachineStatsTopic: .*{message}"):
+        compile_topics(_topic_image(change))
+
+
+def test_a_value_with_room_for_its_key_and_framing_is_accepted() -> None:
+    def change(topic: descriptor_pb2.DescriptorProto, _: object) -> None:
+        raw = topic.options.SerializeToString()
+        topic.options.ParseFromString(raw + _append_to_policy(6, HOST_API_MAX_MESSAGE_BYTES - 1024))
+
+    assert compile_topics(_topic_image(change))[0].policy.max_value_bytes == HOST_API_MAX_MESSAGE_BYTES - 1024
+
+
+def _varint(value: int) -> bytes:
+    encoded = bytearray()
+    while value > 0x7F:
+        encoded.append(value & 0x7F | 0x80)
+        value >>= 7
+    encoded.append(value)
+    return bytes(encoded)
+
+
+def _append_to_policy(number: int, value: int) -> bytes:
+    """Encode a `TopicPolicy` option field, which protobuf merges into the one already set."""
+    update = _varint(number << 3) + _varint(value)
+    return _varint(51004 << 3 | 2) + _varint(len(update)) + update
 
 
 def test_every_client_budget_exceeds_its_runner_cap() -> None:

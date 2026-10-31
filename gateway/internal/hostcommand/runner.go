@@ -42,8 +42,8 @@ type Runner interface {
 	Stream(context.Context, Command, func([]byte) error) error
 }
 
-// ExecRunner runs an argv without a shell. Killing the command and closing its
-// pipes belongs to CommandContext; WaitDelay also bounds inherited child pipes.
+// ExecRunner runs an argv without a shell. Cancellation kills the command's
+// process group and closes its pipes; WaitDelay also bounds inherited child pipes.
 type ExecRunner struct{}
 
 func (ExecRunner) Run(ctx context.Context, command Command) (Result, error) {
@@ -53,6 +53,15 @@ func (ExecRunner) Run(ctx context.Context, command Command) (Result, error) {
 	cmd := exec.CommandContext(ctx, command.Executable, command.Args...)
 	cmd.Stdin = bytes.NewReader(command.Input)
 	cmd.Env = append(os.Environ(), "VIBESYS_STATE_HOME="+command.StateRoot)
+	// A wrapper's children must not outlive its timeout: they would keep running,
+	// and keep the output pipes open until WaitDelay. So the group is killed.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+			return err
+		}
+		return nil
+	}
 	cmd.WaitDelay = time.Second
 	output := &limitedBuffer{limit: MaxOutput}
 	stderr := &limitedBuffer{limit: MaxStderr, truncate: true}
