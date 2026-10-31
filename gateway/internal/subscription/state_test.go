@@ -321,6 +321,42 @@ func TestDeliveredStateConvergesToTheProducersUnderAnyInterleaving(t *testing.T)
 	}
 }
 
+// What a flush sends is fixed when it starts, and bounded by the key bound however
+// the writes and reads interleaved before it: the hub's interval and heartbeat
+// both rely on a flush ending.
+func TestAFlushSendsExactlyWhatWasOwedAndNoMoreThanTheKeyBoundAllows(t *testing.T) {
+	property := func(actions []action) bool {
+		m := newModel(t)
+		for _, next := range actions {
+			m.step(next)
+		}
+		for _, each := range m.clients {
+			owed := m.state.owed(each.id)
+			if owed > 2*modelKeys+2 {
+				return false
+			}
+			sent := 0
+			for {
+				frame, terminal := m.state.next(each.id)
+				if frame == nil {
+					break
+				}
+				sent++
+				if terminal {
+					break
+				}
+			}
+			if failed := m.state.subscribers[each.id].failure != nil; failed && sent != 1 || !failed && sent != owed {
+				return false
+			}
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 2000}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWritesOutrunningAReaderCostOneValuePerKey(t *testing.T) {
 	property := func(writes []uint8) bool {
 		m := newModel(t)

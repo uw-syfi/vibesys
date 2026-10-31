@@ -297,6 +297,78 @@ func TestMinimumIntervalConflatesEachStream(t *testing.T) {
 	})
 }
 
+// hot is a source that writes its one key every period, forever.
+func hot(period time.Duration) subscription.Source[stats] {
+	return script(func(ctx context.Context, sink subscription.Sink[stats]) error {
+		for second := int64(1); ; second++ {
+			sink.Put("machine", value(second))
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(period):
+			}
+		}
+	})
+}
+
+// serveSlowly serves one subscription to a client that takes pause to read each
+// frame, and counts what it was sent until the returned stop is called.
+func serveSlowly(hub *subscription.Hub, pause time.Duration) (sent func() (entries, heartbeats int), stop func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	var entries, heartbeats atomic.Int64
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = hub.Serve(ctx, 1, request, func(frame *apiv1.SubscribeResponse) error {
+			time.Sleep(pause)
+			switch {
+			case frame.GetEntry() != nil:
+				entries.Add(1)
+			case frame.GetHeartbeat() != nil:
+				heartbeats.Add(1)
+			}
+			return nil
+		})
+	}()
+	return func() (int, int) { return int(entries.Load()), int(heartbeats.Load()) }, func() {
+		cancel()
+		<-done
+	}
+}
+
+// The interval exists for the client that cannot keep up, and a hot key refills
+// as fast as a slow client reads it. A flush must end when it has sent what was
+// owed at its start, or the interval never applies to the stream that needs it.
+func TestMinimumIntervalHoldsForAClientSlowerThanTheProducer(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		limited := policy
+		limited.MinInterval = 200 * time.Millisecond
+		source := topic(hot(10 * time.Millisecond))
+		source.Policy = limited
+		sent, stop := serveSlowly(subscription.New(clock.System{}, source), 20*time.Millisecond)
+		time.Sleep(time.Second)
+		synctest.Wait()
+		stop()
+		if entries, _ := sent(); entries > 6 || entries < 4 {
+			t.Fatalf("%d entries in one second at a 200 ms minimum, want 4 to 6", entries)
+		}
+	})
+}
+
+// A client kept busy by a hot key must still be sent its heartbeats: the longest
+// gap between frames is the stream's only sign of life.
+func TestHeartbeatsContinueWhileAHotKeyKeepsASlowClientBusy(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sent, stop := serveSlowly(subscription.New(clock.System{}, topic(hot(time.Millisecond))), 20*time.Millisecond)
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		stop()
+		if _, heartbeats := sent(); heartbeats < int(time.Minute/subscription.HeartbeatInterval)-2 {
+			t.Fatalf("%d heartbeats in a minute", heartbeats)
+		}
+	})
+}
+
 // A stopped source may take time to unwind, and a new subscriber can arrive
 // meanwhile. Two producers of one instance must never overlap, however many
 // subscribers come and go during the gap.

@@ -85,18 +85,10 @@ func (h *Hub) Serve(ctx context.Context, connection uint64, request *apiv1.Subsc
 		return send(&apiv1.SubscribeResponse{Frame: &apiv1.SubscribeResponse_Failed{Failed: refusal}})
 	}
 	defer h.leave(id)
+	beat := &apiv1.SubscribeResponse{Frame: &apiv1.SubscribeResponse_Heartbeat{Heartbeat: &apiv1.Heartbeat{}}}
 	for {
-		for {
-			frame, terminal := h.next(id)
-			if frame == nil {
-				break
-			}
-			if err := send(frame); err != nil {
-				return err
-			}
-			if terminal {
-				return nil
-			}
+		if ended, err := h.flush(id, send); ended || err != nil {
+			return err
 		}
 		select {
 		case <-ctx.Done():
@@ -104,11 +96,32 @@ func (h *Hub) Serve(ctx context.Context, connection uint64, request *apiv1.Subsc
 		case <-woken:
 		case <-flush:
 		case <-heartbeat.Ticks():
-			if err := send(&apiv1.SubscribeResponse{Frame: &apiv1.SubscribeResponse_Heartbeat{Heartbeat: &apiv1.Heartbeat{}}}); err != nil {
+			if err := send(beat); err != nil {
 				return err
 			}
 		}
 	}
+}
+
+// flush sends what the subscriber is owed when it starts, and no more: a client
+// slower than the producer finds its keys changed again as it reads, and a flush
+// that chased them would never end, so neither the interval nor a heartbeat could
+// apply. What changes meanwhile waits for the next flush. ended reports a terminal
+// frame, after which Serve returns.
+func (h *Hub) flush(id subscriberID, send func(*apiv1.SubscribeResponse) error) (ended bool, err error) {
+	for range h.owed(id) {
+		frame, terminal := h.next(id)
+		if frame == nil {
+			return false, nil
+		}
+		if err := send(frame); err != nil {
+			return true, err
+		}
+		if terminal {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (h *Hub) topicOf(request *apiv1.SubscribeRequest) (registered, error) {
@@ -190,6 +203,12 @@ func (h *Hub) leave(id subscriberID) {
 	defer h.mu.Unlock()
 	delete(h.wakes, id)
 	h.perform(h.state.leave(id))
+}
+
+func (h *Hub) owed(id subscriberID) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.state.owed(id)
 }
 
 func (h *Hub) next(id subscriberID) (*apiv1.SubscribeResponse, bool) {

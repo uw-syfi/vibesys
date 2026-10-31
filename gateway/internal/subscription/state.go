@@ -317,6 +317,22 @@ func (s *state) overdue(ref producerRef) effects {
 	return effects{}
 }
 
+// owed counts the frames the subscriber is owed right now. A flush sends at most
+// this many, so a key that changes again while a slow client reads cannot extend
+// the flush: it waits for the next one. It is at most twice the key bound, plus
+// the snapshot marker and a failure.
+func (s *state) owed(id subscriberID) int {
+	each := s.subscribers[id]
+	count := len(each.removed) + len(each.unsent) + len(each.changed)
+	if each.syncPending {
+		count++
+	}
+	if each.failure != nil {
+		count++
+	}
+	return count
+}
+
 // next takes the subscriber's next frame, or nil when it is up to date. Removals
 // go first, so a client never holds more than the topic's key bound. Keys it has
 // never had go before refreshes, and synced between them: values keep moving
