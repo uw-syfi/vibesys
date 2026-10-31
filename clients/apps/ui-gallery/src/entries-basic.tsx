@@ -25,6 +25,7 @@ import {
   Stack,
   StatusDot,
   type StatusTone,
+  StepList,
   Switch,
   Text,
   TextInput,
@@ -460,6 +461,35 @@ export const BASIC_ENTRIES = {
           <Text>A flush card: no padding.</Text>
         </Card>
       </Grid>
+    ),
+  },
+  StepList: {
+    render: () => (
+      <Stack>
+        <StepList
+          title="This Mac"
+          steps={[
+            {id: 'gateway', label: 'Starting gateway', state: 'done', position: '1/3'},
+            {id: 'handshake', label: 'Connecting', state: 'current', position: '2/3'},
+            {id: 'runs', label: 'Loading runs', state: 'pending', position: '3/3'},
+          ]}
+        />
+        <StepList
+          title="host-a"
+          steps={[
+            {
+              id: 'gateway',
+              label: 'Starting gateway',
+              state: 'failed',
+              position: '1/3',
+              note: 'gateway exited (code 1)',
+            },
+            {id: 'handshake', label: 'Connecting', state: 'pending', position: '2/3'},
+            {id: 'runs', label: 'Loading runs', state: 'pending', position: '3/3'},
+          ]}
+          retry={() => undefined}
+        />
+      </Stack>
     ),
   },
   Banner: {

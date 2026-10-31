@@ -116,6 +116,7 @@ describe('Hosts on an older v2 host', () => {
     expect(last).toMatchObject({
       kind: 'unavailable',
       host: hostKey(ALPHA),
+      step: 'runs',
       connection: {kind: 'incompatible'},
     });
     expect(JSON.stringify([pushed, logged])).not.toMatch(/usage|invalid choice|does not provide/i);

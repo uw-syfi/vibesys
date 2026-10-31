@@ -94,6 +94,7 @@ export class HostVersionGate {
       this.#deps.push({
         kind: 'unavailable',
         host: this.#deps.host,
+        step: 'runs',
         connection: {kind: 'incompatible', detail: HOST_UNSUPPORTED_MESSAGE},
       });
       return;

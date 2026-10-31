@@ -162,9 +162,8 @@ export function watchedListing(host: HostKey, runs: ReadonlyMap<string, WatchedR
 }
 
 /** What the views say of a host while its run stream is not delivering. */
-function waiting(state: RunsState): ConnectionStatus {
-  const {phase} = state;
-  if (phase.kind !== 'reconnecting') return {kind: 'connecting'};
+function waiting(phase: Exclude<RunsState['phase'], {readonly kind: 'live'}>): ConnectionStatus {
+  if (phase.kind === 'connecting') return {kind: 'connecting'};
   return phase.attempt >= RECONNECT_OFFLINE_AFTER
     ? {kind: 'offline', detail: phase.detail}
     : {kind: 'reconnecting', attempt: phase.attempt};
@@ -172,7 +171,8 @@ function waiting(state: RunsState): ConnectionStatus {
 
 /** The host's listing once its stream has delivered every run, else why there is none yet. */
 export function hostListingFromRuns(host: HostKey, state: RunsState): HostListing {
-  return state.phase.kind === 'live'
+  const {phase} = state;
+  return phase.kind === 'live'
     ? watchedListing(host, state.runs)
-    : {kind: 'unavailable', host, connection: waiting(state)};
+    : {kind: 'unavailable', host, step: phase.step, connection: waiting(phase)};
 }
