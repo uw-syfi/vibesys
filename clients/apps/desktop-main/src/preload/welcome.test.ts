@@ -164,6 +164,24 @@ function cases(random: Seeded): Case[] {
       {kind: 'usage-window', host, project: path, runIds: [name], since: 1_000, until: 2_000},
     ],
     [
+      bridge => bridge.usageSummary(key, [path], [0, 900_000], 1_000),
+      {kind: 'usage-summary', host, projects: [path], edges: [0, 900_000], now: 1_000},
+    ],
+    [
+      bridge => bridge.usageRatesRefresh(key, force, 1_000),
+      {kind: 'usage-rates-refresh', host, force, now: 1_000},
+    ],
+    [
+      bridge => bridge.usagePricesSave(key, 2, [], [{from: name, to: 'm'}]),
+      {
+        kind: 'usage-prices-save',
+        host,
+        baseRevision: 2,
+        overrides: [],
+        aliases: [{from: name, to: 'm'}],
+      },
+    ],
+    [
       bridge => bridge.readSpan(key, path, name, 'op:turn', 1, 100),
       {kind: 'read-span', host, project: path, runId: name, spanId: 'op:turn', from: 1, max: 100},
     ],

@@ -21,9 +21,11 @@ from server import lazy_module
 if TYPE_CHECKING:
     from entrypoints import host_helper
     from server import host_api, host_helper_requests, host_machine_facts, host_operation_reads
-    from vs_sim.api import Platform
+    from vs_sim import api as sim
+    from vs_sim.api import HttpsGet, Platform
 else:
     host_helper = lazy_module("entrypoints.host_helper")
+    sim = lazy_module("vs_sim.api")
     host_helper_requests = lazy_module("server.host_helper_requests")
     host_operation_reads = lazy_module("server.host_operation_reads")
 
@@ -47,6 +49,11 @@ class ReadHost(HostFacts):
         return host_helper.real_host(self._environ, self._uid, self._threads)
 
 
+def _https() -> HttpsGet:
+    """The client for the one fetch a read makes, the price list; built when a refresh asks."""
+    return sim.UrllibHttpsGet()
+
+
 def read_source(platform: Platform) -> host_operation_reads.HostReadSource:
     """The read adapter over this process's user, host and ``platform``."""
     host = ReadHost(
@@ -57,7 +64,7 @@ def read_source(platform: Platform) -> host_operation_reads.HostReadSource:
         processes=platform.processes,
     )
     return host_operation_reads.HostReadSource(
-        host, None, describe=host.describe, preflight=host.preflight
+        host, None, describe=host.describe, preflight=host.preflight, https=_https
     )
 
 

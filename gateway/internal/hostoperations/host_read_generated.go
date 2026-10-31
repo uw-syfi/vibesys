@@ -34,6 +34,10 @@ func DispatchHostRead(request *apiv1.ReadRequest) (HostCall, bool) {
 		return HostCall{CLI: "list-run-digests", Deadline: 25000 * time.Millisecond, Executor: 1, Effect: 1}, true
 	case request.GetUsageWindow() != nil:
 		return HostCall{CLI: "usage-window", Deadline: 25000 * time.Millisecond, Executor: 1, Effect: 1}, true
+	case request.GetUsageSummary() != nil:
+		return HostCall{CLI: "usage-summary", Deadline: 25000 * time.Millisecond, Executor: 1, Effect: 1}, true
+	case request.GetUsageRatesRefresh() != nil:
+		return HostCall{CLI: "usage-rates-refresh", Deadline: 60000 * time.Millisecond, Executor: 1, Effect: 1}, true
 	default:
 		return HostCall{}, false
 	}
@@ -80,6 +84,12 @@ func HostReadResponseValid(request *apiv1.ReadRequest, response *apiv1.ReadRespo
 	case request.GetUsageWindow() != nil:
 		got := response.GetUsageWindow()
 		return got != nil && got.GetRequestId() == request.GetUsageWindow().GetRequestId()
+	case request.GetUsageSummary() != nil:
+		got := response.GetUsageSummary()
+		return got != nil && got.GetRequestId() == request.GetUsageSummary().GetRequestId()
+	case request.GetUsageRatesRefresh() != nil:
+		got := response.GetUsageRatesRefresh()
+		return got != nil && got.GetRequestId() == request.GetUsageRatesRefresh().GetRequestId()
 	default:
 		return false
 	}

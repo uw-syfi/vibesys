@@ -25,6 +25,7 @@ from server.events import (
     GateFinishedData,
     ModelTurnUsageData,
     OutputData,
+    RateLimitUpdateData,
     RunEvent,
     RunInterruptedData,
     RunStartedData,
@@ -196,6 +197,19 @@ def _drafts() -> st.SearchStrategy[_Draft]:
             agent_kind=ROLES[parts[0]],
         )
     )
+    limit = st.tuples(
+        st.builds(
+            RateLimitUpdateData,
+            provider=st.none() | st.sampled_from(["claude_code", "codex"]),
+            window=st.none() | st.sampled_from(["five_hour", "seven_day", "primary"]),
+            limit=st.none() | st.sampled_from(["claude", "codex_bengalfox"]),
+            used_fraction=st.none() | st.floats(0, 1.5, allow_nan=False),
+            resets_at=st.none() | st.floats(1.7e9, 1.8e9, allow_nan=False),
+            window_minutes=st.none() | st.integers(1, 10080),
+            exhausted=st.booleans(),
+        ),
+        st.none() | st.sampled_from(EXECUTION_IDS),
+    ).map(lambda pair: _Draft(EventType.RATE_LIMIT_UPDATE, pair[0], execution_id=pair[1]))
     tails = st.none() | st.text(max_size=40) | st.integers(3990, 4010).map(lambda n: "x" * n)
     gate = st.tuples(
         st.sampled_from(GateKind),
@@ -245,6 +259,7 @@ def _drafts() -> st.SearchStrategy[_Draft]:
         finished,
         spent,
         spent,
+        limit,
         begun,
         started,
         unseen,

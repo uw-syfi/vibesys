@@ -1663,3 +1663,91 @@ button.vs-dotlegend-item:focus-visible {
   opacity: 0.6;
   vector-effect: non-scaling-stroke;
 }
+
+/* --- area chart: overlaid areas over a tidy axis, a crosshair and a tooltip under the pointer --- */
+
+.vs-area-chart {
+  margin: 0;
+  min-width: 0;
+}
+.vs-area-chart-plot {
+  display: block;
+  max-width: 100%;
+}
+.vs-area-chart-fill {
+  fill: var(--seg-color, var(--accent));
+  opacity: 0.22;
+}
+.vs-area-chart-line {
+  fill: none;
+  stroke: var(--seg-color, var(--accent));
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.vs-area-chart-hit {
+  fill: transparent;
+}
+.vs-area-chart-cross,
+.vs-area-chart-tip {
+  display: none;
+  pointer-events: none;
+}
+.vs-area-chart-cross {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+.vs-area-chart-slice:hover .vs-area-chart-cross,
+.vs-area-chart-slice:hover .vs-area-chart-tip {
+  display: block;
+}
+.vs-area-chart-tip-box {
+  fill: var(--panel);
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.vs-area-chart-tip-row {
+  fill: var(--text);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+}
+
+/* --- share bar: one bar cut into labelled parts ------------------------------------------------------ */
+
+.vs-share {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  min-width: 0;
+}
+.vs-share-bar {
+  display: flex;
+  height: var(--space-3);
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--line);
+}
+.vs-share-segment {
+  flex-basis: 0;
+  min-width: var(--hairline);
+  background: var(--seg-color, var(--accent));
+}
+.vs-share-parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.vs-share-part {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.vs-share-swatch {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--seg-color, var(--accent));
+}

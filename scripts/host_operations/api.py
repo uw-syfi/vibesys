@@ -291,9 +291,13 @@ def compile_topics(image: bytes) -> tuple[Topic, ...]:
 def _entry_key_bytes(pool: descriptor_pool.DescriptorPool) -> int:
     """The longest key an entry may carry, as `TopicEntry.key` states it."""
     rules = pool.FindExtensionByName("buf.validate.field")
-    options = message_factory.GetMessageClass(pool.FindMessageTypeByName("google.protobuf.FieldOptions"))
+    options = message_factory.GetMessageClass(
+        pool.FindMessageTypeByName("google.protobuf.FieldOptions")
+    )
     key = pool.FindMessageTypeByName("vibesys.api.v1.TopicEntry").fields_by_name["key"]
-    return options.FromString(key.GetOptions().SerializeToString()).Extensions[rules].string.max_bytes
+    return (
+        options.FromString(key.GetOptions().SerializeToString()).Extensions[rules].string.max_bytes
+    )
 
 
 def _minimum_checkout_version(image: bytes) -> str:

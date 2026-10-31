@@ -98,6 +98,7 @@ from vs_proto._generated.vibesys.host.v1 import admission_receipt_generated_pb a
 from vs_proto._generated.vibesys.host.v1 import evaluation_receipts_pb as evaluation_receipts
 from vs_proto._generated.vibesys.host.v1 import operation_options_pb as operation_options
 from vs_proto._generated.vibesys.host.v1 import operations_pb as host_payloads
+from vs_proto._generated.vibesys.host.v1 import usage_state_pb as usage_state
 from vs_proto._generated.vibesys.host.v1.failure_pb import FailureCategory, OperationFailure
 from vs_proto._generated.vibesys.search.v1 import serial_effects_pb as serial_effects
 from vs_proto._generated.vibesys.search.v1.attrs_pb import (
@@ -511,6 +512,7 @@ __all__ = [
     "schema_hash",
     "serial_effects",
     "to_mapping",
+    "usage_state",
     "validate",
     "validated_operation_bytes",
     "validation_rules",

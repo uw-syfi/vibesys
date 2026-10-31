@@ -1,138 +1,179 @@
 /**
- * The question the Usage page asks for a window, over the welcome bridge: the projects the app has
- * met on each connected machine, each project's runs, and what those runs spent in the window. A
- * machine that cannot be reached, a project it cannot list, or a helper that predates the question
- * is counted, not hidden, and does not stop the others being read.
+ * The questions the Usage page asks over the welcome bridge: what each connected machine made of
+ * its usage in the period's buckets, a fresh price list from the machines whose list is due, and
+ * the prices a person saved. A machine that cannot be reached, or whose VibeSys predates the
+ * question, is counted, not hidden, and does not stop the others being read.
  */
-import {
-  type HostKey,
-  type HostListing,
-  type ListedRun,
-  USAGE_WINDOW_MAX_RUNS,
-} from '@vibesys/hosts';
+import type {HostKey} from '@vibesys/hosts';
 import {
   attempt,
-  nextOperationToken,
   type UnexpectedFailure,
   type WelcomeBridge,
   type WelcomeResult,
 } from '@vibesys/ipc';
 import {knownProjects} from '@vibesys/runs';
-import type {ModelName, UsageOutcome, UsageSource, UsageSpan} from '../../state/index.js';
+import {
+  changedBook,
+  checkRate,
+  type HostReply,
+  type ModelName,
+  type PeriodEdges,
+  type ReadAnswer,
+  type SaveRequest,
+  type SaveResult,
+} from '../../state/index.js';
 
-/** The bridge calls the question makes. */
+/** The bridge calls the page makes. */
 export type UsageBridge = Pick<
   WelcomeBridge,
-  'overview' | 'projectRuns' | 'cancelProjectRuns' | 'usageWindow' | 'harnesses' | 'onListing'
+  'overview' | 'usageSummary' | 'usageRatesRefresh' | 'usagePricesSave' | 'harnesses' | 'onListing'
 >;
 
-type Listed = Extract<HostListing, {readonly kind: 'listed'}>;
+/** The most projects a question names (the host's bound). */
+const PROJECTS_MAX = 64;
 
-/** What one project answered, or why it did not. */
-type ProjectAnswer =
-  | {readonly kind: 'source'; readonly source: UsageSource}
-  | {readonly kind: 'none'}
-  | {readonly kind: 'unreachable'}
-  | {readonly kind: 'unsupported'};
-
-function value<T>(result: WelcomeResult<T> | {readonly ok: false}): T | null {
+function value<T>(result: WelcomeResult<T> | UnexpectedFailure): T | null {
   return result.ok ? result.value : null;
 }
 
-/** The runs of `project`; the main process stops reading them if `signal` ends the question first. */
-async function listRuns(
-  bridge: UsageBridge,
-  host: HostKey,
-  project: string,
-  signal: AbortSignal,
-): Promise<WelcomeResult<readonly ListedRun[]> | UnexpectedFailure> {
-  signal.throwIfAborted();
-  const token = nextOperationToken();
-  const cancel = (): void => void attempt(() => bridge.cancelProjectRuns(token));
-  signal.addEventListener('abort', cancel, {once: true});
-  try {
-    return await attempt(() => bridge.projectRuns(host, project, token));
-  } finally {
-    signal.removeEventListener('abort', cancel);
-  }
-}
-
-async function askProject(
-  bridge: UsageBridge,
-  host: HostKey,
-  project: string,
-  span: UsageSpan,
-  signal: AbortSignal,
-): Promise<ProjectAnswer> {
-  const runs = value(await listRuns(bridge, host, project, signal));
-  if (runs === null) return {kind: 'unreachable'};
-  // The helper answers for at most this many runs, and the listing is newest first.
-  const asked = runs.slice(0, USAGE_WINDOW_MAX_RUNS).map(run => run.runId);
-  const leftOut = runs.length - asked.length;
-  if (asked.length === 0) return {kind: 'none'};
-  const outcome = value(
-    await attempt(() => bridge.usageWindow(host, project, asked, span.since, span.until)),
-  );
-  if (outcome === null) return {kind: 'unreachable'};
-  if (outcome.kind === 'unsupported') return {kind: 'unsupported'};
-  return {kind: 'source', source: {host, project, usage: outcome.usage, leftOut}};
-}
-
 /** What the machine's catalogue calls its harnesses and models; none when it offers no catalogue. */
-async function namesOn(bridge: UsageBridge, host: HostKey): Promise<readonly ModelName[]> {
+async function namesOnce(bridge: UsageBridge, host: HostKey): Promise<readonly ModelName[]> {
   const listing = value(await attempt(() => bridge.harnesses(host)));
   if (listing === null || listing.kind !== 'listed') return [];
   return listing.harnesses.map(({provider, model, display}) => ({
     harness: provider,
     model,
-    harnessName: display?.providerName ?? provider,
+    harnessName: display?.providerName ?? null,
     modelName: display?.modelName ?? null,
   }));
 }
 
-/**
- * What the projects of every connected machine spent in `span`. Rejects, naming why, when the app
- * cannot even list its machines; `signal` stops asking once the question is no longer wanted.
- */
-export async function loadUsage(
+/** The catalogue, asked a second time when the first answer was none: a machine just up may not have it yet. */
+async function namesOn(bridge: UsageBridge, host: HostKey): Promise<readonly ModelName[]> {
+  const first = await namesOnce(bridge, host);
+  return first.length > 0 ? first : namesOnce(bridge, host);
+}
+
+type Asked =
+  | {readonly kind: 'reply'; readonly reply: HostReply}
+  | {readonly kind: 'unreachable'}
+  | {readonly kind: 'unsupported'};
+
+async function askHost(
   bridge: UsageBridge,
-  span: UsageSpan,
+  host: HostKey,
+  projects: readonly string[],
+  edges: PeriodEdges,
+  now: number,
+): Promise<Asked> {
+  const outcome = value(await attempt(() => bridge.usageSummary(host, projects, edges.edges, now)));
+  if (outcome === null) return {kind: 'unreachable'};
+  if (outcome.kind === 'unsupported') return {kind: 'unsupported'};
+  return {kind: 'reply', reply: {host, projects, summary: outcome.summary}};
+}
+
+/**
+ * What every connected machine made of its usage in `edges`, except those switched off. Rejects,
+ * naming why, when the app cannot even list its machines or nothing could be read; `signal` stops
+ * asking once the question is no longer wanted.
+ */
+export async function readUsage(
+  bridge: UsageBridge,
+  edges: PeriodEdges,
+  now: number,
+  hostsOff: readonly HostKey[],
   signal: AbortSignal,
-): Promise<UsageOutcome> {
+): Promise<ReadAnswer> {
   const overview = await attempt(() => bridge.overview());
   if (!overview.ok) throw new Error(overview.error);
   signal.throwIfAborted();
   const {listings, recent} = overview.value;
-  const listed = listings.filter((listing): listing is Listed => listing.kind === 'listed');
-  const asks = listed.flatMap(listing =>
-    knownProjects(listing, recent, listing.host).map(project => ({host: listing.host, project})),
+  const wanted = listings.filter(listing => !hostsOff.includes(listing.host));
+  const listed = wanted.filter(listing => listing.kind === 'listed');
+  // A machine that is still connecting has not failed: it is waited for, not counted as down.
+  const connecting = wanted.flatMap(listing =>
+    listing.kind === 'unavailable' &&
+    (listing.connection.kind === 'connecting' || listing.connection.kind === 'reconnecting')
+      ? [listing.host]
+      : [],
   );
+  const down = wanted.flatMap(listing =>
+    listing.kind !== 'listed' && !connecting.includes(listing.host) ? [listing.host] : [],
+  );
+  const known = listed.map(listing => knownProjects(listing, recent, listing.host));
   const [answers, names] = await Promise.all([
-    Promise.all(asks.map(ask => askProject(bridge, ask.host, ask.project, span, signal))),
+    Promise.all(
+      listed.map((listing, at) => {
+        const all = known[at] ?? [];
+        // More projects than a question can name: ask for none, and the host reads every run it
+        // indexed. Only runs from before that index are then left out, which the page says.
+        return askHost(bridge, listing.host, all.length > PROJECTS_MAX ? [] : all, edges, now);
+      }),
+    ),
     Promise.all(listed.map(listing => namesOn(bridge, listing.host))),
   ]);
   signal.throwIfAborted();
-  const sources = answers.flatMap(answer => (answer.kind === 'source' ? [answer.source] : []));
-  const unsupported = answers.filter(answer => answer.kind === 'unsupported').length;
-  if (sources.length === 0 && unsupported > 0) return {kind: 'unsupported'};
-  const unreachable =
-    listings.length -
-    listed.length +
-    answers.filter(answer => answer.kind === 'unreachable').length;
-  // Every project asked, or every machine when none was, failed: nothing was read, which is not
-  // "no usage".
-  const nothingRead =
-    answers.length > 0
-      ? answers.every(answer => answer.kind === 'unreachable')
-      : listed.length === 0 && unreachable > 0;
-  if (nothingRead) throw new Error('nothing could be read');
+  const unreachable = [
+    ...down,
+    ...listed.flatMap((listing, at) => (answers[at]?.kind === 'unreachable' ? [listing.host] : [])),
+  ];
+  const unsupported = listed.flatMap((listing, at) =>
+    answers[at]?.kind === 'unsupported' ? [listing.host] : [],
+  );
+  const replies = answers.flatMap(answer => (answer.kind === 'reply' ? [answer.reply] : []));
+  if (
+    replies.length === 0 &&
+    unsupported.length === 0 &&
+    unreachable.length > 0 &&
+    connecting.length === 0
+  ) {
+    throw new Error('nothing could be read');
+  }
   return {
-    kind: 'usage',
-    loaded: {
-      sources,
-      names: names.flat(),
-      unreachable,
-      unsupported,
-    },
+    replies,
+    unreachable,
+    unsupported,
+    connecting,
+    names: names.flat(),
+    olderRunsUnread: known.some(each => each.length > PROJECTS_MAX),
   };
+}
+
+/** Ask each of `hosts` to fetch its price list; a failure leaves the page working on the old one. */
+export async function refreshRates(
+  bridge: UsageBridge,
+  hosts: readonly HostKey[],
+  now: number,
+  signal: AbortSignal,
+): Promise<null> {
+  signal.throwIfAborted();
+  await Promise.all(hosts.map(host => attempt(() => bridge.usageRatesRefresh(host, false, now))));
+  return null;
+}
+
+/**
+ * Save the draft's change to each destination's own book, independently: one host failing, or
+ * having moved since the page read it, never hides another's result.
+ */
+export async function savePrices(
+  bridge: UsageBridge,
+  request: SaveRequest,
+  signal: AbortSignal,
+): Promise<readonly SaveResult[]> {
+  signal.throwIfAborted();
+  const checked = checkRate(request.draft.rate);
+  const rate = request.draft.automatic || !checked.ok ? null : checked.rate;
+  return Promise.all(
+    request.destinations.map(async ({host, book}): Promise<SaveResult> => {
+      const made = changedBook(book, request.draft, rate);
+      if (!made.ok) return {host, outcome: 'failed', reason: made.reason};
+      const result = await attempt(() =>
+        bridge.usagePricesSave(host, book.revision, made.book.overrides, made.book.aliases),
+      );
+      if (!result.ok) return {host, outcome: 'failed', reason: result.error};
+      const outcome = result.value;
+      if (outcome.kind === 'unsupported') return {host, outcome: 'unsupported'};
+      return {host, outcome: outcome.kind, prices: outcome.prices};
+    }),
+  );
 }

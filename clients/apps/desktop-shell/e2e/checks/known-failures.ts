@@ -57,8 +57,6 @@ const NAV_LABEL = /^2 px between groups is not more than the 2 px inside one: "A
 const NAV_FIELD = /^2 px between groups is not more than the 6 px inside one: "Machine/;
 /** A stack nested in a stack of the same gap: nothing tells the groups from their rows. */
 const EVEN_GAPS = /^(\d+) px between groups is not more than the \1 px inside one/;
-const USAGE_TITLE = /^the title "Usage" is 26 px and a text under it is \d+ px/;
-const USAGE_EDGE = /^the title of "Usage" starts at x \d+ and the content/;
 const RUN_HEADER_GAPS = /^4 px between groups is not more than the 4 px inside one: "queue-rs/;
 
 export const KNOWN_FAILURES: readonly KnownFailure[] = [
@@ -116,9 +114,6 @@ export const KNOWN_FAILURES: readonly KnownFailure[] = [
     'hollow-box',
     /under the 40% a box fits: "(Benchmark|Optimizes)/,
   ),
-  // The Usage title sits in the page header, where the checks read it as the page title.
-  visual('usage-title', 'usage', 'heading-depth', USAGE_TITLE),
-  visual('usage-empty-edge', 'usage', 'left-edge', USAGE_EDGE),
 ];
 
 export function isKnown(failure: KnownFailure, screen: string, violation: Violation): boolean {

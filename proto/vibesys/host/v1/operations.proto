@@ -4,6 +4,8 @@ package vibesys.host.v1;
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "vibesys/host/v1/operation_options.proto";
+import "vibesys/host/v1/usage_state.proto";
+import "vibesys/store/v1/agent_attrs.proto";
 import "vibesys/store/v1/skeleton.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1";
@@ -1996,4 +1998,291 @@ message UsageWindowResponse {
   repeated AgentSpend by_agent = 13 [(buf.validate.field).repeated.max_items = 64];
   uint32 agents_omitted = 14;
   repeated string missing_runs = 15 [(buf.validate.field).repeated.max_items = 100];
+}
+
+// What the Usage screen shows for one host: the estimate of what the host's runs and its
+// people's CLI use would cost at today's list prices, in the buckets the caller asks for.
+//
+// The caller sends bucket edges, so the host needs no time zone data and no clock of its own:
+// every host cuts the same buckets and the caller merges replies by bucket number. Edges are whole
+// quarter hours, the grain a host rolls its runs up to.
+message UsageSummaryRequest {
+  option (buf.validate.message).cel = {
+    id: "usage_summary.edges"
+    message: "edges must be whole quarter hours"
+    expression: "this.edges.all(edge, int(edge) % 900 == 0)"
+  };
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  // The project directories to count runs of. The host counts the runs of each. With none, it
+  // counts every run it has indexed (a run is indexed when it starts), whatever its project; a
+  // run that predates the index is then not counted, which a caller that holds more projects
+  // than fit here says to the person.
+  repeated string projects = 2 [(buf.validate.field).repeated = {
+    max_items: 64
+    unique: true
+    items: {
+      string: {
+        min_len: 1
+        max_bytes: 4096
+      }
+    }
+  }];
+  // Bucket `i` is `[edges[i], edges[i + 1])`. Strictly increasing. Whole seconds between 1970
+  // and the end of year 9999, the range a host's calendar can hold.
+  repeated google.protobuf.Timestamp edges = 3 [(buf.validate.field).repeated = {
+    min_items: 2
+    max_items: 100
+    items: {
+      timestamp: {
+        gte: {seconds: 0}
+        lte: {seconds: 253402300799}
+      }
+    }
+  }];
+  google.protobuf.Timestamp now = 4 [(buf.validate.field) = {
+    required: true
+    timestamp: {
+      gte: {seconds: 0}
+      lte: {seconds: 253402300799}
+    }
+  }];
+}
+
+message UsageSeriesKey {
+  UsageOrigin origin = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // An agentshim provider id; `other` for anything else and past the sixteenth provider.
+  string provider = 2 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9_-]{0,31}$"];
+  // The model as the price list names it, after the person's `Map to`; `other` for the series
+  // the reply folded together to stay small.
+  string model = 3 [(buf.validate.field).string.max_bytes = 128];
+  vibesys.store.v1.UsageSpeed speed = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  UsageEstimateSource source = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The index in `sources` of the source the series was read from.
+  uint32 usage_source = 6;
+}
+
+// The buckets of one series. Each array holds one value per populated bucket, in step with
+// `bucket`, so a key is sent once however many buckets it fills.
+message UsageSeries {
+  option (buf.validate.message).cel = {
+    id: "usage_series.parallel"
+    message: "every array holds one value per bucket"
+    expression: "[this.cached, this.cache_write, this.uncached, this.output, this.reasoning, this.turns, this.approximate_turns].all(values, values.size() == this.bucket.size()) && [this.recorded_usd, this.estimate_usd, this.input_usd, this.cache_read_usd, this.cache_write_usd, this.output_usd, this.speed_premium_usd, this.cache_savings_usd].all(values, values.size() == this.bucket.size())"
+  };
+  UsageSeriesKey key = 1 [(buf.validate.field).required = true];
+  // Bucket numbers, strictly increasing.
+  repeated uint32 bucket = 2;
+  // Tokens read from the provider's cache.
+  repeated uint64 cached = 3;
+  repeated uint64 cache_write = 4;
+  // Input that was neither read from nor written to the cache.
+  repeated uint64 uncached = 5;
+  repeated uint64 output = 6;
+  // The part of `output` the provider reports as reasoning.
+  repeated uint64 reasoning = 7;
+  repeated uint32 turns = 8;
+  // The turns whose cost was reached from a record that predates the split by model.
+  repeated uint32 approximate_turns = 9;
+  // What the provider's price table recorded at the time, summed over the bucket's turns.
+  repeated double recorded_usd = 10;
+  // The estimate at today's list price; zero while `key.source` is unpriced.
+  repeated double estimate_usd = 11;
+  repeated double input_usd = 12;
+  repeated double cache_read_usd = 13;
+  repeated double cache_write_usd = 14;
+  repeated double output_usd = 15;
+  // What the speed tier cost beyond the standard tier.
+  repeated double speed_premium_usd = 16;
+  // What cache reads saved against the input rate.
+  repeated double cache_savings_usd = 17;
+}
+
+// Distinct counts, which do not add across buckets or hosts.
+message UsageBucketCount {
+  uint32 bucket = 1;
+  string provider = 2 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9_-]{0,31}$"];
+  uint32 runs = 3;
+  uint32 outside_sessions = 4;
+}
+
+// The kept ideas of the runs that landed in one bucket.
+message UsageBucketBests {
+  uint32 bucket = 1;
+  uint32 count = 2;
+}
+
+message UsageProviderCost {
+  string provider = 1 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9_-]{0,31}$"];
+  double estimate_usd = 2 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  double recorded_usd = 3 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  uint64 tokens = 4;
+}
+
+message UsageRunRow {
+  // The index in the request's `projects` of the run's project; 0 when the request named none.
+  uint32 project = 1;
+  string run_id = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  // The run's task is not here: the caller's list of runs names it, and the host reads no
+  // manifest to answer.
+  repeated UsageProviderCost costs = 3 [(buf.validate.field).repeated.max_items = 16];
+}
+
+message UsageAgentRow {
+  string role = 1 [(buf.validate.field).string.max_bytes = 64];
+  string model = 2 [(buf.validate.field).string.max_bytes = 128];
+  repeated UsageProviderCost costs = 3 [(buf.validate.field).repeated.max_items = 16];
+}
+
+// One place the host read usage from, and how completely.
+message UsageSource {
+  UsageSourceKind kind = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The state directory's random identity: two replies naming one id describe one source.
+  string source_id = 2 [(buf.validate.field).string.max_bytes = 64];
+  // Empty for the journals.
+  string provider = 3 [(buf.validate.field).string.max_bytes = 32];
+  // The directory read, for a person to find, cut to 512 bytes; empty for the journals.
+  string root = 4 [(buf.validate.field).string.max_bytes = 512];
+  UsageSourceStatus status = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Files (journals or transcripts) read, skipped as older than the window, and unusable lines.
+  uint32 scanned = 6;
+  uint32 skipped = 7;
+  uint32 malformed = 8;
+  uint32 failed = 9;
+  // Distinct runs or sessions the source holds in the range.
+  uint32 distinct_sessions = 10;
+  // Transcript sessions left out because a run's journal names the session, or its working
+  // directory is one of the run's.
+  uint32 excluded_exact = 11;
+  // Transcript turns left out on a guess: an older run in the project's own directory.
+  uint32 excluded_approximate = 12;
+}
+
+message UsageResolvedRate {
+  string provider = 1 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9_-]{0,31}$"];
+  string model = 2 [(buf.validate.field).string.max_bytes = 128];
+  vibesys.store.v1.UsageSpeed speed = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Absent when no rate is known: the model is unpriced.
+  optional UsageRate rate = 4;
+  // Override when the person set it, model when the price list has it.
+  UsageEstimateSource source = 5;
+}
+
+message UsageSummaryResponse {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  repeated UsageSeries series = 2 [(buf.validate.field).repeated.max_items = 4096];
+  repeated UsageBucketCount counts = 3 [(buf.validate.field).repeated.max_items = 2048];
+  repeated UsageBucketBests bests = 4 [(buf.validate.field).repeated.max_items = 100];
+  // The costliest runs by estimate, at most 128 for the whole call; the rest are in `runs_other`.
+  repeated UsageRunRow runs = 5 [(buf.validate.field).repeated.max_items = 128];
+  repeated UsageProviderCost runs_other = 6 [(buf.validate.field).repeated.max_items = 16];
+  // The costliest agents by estimate, at most 64 for the whole call.
+  repeated UsageAgentRow agents = 7 [(buf.validate.field).repeated.max_items = 64];
+  repeated UsageProviderCost agents_other = 8 [(buf.validate.field).repeated.max_items = 16];
+  // The estimate of the last hour before `now`, in whole quarter hours, by provider.
+  repeated UsageProviderCost recent = 9 [(buf.validate.field).repeated.max_items = 16];
+  repeated UsageSource sources = 10 [(buf.validate.field).repeated.max_items = 32];
+  UsagePricing pricing = 11 [(buf.validate.field).required = true];
+  UsagePriceBook prices = 12 [(buf.validate.field).required = true];
+  repeated UsageResolvedRate rates = 13 [(buf.validate.field).repeated.max_items = 256];
+  // Runs whose journals were left for a later call by the byte budget, and transcript files
+  // likewise. While either is above zero the figures are partial: ask again.
+  uint32 pending_runs = 14;
+  uint32 pending_files = 15;
+  // How many of the cheapest series the reply folded into `other` to stay under its size bound.
+  uint32 folded_series = 16;
+  google.protobuf.Timestamp read_at = 17 [(buf.validate.field).required = true];
+  // Whether `prices` is what the person set, or the host could not read it and `prices` is empty.
+  UsagePricesStatus prices_status = 18 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // How many distinct provider, model and speed rates the reply left out of `rates` because it
+  // holds at most 256: a row's rate for one of them is not shown, though its estimate is right.
+  uint32 rates_omitted = 19;
+}
+
+// Fetch the price list now, if one is due, and say how current the host's rates are. The host
+// keeps the document it fetched; no reply carries it. A refresh within a minute of the last
+// attempt, failed or not, fetches nothing and answers from what the host holds, so a client may
+// ask whenever a reply said a refresh was due.
+message UsageRatesRefreshRequest {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  // Fetch even if the document is under a day old.
+  bool force = 2;
+  google.protobuf.Timestamp now = 3 [(buf.validate.field) = {
+    required: true
+    timestamp: {
+      gte: {seconds: 0}
+      lte: {seconds: 253402300799}
+    }
+  }];
+}
+message UsageRatesRefreshResponse {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  UsagePricing pricing = 2 [(buf.validate.field).required = true];
+}
+
+// Replace the prices a person set on this host. The book is saved whole, against the revision it
+// was read at: when the host's revision has moved the host changes nothing and answers with its
+// book, so two clients editing at once cannot overwrite each other unseen. A request that equals
+// the host's book is saved already and changes nothing, so a retry after an unknown outcome is
+// safe.
+message UsagePricesSaveRequest {
+  option (buf.validate.message).cel = {
+    id: "usage_prices_save.distinct"
+    message: "a model is overridden once and aliased once"
+    expression: "this.overrides.map(o, o.model).unique() && this.aliases.map(a, a.from).unique()"
+  };
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  uint64 base_revision = 2;
+  repeated UsageRateOverride overrides = 3 [(buf.validate.field).repeated.max_items = 256];
+  repeated UsageAlias aliases = 4 [(buf.validate.field).repeated.max_items = 256];
+}
+message UsagePricesSaveResponse {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  // The host's book after the request: the saved one, or the one that moved.
+  UsagePriceBook prices = 2 [(buf.validate.field).required = true];
+  bool saved = 3;
 }
