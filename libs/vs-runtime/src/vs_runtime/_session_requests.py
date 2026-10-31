@@ -575,14 +575,22 @@ class RuntimeSessionRequests:
         async with self._locks.setdefault(lock_key, asyncio.Lock()):
             return await self._run(call)
 
-    async def attempt(self, request: DispatchTurn, context: ExecutionContext) -> ExecutionResult:
+    async def attempt(
+        self,
+        request: DispatchTurn,
+        context: ExecutionContext,
+        *,
+        behalf: CoreRequestId | None = None,
+    ) -> ExecutionResult:
         """Run one attempt of a turn and return what it observed, recording no receipt of it.
 
         The caller owns the step's result. What survives an attempt that dies is the invocation
         journal, which replays an answered invocation instead of asking it again, and the access
-        receipt, whose baseline the next attempt is judged against.
+        receipt, whose baseline the next attempt is judged against. A turn core asked for as
+        another kind of request (a resume) names that request in *behalf*, which is the step
+        that tags its agent processes and that its dispatch record names.
         """
-        canonical = core_identity(request)
+        canonical = behalf or core_identity(request)
         call = _Call(request, ReceiptKey(canonical.root), canonical, context)
         lock_key = f"{owner_key(request)}/{self._session_id(request).root}"
         async with self._locks.setdefault(lock_key, asyncio.Lock()):

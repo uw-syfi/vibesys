@@ -101,6 +101,8 @@ from vs_runtime._session_requests import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from vs_agent.api import AgentInvocationRecord, AgentSessionCheckpoint, AgentSessions
     from vs_core.api import RequestBase, SessionId, SnapshotAndRetainRun
     from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
@@ -127,6 +129,22 @@ class TurnDispatcher(Protocol):
     ) -> ExecutionOutcome:
         """Dispatch the turn of a request core sent as another kind, recording *behalf*."""
         ...
+
+    async def attempt(
+        self,
+        request: DispatchTurn,
+        context: ExecutionContext,
+        *,
+        behalf: CoreRequestId | None = None,
+    ) -> ExecutionResult:
+        """Run one attempt of the turn, recording no receipt of its result (see the runner)."""
+        ...
+
+
+type ResumedDispatch = Callable[
+    [DispatchTurn, CoreRequestId, ExecutionContext], Awaitable[ExecutionOutcome]
+]
+"""How the turn of a resume is dispatched: with a receipt of its result, or as one attempt."""
 
 
 class ContinuationBinding(BaseModel):
@@ -369,7 +387,7 @@ class SessionLifecycleRequests:
                 facts = await self._blocking.run(self._close, request, context)
                 facts = await self._settled(facts, request, request.session_id, None)
             case ResumeSessionTurn():
-                return await self._resume(request, request_id, context)
+                return await self._resume(request, request_id, context, self._dispatch_resumed)
             case _:
                 facts = _rejected(f"{request.kind} is not executed here")
         return self._result(request, context, facts)
@@ -528,8 +546,34 @@ class SessionLifecycleRequests:
 
     # resume
 
+    async def attempt(
+        self, request: ResumeSessionTurn, context: ExecutionContext
+    ) -> ExecutionResult:
+        """Run one attempt of a resume and return what it observed, recording no receipt of it.
+
+        The step loop owns the step's result. The continuation binding is written once and an
+        attempt that repeats finds it; the nested dispatch is ``RuntimeSessionRequests.attempt``,
+        so a rerun after a killed attempt is dispatched again once the runner has cleared it.
+        """
+        request_id = core_identity(request)
+        return await self._resume(request, request_id, context, self._attempt_resumed)
+
+    async def _dispatch_resumed(
+        self, dispatch: DispatchTurn, behalf: CoreRequestId, context: ExecutionContext
+    ) -> ExecutionOutcome:
+        return await self._dispatcher.dispatch_on_behalf_of(dispatch, behalf, context)
+
+    async def _attempt_resumed(
+        self, dispatch: DispatchTurn, behalf: CoreRequestId, context: ExecutionContext
+    ) -> ExecutionOutcome:
+        return await self._dispatcher.attempt(dispatch, context, behalf=behalf)
+
     async def _resume(
-        self, request: ResumeSessionTurn, request_id: RequestId, context: ExecutionContext
+        self,
+        request: ResumeSessionTurn,
+        request_id: RequestId,
+        context: ExecutionContext,
+        dispatch_turn: ResumedDispatch,
     ) -> ExecutionResult:
         turn = request.turn
         if turn.charge_class != "resume":
@@ -562,9 +606,7 @@ class SessionLifecycleRequests:
             inputs=request.inputs,
             guidance=request.guidance,
         )
-        outcome = await self._dispatcher.dispatch_on_behalf_of(
-            dispatch, core_identity(request), context
-        )
+        outcome = await dispatch_turn(dispatch, core_identity(request), context)
         if not isinstance(outcome, ExecutionResult):
             return self._result(request, context, _unknown(outcome.detail))
         seen = outcome.observation.observation

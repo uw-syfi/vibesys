@@ -3,7 +3,9 @@
 from vs_runtime._agent_turn_step_runner import (
     AgentTurnStepRunner,
     NotATurnError,
+    OperationTurns,
     StepReaper,
+    TurnPaths,
     TurnState,
     TurnWithoutResultError,
 )
@@ -12,8 +14,10 @@ from vs_runtime._workspace_step_runner import StepWorkspaces, WorkspaceStepRunne
 __all__ = [
     "AgentTurnStepRunner",
     "NotATurnError",
+    "OperationTurns",
     "StepReaper",
     "StepWorkspaces",
+    "TurnPaths",
     "TurnState",
     "TurnWithoutResultError",
     "WorkspaceStepRunner",

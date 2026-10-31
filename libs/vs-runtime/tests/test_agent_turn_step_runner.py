@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from enum import StrEnum
 from itertools import count
 from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.session_lifecycle_world import resume_request
 from tests.support.session_world import (
     SCOPE,
     FakeSessionResolver,
@@ -21,7 +23,9 @@ import vs_core.api as core
 from vs_agent.api import (
     STEP_TAG_ENV,
     AgentClient,
+    AgentSessionState,
     AgentTurnRequest,
+    DurableSessionStore,
     reap_step_agents,
     step_tag_env,
 )
@@ -38,10 +42,16 @@ from vs_prompts.api import TemplateRenderer
 from vs_runtime.api.agent_step_runners import (
     AgentTurnStepRunner,
     NotATurnError,
+    TurnPaths,
     TurnState,
     TurnWithoutResultError,
 )
-from vs_runtime.api.core import ReceiptStore, RuntimeSessionRequests
+from vs_runtime.api.core import (
+    ReceiptStore,
+    RuntimeSessionRequests,
+    SealedExecution,
+    SessionLifecycleRequests,
+)
 from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.step_runner import CancelSignal, Cleared
 from vs_runtime.api.testing import (
@@ -71,6 +81,34 @@ if TYPE_CHECKING:
     from vs_agent.api import AgentTurnRequest as TurnRequest
 
 _RUN = "run-a"
+
+
+class Kind(StrEnum):
+    """The three kinds of step that are one agent turn."""
+
+    DISPATCH = "dispatch"
+    RESUME = "resume"
+    OPERATION = "operation"
+
+
+_OPERATION = core.OperationWire(
+    schema_ref=core.OperationSchemaRef(
+        kind="agent_turn",
+        request_schema=core.SchemaRef(name="agent-turn-request", version=1),
+        outcome_schema=core.SchemaRef(name="reply", version=1),
+        lifecycle=core.LifecycleClass.SESSION_TURN,
+    ),
+    payload_json="{}",
+)
+
+
+class FixedTurns:
+    """Resolves every registered operation to a turn of the default session, as its id names."""
+
+    def turn(self, operation: core.ExecuteRegisteredOperation) -> core.DispatchTurn | None:
+        tag = operation.request_id
+        assert tag is not None
+        return dispatch_request(request_id=tag.root, invocation=f"inv-{tag.root}")
 
 
 @dataclass
@@ -110,6 +148,9 @@ class World:
     engine: FakeDockerEngine
     workspace: FakeWorkspace
     containers: tuple[str, ...]
+    lifecycle: SessionLifecycleRequests
+    state: TurnState
+    kind: Kind = Kind.DISPATCH
 
     @property
     def processes(self) -> FakeAgentProcesses:
@@ -127,8 +168,24 @@ class World:
     def provider_turns(self) -> list[AgentTurnRequest]:
         return self.behavior.turns
 
-    def step(self, tag: core.RequestId) -> core.DispatchTurn:
-        return dispatch_request(request_id=tag.root, invocation=f"inv-{tag.root}")
+    def step(self, tag: core.RequestId) -> core.Request:
+        match self.kind:
+            case Kind.DISPATCH:
+                return dispatch_request(request_id=tag.root, invocation=f"inv-{tag.root}")
+            case Kind.RESUME:
+                return resume_request(
+                    request_id=tag.root,
+                    invocation=f"inv-{tag.root}",
+                    continuation=core.ContinuationId(root=f"continuation-{tag.root}"),
+                )
+            case Kind.OPERATION:
+                return core.ExecuteRegisteredOperation(
+                    request_id=tag,
+                    scope=SCOPE,
+                    operation_id=core.OperationId(root="agent-turn"),
+                    operation=_OPERATION,
+                    retry_limit=0,
+                )
 
     def finishing(self, tag: core.RequestId) -> core.Request:
         self.hangs.discard(tag.root)
@@ -145,6 +202,10 @@ class World:
         async def with_session() -> object:
             ensure = ensure_request()
             await self.turns.execute(ensure, context_for(ensure))
+            if self.kind is Kind.RESUME:
+                # A resume continues a conversation that completed a turn.
+                setup = dispatch_request(request_id="setup", invocation="inv-setup")
+                await self.turns.execute(setup, context_for(setup))
             return await main
 
         return run_virtual(self.clock, with_session(), driver=self.threads)
@@ -154,11 +215,12 @@ def tag_named(name: str) -> core.RequestId:
     return core.RequestId(root=name)
 
 
-def open_world(root: Path) -> World:
+def open_world(root: Path, kind: Kind = Kind.DISPATCH) -> World:
     root.mkdir(parents=True, exist_ok=True)
     workspace_path = root / "workspace"
     workspace_path.mkdir()
-    namespace = Project.open(root).state.state_store_namespace("run")
+    project = Project.open(root)
+    namespace = project.state.state_store_namespace("run")
     clock = VirtualClock()
     threads = SimThreads(clock)
     store = ReceiptStore(namespace, threads=threads)
@@ -177,7 +239,13 @@ def open_world(root: Path) -> World:
     behavior.provider = FakeProvider(
         script=FakeTurnScript(({"value": 7},)), on_turn=behavior.on_turn, threads=threads
     )
-    client = AgentClient(behavior.provider, clock=ManualClock(), threads=threads)
+    checkpoints = DurableSessionStore(
+        project.state.state_store_namespace("sessions").slot("sessions.json", AgentSessionState),
+        threads=threads,
+    )
+    client = AgentClient(
+        behavior.provider, clock=ManualClock(), threads=threads, session_store=checkpoints
+    )
     sessions = FakeAgentSessions(client, FakeAgentInvocationStore(), threads=threads)
     blocking = SimBlockingRunner(threads)
     resolver = FakeSessionResolver(workspace_path, TemplateRenderer(workspace_path))
@@ -194,12 +262,30 @@ def open_world(root: Path) -> World:
             reap_tagged=behavior.processes.reap_tagged,
         )
 
-    runner = AgentTurnStepRunner(turns, TurnState(sessions, store, blocking), context_for, reap)
-    return World(runner, turns, clock, threads, behavior, engine, workspace, containers)
+    lifecycle = SessionLifecycleRequests(sessions, turns, store, turns.settlement, blocking)
+    state = TurnState(sessions, store, blocking)
+    runner = AgentTurnStepRunner(
+        TurnPaths(turns, lifecycle, FixedTurns()), state, context_for, reap
+    )
+    return World(
+        runner,
+        turns,
+        clock,
+        threads,
+        behavior,
+        engine,
+        workspace,
+        containers,
+        lifecycle,
+        state,
+        kind,
+    )
 
 
 class AgentTurnContract(StepRunnerContract):
     """The contract over the turn runner, with turns that hang or finish by the tag's flag."""
+
+    kind = Kind.DISPATCH
 
     @pytest.fixture(autouse=True)
     def _scratch(self, tmp_path: Path) -> None:
@@ -207,7 +293,7 @@ class AgentTurnContract(StepRunnerContract):
         self._worlds = count()
 
     def step_runner_under_test(self) -> StepRunnerUnderTest:
-        world = open_world(self._root / f"world-{next(self._worlds)}")
+        world = open_world(self._root / f"world-{next(self._worlds)}", self.kind)
         return StepRunnerUnderTest(
             runner=world.runner,
             run=world.run,
@@ -220,6 +306,14 @@ class AgentTurnContract(StepRunnerContract):
 
 class TestAgentTurnStepRunner(AgentTurnContract):
     pass
+
+
+class TestResumedTurnStepRunner(AgentTurnContract):
+    kind = Kind.RESUME
+
+
+class TestRegisteredTurnStepRunner(AgentTurnContract):
+    kind = Kind.OPERATION
 
 
 def test_a_turn_starts_every_agent_process_with_its_step_s_tag(tmp_path: Path) -> None:
@@ -266,10 +360,11 @@ def test_a_killed_turn_leaves_its_process_until_clear_ends_it_and_no_container_g
     world.run(main())
 
 
+@pytest.mark.parametrize("kind", list(Kind))
 def test_the_next_attempt_after_a_kill_is_asked_again_and_judged_from_the_recorded_baseline(
-    tmp_path: Path,
+    tmp_path: Path, kind: Kind
 ) -> None:
-    world = open_world(tmp_path)
+    world = open_world(tmp_path, kind)
     tag = tag_named("step-a")
 
     async def main() -> None:
@@ -291,14 +386,15 @@ def test_the_next_attempt_after_a_kill_is_asked_again_and_judged_from_the_record
         assert world.turns.settlement.fenced_by(world.workspace.path) == ()
 
     world.run(main())
-    assert len(world.provider_turns) == 2
+    assert [t.step_tag for t in world.provider_turns if t.step_tag == tag.root] == [tag.root] * 2
 
 
+@pytest.mark.parametrize("kind", list(Kind))
 def test_a_rerun_after_a_kill_is_judged_against_workspace_access_like_the_first_attempt(
-    tmp_path: Path,
+    tmp_path: Path, kind: Kind
 ) -> None:
     """A receipt left settled by the kill's cleanup would judge nothing: the rerun's writes stay."""
-    world = open_world(tmp_path)
+    world = open_world(tmp_path, kind)
     tag = tag_named("step-a")
 
     async def main() -> None:
@@ -357,6 +453,75 @@ def test_a_step_that_is_not_a_turn_or_not_the_tags_own_is_refused(tmp_path: Path
             await world.runner.run(job, tag, 1, CancelSignal())
         with pytest.raises(ValueError, match="request id"):
             await world.runner.run(world.finishing(tag), tag_named("step-b"), 1, CancelSignal())
+
+    world.run(main())
+    assert world.provider_turns == []
+
+
+def test_a_registered_operation_is_a_turn_only_when_its_lifecycle_and_its_turn_say_so(
+    tmp_path: Path,
+) -> None:
+    world = open_world(tmp_path, Kind.OPERATION)
+    tag = tag_named("step-a")
+    query = core.ExecuteRegisteredOperation(
+        request_id=tag,
+        scope=SCOPE,
+        operation_id=core.OperationId(root="read"),
+        operation=_OPERATION.model_copy(
+            update={
+                "schema_ref": _OPERATION.schema_ref.model_copy(
+                    update={"lifecycle": core.LifecycleClass.QUERY}
+                )
+            }
+        ),
+        retry_limit=0,
+    )
+
+    async def main() -> None:
+        with pytest.raises(NotATurnError, match="execute_registered_operation"):
+            await world.runner.run(query, tag, 1, CancelSignal())
+
+    world.run(main())
+    assert world.provider_turns == []
+
+
+@pytest.mark.parametrize("kind", list(Kind))
+def test_the_runner_leaves_the_result_of_a_step_to_the_loop_and_seals_no_receipt_of_it(
+    tmp_path: Path, kind: Kind
+) -> None:
+    world = open_world(tmp_path, kind)
+    tag = tag_named("step-a")
+
+    async def main() -> None:
+        result = await world.runner.run(world.finishing(tag), tag, 1, CancelSignal())
+        assert isinstance(result, Finished)
+
+    world.run(main())
+    for key in (tag.root, f"{tag.root}.dispatch"):
+        assert not isinstance(world.state.store.history(key), SealedExecution)
+
+
+@pytest.mark.parametrize("answer", ["none", "another-id"])
+def test_a_registered_turn_that_is_not_the_operations_own_is_refused(
+    tmp_path: Path, answer: str
+) -> None:
+    class Wrong:
+        def turn(self, operation: core.ExecuteRegisteredOperation) -> core.DispatchTurn | None:
+            del operation
+            return None if answer == "none" else dispatch_request(request_id="another")
+
+    world = open_world(tmp_path, Kind.OPERATION)
+    tag = tag_named("step-a")
+    runner = AgentTurnStepRunner(
+        TurnPaths(world.turns, world.lifecycle, Wrong()),
+        world.state,
+        context_for,
+        lambda _tag: None,
+    )
+
+    async def main() -> None:
+        with pytest.raises(NotATurnError if answer == "none" else ValueError):
+            await runner.run(world.step(tag), tag, 1, CancelSignal())
 
     world.run(main())
     assert world.provider_turns == []

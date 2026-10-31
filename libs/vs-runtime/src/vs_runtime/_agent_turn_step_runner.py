@@ -1,9 +1,11 @@
-"""A step runner for one agent turn.
+"""A step runner for one agent turn, whichever kind of request asked for it.
 
-``run`` asks the session executor for one attempt of a ``DispatchTurn``: the turn path that
-resolves the session, enforces the role's workspace access and calls the provider through the
-invocation journal. Every agent process the turn starts carries the step's tag
-(``vs_agent.step_tags``).
+Three kinds of step are one agent turn: ``DispatchTurn``, ``ResumeSessionTurn`` (the turn that
+continues a retained conversation) and a registered operation of lifecycle ``SESSION_TURN``
+(which an ``OperationTurns`` resolves to the ``DispatchTurn`` it runs as). ``run`` asks the
+session executor for one attempt of the turn: the turn path that resolves the session, enforces
+the role's workspace access and calls the provider through the invocation journal. Every agent
+process the turn starts carries the step's tag (``vs_agent.step_tags``).
 
 ``clear`` is what makes the next attempt start clean. A turn never adopts: whatever an earlier
 attempt left is ended, not taken over. ``clear`` kills the processes carrying the tag, then (when
@@ -19,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
@@ -30,20 +32,29 @@ from vs_agent.api import (
     OrphanReapError,
     SessionPersistenceError,
 )
-from vs_core.api import DispatchTurn, ObservationStatus, TurnObserved
+from vs_core.api import (
+    DispatchTurn,
+    ExecuteRegisteredOperation,
+    LifecycleClass,
+    ObservationStatus,
+    ResumeSessionTurn,
+    TurnObserved,
+)
 from vs_core.api.recovery import Cancelled, Finished
 from vs_runtime._access_settlement import AccessKey, AccessSettlementError
+from vs_runtime._core_identity import core_identity
 from vs_runtime._session_requests import load_session_binding, session_binding_key
 from vs_runtime._step_runner import Cleared, ClearUnavailableError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
 
     from vs_agent.api import AgentSessions
-    from vs_core.api import Observation, Request, RequestId
+    from vs_core.api import Observation, Request, RequestId, TurnSpec
     from vs_core.api.recovery import StepResult
     from vs_runtime._core_requests import ExecutionContext, ExecutionResult
     from vs_runtime._receipt_store import ReceiptStore
+    from vs_runtime._session_lifecycle_requests import SessionLifecycleRequests
     from vs_runtime._session_requests import RuntimeSessionRequests
     from vs_runtime._step_runner import Adopted, CancelSignal
     from vs_sim.api import BlockingRunner
@@ -62,11 +73,11 @@ It blocks, so the runner calls it through its ``BlockingRunner``. In production 
 
 
 class NotATurnError(TypeError):
-    """The step is not a ``DispatchTurn``, the one kind this runner runs."""
+    """The step is not an agent turn: this runner runs no other kind."""
 
     def __init__(self, step: Request) -> None:
         """Name the step kind."""
-        super().__init__(f"AgentTurnStepRunner runs DispatchTurn, not {step.kind}")
+        super().__init__(f"AgentTurnStepRunner runs agent turns, not {step.kind}")
 
 
 class TurnWithoutResultError(Exception):
@@ -91,6 +102,37 @@ class StepTurn(BaseModel):
     invocation: str
 
 
+class OperationTurns(Protocol):
+    """Names the turn a registered ``SESSION_TURN`` operation runs as."""
+
+    def turn(self, operation: ExecuteRegisteredOperation) -> DispatchTurn | None:
+        """The ``DispatchTurn`` *operation* runs as, or ``None`` when it is no turn.
+
+        The turn carries the operation's own request id, so what the turn path observes is
+        observed under the step core asked for. In production it is the registry's
+        ``normalize_turn`` of the decoded operation, with the reserved inputs resolved.
+        """
+        ...
+
+
+@dataclass(frozen=True)
+class TurnPaths:
+    """The executors that run the three turn-shaped kinds of step."""
+
+    dispatch: RuntimeSessionRequests
+    resume: SessionLifecycleRequests
+    operations: OperationTurns
+
+
+@dataclass(frozen=True)
+class _Plan:
+    """One step as one turn: what it names in the journal, and how an attempt of it starts."""
+
+    spec: TurnSpec
+    binding_of: Request
+    start: Callable[[], Awaitable[ExecutionResult]]
+
+
 @dataclass(frozen=True)
 class TurnState:
     """The durable state the turn path writes, and the runner that keeps blocking calls off the loop."""
@@ -105,17 +147,17 @@ class AgentTurnStepRunner:
 
     def __init__(
         self,
-        turns: RuntimeSessionRequests,
+        paths: TurnPaths,
         state: TurnState,
-        contexts: Callable[[DispatchTurn], ExecutionContext],
+        contexts: Callable[[Request], ExecutionContext],
         reap: StepReaper,
     ) -> None:
-        """Bind the turn path, the durable state it writes, the contexts of attempts and the reaper.
+        """Bind the turn executors, the durable state they write, the contexts of attempts and the reaper.
 
-        *state* is what *turns* was built with. *contexts* gives the execution context of an
-        attempt of a step.
+        *state* is what the executors were built with. *contexts* gives the execution context
+        of an attempt of a step.
         """
-        self._turns = turns
+        self._paths = paths
         self._sessions = state.sessions
         self._store = state.store
         self._blocking = state.blocking
@@ -127,13 +169,12 @@ class AgentTurnStepRunner:
     ) -> StepResult:
         """Run attempt *attempt* of the turn; ``Cancelled`` once *cancel* is set and the turn ended."""
         del attempt
-        if not isinstance(step, DispatchTurn):
-            raise NotATurnError(step)
+        plan = self._plan(step)
         if step.request_id != tag:
             message = f"the tag {tag} is not the step's request id {step.request_id}"
             raise ValueError(message)
-        started = self._note(step, tag)
-        execution = asyncio.ensure_future(self._turns.attempt(step, self._contexts(step)))
+        started = self._note(plan, tag)
+        execution = asyncio.ensure_future(plan.start())
         try:
             return await self._ended(execution, started, tag, cancel)
         finally:
@@ -141,21 +182,54 @@ class AgentTurnStepRunner:
                 execution.cancel()
                 await asyncio.gather(execution, return_exceptions=True)
 
+    def _plan(self, step: Request) -> _Plan:
+        """The turn *step* is, or ``NotATurnError``."""
+        paths = self._paths
+        match step:
+            case DispatchTurn():
+                return _Plan(
+                    step.turn,
+                    step,
+                    lambda: paths.dispatch.attempt(step, self._contexts(step)),
+                )
+            case ResumeSessionTurn():
+                return _Plan(
+                    step.turn, step, lambda: paths.resume.attempt(step, self._contexts(step))
+                )
+            case ExecuteRegisteredOperation() if (
+                step.operation.schema_ref.lifecycle is LifecycleClass.SESSION_TURN
+            ):
+                dispatch = paths.operations.turn(step)
+                if dispatch is None:
+                    raise NotATurnError(step)
+                if dispatch.request_id != step.request_id:
+                    message = f"the turn of {step.request_id} carries the request id {dispatch.request_id}"
+                    raise ValueError(message)
+                return _Plan(
+                    dispatch.turn,
+                    step,
+                    lambda: paths.dispatch.attempt(
+                        dispatch, self._contexts(step), behalf=core_identity(step)
+                    ),
+                )
+            case _:
+                raise NotATurnError(step)
+
     async def clear(self, tag: RequestId) -> Adopted | Cleared:
         """End everything carrying *tag*, then make the next attempt start from the recorded state."""
         await self._clear(tag)
         return Cleared()
 
-    def _note(self, step: DispatchTurn, tag: RequestId) -> StepTurn | None:
+    def _note(self, plan: _Plan, tag: RequestId) -> StepTurn | None:
         """Record, before the turn can begin, which session and invocation *tag* names."""
-        bkey = session_binding_key(step, step.turn.session.session_id)
+        bkey = session_binding_key(plan.binding_of, plan.spec.session.session_id)
         binding = load_session_binding(self._store, bkey)
         if binding is None:
             return None
         started = StepTurn(
             binding=bkey,
             session_key=binding.session_key,
-            invocation=step.turn.invocation_id.root,
+            invocation=plan.spec.invocation_id.root,
         )
         self._store.record_once(_STEP_TURNS, "turn", tag.root, started)
         return started
@@ -200,7 +274,7 @@ class AgentTurnStepRunner:
             outcome = await self._blocking.run(self._sessions.inspect, key, started.invocation)
             if isinstance(outcome, Completed | InvalidResponse):
                 return
-            await self._turns.settlement.rewind(
+            await self._paths.dispatch.settlement.rewind(
                 AccessKey(binding=started.binding, invocation=started.invocation)
             )
         except AccessSettlementError as error:
