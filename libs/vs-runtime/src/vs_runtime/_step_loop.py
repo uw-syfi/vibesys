@@ -218,7 +218,7 @@ class _StepLoop[S]:
         actions = self._rule.decide(self._log.state, self._clock.now())
         end = next((a for a in actions if isinstance(a, End)), None)
         if end is not None and not self._flights:
-            await self._append(self._log.run_ended(end))
+            await self._record_ended(end)
             return LoopExit.ENDED
         wake_at = self._dispatch(actions)
         if self._rule.settled(self._log.state) is LoopExit.PARKED:
@@ -309,23 +309,34 @@ class _StepLoop[S]:
 
     async def _abandon_flights(self) -> None:
         tasks = [f.task for f in self._flights.values() if f.task is not None]
+        if self._input is not None:
+            tasks.append(self._input)
         for task in tasks:
             task.cancel()
-        extra = [self._input] if self._input is not None else []
-        for task in extra:
-            task.cancel()
-        await asyncio.gather(*tasks, *extra, return_exceptions=True)
+        await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _append(self, write: Coroutine[object, object, None]) -> None:
+    async def _record_started(self, run: Run) -> None:
         async with self._appending:
-            await write
+            await self._log.step_started(run)
+
+    async def _record_finished(self, tag: RequestId, result: StepResult) -> None:
+        async with self._appending:
+            await self._log.step_finished(tag, result)
+
+    async def _record_interrupted(self, tag: RequestId, attempt: int, why: Interruption) -> None:
+        async with self._appending:
+            await self._log.attempt_interrupted(tag, attempt, why)
+
+    async def _record_ended(self, end: End) -> None:
+        async with self._appending:
+            await self._log.run_ended(end)
 
     async def _attempt(self, run: Run, flight: _Flight) -> None:
         cleared = await self._clear(flight) if run.attempt > 1 else Cleared()
         if cleared is None or (flight.signal.is_set() and isinstance(cleared, Cleared)):
             await self._finish_unstarted(flight)
             return
-        await self._append(self._log.step_started(run))
+        await self._record_started(run)
         flight.started = True
         outcome = await self._run_bounded(run, flight.signal)
         await self._finish_attempt(run, flight, outcome)
@@ -334,7 +345,7 @@ class _StepLoop[S]:
         """The wait for ``clear`` ended by a cancel: no attempt of this try ever started."""
         reason = flight.signal.reason
         if reason is not None and _fate(reason) is not _Fate.INTERRUPT:
-            await self._append(self._log.step_finished(flight.tag, Cancelled(reason=reason)))
+            await self._record_finished(flight.tag, Cancelled(reason=reason))
 
     async def _finish_attempt(self, run: Run, flight: _Flight, outcome: StepResult | None) -> None:
         reason = flight.signal.reason
@@ -345,29 +356,27 @@ class _StepLoop[S]:
             and reason is not None
             and _fate(reason) is _Fate.INTERRUPT
         ):
-            await self._append(
-                self._log.attempt_interrupted(run.tag, run.attempt, Interruption.PAUSE)
-            )
+            await self._record_interrupted(run.tag, run.attempt, Interruption.PAUSE)
         else:
-            await self._append(self._log.step_finished(run.tag, outcome))
+            await self._record_finished(run.tag, outcome)
 
     async def _finish_without_result(self, run: Run, flight: _Flight) -> None:
         """The attempt raised or was given up on: clear what it left, then say how it ended."""
         cleared = await self._clear(flight)
         reason = flight.signal.reason
         if isinstance(cleared, Adopted) and cleared.result is not None:
-            await self._append(self._log.step_finished(run.tag, cleared.result))
+            await self._record_finished(run.tag, cleared.result)
         elif reason is None or _fate(reason) is _Fate.INTERRUPT:
             why = Interruption.RAISED if reason is None else Interruption.PAUSE
-            await self._append(self._log.attempt_interrupted(run.tag, run.attempt, why))
+            await self._record_interrupted(run.tag, run.attempt, why)
         elif isinstance(cleared, Adopted):
             outcome = await self._run_bounded(run, flight.signal)
             if outcome is None:
-                await self._append(self._log.step_finished(run.tag, Cancelled(reason=reason)))
+                await self._record_finished(run.tag, Cancelled(reason=reason))
             else:
                 await self._finish_attempt(run, flight, outcome)
         else:
-            await self._append(self._log.step_finished(run.tag, Cancelled(reason=reason)))
+            await self._record_finished(run.tag, Cancelled(reason=reason))
 
     async def _clear_then_finish(self, flight: _Flight, result: StepResult) -> None:
         cleared = await self._clear(flight)
@@ -375,7 +384,7 @@ class _StepLoop[S]:
             return
         if isinstance(cleared, Adopted) and cleared.result is None:
             await self._end_adopted(flight)
-        await self._append(self._log.step_finished(flight.tag, result))
+        await self._record_finished(flight.tag, result)
 
     async def _end_adopted(self, flight: _Flight) -> None:
         """Attach to work ``clear`` adopted and still going, with the signal set, so it ends.
