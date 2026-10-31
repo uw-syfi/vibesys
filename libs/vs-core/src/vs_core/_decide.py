@@ -219,21 +219,23 @@ def _begin(
 ) -> Folded | None:
     """What a record that is, or precedes, the run's seed leaves of the fold."""
     body = record.body
-    if body is not None and body.field in _SEEDS:
-        if prior is not None:
-            message = f"record {record.seq} starts a run the log already started"
-            raise ValueError(message)
-        if body.field == "core_snapshot":
-            message = (
+    if prior is not None and starts_run(record):
+        message = f"record {record.seq} starts a run the log already started"
+        raise ValueError(message)
+    match body:
+        case Oneof(field="run_started", value=message):
+            return Folded(_observed(decode_seed(message, registry), record))
+        case Oneof(field="core_snapshot"):
+            problem = (
                 f"record {record.seq} is a snapshot: its run is decoded by the log's reader "
                 "and folded with apply_saved"
             )
-            raise ValueError(message)
-        return Folded(_observed(decode_seed(body.value, registry), record))
-    if body is not None and body.field in _CORE_RECORDS:
-        message = f"record {record.seq} is core's, and the log holds no seed before it"
-        raise ValueError(message)
-    return None
+            raise ValueError(problem)
+        case Oneof(field=field) if field in _CORE_RECORDS:
+            problem = f"record {record.seq} is core's, and the log holds no seed before it"
+            raise ValueError(problem)
+        case _:
+            return None
 
 
 def _apply(
