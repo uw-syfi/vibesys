@@ -17,7 +17,7 @@ import {idOf, modelOfShape, type Shape} from './ideas-tree-fixtures.js';
 import {IDEAS_FILTER_DEFAULT} from './ideas-view.js';
 import type {RunModel} from './run-model.js';
 
-const ALL = {...IDEAS_FILTER_DEFAULT, failed: true};
+const ALL = IDEAS_FILTER_DEFAULT;
 const SEEDS = Array.from({length: 150}, (_, at) => at + 1);
 
 function shaped(seed: number, depthy = false): Shape {
@@ -309,17 +309,6 @@ describe('failed ideas', () => {
         tree.rows.flatMap(entry => (entry.kind === 'idea' ? [entry.row.id] : [])),
       );
       for (const item of failed) expect(shown.has(item.id), `seed ${seed}`).toBe(true);
-      expect(tree.hiddenFailed).toBe(0);
-    }
-  });
-
-  test('can be hidden by the filter, and the folded summaries still count them', () => {
-    for (const seed of SEEDS) {
-      const model = modelOfShape(shaped(seed));
-      const hidden = ideaTree(model, shape({...IDEAS_FILTER_DEFAULT, failed: false}));
-      const failed = model.candidates.candidates.filter(item => item.outcome === 'failed');
-      expect(hidden.hiddenFailed).toBe(failed.length);
-      expect(hidden.counts.failed).toBe(failed.length);
     }
   });
 });

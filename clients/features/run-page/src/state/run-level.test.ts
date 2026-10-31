@@ -254,7 +254,6 @@ describe('the run level', () => {
   test('ideas show running first, then newest first, the failed with the rest', () => {
     const view = ideasView(model, IDEAS_FILTER_DEFAULT);
     expect(view.rows.map(row => row.title)).toEqual(['arena', 'spin', 'ring-pad', 'ring']);
-    expect(view.hiddenFailed).toBe(0);
     expect(view.counts).toEqual({running: 1, passed: 2, failed: 1});
     const ringPad = view.rows[2];
     expect(ringPad?.badges).toEqual([{label: 'best', tone: 'ok'}]);
@@ -264,11 +263,7 @@ describe('the run level', () => {
     expect(ideasView(model, IDEAS_FILTER_DEFAULT)).toBe(view);
   });
 
-  test('the filter hides the failed, still counting them, and searches titles and ideas', () => {
-    const hidden = ideasView(model, {...IDEAS_FILTER_DEFAULT, failed: false});
-    expect(hidden.rows.map(row => row.title)).toEqual(['arena', 'ring-pad', 'ring']);
-    expect(hidden.hiddenFailed).toBe(1);
-    expect(hidden.counts.failed).toBe(1);
+  test('the query searches titles and ideas', () => {
     const all = ideasView(model, IDEAS_FILTER_DEFAULT);
     expect(all.rows[1]?.figure).toBe('1.20×');
     const found = ideasView(model, {...IDEAS_FILTER_DEFAULT, query: 'try spin'});

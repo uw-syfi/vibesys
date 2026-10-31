@@ -31,8 +31,9 @@ import {
   objectiveCharts,
   objectivesOf,
   paretoView,
-  type RunModel,
+  type RunPosition,
 } from '../../state/index.js';
+import {RunStats} from './run-stats.js';
 import type {ViewBase} from './views/props.js';
 
 /** The comparisons with no reading, each a small label with its status word; none when all read. */
@@ -102,13 +103,14 @@ function ObjectivePanel(props: {
 }
 
 /**
- * The charts of the run, drawn from `whole`, not from the viewed model, so scrubbing neither mounts
- * nor unmounts a chart nor rescales its axes; the scrub position is the cursor of each, and the
- * headlines read the best as of it. `idea` is the open idea's id, or null.
+ * The charts of the run, drawn from the run to its end (`position.whole`), not from the viewed
+ * model, so scrubbing neither mounts nor unmounts a chart nor rescales its axes; the scrub position
+ * is the cursor of each, and the headlines and the stats read the run as of it. `idea` is the open
+ * idea's id, or null.
  */
 export function Hero(
   props: ViewBase & {
-    readonly whole: RunModel;
+    readonly position: RunPosition;
     readonly idea: string | null;
     /** The ideas on the chain the reader points at, ringed on the charts; none when omitted. */
     readonly lit?: ReadonlySet<string>;
@@ -116,22 +118,25 @@ export function Hero(
     readonly hover?: (idea: string | null) => void;
   },
 ): JSX.Element {
-  const objectives = objectivesOf(props.whole);
-  // The time bar stands before the run's end exactly when the viewed model is not the whole run.
-  const scrubbed = props.model.at !== null && props.model.at !== props.whole.at;
-  const scrub = scrubbed ? (props.model.latest ?? props.clock.start) : null;
-  const hero = heroView(props.whole, objectives, scrub);
-  const charts = objectiveCharts(props.whole, {
+  const {whole, scrub} = props.position;
+  const hero = heroView(whole, objectivesOf(whole), scrub);
+  const charts = objectiveCharts(whole, {
     start: props.clock.start,
     now: props.clock.now,
     scrub,
     focus: props.idea,
     ...(props.lit === undefined ? {} : {lit: props.lit}),
   });
-  const pareto = paretoView(props.whole, props.clock.start, scrub, props.idea, props.lit);
+  const pareto = paretoView(whole, props.clock.start, scrub, props.idea, props.lit);
   const legend = chartLegend(charts);
   return (
     <Stack gap="space-3">
+      <RunStats
+        model={props.model}
+        position={props.position}
+        start={props.clock.start}
+        ledger={props.tokens}
+      />
       <ChartColumns>
         {charts.map((chart, at) => (
           <ObjectivePanel

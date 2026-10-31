@@ -2,6 +2,11 @@ import {
   Breadcrumb,
   Button,
   Card,
+  CellInline,
+  CellLines,
+  CellLink,
+  CellMark,
+  ColumnList,
   Dock,
   DotLegend,
   Fact,
@@ -10,6 +15,7 @@ import {
   type GanttRow,
   type GanttView,
   type Guide,
+  type ListColumn,
   LoadingBar,
   LogPane,
   Meter,
@@ -164,6 +170,123 @@ function PickListDemo(): JSX.Element {
   return (
     <Card>
       <CandidateList selected={selected} pick={setSelected} />
+    </Card>
+  );
+}
+
+interface Reading {
+  readonly name: string;
+  readonly parent: string | null;
+  readonly status: string;
+  readonly cause: string | null;
+  readonly value: string;
+  readonly set: boolean;
+  readonly time: string;
+}
+
+const READINGS: readonly Reading[] = [
+  {
+    name: 'ring-v2',
+    parent: 'ring-v1',
+    status: 'Faster',
+    cause: null,
+    value: '6.05M',
+    set: true,
+    time: '6m 00s',
+  },
+  {
+    name: 'ring-v1',
+    parent: null,
+    status: 'Faster',
+    cause: null,
+    value: '4.90M',
+    set: true,
+    time: '6m 00s',
+  },
+  {
+    name: 'spin-park',
+    parent: 'ring-v1',
+    status: 'Dropped',
+    cause: 'Turned down',
+    value: '–',
+    set: false,
+    time: '2m 10s',
+  },
+  {
+    name: 'mutex-ticket',
+    parent: 'ring-v2',
+    status: 'Failed',
+    cause: 'Review rejected',
+    value: '–',
+    set: false,
+    time: '1m 45s',
+  },
+];
+
+const READING_COLUMNS: readonly ListColumn<Reading>[] = [
+  {
+    key: 'name',
+    header: 'Idea',
+    size: 'fill',
+    wrap: true,
+    cell: row => <Text variant="code">{row.name}</Text>,
+  },
+  {
+    key: 'built-on',
+    header: 'Built on',
+    size: 'wide',
+    optional: true,
+    act: () => true,
+    cell: row =>
+      row.parent === null ? (
+        <Text tone="muted">Input</Text>
+      ) : (
+        <CellLink label={row.parent} lit={row.name === 'ring-v2' || row.name === 'ring-v1'} />
+      ),
+  },
+  {
+    key: 'status',
+    header: 'Status',
+    size: 'wide',
+    cell: row => <CellLines main={<Text>{row.status}</Text>} note={row.cause} />,
+  },
+  {
+    key: 'value',
+    header: 'Throughput',
+    size: 'wide',
+    note: {label: '+2', hint: '2 more objectives'},
+    sort: {marked: true, press: noop},
+    cell: row => (
+      <CellInline>
+        <CellMark on={row.set} />
+        <Text variant="code">{row.value}</Text>
+      </CellInline>
+    ),
+  },
+  {
+    key: 'time',
+    header: 'Time',
+    size: 'short',
+    align: 'end',
+    optional: true,
+    sort: {marked: false, press: noop},
+    cell: row => <Text variant="code">{row.time}</Text>,
+  },
+];
+
+function ColumnListDemo(): JSX.Element {
+  const [selected, setSelected] = useState<string | undefined>('mutex-ticket');
+  return (
+    <Card>
+      <ColumnList
+        label="Readings"
+        columns={READING_COLUMNS}
+        rows={READINGS}
+        rowKey={row => row.name}
+        selected={selected}
+        select={setSelected}
+        marks={row => ({lineage: row.name === 'ring-v2' || row.name === 'ring-v1'})}
+      />
     </Card>
   );
 }
@@ -535,6 +658,39 @@ export const FRAME_ENTRIES = {
     ),
   },
   PickList: {render: () => <PickListDemo />},
+  ColumnList: {render: () => <ColumnListDemo />},
+  CellInline: {
+    render: () => (
+      <Text tone="muted">
+        A mark and its word, or a name and its tag, in one line of a ColumnList cell, as in the
+        Status and Throughput columns above.
+      </Text>
+    ),
+  },
+  CellLines: {
+    render: () => (
+      <Text tone="muted">
+        A cell's figure with a quieter line under it, as in the Status column above (a status and
+        its cause).
+      </Text>
+    ),
+  },
+  CellLink: {
+    render: () => (
+      <Text tone="muted">
+        A word in a ColumnList cell that acts on its own without picking the row, as in the Built on
+        column above.
+      </Text>
+    ),
+  },
+  CellMark: {
+    render: () => (
+      <Text tone="muted">
+        A small mark before a cell's figure, filled when its reading set a best, as in the
+        Throughput column above.
+      </Text>
+    ),
+  },
   PickRow: {
     render: () => (
       <Text tone="muted">

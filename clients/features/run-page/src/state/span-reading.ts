@@ -142,6 +142,20 @@ export function formatValue(value: number): string {
   return value.toLocaleString('en-US', {maximumFractionDigits: digits});
 }
 
+const COMPACT = new Intl.NumberFormat('en-US', {
+  notation: 'compact',
+  minimumSignificantDigits: 3,
+  maximumSignificantDigits: 3,
+});
+
+/**
+ * A figure of a list cell: three significant digits from a thousand on (`6.05M`, `949k`), as
+ * `formatValue` below that. Its exact value is the cell's hint, spelt with `formatValue`.
+ */
+export function compactValue(value: number): string {
+  return Math.abs(value) < 1000 ? formatValue(value) : COMPACT.format(value).replace('K', 'k');
+}
+
 /** A ratio to the baseline as the screen writes it: `1.42×`. */
 export function ratio(value: number): string {
   return `${value.toFixed(2)}×`;

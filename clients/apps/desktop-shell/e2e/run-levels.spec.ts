@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Locator, type Page, test} from '@playwright/test';
 import type {RunFixture} from '@vibesys/run-fixtures';
+import {scrolledToEnd} from './checks/settle.js';
 import {
   type FakeBridgeSeed,
   type FakeWindows,
@@ -166,27 +167,27 @@ test('the run level shows the best ratio, the ideas running first, and what runs
   await openRun(page);
   await showList(page);
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
-  // Running first, then the rest newest first, the failed among them.
+  // Running first, then the rest by the first objective, best first; the ones with no reading last.
   await expect(ideas.getByRole('option')).toHaveText([
-    /Per-core queues with stealing/,
-    /Wait-free consumer path/,
-    /Combine W1 ring with W2 padding/,
-    /Larger batch size/,
-    /Spin then park idle consumers/,
-    /Cache-line padding and batched enqueue/,
-    /Lock-free ring with per-slot sequence numbers/,
+    /^Per-core queues with stealing/,
+    /^Wait-free consumer path/,
+    /^Combine W1 ring with W2 padding/,
+    /^Lock-free ring with per-slot sequence numbers/,
+    /^Cache-line padding and batched enqueue/,
+    /^Larger batch size/,
+    /^Spin then park idle consumers/,
   ]);
   await expect(page.getByText('1.18×').first()).toBeVisible();
   const now = page.getByRole('listbox', {name: 'Running now'});
   await expect(now.getByRole('option', {name: /Combine W1 ring/}).first()).toBeVisible();
   await check(page, 'ink-run');
 
-  // The failed are listed; their chip narrows the list to them and a second press brings the rest
+  // The dropped are listed; their chip narrows the list to them and a second press brings the rest
   // back, and the search narrows the list.
-  await page.locator('button.vs-dotlegend-item', {hasText: '2 failed'}).click();
+  await page.locator('button.vs-dotlegend-item', {hasText: /^Dropped 1/}).click();
   await expect(ideas.getByRole('option', {name: /Spin then park/})).toBeVisible();
   await expect(ideas.getByRole('option', {name: /Combine W1 ring/})).toHaveCount(0);
-  await page.locator('button.vs-dotlegend-item', {hasText: '2 failed'}).click();
+  await page.locator('button.vs-dotlegend-item', {hasText: /^Dropped 1/}).click();
   await expect(ideas.getByRole('option', {name: /Combine W1 ring/})).toBeVisible();
   await page.getByLabel('Search ideas').fill('spin');
   await expect(ideas.getByRole('option')).toHaveText([/Spin then park/]);
@@ -310,6 +311,8 @@ test('the performance row is the same element, in the same place and size, at ev
 }) => {
   await openRun(page);
   await expect(perfChart(page)).toBeVisible();
+  // The rows are below the charts: scrolled to them first, a click scrolls nothing.
+  await scrolledToEnd(page);
   await perfChart(page).evaluate(chart => chart.setAttribute('data-probe', 'perf'));
   const atRun = await perfRow(page);
   expect(atRun.probe).toBe('perf');
@@ -494,7 +497,7 @@ test('the scrubber replays the run’s ideas at an earlier event and returns to 
   await expect(ideas.getByRole('option')).toHaveCount(7);
   await page.getByRole('slider', {name: 'Run position'}).focus();
   await page.keyboard.press('Home');
-  await expect(page.getByText('No ideas yet')).toBeVisible();
+  await expect(ideas).toHaveCount(0);
   await page.getByRole('button', {name: 'Back to live'}).click();
   await expect(ideas.getByRole('option')).toHaveCount(7);
   await page.evaluate(

@@ -110,6 +110,10 @@ button.vs-crumb:focus-visible {
   gap: var(--space-4);
   container-type: inline-size;
 }
+/* Panes that hold a list in columns keep the height of its rows: the screen's body scrolls to them. */
+.vs-panes:has(.vs-columnlist) {
+  flex: 1 0 auto;
+}
 /* Too narrow for a list and the idea it opened side by side (the detail would wrap words and clip
    its tabs): the opened pane takes the row, and its close button brings the list back. */
 @container (max-width: 640px) {
@@ -955,6 +959,195 @@ button.vs-crumb:focus-visible {
   }
 }
 
+/* --- a list in columns: header that sorts, rows on one grid, a bar for the path to the selection --- */
+
+.vs-columnlist {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: 0;
+  container-type: inline-size;
+}
+.vs-columnlist-head,
+.vs-columnlist-row {
+  display: grid;
+  grid-template-columns: var(--columns);
+  align-items: center;
+  column-gap: var(--space-3);
+}
+.vs-columnlist-head {
+  padding: 0 var(--space-3) var(--space-1) calc(var(--space-3) + var(--focus-ring));
+  border-bottom: var(--hairline) solid var(--line);
+  color: var(--muted);
+  font-family: var(--text-caption-family);
+  font-size: var(--text-caption-size);
+  line-height: var(--text-caption-line);
+  white-space: nowrap;
+}
+.vs-columnlist-headcell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vs-columnlist-headcell[data-align="end"],
+.vs-columnlist-cell[data-align="end"] {
+  text-align: right;
+}
+.vs-columnlist-marked {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text);
+}
+.vs-columnlist-headcell button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.vs-columnlist-headcell[data-marked] button,
+.vs-columnlist-headcell button:hover {
+  color: var(--text);
+}
+.vs-columnlist-note {
+  margin-left: var(--space-1);
+  color: var(--muted);
+}
+/*
+ * The rows take the height they have, up to sixteen of them: a list of a run's ideas is read by
+ * scrolling the page, not through a short window of its own. Past that many rows the list scrolls
+ * inside itself, and draws only the rows near the visible part.
+ */
+.vs-columnlist-rows {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: calc(var(--row) * 16);
+  overflow-y: auto;
+}
+.vs-columnlist-rows:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-columnlist-row {
+  min-height: var(--row);
+  padding: var(--space-3) var(--space-3);
+  border: var(--hairline) solid transparent;
+  border-left: var(--focus-ring) solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.vs-columnlist-row:hover {
+  background: var(--panel-2);
+}
+.vs-columnlist-row:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-columnlist-row[data-lineage] {
+  border-left-color: var(--accent);
+}
+.vs-columnlist-row[aria-selected="true"] {
+  background: var(--selection);
+  border-left-color: var(--text);
+}
+.vs-columnlist-row[data-fresh] {
+  animation: vs-pane-flash calc(var(--duration-base) * 8) var(--easing);
+}
+/*
+ * A list without room drops its optional columns and the parts of a cell marked optional, and
+ * keeps the rest on one grid; a part marked `data-narrow-only` is drawn only then (a figure that a
+ * dropped column states while the list is wide).
+ */
+.vs-columnlist [data-narrow-only] {
+  display: none;
+}
+@container (max-width: 1100px) {
+  .vs-columnlist-head,
+  .vs-columnlist-row {
+    grid-template-columns: var(--columns-narrow);
+    column-gap: var(--space-2);
+  }
+  .vs-columnlist [data-optional] {
+    display: none;
+  }
+  .vs-columnlist [data-narrow-only] {
+    display: inline;
+  }
+}
+/* A crowded list (a column for each of several objectives) in a pane a half row wide. */
+@container (max-width: 560px) {
+  .vs-columnlist[data-crowded] .vs-columnlist-head,
+  .vs-columnlist[data-crowded] .vs-columnlist-row {
+    grid-template-columns: var(--columns-tight);
+    column-gap: var(--space-2);
+  }
+  .vs-columnlist[data-crowded] [data-tight-hide],
+  .vs-columnlist[data-crowded] .vs-columnlist-lines > :not(:first-child) {
+    display: none;
+  }
+  /* A header over a column cut to its mark keeps its place and says nothing. */
+  .vs-columnlist[data-crowded] [data-tight-blank] > * {
+    visibility: hidden;
+  }
+}
+.vs-columnlist-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-columnlist-cell[data-wrap] {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.vs-columnlist-link {
+  color: var(--muted);
+  cursor: pointer;
+}
+.vs-columnlist-link[data-lit] {
+  color: var(--accent);
+}
+.vs-columnlist-link:hover {
+  text-decoration: underline;
+}
+.vs-columnlist-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 100%;
+  min-width: 0;
+}
+.vs-columnlist-inline[data-nowrap] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-columnlist-mark {
+  flex: none;
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: var(--radius-full);
+}
+.vs-columnlist-mark[data-on] {
+  background: var(--accent);
+}
+.vs-columnlist-lines {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 /* --- reading a tree: column header, dot tooltip, path to the root, dot legend ------------------- */
 
 .vs-listheader {
@@ -1404,9 +1597,9 @@ button.vs-dotlegend-item:disabled {
 button.vs-dotlegend-item:disabled .vs-text {
   color: var(--muted);
 }
-/* A hidden state is drawn without the pill, never struck through (that reads as deleted); a failed count keeps the failed color. */
-.vs-dotlegend-item[data-tone="err"] .vs-text {
-  color: var(--err);
+/* The chip of the state the list is already in has nothing to change, and is the one in force: it keeps its words. */
+button.vs-dotlegend-item[aria-pressed="true"]:disabled .vs-text {
+  color: var(--text);
 }
 button.vs-dotlegend-item:focus-visible {
   outline: var(--focus-ring) solid var(--accent);

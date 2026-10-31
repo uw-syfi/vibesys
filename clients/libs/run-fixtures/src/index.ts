@@ -40,6 +40,7 @@ export {
   type MachineSettingsFixture,
   machineSettingsWorld,
 } from './machine-settings.js';
+export {objectivesRun} from './objectives.js';
 export {journalEvents, type RecordRequest, recordFixture} from './record.js';
 export {FAILURE_REASONS, scenarios} from './scenarios.js';
 export {

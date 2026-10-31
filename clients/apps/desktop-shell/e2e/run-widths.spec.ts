@@ -44,8 +44,11 @@ test('the run header stays beside its controls and chat preserves the main at do
   }
 });
 
-/** A window too short for what sits above the panes scrolls the screen's body; it never squeezes the list. */
-test('the Ideas list keeps two full rows at every supported window size', async ({page}) => {
+/**
+ * A window too short for what sits above the panes scrolls the screen's body; the Ideas list takes
+ * the height of its rows and never a short window of its own: eight rows whole at every size.
+ */
+test('the Ideas list keeps eight full rows at every supported window size', async ({page}) => {
   const fixture = fixtureNamed('finished-ten-ideas');
   await openFixture(page, fixture);
   await playLive(page, fixture);
@@ -59,8 +62,8 @@ test('the Ideas list keeps two full rows at every supported window size', async 
       expect(row, `a row at ${width}x${height}`).not.toBeNull();
       expect(
         list?.height ?? 0,
-        `two rows of the list at ${width}x${height}`,
-      ).toBeGreaterThanOrEqual(2 * (row?.height ?? Number.POSITIVE_INFINITY));
+        `eight rows of the list at ${width}x${height}`,
+      ).toBeGreaterThanOrEqual(8 * (row?.height ?? Number.POSITIVE_INFINITY));
     }
   }
 });
