@@ -22,21 +22,29 @@ from vs_dst._crash_points import (
     crash_point_policy,
 )
 from vs_dst._effects import Effects, RecoverableExecutors
+from vs_dst._interrupt import MAX_RESUMES, Interrupted, Outcome
+from vs_dst._interruptions import Action, Interruption, Moment
 from vs_dst._simulate import SimulatedRun, simulate
 from vs_dst._snapshots import NondeterministicWorldError, WorldNotCopyableError
 from vs_dst._world import Enact, HostedWorld, RunSetup, World
 
 __all__ = [
     "EVERY_POINT",
+    "MAX_RESUMES",
     "SAMPLED",
     "SAMPLE_SIZE",
+    "Action",
     "CrashKind",
     "CrashPoint",
     "CrashPointPolicy",
     "Effects",
     "Enact",
     "HostedWorld",
+    "Interrupted",
+    "Interruption",
+    "Moment",
     "NondeterministicWorldError",
+    "Outcome",
     "RecoverableExecutors",
     "RunSetup",
     "SimulatedRun",
