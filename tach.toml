@@ -1607,7 +1607,7 @@ depends_on = ["vs_core.types.common", "vs_core._outcomes", "vs_core._generated",
 
 [[interfaces]]
 from = ["vs_core.types"]
-expose = ["[a-z_]+\\.[A-Z].*", "sessions\\.(session_waits|session_may_wait|turn_acquires|turn_may_wait)", "records\\.(request_lifecycle|request_interrupt_policy|request_effect|reply_owed|success_without_reply)", "records\\.(within|inherit)", "job_observations\\.may_resubmit"]
+expose = ["[a-z_]+\\.[A-Z].*", "sessions\\.(session_waits|session_may_wait|turn_acquires|turn_may_wait)", "records\\.(request_lifecycle|request_interrupt_policy|request_effect|request_close_policy|reply_owed|success_without_reply)", "records\\.(within|inherit)", "job_observations\\.may_resubmit"]
 
 [[modules]]
 path = "vs_core.types.common"

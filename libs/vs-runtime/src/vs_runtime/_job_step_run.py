@@ -44,7 +44,7 @@ from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
 
 if TYPE_CHECKING:
     from vs_core.api import Request, RequestId
-    from vs_core.api.recovery import StepResult
+    from vs_core.api.recovery import CancelReason, StepResult
     from vs_evaluation.api import EvaluationRequest, ExecutorPoll, PollingEvaluationExecutor
     from vs_runtime._job_registry import JobBooks
     from vs_runtime._step_runner import CancelSignal
@@ -104,6 +104,8 @@ class JobStepRun:
         ``deadline_at`` is the run-clock second the job's stages are told to end by.
         """
         submission = submission_of(step)
+        if cancel.is_set() and (await self._executor.poll(handle)).phase is PollPhase.UNSUBMITTED:
+            return Cancelled(reason=_reason_of(cancel))
         try:
             request = evaluation_request(submission, handle, deadline_at=deadline_at)
             self._registry.register(JobRecord.of(submission, tag, handle, payload_digest_of(step)))
@@ -154,10 +156,7 @@ class JobStepRun:
         A pause that leaves the job running answers ``Cancelled`` at once: the attempt ends and the
         job does not.
         """
-        reason = cancel.reason
-        if reason is None:
-            message = "a job is cancelled only for a reason"
-            raise ContractError(("cancel", "reason"), message)
+        reason = _reason_of(cancel)
         if self._outlives_host and interruption_of(reason):
             return Cancelled(reason=reason)
         await self._executor.cancel(handle)
@@ -227,6 +226,15 @@ class JobStepRun:
             children_complete=facts.children_complete,
             diagnostic=facts.diagnostic,
         )
+
+
+def _reason_of(cancel: CancelSignal) -> CancelReason:
+    """Why the step was cancelled; a job is cancelled only for a reason."""
+    reason = cancel.reason
+    if reason is None:
+        message = "a job is cancelled only for a reason"
+        raise ContractError(("cancel", "reason"), message)
+    return reason
 
 
 def submission_of(step: Request) -> SubmitMeasurement:

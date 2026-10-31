@@ -390,6 +390,54 @@ def test_a_cancel_that_ends_the_step_cancels_the_job_and_the_next_attempt_submit
     assert world.cluster.live_jobs() == 0
 
 
+@pytest.mark.parametrize("reason", list(CancelReason))
+def test_a_step_cancelled_before_its_run_began_submits_nothing(
+    tmp_path: Path, reason: CancelReason
+) -> None:
+    """A closing scope withdraws a step that waits to start: its job is never submitted after."""
+    world = World(tmp_path)
+    runner = world.first.runner
+    tag = tag_of("early")
+
+    async def main() -> None:
+        cancel = CancelSignal()
+        cancel.set(reason)
+        assert await runner.run(
+            world.step(tag, ends=False), tag, 1, DEADLINE_AT, cancel
+        ) == Cancelled(reason=reason)
+        assert await runner.clear(world.submission(tag), tag) == Cleared()
+        await world.close()
+
+    world.run(main())
+    assert world.cluster.submissions == []
+    assert world.cluster.cancelled == []
+
+
+def test_a_withdrawn_step_of_the_content_another_step_submitted_leaves_that_job_alone(
+    tmp_path: Path,
+) -> None:
+    """The step found the job by its content, not by its tag: its withdrawal holds nothing to cancel."""
+    world = World(tmp_path)
+    first, second_tag = tag_of("first"), tag_of("second")
+
+    async def main() -> None:
+        await world.die_mid_run(world.first, first, attempt=1)
+        runner = (await world.spawn()).runner
+        assert await runner.clear(world.submission(second_tag), second_tag) == Adopted(None)
+        cancel = CancelSignal()
+        cancel.set(CancelReason.WITHDRAWN)
+        withdrawn = await runner.run(
+            world.step(second_tag, ends=False), second_tag, 1, DEADLINE_AT, cancel
+        )
+        assert withdrawn == Cancelled(reason=CancelReason.WITHDRAWN)
+        assert len(world.cluster.submissions) == 1
+        assert world.cluster.live_jobs() == 1
+        assert world.cluster.cancelled == []
+        await world.close()
+
+    world.run(main())
+
+
 def test_any_order_of_kills_pauses_restarts_and_clears_runs_one_job_and_cancels_none(
     tmp_path: Path,
 ) -> None:

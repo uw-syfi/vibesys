@@ -28,7 +28,7 @@ from vs_dst._interruptions import Action, Interruption, Moment
 from vs_dst._simulate import SimulatedRun, simulate
 from vs_dst._snapshots import NondeterministicWorldError, WorldNotCopyableError
 from vs_dst._step_host import StepLoopHosting
-from vs_dst._world import Enact, HostedWorld, RunSetup, World
+from vs_dst._world import Enact, HoldingWorld, HostedWorld, RunSetup, World
 
 __all__ = [
     "EVERY_POINT",
@@ -41,6 +41,7 @@ __all__ = [
     "CrashPointPolicy",
     "Effects",
     "Enact",
+    "HoldingWorld",
     "HostedWorld",
     "Hosting",
     "Interrupted",

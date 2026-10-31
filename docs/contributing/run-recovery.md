@@ -715,12 +715,32 @@ snapshot, directly or through other steps, cannot end before it and does not hol
 blocked this way still ends: every writer has a limit, and the snapshot's own limit settles it. A
 `CLOSES` step runs only when every other step of its scope has a result, because a step that began
 before the close and reports its job after it would leave that job running with no one to cancel it;
-a step that waits for the close itself does not hold it back. The close waits for a running step to end
-by itself or at its limit: the rule does not withdraw the work of a closing scope, because nothing kind-free
-yet tells work whose result is no longer wanted from the cleanup the close depends on. What
-is missing for a precise rule is a declaration on `OperationDescriptor` of whether an operation
-writes the tree; until then every operation that is not a query counts as a writer, which only delays
-a snapshot. `libs/vs-core/tests/test_recovery_scope_order.py` holds the rule over generated states.
+a step that waits for the close itself does not hold it back. What is missing for a precise
+snapshot rule is a declaration on `OperationDescriptor` of whether an operation writes the tree;
+until then every operation that is not a query counts as a writer, which only delays a snapshot.
+
+What a close does with the open steps of its scope is declared by each step's kind
+(`request_close_policy`, beside `request_effect`; its match is exhaustive, so a new kind takes a
+side). A scope is closing while its `CloseAttemptScope` is open, and it treats a step by its
+`ClosePolicy`:
+
+- `WAIT` is the default: the close waits for the step to end by itself or at its limit. These are the
+  cleanup the close depends on (`DiscardWorkspace`, the snapshot kinds, the close itself), every turn,
+  and every operation nobody declared.
+- `WITHDRAW` is for work whose result only the scope would read, so waiting for it only keeps the scope
+  open: `SubmitMeasurement`, and a registered operation whose descriptor says `on_close=WITHDRAW`.
+
+`decide` ends a withdrawable step of a closing scope as it ends any step its asker no longer wants:
+`Cancel(WITHDRAWN)` while an attempt of it runs, and `Settle(Cancelled(WITHDRAWN))` while none does,
+so a step that waits to start never starts. A step that waits for the close itself is not withdrawn: it
+is the close's to run. No kind name appears in `decide`. The step's runner honors the cancel. A job
+step's runner cancels the job it submitted, queued in the scheduler or still waiting for local admission
+(that job ends before dispatch and is never submitted afterwards), and a job step cancelled before its
+`run` began registers nothing, submits nothing and takes no use of a job another step of the same
+content left. `libs/vs-core/tests/test_recovery_scope_order.py` holds the rule over generated states
+(a closing scope never waits on a withdrawable step and never withdraws one it must wait for), and
+`libs/vs-dst/tests/test_close_withdraws.py` closes a scope over a job the world holds pending forever,
+also across a kill at every record.
 
 `decide` is total: it never raises on a validated log, and a log that fails validation is a read error at
 the boundary (a corrupt record stops the reader, as `vs_runlog` does today), never an action.
