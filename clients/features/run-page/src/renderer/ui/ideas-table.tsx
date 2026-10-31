@@ -80,12 +80,20 @@ function ObjectiveFigure(props: {
   if (cell.value === null) return <Text tone="muted">{NONE}</Text>;
   const value = formatValue(cell.value);
   const exact = `${value}${column.unit === '' ? '' : ` ${column.unit}`}`;
+  // The unit is the column's header; the cell drops it when the list is narrow (`data-optional`).
+  const alone = column.unit === '' ? null : <span data-optional>{` ${column.unit}`}</span>;
   return (
     <span title={exact}>
       <CellInline>
         <CellMark on={cell.setBest} />
         {form === 'multiple' ? null : (
-          <Text variant="code">{form === 'value' ? exact : value}</Text>
+          // Beside a multiple the value gives way when the list is narrow; alone it keeps its place.
+          <span data-optional={form === 'value-multiple' || undefined}>
+            <Text variant="code">
+              {value}
+              {form === 'value' ? alone : null}
+            </Text>
+          </span>
         )}
         {form === 'value' ? null : <Multiple cell={cell} />}
       </CellInline>

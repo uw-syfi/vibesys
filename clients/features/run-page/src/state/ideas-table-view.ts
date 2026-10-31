@@ -8,9 +8,15 @@
  * `vs input` is the multiple of the chart's headline.
  */
 import type {Candidate} from '@vibesys/run-state/candidates';
-import {type BaselineColumns, baselineColumns, improvement} from './baselines.js';
+import {
+  type BaselineColumns,
+  baselineColumns,
+  baselineReferences,
+  improvement,
+  objectiveMetric,
+} from './baselines.js';
 import type {Direction} from './direction.js';
-import {changeOf, unitWords} from './headline.js';
+import {type Change, changeOf, unitWords} from './headline.js';
 import {type IdeaBases, ideaBases} from './idea-bases.js';
 import {type Impact, impactOf, type ObjectiveCell, type ObjectiveColumn} from './idea-impact.js';
 import {
@@ -155,12 +161,24 @@ function formOf(count: number): CellForm {
 function changeOver(
   item: Candidate,
   cells: readonly ObjectiveCell[] | undefined,
-  direction: Direction,
-) {
+  model: RunModel,
+): Change | null {
   const changes = (cells ?? []).flatMap(cell => (cell.change === null ? [] : [cell.change]));
   if (changes.length > 0) return changes.includes('faster') ? 'faster' : (changes[0] ?? null);
-  const own = item.measurement?.vsBaseline ?? null;
-  return own === null ? null : changeOf(improvement(own, direction));
+  const own = item.measurement?.vsBaseline ?? item.measurement?.against?.ratio ?? null;
+  if (own !== null) return changeOf(improvement(own, model.direction));
+  // A run with no reading of its input compares with what it was set against (`vs vLLM`).
+  const value = cells?.[0]?.value ?? item.measurement?.metricValue ?? null;
+  const reference = baselineReferences(model.baselines, objectiveMetric(model)).find(
+    each => each.value > 0,
+  );
+  if (value === null || reference === undefined) return null;
+  return changeOf(improvement(value / reference.value, model.direction));
+}
+
+/** Whether `item` has a reading, of an objective or of its own measurement. */
+function hasReading(item: Candidate, cells: readonly ObjectiveCell[] | undefined): boolean {
+  return item.measurement?.metricValue != null || (cells ?? []).some(cell => cell.value !== null);
 }
 
 /** `a` before `b` where `direction` says higher or lower is better; missing values last. */
@@ -213,7 +231,7 @@ function rowOf(item: Candidate, context: RowContext): IdeaTableRow {
   const {model, impact} = context;
   const best = model.candidates.best;
   const all = impact.cells.get(item.id) ?? [];
-  const status = context.statuses.get(item.id) ?? ideaStatus(item, null);
+  const status = context.statuses.get(item.id) ?? ideaStatus(item, null, false);
   const gain = all[0]?.gain ?? null;
   const fraction = impact.shares?.get(item.id);
   return {
@@ -283,10 +301,10 @@ export function ideasTable(
   const {columns, more} = columnsOf(model, objectives, impact);
   const sole = impact.columns.length === 1;
   const statuses = new Map(
-    tree.candidates.map(item => [
-      item.id,
-      ideaStatus(item, changeOver(item, impact.cells.get(item.id), model.direction)),
-    ]),
+    tree.candidates.map(item => {
+      const cells = impact.cells.get(item.id);
+      return [item.id, ideaStatus(item, changeOver(item, cells, model), hasReading(item, cells))];
+    }),
   );
   const comparisons = sole ? baselineColumns(model) : {labels: [], cells: new Map()};
   const context: RowContext = {

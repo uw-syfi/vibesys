@@ -21,7 +21,7 @@ describe('the status of an idea', () => {
         fc.oneof(fc.constantFrom(...FAILURE_REASONS), fc.string(), fc.constant(null)),
         changes,
         (outcome, reason, change) => {
-          const found = ideaStatus({...idea('i', outcome, 0, 60), reason}, change);
+          const found = ideaStatus({...idea('i', outcome, 0, 60), reason}, change, change !== null);
           expect(IDEA_STATUSES).toContain(found.status);
           expect(found.status === 'running').toBe(outcome === 'running');
         },
@@ -31,7 +31,7 @@ describe('the status of an idea', () => {
 
   test('names a cause that is words, not an identifier, and not the status again', () => {
     for (const reason of FAILURE_REASONS) {
-      const found = ideaStatus(failed(reason), null);
+      const found = ideaStatus(failed(reason), null, false);
       if (found.cause === null) continue;
       expect(found.cause).not.toMatch(/[_-]/);
       expect(found.cause.toLowerCase()).not.toBe(STATUS_WORDS[found.status].toLowerCase());
@@ -43,33 +43,35 @@ describe('the status of an idea', () => {
       fc.property(
         fc.string().filter(text => !/^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$/.test(text)),
         text => {
-          expect(ideaStatus(failed(text), null).cause).toBeNull();
+          expect(ideaStatus(failed(text), null, false).cause).toBeNull();
         },
       ),
     );
   });
 
   test('reads the cause of the reasons the screen words by hand', () => {
-    expect(ideaStatus(failed('turned_down'), null)).toEqual({
+    expect(ideaStatus(failed('turned_down'), null, false)).toEqual({
       status: 'dropped',
       cause: 'Turned down',
     });
-    expect(ideaStatus(failed('implementation-failed'), null)).toEqual({
+    expect(ideaStatus(failed('implementation-failed'), null, false)).toEqual({
       status: 'failed',
       cause: 'Not implemented',
     });
-    expect(ideaStatus(failed('review-rejected'), null)).toEqual({
+    expect(ideaStatus(failed('review-rejected'), null, false)).toEqual({
       status: 'failed',
       cause: 'Review rejected',
     });
-    expect(ideaStatus(failed('not_measured'), null).status).toBe('not-measured');
+    expect(ideaStatus(failed('not_measured'), null, false).status).toBe('not-measured');
   });
 
   test('a passed idea is faster, no gain by what it measured, or not measured', () => {
     const passed = idea('p', 'passed', 0, 60);
-    expect(ideaStatus(passed, 'faster').status).toBe('faster');
-    expect(ideaStatus(passed, 'same').status).toBe('no-gain');
-    expect(ideaStatus(passed, 'slower').status).toBe('no-gain');
-    expect(ideaStatus(passed, null).status).toBe('not-measured');
+    expect(ideaStatus(passed, 'faster', true).status).toBe('faster');
+    expect(ideaStatus(passed, 'same', true).status).toBe('no-gain');
+    expect(ideaStatus(passed, 'slower', true).status).toBe('no-gain');
+    // A reading with nothing to compare it with has no gain to state; none at all is not measured.
+    expect(ideaStatus(passed, null, true).status).toBe('no-gain');
+    expect(ideaStatus(passed, null, false).status).toBe('not-measured');
   });
 });
