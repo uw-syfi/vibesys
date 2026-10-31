@@ -55,6 +55,7 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
 | Runners: agent turn (`DispatchTurn`, `ResumeSessionTurn`, registered `SESSION_TURN` operations) and workspace | built, dormant: `vs_runtime.api.agent_step_runners`, with `vs_agent.reap_step_agents` and `AgentSessions.forget_unfinished` beneath them (#3475 item 5a). [Which runner owns each request kind](#the-runner-of-each-request-kind) names the 13 kinds with no owner |
 | Runners: Slurm and local evaluation | unbuilt; `libs/vs-slurm/src/vs_slurm/ledger.py` is the model |
 | Runners: registered operation and adoption | built and dormant: `vs_runtime.api.operation_step_runner` and `vs_runtime.api.adoption_step_runner`, each in the contract suite (#3475 item 5c) |
+| Runner of the 13 executor kinds: `ExecutorStepRunner` | built and dormant: `vs_runtime.api.executor_step_runner`, in the contract suite for every kind (#3475 item 5d) |
 | Per-environment `clear` (Docker, SkyPilot, Modal, Host) | unbuilt; see [open risks](#open-risks) for what each environment can and cannot clear |
 | Pause drains within a deadline and records `Parked` | in progress (#3475 item 1) |
 | `vs-dst` kills and pauses at every log write and every await | in progress (#3475 item 2) |
@@ -185,7 +186,7 @@ table because they exist only to settle unknown outcomes. They are deleted.
 Every kind of `libs/vs-core/src/vs_core/types/records.py:Request` (24, in six groups) has one runner, or
 is deleted, or has no owner yet. A runner is named only if its module exists in the pull request that
 lands it. "Executor step" below means a step that runs on its role's existing executor and needs no
-`clear` (the "none" rows of the table above).
+`clear` (the "none" rows of the table above); `ExecutorStepRunner` runs them.
 
 | Group | Kind | Runner | State |
 |---|---|---|---|
@@ -193,27 +194,30 @@ lands it. "Executor step" below means a step that runs on its role's existing ex
 | Session | `ResumeSessionTurn` | `AgentTurnStepRunner` | built, dormant (5a) |
 | Operation | `ExecuteRegisteredOperation` of lifecycle `SESSION_TURN` | `AgentTurnStepRunner`, through an `OperationTurns` the wiring supplies | built, dormant (5a); the wiring is 6a |
 | Operation | `ExecuteRegisteredOperation` of lifecycle `OWNED_JOB` | `SlurmJobStepRunner` or `LocalJobStepRunner` | 5b |
-| Operation | `ExecuteRegisteredOperation` of lifecycle `QUERY` or `IDEMPOTENT_WRITE` | `OperationStepRunner` | 5c |
+| Operation | `ExecuteRegisteredOperation` of lifecycle `QUERY` or `IDEMPOTENT_WRITE` | `OperationStepRunner` | built, dormant (5c) |
 | Evaluation | `SubmitMeasurement` | `SlurmJobStepRunner` or `LocalJobStepRunner` | 5b |
-| Adoption | `AdoptRevision`, `VerifyAdoption` | `AdoptionStepRunner` | 5c |
-| Workspace | `EnsureWorkspace`, `RestoreRevision`, `DiscardWorkspace`, `CloseAttemptScope` | none: executor steps | no owner |
-| Workspace | `SnapshotAndRetain`, `RetainRevision` | none: executor steps that need their scope's writers ended first | no owner |
-| Session | `EnsureSession`, `CancelTurn`, `CloseSession` | none: executor steps | no owner |
-| Session | `SnapshotAndRetainRun` | none: an executor step that needs the run's writers ended first | no owner |
-| Evaluation | `ObserveOwnedJob`, `CollectEvidence`, `CancelOwnedJob` | none: executor steps | no owner |
+| Adoption | `AdoptRevision`, `VerifyAdoption` | `AdoptionStepRunner` | built, dormant (5c) |
+| Workspace | `EnsureWorkspace`, `RestoreRevision`, `DiscardWorkspace`, `CloseAttemptScope` | `ExecutorStepRunner` | built, dormant (5d) |
+| Workspace | `SnapshotAndRetain`, `RetainRevision` | `ExecutorStepRunner`; they need their scope's writers ended first | built, dormant (5d) |
+| Session | `EnsureSession`, `CancelTurn`, `CloseSession` | `ExecutorStepRunner` | built, dormant (5d) |
+| Session | `SnapshotAndRetainRun` | `ExecutorStepRunner`; it needs the run's writers ended first | built, dormant (5d) |
+| Evaluation | `ObserveOwnedJob`, `CollectEvidence`, `CancelOwnedJob` | `ExecutorStepRunner` | built, dormant (5d) |
 | Reconciliation | `InspectRequest`, `CancelOwnedResource`, `BlockRequest` | none: deleted | deleted at the cutover |
 | Session | `InspectTurn` | none: deleted | deleted at the cutover |
 | Evaluation | `InspectOwnedJob` | none: deleted | deleted at the cutover |
 
 Two things follow.
 
-- **13 kinds have no owner:** `EnsureWorkspace`, `RestoreRevision`, `DiscardWorkspace`,
+- **13 kinds had no owner:** `EnsureWorkspace`, `RestoreRevision`, `DiscardWorkspace`,
   `CloseAttemptScope`, `SnapshotAndRetain`, `RetainRevision`, `EnsureSession`, `CancelTurn`,
-  `CloseSession`, `SnapshotAndRetainRun`, `ObserveOwnedJob`, `CollectEvidence` and `CancelOwnedJob`. The
-  runners above execute their own kinds. `WorkspaceStepRunner` is a decorator, not an owner: it records and
-  restores a workspace around an inner runner that runs the step. The cutover needs one more runner, an
-  `ExecutorStepRunner` that runs the step on its role's executor (`RequestExecutors`) and answers
-  `Cleared`, which the design's runner list does not name. It would be the same size as the Fake.
+  `CloseSession`, `SnapshotAndRetainRun`, `ObserveOwnedJob`, `CollectEvidence` and `CancelOwnedJob`.
+  `ExecutorStepRunner` (item 5d) runs them on their role's executor (`RequestExecutors`). It does not
+  answer `Cleared` for everything: each kind declares in `DECLARED_REPEATS` why a second run reaches
+  the same state, in one of four classes taken from the table above (`ReadOnly`, `FixedEnd` for
+  `EnsureWorkspace` and `RestoreRevision`, `ReleaseOrBind` for the releases, binds and cancels, and
+  `RetainByContent` for the snapshot and retain kinds). The constructor refuses a kind with no class and
+  a kind another runner owns. `WorkspaceStepRunner` is a decorator, not an owner: it records and restores
+  a workspace around an inner runner that runs the step.
 - **The snapshot kinds depend on ordering, not on a reap.** The table above says `clear` of
   `SnapshotAndRetain`, `SnapshotAndRetainRun` and `RetainRevision` reaps the scope's tagged agent
   processes. A process carries the tag of its own step, so a snapshot step's `clear(step, tag)` cannot find
@@ -448,8 +452,8 @@ import it. Each runner is a `vs_runtime` implementation that adapts one library'
 (`vs_agent`, `vs_slurm`, `vs_project`). The library supplies the mechanism (kill by tag, adopt by ledger
 key); the issue's wording "one `StepRunner` each in `vs-agent`, `vs-slurm`" would need an upward edge.
 Implementations are named `<Variant><Role>`: `FakeStepRunner`, `AgentTurnStepRunner`,
-`WorkspaceStepRunner`, `SlurmJobStepRunner`, `LocalJobStepRunner`, `OperationStepRunner` and
-`AdoptionStepRunner`.
+`WorkspaceStepRunner`, `SlurmJobStepRunner`, `LocalJobStepRunner`, `OperationStepRunner`,
+`AdoptionStepRunner` and `ExecutorStepRunner`.
 
 ```python
 @dataclass(frozen=True)
@@ -721,6 +725,22 @@ These are facts the implementation must settle, found while checking the design 
 - **Provider session id of a killed turn.** `forget_unfinished` does not touch the provider conversation. A
   provider that rewrites its session id mid-turn makes the retry's expected-checkpoint check fail loudly
   (`SessionResumeError`) instead of resuming; the fix belongs to that provider's contract case.
+- **The executor kinds repeat safely today because their executors keep receipts.** `ExecutorStepRunner`
+  runs on `RuntimeWorkspaceRequests`, `RuntimeSessionRequests` and the evaluation executor, which replay a
+  sealed result by request id and resume an unsealed one (`run_once`). Every kind passes a kill at sampled
+  durable writes through the runner (every write, for `EnsureSession`), but the cutover deletes
+  `run_once`, and these facts must then hold without it:
+  - `SnapshotAndRetain` and `SnapshotAndRetainRun` look for the snapshot an interrupted attempt already
+    committed by its label only when resumed (`_snapshot`, `find_snapshot` under `if resumed`). Without
+    the flag a repeat commits again: an unreferenced equal-tree commit, never a wrong result. The lookup
+    has to become unconditional. Measured on a repeat under another request id, each snapshot or retain
+    adds one retained revision (effects 9 to 10, 7 to 8, 7 to 8), where `EnsureWorkspace`,
+    `RestoreRevision`, `DiscardWorkspace`, `CancelTurn`, `CloseSession` and the evaluation kinds add none.
+  - `EnsureSession` repeats safely only under the same request id: the binding records the ensure that
+    made it, and a fresh-policy ensure under another id is refused ("session identity is already in use").
+    The tag is stable across epochs, so the runner is safe; a retry that minted a new id would not be.
+- **The snapshot kinds are unchecked here.** `RetainByContent` is safe once every writer of the scope has
+  a result, which is `decide`'s rule (item 4a); `ExecutorStepRunner` does not check it.
 - **Per-environment `clear` (item 5c, not built).** `RunEnvironment` has run-wide `reap_orphans` and
   `reconcile_writers` today, and no step-level `clear`. The agent and stage runners take their reaper as a
   function of the tag (`StepReaper`, `StageWorkReaper`), so each environment owes them one:

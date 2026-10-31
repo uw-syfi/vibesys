@@ -51,8 +51,12 @@ class StepRunnerUnderTest:
     """A step that runs until it is cancelled."""
     left_running: Callable[[RequestId], Coroutine[Any, Any, int]]
     """How many pieces of work carrying the tag still run, read from the backend itself."""
-    unreachable: Callable[[], AbstractContextManager[None]]
-    """Make the backend refuse every ``clear`` for as long as the context is open."""
+    unreachable: Callable[[], AbstractContextManager[None]] | None = None
+    """Make the backend refuse every ``clear`` for as long as the context is open.
+
+    ``None`` for a runner whose ``clear`` reaches no backend, such as one whose steps only read
+    or are safe to repeat as they stand. Clause 6 then has no backend to refuse, and its case
+    checks that ``clear`` answers."""
     ran: dict[RequestId, Request] = field(default_factory=dict)
     """The step each tag last ran, kept by the cases: ``clear`` gets the step the log holds."""
 
@@ -152,11 +156,18 @@ class StepRunnerContract:
 
         async def main() -> None:
             await _kill_mid_run(subject, tag, attempt=1)
-            with subject.unreachable():
-                for _ in range(2):
-                    refusal = await _refusal(subject, tag)
-                    assert refusal is not None, "clear answered while its backend was unreachable"
-                    assert refusal.tag == tag
+            if subject.unreachable is None:
+                assert await _refusal(subject, tag) is None, (
+                    "clear refused with no backend to reach"
+                )
+            else:
+                with subject.unreachable():
+                    for _ in range(2):
+                        refusal = await _refusal(subject, tag)
+                        assert refusal is not None, (
+                            "clear answered while its backend was unreachable"
+                        )
+                        assert refusal.tag == tag
             await _finish_after_clear(subject, tag, attempt=2)
             assert await subject.left_running(tag) == 0
 

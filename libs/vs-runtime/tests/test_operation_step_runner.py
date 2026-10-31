@@ -286,8 +286,12 @@ class OperationRunnerContract(StepRunnerContract):
             finishing_step=lambda tag: built.step(tag, hangs=False),
             running_step=lambda tag: built.step(tag, hangs=True),
             left_running=left_running,
-            unreachable=unreachable,
+            unreachable=unreachable if self.cleared or self.keyed else None,
         )
+
+
+class TestReadOnlyOperationStepRunner(OperationRunnerContract):
+    request = QueryWork
 
 
 class TestKeyedWriteOperationStepRunner(OperationRunnerContract):
