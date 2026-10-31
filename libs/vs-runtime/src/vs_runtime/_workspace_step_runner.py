@@ -69,16 +69,21 @@ class WorkspaceStepRunner:
         self._settlement = settlement
 
     async def run(
-        self, step: Request, tag: RequestId, attempt: int, cancel: CancelSignal
+        self,
+        step: Request,
+        tag: RequestId,
+        attempt: int,
+        deadline_at: float,
+        cancel: CancelSignal,
     ) -> StepResult:
         """Record the workspace, run the step on the inner runner, then judge what it wrote."""
         target = await self._workspaces.target(step)
         if target is None:
-            return await self._inner.run(step, tag, attempt, cancel)
+            return await self._inner.run(step, tag, attempt, deadline_at, cancel)
         key = self._unsettled(tag) or self._next_record(tag)
         await self._settlement.begin(key, target.ref, target.workspace, target.grant)
         try:
-            result = await self._inner.run(step, tag, attempt, cancel)
+            result = await self._inner.run(step, tag, attempt, deadline_at, cancel)
         finally:
             self._settlement.fence(key)
         violation = await self._settlement.settle(key)
@@ -86,13 +91,13 @@ class WorkspaceStepRunner:
             return Failed(reason=FailureReason.REFUSED, cause=RejectionCode.CAPABILITY)
         return result
 
-    async def clear(self, tag: RequestId) -> Adopted | Cleared:
+    async def clear(self, step: Request, tag: RequestId) -> Adopted | Cleared:
         """Clear the inner runner, then restore the workspace to the commit recorded for *tag*.
 
         Work the inner runner adopted is not restored under: it still runs in the workspace, or
         it ended and its result stands.
         """
-        cleared = await self._inner.clear(tag)
+        cleared = await self._inner.clear(step, tag)
         if isinstance(cleared, Cleared):
             try:
                 await self._restore(tag)

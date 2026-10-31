@@ -12,18 +12,17 @@ attempt left is ended, not taken over. ``clear`` kills the processes carrying th
 the journal holds no answer for the invocation) returns the workspace to the baseline the access
 receipt retains and forgets the unanswered journal record, so the invocation is dispatched
 again. An answered invocation is left alone: the journal replays it, and its writes were judged.
-The tag is the step's request id, the same in every epoch, so a restarted process finds what an
-earlier one started by the tag alone: ``run`` records, before any I/O, which session and
-invocation the tag names.
+The tag is the step's request id, the same in every epoch, and ``clear`` is given the step the log
+holds, so a restarted process finds the session, invocation and workspace an earlier attempt used
+from the step itself, with no index of its own.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
-
-from pydantic import BaseModel, ConfigDict
 
 from vs_agent.api import (
     AgentSessionKey,
@@ -39,10 +38,12 @@ from vs_core.api import (
     ObservationStatus,
     ResumeSessionTurn,
     TurnObserved,
+    Until,
 )
 from vs_core.api.recovery import Cancelled, Finished
 from vs_runtime._access_settlement import AccessKey, AccessSettlementError
 from vs_runtime._core_identity import core_identity
+from vs_runtime._core_requests import ExecutionContext
 from vs_runtime._session_requests import load_session_binding, session_binding_key
 from vs_runtime._step_runner import Cleared, ClearUnavailableError
 
@@ -50,16 +51,15 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from vs_agent.api import AgentSessions
-    from vs_core.api import Observation, Request, RequestId, TurnSpec
+    from vs_core.api import HostFence, Observation, Request, RequestId, TurnSpec
     from vs_core.api.recovery import StepResult
-    from vs_runtime._core_requests import ExecutionContext, ExecutionResult
+    from vs_runtime._core_requests import ExecutionResult
     from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._session_lifecycle_requests import SessionLifecycleRequests
     from vs_runtime._session_requests import RuntimeSessionRequests
     from vs_runtime._step_runner import Adopted, CancelSignal
-    from vs_sim.api import BlockingRunner
+    from vs_sim.api import BlockingRunner, Clock
 
-_STEP_TURNS = "step-turns"
 _AGENTS = "the agent containers"
 _WORKSPACE = "the workspace"
 _JOURNAL = "the invocation journal"
@@ -93,15 +93,6 @@ class TurnWithoutResultError(Exception):
         self.observation = observation
 
 
-class StepTurn(BaseModel):
-    """Which session and invocation a step's tag started, recorded before the turn begins."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    binding: str
-    session_key: str
-    invocation: str
-
-
 class OperationTurns(Protocol):
     """Names the turn a registered ``SESSION_TURN`` operation runs as."""
 
@@ -112,7 +103,6 @@ class OperationTurns(Protocol):
         observed under the step core asked for. In production it is the registry's
         ``normalize_turn`` of the decoded operation, with the reserved inputs resolved.
         """
-        ...
 
 
 @dataclass(frozen=True)
@@ -130,7 +120,8 @@ class _Plan:
 
     spec: TurnSpec
     binding_of: Request
-    start: Callable[[], Awaitable[ExecutionResult]]
+    start: Callable[[ExecutionContext], Awaitable[ExecutionResult]]
+    """Starts one attempt under the execution context the runner builds for it."""
 
 
 @dataclass(frozen=True)
@@ -149,53 +140,66 @@ class AgentTurnStepRunner:
         self,
         paths: TurnPaths,
         state: TurnState,
-        contexts: Callable[[Request], ExecutionContext],
+        clock: Clock,
+        fence: HostFence,
         reap: StepReaper,
     ) -> None:
-        """Bind the turn executors, the durable state they write, the contexts of attempts and the reaper.
+        """Bind the turn executors, the durable state they write, the run clock, the fence and the reaper.
 
-        *state* is what the executors were built with. *contexts* gives the execution context
-        of an attempt of a step.
+        *state* is what the executors were built with. *clock* is the run clock the deadline
+        of an attempt is read against. *fence* is the host identity the executors' effect
+        fences record: one run lock holder is the only writer, so it does not change within a
+        run.
         """
         self._paths = paths
         self._sessions = state.sessions
         self._store = state.store
         self._blocking = state.blocking
-        self._contexts = contexts
+        self._clock = clock
+        self._fence = fence
         self._reap = reap
 
     async def run(
-        self, step: Request, tag: RequestId, attempt: int, cancel: CancelSignal
+        self,
+        step: Request,
+        tag: RequestId,
+        attempt: int,
+        deadline_at: float,
+        cancel: CancelSignal,
     ) -> StepResult:
         """Run attempt *attempt* of the turn; ``Cancelled`` once *cancel* is set and the turn ended."""
         del attempt
-        plan = self._plan(step)
-        if step.request_id != tag:
-            message = f"the tag {tag} is not the step's request id {step.request_id}"
-            raise ValueError(message)
-        started = self._note(plan, tag)
-        execution = asyncio.ensure_future(plan.start())
+        plan = self._plan(step, tag)
+        context = ExecutionContext(
+            fence=self._fence,
+            now_at=self._clock.now(),
+            until=Until(at=deadline_at),
+            payload_digest=hashlib.sha256(step.model_dump_json().encode()).hexdigest(),
+        )
+        execution = asyncio.ensure_future(plan.start(context))
         try:
-            return await self._ended(execution, started, tag, cancel)
+            return await self._ended(execution, plan, tag, cancel)
         finally:
             if not execution.done():
                 execution.cancel()
                 await asyncio.gather(execution, return_exceptions=True)
 
-    def _plan(self, step: Request) -> _Plan:
-        """The turn *step* is, or ``NotATurnError``."""
+    async def clear(self, step: Request, tag: RequestId) -> Adopted | Cleared:
+        """End everything carrying *tag*, then make the next attempt start from the recorded state."""
+        await self._clear(self._plan(step, tag), tag)
+        return Cleared()
+
+    def _plan(self, step: Request, tag: RequestId) -> _Plan:
+        """The turn *step* is, or ``NotATurnError``; *tag* must be the step's own request id."""
+        if step.request_id != tag:
+            message = f"the tag {tag} is not the step's request id {step.request_id}"
+            raise ValueError(message)
         paths = self._paths
         match step:
             case DispatchTurn():
-                return _Plan(
-                    step.turn,
-                    step,
-                    lambda: paths.dispatch.attempt(step, self._contexts(step)),
-                )
+                return _Plan(step.turn, step, lambda context: paths.dispatch.attempt(step, context))
             case ResumeSessionTurn():
-                return _Plan(
-                    step.turn, step, lambda: paths.resume.attempt(step, self._contexts(step))
-                )
+                return _Plan(step.turn, step, lambda context: paths.resume.attempt(step, context))
             case ExecuteRegisteredOperation() if (
                 step.operation.schema_ref.lifecycle is LifecycleClass.SESSION_TURN
             ):
@@ -208,36 +212,25 @@ class AgentTurnStepRunner:
                 return _Plan(
                     dispatch.turn,
                     step,
-                    lambda: paths.dispatch.attempt(
-                        dispatch, self._contexts(step), behalf=core_identity(step)
+                    lambda context: paths.dispatch.attempt(
+                        dispatch, context, behalf=core_identity(step)
                     ),
                 )
             case _:
                 raise NotATurnError(step)
 
-    async def clear(self, tag: RequestId) -> Adopted | Cleared:
-        """End everything carrying *tag*, then make the next attempt start from the recorded state."""
-        await self._clear(tag)
-        return Cleared()
-
-    def _note(self, plan: _Plan, tag: RequestId) -> StepTurn | None:
-        """Record, before the turn can begin, which session and invocation *tag* names."""
+    def _journaled(self, plan: _Plan) -> tuple[str, AgentSessionKey, str] | None:
+        """The binding key, session key and invocation the turn uses, or ``None`` before any session."""
         bkey = session_binding_key(plan.binding_of, plan.spec.session.session_id)
         binding = load_session_binding(self._store, bkey)
         if binding is None:
             return None
-        started = StepTurn(
-            binding=bkey,
-            session_key=binding.session_key,
-            invocation=plan.spec.invocation_id.root,
-        )
-        self._store.record_once(_STEP_TURNS, "turn", tag.root, started)
-        return started
+        return bkey, AgentSessionKey.parse(binding.session_key), plan.spec.invocation_id.root
 
     async def _ended(
         self,
         execution: asyncio.Future[ExecutionResult],
-        started: StepTurn | None,
+        plan: _Plan,
         tag: RequestId,
         cancel: CancelSignal,
     ) -> StepResult:
@@ -250,37 +243,38 @@ class AgentTurnStepRunner:
         if execution.done() and not cancel.is_set():
             return _finished(execution.result(), tag)
         reason = await cancel.wait()
-        if started is not None:
-            key = AgentSessionKey.parse(started.session_key)
-            await self._blocking.run(self._sessions.cancel, key, started.invocation)
+        journaled = self._journaled(plan)
+        if journaled is not None:
+            _, key, invocation = journaled
+            await self._blocking.run(self._sessions.cancel, key, invocation)
         (outcome,) = await asyncio.gather(execution, return_exceptions=True)
         if isinstance(outcome, BaseException) and not isinstance(outcome, Exception):
             raise outcome
         if not isinstance(outcome, BaseException) and _answered(outcome):
             return _finished(outcome, tag)
-        await self._clear(tag)
+        await self._clear(plan, tag)
         return Cancelled(reason=reason)
 
-    async def _clear(self, tag: RequestId) -> None:
+    async def _clear(self, plan: _Plan, tag: RequestId) -> None:
         try:
             await self._blocking.run(self._reap, tag.root)
         except OrphanReapError as error:
             raise ClearUnavailableError(tag, _AGENTS) from error
-        started = self._store.load(_STEP_TURNS, "turn", tag.root, StepTurn)
-        if started is None:
+        journaled = self._journaled(plan)
+        if journaled is None:
             return
-        key = AgentSessionKey.parse(started.session_key)
+        bkey, key, invocation = journaled
         try:
-            outcome = await self._blocking.run(self._sessions.inspect, key, started.invocation)
+            outcome = await self._blocking.run(self._sessions.inspect, key, invocation)
             if isinstance(outcome, Completed | InvalidResponse):
                 return
             await self._paths.dispatch.settlement.rewind(
-                AccessKey(binding=started.binding, invocation=started.invocation)
+                AccessKey(binding=bkey, invocation=invocation)
             )
         except AccessSettlementError as error:
             raise ClearUnavailableError(tag, _WORKSPACE) from error
         try:
-            await self._blocking.run(self._sessions.forget_unfinished, key, started.invocation)
+            await self._blocking.run(self._sessions.forget_unfinished, key, invocation)
         except SessionPersistenceError as error:
             raise ClearUnavailableError(tag, _JOURNAL) from error
 

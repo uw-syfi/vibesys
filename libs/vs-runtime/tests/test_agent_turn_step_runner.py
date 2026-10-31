@@ -75,12 +75,14 @@ from vs_sim.api.testing import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine
+    from collections.abc import Callable, Coroutine
     from pathlib import Path
 
     from vs_agent.api import AgentTurnRequest as TurnRequest
 
 _RUN = "run-a"
+DEADLINE_AT = 1_000_000.0
+FENCE = core.HostFence(host_id=core.HostId(root="host"), epoch=1)
 
 
 class Kind(StrEnum):
@@ -150,6 +152,8 @@ class World:
     containers: tuple[str, ...]
     lifecycle: SessionLifecycleRequests
     state: TurnState
+    restarted: Callable[[], AgentTurnStepRunner]
+    """A new process's runner over the same durable state: it remembers nothing."""
     kind: Kind = Kind.DISPATCH
 
     @property
@@ -264,11 +268,13 @@ def open_world(root: Path, kind: Kind = Kind.DISPATCH) -> World:
 
     lifecycle = SessionLifecycleRequests(sessions, turns, store, turns.settlement, blocking)
     state = TurnState(sessions, store, blocking)
-    runner = AgentTurnStepRunner(
-        TurnPaths(turns, lifecycle, FixedTurns()), state, context_for, reap
-    )
+    paths = TurnPaths(turns, lifecycle, FixedTurns())
+
+    def restarted() -> AgentTurnStepRunner:
+        return AgentTurnStepRunner(paths, state, clock, FENCE, reap)
+
     return World(
-        runner,
+        restarted(),
         turns,
         clock,
         threads,
@@ -278,6 +284,7 @@ def open_world(root: Path, kind: Kind = Kind.DISPATCH) -> World:
         containers,
         lifecycle,
         state,
+        restarted,
         kind,
     )
 
@@ -322,7 +329,9 @@ def test_a_turn_starts_every_agent_process_with_its_step_s_tag(tmp_path: Path) -
     cancel = CancelSignal()
 
     async def main() -> None:
-        task = asyncio.ensure_future(world.runner.run(world.running(tag), tag, 1, cancel))
+        task = asyncio.ensure_future(
+            world.runner.run(world.running(tag), tag, 1, DEADLINE_AT, cancel)
+        )
         await yield_until(
             lambda: world.left_running(tag), lambda running: running == 1, "the turn's process"
         )
@@ -343,7 +352,9 @@ def test_a_killed_turn_leaves_its_process_until_clear_ends_it_and_no_container_g
     bystander = world.processes.start(world.containers[1], step_tag_env("step-b"))
 
     async def main() -> None:
-        task = asyncio.ensure_future(world.runner.run(world.running(tag), tag, 1, CancelSignal()))
+        task = asyncio.ensure_future(
+            world.runner.run(world.running(tag), tag, 1, DEADLINE_AT, CancelSignal())
+        )
         await yield_until(
             lambda: world.left_running(tag), lambda running: running == 1, "the turn's process"
         )
@@ -351,7 +362,7 @@ def test_a_killed_turn_leaves_its_process_until_clear_ends_it_and_no_container_g
         await asyncio.gather(task, return_exceptions=True)
         assert await world.left_running(tag) == 1
 
-        assert await world.runner.clear(tag) == Cleared()
+        assert await world.runner.clear(world.step(tag), tag) == Cleared()
 
         assert await world.left_running(tag) == 0
         assert world.processes.is_alive(bystander)
@@ -368,7 +379,9 @@ def test_the_next_attempt_after_a_kill_is_asked_again_and_judged_from_the_record
     tag = tag_named("step-a")
 
     async def main() -> None:
-        task = asyncio.ensure_future(world.runner.run(world.running(tag), tag, 1, CancelSignal()))
+        task = asyncio.ensure_future(
+            world.runner.run(world.running(tag), tag, 1, DEADLINE_AT, CancelSignal())
+        )
         await yield_until(
             lambda: world.left_running(tag), lambda running: running == 1, "the turn's process"
         )
@@ -376,11 +389,11 @@ def test_the_next_attempt_after_a_kill_is_asked_again_and_judged_from_the_record
         await asyncio.gather(task, return_exceptions=True)
         assert world.turns.settlement.fenced_by(world.workspace.path) != ()
 
-        await world.runner.clear(tag)
+        await world.runner.clear(world.step(tag), tag)
 
         assert world.turns.settlement.fenced_by(world.workspace.path) == ()
         assert len(world.workspace.agent_restore_calls) == 1
-        result = await world.runner.run(world.finishing(tag), tag, 2, CancelSignal())
+        result = await world.runner.run(world.finishing(tag), tag, 2, DEADLINE_AT, CancelSignal())
         assert isinstance(result, Finished)
         assert result.report.outcome_json == '{"value":7}'
         assert world.turns.settlement.fenced_by(world.workspace.path) == ()
@@ -398,16 +411,18 @@ def test_a_rerun_after_a_kill_is_judged_against_workspace_access_like_the_first_
     tag = tag_named("step-a")
 
     async def main() -> None:
-        task = asyncio.ensure_future(world.runner.run(world.running(tag), tag, 1, CancelSignal()))
+        task = asyncio.ensure_future(
+            world.runner.run(world.running(tag), tag, 1, DEADLINE_AT, CancelSignal())
+        )
         await yield_until(
             lambda: world.left_running(tag), lambda running: running == 1, "the turn's process"
         )
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
-        await world.runner.clear(tag)
+        await world.runner.clear(world.step(tag), tag)
         world.workspace.script_pending_changes(["candidate.py"], [])
 
-        result = await world.runner.run(world.finishing(tag), tag, 2, CancelSignal())
+        result = await world.runner.run(world.finishing(tag), tag, 2, DEADLINE_AT, CancelSignal())
 
         assert isinstance(result, Finished)
         assert result.observation.status is core.ObservationStatus.FAILED
@@ -429,13 +444,15 @@ def test_an_answered_turn_is_never_asked_again_and_a_clear_never_reverts_its_wri
     tag = tag_named("step-a")
 
     async def main() -> None:
-        answered = await world.runner.run(world.finishing(tag), tag, 1, CancelSignal())
+        answered = await world.runner.run(world.finishing(tag), tag, 1, DEADLINE_AT, CancelSignal())
         assert isinstance(answered, Finished)
         for attempt, action in enumerate(later, start=2):
             if action == "clear":
-                assert await world.runner.clear(tag) == Cleared()
+                assert await world.runner.clear(world.step(tag), tag) == Cleared()
             else:
-                again = await world.runner.run(world.finishing(tag), tag, attempt, CancelSignal())
+                again = await world.runner.run(
+                    world.finishing(tag), tag, attempt, DEADLINE_AT, CancelSignal()
+                )
                 assert again == answered
         assert len(world.provider_turns) == 1
         assert world.workspace.agent_restore_calls == []
@@ -450,9 +467,11 @@ def test_a_step_that_is_not_a_turn_or_not_the_tags_own_is_refused(tmp_path: Path
 
     async def main() -> None:
         with pytest.raises(NotATurnError, match="observe"):
-            await world.runner.run(job, tag, 1, CancelSignal())
+            await world.runner.run(job, tag, 1, DEADLINE_AT, CancelSignal())
         with pytest.raises(ValueError, match="request id"):
-            await world.runner.run(world.finishing(tag), tag_named("step-b"), 1, CancelSignal())
+            await world.runner.run(
+                world.finishing(tag), tag_named("step-b"), 1, DEADLINE_AT, CancelSignal()
+            )
 
     world.run(main())
     assert world.provider_turns == []
@@ -479,10 +498,38 @@ def test_a_registered_operation_is_a_turn_only_when_its_lifecycle_and_its_turn_s
 
     async def main() -> None:
         with pytest.raises(NotATurnError, match="execute_registered_operation"):
-            await world.runner.run(query, tag, 1, CancelSignal())
+            await world.runner.run(query, tag, 1, DEADLINE_AT, CancelSignal())
 
     world.run(main())
     assert world.provider_turns == []
+
+
+@pytest.mark.parametrize("kind", list(Kind))
+def test_a_restarted_runner_clears_what_an_earlier_one_started_from_the_step_alone(
+    tmp_path: Path, kind: Kind
+) -> None:
+    world = open_world(tmp_path, kind)
+    tag = tag_named("step-a")
+
+    async def main() -> None:
+        task = asyncio.ensure_future(
+            world.runner.run(world.running(tag), tag, 1, DEADLINE_AT, CancelSignal())
+        )
+        await yield_until(
+            lambda: world.left_running(tag), lambda running: running == 1, "the turn's process"
+        )
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        restarted = world.restarted()
+
+        assert await restarted.clear(world.step(tag), tag) == Cleared()
+
+        assert await world.left_running(tag) == 0
+        assert world.turns.settlement.fenced_by(world.workspace.path) == ()
+        result = await restarted.run(world.finishing(tag), tag, 2, DEADLINE_AT, CancelSignal())
+        assert isinstance(result, Finished)
+
+    world.run(main())
 
 
 @pytest.mark.parametrize("kind", list(Kind))
@@ -493,7 +540,7 @@ def test_the_runner_leaves_the_result_of_a_step_to_the_loop_and_seals_no_receipt
     tag = tag_named("step-a")
 
     async def main() -> None:
-        result = await world.runner.run(world.finishing(tag), tag, 1, CancelSignal())
+        result = await world.runner.run(world.finishing(tag), tag, 1, DEADLINE_AT, CancelSignal())
         assert isinstance(result, Finished)
 
     world.run(main())
@@ -515,13 +562,14 @@ def test_a_registered_turn_that_is_not_the_operations_own_is_refused(
     runner = AgentTurnStepRunner(
         TurnPaths(world.turns, world.lifecycle, Wrong()),
         world.state,
-        context_for,
+        world.clock,
+        FENCE,
         lambda _tag: None,
     )
 
     async def main() -> None:
         with pytest.raises(NotATurnError if answer == "none" else ValueError):
-            await runner.run(world.step(tag), tag, 1, CancelSignal())
+            await runner.run(world.step(tag), tag, 1, DEADLINE_AT, CancelSignal())
 
     world.run(main())
     assert world.provider_turns == []
@@ -537,13 +585,13 @@ def test_a_provider_that_dies_after_accepting_the_turn_gives_no_result_and_the_r
 
     async def main() -> None:
         with pytest.raises(TurnWithoutResultError) as lost:
-            await world.runner.run(world.finishing(tag), tag, 1, CancelSignal())
+            await world.runner.run(world.finishing(tag), tag, 1, DEADLINE_AT, CancelSignal())
         assert lost.value.tag == tag
         assert not lost.value.observation.terminal
 
         world.fails.discard(tag.root)
-        assert await world.runner.clear(tag) == Cleared()
-        result = await world.runner.run(world.finishing(tag), tag, 2, CancelSignal())
+        assert await world.runner.clear(world.step(tag), tag) == Cleared()
+        result = await world.runner.run(world.finishing(tag), tag, 2, DEADLINE_AT, CancelSignal())
 
         assert isinstance(result, Finished)
 

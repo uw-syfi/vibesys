@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 
 _SLOW = "slow"
 _SCOPE = core.Scope(owner=core.RunId(root="run"), generation=0)
+DEADLINE_AT = 1_000_000.0
 
 
 class FaultingWorkspace(FakeWorkspace):
@@ -161,7 +162,9 @@ class TestAdoptingWorkspaceStepRunner(WorkspaceContract):
 
 async def start_killed(world: World, tag: core.RequestId, attempt: int) -> None:
     """Start an attempt that never ends by itself, then cancel the task awaiting it."""
-    task = asyncio.ensure_future(world.runner.run(a_step(tag, _SLOW), tag, attempt, CancelSignal()))
+    task = asyncio.ensure_future(
+        world.runner.run(a_step(tag, _SLOW), tag, attempt, DEADLINE_AT, CancelSignal())
+    )
 
     async def observe() -> tuple[core.RequestId, ...]:
         return world.inner.running()
@@ -190,15 +193,15 @@ def test_after_any_number_of_killed_attempts_clear_restores_the_recorded_commit_
     async def main() -> None:
         for attempt in range(1, killed + 1):
             if attempt > 1:
-                await world.runner.clear(tag)
+                await world.runner.clear(a_step(tag), tag)
             await start_killed(world, tag, attempt)
-        await world.runner.clear(tag)
+        await world.runner.clear(a_step(tag), tag)
         restored_to = world.workspace.agent_restore_calls[-1][0]
         assert restored_to == baseline_of(world, tag, killed)
         restored = {revision for revision, _ in world.workspace.agent_restore_calls}
         assert restored == {baseline_of(world, tag, n) for n in range(1, killed + 1)}
         assert world.settlement.fenced_by(world.workspace.path) == ()
-        result = await world.runner.run(a_step(tag), tag, killed + 1, CancelSignal())
+        result = await world.runner.run(a_step(tag), tag, killed + 1, DEADLINE_AT, CancelSignal())
         assert isinstance(result, Finished)
         assert world.settlement.fenced_by(world.workspace.path) == ()
 
@@ -215,7 +218,7 @@ def test_a_second_attempt_started_without_clear_is_refused_by_the_unsettled_firs
     async def main() -> None:
         await start_killed(world, tag, 1)
         assert world.settlement.fenced_by(world.workspace.path) != ()
-        await world.runner.clear(tag)
+        await world.runner.clear(a_step(tag), tag)
         assert world.settlement.fenced_by(world.workspace.path) == ()
 
     run_virtual(world.clock, main())
@@ -230,9 +233,9 @@ def test_a_clear_that_cannot_restore_raises_unavailable_and_a_later_clear_restor
     async def main() -> None:
         await start_killed(world, tag, 1)
         with refusing_restores(world.workspace), pytest.raises(ClearUnavailableError) as refused:
-            await world.runner.clear(tag)
+            await world.runner.clear(a_step(tag), tag)
         assert refused.value.tag == tag
-        await world.runner.clear(tag)
+        await world.runner.clear(a_step(tag), tag)
         assert world.workspace.agent_restore_calls[-1][0] == baseline_of(world, tag, 1)
         assert world.settlement.fenced_by(world.workspace.path) == ()
 
@@ -247,7 +250,7 @@ def test_a_step_that_writes_outside_its_grant_fails_with_a_typed_reason_and_is_r
     world.workspace.script_pending_changes(["candidate.py"], [])
 
     async def main() -> None:
-        result = await world.runner.run(a_step(tag), tag, 1, CancelSignal())
+        result = await world.runner.run(a_step(tag), tag, 1, DEADLINE_AT, CancelSignal())
         assert isinstance(result, Failed)
         assert result.reason is core.FailureReason.REFUSED
         assert world.settlement.fenced_by(world.workspace.path) == ()
