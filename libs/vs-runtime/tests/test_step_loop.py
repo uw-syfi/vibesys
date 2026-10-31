@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -35,8 +35,29 @@ from vs_core.api.recovery import (
     Settle,
     StepResult,
     Wait,
+    decide,
+    finished_message,
+    interrupted_message,
+    started_message,
 )
-from vs_runtime.api.step_runner import Interruption, LoopExit, StepLoopTiming, run_step_loop
+from vs_core.api.recovery import (
+    fold as core_fold,
+)
+from vs_proto.api import (
+    AttemptInterrupted,
+    InterruptionReason,
+    StepFinished,
+    StepStarted,
+    Timestamp,
+)
+from vs_runlog.api import Appended, ConfirmedLog
+from vs_runtime.api.step_runner import (
+    Interruption,
+    LoopExit,
+    StepLog,
+    StepLoopTiming,
+    run_step_loop,
+)
 from vs_runtime.api.testing import (
     AttemptHangs,
     AttemptRaises,
@@ -51,11 +72,12 @@ from vs_runtime.api.testing import (
     RunnerCall,
     RunnerMethod,
 )
-from vs_sim.api.testing import VirtualClock, examples, run_virtual, swept
+from vs_sim.api.testing import Changes, VirtualClock, examples, run_virtual, swept, wait_for_state
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from vs_proto.api import Record
     from vs_runtime.api.step_runner import Adopted, CancelSignal, Cleared
     from vs_runtime.api.testing import Behavior
 
@@ -261,13 +283,13 @@ class _Switch:
         self.ticks += 1
 
 
-class _CrashingLog:
-    def __init__(self, inner: FakeStepLog[Model, Input], switch: _Switch) -> None:
+class _CrashingLog[S]:
+    def __init__(self, inner: StepLog[S], switch: _Switch) -> None:
         self._inner = inner
         self._switch = switch
 
     @property
-    def state(self) -> Model:
+    def state(self) -> S:
         return self._inner.state
 
     async def _around(self, write: Callable[[], Awaitable[None]]) -> None:
@@ -654,3 +676,263 @@ def test_any_fault_schedule_with_a_kill_at_any_boundary_ends_with_every_step_fin
     check_invariants(clean, scenario)
     kill_at = data.draw(st.integers(0, max(0, clean.boundaries - 1)))
     check_invariants(run_world(scenario, kill_at), scenario)
+
+
+# --- The loop over core's own rule: real fold, real decide, real records -----------------------
+
+
+class QueryOutcome(core.Value):
+    status: Literal["succeeded"] = "succeeded"
+
+
+class Query(core.OperationRequest):
+    kind: Literal["test.query"] = "test.query"
+    lifecycle: Literal[core.LifecycleClass.QUERY] = core.LifecycleClass.QUERY
+    outcome_model: ClassVar[type[QueryOutcome]] = QueryOutcome
+    value: int
+
+
+def query_registry() -> core.OperationRegistry:
+    descriptor = core.OperationDescriptor(
+        kind="test.query",
+        lifecycle=core.LifecycleClass.QUERY,
+        request_schema=core.SchemaRef(name="query", version=1),
+        outcome_schema=core.SchemaRef(name="outcome", version=1),
+    )
+    return core.OperationRegistry(
+        (
+            core.OperationRegistration(
+                descriptor=descriptor, request_model=Query, outcome_model=QueryOutcome
+            ),
+        )
+    )
+
+
+def state_with_open_steps(count: int, registry: core.OperationRegistry) -> core.CoreState:
+    state = core.initial_state()
+    state = state.model_copy(
+        update={
+            "registry": registry.descriptors,
+            "run": state.run.model_copy(
+                update={"capabilities": core.Capabilities(operations=registry.descriptors)}
+            ),
+        }
+    )
+    scope = core.Scope(owner=state.run.run_id, generation=0)
+    for index in range(count):
+        decision = registry.validate_decision(
+            core.Operation(
+                decision_id=core.DecisionId(root=f"d:{index}"),
+                scope=scope,
+                request=Query(value=index),
+            )
+        )
+        state = core.step(
+            state,
+            core.DecisionSubmitted(
+                decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+                expected_revision=state.revision,
+            ),
+        ).state
+    return state
+
+
+class MemoryRecords:
+    """The writer surface of the confirmed log, kept in memory: what survives a host death."""
+
+    def __init__(self) -> None:
+        self.records: list[Record] = []
+        self.changes = Changes()
+
+    def append(self, record: Record) -> None:
+        self.records.append(record)
+
+    def commit(self) -> None:
+        self.changes.notify()
+
+    def read(self) -> tuple[Record, ...]:
+        return tuple(self.records)
+
+    def count(self, field: str) -> int:
+        return sum(1 for r in self.records if r.body is not None and r.body.field == field)
+
+    def attempts_started(self) -> dict[str, list[int]]:
+        by_tag: dict[str, list[int]] = {}
+        for record in self.records:
+            if record.body is not None and record.body.field == "step_started":
+                message = record.body.value
+                by_tag.setdefault(message.tag, []).append(message.attempt)
+        return by_tag
+
+
+class CoreStepLog:
+    """A ``StepLog`` over core's records: each method appends one and folds it into the state."""
+
+    def __init__(
+        self,
+        records: MemoryRecords,
+        seed: core.CoreState,
+        registry: core.OperationRegistry,
+        clock: VirtualClock,
+        epoch: int,
+    ) -> None:
+        self._log = ConfirmedLog(records)
+        self._registry = registry
+        self._clock = clock
+        self._epoch = epoch
+        folded = core_fold(records.read(), seed, registry=registry)
+        steps = folded.steps.model_copy(update={"epoch": epoch})
+        self._state = folded.model_copy(update={"steps": steps})
+        self._runs: dict[core.RequestId, Run] = {}
+
+    @property
+    def state(self) -> core.CoreState:
+        return self._state
+
+    def latest_run(self, tag: core.RequestId) -> Run | None:
+        return self._runs.get(tag)
+
+    async def step_started(self, run: Run) -> None:
+        self._runs[run.tag] = run
+        self._append(started_message(run))
+
+    async def step_finished(self, tag: core.RequestId, attempt: int, result: StepResult) -> None:
+        self._append(finished_message(tag, attempt, result))
+
+    async def attempt_interrupted(
+        self, tag: core.RequestId, attempt: int, why: Interruption
+    ) -> None:
+        assert why is Interruption.PAUSE, "core's records have no reason for a runner that raised"
+        self._append(interrupted_message(tag, attempt, InterruptionReason.PAUSE))
+
+    async def run_ended(self, end: End) -> None:
+        raise NotImplementedError
+
+    async def next_input(self) -> None:
+        await asyncio.Event().wait()
+
+    def _append(self, message: StepStarted | StepFinished | AttemptInterrupted) -> None:
+        appended = self._log.append(
+            message, epoch=self._epoch, at=Timestamp(), clock=self._clock.now()
+        )
+        assert isinstance(appended, Appended)
+        self._state = core_fold([appended.record], self._state, registry=self._registry)
+
+
+class CoreRule:
+    def decide(self, state: core.CoreState, now: float) -> tuple[Action, ...]:
+        return decide(state, now)
+
+    def settled(self, state: core.CoreState) -> LoopExit | None:
+        match state.run.status:
+            case core.RunStatus.TERMINAL:
+                return LoopExit.ENDED
+            case core.RunStatus.PARKED:
+                return LoopExit.PARKED
+            case _:
+                return None
+
+
+def a_report(step: core.Request, tag: core.RequestId) -> Finished:
+    return Finished(
+        observation=core.Observation(
+            event_id=core.EventId(root=f"{tag.root}-done"),
+            request_id=tag,
+            scope=step.scope,
+            sequence=0,
+            observed_at=0.0,
+            status=core.ObservationStatus.SUCCEEDED,
+            terminal=True,
+            accepted=True,
+            released=True,
+            children_complete=True,
+        )
+    )
+
+
+@dataclass
+class CoreWorld:
+    records: MemoryRecords
+    runner: FakeStepRunner
+    boundaries: int
+
+
+def run_core_world(count: int, behaviors: tuple[Behavior, ...], kill_at: int | None) -> CoreWorld:
+    """Run ``count`` open steps through the loop over core's rule until each has its result.
+
+    Core ends a run only when a strategy proposes its result, and there is none here, so the
+    loop idles once every step has finished and the host stops it.
+    """
+    clock = VirtualClock()
+    registry = query_registry()
+    seed = state_with_open_steps(count, registry)
+    records = MemoryRecords()
+
+    def behave(step: core.Request, tag: core.RequestId, attempt: int) -> Behavior:
+        behavior = behaviors[min(attempt, len(behaviors)) - 1]
+        if isinstance(behavior, AttemptReturns) and behavior.result is None:
+            return AttemptReturns(result=a_report(step, tag), after_s=behavior.after_s)
+        return behavior
+
+    runner = FakeStepRunner(clock, behave=behave)
+
+    async def main() -> int:
+        epoch = 0
+        while True:
+            switch = _Switch(kill_at if epoch == 0 else None)
+            log = CoreStepLog(records, seed, registry, clock, epoch + 1)
+            loop = asyncio.ensure_future(
+                run_step_loop(
+                    _CrashingLog(log, switch),
+                    CoreRule(),
+                    _CrashingRunner(runner, switch),
+                    clock,
+                    TIMING,
+                )
+            )
+            switch.loop = loop
+            done = asyncio.ensure_future(
+                wait_for_state(
+                    lambda: records.count("step_finished"), lambda n: n == count, records.changes
+                )
+            )
+            await asyncio.wait({loop, done}, return_when=asyncio.FIRST_COMPLETED)
+            loop.cancel()
+            done.cancel()
+            outcomes = await asyncio.gather(loop, done, return_exceptions=True)
+            raised = [o for o in outcomes if isinstance(o, Exception)]
+            if raised:
+                raise raised[0]
+            epoch += 1
+            if records.count("step_finished") == count:
+                return switch.ticks
+
+    return CoreWorld(records, runner, run_virtual(clock, main()))
+
+
+def check_core_world(world: CoreWorld, count: int) -> None:
+    assert world.records.count("step_finished") == count
+    started = world.records.attempts_started()
+    assert len(started) == count
+    for attempts in started.values():
+        assert attempts == list(range(1, len(attempts) + 1))
+    check_clear_precedes_every_rerun(Outcome([], world.runner.calls, world.runner, 0, 0))
+    assert world.runner.running() == ()
+    assert world.runner.violations == ()
+
+
+def test_core_open_steps_run_to_their_results_through_the_loop() -> None:
+    world = run_core_world(3, (FINISHES,), None)
+    check_core_world(world, 3)
+    assert world.records.count("step_started") == 3
+
+
+def test_a_step_past_its_limit_ends_cancelled_through_the_loop() -> None:
+    world = run_core_world(2, (HANGS,), None)
+    check_core_world(world, 2)
+
+
+def test_every_boundary_of_a_run_over_core_rule_survives_a_kill() -> None:
+    boundaries = run_core_world(2, (FINISHES,), None).boundaries
+    for kill_at in swept(boundaries, sample=8):
+        check_core_world(run_core_world(2, (FINISHES,), kill_at), 2)
