@@ -1,7 +1,8 @@
 /**
  * `screenCheck(page)`: the layout and wording checks over the screen a page shows now, against its
  * real layout. It returns every violation (`in-page.ts` says what each check reads); `report`
- * separates those a known failure explains (`known-failures.ts`) from the rest. The checks are deterministic: no timing, only the page's layout at the
+ * separates those a known failure explains (`known-failures.ts`) from the rest. A screen suite asks
+ * for `SCREEN_CHECKS`, which adds the visual spec's laws; a journey's default stays with the defects. The checks are deterministic: no timing, only the page's layout at the
  * moment of the call, so the caller fixes the viewport, theme and fonts and lets the page settle.
  */
 import type {Page} from '@playwright/test';
@@ -19,6 +20,9 @@ import {
   dragRegionCheck,
   focusRingCheck,
   HELPERS,
+  headingDepthCheck,
+  hollowBoxCheck,
+  leftEdgeCheck,
   legendCheck,
   numberLabelCheck,
   overflowCheck,
@@ -27,7 +31,9 @@ import {
   rawTextCheck,
   repeatCheck,
   scrollRoomCheck,
+  spacingOrderCheck,
   strikeCheck,
+  titleStripCheck,
   truncationCheck,
   truncationRoomCheck,
   type Violation,
@@ -61,7 +67,21 @@ const CHECKS: Readonly<Record<PageCheckId, (input: CheckInput) => Violation[]>> 
   banner: bannerCheck,
   'chrome-clear': chromeClearCheck,
   'drag-region': dragRegionCheck,
+  'left-edge': leftEdgeCheck,
+  'heading-depth': headingDepthCheck,
+  'spacing-order': spacingOrderCheck,
+  'hollow-box': hollowBoxCheck,
+  'title-strip': titleStripCheck,
 };
+
+/** The laws of the visual spec a page can decide: a suite that owns a screen's look runs these. */
+const VISUAL_CHECKS: readonly PageCheckId[] = [
+  'left-edge',
+  'heading-depth',
+  'spacing-order',
+  'hollow-box',
+  'title-strip',
+];
 
 /** Enum values that never read as words: the failure reasons spelled with a hyphen or underscore. */
 const RAW_WORDS: readonly string[] = FAILURE_REASONS.filter(reason => /[-_]/.test(reason));
@@ -124,10 +144,15 @@ async function bundledFontCheck(page: Page): Promise<Violation[]> {
   }));
 }
 
-/** Every violation of `only` (every check by default) on the screen `page` shows now. */
+/** The checks a journey runs: the defects, not the visual spec's laws (a journey passing through a screen cannot pay that screen's debt). */
+const JOURNEY_CHECKS: readonly (PageCheckId | 'bundled-font')[] = SCREEN_CHECKS.filter(
+  id => id === 'bundled-font' || !VISUAL_CHECKS.includes(id),
+);
+
+/** Every violation of `only` (the journey checks by default) on the screen `page` shows now. */
 export async function screenCheck(
   page: Page,
-  only: readonly (PageCheckId | 'bundled-font')[] = SCREEN_CHECKS,
+  only: readonly (PageCheckId | 'bundled-font')[] = JOURNEY_CHECKS,
 ): Promise<Violation[]> {
   const inPage = only.filter((id): id is PageCheckId => id !== 'bundled-font');
   const violations = await page.evaluate<Violation[]>(
