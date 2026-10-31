@@ -1,0 +1,16 @@
+journeys/lineage10
+records 47
+blobs 1
+streams 0
+record kinds
+  declaration_amended 1
+  epoch_started 1
+  lifecycle 1
+  metric 11
+  span 33
+span label kinds
+  (no label) 1
+  adoption 1
+  agent_turn 10
+  gate 11
+  workstream 10

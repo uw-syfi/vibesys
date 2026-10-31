@@ -58,7 +58,9 @@ From the clients workspace root:
   `pnpm --filter @vibesys/app-desktop-shell e2e --headed <spec> -g <fixture>`.
 - The same suite in CI's Linux image (needs Docker):
   `pnpm --filter @vibesys/app-desktop-shell e2e:linux`. Run it when a check
-  passes here and you suspect a font or rendering difference.
+  passes here and you suspect a font or rendering difference. The native
+  replays are made on the host and mounted read-only; a spec that builds a
+  fixture differing from its declaration needs one host run first.
 
 ## Iterate on a fixture with hot reload
 

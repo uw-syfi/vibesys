@@ -1,0 +1,17 @@
+shared/comparison-baselines
+records 25
+blobs 1
+streams 0
+record kinds
+  epoch_started 1
+  lifecycle 1
+  metric 4
+  span 19
+span label kinds
+  (no label) 1
+  agent_turn 4
+  baseline 2
+  comparison 2
+  gate 4
+  planning_call 2
+  workstream 4
