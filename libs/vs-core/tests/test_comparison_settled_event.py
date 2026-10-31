@@ -20,7 +20,7 @@ import vs_core.api as core
 from vs_sim.api.testing import examples
 
 from .test_comparison_liveness import Bench, base_runs, died_steps, running, seeded
-from .test_measurement_comparison import FLOOR, Lab, ended_steps
+from .test_measurement_comparison import FLOOR, STALENESS, Lab, ended_steps
 from .test_measurement_reuse import reloaded
 from .test_measurements import transition
 
@@ -105,19 +105,35 @@ def told_in(transition: core.Transition) -> list[Subject]:
     ]
 
 
-def check_told(lab: Lab, steps: tuple[core.Transition, ...]) -> None:
-    """Each transition tells exactly the comparisons it took from settling to settled."""
+def check_told(
+    lab: Lab, steps: tuple[core.Transition, ...], waiting: set[Subject] | None = None
+) -> None:
+    """Each transition tells exactly the comparisons a flow may wait on that it took to settled.
+
+    ``waiting`` carries, from one call to the next, every comparison the view stated settling
+    and nobody has been told of since: a flow that read it settling waits for the report. A
+    comparison can leave the view while it settles (every base sample went stale) and come back
+    when the run that feeds it lands; its flow is still waiting then, so it is told all the
+    same. One the view did not state before the step (left out, or never stated) may be told
+    when its last run ends, since the view cannot say whether a run fed it.
+    """
+    waiting = set() if waiting is None else waiting
     for step in steps:
         before = stated(lab)
+        waiting |= {subject for subject, settling in before.items() if settling}
         lab.state = step.state
         after = stated(lab)
         said = told_in(step)
         assert len(said) == len(set(said)), "a comparison told twice in one step"
         settled = {subject for subject, settling in after.items() if not settling}
-        settling = {subject for subject, settling in before.items() if settling}
-        assert set(said) <= settled, "told while a run still feeds it"
-        assert set(said) <= settling, "told again, though nothing fed it since it was told"
-        assert settling & settled <= set(said), "a comparison stopped settling and nobody was told"
+        still = {subject for subject, settling in after.items() if settling}
+        assert not set(said) & still, "told while a run still feeds it"
+        assert set(said) <= waiting | (set(said) - set(before)), (
+            "told again, though nothing fed it since it was told"
+        )
+        assert waiting & settled <= set(said), "a comparison stopped settling and nobody was told"
+        waiting -= set(said)
+        waiting |= still
 
 
 @settings(max_examples=examples(pr=60, nightly=600))
@@ -126,7 +142,7 @@ def check_told(lab: Lab, steps: tuple[core.Transition, ...]) -> None:
     spread=st.sampled_from((0.0, 0.01, 0.05)),
     steps=st.lists(
         st.tuples(
-            st.sampled_from(("call", "end")),
+            st.sampled_from(("call", "end", "wait")),
             st.integers(0, 1),
             st.integers(0, 7),
             st.sampled_from(ENDS),
@@ -142,31 +158,52 @@ def check_told(lab: Lab, steps: tuple[core.Transition, ...]) -> None:
     seed=0,
 )
 @example(floor=0.0, spread=0.01, steps=[("call", 0, 0, "sample")], seed=0)
+@example(
+    # The close call's base run lands after the only fresh base sample went stale: the view
+    # leaves the comparison out while it runs, and core told nobody when it landed.
+    floor=FLOOR,
+    spread=0.0,
+    steps=[
+        ("call", 0, 0, "sample"),
+        ("end", 0, 0, "sample"),
+        ("end", 0, 0, "sample"),
+        ("wait", 0, 5, "sample"),
+    ],
+    seed=0,
+)
+@pytest.mark.regression
 def test_every_end_of_a_run_tells_each_comparison_it_settles_exactly_once(
     floor: float, spread: float, steps: list[tuple[str, int, int, End]], seed: int
 ) -> None:
     """Whatever way each run ends, a comparison is told settled once, when its last run ends.
 
     Runs end with a sample, without one (`Outcome`), blocked by core at their limit before
-    they were observed, or with a sample reaching a restarted host. After the steps every run
-    left ends with a sample, so every close call takes the runs it earns.
+    they were observed, or with a sample reaching a restarted host. Between them the run clock
+    moves on (``wait``, a quarter of ``base_staleness`` per unit), so base samples go stale
+    while runs that feed a comparison are under way. After the steps every run left ends with
+    a sample, so every close call takes the runs it earns, and no flow is left waiting.
     """
-    lab = Lab.of("a", "b", floor=floor, staleness=1e9)
+    lab = Lab.of("a", "b", floor=floor, staleness=STALENESS)
     bench = Bench(
         {"input-1": 100.4, "input-2": 103.0, "base": 100.0}, spread, seeded(f"ends:{seed}")
     )
+    waiting: set[Subject] = set()
     tail: list[tuple[str, int, int, End]] = [("end", 0, 0, "sample")] * 40
     for kind, who, which, how in [*steps, *tail]:
         name = "ab"[who]
         if kind == "call":
             lab.call(name, f"c-{name}-{which % 2}", f"input-{which % 2 + 1}")
             continue
+        if kind == "wait":
+            lab.advance(which * STALENESS / 4)
+            continue
         live = running(lab)
         if not live:
             continue
-        check_told(lab, ending(lab, live[which % len(live)], how, bench))
+        check_told(lab, ending(lab, live[which % len(live)], how, bench), waiting)
     assert not running(lab), "the runs a comparison takes are bounded"
     assert not any(stated(lab).values()), "every comparison settles once its runs have ended"
+    assert not waiting, "every flow that waited for a comparison was told it settled"
 
 
 @pytest.mark.regression
@@ -278,3 +315,34 @@ def test_a_registered_measurement_job_does_not_keep_a_comparison_settling() -> N
     )
     (comparison,) = lab.comparisons()
     assert not core.comparison_settling(registered, comparison)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("floor", [FLOOR, 0.0], ids=["floor", "no-floor"])
+def test_a_close_call_whose_only_fresh_base_sample_expires_mid_run_still_settles(
+    floor: float,
+) -> None:
+    """A close call's base run lands after the one base sample it was to join went stale.
+
+    The view stops stating the comparison while the run is under way (no fresh base sample),
+    and states it again over the new sample once the run lands. Before, core read whether the
+    comparison was settling from the view alone, so the step that ended the run saw nothing
+    settling and told nobody: the flow waiting in ``measure_compared`` slept to its bound
+    (``SETTLE_RUNS`` measurement limits, hours on a real task).
+    """
+    lab = Lab.of("a", floor=floor, staleness=STALENESS)
+    bench = Bench({"input-1": 100.4, "base": 100.0}, 0.0, seeded("expires"))
+    subject = (lab.scopes["a"], "input-1", "base")
+    for run in lab.call("a", "c-a", "input-1"):
+        check_told(lab, ending(lab, run, "sample", bench))
+    assert stated(lab) == {subject: True}, "the close call earned a base run"
+    lab.advance(STALENESS + 1.0)
+    waiting: set[Subject] = set()
+    told: list[Subject] = []
+    while live := running(lab):
+        steps = ending(lab, live[0], "sample", bench)
+        check_told(lab, steps, waiting)
+        told.extend(subject for step in steps for subject in told_in(step))
+    assert stated(lab) == {subject: False}
+    assert told[-1:] == [subject], "the flow waiting for the comparison is told it settled"
+    assert not waiting
