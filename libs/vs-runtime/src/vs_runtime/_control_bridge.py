@@ -912,6 +912,7 @@ class RunControlBridge:
                     if not job.terminal and job.resource_id is not None
                 ),
                 immediate=immediate,
+                parked=core.run.status is RunStatus.PARKED,
             )
         held = {control.control_id for control in core.run.controls}
         self._settle_inbox(

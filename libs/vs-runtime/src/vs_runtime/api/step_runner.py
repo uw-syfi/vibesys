@@ -5,7 +5,12 @@ from collections.abc import Callable
 from vs_core.api.recovery import OpenStep
 from vs_runtime._core_inputs import Controls, CoreInputs, SearchRun
 from vs_runtime._fold_keeper import CACHE_EVERY, CacheUsed, FoldStart, start_fold
-from vs_runtime._run_log_step_log import RunLogStepLog, RunLogUncertainError, SearchHearing
+from vs_runtime._run_log_step_log import (
+    RestAnnouncer,
+    RunLogStepLog,
+    RunLogUncertainError,
+    SearchHearing,
+)
 from vs_runtime._saved_run_record import fold_log, restore_log, saved_run_in, snapshot_message
 from vs_runtime._step_loop import (
     Interrupted,
@@ -44,6 +49,7 @@ __all__ = [
     "Interrupted",
     "OpenStep",
     "Recorded",
+    "RestAnnouncer",
     "RunLogStepLog",
     "RunLogUncertainError",
     "SearchHearing",

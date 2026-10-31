@@ -209,6 +209,16 @@ class EventJournal(DurableEventJournal[CoreEvent]):
             )
         )
 
+    def parking(self, *, draining: bool) -> None:
+        """Show the run as parked, as the step log is about to record the park that makes it so.
+
+        A run parked outright shows its drain first: the control bridge shows none for a run that
+        is already parked when it looks.
+        """
+        if not draining:
+            self.emit(CoreEventType.PARK_REQUESTED, "Park requested")
+        self.emit(CoreEventType.PARKED, "Run paused")
+
     def has_recorded(self, event_type: CoreEventType) -> bool:
         """Whether an event of ``event_type`` was recorded, this process's or an earlier one's."""
         return any(event.type is event_type for event in self.history())

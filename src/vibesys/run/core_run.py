@@ -154,6 +154,7 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         search=search,
         stamp=clock.stamp,
         cache=FileFoldCache(Project.state_cache_path_for(services.project.root, services.run_id)),
+        announcer=integration.events,
     )
     controls = OperatorControls(
         RunControlBridge(

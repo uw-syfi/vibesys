@@ -355,7 +355,6 @@ class _LocalRunSession:
             succeeded = outcome.status.value == "succeeded"
         except OperatorPaused:
             self._status = RunStatus.PARKED
-            self._integration.events.emit(CoreEventType.PARKED, "Run paused")
             return RunResult(
                 run_id=self._run_id(),
                 loop=request.orchestration.id,
