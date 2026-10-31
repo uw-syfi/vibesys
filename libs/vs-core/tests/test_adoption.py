@@ -178,10 +178,23 @@ class Run:
         terminal: bool = True,
         published: tuple[core.AdoptionPublication, core.CheckoutUpdate] | None = None,
     ) -> core.Transition:
+        observation = self.observation(request, status, terminal=terminal)
+        event = core.AdoptionObserved(
+            observation=observation,
+            revision=revision,
+            publication=None if published is None else published[0],
+            checkout=None if published is None else published[1],
+        )
+        self.delivered.append(event)
+        return self.feed(event)
+
+    def observation(
+        self, request: core.Request, status: core.ObservationStatus, *, terminal: bool = True
+    ) -> core.Observation:
         assert request.request_id is not None
         key = request.request_id.root
         self.sequences[key] = self.sequences.get(key, 0) + 1
-        observation = core.Observation(
+        return core.Observation(
             event_id=core.EventId(root=f"{key}:{self.sequences[key]}"),
             request_id=request.request_id,
             scope=RUN_SCOPE,
@@ -191,14 +204,26 @@ class Run:
             accepted=True,
             terminal=terminal,
         )
-        event = core.AdoptionObserved(
-            observation=observation,
-            revision=revision,
-            publication=None if published is None else published[0],
-            checkout=None if published is None else published[1],
+
+    def report(
+        self,
+        request: core.Request,
+        status: core.ObservationStatus,
+        *,
+        revision: core.RevisionRef,
+        published: tuple[core.AdoptionPublication, core.CheckoutUpdate],
+    ) -> core.Transition:
+        """The executor's report alone, with no owner event beside it, as a step's fold has it."""
+        assert request.request_id is not None
+        self.feed(core.DispatchAuthorized(request_id=request.request_id))
+        return self.feed(
+            core.RequestObserved(
+                observation=self.observation(request, status),
+                revision=revision,
+                publication=published[0],
+                checkout=published[1],
+            )
         )
-        self.delivered.append(event)
-        return self.feed(event)
 
     def adoption_requests(self) -> list[core.AdoptRevision | core.VerifyAdoption]:
         return [
@@ -985,6 +1010,42 @@ def test_publication_adopts_without_root_verification_in_every_checkout_state(
     run.state = reload(run.state)
     run.feed(run.delivered[-1])
     assert run.results() == [result]
+
+
+@pytest.mark.regression
+@given(status=st.sampled_from(tuple(core.CheckoutStatus)))
+@example(status=core.CheckoutStatus.DIRTY_TREE)
+def test_a_report_that_carries_the_publication_adopts_as_the_executors_own_event_does(
+    status: core.CheckoutStatus,
+) -> None:
+    """The report alone says what the executor's event says, so no VerifyAdoption follows it."""
+    publication = core.AdoptionPublication(
+        revision=GOOD[0].revision.revision_id.root,
+        commit="a" * 40,
+        branch="vibesys-adoptions/run",
+    )
+    published = (publication, core.CheckoutUpdate(status=status))
+    by_event, by_report = start(), start()
+    (event_request,) = new_requests(by_event.propose(GOOD[0]))
+    (report_request,) = new_requests(by_report.propose(GOOD[0]))
+    by_event.answer(
+        event_request,
+        core.ObservationStatus.SUCCEEDED,
+        revision=GOOD[0].revision,
+        published=published,
+    )
+    completed = by_report.report(
+        report_request,
+        core.ObservationStatus.SUCCEEDED,
+        revision=GOOD[0].revision,
+        published=published,
+    )
+    assert new_requests(completed) == []
+    assert by_report.view() == by_event.view()
+    assert [(item.publication, item.checkout) for item in by_report.results()] == [
+        (item.publication, item.checkout) for item in by_event.results()
+    ]
+    assert by_report.results() != []
 
 
 @pytest.mark.regression

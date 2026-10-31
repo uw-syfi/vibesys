@@ -4,11 +4,11 @@
  */
 import type {HostKey} from '@vibesys/hosts';
 import {
-  Banner,
   Button,
   type CheckItem,
   CheckList,
   type CheckState,
+  Chip,
   Row,
   Stack,
   Text,
@@ -24,6 +24,7 @@ import {
   type NewRunSnapshot,
   roleLabel,
   type StepId,
+  startUnconfirmed,
   stepIds,
 } from '../../state/index.js';
 import {backendLabel} from './cause-words.js';
@@ -175,24 +176,35 @@ function Summary(props: {
   );
 }
 
-/** Why the last load, fix or start failed, in plain words, with a retry for a load or check. */
-export function ProblemBanner(props: {
+/**
+ * Why the last load, fix or start failed, in a few words, the account in the chip's description.
+ * A load or check has a retry. A start that may have happened says so on the page and sends the
+ * person to their runs, which is also what opens Start again.
+ */
+export function ProblemStatus(props: {
   readonly context: NewRunContext;
   readonly dispatch: Dispatch;
+  /** Open the Runs screen, where a run that did start is listed. */
+  readonly showRuns: () => void;
 }): JSX.Element | null {
   const {context, dispatch} = props;
   if (context.problem === null) return null;
   const words = problemWords(context.problem, machineLabel(context.form.machine));
+  const account = [words.title, words.body, words.detail].filter(each => each !== null).join('\n');
   return (
-    <Banner
-      tone="failed"
-      title={words.title}
-      body={words.body}
-      {...(words.detail === null ? {} : {hint: words.detail})}
-      {...(words.retry
-        ? {actions: <Button text="Try again" press={() => dispatch({type: 'retry'})} />}
-        : {})}
-    />
+    <Row gap="space-3" align="center" wrap>
+      <Chip label={words.label} tone={words.look ? 'warn' : 'err'} dot hint={account} />
+      {words.retry ? <Button text="Try again" press={() => dispatch({type: 'retry'})} /> : null}
+      {words.look ? (
+        <Button
+          text="Open Runs"
+          press={() => {
+            dispatch({type: 'looked'});
+            props.showRuns();
+          }}
+        />
+      ) : null}
+    </Row>
   );
 }
 
@@ -252,12 +264,14 @@ export function StartButton(props: {
   readonly dispatch: Dispatch;
 }): JSX.Element {
   const blocked = startBlocked(props.snapshot);
+  // After a start that may have happened the reason is drawn beside Start, not only described.
+  const quiet = !startUnconfirmed(props.snapshot.context.problem);
   return (
     <Button
       variant="primary"
       text="Start run"
       press={() => props.dispatch({type: 'start'})}
-      {...(blocked === undefined ? {} : {disabledReason: blocked, quietReason: true})}
+      {...(blocked === undefined ? {} : {disabledReason: blocked, quietReason: quiet})}
     />
   );
 }

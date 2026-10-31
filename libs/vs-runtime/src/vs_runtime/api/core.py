@@ -82,7 +82,6 @@ from vs_runtime._core_requests import (
     ExecutorRefusal,
     ExecutorRole,
     OperationExecutor,
-    OwnerEvent,
     RefusingRequestExecution,
     RequestExecutors,
     SemanticEvents,
@@ -130,7 +129,7 @@ from vs_runtime._effect_fence import (
     Unrecorded,
 )
 from vs_runtime._evaluation_jobs import handle_for
-from vs_runtime._evaluation_requests import JobRecord, MeasurementRequests
+from vs_runtime._evaluation_requests import MeasurementRequests
 from vs_runtime._evidence_ledger import (
     EvidenceEntry,
     EvidenceLookup,
@@ -139,7 +138,8 @@ from vs_runtime._evidence_ledger import (
 )
 from vs_runtime._evidence_operations import InterpretEvidenceOwner, RetainRevisionOwner
 from vs_runtime._export_patch_operation import ExportPatchOwner
-from vs_runtime._issue_board_operations import BoardTexts, IssueBoardOwner
+from vs_runtime._issue_board_operations import BOARD_KEY, BoardTexts, IssueBoardOwner
+from vs_runtime._job_registry import JobRecord, JobRegistry
 from vs_runtime._measurement_progress import (
     IgnoreMeasurement,
     MeasurementDecisions,
@@ -209,6 +209,7 @@ from vs_runtime._request_inspection import (
     RecordedRequestInspector,
     as_target,
 )
+from vs_runtime._rerun_policy import KeyedWrite, ReadOnly, read_or_keyed
 from vs_runtime._semantic_events import BlockDiagnostic, JournalSemanticEvents
 from vs_runtime._session_lifecycle_requests import (
     ContinuationBinding,
@@ -258,6 +259,7 @@ from vs_runtime._workspace_requests import (
 )
 
 __all__ = [
+    "BOARD_KEY",
     "EVALUATION_TOOL_ID",
     "HAND_ROLLED_ROLES",
     "HEARTBEAT_TASK",
@@ -330,9 +332,11 @@ __all__ = [
     "InterpretEvidenceOwner",
     "IssueBoardOwner",
     "JobRecord",
+    "JobRegistry",
     "JournalPublicationDelivery",
     "JournalRunInvocations",
     "JournalSemanticEvents",
+    "KeyedWrite",
     "LeaseUnavailableError",
     "LifecycleReportingExecutor",
     "MayHold",
@@ -363,7 +367,6 @@ __all__ = [
     "OwedKey",
     "OwedSubmission",
     "OwedSubmissions",
-    "OwnerEvent",
     "OwnerEventRejectedError",
     "OwnerNotApplied",
     "Performed",
@@ -376,6 +379,7 @@ __all__ = [
     "PublicationDelivery",
     "PublicationHistory",
     "PublicationLease",
+    "ReadOnly",
     "ReceiptCorruptError",
     "ReceiptEvidenceLedger",
     "ReceiptStore",
@@ -463,6 +467,7 @@ __all__ = [
     "operation_roles",
     "owner_key",
     "production_owners",
+    "read_or_keyed",
     "receipt_executor_kinds",
     "reject_legacy_resume",
     "reply_variable",

@@ -23,7 +23,8 @@ from vs_core.api import (
     StrategyState,
     decode_stored,
 )
-from vs_runtime._core_requests import ExecutionLease, OwnerEvent
+from vs_core.api.recovery import OwnerEvent
+from vs_runtime._core_requests import ExecutionLease
 
 if TYPE_CHECKING:
     from collections.abc import Callable

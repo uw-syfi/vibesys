@@ -70,6 +70,7 @@ from vs_runtime.api.core import (
     Applied,
     ExecutionResult,
     FenceKind,
+    KeyedWrite,
     MeasurementRequests,
     NamespaceOperationReceipts,
     NotApplied,
@@ -489,7 +490,9 @@ class _OperationWorld:
     def host(self, epoch: int, life: HostLife, blocking: BlockingRunner) -> FenceHost:
         store = ReceiptStore(life.namespace(self._namespace()), threads=OsThreads())
         owner = _EchoOwner(self._effects, blocking)
-        catalog = OperationCatalog(_REGISTRY, (OperationEntry.owned(_ECHO, owner),))
+        catalog = OperationCatalog(
+            _REGISTRY, (OperationEntry.owned(_ECHO, owner, KeyedWrite("the echoed text")),)
+        )
         executor = RegisteredOperationRequests(
             catalog, NamespaceOperationReceipts(store), ObservationFactory(store)
         )

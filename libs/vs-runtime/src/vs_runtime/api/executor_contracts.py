@@ -23,6 +23,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from vs_runtime._receipt_store import Performed, ReceiptStore
+
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
     from pathlib import Path
@@ -31,6 +33,8 @@ if TYPE_CHECKING:
 
     from vs_core.api import RequestBase
     from vs_project.api import StateNamespace
+    from vs_runtime._core_requests import ExecutionContext
+    from vs_runtime._receipt_store import Execution, Performer
     from vs_runtime.api.core import ExecutionResult
     from vs_runtime.api.executor_contexts import RevocableLease
 
@@ -78,6 +82,30 @@ class FaultingNamespace:
         return getattr(self._real, name)
 
 
+class UnreceiptedStore(ReceiptStore):
+    """A receipt store that keeps no execution record, so a repeat is told only by the context.
+
+    ``run_once`` runs the effect on every call and passes it ``context.repeat``: nothing is
+    replayed, nothing is sealed, and no begun marker says an earlier attempt started. This is the
+    store once the runner loop owns repeats; a test that runs an executor over it proves the
+    repeat safe through the effect itself, never through a receipt.
+    """
+
+    async def run_once[ResultT: BaseModel](
+        self,
+        key: str,
+        *,
+        owner: str,
+        context: ExecutionContext,
+        result_type: type[ResultT],
+        perform: Performer[ResultT],
+    ) -> Execution[ResultT]:
+        """Run *perform* now, as a repeat when *context* says so."""
+        del key, owner, result_type
+        settled = await perform(repeat=context.repeat)
+        return Performed(settled.result)
+
+
 @dataclass(frozen=True)
 class Scenario:
     """One request kind of one executor.
@@ -105,8 +133,12 @@ class CaseWorld(Protocol):
         lease: RevocableLease,
         crash_at: int | None,
         digest: str | None = None,
+        repeat: bool = False,
     ) -> ExecutionResult:
-        """Run the request on a freshly built executor over the same disk (a restart)."""
+        """Run the request on a freshly built executor over the same disk (a restart).
+
+        With *repeat*, the context says an earlier attempt of the request may have run.
+        """
         ...
 
     def writes(self) -> int:
@@ -132,6 +164,9 @@ class ExecutorCase(Protocol):
     name: str
     scenarios: tuple[Scenario, ...]
 
-    def world(self) -> AbstractAsyncContextManager[CaseWorld]:
-        """A fresh world in its own temporary directory."""
+    def world(self, *, receipted: bool = True) -> AbstractAsyncContextManager[CaseWorld]:
+        """A fresh world in its own temporary directory.
+
+        With *receipted* false its executors keep no execution record (``UnreceiptedStore``).
+        """
         ...
