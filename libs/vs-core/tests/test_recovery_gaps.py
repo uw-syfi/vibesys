@@ -278,7 +278,7 @@ def test_a_flight_that_waited_while_the_run_parked_cannot_record_its_start() -> 
         assert started_row is not None
         loop.add(Oneof("attempt_interrupted", interrupted_message(tag, 1, Interruption.PAUSE)))
     assert loop.state.run.status is core.RunStatus.PARKED
-    assert not may_start(loop.state, steps[1])
+    assert not may_start(loop.state, steps[1], loop.clock)
     with pytest.raises(ValueError, match="may not start it"):
         loop.add(Oneof("step_started", started_message(stale)))
 
@@ -291,6 +291,6 @@ def test_may_start_is_false_for_a_step_with_a_result_and_for_one_no_one_knows(
     (tag,) = [row.request_id for row in loop.state.records.records]
     if settled:
         loop.finish_running(0)
-        assert not may_start(loop.state, tag)
+        assert not may_start(loop.state, tag, loop.clock)
     else:
-        assert not may_start(loop.state, core.RequestId(root="no-such-step"))
+        assert not may_start(loop.state, core.RequestId(root="no-such-step"), loop.clock)

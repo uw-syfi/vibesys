@@ -299,7 +299,9 @@ def may_start_agrees_with_decide(loop: Loop) -> None:
     """The step a flight asks about may start exactly when the rule would run it."""
     runs = {a.tag for a in decide(loop.state, loop.clock) if isinstance(a, Run)}
     for row in loop.state.records.records:
-        assert may_start(loop.state, row.request_id) is (row.request_id in runs), row.request_id
+        assert may_start(loop.state, row.request_id, loop.clock) is (row.request_id in runs), (
+            row.request_id
+        )
 
 
 def play(loop: Loop, move: Move) -> None:
