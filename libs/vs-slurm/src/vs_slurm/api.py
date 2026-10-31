@@ -111,6 +111,7 @@ from .ledger import (
     settlement,
     submit_step,
     transitioned,
+    validate_handle,
     validate_holder,
     validate_project,
 )
@@ -448,6 +449,7 @@ __all__ = [
     "undo_expired_withdrawal",
     "unframed_output",
     "validate_cluster_operation_id",
+    "validate_handle",
     "validate_holder",
     "validate_project",
     "withdraw",
@@ -572,6 +574,21 @@ class EvaluationLedger(Protocol):
 
     def list_keys(self) -> tuple[str, ...]:
         """Every request key the project's ledger holds."""
+        ...
+
+    def bind_handle(self, holder: str, handle: str, key: str) -> str:
+        """Record that the run ``holder``'s evaluation ``handle`` asks for request ``key``.
+
+        Create-only, so the first binding stands: returns the key the handle is bound
+        to, which is ``key`` unless an earlier call bound another. A later process that
+        knows only the handle finds the request through it (``bound_key``), without the
+        content its key hashes. The index sits beside the requests and is no part of one,
+        so a build that does not know it neither reads nor trips over it.
+        """
+        ...
+
+    def bound_key(self, holder: str, handle: str) -> str | None:
+        """The key the run ``holder``'s evaluation ``handle`` was bound to, None if never."""
         ...
 
     def operator_file_sha256(self, path: str) -> str | None:

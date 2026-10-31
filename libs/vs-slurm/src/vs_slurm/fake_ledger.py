@@ -22,6 +22,7 @@ from .ledger import (
     encode,
     entry_of,
     read_withdrawal_revision,
+    validate_handle,
     validate_holder,
     validate_key,
     validate_project,
@@ -47,6 +48,8 @@ class _Store:
         self.withdrawals: dict[tuple[str, str], dict[tuple[int, int], tuple[str, float]]] = {}
         # (project, key) -> holder -> (encoded lease, when its file was last written)
         self.leases: dict[tuple[str, str], dict[str, tuple[str, float]]] = {}
+        # (project, holder, handle) -> the key the handle was bound to
+        self.handles: dict[tuple[str, str, str], str] = {}
         # The cluster's filesystem outside the ledger: absolute path -> bytes.
         self.operator_files: dict[str, bytes] = {}
 
@@ -174,6 +177,17 @@ class FakeEvaluationLedger:
         """Every request the project's ledger holds."""
         return tuple(
             sorted(key for project, key in self._store.records if project == self._project)
+        )
+
+    def bind_handle(self, holder: str, handle: str, key: str) -> str:
+        """Bind the handle to the key unless it is bound; return the key it is bound to."""
+        name = (self._project, validate_holder(holder), validate_handle(handle))
+        return self._store.handles.setdefault(name, validate_key(key))
+
+    def bound_key(self, holder: str, handle: str) -> str | None:
+        """The key the handle was bound to, or None."""
+        return self._store.handles.get(
+            (self._project, validate_holder(holder), validate_handle(handle))
         )
 
     def _create(self, record: LedgerRecord, revision: int) -> bool:

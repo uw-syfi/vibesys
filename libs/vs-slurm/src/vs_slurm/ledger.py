@@ -187,6 +187,13 @@ def validate_holder(value: str) -> str:
     return value
 
 
+def validate_handle(value: str) -> str:
+    """Require an evaluation handle that is one safe path component."""
+    if _HOLDER.fullmatch(value) is None:
+        raise LedgerError.invalid_name("handle", value)
+    return value
+
+
 def evaluation_key(
     project: str,
     request: SlurmBatchRequest,

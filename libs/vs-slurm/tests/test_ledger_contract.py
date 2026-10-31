@@ -182,6 +182,33 @@ _JOB = SubmitBoundJob(
 )
 
 
+def test_a_handle_finds_its_request_from_another_process_and_its_first_binding_stands(
+    case: _Case,
+) -> None:
+    """A later process that knows only the handle reaches the request the first one bound."""
+    assert case.ledger.bound_key("run-a", "vs-handle") is None
+    assert case.ledger.bind_handle("run-a", "vs-handle", KEY) == KEY
+    assert case.reopen().bound_key("run-a", "vs-handle") == KEY
+    assert case.reopen().bind_handle("run-a", "vs-handle", OTHER_KEY) == KEY
+    assert case.ledger.bound_key("run-a", "vs-handle") == KEY
+
+
+def test_a_handle_is_bound_for_its_run_alone_and_is_no_request(case: _Case) -> None:
+    case.ledger.bind_handle("run-a", "vs-handle", KEY)
+
+    assert case.ledger.bound_key("run-b", "vs-handle") is None
+    assert case.ledger.bound_key("run-a", "vs-other") is None
+    assert case.ledger.list_keys() == ()
+
+
+@pytest.mark.parametrize("holder", ["", "../x", "a/b"])
+def test_a_handle_that_cannot_name_a_path_is_refused(case: _Case, holder: str) -> None:
+    with pytest.raises(LedgerError):
+        case.ledger.bind_handle(holder, "vs-handle", KEY)
+    with pytest.raises(LedgerError):
+        case.ledger.bind_handle("run-a", holder, KEY)
+
+
 def test_an_unknown_request_reads_as_absent(case: _Case) -> None:
     assert case.ledger.read(KEY) is None
     assert case.ledger.list_keys() == ()
