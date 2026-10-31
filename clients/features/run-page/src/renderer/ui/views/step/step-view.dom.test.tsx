@@ -225,16 +225,17 @@ describe('an agent turn', () => {
     expect(heads[1]?.textContent).toContain('1 tool');
   });
 
-  test('a failed call stays a red line while its group is closed, and the group opens in place', async () => {
+  test('a short run of calls starts open as rows, and closes in place', async () => {
     const fx = fixture(TURN);
     const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
+    const heads = all(container, '.vs-toolgroup-head');
+    expect(heads.map(head => head.getAttribute('aria-expanded'))).toEqual(['true', 'true']);
+    expect(all(container, '.vs-toolgroup-row')).toHaveLength(3);
+    await click(one(container, '.vs-toolgroup-head'));
+    expect(heads[0]?.getAttribute('aria-expanded')).toBe('false');
     expect(all(container, '.vs-toolgroup-row').map(row => row.getAttribute('data-state'))).toEqual([
       'failed',
     ]);
-    const first = one(container, '.vs-toolgroup-head');
-    await click(first);
-    expect(first.getAttribute('aria-expanded')).toBe('true');
-    expect(all(container, '.vs-toolgroup-row')).toHaveLength(3);
     expect(fx.zooms).toEqual([]);
   });
 
@@ -249,7 +250,6 @@ describe('an agent turn', () => {
   test('beside an opened item its group is open and its row is marked', async () => {
     const fx = fixture(TURN);
     const opened = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
-    await click(one(opened, '.vs-toolgroup-head'));
     await click(all(opened, '.vs-toolgroup-row')[1] as HTMLElement);
     const item = (fx.zooms[0] as {item: string}).item;
     const container = await mount(<StepView {...viewProps(fx, fx.turn, item)} compact />);
@@ -344,7 +344,9 @@ describe('a gate', () => {
 describe('an item', () => {
   async function itemOf(fx: Fixture, name: RegExp): Promise<string> {
     const opened = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
-    for (const head of all(opened, '.vs-toolgroup-head')) await click(head);
+    for (const head of all(opened, '.vs-toolgroup-head')) {
+      if (head.getAttribute('aria-expanded') === 'false') await click(head);
+    }
     const row = all(opened, '.vs-toolgroup-row').find(each => name.test(each.textContent ?? ''));
     if (row === undefined) throw new Error('no such row');
     await click(row);
@@ -574,10 +576,248 @@ describe('the turn’s layout', () => {
     ]);
     const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
     expect(all(container, '.vs-thought')).toHaveLength(2);
+    for (const head of all(container, '.vs-thought .vs-collapsible-head')) await click(head);
     expect(all(container, '.vs-thought strong').map(each => each.textContent)).toEqual([
       'Inspecting history',
       'Scoping the change',
     ]);
     expect(container.textContent).not.toContain('**');
   });
+});
+
+function commandResult(
+  sequence: number,
+  id: string,
+  command: {stdout: string; stderr: string; exit_code: number | null; duration: number | null},
+  error = false,
+): RunEvent {
+  return event(sequence, 'tool_result', {
+    invocation_id: 'inv',
+    agent_kind: 'implementer',
+    span_id: 'turn',
+    data: {
+      kind: 'tool_result',
+      tool: 'Bash',
+      call_id: id,
+      content: command.stdout || command.stderr,
+      is_error: error,
+      payload: {kind: 'command', ...command},
+    },
+  });
+}
+
+/** `count` calls with results, one second apart, from `from`; the call numbered `failing` fails. */
+function calls(from: number, count: number, failing: number | null = null): RunEvent[] {
+  return Array.from({length: count}, (_, index) => {
+    const id = `k${from}-${index}`;
+    return [
+      call(from + index * 2, id, `step ${index}`),
+      result(from + index * 2 + 1, id, `out ${index}`, index === failing),
+    ];
+  }).flat();
+}
+
+const OVERVIEW = '**Looking at the benchmark**\n\nThe head and tail counters share a cache line.';
+
+describe('reasoning in a turn', () => {
+  test('a finished turn starts it closed, as "Thought" with a one-line preview, and the reader opens it', async () => {
+    const fx = fixture([chunk(10, 'analysis', OVERVIEW), chunk(11, 'assistant', 'Padding.')]);
+    const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
+    const head = one(container, '.vs-thought .vs-collapsible-head');
+    expect(one(head, '.vs-collapsible-label').textContent).toBe('Thought');
+    expect(one(head, '.vs-collapsible-summary').textContent).toBe(
+      'Looking at the benchmark The head and tail counters share a cache line.',
+    );
+    expect(container.querySelector('.vs-thought .vs-collapsible-body')).toBeNull();
+    expect(container.querySelector('.vs-thought[data-live]')).toBeNull();
+    await click(head);
+    expect(one(container, '.vs-thought .vs-collapsible-body strong').textContent).toBe(
+      'Looking at the benchmark',
+    );
+    expect(container.querySelector('.vs-thought .vs-collapsible-summary')).toBeNull();
+    await click(head);
+    expect(container.querySelector('.vs-thought .vs-collapsible-body')).toBeNull();
+  });
+
+  test('a live turn leaves the thought it is writing open as "Thinking", and earlier ones closed', async () => {
+    const fx = fixture(
+      [
+        chunk(10, 'analysis', '**First idea**\n\nTry padding.'),
+        chunk(11, 'assistant', 'Trying it.'),
+        chunk(12, 'analysis', '**Second idea**\n\nMeasure it.'),
+      ],
+      'running',
+    );
+    const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
+    const thoughts = all(container, '.vs-thought');
+    expect(thoughts.map(each => one(each, '.vs-collapsible-label').textContent)).toEqual([
+      'Thought',
+      'Thinking',
+    ]);
+    expect(thoughts.map(each => each.querySelector('.vs-collapsible-body') !== null)).toEqual([
+      false,
+      true,
+    ]);
+    expect(thoughts.map(each => each.getAttribute('data-live'))).toEqual([null, 'true']);
+  });
+
+  test('stops being live when the turn moves on, and when the turn ends', async () => {
+    const writing = [chunk(10, 'analysis', OVERVIEW)];
+    const moved = await mount(
+      (() => {
+        const fx = fixture([...writing, ...calls(11, 1)], 'running');
+        return <StepView {...viewProps(fx, fx.turn, null)} />;
+      })(),
+    );
+    expect(one(moved, '.vs-thought .vs-collapsible-label').textContent).toBe('Thought');
+    const over = await mount(
+      (() => {
+        const fx = fixture(writing, 'done');
+        return <StepView {...viewProps(fx, fx.turn, null)} />;
+      })(),
+    );
+    expect(one(over, '.vs-thought .vs-collapsible-label').textContent).toBe('Thought');
+    expect(over.querySelector('.vs-thought .vs-collapsible-body')).toBeNull();
+  });
+
+  test('keeps what the reader opened when more of the turn arrives', async () => {
+    const before = fixture([chunk(10, 'analysis', OVERVIEW)], 'done');
+    const after = fixture([chunk(10, 'analysis', OVERVIEW), ...calls(11, 1)], 'done');
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<StepView {...viewProps(before, before.turn, null)} />));
+    await click(one(container, '.vs-thought .vs-collapsible-head'));
+    await act(async () => root.render(<StepView {...viewProps(after, after.turn, null)} />));
+    expect(container.querySelector('.vs-thought .vs-collapsible-body')).not.toBeNull();
+  });
+});
+
+describe('tool groups in a turn', () => {
+  const states = (container: HTMLElement): (string | null)[] =>
+    all(container, '.vs-toolgroup-row').map(row => row.getAttribute('data-state'));
+
+  test('a group of three calls or fewer starts open, one row each', async () => {
+    for (const count of [1, 2, 3]) {
+      const fx = fixture(calls(10, count, 0));
+      const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
+      expect(one(container, '.vs-toolgroup-head').getAttribute('aria-expanded')).toBe('true');
+      expect(all(container, '.vs-toolgroup-row')).toHaveLength(count);
+    }
+  });
+
+  test('a group of more than three starts closed and keeps its failed call visible', async () => {
+    const fx = fixture(calls(10, 4, 2));
+    const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
+    const head = one(container, '.vs-toolgroup-head');
+    expect(head.getAttribute('aria-expanded')).toBe('false');
+    expect(head.textContent).toContain('4 tools');
+    expect(states(container)).toEqual(['failed']);
+    await click(head);
+    expect(states(container)).toEqual(['ok', 'ok', 'failed', 'ok']);
+  });
+
+  test('thirty calls start closed, every failed one visible, and open to thirty rows', async () => {
+    const fx = fixture(calls(10, 30, 7));
+    const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
+    expect(one(container, '.vs-toolgroup-count').textContent).toBe('30 tools');
+    expect(states(container)).toEqual(['failed']);
+    await click(one(container, '.vs-toolgroup-head'));
+    expect(all(container, '.vs-toolgroup-row')).toHaveLength(30);
+  });
+
+  test('a group beside an opened item is open however many calls it holds', async () => {
+    const fx = fixture(calls(10, 5));
+    const opened = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
+    await click(one(opened, '.vs-toolgroup-head'));
+    await click(all(opened, '.vs-toolgroup-row')[3] as HTMLElement);
+    const item = (fx.zooms.at(-1) as {item: string}).item;
+    const container = await mount(<StepView {...viewProps(fx, fx.turn, item)} compact />);
+    expect(one(container, '.vs-toolgroup-head').getAttribute('aria-expanded')).toBe('true');
+    expect(one(container, '[aria-current="true"]').textContent).toContain('step 3');
+  });
+
+  test('each row says when in the turn its call was made', async () => {
+    const fx = fixture([chunk(10, 'analysis', 'Hm.'), ...calls(12, 3)]);
+    const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
+    expect(
+      all(container, '.vs-toolgroup-row .vs-toolgroup-time').map(each => each.textContent),
+    ).toEqual(['2s', '4s', '6s']);
+  });
+});
+
+describe('a command result in a turn', () => {
+  const FAILED = {
+    stdout: 'running 3 tests',
+    stderr: 'error: test failed',
+    exit_code: 1,
+    duration: 0.4,
+  };
+  const PASSED = {stdout: 'ok', stderr: '', exit_code: 0, duration: 2.34};
+
+  const fx = fixture([
+    call(10, 'k1', 'cargo test'),
+    commandResult(11, 'k1', PASSED),
+    call(12, 'k2', 'cargo bench'),
+    commandResult(13, 'k2', FAILED, true),
+    call(14, 'k3', 'cargo fmt'),
+    commandResult(15, 'k3', {stdout: '', stderr: '', exit_code: 0, duration: 75}),
+    call(16, 'k4', 'cargo doc'),
+    commandResult(17, 'k4', {stdout: 'built', stderr: '', exit_code: null, duration: null}),
+  ]);
+
+  test('shows the exit code and how long it ran on its row', async () => {
+    const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
+    await click(one(container, '.vs-toolgroup-head'));
+    expect(
+      all(container, '.vs-toolgroup-row').map(
+        row => row.querySelector('.vs-toolgroup-outcome')?.textContent,
+      ),
+    ).toEqual(['exit 0 · 2.3s', 'exit 1 · 0.4s', 'exit 0 · 1m', '5 chars']);
+  });
+
+  test('reads its exit code and duration beside the outcome when opened', async () => {
+    const item = await openedItem(/cargo bench/);
+    const container = await mount(
+      <ItemView {...fx.base} core={fx.core} step={fx.turn} item={item} />,
+    );
+    expect(container.textContent).toContain('Failed');
+    expect(container.textContent).toContain('exit 1 · 0.4s');
+  });
+
+  test('splits what it printed into stdout and stderr, stderr in the error color', async () => {
+    const item = await openedItem(/cargo bench/);
+    const container = await mount(
+      <ItemView {...fx.base} core={fx.core} step={fx.turn} item={item} />,
+    );
+    const lines = all(container, '[role="log"] [data-stream]').map(
+      line => `${line.getAttribute('data-stream')}: ${line.textContent}`,
+    );
+    const at = (text: string): number => lines.findIndex(line => line.endsWith(text));
+    expect(at('Input')).toBeLessThan(at('Stdout'));
+    expect(at('Stdout')).toBeLessThan(at('Stderr'));
+    expect(lines[at('running 3 tests')]).toBe('out: running 3 tests');
+    expect(lines[at('error: test failed')]).toBe('err: error: test failed');
+  });
+
+  test('leaves out the stream it did not print on', async () => {
+    const item = await openedItem(/cargo test/);
+    const container = await mount(
+      <ItemView {...fx.base} core={fx.core} step={fx.turn} item={item} />,
+    );
+    const log = one(container, '[role="log"]').textContent ?? '';
+    expect(log).toContain('Stdout');
+    expect(log).not.toContain('Stderr');
+  });
+
+  async function openedItem(name: RegExp): Promise<string> {
+    const opened = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
+    for (const head of all(opened, '.vs-toolgroup-head')) {
+      if (head.getAttribute('aria-expanded') === 'false') await click(head);
+    }
+    const row = all(opened, '.vs-toolgroup-row').find(each => name.test(each.textContent ?? ''));
+    if (row === undefined) throw new Error('no such row');
+    await click(row);
+    return (fx.zooms.at(-1) as {item: string}).item;
+  }
 });

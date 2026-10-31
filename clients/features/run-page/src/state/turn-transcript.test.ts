@@ -3,6 +3,7 @@ import type {RunEvent, Span} from '@vibesys/contracts';
 import {event} from '@vibesys/contracts/testing';
 import {initialCoreState, reduceEventBatch} from '@vibesys/run-state';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
+import * as fc from 'fast-check';
 import {type RunPageAction, type RunPageState, runPageInitial, runPageStep} from './run-page.js';
 import {type TurnRow, turnTranscript} from './turn-transcript.js';
 import {viewedRun} from './views.js';
@@ -148,6 +149,7 @@ describe('the turns under a step', () => {
         meta: '13 chars',
         input: '{\n  "command": "cargo bench"\n}',
         output: 'ok 14 benches',
+        elapsed: 2,
       },
       expect.objectContaining({kind: 'tool', name: 'Bash', state: 'pending', output: null}),
     ]);
@@ -392,5 +394,154 @@ describe('a tool call in the turn view', () => {
     const empty = rowsOf([call(10, 'op:1', 'c1', 'x'), result(11, 'op:1', 'c1', '')], 'op:1');
     expect(empty[1]).toMatchObject({meta: 'no output'});
     expect(rowsOf([call(10, 'op:1', 'c1', 'x')], 'op:1')[1]).not.toHaveProperty('meta');
+  });
+});
+
+function commandResult(
+  sequence: number,
+  callId: string,
+  command: {stdout: string; stderr: string; exit_code: number | null; duration: number | null},
+) {
+  return event(sequence, 'tool_result', {
+    invocation_id: 'inv-op:1',
+    agent_kind: 'implementer',
+    span_id: 'op:1',
+    data: {
+      kind: 'tool_result',
+      tool: 'Bash',
+      call_id: callId,
+      content: command.stdout || command.stderr,
+      is_error: false,
+      payload: {kind: 'command', ...command},
+    },
+  });
+}
+
+type ToolTurnRow = Extract<TurnRow, {kind: 'tool'}>;
+const toolRows = (rows: readonly TurnRow[] | undefined): ToolTurnRow[] =>
+  (rows ?? []).filter((row): row is ToolTurnRow => row.kind === 'tool');
+
+describe('a command result in a turn’s rows', () => {
+  test('keeps the exit code, the run time and both streams as the result reported them', () => {
+    fc.assert(
+      fc.property(
+        fc.string(),
+        fc.string(),
+        fc.option(fc.integer({min: 0, max: 255}), {nil: null}),
+        fc.option(fc.double({min: 0, max: 1e5, noNaN: true}), {nil: null}),
+        (stdout, stderr, exit_code, duration) => {
+          const state = page(
+            [
+              call(10, 'op:1', 'c1', 'x'),
+              commandResult(11, 'c1', {stdout, stderr, exit_code, duration}),
+            ],
+            'op:1',
+          );
+          const [row] = toolRows(turns(state)?.rows);
+          expect(row?.command).toEqual({exitCode: exit_code, seconds: duration, stdout, stderr});
+        },
+      ),
+    );
+  });
+
+  test('says how it ended in words: the exit code, then the time, tenths below ten seconds', () => {
+    const words = (exit_code: number | null, duration: number | null): string | undefined => {
+      const state = page(
+        [
+          call(10, 'op:1', 'c1', 'x'),
+          commandResult(11, 'c1', {stdout: 'out', stderr: '', exit_code, duration}),
+        ],
+        'op:1',
+      );
+      return toolRows(turns(state)?.rows)[0]?.meta;
+    };
+    expect(words(0, 2.34)).toBe('exit 0 · 2.3s');
+    expect(words(1, 0.04)).toBe('exit 1 · 0.0s');
+    expect(words(2, 9.94)).toBe('exit 2 · 9.9s');
+    expect(words(2, 9.96)).toBe('exit 2 · 10s');
+    expect(words(0, 59)).toBe('exit 0 · 59s');
+    expect(words(0, 125)).toBe('exit 0 · 2m');
+    expect(words(137, null)).toBe('exit 137');
+    expect(words(null, 3)).toBe('3.0s');
+  });
+
+  test('falls back to the size of the output when it reported neither, and for any other result', () => {
+    const none = page(
+      [
+        call(10, 'op:1', 'c1', 'x'),
+        commandResult(11, 'c1', {stdout: 'built', stderr: '', exit_code: null, duration: null}),
+      ],
+      'op:1',
+    );
+    expect(toolRows(turns(none)?.rows)[0]?.meta).toBe('5 chars');
+    const plain = page([call(10, 'op:1', 'c1', 'x'), result(11, 'op:1', 'c1', 'a\nb')], 'op:1');
+    const [row] = toolRows(turns(plain)?.rows);
+    expect(row?.meta).toBe('2 lines');
+    expect(row?.command).toBeUndefined();
+  });
+
+  test('a call that has no result yet has none of it', () => {
+    const [row] = toolRows(turns(page([call(10, 'op:1', 'c1', 'x')], 'op:1'))?.rows);
+    expect(row?.state).toBe('pending');
+    expect(row?.command).toBeUndefined();
+    expect(row?.meta).toBeUndefined();
+  });
+});
+
+describe('when in a turn a row happened', () => {
+  test('is the seconds since the turn’s first timed entry, never negative or backwards', () => {
+    fc.assert(
+      fc.property(fc.array(fc.integer({min: 0, max: 600}), {minLength: 1, maxLength: 25}), gaps => {
+        const events: RunEvent[] = [];
+        let at = 0;
+        gaps.forEach((gap, index) => {
+          at += gap;
+          events.push({
+            ...call(10 + index, 'op:1', `c${index}`, `cmd ${index}`),
+            timestamp: new Date(Date.parse('2026-10-15T16:00:00Z') + at * 1000).toISOString(),
+          });
+        });
+        const elapsed = toolRows(turns(page(events, 'op:1'))?.rows).map(row => row.elapsed);
+        const offsets = gaps.map((_, index) => gaps.slice(0, index + 1).reduce((a, b) => a + b, 0));
+        expect(elapsed).toEqual(offsets.map(each => each - (offsets[0] ?? 0)));
+        expect(elapsed.every(each => each !== undefined && each >= 0)).toBe(true);
+      }),
+    );
+  });
+
+  test('counts from the first entry that has a time, and is absent when no entry has one', () => {
+    const untimed = (sequence: number) =>
+      ({...say(sequence, 'op:1', 'hello '), timestamp: 'unknown'}) as RunEvent;
+    const mixed = page(
+      [untimed(10), call(11, 'op:1', 'c1', 'a'), call(14, 'op:1', 'c2', 'b')],
+      'op:1',
+    );
+    expect(toolRows(turns(mixed)?.rows).map(row => row.elapsed)).toEqual([0, 3]);
+    const none = page(
+      [
+        {...call(11, 'op:1', 'c1', 'a'), timestamp: 'unknown'} as RunEvent,
+        {...call(12, 'op:1', 'c2', 'b'), timestamp: 'unknown'} as RunEvent,
+      ],
+      'op:1',
+    );
+    expect(toolRows(turns(none)?.rows).every(row => !('elapsed' in row))).toBe(true);
+  });
+
+  test('is counted from each turn’s own start under a workstream', () => {
+    const state = page(
+      [
+        call(10, 'op:1', 'a1', 'first'),
+        call(12, 'op:2', 'b1', 'second'),
+        call(14, 'op:1', 'a2', 'third'),
+        call(17, 'op:2', 'b2', 'fourth'),
+      ],
+      'flow:root#1',
+    );
+    expect(toolRows(turns(state)?.rows).map(row => `${row.summary} ${row.elapsed}`)).toEqual([
+      'first 0',
+      'third 4',
+      'second 0',
+      'fourth 5',
+    ]);
   });
 });

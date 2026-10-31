@@ -1125,14 +1125,46 @@ button.vs-crumb:focus-visible {
   font-size: var(--text-body-size);
   line-height: var(--text-body-line);
 }
-.vs-thought {
-  padding-left: var(--space-3);
-  border-left: var(--hairline) solid var(--line);
-  color: var(--muted);
-  font-style: italic;
-}
 .vs-said {
   color: var(--text);
+}
+/* The thinking: a muted line (a brain, "Thought" or "Thinking", a one-line preview) over italic text. */
+.vs-thought {
+  color: var(--muted);
+}
+.vs-thought .vs-collapsible {
+  gap: 0;
+}
+.vs-thought .vs-collapsible-head {
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  color: var(--muted);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  font-weight: var(--text-small-weight);
+}
+.vs-thought .vs-collapsible-head:hover {
+  color: var(--text);
+}
+.vs-thought .vs-collapsible-summary {
+  font-style: italic;
+}
+.vs-thought .vs-collapsible-body {
+  gap: 0;
+  margin-left: var(--space-2);
+  padding-left: var(--space-3);
+  border-left: var(--hairline) solid var(--line);
+  font-style: italic;
+}
+.vs-thought-icon {
+  display: inline-flex;
+  flex: none;
+}
+@keyframes vs-live-pulse {
+  to {
+    opacity: 0.35;
+  }
 }
 .vs-toolgroup {
   display: flex;
@@ -1183,13 +1215,42 @@ button.vs-crumb:focus-visible {
 .vs-toolgroup-row {
   padding-left: calc(var(--space-2) + var(--space-5));
 }
+.vs-toolgroup-status {
+  display: inline-flex;
+  flex: none;
+}
+.vs-toolgroup-row[data-state="ok"] .vs-toolgroup-status {
+  color: var(--ok);
+}
+/* What is still going on pulses: the thought being written and the call waiting for its result. */
+.vs-thought[data-live] .vs-thought-icon,
+.vs-toolgroup-row[data-state="pending"] .vs-toolgroup-status {
+  animation: vs-live-pulse calc(var(--duration-base) * 5) var(--easing) infinite alternate;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vs-thought[data-live] .vs-thought-icon,
+  .vs-toolgroup-row[data-state="pending"] .vs-toolgroup-status {
+    animation: none;
+  }
+}
 .vs-toolgroup-name {
   flex: none;
-  min-width: var(--space-8);
+  padding: 0 var(--space-2);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--hover);
   color: var(--text);
 }
 .vs-toolgroup-outcome {
   flex: none;
+}
+.vs-toolgroup-time {
+  flex: none;
+  min-width: var(--space-8);
+  padding-left: var(--space-2);
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 .vs-toolgroup-row[data-state="failed"],
 .vs-toolgroup-row[data-state="failed"] .vs-toolgroup-name {
