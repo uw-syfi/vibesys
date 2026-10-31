@@ -70,8 +70,7 @@ export function scrollKeeper(window: Window): ScrollKeeper {
   const memory = new ScrollMemory();
   const document = window.document;
   let entry = entryOf(window.history.state);
-  // The elements that scrolled while this entry was shown, and the offsets still to give back.
-  const scrolled = new Set<Element>();
+  // The offsets still to give back to the entry arrived at.
   let owed = new Map<string, number>();
 
   const give = (): void => {
@@ -84,21 +83,15 @@ export function scrollKeeper(window: Window): ScrollKeeper {
   };
   const leave = (): void => {
     const left: Record<string, number> = {};
-    for (const element of scrolled) {
-      const name = element.isConnected ? nameOf(element) : null;
+    // Read from the page, not from scroll events, which wait for the next frame.
+    for (const element of document.querySelectorAll('*')) {
+      if (element.scrollTop <= 0) continue;
+      const name = nameOf(element);
       if (name !== null) left[name] = element.scrollTop;
     }
-    scrolled.clear();
     memory.leave(entry, left);
   };
 
-  window.addEventListener(
-    'scroll',
-    event => {
-      if (event.target instanceof Element) scrolled.add(event.target);
-    },
-    true,
-  );
   // The reader's own scrolling, by wheel, touch, key or scroll bar, ends what is owed.
   for (const kind of ['wheel', 'touchstart', 'keydown', 'pointerdown'])
     window.addEventListener(kind, () => owed.clear(), true);
