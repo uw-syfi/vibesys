@@ -1,4 +1,5 @@
 import {
+  Banner,
   Button,
   Card,
   EmptyState,
@@ -134,7 +135,7 @@ function AppContent(props: {
   if (state.kind === 'failed') {
     return (
       <Banner
-        tone="err"
+        tone="failed"
         title="Could not read settings"
         body={state.error}
         actions={<Button text="Retry" press={() => dispatch({type: 'retry'})} />}
