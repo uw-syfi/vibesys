@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from typing import cast
 
+from hypothesis import given
+from hypothesis import strategies as st
+
 from server.host_api import HelperErrorCode
 from server.host_operation_reads import read_failure_category
-from vibesys.api.host_operations.api import ReadSource, execute_host_read
+from vibesys.api.host_operations.reads import ReadSource, execute_host_read
 from vs_proto.api import (
     FailureCategory,
     Oneof,
@@ -114,3 +117,50 @@ def test_every_helper_refusal_maps_once_and_read_only_is_permission_denied() -> 
     assert categories[HelperErrorCode.CLUSTER_READ_ONLY] is FailureCategory.PERMISSION_DENIED
     assert categories[HelperErrorCode.DEADLINE_EXCEEDED] is FailureCategory.DEADLINE_EXCEEDED
     assert categories[HelperErrorCode.INVALID_REQUEST] is FailureCategory.INVALID_INPUT
+
+
+_PROVIDERS = ("claude", "codex", "gemini", "opencode")
+
+
+class _Catalog:
+    """A source that can list the harness catalog and answers nothing else about the host."""
+
+    def __init__(self, providers: tuple[str, ...]) -> None:
+        self._providers = providers
+
+    def harnesses(self) -> list[pb.HarnessOption]:
+        return [
+            pb.HarnessOption(
+                provider=provider,
+                model=f"{provider}-model",
+                default=True,
+                display=pb.HarnessDisplay(provider_name=provider.title()),
+            )
+            for provider in self._providers
+        ]
+
+
+@given(order=st.permutations(_PROVIDERS), with_generations=st.booleans())
+def test_list_harnesses_answers_the_catalog_in_its_own_order(
+    order: list[str], *, with_generations: bool
+) -> None:
+    """The catalog read needs nothing from the machine: which CLIs are installed takes a login
+    shell, and the machine description already reports it. Regression: the handler asked its
+    source which providers were installed to list those first, so every ``list-harnesses``
+    started a shell and the order changed with the machine."""
+    payload = ReadRequest(
+        checkout="/checkout",
+        method=Oneof(
+            "list_harnesses",
+            pb.ListHarnessesRequest(request_id="request-a", with_generations=with_generations),
+        ),
+    ).to_binary()
+
+    encoded = execute_host_read(
+        payload, cast("ReadSource", _Catalog(tuple(order))), cli="list-harnesses"
+    )
+
+    response = ReadResponse.from_binary(encoded)
+    assert response.result is not None
+    assert response.result.field == "list_harnesses"
+    assert [option.provider for option in response.result.value.harnesses] == order

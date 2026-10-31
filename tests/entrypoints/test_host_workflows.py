@@ -208,6 +208,53 @@ def test_candidate_inspection_is_a_registered_binary_read(host_root: Path, sim: 
     assert response.result.value.state == pb.CandidateState.NOT_FOUND
 
 
+@pytest.mark.parametrize(
+    "cli",
+    [
+        "list-tasks",
+        "get-task-goal",
+        "list-harnesses",
+        "list-examples",
+        "list-compute",
+        "inspect-destination",
+    ],
+)
+def test_a_catalog_read_answers_without_starting_a_process(
+    host_root: Path, sim: Sim, cli: str
+) -> None:
+    """The catalogs the app asks for at every launch answer from files; ``invoke`` fails the test
+    if the read ran anything on the platform's processes (Git, a probe of the machine)."""
+    project = host_root / "project"
+    project.mkdir()
+    Project.open(project).state.create_project("example", now=datetime(2026, 1, 1, tzinfo=UTC))
+    write_task(project, "", task="alpha")
+    requests: dict[str, tuple[str, object]] = {
+        "list-tasks": ("list_tasks", pb.ListTasksRequest(request_id="r", project=str(project))),
+        "get-task-goal": (
+            "get_task_goal",
+            pb.GetTaskGoalRequest(request_id="r", project=str(project), task="alpha"),
+        ),
+        "list-harnesses": ("list_harnesses", pb.ListHarnessesRequest(request_id="r")),
+        "list-examples": ("list_examples", pb.ListExamplesRequest(request_id="r")),
+        "list-compute": ("list_compute", pb.ListComputeRequest(request_id="r")),
+        "inspect-destination": (
+            "inspect_destination",
+            pb.InspectDestinationRequest(
+                request_id="r", example="kvstore-default", destination=str(project / "copy")
+            ),
+        ),
+    }
+    slot, message = requests[cli]
+    request = ReadRequest(checkout="/src/checkout", method=Oneof(slot, message))
+    validate(request)
+
+    response = ReadResponse.from_binary(invoke(cli, request.to_binary(), sim))
+
+    validate(response)
+    assert response.result is not None
+    assert response.result.field == slot
+
+
 @pytest.mark.regression
 def test_native_cluster_probe_uses_the_injected_processes_and_replays_once(
     host_root: Path, sim: Sim
