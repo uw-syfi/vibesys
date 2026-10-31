@@ -19,8 +19,8 @@ from vs_core.api import (
     RecoveryPhase,
     RequestPhase,
     RunControlEvent,
-    RunStatus,
 )
+from vs_dst._host import has_ended
 from vs_dst._interruptions import Action, Interruption, Moment
 
 if TYPE_CHECKING:
@@ -209,7 +209,7 @@ def _classify(last: Hosted, expected: RunResultProposal | None) -> tuple[Outcome
 
 def _ended_as(core: CoreState, expected: RunResultProposal | None) -> tuple[Outcome, str]:
     """How the run stands in ``core``, whose host returned: ended, or stuck for a reason."""
-    if core.run.status != RunStatus.TERMINAL:
+    if not has_ended(core):
         recovery = core.records.recovery.phase.value
         return Outcome.STUCK, f"run {core.run.status.value}, recovery {recovery}"
     if core.records.recovery.phase == RecoveryPhase.BLOCKED:

@@ -5,12 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from vs_core.api import RunStatus
 from vs_core.api.testing import Budget, liveness
 from vs_dst import _interrupt
 from vs_dst._crash_points import CrashKind, CrashPoint, crash_point_policy
 from vs_dst._effects import Effects
-from vs_dst._host import FIRST_HOST_STARTS_AT, Hosted, Hosting, HostPlan, ShellHosting
+from vs_dst._host import (
+    FIRST_HOST_STARTS_AT,
+    Hosted,
+    Hosting,
+    HostPlan,
+    ShellHosting,
+    has_ended,
+)
 from vs_dst._interrupt import Expectation
 from vs_dst._interruptions import Action, Interruption, Moment, choose
 from vs_dst._snapshots import (
@@ -27,6 +33,7 @@ if TYPE_CHECKING:
     from vs_dst._interrupt import Interrupted
     from vs_dst._world import World
     from vs_runtime.api.core import DispatchCapExceededError, RunStalledError
+    from vs_runtime.api.step_runner import StepLoopStalledError
 
 
 @dataclass(frozen=True)
@@ -101,10 +108,10 @@ class SimulatedRun:
     @property
     def finished(self) -> bool:
         """Whether the run reached its terminal state."""
-        return self._run.core.run.status == RunStatus.TERMINAL
+        return has_ended(self._run.core)
 
     @property
-    def halted(self) -> DispatchCapExceededError | RunStalledError | None:
+    def halted(self) -> DispatchCapExceededError | RunStalledError | StepLoopStalledError | None:
         """Why the loop gave up on the run (dispatch cap, stall), or None."""
         return self._run.halted
 

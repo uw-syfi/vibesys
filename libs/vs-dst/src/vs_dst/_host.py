@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Protocol
 
 from vs_core.api import ContractError, FlowCodeChanged, RunStatus
+from vs_core.api.recovery import RunRest, at_rest
 from vs_dst._effects import Effects, RecoverableExecutors
 from vs_dst._interruptions import Moment
 from vs_dst._snapshots import RecordingStore
@@ -44,6 +45,11 @@ RUN_FAILURES = (ContractError, FlowCodeChanged, RuntimeError)
 """What a host that fails by its own contract raises: core refusing a transition, a flow that
 cannot be restored from its journal, the runtime refusing to commit. Anything else is a defect
 in the test, and propagates."""
+
+
+def has_ended(core: CoreState) -> bool:
+    """Whether the run is over: terminal on the shell, or its end recorded in the log."""
+    return core.run.status == RunStatus.TERMINAL or at_rest(core) is RunRest.ENDED
 
 
 class Hosting(Protocol):
@@ -107,7 +113,7 @@ class Hosted:
     @property
     def finished(self) -> bool:
         """Whether the host ended the run itself: it returned with the run terminal."""
-        return isinstance(self.ended, Run) and self.ended.core.run.status == RunStatus.TERMINAL
+        return isinstance(self.ended, Run) and has_ended(self.ended.core)
 
     @property
     def how(self) -> str:

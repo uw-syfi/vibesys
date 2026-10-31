@@ -224,10 +224,16 @@ class CoreInputs:
     def stalled(self) -> str | None:
         """Why the run can never go on, or None while a timer, a wake-up or the operator can move it.
 
-        A paused run waits for its operator. Any other run that no timer, search wake-up or
-        core clock will move is stuck on the search, which stopped proposing, or on something
-        core holds open that nothing ends.
+        What is due now is brought in first (the clock, the deadline, the operator, the search's
+        wake-ups), so a timer that came due is never reported as a stall: if that appended
+        anything the run is not stalled, and the loop decides again. A paused run waits for its
+        operator. Any other run that no timer, search wake-up or core clock will move is stuck on
+        the search, which stopped proposing, or on something core holds open that nothing ends.
         """
+        before = self._log.records_appended
+        self._poll()
+        if self._log.records_appended != before:
+            return None
         state = self.state
         if state.run.status in (RunStatus.PAUSED, RunStatus.DRAINING, RunStatus.PARKED):
             return None
