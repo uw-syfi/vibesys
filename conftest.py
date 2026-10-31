@@ -32,6 +32,7 @@ pytest_plugins = [
     "tests.support.path_hygiene",
     "tests.support.sharding",
     "tests.support.worker_exit",
+    "tests.support.bounded_comparison",
 ]
 
 if TYPE_CHECKING:
