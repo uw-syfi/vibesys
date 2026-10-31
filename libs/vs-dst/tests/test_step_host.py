@@ -301,7 +301,7 @@ WORLDS = {
         ("tiny", lambda: TinyWorld(3)),
         ("restartable", lambda: RestartableWorld(4, changed=False)),
     )
-}
+} | {"retaining-step-loop": (STEP_LOOP, lambda: TinyWorld(2, retain=True))}
 
 
 @dataclass(frozen=True)
@@ -380,6 +380,25 @@ def test_a_kill_takes_hold_of_the_host_that_winds_down_after_a_pause(stops: Stop
         stops.normal.interrupt_while_draining(pause, kill).interruption.action is Action.KILL
         for kill in stops.kills
     ), "no kill landed on the draining host"
+
+
+def test_a_resume_after_a_kill_in_the_middle_of_a_drain_is_taken_the_first_time() -> None:
+    """The dead host's pause is still draining effects a drain lets through (a retention, the
+    close of a scope) when the next epoch opens: the operator's first Resume lifts it.
+
+    The pause lands at the fourth commit of the run, which asks for the retention of the first
+    workspace's work; the host dies while it winds down, with that effect still to run.
+    """
+    normal = simulate(TinyWorld(1, retain=True), STEP_LOOP)
+    pause = Interruption(Action.PAUSE, Moment.BEFORE_COMMIT, 4)
+    kill = Interruption(Action.KILL, Moment.BEFORE_COMMIT, 8)
+
+    interrupted = normal.interrupt_while_draining(pause, kill)
+
+    assert interrupted.interruption.action is Action.KILL
+    assert interrupted.resumes == 1, interrupted.history
+    assert interrupted.matches_uninterrupted(), interrupted.detail
+    assert interrupted.every_step_finished_once()
 
 
 def test_a_run_is_paused_and_then_killed_and_not_the_other_way_round() -> None:
