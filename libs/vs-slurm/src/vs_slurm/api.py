@@ -29,6 +29,7 @@ from .cluster_types import (
     ClusterSubmitted,
     ClusterTarget,
     ClusterUnknown,
+    live_observation,
 )
 from .cluster_types import validate_operation_id as validate_cluster_operation_id
 from .config import (
@@ -416,6 +417,7 @@ __all__ = [
     "ledger_operation_id",
     "life_for_status",
     "list_entries",
+    "live_observation",
     "load_slurm_config",
     "minimal_job",
     "needs_accounting",
