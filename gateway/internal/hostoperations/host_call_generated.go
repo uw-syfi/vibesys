@@ -8,11 +8,11 @@ import (
 )
 
 type HostCall struct {
-	CLI        string
-	Deadline   time.Duration
-	Executor   hostv1.Executor
-	Effect     hostv1.OperationEffect
-	FirstEvent time.Duration
+	CLI                  string
+	Deadline             time.Duration
+	Executor             hostv1.Executor
+	Effect               hostv1.OperationEffect
+	FirstEvent, Progress time.Duration
 }
 
 func DispatchHostCall(request *apiv1.HostCallRequest) (HostCall, bool) {

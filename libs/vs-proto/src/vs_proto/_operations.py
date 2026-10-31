@@ -64,6 +64,7 @@ class Operation[Request: Message, Response: Message]:
     executor: int
     cardinality: int
     first_event_ms: int | None
+    progress_ms: int | None
     request: type[Request]
     response: type[Response]
     correlations: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]

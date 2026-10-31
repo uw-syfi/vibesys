@@ -31,6 +31,7 @@ type WatchRequest struct {
 	// Types that are valid to be assigned to Method:
 	//
 	//	*WatchRequest_Login
+	//	*WatchRequest_StreamSavedRuns
 	Method        isWatchRequest_Method `protobuf_oneof:"method"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -89,6 +90,15 @@ func (x *WatchRequest) GetLogin() *v1.LoginRequest {
 	return nil
 }
 
+func (x *WatchRequest) GetStreamSavedRuns() *v1.StreamSavedRunsRequest {
+	if x != nil {
+		if x, ok := x.Method.(*WatchRequest_StreamSavedRuns); ok {
+			return x.StreamSavedRuns
+		}
+	}
+	return nil
+}
+
 type isWatchRequest_Method interface {
 	isWatchRequest_Method()
 }
@@ -97,7 +107,13 @@ type WatchRequest_Login struct {
 	Login *v1.LoginRequest `protobuf:"bytes,40,opt,name=login,proto3,oneof"`
 }
 
+type WatchRequest_StreamSavedRuns struct {
+	StreamSavedRuns *v1.StreamSavedRunsRequest `protobuf:"bytes,43,opt,name=stream_saved_runs,json=streamSavedRuns,proto3,oneof"`
+}
+
 func (*WatchRequest_Login) isWatchRequest_Method() {}
+
+func (*WatchRequest_StreamSavedRuns) isWatchRequest_Method() {}
 
 // The matching result, or a typed failure. Tag 2 stays reserved for failure.
 type WatchResponse struct {
@@ -106,6 +122,7 @@ type WatchResponse struct {
 	//
 	//	*WatchResponse_Failure
 	//	*WatchResponse_Login
+	//	*WatchResponse_StreamSavedRuns
 	Result        isWatchResponse_Result `protobuf_oneof:"result"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -166,6 +183,15 @@ func (x *WatchResponse) GetLogin() *v1.LoginResponse {
 	return nil
 }
 
+func (x *WatchResponse) GetStreamSavedRuns() *v1.StreamSavedRunsResponse {
+	if x != nil {
+		if x, ok := x.Result.(*WatchResponse_StreamSavedRuns); ok {
+			return x.StreamSavedRuns
+		}
+	}
+	return nil
+}
+
 type isWatchResponse_Result interface {
 	isWatchResponse_Result()
 }
@@ -178,23 +204,31 @@ type WatchResponse_Login struct {
 	Login *v1.LoginResponse `protobuf:"bytes,40,opt,name=login,proto3,oneof"`
 }
 
+type WatchResponse_StreamSavedRuns struct {
+	StreamSavedRuns *v1.StreamSavedRunsResponse `protobuf:"bytes,43,opt,name=stream_saved_runs,json=streamSavedRuns,proto3,oneof"`
+}
+
 func (*WatchResponse_Failure) isWatchResponse_Result() {}
 
 func (*WatchResponse_Login) isWatchResponse_Result() {}
+
+func (*WatchResponse_StreamSavedRuns) isWatchResponse_Result() {}
 
 var File_vibesys_api_v1_host_watch_generated_proto protoreflect.FileDescriptor
 
 const file_vibesys_api_v1_host_watch_generated_proto_rawDesc = "" +
 	"\n" +
-	")vibesys/api/v1/host_watch_generated.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/host/v1/failure.proto\x1a vibesys/host/v1/operations.proto\"~\n" +
+	")vibesys/api/v1/host_watch_generated.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/host/v1/failure.proto\x1a vibesys/host/v1/operations.proto\"\xd5\x01\n" +
 	"\fWatchRequest\x12&\n" +
 	"\bcheckout\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80 R\bcheckout\x125\n" +
-	"\x05login\x18( \x01(\v2\x1d.vibesys.host.v1.LoginRequestH\x00R\x05loginB\x0f\n" +
-	"\x06method\x12\x05\xbaH\x02\b\x01\"\x97\x01\n" +
+	"\x05login\x18( \x01(\v2\x1d.vibesys.host.v1.LoginRequestH\x00R\x05login\x12U\n" +
+	"\x11stream_saved_runs\x18+ \x01(\v2'.vibesys.host.v1.StreamSavedRunsRequestH\x00R\x0fstreamSavedRunsB\x0f\n" +
+	"\x06method\x12\x05\xbaH\x02\b\x01\"\xef\x01\n" +
 	"\rWatchResponse\x12=\n" +
 	"\afailure\x18\x02 \x01(\v2!.vibesys.host.v1.OperationFailureH\x00R\afailure\x126\n" +
-	"\x05login\x18( \x01(\v2\x1e.vibesys.host.v1.LoginResponseH\x00R\x05loginB\x0f\n" +
+	"\x05login\x18( \x01(\v2\x1e.vibesys.host.v1.LoginResponseH\x00R\x05login\x12V\n" +
+	"\x11stream_saved_runs\x18+ \x01(\v2(.vibesys.host.v1.StreamSavedRunsResponseH\x00R\x0fstreamSavedRunsB\x0f\n" +
 	"\x06result\x12\x05\xbaH\x02\b\x01B=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3"
 
 var (
@@ -211,21 +245,25 @@ func file_vibesys_api_v1_host_watch_generated_proto_rawDescGZIP() []byte {
 
 var file_vibesys_api_v1_host_watch_generated_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_vibesys_api_v1_host_watch_generated_proto_goTypes = []any{
-	(*WatchRequest)(nil),        // 0: vibesys.api.v1.WatchRequest
-	(*WatchResponse)(nil),       // 1: vibesys.api.v1.WatchResponse
-	(*v1.LoginRequest)(nil),     // 2: vibesys.host.v1.LoginRequest
-	(*v1.OperationFailure)(nil), // 3: vibesys.host.v1.OperationFailure
-	(*v1.LoginResponse)(nil),    // 4: vibesys.host.v1.LoginResponse
+	(*WatchRequest)(nil),               // 0: vibesys.api.v1.WatchRequest
+	(*WatchResponse)(nil),              // 1: vibesys.api.v1.WatchResponse
+	(*v1.LoginRequest)(nil),            // 2: vibesys.host.v1.LoginRequest
+	(*v1.StreamSavedRunsRequest)(nil),  // 3: vibesys.host.v1.StreamSavedRunsRequest
+	(*v1.OperationFailure)(nil),        // 4: vibesys.host.v1.OperationFailure
+	(*v1.LoginResponse)(nil),           // 5: vibesys.host.v1.LoginResponse
+	(*v1.StreamSavedRunsResponse)(nil), // 6: vibesys.host.v1.StreamSavedRunsResponse
 }
 var file_vibesys_api_v1_host_watch_generated_proto_depIdxs = []int32{
 	2, // 0: vibesys.api.v1.WatchRequest.login:type_name -> vibesys.host.v1.LoginRequest
-	3, // 1: vibesys.api.v1.WatchResponse.failure:type_name -> vibesys.host.v1.OperationFailure
-	4, // 2: vibesys.api.v1.WatchResponse.login:type_name -> vibesys.host.v1.LoginResponse
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	3, // 1: vibesys.api.v1.WatchRequest.stream_saved_runs:type_name -> vibesys.host.v1.StreamSavedRunsRequest
+	4, // 2: vibesys.api.v1.WatchResponse.failure:type_name -> vibesys.host.v1.OperationFailure
+	5, // 3: vibesys.api.v1.WatchResponse.login:type_name -> vibesys.host.v1.LoginResponse
+	6, // 4: vibesys.api.v1.WatchResponse.stream_saved_runs:type_name -> vibesys.host.v1.StreamSavedRunsResponse
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_api_v1_host_watch_generated_proto_init() }
@@ -235,10 +273,12 @@ func file_vibesys_api_v1_host_watch_generated_proto_init() {
 	}
 	file_vibesys_api_v1_host_watch_generated_proto_msgTypes[0].OneofWrappers = []any{
 		(*WatchRequest_Login)(nil),
+		(*WatchRequest_StreamSavedRuns)(nil),
 	}
 	file_vibesys_api_v1_host_watch_generated_proto_msgTypes[1].OneofWrappers = []any{
 		(*WatchResponse_Failure)(nil),
 		(*WatchResponse_Login)(nil),
+		(*WatchResponse_StreamSavedRuns)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

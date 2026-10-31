@@ -38,6 +38,8 @@ _BOUNDED_READ = 2
 _STREAM = 2
 _CHECKOUT = 1
 _FAILURE_RESPONSE_TAG = 2
+_RETIRED_OPERATIONS = frozenset({37})
+"""Ids and tags of removed operations: the paged ``ListSavedRuns``. A new use would misroute a peer."""
 
 
 class GenerationError(ValueError):
@@ -62,7 +64,7 @@ class Operation:
 
     def is_read(self) -> bool:
         """Catalog reads use the helper handler slots and the neutral receipt union."""
-        return self.policy.effect == _READ
+        return self.policy.effect == _READ and self.policy.cardinality != _STREAM
 
     def is_host_call(self) -> bool:
         """The HostCall methods keep their API messages and envelope."""
@@ -105,10 +107,18 @@ def _path(message: object, numbers: object, location: str) -> tuple[tuple[str, .
     return tuple(names), (field.type, field.enum_type and field.enum_type.full_name)
 
 
+def _not_retired(policy: object, name: str) -> None:
+    for field in ("operation_id", "request_tag", "response_tag"):
+        value = getattr(policy, field)
+        if value in _RETIRED_OPERATIONS:
+            _fail(name, f"{field} {value} is retired")
+
+
 def _policy(policy: object, method: object) -> None:
     name = method.name
     if not 0 < policy.operation_id <= 2**32 - 1:
         _fail(name, "operation_id must be positive")
+    _not_retired(policy, name)
     for field in ("request_tag", "response_tag"):
         value = getattr(policy, field)
         if field == "response_tag" and value == _FAILURE_RESPONSE_TAG:
@@ -139,6 +149,10 @@ def _stream_policy(policy: object, method: object) -> None:
         cardinality != _STREAM or not 0 < policy.first_event_ms <= policy.cap_ms
     ):
         _fail(name, "invalid first_event_ms")
+    if policy.HasField("progress_ms") and (
+        cardinality != _STREAM or not 0 < policy.progress_ms <= policy.cap_ms
+    ):
+        _fail(name, "invalid progress_ms")
 
 
 def compile_registry(

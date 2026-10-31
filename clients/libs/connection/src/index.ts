@@ -67,7 +67,12 @@ export {
   registryRunReads,
   usageWindowEntry,
 } from './shell/registry-run-reads.js';
-export {type RegistrySavedRuns, registrySavedRuns} from './shell/registry-saved-runs.js';
+export {
+  type RegistrySavedRuns,
+  registrySavedRuns,
+  SavedRunsInterrupted,
+  type SavedRunsPorts,
+} from './shell/registry-saved-runs.js';
 export {
   type CompletedPaths,
   type InspectedCandidate,

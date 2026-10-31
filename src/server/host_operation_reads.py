@@ -5,7 +5,7 @@ neither the helper channel nor a live run. Read refusals retain their closed
 category; callers receive a validated registry response.
 
 Public surface: HostReadFacts, HostReadSource, ReadRefusedError,
-read_failure_category and answer_registered_read.
+read_failure_category, answer_registered_read and stream_saved_runs.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from server.host_examples import ProjectLookupError
 from server.host_run_summary import UsageWindowRequest
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable, Iterator
     from types import ModuleType
 
     from server.host_agent_logins import AgentLogin
@@ -38,10 +38,12 @@ if TYPE_CHECKING:
 
 
 class _ReadProjects(Protocol):
-    def saved_runs(self, request: pb.ListSavedRunsRequest) -> pb.ListSavedRunsResponse: ...
+    def stream_runs(self, project: Path) -> tuple[Path, Iterator[ProjectRun]]: ...
     def tasks(self, project: Path) -> TaskList: ...
     def task_goal(self, project: Path, task: str) -> TaskGoal: ...
-    def runs(self, project: Path) -> tuple[Path, tuple[ProjectRun, ...]]: ...
+    def named_runs(
+        self, project: Path, run_ids: Iterable[str]
+    ) -> tuple[Path, tuple[ProjectRun, ...]]: ...
     def run_digest(
         self, project_root: Path, run_id: str
     ) -> RunDigest | RunDigestUnreadable | None: ...
@@ -152,16 +154,15 @@ class HostReadSource:
             expanded if expanded.is_absolute() else Path(self._host.directories.home()) / expanded
         )
 
-    def saved_runs(self, request: pb.ListSavedRunsRequest) -> pb.ListSavedRunsResponse:
-        """Read native discovery through the existing project catalog owner."""
-        request = type(request).from_binary(request.to_binary())
-        request.project = str(self._path(request.project))
-        return self._host.projects.saved_runs(request)
+    def saved_runs(self, project: str) -> tuple[str, Iterable[pb.SavedRun]]:
+        """One lazy scan through the existing project catalog owner, in discovery order."""
+        root, runs = self._host.projects.stream_runs(self._path(project))
+        return str(root), import_module("server.host_saved_runs").saved_run_rows(root, runs)
 
     def run_digests(self, request: pb.ListRunDigestsRequest) -> pb.ListRunDigestsResponse:
         """Read each run's digest through the owner of the helper's project run listing."""
         requests = import_module("server.host_run_reads")
-        runs = requests.project_runs(
+        runs = requests.named_run_digests(
             self._host,
             self._path(request.project),
             request.run_ids,
@@ -351,10 +352,22 @@ def answer_registered_read(cli: str, payload: bytes, source: HostReadSource) -> 
         return operations.host_read_failure(read_failure_category(error.code), str(error))
 
 
+def stream_saved_runs(
+    payload: bytes, source: HostReadSource, write: Callable[[bytes], object]
+) -> None:
+    """Run the saved-run stream for ``vibesys host``; a refusal ends it as a typed failure frame."""
+    operations = import_module("vibesys.api.host_operations.api")
+    try:
+        operations.serve_saved_runs(payload, source, cli="stream-saved-runs", write=write)
+    except ProjectLookupError as error:
+        write(operations.host_watch_failure(read_failure_category(error.code), str(error)))
+
+
 __all__ = [
     "HostReadFacts",
     "HostReadSource",
     "ReadRefusedError",
     "answer_registered_read",
     "read_failure_category",
+    "stream_saved_runs",
 ]

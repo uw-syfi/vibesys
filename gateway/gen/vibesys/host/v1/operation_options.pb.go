@@ -245,6 +245,8 @@ type OperationPolicy struct {
 	Correlation   []*Correlation  `protobuf:"bytes,9,rep,name=correlation,proto3" json:"correlation,omitempty"`
 	RequestTag    uint32          `protobuf:"varint,10,opt,name=request_tag,json=requestTag,proto3" json:"request_tag,omitempty"`
 	ResponseTag   uint32          `protobuf:"varint,11,opt,name=response_tag,json=responseTag,proto3" json:"response_tag,omitempty"`
+	// The longest a finite stream may stay silent, before its first frame or between two.
+	ProgressMs    *uint32 `protobuf:"varint,13,opt,name=progress_ms,json=progressMs,proto3,oneof" json:"progress_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -363,6 +365,13 @@ func (x *OperationPolicy) GetResponseTag() uint32 {
 	return 0
 }
 
+func (x *OperationPolicy) GetProgressMs() uint32 {
+	if x != nil && x.ProgressMs != nil {
+		return *x.ProgressMs
+	}
+	return 0
+}
+
 type Correlation struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RequestPath   []uint32               `protobuf:"varint,1,rep,packed,name=request_path,json=requestPath,proto3" json:"request_path,omitempty"`
@@ -464,7 +473,7 @@ var File_vibesys_host_v1_operation_options_proto protoreflect.FileDescriptor
 
 const file_vibesys_host_v1_operation_options_proto_rawDesc = "" +
 	"\n" +
-	"'vibesys/host/v1/operation_options.proto\x12\x0fvibesys.host.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\"\xda\x05\n" +
+	"'vibesys/host/v1/operation_options.proto\x12\x0fvibesys.host.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\"\x99\x06\n" +
 	"\x0fOperationPolicy\x12B\n" +
 	"\x0eadapter_method\x18\f \x01(\tB\x16\xbaH\x13r\x112\x0f^[a-z][a-z_.]*$H\x00R\radapterMethod\x88\x01\x01\x12*\n" +
 	"\foperation_id\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\voperationId\x12\"\n" +
@@ -485,9 +494,12 @@ const file_vibesys_host_v1_operation_options_proto_rawDesc = "" +
 	"*\b\x18\xff\xff\xff\xff\x01 \x00R\n" +
 	"requestTag\x122\n" +
 	"\fresponse_tag\x18\v \x01(\rB\x0f\xbaH\f*\n" +
-	"8\x02\x18\xff\xff\xff\xff\x01 \x00R\vresponseTagB\x11\n" +
+	"8\x02\x18\xff\xff\xff\xff\x01 \x00R\vresponseTag\x12-\n" +
+	"\vprogress_ms\x18\r \x01(\rB\a\xbaH\x04*\x02 \x00H\x02R\n" +
+	"progressMs\x88\x01\x01B\x11\n" +
 	"\x0f_adapter_methodB\x11\n" +
-	"\x0f_first_event_ms\"u\n" +
+	"\x0f_first_event_msB\x0e\n" +
+	"\f_progress_ms\"u\n" +
 	"\vCorrelation\x121\n" +
 	"\frequest_path\x18\x01 \x03(\rB\x0e\xbaH\v\x92\x01\b\b\x01\"\x04*\x02 \x00R\vrequestPath\x123\n" +
 	"\rresponse_path\x18\x02 \x03(\rB\x0e\xbaH\v\x92\x01\b\b\x01\"\x04*\x02 \x00R\fresponsePath*\x98\x01\n" +

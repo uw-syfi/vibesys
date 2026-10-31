@@ -9,7 +9,9 @@ import (
 func DispatchHostWatch(request *apiv1.WatchRequest) (HostCall, bool) {
 	switch {
 	case request.GetLogin() != nil:
-		return HostCall{CLI: "login", Deadline: 600000 * time.Millisecond, Executor: 1, Effect: 3, FirstEvent: 25000 * time.Millisecond}, true
+		return HostCall{CLI: "login", Deadline: 600000 * time.Millisecond, Executor: 1, Effect: 3, FirstEvent: 25000 * time.Millisecond, Progress: 0 * time.Millisecond}, true
+	case request.GetStreamSavedRuns() != nil:
+		return HostCall{CLI: "stream-saved-runs", Deadline: 600000 * time.Millisecond, Executor: 1, Effect: 1, FirstEvent: 0 * time.Millisecond, Progress: 25000 * time.Millisecond}, true
 	default:
 		return HostCall{}, false
 	}
@@ -20,6 +22,9 @@ func HostWatchResponseValid(request *apiv1.WatchRequest, response *apiv1.WatchRe
 	case request.GetLogin() != nil:
 		got := response.GetLogin()
 		return got != nil && got.GetRequestId() == request.GetLogin().GetRequestId()
+	case request.GetStreamSavedRuns() != nil:
+		got := response.GetStreamSavedRuns()
+		return got != nil && got.GetRequestId() == request.GetStreamSavedRuns().GetRequestId()
 	default:
 		return false
 	}

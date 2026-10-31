@@ -40,7 +40,7 @@ const (
 	HostOperationsService_PostIntent_FullMethodName         = "/vibesys.api.v1.HostOperationsService/PostIntent"
 	HostOperationsService_Relaunch_FullMethodName           = "/vibesys.api.v1.HostOperationsService/Relaunch"
 	HostOperationsService_ChatMessage_FullMethodName        = "/vibesys.api.v1.HostOperationsService/ChatMessage"
-	HostOperationsService_ListSavedRuns_FullMethodName      = "/vibesys.api.v1.HostOperationsService/ListSavedRuns"
+	HostOperationsService_StreamSavedRuns_FullMethodName    = "/vibesys.api.v1.HostOperationsService/StreamSavedRuns"
 	HostOperationsService_TerminateRun_FullMethodName       = "/vibesys.api.v1.HostOperationsService/TerminateRun"
 	HostOperationsService_ListAgentLogins_FullMethodName    = "/vibesys.api.v1.HostOperationsService/ListAgentLogins"
 	HostOperationsService_CreateChatSession_FullMethodName  = "/vibesys.api.v1.HostOperationsService/CreateChatSession"
@@ -85,8 +85,9 @@ type HostOperationsServiceClient interface {
 	PostIntent(ctx context.Context, in *PostIntentRequest, opts ...grpc.CallOption) (*PostIntentResponse, error)
 	Relaunch(ctx context.Context, in *RelaunchRequest, opts ...grpc.CallOption) (*RelaunchResponse, error)
 	ChatMessage(ctx context.Context, in *ChatMessageRequest, opts ...grpc.CallOption) (*ChatMessageResponse, error)
-	// Native discovery does not migrate the helper's runs.list summary contract.
-	ListSavedRuns(ctx context.Context, in *v1.ListSavedRunsRequest, opts ...grpc.CallOption) (*v1.ListSavedRunsResponse, error)
+	// One scan in one process, however many runs the project holds. Only silence fails it:
+	// each frame resets progress_ms, and cap_ms is a hang guard, not a target for the walk.
+	StreamSavedRuns(ctx context.Context, in *v1.StreamSavedRunsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[v1.StreamSavedRunsResponse], error)
 	TerminateRun(ctx context.Context, in *v1.TerminateRunRequest, opts ...grpc.CallOption) (*v1.TerminateRunResponse, error)
 	ListAgentLogins(ctx context.Context, in *v1.ListAgentLoginsRequest, opts ...grpc.CallOption) (*v1.ListAgentLoginsResponse, error)
 	CreateChatSession(ctx context.Context, in *CreateChatSessionRequest, opts ...grpc.CallOption) (*CreateChatSessionResponse, error)
@@ -313,15 +314,24 @@ func (c *hostOperationsServiceClient) ChatMessage(ctx context.Context, in *ChatM
 	return out, nil
 }
 
-func (c *hostOperationsServiceClient) ListSavedRuns(ctx context.Context, in *v1.ListSavedRunsRequest, opts ...grpc.CallOption) (*v1.ListSavedRunsResponse, error) {
+func (c *hostOperationsServiceClient) StreamSavedRuns(ctx context.Context, in *v1.StreamSavedRunsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[v1.StreamSavedRunsResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(v1.ListSavedRunsResponse)
-	err := c.cc.Invoke(ctx, HostOperationsService_ListSavedRuns_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &HostOperationsService_ServiceDesc.Streams[1], HostOperationsService_StreamSavedRuns_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &grpc.GenericClientStream[v1.StreamSavedRunsRequest, v1.StreamSavedRunsResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type HostOperationsService_StreamSavedRunsClient = grpc.ServerStreamingClient[v1.StreamSavedRunsResponse]
 
 func (c *hostOperationsServiceClient) TerminateRun(ctx context.Context, in *v1.TerminateRunRequest, opts ...grpc.CallOption) (*v1.TerminateRunResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -410,8 +420,9 @@ type HostOperationsServiceServer interface {
 	PostIntent(context.Context, *PostIntentRequest) (*PostIntentResponse, error)
 	Relaunch(context.Context, *RelaunchRequest) (*RelaunchResponse, error)
 	ChatMessage(context.Context, *ChatMessageRequest) (*ChatMessageResponse, error)
-	// Native discovery does not migrate the helper's runs.list summary contract.
-	ListSavedRuns(context.Context, *v1.ListSavedRunsRequest) (*v1.ListSavedRunsResponse, error)
+	// One scan in one process, however many runs the project holds. Only silence fails it:
+	// each frame resets progress_ms, and cap_ms is a hang guard, not a target for the walk.
+	StreamSavedRuns(*v1.StreamSavedRunsRequest, grpc.ServerStreamingServer[v1.StreamSavedRunsResponse]) error
 	TerminateRun(context.Context, *v1.TerminateRunRequest) (*v1.TerminateRunResponse, error)
 	ListAgentLogins(context.Context, *v1.ListAgentLoginsRequest) (*v1.ListAgentLoginsResponse, error)
 	CreateChatSession(context.Context, *CreateChatSessionRequest) (*CreateChatSessionResponse, error)
@@ -489,8 +500,8 @@ func (UnimplementedHostOperationsServiceServer) Relaunch(context.Context, *Relau
 func (UnimplementedHostOperationsServiceServer) ChatMessage(context.Context, *ChatMessageRequest) (*ChatMessageResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ChatMessage not implemented")
 }
-func (UnimplementedHostOperationsServiceServer) ListSavedRuns(context.Context, *v1.ListSavedRunsRequest) (*v1.ListSavedRunsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ListSavedRuns not implemented")
+func (UnimplementedHostOperationsServiceServer) StreamSavedRuns(*v1.StreamSavedRunsRequest, grpc.ServerStreamingServer[v1.StreamSavedRunsResponse]) error {
+	return status.Error(codes.Unimplemented, "method StreamSavedRuns not implemented")
 }
 func (UnimplementedHostOperationsServiceServer) TerminateRun(context.Context, *v1.TerminateRunRequest) (*v1.TerminateRunResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method TerminateRun not implemented")
@@ -881,23 +892,16 @@ func _HostOperationsService_ChatMessage_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
-func _HostOperationsService_ListSavedRuns_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(v1.ListSavedRunsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
+func _HostOperationsService_StreamSavedRuns_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(v1.StreamSavedRunsRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
 	}
-	if interceptor == nil {
-		return srv.(HostOperationsServiceServer).ListSavedRuns(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: HostOperationsService_ListSavedRuns_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(HostOperationsServiceServer).ListSavedRuns(ctx, req.(*v1.ListSavedRunsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
+	return srv.(HostOperationsServiceServer).StreamSavedRuns(m, &grpc.GenericServerStream[v1.StreamSavedRunsRequest, v1.StreamSavedRunsResponse]{ServerStream: stream})
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type HostOperationsService_StreamSavedRunsServer = grpc.ServerStreamingServer[v1.StreamSavedRunsResponse]
 
 func _HostOperationsService_TerminateRun_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(v1.TerminateRunRequest)
@@ -1073,10 +1077,6 @@ var HostOperationsService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _HostOperationsService_ChatMessage_Handler,
 		},
 		{
-			MethodName: "ListSavedRuns",
-			Handler:    _HostOperationsService_ListSavedRuns_Handler,
-		},
-		{
 			MethodName: "TerminateRun",
 			Handler:    _HostOperationsService_TerminateRun_Handler,
 		},
@@ -1101,6 +1101,11 @@ var HostOperationsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Login",
 			Handler:       _HostOperationsService_Login_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "StreamSavedRuns",
+			Handler:       _HostOperationsService_StreamSavedRuns_Handler,
 			ServerStreams: true,
 		},
 	},

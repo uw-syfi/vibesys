@@ -9003,30 +9003,28 @@ func (x *SavedRun) GetDetail() string {
 	return ""
 }
 
-type ListSavedRunsRequest struct {
+type StreamSavedRunsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	Project       string                 `protobuf:"bytes,2,opt,name=project,proto3" json:"project,omitempty"`
-	Offset        uint32                 `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`
-	Revision      string                 `protobuf:"bytes,4,opt,name=revision,proto3" json:"revision,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ListSavedRunsRequest) Reset() {
-	*x = ListSavedRunsRequest{}
+func (x *StreamSavedRunsRequest) Reset() {
+	*x = StreamSavedRunsRequest{}
 	mi := &file_vibesys_host_v1_operations_proto_msgTypes[117]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ListSavedRunsRequest) String() string {
+func (x *StreamSavedRunsRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ListSavedRunsRequest) ProtoMessage() {}
+func (*StreamSavedRunsRequest) ProtoMessage() {}
 
-func (x *ListSavedRunsRequest) ProtoReflect() protoreflect.Message {
+func (x *StreamSavedRunsRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_vibesys_host_v1_operations_proto_msgTypes[117]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -9038,64 +9036,51 @@ func (x *ListSavedRunsRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ListSavedRunsRequest.ProtoReflect.Descriptor instead.
-func (*ListSavedRunsRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use StreamSavedRunsRequest.ProtoReflect.Descriptor instead.
+func (*StreamSavedRunsRequest) Descriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{117}
 }
 
-func (x *ListSavedRunsRequest) GetRequestId() string {
+func (x *StreamSavedRunsRequest) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
 	return ""
 }
 
-func (x *ListSavedRunsRequest) GetProject() string {
+func (x *StreamSavedRunsRequest) GetProject() string {
 	if x != nil {
 		return x.Project
 	}
 	return ""
 }
 
-func (x *ListSavedRunsRequest) GetOffset() uint32 {
-	if x != nil {
-		return x.Offset
-	}
-	return 0
-}
-
-func (x *ListSavedRunsRequest) GetRevision() string {
-	if x != nil {
-		return x.Revision
-	}
-	return ""
-}
-
-type ListSavedRunsResponse struct {
+// One frame of one scan, in no promised order. Only the last frame says complete; a stream
+// that ends without it is a partial listing, whatever frames came first.
+type StreamSavedRunsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	ProjectRoot   string                 `protobuf:"bytes,2,opt,name=project_root,json=projectRoot,proto3" json:"project_root,omitempty"`
 	Runs          []*SavedRun            `protobuf:"bytes,3,rep,name=runs,proto3" json:"runs,omitempty"`
-	Revision      string                 `protobuf:"bytes,4,opt,name=revision,proto3" json:"revision,omitempty"`
-	NextOffset    *uint32                `protobuf:"varint,5,opt,name=next_offset,json=nextOffset,proto3,oneof" json:"next_offset,omitempty"`
+	Complete      bool                   `protobuf:"varint,4,opt,name=complete,proto3" json:"complete,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ListSavedRunsResponse) Reset() {
-	*x = ListSavedRunsResponse{}
+func (x *StreamSavedRunsResponse) Reset() {
+	*x = StreamSavedRunsResponse{}
 	mi := &file_vibesys_host_v1_operations_proto_msgTypes[118]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ListSavedRunsResponse) String() string {
+func (x *StreamSavedRunsResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ListSavedRunsResponse) ProtoMessage() {}
+func (*StreamSavedRunsResponse) ProtoMessage() {}
 
-func (x *ListSavedRunsResponse) ProtoReflect() protoreflect.Message {
+func (x *StreamSavedRunsResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_vibesys_host_v1_operations_proto_msgTypes[118]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -9107,44 +9092,37 @@ func (x *ListSavedRunsResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ListSavedRunsResponse.ProtoReflect.Descriptor instead.
-func (*ListSavedRunsResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use StreamSavedRunsResponse.ProtoReflect.Descriptor instead.
+func (*StreamSavedRunsResponse) Descriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{118}
 }
 
-func (x *ListSavedRunsResponse) GetRequestId() string {
+func (x *StreamSavedRunsResponse) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
 	return ""
 }
 
-func (x *ListSavedRunsResponse) GetProjectRoot() string {
+func (x *StreamSavedRunsResponse) GetProjectRoot() string {
 	if x != nil {
 		return x.ProjectRoot
 	}
 	return ""
 }
 
-func (x *ListSavedRunsResponse) GetRuns() []*SavedRun {
+func (x *StreamSavedRunsResponse) GetRuns() []*SavedRun {
 	if x != nil {
 		return x.Runs
 	}
 	return nil
 }
 
-func (x *ListSavedRunsResponse) GetRevision() string {
+func (x *StreamSavedRunsResponse) GetComplete() bool {
 	if x != nil {
-		return x.Revision
+		return x.Complete
 	}
-	return ""
-}
-
-func (x *ListSavedRunsResponse) GetNextOffset() uint32 {
-	if x != nil && x.NextOffset != nil {
-		return *x.NextOffset
-	}
-	return 0
+	return false
 }
 
 // Internal Pause-now escalation, never another operator control.
@@ -11396,27 +11374,21 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"\bimported\x18\x05 \x01(\x0e2\x1f.vibesys.host.v1.SavedRunImportB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\bimported\x12!\n" +
 	"\x06detail\x18\x06 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04R\x06detailB\a\n" +
-	"\x05_task\"\x95\x02\n" +
-	"\x14ListSavedRunsRequest\x12)\n" +
+	"\x05_task\"i\n" +
+	"\x16StreamSavedRunsRequest\x12)\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01\x18\x80\x01R\trequestId\x12$\n" +
 	"\aproject\x18\x02 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01(\x80 R\aproject\x12\x16\n" +
-	"\x06offset\x18\x03 \x01(\rR\x06offset\x12#\n" +
-	"\brevision\x18\x04 \x01(\tB\a\xbaH\x04r\x02(@R\brevision:o\xbaHl\x1aj\n" +
-	"\x13saved_runs.revision\x12)revision is required after the first page\x1a(this.offset == 0u || this.revision != ''\"\x94\x02\n" +
-	"\x15ListSavedRunsResponse\x12)\n" +
+	"\xbaH\ar\x05\x10\x01(\x80 R\aproject\"\xc9\x01\n" +
+	"\x17StreamSavedRunsResponse\x12)\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01\x18\x80\x01R\trequestId\x12-\n" +
 	"\fproject_root\x18\x02 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80 R\vprojectRoot\x128\n" +
-	"\x04runs\x18\x03 \x03(\v2\x19.vibesys.host.v1.SavedRunB\t\xbaH\x06\x92\x01\x03\x10\xc8\x01R\x04runs\x121\n" +
-	"\brevision\x18\x04 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$R\brevision\x12$\n" +
-	"\vnext_offset\x18\x05 \x01(\rH\x00R\n" +
-	"nextOffset\x88\x01\x01B\x0e\n" +
-	"\f_next_offset\"\xc0\x04\n" +
+	"\x04runs\x18\x03 \x03(\v2\x19.vibesys.host.v1.SavedRunB\t\xbaH\x06\x92\x01\x03\x10\xc8\x01R\x04runs\x12\x1a\n" +
+	"\bcomplete\x18\x04 \x01(\bR\bcomplete\"\xc0\x04\n" +
 	"\x13TerminateRunRequest\x12G\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tB(\xbaH%r#\x10\x01\x18\x80\x012\x1c^[A-Za-z0-9][A-Za-z0-9._-]*$R\trequestId\x12-\n" +
@@ -11939,8 +11911,8 @@ var file_vibesys_host_v1_operations_proto_goTypes = []any{
 	(*StartRunResponse)(nil),                     // 140: vibesys.host.v1.StartRunResponse
 	(*LoginResponse)(nil),                        // 141: vibesys.host.v1.LoginResponse
 	(*SavedRun)(nil),                             // 142: vibesys.host.v1.SavedRun
-	(*ListSavedRunsRequest)(nil),                 // 143: vibesys.host.v1.ListSavedRunsRequest
-	(*ListSavedRunsResponse)(nil),                // 144: vibesys.host.v1.ListSavedRunsResponse
+	(*StreamSavedRunsRequest)(nil),               // 143: vibesys.host.v1.StreamSavedRunsRequest
+	(*StreamSavedRunsResponse)(nil),              // 144: vibesys.host.v1.StreamSavedRunsResponse
 	(*TerminateRunRequest)(nil),                  // 145: vibesys.host.v1.TerminateRunRequest
 	(*TerminateRunResponse)(nil),                 // 146: vibesys.host.v1.TerminateRunResponse
 	(*LoginAccount)(nil),                         // 147: vibesys.host.v1.LoginAccount
@@ -12094,7 +12066,7 @@ var file_vibesys_host_v1_operations_proto_depIdxs = []int32{
 	115, // 123: vibesys.host.v1.LoginResponse.unavailable:type_name -> vibesys.host.v1.LoginUnavailableBody
 	168, // 124: vibesys.host.v1.SavedRun.created_at:type_name -> google.protobuf.Timestamp
 	19,  // 125: vibesys.host.v1.SavedRun.imported:type_name -> vibesys.host.v1.SavedRunImport
-	142, // 126: vibesys.host.v1.ListSavedRunsResponse.runs:type_name -> vibesys.host.v1.SavedRun
+	142, // 126: vibesys.host.v1.StreamSavedRunsResponse.runs:type_name -> vibesys.host.v1.SavedRun
 	169, // 127: vibesys.host.v1.TerminateRunRequest.expected_process:type_name -> vibesys.store.v1.RunProcess
 	168, // 128: vibesys.host.v1.TerminateRunRequest.deadline:type_name -> google.protobuf.Timestamp
 	20,  // 129: vibesys.host.v1.TerminateRunResponse.outcome:type_name -> vibesys.host.v1.TerminateRunOutcome
@@ -12227,7 +12199,6 @@ func file_vibesys_host_v1_operations_proto_init() {
 		(*LoginResponse_Unavailable)(nil),
 	}
 	file_vibesys_host_v1_operations_proto_msgTypes[116].OneofWrappers = []any{}
-	file_vibesys_host_v1_operations_proto_msgTypes[118].OneofWrappers = []any{}
 	file_vibesys_host_v1_operations_proto_msgTypes[122].OneofWrappers = []any{}
 	file_vibesys_host_v1_operations_proto_msgTypes[123].OneofWrappers = []any{
 		(*AgentLoginHow_Account)(nil),
