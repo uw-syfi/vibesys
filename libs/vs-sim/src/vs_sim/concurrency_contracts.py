@@ -584,6 +584,33 @@ def _pattern(size: int) -> bytes:
     return (bytes(range(256)) * (size // 256 + 1))[:size]
 
 
+def _outcome_of(call: Callable[[], object]) -> object:
+    """What ``call`` returns, or the ``OSError`` or ``ValueError`` it raises."""
+    try:
+        return call()
+    except (OSError, ValueError) as error:
+        return error
+
+
+def _is_raw_bad_descriptor(outcome: object) -> bool:
+    """Whether ``outcome`` is the kernel's ``EBADF``, not the network's own "connection closed".
+
+    A call that finds its connection closed gets the network's own error. A bad descriptor
+    from the system means a descriptor was closed under a call that was still using it.
+    """
+    return (
+        isinstance(outcome, OSError)
+        and outcome.errno == errno.EBADF
+        and outcome.strerror != "connection closed"
+    )
+
+
+def _errno_of(call: Callable[[], object]) -> int | None:
+    """The ``errno`` of the ``OSError`` ``call`` raises; ``None`` when it returns."""
+    outcome = _outcome_of(call)
+    return outcome.errno if isinstance(outcome, OSError) else None
+
+
 def _send_to_a_peer_that_reads_nothing(
     subject: NetworkUnderTest, payload: bytes, timeout: float
 ) -> tuple[bool, bytes]:
@@ -961,6 +988,178 @@ class NetworkContract:
             return timed_out, reply[0] if reply else b""
 
         assert subject.threads.run(program) == (True, b"ping")
+
+    def test_a_timeout_already_over_allows_one_attempt_and_then_times_out(self) -> None:
+        """A zero, negative or tiny timeout tries the send once; it never waits and never hangs.
+
+        A send that fits returns whatever the timeout. One that does not fit writes what fits,
+        in order, and raises ``TimeoutError`` at once. A deadline already past must not reach
+        a wait: a wait for the remaining time would then be a wait for ever.
+        """
+        for timeout in (0.0, -1.0, 1e-9):
+            small, large = _pattern(16), _pattern(8 << 20)
+
+            timed_out, received = _send_to_a_peer_that_reads_nothing(
+                self.network_under_test(0), small, timeout
+            )
+            assert (timed_out, received) == (False, small), timeout
+
+            timed_out, received = _send_to_a_peer_that_reads_nothing(
+                self.network_under_test(0), large, timeout
+            )
+            assert timed_out, timeout
+            assert received, timeout  # The one attempt wrote what fit.
+            assert large.startswith(received), timeout
+
+    def test_a_recv_with_a_timeout_already_over_times_out_when_nothing_arrived(self) -> None:
+        """A zero, negative or tiny timeout on an idle connection raises ``TimeoutError`` at once."""
+        subject = self.network_under_test(0)
+
+        def program() -> list[bool]:
+            threads = subject.threads.threads
+            address = subject.address("idle")
+            listener = subject.network.listen(address)
+            done = threads.event()
+            outcomes: list[bool] = []
+
+            def serve() -> None:
+                connection = listener.accept(HANG_GUARD_S)
+                _wait(done, "the client's receives ending")
+                connection.close()
+
+            def receive(client: Connection) -> None:
+                for timeout in (0.0, -1.0, 1e-9):
+                    try:
+                        client.recv(1, timeout)
+                    except TimeoutError:
+                        outcomes.append(True)
+                    else:
+                        outcomes.append(False)
+
+            server = threads.spawn(serve, name="server")
+            client = subject.network.connect(address, HANG_GUARD_S)
+            receiver = threads.spawn(lambda: receive(client), name="receiver")
+            try:
+                _join(receiver)
+            finally:
+                client.close()
+                done.set()
+                _join(server)
+                listener.close()
+            return outcomes
+
+        assert subject.threads.run(program) == [True, True, True]
+
+    def test_a_send_timeout_bounds_only_that_send(self) -> None:
+        """A send that gave up leaves no deadline behind: a later untimed send waits for a slow reader.
+
+        A timeout kept on the socket after the timed call would fail the next send of any
+        thread once the peer took that long to read.
+        """
+        subject = self.network_under_test(0)
+        payload = _pattern(8 << 20)
+
+        def program() -> tuple[bool, bytes, bytes]:
+            threads = subject.threads.threads
+            address = subject.address("patient")
+            listener = subject.network.listen(address)
+            release = threads.event()
+            received: list[bytes] = []
+
+            def serve() -> None:
+                connection = listener.accept(HANG_GUARD_S)
+                _wait(release, "the client's first send timing out")
+                threads.sleep(20 * subject.threads.tick)
+                chunks = bytearray()
+                while chunk := connection.recv(1 << 16, HANG_GUARD_S):
+                    chunks += chunk
+                received.append(bytes(chunks))
+                connection.close()
+
+            server = threads.spawn(serve, name="server")
+            client = subject.network.connect(address, HANG_GUARD_S)
+            try:
+                client.send(payload, 10 * subject.threads.tick)
+            except TimeoutError:
+                timed_out = True
+            else:
+                timed_out = False
+            release.set()
+            second = payload[::-1]
+            client.send(
+                second
+            )  # Untimed on purpose: only a call with no deadline of its own shows a leaked one.
+            client.close()
+            _join(server)
+            listener.close()
+            return timed_out, second, received[0] if received else b""
+
+        timed_out, second, received = subject.threads.run(program)
+        assert timed_out
+        assert received.endswith(second)
+        assert payload.startswith(received[: len(received) - len(second)])
+
+    def test_closing_a_connection_ends_a_reader_and_a_writer_blocked_together(self) -> None:
+        """One end closed, once or twice at the same moment, ends every call blocked on it.
+
+        A reader and a writer wait on the same connection. Closing it ends both promptly, the
+        reader with EOF or an ``OSError`` and the writer with an ``OSError``, and no call fails
+        any other way (the system's bad descriptor included, which would mean the descriptor
+        was closed under a call still using it). Every call made afterwards raises ``OSError``
+        with ``EBADF``.
+        """
+        subject = self.network_under_test(0)
+        payload = _pattern(8 << 20)
+
+        def program() -> tuple[object, object, list[int | None]]:
+            threads = subject.threads.threads
+            address = subject.address("closing")
+            listener = subject.network.listen(address)
+            done = threads.event()
+            outcome: dict[str, object] = {}
+
+            def serve() -> None:
+                connection = listener.accept(HANG_GUARD_S)
+                _wait(done, "the client's calls ending")
+                connection.close()
+
+            server = threads.spawn(serve, name="server")
+            client = subject.network.connect(address, HANG_GUARD_S)
+
+            def read() -> None:
+                outcome["reader"] = _outcome_of(lambda: client.recv(1))
+
+            def write() -> None:
+                outcome["writer"] = _outcome_of(lambda: client.send(payload, HANG_GUARD_S))
+
+            reader = threads.spawn(read, name="reader")
+            writer = threads.spawn(write, name="writer")
+            threads.sleep(10 * subject.threads.tick)
+            closers = [threads.spawn(client.close, name=f"closer-{n}") for n in range(2)]
+            try:
+                for worker in (reader, writer, *closers):
+                    _join(worker)
+            finally:
+                client.close()
+                done.set()
+                _join(server)
+                listener.close()
+            later = [
+                _errno_of(call)
+                for call in (
+                    lambda: client.send(b"x", subject.threads.tick),
+                    lambda: client.recv(1),
+                    lambda: client.recv(1, subject.threads.tick),
+                )
+            ]
+            return outcome.get("reader"), outcome.get("writer"), later
+
+        reader, writer, later = subject.threads.run(program)
+        assert reader == b"" or isinstance(reader, OSError), reader
+        assert isinstance(writer, OSError), writer
+        assert not _is_raw_bad_descriptor(reader), reader
+        assert not _is_raw_bad_descriptor(writer), writer
+        assert later == [errno.EBADF] * 3
 
     def test_a_peer_that_stops_reading_blocks_an_untimed_writer_until_its_end_closes(
         self,

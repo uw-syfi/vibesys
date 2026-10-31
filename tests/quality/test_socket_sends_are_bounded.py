@@ -39,8 +39,9 @@ ALLOWED: dict[str, tuple[int, str]] = {
         "one reply line, far under a socket buffer, so the send never waits for room",
     ),
     "libs/vs-sim/src/vs_sim/concurrency_contracts.py": (
-        6,
-        "contract cases of the network itself, whose peers always read",
+        7,
+        "contract cases of the network itself, whose peers always read; one sends with no "
+        "timeout on purpose, to show that an earlier timed send left no deadline behind",
     ),
     "libs/vs-sandbox/src/vs_sandbox/host_command_client.py": (
         1,

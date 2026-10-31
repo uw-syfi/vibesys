@@ -161,7 +161,7 @@ class _UnixConnection:
             return None
 
     def _wait(self, event: int, deadline: float | None) -> bool:
-        """Whether ``event`` (or a hang-up or error) arrived before ``deadline``; ``None`` waits for ever."""
+        """Whether ``event``, a hang-up or an error arrived before ``deadline`` (``None``: no deadline)."""
         poller = select.poll()
         poller.register(self._sock, event)
         if deadline is None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import tempfile
 import threading
 from pathlib import Path
@@ -116,6 +117,23 @@ def test_refusing_reservable_threads_refuses_a_start_without_running_its_target(
     assert ran == ["started"]
 
 
+def _outcome_of(call: Callable[[], object]) -> object:
+    try:
+        return call()
+    except (OSError, ValueError) as error:
+        return error
+
+
+def _is_raw_bad_descriptor(outcome: object) -> bool:
+    # The network reports a closed connection as "connection closed"; the system's own EBADF
+    # means a descriptor was closed under a call that was still using it.
+    return (
+        isinstance(outcome, OSError)
+        and outcome.errno == errno.EBADF
+        and outcome.strerror != "connection closed"
+    )
+
+
 def _unix_paths() -> Callable[[str], str]:
     # Unix socket paths are short-limited, so the directory lives directly under the system
     # temporary directory rather than under pytest's long per-test path.
@@ -155,6 +173,55 @@ class TestUnixNetwork(NetworkContract):
         assert client.recv(1, HANG_GUARD_S) == b""
         client.close()
         listener.close()
+
+    def test_closing_with_calls_in_flight_closes_the_descriptor_after_the_last_call(self) -> None:
+        """Calls waiting on a closed connection see its shutdown, and the descriptor is released.
+
+        The first call to leave closing the descriptor under the others hands them the system's
+        ``EBADF`` where they should see EOF or a broken pipe, and a descriptor nobody closes
+        stays in ``/dev/fd`` for good.
+        """
+        network = UnixNetwork()
+        paths = _unix_paths()
+        pause = OsThreads()
+        big = b"x" * (8 << 20)
+
+        def one_round(n: int) -> list[object]:
+            listener = network.listen(paths(f"round{n}"))
+            client = network.connect(paths(f"round{n}"), HANG_GUARD_S)
+            peer = listener.accept(HANG_GUARD_S)
+            listener.close()
+            outcomes: list[object] = []
+            calls = [lambda: client.recv(1)] * 3 + [lambda: client.send(big)] * 3
+            workers = [
+                threading.Thread(target=lambda call=call: outcomes.append(_outcome_of(call)))
+                for call in calls
+            ]
+            for worker in workers:
+                worker.start()
+            pause.sleep(
+                10 * _REAL_TICK_S
+            )  # Let the calls park; the outcomes hold if they have not.
+            closers = [threading.Thread(target=client.close) for _ in range(2)]
+            for closer in closers:
+                closer.start()
+            try:
+                for thread in (*workers, *closers):
+                    join_or_fail(thread)
+            finally:
+                client.close()
+                peer.close()
+            return outcomes
+
+        def open_descriptors() -> int:
+            return len(list(Path("/dev/fd").iterdir()))
+
+        one_round(0)  # Opens whatever the process opens once.
+        before = open_descriptors()
+        outcomes = [outcome for n in range(1, 21) for outcome in one_round(n)]
+        assert open_descriptors() == before
+        assert all(outcome == b"" or isinstance(outcome, OSError) for outcome in outcomes)
+        assert not [outcome for outcome in outcomes if _is_raw_bad_descriptor(outcome)]
 
     def test_closing_a_listener_leaves_a_socket_file_a_later_listener_replaced(self) -> None:
         path = _unix_paths()("replaced")
