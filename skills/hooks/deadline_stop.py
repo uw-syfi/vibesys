@@ -1,67 +1,62 @@
 #!/usr/bin/env python3
-"""Claude Code Stop hook: keep a `vibesys:optimize` run going until its deadline.
+"""Stop gate for optimization runs. Unreadable state fails open.
 
-Finds the project from CLAUDE_PROJECT_DIR or the nearest ancestor holding
-``.vibesys-optimize/``. Its ``active`` file names the active run; the run's ``run.json`` holds the ``deadline`` (ISO 8601 with a
-timezone). Before the deadline the hook blocks the stop and tells the lead to continue; at or
-after it, or once the file is gone, the stop goes through.
-
-It fails open: any problem reading the state allows the stop, so a broken run directory can
-never trap a session. Repeated stop-hook continuations are released, as are turns with
-pending background tasks or scheduled wakeups; those resume the lead without busy waiting.
-Standard library only (Python 3.10 or newer).
-
-Reads the hook's JSON from stdin (the ``cwd`` field names the session's directory); a block is
-``{"decision": "block", "reason": ...}`` on stdout, an allowed stop prints nothing. Exit code 0.
+Only running subagents or explicitly tracked shell commands release search turns.
+Crons and stop_hook_active never bypass the gate. The run deadline bounds blocking;
+Claude Code additionally caps consecutive tool-free continuations at eight.
 """
 
 from __future__ import annotations
 
 import json
-import math
 import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TextIO
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "search/measure/scripts"))
+from run import read_state, status
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from typing import TextIO
 
 __all__ = ["block_reason", "main"]
 
-STATE_DIR = ".vibesys-optimize"
-ACTIVE_FILE = "active"
-_FAIL_OPEN = (OSError, ValueError, KeyError, TypeError, AttributeError)
-"""What reading the state can raise: unreadable or missing files, bad JSON or dates, wrong shapes."""
 
-
-def block_reason(cwd: Path, now: datetime) -> str | None:
-    """The reason to keep the session going, or None when the stop should go through."""
+def block_reason(cwd: Path, now: datetime, event: dict[str, Any] | None = None) -> str | None:
+    """Return a state-derived continuation instruction, or None to release."""
+    event = event or {}
     try:
-        root = next((p for p in (cwd, *cwd.parents) if (p / STATE_DIR).is_dir()), cwd)
-        active = root / STATE_DIR / ACTIVE_FILE
-        run_id = active.read_text(encoding="utf-8").strip()
-        if not run_id or "/" in run_id or "\\" in run_id or run_id in (".", ".."):
+        root = next((p for p in (cwd, *cwd.parents) if (p / ".vibesys-optimize").is_dir()), cwd)
+        home = root / ".vibesys-optimize"
+        run_id = (home / "active").read_text().strip()
+        if not run_id or any(c in run_id for c in ("/", "\\")) or run_id in {".", ".."}:
             return None
-        run_dir = root / STATE_DIR / run_id
-        stated = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))["deadline"]
-        # Python 3.10 does not read a trailing Z; 3.11 and later do.
-        deadline = datetime.fromisoformat(
-            stated.removesuffix("Z") + "+00:00" if stated[-1:] == "Z" else stated
+        run = home / run_id
+        state = read_state(run)
+        summary = status(state, now)
+        if summary["seconds_left"] <= 0 or state["finished"]:
+            return None
+        wrap_up = datetime.fromisoformat(state["wrap_up_at"])
+        pending = event.get("background_tasks", [])
+        running = any(
+            t.get("status") == "running"
+            and (
+                t.get("type") == "subagent"
+                or (t.get("type") == "shell" and t.get("id") in state["commands"])
+            )
+            for t in pending
         )
-        remaining = (deadline - now).total_seconds()
-    except _FAIL_OPEN:
+        if now < wrap_up and running:
+            return None
+        return (
+            f"{summary['seconds_left']:g} seconds left; wrap-up {summary['wrap_up_at']}; "
+            f"{summary['free_slots']} free slots. {summary['next']}. "
+            f'Run python3 "{Path(__file__).resolve().parents[1]}/search/measure/scripts/run.py" status --run "{run}"'
+        )
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return None
-    if remaining <= 0:
-        return None
-    minutes = math.ceil(remaining / 60)
-    unit = "minute remains" if minutes == 1 else "minutes remain"
-    return (
-        f"{minutes} {unit} until the deadline: continue the vibesys:optimize loop from "
-        f"{STATE_DIR}/{run_id}/notes; at wrap-up remove {STATE_DIR}/{ACTIVE_FILE}"
-    )
 
 
 def main(
@@ -72,21 +67,15 @@ def main(
     fallback_cwd: Path,
     project_dir: Path | None = None,
 ) -> int:
-    """Answer one Stop event; always returns 0 (an error allows the stop)."""
+    """Handle one Stop input. All time and streams are supplied by the caller."""
     try:
         event = json.loads(stdin.read() or "{}")
-        if (
-            event.get("stop_hook_active")
-            or event.get("background_tasks")
-            or event.get("session_crons")
-        ):
-            return 0
         cwd = Path(event["cwd"]) if isinstance(event.get("cwd"), str) else fallback_cwd
-        reason = block_reason(project_dir if project_dir is not None else cwd, now())
-    except _FAIL_OPEN:
-        return 0
-    if reason is not None:
-        out.write(json.dumps({"decision": "block", "reason": reason}) + "\n")
+        reason = block_reason(project_dir or cwd, now(), event)
+        if reason:
+            out.write(json.dumps({"decision": "block", "reason": reason}) + "\n")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        pass
     return 0
 
 

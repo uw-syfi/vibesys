@@ -19,10 +19,11 @@ measurement does. Load `vibesys:measure`.
 Start from the diff against the parent (`git diff <parent> <candidate>`) and the claim. Answer:
 
 1. **Correct?** Does the code do what the claim says, and does it still do everything it did?
-   Confirm the worker's correctness-check evidence names this exact commit and task version.
-   If evidence is missing or stale, rerun the correctness check in the candidate worktree
-   (coordinate the measurement slot with the lead). If the budget cannot cover it, return
-   `unmeasured`; never pass without current evidence.
+   Run the task's declared correctness command yourself, in your own candidate worktree,
+   using your own allocated port. Worker evidence is not a substitute. Coordinate the slot
+   with the lead. Return `unmeasured` if the budget cannot cover the check.
+   Start any required service yourself, save its PID, and stop only that PID in cleanup.
+   Never use `pkill -f` or `pkill -x`: process names do not establish ownership.
 2. **Active?** Is the change on the path the benchmark runs? A change that the benchmark never
    reaches cannot explain a gain.
 3. **Honest?** Does it special-case the benchmark's inputs, cache on its seed, skip or weaken a

@@ -26,70 +26,44 @@ before you plan and again at each wrap-up.
    `[benchmark.result]` table, the task directory is not committed, or tracked files have
    uncommitted changes (the base must be a commit).
    Verify background Agent execution and session scheduling are available before creating state.
-2. Create the run: id, directory, `run.json` with the deadline, the exclude line, the branch
-   `vibesys/<run-id>` and its worktree, and `.vibesys-optimize/active`. Commands are in
-   run-state.md.
-3. Keep exactly one pending wakeup, for the next milestone: wrap-up first, then the deadline.
-   For a normal skill invocation use `CronCreate` with `recurring: false`, and record its ID.
-   Only a self-paced `/loop` uses `ScheduleWakeup`; each call replaces its pending wakeup,
-   so never schedule wrap-up and deadline together. Re-arm after every wake, checking the
-   actual clock before advancing phases (cron may fire early or after a busy turn).
-   Use `CronList` to reconcile on resume and `CronDelete` to cancel obsolete run-owned tasks.
-   If scheduling or background agents are unavailable, remove this run's `active` marker,
-   cancel any wakeup already created, and explain the blocker.
+2. Run `python3 "${CLAUDE_SKILL_DIR}/../measure/scripts/run.py" start --task <task>
+   --seconds <duration-in-seconds> --fanout <N>`. Save its absolute output as `$RUN`.
+   The controller creates main and owns all lifecycle state; commands are in run-state.md.
+3. Create exactly one one-shot wrap-up wakeup with `CronCreate`, `recurring: false`.
+   Reconcile with `CronList` on resume, cancel obsolete owned wakeups with `CronDelete`.
 4. Measure the base with `vibesys:measure`, at least 5 samples, as a tracked background Bash command with `run_in_background: true`. No comparison
    means anything until it lands. Plan while it runs.
 
 ## Loop
 
-1. **Plan** a portfolio of distinct, falsifiable hypotheses from the objective, the code and any
-   profiles. Never split one change into parallel fragments. Four kinds of work:
-   - *implement*: one hypothesis, built and measured in its own worktree.
-   - *profile*: answer one question that the next decision depends on, changing no code.
-   - *combine*: apply several candidates' changes into one new candidate.
-   - *merge*: move winners into main. Main moves only to a commit that passes the check and
-     does not measure worse than main.
-2. **Dispatch** each item as a background subagent with a self-contained brief from briefs.md.
-   Create its worktree and branch yourself, at an exact base commit. Every implement item begins
-   with the smallest step that yields a measurement. Allocate measurement slots as described
-   in `vibesys:measure`, so benchmarks and load profiles never overlap. Keep at most the fanout cap running, and
-   fill every free slot with work that does not conflict with what runs.
-3. **Write a note** in `notes/<work-id>.md` as you dispatch: what you expect, and what you will
-   do if it succeeds and if it fails.
-4. **When a subagent finishes**: confirm its commit exists; check the handoff (was it measured,
-   not just written; any shortcut); measure every `ready for measurement` commit before
-   interpreting its gain; send each candidate that claims a gain to an independent
-   judge (`vibesys:judge-candidate`) before treating it as a win; update the ledger and
-   decisions; compare what happened with the note. Park or abandon a direction with a stated
-   reason. A direction that fails to converge after two tries is parked. A step that ended
-   without a candidate is narrowed, never reassigned unchanged.
-5. **Refill until wrap-up**: every free slot gets new work. When a direction wins, branch new
-   hypotheses from the winner: tune it, combine compatible gains, or profile the next bottleneck.
-   Drop work that no longer changes the outcome and replace it; exhausted initial ideas are
-   a reason to inspect the winner, not to end the search early.
+After every completion notification or wakeup, run:
 
-Run each measurement as a tracked background Bash command (`run_in_background: true`),
-never detached with `nohup`, `setsid`, shell `&` or `disown`. Serialize measurements by starting
-the next only when the previous command's completion notification arrives; do not make a
-home-made chain script that launches multiple measurements.
+```sh
+python3 "${CLAUDE_SKILL_DIR}/../measure/scripts/run.py" status --run "$RUN"
+```
 
-Never poll or use foreground Bash `sleep` to wait for subagents or the clock. Claude Code delivers background results as
-completion notifications. When all useful work is dispatched, yield the turn to those
-notifications and the scheduled wakeups; keep the session open. The optional Stop hook is a
-reminder, not a deadline guarantee: it fails open on repeated continuations and lets pending
-background tasks or scheduled wakeups resume the lead. See the official
-[subagent](https://code.claude.com/docs/en/sub-agents),
-[scheduling](https://code.claude.com/docs/en/scheduled-tasks) and
-[hook](https://code.claude.com/docs/en/hooks) contracts.
+Do what `next` says. Use the commands in [run-state.md](references/run-state.md) to add work
+before dispatch, transition it on return, record its judge result, and promote winners.
+Give each background subagent a self-contained brief from briefs.md and its own worktree.
+Keep measurements serialized as tracked background Bash commands (`run_in_background: true`).
+Use `track` with the Bash task ID; after its completion notification use `untrack`.
+
+Wait only on completion notifications or the one wakeup. Never use foreground `sleep` or a
+`pgrep` loop. Do useful work or yield. A cron alone does not release the Stop hook.
 
 ## Wrap-up
 
-Start only at the computed wrap-up time defined in run-state.md, never because ideas feel exhausted. Dispatch no new hypotheses; judges, combinations
-and final measurements may still run within the remaining budget. Merge judged winners into main
-with `vibesys:combine-candidates`. Stop or collect outstanding workers before the deadline.
-Never merge an unjudged combination. Re-measure the final main against the base with
-`vibesys:measure`. Write `report.md`: the best commit, the verdict and ratio against the base,
-what was tried and why each direction ended. If time cannot cover a final measurement, report
-the last verified main (the base if no win), and mark the final verification incomplete. Delete
-`.vibesys-optimize/active`, cancel this run's scheduled wakeups, then stop. The result is the
-branch `vibesys/<run-id>`. Never change the user's checked-out branch.
+When status says begin wrap-up, dispatch no new hypotheses. Collect or stop your own agents
+and background tasks, transition every open item to a terminal state with a reason, and
+untrack commands only after they have stopped. Promote only through `move-main`.
+Re-measure the current main head after its last move, then run:
+
+```sh
+python3 "${CLAUDE_SKILL_DIR}/../measure/scripts/run.py" finish --run "$RUN"
+```
+
+`finish` checks time, closed work, stopped tracked commands and a fresh final measurement.
+It writes result numbers into `report.md` and removes `active`. Append explanatory prose to
+the report; do not copy numbers or remove the marker yourself. Cancel the owned wakeup.
+If the deadline prevents finishing, report the failed guard and incomplete verification.
+The result branch is `vibesys/<run-id>`; preserve the user's checked-out branch.

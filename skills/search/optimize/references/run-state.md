@@ -1,87 +1,53 @@
-# Run state
+# Run controller
 
-Each run keeps its state in `.vibesys-optimize/<run-id>/` at the repository root. The directory
-is excluded from git, so nothing in it is ever committed.
+`python3 "${CLAUDE_SKILL_DIR}/../measure/scripts/run.py"` owns run lifecycle state.
+The installed plugin needs only Python 3.10+ and git. Convert the requested duration to
+seconds, then `start --task <task> --seconds <seconds> --fanout <N>` prints the absolute run
+directory. Save it as `$RUN`. Never edit `run.json`, `ledger.md` or the active marker.
 
-## Create a run
+Every other command takes `--run "$RUN"`:
 
-```sh
-RUN_ID="$(date +%Y%m%d-%H%M%S)-<task>"
-RUN="$(git rev-parse --show-toplevel)/.vibesys-optimize/$RUN_ID"
-mkdir -p "$RUN/notes" "$RUN/worktrees"
-echo '.vibesys-optimize/' >> "$(git rev-parse --git-path info/exclude)"
-BASE="$(git rev-parse HEAD)"
-git branch "vibesys/$RUN_ID" "$BASE"
-git worktree add "$RUN/worktrees/main" "vibesys/$RUN_ID"
-# Parse the requested duration to seconds (90m = 5400; 1h30m = 5400), then:
-python3 - "$RUN" "<task>" "<seconds>" "<fanout>" "$BASE" "$RUN_ID" <<'PYTHON'
-import json, sys
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-run, task, seconds, fanout, base, run_id = sys.argv[1:]
-started = datetime.now(timezone.utc)
-state = dict(task=task, deadline=(started + timedelta(seconds=int(seconds))).isoformat(),
-             fanout=int(fanout), started_at=started.isoformat(), base_commit=base,
-             main_branch=f"vibesys/{run_id}")
-Path(run, "run.json").write_text(json.dumps(state) + "\n")
-Path(run).parent.joinpath("active").write_text(run_id + "\n")
-PYTHON
-```
-
-Reject an existing `active` run, invalid task names (use letters, digits, hyphens or
-underscores), nonpositive durations and fanout values before creating state. Add the exclude
-line only if it is not there yet. Use absolute paths in all briefs and measurement commands.
-
-Branch names: main is `vibesys/<run-id>`. A work item's branch is
-`vibesys-work/<run-id>/<work-id>`, because git cannot hold `vibesys/<run-id>` and
-`vibesys/<run-id>/x` at once. Work item worktrees live in `$RUN/worktrees/<work-id>`; the user's
-own checkout stays untouched.
-
-## Files
-
-`run.json`: one JSON object.
-
-| key | meaning |
+| Command | Arguments and effect |
 | --- | --- |
-| `task` | the task name, a folder in `.vibesys/tasks/` |
-| `deadline` | ISO 8601 with a timezone offset; the stop hook reads this |
-| `fanout` | the most subagents running at once |
-| `started_at` | ISO 8601 with a timezone offset |
-| `base_commit` | full SHA of the commit the run started from |
-| `main_branch` | `vibesys/<run-id>` |
+| `status` | Prints time left, wrap-up, open items, free slots and next action |
+| `add` | `--id <id> --kind implement\|profile\|combine\|judge --hypothesis <text>`; records dispatch and consumes a slot |
+| `transition` | `--id <id> --to returned\|judging\|won\|parked\|abandoned --reason <text>` |
+| `judge` | `--id <id> --commit <sha> --result pass\|fail --reason <evidence>`; records the independent judge's own check |
+| `move-main` | `--id <id>`; only a won item with judge pass, check pass and `better` against current main |
+| `track` | `--id <Bash-task-id> --description <text>`; registers an owned background command |
+| `untrack` | `--id <Bash-task-id>`; after completion or confirmed cancellation |
+| `finish` | Requires wrap-up, all items terminal, no tracked commands, fresh successful measurement of main |
 
-`active` (in `.vibesys-optimize/`, not in the run directory): the run id, one line. Present
-while the run is live. The lead removes it at the end of wrap-up.
+Legal transitions are dispatched to returned or abandoned, returned to judging, parked or
+abandoned, and judging to won, parked or abandoned. Won requires a recorded judge pass.
+Returned items release their worker slot; judging consumes one. Judges share the fanout cap.
+Promotion requires `better`; `within_noise` is parked even with a judge pass.
 
-`measurements.jsonl`: written only by `vibesys:measure`'s script; never edit it.
+The controller owns `run.json` (metadata, items, commands, promotion intent), rendered
+`ledger.md`, the git exclude entry, main's branch/worktree, the active marker, and the numeric
+section of `report.md`. `measurements.py` alone owns `measurements.jsonl`; the controller uses
+its public reader and comparison. The lead owns prose notes and appends report prose.
+State is atomically replaced; ledger is regenerated on every command. A persisted promotion
+intent is reconciled against git on the next command; a recovered move requires a new final
+measurement. Only the lead runs mutating commands, serially; workers return evidence.
+Do not move main by hand. Use `vibesys-work/<run-id>/<work-id>` for candidate branches.
 
-`ledger.md`: a Markdown table, one row per piece of work, updated when its state changes.
-Columns: `id`, `kind` (implement, profile, combine, merge), `hypothesis`, `worktree / branch`,
-`started`, `ended`, `outcome` (running, win, no gain, failed, parked, abandoned), `best value`.
+Wrap-up starts `min(1200 seconds, 25% of duration)` before deadline. `finish` cannot end search
+early. Stop owned tasks before finishing, then cancel the one owned wakeup. At deadline the
+hook releases even if verification is incomplete; report that explicitly.
 
-`decisions.md`: numbered entries, each with what you decided, why, and the alternatives you
-turned down. Add one for every park, abandon, merge and change of plan.
+# Stop hook contract
 
-`notes/<work-id>.md`: written when you dispatch the item. What you expect it to show, what you
-will do on each outcome. After a compaction these are how you know what you meant.
+The [official Stop input reference](https://code.claude.com/docs/en/hooks#stop-input)
+documents `background_tasks` entries with `id`, `type`, `status`, and separate `session_crons`.
+The hook releases search turns only for running subagents or registered running shell tasks.
+A cron alone and `stop_hook_active` do not release. During wrap-up it blocks until finish or
+deadline. Unreadable state fails open. The deadline bounds total blocking; Claude Code's
+additional eight consecutive tool-free continuation cap bounds an inert lead (a tool call
+resets that cap). Neither bound substitutes for finishing successfully.
 
-`wakeups.json`: the single next wakeup ID and milestone for this run; replace after each wake and cancel at exit.
-
-`report.md`: written at wrap-up.
-
-## Time
-
-```sh
-python3 - "$RUN/run.json" <<'PY'
-import json, sys
-from datetime import datetime, timezone
-run = json.load(open(sys.argv[1]))
-left = (datetime.fromisoformat(run["deadline"]) - datetime.now(timezone.utc)).total_seconds() / 60
-print(f"{left:.0f} minutes left")
-PY
-```
-
-Wrap-up starts `min(20 minutes, 25% of the time limit)` before the deadline (7.5 minutes for a
-30-minute run). Check time after every completion. Give each worker an earlier return time,
-leaving room for judging and measurement. Bound each command by the smaller of its declared
-timeout and the remaining worker budget. Do not start work that cannot finish in it.
+Trial 2's `stop_hook_summary` records, in session
+`cc57aa3d-e0a2-4ac1-a31a-8ff77f102841`, show all 11 hooks with
+`preventedContinuation: false` and `hasOutput: false`, including nested-directory stops at
+01:30:14 and 01:36:39 UTC. Those summaries prove the outcome, not the raw hook input arrays.
+The documented array schemas, rather than inferred summary fields, determine this hook.

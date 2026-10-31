@@ -48,3 +48,10 @@ command with `run_in_background: true`. Never detach with `nohup`, `setsid`, she
 next measurement only when the previous command's completion notification arrives. Do not
 launch a home-made chain script of measurements. While it runs, do other useful work or yield
 for its notification; never wait with foreground `sleep`.
+
+Use `set -euo pipefail` in the measurement shell. Preserve failure with
+`measure-command > "$RUN/measure.log" 2>&1` as the last command; read the log in a separate
+call after notification. Never append `; tail ...` to a measurement. Record the exact
+executed benchmark command, including dependency flags, port and output argument. Build
+that command once and execute the same value you record; do not reconstruct it from memory.
+Stop only services you started, by their saved PID in cleanup.
