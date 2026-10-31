@@ -22,7 +22,7 @@ import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ValidationError
 
 from vs_core.api import (
     ContractError,
@@ -34,7 +34,8 @@ from vs_core.api import (
     RequestObserved,
     Until,
 )
-from vs_core.api.recovery import Cancelled, Finished
+from vs_core.api.recovery import Finished
+from vs_runtime._cancel_wait import cancelled_for, finished_before_cancel
 from vs_runtime._core_identity import core_identity
 from vs_runtime._core_requests import ExecutionContext
 from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
@@ -45,10 +46,9 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from vs_core.api import Observation, OperationRequest, Request, RequestId
-    from vs_core.api.recovery import CancelReason, StepResult
+    from vs_core.api.recovery import StepResult
     from vs_runtime._observation_factory import ObservationFactory
-    from vs_runtime._operation_catalog import OperationCatalog, OperationEntry
-    from vs_runtime._receipt_store import ReceiptStore
+    from vs_runtime._operation_catalog import OperationCatalog, OperationEntry, OperationOwner
     from vs_runtime._step_runner import CancelSignal
     from vs_sim.api import Clock
 
@@ -96,16 +96,8 @@ _FITS: Mapping[LifecycleClass, tuple[type, ...]] = {
     LifecycleClass.QUERY: (ReadOnly, ClearedWork),
     LifecycleClass.IDEMPOTENT_WRITE: (KeyedWrite, ClearedWork),
 }
-_MARKS = "step-operations"
 _NO_FENCE = HostFence(host_id=HostId(root="step-runner"), epoch=0)
 """``ExecutionContext`` still requires a host fence; the run's lock is the only fence now."""
-
-
-class OperationMark(BaseModel):
-    """The request an attempt began, kept so ``clear`` can find its operation from the tag."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-    request: ExecuteRegisteredOperation
 
 
 class OperationStepRunner:
@@ -115,7 +107,6 @@ class OperationStepRunner:
         self,
         catalog: OperationCatalog,
         policies: Mapping[str, RerunPolicy],
-        store: ReceiptStore,
         observations: ObservationFactory,
         *,
         clock: Clock,
@@ -129,83 +120,65 @@ class OperationStepRunner:
         _check_policies(catalog, policies)
         self._catalog = catalog
         self._policies = dict(policies)
-        self._store = store
         self._observations = observations
         self._clock = clock
 
     async def run(
-        self, step: Request, tag: RequestId, attempt: int, cancel: CancelSignal
+        self,
+        step: Request,
+        tag: RequestId,
+        attempt: int,
+        deadline_at: float,
+        cancel: CancelSignal,
     ) -> StepResult:
         """Run the operation's owner, or return the outcome a clear found it already wrote.
 
         An exception of the owner is "no result": it propagates, and the loop clears and
         runs the next attempt.
         """
-        del attempt  # the owner is found by the tag, so no attempt number names its work
         request = _operation(step, tag)
         entry = self._catalog.find(request.operation.schema_ref)
         if entry is None or entry.owner is None:
             return self._refused(request, entry)
-        begun = self._begin(tag, request)
-        if begun:
-            match await self.clear(tag):
+        if attempt > 1:
+            match await self.clear(step, tag):
                 case Adopted(result) if result is not None:
                     return result
         decoded = self._catalog.registry.decode(request.operation)
-        context = self._context(request)
-        work = asyncio.ensure_future(entry.owner.execute(decoded, context))
-        stop = asyncio.ensure_future(cancel.wait())
-        try:
-            await asyncio.wait({work, stop}, return_when=asyncio.FIRST_COMPLETED)
-        finally:
-            stop.cancel()
-            if not work.done():
-                work.cancel()
-            await asyncio.gather(work, stop, return_exceptions=True)
-        if work.cancelled():
+        work = asyncio.ensure_future(
+            entry.owner.execute(decoded, self._context(request, deadline_at))
+        )
+        if not await finished_before_cancel(work, cancel):
             await self._clean(tag, request)
-            return Cancelled(reason=_why(cancel))
+            return cancelled_for(cancel)
         return self._finished(request, entry, work.result())
 
-    async def clear(self, tag: RequestId) -> Adopted | Cleared:
+    async def clear(self, step: Request, tag: RequestId) -> Adopted | Cleared:
         """Adopt the outcome of a write that landed, or remove what the attempt left."""
-        mark = self._mark(tag)
-        if mark is None:
-            return Cleared()
-        request = mark.request
-        entry = self._catalog.find(request.operation.schema_ref)
-        policy = None if entry is None else self._policies.get(entry.schema.kind)
-        match policy:
-            case KeyedWrite():
-                return await self._adopt_written(tag, request)
-            case ClearedWork(cleaner):
-                await cleaner.clear(tag, self._catalog.registry.decode(request.operation))
-                return Cleared()
-            case _:
-                return Cleared()
-
-    def _mark(self, tag: RequestId) -> OperationMark | None:
-        """The request an earlier attempt began; a state directory that cannot be read proves nothing."""
-        try:
-            return self._store.load(_MARKS, "mark", tag.root, OperationMark)
-        except OSError as error:
-            raise ClearUnavailableError(tag, "the run's state directory") from error
-
-    def _begin(self, tag: RequestId, request: ExecuteRegisteredOperation) -> bool:
-        """Record the request before any effect; say whether an earlier attempt already did."""
-        known = self._mark(tag) is not None
-        self._store.replace(_MARKS, "mark", tag.root, OperationMark(request=request))
-        return known
-
-    async def _adopt_written(
-        self, tag: RequestId, request: ExecuteRegisteredOperation
-    ) -> Adopted | Cleared:
+        request = _operation(step, tag)
         entry = self._catalog.find(request.operation.schema_ref)
         if entry is None or entry.owner is None:
             return Cleared()
+        match self._policies[entry.schema.kind]:
+            case KeyedWrite():
+                return await self._adopt_written(tag, request, entry, entry.owner)
+            case ClearedWork(cleaner):
+                await cleaner.clear(tag, self._catalog.registry.decode(request.operation))
+                return Cleared()
+            case ReadOnly():
+                return Cleared()
+
+    async def _adopt_written(
+        self,
+        tag: RequestId,
+        request: ExecuteRegisteredOperation,
+        entry: OperationEntry,
+        owner: OperationOwner,
+    ) -> Adopted | Cleared:
+        """Ask the owner whether the write landed; a write it cannot read back proves nothing."""
         decoded = self._catalog.registry.decode(request.operation)
         try:
-            found = await entry.owner.inspect(decoded, self._context(request))
+            found = await owner.inspect(decoded, self._context(request, self._clock.now()))
         except Exception as error:
             raise ClearUnavailableError(tag, entry.schema.kind) from error
         match found:
@@ -223,13 +196,12 @@ class OperationStepRunner:
         if isinstance(policy, ClearedWork):
             await policy.cleaner.clear(tag, self._catalog.registry.decode(request.operation))
 
-    def _context(self, request: ExecuteRegisteredOperation) -> ExecutionContext:
-        now = self._clock.now()
+    def _context(self, request: ExecuteRegisteredOperation, until_at: float) -> ExecutionContext:
         return ExecutionContext(
             fence=_NO_FENCE,
-            now_at=now,
+            now_at=self._clock.now(),
             payload_digest=hashlib.sha256(request.model_dump_json().encode()).hexdigest(),
-            until=Until(at=now),
+            until=Until(at=until_at),
         )
 
     def _finished(
@@ -298,14 +270,6 @@ def _operation(step: Request, tag: RequestId) -> ExecuteRegisteredOperation:
     if core_identity(step) != tag:
         raise ContractError(("step", str(tag)), "the tag is not the step's request id")
     return step
-
-
-def _why(cancel: CancelSignal) -> CancelReason:
-    reason = cancel.reason
-    if reason is None:
-        message = "the owner was cancelled without a cancel signal"
-        raise RuntimeError(message)
-    return reason
 
 
 def _check_policies(catalog: OperationCatalog, policies: Mapping[str, RerunPolicy]) -> None:

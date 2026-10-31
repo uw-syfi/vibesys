@@ -137,7 +137,6 @@ class World:
     process_outlives_task: bool
     effects: list[str] = field(default_factory=list)
     working: dict[str, int] = field(default_factory=dict)
-    unreachable: bool = False
     owner_blind: bool = False
     dies_after_effect: bool = False
     process_table_down: bool = False
@@ -189,22 +188,6 @@ class WorldCleaner:
         self.world.working[tag.root] = 0
 
 
-class UnreachableStore(ReceiptStore):
-    """A real receipt store whose files cannot be read while the world is unreachable."""
-
-    def __init__(self, namespace: StateNamespace, world: World) -> None:
-        super().__init__(namespace, SimThreads())
-        self.world = world
-
-    def load[ReceiptT: BaseModel](
-        self, family: str, part: str, key: str, model: type[ReceiptT]
-    ) -> ReceiptT | None:
-        if self.world.unreachable:
-            message = "state directory unreachable"
-            raise OSError(message)
-        return super().load(family, part, key, model)
-
-
 @contextmanager
 def namespace_in(root: Path) -> Iterator[StateNamespace]:
     root.mkdir(parents=True, exist_ok=True)
@@ -232,7 +215,6 @@ class Harness:
         return OperationStepRunner(
             self.catalog,
             {self.kind: self.policy},
-            self.store,
             ObservationFactory(self.store),
             clock=self.clock,
         )
@@ -259,7 +241,7 @@ def harness(root: Path, request: type[Work], *, cleared: bool, keyed: bool) -> H
         ClearedWork(WorldCleaner(world)) if cleared else KeyedWrite("name") if keyed else ReadOnly()
     )
     return Harness(
-        world, catalog, UnreachableStore(namespace, world), VirtualClock(), policy, request
+        world, catalog, ReceiptStore(namespace, SimThreads()), VirtualClock(), policy, request
     )
 
 
@@ -290,11 +272,13 @@ class OperationRunnerContract(StepRunnerContract):
 
         @contextmanager
         def unreachable() -> Iterator[None]:
-            built.world.unreachable = True
+            """The backend of a keyed write is its owner; the backend of cleared work is the host."""
+            flag = "process_table_down" if self.cleared else "owner_blind"
+            setattr(built.world, flag, True)
             try:
                 yield
             finally:
-                built.world.unreachable = False
+                setattr(built.world, flag, False)
 
         return StepRunnerUnderTest(
             runner=runner,
@@ -304,10 +288,6 @@ class OperationRunnerContract(StepRunnerContract):
             left_running=left_running,
             unreachable=unreachable,
         )
-
-
-class TestReadOnlyOperationStepRunner(OperationRunnerContract):
-    request = QueryWork
 
 
 class TestKeyedWriteOperationStepRunner(OperationRunnerContract):
@@ -320,6 +300,9 @@ class TestClearedWorkOperationStepRunner(OperationRunnerContract):
     cleared = True
 
 
+DEADLINE = 600.0
+
+
 def tag_named(name: str) -> RequestId:
     return RequestId(root=name)
 
@@ -328,7 +311,9 @@ async def start_hanging(
     built: Harness, tag: RequestId
 ) -> tuple[asyncio.Task[object], CancelSignal]:
     cancel = CancelSignal()
-    task = asyncio.ensure_future(built.runner().run(built.step(tag, hangs=True), tag, 1, cancel))
+    task = asyncio.ensure_future(
+        built.runner().run(built.step(tag, hangs=True), tag, 1, DEADLINE, cancel)
+    )
 
     async def working() -> int:
         return built.world.working.get(tag.root, 0)
@@ -355,6 +340,27 @@ def test_a_cancelled_attempt_returns_cancelled_for_the_reason_and_leaves_no_work
     run_virtual(built.clock, main())
 
 
+def test_a_read_only_operation_has_nothing_to_clear_and_runs_again_after_a_kill(
+    tmp_path: Path,
+) -> None:
+    built = harness(tmp_path, QueryWork, cleared=False, keyed=False)
+    tag = tag_named("reread")
+
+    async def main() -> None:
+        task, _ = await start_hanging(built, tag)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        assert built.world.working[tag.root] == 0
+        assert await built.runner().clear(built.step(tag, hangs=False), tag) == Cleared()
+        result = await built.runner().run(
+            built.step(tag, hangs=False), tag, 2, DEADLINE, CancelSignal()
+        )
+        assert isinstance(result, Finished)
+        assert built.world.effects == [tag.root]
+
+    run_virtual(built.clock, main())
+
+
 def test_a_write_that_landed_before_the_attempt_died_is_adopted_and_never_written_twice(
     tmp_path: Path,
 ) -> None:
@@ -362,12 +368,12 @@ def test_a_write_that_landed_before_the_attempt_died_is_adopted_and_never_writte
     tag = tag_named("landed")
 
     async def main() -> None:
-        await built.runner().run(built.step(tag, hangs=False), tag, 1, CancelSignal())
+        await built.runner().run(built.step(tag, hangs=False), tag, 1, DEADLINE, CancelSignal())
         restarted = built.runner()
-        adopted = await restarted.clear(tag)
+        adopted = await restarted.clear(built.step(tag, hangs=False), tag)
         assert isinstance(adopted, Adopted)
         assert isinstance(adopted.result, Finished)
-        again = await restarted.run(built.step(tag, hangs=False), tag, 2, CancelSignal())
+        again = await restarted.run(built.step(tag, hangs=False), tag, 2, DEADLINE, CancelSignal())
         assert again == adopted.result
         assert built.world.effects == [tag.root]
 
@@ -381,15 +387,15 @@ def test_an_owner_that_cannot_read_its_effect_makes_clear_unavailable_not_a_resu
     tag = tag_named("blind")
 
     async def main() -> None:
-        await built.runner().run(built.step(tag, hangs=False), tag, 1, CancelSignal())
+        await built.runner().run(built.step(tag, hangs=False), tag, 1, DEADLINE, CancelSignal())
         built.world.owner_blind = True
         with pytest.raises(ClearUnavailableError) as refused:
-            await built.runner().clear(tag)
+            await built.runner().clear(built.step(tag, hangs=False), tag)
         assert refused.value.tag == tag
         with pytest.raises(ClearUnavailableError):
-            await built.runner().run(built.step(tag, hangs=False), tag, 2, CancelSignal())
+            await built.runner().run(built.step(tag, hangs=False), tag, 2, DEADLINE, CancelSignal())
         built.world.owner_blind = False
-        assert isinstance(await built.runner().clear(tag), Adopted)
+        assert isinstance(await built.runner().clear(built.step(tag, hangs=False), tag), Adopted)
 
     run_virtual(built.clock, main())
 
@@ -406,10 +412,10 @@ def test_a_cleaner_that_cannot_reach_the_process_table_makes_clear_unavailable(
         await asyncio.gather(task, return_exceptions=True)
         built.world.process_table_down = True
         with pytest.raises(ClearUnavailableError):
-            await built.runner().clear(tag)
+            await built.runner().clear(built.step(tag, hangs=False), tag)
         assert built.world.working[tag.root] == 1
         built.world.process_table_down = False
-        assert await built.runner().clear(tag) == Cleared()
+        assert await built.runner().clear(built.step(tag, hangs=True), tag) == Cleared()
         assert built.world.working[tag.root] == 0
 
     run_virtual(built.clock, main())
@@ -445,7 +451,6 @@ def test_an_operation_registers_only_with_a_policy_its_lifecycle_allows(
         return OperationStepRunner(
             built.catalog,
             policies,
-            built.store,
             ObservationFactory(built.store),
             clock=built.clock,
         )
@@ -463,7 +468,6 @@ def test_a_policy_for_an_operation_the_catalog_does_not_own_is_refused(tmp_path:
         OperationStepRunner(
             built.catalog,
             {built.kind: ReadOnly(), "test.stray": ReadOnly()},
-            built.store,
             ObservationFactory(built.store),
             clock=built.clock,
         )
@@ -539,7 +543,6 @@ def scenario_runner(
     return OperationStepRunner(
         catalog_of(items),
         policies_of(items),
-        store,
         ObservationFactory(store),
         clock=clock,
     )
@@ -558,7 +561,9 @@ def test_a_step_of_every_scenario_runs_once_and_runs_again_with_the_same_effect(
         assert tag is not None
 
         async def main() -> None:
-            first = await scenario_runner(items, store, clock).run(request, tag, 1, CancelSignal())
+            first = await scenario_runner(items, store, clock).run(
+                request, tag, 1, DEADLINE, CancelSignal()
+            )
             assert isinstance(first, Finished)
             effects = item.effects()
             assert_core_accepts([ExecutionResult(observation=first.report)], expect_retry=False)
@@ -566,7 +571,9 @@ def test_a_step_of_every_scenario_runs_once_and_runs_again_with_the_same_effect(
                 assert first.observation.status is ObservationStatus.REJECTED
                 return
             assert first.observation.status is ObservationStatus.SUCCEEDED
-            again = await scenario_runner(items, store, clock).run(request, tag, 2, CancelSignal())
+            again = await scenario_runner(items, store, clock).run(
+                request, tag, 2, DEADLINE, CancelSignal()
+            )
             assert again == first or item.allows_repeat
             assert item.effects() == effects
 
@@ -586,10 +593,12 @@ def test_a_process_that_died_around_the_effect_leaves_it_done_once_after_clear_a
 
         async def main() -> None:
             with pytest.raises(SimulatedCrashError):
-                await scenario_runner(items, store, clock).run(request, tag, 1, CancelSignal())
+                await scenario_runner(items, store, clock).run(
+                    request, tag, 1, DEADLINE, CancelSignal()
+                )
             landed = item.effects()
             restarted = scenario_runner(items, store, clock)
-            cleared = await restarted.clear(tag)
+            cleared = await restarted.clear(request, tag)
             if item.allows_repeat or died == "before_effect":
                 assert cleared == Cleared()
             else:
@@ -621,7 +630,7 @@ def test_whatever_the_order_of_kills_deaths_and_restarts_a_keyed_write_lands_onc
 
     async def run_once(attempt: int) -> None:
         outcome = await asyncio.gather(
-            runner.run(built.step(tag, hangs=False), tag, attempt, CancelSignal()),
+            runner.run(built.step(tag, hangs=False), tag, attempt, DEADLINE, CancelSignal()),
             return_exceptions=True,
         )
         if isinstance(outcome[0], SimulatedCrashError):
@@ -644,10 +653,10 @@ def test_whatever_the_order_of_kills_deaths_and_restarts_a_keyed_write_lands_onc
                     built.world.dies_after_effect = True
                     await run_once(attempt)
                 case "clear":
-                    await runner.clear(tag)
+                    await runner.clear(built.step(tag, hangs=False), tag)
             assert built.world.effects.count(tag.root) <= 1
-        await runner.clear(tag)
-        await run_once(0)
+        await runner.clear(built.step(tag, hangs=False), tag)
+        await run_once(2)
         assert built.world.effects.count(tag.root) == 1
 
     run_virtual(built.clock, main())
