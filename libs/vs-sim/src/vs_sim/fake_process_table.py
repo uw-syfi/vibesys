@@ -38,6 +38,10 @@ class FakeProcessTable:
         self.unreadable = False
         self.survivors = False
         """A kill signals but the group does not end: a stuck kernel."""
+        self.respawning = False
+        """A supervisor outside the mark starts a new marked process after every kill."""
+        self.unsignalable = False
+        """The host refuses the signal (``EPERM``) for a process it listed."""
 
     def start_stage(self, name: str, value: str, *, pid: int | None = None) -> MarkedProcess:
         """A new group leader marked *name*=*value*; *pid* takes over a pid from its last holder."""
@@ -93,11 +97,15 @@ class FakeProcessTable:
             if self._shows is Shows.ENVIRONMENT
             else [pid for pid, p in self._live.items() if p.pgid == group]
         )
+        if self.unsignalable:
+            raise ProcessTableUnavailableError
         if self.survivors:
             raise ProcessSurvivedError
         for pid in doomed:
             del self._live[pid]
         self.killed.append(process)
+        if self.respawning:
+            self.start_stage(name, held.environment[name])
         return True
 
 

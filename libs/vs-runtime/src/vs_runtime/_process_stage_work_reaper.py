@@ -60,6 +60,8 @@ class ProcessStageWorkReaper:
             self._processes.kill(process, STEP_TAG_ENV)
         except ProcessSurvivedError as error:
             raise ClearUnavailableError(tag, "stage processes that survive SIGKILL") from error
+        except ProcessTableUnavailableError as error:
+            raise ClearUnavailableError(tag, _BACKEND) from error
 
     def _marked(self, tag: RequestId) -> tuple[MarkedProcess, ...]:
         try:

@@ -14,6 +14,14 @@ back differs, so the table that reads it differs:
   space, within one second of the check, and the signal then reaches a group that has the same
   pid *and* is a new leader. That is the guarantee, not an atomic one.
 
+Only a definite absence means a process is gone (ENOENT, ESRCH). A process whose environment
+this user may not read (EACCES) is another user's, which this host's launcher did not start, or
+one of this user's own that cleared its dumpable flag (an ``ssh-agent``, a browser's sandbox);
+the second is a residual (``docs/contributing/run-recovery.md``), not an outage, since waiting
+would never end it. Any other failure to read a process (no file descriptors left, no memory, an
+I/O error) is a host that cannot show its table, and raises
+:class:`ProcessTableUnavailableError`: the work is then neither found nor proven gone.
+
 A process is named by its pid and the kernel's start time of it, so a reused pid is a different
 process. Work that left the group on macOS (a ``setsid`` child), or whose leader died first, is
 not found: nothing marks it any more.
@@ -99,7 +107,7 @@ class OsProcessTable:
     def __init__(self) -> None:
         """Choose the table the host's platform can read."""
         self._table: ProcessTable | None = (
-            _ProcfsProcessTable()
+            ProcfsProcessTable()
             if sys.platform.startswith("linux")
             else _PsProcessTable()
             if sys.platform == "darwin"
@@ -145,36 +153,66 @@ class NoProcessTable:
         return ProcessTableUnavailableError(message)
 
 
-class _ProcfsProcessTable:
-    """Linux: every process whose environment sets the mark."""
+class ProcfsProcessTable:
+    """Linux: every process whose environment sets the mark, read from a ``/proc`` tree."""
+
+    def __init__(self, root: Path = _PROC) -> None:
+        """Read the tree at *root*: ``/proc``, or a copy of its layout a test lays out."""
+        self._root = root
 
     def marked(self, name: str, matches: Callable[[str], bool]) -> tuple[MarkedProcess, ...]:
+        """Every live process of the tree whose environment sets *name* to a value *matches*."""
+        try:
+            entries = tuple(self._root.iterdir())
+        except OSError as error:
+            message = f"{self._root} cannot be listed: {error}"
+            raise ProcessTableUnavailableError(message) from error
         found: list[MarkedProcess] = []
-        for entry in _PROC.iterdir():
+        for entry in entries:
             if not entry.name.isdigit():
                 continue
-            process = _read_procfs(int(entry.name), name)
+            process = _read_procfs(self._root, int(entry.name), name)
             if process is not None and matches(process.value):
                 found.append(process)
         return tuple(found)
 
     def kill(self, process: MarkedProcess, name: str) -> bool:
+        """SIGKILL *process* through a pidfd; raise if it is still marked after the bounded wait."""
+
         def current() -> bool:
-            return _read_procfs(process.pid, name) == process
+            return _read_procfs(self._root, process.pid, name) == process
 
         try:
-            return signal_if_current(process.pid, signal.SIGKILL, current, exit_wait_s=_EXIT_WAIT_S)
+            signalled = signal_if_current(
+                process.pid, signal.SIGKILL, current, exit_wait_s=_EXIT_WAIT_S
+            )
         except ProcessLookupError:
             return False
+        except PermissionError as error:
+            message = f"process {process.pid} may not be signalled: {error}"
+            raise ProcessTableUnavailableError(message) from error
+        if signalled and current():
+            message = f"process {process.pid} survived SIGKILL"
+            raise ProcessSurvivedError(message)
+        return signalled
 
 
-def _read_procfs(pid: int, name: str) -> MarkedProcess | None:
-    """The process *pid* if it is alive, readable and sets *name*; else ``None``."""
+def _read_procfs(root: Path, pid: int, name: str) -> MarkedProcess | None:
+    """The process *pid* if it is alive, readable and sets *name*; else ``None``.
+
+    Raises :class:`ProcessTableUnavailableError` when the process cannot be read for a reason
+    that does not say it is gone or not this user's (see the module docstring).
+    """
     try:
-        environ = (_PROC / str(pid) / "environ").read_bytes()
-        stat = (_PROC / str(pid) / "stat").read_text()
-    except OSError:
-        return None  # gone, a zombie (no environment), or another user's
+        environ = (root / str(pid) / "environ").read_bytes()
+        stat = (root / str(pid) / "stat").read_text()
+    except (FileNotFoundError, ProcessLookupError):
+        return None  # gone, between the listing and the read
+    except PermissionError:
+        return None  # another user's, or this user's own that is not dumpable
+    except OSError as error:
+        message = f"process {pid} cannot be read: {error}"
+        raise ProcessTableUnavailableError(message) from error
     prefix = f"{name}=".encode()
     for line in environ.split(b"\0"):
         if line.startswith(prefix):
