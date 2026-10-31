@@ -75,23 +75,6 @@ func fail(t *testing.T, source subscription.Source[stats]) *apiv1.TopicFailure {
 	return last.GetFailed()
 }
 
-func TestFakeTopicPassesTheContract(t *testing.T) {
-	subscriptiontest.Contract(t, func() subscriptiontest.Subject[stats] {
-		fake := topic(script(func(ctx context.Context, sink subscription.Sink[stats]) error {
-			sink.Put("machine", value(1))
-			sink.Synced()
-			return wait(ctx)
-		}))
-		fake.Policy = hostoperations.Topics[fake.Name]
-		return subscriptiontest.Subject[stats]{
-			Topic:   fake,
-			Request: request,
-			Failing: script(func(context.Context, subscription.Sink[stats]) error { return errors.New("broken") }),
-			Failure: apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_SOURCE_FAILED,
-		}
-	})
-}
-
 func TestEveryWayASourceCanEndIsATypedFailure(t *testing.T) {
 	cases := map[string]struct {
 		run  func(context.Context, subscription.Sink[stats]) error

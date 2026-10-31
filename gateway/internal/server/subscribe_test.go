@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -276,6 +277,11 @@ var contractCases = map[string]func(*testing.T){
 						Request: machineStats,
 						Failing: machinestats.Topic("plan9", clock.System{}, machinestatstest.Linux()).Source,
 						Failure: apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_UNSUPPORTED,
+						Stuck: func() (subscription.Source[*apiv1.MachineStats], func()) {
+							host := machinestatstest.Wedge(machinestatstest.Recorded(goos), machinestatstest.Everything)
+							release := sync.OnceFunc(func() { close(host.Release) })
+							return machinestats.Topic(goos, clock.System{}, host).Source, release
+						},
 					}
 				})
 			})
