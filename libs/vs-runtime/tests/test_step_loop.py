@@ -254,22 +254,25 @@ class Switch:
         self.ticks += 1
 
 
+@dataclass(frozen=True)
+class LogFaults:
+    """What goes wrong around the log's appends."""
+
+    start_waits_s: tuple[float, ...] = ()
+    """How long each attempt's start waits behind the writer, as ``Scenario.start_waits_s``."""
+    before_result: Callable[[core.RequestId, int], Awaitable[None]] | None = None
+    """Runs just before a result is appended: where a racing pause lands."""
+
+
 class CrashingLog:
     def __init__(
-        self,
-        inner: StepLog,
-        switch: Switch,
-        watch: Watch,
-        clock: WatchedClock,
-        start_waits_s: tuple[float, ...],
-        before_result: Callable[[core.RequestId, int], Awaitable[None]] | None = None,
+        self, inner: StepLog, switch: Switch, watch: Watch, clock: WatchedClock, faults: LogFaults
     ) -> None:
         self._inner = inner
         self._switch = switch
         self._watch = watch
         self._clock = clock
-        self._start_waits_s = start_waits_s
-        self._before_result = before_result
+        self._faults = faults
 
     @property
     def state(self) -> core.CoreState:
@@ -290,7 +293,7 @@ class CrashingLog:
         self._watch.before_record("step_started", run.tag)
 
         async def behind_the_writer() -> Run | RecordRefusal:
-            waits = self._start_waits_s
+            waits = self._faults.start_waits_s
             wait = waits[min(run.attempt, len(waits)) - 1] if waits else 0.0
             if wait > 0:
                 await self._clock.sleep(wait)
@@ -302,8 +305,8 @@ class CrashingLog:
         self, tag: core.RequestId, attempt: int, result: StepResult
     ) -> StepRecord:
         self._watch.before_record("step_finished", tag)
-        if self._before_result is not None:
-            await self._before_result(tag, attempt)
+        if self._faults.before_result is not None:
+            await self._faults.before_result(tag, attempt)
         return await self._around(lambda: self._inner.step_finished(tag, attempt, result))
 
     async def attempt_interrupted(
@@ -476,8 +479,9 @@ async def run_epochs(world: World, clock: VirtualClock, kill_at: int | None) -> 
                     switch,
                     world.watch,
                     watched,
-                    world.scenario.start_waits_s,
-                    racing(world.scenario, log, clock, delivered),
+                    LogFaults(
+                        world.scenario.start_waits_s, racing(world.scenario, log, clock, delivered)
+                    ),
                 ),
                 CrashingRunner(world.runner, switch, world.watch),
                 watched,
