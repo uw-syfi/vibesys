@@ -26,6 +26,12 @@ class EvaluationRequest(_Message):
     invocation_id: Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]
     arguments: tuple[str, ...] = ()
     artifacts: tuple[str, ...] = ()
+    step_tag: Annotated[str, Field(min_length=1, max_length=512)] | None = None
+    """The step whose agent turn asked for this evaluation, from the mark its process carries.
+
+    A step that is run again cancels the jobs its earlier attempt left by this tag. It is not
+    part of the request's identity: a retried invocation of another attempt is the same request.
+    """
 
 
 class OutputFrame(_Message):

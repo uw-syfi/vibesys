@@ -12,6 +12,7 @@ from vs_project.api import Git
 from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
 from vs_sim.api import (
     OsProcesses,
+    OsProcessTable,
     OsThreads,
     PidfdProcessSignaller,
     SubprocessPipedProcessLauncher,
@@ -47,6 +48,7 @@ def _production_settings() -> LaunchSettings:
         piped_processes=SubprocessPipedProcessLauncher(),
         blocking=ThreadBlockingRunner(),
         network=UnixNetwork(),
+        process_table=OsProcessTable(),
     )
 
 

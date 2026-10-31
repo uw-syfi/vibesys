@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 from collections import Counter
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from tests.support.dynamic_script import FACTS, Executors, lease
 from tests.support.skeleton_strategy import (
@@ -43,6 +43,7 @@ from vs_core.api import (
     ObserveOwnedJob,
     OwnedJob,
     ParentVerification,
+    PauseOwner,
     RenderedArtifacts,
     ResourceId,
     ResumeSessionTurn,
@@ -66,6 +67,7 @@ from vs_runtime.api.testing import Launch
 if TYPE_CHECKING:
     from vs_core.api import CoreState, Request
     from vs_runtime.api.core import CoreRuntime
+    from vs_sim.api.testing import VirtualClock
 
 COMMIT = hashlib.sha256(ATTEMPT.attempt_id.root.encode()).hexdigest()[:40]
 """The commit the scripted implementer reports: the one core's snapshot of the attempt makes."""
@@ -139,12 +141,39 @@ def _nth(outcomes: tuple[str, ...], position: int, default: str) -> str:
     return default if not outcomes else outcomes[min(position, len(outcomes) - 1)]
 
 
+@dataclass(frozen=True)
+class Pause:
+    """The operator's pause, sent while the ``at``-th request executes (each, for a tuple).
+
+    ``action`` is the pause that drains or pause-now; ``drain_seconds`` is the deadline it carries.
+    """
+
+    at: int | tuple[int, ...]
+    action: Literal["pause", "pause_now"] = "pause"
+    drain_seconds: float | None = None
+
+    @property
+    def positions(self) -> tuple[int, ...]:
+        """The requests it is sent at."""
+        return (self.at,) if isinstance(self.at, int) else self.at
+
+    def event(self, position: int, now_at: float) -> RunControlEvent:
+        """The event sent at the request in ``position``."""
+        control = ControlInput(
+            control_id=ControlId(root=f"{self.action}-{position}"),
+            action=self.action,
+            owner=PauseOwner.OPERATOR if self.action == "pause" else None,
+        )
+        return RunControlEvent(control=control, now_at=now_at, drain_seconds=self.drain_seconds)
+
+
 class Faulted:
     """A world whose measurements and turns go the way `Outcomes` says, over the scripted world.
 
     With ``stop_at`` the operator's stop arrives while the ``stop_at``-th request executes,
     the way a control arrives mid-run in production (the shell admits it between steps); a tuple
-    stops the run at each of those requests, across the hosts a resume starts.
+    stops the run at each of those requests, across the hosts a resume starts. ``pause`` sends the
+    operator's pause the same way.
     """
 
     def __init__(
@@ -152,13 +181,18 @@ class Faulted:
         outcomes: Outcomes | None = None,
         *,
         stop_at: int | tuple[int, ...] | None = None,
+        pause: Pause | None = None,
         base: SkeletonScript | None = None,
     ) -> None:
         """Layer ``outcomes`` over ``base`` (a plain scripted world by default)."""
         self._base = base or SkeletonScript()
         self._outcomes = outcomes or Outcomes()
         self._stops = (stop_at,) if isinstance(stop_at, int) else stop_at or ()
+        self._pause = pause
+        self.paused = False
         self._shell: CoreRuntime[Any] | None = None
+        self.clock: VirtualClock | None = None
+        """The clock of the host that is running, for an executor that waits on it."""
         self.requests = 0
         self._submitted = 0
         self._asked = 0
@@ -167,32 +201,38 @@ class Faulted:
         self.executed: Counter[str] = Counter()
         self.kinds: list[str] = []
         """The kind of every request the run executed, in order: where a stop point lands."""
+        self.cores: list[CoreState] = []
+        """The core state each request executed in, in order: where a control can land."""
 
-    def attach(self, shell: CoreRuntime[Any], clock: object) -> None:
+    def attach(self, shell: CoreRuntime[Any], clock: VirtualClock) -> None:
         """Hear the shell once it exists: the operator's stop is submitted to it, as a control is."""
-        del clock
         self._shell = shell
+        self.clock = clock
 
     def __call__(self, request: Request, core: CoreState) -> Answer:
         """Answer from the generated outcome when there is one, else from the scripted world."""
         if request.request_id is not None:
             self.executed[request.request_id.root] += 1
         self.kinds.append(request.kind)
-        self._maybe_stop(core)
+        self.cores.append(core)
+        self._maybe_control(core)
         faulted = self._measurement(request) or self._job(request, core) or self._turn(request)
         return self._base(request, core) if faulted is None else faulted
 
-    def _maybe_stop(self, core: CoreState) -> None:
+    def _maybe_control(self, core: CoreState) -> None:
         position, self.requests = self.requests, self.requests + 1
-        if position not in self._stops or self._shell is None:
+        if self._shell is None:
             return
-        self.stopped = True
-        control = ControlInput(
-            control_id=ControlId(root=f"stop-{position}"), action="stop", mode=StopMode.DRAIN
-        )
-        self._shell.submit(
-            RunControlEvent(control=control, now_at=core.run.now_at), now_at=core.run.now_at
-        )
+        now_at = core.run.now_at
+        if position in self._stops:
+            self.stopped = True
+            stop = ControlInput(
+                control_id=ControlId(root=f"stop-{position}"), action="stop", mode=StopMode.DRAIN
+            )
+            self._shell.submit(RunControlEvent(control=stop, now_at=now_at), now_at=now_at)
+        if self._pause is not None and position in self._pause.positions:
+            self.paused = True
+            self._shell.submit(self._pause.event(position, now_at), now_at=now_at)
 
     def _measurement(self, request: Request) -> Answer | None:
         if not isinstance(request, SubmitMeasurement):

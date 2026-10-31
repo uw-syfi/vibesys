@@ -17,7 +17,7 @@ from ._request_ledger import dispatch_until, retry_limit
 from ._request_recovery import is_open
 from ._run_park import dispatch_allowed, pause_withdraws
 from ._scope_order import holds_back
-from ._step import advance_run_time, step
+from ._step import advance_run_time, settle_park, step
 from ._step_attempts import (
     dispatched,
     epoch_opened,
@@ -96,7 +96,9 @@ def _apply(
             return _finish(state, message, registry)
         case Oneof(field="attempt_interrupted", value=message):
             tag = RequestId(root=message.tag)
-            return interrupted(state, tag, message.attempt, decode_interruption(message))
+            return settle_park(
+                interrupted(state, tag, message.attempt, decode_interruption(message))
+            )
         case _:
             return state
 
