@@ -14,6 +14,9 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 import vs_core.api as core
 from vs_core.api import RequestPhase, RunStatus
 from vs_core.api.recovery import (
+    Interruption,
+    RunRest,
+    at_rest,
     finished_message,
     fold,
     input_message,
@@ -30,14 +33,20 @@ from vs_proto.api import (
     Timestamp,
 )
 from vs_runlog.api import Appended, ConfirmedLog
-from vs_runtime._step_loop import OpenStep
+from vs_runtime._step_loop import (
+    Interrupted,
+    OpenStep,
+    Recorded,
+    StepRecord,
+    running_attempt,
+)
 from vs_sim.api.testing import Changes
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vs_core.api import CoreEvent, CoreState, OperationRegistry, RequestId
-    from vs_core.api.recovery import End, Interruption, Run, StepResult
+    from vs_core.api.recovery import End, Run, StepResult
     from vs_sim.api import Clock
 
 _OPEN = (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
@@ -153,9 +162,14 @@ class FakeStepLog:
         """Append ``StepStarted``."""
         self._append(started_message(run))
 
-    async def step_finished(self, tag: RequestId, attempt: int, result: StepResult) -> None:
-        """Append ``StepFinished``."""
+    async def step_finished(self, tag: RequestId, attempt: int, result: StepResult) -> StepRecord:
+        """Append ``StepFinished``, or ``AttemptInterrupted`` for the attempt of a parked run."""
+        if at_rest(self._state) is RunRest.PARKED:
+            if running_attempt(self._state, tag, attempt):
+                self._append(interrupted_message(tag, attempt, Interruption.PAUSE))
+            return Interrupted()
         self._append(finished_message(tag, attempt, result))
+        return Recorded()
 
     async def attempt_interrupted(self, tag: RequestId, attempt: int, why: Interruption) -> None:
         """Append ``AttemptInterrupted``."""
@@ -169,6 +183,10 @@ class FakeStepLog:
         self._records.ends.append(end)
         self._records.changes.notify()
         self._state = self._with_standins(self._state)
+
+    def stalled(self) -> str | None:
+        """Never: the test that owns this log is the operator, and can always push an input."""
+        return None
 
     async def next_input(self) -> None:
         """Return once ``push`` was called since this last returned."""

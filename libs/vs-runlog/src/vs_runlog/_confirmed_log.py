@@ -113,14 +113,23 @@ class ConfirmedLog:
         self._confirmed = prefix
         return Appended(record)
 
+    def next_record(
+        self, message: CoreMessage, *, epoch: int, at: Timestamp, clock: float
+    ) -> Record:
+        """``message`` stamped as the record that follows the confirmed prefix, not yet appended.
+
+        A caller that must accept a record before it is durable (a fold that refuses it) builds
+        it here and passes it to ``extend``.
+        """
+        return Record(
+            seq=len(self._prefix()) + 1, epoch=epoch, at=at, clock=clock, body=_body(message)
+        )
+
     def append(
         self, message: CoreMessage, *, epoch: int, at: Timestamp, clock: float
     ) -> Appended | Uncertain:
         """Stamp ``message`` with the next sequence and append it as a record."""
-        record = Record(
-            seq=len(self._prefix()) + 1, epoch=epoch, at=at, clock=clock, body=_body(message)
-        )
-        return self.extend(record)
+        return self.extend(self.next_record(message, epoch=epoch, at=at, clock=clock))
 
 
 def _body(message: CoreMessage) -> _CoreBody:
