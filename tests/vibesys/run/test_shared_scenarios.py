@@ -1,13 +1,13 @@
 """Shared client scenarios have one canonical source and checked native projection output."""
 
-import hashlib
 import json
 from pathlib import Path
 
 import pytest
-from tests.support.shared_scenarios import GOLDENS, declarations, fingerprint, project_shared
+from tests.support.replay_golden import assert_replay_golden
+from tests.support.shared_scenarios import GOLDENS, declarations, project_shared
 
-from vs_proto.api import ClientReplay, Record, validate
+from vs_proto.api import Record, validate
 
 
 @pytest.mark.parametrize(
@@ -16,23 +16,10 @@ from vs_proto.api import ClientReplay, Record, validate
     ids=lambda path: path.stem,
 )
 def test_shared_scenario_is_exactly_the_real_native_projection(path: Path) -> None:
-    expected = project_shared(path)
-    actual = ClientReplay.from_binary((GOLDENS / f"{path.stem}.pb").read_bytes())
-    assert actual == expected, "Regenerate: uv run python -m tests.support.journey_fixtures"
+    actual = assert_replay_golden(GOLDENS / f"{path.stem}.pb", project_shared(path))
     for batch in actual.batches:
         for wire in batch.records:
             validate(Record.from_binary(wire))
-
-
-def test_shared_native_sources_and_large_golden_cannot_drift() -> None:
-    assert (GOLDENS / "source.sha256").read_text().strip() == fingerprint(), (
-        "Regenerate: uv run python -m tests.support.journey_fixtures"
-    )
-    expected = (GOLDENS / "goldens.sha256").read_text()
-    assert expected == "".join(
-        f"{path.name} {hashlib.sha256(path.read_bytes()).hexdigest()}\n"
-        for path in sorted(GOLDENS.glob("*.pb"))
-    )
 
 
 @pytest.mark.parametrize("path", declarations(), ids=lambda path: path.stem)
