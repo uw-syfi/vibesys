@@ -399,10 +399,13 @@ def test_duplicate_epoch_descriptor_names_fail_validation() -> None:
 
 
 _NATIVE_RECORDS = record_examples()
+_CORE_RECORDS = frozenset({"core_input", "step_started", "step_finished", "attempt_interrupted"})
+"""The records of the recovery rule: a keyed replay log never holds them, and the archive refuses them."""
 _NON_POLICY_RECORDS = tuple(
     name
     for name, record in _NATIVE_RECORDS.items()
-    if record.body is not None and record.body.field not in {"epoch_started", "legacy_event"}
+    if record.body is not None
+    and record.body.field not in {"epoch_started", "legacy_event"} | _CORE_RECORDS
 )
 
 
@@ -415,6 +418,11 @@ def test_shared_record_corpus_covers_every_archive_body_family() -> None:
         if field.has_field("oneof_index") and field.oneof_index == index
     }
     assert declared == {record.body.field for record in _NATIVE_RECORDS.values() if record.body}
+    for name in _CORE_RECORDS:
+        refused = deepcopy(_NATIVE_RECORDS[name])
+        refused.seq, refused.clock = 2, 0
+        with pytest.raises(ReplayError, match="unsupported record"):
+            decode([records()[0]]).append(refused)
     archive = decode([records()[0]])
     for sequence, name in enumerate(_NON_POLICY_RECORDS, 2):
         record = deepcopy(_NATIVE_RECORDS[name])

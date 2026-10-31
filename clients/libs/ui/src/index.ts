@@ -139,6 +139,7 @@ export {Sparkline, type SparkStep} from './components/sparkline.js';
 export {type AreaLayer, StackedArea} from './components/stacked-area.js';
 export {type BarSegment, type StackedBar, StackedBars} from './components/stacked-bars.js';
 export {Chip, StatusDot, type StatusTone} from './components/status.js';
+export {type StepItem, StepList, type StepState} from './components/step-list.js';
 export {type ReplyField, StructuredReply} from './components/structured-reply.js';
 export {Swatch, type SwatchItem, SwatchLegend} from './components/swatch-legend.js';
 export {Table, type TableColumn} from './components/table.js';

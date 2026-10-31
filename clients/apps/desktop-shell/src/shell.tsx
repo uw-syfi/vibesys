@@ -10,6 +10,7 @@ import {
   type DashboardRow,
   dashboardRows,
   digestKey,
+  machineLoads,
   projectRunGaps,
   recentNotice,
   runLabels,
@@ -43,6 +44,7 @@ import {RUN_ROUTE, routeQuery} from '@vibesys/feature-run-page/state';
 import {
   createGroupingStore,
   type GroupingStore,
+  type MachineSteps,
   type RunsDraft,
   RunsScreen,
 } from '@vibesys/feature-runs-dashboard/renderer';
@@ -68,7 +70,7 @@ import type {Store} from '@vibesys/store';
 import {applyTheme, Card, EmptyState, Page, type ThemeTarget, WindowFrame} from '@vibesys/ui';
 import {type JSX, useMemo, useSyncExternalStore} from 'react';
 import {GatewayRun} from './gateway-run.js';
-import {runCounts, runInput} from './shell-runs.js';
+import {loadingMachines, runCounts, runInput} from './shell-runs.js';
 
 /** The clock the shell's screens time their bounds on: the window's own timers, in `main.tsx`. */
 export type Schedule = (callback: () => void, delayMs: number) => () => void;
@@ -430,7 +432,7 @@ function RunsRoute(props: {
   readonly tiles: readonly Tile[];
   readonly stores: ShellStores;
   readonly draft: RunsDraft | null;
-  readonly reading: boolean;
+  readonly loads: readonly MachineSteps[];
   readonly select: (screen: Screen) => void;
 }): JSX.Element {
   const {rows, stores, select} = props;
@@ -459,7 +461,7 @@ function RunsRoute(props: {
         ];
       }}
       draft={props.draft}
-      reading={props.reading}
+      loads={props.loads}
       newRun={() => select({kind: 'new-run'})}
       notice={
         gaps.length === 0
@@ -544,10 +546,8 @@ export function Shell(props: {
   const counts = useMemo(() => runCounts(rows), [rows]);
   const select = (screen: Screen): void => sidebar.store.dispatch({type: 'select', screen});
   const machinesListed = machineCounts(machinesState).listed;
-  const known = runsKnown(
-    sidebarState,
-    machinesListed ? machinesState.machines.map(each => each.host) : null,
-  );
+  const saved = machinesListed ? machinesState.machines.map(each => each.host) : null;
+  const known = runsKnown(sidebarState, saved);
   // The window never changes screen by itself, on a clock or on what a machine says: Runs reads
   // while the machines answer and says so when they hold no run. Only the mark, pressed, goes to
   // New run when none is known.
@@ -582,7 +582,7 @@ export function Shell(props: {
             tiles={tiles}
             stores={props.stores}
             draft={draft}
-            reading={known === 'unknown'}
+            loads={loadingMachines(machineLoads(sidebarState, saved), sidebar.actions.retryLoad)}
             select={select}
           />
         );
@@ -610,7 +610,6 @@ export function Shell(props: {
         needsYou: needsYou(tiles).length,
         machineWarning: attention === null ? null : problemWord(attention),
       }}
-      showRuns={known === 'some' || sidebarState.selection.kind === 'runs'}
       home={home}
       screen={screen}
     />

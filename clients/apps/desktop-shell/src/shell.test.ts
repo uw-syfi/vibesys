@@ -422,6 +422,7 @@ test("a machine's Settings reading that failed while it was unreachable is read 
   const listing = {
     kind: 'unavailable' as const,
     host: 'ssh:gpu-box',
+    step: 'gateway' as const,
     connection: {kind: 'offline' as const, detail: 'down'},
   };
   stores.sidebar.store.dispatch({type: 'listing', listing});

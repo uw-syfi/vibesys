@@ -5,7 +5,7 @@
 
 export {projectRunGaps} from './all-runs.js';
 export {type DashboardRow, dashboardRows, type RunLabel, runLabels} from './all-runs-rows.js';
-export {type RunsKnown, runsKnown} from './home.js';
+export {machineLoads, type RunsKnown, runsKnown} from './home.js';
 export {type NoticeKind, type RunNotice, runNotices} from './notices.js';
 export {NOTICE_REASONS, type RecentNotice, recentNotice} from './recent-notice.js';
 export {type Clock, formatStarted, formatWhen} from './recent-words.js';

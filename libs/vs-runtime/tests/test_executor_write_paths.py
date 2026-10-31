@@ -28,6 +28,8 @@ OWNERS = frozenset(
         # The scripted shell test kit: it stands in for the executors, so it builds the
         # observations their translators would.
         "_shell_kit.py",
+        # The Fake step runner stands in for a runner, so it builds the result a runner returns.
+        "_fake_step_runner.py",
     }
 )
 RECORD_NAMES = frozenset({"ExecutionRecord", "ExecutionPhase"})

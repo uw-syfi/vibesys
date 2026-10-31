@@ -131,6 +131,16 @@ function AppContent(props: {
 }): JSX.Element {
   const {section, state, dispatch} = props;
   if (state.kind === 'loading') return <Text variant="body">Loading settings…</Text>;
+  if (state.kind === 'failed') {
+    return (
+      <Banner
+        tone="err"
+        title="Could not read settings"
+        body={state.error}
+        actions={<Button text="Retry" press={() => dispatch({type: 'retry'})} />}
+      />
+    );
+  }
   const {appearance, notifications} = state.shown;
   const choose = (next: Appearance): void =>
     dispatch({type: 'change', change: {kind: 'appearance', appearance: next}});

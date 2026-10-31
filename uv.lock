@@ -3462,6 +3462,7 @@ version = "0.1.0"
 source = { editable = "libs/vs-runlog" }
 dependencies = [
     { name = "google-crc32c" },
+    { name = "protobuf-py" },
     { name = "vs-proto" },
     { name = "vs-sim" },
 ]
@@ -3469,6 +3470,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "google-crc32c", specifier = ">=1.7,<2" },
+    { name = "protobuf-py", specifier = "==0.6.0" },
     { name = "vs-proto", editable = "libs/vs-proto" },
     { name = "vs-sim", editable = "libs/vs-sim" },
 ]

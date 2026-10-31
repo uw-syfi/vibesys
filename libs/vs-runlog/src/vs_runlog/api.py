@@ -1,6 +1,13 @@
 """Bounded append-only run.log files, with offset-based reads and explicit stop reasons."""
 
 from vs_runlog._atomic import FakeFileSync, FileSync, OsFileSync
+from vs_runlog._confirmed_log import (
+    Appended,
+    ConfirmedLog,
+    CoreMessage,
+    RunLogRecords,
+    Uncertain,
+)
 from vs_runlog._epoch import CurrentEpoch, current_epoch, epoch_has_ended
 from vs_runlog._file import (
     FileRunContent,
@@ -25,6 +32,9 @@ from vs_runlog._observe import HeadObserver, RunLogDamagedError, read_current_ep
 from vs_runlog._upgrade import upgrade_skeleton
 
 __all__ = [
+    "Appended",
+    "ConfirmedLog",
+    "CoreMessage",
     "CurrentEpoch",
     "FakeFileSync",
     "FileRunContent",
@@ -37,7 +47,9 @@ __all__ = [
     "RunLock",
     "RunLogDamagedError",
     "RunLogReader",
+    "RunLogRecords",
     "RunLogStopReason",
+    "Uncertain",
     "WriterIdentityState",
     "assert_run_unlocked",
     "current_epoch",
