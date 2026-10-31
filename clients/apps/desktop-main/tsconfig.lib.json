@@ -63,6 +63,9 @@
     },
     {
       "path": "../../libs/runs/tsconfig.intents.json"
+    },
+    {
+      "path": "../../libs/subscription/tsconfig.lib.json"
     }
   ]
 }
