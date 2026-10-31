@@ -707,11 +707,14 @@ test('a live turn keeps its scroll position and its element as events arrive', a
   await expect(turn).toContainText('Padded both counters');
   await expect(turn.getByRole('button', {name: /Show all fields/})).toHaveCount(0);
 
-  // The turn is over, so its reasoning is closed to a one-line preview; opened, a bold title is a
-  // title, never markup. (Opening a block is the reader's own move: it does not follow the end.)
+  // The turn is over. The reader had its first thought in view while it was written, so it stays
+  // open rather than collapsing under them; its bold title is a title, never markup.
   const line = turn.locator('.vs-thought').first().getByRole('button');
-  await expect(line).toHaveAttribute('aria-expanded', 'false');
-  await line.click();
+  await expect(line).toHaveAttribute('aria-expanded', 'true');
   await expect(turn.locator('.vs-thought strong').first()).toBeVisible();
+  // A press closes it to a one-line preview, and it stays closed.
+  await line.click();
+  await expect(line).toHaveAttribute('aria-expanded', 'false');
+  await expect(turn.locator('.vs-thought .vs-collapsible-summary').first()).toBeVisible();
   expect(await turn.evaluate(element => element.textContent?.includes('**'))).toBe(false);
 });
