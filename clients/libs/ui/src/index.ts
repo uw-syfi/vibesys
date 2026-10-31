@@ -41,6 +41,16 @@ export {
   type ProseBlock,
   Stat,
 } from './components/display.js';
+export {
+  CellInline,
+  CellLines,
+  CellLink,
+  CellMark,
+  ColumnList,
+  type ColumnSize,
+  type ListColumn,
+  type RowMarks,
+} from './components/column-list.js';
 export {DotLegend, type LegendItem} from './components/dot-legend.js';
 export {Fact, FactLine} from './components/facts.js';
 export {Field, TextInput} from './components/field.js';

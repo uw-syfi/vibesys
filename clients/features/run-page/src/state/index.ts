@@ -39,13 +39,23 @@ export {
 } from './ideas-tree.js';
 export {
   ageWords,
-  chipPressed,
+  IDEAS_FILTER_DEFAULT,
   type IdeaRow,
   type IdeasFilter,
   ideasView,
-  noIdeasWords,
-  pressChip,
 } from './ideas-view.js';
+export {
+  DEFAULT_SORT,
+  type IdeasSort,
+  type IdeasTable,
+  type IdeaTableRow,
+  ideasTable,
+  type StatusChip,
+  type TableColumn,
+} from './ideas-table-view.js';
+export {IDEA_STATUSES, type IdeaStatus, STATUS_WORDS} from './idea-status.js';
+export {type Impact, impactOf, type ObjectiveCell} from './idea-impact.js';
+export {type RunStats, runStats, type StatTile, statTiles} from './run-stats.js';
 export type {GateFailure} from './input-gates.js';
 export {
   EMPTY_TRACE_LOG,

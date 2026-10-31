@@ -28,7 +28,7 @@ describe('a failed idea', () => {
       const said = reason === 'turned_down' ? 'Failed' : `Failed · ${words}`;
       expect(figureOf(item).figure).toBe(said);
       expect(outcomeWords(item)).toBe(said.toLowerCase());
-      const view = ideasView(modelOf([item]), {...IDEAS_FILTER_DEFAULT, failed: true});
+      const view = ideasView(modelOf([item]), IDEAS_FILTER_DEFAULT);
       expect(view.rows[0]?.state.label).toBe(said);
       expect(view.rows[0]?.figure).toBe(said);
     }
@@ -42,10 +42,7 @@ describe('a failed idea', () => {
 describe('the bar column', () => {
   test('every row holds it, so a row with no share leaves an empty track under "vs best"', () => {
     const measured = idea('m', 'passed', 0, 60);
-    const view = ideasView(modelOf([measured, failedFor('not_measured')], 'm'), {
-      ...IDEAS_FILTER_DEFAULT,
-      failed: true,
-    });
+    const view = ideasView(modelOf([measured, failedFor('not_measured')], 'm'), IDEAS_FILTER_DEFAULT);
     expect(view.rows.map(row => row.bar.value > 0)).toEqual([false, true]);
     expect(view.rows).toHaveLength(2);
   });

@@ -59,10 +59,21 @@ export interface HeroView {
   readonly baselineNotes: readonly BaselineNote[];
 }
 
-/** Within this of 1 the best reads as the same as the input. */
+/** Within this of 1 a multiple reads as the same as the input. */
 const SAME = 0.0005;
 
-const NO_CLEAR_CHANGE = 'No clear change';
+/** How a multiple of the input reads: better, worse, or within `SAME` of it. */
+export type Change = 'faster' | 'slower' | 'same';
+
+/** The change a multiple of the input is: the one reading of it, so no face words it differently. */
+export function changeOf(better: number): Change {
+  if (better > 1 + SAME) return 'faster';
+  if (better < 1 - SAME) return 'slower';
+  return 'same';
+}
+
+/** What a multiple within `SAME` of the input says. */
+export const NO_CLEAR_CHANGE = 'No clear change';
 
 type Words = Pick<
   ObjectiveHeadline,
@@ -79,13 +90,14 @@ function verdictOf(better: number): {
   readonly tone: ObjectiveHeadline['tone'];
   readonly words: string;
 } {
-  if (better > 1 + SAME) {
-    return {note: 'faster than input', tone: 'ok', words: `${ratio(better)} faster`};
+  switch (changeOf(better)) {
+    case 'faster':
+      return {note: 'faster than input', tone: 'ok', words: `${ratio(better)} faster`};
+    case 'slower':
+      return {note: 'slower than input', tone: 'err', words: `${ratio(better)} slower`};
+    case 'same':
+      return {note: 'same as input', tone: 'muted', words: NO_CLEAR_CHANGE};
   }
-  if (better < 1 - SAME) {
-    return {note: 'slower than input', tone: 'err', words: `${ratio(better)} slower`};
-  }
-  return {note: 'same as input', tone: 'muted', words: NO_CLEAR_CHANGE};
 }
 
 /** The best's reading against one measured comparison. */
@@ -246,7 +258,7 @@ function wordsOf(model: RunModel, read: Reading): Words {
 }
 
 /** The unit as a suffix (` ops/s`): the run's own, else the name of the measure in lower case. */
-function unitWords(model: RunModel, series: ObjectiveSeries, alone: boolean, name: string) {
+export function unitWords(model: RunModel, series: ObjectiveSeries, alone: boolean, name: string) {
   if (alone) return ` ${objectiveUnit(model.overview) || name.toLowerCase()}`;
   const unit = model.candidates.candidates
     .flatMap(item => [

@@ -14,7 +14,13 @@
  */
 import type {CoreState, TokenLedger} from '@vibesys/run-state';
 import type {ReactNode} from 'react';
-import type {ModelNames, RunModel, WhoBySpan, ZoomEvent} from '../../../state/index.js';
+import type {
+  ModelNames,
+  ObjectiveSeries,
+  RunModel,
+  WhoBySpan,
+  ZoomEvent,
+} from '../../../state/index.js';
 
 /** Moves the screen: the route machine's events. */
 export type Zoom = (event: ZoomEvent) => void;
@@ -29,6 +35,8 @@ interface RunClock {
 export interface ViewBase {
   readonly emptyLabelsOnly?: boolean;
   readonly model: RunModel;
+  /** The run's objectives, read from the whole run, so a position of the time bar keeps the columns. */
+  readonly objectives?: readonly ObjectiveSeries[];
   readonly clock: RunClock;
   /** The tokens the run's turns spent, by turn span (empty before any turn finished). */
   readonly tokens: TokenLedger;

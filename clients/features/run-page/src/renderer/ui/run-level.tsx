@@ -6,37 +6,27 @@
 
 import type {CoreState} from '@vibesys/run-state';
 import {
-  Button,
-  DotLegend,
   EmptyState,
-  Field,
   markdownToPlain,
   Pane,
   Panes,
   PickList,
   PickRow,
-  Row,
-  SearchBox,
   SegmentedControl,
-  Select,
   Stack,
+  Text,
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import {
   ageWords,
-  chipPressed,
-  type IdeaEffects,
   type IdeasFilter,
+  type IdeasSort,
   type ImplementerOutcomes,
-  ideaEffects,
   ideasView,
-  implementerOutcomes,
   NO_MODEL_NAMES,
   type NowItem,
-  noIdeasWords,
   nowView,
   predatesTraceWords,
-  pressChip,
   type RunMode,
   type RunPageAction,
   type RunPageState,
@@ -48,7 +38,7 @@ import {
 } from '../../state/index.js';
 import {FramedPane} from './framed-pane.js';
 import {IdeaPickRow} from './idea-pick-row.js';
-import {type IdeasSort, IdeasTable} from './ideas-table.js';
+import {IdeasTable} from './ideas-table.js';
 import {AgentsView, type AgentsViewProps} from './views/agents/agents-view.js';
 import {agentsHeader, logsHeader, timelineHeader} from './views/headers.js';
 import {LogsView, type LogsViewProps} from './views/logs/logs-view.js';
@@ -91,12 +81,9 @@ export function IdeasList(props: {
   readonly compact: boolean;
   readonly dispatch: Dispatch;
 }): JSX.Element {
-  const {base, filter, dispatch} = props;
+  const {base, filter} = props;
   const view = ideasView(base.model, filter);
-  if (view.rows.length === 0 && view.hiddenFailed === 0) {
-    const words = noIdeasWords(filter);
-    return <EmptyState title={words.title} body={words.body} />;
-  }
+  if (view.rows.length === 0) return <Text tone="muted">No matches</Text>;
   return (
     <Stack gap="space-2" grow>
       <PickList
@@ -127,92 +114,33 @@ export function IdeasList(props: {
           />
         ))}
       </PickList>
-      {view.hiddenFailed === 0 ? null : (
-        <Button
-          size="sm"
-          variant="quiet"
-          text={`+ ${view.hiddenFailed} failed`}
-          press={() => dispatch({type: 'ideas-filter', filter: {...filter, failed: true}})}
-        />
-      )}
     </Stack>
-  );
-}
-
-function IdeasLegend(props: {
-  readonly state: RunPageState;
-  readonly base: ViewBase;
-  readonly dispatch: Dispatch;
-}): JSX.Element {
-  const filter = props.state.ideas;
-  const {counts} = ideasView(props.base.model, filter);
-  const chip = (group: 'passed' | 'running' | 'failed', tone: 'ok' | 'live' | 'err') => ({
-    tone,
-    label: `${counts[group]} ${group}`,
-    on: chipPressed(filter, group),
-    disabled: counts[group] === 0,
-    toggle: () => props.dispatch({type: 'ideas-filter', filter: pressChip(filter, group)}),
-  });
-  return (
-    <DotLegend items={[chip('passed', 'ok'), chip('running', 'live'), chip('failed', 'err')]} />
   );
 }
 
 function IdeasFace(props: {
   readonly state: RunPageState;
   readonly base: ViewBase;
-  readonly outcomes: ImplementerOutcomes;
-  readonly effects: IdeaEffects;
   readonly selected: string | null;
   readonly modeControls: boolean;
   readonly dispatch: Dispatch;
 }): JSX.Element {
   const {state, base, dispatch} = props;
-  const [sort, setSort] = useState<IdeasSort>('newest');
-  if (base.model.candidates.candidates.length === 0) {
-    return (
-      <>
-        {props.modeControls ? <ModeSwitch mode="ideas" options={MODES} zoom={base.zoom} /> : null}
-        <EmptyState
-          title="No ideas yet"
-          body={base.emptyLabelsOnly ? '' : 'Each idea the run tries shows here.'}
-        />
-      </>
-    );
-  }
+  // The order the reader chose by a column header; null: running first, then the first objective's best.
+  const [sort, setSort] = useState<IdeasSort | null>(null);
+  const modes = props.modeControls ? (
+    <ModeSwitch mode="ideas" options={MODES} zoom={base.zoom} />
+  ) : null;
+  if (base.model.candidates.candidates.length === 0) return <>{modes}</>;
   return (
     <>
-      {props.modeControls ? <ModeSwitch mode="ideas" options={MODES} zoom={base.zoom} /> : null}
-      <IdeasLegend state={state} base={base} dispatch={dispatch} />
-      <Row gap="space-3" align="center">
-        <Stack gap="space-0" grow>
-          <SearchBox
-            label="Search ideas"
-            placeholder="Search ideas"
-            value={state.ideas.query}
-            change={query => dispatch({type: 'ideas-filter', filter: {...state.ideas, query}})}
-          />
-        </Stack>
-        <Field label="Sort ideas" hideLabel>
-          <Select
-            size="sm"
-            value={sort}
-            options={[
-              {value: 'newest', label: 'Newest'},
-              {value: 'oldest', label: 'Oldest'},
-              {value: 'result', label: 'Best result'},
-            ]}
-            change={setSort}
-          />
-        </Field>
-      </Row>
+      {modes}
       <IdeasTable
         base={base}
         filter={state.ideas}
         sort={sort}
+        setSort={setSort}
         selected={props.selected}
-        outcomes={props.outcomes}
-        effects={props.effects}
         dispatch={dispatch}
       />
     </>
@@ -227,8 +155,6 @@ export function IdeasPane(props: {
   readonly selected: string | null;
   readonly dispatch: Dispatch;
 }): JSX.Element {
-  const outcomes = implementerOutcomes(props.core, props.base.model.candidates);
-  const effects = ideaEffects(props.core, props.base.model.candidates);
   return (
     <FramedPane
       kicker="ideas"
@@ -237,7 +163,7 @@ export function IdeasPane(props: {
       header={{}}
       fixed
     >
-      <IdeasFace {...props} outcomes={outcomes} effects={effects} modeControls />
+      <IdeasFace {...props} modeControls />
     </FramedPane>
   );
 }
@@ -295,8 +221,6 @@ export function agentFolds(
 function runFace(
   state: RunPageState,
   base: ViewBase,
-  outcomes: ImplementerOutcomes,
-  effects: IdeaEffects,
   mode: RunMode,
   dispatch: Dispatch,
 ): {readonly header: PaneHeader; readonly body: JSX.Element} {
@@ -350,8 +274,6 @@ function runFace(
           <IdeasFace
             state={state}
             base={base}
-            outcomes={outcomes}
-            effects={effects}
             selected={null}
             modeControls={false}
             dispatch={dispatch}
@@ -385,9 +307,7 @@ export function RunLevel(props: {
     timeline: base.model.candidates.candidates.length,
     logs: 0,
   }[mode];
-  const outcomes = implementerOutcomes(props.core, base.model.candidates);
-  const effects = ideaEffects(props.core, base.model.candidates);
-  const face = runFace(state, base, outcomes, effects, mode, dispatch);
+  const face = runFace(state, base, mode, dispatch);
   return (
     <Panes>
       <FramedPane

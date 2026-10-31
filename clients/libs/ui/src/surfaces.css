@@ -478,6 +478,11 @@
   gap: var(--space-1);
   min-width: 0;
 }
+.vs-stat-value {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
 .vs-empty {
   display: flex;
   flex-direction: column;

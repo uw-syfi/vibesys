@@ -66,10 +66,16 @@ export function placesAlong(seconds: readonly number[]): readonly number[] {
 }
 
 /**
- * The seconds the run has worked in all, from its start to the latest time it recorded: the sum of
- * what its sessions worked, with every stopped stretch left out. Null before the run recorded a
- * time. This is the one sum a header, a stats row and a chart's caption say of the run's length.
+ * The seconds the run has worked from its start to the run-clock time `clock` (default: the latest
+ * time it recorded): the sum of what its sessions worked, with every stopped stretch left out. Null
+ * before the run recorded a time. This is the one sum a header, a stats row and a chart's caption
+ * say of the run's length; `whole` holds the sessions, so a position of the time bar reads the same
+ * sum the chart's cursor does.
  */
-export function runningSeconds(whole: RunModel, start: number): number | null {
-  return whole.latest === null ? null : runningTimeOf(whole.sessions ?? [], start).at(whole.latest);
+export function runningSeconds(
+  whole: RunModel,
+  start: number,
+  clock: number | null = whole.latest,
+): number | null {
+  return clock === null ? null : runningTimeOf(whole.sessions ?? [], start).at(clock);
 }

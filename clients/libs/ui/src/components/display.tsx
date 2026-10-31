@@ -89,16 +89,27 @@ export function Prose(props: {readonly blocks: readonly ProseBlock[]}): JSX.Elem
   );
 }
 
-/** A key number: a `section` label, the value in the `metric` style, and an optional sub-label. */
+/**
+ * A key number: a `section` label, the value in the `metric` style (with a small `unit` after it),
+ * and an optional sub-label.
+ */
 export function Stat(props: {
   readonly label: string;
   readonly value: string;
+  readonly unit?: string;
   readonly sub?: string;
 }): JSX.Element {
   return (
     <div className="vs-stat">
       <Text variant="section">{props.label}</Text>
-      <Text variant="metric">{props.value}</Text>
+      <span className="vs-stat-value">
+        <Text variant="metric">{props.value}</Text>
+        {props.unit === undefined ? null : (
+          <Text variant="small" tone="muted">
+            {props.unit}
+          </Text>
+        )}
+      </span>
       {props.sub === undefined ? null : (
         <Text variant="small" tone="muted">
           {props.sub}

@@ -85,24 +85,30 @@ test('the Ideas table has a ratio column for each comparison, a dash where there
     <IdeasTable
       base={BASE}
       filter={IDEAS_FILTER_DEFAULT}
-      sort="newest"
+      sort={null}
+      setSort={() => undefined}
       selected={null}
-      outcomes={new Map()}
-      effects={new Map()}
       dispatch={() => undefined}
     />,
   );
-  const header = [...screen.container.querySelectorAll('.vs-listheader-col')].map(
-    column => column.textContent,
+  const header = [...screen.container.querySelectorAll('.vs-columnlist-headcell')].map(
+    column => column.textContent?.replace(/ ▾$/, ''),
   );
-  expect(header).toEqual(['vs input', 'vLLM', 'SGLang']);
+  expect(header.slice(header.indexOf('vs input'), header.indexOf('vs input') + 3)).toEqual([
+    'vs input',
+    'vLLM',
+    'SGLang',
+  ]);
+  const at = header.indexOf('vs input');
   const rows = [...screen.container.querySelectorAll('[role="option"]')].map(row => ({
-    title: row.querySelector('.vs-pickrow-text > .vs-text')?.textContent,
-    cells: [...row.querySelectorAll('.vs-pickrow-measure')].map(cell => cell.textContent),
+    title: row.querySelector('.vs-columnlist-cell')?.textContent,
+    cells: [...row.querySelectorAll('.vs-columnlist-cell')]
+      .slice(at, at + 3)
+      .map(cell => cell.textContent),
   }));
   expect(rows).toEqual([
-    {title: 'Pin the consumers to cores', cells: ['5.82×', '–']},
-    {title: 'Preallocate the arena', cells: ['5.29×', '–']},
+    {title: 'Pin the consumers to cores', cells: ['5.82×', '5.82×', '–']},
+    {title: 'Preallocate the arena', cells: ['5.29×', '5.29×', '–']},
   ]);
   await screen.done();
 });

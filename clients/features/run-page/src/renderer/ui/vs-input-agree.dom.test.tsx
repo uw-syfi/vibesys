@@ -1,7 +1,6 @@
 /**
- * The `vs input` column on both faces that have it. The Ideas list and the Timeline show one idea's
- * figure, so over every fixture run they read alike: an idea's multiple, or a dash when it has none
- * (a failed check's progress is not a comparison with the input).
+ * The `vs input` of an idea on both faces that have it. The Ideas table and the Timeline show one
+ * idea's multiple of the input, so over every fixture run they read alike.
  */
 import {afterAll, beforeAll, expect, test} from 'bun:test';
 import {FIXTURE_NAMES, fixtureNamed} from '@vibesys/run-fixtures';
@@ -9,10 +8,10 @@ import {EMPTY_LEDGER} from '@vibesys/run-state';
 import {Window} from 'happy-dom';
 import {act, type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
-import {IDEAS_FILTER_DEFAULT} from '../../state/ideas-view.js';
+import {IDEAS_FILTER_DEFAULT, ideasTable, objectiveSeriesOf} from '../../state/index.js';
+import {ratio} from '../../state/span-reading.js';
 import {EMPTY_TRACE_LOG, traceStep} from '../../state/live.js';
 import {createRunReader} from '../../state/run-model.js';
-import {IdeasTable} from './ideas-table.js';
 import {TimelineView} from './views/timeline/timeline-view.js';
 
 const window = new Window();
@@ -74,19 +73,18 @@ test('over every fixture run an idea has the same `vs input` figure on the Ideas
       who: new Map(),
       zoom: () => undefined,
     };
-    const ideas = await figuresOf(
-      <IdeasTable
-        base={base}
-        filter={IDEAS_FILTER_DEFAULT}
-        sort="newest"
-        selected={null}
-        outcomes={new Map()}
-        effects={new Map()}
-        dispatch={() => undefined}
-      />,
-      '[role="option"]',
-      '.vs-pickrow-text > .vs-text',
-      '.vs-pickrow-figure',
+    const table = ideasTable(model, {
+      objectives: objectiveSeriesOf(model),
+      filter: IDEAS_FILTER_DEFAULT,
+      sort: null,
+      selected: null,
+      now: null,
+    });
+    const ideas = new Map(
+      table.rows.map(row => {
+        const multiple = row.cells[0]?.multiple ?? null;
+        return [row.title, multiple === null ? '–' : ratio(multiple)];
+      }),
     );
     const timeline = await figuresOf(
       <TimelineView {...base} idea={null} />,
@@ -96,7 +94,7 @@ test('over every fixture run an idea has the same `vs input` figure on the Ideas
     );
     for (const [title, cell] of timeline) {
       const listed = ideas.get(title);
-      if (listed === undefined) continue;
+      if (listed === undefined || !/^\d+\.\d\d×$/.test(cell)) continue;
       compared += 1;
       expect({fixture: name, title, cell}).toEqual({fixture: name, title, cell: listed});
     }

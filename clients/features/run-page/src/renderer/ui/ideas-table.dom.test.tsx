@@ -4,8 +4,13 @@ import {Window} from 'happy-dom';
 import {act, useState} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
 import {modelOfShape} from '../../state/ideas-tree-fixtures.js';
-import {ideasView, type RunPageAction, runPageInitial, runPageStep} from '../../state/index.js';
-import {subtitleOf} from './ideas-table.js';
+import {
+  IDEAS_FILTER_DEFAULT,
+  type RunPageAction,
+  runPageInitial,
+  runPageStep,
+} from '../../state/index.js';
+import {IdeasTable} from './ideas-table.js';
 import {RunLevel} from './run-level.js';
 
 const window = new Window();
@@ -33,74 +38,23 @@ const SHAPE = {
   best: 2,
 } as const;
 
-test('a failed idea turned down by its checks says only Failed; another reason is named', () => {
-  const model = modelOfShape(SHAPE);
-  const row = ideasView(model, {query: '', passed: true, running: true, failed: true}).rows.find(
-    item => item.outcome === 'failed',
-  );
-  if (row === undefined) throw new Error('fixture needs a failed idea');
-  const said = (label: string) =>
-    subtitleOf({...row, state: {...row.state, label}}, new Map(), new Map());
-  const from = subtitleOf(row, new Map(), new Map());
-  expect(from).toMatch(/^From /);
-  expect(said('Failed')).toBe(from);
-  expect(said('Failed · no design')).toBe(`${from} · no design`);
-});
-
-test('the line under an idea carries its effect verdict, never its status again', () => {
-  const model = modelOfShape(SHAPE);
-  const rows = ideasView(model, {query: '', passed: true, running: true, failed: true}).rows;
-  const passed = rows.find(item => item.outcome === 'passed');
-  if (passed === undefined) throw new Error('fixture needs a passed idea');
-  const from = subtitleOf(passed, new Map(), new Map());
-  expect(from).toMatch(/^From /);
-  expect(from.toLowerCase()).not.toContain('passed');
-  expect(subtitleOf(passed, new Map(), new Map([[passed.id, 'within noise']]))).toBe(
-    `${from} · within noise of its base`,
-  );
-});
-
-async function shown(compared = false) {
+async function shown() {
   const container = document.createElement('div');
   document.body.append(container);
   const root: Root = createRoot(container);
   const shape = modelOfShape(SHAPE);
-  // A compared idea has a ratio against its base (the run has none against the input).
-  const fixture = compared
-    ? {
-        ...shape,
-        candidates: {
-          ...shape.candidates,
-          candidates: shape.candidates.candidates.map(item =>
-            item.id === 'n3' && item.measurement !== null
-              ? {
-                  ...item,
-                  measurement: {
-                    ...item.measurement,
-                    vsBaseline: null,
-                    against: {
-                      ratio: 1.1,
-                      baseCommit: item.attempts[0]?.revision ?? 'x',
-                      baseValue: 100,
-                      verdict: 'better' as const,
-                    },
-                  },
-                }
-              : item,
-          ),
-        },
-      }
-    : shape;
   const model = {
-    ...fixture,
-    candidates: {...fixture.candidates, best: {candidate: 'n2', adopted: true}},
+    ...shape,
+    candidates: {...shape.candidates, best: {candidate: 'n2', adopted: true}},
   };
+  const zoomed: unknown[] = [];
+  const hovered: (string | null)[] = [];
   const base = {
     model,
     clock: {start: 0, now: null},
     tokens: EMPTY_LEDGER,
     who: new Map(),
-    zoom: () => undefined,
+    zoom: (event: unknown) => zoomed.push(event),
   };
   const initial = runPageInitial({
     identity: {host: 'ssh:host-b', runId: 'run-1'},
@@ -111,12 +65,19 @@ async function shown(compared = false) {
   let send: (action: RunPageAction) => void = () => undefined;
   function Harness() {
     const [state, setState] = useState(initial);
-    send = action => setState(now => runPageStep(now, action).state);
-    return <RunLevel state={state} base={base} core={null} mode="ideas" dispatch={send} />;
+    send = action => {
+      if (action.type === 'ideas-hover') hovered.push(action.idea);
+      setState(now => runPageStep(now, action).state);
+    };
+    return (
+      <RunLevel state={state} base={base} core={null} mode="ideas" dispatch={send} />
+    );
   }
   await act(async () => root.render(<Harness />));
   return {
     container,
+    zoomed,
+    hovered,
     press: async (action: RunPageAction) => act(async () => send(action)),
     done: async () => {
       await act(async () => root.unmount());
@@ -125,98 +86,24 @@ async function shown(compared = false) {
   };
 }
 
-function titles(container: HTMLElement): string[] {
-  return [
-    ...container.querySelectorAll(
-      '[aria-label="Ideas"] [role="option"] .vs-pickrow-text > .vs-text:first-child',
-    ),
-  ].map(each => each.textContent ?? '');
+const ROWS = '[aria-label="Ideas"] [role="option"]';
+
+/** The text of the cell under `header` in each row. */
+function column(container: HTMLElement, header: string): string[] {
+  const heads = [...container.querySelectorAll('.vs-columnlist-headcell')].map(
+    each => each.textContent?.replace(/ ▾$/, '') ?? '',
+  );
+  const at = heads.indexOf(header);
+  if (at < 0) throw new Error(`no column ${header}: ${heads.join(', ')}`);
+  return [...container.querySelectorAll(ROWS)].map(
+    row => row.querySelectorAll('.vs-columnlist-cell')[at]?.textContent ?? '',
+  );
 }
 
-test('ideas are flat, newest first, with an adopted pill and no lineage controls', async () => {
-  const screen = await shown();
-  expect(titles(screen.container)).toEqual([
-    'idea 6',
-    'idea 5',
-    'idea 4',
-    'idea 3',
-    'idea 2',
-    'idea 1',
-    'idea 0',
-  ]);
-  expect(screen.container.querySelector('[aria-label="Ideas"] .vs-guide')).toBeNull();
-  expect(screen.container.querySelector('[aria-label="Ideas"] .vs-pickrow-fold')).toBeNull();
-  expect(screen.container.textContent).not.toContain('best path');
-  expect(screen.container.textContent).not.toContain('from input');
-  expect(
-    screen.container.querySelectorAll('[aria-label="Ideas"] .vs-chip[data-tone="ok"]'),
-  ).toHaveLength(6);
-  expect(
-    [...screen.container.querySelectorAll('[aria-label="Ideas"] .vs-chip[data-tone="ok"]')].filter(
-      chip => chip.textContent === 'Adopted',
-    ),
-  ).toHaveLength(1);
-  expect(
-    [...screen.container.querySelectorAll('[aria-label="Ideas"] .vs-chip[data-tone="ok"]')].filter(
-      chip => chip.textContent === 'Passed',
-    ),
-  ).toHaveLength(5);
-  const adoptedRow = [
-    ...screen.container.querySelectorAll('[aria-label="Ideas"] [role="option"]'),
-  ].find(row => row.querySelector('.vs-chip[data-tone="ok"]') !== null);
-  expect(
-    [...(adoptedRow?.children ?? [])]
-      .map(child => child.className)
-      .filter(name => name === 'vs-chip' || name === 'vs-pickrow-figure'),
-  ).toEqual(['vs-chip', 'vs-pickrow-figure']);
-  expect(screen.container.querySelector('[aria-label="Ideas"] .vs-pickrow-measure')).toBeNull();
-  await screen.done();
-});
-
-test('search shows matching ideas only and failed rows use one concise outcome', async () => {
-  const screen = await shown();
-  await screen.press({
-    type: 'ideas-filter',
-    filter: {query: 'idea 4', passed: true, running: true, failed: true},
-  });
-  expect(titles(screen.container)).toEqual(['idea 4']);
-  const row = screen.container.querySelector('[aria-label="Ideas"] [role="option"]');
-  expect(row?.querySelector('.vs-pickrow-bar')).toBeNull();
-  expect(row?.querySelector('.vs-pickrow-figure')?.textContent).toBe('–');
-  expect(row?.querySelector('.vs-chip[data-tone="err"]')?.textContent).toBe('Failed');
-  expect(row?.querySelector('.vs-pickrow-text > .vs-text:last-child')?.textContent).not.toContain(
-    'failed ·',
-  );
-  await screen.done();
-});
-
-test('sort control changes the flat order', async () => {
-  const screen = await shown();
-  const select = screen.container.querySelector('select') as HTMLSelectElement;
-  expect(select.value).toBe('newest');
-  await act(async () => {
-    select.value = 'oldest';
-    select.dispatchEvent(new window.Event('change', {bubbles: true}) as unknown as Event);
-  });
-  expect(titles(screen.container)).toEqual([
-    'idea 0',
-    'idea 1',
-    'idea 2',
-    'idea 3',
-    'idea 4',
-    'idea 5',
-    'idea 6',
-  ]);
-  await screen.done();
-});
-
-function chips(
-  container: HTMLElement,
-): {label: string; pressed: string | null; disabled: boolean}[] {
+function chips(container: HTMLElement): {label: string; pressed: string | null}[] {
   return [...container.querySelectorAll('button.vs-dotlegend-item')].map(each => ({
     label: each.textContent ?? '',
     pressed: each.getAttribute('aria-pressed'),
-    disabled: (each as HTMLButtonElement).disabled,
   }));
 }
 
@@ -230,43 +117,125 @@ function click(container: HTMLElement, label: string): Promise<void> {
   });
 }
 
-test('a chip lists its own group, shows it pressed, and a chip with nothing behind it is disabled', async () => {
+test('ideas list the first objective best first, an idea with no reading last, each with status and cause', async () => {
+  const screen = await shown();
+  expect(column(screen.container, 'Idea')).toEqual([
+    'idea 6',
+    'idea 5',
+    'idea 3',
+    'idea 2Adopted',
+    'idea 1',
+    'idea 0',
+    'idea 4',
+  ]);
+  expect(column(screen.container, 'Status')).toEqual([
+    'Faster',
+    'Faster',
+    'Faster',
+    'Faster',
+    'Faster',
+    'No gain',
+    'DroppedTurned down',
+  ]);
+  expect(column(screen.container, 'vs input')).toEqual([
+    '1.06×',
+    '1.05×',
+    '1.03×',
+    '1.02×',
+    '1.01×',
+    'No clear change',
+    '–',
+  ]);
+  await screen.done();
+});
+
+test('the chips count each status, press to narrow the list and press again to show every idea', async () => {
   const screen = await shown();
   expect(chips(screen.container)).toEqual([
-    {label: '6 passed', pressed: 'false', disabled: false},
-    {label: '0 running', pressed: 'false', disabled: true},
-    {label: '1 failed', pressed: 'false', disabled: false},
+    {label: 'All 7', pressed: 'true'},
+    {label: 'Faster 5', pressed: 'false'},
+    {label: 'No gain 1', pressed: 'false'},
+    {label: 'Dropped 1', pressed: 'false'},
   ]);
-  await click(screen.container, '1 failed');
-  expect(titles(screen.container)).toEqual(['idea 4']);
-  expect(chips(screen.container).map(each => each.pressed)).toEqual(['false', 'false', 'true']);
-  await click(screen.container, '6 passed');
-  expect(titles(screen.container)).toHaveLength(6);
-  await click(screen.container, '6 passed');
-  expect(titles(screen.container)).toHaveLength(7);
+  await click(screen.container, 'Dropped');
+  expect(column(screen.container, 'Idea')).toEqual(['idea 4']);
+  expect(chips(screen.container).map(each => each.pressed)).toEqual([
+    'false',
+    'false',
+    'false',
+    'true',
+  ]);
+  await click(screen.container, 'Dropped');
+  expect(column(screen.container, 'Idea')).toHaveLength(7);
   await screen.done();
 });
 
-test('a search that matches nothing says so instead of leaving the list blank', async () => {
+test('a search narrows the list, and one that matches nothing says No matches', async () => {
   const screen = await shown();
-  await screen.press({
-    type: 'ideas-filter',
-    filter: {query: 'zzzz', passed: true, running: true, failed: true},
-  });
-  expect(titles(screen.container)).toEqual([]);
-  expect(screen.container.textContent).toContain('No ideas match “zzzz”');
+  await screen.press({type: 'ideas-filter', filter: {query: 'idea 4', status: null}});
+  expect(column(screen.container, 'Idea')).toEqual(['idea 4']);
+  await screen.press({type: 'ideas-filter', filter: {query: 'zzzz', status: null}});
+  expect(column(screen.container, 'Idea')).toEqual([]);
+  expect(screen.container.textContent).toContain('No matches');
   await screen.done();
 });
 
-test('a ratio against a base reads short in the column and whole on hover', async () => {
-  const screen = await shown(true);
-  const figures = [...screen.container.querySelectorAll('[aria-label="Ideas"] .vs-pickrow-figure')];
-  const short = figures.find(each => (each.textContent ?? '').includes('1.10×'));
-  expect(short?.textContent).toMatch(/^1\.10× (r\d+|base)$/);
-  expect(short?.getAttribute('title')).toMatch(/^1\.10× vs /);
-  expect(short?.getAttribute('title')).not.toBe(short?.textContent);
-  // A plain ratio to the input is its own title.
-  const plain = figures.find(each => each.textContent === '1.01×');
-  expect(plain?.getAttribute('title')).toBe('1.01×');
+test('a header sorts by its column and the same header again restores the default order', async () => {
+  const screen = await shown();
+  const header = [...screen.container.querySelectorAll('.vs-columnlist-headcell button')].find(
+    each => each.textContent?.startsWith('Agent time'),
+  ) as HTMLElement;
+  await act(async () => header.click());
+  // Every idea worked as long as the others: the order falls back to newest first.
+  expect(column(screen.container, 'Idea')[0]).toBe('idea 6');
+  await act(async () => header.click());
+  expect(column(screen.container, 'Idea')[0]).toBe('idea 6');
   await screen.done();
+});
+
+test('pressing a row opens its idea and the pointer on it names it for the charts', async () => {
+  const screen = await shown();
+  const row = screen.container.querySelectorAll(ROWS)[1] as HTMLElement;
+  await act(async () => row.click());
+  expect(screen.zoomed).toEqual([{type: 'open-idea', idea: 'n5'}]);
+  await act(async () => {
+    row.dispatchEvent(new window.MouseEvent('mouseover', {bubbles: true}) as unknown as Event);
+    row.dispatchEvent(new window.MouseEvent('mouseenter') as unknown as Event);
+  });
+  expect(screen.hovered).toContain('n5');
+  await screen.done();
+});
+
+test('the rows that built the selected idea carry a bar, and the selected row is marked', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root: Root = createRoot(container);
+  const base = {
+    model: modelOfShape(SHAPE),
+    clock: {start: 0, now: null},
+    tokens: EMPTY_LEDGER,
+    who: new Map(),
+    zoom: () => undefined,
+  };
+  await act(async () =>
+    root.render(
+      <IdeasTable
+        base={base}
+        filter={IDEAS_FILTER_DEFAULT}
+        sort={null}
+        setSort={() => undefined}
+        selected="n6"
+        dispatch={() => undefined}
+      />,
+    ),
+  );
+  const marked = (attribute: string): string[] =>
+    [...container.querySelectorAll(`${ROWS}[${attribute}]`)].map(
+      row => row.querySelector('.vs-columnlist-cell')?.textContent ?? '',
+    );
+  // idea 6 is built on idea 5, on idea 3, on idea 0 (the input).
+  expect(marked('data-lineage')).toEqual(['idea 5', 'idea 3', 'idea 0']);
+  expect(marked('aria-selected="true"')).toEqual(['idea 6']);
+  await act(async () => root.unmount());
+  container.remove();
 });
