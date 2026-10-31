@@ -19,6 +19,7 @@ import pytest
 
 from vs_core.api import RequestId
 from vs_runtime.api.docker_agent_work_reaper import DockerAgentWorkReaper
+from vs_runtime.api.stage_marks import agent_mark
 from vs_runtime.api.step_runner import ClearUnavailableError
 from vs_sandbox.api import RUN_ID_LABEL, STEP_TAG_ENV
 from vs_sandbox.fake_docker_engine import FakeDockerEngine
@@ -41,10 +42,11 @@ _EXIT_BOUND_S = 30.0
 
 
 @contextmanager
-def _marked_process(tag: str) -> Iterator[subprocess.Popen[bytes]]:
+def _marked_process(mark: str) -> Iterator[subprocess.Popen[bytes]]:
+    """A process carrying *mark* in its environment, as an agent's process carries its step's."""
     process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-914333 [S603]; a real-tier test starts its own fixed argv.
         [sys.executable, "-I", "-c", _SLEEP],
-        env={**os.environ, STEP_TAG_ENV: tag},
+        env={**os.environ, STEP_TAG_ENV: mark},
         start_new_session=True,
     )
     try:
@@ -54,12 +56,19 @@ def _marked_process(tag: str) -> Iterator[subprocess.Popen[bytes]]:
         process.wait(_EXIT_BOUND_S)
 
 
+def _mark(tag: str, run: str = _RUN) -> str:
+    """What the agent processes of step *tag* of run *run* carry: the mark the reaper sweeps for."""
+    return agent_mark(run, RequestId(root=tag))
+
+
 def test_the_sweep_ends_the_processes_of_one_step_and_no_other() -> None:
     with (
         tempfile.TemporaryDirectory() as raw,
-        _marked_process("step-a") as target,
-        _marked_process("step-ab") as longer,
-        _marked_process("other") as other,
+        _marked_process(_mark("step-a")) as target,
+        _marked_process(_mark("step-ab")) as longer,
+        _marked_process(_mark("other")) as other,
+        _marked_process(_mark("step-a", run="run-b")) as another_run,
+        _marked_process("step-a") as bare,
     ):
         engine = FakeDockerEngine(Path(raw), launcher=SubprocessPipedProcessLauncher())
         engine.run(
@@ -74,6 +83,8 @@ def test_the_sweep_ends_the_processes_of_one_step_and_no_other() -> None:
         assert target.wait(_EXIT_BOUND_S) == -9
         assert longer.poll() is None
         assert other.poll() is None
+        assert another_run.poll() is None, "the same tag of another run is not this run's work"
+        assert bare.poll() is None, "a bare tag, with no run, is not a mark of any step"
 
 
 class _EngineWhoseSweepCannotKill(FakeDockerEngine):
@@ -91,7 +102,7 @@ class _EngineWhoseSweepCannotKill(FakeDockerEngine):
 
 def test_a_process_the_sweep_cannot_kill_is_never_reported_clear() -> None:
     """Regression: the sweep counted the kills that worked, so a failed kill read as nothing found."""
-    with tempfile.TemporaryDirectory() as raw, _marked_process("step-a") as target:
+    with tempfile.TemporaryDirectory() as raw, _marked_process(_mark("step-a")) as target:
         engine = _EngineWhoseSweepCannotKill(Path(raw), launcher=SubprocessPipedProcessLauncher())
         engine.run(
             ["docker", "run", "-d", "--label", f"{RUN_ID_LABEL}={_RUN}", "image"],
