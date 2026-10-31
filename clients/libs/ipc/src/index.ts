@@ -50,7 +50,9 @@ export {
 export {
   type AgentLogin,
   attempt,
+  CHROME_INSET_CHANNEL,
   type CheckoutInspection,
+  type ChromeInset,
   type ClusterTest,
   type ComputeSettings,
   type DestinationFound,

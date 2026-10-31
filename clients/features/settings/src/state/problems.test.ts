@@ -77,37 +77,28 @@ test('settings still loading report nothing', () => {
   expect(settingsProblems(initialSettings('light').state)).toEqual([]);
 });
 
-test('a connection test that failed is a problem until the settings change and it must be run again', () => {
-  const walk = new Walk();
-  walk.do({type: 'focus', host: HOST, section: 'clusters'});
-  walk.do({type: 'open-form', host: HOST});
-  for (const [key, value] of [
-    ['name', 'lab'],
-    ['host', 'lab-login'],
-    ['workspace', '/w'],
-  ] as const) {
-    walk.do({type: 'field', host: HOST, key, value});
-  }
-  walk.do({type: 'test', host: HOST});
-  walk.do({
-    type: 'tested',
-    token: walk.last('test').token,
-    host: HOST,
-    result: {ok: true, value: {outcome: 'failed', stage: 'workspace', detail: 'not writable'}},
-  });
-  expect(walk.problems()).toEqual([
-    {
-      id: `settings/cluster-test/${HOST}`,
-      tone: 'err',
-      title: 'The workspace is not usable',
-      detail: 'not writable',
-    },
-  ]);
-  walk.do({type: 'field', host: HOST, key: 'workspace', value: '/other'});
-  expect(walk.problems()).toEqual([]);
-});
+type TestAnswer = Extract<MachineSettingsAction, {readonly type: 'tested'}>['result'];
+type SaveAnswer = Extract<MachineSettingsAction, {readonly type: 'saved'}>['result'];
 
-test('a cluster that was not saved is a problem when it names no field, until the next save', () => {
+/** Every kind of answer a connection test can get: it passed, failed at a stage, or errored. */
+const TEST_ANSWERS: readonly TestAnswer[] = [
+  {ok: true, value: {outcome: 'passed', hardware: {}, partitions: []}},
+  {ok: true, value: {outcome: 'failed', stage: 'reach', detail: 'no route'}},
+  {ok: true, value: {outcome: 'failed', stage: 'scheduler', detail: 'no sinfo'}},
+  {ok: true, value: {outcome: 'failed', stage: 'workspace', detail: 'not writable'}},
+  {ok: false, error: 'the helper did not answer'},
+  {ok: false, error: 'cluster.workspace: not a directory'},
+];
+
+/** Every kind of answer a save can get: it worked, errored, or named a field. */
+const SAVE_ANSWERS: readonly SaveAnswer[] = [
+  {ok: true, value: {config_path: '/c.toml', clusters: [], modal: {token_present: false}}},
+  {ok: false, error: 'the file is read-only'},
+  {ok: false, error: 'cluster.name: already set up'},
+];
+
+/** A walk with the Add a cluster form filled in and its test answered with `answer`. */
+function walkTested(answer: TestAnswer): Walk {
   const walk = new Walk();
   walk.do({type: 'focus', host: HOST, section: 'clusters'});
   walk.do({type: 'open-form', host: HOST});
@@ -119,22 +110,20 @@ test('a cluster that was not saved is a problem when it names no field, until th
     walk.do({type: 'field', host: HOST, key, value});
   }
   walk.do({type: 'test', host: HOST});
-  walk.do({
-    type: 'tested',
-    token: walk.last('test').token,
-    host: HOST,
-    result: {ok: true, value: {outcome: 'passed', hardware: {}, partitions: []}},
-  });
-  walk.do({type: 'save', host: HOST});
-  walk.do({
-    type: 'saved',
-    token: walk.last('save').token,
-    host: HOST,
-    result: {ok: false, error: 'the file is read-only'},
-  });
-  expect(walk.problems().map(each => each.title)).toEqual(['The cluster was not saved.']);
-  walk.do({type: 'save', host: HOST});
-  expect(walk.problems()).toEqual([]);
+  walk.do({type: 'tested', token: walk.last('test').token, host: HOST, result: answer});
+  return walk;
+}
+
+test('the Add a cluster form holds its own failures: none is a problem on the board', () => {
+  for (const answer of TEST_ANSWERS) {
+    expect(walkTested(answer).problems()).toEqual([]);
+  }
+  for (const saved of SAVE_ANSWERS) {
+    const walk = walkTested({ok: true, value: {outcome: 'passed', hardware: {}, partitions: []}});
+    walk.do({type: 'save', host: HOST});
+    walk.do({type: 'saved', token: walk.last('save').token, host: HOST, result: saved});
+    expect(walk.problems()).toEqual([]);
+  }
 });
 
 test('a login that did not start is a problem naming the machine, until the next try', () => {

@@ -454,7 +454,7 @@ export const RICH_ENTRIES = {
     render: () => (
       <WindowFrame>
         <Card>
-          <Text>A window that is only a page sits below the title-bar row.</Text>
+          <Text>A window that is only a page, clear of the window's own controls.</Text>
         </Card>
       </WindowFrame>
     ),

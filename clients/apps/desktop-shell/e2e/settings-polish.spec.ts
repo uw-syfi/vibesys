@@ -1,6 +1,11 @@
 import {expect, type Page, test} from '@playwright/test';
 import {fixtureNamed} from '@vibesys/run-fixtures';
-import {installFakeBridge, installFakeMachines, installFakeNewRun} from './fake-bridge.js';
+import {
+  installFakeBridge,
+  installFakeChrome,
+  installFakeMachines,
+  installFakeNewRun,
+} from './fake-bridge.js';
 import {openFixture} from './fixture-world.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {revealNav} from './settings-machine.js';
@@ -28,6 +33,7 @@ async function openSettings(
   const world = {...SEED, machines};
   await resize(page, width);
   await addInitScripts(page, [
+    initScript(installFakeChrome, world),
     initScript(installFakeBridge, world),
     initScript(installFakeMachines, world),
     initScript(installFakeNewRun, world),
