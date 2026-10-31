@@ -179,6 +179,39 @@ test('a banner is found by its color, whatever it is called or where it sits', a
   ]);
 });
 
+test('a chip, a toast, a tile, a log and a status word beside its control are not status rows', async ({
+  page,
+}) => {
+  await show(
+    page,
+    `<main style="display:block;width:440px">
+      <span class="vs-chip" data-tone="warn" role="status" style="display:block">Needs an update</span>
+      <section class="vs-toast-stack" aria-live="polite"><div class="vs-toast" role="alert">Could not resume the run</div></section>
+      <div class="vs-overview-tile" role="status">3 need you</div>
+      <div class="vs-log"><div role="log"><span class="vs-text" data-tone="err" style="display:block">error: linker not found</span></div></div>
+      <div style="display:flex;gap:8px"><span class="vs-text" data-tone="err">Unavailable</span><button>Retry history</button></div>
+    </main>`,
+  );
+  expect(await screenCheck(page, ['status-row'])).toEqual([]);
+});
+
+test('a status row is found by what it says, tinted or not, and a hidden one is not', async ({
+  page,
+}) => {
+  await show(
+    page,
+    `<main style="display:block;width:440px">
+      <div role="alert">Could not read the runs</div>
+      <div role="alert" hidden>Never drawn</div>
+      <div role="alert" style="width:100px">Narrow</div>
+    </main>`,
+  );
+  const found = await screenCheck(page, ['status-row']);
+  expect(found.map(each => each.message)).toEqual([
+    'a status row 100% of the main pane wide (alert): "Could not read the runs"',
+  ]);
+});
+
 const CHART = `<div id="row" style="position:relative;height:90px">
   <svg id="chart" role="group" aria-label="Metric of each measured idea over the run, with the best so far" width="240" height="80"><circle cx="40" cy="40" r="6" fill="red"/></svg>
   <input id="bar" type="range" aria-label="Run position" style="position:absolute;left:260px;top:10px"/>

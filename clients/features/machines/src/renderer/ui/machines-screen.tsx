@@ -266,11 +266,6 @@ function Detail(props: {
           <CheckoutForm state={state} machine={machine} dispatch={dispatch} />
         )}
         <KeyValue items={machineFacts(machine)} />
-        {state.actionProblem === null ? null : (
-          <Text tone="err" variant="small">
-            {state.actionProblem}
-          </Text>
-        )}
         <Row gap="space-2" wrap>
           <Button text="New run here" press={() => newRun(machine.host)} />
           <Button

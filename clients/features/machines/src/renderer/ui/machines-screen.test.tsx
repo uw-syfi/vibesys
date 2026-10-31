@@ -4,6 +4,7 @@ import {
   initialMachines,
   type MachinesAction,
   type MachinesState,
+  machinesProblems,
   machinesStep,
 } from '../../state/index.js';
 import {MachinesScreen} from './machines-screen.js';
@@ -110,4 +111,25 @@ test('a machine that needs a sign-in has its status word, the reason as its desc
   expect(html).toContain('>Sign in<');
   expect(html).toContain(`aria-description="The app couldn’t connect: ${RAW}"`);
   expect(html).not.toContain('vs-banner');
+});
+
+test('a machine that could not be removed is said by the toast alone: its card has no row for it', () => {
+  let {state} = initialMachines();
+  const run = (action: MachinesAction) => {
+    const step = machinesStep(state, action);
+    state = step.state;
+    return step;
+  };
+  run({
+    type: 'listed',
+    token: 1,
+    result: {ok: true, value: [{host: 'ssh:host-a', label: 'host-a', checkout: '~/vibesys'}]},
+  });
+  const removal = run({type: 'remove', host: 'ssh:host-a'}).requests.find(
+    request => request.kind === 'remove',
+  );
+  const error = 'The machine was not removed.';
+  run({type: 'done', token: removal?.token ?? 0, result: {ok: false, error}});
+  expect(machinesProblems(state).map(problem => problem.title)).toEqual([error]);
+  expect(screen(state)).not.toContain(error);
 });

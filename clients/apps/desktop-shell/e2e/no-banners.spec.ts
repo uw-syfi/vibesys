@@ -2,9 +2,9 @@
  * No screen draws a banner. A run's state is the header's status chip with a few words of why, its
  * actions beside it, and its diagnostic a row of Logs marked on the tab; a problem with one thing
  * is a status word at that thing with the detail on the pointer. Each changed screen is walked in a
- * light and a dark theme, and none has a `.vs-banner`, a full-width strip, or an "Show details"
- * button on the page (a toast has its own). `NO_BANNERS_DIR=<dir>` writes the app window of each
- * screen and a contact sheet of them.
+ * light and a dark theme, and none has a `.vs-banner`, a full-width strip (tinted or not: the
+ * `banner` and `status-row` screen checks), or an "Show details" button on the page (a toast has
+ * its own). `NO_BANNERS_DIR=<dir>` writes the app window of each screen and a contact sheet of them.
  */
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {expect, type Page, test} from '@playwright/test';
@@ -12,6 +12,7 @@ import {REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
 import {fixtureNamed} from '@vibesys/run-fixtures';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
 import {screenCheck} from './checks/screen-check.js';
+import {dashboardWorld, MANY_RUNS, open as openDashboard} from './dashboard-world.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
@@ -52,11 +53,12 @@ async function shoot(page: Page, name: string, look: Look): Promise<void> {
 
 /**
  * What no screen has: a strip tinted by a status color (the `banner` screen check reads colors, so a
- * banner is found under any name), a details button outside a toast, or a status word stretched
- * across the page (a chip is as wide as its label, never half the window).
+ * banner is found under any name), a row announced as an alert or status or written in a status tone
+ * (the `status-row` check), a details button outside a toast, or a status word stretched across the
+ * page (a chip is as wide as its label, never half the window).
  */
 async function expectNoBanner(page: Page): Promise<void> {
-  expect(await screenCheck(page, ['banner'])).toEqual([]);
+  expect(await screenCheck(page, ['banner', 'status-row'])).toEqual([]);
   const main = page.getByRole('main');
   await expect(main.getByRole('button', {name: 'Show details'})).toHaveCount(0);
   const room = (await main.boundingBox())?.width ?? 0;
@@ -108,6 +110,8 @@ async function newRunMayHaveStarted(page: Page, look: Look): Promise<void> {
   await expect(newRunMain(page).getByText('May have started', {exact: true})).toBeVisible();
   await expect(newRunMain(page).getByText('Check Runs first', {exact: true})).toBeVisible();
   await expect(newRunMain(page).getByRole('button', {name: 'Open Runs'})).toBeVisible();
+  // The state of the checks is a status word beside its heading, not a line of its own.
+  await expect(newRunMain(page).locator('.vs-chip', {hasText: /^Ready ·/})).toBeVisible();
   await expectNoBanner(page);
   expect(await screenCheck(page)).toEqual([]);
   await shoot(page, 'new-run-may-have-started', look);
@@ -141,6 +145,26 @@ async function settingsStatus(page: Page, look: Look): Promise<void> {
   await expectNoBanner(page);
   expect(await screenCheck(page)).toEqual([]);
   await shoot(page, 'settings-login-started', look);
+}
+
+/**
+ * A connection test that failed: a status word with what to read beside it, above the actions that
+ * try again, in the form's card and not across the page.
+ */
+async function clusterTestFailed(page: Page, look: Look): Promise<void> {
+  await openSettingsAt(page, 1440, themed(SEED, look));
+  await openSection(page, 'Clusters and clouds', 'host-b');
+  const settings = settingsMain(page);
+  await settings.getByRole('button', {name: 'Add a cluster'}).click();
+  await settings.getByRole('textbox', {name: 'Name'}).fill('lab');
+  await settings.getByRole('textbox', {name: 'Workspace on the cluster'}).fill('/scratch/vibesys');
+  await settings.getByRole('textbox', {name: 'SSH host alias'}).fill('no-workspace');
+  await settings.getByRole('button', {name: 'Test connection'}).click();
+  const failure = settings.getByRole('alert');
+  await expect(failure.locator('.vs-chip', {hasText: 'The workspace is not usable'})).toBeVisible();
+  await expectNoBanner(page);
+  expect(await screenCheck(page)).toEqual([]);
+  await shoot(page, 'settings-cluster-test-failed', look);
 }
 
 async function machinesStatus(page: Page, look: Look): Promise<void> {
@@ -203,6 +227,26 @@ async function newRunWhere(page: Page, look: Look): Promise<void> {
   await shoot(page, 'new-run-where', look);
 }
 
+/**
+ * A machine that listed some of its projects and could not list the rest: the Runs title carries the
+ * status word, the runs that were read are listed under it, and no row of its own says the list is
+ * incomplete.
+ */
+async function runsIncomplete(page: Page, look: Look): Promise<void> {
+  const world = dashboardWorld(MANY_RUNS);
+  const listed = Object.fromEntries(
+    Object.entries(world.projectRuns ?? {}).filter(([key]) => !key.startsWith('ssh:host-b|')),
+  );
+  await openDashboard(page, themed({...world, projectRuns: listed}, look));
+  const main = page.getByRole('main');
+  await expect(main.locator('.vs-chip', {hasText: 'Run list incomplete'})).toBeVisible();
+  // The runs that were read are there, and so is the one machine's run its registry reports.
+  await expect(main.locator('.vs-overview-tile', {hasText: 'host-a'}).first()).toBeVisible();
+  await expectNoBanner(page);
+  expect(await screenCheck(page)).toEqual([]);
+  await shoot(page, 'runs-incomplete', look);
+}
+
 async function runsSkipped(page: Page, look: Look): Promise<void> {
   const skippedRecent = [
     {index: 16, reason: 'recent.json: runs[16].task must be a task name'},
@@ -227,6 +271,10 @@ const SCREENS: readonly {
     walk: newRunMayHaveStarted,
   },
   {
+    title: 'Settings: a failed connection test is a status word in the form',
+    walk: clusterTestFailed,
+  },
+  {
     title: 'Machines: the status word, its reason on the pointer, its fix beside it',
     walk: machinesStatus,
   },
@@ -234,6 +282,10 @@ const SCREENS: readonly {
   {
     title: 'Runs: saved runs that could not be read are a status word by the title',
     walk: runsSkipped,
+  },
+  {
+    title: 'Runs: a project whose runs could not be listed is a status word by the title',
+    walk: runsIncomplete,
   },
 ];
 

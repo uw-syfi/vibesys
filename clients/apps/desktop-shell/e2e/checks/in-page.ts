@@ -24,6 +24,7 @@ export type CheckId =
   | 'truncation-room'
   | 'focus-ring'
   | 'banner'
+  | 'status-row'
   | 'chrome-clear'
   | 'drag-region'
   | 'bundled-font'
@@ -1347,6 +1348,46 @@ export function bannerCheck(): Violation[] {
     found.push({
       check: 'banner',
       message: `a strip ${Math.round((100 * width) / room)}% of the main pane wide is tinted by a status color: "${(element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40)}"`,
+      where: describe(element),
+    });
+  }
+  return found;
+}
+
+/**
+ * A full-width status row: a line across the main pane (at least half its width) that says a status,
+ * a warning or an error in a stretch of its own, tinted or not. `bannerCheck` finds a strip by its
+ * fill; this finds one by what it is: announced as an alert, a status or a live region, or words in
+ * a status tone. A status belongs to the thing it is about, a chip or a dot as wide as its label, a
+ * toast, or a row of the Logs, never a row of its own. What may sit at that width is the allow-list
+ * below, each by what it is: a toast, a chip, an attention tile and a log, whose lines are the data.
+ * Anything else needs its own argument, made here in review. A strip that is neither announced nor
+ * toned nor filled (a bordered box with a status dot) is not found: Unenforced.
+ */
+export function statusRowCheck(): Violation[] {
+  const main = document.querySelector('main');
+  if (main === null) return [];
+  const room = main.getBoundingClientRect().width;
+  if (room <= 0) return [];
+  const allowed = '.vs-toast, .vs-toast-stack, .vs-chip, .vs-overview-tile, .vs-log, [role="log"]';
+  // What is announced, or drawn in a status tone: `Text` is the one component that paints words in
+  // a tone, so its `data-tone` names them whatever the element is called.
+  const status =
+    '[role="alert"], [role="status"], [aria-live], .vs-text[data-tone="ok"], .vs-text[data-tone="warn"], .vs-text[data-tone="err"]';
+  const rows: Element[] = [];
+  const found: Violation[] = [];
+  for (const element of document.body.querySelectorAll(status)) {
+    if (element.closest(allowed) !== null || !isShown(element)) continue;
+    // A row says it once: what an announcing row holds is part of it.
+    if (rows.some(row => row.contains(element))) continue;
+    const width = element.getBoundingClientRect().width;
+    if (width < room * 0.5) continue;
+    rows.push(element);
+    const tone = element.getAttribute('data-tone');
+    const how = tone === null ? (element.getAttribute('role') ?? 'live region') : `${tone} text`;
+    found.push({
+      check: 'status-row',
+      message: `a status row ${Math.round((100 * width) / room)}% of the main pane wide (${how}): "${(element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40)}"`,
       where: describe(element),
     });
   }
