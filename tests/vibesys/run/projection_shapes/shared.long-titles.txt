@@ -1,0 +1,17 @@
+shared/long-titles
+records 61
+blobs 1
+streams 0
+record kinds
+  declaration_amended 1
+  epoch_started 1
+  lifecycle 1
+  metric 13
+  span 45
+span label kinds
+  (no label) 1
+  adoption 1
+  agent_turn 14
+  gate 13
+  planning_call 2
+  workstream 14
