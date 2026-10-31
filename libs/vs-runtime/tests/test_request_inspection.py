@@ -79,10 +79,8 @@ class _Setup:
     async def seal(self, target: str, result: ExecutionResult) -> None:
         request = _inspect(target)
 
-        async def perform(
-            *, resumed: bool
-        ) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
-            del resumed
+        async def perform(*, repeat: bool) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
+            del repeat
             return settle(result)
 
         await self.store.run_once(
@@ -97,8 +95,8 @@ class _Setup:
         request = _inspect(target)  # any request: only its fence and digest matter here
         context = context_for(request)
 
-        async def perform(*, resumed: bool) -> Settled[_Unregistered] | Transient[_Unregistered]:
-            del resumed
+        async def perform(*, repeat: bool) -> Settled[_Unregistered] | Transient[_Unregistered]:
+            del repeat
             result = _Unregistered(value=1)
             return Settled(result) if sealed else Transient(result)
 

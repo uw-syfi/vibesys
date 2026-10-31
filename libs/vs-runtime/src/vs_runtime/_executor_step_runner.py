@@ -16,9 +16,12 @@ so each kind declares, in a ``Repeat`` class, why a second run reaches the same 
 The constructor refuses a kind with no declared class, and a kind that another runner owns. No class
 leaves anything for ``clear`` to remove: the executor runs in this process, so an attempt that died
 left only what the repeat reaches again, and one that is cancelled in this process is ended before
-``run`` returns. What guards a repeat is the executor itself: when it cannot conclude (a precondition
-unmet, the host not holding authority) it answers with an observation that is not terminal, and
-``run`` raises, which the loop clears and runs again within the step's retry bound.
+``run`` returns. The loop records an attempt before its I/O, so an attempt after the first proves an
+earlier one may have run: ``run`` passes that to the executor as ``ExecutionContext.repeat``, and the
+executor looks for what the earlier attempt left (a snapshot by its label, a release it already made)
+instead of doing it twice. What guards a repeat is that and the executor itself: when it cannot
+conclude (a precondition unmet, the host not holding authority) it answers with an observation that is
+not terminal, and ``run`` raises, which the loop clears and runs again within the step's retry bound.
 
 A step cancelled mid-execution ends its wait for the executor, not any thread the executor started;
 the repeat of such a step reaches the same state, which is the one residual.
@@ -27,7 +30,6 @@ the repeat of such a step reaches the same state, which is the one residual.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING
@@ -51,8 +53,8 @@ from vs_core.api import (
 )
 from vs_core.api.recovery import Finished
 from vs_runtime._cancel_wait import cancelled_for, finished_before_cancel
-from vs_runtime._core_requests import ExecutionContext, ExecutorRefusal
-from vs_runtime._operation_step_runner import ReadOnly
+from vs_runtime._core_requests import ExecutionContext, ExecutorRefusal, payload_digest_of
+from vs_runtime._rerun_policy import ReadOnly
 from vs_runtime._step_runner import Cleared
 
 if TYPE_CHECKING:
@@ -159,14 +161,14 @@ class ExecutorStepRunner:
         cancel: CancelSignal,
     ) -> StepResult:
         """Run the step on its executor; ``Cancelled`` once *cancel* is set and the executor ended."""
-        del attempt  # the executor finds the step by its request id, so no attempt number names it
         self._served(step, tag)
         context = ExecutionContext(
             fence=self._fence,
             now_at=self._clock.now(),
             until=Until(at=deadline_at),
-            payload_digest=hashlib.sha256(step.model_dump_json().encode()).hexdigest(),
+            payload_digest=payload_digest_of(step),
             lease=self._lease,
+            repeat=attempt > 1,
         )
         work = asyncio.ensure_future(self._executors.dispatch(step, context))
         if not await finished_before_cancel(work, cancel):
@@ -196,10 +198,12 @@ def _check_repeats(repeats: Mapping[type[Request], Repeat]) -> None:
 
 
 def _finished(outcome: ExecutionOutcome, tag: RequestId) -> Finished:
-    """The step's result: what the executor observed, which must be final."""
+    """The step's result: what the executor observed, which must be final, and its owner events."""
     if isinstance(outcome, ExecutorRefusal):
         raise ExecutorRefusedError(outcome)
     observed = outcome.observation
     if not observed.observation.terminal:
         raise StepWithoutResultError(tag, observed.observation)
-    return Finished(observation=observed.observation, observed=observed)
+    return Finished(
+        observation=observed.observation, observed=observed, owner_events=outcome.owner_events
+    )

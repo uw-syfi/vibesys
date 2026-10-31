@@ -196,7 +196,7 @@ test('the last page settles the screen: the run, final, with no loading left', a
   expect(text).not.toMatch(/[1-9]\d* running/);
   expect(text).not.toContain('Adopted the candidate');
   expect(text).toContain('Resume');
-  expect(text).toContain('View logs');
+  expect(text).toContain('Run again');
 });
 
 test('the loading screen counts events of the total once the host says it, else events so far', async () => {
@@ -269,7 +269,7 @@ test('property: every legacy ending renders the host-admitted Resume, regardless
         const state = runPageStep(loaded, {type: 'record', record: {kind: 'ended', run}}).state;
         const text = await screenText(state);
         expect(text).toContain('Resume');
-        expect(text).toContain('View logs');
+        expect(text).toContain('Run again');
       },
     ),
     {numRuns: 12, seed: 3436, examples: [['completed', false]]},
