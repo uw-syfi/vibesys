@@ -35,7 +35,7 @@ from tests.e2e.scripted_value_run import SEED
 
 from entrypoints.control import control_main, time_ordered_id
 from vibesys.events import CoreEventType
-from vibesys.orchestration.dynamic.scripted.api import IMPLEMENTER_KIND, JUDGE_KIND, PLANNER_KIND
+from vibesys.orchestration.dynamic.scripted.api import IMPLEMENTER_KIND, PLANNER_KIND
 from vs_sim.api import OsThreads
 from vs_sim.api.testing import HANG_GUARD_S
 from vs_slurm.fake_connector import active_jobs, pending_jobs, release_jobs
@@ -259,14 +259,17 @@ def _assert_ends_as_uninterrupted(
 
 
 def _wait_until_only_evaluations_remain(scenario: Scenario, run: RunProcess) -> None:
-    """Wait until the judge has answered and an evaluation job is pending on the held cluster.
+    """Wait until the judge's step has ended and an evaluation job is pending on the held cluster.
 
     The input's measurement is submitted as the run starts, in parallel with the planner, so a
     pending job alone says nothing about what else is mid-step. The judge is the last agent
-    turn of the one round, so after it the only steps left are the held evaluations.
+    turn of the one round, and its step is over once the run records it ended (its turn's
+    report comes earlier), so after that the only steps left are the held evaluations.
     """
     run.wait_for(
-        lambda line: line.get("event") == "phase_finished" and line.get("stage") == JUDGE_KIND
+        lambda line: (
+            line.get("event") == "span_ended" and str(line.get("span", "")).endswith("/judge.1")
+        )
     )
     scenario.wait_for_pending_job()
 
@@ -328,10 +331,6 @@ def test_a_run_killed_in_an_agent_turn_resumes_to_the_uninterrupted_result(
     _assert_ends_as_uninterrupted(scenario, resumed.finish(), uninterrupted)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#3475 recovery redesign: the resumed run stays silent on the killed evaluation's request",
-)
 def test_a_run_killed_in_an_evaluation_resumes_to_the_uninterrupted_result(
     scenario: Scenario, uninterrupted: dict[str, object]
 ) -> None:

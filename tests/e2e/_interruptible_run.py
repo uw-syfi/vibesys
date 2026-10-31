@@ -149,6 +149,7 @@ def _report(event: CoreEvent) -> None:
         event=event.type.value,
         stage=getattr(data, "stage", None) or getattr(data, "phase", None),
         gate=getattr(getattr(data, "gate", None), "value", None),
+        span=getattr(getattr(data, "span", None), "id", None),
     )
 
 
