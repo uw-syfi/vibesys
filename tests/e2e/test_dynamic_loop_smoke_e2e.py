@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING
 
 import agentshim
 import pytest
-from tests.e2e.dynamic_loop_harness import LoopInput
+from tests.e2e.dynamic_loop_harness import LoopInput, load_run
 from tests.support import run_test_command
 from tests.support.docker_environment import host_container_backend
 from tests.support.loop_invariants import (
@@ -76,7 +76,7 @@ from vs_agent.api.testing import (
 )
 from vs_core.api import MIN_SAMPLES_WITHOUT_FLOOR
 from vs_evaluation.api.tools import SUBMIT_TOOL, VALIDATE_WAIT_TOOL, build_core_evaluation_tools
-from vs_project.api import Project, StoredEnvelope
+from vs_project.api import Project
 from vs_sim.api import (
     LoopSignalSource,
     MonotonicClock,
@@ -342,12 +342,9 @@ class SmokeRun:
         logs = self.logs_dir()
         assert logs is not None, (self.base / "vibesys.log").read_text(encoding="utf-8")[-4000:]
         run_id = next(str(event["run_id"]) for event in self.events() if event.get("run_id"))
-        stored = Project.open(self.project).state_store(run_id).load()
-        envelope = (
-            json.loads(stored.payload)["envelope"] if isinstance(stored, StoredEnvelope) else None
-        )
+        logged = load_run(Project.open(self.project), run_id)
         loaded = RunRecords.load(logs, None, self.cluster)
-        return replace(loaded, envelope=envelope)
+        return replace(loaded, envelope=None if logged is None else logged.envelope)
 
     def verdict(self, *, stop_grace_s: float | None = None) -> list[Violation]:
         """Check the invariants and print the run's one-line summary."""
@@ -920,9 +917,9 @@ def test_core_path_runs_the_fake_slurm_search(
     assert result.succeeded is True
     assert result.status is RunStatus.COMPLETED
     run = Project.open(loop_input.root)
-    stored = run.state_store(result.run_id).load()
-    assert isinstance(stored, StoredEnvelope)
-    envelope = json.loads(stored.payload)["envelope"]
+    logged = load_run(run, result.run_id)
+    assert logged is not None
+    envelope = logged.envelope
     assert envelope["strategy"]["schema_version"] >= 1
     assert (envelope["core"]["run"]["status"], envelope["core"]["run"]["result"]["outcome"]) == (
         "terminal",
@@ -1010,9 +1007,9 @@ def test_core_run_cancelled_before_local_admission_never_submits(tmp_path: Path)
     result, _renderer = _core_slurm_search(loop_input, interleaving=interleaving)
     assert result.succeeded is True
     run = Project.open(loop_input.root)
-    stored = run.state_store(result.run_id).load()
-    assert isinstance(stored, StoredEnvelope)
-    evaluation = json.loads(stored.payload)["envelope"]["core"]["evaluation"]
+    logged = load_run(run, result.run_id)
+    assert logged is not None
+    evaluation = logged.envelope["core"]["evaluation"]
     assert len(evaluation["core_runs"]) == 4
     (official,) = (job for job in evaluation["jobs"] if job["plan"]["purpose"] == "official")
     assert official["reuses"] is not None

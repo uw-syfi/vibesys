@@ -57,13 +57,12 @@ from vibesys.orchestration.dynamic.search.api import (
     HypothesisRecord,
     RunSnapshot,
 )
+from vibesys.run.logged_run import read_logged_run
 from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
 from vs_agent.api.testing import FakeAgentClient
 from vs_core.api import CoreState, FlowDriver, FlowState
-from vs_core.api.recovery import fold
 from vs_core.testing.liveness import Budget, End, Journal, assert_live
 from vs_project.api import Project
-from vs_runlog.api import RunLogReader
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import CrashableRunClock, FakeStopTimer
 from vs_sim.api import (
@@ -77,13 +76,12 @@ from vs_sim.api.testing import run_virtual
 from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, FakeConnector, recorded_commands
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator
+    from collections.abc import Callable, Iterable
     from pathlib import Path
     from typing import Any
 
     from pydantic import BaseModel
 
-    import vs_proto.api as p
     from vibesys.api import CoreEvent, RunHandle
     from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionStore, SkillSelection
     from vs_agent.api.testing import FakeInvocation
@@ -753,42 +751,26 @@ def assert_run_live(core: CoreState, end: End = End.TERMINAL) -> None:
     )
 
 
-def _advances(records: list[p.Record]) -> Iterator[p.StrategyAdvanced]:
-    """The search's advance records, in log order."""
-    for record in records:
-        body = record.body
-        if body is not None and body.field == "strategy_advanced":
-            yield body.value
-
-
 @dataclass(frozen=True)
 class LoadedRun:
     """A run's core state folded from its run.log, and the same with the search's, as JSON."""
 
     core: CoreState
     envelope: dict[str, Any]
-    """``core`` and, once the run ended or parked, ``strategy``: the whole state the search logged."""
+    """``core`` and, once the search logged a whole state, ``strategy``."""
 
 
 def load_run(project: Project, run_id: str, *, plugin_id: str = "dynamic") -> LoadedRun | None:
-    """Fold the run's run.log; None when it holds no start of the run."""
-    path = Project.run_log_path_for(project.root, run_id)
-    if not path.exists():
+    """The run as its run.log leaves it, through the one reader; None when it holds no start."""
+    logged = read_logged_run(
+        project, run_id, registry=loop_spec(plugin_id).registry(), state_type=FlowState
+    )
+    if logged is None:
         return None
-    with path.open("rb") as stream:
-        records = list(RunLogReader(stream))
-    if not any(r.body is not None and r.body.field == "run_started" for r in records):
-        return None
-    core = fold(records, registry=loop_spec(plugin_id).registry())
-    whole = [
-        advance.strategy.value
-        for advance in _advances(records)
-        if advance.strategy is not None and advance.strategy.field == "checkpoint"
-    ]
-    envelope: dict[str, Any] = {"core": json.loads(core.model_dump_json())}
-    if whole:
-        envelope["strategy"] = json.loads(whole[-1])
-    return LoadedRun(core, envelope)
+    envelope: dict[str, Any] = {"core": json.loads(logged.core.model_dump_json())}
+    if logged.strategy is not None:
+        envelope["strategy"] = json.loads(logged.strategy.model_dump_json())
+    return LoadedRun(logged.core, envelope)
 
 
 def simulated_clock() -> CrashableRunClock:
@@ -802,7 +784,7 @@ def resume_request(request: RunRequest, run_id: str) -> RunRequest:
 
 
 class CoreRecords:
-    """A finished run's committed core record, read through the state store."""
+    """A finished run's committed core record, folded from its run.log."""
 
     def __init__(self, loop_input: LoopInput, run_id: str) -> None:
         """Load the run's committed envelope; fail when none was committed."""
