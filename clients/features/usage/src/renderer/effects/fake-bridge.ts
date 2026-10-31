@@ -43,7 +43,7 @@ export function seriesOf(
   return {
     origin: key.origin ?? 'run',
     provider: key.provider ?? 'claude',
-    model: key.model ?? 'claude-opus-5-5',
+    model: key.model ?? 'model-a',
     speed: key.speed ?? 'standard',
     source: key.source ?? 'model',
     usageSource: 0,

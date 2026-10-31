@@ -17,7 +17,7 @@ function spent(usd: number, extra: Partial<UsageSummaryEntry> = {}): FakeAnswer 
     rates: [
       {
         provider: 'claude',
-        model: 'claude-opus-5-5',
+        model: 'model-a',
         speed: 'standard',
         rate: {input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25, cacheWrite1h: null},
         source: 'model',
@@ -225,7 +225,7 @@ describe('the prices dialog', () => {
     const made = usage(bridge);
     const unsubscribe = made.store.subscribe(() => undefined);
     await settle(made.store);
-    made.actions.setPrice('claude\u0000claude-opus-5-5');
+    made.actions.setPrice('claude\u0000model-a');
     return {...made, bridge, unsubscribe};
   }
 
@@ -236,7 +236,7 @@ describe('the prices dialog', () => {
     if (dialog?.kind !== 'prices') throw new Error('expected the prices dialog');
     expect(dialog.prices?.draft).toEqual(
       draftOf(
-        'claude-opus-5-5',
+        'model-a',
         {input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25, cacheWrite1h: null},
         '',
       ),
