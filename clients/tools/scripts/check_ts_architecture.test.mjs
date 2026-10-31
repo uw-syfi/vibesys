@@ -127,6 +127,10 @@ const VALID_FILES = {
   'apps/web/e2e/live.spec.ts': "import 'declared-package';\nimport './fixtures.js';\n",
   'apps/web/e2e/fixtures.ts': '',
   'tools/scripts/check.mjs': "import 'node:fs';\nimport 'declared-package';\n",
+  // The end-to-end specs may use the shared end-to-end support, which `tools-are-leaves` would
+  // otherwise refuse as another tool directory.
+  'apps/ui-gallery/e2e/gallery.spec.ts': "import '../../../tools/e2e/support.js';\n",
+  'tools/e2e/support.ts': '',
   // The desktop main process: the app composes the packages, the connection manager's shell owns
   // its processes and drives its pure state, and a preload binds `@vibesys/ipc`'s messages to
   // Electron and imports nothing else.
@@ -243,6 +247,21 @@ const RULE_CASES = [
   {
     rule: 'tools-are-leaves',
     files: {'apps/desktop-shell/src/index.ts': "import '../../../tools/scripts/check.mjs';\n"},
+  },
+  {
+    rule: 'tools-are-leaves',
+    files: {
+      'apps/ui-gallery/e2e/gallery.spec.ts': "import '../../desktop-shell/e2e/world.js';\n",
+      'apps/desktop-shell/e2e/world.ts': '',
+    },
+  },
+  {
+    rule: 'shared-e2e-support-is-for-e2e-specs',
+    files: {'apps/desktop-shell/src/index.ts': "import '../../../tools/e2e/support.js';\n"},
+  },
+  {
+    rule: 'shared-e2e-support-is-for-e2e-specs',
+    files: {'libs/run-state/bench/run-map.ts': "import '../../../tools/e2e/support.js';\n"},
   },
   {
     rule: 'scripts-do-not-import-package-code',
