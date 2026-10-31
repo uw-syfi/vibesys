@@ -24,6 +24,7 @@ export type CheckId =
   | 'truncation-room'
   | 'focus-ring'
   | 'banner'
+  | 'status-row'
   | 'chrome-clear'
   | 'drag-region'
   | 'bundled-font'
@@ -1353,6 +1354,85 @@ export function bannerCheck(): Violation[] {
   return found;
 }
 
+/** How far across the page `element`'s own words reach: the width of the rectangle round all its text. */
+function textSpan(element: Element): number {
+  let left = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    if ((node.textContent ?? '').trim() === '') continue;
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    for (const box of range.getClientRects()) {
+      left = Math.min(left, box.left);
+      right = Math.max(right, box.right);
+    }
+  }
+  return right > left ? right - left : 0;
+}
+
+/**
+ * A full-width status row: a status, a warning or an error said across the main pane (at least half
+ * its width), tinted or not. `bannerCheck` finds a strip by its fill; this finds one by what it is:
+ * announced as an alert, a status or a live region, or written in a status tone, with words that
+ * reach half the pane. A status belongs to the thing it is about, a chip as wide as its label, a
+ * toast, or a row of the Logs, never a sentence across the page.
+ *
+ * What it measures is the words, not the box: a figure or a lone word in a status tone that a flex
+ * column stretches, and a live region that wraps other content, are as wide as their layout and say
+ * little. A chip is the other way round: it must hug its label, so a chip whose box reaches half the
+ * pane fails. An announced element that holds a chip says its status with the chip, and the rest of
+ * it is the detail beside it, however long that wraps. What may sit at that width is the allow-list
+ * below, each by what it is: a toast, an attention tile and a log, whose lines are the data.
+ * Anything else needs its own argument, made here in review. Unenforced: a lone status word on a line
+ * of its own (it cannot be told from a figure or an empty-state word), and a strip that is neither
+ * announced nor toned nor filled (a bordered box with a status dot).
+ */
+export function statusRowCheck(): Violation[] {
+  const main = document.querySelector('main');
+  if (main === null) return [];
+  const room = main.getBoundingClientRect().width;
+  if (room <= 0) return [];
+  const allowed = '.vs-toast, .vs-toast-stack, .vs-overview-tile, .vs-log, [role="log"]';
+  // What is announced, or drawn in a status tone: `Text` is the one component that paints words in
+  // a tone, so its `data-tone` names them whatever the element is called.
+  const status =
+    '[role="alert"], [role="status"], [aria-live], .vs-text[data-tone="ok"], .vs-text[data-tone="warn"], .vs-text[data-tone="err"]';
+  const rows: Element[] = [];
+  const found: Violation[] = [];
+  for (const element of document.body.querySelectorAll(`${status}, .vs-chip`)) {
+    if (element.closest(allowed) !== null || !isShown(element)) continue;
+    // A row says it once: what an announcing row holds is part of it.
+    if (rows.some(row => row.contains(element))) continue;
+    const row = statusRowOf(element, room);
+    if (row === null) continue;
+    rows.push(element);
+    found.push(row);
+  }
+  return found;
+}
+
+/**
+ * `element` as a status row, or null: a chip is one when its box reaches half the pane, anything
+ * else when its words do; an announced element that holds a chip says its status with the chip.
+ */
+function statusRowOf(element: Element, room: number): Violation | null {
+  const chip = element.classList.contains('vs-chip');
+  const reach = chip ? element.getBoundingClientRect().width : textSpan(element);
+  if (reach < room * 0.5) return null;
+  if (!chip && element.querySelector('.vs-chip') !== null) return null;
+  const tone = element.getAttribute('data-tone');
+  let how = `${tone} text`;
+  if (chip) how = 'chip';
+  else if (tone === null) how = element.getAttribute('role') ?? 'live region';
+  const text = (element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  return {
+    check: 'status-row',
+    message: `a ${chip ? 'chip' : 'status row'} ${Math.round((100 * reach) / room)}% of the main pane wide (${how}): "${text}"`,
+    where: describe(element),
+  };
+}
+
 /** A host fact about the window's own controls (`--chrome-*` on the root element), in pixels; 0 when unset. */
 function chromeFact(name: string): number {
   return Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
@@ -1507,6 +1587,8 @@ export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
   roomRight,
   chartLabelProblems,
   toneFills,
+  textSpan,
+  statusRowOf,
   chromeFact,
   chromeRooms,
   controlsOf,

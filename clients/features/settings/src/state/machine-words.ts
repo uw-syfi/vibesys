@@ -160,3 +160,17 @@ const TEST_STAGE_WORDS: Readonly<Record<TestStage, string>> = {
 export function testFailureWords(stage: TestStage): string {
   return TEST_STAGE_WORDS[stage];
 }
+
+/**
+ * The status word of a form-level failure, which has no stage of its own: the connection's typed
+ * cause when it had one, else what the form was doing. The host's own sentence is the detail.
+ */
+export function formFailureWord(during: 'test' | 'save', cause?: FailureCause): string {
+  if (cause !== undefined) return FAILURE_CAUSE_WORDS[cause];
+  return during === 'save' ? 'Not saved' : 'Not tested';
+}
+
+/** `text` as a sentence: a host reports "the workspace ... is missing", the screen starts it with a capital. */
+export function sentenceCase(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
