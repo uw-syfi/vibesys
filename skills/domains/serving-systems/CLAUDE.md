@@ -227,3 +227,7 @@ git -C third_party/serving-repos/vllm pull origin main      # update one
 - **Concise code blocks** over prose explanations.
 - **Tables for enumerations** — faster to scan than bullet lists for both Claude and humans.
 - **No "I will ..." / "Let me ..."** — references aren't first-person.
+
+The `SERVE_REPOS=<vibesys-root>/third_party/serving-repos` layout exists only
+in a VibeSys checkout. In another repository, set `SERVE_REPOS` to your own
+reference-engine checkout directory; installing the skill does not install engines.
