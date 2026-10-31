@@ -937,7 +937,7 @@ function toneFills(): [number, number, number][] {
 }
 
 /**
- * A strip tinted by a status color: an element wider than 60% of the main pane that is filled
+ * A strip tinted by a status color: an element at least half as wide as the main pane that is filled
  * with a tone fill, whatever it is called (a banner is a banner under any class name). What may be
  * tinted is the allow-list below, each by what it is: a chip, a toast, an attention tile, a dot, and
  * the bars and fills of a meter or a chart, which are data. Anything else needs its own argument,
@@ -956,7 +956,7 @@ export function bannerCheck(): Violation[] {
   for (const element of document.body.querySelectorAll('*')) {
     if (element.closest(allowed) !== null || !isShown(element)) continue;
     const width = element.getBoundingClientRect().width;
-    if (width < room * 0.6) continue;
+    if (width < room * 0.5) continue;
     const [r = 0, g = 0, b = 0, a = 0] = toRgb(getComputedStyle(element).backgroundColor);
     if (a === 0 || !fills.some(fill => Math.hypot(fill[0] - r, fill[1] - g, fill[2] - b) <= 3)) {
       continue;
