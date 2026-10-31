@@ -10,7 +10,15 @@ from __future__ import annotations
 import pytest
 
 import vs_core.api as core
-from vs_core.api.recovery import Finished, Run, finished_message, fold, started_message
+from vs_core.api.recovery import (
+    Finished,
+    RecordRefusedError,
+    RefusalReason,
+    Run,
+    finished_message,
+    fold,
+    started_message,
+)
 from vs_proto.api import Oneof, Record, Timestamp
 
 from .test_owner_event_precedence import REPLY, SCHEMA, dispatched, observation
@@ -26,10 +34,12 @@ def log_of(
 ) -> list[Record]:
     assert request.request_id is not None
     tag = tag or request.request_id
-    run = Run(step=request, tag=tag, attempt=1, deadline_at=100.0)
+    # The seed's step was in flight when an earlier version stopped: the log's first attempt of it
+    # is the second, a re-run.
+    run = Run(step=request, tag=tag, attempt=2, deadline_at=100.0, clear_first=True)
     return [
         record(1, Oneof("step_started", started_message(run))),
-        record(2, Oneof("step_finished", finished_message(tag, 1, finished))),
+        record(2, Oneof("step_finished", finished_message(tag, 2, finished))),
     ]
 
 
@@ -99,5 +109,6 @@ def test_a_fact_that_names_another_request_is_refused_not_applied(where: str) ->
             observed=report,
             owner_events=(owner.model_copy(update={"observation": foreign(seen)}),),
         )
-    with pytest.raises(ValueError, match="another request"):
+    with pytest.raises(RecordRefusedError, match="another request") as refused:
         fold(log_of(request, finished), state)
+    assert refused.value.refusal.reason is RefusalReason.RESULT_MISMATCH
