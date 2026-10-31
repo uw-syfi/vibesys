@@ -30,6 +30,7 @@ from server.api.protocol import (
     Response,
 )
 from server.events import EventType, ExperimentsChangedData
+from vibesys import plugin_registration
 from vibesys.api.contracts import RunStatus
 from vibesys.api.hypothesis import (
     CandidateDisposition,
@@ -52,7 +53,7 @@ from vibesys.hypothesis.state import (
     HypothesisStrategy,
 )
 from vibesys.hypothesis.transitions import reproject_run_evidence
-from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoreRecord
+from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 from vs_sim.api import OsThreads
 from vs_sim.api.testing import SimThreads, wait_or_fail
@@ -61,6 +62,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.api import RunView
+    from vibesys.run.logged_run import LoggedRun
+    from vs_core.api import FlowState, OperationRegistry
 
 
 class _RoundFields(TypedDict, total=False):
@@ -725,9 +728,9 @@ def test_service_projects_committed_live_state_without_reloading_history(
         data=ExperimentsChangedData(reason="round_persisted", revision=2),
     )
     monkeypatch.setattr(
-        Project,
-        "stored_record",
-        lambda _self, _run_id: (_ for _ in ()).throw(AssertionError("unexpected state reload")),
+        plugin_registration,
+        "read_logged_run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unexpected state reload")),
     )
 
     delta = parts.api.execute(
@@ -764,18 +767,24 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
     )
     loaded = threads.event()
     release = threads.event()
-    original_load = Project.stored_record
+    original_load = plugin_registration.read_logged_run
     load_count = 0
 
-    def delayed_load(current: Project, current_run_id: str) -> StoreRecord | None:
+    def delayed_load(
+        project: Project,
+        run_id: str,
+        *,
+        registry: OperationRegistry,
+        state_type: type[FlowState],
+    ) -> LoggedRun[FlowState] | None:
         nonlocal load_count
         load_count += 1
-        state = original_load(current, current_run_id)
+        state = original_load(project, run_id, registry=registry, state_type=state_type)
         loaded.set()
         wait_or_fail(release, "the test to release the load")
         return state
 
-    monkeypatch.setattr(Project, "stored_record", delayed_load)
+    monkeypatch.setattr(plugin_registration, "read_logged_run", delayed_load)
 
     def scenario() -> Response:
         response_future = Task(

@@ -413,6 +413,8 @@ def test_a_question_on_an_ended_run_is_answered_from_the_runs_own_tools(
     tmp_path: Path, ended_run: _EndedRun
 ) -> None:
     """The reader of a saved run serves its tools to a real chat conversation, as a live run does."""
+    # The run's log lives in the state home of the test that writes it, and each test has its own.
+    seed_agent_state(ended_run.project, ended_run.run_id)
     threads = SimThreads(schedule_seed=0)
     network = SimNetwork(threads)
     tools = _RunTools(threads, network)

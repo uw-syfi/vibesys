@@ -1,80 +1,71 @@
-"""Commit a hypothesis ledger as the runtime record of a multi run, for read-path tests.
+"""Write a hypothesis ledger into the run.log of a multi run, for read-path tests.
 
-A multi run keeps what its flow published in the run's state store as a core runtime record. The server and the
-chat tools read the hypothesis ledger through the registration's projector, so a test of those
-read paths commits the ledger the same way, without driving a run.
+A multi run keeps what its flow published in its run.log: core's state is a fold of the log, and the
+search's state is the last whole state the log holds. The server and the chat tools read the
+hypothesis ledger through the registration's projector, so a test of those read paths writes the
+ledger the same way, without driving a run.
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from protobuf import Oneof
 from tests.vibesys.orchestration.multi._host import MultiHost, config
 
 from vibesys.orchestration.multi.search.api import multi
-from vs_core.api import (
-    ENVELOPE_SCHEMA_VERSION,
-    EventCursor,
-    FlowState,
-    HostFence,
-    HostId,
-    RunEnvelope,
-)
+from vs_core.api.recovery import seed_message
 from vs_core.testing.builders import initial_state
-from vs_project.api import StoredEnvelope
-from vs_runtime.api.core import RuntimeRecord
+from vs_project.api import Project
+from vs_proto.api import EpochStarted, Record, StrategyAdvanced, Timestamp
+from vs_runlog.api import FileRunLogWriter
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from vibesys.hypothesis.state import HypothesisState
-    from vs_project.api import Project, StoreFence
+
+AT = Timestamp.from_datetime(datetime(2026, 8, 11, 12, 34, 56, tzinfo=UTC))
 
 
 class SearchRecord:
-    """The committed runtime record of one multi run, rewritten with each saved ledger."""
+    """The run.log of one multi run, with a whole search state appended for each saved ledger."""
 
     def __init__(self, project: Project, run_id: str) -> None:
-        """Bind the run whose state store receives the records."""
+        """Bind the run whose log receives the records."""
         self._project = project
         self._run_id = run_id
-        self._fence: StoreFence | None = None
 
     def save(self, search: HypothesisState) -> None:
-        """Commit a record whose strategy state holds ``search``."""
+        """Append a process that starts the run if the log holds none, then a whole search state."""
         started = MultiHost.start(config(), restarting=False).run.state
         state = started.model_copy(
             update={"live": started.live.model_copy(update={"published": search.model_dump_json()})}
         )
-        declaration = multi.declaration
         core = initial_state()
         core = core.model_copy(
-            update={"run": core.run.model_copy(update={"declaration": declaration})}
+            update={"run": core.run.model_copy(update={"declaration": multi.declaration})}
         )
-        record = RuntimeRecord[FlowState].fresh(
-            RunEnvelope[FlowState](
-                schema_version=ENVELOPE_SCHEMA_VERSION,
-                fence=HostFence(host_id=HostId(root="writer"), epoch=1),
-                strategy_id=declaration.strategy_id,
-                state_schema=declaration.state_schema,
-                core=core,
-                strategy=state,
-                event_cursor=EventCursor(sequence=0),
+        log = Project.run_log_path_for(self._project.root, self._run_id)
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with FileRunLogWriter(log, clock=ManualClock(), threads=SimThreads()) as writer:
+            epoch = writer.epoch + 1
+            bodies = [Oneof("epoch_started", EpochStarted(epoch=epoch))]
+            if writer.sequence == 0:
+                bodies.append(Oneof("run_started", seed_message(core)))
+            bodies.append(
+                Oneof(
+                    "strategy_advanced",
+                    StrategyAdvanced(
+                        schema_version=1,
+                        strategy=Oneof("checkpoint", state.model_dump_json().encode()),
+                    ),
+                )
             )
-        )
-        store = self._project.state_store(self._run_id)
-        if self._fence is None:
-            self._fence = store.acquire("writer", now=0, duration=1)
-        assert self._fence is not None
-        stored = store.load()
-        expected = stored.revision if isinstance(stored, StoredEnvelope) else None
-        revision = 0 if expected is None else expected + 1
-        store.commit(
-            expected,
-            StoredEnvelope(
-                revision=revision, schema_version=1, payload=record.model_dump_json().encode()
-            ),
-            self._fence,
-            now=0,
-        )
+            for body in bodies:
+                writer.append(
+                    Record(seq=writer.sequence + 1, epoch=epoch, at=AT, clock=0.0, body=body)
+                )
 
 
 __all__ = ["SearchRecord"]

@@ -102,10 +102,13 @@ def _tools(tmp_path: Path) -> tuple[tuple[ToolSpec, ...], str]:
     return build_tools(store, run_id), run_id
 
 
-@pytest.fixture(scope="module")
-def seeded(tmp_path_factory: pytest.TempPathFactory) -> tuple[FastMCP, tuple[ToolSpec, ...], str]:
-    """One seeded run served by one server: the tools only read, so every test shares it."""
-    tools, run_id = _tools(tmp_path_factory.mktemp("chat-tools"))
+@pytest.fixture
+def seeded(tmp_path: Path) -> tuple[FastMCP, tuple[ToolSpec, ...], str]:
+    """One seeded run served by one server, in the state home of the test that reads it.
+
+    The run's log is written under the state home, and each test has its own.
+    """
+    tools, run_id = _tools(tmp_path)
     return _server(tools), tools, run_id
 
 
@@ -235,15 +238,16 @@ class TestEndToEnd:
         assert "step 1: passed=True" in out
         assert "commit=c1" in out
 
-    def test_list_state_files_includes_the_manifest_and_the_core_record(
+    def test_list_state_files_includes_the_manifest_and_not_the_run_log(
         self, seeded: tuple[FastMCP, tuple[ToolSpec, ...], str]
     ) -> None:
+        """Core's state is the run's log, which is machine-local and not a portable document."""
         server, _tools_unused, _run_id = seeded
 
         out = asyncio.run(_call(server, "list_state_files"))
 
         assert "run.json" in out
-        assert "core-store/store.json" in out
+        assert "run.log" not in out
 
     def test_read_state_file_returns_the_run_manifest_contents(
         self, seeded: tuple[FastMCP, tuple[ToolSpec, ...], str]

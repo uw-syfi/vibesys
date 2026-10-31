@@ -718,7 +718,11 @@ def _play(
     for crash in (*crashes, Crash()):
         host = boot(crash)
 
-        async def run(host: CoreRunHost = host) -> None:
+        async def run(host: CoreRunHost = host, *, restart: bool = died) -> None:
+            if restart:
+                # The runtime this test drives takes a lease, which a host that died keeps until
+                # it expires: a restart waits it out on the run clock, instantly in virtual time.
+                await clock.sleep(LEASE)
             start_core(host, config)
             await drive_core(host, config)
 
