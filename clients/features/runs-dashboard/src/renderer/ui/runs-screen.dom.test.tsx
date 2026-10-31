@@ -74,7 +74,7 @@ async function mount(
         open={() => undefined}
         menu={() => []}
         draft={null}
-        reading={false}
+        loads={[]}
         newRun={() => undefined}
         notice={null}
       />,
