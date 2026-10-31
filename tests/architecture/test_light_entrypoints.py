@@ -84,6 +84,7 @@ ALLOWED_FIRST_PARTY = (
     "server.host_operation_types_generated",
     "server.host_run_dashboard",
     "server.host_run_summary",
+    "server.host_task_goal",
     "server.run_summary",
     "server.run_summary_cache",
     "server.instances",
@@ -229,11 +230,17 @@ def test_light_entrypoint_imports_only_light_modules(entrypoint: str) -> None:
     assert violations(entrypoint) == []
 
 
+LAZY_MODULE_PRIMITIVE = frozenset({"server"})
+"""The ``server`` package, whose init holds only ``lazy_module``: it imports nothing until a handle is read."""
+
+
 @pytest.mark.regression
 def test_native_host_admission_does_not_load_server_adapters() -> None:
     closure = import_closure("entrypoints.host")
     assert not {
-        name: chain for name, chain in closure.items() if name.partition(".")[0] == "server"
+        name: chain
+        for name, chain in closure.items()
+        if name.partition(".")[0] == "server" and name not in LAZY_MODULE_PRIMITIVE
     }
 
 

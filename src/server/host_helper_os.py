@@ -9,7 +9,6 @@ is light (``tests/architecture/test_light_entrypoints.py``).
 Public surface: ``FileProjects``, ``ProjectStopIntents``, ``OsDirectories``,
 ``SubprocessRunLauncher``,
 ``SubprocessRunPreflight``,
-``read_task_goal``,
 ``GitCheckoutProbe`` and ``StoreLogReader`` with ``run_streams_directory``.
 """
 
@@ -20,12 +19,12 @@ import os
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
 
 from pydantic import JsonValue, TypeAdapter
 
+from server import lazy_module
 from server.host_api import (
     RUN_EVENTS_FILE,
     RUN_EVENTS_READ_MAX_BYTES,
@@ -45,12 +44,10 @@ from server.host_api import (
     RunDigestUnreadable,
 )
 from server.host_examples import (
-    ExampleObjective,
     ProjectLookupError,
     TaskGoal,
     TaskList,
     TaskSummary,
-    bounded_goal,
 )
 from server.host_helper_logs import (
     LogStoreCorruptError,
@@ -89,24 +86,29 @@ from vs_project.api import (
     Project,
     ProjectError,
     is_run_id,
-    load_objectives,
 )
 from vs_sim.api import ProcessSpec
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Sequence
 
-    from server.host_run_reads import ProjectRun
+    from server import host_run_reads, host_task_goal, run_digest_store
     from server.run_summary import Summarized
     from server.run_summary_cache import SummaryReader
     from vs_logs.read import LogReader as StoreReader
-    from vs_project.api import GitRepositoryFactory, OrchestrationRunManifest, TaskDirectory
+    from vs_project.api import GitRepositoryFactory, OrchestrationRunManifest
+    from vs_runlog import api as run_log_library
     from vs_sim.api import (
         CommandProbe,
         ProcessLauncher,
         SleepingClock,
         Threads,
     )
+else:
+    host_run_reads = lazy_module("server.host_run_reads")
+    host_task_goal = lazy_module("server.host_task_goal")
+    run_digest_store = lazy_module("server.run_digest_store")
+    run_log_library = lazy_module("vs_runlog.api")
 
 _PYPROJECT_LIMIT_BYTES = 1 << 20
 _LAUNCH_OUTPUT_TAIL = 2000
@@ -124,7 +126,7 @@ def _run_began(project_root: Path, run_id: str) -> datetime:
     if not path.is_file():
         return _journal_began(Project.log_directory_for(project_root, run_id))
     try:
-        with import_module("vs_runlog.api").open_run_log(path) as records:
+        with run_log_library.open_run_log(path) as records:
             first = next(iter(records), None)
     except OSError:
         return datetime.fromtimestamp(0, UTC)
@@ -145,8 +147,8 @@ def _holds_log(project_root: Path, run_id: str) -> bool:
     ).is_file() or Project.run_log_path_for(project_root, run_id).is_file()
 
 
-def _recorded_run(manifest: OrchestrationRunManifest) -> ProjectRun:
-    return import_module("server.host_run_reads").ProjectRun(
+def _recorded_run(manifest: OrchestrationRunManifest) -> host_run_reads.ProjectRun:
+    return host_run_reads.ProjectRun(
         run_id=manifest.run_id,
         task=manifest.task_name,
         display_name=manifest.display_name,
@@ -154,8 +156,8 @@ def _recorded_run(manifest: OrchestrationRunManifest) -> ProjectRun:
     )
 
 
-def _logged_run(project_root: Path, run_id: str) -> ProjectRun:
-    return import_module("server.host_run_reads").ProjectRun(
+def _logged_run(project_root: Path, run_id: str) -> host_run_reads.ProjectRun:
+    return host_run_reads.ProjectRun(
         run_id=run_id,
         task=None,
         display_name=run_id,
@@ -218,29 +220,6 @@ def tally_journal(stream: BinaryIO, previous: JournalTally) -> JournalTally:
     return JournalTally(size, lines)
 
 
-def read_task_goal(task: TaskDirectory) -> TaskGoal:
-    """What ``task`` is for: its ``OBJECTIVE.md`` (cut to ``GOAL_MAX_CHARS``) and its axes.
-
-    Raises ``OSError`` for a file that cannot be read and ``ValueError`` (naming the file) for
-    ``objectives.toml`` that is invalid or a goal that is not UTF-8 text.
-    """
-    objectives = load_objectives(task.path).objective
-    try:
-        text = task.objective_path.read_text(encoding="utf-8")
-    except UnicodeDecodeError as exc:
-        message = f"{task.objective_path} is not UTF-8 text: {exc}"
-        raise ValueError(message) from exc
-    goal, truncated = bounded_goal(text)
-    return TaskGoal(
-        task=task.name.value,
-        objectives=tuple(
-            ExampleObjective(metric=axis.name, direction=axis.direction) for axis in objectives
-        ),
-        goal=goal,
-        goal_truncated=truncated,
-    )
-
-
 class FileProjects:
     """Projects read through ``vs_project``'s ``Project`` on this filesystem.
 
@@ -284,13 +263,13 @@ class FileProjects:
         """The goal and axes of the project's task ``task``."""
         opened = self._initialized(project)
         try:
-            return read_task_goal(opened.select_task(task))
+            return host_task_goal.read_task_goal(opened.select_task(task))
         except (ProjectError, OSError, ValueError) as exc:
             raise ProjectLookupError(
                 HelperErrorCode.TASK_INVALID, str(opened.root), str(exc)
             ) from exc
 
-    def stream_runs(self, project: Path) -> tuple[Path, Iterator[ProjectRun]]:
+    def stream_runs(self, project: Path) -> tuple[Path, Iterator[host_run_reads.ProjectRun]]:
         """The project's root and one lazy scan of its runs, in discovery order.
 
         A run is its identity, not only its portable record: a run with a journal in this
@@ -301,7 +280,7 @@ class FileProjects:
         opened = self._open(project)
         return opened.root, self._scanned_runs(opened)
 
-    def _scanned_runs(self, opened: Project) -> Iterator[ProjectRun]:
+    def _scanned_runs(self, opened: Project) -> Iterator[host_run_reads.ProjectRun]:
         known: set[str] = set()
         try:
             for manifest in self._history(opened).scan():
@@ -318,7 +297,7 @@ class FileProjects:
 
     def named_runs(
         self, project: Path, run_ids: Iterable[str]
-    ) -> tuple[Path, tuple[ProjectRun, ...]]:
+    ) -> tuple[Path, tuple[host_run_reads.ProjectRun, ...]]:
         """The project's root and those of ``run_ids`` it holds, oldest first.
 
         Reads the named runs only, so the cost follows ``run_ids`` and not the project's size.
@@ -379,7 +358,7 @@ class FileProjects:
             cached = self._native_digests.get(path)
             if cached is not None and cached[0] == version:
                 return cached[1]
-            digest = import_module("server.run_digest_store").read_digest(path)
+            digest = run_digest_store.read_digest(path)
         except (OSError, ValueError) as exc:
             return RunDigestUnreadable(
                 message="the run's committed store could not be read: "
