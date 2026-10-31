@@ -1,9 +1,10 @@
-"""Every environment ends one step's agent processes, or refuses at the start naming what it cannot.
+"""Every environment ends one step's agent processes through its own reaper.
 
 The Docker, SkyPilot, Modal and Slurm environments run the agent in a local container labelled with
-the run; the Host environment finds the agent's processes by the tag in their environment. Each
-reaper passes the ``StageWorkReaper`` contract over a Fake that models the tool it reaches: a
-Docker daemon with its containers, or a process table.
+the run; the Host environment finds the agent's processes through the process table, the way a
+local evaluation's stage commands are found. Each reaper passes the ``StageWorkReaper`` contract
+over a Fake that models what the tool shows: a daemon with its containers, or a process table that
+shows what Linux or macOS shows.
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ from vs_agent.api.testing import FakeAgentProcesses
 from vs_core.api import RequestId
 from vs_project.api import Project, RunResourceRequest
 from vs_runtime.api.docker_agent_work_reaper import DockerAgentWorkReaper
-from vs_runtime.api.evaluation_step_runners import MarkedStageWorkReaper, marked_with_the_tag
 from vs_runtime.api.infrastructure import (
     HostEnvironment,
     RunEnvironment,
@@ -28,8 +28,10 @@ from vs_runtime.api.infrastructure import (
     build_run_environment,
     make_run_environment_spec,
 )
-from vs_runtime.api.step_clear import AGENT_STEP_KINDS, StepClearUnsupportedError
+from vs_runtime.api.stage_marks import agent_mark, handle_of_life, is_stage_mark_of, stage_mark
+from vs_runtime.api.step_runner import ClearUnavailableError
 from vs_runtime.api.testing import (
+    StageWorkPlace,
     StageWorkReaperContract,
     StageWorkUnderTest,
     idle_environment_system,
@@ -45,23 +47,30 @@ from vs_sim.api.testing import (
     InlineBlockingRunner,
     ManualClock,
     ProcessScript,
+    Shows,
     VirtualClock,
     run_virtual,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Coroutine, Iterator
+    from contextlib import AbstractContextManager
 
     from vs_project.api import StateNamespace
     from vs_runtime.api.infrastructure import EnvironmentSystem
 
-_RUN = "run-a"
+RUN = "run-a"
+OTHER_RUN = "run-b"
 
 
 def _no_namespace(name: str) -> StateNamespace:
     """A run's local state the environment under test must not read."""
     message = f"the {name} state namespace was read"
     raise AssertionError(message)
+
+
+def _run[T](main: Coroutine[object, object, T]) -> T:
+    return run_virtual(VirtualClock(0.0), main)
 
 
 def _containers(engine: FakeDockerEngine, run: str, count_: int) -> tuple[str, ...]:
@@ -87,128 +96,118 @@ class TestDockerAgentWorkReaper(StageWorkReaperContract):
         root = self._root / f"world-{next(self._worlds)}"
         root.mkdir()
         engine = FakeDockerEngine(root, agent_ids=(1000, 1000), launcher=FakePipedProcessLauncher())
-        mine = _containers(engine, _RUN, 2)
+        containers = {
+            RUN: _containers(engine, RUN, 2),
+            OTHER_RUN: _containers(engine, OTHER_RUN, 1),
+        }
         processes = FakeAgentProcesses()
-        clock = VirtualClock(0.0)
         reaper = DockerAgentWorkReaper(
-            _RUN, engine, InlineBlockingRunner(), lambda _line: None, processes.reap_tagged
+            RUN, engine, InlineBlockingRunner(), lambda _line: None, processes.reap_tagged
         )
         placed = count()
 
-        def leave(tag: RequestId) -> None:
-            processes.start(mine[next(placed) % len(mine)], {STEP_TAG_ENV: tag.root})
+        def leave(run: str, tag: RequestId) -> None:
+            home = containers[run]
+            processes.start(home[next(placed) % len(home)], {STEP_TAG_ENV: agent_mark(run, tag)})
+
+        def running(run: str, tag: RequestId) -> int:
+            return len(processes.alive(tag=agent_mark(run, tag)))
 
         return StageWorkUnderTest(
             reaper=reaper,
-            run=lambda main: run_virtual(clock, main),
-            leave=leave,
-            running=lambda tag: len(processes.alive(tag=tag.root)),
+            run=_run,
+            places=(StageWorkPlace.CONTAINER,),
+            leave=lambda tag, _place: leave(RUN, tag),
+            leave_in_other_run=lambda tag, _place: leave(OTHER_RUN, tag),
+            running=lambda tag: running(RUN, tag),
+            running_in_other_run=lambda tag: running(OTHER_RUN, tag),
             unreachable=processes.unreachable,
+            stuck=processes.stuck,
         )
 
 
-def test_a_run_s_reaper_leaves_the_processes_of_another_run_s_containers(tmp_path: Path) -> None:
-    engine = FakeDockerEngine(tmp_path, agent_ids=(1000, 1000), launcher=FakePipedProcessLauncher())
-    (mine,) = _containers(engine, _RUN, 1)
-    (theirs,) = _containers(engine, "run-b", 1)
-    processes = FakeAgentProcesses()
-    ours = processes.start(mine, {STEP_TAG_ENV: "step"})
-    other = processes.start(theirs, {STEP_TAG_ENV: "step"})
-    reaper = DockerAgentWorkReaper(
-        _RUN, engine, InlineBlockingRunner(), lambda _line: None, processes.reap_tagged
-    )
+class _HostAgents:
+    """Agent processes on a host whose process table shows ``shows``, reaped by its environment."""
 
-    run_virtual(VirtualClock(0.0), reaper.reap(RequestId(root="step")))
+    def __init__(self, shows: Shows) -> None:
+        self.table = FakeProcessTable(shows)
+        self.reaper = HostEnvironment().agent_work_reaper(
+            RUN,
+            system=replace(idle_environment_system(), process_table=self.table),
+            blocking=InlineBlockingRunner(),
+            local_namespace=_no_namespace,
+            log=lambda _line: None,
+        )
 
-    assert not processes.is_alive(ours)
-    assert processes.is_alive(other)
+    def leave(self, run: str, tag: RequestId, place: StageWorkPlace) -> None:
+        leader = self.table.start_stage(STEP_TAG_ENV, agent_mark(run, tag))
+        if place is StageWorkPlace.DESCENDANT:
+            self.table.spawn(leader)
+
+    def running(self, run: str, tag: RequestId) -> int:
+        return self.table.running(STEP_TAG_ENV, lambda mark: is_stage_mark_of(run, tag, mark))
+
+    def under_test(self) -> StageWorkUnderTest:
+        return StageWorkUnderTest(
+            reaper=self.reaper,
+            run=_run,
+            places=(StageWorkPlace.LEADER, StageWorkPlace.DESCENDANT),
+            leave=lambda tag, place: self.leave(RUN, tag, place),
+            leave_in_other_run=lambda tag, place: self.leave(OTHER_RUN, tag, place),
+            running=lambda tag: self.running(RUN, tag),
+            running_in_other_run=lambda tag: self.running(OTHER_RUN, tag),
+            unreachable=_flag(self.table, "unreadable"),
+            stuck=_flag(self.table, "survivors"),
+        )
 
 
-def _leave(table: FakeProcessTable, tag: RequestId) -> None:
-    """A dead agent left a process carrying the tag."""
-    table.start(STEP_TAG_ENV, tag.root)
+def _flag(owner: object, name: str) -> Callable[[], AbstractContextManager[None]]:
+    @contextmanager
+    def context() -> Iterator[None]:
+        setattr(owner, name, True)
+        try:
+            yield
+        finally:
+            setattr(owner, name, False)
+
+    return context
 
 
-class TestHostAgentWorkReaper(StageWorkReaperContract):
-    """The host's agent processes, found by the tag in their environment."""
+class TestHostAgentWorkReaperOnLinux(StageWorkReaperContract):
+    """The host shows every process's environment, so a descendant is found by its mark."""
 
     def stage_work_under_test(self) -> StageWorkUnderTest:
-        table = FakeProcessTable()
-        clock = VirtualClock(0.0)
-        environment = HostEnvironment(process_table=table)
-        reaper = environment.agent_work_reaper(
-            _RUN,
-            system=idle_environment_system(),
-            blocking=InlineBlockingRunner(),
-            local_namespace=_no_namespace,
-            log=lambda _line: None,
-        )
-
-        @contextmanager
-        def unreachable() -> Iterator[None]:
-            table.unreadable = True
-            try:
-                yield
-            finally:
-                table.unreadable = False
-
-        return StageWorkUnderTest(
-            reaper=reaper,
-            run=lambda main: run_virtual(clock, main),
-            leave=lambda tag: _leave(table, tag),
-            running=lambda tag: len(table.marked(STEP_TAG_ENV, marked_with_the_tag(tag))),
-            unreachable=unreachable,
-        )
+        return _HostAgents(Shows.ENVIRONMENT).under_test()
 
 
-def test_the_host_reaper_matches_the_whole_tag_and_not_a_longer_one() -> None:
-    table = FakeProcessTable()
-    kept = table.start(STEP_TAG_ENV, "step-ab")
-    ended = table.start(STEP_TAG_ENV, "step-a")
-    reaper = MarkedStageWorkReaper(table, marked_with_the_tag)
+class TestHostAgentWorkReaperOnMacOS(StageWorkReaperContract):
+    """The host shows only a group leader's arguments, so the agent's leader carries the mark."""
 
-    run_virtual(VirtualClock(0.0), reaper.reap(RequestId(root="step-a")))
-
-    assert table.alive(kept)
-    assert not table.alive(ended)
+    def stage_work_under_test(self) -> StageWorkUnderTest:
+        return _HostAgents(Shows.LEADER_ARGUMENTS).under_test()
 
 
-def test_a_host_that_cannot_list_process_environments_refuses_agent_steps_at_the_start() -> None:
-    """The macOS case: ``ps`` does not show another process's environment, so no mark can be found."""
-    table = FakeProcessTable()
-    table.unreadable = True
-    environment = HostEnvironment(process_table=table)
+def test_a_host_without_a_process_table_never_reports_an_agent_clear() -> None:
+    """The default system has no table to read, so the clear is unavailable, not empty."""
+    reaper = HostEnvironment().agent_work_reaper(
+        RUN,
+        system=idle_environment_system(),
+        blocking=InlineBlockingRunner(),
+        local_namespace=_no_namespace,
+        log=lambda _line: None,
+    )
 
-    with pytest.raises(StepClearUnsupportedError) as refused:
-        environment.agent_work_reaper(
-            _RUN,
-            system=idle_environment_system(),
-            blocking=InlineBlockingRunner(),
-            local_namespace=_no_namespace,
-            log=lambda _line: None,
-        )
-
-    assert refused.value.environment == "host"
-    assert refused.value.step_kinds == AGENT_STEP_KINDS
-    assert "dispatch_turn" in str(refused.value)
+    with pytest.raises(ClearUnavailableError):
+        _run(reaper.reap(RequestId(root="step-a")))
 
 
-def _docker_script(spec: ProcessSpec) -> ProcessScript:
-    """A Docker client over one container of the run: it lists it, and every other command is ok."""
-    argv = spec.argv
-    if argv[:2] == ("docker", "ps"):
-        return ProcessScript(stdout=b"c0ffee\n")
-    return ProcessScript()
+def test_an_agent_and_a_stage_command_of_one_step_are_found_by_the_same_mark_kind() -> None:
+    """One reaper serves both: an agent's mark is the stage mark of the step's own handle."""
+    tag = RequestId(root="step-a")
 
-
-def _system(processes: FakeProcesses) -> EnvironmentSystem:
-    return replace(idle_environment_system(), processes=processes)
-
-
-def _docker_world() -> tuple[FakeProcesses, EnvironmentSystem]:
-    clock = ManualClock()
-    processes = FakeProcesses(script=_docker_script, pass_time=clock.advance)
-    return processes, _system(processes)
+    assert agent_mark(RUN, tag) == stage_mark(RUN, handle_of_life(tag, 0))
+    assert is_stage_mark_of(RUN, tag, agent_mark(RUN, tag))
+    assert not is_stage_mark_of(OTHER_RUN, tag, agent_mark(RUN, tag))
 
 
 _SLURM_CONFIG = """[slurm]
@@ -218,6 +217,21 @@ remote_workspace_root = "/shared/vibesys"
 [slurm.transport]
 kind = "local"
 """
+
+
+def _docker_script(spec: ProcessSpec) -> ProcessScript:
+    """A Docker client over one container of the run: it lists it, and every other command is ok."""
+    if spec.argv[:2] == ("docker", "ps"):
+        return ProcessScript(stdout=b"c0ffee\n")
+    if spec.argv[:2] == ("docker", "exec"):
+        return ProcessScript(stdout=b"0\n")
+    return ProcessScript()
+
+
+def _docker_world() -> tuple[FakeProcesses, EnvironmentSystem]:
+    clock = ManualClock()
+    processes = FakeProcesses(script=_docker_script, pass_time=clock.advance)
+    return processes, replace(idle_environment_system(), processes=processes)
 
 
 def _container_environments(tmp_path: Path) -> dict[str, RunEnvironment]:
@@ -246,20 +260,21 @@ def test_a_container_environment_sweeps_the_containers_of_its_run_for_the_step(
 ) -> None:
     processes, system = _docker_world()
     reaper = _container_environments(tmp_path)[name].agent_work_reaper(
-        _RUN,
+        RUN,
         system=system,
         blocking=InlineBlockingRunner(),
         local_namespace=Project.open(tmp_path).state.state_store_namespace,
         log=lambda _line: None,
     )
+    tag = RequestId(root="step-a")
 
-    run_virtual(VirtualClock(0.0), reaper.reap(RequestId(root="step-a")))
+    _run(reaper.reap(tag))
 
     listing, sweep = (spec.argv for spec in processes.ran)
     assert listing[:2] == ("docker", "ps")
-    assert f"label={RUN_ID_LABEL}={_RUN}" in listing
+    assert f"label={RUN_ID_LABEL}={RUN}" in listing
     assert sweep[:3] == ("docker", "exec", "c0ffee")
-    assert sweep[-2:] == (STEP_TAG_ENV, "step-a")
+    assert sweep[-2:] == (STEP_TAG_ENV, agent_mark(RUN, tag))
 
 
 @pytest.mark.parametrize("name", ["docker", "skypilot", "modal", "slurm"])
@@ -267,8 +282,6 @@ def test_every_container_environment_answers_the_run_wide_reap(name: str, tmp_pa
     """Regression: SkyPilot inherited a Docker reap that read Docker settings its config lacks."""
     processes, system = _docker_world()
 
-    _container_environments(tmp_path)[name].reap_orphans(
-        _RUN, system=system, log=lambda _line: None
-    )
+    _container_environments(tmp_path)[name].reap_orphans(RUN, system=system, log=lambda _line: None)
 
     assert processes.ran[0].argv[:2] == ("docker", "ps")

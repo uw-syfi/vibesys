@@ -18,16 +18,16 @@ from vs_core.api import SubmitMeasurement
 from vs_evaluation.api import PollPhase
 from vs_runtime._evaluation_jobs import handle_of_life
 from vs_runtime._job_step_run import JobStepRun
-from vs_runtime._marked_stage_work_reaper import MarkedStageWorkReaper
 from vs_runtime._step_runner import Cleared
 
 if TYPE_CHECKING:
     from vs_core.api import Request, RequestId
     from vs_core.api.recovery import StepResult
     from vs_evaluation.api import PollingEvaluationExecutor
+    from vs_runtime._host_stage_work import HostStageWork
     from vs_runtime._job_registry import JobRegistry
     from vs_runtime._step_runner import Adopted, CancelSignal
-    from vs_sim.api import Clock, ProcessTable
+    from vs_sim.api import Clock
 
 
 class StageWorkReaper(Protocol):
@@ -49,7 +49,7 @@ class LocalJobStepRunner:
     def on_host(
         cls,
         executor: PollingEvaluationExecutor,
-        processes: ProcessTable,
+        host: HostStageWork,
         registry: JobRegistry,
         *,
         clock: Clock,
@@ -57,12 +57,12 @@ class LocalJobStepRunner:
     ) -> LocalJobStepRunner:
         """Run on *executor*, registering its jobs in *registry*.
 
-        What a dead process left is found by the marks in the process table *processes*.
+        What a dead process left is found through what *host* shows of its stage work.
         """
         job = JobStepRun(
             executor, registry, clock=clock, poll_interval_s=poll_interval_s, outlives_host=False
         )
-        return cls(executor, MarkedStageWorkReaper(processes), job)
+        return cls(executor, host.reaper(), job)
 
     def __init__(
         self,

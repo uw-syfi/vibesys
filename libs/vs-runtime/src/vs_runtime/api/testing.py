@@ -49,7 +49,11 @@ from vs_runtime._shell_kit import (
     scripted_host,
 )
 from vs_runtime._validation_passes import MemoryValidationPasses
-from vs_runtime.api.stage_work_contracts import StageWorkReaperContract, StageWorkUnderTest
+from vs_runtime.api.stage_work_contracts import (
+    StageWorkPlace,
+    StageWorkReaperContract,
+    StageWorkUnderTest,
+)
 from vs_runtime.api.step_runner_contracts import StepRunnerContract, StepRunnerUnderTest
 from vs_runtime.fake_docker_daemon import DaemonBackend, daemon_docker_config, daemon_engine
 from vs_runtime.fakes import (
@@ -166,6 +170,7 @@ __all__ = [
     "Script",
     "ScriptedExecutors",
     "ScriptedHost",
+    "StageWorkPlace",
     "StageWorkReaperContract",
     "StageWorkUnderTest",
     "StepRunnerContract",

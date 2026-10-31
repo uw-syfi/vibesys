@@ -601,6 +601,33 @@ def test_confine_to_sandbox_starts_a_step_s_program_with_its_tag_in_the_environm
     assert tagged[:-4] == plain[:-2]
 
 
+@pytest.mark.parametrize("leads_group", [True, False])
+def test_a_host_command_is_led_by_a_process_that_carries_the_mark_as_an_argument(
+    tmp_path: Path, *, leads_group: bool
+) -> None:
+    """macOS shows another process's arguments, not its environment, so the leader carries it."""
+    fake = FakeExecutor([FakeRun()])
+    executor = subject.confine_to_sandbox(fake, _FakeHostSandbox(), leads_group=leads_group)
+    request = agentshim.CommandRequest(
+        argv=["claude", "-p"],
+        stdin=None,
+        cwd=str(tmp_path),
+        env=step_tag_env("run-a:step-a"),
+        timeout=None,
+    )
+
+    executor.run(request, agentshim.NullSink())
+
+    argv = list(fake.requests[-1].argv)
+    if leads_group:
+        assert argv[0] == "/bin/sh"
+        assert f"{STEP_TAG_ENV}=run-a:step-a" in argv
+        assert argv[-1].endswith(f"env {STEP_TAG_ENV}=run-a:step-a claude -p")
+    else:
+        assert argv[0] == "/usr/bin/stub-sandbox"
+        assert argv[-4:] == ["env", f"{STEP_TAG_ENV}=run-a:step-a", "claude", "-p"]
+
+
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
 def test_a_turn_marks_its_provider_process_with_the_step_that_asked_for_it(
     sandbox_builds: list[dict[str, Any]],

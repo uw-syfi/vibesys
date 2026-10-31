@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from vs_runtime._stage_marks import agent_mark
 from vs_runtime._step_runner import ClearUnavailableError
 from vs_sandbox.api.skypilot import SkyPilotCLIError, cancel_step_jobs
 
@@ -28,15 +29,18 @@ class SkyPilotStepWorkReaper:
 
     def __init__(
         self,
+        run_id: str,
         agents: StageWorkReaper,
         journal: InvocationJournal,
         runner: SkyPilotJobRunner,
         blocking: BlockingRunner,
     ) -> None:
-        """End the agent processes through *agents*, then cancel jobs found in *journal* by *runner*.
+        """End the agent processes of run *run_id* through *agents*, then cancel jobs of *journal*.
 
-        *blocking* carries the journal reads and the ``sky`` commands off the event loop.
+        The jobs are found in *journal* by *runner*. *blocking* carries the journal reads and the
+        ``sky`` commands off the event loop.
         """
+        self._run_id = run_id
         self._agents = agents
         self._journal = journal
         self._runner = runner
@@ -50,6 +54,8 @@ class SkyPilotStepWorkReaper:
         """
         await self._agents.reap(tag)
         try:
-            await self._blocking.run(cancel_step_jobs, self._journal, self._runner, tag.root)
+            await self._blocking.run(
+                cancel_step_jobs, self._journal, self._runner, agent_mark(self._run_id, tag)
+            )
         except SkyPilotCLIError as error:
             raise ClearUnavailableError(tag, _BACKEND) from error

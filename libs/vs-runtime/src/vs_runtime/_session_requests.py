@@ -470,6 +470,8 @@ class _Call:
     canonical: CoreRequestId
     """The request core knows as the one executing: what the dispatch record names."""
     context: ExecutionContext
+    mark: str | None = None
+    """What the turn's agent processes are marked with, when a step runner asked for the turn."""
 
 
 class TurnYields[TurnT, WaitT](Protocol):
@@ -581,6 +583,7 @@ class RuntimeSessionRequests:
         request: DispatchTurn,
         context: ExecutionContext,
         *,
+        mark: str,
         behalf: CoreRequestId | None = None,
     ) -> ExecutionResult:
         """Run one attempt of a turn and return what it observed, recording no receipt of it.
@@ -588,11 +591,12 @@ class RuntimeSessionRequests:
         The caller owns the step's result. What survives an attempt that dies is the invocation
         journal, which replays an answered invocation instead of asking it again, and the access
         receipt, whose baseline the next attempt is judged against. A turn core asked for as
-        another kind of request (a resume) names that request in *behalf*, which is the step
-        that tags its agent processes and that its dispatch record names.
+        another kind of request (a resume) names that request in *behalf*, which its dispatch
+        record names. Every agent process the turn starts carries *mark*, which the step's
+        runner finds them by after the process that started the turn died.
         """
         canonical = behalf or core_identity(request)
-        call = _Call(request, ReceiptKey(canonical.root), canonical, context)
+        call = _Call(request, ReceiptKey(canonical.root), canonical, context, mark)
         lock_key = f"{owner_key(request)}/{self._session_id(request).root}"
         async with self._locks.setdefault(lock_key, asyncio.Lock()):
             return (await self._performed(call)).result
@@ -867,7 +871,7 @@ class RuntimeSessionRequests:
                 template,
                 output_schema=schema,
                 timeout=None if timeout is None else timeout,
-                step_tag=call.canonical.root,
+                step_tag=call.mark,
             ),
             message,
             turn.invocation_id.root,

@@ -40,6 +40,7 @@ observation. Only terminal observations are stored.
 
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING, Protocol, assert_never
 
 from pydantic import BaseModel, ConfigDict
@@ -136,6 +137,7 @@ class TurnDispatcher(Protocol):
         request: DispatchTurn,
         context: ExecutionContext,
         *,
+        mark: str,
         behalf: CoreRequestId | None = None,
     ) -> ExecutionResult:
         """Run one attempt of the turn, recording no receipt of its result (see the runner)."""
@@ -546,16 +548,18 @@ class SessionLifecycleRequests:
     # resume
 
     async def attempt(
-        self, request: ResumeSessionTurn, context: ExecutionContext
+        self, request: ResumeSessionTurn, context: ExecutionContext, *, mark: str
     ) -> ExecutionResult:
         """Run one attempt of a resume and return what it observed, recording no receipt of it.
 
         The step loop owns the step's result. The continuation binding is written once and an
         attempt that repeats finds it; the nested dispatch is ``RuntimeSessionRequests.attempt``,
         so a rerun after a killed attempt is dispatched again once the runner has cleared it.
+        The turn's agent processes carry *mark*.
         """
         request_id = core_identity(request)
-        return await self._resume(request, request_id, context, self._attempt_resumed)
+        dispatch = partial(self._attempt_resumed, mark=mark)
+        return await self._resume(request, request_id, context, dispatch)
 
     async def _dispatch_resumed(
         self, dispatch: DispatchTurn, behalf: CoreRequestId, context: ExecutionContext
@@ -563,9 +567,9 @@ class SessionLifecycleRequests:
         return await self._dispatcher.dispatch_on_behalf_of(dispatch, behalf, context)
 
     async def _attempt_resumed(
-        self, dispatch: DispatchTurn, behalf: CoreRequestId, context: ExecutionContext
+        self, dispatch: DispatchTurn, behalf: CoreRequestId, context: ExecutionContext, *, mark: str
     ) -> ExecutionOutcome:
-        return await self._dispatcher.attempt(dispatch, context, behalf=behalf)
+        return await self._dispatcher.attempt(dispatch, context, mark=mark, behalf=behalf)
 
     async def _resume(
         self,

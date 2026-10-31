@@ -44,6 +44,7 @@ from vs_runtime._access_settlement import AccessKey, AccessSettlementError
 from vs_runtime._core_identity import core_identity
 from vs_runtime._core_requests import ExecutionContext
 from vs_runtime._session_requests import load_session_binding, session_binding_key
+from vs_runtime._stage_marks import agent_mark
 from vs_runtime._step_runner import Cleared, ClearUnavailableError
 
 if TYPE_CHECKING:
@@ -112,8 +113,21 @@ class _Plan:
 
     spec: TurnSpec
     binding_of: Request
-    start: Callable[[ExecutionContext], Awaitable[ExecutionResult]]
-    """Starts one attempt under the execution context the runner builds for it."""
+    start: Callable[[ExecutionContext, str], Awaitable[ExecutionResult]]
+    """Starts one attempt under the execution context and the mark the runner builds for it."""
+
+
+@dataclass(frozen=True)
+class RunWriter:
+    """The one writer of a run: its id, and the host fence it holds.
+
+    The run's lock makes one process the only writer, so the fence does not change within a
+    run. The id names the run in the mark of every agent process, because two runs on one host
+    can reuse a request id.
+    """
+
+    run_id: str
+    fence: HostFence
 
 
 @dataclass(frozen=True)
@@ -133,23 +147,21 @@ class AgentTurnStepRunner:
         paths: TurnPaths,
         state: TurnState,
         clock: Clock,
-        fence: HostFence,
+        writer: RunWriter,
         reaper: StageWorkReaper,
     ) -> None:
-        """Bind the turn executors, the durable state they write, the run clock, the fence and the reaper.
+        """Bind the turn executors, the durable state they write, the run clock, the writer and the reaper.
 
         *state* is what the executors were built with. *reaper* ends the processes of a step by its
         tag (the environment's: containers, or host processes found by their mark). *clock* is the
-        run clock the deadline of an attempt is read against. *fence* is the host identity the executors' effect
-        fences record: one run lock holder is the only writer, so it does not change within a
-        run.
+        run clock the deadline of an attempt is read against.
         """
         self._paths = paths
         self._sessions = state.sessions
         self._store = state.store
         self._blocking = state.blocking
         self._clock = clock
-        self._fence = fence
+        self._writer = writer
         self._reaper = reaper
 
     async def run(
@@ -164,12 +176,13 @@ class AgentTurnStepRunner:
         del attempt
         plan = self._plan(step, tag)
         context = ExecutionContext(
-            fence=self._fence,
+            fence=self._writer.fence,
             now_at=self._clock.now(),
             until=Until(at=deadline_at),
             payload_digest=hashlib.sha256(step.model_dump_json().encode()).hexdigest(),
         )
-        execution = asyncio.ensure_future(plan.start(context))
+        mark = agent_mark(self._writer.run_id, tag)
+        execution = asyncio.ensure_future(plan.start(context, mark))
         try:
             return await self._ended(execution, plan, tag, cancel)
         finally:
@@ -190,9 +203,17 @@ class AgentTurnStepRunner:
         paths = self._paths
         match step:
             case DispatchTurn():
-                return _Plan(step.turn, step, lambda context: paths.dispatch.attempt(step, context))
+                return _Plan(
+                    step.turn,
+                    step,
+                    lambda context, mark: paths.dispatch.attempt(step, context, mark=mark),
+                )
             case ResumeSessionTurn():
-                return _Plan(step.turn, step, lambda context: paths.resume.attempt(step, context))
+                return _Plan(
+                    step.turn,
+                    step,
+                    lambda context, mark: paths.resume.attempt(step, context, mark=mark),
+                )
             case ExecuteRegisteredOperation() if (
                 step.operation.schema_ref.lifecycle is LifecycleClass.SESSION_TURN
             ):
@@ -205,8 +226,8 @@ class AgentTurnStepRunner:
                 return _Plan(
                     dispatch.turn,
                     step,
-                    lambda context: paths.dispatch.attempt(
-                        dispatch, context, behalf=core_identity(step)
+                    lambda context, mark: paths.dispatch.attempt(
+                        dispatch, context, mark=mark, behalf=core_identity(step)
                     ),
                 )
             case _:

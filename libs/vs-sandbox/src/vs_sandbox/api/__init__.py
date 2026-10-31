@@ -132,7 +132,13 @@ if TYPE_CHECKING:
     from vs_sandbox.modal_model_setup import ensure_model_volume
     from vs_sandbox.operator_root import exposed_grant, operator_root
     from vs_sandbox.rocm_backend import RocmBackend
-    from vs_sandbox.step_marks import STEP_TAG_ENV, step_tag_env
+    from vs_sandbox.step_containers import (
+        DockerStepContainers,
+        StepContainer,
+        StepContainerError,
+        StepContainers,
+    )
+    from vs_sandbox.step_marks import STEP_TAG_ENV, STEP_TAG_LABEL, step_shell_argv, step_tag_env
     from vs_sandbox.toolchain_features import (
         CONTAINER_RUNTIME_TOOLCHAIN,
         DOCKER_COMPOSE_VERSION,
@@ -167,6 +173,7 @@ __all__ = [
     "SANDBOX_DISABLE_ENV",
     "SANDBOX_GPU_DEVICES_ENV",
     "STEP_TAG_ENV",
+    "STEP_TAG_LABEL",
     "TOOLCHAIN_FEATURES_PROJECT",
     "AcceleratorDiscovery",
     "AcceleratorInventory",
@@ -195,6 +202,7 @@ __all__ = [
     "DockerCli",
     "DockerCommandRunner",
     "DockerSandbox",
+    "DockerStepContainers",
     "EnvironmentBindMount",
     "FeatureImage",
     "FeatureImageBuildError",
@@ -230,6 +238,9 @@ __all__ = [
     "SandboxSession",
     "SandboxUnavailableError",
     "SeatbeltSandbox",
+    "StepContainer",
+    "StepContainerError",
+    "StepContainers",
     "SubprocessDockerCli",
     "SystemAcceleratorDiscovery",
     "TrainiumBackend",
@@ -262,6 +273,7 @@ __all__ = [
     "released",
     "require_sysbox_runtime",
     "start_sandbox",
+    "step_shell_argv",
     "step_tag_env",
     "stop_sandbox",
     "sysbox_unavailable",
@@ -344,10 +356,16 @@ _LAZY_EXPORTS = {
     "AGENT_HOME": ("docker_sandbox", "AGENT_HOME"),
     "RUN_ID_LABEL": ("docker_sandbox", "RUN_ID_LABEL"),
     "STEP_TAG_ENV": ("step_marks", "STEP_TAG_ENV"),
+    "STEP_TAG_LABEL": ("step_marks", "STEP_TAG_LABEL"),
+    "step_shell_argv": ("step_marks", "step_shell_argv"),
     "step_tag_env": ("step_marks", "step_tag_env"),
     "DockerCli": ("docker_cli", "DockerCli"),
     "SubprocessDockerCli": ("docker_cli", "SubprocessDockerCli"),
     "DockerSandbox": ("docker_sandbox", "DockerSandbox"),
+    "DockerStepContainers": ("step_containers", "DockerStepContainers"),
+    "StepContainer": ("step_containers", "StepContainer"),
+    "StepContainerError": ("step_containers", "StepContainerError"),
+    "StepContainers": ("step_containers", "StepContainers"),
     "INITIAL_CONTAINER_LIFE": ("docker_states", "INITIAL_CONTAINER_LIFE"),
     "ContainerGone": ("docker_states", "ContainerGone"),
     "ContainerLife": ("docker_states", "ContainerLife"),

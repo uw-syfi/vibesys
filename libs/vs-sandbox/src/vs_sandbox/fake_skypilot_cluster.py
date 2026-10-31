@@ -39,6 +39,7 @@ class FakeSkyPilotCluster:
         """Start with no cluster and a reachable control plane."""
         self._jobs: dict[str, dict[int, tuple[str, SkyJobState]]] = {}
         self._reachable = True
+        self._cancels_end_jobs = True
         self.calls: list[tuple[str, ...]] = []
         """Every command received, in order."""
 
@@ -61,6 +62,15 @@ class FakeSkyPilotCluster:
             if cluster in (None, name)
             for _, state in jobs.values()
         )
+
+    @contextmanager
+    def stuck(self) -> Iterator[None]:
+        """Make a cancel succeed and change nothing while the context is open: a job that keeps running."""
+        self._cancels_end_jobs = False
+        try:
+            yield
+        finally:
+            self._cancels_end_jobs = True
 
     @contextmanager
     def unreachable(self) -> Iterator[None]:
@@ -109,5 +119,5 @@ class FakeSkyPilotCluster:
 
     def _cancel(self, cluster: str, job_id: int) -> None:
         name, state = self._jobs[cluster][job_id]
-        if state not in _ENDED:
+        if self._cancels_end_jobs and state not in _ENDED:
             self._jobs[cluster][job_id] = (name, SkyJobState.CANCELLED)

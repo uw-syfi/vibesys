@@ -81,11 +81,11 @@ from vs_runtime._environment_startup import (
     startup_stage,
 )
 from vs_runtime._image_features import image_features
-from vs_runtime._marked_stage_work_reaper import MarkedStageWorkReaper, marked_with_the_tag
 from vs_runtime._model_artifacts import read_model_metadata
 from vs_runtime._objective_document import (
     outside_objective,
 )
+from vs_runtime._process_stage_work_reaper import ProcessStageWorkReaper
 from vs_runtime._project_run import CaptureRecoverySource, NoCaptureRecovery
 from vs_runtime._run_environment_facts import (
     ClusterEvaluationFacts,
@@ -94,7 +94,7 @@ from vs_runtime._run_environment_facts import (
     ModalEnvironmentFacts,
     RunEnvironmentPresentationFacts,
 )
-from vs_runtime._step_clear import AGENT_STEP_KINDS, StepClearUnsupportedError
+from vs_runtime._stage_marks import stage_mark
 from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
 from vs_runtime._trusted_evaluation_preparation import (
@@ -118,7 +118,6 @@ from vs_runtime._writer_reconciliation import (
 )
 from vs_sandbox.api import (
     CONTAINER_RUNTIME_TOOLCHAIN,
-    STEP_TAG_ENV,
     DeviceLease,
     EnvironmentBindMount,
     HostResource,
@@ -150,8 +149,6 @@ from vs_sandbox.api.symlink_mounts import (
 from vs_sim.api import (
     DISCARD,
     CloseOnce,
-    OsProcessTable,
-    ProcessTableUnavailableError,
     ReleaseStack,
 )
 
@@ -174,7 +171,7 @@ if TYPE_CHECKING:
         FeatureRef,
         WorkspaceSandbox,
     )
-    from vs_sim.api import BlockingRunner, Clock, OutputSink, ProcessTable
+    from vs_sim.api import BlockingRunner, Clock, OutputSink
 
 
 @dataclass(frozen=True)
@@ -704,11 +701,6 @@ class _NoopWorkspaceRecovery(NoCaptureRecovery):
         return False
 
 
-def _nothing(value: str) -> bool:
-    del value
-    return False
-
-
 class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
     """Run the agent on the host, refusing to start unless it is confined.
 
@@ -735,11 +727,9 @@ class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
     def __init__(
         self,
         build_sandbox: Callable[..., WorkspaceSandbox | None] = build_host_sandbox,
-        process_table: ProcessTable | None = None,
     ) -> None:
-        """Take the host-sandbox builder and the process table, seams for substituting the platform's."""
+        """Take the host-sandbox builder, a seam for substituting the platform's."""
         self._build_sandbox = build_sandbox
-        self._process_table = OsProcessTable() if process_table is None else process_table
 
     def agent_work_reaper(
         self,
@@ -750,18 +740,14 @@ class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
         local_namespace: Callable[[str], StateNamespace],
         log: Callable[[str], None],
     ) -> StageWorkReaper:
-        """Find one step's agent processes by the tag in their environment.
+        """Find one step's agent processes by the mark they carry, through the process table.
 
-        The host has no container to remove, so the process table is all there is. A host that
-        cannot list the environments of its processes cannot clear an agent, and refuses here.
+        The host has no container to remove, so the process table is all there is. The agent's
+        launcher gives it the mark twice, in its environment and as an argument of its leader,
+        as a stage command gets it, so one reaper serves both on Linux and on macOS.
         """
-        del run_id, system, blocking, local_namespace, log
-        try:
-            self._process_table.marked(STEP_TAG_ENV, _nothing)
-        except ProcessTableUnavailableError as error:
-            reason = "the host cannot list the environments of its processes"
-            raise StepClearUnsupportedError("host", AGENT_STEP_KINDS, reason) from error
-        return MarkedStageWorkReaper(self._process_table, marked_with_the_tag)
+        del blocking, local_namespace, log
+        return ProcessStageWorkReaper(system.process_table, run_id)
 
     def locate_tool(self, executable: str, site: ToolSite) -> ToolLocation:
         """Find *executable* on the host's ``PATH``: the agent and its workload both run there."""
@@ -939,7 +925,9 @@ def _starting_container(
 
 def _step_mark(request: RunEnvironmentRequest) -> dict[str, str]:
     """The environment that marks the session's commands as its step's, or none."""
-    return {} if request.step_tag is None else step_tag_env(request.step_tag)
+    if request.step_tag is None:
+        return {}
+    return step_tag_env(stage_mark(request.run_id, request.step_tag))
 
 
 def _reporting_tool_builds(request: RunEnvironmentRequest) -> ToolBuildOutputOpener | None:

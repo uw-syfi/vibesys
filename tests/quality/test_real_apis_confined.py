@@ -2053,9 +2053,9 @@ REAL_DEFAULT_PENDING: dict[str, dict[str, Owner]] = {
         "agent_image_is_pushed:SubprocessDockerBuildRunner()": Owner.LANE_A,
         "ensure_pushed:SubprocessDockerBuildRunner()": Owner.LANE_A,
     },
-    "libs/vs-runtime/src/vs_runtime/_run_environment.py": {
+    "libs/vs-runtime/src/vs_runtime/_skypilot_environment.py": {
+        "SkyPilotEnvironment._job_runner:SkyPilotJobRunner(...)": Owner.CONFINEMENT,
         "SkyPilotEnvironment._open_skypilot:SkyPilotBridge(...)": Owner.CONFINEMENT,
-        "SkyPilotEnvironment._open_skypilot:SkyPilotJobRunner(...)": Owner.CONFINEMENT,
     },
     "libs/vs-sandbox/src/vs_sandbox/fake_command_runner.py": {
         "FakeCommandRunner:default_factory=OsThreads": Owner.PURITY,

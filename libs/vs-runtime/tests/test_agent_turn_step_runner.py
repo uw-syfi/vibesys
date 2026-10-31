@@ -39,6 +39,7 @@ from vs_prompts.api import TemplateRenderer
 from vs_runtime.api.agent_step_runners import (
     AgentTurnStepRunner,
     NotATurnError,
+    RunWriter,
     TurnPaths,
     TurnState,
     TurnWithoutResultError,
@@ -51,6 +52,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.docker_agent_work_reaper import DockerAgentWorkReaper
 from vs_runtime.api.executor_contexts import context_for
+from vs_runtime.api.stage_marks import agent_mark
 from vs_runtime.api.step_runner import CancelSignal, Cleared
 from vs_runtime.api.testing import (
     FakeStageWorkReaper,
@@ -82,6 +84,7 @@ if TYPE_CHECKING:
 _RUN = "run-a"
 DEADLINE_AT = 1_000_000.0
 FENCE = core.HostFence(host_id=core.HostId(root="host"), epoch=1)
+WRITER = RunWriter(_RUN, FENCE)
 
 
 class Kind(StrEnum):
@@ -191,15 +194,15 @@ class World:
                 )
 
     def finishing(self, tag: core.RequestId) -> core.Request:
-        self.hangs.discard(tag.root)
+        self.hangs.discard(mark_of(tag))
         return self.step(tag)
 
     def running(self, tag: core.RequestId) -> core.Request:
-        self.hangs.add(tag.root)
+        self.hangs.add(mark_of(tag))
         return self.step(tag)
 
     async def left_running(self, tag: core.RequestId) -> int:
-        return len(self.processes.alive(tag=tag.root))
+        return len(self.processes.alive(tag=mark_of(tag)))
 
     def run(self, main: Coroutine[object, object, object]) -> object:
         async def with_session() -> object:
@@ -216,6 +219,11 @@ class World:
 
 def tag_named(name: str) -> core.RequestId:
     return core.RequestId(root=name)
+
+
+def mark_of(tag: core.RequestId) -> str:
+    """What the step's agent processes carry: its run-qualified mark."""
+    return agent_mark(_RUN, tag)
 
 
 def open_world(root: Path, kind: Kind = Kind.DISPATCH) -> World:
@@ -269,7 +277,7 @@ def open_world(root: Path, kind: Kind = Kind.DISPATCH) -> World:
     paths = TurnPaths(turns, lifecycle, FixedTurns())
 
     def restarted() -> AgentTurnStepRunner:
-        return AgentTurnStepRunner(paths, state, clock, FENCE, reaper)
+        return AgentTurnStepRunner(paths, state, clock, WRITER, reaper)
 
     return World(
         restarted(),
@@ -333,13 +341,13 @@ def test_a_turn_starts_every_agent_process_with_its_step_s_tag(tmp_path: Path) -
         await yield_until(
             lambda: world.left_running(tag), lambda running: running == 1, "the turn's process"
         )
-        (process,) = world.processes.alive(tag=tag.root)
-        assert process.env == {STEP_TAG_ENV: tag.root}
+        (process,) = world.processes.alive(tag=mark_of(tag))
+        assert process.env == {STEP_TAG_ENV: mark_of(tag)}
         cancel.set(CancelReason.WITHDRAWN)
         assert await task == Cancelled(reason=CancelReason.WITHDRAWN)
 
     world.run(main())
-    assert [request.step_tag for request in world.provider_turns] == [tag.root]
+    assert [request.step_tag for request in world.provider_turns] == [mark_of(tag)]
 
 
 def test_a_killed_turn_leaves_its_process_until_clear_ends_it_and_no_container_goes(
@@ -347,7 +355,9 @@ def test_a_killed_turn_leaves_its_process_until_clear_ends_it_and_no_container_g
 ) -> None:
     world = open_world(tmp_path)
     tag = tag_named("step-a")
-    bystander = world.processes.start(world.containers[1], step_tag_env("step-b"))
+    bystander = world.processes.start(
+        world.containers[1], step_tag_env(mark_of(tag_named("step-b")))
+    )
 
     async def main() -> None:
         task = asyncio.ensure_future(
@@ -397,7 +407,9 @@ def test_the_next_attempt_after_a_kill_is_asked_again_and_judged_from_the_record
         assert world.turns.settlement.fenced_by(world.workspace.path) == ()
 
     world.run(main())
-    assert [t.step_tag for t in world.provider_turns if t.step_tag == tag.root] == [tag.root] * 2
+    assert [t.step_tag for t in world.provider_turns if t.step_tag == mark_of(tag)] == [
+        mark_of(tag)
+    ] * 2
 
 
 @pytest.mark.parametrize("kind", list(Kind))
@@ -561,7 +573,7 @@ def test_a_registered_turn_that_is_not_the_operations_own_is_refused(
         TurnPaths(world.turns, world.lifecycle, Wrong()),
         world.state,
         world.clock,
-        FENCE,
+        WRITER,
         FakeStageWorkReaper(),
     )
 
@@ -579,7 +591,7 @@ def test_a_provider_that_dies_after_accepting_the_turn_gives_no_result_and_the_r
     """The attempt raises, as a crash does; clear forgets the unanswered record; the rerun answers."""
     world = open_world(tmp_path)
     tag = tag_named("step-a")
-    world.fails.add(tag.root)
+    world.fails.add(mark_of(tag))
 
     async def main() -> None:
         with pytest.raises(TurnWithoutResultError) as lost:
@@ -587,7 +599,7 @@ def test_a_provider_that_dies_after_accepting_the_turn_gives_no_result_and_the_r
         assert lost.value.tag == tag
         assert not lost.value.observation.terminal
 
-        world.fails.discard(tag.root)
+        world.fails.discard(mark_of(tag))
         assert await world.runner.clear(world.step(tag), tag) == Cleared()
         result = await world.runner.run(world.finishing(tag), tag, 2, DEADLINE_AT, CancelSignal())
 

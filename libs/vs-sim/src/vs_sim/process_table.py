@@ -1,15 +1,32 @@
-"""Find the processes that carry a mark in their environment, and end them by identity.
+"""Find the processes that carry a mark, and end them by identity.
 
-A mark is an environment variable a process started with and its descendants inherit, so the
-processes of work a dead owner started are found by the mark alone. A process is named by its
-pid and the kernel's start time of it: a pid the kernel reused for another process has another
-start time and is never ended.
+A mark is a ``NAME=value`` the launcher gave a process twice: in its environment, which its
+descendants inherit, and as an argument of its leader, which ``ps`` shows. What a host can read
+back differs, so the table that reads it differs:
+
+- Linux lists every process whose environment sets the mark (``/proc/<pid>/environ``) and ends
+  each one through a pidfd opened before its identity is checked, so a reused pid is never
+  signalled.
+- macOS shows no other process's environment, only its arguments. It lists the process group
+  leaders whose arguments carry the mark and ends the leader's whole group. Its identity is the
+  pid with the process's start second; there is no pidfd, so the check and the signal are two
+  steps. A pid can be reused only after its whole group is gone and the kernel wraps its pid
+  space, within one second of the check, and the signal then reaches a group that has the same
+  pid *and* is a new leader. That is the guarantee, not an atomic one.
+
+A process is named by its pid and the kernel's start time of it, so a reused pid is a different
+process. Work that left the group on macOS (a ``setsid`` child), or whose leader died first, is
+not found: nothing marks it any more.
 """
 
 from __future__ import annotations
 
+import os
+import re
 import signal
+import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -24,10 +41,21 @@ _STAT_FIELDS_AFTER_COMM = 20
 """Fields of ``/proc/<pid>/stat`` between the command's closing parenthesis and the start time."""
 _EXIT_WAIT_S = 10.0
 """How long a kill waits for the process to exit; SIGKILL cannot be handled, so this bounds only a stuck kernel."""
+_GROUP_POLL_S = 0.02
+_PS = ("ps", "-axww", "-o", "pid=,pgid=,stat=,lstart=,command=")
+_PS_TIMEOUT_S = 30.0
+_PS_ROW = re.compile(
+    r"^\s*(?P<pid>\d+)\s+(?P<pgid>\d+)\s+(?P<stat>\S+)\s+"
+    r"(?P<started>\w{3} \w{3}\s+\d+ \d\d:\d\d:\d\d \d{4})\s+(?P<command>.*)$"
+)
 
 
 class ProcessTableUnavailableError(RuntimeError):
-    """The host cannot list the environments of its processes."""
+    """The host cannot list the marks of its processes."""
+
+
+class ProcessSurvivedError(RuntimeError):
+    """A process was sent SIGKILL and was still running when the wait for it ended."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,19 +63,21 @@ class MarkedProcess:
     """A live process that carries a mark, named so that a reused pid is a different process."""
 
     pid: int
-    started: int
-    """The kernel's start time of the process (clock ticks since boot on Linux)."""
+    started: str
+    """The kernel's start time of the process, in the form the host reports it."""
     value: str
     """What the mark was set to."""
+    pgid: int = 0
+    """The process group it leads or belongs to."""
 
 
 class ProcessTable(Protocol):
-    """The host's processes, by the marks in their initial environments."""
+    """The host's processes, by the marks they carry."""
 
     def marked(self, name: str, matches: Callable[[str], bool]) -> tuple[MarkedProcess, ...]:
-        """Every live process whose environment sets *name* to a value *matches* accepts.
+        """The live processes this host can show carrying *name* with a value *matches* accepts.
 
-        A zombie holds no environment and is not listed. Raises
+        Which processes those are depends on the host (see the module docstring). Raises
         :class:`ProcessTableUnavailableError` when the host cannot list them.
         """
         ...
@@ -55,34 +85,82 @@ class ProcessTable(Protocol):
     def kill(self, process: MarkedProcess, name: str) -> bool:
         """End *process* with SIGKILL iff the pid is still that process and still carries the mark.
 
-        Returns whether the signal was sent: a process already gone, or a pid another process
-        now holds, is left alone and reported ``False``.
+        Where the host shows only a group's leader, the whole group ends. Returns whether the
+        signal was sent: a process already gone, or a pid another process now holds, is left
+        alone and reported ``False``. Raises :class:`ProcessSurvivedError` when what was
+        signalled is still running after a bounded wait.
         """
         ...
 
 
 class OsProcessTable:
-    """The Linux process table, read from ``/proc``."""
+    """The process table of the host this runs on: ``/proc`` on Linux, ``ps`` on macOS."""
+
+    def __init__(self) -> None:
+        """Choose the table the host's platform can read."""
+        self._table: ProcessTable | None = (
+            _ProcfsProcessTable()
+            if sys.platform.startswith("linux")
+            else _PsProcessTable()
+            if sys.platform == "darwin"
+            else None
+        )
 
     def marked(self, name: str, matches: Callable[[str], bool]) -> tuple[MarkedProcess, ...]:
-        """List the marked processes the current user may read."""
-        _require_procfs()
+        """List through the platform's table."""
+        return self._available().marked(name, matches)
+
+    def kill(self, process: MarkedProcess, name: str) -> bool:
+        """Kill through the platform's table."""
+        return self._available().kill(process, name)
+
+    def _available(self) -> ProcessTable:
+        if self._table is None:
+            message = f"no way to read process marks on {sys.platform}"
+            raise ProcessTableUnavailableError(message)
+        return self._table
+
+
+class NoProcessTable:
+    """A host with no table wired in: it cannot list marks, so nothing is ever reported gone.
+
+    The default of a seam an entrypoint fills with :class:`OsProcessTable`. Asking it raises
+    :class:`ProcessTableUnavailableError`, so a caller that waits on the table waits instead of
+    concluding that no process is left.
+    """
+
+    def marked(self, name: str, matches: Callable[[str], bool]) -> tuple[MarkedProcess, ...]:
+        """Refuse: there is no table to list."""
+        del matches
+        raise self._unavailable(name)
+
+    def kill(self, process: MarkedProcess, name: str) -> bool:
+        """Refuse: there is no table to find *process* in."""
+        del process
+        raise self._unavailable(name)
+
+    @staticmethod
+    def _unavailable(name: str) -> ProcessTableUnavailableError:
+        message = f"no process table was provided to read the {name} mark"
+        return ProcessTableUnavailableError(message)
+
+
+class _ProcfsProcessTable:
+    """Linux: every process whose environment sets the mark."""
+
+    def marked(self, name: str, matches: Callable[[str], bool]) -> tuple[MarkedProcess, ...]:
         found: list[MarkedProcess] = []
         for entry in _PROC.iterdir():
             if not entry.name.isdigit():
                 continue
-            pid = int(entry.name)
-            process = _read(pid, name)
+            process = _read_procfs(int(entry.name), name)
             if process is not None and matches(process.value):
                 found.append(process)
         return tuple(found)
 
     def kill(self, process: MarkedProcess, name: str) -> bool:
-        """Signal through a pidfd opened before the identity is checked."""
-        _require_procfs()
-
         def current() -> bool:
-            return _read(process.pid, name) == process
+            return _read_procfs(process.pid, name) == process
 
         try:
             return signal_if_current(process.pid, signal.SIGKILL, current, exit_wait_s=_EXIT_WAIT_S)
@@ -90,13 +168,7 @@ class OsProcessTable:
             return False
 
 
-def _require_procfs() -> None:
-    if not sys.platform.startswith("linux"):
-        message = f"listing process environments needs Linux procfs, not {sys.platform}"
-        raise ProcessTableUnavailableError(message)
-
-
-def _read(pid: int, name: str) -> MarkedProcess | None:
+def _read_procfs(pid: int, name: str) -> MarkedProcess | None:
     """The process *pid* if it is alive, readable and sets *name*; else ``None``."""
     try:
         environ = (_PROC / str(pid) / "environ").read_bytes()
@@ -106,7 +178,77 @@ def _read(pid: int, name: str) -> MarkedProcess | None:
     prefix = f"{name}=".encode()
     for line in environ.split(b"\0"):
         if line.startswith(prefix):
-            after_comm = stat.rpartition(")")[2].split()
-            started = int(after_comm[_STAT_FIELDS_AFTER_COMM])
-            return MarkedProcess(pid, started, line[len(prefix) :].decode(errors="replace"))
+            fields = stat.rpartition(")")[2].split()
+            pgid = int(fields[2])
+            started = fields[_STAT_FIELDS_AFTER_COMM]
+            return MarkedProcess(pid, started, line[len(prefix) :].decode(errors="replace"), pgid)
     return None
+
+
+@dataclass(frozen=True, slots=True)
+class PsRow:
+    """One process as ``ps`` lists it."""
+
+    pid: int
+    pgid: int
+    stat: str
+    started: str
+    command: str
+
+
+def parse_ps(listing: str) -> tuple[PsRow, ...]:
+    """The rows of ``ps -axww -o pid=,pgid=,stat=,lstart=,command=``; other lines are skipped."""
+    rows = (_PS_ROW.match(line) for line in listing.splitlines())
+    return tuple(
+        PsRow(int(m["pid"]), int(m["pgid"]), m["stat"], m["started"], m["command"])
+        for m in rows
+        if m is not None
+    )
+
+
+def mark_in(command: str, name: str) -> str | None:
+    """The value of the ``name=value`` argument in a ``ps`` command column, if there is one."""
+    found = re.search(rf"(?:^|\s){re.escape(name)}=(\S+)(?:\s|$)", command)
+    return None if found is None else found[1]
+
+
+class _PsProcessTable:
+    """macOS: the group leaders whose arguments carry the mark; ending one ends its group."""
+
+    def marked(self, name: str, matches: Callable[[str], bool]) -> tuple[MarkedProcess, ...]:
+        found: list[MarkedProcess] = []
+        for row in _listing():
+            value = mark_in(row.command, name) if row.pid == row.pgid else None
+            if value is not None and matches(value) and not row.stat.startswith("Z"):
+                found.append(MarkedProcess(row.pid, row.started, value, row.pgid))
+        return tuple(found)
+
+    def kill(self, process: MarkedProcess, name: str) -> bool:
+        if process not in self.marked(name, lambda value: value == process.value):
+            return False
+        try:
+            os.killpg(process.pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            return False
+        deadline = time.monotonic() + _EXIT_WAIT_S
+        while _group_running(process.pgid):
+            if time.monotonic() > deadline:
+                message = f"process group {process.pgid} survived SIGKILL"
+                raise ProcessSurvivedError(message)
+            time.sleep(_GROUP_POLL_S)
+        return True
+
+
+def _group_running(pgid: int) -> bool:
+    return any(row.pgid == pgid and not row.stat.startswith("Z") for row in _listing())
+
+
+def _listing() -> tuple[PsRow, ...]:
+    try:
+        done = subprocess.run(  # noqa: S603  # lint-waiver: LW-914302 [S603]; the fixed argv of the host's own ps.
+            _PS, capture_output=True, text=True, check=True, timeout=_PS_TIMEOUT_S
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        message = f"ps could not list the processes: {error}"
+        raise ProcessTableUnavailableError(message) from error
+    return parse_ps(done.stdout)

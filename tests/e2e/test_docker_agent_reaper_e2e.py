@@ -39,7 +39,7 @@ _EXIT_BOUND_S = 30.0
 
 @contextmanager
 def _marked_process(tag: str) -> Iterator[subprocess.Popen[bytes]]:
-    process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-914302 [S603]; a real-tier test starts its own fixed argv.
+    process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-914333 [S603]; a real-tier test starts its own fixed argv.
         [sys.executable, "-I", "-c", _SLEEP],
         env={**os.environ, STEP_TAG_ENV: tag},
         start_new_session=True,

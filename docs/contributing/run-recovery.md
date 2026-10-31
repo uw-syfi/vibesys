@@ -53,10 +53,10 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
 | `fold(log)` and `decide(state, now) -> actions` in `vs_core` | built, dormant (#3475 item 4a) |
 | Runner loop, `StepRunner` Protocol, `FakeStepRunner`, contract suite | built and dormant: `vs_runtime.api.step_runner` and `vs_runtime.api.testing`; no run selects it (#3475 item 4b) |
 | Runners: agent turn (`DispatchTurn`, `ResumeSessionTurn`, registered `SESSION_TURN` operations) and workspace | built, dormant: `vs_runtime.api.agent_step_runners`, with `vs_agent.reap_step_agents` and `AgentSessions.forget_unfinished` beneath them (#3475 item 5a). [Which runner owns each request kind](#the-runner-of-each-request-kind) names the 13 kinds with no owner |
-| Runners: Slurm and local evaluation (`SlurmJobStepRunner`, `LocalJobStepRunner`) | built and dormant; the local runner reaps what a dead process left through a `StageWorkReaper`; `MarkedStageWorkReaper` finds the host processes of a local evaluation by the `VIBESYS_STEP_TAG` mark its candidate session sets (Linux), and Docker candidate containers are not yet reaped by tag |
+| Runners: Slurm and local evaluation (`SlurmJobStepRunner`, `LocalJobStepRunner`) | built and dormant; the local runner reaps what a dead process left through a `StageWorkReaper`: `ProcessStageWorkReaper` ends the stage processes and `ContainerStageWorkReaper` the Docker candidate containers of the tag, both found by the step mark (see [Marks](#marks-on-local-stage-work)) |
 | Runners: registered operation and adoption | built and dormant: `vs_runtime.api.operation_step_runner` and `vs_runtime.api.adoption_step_runner`, each in the contract suite (#3475 item 5c) |
 | Runner of the 13 executor kinds: `ExecutorStepRunner` | built and dormant: `vs_runtime.api.executor_step_runner`, in the contract suite for every kind (#3475 item 5d) |
-| Per-environment `clear` (Docker, SkyPilot, Modal, Slurm, Host) | built, dormant: `RunEnvironment.agent_work_reaper` (#3475 item 5e); the Host environment refuses agent steps where it cannot list process environments, see [open risks](#open-risks) |
+| Per-environment `clear` (Docker, SkyPilot, Modal, Slurm, Host) | built, dormant: `RunEnvironment.agent_work_reaper` (#3475 item 5e); every environment clears an agent step, the Host environment on macOS through a leader that carries the mark, see [open risks](#open-risks) |
 | Pause drains within a deadline and records `Parked` | in progress (#3475 item 1) |
 | `vs-dst` kills and pauses at every log write and every await | in progress (#3475 item 2) |
 | `state.pb` as a cache, one-append commit | unbuilt |
@@ -227,6 +227,18 @@ Two things follow.
   and a result is only recorded after its runner's `clear` or its own cancel path ended the processes. That
   ordering is `decide`'s rule from item 4a, and no test here proves it for the snapshot kinds.
 
+### Marks on local stage work
+
+A local evaluation runs its stages in a throwaway candidate session opened under `<run id>:<evaluation handle>`. Every stage command carries that mark as `VIBESYS_STEP_TAG` in its environment, and its process group leader carries it as an argument; a Docker candidate container also carries it as the `vibesys.step-tag` label. The run id is part of the mark because two runs on one host can use the same request id. What `clear` can find depends on what the host shows:
+
+| Host | Shown | Ends | Guarantee against pid reuse |
+|---|---|---|---|
+| Linux | the environment of every process (`/proc`) | each marked process, including a `setsid` descendant | a pidfd is opened before the process's start time is checked, so a reused pid is never signalled |
+| macOS | only arguments, so only the group leader | the leader's whole group | none atomic: the pid and its start second are checked, then the group is signalled; a wrong kill needs the pid space to wrap within that second and a new group leader to take the pid |
+| Docker | the container label, read from the daemon | the container, listed again afterwards to confirm | the container id |
+
+Not found on macOS: the members of a group whose leader died first, and a `setsid` child, because nothing visible carries the mark any more. `clear` then reports a clean host although they run. The leader is a shell that waits for its command and never replaces itself, so it dies before its group only by an outside `SIGKILL`. A durable record of the group, kept through `Project`, would close this; it is not built. Partial output is never reset: each open of a stage stream is a new stream with a new id, so a re-run starts empty and the dead attempt's bytes stay as its history.
+
 ### What fits none
 
 - **Effects an agent performs itself** outside the workspace and the tool servers, such as a network call
@@ -239,9 +251,10 @@ Two things follow.
   marker sweep this page first described is not available there: the Host environment serves macOS, where
   `ps eww` does not show another process's environment (measured on Darwin 27.2: the marker of a child
   process owned by the same user is absent from its `ps eww` line), so no process can be found by the
-  marker the way a Linux `/proc/<pid>/environ` scan finds it inside a container. The Host environment finds
-  agents through the process table that item 5d builds, and refuses agent steps where that table cannot list
-  environments (see the per-environment risk below), instead of recording a process group of its own.
+  marker the way a Linux `/proc/<pid>/environ` scan finds it inside a container. The Host environment
+  launches an agent the way a stage command is launched, led by a shell that carries the mark as an argument,
+  and finds it through the process table of item 5d, so a Metal run on macOS starts and clears (see the
+  per-environment risk below).
 - **A cancelled adoption.** `Workspaces.adopt` publishes in a worker thread, and cancelling the step ends
   the wait for it, not the thread. The commit a straggler writes is the commit the next attempt writes
   (`adopt` is idempotent), so `AdoptionStepRunner.clear` removes nothing and only proves the workspace
@@ -846,24 +859,60 @@ These are facts the implementation must settle, found while checking the design 
     just before it was killed can still be journaled after the sweep read the journal, and then its job
     runs until its own end; the window is the bridge's handling time of one request.
   - **Modal** has no per-step handle: its app is named per run (`VIBESYS_MODAL_APP_NAME`) and the
-    candidate's `modal run` is a client process inside the agent container, so it carries the step's tag
+    candidate's `modal run` is a client process inside the agent container, so it carries the step's mark
     and is ended by the Docker sweep. What Modal then does with remote work whose client was killed is
-    Modal's own cleanup and is not measured here; a real-tier test with a Modal account is owed.
+    Modal's own cleanup and is not measured here: after a kill, a function call may keep running, and
+    spending, until Modal ends it. A real-tier test with a Modal account is owed.
   - **Slurm** edits in a local Docker container too and gets the Docker sweep. Its jobs are adopted, not
     cleared (`SlurmJobStepRunner`).
-  - **Host** finds the agent's processes by the tag in their environment through the process table. Where
-    the table cannot list process environments (macOS today) `agent_work_reaper` raises
-    `StepClearUnsupportedError`, naming `dispatch_turn`, `resume_session_turn` and
-    `execute_registered_operation`, at the start of the run, so a step that could never be cleared
-    does not wait. `MarkedStageWorkReaper` takes a matcher so one sweep serves a stage command (a handle of
-    the tag) and an agent (the tag). A local evaluation's stage commands (`SubmitMeasurement`,
-    `capture_command`, `validate_local`) have the same gap on macOS and still raise
-    `ClearUnavailableError` there, which the loop retries for ever.
+  - **Host** finds the agent's processes through the same process table and reaper as a local
+    evaluation's stage commands (`ProcessStageWorkReaper`). The mark an agent carries is the stage mark of
+    the step's own handle (`agent_mark`), so one reaper finds both. `confine_to_sandbox(leads_group=True)`
+    leads the host command with a shell that carries the mark as an argument (`step_shell_argv`), as
+    `LocalShellRunner` leads a stage command, because macOS shows another process's arguments and not its
+    environment. No step kind is refused: a Metal run on macOS starts and clears. A contract case runs the
+    reaper over a process table that shows what Linux shows and one that shows what macOS shows, and an
+    end-to-end case runs the production argv against the real `ps` or `/proc` of the host it runs on. The
+    macOS residual below applies to an agent too: a descendant that left its group, or whose group leader
+    died first, is not found.
   - **Found on the way:** `SkyPilotEnvironment` inherited a Docker run-wide reap that read Docker settings
     its configuration lacks, so resuming a SkyPilot run raised `AttributeError`; and the Modal and Slurm
     environments never reaped their run-labelled agent containers on resume. Both are fixed, with a test
     over every container environment.
+- **6a must replace the receipts the 13 executor kinds rely on.** In plain words: `EnsureWorkspace`,
+  `RestoreRevision`, `DiscardWorkspace`, `CloseAttemptScope`, `SnapshotAndRetain`, `RetainRevision`,
+  `EnsureSession`, `CancelTurn`, `CloseSession`, `SnapshotAndRetainRun`, `ObserveOwnedJob`, `CollectEvidence`
+  and `CancelOwnedJob` are run again after a crash with no `clear`, and that is safe today only because their
+  executors write a receipt for each request and read it back. The cutover deletes those receipts, so 6a has
+  to give each kind an equivalent that does the same job. Two need it spelled out: `EnsureSession` repeats
+  safely only under the same request id, and `SnapshotAndRetain` and `SnapshotAndRetainRun` find the
+  snapshot an interrupted attempt already made by its label only when they are resumed.
+- **The executor kinds repeat safely today because their executors keep receipts.** `ExecutorStepRunner`
+  runs on `RuntimeWorkspaceRequests`, `RuntimeSessionRequests` and the evaluation executor, which replay a
+  sealed result by request id and resume an unsealed one (`run_once`). Every kind passes a kill at sampled
+  durable writes through the runner (every write, for `EnsureSession`), but the cutover deletes
+  `run_once`, and these facts must then hold without it:
+  - `SnapshotAndRetain` and `SnapshotAndRetainRun` look for the snapshot an interrupted attempt already
+    committed by its label only when resumed (`_snapshot`, `find_snapshot` under `if resumed`). Without
+    the flag a repeat commits again: an unreferenced equal-tree commit, never a wrong result. The lookup
+    has to become unconditional. Measured on a repeat under another request id, each snapshot or retain
+    adds one retained revision (effects 9 to 10, 7 to 8, 7 to 8), where `EnsureWorkspace`,
+    `RestoreRevision`, `DiscardWorkspace`, `CancelTurn`, `CloseSession` and the evaluation kinds add none.
+  - `EnsureSession` repeats safely only under the same request id: the binding records the ensure that
+    made it, and a fresh-policy ensure under another id is refused ("session identity is already in use").
+    The tag is stable across epochs, so the runner is safe; a retry that minted a new id would not be.
+- **The snapshot kinds are unchecked here.** `RetainByContent` is safe once every writer of the scope has
+  a result, which is `decide`'s rule (item 4a); `ExecutorStepRunner` does not check it.
 - **Fold cost.** Measured, see [state.pb is a cache](#statepb-is-a-cache); the keyframe interval is open.
+- **Stage work left running on a Metal run on macOS.** This applies only to Metal runs on the macOS host, where
+  macOS shows other processes' arguments but not their environment. A stage command is found by the mark on
+  its process group leader. If something outside the run kills that leader with SIGKILL while other processes
+  of its group keep running, nothing visible carries the mark any more. `clear` does not find them and
+  reports the host clean, and the re-run then races them. A child that starts its own session is missed the
+  same way. Linux and Docker runs are not affected: Linux reads the mark from every process's environment,
+  and Docker removes the container. No durable record of the group is kept; accepted for now. See
+  [marks on local stage work](#marks-on-local-stage-work).
+- **Fold cost.** See [state.pb is a cache](#statepb-is-a-cache).
 - **Interim bodies.** Request and event bodies in the new records are not yet proto messages. Until phase 3
   generates them, schema evolution of those bodies follows today's envelope migration chain, which is
   deleted at phase 3.
