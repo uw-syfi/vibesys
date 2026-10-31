@@ -50,6 +50,7 @@ from ._proofs import (
 )
 from ._quota_pause_clock import credit_quota_pause
 from ._registry import ContractError
+from ._request_recovery import is_open
 from ._routing import SIGNAL_ORDER, event_area
 from ._run_pause import EpochFacts, control_refusal, reopened, stop_standing
 from ._session_inputs import check_declared_target, may_have_been_read
@@ -1215,7 +1216,12 @@ def _command(submission: Submission) -> Command:
 
 
 def _submitted(
-    state: CoreState, event: DecisionSubmitted, dispatch: Dispatch, *, check_revision: bool = True
+    state: CoreState,
+    event: DecisionSubmitted,
+    dispatch: Dispatch,
+    *,
+    check_revision: bool = True,
+    stopping: bool = False,
 ) -> Transition:
     submission = event.decision
     decision = event.command
@@ -1223,7 +1229,7 @@ def _submitted(
     replay = _decision_replay(state, submission)
     if replay is not None:
         return replay
-    rejection = validate_decision(state, event, check_revision=check_revision)
+    rejection = validate_decision(state, event, check_revision=check_revision, stopping=stopping)
     feedback = rejection or Accepted(decision_id=decision.decision_id)
     until = (
         resolve_until(state.run, submission.until)
@@ -1254,7 +1260,7 @@ def _submitted(
         updated = updated.model_copy(
             update={
                 "run": updated.run.model_copy(
-                    update={"result": decision.result, "status": RunStatus.CLOSING}
+                    update={"result": decision.result, "status": RunStatus.CLOSING, "park": None}
                 )
             }
         )
@@ -1353,7 +1359,10 @@ def _stop_control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) 
         return Transition(state=state)
     timed = _advance_event_time(state, event)
     result = _submitted(
-        timed, DecisionSubmitted(decision=decision, expected_revision=state.revision), dispatch
+        timed,
+        DecisionSubmitted(decision=decision, expected_revision=state.revision),
+        dispatch,
+        stopping=True,
     )
     if not any(isinstance(feedback, Accepted) for feedback in result.events):
         return result
@@ -1798,6 +1807,29 @@ def settle_park(state: CoreState) -> CoreState:
     if not cancellations:
         return parked
     return _registered_transition(parked, list(cancellations), []).state
+
+
+def settle_end(state: CoreState) -> CoreState:
+    """A closing run whose last step has a result, taken to its terminal status.
+
+    The kernel notices that nothing is left open at its next clock input, which the live shell
+    supplies on a timer. A fold has no timer, and the record of the step is the last input there
+    is, so the wake the shell would send is applied here, until it changes nothing: ending a
+    record the wake finds past its limit is one change, and the run's end the next. Without it a
+    run that was stopped with steps open is closing for good, and its end is recorded while it is.
+    """
+    while state.run.status is RunStatus.CLOSING and not any(
+        is_open(row) for row in state.records.records
+    ):
+        woken = step_recorded(state, ClockAdvanced(now_at=state.run.now_at)).state
+        if _phases(woken) == _phases(state):
+            return woken
+        state = woken
+    return state
+
+
+def _phases(state: CoreState) -> tuple[RunStatus, tuple[RequestPhase, ...]]:
+    return state.run.status, tuple(row.phase for row in state.records.records)
 
 
 def step(state: CoreState, event: CoreEvent, *, reducers: CoreReducers | None = None) -> Transition:

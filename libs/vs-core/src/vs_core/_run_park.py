@@ -1,27 +1,35 @@
 """Drain a run without settling its search or consuming unfinished measurements.
 
-Park owns only admission and physical job release. Existing turn/checkpoint transitions
-finish normally, and the ordinary persisted search and request ledger resume next epoch.
+Park owns admission, and the physical release of the jobs an executor hosts. Existing
+turn/checkpoint transitions finish normally, and the ordinary persisted search and request ledger
+resume next epoch.
 
-A park never leaves a running request behind. Both modes close admission and wait until every
-request the run dispatched has recorded its outcome. Pause-now also cancels what can be
-cancelled at once (turns, jobs). A pause may carry a drain deadline (``RunPark.deadline_at``,
-from the event's ``drain_seconds``; Pause-now has the run's cleanup bound when it names none).
-At the deadline the drain stops waiting: a request recovery would send again goes back to
-PREPARED, interrupted and unreported (``resent``), and the next epoch runs it again; the rest is
-cancelled and ends at its limit, a cleanup bound after the deadline.
+A park never leaves a running request behind, with two exceptions. A run the step loop hosts
+(``_hosted_by_loop``) leaves its jobs alone: the request that watches a job goes back to
+PREPARED, interrupted and unreported (``resent``), the job runs on, and the next epoch runs the
+request again, where its runner finds the job and attaches to it. An executor's run still has its
+jobs cancelled and their requests preserved, until the cutover removes the executor. And a request
+whose attempt the step loop runs (``_attempt_running``) does not hold a drain that cancels: the
+loop cancels the attempt and records its interruption when it can, and a call that cannot be
+stopped ends with the process, whose attempt the next epoch ends as interrupted, not as a crash
+(``epoch_opened``).
 
-The one exception is a request whose attempt the step loop runs (``_attempt_running``). A drain
-that cancels does not wait for it: the loop cancels the attempt and records its interruption
-when it can, and a call that cannot be stopped ends with the process.
+Both modes close admission and wait until every other request the run dispatched has recorded its
+outcome. Pause-now also cancels what can be cancelled at once (turns, an executor's jobs). A pause
+may carry a drain deadline (``RunPark.deadline_at``, from the event's ``drain_seconds``; Pause-now
+has the run's cleanup bound when it names none). At the deadline the drain stops waiting: a request
+recovery would send again goes back to PREPARED the same way; the rest is cancelled and ends at
+its limit, a cleanup bound after the deadline.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._proofs import request_dependency_status
 from ._recovery_unanswered import Inspection, settlement
-from ._request_recovery import resent
+from ._scope_order import holds_back
+from ._step_attempts import unstarted
 from ._turn_permit import (
     cap_open_records,
     drain_in_force,
@@ -32,7 +40,7 @@ from ._turn_permit import (
     turn_executing,
 )
 from .types.attempts import CloseAttemptScope, DiscardWorkspace, RetainRevision, SnapshotAndRetain
-from .types.common import RequestId, RunStatus
+from .types.common import DependencyStatus, LifecycleClass, RequestId, RunStatus
 from .types.evaluation import (
     CancelOwnedJob,
     CollectEvidence,
@@ -41,7 +49,7 @@ from .types.evaluation import (
     OwnedJob,
     SubmitMeasurement,
 )
-from .types.records import BlockRequest, RequestPhase, Scheduled
+from .types.records import BlockRequest, RequestPhase, Scheduled, request_lifecycle
 from .types.sessions import (
     CancelTurn,
     CloseSession,
@@ -128,6 +136,33 @@ def dispatch_allowed(state: CoreState, request: Request) -> bool:
     )
 
 
+def starts(state: CoreState, record: RequestRecord, dependencies: DependencyStatus) -> bool:
+    """Whether the run lets the prepared step ``record`` start.
+
+    It is the one question `decide` and the drain of a pause both ask.
+
+    Its dependencies are met, the run's status admits it (a draining run starts only the work the
+    drain lets through), and no step of its scope must end first. A drain parks when nothing
+    starts, so a step the rule holds back can never keep a pause from parking.
+    """
+    return (
+        dependencies is not DependencyStatus.PENDING
+        and _admits(state, record.request)
+        and not holds_back(state, record)
+    )
+
+
+def _admits(state: CoreState, request: Request) -> bool:
+    """Whether the run's status lets a step start: a paused run starts none but drain work."""
+    match state.run.status:
+        case RunStatus.RUNNING | RunStatus.CLOSING:
+            return True
+        case RunStatus.DRAINING:
+            return dispatch_allowed(state, request)
+        case _:
+            return False
+
+
 def drain_deadline(event: RunControlEvent, now_at: float, cleanup_bound: float) -> float | None:
     """When the drain a pause starts stops waiting; None for a pause that waits for its turns.
 
@@ -158,13 +193,25 @@ def _pause_now_holds_back(state: CoreState, request: Request) -> bool:
     )
 
 
+def _releases_a_job(state: CoreState, request: Request) -> bool:
+    """Whether the drain lets go of the request that watches a job, which any pause does at once."""
+    park = state.run.park
+    return (
+        park is not None
+        and state.run.status == RunStatus.DRAINING
+        and state.records.recovery.epoch == park.epoch
+        and request_lifecycle(request) is LifecycleClass.OWNED_JOB
+    )
+
+
 def pause_cancels(state: CoreState, request: Request) -> bool:
     """Whether the drain of a pause cancels this running request now.
 
-    A Pause-now does from the start, and any pause does once its drain deadline has passed. The
-    effects that finish work a turn already did (a snapshot, a cleanup) are left to end.
+    A Pause-now does from the start, any pause does once its drain deadline has passed, and a
+    pause lets go of the request that watches a job at once: the job is left running. The effects
+    that finish work a turn already did (a snapshot, a cleanup) are left to end.
     """
-    return _pause_now_holds_back(state, request)
+    return _pause_now_holds_back(state, request) or _releases_a_job(state, request)
 
 
 def _unfinished(state: CoreState, record: RequestRecord) -> bool:
@@ -177,10 +224,12 @@ def _unfinished(state: CoreState, record: RequestRecord) -> bool:
             session.resource_id == record.observation.resource_id
             for session in state.sessions.sessions
         )
-    # A submitted job keeps its request open until the measurement ends. The park
-    # cancellation releases its physical job and deliberately preserves that request.
+    # A job an executor watches keeps its request open until the measurement ends: the park
+    # cancellation releases its physical job and deliberately preserves that request. The step
+    # loop's request does not: the loop interrupts it and the job runs on (``_interrupt``).
     return not (
         isinstance(record.request, SubmitMeasurement)
+        and not _hosted_by_loop(state)
         and any(job.submission_id == record.request_id for job in state.evaluation.jobs)
     )
 
@@ -190,8 +239,9 @@ def _holds_park(state: CoreState, record: RequestRecord, *, immediate: bool) -> 
 
     A drain that cancels (a Pause now, or any pause past its deadline) does not wait for a request
     whose attempt the step loop runs: the loop cancels it, and a call that cannot be stopped
-    ends with the process, which the next epoch's ``clear`` reaps. The kernel's own requests are
-    waited for, so a park leaves none of them open.
+    ends with the process: the next epoch ends its attempt as interrupted (``epoch_opened``) and
+    its ``clear`` reaps what it left. The kernel's own requests are waited for, so a park leaves none
+    of them open.
     """
     return _unfinished(state, record) and not (immediate and _attempt_running(state, record))
 
@@ -287,9 +337,10 @@ def _rerunnable(record: RequestRecord) -> bool:
 def cap_to_drain_deadline(state: CoreState) -> CoreState:
     """Give the running requests a drain's deadline cannot interrupt a cleanup bound past it.
 
-    A request that cannot be sent again is cancelled once the deadline passes (a turn, a job) or
-    left to its own limit; either way it ends by ``cleanup_bound`` after the deadline, as any
-    request ends at its limit, and the loop then cancels its executor.
+    A request that cannot be sent again is cancelled once the deadline passes (a turn) or left to
+    its own limit; either way it ends by ``cleanup_bound`` after the deadline, as any request ends
+    at its limit, and the loop then cancels its executor. In a run the step loop hosts a job's
+    request is not among them: the drain returns it at once, and the cap would outlive the attempt.
     """
     park = state.run.park
     if park is None or park.deadline_at is None or state.run.status != RunStatus.DRAINING:
@@ -301,19 +352,33 @@ def cap_to_drain_deadline(state: CoreState) -> CoreState:
     )
 
 
-def _interrupt_overdue(state: CoreState, park: RunPark) -> CoreState:
-    """At the drain deadline, send the running requests recovery could send again back to PREPARED.
+def _hosted_by_loop(state: CoreState) -> bool:
+    """Whether the step loop runs this run: its log has opened an epoch.
 
-    The request is neither observed nor reported to its owner, and counts as no failure and no
-    retry. The loop cancels its executor, whose cleanup runs, and the next epoch dispatches it
-    again unchanged.
+    An executor's run has none. Its jobs are released by the park's cancellation instead, until
+    the cutover replaces the executor; the loop's runs leave a job alone.
     """
-    if not _past_deadline(state, park):
-        return state
-    reconciliation = state.run.limits.reconciliation_bound
+    return state.steps.epoch > 0
+
+
+def _holds_a_job(record: RequestRecord) -> bool:
+    """Whether the request is the one that watches a job, which a pause releases at once."""
+    return request_lifecycle(record.request) is LifecycleClass.OWNED_JOB
+
+
+def _interrupt(state: CoreState, park: RunPark) -> CoreState:
+    """Send the running requests a drain no longer waits for back to PREPARED.
+
+    A job's request goes at once, a pause leaving the job alone; the rest recovery could send
+    again go at the drain deadline. The request is neither observed nor reported to its owner, and
+    counts as no failure and no retry. The loop cancels its executor, whose cleanup leaves a job
+    running, and the next epoch dispatches the request again unchanged.
+    """
+    overdue = _past_deadline(state, park)
     records = tuple(
-        resent(row, state.run.now_at, reconciliation)
-        if _unfinished(state, row) and _rerunnable(row)
+        unstarted(state, row)
+        if _unfinished(state, row)
+        and ((_holds_a_job(row) and _hosted_by_loop(state)) or (overdue and _rerunnable(row)))
         else row
         for row in state.records.records
     )
@@ -325,11 +390,11 @@ def _interrupt_overdue(state: CoreState, park: RunPark) -> CoreState:
 
 
 def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
-    """Request each live job's release once, then park after turns and their checkpoints drain."""
+    """Release what a drain no longer waits for, then park after turns and their checkpoints drain."""
     park = state.run.park
     if state.run.status != RunStatus.DRAINING or park is None:
         return state, ()
-    state = _interrupt_overdue(state, park)
+    state = _interrupt(state, park)
     immediate = _immediate(state, park)
     # Polls/submissions already authorized must commit before their jobs are cancelled.
     if not immediate and any(
@@ -340,12 +405,12 @@ def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
         return state, ()
     pending, released = _cancel_turns(state, park)
     for job in (*state.evaluation.jobs, *state.evaluation.registered_jobs):
-        if job.terminal or job.resource_id is None:
-            continue
+        source_id = job.submission_id if isinstance(job, OwnedJob) else job.request_id
+        if job.terminal or job.resource_id is None or _hosted_by_loop(state):
+            continue  # the step loop hosts this run, and a pause leaves its jobs alone
         identity = RequestId(root=f"park:{park.control_id.root}:{job.resource_id.root}")
         held = state.records.record(identity)
         if held is None:
-            source_id = job.submission_id if isinstance(job, OwnedJob) else job.request_id
             source = state.records.record(source_id)
             request = CancelOwnedJob(
                 request_id=identity,
@@ -385,7 +450,12 @@ def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
     ):
         return state, ()
     if not immediate and any(
-        row.phase == RequestPhase.PREPARED and dispatch_allowed(state, row.request)
+        row.phase == RequestPhase.PREPARED
+        and starts(
+            state,
+            row,
+            request_dependency_status(row.request, state.run.receipts, state.records),
+        )
         for row in state.records.records
     ):
         return state, ()
