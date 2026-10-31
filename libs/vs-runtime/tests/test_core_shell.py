@@ -493,6 +493,18 @@ class _InvalidStateSearch:
         del event, view
         return state.model_copy(update={"dropped": "not a tuple"}), []
 
+    def awaits(self, state: FlowState, decision: Decision) -> bool:
+        return self._inner.awaits(state, decision)
+
+    def changes(self, before: FlowState, after: FlowState) -> bytes | None:
+        return self._inner.changes(before, after)
+
+    def extend(self, state: FlowState, changes: bytes) -> FlowState:
+        return self._inner.extend(state, changes)
+
+    def resume(self, state: FlowState) -> FlowState:
+        return self._inner.resume(state)
+
 
 def test_a_strategy_state_that_breaks_its_own_invariant_never_becomes_durable() -> None:
     """The commit rejects it, so the last good record stays loadable by a later process."""

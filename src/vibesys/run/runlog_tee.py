@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from datetime import datetime
     from types import TracebackType
 
-    from vs_runlog.api import FileRunContent, FileRunLogWriter
+    from vs_runlog.api import FileRunContent, ProjectionWriter
 
 # A journal observation can contain large content; the record cap applies only
 # after its content has been moved to blobs and transcript streams.
@@ -57,7 +57,7 @@ class RunLogTee:
 
     def __init__(
         self,
-        writer: FileRunLogWriter,
+        writer: ProjectionWriter,
         content: FileRunContent,
         run_id: str,
         *,

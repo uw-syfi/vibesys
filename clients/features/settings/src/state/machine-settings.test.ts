@@ -295,6 +295,49 @@ describe('adding a cluster', () => {
     expect(refused.form().problem?.field).toBe('name');
   });
 
+  test("a failure of the form as a whole has a short status word: the connection's cause, else what it was doing", () => {
+    const SAID = 'the helper replied with an error nobody classified';
+    const save = (cause?: 'link' | 'auth') => {
+      const walk = new Walk();
+      walk.passing();
+      walk.do({type: 'save', host: HOST});
+      walk.do({
+        type: 'saved',
+        token: walk.last('save').token,
+        host: HOST,
+        result: {ok: false, error: SAID, ...(cause === undefined ? {} : {cause})},
+      });
+      return walk.form().problem;
+    };
+    expect(save()).toEqual({field: null, text: SAID, word: 'Not saved'});
+    expect(save('link')?.word).toBe('Unreachable');
+    expect(save('auth')?.word).toBe('Sign-in needed');
+
+    const test = new Walk();
+    test.do({type: 'focus', host: HOST, section: 'clusters'});
+    test.do({type: 'open-form', host: HOST});
+    test.type({name: 'lab', host: 'lab-login', workspace: '/scratch/vibesys'});
+    test.do({type: 'test', host: HOST});
+    test.do({
+      type: 'tested',
+      token: test.last('test').token,
+      host: HOST,
+      result: {ok: false, error: SAID},
+    });
+    expect(test.form().problem?.word).toBe('Not tested');
+    // A failure that names a field is that field's, with no status word of its own.
+    const refused = new Walk();
+    refused.passing();
+    refused.do({type: 'save', host: HOST});
+    refused.do({
+      type: 'saved',
+      token: refused.last('save').token,
+      host: HOST,
+      result: {ok: false, error: "a cluster named 'lab' is already set up"},
+    });
+    expect(refused.form().problem?.word).toBeUndefined();
+  });
+
   test('the form cannot be closed or edited while its save is awaited', () => {
     const walk = new Walk();
     walk.passing();

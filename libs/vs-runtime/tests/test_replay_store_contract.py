@@ -103,7 +103,9 @@ def stores(request: pytest.FixtureRequest, tmp_path: Path, sim: Sim) -> StoreFac
             yield project.state_store(RUN, fault_plan=fault_plan)
         else:
             with log_writer(project, sim) as writer:
-                yield RunLogReplayStore(writer, project.state_store(RUN, fault_plan=fault_plan))
+                yield RunLogReplayStore(
+                    writer, project.state_store(RUN, fault_plan=fault_plan), SimThreads()
+                )
 
     return opened
 
@@ -173,7 +175,7 @@ def test_a_fault_at_any_fsync_resumes_to_the_same_log(
             gate.around(Boundary.DURABLE_WRITE, "fsync", partial(real, descriptor))
 
         with log_writer(project, sim, sync) as writer:
-            store = RunLogReplayStore(writer, project.state_store(RUN))
+            store = RunLogReplayStore(writer, project.state_store(RUN), SimThreads())
             fence = store.acquire("host-a", now, 30)
             assert fence is not None
             extend(store, fence, now=now)
@@ -194,13 +196,15 @@ def test_a_fault_at_any_fsync_resumes_to_the_same_log(
         gate.heal()
         settle(project, gate, 100)  # The crashed process's lease has lapsed.
         with log_writer(project, sim) as writer:
-            assert RunLogReplayStore(writer, project.state_store(RUN)).load() == envelope(LENGTH)
+            assert RunLogReplayStore(
+                writer, project.state_store(RUN), SimThreads()
+            ).load() == envelope(LENGTH)
 
 
 def written_run(tmp_path: Path, sim: Sim) -> tuple[Project, Path]:
     project = Project.open(tmp_path)
     with log_writer(project, sim) as writer:
-        store = RunLogReplayStore(writer, project.state_store(RUN))
+        store = RunLogReplayStore(writer, project.state_store(RUN), SimThreads())
         fence = store.acquire("host-a", 0, 30)
         assert fence is not None
         assert extend(store, fence)
@@ -212,7 +216,7 @@ def reload(project: Project) -> StoredEnvelope | None:
     threads = SimThreads()
     path = project.run_log_path_for(project.root, RUN)
     with FileRunLogWriter(path, clock=threads.clock, threads=threads) as writer:
-        stored = RunLogReplayStore(writer, project.state_store(RUN)).load()
+        stored = RunLogReplayStore(writer, project.state_store(RUN), SimThreads()).load()
     assert stored is None or isinstance(stored, StoredEnvelope)
     return stored
 
@@ -275,7 +279,7 @@ def test_a_retained_positional_store_requires_facts_only_import(tmp_path: Path, 
     assert isinstance(store.commit(None, retained, owner, 0), Committed)
     assert store.release(owner, 0)
     with log_writer(project, sim) as writer:
-        replay_store = RunLogReplayStore(writer, store)
+        replay_store = RunLogReplayStore(writer, store, SimThreads())
         fence = replay_store.acquire("host-a", 0, 30)
         assert fence is not None
         with pytest.raises(ValueError, match="facts-only import"):

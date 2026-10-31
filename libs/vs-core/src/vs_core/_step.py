@@ -1437,10 +1437,14 @@ def _lifted(state: CoreState, control: ControlInput) -> tuple[CoreState, bool]:
     """
     if control.action != "resume":
         return state, False
-    lifting = stop_standing(state.run) or state.run.status in (RunStatus.TERMINAL, RunStatus.PARKED)
-    if state.run.status == RunStatus.TERMINAL:
+    stopped = stop_standing(state.run)
+    terminal = state.run.status == RunStatus.TERMINAL
+    lifting = stopped or terminal or state.run.status == RunStatus.PARKED
+    if terminal:
         state = state.model_copy(update={"run": reopened(state.run)})
-    if lifting:
+    if stopped or terminal:
+        # The adoption of a stopped run answered the stop. One a pause merely outlasted was the
+        # run's own, and stays: the search that made it goes on to finish the run with it.
         state = state.model_copy(update={"settlement": reopen_adoption(state.settlement)})
     return state, lifting
 
@@ -1466,7 +1470,7 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     if refusal is not None:
         raise refusal
     check_declared_target(event.control.target, state.run.declaration)
-    new_epoch = state.run.status in (RunStatus.TERMINAL, RunStatus.PARKED)
+    new_epoch = state.run.status == RunStatus.TERMINAL
     state, lifting = _lifted(state, event.control)
     # A capacity wait leaves the run paused: it only records when the run resumes itself.
     waits = event.control.when == "capacity_returns"
