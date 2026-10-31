@@ -60,6 +60,7 @@ if TYPE_CHECKING:
     from vs_sim.probes import CommandProbe, ProbeResult, ProcessesProbe, SubprocessProbe
     from vs_sim.process_table import (
         MarkedProcess,
+        NoProcessTable,
         OsProcessTable,
         ProcessSurvivedError,
         ProcessTable,
@@ -211,6 +212,7 @@ _MODULES: dict[str, str] = {
     "UrllibLoopbackHttp": "vs_sim.loopback_http",
     "PidfdProcessSignaller": "vs_sim.signals",
     "MarkedProcess": "vs_sim.process_table",
+    "NoProcessTable": "vs_sim.process_table",
     "OsProcessTable": "vs_sim.process_table",
     "ProcessTable": "vs_sim.process_table",
     "ProcessSurvivedError": "vs_sim.process_table",
@@ -278,6 +280,7 @@ __all__ = [
     "MarkedProcess",
     "MonotonicClock",
     "Network",
+    "NoProcessTable",
     "NotReleasedError",
     "NothingLeft",
     "OsProcessTable",

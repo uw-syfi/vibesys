@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_sim.api import mark_in, parse_ps
+from vs_sim.api import (
+    MarkedProcess,
+    NoProcessTable,
+    ProcessTableUnavailableError,
+    mark_in,
+    parse_ps,
+)
 
 # Rows as macOS ``ps -axww -o pid=,pgid=,stat=,lstart=,command=`` prints them: a leader whose
 # arguments carry the mark, its inner shell, a child, a zombie, and a day-of-month under ten.
@@ -41,3 +48,15 @@ def test_a_mark_is_read_only_as_a_whole_argument(name: str, value: str, before: 
     assert mark_in(f"/bin/sh {name}={value}", name) == value
     if before:
         assert mark_in(f"/bin/sh {before}{name}={value}", name) is None
+
+
+@given(name=st.from_regex(r"[A-Z_]{1,12}", fullmatch=True))
+def test_a_host_with_no_table_neither_lists_nor_kills_and_so_is_never_read_as_empty(
+    name: str,
+) -> None:
+    table = NoProcessTable()
+
+    with pytest.raises(ProcessTableUnavailableError, match=name):
+        table.marked(name, lambda _value: True)
+    with pytest.raises(ProcessTableUnavailableError, match=name):
+        table.kill(MarkedProcess(pid=1, started="", value="x"), name)

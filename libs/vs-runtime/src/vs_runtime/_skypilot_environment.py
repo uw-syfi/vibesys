@@ -150,6 +150,10 @@ class SkyPilotEnvironment(RefusesDockerInDocker, DockerEnvironment):
         """The editor container's Docker client is the host's own: SkyPilot's config names none."""
         return DockerEnvironmentConfig()
 
+    def _job_runner(self) -> SkyPilotJobRunner:
+        """The ``sky`` client the bridge and the step reaper both run jobs through."""
+        return SkyPilotJobRunner(executable=self.config.executable)
+
     def agent_work_reaper(
         self,
         run_id: str,
@@ -171,7 +175,7 @@ class SkyPilotEnvironment(RefusesDockerInDocker, DockerEnvironment):
             run_id,
             agents,
             InvocationJournal(local_namespace("skypilot")),
-            SkyPilotJobRunner(executable=self.config.executable),
+            self._job_runner(),
             blocking,
         )
 
@@ -288,7 +292,7 @@ class SkyPilotEnvironment(RefusesDockerInDocker, DockerEnvironment):
 
         log = request.log or _noop_log
         bridge = SkyPilotBridge(
-            runner=SkyPilotJobRunner(executable=self.config.executable),
+            runner=self._job_runner(),
             cluster_name=cluster_name,
             resources=cluster_resources,
             workspace=request.workspace,

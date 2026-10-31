@@ -16,10 +16,10 @@ from typing import TYPE_CHECKING, Any
 from vs_core.api import ObservationStatus, RequestId
 from vs_core.api.recovery import Cancelled, CancelReason, Finished
 from vs_evaluation.api import ResourceRequirements
-from vs_runtime._evaluation_jobs import handle_of_life
 from vs_runtime.api import AccuracyEvaluation, PollingEvaluationExecutor
 from vs_runtime.api.evaluation_step_runners import LocalJobStepRunner
 from vs_runtime.api.slurm_evaluation_stack import plan, submission
+from vs_runtime.api.stage_marks import handle_of_life
 from vs_runtime.api.step_runner import CancelSignal, Cleared
 from vs_runtime.api.testing import (
     FakeCandidateWorkspace,

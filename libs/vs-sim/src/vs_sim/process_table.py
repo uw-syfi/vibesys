@@ -121,6 +121,30 @@ class OsProcessTable:
         return self._table
 
 
+class NoProcessTable:
+    """A host with no table wired in: it cannot list marks, so nothing is ever reported gone.
+
+    The default of a seam an entrypoint fills with :class:`OsProcessTable`. Asking it raises
+    :class:`ProcessTableUnavailableError`, so a caller that waits on the table waits instead of
+    concluding that no process is left.
+    """
+
+    def marked(self, name: str, matches: Callable[[str], bool]) -> tuple[MarkedProcess, ...]:
+        """Refuse: there is no table to list."""
+        del matches
+        raise self._unavailable(name)
+
+    def kill(self, process: MarkedProcess, name: str) -> bool:
+        """Refuse: there is no table to find *process* in."""
+        del process
+        raise self._unavailable(name)
+
+    @staticmethod
+    def _unavailable(name: str) -> ProcessTableUnavailableError:
+        message = f"no process table was provided to read the {name} mark"
+        return ProcessTableUnavailableError(message)
+
+
 class _ProcfsProcessTable:
     """Linux: every process whose environment sets the mark."""
 

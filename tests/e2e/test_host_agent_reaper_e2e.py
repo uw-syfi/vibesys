@@ -14,6 +14,7 @@ import os
 import signal
 import subprocess
 import sys
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import agentshim
@@ -22,15 +23,16 @@ from agentshim.testing import FakeExecutor, FakeRun
 
 from vs_agent.session_launch import confine_to_sandbox
 from vs_core.api import RequestId
-from vs_runtime._stage_marks import agent_mark
 from vs_runtime.api.infrastructure import HostEnvironment
+from vs_runtime.api.stage_marks import agent_mark
 from vs_runtime.api.testing import idle_environment_system
 from vs_sandbox.api import step_tag_env
 from vs_sim.api import OsProcessTable, parse_ps
 from vs_sim.api.testing import InlineBlockingRunner, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Iterator, Mapping
+    from pathlib import Path
 
     from vs_project.api import StateNamespace
 
@@ -47,9 +49,16 @@ _LEFT_RUNNING: list[int] = []
 class _Unconfined:
     """A sandbox that confines nothing, so the argv under test is only the launch's own."""
 
-    def wrap(self, argv: Sequence[str], cwd: str | None) -> list[str]:
+    @property
+    def env(self) -> Mapping[str, str]:
+        return {}
+
+    def wrap(self, argv: list[str], cwd: Path | str | None = None, /) -> list[str]:
         del cwd
         return list(argv)
+
+    def agent_path(self, path: Path | str, /) -> str:
+        return str(path)
 
 
 @pytest.fixture(autouse=True)
@@ -66,8 +75,8 @@ def _no_namespace(name: str) -> StateNamespace:
 
 
 def _running_in_group(pgid: int) -> int:
-    listing = subprocess.run(  # lint-waiver: LW-914312 [S603]; ps on PATH, as the table under test runs it.
-        ["ps", "-axww", "-o", "pid=,pgid=,stat=,lstart=,command="],  # noqa: S607  # lint-waiver: LW-914313 [S607]; ps on PATH, as the table under test runs it.
+    listing = subprocess.run(
+        ["ps", "-axww", "-o", "pid=,pgid=,stat=,lstart=,command="],  # noqa: S607  # lint-waiver: LW-914331 [S607]; ps on PATH, as the table under test runs it.
         capture_output=True,
         text=True,
         check=True,
@@ -90,7 +99,7 @@ def _start_agent(tag: RequestId) -> subprocess.Popen[bytes]:
     )
     executor.run(request, agentshim.NullSink())
     argv = list(recorder.requests[-1].argv)
-    process = subprocess.Popen(argv, env=environment, start_new_session=True)  # noqa: S603  # lint-waiver: LW-914314 [S603]; a real-tier test starts its own fixed argv.
+    process = subprocess.Popen(argv, env=environment, start_new_session=True)  # noqa: S603  # lint-waiver: LW-914332 [S603]; a real-tier test starts its own fixed argv.
     _LEFT_RUNNING.append(process.pid)
     return process
 
@@ -98,9 +107,9 @@ def _start_agent(tag: RequestId) -> subprocess.Popen[bytes]:
 def test_a_host_agent_is_ended_by_its_mark_and_another_step_s_agent_is_left() -> None:
     target, bystander = RequestId(root="step-a"), RequestId(root="step-b")
     ended, kept = _start_agent(target), _start_agent(bystander)
-    reaper = HostEnvironment(process_table=OsProcessTable()).agent_work_reaper(
+    reaper = HostEnvironment().agent_work_reaper(
         RUN,
-        system=idle_environment_system(),
+        system=replace(idle_environment_system(), process_table=OsProcessTable()),
         blocking=InlineBlockingRunner(),
         local_namespace=_no_namespace,
         log=lambda _line: None,

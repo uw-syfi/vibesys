@@ -34,7 +34,7 @@ class DockerAgentWorkReaper:
         docker: DockerCli,
         blocking: BlockingRunner,
         log: Callable[[str], None],
-        reap_tagged: Callable[[str, str], None] | None = None,
+        reap_tagged: Callable[[str, str], int] | None = None,
     ) -> None:
         """Sweep the containers labelled *run_id* through *docker*; *blocking* carries each sweep.
 

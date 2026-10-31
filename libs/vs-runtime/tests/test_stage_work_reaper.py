@@ -14,12 +14,17 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_core.api import RequestId
-from vs_runtime._evaluation_jobs import handle_for, handle_of_life, is_handle_of
-from vs_runtime._stage_marks import is_stage_mark_of, stage_mark
 from vs_runtime.api.evaluation_step_runners import (
     ContainerStageWorkReaper,
     EachStageWorkReaper,
     ProcessStageWorkReaper,
+)
+from vs_runtime.api.stage_marks import (
+    handle_for,
+    handle_of_life,
+    is_handle_of,
+    is_stage_mark_of,
+    stage_mark,
 )
 from vs_runtime.api.testing import (
     FakeStageWorkReaper,

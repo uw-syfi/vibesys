@@ -36,7 +36,6 @@ from vs_agent.api.testing import (
 from vs_core.api.recovery import Cancelled, CancelReason, Finished
 from vs_project.api import Project
 from vs_prompts.api import TemplateRenderer
-from vs_runtime._stage_marks import agent_mark
 from vs_runtime.api.agent_step_runners import (
     AgentTurnStepRunner,
     NotATurnError,
@@ -53,6 +52,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.docker_agent_work_reaper import DockerAgentWorkReaper
 from vs_runtime.api.executor_contexts import context_for
+from vs_runtime.api.stage_marks import agent_mark
 from vs_runtime.api.step_runner import CancelSignal, Cleared
 from vs_runtime.api.testing import (
     FakeStageWorkReaper,

@@ -14,8 +14,8 @@ import pytest
 
 from vs_core.api import RequestId
 from vs_project.api import Project
-from vs_runtime._stage_marks import agent_mark
 from vs_runtime.api.docker_agent_work_reaper import SkyPilotStepWorkReaper
+from vs_runtime.api.stage_marks import agent_mark
 from vs_runtime.api.step_runner import ClearUnavailableError
 from vs_runtime.api.testing import (
     FakeStageWorkReaper,

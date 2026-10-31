@@ -149,7 +149,6 @@ from vs_sandbox.api.symlink_mounts import (
 from vs_sim.api import (
     DISCARD,
     CloseOnce,
-    OsProcessTable,
     ReleaseStack,
 )
 
@@ -172,7 +171,7 @@ if TYPE_CHECKING:
         FeatureRef,
         WorkspaceSandbox,
     )
-    from vs_sim.api import BlockingRunner, Clock, OutputSink, ProcessTable
+    from vs_sim.api import BlockingRunner, Clock, OutputSink
 
 
 @dataclass(frozen=True)
@@ -728,11 +727,9 @@ class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
     def __init__(
         self,
         build_sandbox: Callable[..., WorkspaceSandbox | None] = build_host_sandbox,
-        process_table: ProcessTable | None = None,
     ) -> None:
-        """Take the host-sandbox builder and the process table, seams for substituting the platform's."""
+        """Take the host-sandbox builder, a seam for substituting the platform's."""
         self._build_sandbox = build_sandbox
-        self._process_table = OsProcessTable() if process_table is None else process_table
 
     def agent_work_reaper(
         self,
@@ -749,8 +746,8 @@ class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
         launcher gives it the mark twice, in its environment and as an argument of its leader,
         as a stage command gets it, so one reaper serves both on Linux and on macOS.
         """
-        del system, blocking, local_namespace, log
-        return ProcessStageWorkReaper(self._process_table, run_id)
+        del blocking, local_namespace, log
+        return ProcessStageWorkReaper(system.process_table, run_id)
 
     def locate_tool(self, executable: str, site: ToolSite) -> ToolLocation:
         """Find *executable* on the host's ``PATH``: the agent and its workload both run there."""

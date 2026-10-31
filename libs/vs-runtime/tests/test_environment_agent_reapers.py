@@ -20,8 +20,6 @@ import pytest
 from vs_agent.api.testing import FakeAgentProcesses
 from vs_core.api import RequestId
 from vs_project.api import Project, RunResourceRequest
-from vs_runtime._evaluation_jobs import handle_of_life
-from vs_runtime._stage_marks import agent_mark, is_stage_mark_of, stage_mark
 from vs_runtime.api.docker_agent_work_reaper import DockerAgentWorkReaper
 from vs_runtime.api.infrastructure import (
     HostEnvironment,
@@ -30,6 +28,8 @@ from vs_runtime.api.infrastructure import (
     build_run_environment,
     make_run_environment_spec,
 )
+from vs_runtime.api.stage_marks import agent_mark, handle_of_life, is_stage_mark_of, stage_mark
+from vs_runtime.api.step_runner import ClearUnavailableError
 from vs_runtime.api.testing import (
     StageWorkPlace,
     StageWorkReaperContract,
@@ -131,9 +131,9 @@ class _HostAgents:
 
     def __init__(self, shows: Shows) -> None:
         self.table = FakeProcessTable(shows)
-        self.reaper = HostEnvironment(process_table=self.table).agent_work_reaper(
+        self.reaper = HostEnvironment().agent_work_reaper(
             RUN,
-            system=idle_environment_system(),
+            system=replace(idle_environment_system(), process_table=self.table),
             blocking=InlineBlockingRunner(),
             local_namespace=_no_namespace,
             log=lambda _line: None,
@@ -185,6 +185,20 @@ class TestHostAgentWorkReaperOnMacOS(StageWorkReaperContract):
 
     def stage_work_under_test(self) -> StageWorkUnderTest:
         return _HostAgents(Shows.LEADER_ARGUMENTS).under_test()
+
+
+def test_a_host_without_a_process_table_never_reports_an_agent_clear() -> None:
+    """The default system has no table to read, so the clear is unavailable, not empty."""
+    reaper = HostEnvironment().agent_work_reaper(
+        RUN,
+        system=idle_environment_system(),
+        blocking=InlineBlockingRunner(),
+        local_namespace=_no_namespace,
+        log=lambda _line: None,
+    )
+
+    with pytest.raises(ClearUnavailableError):
+        _run(reaper.reap(RequestId(root="step-a")))
 
 
 def test_an_agent_and_a_stage_command_of_one_step_are_found_by_the_same_mark_kind() -> None:
