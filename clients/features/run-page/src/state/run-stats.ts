@@ -10,7 +10,7 @@
  * - Measurements: the attempts that measured a value; failed: the attempts that did not measure one
  *   (the reason `not_measured`, a failed check, a verdict `failed_check`). A re-measured idea counts
  *   once for each attempt.
- * - Running time: `runningSeconds`, the one sum of the chart's axis and the time bar: the run clock
+ * - Running time: `runningTimeOf(...).at`, the one sum of the chart's axis and the time bar: the run clock
  *   with every stopped stretch left out.
  * - Agent time: the time at least one agent turn was working, counted on the running time's axis, so
  *   it never exceeds the running time and two agents working at once count once.
@@ -21,8 +21,7 @@ import {compactTokens} from '@vibesys/run-state/usage';
 import {impactOf} from './idea-impact.js';
 import type {ObjectiveSeries} from './objective-reading.js';
 import type {RunModel} from './run-model.js';
-import {runningSeconds, runningTimeOf} from './running-time.js';
-import {workedWords} from './time-words.js';
+import {runningTimeOf, runningWords} from './running-time.js';
 
 /** A stretch of the run clock. */
 interface Interval {
@@ -35,7 +34,7 @@ export interface RunStats {
   readonly measurements: {readonly measured: number; readonly failed: number};
   /** Seconds the agents worked; null while the run has recorded no time. */
   readonly agentSeconds: number | null;
-  /** Seconds the run worked (`runningSeconds`); null while it has recorded no time. */
+  /** Seconds the run worked at the position; null while it has recorded no time. */
   readonly runningSeconds: number | null;
   /** What the run's turns spent; null when none reported a count. */
   readonly tokens: TokenTally | null;
@@ -112,7 +111,7 @@ export function runStats(
     (total, each) => total + time.at(each.to) - time.at(each.from),
     0,
   );
-  const running = runningSeconds(whole, start, model.latest);
+  const running = model.latest === null ? null : time.at(model.latest);
   return {
     ideas: {
       tried: candidates.length,
@@ -195,10 +194,10 @@ export function statTiles(stats: RunStats): readonly StatTile[] {
     {
       id: 'agent-time',
       label: 'Agent time',
-      figure: stats.agentSeconds === null ? '–' : workedWords(stats.agentSeconds),
+      figure: stats.agentSeconds === null ? '–' : runningWords(stats.agentSeconds),
       unit: null,
       quiet: false,
-      note: stats.runningSeconds === null ? '' : `of ${workedWords(stats.runningSeconds)} running`,
+      note: stats.runningSeconds === null ? '' : `of ${runningWords(stats.runningSeconds)} running`,
     },
     tokenTile(stats.tokens),
   ];

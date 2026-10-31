@@ -12,6 +12,7 @@ import {
   bestRow,
   candidateOf,
   chartBest,
+  oracleBest,
   type Run,
   readFromEvents,
   readFromWriter,
@@ -42,6 +43,23 @@ for (const [reader, read] of [
   ],
 ] as const) {
   describe(`the best of an objective, as read from ${reader}`, () => {
+    test('the line ends at the best the definition names, whatever the writer states', () => {
+      fc.assert(
+        fc.property(run, each => {
+          const candidates = each.ideas.map((item, at) => candidateOf(item, at, each));
+          const {chart, reached} = chartBest(read(each, candidates), null);
+          const input = chart?.steps[0]?.y;
+          // No input measured and nothing read: no line to end.
+          if (input === undefined) return;
+          // What the writer states, else the best passed reading that beats the input: an oracle
+          // over the generated ideas, not a fold of them.
+          const stated = reader === 'the writer' ? each.stated : null;
+          expect(reached?.y).toBe(stated ?? oracleBest(each, input) ?? input);
+        }),
+        SETTINGS,
+      );
+    });
+
     test('the headline, the end of the line and the best row state one multiple of the one input', () => {
       fc.assert(
         fc.property(run, each => {
@@ -58,7 +76,8 @@ for (const [reader, read] of [
           expect(input).toBeDefined();
           const multiple = multipleOver(reached?.y as number, input as number, each.direction);
           expect(headline.ratio).toBe(ratio(multiple as number));
-          expect(row?.figure).toBe(headline.ratio);
+          // The writer's leader is the idea that has the best it states: no idea, no row.
+          if (reader === 'events' || row !== null) expect(row?.figure).toBe(headline.ratio);
         }),
         SETTINGS,
       );
@@ -85,7 +104,7 @@ for (const [reader, read] of [
             each.direction,
           );
           expect(headline.ratio).toBe(ratio(multiple as number));
-          expect(row?.figure).toBe(headline.ratio);
+          if (reader === 'events' || row !== null) expect(row?.figure).toBe(headline.ratio);
         }),
         SETTINGS,
       );

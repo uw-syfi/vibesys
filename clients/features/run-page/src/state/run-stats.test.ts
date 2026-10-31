@@ -5,8 +5,7 @@ import type {RunSession} from '@vibesys/run-state/skeleton';
 import fc from 'fast-check';
 import type {RunModel} from './run-model.js';
 import {runStats, statTiles} from './run-stats.js';
-import {runningSeconds} from './running-time.js';
-import {workedWords} from './time-words.js';
+import {runningTimeOf, runningWords} from './running-time.js';
 import {idea, modelOf} from './timeline-fixtures.js';
 
 const turn = fc.record({
@@ -62,7 +61,7 @@ describe('the stats row', () => {
       fc.property(fc.array(turn, {maxLength: 12}), sessions, (turns, runSessions) => {
         const model = modelWith(turns, runSessions);
         const stats = runStats(model, model, 0, null);
-        const running = runningSeconds(model, 0);
+        const running = runningTimeOf(model.sessions ?? [], 0).at(model.latest ?? 0);
         expect(stats.runningSeconds).toBe(running);
         expect(stats.agentSeconds).not.toBeNull();
         expect(stats.agentSeconds as number).toBeGreaterThanOrEqual(0);
@@ -104,7 +103,7 @@ describe('the stats row', () => {
     expect(tiles.map(tile => [tile.label, tile.figure, tile.note])).toEqual([
       ['Ideas tried', '2', '1 measured · 1 running'],
       ['Measurements', '1', '0 failed'],
-      ['Agent time', workedWords(600), `of ${workedWords(1300)} running`],
+      ['Agent time', runningWords(600), `of ${runningWords(1300)} running`],
       ['Tokens', '8.1M', '6.5M cached · 459k output'],
     ]);
     expect(statTiles(runStats(model, model, 0, null))[3]?.figure).toBe('Not reported');

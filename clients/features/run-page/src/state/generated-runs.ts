@@ -21,6 +21,8 @@ export interface Generated {
   readonly passed: boolean;
   /** Which session measured it; each session measured the input again, to its own value. */
   readonly session: number;
+  /** Whether its measurement states its own ratio to the input (a resumed session may not). */
+  readonly compared: boolean;
 }
 
 export interface Run {
@@ -31,9 +33,29 @@ export interface Run {
   readonly ideas: readonly Generated[];
   /** Where the time bar stands, as a share of the run. */
   readonly cursor: number;
+  /**
+   * The best the writer states for the run's headline and its series, whatever its points say; null:
+   * it states the best of the run's readings (`oracleBest`). Not read from events.
+   */
+  readonly stated: number | null;
 }
 
 const NAME = 'metric';
+
+/**
+ * The best of `run` by its definition alone, from the generated ideas and not from any fold of them:
+ * the best passed value that beats `input`, where the direction says which way is better; null when
+ * none does, so the input stands.
+ */
+export function oracleBest(run: Run, input: number): number | null {
+  const beating = run.ideas
+    .filter(
+      item => item.passed && (run.direction === 'max' ? item.value > input : item.value < input),
+    )
+    .map(item => item.value);
+  if (beating.length === 0) return null;
+  return run.direction === 'max' ? Math.max(...beating) : Math.min(...beating);
+}
 
 /** The idea of `item`, measured: its own session's input is what its `vs input` is over. */
 export function candidateOf(item: Generated, at: number, run: Run): Candidate {
@@ -43,7 +65,7 @@ export function candidateOf(item: Generated, at: number, run: Run): Candidate {
     span: `i${at}-g`,
     at: item.at + 5,
     metricValue: item.value,
-    vsBaseline: item.value / input,
+    vsBaseline: item.compared ? item.value / input : null,
     against: null,
     readings: [{name: NAME, value: item.value, unit: null, direction: run.direction}],
     inputReadings: [{name: NAME, value: input, unit: null, direction: run.direction}],
@@ -80,7 +102,11 @@ export function readFromEvents(run: Run, candidates: readonly Candidate[]): RunM
   } as unknown as RunModel;
 }
 
-/** The run as its writer states it: a series with the best and the input, and the headline of both. */
+/**
+ * The run as its writer states it: a series with the best and the input, and the headline of both. The
+ * best it states is the run's own statement (`Run.stated`), else the best of the generated readings;
+ * its points' decisions come from the fold, so the three can differ, as a writer's can.
+ */
 export function readFromWriter(
   run: Run,
   candidates: readonly Candidate[],
@@ -88,19 +114,25 @@ export function readFromWriter(
 ): RunModel {
   const events = readFromEvents(run, candidates);
   const fold: PerformanceFold = performanceFold(candidates, run.direction, run.input, NAME);
-  const leader = fold.points.filter(point => point.best).at(-1);
-  const stated = {...fold, value: leader?.value ?? run.input, input: run.input};
+  const best = run.stated ?? oracleBest(run, run.input);
+  const stated = {...fold, value: best ?? run.input, input: run.input};
+  // The writer's leader is the idea that has the stated best, the one that set it first.
+  const leader =
+    best === null
+      ? undefined
+      : (fold.points.find(point => point.best && point.value === best) ??
+        fold.points.find(point => point.result === 'passed' && point.value === best));
   return {
     ...events,
     series: new Map([[NAME, stated]]),
     headline: {
       series: {name: NAME, unit: ''},
       inputValue: run.input,
-      bestValue: leader?.value,
+      bestValue: best ?? undefined,
       leader: undefined,
       measured: fold.points.length,
     },
-    // The writer's leader is the one the Ideas list badges as the best.
+    // The Ideas list badges the writer's leader as the best.
     candidates: {
       ...events.candidates,
       best: leader === undefined ? null : {candidate: leader.id, adopted: false},

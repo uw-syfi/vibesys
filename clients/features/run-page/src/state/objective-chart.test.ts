@@ -110,7 +110,7 @@ describe('the performance chart', () => {
   test('the x axis reads minutes of the run, with its length as the caption', () => {
     const chart = chartOf(modelOf([result('a', 60, 10, 'passed')]), 25 * 60);
     expect(chart?.xTicks.map(tick => tick.label)).toEqual(['0m', '5m', '10m', '15m', '20m', '25m']);
-    expect(chart?.caption).toBe('running time · 25m');
+    expect(chart?.caption).toBe('running time · 25m 00s');
     expect(chart?.resumes).toEqual([]);
   });
 });

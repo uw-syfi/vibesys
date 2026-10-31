@@ -61,10 +61,11 @@ function progressOf(failed: FailedCheck): string {
 /**
  * The figure at the right of an idea's row: its multiple of the input, its failed check's progress,
  * or why not. `vsInput` reads the multiple (`vsInputOf`), the same reading the chart's headline is
- * made of, so a row and a chart never state two multiples of the one input; an idea it gives none
- * for keeps the ratio its own measurement states. An idea the framework compared with a base but
- * has no ratio to the input for shows the ratio it made, named by that base (`1.10× vs round 2`):
- * `againstWords` words a comparison.
+ * made of, so a row and a chart never state two multiples of the one input, whether or not the idea's
+ * own measurement states a ratio to it; an idea it gives none for keeps the ratio its own
+ * measurement states. An idea the framework compared with a base and the run has no ratio to the
+ * input for shows the ratio it made, named by that base (`1.10× vs round 2`): `againstWords` words
+ * a comparison.
  */
 export function figureOf(
   item: Candidate,
@@ -78,8 +79,9 @@ export function figureOf(
   const failed = measured?.failed ?? null;
   if (failed !== null) return {figure: `Failed · ${progressOf(failed)}`, tone: 'err'};
   const tone = item.outcome === 'passed' ? 'ok' : 'err';
-  // An idea the framework gave no ratio to the input has none here either: its base is named below.
-  const multiple = measured?.vsBaseline == null ? null : (vsInput(item) ?? measured.vsBaseline);
+  // The run's input decides: an idea whose own comparison is not with it (a resumed session's) still
+  // has the multiple the chart's tip states. Its own ratio stands only where the run has none.
+  const multiple = vsInput(item) ?? measured?.vsBaseline ?? null;
   if (multiple !== null) return {figure: ratio(multiple), tone};
   if (measured?.against != null) {
     return {figure: againstWords(measured.against), tone};

@@ -564,7 +564,7 @@ export const RICH_ENTRIES = {
             cursor={3.5}
             marks={[2, 4]}
             markLabel="resumed"
-            caption="running time · 6m"
+            caption="running time · 6m 00s"
             yTicks={[
               {value: 90, label: '0.9x'},
               {value: 110, label: '1.1x'},

@@ -35,10 +35,10 @@ import {
   ideasTable,
   type ObjectiveCell,
   type RunPageAction,
+  runningWords,
   type TableColumn,
 } from '../../state/index.js';
 import {formatValue, ratio} from '../../state/span-reading.js';
-import {workedWords} from '../../state/time-words.js';
 import type {ViewBase} from './views/props.js';
 
 const STATUS_TONES: Readonly<Record<IdeaStatus, StatusTone>> = {
@@ -261,7 +261,7 @@ function columnsOf(
       align: 'end',
       optional: true,
       sort: sorted({by: 'agent-time'}),
-      cell: row => <Text variant="code">{workedWords(row.agentSeconds)}</Text>,
+      cell: row => <Text variant="code">{runningWords(row.agentSeconds)}</Text>,
     },
   ];
 }

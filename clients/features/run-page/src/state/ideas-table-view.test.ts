@@ -58,9 +58,16 @@ function tableOf(
 }
 
 /** The best row of `viewed` at `scrub` states the multiple of the headline the chart of `whole` says. */
-function expectBestRowToState(whole: RunModel, viewed: RunModel, scrub: number | null): void {
+function expectBestRowToState(
+  whole: RunModel,
+  viewed: RunModel,
+  scrub: number | null,
+  /** The run's writer states its best as it likes: a best no idea set has no row. */
+  ownerless: boolean,
+): void {
   const {headline} = chartBest(whole, scrub);
   const best = bestSoFar(readObjectives(whole)[0] as ObjectiveReading, scrub)?.idea;
+  if (ownerless && (best === undefined || best === null)) return;
   const row = tableOf(viewed, whole).rows.find(each => each.id === best);
   const multiple = row?.cells[0]?.multiple ?? null;
   if (headline === undefined || headline.ratio === null) {
@@ -92,7 +99,7 @@ for (const [reader, read] of READERS) {
           const end = whole.latest ?? 0;
           for (const scrub of [null, Math.floor(each.cursor * end)]) {
             const viewed = scrub === null ? whole : viewedAt(whole, each, scrub, reader);
-            expectBestRowToState(whole, viewed, scrub);
+            expectBestRowToState(whole, viewed, scrub, reader === 'the writer');
           }
         }),
         SETTINGS,

@@ -25,10 +25,9 @@ import {EMPTY_TRACE_LOG} from './live.js';
 import {clockStart} from './run-level.js';
 import type {RunModel} from './run-model.js';
 import {type RunPageSeed, type RunPageState, runPageInitial} from './run-page.js';
-import {placesAlong, runningTimeOf} from './running-time.js';
+import {placesAlong, runningTimeOf, runningWords} from './running-time.js';
 import {settleIdeas} from './settled-ideas.js';
 import {skeletonPerformance} from './skeleton-performance.js';
-import {duration} from './span-reading.js';
 import {STARTUP_LABELS} from './startup-stages.js';
 
 export {skeletonPositions} from '@vibesys/run-state/skeleton';
@@ -248,5 +247,5 @@ function timeBar(
 
 function positionWord(progress: LoadProgress | undefined, running: number | null): string {
   if (progress && progress.phase !== 'complete') return 'Catching up';
-  return running === null ? 'Start' : duration(running);
+  return running === null ? 'Start' : runningWords(running);
 }
