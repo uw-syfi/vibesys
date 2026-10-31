@@ -40,6 +40,7 @@ function world(replies: readonly (() => Promise<Overview>)[]) {
     openRunWindow: () => never,
     runDigests: () => never,
     projectRuns: () => never,
+    cancelProjectRuns: () => never,
     retryListing: host => {
       retried.push(host);
       return Promise.resolve({ok: true, value: null});

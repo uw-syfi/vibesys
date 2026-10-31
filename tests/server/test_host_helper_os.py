@@ -113,7 +113,7 @@ def test_projects_report_missing_and_uninitialized_directories(tmp_path: Path) -
 
     assert missing.value.code is HelperErrorCode.PROJECT_MISSING
     assert bare.value.code is HelperErrorCode.PROJECT_UNINITIALIZED
-    assert projects.runs(tmp_path) == (tmp_path.resolve(), ())
+    assert projects.named_runs(tmp_path, ()) == (tmp_path.resolve(), ())
 
 
 class _NoWait:

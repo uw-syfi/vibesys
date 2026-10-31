@@ -5,14 +5,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from vs_proto.api import host_payloads as pb
 
 
 class ReadSource(Protocol):
     """Fresh host facts; the caller owns I/O and remaining-budget enforcement."""
 
-    def saved_runs(self, request: pb.ListSavedRunsRequest) -> pb.ListSavedRunsResponse:
-        """Discover and import retained runs through their existing owners."""
+    def saved_runs(self, project: str) -> tuple[str, Iterable[pb.SavedRun]]:
+        """The project's root and one lazy scan of its retained runs, in discovery order."""
         ...
 
     def run_digests(self, request: pb.ListRunDigestsRequest) -> pb.ListRunDigestsResponse:

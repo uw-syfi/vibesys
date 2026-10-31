@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
-from vs_project._run_branches import RUN_BRANCH_PREFIX, run_of_branch
+from vs_project._layout import is_run_id
+from vs_project._run_branches import RUN_BRANCH_PREFIX, run_branch, run_of_branch
 from vs_project._state import (
     StateFile,
     _validate_state_relative_path,
@@ -17,7 +19,7 @@ from vs_project.api.run_history import RecordedRuns
 from vs_project.errors import ProjectStateError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Iterable, Iterator, Mapping
 
     from vs_project._manifests import OrchestrationRunManifest
     from vs_project.api.git_repository import GitRepository
@@ -41,6 +43,11 @@ def _recorded(
             unreadable.append((run_id, error))
     runs.sort(key=lambda manifest: (manifest.created_at, manifest.run_id))
     return RecordedRuns(runs=tuple(runs), unreadable=tuple(unreadable))
+
+
+def _known_ids(run_ids: Iterable[str]) -> tuple[str, ...]:
+    """``run_ids`` without repeats or an id no run can have."""
+    return tuple(run_id for run_id in dict.fromkeys(run_ids) if is_run_id(run_id))
 
 
 def _relative(relative_path: str | PurePosixPath) -> PurePosixPath:
@@ -76,9 +83,26 @@ class GitRunHistory:
         }
         return _recorded(candidates, found)
 
+    def scan(self) -> Iterator[OrchestrationRunManifest]:
+        branches = self._branches()
+        for run_id in sorted({*self._project.state.checkout_run_ids(), *branches}):
+            manifest = self._readable(run_id, branches)
+            if manifest is not None:
+                yield manifest
+
+    def named(self, run_ids: Iterable[str]) -> RecordedRuns:
+        wanted = _known_ids(run_ids)
+        branches = self._branches_of(wanted)
+        found = {
+            run_id: located
+            for run_id in wanted
+            if (located := self._manifest_bytes(run_id, branches)) is not None
+        }
+        return _recorded(wanted, found)
+
     def manifest(self, run_id: str) -> OrchestrationRunManifest:
         validate_run_id(run_id)
-        located = self._manifest_bytes(run_id, self._branches())
+        located = self._manifest_bytes(run_id, self._branches_of((run_id,)))
         if located is None:
             raise ProjectStateError.metadata_file_missing(self._checkout_path(run_id, _MANIFEST))
         return parse_run_manifest(located[0], source=located[1])
@@ -86,7 +110,7 @@ class GitRunHistory:
     def document(self, run_id: str, relative_path: str | PurePosixPath) -> bytes | None:
         validate_run_id(run_id)
         relative = _relative(relative_path)
-        committed = self._committed(run_id, relative, self._branches())
+        committed = self._committed(run_id, relative, self._branches_of((run_id,)))
         if committed is not None:
             return committed
         return self._project.state.checkout_run_file(run_id, relative)
@@ -96,7 +120,7 @@ class GitRunHistory:
         files = {
             item.relative_path: item for item in self._project.state.checkout_run_files(run_id)
         }
-        branch = self._branches().get(run_id)
+        branch = self._branches_of((run_id,)).get(run_id)
         if branch is not None:
             directory = self._project.state.run_directory(run_id)
             for path in self._git.tree_files(branch, directory.as_posix()):
@@ -105,6 +129,16 @@ class GitRunHistory:
                     relative = PurePosixPath(path).relative_to(directory)
                     files[relative] = StateFile(relative_path=relative, contents=contents)
         return tuple(files[path] for path in sorted(files, key=PurePosixPath.as_posix))
+
+    def _readable(
+        self, run_id: str, branches: Mapping[str, str]
+    ) -> OrchestrationRunManifest | None:
+        """The run's manifest; ``None`` when it cannot be read, or was removed since listing."""
+        try:
+            located = self._manifest_bytes(run_id, branches)
+            return None if located is None else parse_run_manifest(located[0], source=located[1])
+        except ProjectStateError:
+            return None
 
     def _manifest_bytes(
         self, run_id: str, branches: Mapping[str, str]
@@ -142,6 +176,18 @@ class GitRunHistory:
             except ProjectStateError:
                 continue
         return branches
+
+    def _branches_of(self, run_ids: Iterable[str]) -> dict[str, str]:
+        """``_branches`` for the named runs only, without listing any other run's branch."""
+        if not self._is_project_repository():
+            return {}
+        current = self._git.current_branch()
+        branches = {run_id: run_branch(run_id) for run_id in run_ids}
+        return {
+            run_id: branch
+            for run_id, branch in branches.items()
+            if branch != current and self._git.branch_exists(branch)
+        }
 
     def _is_project_repository(self) -> bool:
         """Whether the project root is the top level of a repository (else no branch is its)."""
@@ -182,6 +228,23 @@ class FakeRunHistory:
             if _MANIFEST in files
         }
         return _recorded(self._runs, found)
+
+    def scan(self) -> Iterator[OrchestrationRunManifest]:
+        for run_id in sorted(self._runs):
+            contents = self._runs.get(run_id, {}).get(_MANIFEST)
+            if contents is None:
+                continue
+            with suppress(ProjectStateError):
+                yield parse_run_manifest(contents, source=self._source(run_id))
+
+    def named(self, run_ids: Iterable[str]) -> RecordedRuns:
+        wanted = _known_ids(run_ids)
+        found = {
+            run_id: (self._runs[run_id][_MANIFEST], self._source(run_id))
+            for run_id in wanted
+            if _MANIFEST in self._runs.get(run_id, {})
+        }
+        return _recorded(wanted, found)
 
     def manifest(self, run_id: str) -> OrchestrationRunManifest:
         contents = self._runs.get(validate_run_id(run_id), {}).get(_MANIFEST)
