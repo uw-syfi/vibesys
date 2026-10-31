@@ -28,6 +28,7 @@ export interface FakeHostWindow extends Window {
   fakeHost: {
     readonly newRun: FakeNewRun;
     listing(listing: unknown): void;
+    readonly retried: readonly string[];
     openSettings(): void;
     recent(runs: readonly unknown[]): void;
   };

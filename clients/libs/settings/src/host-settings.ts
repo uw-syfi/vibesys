@@ -95,6 +95,18 @@ export function decodeRetainedSettings(value: unknown): SettingsFile {
   });
 }
 
+/**
+ * The machines the app has: This Mac, then every saved host. The Machines screen lists these and
+ * the hosts feature watches each, so a machine the screen shows always has a listing coming.
+ */
+export function configuredMachines(file: SettingsFile): HostId[] {
+  const local: HostId = {kind: 'local'};
+  const saved = Object.keys(file.hosts)
+    .filter(key => key !== hostKey(local))
+    .map(key => hostFromKey(key));
+  return [local, ...saved];
+}
+
 export function settingsFor(file: SettingsFile, id: HostId): HostSettings | null {
   return file.hosts[hostKey(id)] ?? null;
 }

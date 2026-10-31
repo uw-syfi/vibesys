@@ -45,10 +45,20 @@ export {
   type InstanceObservation,
   instanceObservation,
   instancePhaseText,
+  LISTING_STEPS,
+  type ListingStep,
   newestServerOf,
   type RunEnd,
   type RunPause,
 } from './listing.js';
+export {
+  failureWords,
+  type LoadStep,
+  type LoadStepState,
+  loadSteps,
+  type MachineLoad,
+  machineLoad,
+} from './machine-load.js';
 export {
   connectionProblem,
   MACHINE_PROBLEMS,

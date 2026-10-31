@@ -465,6 +465,7 @@ CoreState.run required {"$ref":"#/$defs/RunState"}
 CoreState.scheduling optional {"$ref":"#/$defs/SchedulingState","default":{"admission_closed":false,"queue":[],"released_slot_seconds":0.0,"slots":[]}}
 CoreState.sessions optional {"$ref":"#/$defs/SessionsState","default":{"acquisition_groups":[],"inputs":[],"interrupts":[],"invocations":[],"run_charges":[],"run_checkpoints":[],"sessions":[]}}
 CoreState.settlement optional {"$ref":"#/$defs/SettlementState","default":{"adoption":null,"pending":[],"settlements":[]}}
+CoreState.steps optional {"$ref":"#/$defs/StepsState","default":{"attempts":[],"epoch":0}}
 Count {"minimum":0,"type":"integer"}
 DeadlineReached {"additionalProperties":false,"type":"object"}
 DeadlineReached.continuation_id required {"$ref":"#/$defs/ContinuationId"}
@@ -624,7 +625,7 @@ Failed.turn optional {"anyOf":[{"$ref":"#/$defs/InvocationRef"},{"type":"null"}]
 Failed.turn_failure optional {"anyOf":[{"$ref":"#/$defs/TurnFailureKind"},{"type":"null"}],"default":null}
 Failed.watch optional {"anyOf":[{"$ref":"#/$defs/Watch"},{"type":"null"}],"default":null}
 FailureKind {"enum":["outcome","interruption"],"type":"string"}
-FailureReason {"enum":["timed-out","workspace-closed","owner-gone","refused","lost","invalid-reply","render-failed","turn-failed","wait-refused","queue-budget-spent","out-of-budget","measurement-untrusted"],"type":"string"}
+FailureReason {"enum":["timed-out","workspace-closed","owner-gone","refused","lost","invalid-reply","render-failed","turn-failed","wait-refused","queue-budget-spent","out-of-budget","measurement-untrusted","attempts-exhausted"],"type":"string"}
 Finish {"additionalProperties":false,"type":"object"}
 Finish.decision_id required {"$ref":"#/$defs/DecisionId"}
 Finish.kind optional {"const":"finish","default":"finish","type":"string"}
@@ -781,6 +782,7 @@ InterruptFailed.decline optional {"anyOf":[{"$ref":"#/$defs/CheckpointDecline"},
 InterruptFailed.invocation required {"$ref":"#/$defs/InvocationRef"}
 InterruptFailed.kind optional {"const":"interrupt_failed","default":"interrupt_failed","type":"string"}
 InterruptFailed.reason required {"$ref":"#/$defs/CheckpointFailure"}
+InterruptPolicy {"enum":["rerun","cancel"],"type":"string"}
 InterruptRequested {"additionalProperties":false,"type":"object"}
 InterruptRequested.authority required {"$ref":"#/$defs/RequestId"}
 InterruptRequested.invocation required {"$ref":"#/$defs/InvocationRef"}
@@ -1081,6 +1083,7 @@ OperationDescriptor.inspect optional {"default":false,"type":"boolean"}
 OperationDescriptor.kind required {"minLength":1,"type":"string"}
 OperationDescriptor.lifecycle required {"$ref":"#/$defs/LifecycleClass"}
 OperationDescriptor.normalization optional {"$ref":"#/$defs/OperationNormalizationKind","default":"none"}
+OperationDescriptor.on_interrupt optional {"$ref":"#/$defs/InterruptPolicy","default":"rerun"}
 OperationDescriptor.outcome_schema required {"$ref":"#/$defs/SchemaRef"}
 OperationDescriptor.request_schema required {"$ref":"#/$defs/SchemaRef"}
 OperationDescriptor.resource_pool optional {"anyOf":[{"$ref":"#/$defs/PoolId"},{"type":"null"}],"default":null}
@@ -1107,6 +1110,7 @@ OperationResult.outcome_schema required {"$ref":"#/$defs/SchemaRef"}
 OperationSchemaRef {"additionalProperties":false,"type":"object"}
 OperationSchemaRef.kind required {"minLength":1,"type":"string"}
 OperationSchemaRef.lifecycle required {"$ref":"#/$defs/LifecycleClass"}
+OperationSchemaRef.on_interrupt optional {"$ref":"#/$defs/InterruptPolicy","default":"rerun"}
 OperationSchemaRef.outcome_schema required {"$ref":"#/$defs/SchemaRef"}
 OperationSchemaRef.request_schema required {"$ref":"#/$defs/SchemaRef"}
 OperationWire {"additionalProperties":false,"type":"object"}
@@ -1482,6 +1486,7 @@ RunJobsCancelRequested.scope required {"$ref":"#/$defs/Scope"}
 RunPark {"additionalProperties":false,"type":"object"}
 RunPark.admitted_turns optional {"default":[],"items":{"$ref":"#/$defs/InvocationRef"},"type":"array"}
 RunPark.control_id required {"$ref":"#/$defs/ControlId"}
+RunPark.deadline_at optional {"anyOf":[{"type":"number"},{"type":"null"}],"default":null}
 RunPark.epoch required {"minimum":0,"type":"integer"}
 RunPark.immediate optional {"default":false,"type":"boolean"}
 RunResultProposal {"additionalProperties":false,"type":"object"}
@@ -1756,6 +1761,14 @@ Step.digest required {"type":"string"}
 Step.event optional {"anyOf":[{"$ref":"#/$defs/JournaledEvent"},{"type":"null"}],"default":null}
 Step.reads optional {"default":[],"items":{"type":"string"},"type":"array"}
 Step.recorded optional {"anyOf":[{"$ref":"#/$defs/Recorded"},{"type":"null"}],"default":null}
+StepAttempts {"additionalProperties":false,"type":"object"}
+StepAttempts.ended optional {"default":false,"type":"boolean"}
+StepAttempts.started required {"minimum":1,"type":"integer"}
+StepAttempts.tag required {"$ref":"#/$defs/RequestId"}
+StepAttempts.uncharged optional {"$ref":"#/$defs/Count","default":0}
+StepsState {"additionalProperties":false,"type":"object"}
+StepsState.attempts optional {"default":[],"items":{"$ref":"#/$defs/StepAttempts"},"type":"array"}
+StepsState.epoch optional {"$ref":"#/$defs/Count","default":0}
 StopLiftRecorded {"additionalProperties":false,"type":"object"}
 StopLiftRecorded.control required {"$ref":"#/$defs/ControlInput"}
 StopLiftRecorded.kind optional {"const":"stop_lift_recorded","default":"stop_lift_recorded","type":"string"}
@@ -1859,6 +1872,7 @@ TurnSpec.charge_class required {"enum":["paid","correction","resume","free"],"ty
 TurnSpec.continuation_id optional {"anyOf":[{"$ref":"#/$defs/ContinuationId"},{"type":"null"}],"default":null}
 TurnSpec.invocation_id required {"$ref":"#/$defs/InvocationId"}
 TurnSpec.max_turns optional {"default":1,"minimum":1,"type":"integer"}
+TurnSpec.on_interrupt optional {"$ref":"#/$defs/InterruptPolicy","default":"rerun"}
 TurnSpec.output_schema required {"$ref":"#/$defs/SchemaRef"}
 TurnSpec.predecessor optional {"anyOf":[{"$ref":"#/$defs/InvocationRef"},{"type":"null"}],"default":null}
 TurnSpec.prompts required {"items":{"$ref":"#/$defs/ArtifactRef"},"type":"array"}

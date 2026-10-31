@@ -1,6 +1,7 @@
 /** One main-owned gateway session; renderer calls keep only bytes and cancellation handles. */
 import type {Duplex} from 'node:stream';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
+import {LISTING_STEPS, type ListingStep} from '@vibesys/hosts';
 import {clockFrom} from '@vibesys/machine';
 import {
   API_SCHEMA_HASH,
@@ -38,6 +39,8 @@ interface LiveCall {
   readonly deadlineMs: number | undefined;
   bytes: Uint8Array;
   readonly receive: (bytes: Uint8Array) => void;
+  /** Told each step the session reaches on the way to this call. */
+  readonly reached: (step: ListingStep) => void;
   readonly finish: (error?: unknown) => void;
   abort: AbortController | null;
 }
@@ -47,6 +50,7 @@ export class GatewayConnection {
   readonly #actor;
   #session: GatewaySession | null = null;
   #closed = false;
+  #step: ListingStep = LISTING_STEPS[0];
 
   constructor(dialer: GatewayDialer, schedule: ScheduleTimeout) {
     this.#actor = createActor(
@@ -54,8 +58,12 @@ export class GatewayConnection {
         actors: {
           dial: fromPromise(async ({signal}) => {
             try {
-              this.#session = await openSession(dialer, schedule, signal, () =>
-                this.#actor.send({type: 'lost'}),
+              this.#session = await openSession(
+                dialer,
+                schedule,
+                signal,
+                () => this.#actor.send({type: 'lost'}),
+                step => this.#reached(step),
               );
               return {ok: true as const};
             } catch (error) {
@@ -123,8 +131,14 @@ export class GatewayConnection {
     bytes: Uint8Array,
     signal: AbortSignal,
     receive: (bytes: Uint8Array) => void,
+    reached: (step: ListingStep) => void = () => {},
   ): Promise<void> {
-    return this.#call(method, bytes, signal, receive, false);
+    return this.#call(method, bytes, signal, receive, false, reached);
+  }
+
+  #reached(step: ListingStep): void {
+    this.#step = step;
+    for (const call of this.#calls) call.reached(step);
   }
 
   #call(
@@ -133,6 +147,7 @@ export class GatewayConnection {
     signal: AbortSignal,
     receive: (bytes: Uint8Array) => void,
     unary: boolean,
+    reached: (step: ListingStep) => void = () => {},
   ): Promise<void> {
     if (this.#closed || this.#actor.getSnapshot().status === 'done')
       return Promise.reject(new Error('gateway closed'));
@@ -150,6 +165,7 @@ export class GatewayConnection {
         deadlineMs: unary ? unaryDeadline(method, bytes) : undefined,
         bytes,
         receive,
+        reached,
         abort: null,
         finish: error => {
           if (!this.#calls.delete(call)) return;
@@ -164,6 +180,7 @@ export class GatewayConnection {
         call.finish(signal.reason ?? new Error('cancelled')),
       );
       detach = registration.detach;
+      reached(this.#step);
       if (registration.aborted) call.finish(new Error('cancelled'));
       else if (this.#actor.getSnapshot().matches('ready')) this.#start(call);
     });
@@ -179,6 +196,7 @@ export class GatewayConnection {
     if (session === null) return;
     const abort = new AbortController();
     call.abort = abort;
+    call.reached('runs');
     void session
       .stream(
         call.method,
@@ -258,9 +276,12 @@ async function openSession(
   schedule: ScheduleTimeout,
   signal: AbortSignal,
   lost: () => void,
+  reached: (step: ListingStep) => void,
 ): Promise<GatewaySession> {
   for (const force of [false, true]) {
+    reached('gateway');
     const duplex = await dialer.dial(signal, force);
+    reached('handshake');
     const session = new GatewaySession(duplex, schedule, lost);
     const aborted = registerAbort(signal, () => session.close());
     try {

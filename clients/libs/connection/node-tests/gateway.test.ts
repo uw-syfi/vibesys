@@ -168,6 +168,31 @@ describe('gateway public transport', () => {
   });
 });
 
+test('a stream hears each step of its session, and a late one the step it joins at', {
+  timeout: 15000,
+}, async () => {
+  const fake = new FakeGateway();
+  const connection = new GatewayConnection(fake, new FakeClock().schedule);
+  const abort = new AbortController();
+  const first: string[] = [];
+  const later: string[] = [];
+  const open = (heard: string[]) =>
+    connection.stream(
+      TAIL_METHOD,
+      request(),
+      abort.signal,
+      () => {},
+      step => heard.push(step),
+    );
+  const streams = [open(first), open(later)];
+  await Promise.all([fake.nextTail(), fake.nextTail()]);
+  expect(first).toEqual(['gateway', 'handshake', 'runs']);
+  expect(later.at(-1)).toBe('runs');
+  abort.abort();
+  await Promise.allSettled(streams);
+  connection.close();
+});
+
 test('two live calls share a single host session', {
   timeout: 15000,
 }, async () => {

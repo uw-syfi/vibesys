@@ -298,9 +298,15 @@ importers:
       '@types/react':
         specifier: 19.1.13
         version: 19.1.13
+      '@types/react-dom':
+        specifier: 19.1.9
+        version: 19.1.9(@types/react@19.1.13)
       fast-check:
         specifier: 4.10.2
         version: 4.10.2
+      react-dom:
+        specifier: 19.1.1
+        version: 19.1.1(react@19.1.1)
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -751,6 +757,12 @@ importers:
       '@types/react':
         specifier: 19.1.13
         version: 19.1.13
+      '@types/react-dom':
+        specifier: 19.1.9
+        version: 19.1.9(@types/react@19.1.13)
+      react-dom:
+        specifier: 19.1.1
+        version: 19.1.1(react@19.1.1)
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -920,6 +932,9 @@ importers:
       '@types/bun':
         specifier: 1.4.2
         version: 1.4.2
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
