@@ -198,6 +198,49 @@ def test_an_adoption_published_twice_is_the_same_publication(tmp_path: Path) -> 
     run_virtual(built.clock, main())
 
 
+@pytest.mark.parametrize("verify", [False, True])
+def test_the_report_of_a_succeeded_adoption_says_where_it_published_and_what_it_did_to_the_checkout(
+    tmp_path: Path, *, verify: bool
+) -> None:
+    """Core folds the report alone, so what only the report can carry must be on it."""
+    built = harness_in(tmp_path)
+    tag = tag_named("report")
+
+    async def main() -> None:
+        await retain(built, GOOD)
+        selection = adopt(tag, GOOD)
+        step = (
+            VerifyAdoption(request_id=tag, scope=SCOPE, selection=selection.selection)
+            if verify
+            else selection
+        )
+        done = await built.runner().run(step, tag, 1, DEADLINE, CancelSignal())
+        assert isinstance(done, Finished)
+        assert done.report.publication is not None
+        assert done.report.publication.commit == built.world.published[-1]
+        assert (done.report.checkout is None) is verify
+
+    run_virtual(built.clock, main())
+
+
+def test_the_report_of_an_adoption_that_published_nothing_carries_no_publication(
+    tmp_path: Path,
+) -> None:
+    built = harness_in(tmp_path)
+    tag = tag_named("refused")
+
+    async def main() -> None:
+        refused = await built.runner().run(adopt(tag, STRANGER), tag, 1, DEADLINE, CancelSignal())
+        kept = await built.runner(publishes=False).run(
+            adopt(tag, BASE), tag, 1, DEADLINE, CancelSignal()
+        )
+        for done in (refused, kept):
+            assert isinstance(done, Finished)
+            assert (done.report.publication, done.report.checkout) == (None, None)
+
+    run_virtual(built.clock, main())
+
+
 # What may be adopted: a retained revision of the run, or the trusted baseline.
 
 CASES = {

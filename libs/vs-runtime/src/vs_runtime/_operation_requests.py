@@ -214,8 +214,8 @@ class RegisteredOperationRequests:
                 f"operation {kind!r} is not in the catalog",
             )
 
-        async def perform(*, resumed: bool) -> Settled[ResultReceipt] | Transient[ResultReceipt]:
-            return await self._perform(request, context, entry, resumed=resumed)
+        async def perform(*, repeat: bool) -> Settled[ResultReceipt] | Transient[ResultReceipt]:
+            return await self._perform(request, context, entry, repeat=repeat)
 
         execution = await self._receipts.store.run_once(
             request_id.root,
@@ -240,9 +240,9 @@ class RegisteredOperationRequests:
         context: ExecutionContext,
         entry: OperationEntry,
         *,
-        resumed: bool,
+        repeat: bool,
     ) -> Settled[ResultReceipt] | Transient[ResultReceipt]:
-        """The effect, run under the store's begun marker. ``resumed`` means inspect first."""
+        """The effect, run under the store's begun marker. ``repeat`` means inspect first."""
         owner = entry.owner
         if owner is None:
             return Settled(
@@ -268,7 +268,7 @@ class RegisteredOperationRequests:
                 )
         try:
             return await self._run_owner(
-                request, context, entry, owner, resumed=resumed, admission=admission
+                request, context, entry, owner, repeat=repeat, admission=admission
             )
         finally:
             self._fences.leave(fence, by=by)
@@ -280,7 +280,7 @@ class RegisteredOperationRequests:
         entry: OperationEntry,
         owner: OperationOwner,
         *,
-        resumed: bool,
+        repeat: bool,
         admission: Entered | Fenced,
     ) -> Settled[ResultReceipt] | Transient[ResultReceipt]:
         """Run the owner inside the operation's fence, inspecting first when it may have run."""
@@ -288,7 +288,7 @@ class RegisteredOperationRequests:
         if isinstance(admission, Fenced) and not admission.entered_before:
             # An inspection proved it never ran and closed the fence first: it never will.
             return Settled(self._withdrawn(request, context, entry))
-        if resumed or isinstance(admission, Fenced):
+        if repeat or isinstance(admission, Fenced):
             match await _inspect(owner, decoded, context):
                 case Applied(outcome):
                     return Settled(self._complete(request, context, entry, outcome))
@@ -588,8 +588,8 @@ class RegisteredOperationRequests:
             )
         target_entry, operation = entry, record.operation
 
-        async def perform(*, resumed: bool) -> Settled[ResultReceipt] | Transient[ResultReceipt]:
-            del resumed  # cancellation is idempotent by contract, so a resume repeats it
+        async def perform(*, repeat: bool) -> Settled[ResultReceipt] | Transient[ResultReceipt]:
+            del repeat  # cancellation is idempotent by contract, so a repeat repeats it
             owner = target_entry.owner
             if not isinstance(owner, CancellableOwner):
                 return Settled(

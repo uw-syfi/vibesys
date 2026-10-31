@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 from vibesys.orchestration.dynamic.core_policy.api import prompts
 from vibesys.orchestration.dynamic.search.api import HANDOFF, HandoffWritten, WriteHandoff
 from vs_prompts.api import TemplateRenderer
-from vs_runtime.api.core import Applied, Inspection, NotApplied, OperationEntry
+from vs_runtime.api.core import Applied, Inspection, KeyedWrite, NotApplied, OperationEntry
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -156,7 +156,10 @@ def handoff_entries(resources: OwnedOperationResources) -> tuple[OperationEntry,
     state = resources.project.state
     namespace = state.agent_visible_namespace(resources.run_id, HANDOFF_NAMESPACE)
     earlier = state.portable_namespace(resources.run_id, HANDOFF_NAMESPACE)
-    return (OperationEntry.owned(HANDOFF, HandoffOwner(namespace, earlier=earlier)),)
+    owner = HandoffOwner(namespace, earlier=earlier)
+    return (
+        OperationEntry.owned(HANDOFF, owner, KeyedWrite("the handoff file of the planner call")),
+    )
 
 
 __all__ = [

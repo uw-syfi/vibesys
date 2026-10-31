@@ -4,7 +4,7 @@
  * The hero, panes and counts wait for the whole history, since a prefix of it would read as a run
  * still going.
  */
-import {Button, Card, LoadingBar, Meter, Stack, Text} from '@vibesys/ui';
+import {Button, Card, LoadingBar, Meter, Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {type HistoryProgress, historyLoadingView} from '../../state/index.js';
 
@@ -64,16 +64,21 @@ export function RunUnplaced(props: {readonly label: string; readonly words: stri
   );
 }
 
+/** The run's history could not be read: why, Retry, and the run's logs, which need no history. */
 export function RunLoadError(props: {
   readonly message: string;
   readonly retry: () => void;
+  readonly viewLogs: () => void;
 }): JSX.Element {
   return (
     <Card>
       <Stack gap="space-3">
         <Text variant="heading">Could not load this run</Text>
         <Text tone="muted">{props.message}</Text>
-        <Button variant="secondary" text="Retry" press={props.retry} />
+        <Row gap="space-2" wrap>
+          <Button variant="secondary" text="Retry" press={props.retry} />
+          <Button variant="secondary" text="View logs" press={props.viewLogs} />
+        </Row>
       </Stack>
     </Card>
   );

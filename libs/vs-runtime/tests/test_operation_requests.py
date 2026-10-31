@@ -196,7 +196,7 @@ async def test_concurrent_deliveries_execute_one_registered_operation() -> None:
         owner = echo.entry.owner
         assert isinstance(owner, EchoOwner)
         held = HeldEchoOwner(owner)
-        entry = OperationEntry.owned(echo.entry.registration, held)
+        entry = replace(echo.entry, owner=held)
         items = tuple(replace(item, entry=entry) if item is echo else item for item in items)
         request = execute_request(catalog_of(items), echo.request, "req-concurrent")
         context = context_for(request)
@@ -506,9 +506,9 @@ async def test_inspection_seals_an_effect_the_owner_proves_never_happened() -> N
         context = context_for(request)
 
         async def crash_after_record(
-            *, resumed: bool
+            *, repeat: bool
         ) -> Settled[ResultReceipt] | Transient[ResultReceipt]:
-            del resumed
+            del repeat
             receipts.record_record(
                 RecordReceipt(
                     request_id="req-never",

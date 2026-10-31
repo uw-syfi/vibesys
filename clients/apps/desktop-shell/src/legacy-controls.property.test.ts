@@ -1,7 +1,7 @@
 import {expect, test} from 'bun:test';
 import {validateRunEvent} from '@vibesys/contracts';
 import {event} from '@vibesys/contracts/testing';
-import {endedView, headerView, runPageInitial, runPageStep} from '@vibesys/feature-run-page/state';
+import {headerView, runPageInitial, runPageStep} from '@vibesys/feature-run-page/state';
 import type {HostKey, HostRun} from '@vibesys/hosts';
 import {initialCoreState, reduceEvent} from '@vibesys/run-state';
 import fc from 'fast-check';
@@ -66,7 +66,7 @@ test('property: legacy controls follow terminal journal facts despite stale list
       expect(headerView(state).pause.shown).toBe(false);
       expect(headerView(state).pauseNow.shown).toBe(false);
       // The host admits Resume after every ending, whatever flag its record keeps for old readers.
-      expect(endedView(state)?.resume).toBe('Resume');
+      expect(headerView(state).resume.shown).toBe(true);
       expect(runPageStep(state, {type: 'resume-ended'}).requests).toHaveLength(1);
       for (const type of ['pause', 'ask-pause-now', 'confirm-pause-now'] as const)
         expect(runPageStep(state, {type}).requests).toEqual([]);

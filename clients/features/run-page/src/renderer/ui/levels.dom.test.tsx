@@ -8,7 +8,7 @@ import {Window} from 'happy-dom';
 import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {type RunModel, runPageInitial} from '../../state/index.js';
-import {idea, modelOf} from '../../state/timeline-fixtures.js';
+import {idea, modelOf, step} from '../../state/timeline-fixtures.js';
 import {DeepLevel} from './levels.js';
 
 const window = new Window();
@@ -70,6 +70,7 @@ async function paneOf(
         mode="ideas"
         dispatch={() => undefined}
         loading={null}
+        problem={null}
         zoomed={{idea: opened, agent: null, step: null, item: null}}
       />,
     ),
@@ -103,4 +104,67 @@ test('a failed idea says why once: its badge says Failed and its body line gives
 test('a passed or running idea carries no reason in its header', async () => {
   expect(await chipsOf('passed', null)).toContain('Passed');
   expect(await chipsOf('running', null)).toContain('Running');
+});
+
+/** The chips of an opened step's header, with the text each shows and the pointer it carries. */
+async function stepChips(problem: string | null): Promise<{text: string | null; hint: string}[]> {
+  const opened = idea('mpmc', 'passed', 100, 300);
+  const model = {
+    ...modelOf([opened]),
+    overview: null,
+    inputGates: [],
+    changed: new Set<string>(),
+    agents: {agents: []},
+    trace: {spans: new Map()},
+  } as unknown as RunModel;
+  const state = runPageInitial({
+    identity: {host: 'ssh:host-b', runId: 'run-1'},
+    title: {project: 'queue-rs', task: null},
+    hostLabel: 'host-b',
+    unavailable: {},
+  });
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () =>
+    root.render(
+      <DeepLevel
+        state={state}
+        base={{
+          model,
+          clock: {start: 0, now: 1000},
+          tokens: EMPTY_LEDGER,
+          who: new Map(),
+          zoom: () => undefined,
+        }}
+        core={null}
+        mode="ideas"
+        dispatch={() => undefined}
+        loading={null}
+        problem={problem}
+        zoomed={{
+          idea: opened,
+          agent: null,
+          step: step('s1', 'implement', 'implementer', 100, 50),
+          item: null,
+        }}
+      />,
+    ),
+  );
+  const chips = [...container.querySelectorAll('.vs-chip')].map(chip => ({
+    text: chip.textContent,
+    hint: chip.getAttribute('aria-description') ?? '',
+  }));
+  await act(async () => root.unmount());
+  container.remove();
+  return chips;
+}
+
+test('a step whose transcript could not be read says so at the step, with the reason as its description', async () => {
+  const chips = await stepChips('the span page made no progress');
+  expect(chips).toContainEqual({
+    text: 'Transcript unavailable',
+    hint: 'the span page made no progress',
+  });
+  expect((await stepChips(null)).map(chip => chip.text)).not.toContain('Transcript unavailable');
 });
