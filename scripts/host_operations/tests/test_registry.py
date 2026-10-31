@@ -15,6 +15,7 @@ from scripts.host_operations.api import (
     GenerationError,
     compile_outputs,
     compile_registry,
+    compile_subscribe_timing,
     compile_topics,
 )
 from scripts.host_operations.generate import generate
@@ -266,6 +267,67 @@ def test_a_value_with_room_for_its_key_and_framing_is_accepted() -> None:
         topic.options.ParseFromString(raw + _append_to_policy(6, HOST_API_MAX_MESSAGE_BYTES - 1024))
 
     assert compile_topics(_topic_image(change))[0].policy.max_value_bytes == HOST_API_MAX_MESSAGE_BYTES - 1024
+
+
+def _timing_image(change: Callable[[descriptor_pb2.DescriptorProto], None]) -> bytes:
+    """Rewrite the frame timing option of `SubscribeRequest`."""
+    image = _image()
+    file = next(f for f in image.file if f.name == "vibesys/api/v1/subscribe.proto")
+    change(next(message for message in file.message_type if message.name == "SubscribeRequest"))
+    return image.SerializeToString()
+
+
+def test_frame_timing_compiles_from_the_descriptor_into_both_languages() -> None:
+    root = Path(__file__).resolve().parents[3]
+    image = _image().SerializeToString()
+    timing = compile_subscribe_timing(image)
+    assert (timing.heartbeat_ms, timing.lease_ms) == (5000, 30000)
+    outputs = compile_outputs(image, _slots(), _server_sources(root), _watches())
+    typescript = outputs["clients/libs/proto/src/generated/host-operations.ts"]
+    go = outputs["gateway/internal/hostoperations/topics_generated.go"]
+    assert f"heartbeatMs: {timing.heartbeat_ms}, leaseMs: {timing.lease_ms}" in typescript
+    assert (
+        f"FrameTiming{{Heartbeat: {timing.heartbeat_ms} * time.Millisecond, "
+        f"Lease: {timing.lease_ms} * time.Millisecond}}"
+    ) in go
+
+
+def test_a_request_without_frame_timing_fails_generation() -> None:
+    def change(request: descriptor_pb2.DescriptorProto) -> None:
+        request.options.Clear()
+
+    with pytest.raises(GenerationError, match="SubscribeRequest: missing subscribe timing"):
+        compile_subscribe_timing(_timing_image(change))
+
+
+@pytest.mark.parametrize(
+    ("heartbeat", "lease", "message"),
+    [
+        (0, 30000, "heartbeat_ms and lease_ms are required"),
+        (5000, 0, "heartbeat_ms and lease_ms are required"),
+        (5000, 5000, "lease_ms must exceed heartbeat_ms"),
+        (5000, 4999, "lease_ms must exceed heartbeat_ms"),
+        (1, 2, None),
+    ],
+)
+def test_a_lease_that_cannot_hold_a_beat_fails_generation(
+    heartbeat: int, lease: int, message: str | None
+) -> None:
+    def change(request: descriptor_pb2.DescriptorProto) -> None:
+        update = (
+            _varint(1 << 3) + _varint(heartbeat) + _varint(2 << 3) + _varint(lease)
+        )
+        option = _varint(51005 << 3 | 2) + _varint(len(update)) + update
+        request.options.Clear()
+        request.options.ParseFromString(option)
+
+    image = _timing_image(change)
+    if message is None:
+        timing = compile_subscribe_timing(image)
+        assert (timing.heartbeat_ms, timing.lease_ms) == (heartbeat, lease)
+        return
+    with pytest.raises(GenerationError, match=f"SubscribeRequest: {message}"):
+        compile_subscribe_timing(image)
 
 
 def _varint(value: int) -> bytes:
