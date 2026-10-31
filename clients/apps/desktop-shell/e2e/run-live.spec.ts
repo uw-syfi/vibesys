@@ -6,8 +6,10 @@ import {Controls} from './chat-controls.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
+  installFakeChrome,
   installFakeMachines,
   installFakeProjectRuns,
+  MAC_CHROME,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyFixture, journeyHead, journeyScript, transitionJourney} from './journey-world.js';
@@ -49,7 +51,7 @@ function listed(live: unknown[]): Record<string, unknown> {
 
 const SEED: FakeBridgeSeed = {
   theme: 'ink',
-  chromeInset: {width: 84, height: 40},
+  chromeInset: MAC_CHROME,
   appearance: {mode: 'dark', light: 'paper', dark: 'ink'},
   listings: [listed([server('running')])],
   recent: [
@@ -84,6 +86,7 @@ test('a live run folds its trace into the ideas, the failed listed and hideable'
   page,
 }) => {
   await addInitScripts(page, [
+    initScript(installFakeChrome, SEED),
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
     initScript(installFakeMachines, SEED),
@@ -114,6 +117,7 @@ test('a live run folds its trace into the ideas, the failed listed and hideable'
 
 test('a run that has tried no idea yet says what will appear, not a guess', async ({page}) => {
   await addInitScripts(page, [
+    initScript(installFakeChrome, SEED),
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
     initScript(installFakeMachines, SEED),
@@ -133,6 +137,7 @@ test('a live run drains from the header over its session, and is let go', async 
   const controls = new Controls(page, journeyFixture('empty'));
   await controls.attach();
   await addInitScripts(page, [
+    initScript(installFakeChrome, SEED),
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
     initScript(installFakeMachines, SEED),

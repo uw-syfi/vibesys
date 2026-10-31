@@ -2,12 +2,20 @@ import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
 import fc from 'fast-check';
 import {settled} from './checks/settle.js';
-import {type Anchor, anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
+import {
+  type Anchor,
+  anchorsOf,
+  pageBox,
+  RUN_ANCHORS,
+  stabilityViolations,
+} from './checks/stability.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
+  installFakeChrome,
   installFakeMachines,
   installFakeProjectRuns,
+  MAC_CHROME,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyScript} from './journey-world.js';
@@ -18,7 +26,7 @@ const INSTANCE = '00000000000a';
 const RUN = '20261017-120000';
 const SEED: FakeBridgeSeed = {
   theme: 'ink',
-  chromeInset: {width: 84, height: 40},
+  chromeInset: MAC_CHROME,
   appearance: {mode: 'dark', light: 'paper', dark: 'ink'},
   listings: [
     {
@@ -57,6 +65,7 @@ const SEED: FakeBridgeSeed = {
 
 async function openRun(page: Page, count: number): Promise<void> {
   await addInitScripts(page, [
+    initScript(installFakeChrome, SEED),
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
     initScript(installFakeMachines, SEED),
@@ -308,16 +317,10 @@ test('choosing another idea keeps the list, the detail and the chart where they 
   const before = await anchorsOf(page, PANES);
   const steps = page.getByRole('listbox', {name: /steps$/});
   // The steps list is as tall as the idea's steps, so only where it starts and how wide it is hold.
-  // Where it is on the page: pressing a row may scroll the page, which moves nothing.
-  const placed = async () =>
-    steps.evaluate(element => {
-      let scrolled = window.scrollY;
-      for (let node = element.parentElement; node !== null; node = node.parentElement) {
-        scrolled += node.scrollTop;
-      }
-      const box = element.getBoundingClientRect();
-      return {x: box.x, y: box.y + scrolled, width: box.width};
-    });
+  const placed = async () => {
+    const {x, y, width} = await pageBox(steps);
+    return {x, y, width};
+  };
   const stepsBefore = await placed();
   for (const index of [1, 2, 0]) {
     await options.nth(index).hover();

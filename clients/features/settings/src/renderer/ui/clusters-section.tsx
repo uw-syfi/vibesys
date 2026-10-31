@@ -38,6 +38,7 @@ import {
   reachWords,
   stale,
   statedHardware,
+  testFailureWords,
 } from '../../state/index.js';
 import {Reading} from './reading.js';
 
@@ -230,10 +231,37 @@ function ClusterFormCard(props: FormProps): JSX.Element {
         <IdentityFields {...props} />
         <SlurmFields {...props} />
         <HardwareFields {...props} />
-        <TestResult form={form} outdated={stale(form)} />
+        <FormResult form={form} />
         <FormActions {...props} />
       </Stack>
     </Card>
+  );
+}
+
+/** A failure the form holds, inline above the actions that try again; announced when it appears. */
+function FormFailure(props: {readonly title: string; readonly detail?: string}): JSX.Element {
+  return (
+    <div role="alert">
+      <Stack gap="space-1">
+        <Text variant="body-strong" tone="err">
+          {props.title}
+        </Text>
+        {props.detail === undefined ? null : <Text tone="muted">{props.detail}</Text>}
+      </Stack>
+    </div>
+  );
+}
+
+/** What the form says of itself above its actions: a failure it holds, and its connection test. */
+function FormResult(props: {readonly form: ClusterForm}): JSX.Element {
+  const {form} = props;
+  return (
+    <>
+      {form.problem === null || form.problem.field !== null ? null : (
+        <FormFailure title={form.problem.text} />
+      )}
+      <TestResult form={form} outdated={stale(form)} />
+    </>
   );
 }
 
@@ -252,7 +280,9 @@ function TestResult(props: {
       />
     );
   }
-  if (test.kind === 'failed') return null;
+  if (test.kind === 'failed') {
+    return <FormFailure title={testFailureWords(test.stage)} detail={test.detail} />;
+  }
   return (
     <Banner
       tone="ok"

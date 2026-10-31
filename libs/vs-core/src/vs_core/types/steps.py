@@ -21,6 +21,7 @@ from .common import (
     InterruptPolicy,
     Observation,
     RequestId,
+    Seconds,
     Value,
     unset,
 )
@@ -137,6 +138,9 @@ class StepAttempts(Value):
     """Whether the latest attempt ended without a result."""
     uncharged: Count = 0
     """The attempts a pause or shutdown ended."""
+    deadline_at: Seconds | None = Field(default=None, exclude_if=unset)
+    """The limit the first attempt started with: the step's own, which a cap on one attempt does
+    not move. A drain caps the request it cannot interrupt; the cap ends with that attempt."""
 
     @property
     def charged(self) -> int:

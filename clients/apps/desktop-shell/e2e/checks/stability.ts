@@ -5,7 +5,7 @@
  * a jump to the user. `anchorsOf` records the anchors on the screen now; `stabilityViolations`
  * compares the screen later against what was recorded.
  */
-import type {Page} from '@playwright/test';
+import type {Locator, Page} from '@playwright/test';
 import type {Violation} from './in-page.js';
 
 /** An element that must stay put: how the page names it, and the selector that finds it. */
@@ -130,4 +130,25 @@ function movement(was: Placed, is: Placed & {same: boolean}, copies: boolean): s
   return moved.length === 0
     ? null
     : `changed its ${moved.map(key => `${key} from ${was[key]} to ${is[key]}`).join(', ')}`;
+}
+
+/**
+ * Where `element` is on the page, not on the screen: the page scrolls to a row that was pressed (the
+ * performance row is tall), and a scroll moves nothing. The scroll of the window and of every
+ * container above the element is added back to its box.
+ */
+export async function pageBox(element: Locator): Promise<{
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}> {
+  return element.evaluate(node => {
+    let scrolled = window.scrollY;
+    for (let each = node.parentElement; each !== null; each = each.parentElement) {
+      scrolled += each.scrollTop;
+    }
+    const {x, y, width, height} = node.getBoundingClientRect();
+    return {x, y: y + scrolled, width, height};
+  });
 }

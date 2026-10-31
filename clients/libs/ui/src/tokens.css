@@ -166,7 +166,6 @@
   --accent-text: var(--bg);
   --hover: var(--panel-2);
   --selected: var(--selection);
-  --titlebar: var(--control);
 }
 :root {
   color-scheme: light;

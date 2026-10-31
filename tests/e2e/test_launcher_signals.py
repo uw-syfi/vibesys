@@ -14,7 +14,6 @@ proves the console entry point's wiring.
 from __future__ import annotations
 
 import os
-import select
 import signal
 import subprocess
 import sys
@@ -26,6 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.e2e.descriptor_lines import DescriptorLines
 
 from entrypoints.launcher import call_child
 from entrypoints.launcher import main as launcher_main
@@ -82,17 +82,15 @@ class _Engine:
         # Reaches end-of-file when the launcher, its only writer, exits.
         self._launcher = launcher_alive
         # Opening blocks until the engine opens its end for writing.
-        self._events = events.open(encoding="utf-8")
+        self._events = os.open(events, os.O_RDONLY)
+        self._lines = DescriptorLines(self._events, bound=HANG_GUARD_S)
 
     def next_event(self) -> str | None:
         """Return the engine's next line, or ``None`` once the launcher exited."""
-        readable, _, _ = select.select([self._events, self._launcher], [], [])
-        if self._events in readable:
-            return self._events.readline().strip()
-        return None
+        return self._lines.next_line(unless_readable=self._launcher)
 
     def close(self) -> None:
-        self._events.close()
+        os.close(self._events)
         os.close(self._launcher)
 
 
@@ -394,17 +392,12 @@ class _EngineLines:
 
     def __init__(self, events: Path) -> None:
         self._events = os.open(events, os.O_RDONLY | os.O_NONBLOCK)
-        self._buffer = b""
+        self._lines = DescriptorLines(self._events, bound=HANG_GUARD_S)
 
     def next_line(self) -> str:
-        while b"\n" not in self._buffer:
-            readable, _, _ = select.select([self._events], [], [], HANG_GUARD_S)
-            assert readable, "the engine went quiet"
-            chunk = os.read(self._events, 4096)
-            assert chunk, "the engine exited"
-            self._buffer += chunk
-        line, self._buffer = self._buffer.split(b"\n", 1)
-        return line.decode()
+        line = self._lines.next_line()
+        assert line is not None
+        return line
 
     def close(self) -> None:
         os.close(self._events)

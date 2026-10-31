@@ -9,6 +9,7 @@ import {
   type FailureCause,
   type SlurmClusterSettings,
 } from '@vibesys/ipc';
+import type {FormTest} from './cluster-form.js';
 
 type Tone = 'neutral' | 'ok' | 'warn' | 'err';
 
@@ -124,4 +125,17 @@ export function failureWords(failed: {readonly error: string; readonly cause?: F
   return failed.cause === undefined
     ? {body: failed.error}
     : {body: FAILURE_CAUSE_WORDS[failed.cause], hint: failed.error};
+}
+
+type TestStage = Extract<FormTest, {readonly kind: 'failed'}>['stage'];
+
+const TEST_STAGE_WORDS: Readonly<Record<TestStage, string>> = {
+  reach: 'Could not reach the cluster',
+  scheduler: 'The cluster’s scheduler did not answer',
+  workspace: 'The workspace is not usable',
+};
+
+/** What a connection test that failed says of the stage it failed at. */
+export function testFailureWords(stage: TestStage): string {
+  return TEST_STAGE_WORDS[stage];
 }
