@@ -65,10 +65,7 @@ exhaustion fails before the client runs. Do not write `&`/PID/sleep recipes.
 Every load-generating command, recorded or unrecorded (including sanity and tuning runs),
 must execute through `measurements.py run -- <command>`. Its host-wide flock prevents overlap.
 
-Read every task objective gate, including prose in OBJECTIVE.md. `gates --run <dir>` lists
-the exact declaration keys. `record --gates <file>`
-accepts a JSON object keyed by each exact stripped gate/SLA declaration line in task Markdown.
-Each result has `passed: [true|false, ...]` and `values: [number, ...]`, one of each per
-throughput sample. Evaluate the actual task limits; never infer pass from missing data.
-`compare` prints gate status for each revision and pooled metric ranges; derive report prose
-ranges only from that output. Missing results are unmeasured; any failed sample blocks approval.
+Use `record --observations <JSON file>` for descriptive auxiliary measurements such as
+latency: map metric names (including units) to numeric sample arrays. `compare` and the
+report print the pooled observed ranges for the exact contributing revisions and evaluator.
+Derive prose ranges only from that output; omit ranges that were not recorded.

@@ -87,6 +87,7 @@ class Run:
             "check": "pass",
             "exclusive": "yes",
             "host": "host-a",
+            "observations": None,
         }
         assert set(overrides) <= set(fields), overrides
         fields.update(overrides)
@@ -97,7 +98,7 @@ class Run:
         ]  # fmt: skip
         for value in samples:
             argv += ["--sample", repr(value)]
-        for flag in ("check", "exclusive"):
+        for flag in ("check", "exclusive", "observations"):
             if fields[flag]:
                 argv += [f"--{flag}", fields[flag]]
         return self.cli(*argv, host=fields["host"])
@@ -360,8 +361,7 @@ def test_a_record_carries_what_was_measured_where_and_against_which_task(new_run
         "check": "pass",
         "exclusive": "yes",
         "evaluator": script.task_fingerprint(run.task),
-        "gate_requirements": [],
-        "gates": {},
+        "observations": {},
     }
 
 
@@ -695,3 +695,33 @@ def test_first_base_record_must_match_controller_base(new_run: NewRun) -> None:
     assert "base_commit" in err
     assert run.lines == []
     assert run.record(SHA_B, [1, 2, 3], role="base")[0] == 0
+
+
+def test_observation_ranges_pool_only_recorded_comparable_data(new_run: NewRun) -> None:
+    run = new_run()
+    assert run.record(SHA_A, [100, 101, 102], role="base")[0] == 0
+    observations = run.root / "observations.json"
+    observations.write_text(json.dumps({"latency_p99_ms": [0.15, 0.3]}))
+    assert run.record(SHA_B, [200, 201, 202], observations=str(observations))[0] == 0
+    observations.write_text(json.dumps({"latency_p99_ms": [0.394, 0.401]}))
+    assert run.record(SHA_B, [203, 204, 205], observations=str(observations))[0] == 0
+    result = run.compare(SHA_B)
+    assert result["observed_ranges"]["candidate"] == {
+        "ops": [200, 205],
+        "latency_p99_ms": [0.15, 0.401],
+    }
+    assert result["verdict"] == "better"
+    code, out, err = run.cli("compare", "--run", str(run.dir), "--commit", SHA_B)
+    assert code == 0, err
+    assert "0.401" in out
+
+
+@pytest.mark.parametrize("values", [[True], [], [float("inf")], ["bad"]])
+def test_auxiliary_observations_are_numeric_samples(new_run: NewRun, values: list) -> None:
+    run = new_run()
+    observations = run.root / "observations.json"
+    observations.write_text(json.dumps({"auxiliary": values}))
+    code, _, err = run.record(SHA_B, [200, 201, 202], observations=str(observations))
+    assert code == 2
+    assert err
+    assert run.lines == []

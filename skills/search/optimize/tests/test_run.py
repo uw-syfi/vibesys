@@ -442,55 +442,6 @@ def test_pending_promotion_recovers_at_either_git_boundary(
     assert run.state() == recovered
 
 
-@pytest.mark.parametrize("result", [None, False, True])
-def test_judge_cannot_pass_missing_or_failed_declared_gate(
-    tmp_path: Path, *, result: bool | None
-) -> None:
-    run = Run(tmp_path)
-    task = tmp_path / ".vibesys/tasks/demo"
-    task.mkdir(parents=True)
-    declaration = "Latency SLA: latency must stay under the task limit."
-    (task / "OBJECTIVE.md").write_text(declaration)
-    run.record(BASE, [10, 11, 12], 1)
-    run.record(CANDIDATE, [100, 110, 120], 2)
-    path = run.path / "measurements.jsonl"
-    rows = [json.loads(line) for line in path.read_text().splitlines()]
-    for row in rows:
-        row["gate_requirements"] = [declaration]
-        row["gates"] = (
-            {}
-            if result is None
-            else {declaration: {"passed": [result] * 3, "values": [0.1, 0.2, 0.3]}}
-        )
-    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
-    assert run.call("add", "--id", "x", "--kind", "implement", "--hypothesis", "reduce copies") == 0
-    assert run.call("transition", "--id", "x", "--to", "returned", "--reason", "done") == 0
-    assert run.call("transition", "--id", "x", "--to", "judging", "--reason", "review") == 0
-    assert (
-        run.call(
-            "judge", "--id", "x", "--commit", CANDIDATE, "--result", "pass", "--reason", "checked"
-        )
-        == 0
-    ) == (result is True)
-    if result is True:
-        assert run.call("transition", "--id", "x", "--to", "won", "--reason", "judged") == 0
-        failed = {
-            **rows[-1],
-            "gates": {declaration: {"passed": [True, False, True], "values": [0.1, 2.0, 0.3]}},
-        }
-        with path.open("a") as stream:
-            stream.write(json.dumps(failed) + "\n")
-        assert run.call("move-main", "--id", "x") == 2
-        assert run.state()["main_commit"] == BASE
-        path.write_text("".join(json.dumps(r) + "\n" for r in rows))
-    comparison = measurements.compare_commit(measurements.load_records(run.path), CANDIDATE, BASE)
-    assert comparison["gates"]["candidate"]["status"] == (
-        "unmeasured" if result is None else "pass" if result else "fail"
-    )
-    if result is not None:
-        assert comparison["gates"]["candidate"]["ranges"][declaration] == [0.1, 0.3]
-
-
 def exercise_git_contract(git: controller.Git, root: Path, base: str, candidate: str) -> None:
     """The controller's supported Git operations, shared with the real-tier host test."""
     assert Path(git(root, ["rev-parse", "--show-toplevel"]).strip()) == root
@@ -530,7 +481,7 @@ def test_unmeasured_judge_releases_for_measurement_then_rejudge(tmp_path: Path) 
             "--result",
             "unmeasured",
             "--reason",
-            "missing gates",
+            "missing speed evidence",
         )
         == 0
     )

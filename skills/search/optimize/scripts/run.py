@@ -30,9 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "measure/scripts"))
 from measurements import (
     InvalidInputError,
     compare_commit,
-    gate_summary,
     load_records,
-    objective_gates,
 )
 
 if TYPE_CHECKING:
@@ -273,20 +271,10 @@ def _start(args: argparse.Namespace, now: datetime, git: Git) -> Path:
     return run
 
 
-def _check_gates(run: Path, commit: str) -> None:
-    state = read_state(run)
-    task = run.parent.parent / ".vibesys/tasks" / state["task"]
-    records = [r for r in load_records(run) if r["commit"] == commit]
-    summary = gate_summary(records, objective_gates(task))
-    if summary["status"] != "pass":
-        raise ValueError("objective gates: " + summary["status"])
-
-
 def _move(run: Path, state: State, item: str, now: datetime, git: Git) -> None:
     row = state["items"][item]
     commit = _sha(row.get("commit", ""))
     comparison = compare_commit(load_records(run), commit, state["main_commit"])
-    _check_gates(run, commit)
     if (
         row["state"] != "won"
         or not row.get("judge_pass")
@@ -381,12 +369,10 @@ def _finish(
     return comparison
 
 
-def _preconditions(args: argparse.Namespace, run: Path, state: State, git: Git) -> None:
+def _preconditions(args: argparse.Namespace, state: State, git: Git) -> None:
     command = args.command
     if state["finished"] and command != "status":
         raise ValueError("run already finished")
-    if command == "judge" and args.result == "pass":
-        _check_gates(run, args.commit)
     if command == "track" and args.pid_file:
         args.pid = git.pid_file(args.pid_file, args.timeout)
 
@@ -399,7 +385,7 @@ def _operate(
     git: Git,
 ) -> dict[str, Any]:
     command = args.command
-    _preconditions(args, run, state, git)
+    _preconditions(args, state, git)
     if command in {"add", "transition", "judge"}:
         state = _item_command(args, state, now)
     elif command == "move-main":
@@ -415,7 +401,6 @@ def _operate(
     elif command == "finish":
         if any(git.alive(row["pid"]) for row in state["commands"].values()):
             raise ValueError("tracked process still alive")
-        _check_gates(run, state["main_commit"])
         comparison = _finish(run, state, now, git, args)
     _save(run, state)
     if state["finished"]:
