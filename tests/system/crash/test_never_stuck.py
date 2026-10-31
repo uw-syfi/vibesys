@@ -53,8 +53,7 @@ STUCK_GROUPS: frozenset[tuple[str, Action, Moment]] = frozenset(
     {
         *(("dynamic", KILL, IN_FLIGHT), ("dynamic-parallel", KILL, IN_FLIGHT)),
         *(("evolve", KILL, IN_FLIGHT), ("issue-queue", KILL, IN_FLIGHT)),
-        ("single", KILL, IN_FLIGHT),
-        *(("dynamic", PAUSE, moment) for moment in Moment),
+        *(("single", KILL, IN_FLIGHT), ("multi", KILL, IN_FLIGHT)),
         *(("single", PAUSE, moment) for moment in Moment),
         *(("multi", PAUSE, moment) for moment in Moment),
     }
