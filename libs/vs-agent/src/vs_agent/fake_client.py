@@ -567,13 +567,7 @@ class FakeAgentClient:
             reuse_session=True,
             session_key=session_key,
         )
-        self._write_usage(
-            session_spec.role, turn.label, session_spec.model, session_spec.reasoning_effort
-        )
-        self._maybe_raise(
-            session_spec.role, turn.message, turn.label, turn.invocation_id, session_key
-        )
-        self._update_session(reuse_session=True, session_key=session_key)
+        self._finish_turn(invocation, session_spec.model, session_spec.reasoning_effort)
         if session_key is not None:
             self._raw_fingerprints[session_key] = fingerprint
             # The provider hands out the conversation id with the turn, so it is on record
@@ -699,9 +693,7 @@ class FakeAgentClient:
             reuse_session=reuse_session,
             session_key=session_key,
         )
-        self._write_usage(kind, round_label, self.model_for_kind(kind), None)
-        self._maybe_raise(kind, user_prompt, round_label, invocation_id, session_key)
-        self._update_session(reuse_session=reuse_session, session_key=session_key)
+        self._finish_turn(invocation, self.model_for_kind(kind), None)
         self._emit_stream(kind, invocation)
         return self._resolve_response(kind, invocation, response_cls)
 
@@ -737,9 +729,7 @@ class FakeAgentClient:
             reuse_session=reuse_session,
             session_key=session_key,
         )
-        self._write_usage(kind, round_label, self.model_for_kind(kind), None)
-        self._maybe_raise(kind, user_prompt, round_label, invocation_id, session_key)
-        self._update_session(reuse_session=reuse_session, session_key=session_key)
+        self._finish_turn(invocation, self.model_for_kind(kind), None)
         self._emit_stream(kind, invocation)
         text = self._resolve_text(kind, invocation)
         _refuse_flood(text)
@@ -784,10 +774,46 @@ class FakeAgentClient:
             callback(invocation)
         return invocation
 
-    def _write_usage(
-        self, kind: str, round_label: str | None, model: str | None, reasoning_effort: str | None
+    def _finish_turn(
+        self, invocation: FakeInvocation, model: str | None, reasoning_effort: str | None
     ) -> None:
-        """Append the turn's usage row, before its outcome is known, like the real client."""
+        """Write the turn's usage row, then fail it if a failure is due, else keep its conversation.
+
+        The row names the conversation the turn ran in, as the real client's does: the one on
+        record when the turn failed (the provider named no other), the id the turn returns when it
+        did not. A failed turn keeps no new conversation.
+        """
+        key = invocation.session_key
+        kind, label = invocation.kind, invocation.round_label
+        session_id = self._turn_session_id(reuse_session=invocation.reuse_session, session_key=key)
+        try:
+            self._maybe_raise(kind, invocation.user_prompt, label, invocation.invocation_id, key)
+        except BaseException:
+            on_record = None if key is None else self.provider_session_id(key)
+            self._write_usage(kind, label, model, reasoning_effort, on_record)
+            raise
+        self._write_usage(kind, label, model, reasoning_effort, session_id)
+        if session_id is not None and key is not None:
+            self._sessions[key] = session_id
+            self._last_turn_sessions[key] = session_id
+
+    def _turn_session_id(
+        self, *, reuse_session: bool | None, session_key: AgentSessionKey | None
+    ) -> str | None:
+        """The conversation a turn on ``session_key`` runs in: the one on record, else a new one."""
+        if not (self._session_reuse and reuse_session and session_key is not None):
+            return None
+        return self.provider_session_id(session_key) or f"fake-session-{uuid4()}"
+
+    def _write_usage(
+        self,
+        kind: str,
+        round_label: str | None,
+        model: str | None,
+        reasoning_effort: str | None,
+        provider_session_id: str | None,
+    ) -> None:
+        """Append the turn's usage row, like the real client."""
         if self._log_dir is None:
             return
         append_usage_record(
@@ -800,6 +826,7 @@ class FakeAgentClient:
             usage=self._usage,
             skills=AgentSkillUse(),
             recorded_at=utc_datetime(_FAKE_EPOCH),
+            provider_session_id=provider_session_id,
         )
 
     def set_capacity_gate(self, gate: CapacityGate) -> None:
@@ -866,17 +893,6 @@ class FakeAgentClient:
         if state.remaining > 0:
             state.remaining -= 1
             raise state.exc
-
-    def _update_session(
-        self, *, reuse_session: bool | None, session_key: AgentSessionKey | None
-    ) -> None:
-        if not (self._session_reuse and reuse_session and session_key is not None):
-            return
-        session_id = self.provider_session_id(session_key)
-        if session_id is None:
-            session_id = f"fake-session-{uuid4()}"
-        self._sessions[session_key] = session_id
-        self._last_turn_sessions[session_key] = session_id
 
     def _emit_stream(self, kind: str, invocation: FakeInvocation) -> None:
         chunks = self._stream_chunks.get(kind)
