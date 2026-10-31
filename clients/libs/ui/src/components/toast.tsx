@@ -1,6 +1,6 @@
 import type {JSX} from 'react';
 import {Button} from './button.js';
-import {Collapsible} from './collapsible.js';
+import {DetailsToggle} from './details-toggle.js';
 import {StatusDot} from './status.js';
 import {Text} from './text.js';
 
@@ -22,9 +22,9 @@ const TONE_WORDS: Record<ToastTone, string> = {warn: 'Warning', err: 'Error'};
 
 /**
  * A small notification that stays until it is dismissed: a tone dot, a short title, and a dismiss
- * button. With a `detail` the title is also the control that opens it; a toast without one has
- * nothing to open. An error is announced at once (`alert`), a warning when the reader is idle
- * (`status`); the tone is never color alone, the dot is named by its word.
+ * button. With a `detail` it also has an expand control, which shows the detail under the title;
+ * one without has nothing to open. An error is announced at once (`alert`), a warning when the
+ * reader is idle (`status`); the tone is never color alone, the dot is named by its word.
  */
 export function Toast(props: {
   readonly tone: ToastTone;
@@ -34,7 +34,6 @@ export function Toast(props: {
   readonly toggle: (open: boolean) => void;
   readonly dismiss: () => void;
 }): JSX.Element {
-  const dot = <StatusDot tone={props.tone} label={TONE_WORDS[props.tone]} />;
   return (
     <div
       className="vs-toast"
@@ -42,20 +41,22 @@ export function Toast(props: {
       role={props.tone === 'err' ? 'alert' : 'status'}
     >
       <div className="vs-toast-main">
-        {props.detail === undefined ? (
-          <div className="vs-toast-head" title={props.title}>
-            {dot}
-            <span className="vs-toast-title">{props.title}</span>
+        <div className="vs-toast-head">
+          <StatusDot tone={props.tone} label={TONE_WORDS[props.tone]} />
+          <span className="vs-toast-title">{props.title}</span>
+        </div>
+        {props.detail !== undefined && props.open ? (
+          <div className="vs-toast-detail">
+            <Text tone="muted">{props.detail}</Text>
           </div>
-        ) : (
-          <Collapsible label={props.title} leading={dot} open={props.open} toggle={props.toggle}>
-            <div className="vs-toast-detail">
-              <Text tone="muted">{props.detail}</Text>
-            </div>
-          </Collapsible>
-        )}
+        ) : null}
       </div>
-      <Button variant="quiet" size="sm" icon="cross" label="Dismiss" press={props.dismiss} />
+      <div className="vs-toast-controls">
+        {props.detail === undefined ? null : (
+          <DetailsToggle open={props.open} toggle={props.toggle} />
+        )}
+        <Button variant="quiet" size="sm" icon="cross" label="Dismiss" press={props.dismiss} />
+      </div>
     </div>
   );
 }

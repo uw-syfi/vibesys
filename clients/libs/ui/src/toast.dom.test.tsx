@@ -4,7 +4,7 @@ import {afterAll, beforeAll, describe, expect, test} from 'bun:test';
 import {Window} from 'happy-dom';
 import {act, type ReactNode, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Banner, Button, type ToastItem, ToastStack} from './index.js';
+import {Banner, type BannerTone, Button, type ToastItem, ToastStack} from './index.js';
 
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
@@ -43,7 +43,7 @@ const buttons = (container: HTMLElement): HTMLButtonElement[] => [
 ];
 const named = (container: HTMLElement, name: string): HTMLButtonElement => {
   const found = buttons(container).find(
-    button => button.getAttribute('aria-label') === name || button.textContent?.includes(name),
+    button => (button.getAttribute('aria-label') ?? button.textContent) === name,
   );
   if (found === undefined) throw new Error(`no button named ${name}`);
   return found;
@@ -83,20 +83,17 @@ describe('a toast', () => {
     const container = await mount(<Owner initial={[SAVE]} />);
     expect(container.textContent).toContain('Could not save the change');
     expect(container.textContent).not.toContain('read-only');
-    const expand = named(container, 'Could not save the change');
-    expect(expand.getAttribute('aria-expanded')).toBe('false');
+    expect(named(container, 'Show details').getAttribute('aria-expanded')).toBe('false');
     expect(container.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Error');
     expect(named(container, 'Dismiss')).toBeDefined();
   });
 
   test('opens to its detail and closes again', async () => {
     const container = await mount(<Owner initial={[SAVE]} />);
-    await click(named(container, 'Could not save the change'));
+    await click(named(container, 'Show details'));
     expect(container.textContent).toContain('The settings file is read-only.');
-    expect(named(container, 'Could not save the change').getAttribute('aria-expanded')).toBe(
-      'true',
-    );
-    await click(named(container, 'Could not save the change'));
+    expect(named(container, 'Hide details').getAttribute('aria-expanded')).toBe('true');
+    await click(named(container, 'Hide details'));
     expect(container.textContent).not.toContain('read-only');
   });
 
@@ -118,6 +115,14 @@ describe('a toast', () => {
     ]);
     expect(container.querySelector('[aria-expanded]')).toBeNull();
   });
+
+  test('is never a control named like an action beside it: only its two buttons are controls', async () => {
+    const container = await mount(<Owner initial={[SAVE]} />);
+    expect(buttons(container).map(button => button.getAttribute('aria-label'))).toEqual([
+      'Show details',
+      'Dismiss',
+    ]);
+  });
 });
 
 describe('a stack of toasts', () => {
@@ -137,10 +142,11 @@ describe('a stack of toasts', () => {
 
   test('lists toasts in the order given and puts every control in the tab order', async () => {
     const container = await mount(<Owner initial={[READ, SAVE]} />);
-    const order = buttons(container).map(
-      button => button.getAttribute('aria-label') ?? button.textContent,
+    const order = buttons(container).map(button => button.getAttribute('aria-label'));
+    expect(order).toEqual(['Dismiss', 'Show details', 'Dismiss']);
+    expect(container.textContent?.indexOf('could not be read')).toBeLessThan(
+      container.textContent?.indexOf('Could not save') ?? 0,
     );
-    expect(order).toEqual(['Dismiss', 'Could not save the change', 'Dismiss']);
     for (const button of buttons(container)) {
       expect(button.getAttribute('tabindex')).toBeNull();
       expect(button.disabled).toBe(false);
@@ -150,23 +156,23 @@ describe('a stack of toasts', () => {
 });
 
 describe('a banner', () => {
-  test('is one line until its title is opened to the body and hint behind it', async () => {
+  test('is one line until its details control is opened to the body and hint behind it', async () => {
     const container = await mount(
       <Banner tone="warn" title="Needs an update" body="The body." hint="The hint." />,
     );
     expect(container.textContent).toContain('Needs an update');
     expect(container.textContent).not.toContain('The body.');
-    await click(named(container, 'Needs an update'));
+    await click(named(container, 'Show details'));
     expect(container.textContent).toContain('The body.');
     expect(container.textContent).toContain('The hint.');
   });
 
-  test('keeps its actions reachable while closed', async () => {
+  test('keeps its actions reachable while closed, and its title is not a control', async () => {
     let pressed = 0;
     const container = await mount(
       <Banner
         tone="failed"
-        title="Run ended"
+        title="Run again"
         body="Why it ended."
         actions={<Button text="Run again" press={() => (pressed += 1)} />}
       />,
@@ -174,11 +180,18 @@ describe('a banner', () => {
     expect(container.textContent).not.toContain('Why it ended.');
     await click(named(container, 'Run again'));
     expect(pressed).toBe(1);
+    expect(buttons(container).filter(button => button.textContent === 'Run again')).toHaveLength(1);
   });
 
   test('without a body or hint has nothing to open', async () => {
     const container = await mount(<Banner title="No VibeSys checkout" />);
     expect(container.querySelector('button')).toBeNull();
     expect(container.textContent).toBe('No VibeSys checkout');
+  });
+
+  test('has no error tone: a failure passed through is a toast, a failure held is `failed`', () => {
+    const rejectsErr: 'err' extends BannerTone ? never : true = true;
+    const acceptsFailed: 'failed' extends BannerTone ? true : never = true;
+    expect([rejectsErr, acceptsFailed]).toEqual([true, true]);
   });
 });

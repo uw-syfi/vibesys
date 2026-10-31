@@ -408,10 +408,8 @@ test('the Run screen shows the same native failure diagnostic as Logs', async ()
       ),
     );
     expect(container.textContent).not.toContain(diagnostic.message);
-    const open = [...container.querySelectorAll('button')].find(
-      each => each.textContent === 'Run diagnostic',
-    );
-    await act(async () => open?.click());
+    const open = container.querySelector('button[aria-label="Show details"]');
+    await act(async () => (open as HTMLElement | null)?.click());
     expect(container.textContent).toContain(diagnostic.message);
   } finally {
     await act(async () => root.unmount());

@@ -1,5 +1,5 @@
 import {type JSX, type ReactNode, useId, useState} from 'react';
-import {Collapsible} from './collapsible.js';
+import {DetailsToggle} from './details-toggle.js';
 import {Text} from './text.js';
 
 /**
@@ -39,8 +39,8 @@ export function Card(props: {
 
 /**
  * A state its screen is in, on one line: the title, with the actions beside it. The longer account
- * (`body`, then `hint`) is behind the title, which opens it; a banner with neither has nothing to
- * open.
+ * (`body`, then `hint`) is behind a details control at the end of the line; a banner with neither
+ * has nothing to open.
  */
 export function Banner(props: {
   readonly title: string;
@@ -54,19 +54,21 @@ export function Banner(props: {
   return (
     <div className="vs-banner" data-tone={props.tone ?? 'neutral'}>
       <div className="vs-banner-text">
-        {detailed ? (
-          <Collapsible label={props.title} open={open} toggle={setOpen}>
+        <span className="vs-banner-title">
+          <Text variant="body-strong">{props.title}</Text>
+        </span>
+        {detailed && open ? (
+          <>
             {props.body === undefined ? null : <Text tone="muted">{props.body}</Text>}
             {props.hint === undefined ? null : <Text tone="muted">{props.hint}</Text>}
-          </Collapsible>
-        ) : (
-          <span className="vs-banner-title" title={props.title}>
-            <Text variant="body-strong">{props.title}</Text>
-          </span>
-        )}
+          </>
+        ) : null}
       </div>
-      {props.actions === undefined ? null : (
-        <div className="vs-banner-actions">{props.actions}</div>
+      {props.actions === undefined && !detailed ? null : (
+        <div className="vs-banner-actions">
+          {props.actions}
+          {detailed ? <DetailsToggle open={open} toggle={setOpen} /> : null}
+        </div>
       )}
     </div>
   );
