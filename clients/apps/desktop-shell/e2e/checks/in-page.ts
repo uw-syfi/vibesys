@@ -242,12 +242,23 @@ export function overlapCheck(): Violation[] {
 }
 
 /** A short text on several lines (a chip, number or badge), or a short word broken mid-word. */
+/**
+ * Whether `text` is a fragment of a paragraph or list item: the words between its inline code and
+ * emphasis, which wrap with the sentence they are in. A label is the whole text of its element.
+ */
+function isProseFragment(element: Element, text: string): boolean {
+  const prose = element.closest('li, p');
+  return (
+    prose !== null && (prose.textContent ?? '').replace(/\s+/g, ' ').trim().length > text.length
+  );
+}
+
 export function wrapCheck(): Violation[] {
   const found: Violation[] = [];
   for (const {node, element, text} of textBoxes()) {
     if (inCode(element)) continue;
     const lines = lineCount(node);
-    if (lines > 1 && text.length <= 24) {
+    if (lines > 1 && text.length <= 24 && !isProseFragment(element, text)) {
       found.push({
         check: 'wrap',
         message: `"${text}" is ${text.length} characters and wraps onto ${lines} lines`,
@@ -1113,6 +1124,7 @@ export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
   markColors,
   legendColors,
   columnOf,
+  isProseFragment,
   labelsOf,
   hasIdAsWord,
   idHits,

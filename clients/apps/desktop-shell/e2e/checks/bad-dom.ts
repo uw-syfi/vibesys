@@ -43,6 +43,7 @@ export const CLEAN_SCREEN = `
       <span style="display:inline-block;width:10px;height:10px;background:rgb(40, 90, 200)"></span> passed
     </div>
     <p>The planner explained <code>total_ops_per_sec</code> and <code>0123456789abcdef0123</code>.</p>
+    <ul style="width:150px;margin:0;padding-left:16px"><li>Served by <code>engine/server.py</code>, echo and logprobs, then more words after them</li></ul>
     <div style="width:80px">we will pad and re-measure the queue</div>
     <div><span>Claude Code · Opus 5.5 · Judge</span> <span>Perf evaluator</span> <span>Planner</span></div>
     <div>Lock-free ring with per-slot sequence numbers</div>
