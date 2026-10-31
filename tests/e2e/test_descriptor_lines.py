@@ -7,7 +7,7 @@ import select
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.descriptor_lines import DescriptorLines
+from tests.e2e.descriptor_lines import DescriptorLines
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

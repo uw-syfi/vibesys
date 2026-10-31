@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.descriptor_lines import DescriptorLines
+from tests.e2e.descriptor_lines import DescriptorLines
 from tests.support.unique_run_id import unique_run_id
 
 from vs_core.api import RequestId

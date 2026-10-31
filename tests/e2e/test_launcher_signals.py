@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.descriptor_lines import DescriptorLines
+from tests.e2e.descriptor_lines import DescriptorLines
 
 from entrypoints.launcher import call_child
 from entrypoints.launcher import main as launcher_main

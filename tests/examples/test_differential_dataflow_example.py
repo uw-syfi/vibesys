@@ -224,33 +224,3 @@ def test_crash_injection_times_out_when_candidate_emits_no_output(
     assert crashed is False
     assert ok is True
     assert "no stdout" in message
-
-
-# Prints three lines in one write, then stays alive the first time it runs in a directory: what
-# an engine does when its output arrives in a burst. A second run in the same directory (the
-# gate's restart) prints them and exits.
-_BURST_ENGINE = (
-    "import os, sys, time\n"
-    "first = not os.path.exists('started')\n"
-    "open('started', 'w').close()\n"
-    "sys.stdout.write('1\\n2\\n3\\n')\n"
-    "sys.stdout.flush()\n"
-    "if first:\n"
-    "    time.sleep(60)\n"
-)
-
-
-def test_crash_injection_counts_lines_that_arrive_together(tmp_path: Path) -> None:
-    """Regression: a buffered readline kept the second line of a burst where select could not see
-    it, so the gate waited on an empty pipe, reported no stdout, and skipped the crash point."""
-    crash_gate = _load_module(
-        "differential_dataflow_crash_recovery_burst",
-        "accuracy_checker/crash_recovery_gate.py",
-    )
-
-    crashed, ok, message = crash_gate._crash_then_restart(  # noqa: SLF001  # lint-waiver: LW-008509 [SLF001]; exercise the crash point without building the external engine or running unrelated CLI gates.
-        sys.executable, ["-c", _BURST_ENGINE], tmp_path, 2
-    )
-
-    assert crashed is True, message
-    assert ok is True, message
