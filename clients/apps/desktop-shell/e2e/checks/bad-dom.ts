@@ -271,6 +271,24 @@ export const BAD_SCREENS: readonly BadScreen[] = [
     html: `<style>:root{--chip-warn-bg:#f3e6c8;--chip-err-bg:#f6dad6}</style><main style="display:block;width:440px"><div class="vs-notice" style="display:flex;gap:8px;background:var(--chip-warn-bg)">Login started <button>Check again</button></div></main>`,
   },
   {
+    name: 'an alert row across the pane, not tinted and with no chevron',
+    check: 'status-row',
+    message: /a status row 100% of the main pane wide \(alert\): "Could not read the runs"/,
+    html: `<main style="display:block;width:440px"><div role="alert" style="border:1px solid #ccc">Could not read the runs</div></main>`,
+  },
+  {
+    name: 'a status line in the error tone on a line of its own in a column',
+    check: 'status-row',
+    message: /a status row 100% of the main pane wide \(err text\): "1 check needs attention"/,
+    html: `<main style="display:block;width:440px"><div style="display:flex;flex-direction:column"><span class="vs-text" data-tone="err">1 check needs attention</span></div></main>`,
+  },
+  {
+    name: 'a status line under a new class name that a screen reader announces as a status',
+    check: 'status-row',
+    message: /a status row 100% of the main pane wide \(status\): "Reading runs 3\/3"/,
+    html: `<main style="display:block;width:440px"><div class="vs-notice" role="status"><span>Reading runs 3/3</span></div></main>`,
+  },
+  {
     name: 'text drawn outside the window',
     check: 'overflow',
     message: /text runs outside the window/,

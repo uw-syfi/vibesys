@@ -27,6 +27,7 @@ import {
   rawTextCheck,
   repeatCheck,
   scrollRoomCheck,
+  statusRowCheck,
   strikeCheck,
   truncationCheck,
   truncationRoomCheck,
@@ -59,6 +60,7 @@ const CHECKS: Readonly<Record<PageCheckId, (input: CheckInput) => Violation[]>> 
   'truncation-room': truncationRoomCheck,
   'focus-ring': focusRingCheck,
   banner: bannerCheck,
+  'status-row': statusRowCheck,
   'chrome-clear': chromeClearCheck,
   'drag-region': dragRegionCheck,
 };
