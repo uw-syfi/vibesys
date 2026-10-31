@@ -143,4 +143,5 @@ test('every registered topic has a contract case, and no case names an unregiste
   expect(ALL_TOPICS.map(topic => String(topic.arm)).sort()).toEqual(Object.keys(CASES).sort());
 });
 
-for (const each of Object.values(CASES)) topicContract(each);
+const EVERY_CASE: readonly TopicCase<unknown>[] = Object.values(CASES);
+for (const each of EVERY_CASE) topicContract(each);

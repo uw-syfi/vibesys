@@ -17,7 +17,7 @@ import {
   SpanStatus,
   type Record as StoreRecord,
   TailResponseSchema,
-  WatchRunsResponseSchema,
+  RunEntrySchema,
 } from '@vibesys/proto';
 import {fixtureNamed, INTENT_REPLAYS, intentReplay, storeRunFixture} from '@vibesys/run-fixtures';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
@@ -186,12 +186,7 @@ function finishOpenSpans(records: StoreRecord[], next: () => bigint): StoreRecor
 }
 
 async function observeWriter(page: Page, epoch: number, liveness: RunLiveness) {
-  const bytes = [
-    ...toBinary(
-      WatchRunsResponseSchema,
-      create(WatchRunsResponseSchema, {runId: 'run-a', liveness, head: {epoch}}),
-    ),
-  ];
+  const bytes = [...toBinary(RunEntrySchema, create(RunEntrySchema, {liveness, head: {epoch}}))];
   await page.evaluate(
     bytes => (window as unknown as GatewayWindow).fakeGateway.observe(bytes),
     bytes,

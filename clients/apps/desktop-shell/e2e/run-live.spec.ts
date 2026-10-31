@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {expect, type Page, test} from '@playwright/test';
-import {IntentAction, RunLiveness, WatchRunsResponseSchema} from '@vibesys/proto';
+import {IntentAction, RunEntrySchema, RunLiveness} from '@vibesys/proto';
 import {Controls} from './chat-controls.js';
 import {
   type FakeBridgeSeed,
@@ -172,9 +172,8 @@ test('a live run drains from the header over its session, and is let go', async 
       (window as unknown as {fakeGateway: {observe(b: number[]): void}}).fakeGateway.observe(bytes),
     [
       ...toBinary(
-        WatchRunsResponseSchema,
-        create(WatchRunsResponseSchema, {
-          runId: RUN_ID,
+        RunEntrySchema,
+        create(RunEntrySchema, {
           liveness: RunLiveness.PARKED,
           head: {epoch: 1},
         }),

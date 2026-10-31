@@ -449,10 +449,9 @@ const FAULT = fc.record({
   fault: fc.constantFrom('end', 'stall'),
   elapsed: fc.integer({min: 0, max: 31_000}),
 });
-type Fault = Generated<typeof FAULT>;
 
 /** The records streams the reader follows; the host's liveness is `peer.host`, held by main. */
-function followers(peer: RunPeer, source: 'lifecycle') {
+function followers(peer: RunPeer) {
   return peer.streams.filter(stream => {
     if (stream.cancelled) return false;
     if (stream.method !== peer.input.methods.tail) return false;
@@ -500,7 +499,7 @@ test('property: independently ending or stalling streams cannot revive a dead wr
         await withPeer(peer, async (container, clock) => {
           for (const fault of faults) {
             const before = peer.streams.length;
-            const old = fault.source === 'lifecycle' ? followers(peer, 'lifecycle') : [];
+            const old = fault.source === 'lifecycle' ? followers(peer) : [];
             await act(async () => {
               if (fault.source === 'liveness') peer.host.lose();
               else if (fault.fault === 'end')
@@ -622,7 +621,7 @@ test('property: a successor on any independent stream exposes a stalled lifecycl
           await act(async () => {
             if (fault.source === 'liveness') peer.host.lose();
             else if (fault.fault === 'end')
-              for (const stream of followers(peer, 'lifecycle')) stream.ended('disconnected');
+              for (const stream of followers(peer)) stream.ended('disconnected');
           });
           assertVisible(container);
           await act(async () => clock.advanceBy(fault.elapsed));
@@ -667,7 +666,7 @@ function deliverLead(
   snapshot: WireFixture,
 ) {
   if (lead === 'history')
-    for (const stream of followers(peer, 'lifecycle'))
+    for (const stream of followers(peer))
       stream.receive(
         toBinary(
           TailResponseSchema,

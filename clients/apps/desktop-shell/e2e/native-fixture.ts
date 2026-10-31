@@ -14,7 +14,7 @@ import {
   STORE_SCHEMA_HASH,
   type Record as StoreRecord,
   TailResponseSchema,
-  WatchRunsResponseSchema,
+  RunEntrySchema,
 } from '@vibesys/proto';
 import {parseFixture, type RunFixture, type StoreRunFixture} from '@vibesys/run-fixtures';
 import {gatewayScript, wire} from './fake-gateway.js';
@@ -161,7 +161,7 @@ export function nativeReplayScript(
               }),
             ),
           ],
-          observation: replayObservation(replay, source, fixture.runId),
+          observation: replayObservation(replay, source),
         },
       ]),
   );
@@ -193,14 +193,12 @@ function connectUpdates(updates: Record<string, {tail: number[]; observation: nu
 function replayObservation(
   replay: import('@bufbuild/protobuf').MessageShape<typeof ClientReplaySchema>,
   source: number,
-  runId: string,
 ): number[] {
   const head = replay.batches.find(batch => Number(batch.sourceSequence) === source)?.head;
   return [
     ...toBinary(
-      WatchRunsResponseSchema,
-      create(WatchRunsResponseSchema, {
-        runId,
+      RunEntrySchema,
+      create(RunEntrySchema, {
         head,
         liveness: head?.lifecycle?.state.case === 'ended' ? RunLiveness.ENDED : RunLiveness.ALIVE,
       }),

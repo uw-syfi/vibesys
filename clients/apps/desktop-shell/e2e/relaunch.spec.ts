@@ -13,7 +13,7 @@ import {
   RelaunchRefusal,
   RunLiveness,
   TailResponseSchema,
-  WatchRunsResponseSchema,
+  RunEntrySchema,
 } from '@vibesys/proto';
 import {fixtureNamed, type StoreRunFixture, storeRunFixture} from '@vibesys/run-fixtures';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
@@ -130,9 +130,8 @@ async function newEpoch(page: Page, fixture: StoreRunFixture): Promise<void> {
   ];
   const watch = [
     ...toBinary(
-      WatchRunsResponseSchema,
-      create(WatchRunsResponseSchema, {
-        runId: 'run-a',
+      RunEntrySchema,
+      create(RunEntrySchema, {
         liveness: RunLiveness.ALIVE,
         head: {
           strategy: 'fixture',

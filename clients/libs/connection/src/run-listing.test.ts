@@ -189,6 +189,7 @@ const STATE: fc.Arbitrary<SubscriptionState<HostRunFacts>> = fc.oneof(
     value: RUNS,
     reason: STALE_REASON,
     attempt: fc.integer({min: 1, max: 4}),
+    valueAt: fc.nat(),
   }),
   fc.record({kind: fc.constant('failed' as const), reason: REASON, retrying: fc.boolean()}),
 );

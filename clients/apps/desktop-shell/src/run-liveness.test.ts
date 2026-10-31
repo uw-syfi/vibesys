@@ -51,6 +51,7 @@ const STATE: fc.Arbitrary<SubscriptionState<HostRunFacts>> = fc.oneof(
     value: FACT_MAP,
     reason: fc.constantFrom(...RETRYABLE_REASONS),
     attempt: fc.integer({min: 1, max: 6}),
+    valueAt: fc.nat(),
   }),
   fc.record({
     kind: fc.constant('failed' as const),
