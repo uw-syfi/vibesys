@@ -1,7 +1,7 @@
 """Every stale-golden failure names the one command that regenerates the goldens.
 
-``./scripts/regenerate_goldens.sh`` rewrites the native replays, the conversion goldens and the
-Skeleton wire golden. Agents used to rediscover a hand-run chain of three commands, so no failure
+``./scripts/regenerate_goldens.sh`` rewrites the conversion goldens, the Skeleton wire golden and
+the retained gateway replies. Agents used to rediscover a hand-run chain of commands, so no failure
 message, doc or skill may name a piece of that chain as the fix.
 """
 
@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 
 import pytest
-from tests.support.wire_goldens import REGENERATE
+from tests.support.golden_regeneration import REGENERATE
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/regenerate_goldens.sh"
@@ -23,12 +23,11 @@ GO_FAILURE_SITES = (
 )
 PYTHON_FAILURE_SITES = (
     "tests/vibesys/run/test_runlog_conversion.py",
-    "tests/support/replay_golden.py",
-    "tests/support/native_goldens.py",
+    "tests/vibesys/run/test_journey_fixtures.py",
 )
 #: The pieces of the old chain, which only the script and the generators themselves may name.
 CHAIN = (
-    "python -m tests.support.journey_fixtures",
+    "python -m tests.support.shared_scenarios",
     "python proto/testdata/conversion/generate.py",
     "VIBESYS_UPDATE_GOLDEN=1 go test",
 )
@@ -50,7 +49,7 @@ def test_a_stale_golden_failure_in_go_names_the_regeneration_command(site: str) 
 def test_a_stale_golden_failure_in_python_formats_the_regeneration_command(site: str) -> None:
     text = (ROOT / site).read_text()
 
-    assert "from tests.support.wire_goldens import REGENERATE" in text, site
+    assert "from tests.support.golden_regeneration import REGENERATE" in text, site
     assert "{REGENERATE}" in text, f"{site} must name {REGENERATE} as the fix"
 
 

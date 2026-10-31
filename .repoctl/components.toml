@@ -93,8 +93,10 @@ field = "name"
 id = "python_support"
 class = "python_support"
 job = "python"
-# Central tests and project tooling are outside Tach's source roots.
-roots = ["tests", "libs", "sdk", "scripts", "packaging", "resources", "examples"]
+# Central tests and project tooling are outside Tach's source roots. The committed goldens under
+# proto/testdata have no input hash, so the Python tests that compare them with what the converter
+# writes now run when one changes.
+roots = ["tests", "libs", "sdk", "scripts", "packaging", "resources", "examples", "proto/testdata"]
 files = [
   "tach.toml",
   "pyproject.toml",
@@ -305,4 +307,6 @@ files = ["buf.yaml", "buf.gen.yaml", "buf.gen.core.yaml", "scripts/check_proto_l
 id = "gateway"
 class = "manual"
 job = "gateway"
-root = "gateway"
+# The gateway tests read the conversion and retained goldens and compare the Skeleton wire golden
+# byte for byte, so a change to any of them runs them.
+roots = ["gateway", "proto/testdata"]

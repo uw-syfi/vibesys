@@ -524,6 +524,18 @@ Components, under `renderer/ui/`:
 To see a change on a recorded run with hot reload, use the fixture dev app
 (`pnpm --filter @vibesys/app-desktop-shell dev:fixture`, see the `verify-desktop-ui` skill).
 
+The native replays that the run page tests and the desktop e2e read (the records the shipping Python
+projector makes of each declaration in `libs/run-fixtures/src/data` and
+`apps/desktop-shell/e2e/scenarios`) are not committed. `tests/support/derived_replays.py` stores them
+under the hash of every file they derive from, so a projector, schema or declaration change names a
+new set, a stale one is never read, and two pull requests cannot conflict on them. The `test` script
+of `run-page` and the `e2e` and `dev:fixture` scripts of the desktop shell start through
+`tools/scripts/with_derived_replays.mjs`, which makes the set and exports its directory; a test
+reads one through `@vibesys/run-fixtures/derived`, which fails naming the script when it was
+skipped. A cold set takes about a minute and a half, made once per machine for every checkout, and
+CI restores it from a cache keyed by the same hash. Only the goldens that pin a contract stay
+committed (`proto/testdata`), rewritten by `./scripts/regenerate_goldens.sh`.
+
 ## Display names
 
 A screen never shows an id a program matches on (`judge`, `perf-evaluator`, `claude`, a model's
