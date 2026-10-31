@@ -131,12 +131,12 @@ describe('the turns under a step', () => {
     const view = turns(state);
     expect(view?.turns).toBe(1);
     expect(view?.rows).toEqual([
-      {kind: 'heading', id: 'turn op:1', title: 'Implementer', detail: 'Running'},
+      {kind: 'heading', id: 'turn op:1', title: 'Builder', detail: 'Running'},
       expect.objectContaining({kind: 'message', variant: 'reasoning', text: 'Thinking it over. '}),
       expect.objectContaining({
         kind: 'message',
         variant: 'reply',
-        author: 'Implementer',
+        author: 'Builder',
         text: 'I will pad the counters.',
       }),
       {
@@ -310,7 +310,7 @@ describe('a structured reply under a step', () => {
     expect(rows.map(row => row.kind)).toEqual(['heading', 'reply']);
     const reply = rows[1];
     if (reply?.kind !== 'reply') throw new Error('no reply row');
-    expect(reply.title).toBe('Judge response');
+    expect(reply.title).toBe('Reviewer response');
     expect(reply.fields).toEqual([
       {kind: 'prose', key: 'analysis', label: 'Analysis', text: 'The current src/lib.rs matches.'},
       {kind: 'badge', key: 'verdict', label: 'Verdict', value: 'pass', tone: 'ok'},

@@ -93,9 +93,9 @@ test('a one-attempt idea shows its steps, role first, and a step opens', async (
   expect(listNames(container).some(name => name === 'Attempts')).toBe(false);
   const steps = options(container, 'mpmc steps');
   expect(steps.map(row => row.textContent)).toEqual([
-    expect.stringContaining('Implementer'),
+    expect.stringContaining('Builder'),
     expect.stringContaining('Gate'),
-    expect.stringContaining('Judge'),
+    expect.stringContaining('Reviewer'),
   ]);
   expect(steps[0]?.textContent).toContain('1m');
   await act(async () => steps[1]?.click());
@@ -268,7 +268,7 @@ test('the strip is keyed by a legend of exactly the roles in it, in the segments
   const legend = container.querySelector('ul[aria-label="Step colors"]');
   expect(legend).not.toBeNull();
   const entries = [...(legend?.querySelectorAll('li') ?? [])];
-  expect(entries.map(each => each.textContent)).toEqual(['Implementer', 'Planner', 'Gate']);
+  expect(entries.map(each => each.textContent)).toEqual(['Builder', 'Planner', 'Gate']);
   const swatches = entries.map(each => each.querySelector('.vs-series-swatch') as HTMLElement);
   expect(swatches.map(each => each.getAttribute('data-hatched') !== null)).toEqual([
     false,
@@ -293,7 +293,7 @@ test('a strip without a gate has no gate entry, and a role is listed once', asyn
   const {container, unmount} = await mount(<IdeaView {...view(candidate, () => undefined)} />);
   const legend = container.querySelector('ul[aria-label="Step colors"]');
   expect([...(legend?.querySelectorAll('li') ?? [])].map(each => each.textContent)).toEqual([
-    'Judge',
+    'Reviewer',
   ]);
   await unmount();
 });
@@ -310,9 +310,9 @@ test('a step row names its role once, in its strip color, with status only when 
   const occurrences = (row: HTMLElement | undefined, word: string): number =>
     (row?.textContent ?? '').split(word).length - 1;
   expect(occurrences(rows[0], 'Planner')).toBe(1);
-  expect(occurrences(rows[1], 'Implementer')).toBe(1);
+  expect(occurrences(rows[1], 'Builder')).toBe(1);
   expect(rows[1]?.textContent).toContain('Padded the counters');
-  expect(occurrences(rows[2], 'Judge')).toBe(1);
+  expect(occurrences(rows[2], 'Reviewer')).toBe(1);
   expect(occurrences(rows[3], 'Gate')).toBe(1);
   const swatches = rows.map(row => row.querySelector('.vs-series-swatch') as HTMLElement);
   expect(colorsOf(swatches)).toEqual(colorsOf(container.querySelectorAll('.vs-gantt-seg')));

@@ -160,7 +160,7 @@ function planResult(reply: ReplyRow, context: ResultContext): TurnResultView {
   };
 }
 
-/** The card is the response, so its label does not say so: `Judge response` reads as `Judge`. */
+/** The card is the response, so its label does not say so: `Reviewer response` reads as `Reviewer`. */
 function cardLabel(title: string): string {
   const bare = title.replace(/\s+(response|reply)$/i, '');
   return bare === '' ? title : bare;

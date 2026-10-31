@@ -48,6 +48,7 @@ from vs_runtime.api.step_runner import (
     CoreInputs,
     RunLogStepLog,
     SearchRun,
+    StallBoard,
     StepLoopStalledError,
     StepLoopTiming,
     run_step_loop,
@@ -210,7 +211,9 @@ class _Host:
             clock,
             epoch,
         )
-        loop = asyncio.ensure_future(run_step_loop(_Counting(inputs), runner, clock, TIMING))
+        loop = asyncio.ensure_future(
+            run_step_loop(_Counting(inputs), runner, clock, TIMING, StallBoard())
+        )
         halted: DispatchCapExceededError | StepLoopStalledError | None = None
         try:
             await self._until(loop, clock, patience)

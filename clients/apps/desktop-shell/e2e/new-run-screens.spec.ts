@@ -38,7 +38,7 @@ for (const theme of THEMES) {
         await expect(main(page).getByRole('heading', {level: 1})).toBeVisible();
         // The roles come with the first check of the run's inputs; the page is checked with them.
         if (each.agent !== undefined && each.step === 'agent') {
-          await expect(main(page).getByLabel('Judge model')).toBeVisible();
+          await expect(main(page).getByLabel('Reviewer model')).toBeVisible();
         }
         // The goal of the user's own task is read from the machine; the page is checked with it.
         if (each.step === 'goal' && each.answers.from === 'project') {

@@ -39,6 +39,7 @@
   },
   "dependencies": {
     "@vibesys/ipc": "workspace:*",
+    "@vibesys/problems": "workspace:*",
     "@vibesys/settings": "workspace:*",
     "@vibesys/store": "workspace:*",
     "@vibesys/ui": "workspace:*",

@@ -242,7 +242,7 @@ describe('the plan an orchestrator turn ends with', () => {
     const w = world(recorded);
     const last = w.narrative('turn2')?.blocks.at(-1);
     if (last?.kind !== 'reply') throw new Error('no reply');
-    const judged = turnResult({...last.reply, author: 'Judge', role: 'judge'}, w.context(2));
+    const judged = turnResult({...last.reply, author: 'Reviewer', role: 'judge'}, w.context(2));
     expect(judged.builtOn).toBeNull();
     expect(judged.summary).not.toContain('builds on');
   });
@@ -322,11 +322,11 @@ describe('another role’s reply keeps its fields and ends the turn', () => {
       }),
     ]);
     const card = resultOf(w, 'turn2', 2);
-    expect(card?.label).toBe('Implementer');
+    expect(card?.label).toBe('Builder');
     expect(card?.headline).toBeNull();
     expect(card?.chips).toEqual([{label: 'done'}]);
     expect(card?.sections.map(each => each.key)).toEqual(['summary']);
     expect(card?.more.map(each => each.key)).toEqual(['changed']);
-    expect(card?.summary).toBe('Implementer response: done · Padded the counters.');
+    expect(card?.summary).toBe('Builder response: done · Padded the counters.');
   });
 });

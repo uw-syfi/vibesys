@@ -44,7 +44,7 @@ CORRECTION = Exchanges(correction="reply_correction.j2")
 
 IMPLEMENTER = Role(
     name="implementer",
-    title="Implementer",
+    title="Builder",
     prompt="implement.j2",
     reply=IssueImplementerResult,
     workspace=WorkspaceMode.ISOLATED_CHILD,
@@ -61,7 +61,7 @@ IMPLEMENTER = Role(
 
 JUDGE = Role(
     name="judge",
-    title="Judge",
+    title="Reviewer",
     prompt="review.j2",
     reply=IssueJudgeResult,
     workspace=WorkspaceMode.READ_ONLY_REVISION,

@@ -218,7 +218,7 @@ test('New steer turns the typed text into a card whose target is picked from the
   await act(async () => press(container, 'New steer'));
   const select = container.querySelector('select') as HTMLSelectElement;
   const options = [...select.querySelectorAll('option')].map(each => each.textContent);
-  expect(options).toEqual(['Whole run', 'Planner', 'Implementer']);
+  expect(options).toEqual(['Whole run', 'Planner', 'Builder']);
   expect(sent).toEqual([]);
   await act(async () => {
     select.value = 'role:implementer';

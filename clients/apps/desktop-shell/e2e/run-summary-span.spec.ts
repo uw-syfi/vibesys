@@ -28,7 +28,7 @@ test('a finished run opens from its skeleton, and a step reads only its own cont
   await expect(steps).toBeVisible();
   const before = await gatewayCalls(page);
   await steps
-    .getByRole('option', {name: /implementer/i})
+    .getByRole('option', {name: /builder/i})
     .first()
     .click();
   await expect(steps).toBeVisible();
@@ -78,7 +78,7 @@ test('regression: opening a step moves neither pane, the chart nor the time bar'
     );
   const placed = await columns();
   await steps
-    .getByRole('option', {name: /implementer/i})
+    .getByRole('option', {name: /builder/i})
     .first()
     .click();
   await expect(page.getByRole('navigation', {name: 'Zoom'})).toBeVisible();

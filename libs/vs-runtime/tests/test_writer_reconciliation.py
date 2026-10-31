@@ -12,13 +12,12 @@ from hypothesis import strategies as st
 
 from vs_agent.api import reap_recorded_agents
 from vs_agent.api.testing import FakeConfinement
-from vs_core.api.replay import ReplayRootReuse
 from vs_project.api import FakeStateStore, Project
 from vs_proto.api import ValidationError, replay, validate
 from vs_runtime.api.infrastructure import RunEnvironmentSpec, build_run_environment
 from vs_runtime.api.replay import (
     DockerWriterReconciler,
-    ReplayWriterBarrier,
+    ReplayRootReuse,
     UnsupportedWriterReconciler,
     WriterProofError,
     WriterRegistry,
@@ -29,7 +28,6 @@ from vs_sim.api import DISCARD
 from vs_sim.api.testing import (
     FakePipedProcessLauncher,
     GatedBlockingRunner,
-    InlineBlockingRunner,
     SimThreads,
 )
 
@@ -40,12 +38,6 @@ if TYPE_CHECKING:
 BACKING = replay.WriterBacking(
     environment="docker", identity="root-a", generation=1, authority="fake-daemon"
 )
-
-
-def empty_barrier(project: Project) -> ReplayWriterBarrier:
-    ledger = WriterRegistry(project.state.state_store_namespace("backing-a"), BACKING, SimThreads())
-    ledger.create()
-    return ReplayWriterBarrier(ledger, UnsupportedWriterReconciler("host"), InlineBlockingRunner())
 
 
 def registry(tmp_path: Path) -> WriterRegistry:
