@@ -1,7 +1,6 @@
 import {describe, expect, test} from 'bun:test';
-import {SYNTHESIZED_TASK_NAME} from '@vibesys/contracts';
 import type {DashboardRow} from '@vibesys/feature-app-shell/state';
-import {type GroupBy, groupTiles, tilesOf} from '@vibesys/feature-runs-dashboard/state';
+import {GROUP_BYS, groupTiles, tilesOf} from '@vibesys/feature-runs-dashboard/state';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {loadingMachines, runCounts, runInput} from './shell-runs.js';
 
@@ -45,7 +44,6 @@ test('each machine is counted its own runs, and the counts add up to every run l
 });
 
 test('every listed run has a tile in its grouping, however many, and the machines count them all', () => {
-  const GROUPS: readonly GroupBy[] = ['status', 'machine', 'task', 'agent'];
   for (const seed of SEEDS) {
     const random = new Seeded(seed);
     const rows = Array.from({length: random.int(90)}, (_, index) => ({
@@ -57,7 +55,7 @@ test('every listed run has a tile in its grouping, however many, and the machine
       },
     }));
     const tiles = tilesOf(rows.map(row => runInput(row, 0)));
-    const grouped = groupTiles(tiles, random.pick(GROUPS)).flatMap(group =>
+    const grouped = groupTiles(tiles, random.pick(GROUP_BYS)).flatMap(group =>
       group.tiles.map(tile => tile.hint),
     );
     expect(grouped.sort()).toEqual(rows.map(row => row.row.run.runId).sort());
@@ -87,7 +85,6 @@ function entry(status: 'live' | 'failed', now: string | null): DashboardRow {
     },
     host: 'local',
     machine: 'this computer',
-    task: 'mpmc',
     project: '/p/default',
     createdAt: Date.parse('2026-10-19T07:11:00Z'),
   } as DashboardRow;
@@ -96,17 +93,10 @@ function entry(status: 'live' | 'failed', now: string | null): DashboardRow {
 describe('the dashboard input of a run', () => {
   const now = Date.parse('2026-10-19T08:00:00Z');
 
-  test('carries why an ended run ended, and the id and task it is named by', () => {
+  test('carries why an ended run ended, and the id it is named by', () => {
     const input = runInput(entry('failed', 'the agent crashed'), now);
     expect(input.reason).toBe('the agent crashed');
     expect(input.runId).toBe('20261019-071100');
-    expect(input.task).toBe('mpmc');
-  });
-
-  test('groups a run with no task of its own under its title, never the synthesized task name', () => {
-    const input = runInput({...entry('live', null), task: null}, now);
-    expect(input.task).toBe('queue-rs');
-    expect(input.task).not.toBe(SYNTHESIZED_TASK_NAME);
   });
 
   test('is titled as its row is, the one title every screen gives the run', () => {

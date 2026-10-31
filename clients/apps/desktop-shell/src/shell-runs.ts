@@ -87,12 +87,9 @@ export function runInput(entry: DashboardRow, now: number): RunInput {
     id: digestKey(row.run),
     runId: row.run.runId,
     title: entry.row.title,
-    // A run with no task of its own is grouped under its title: the project's name.
-    task: entry.task ?? row.title,
     started: formatStarted(entry.createdAt, {now}),
     machine: entry.machine,
     hardware: null,
-    agent: null,
     status: {
       kind: STATUS_KINDS[row.status],
       word: row.problem === null ? row.look.word : STATUS_WORDS[row.status],
