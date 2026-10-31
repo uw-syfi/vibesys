@@ -7,6 +7,7 @@ declarations and fails, naming each file whose code ran outside the key.
 
 from __future__ import annotations
 
+import gc
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -36,6 +37,13 @@ def _files_that_run(action: Callable[[], None]) -> set[Path]:
         return monitoring.DISABLE
 
     monitoring.use_tool_id(tool, "derived-replay-inputs")
+    # A finalizer (`FlowDriver.__del__`) of an object an earlier test in this worker left in a
+    # cycle runs wherever the collector next fires, which can be inside the traced projection and
+    # would name flow modules the projection never uses. Collect before, and keep the collector
+    # off while tracing, so the files named are the projection's own.
+    gc.collect()
+    collecting = gc.isenabled()
+    gc.disable()
     try:
         monitoring.register_callback(tool, monitoring.events.PY_START, started)
         monitoring.set_events(tool, monitoring.events.PY_START)
@@ -44,6 +52,8 @@ def _files_that_run(action: Callable[[], None]) -> set[Path]:
         monitoring.set_events(tool, 0)
         monitoring.register_callback(tool, monitoring.events.PY_START, None)
         monitoring.free_tool_id(tool)
+        if collecting:
+            gc.enable()
     return {Path(name).resolve() for name in files if Path(name).is_absolute()}
 
 

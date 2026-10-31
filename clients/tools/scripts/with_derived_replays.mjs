@@ -41,7 +41,8 @@ export function derivedReplaysDirectory() {
   if (found.status === 0) return found.stdout.trim();
   const made = python('tests.support.materialize_replays');
   if (made.status !== 0) {
-    throw new Error(`generating the derived replays failed (exit ${made.status}); see above`);
+    const cause = made.error?.message ?? `exit ${made.status}`;
+    throw new Error(`generating the derived replays failed (${cause}); see above`);
   }
   return made.stdout.trim().split('\n').at(-1);
 }
