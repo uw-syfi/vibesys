@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from ._actions import OpenStep
 from ._request_recovery import is_open, resent
-from .types.common import EventId, Observation, ObservationStatus, RunStatus
+from .types.common import EventId, Observation, ObservationStatus
 from .types.records import RequestObserved, RequestPhase, RequestRecord
 from .types.steps import (
     Cancelled,
@@ -43,9 +43,10 @@ def epoch_opened(state: CoreState, epoch: int) -> CoreState:
     Their steps go back to the state of a step no one has started, which is what a draining run
     waits for before it parks.
 
-    The kernel's host epoch moves with the log's. A drain in progress keeps its authority in the
-    new epoch, so a Pause-now still cancels; a parked run does not: it stays parked and a later
-    epoch is where an operator's Resume is admitted.
+    The kernel's host epoch moves with the log's, and ``RunPark.epoch`` does not: it stays the
+    epoch the operator paused in. A drain in progress keeps its authority in the new epoch (see
+    ``drain_in_force``), so a Pause-now still cancels; when it parks, the park is older than the
+    epoch it parks in, and the operator's Resume is admitted at once.
     """
     if epoch <= state.steps.epoch:
         return state
@@ -56,11 +57,8 @@ def epoch_opened(state: CoreState, epoch: int) -> CoreState:
     records = state.records.model_copy(
         update={"recovery": recovery.model_copy(update={"epoch": max(recovery.epoch, epoch)})}
     )
-    run = state.run
-    if run.status is RunStatus.DRAINING and run.park is not None:
-        run = run.model_copy(update={"park": run.park.model_copy(update={"epoch": epoch})})
     steps = state.steps.model_copy(update={"epoch": epoch, "attempts": rows})
-    return state.model_copy(update={"steps": steps, "records": records, "run": run})
+    return state.model_copy(update={"steps": steps, "records": records})
 
 
 def started(

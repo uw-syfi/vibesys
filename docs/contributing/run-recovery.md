@@ -384,7 +384,8 @@ kind. The rule is:
   (`_run_park.dispatch_allowed`); a running step is `Cancel(PAUSE_NOW)` when Pause now withdrew it and
   `Cancel(DRAIN_EXPIRED)` once the pause's drain deadline (`RunPark.deadline_at`) has passed
   (`_run_park.pause_cancels`);
-- a parked run is at rest: `decide` returns only `Wait`, whatever its steps hold or however late the clock is;
+- a parked run is at rest: it starts and settles nothing, whatever its steps hold or however late the clock is, and
+  an attempt it still has running gets `Cancel(PAUSE_NOW)`; with none, `decide` returns only `Wait`;
 - a run whose committed finish is a cancel, or that has ended, gets `Cancel(RUN_ENDING)` for each running
   step and `Settle(Cancelled(RUN_ENDING))` for each other open step, and starts none;
 - a step that snapshots its scope's files waits while any step that writes them is open, and a step that
@@ -409,7 +410,9 @@ cooperative runners comes to rest.
 - **Parked is at rest, and a recorded result is never dropped.** A parked epoch ignores what is offered
   to it (`parked_epoch_drops`). That is a filter on live input. A fact the log holds is history, and the
   fold applies the report and the owner events of a `StepFinished` through `step_recorded`, which does not
-  drop. `decide` is silent in a parked run, so it never asks for a result the kernel would ignore.
+  drop. `decide` settles nothing in a parked run, so it never asks for a result the kernel would ignore;
+  it still cancels an attempt the park found running, because the kernel can park at a Pause now before
+  the loop has stopped what runs, and a flight nothing cancels would hold the process up.
 - **A draining pause parks when no attempt runs.** An attempt that ends without a result (an
   interruption, a raise, a crash into a new epoch) returns its step to the state of a step no one has
   started, as a drain that interrupts a request does (`resent`), and the fold then advances the drain
@@ -425,8 +428,17 @@ cooperative runners comes to rest.
   rest of the epoch it was made in, and the kernel refuses a resume there ("pause is terminal for this
   epoch"). Resume is a relaunch: the new process opens the next epoch (`EpochStarted`), which moves the
   kernel's host epoch with the log's and leaves the parked run parked, and the resume control is then an
-  ordinary input that the fold takes. A drain in progress keeps its authority across the new epoch, so a
-  Pause now still cancels.
+  ordinary input that the fold takes.
+- **The pause epoch and the drain's authority are different things.** `RunPark.epoch` is the epoch the
+  operator paused in and never moves. A drain keeps its authority over the work in flight in whatever epoch
+  it is (`drain_in_force`: still draining, or parked in this epoch), so a Pause now still cancels after a
+  kill. A drain a kill cut short therefore parks in the next epoch with a park that is older than that
+  epoch, and the Resume that follows is admitted there at once instead of being refused.
+- **A drain with only held calls left ends with the process.** A held call ignored its cancel and its
+  task's cancellation, and the loop records nothing about its tag while it runs. The drain cannot finish
+  in that process, so the loop returns `PARKED` as a parked run does; the caller exits, the call dies with
+  the process, and the next process's log ends the attempt (charged as a crash), parks the drain and
+  admits the Resume.
 
 - **The log holds only starts the rule would run.** A flight that waited for its `clear` while the run
   paused or parked would record a start into a parked run, leaving an attempt that nothing cancels. The

@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict
 
 from ._strategy_operations import RenderRoleArtifactsBase
 from ._wait_clock import turn_bound
-from .types.common import ExecuteRegisteredOperation, InvocationRef, Scope
+from .types.common import ExecuteRegisteredOperation, InvocationRef, RunStatus, Scope
 from .types.evaluation import EvaluationState, SubmitMeasurement
 from .types.records import RecordsState, RequestPhase, Scheduled
 from .types.sessions import (
@@ -188,6 +188,20 @@ def _cap_pair(now_at: float, scheduled: Scheduled, permit: TurnPermit | None) ->
     )
 
 
+def drain_in_force(run: RunState, records: RecordsState) -> bool:
+    """Whether the run's pause still holds its authority over the work in flight.
+
+    ``RunPark.epoch`` is the epoch the operator paused in: it never moves, so a resume is admitted
+    in any later epoch (a drain a kill interrupted parks in the next epoch, and the Resume that
+    follows is the relaunch). The drain's authority is a different thing: a run that is still
+    draining keeps it in whatever epoch it is, and a parked run keeps it for the epoch it parked in.
+    """
+    park = run.park
+    if park is None:
+        return False
+    return run.status is RunStatus.DRAINING or park.epoch == records.recovery.epoch
+
+
 def _operator_drain(facts: _Facts) -> bool:
     """Whether a non-immediate operator Pause of this epoch is draining successors.
 
@@ -195,7 +209,7 @@ def _operator_drain(facts: _Facts) -> bool:
     running turn's own permit is not one either.
     """
     park = facts.run.park
-    return park is not None and not park.immediate and park.epoch == facts.records.recovery.epoch
+    return park is not None and not park.immediate and drain_in_force(facts.run, facts.records)
 
 
 def _for_request(facts: _Facts, request: object, *, live: bool) -> TurnPermit | None:
@@ -397,7 +411,7 @@ def _holds(facts: _Facts, invocation: Invocation) -> bool:
     # A same-epoch Pause admits only the turns it captured, including once the
     # drain has parked. An immediate pause admits none. The dispatch record
     # below is a running turn, not a Pause.
-    if park is not None and park.epoch == records.recovery.epoch:
+    if park is not None and drain_in_force(facts.run, records):
         return not park.immediate and invocation.invocation in park.admitted_turns
     return any(
         isinstance(row.request, DispatchTurn | ResumeSessionTurn)
