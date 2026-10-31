@@ -22,8 +22,8 @@ _SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "chat_prompts"
 @pytest.mark.parametrize(
     ("name", "text"),
     [
-        ("system", experiment_chat_system_prompt()),
-        ("continuation", experiment_chat_continuation_prompt()),
+        pytest.param("system", experiment_chat_system_prompt(), id="system"),
+        pytest.param("continuation", experiment_chat_continuation_prompt(), id="continuation"),
     ],
 )
 def test_chat_prompt_matches_golden(name: str, text: str) -> None:
