@@ -41,6 +41,7 @@ export {
 export {
   type AgentLogin,
   attempt,
+  nextOperationToken,
   type CheckoutInspection,
   type ClusterTest,
   type ComputeSettings,

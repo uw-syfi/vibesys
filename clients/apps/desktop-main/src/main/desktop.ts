@@ -41,6 +41,8 @@ export interface DesktopDeps {
     Hosts,
     | 'cancelCheckout'
     | 'cancelCheckoutOwner'
+    | 'cancelProjectRuns'
+    | 'cancelProjectRunsOwner'
     | 'configured'
     | 'complete'
     | 'harnesses'
@@ -173,6 +175,10 @@ export class Desktop {
           {
             name: 'checkout cancellation',
             run: () => deps.hosts.cancelCheckoutOwner(rendererGeneration),
+          },
+          {
+            name: 'project listing cancellation',
+            run: async () => deps.hosts.cancelProjectRunsOwner(rendererGeneration),
           },
           {name: 'host retirement', run: () => deps.hosts.retireOwner(rendererGeneration)},
         ] as const;
@@ -320,7 +326,13 @@ export class Desktop {
       case 'run-digests':
         return hosts.runDigests(request.host, request.project, request.runIds);
       case 'project-runs':
-        return hosts.projectRuns(request.host, request.project);
+        return hosts.projectRuns(request.host, request.project, {
+          owner: rendererGeneration,
+          token: request.token,
+        });
+      case 'cancel-project-runs':
+        hosts.cancelProjectRuns({owner: rendererGeneration, token: request.token});
+        return null;
       case 'usage-window':
         return hosts.usageWindow(
           request.host,

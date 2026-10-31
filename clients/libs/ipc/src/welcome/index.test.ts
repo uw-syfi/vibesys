@@ -1,7 +1,12 @@
 import {describe, expect, test} from 'bun:test';
 import {isInstanceId, isRunId} from '@vibesys/runs';
 import {Seeded} from '@vibesys/store/testing';
-import {parseWelcomeRequest, WELCOME_CHANNELS, type WelcomeRequest} from '../index.js';
+import {
+  nextOperationToken,
+  parseWelcomeRequest,
+  WELCOME_CHANNELS,
+  type WelcomeRequest,
+} from '../index.js';
 
 const VALUES: readonly unknown[] = [
   undefined,
@@ -66,7 +71,8 @@ const VALID_ARGUMENTS: Readonly<
   [WELCOME_CHANNELS.readSummary]: ['local', '/srv/project', 'run-1'],
   [WELCOME_CHANNELS.readSpan]: ['local', '/srv/project', 'run-1', 'op:turn', 1, 100],
   [WELCOME_CHANNELS.runDigests]: ['local', '/srv/project', ['run-1']],
-  [WELCOME_CHANNELS.projectRuns]: ['local', '/srv/project'],
+  [WELCOME_CHANNELS.projectRuns]: ['local', '/srv/project', 1],
+  [WELCOME_CHANNELS.cancelProjectRuns]: [1],
   [WELCOME_CHANNELS.usageWindow]: ['local', '/srv/project', ['run-1'], 1_000, 2_000],
   [WELCOME_CHANNELS.preferences]: [],
   [WELCOME_CHANNELS.setAppearance]: [{mode: 'dark', light: 'mist', dark: 'midnight'}],
@@ -199,6 +205,40 @@ describe('parseWelcomeRequest', () => {
     expect(() => parseWelcomeRequest(WELCOME_CHANNELS.cancelCheckout, [0])).toThrow(
       'a checkout change is named by a positive integer',
     );
+  });
+
+  test('every token a view draws is new and one the main process accepts', () => {
+    const drawn = Array.from({length: 50}, () => nextOperationToken());
+    expect(new Set(drawn).size).toBe(drawn.length);
+    for (const token of drawn) {
+      expect(parseWelcomeRequest(WELCOME_CHANNELS.cancelProjectRuns, [token])).toEqual({
+        kind: 'cancel-project-runs',
+        token,
+      });
+    }
+  });
+
+  test('a project listing and its cancellation carry the same validated operation token', () => {
+    expect(
+      parseWelcomeRequest(WELCOME_CHANNELS.projectRuns, ['ssh:gpu', '/srv/project', 9]),
+    ).toEqual({
+      kind: 'project-runs',
+      host: {kind: 'ssh', host: 'gpu'},
+      project: '/srv/project',
+      token: 9,
+    });
+    expect(parseWelcomeRequest(WELCOME_CHANNELS.cancelProjectRuns, [9])).toEqual({
+      kind: 'cancel-project-runs',
+      token: 9,
+    });
+    for (const bad of [0, -1, 1.5, '3', null]) {
+      expect(() =>
+        parseWelcomeRequest(WELCOME_CHANNELS.projectRuns, ['local', '/srv/project', bad]),
+      ).toThrow('a project listing is named by a positive integer');
+      expect(() => parseWelcomeRequest(WELCOME_CHANNELS.cancelProjectRuns, [bad])).toThrow(
+        'a project listing is named by a positive integer',
+      );
+    }
   });
 
   test('a logs request names its host and instance, and a read only that instance', () => {

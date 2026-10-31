@@ -100,7 +100,8 @@ const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.readSummary]: 3,
   [WELCOME_CHANNELS.readSpan]: 6,
   [WELCOME_CHANNELS.runDigests]: 3,
-  [WELCOME_CHANNELS.projectRuns]: 2,
+  [WELCOME_CHANNELS.projectRuns]: 3,
+  [WELCOME_CHANNELS.cancelProjectRuns]: 1,
   [WELCOME_CHANNELS.usageWindow]: 5,
   [WELCOME_CHANNELS.preferences]: 0,
   [WELCOME_CHANNELS.setAppearance]: 1,
@@ -245,6 +246,7 @@ export type {
 } from './start-run.js';
 export {
   attempt,
+  nextOperationToken,
   FAILURE_CAUSE_WORDS,
   type FailureCause,
   type PathCompletion,
