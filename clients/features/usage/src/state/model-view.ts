@@ -227,15 +227,20 @@ const RESULTS: Record<SaveResult['outcome'], string> = {
   unsupported: 'Update required',
 };
 
+/** What the prices dialog is made from besides the draft: the destinations, their results and the catalogue. */
+interface PricesInputs {
+  readonly apply: readonly HostKey[];
+  readonly results: readonly SaveResult[];
+  readonly replies: readonly HostReply[];
+  readonly problem: string | null;
+  readonly names: readonly ModelName[];
+}
+
 /** The dialog of the prices a person is setting for the model `key`. */
-export function pricesView(
-  key: string,
-  draft: PriceDraft,
-  apply: readonly HostKey[],
-  results: readonly SaveResult[],
-  replies: readonly HostReply[],
-  problem: string | null,
-): PricesView {
+export function pricesView(key: string, draft: PriceDraft, inputs: PricesInputs): PricesView {
+  const {apply, results, replies, problem, names} = inputs;
+  const [provider = ''] = key.split('\u0000');
+  const catalogued = names.find(each => each.harness === provider && each.model === draft.model);
   const checked = checkRate(draft.rate);
   const invalid = !draft.automatic && !checked.ok ? checked.field : null;
   const targets = [
@@ -250,7 +255,7 @@ export function pricesView(
   const writes = draft.automatic || checked.ok;
   return {
     key,
-    title: draft.model,
+    title: catalogued?.modelName ?? draft.model,
     draft,
     fields: FIELDS.map(({field, label}) => ({
       field,

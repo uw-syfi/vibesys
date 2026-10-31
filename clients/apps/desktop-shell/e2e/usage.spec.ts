@@ -1,5 +1,7 @@
+import {mkdirSync, writeFileSync} from 'node:fs';
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
+import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
 import {KnownLedger} from './checks/known-ledger.js';
 import {SCREEN_CHECKS, screenCheck} from './checks/screen-check.js';
 import {settled} from './checks/settle.js';
@@ -22,7 +24,7 @@ import {runFixtureFor, seedFor, USAGE_CASES, type UsageCase} from './usage-world
  * a price, a figure too large for its box, a host that predates the question and one that fails.
  * One session per case is resized across the widths. Each screen passes the layout and wording
  * checks, does not scroll as a page, and says only labels, figures and status words.
- * `USAGE_SCREENS_DIR=<dir>` writes each screen's screenshot (the page only).
+ * `USAGE_SCREENS_DIR=<dir>` also writes each screen's screenshot and the contact sheet (the page only).
  */
 
 const WIDTHS = [1440, 1000, 660] as const;
@@ -95,9 +97,6 @@ for (const usage of USAGE_CASES) {
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
       );
       expect(overflow, name).toBeLessThanOrEqual(0);
-      if (SHOTS !== undefined) {
-        await page.getByRole('main').screenshot({path: `${SHOTS}/${usage.name}-${width}.png`});
-      }
     }
   });
 }
@@ -151,6 +150,8 @@ test('an empty period says No usage, at the page’s left edge, and shows no tab
   await open(page, caseNamed('empty-period'), 1440);
   await expect(page.getByText('No usage', {exact: true})).toBeVisible();
   await expect(page.getByRole('table', {name: 'Models'})).toHaveCount(0);
+  // With no provider there is nothing to switch on or off: no bare header row.
+  await expect(page.getByRole('table', {name: 'Providers'})).toHaveCount(0);
 });
 
 test('the page title is the largest text on it, however large the figures are', async ({page}) => {
@@ -239,7 +240,7 @@ test('the source select and a provider toggle cut the figures by exactly the row
 }) => {
   await open(page, caseNamed('outside-runs'), 1440);
   const total = async () => (await hero(page).textContent()) ?? '';
-  const dollars = async () => Number((await total()).replace('$', ''));
+  const dollars = async () => Number((await total()).replace(/[$,]/g, ''));
   const all = await dollars();
   const source = page.getByLabel('Source');
   await source.selectOption({label: 'VibeSys runs'});
@@ -378,4 +379,87 @@ test('the Usage page has no accessibility violations', async ({page}) => {
   await open(page, caseNamed('many-runs'), 1440);
   const result = await new AxeBuilder({page}).analyze();
   expect(result.violations.map(each => `${each.id}: ${each.help}`)).toEqual([]);
+});
+
+/**
+ * Every control walked in both directions with a screenshot of each state, then the contact sheet
+ * of them all. Only when `USAGE_SCREENS_DIR` is set; the shots are the page, never the desktop.
+ */
+test('every tab, period, source and dialog, walked and captured', async ({page, browser}) => {
+  test.skip(SHOTS === undefined, 'set USAGE_SCREENS_DIR to write the screenshots and the sheet');
+  const dir = SHOTS ?? '';
+  mkdirSync(dir, {recursive: true});
+  const entries: SheetEntry[] = [];
+  const shoot = async (name: string): Promise<void> => {
+    await settled(page);
+    const file = `${name.replace(/[^a-z0-9]+/gi, '-')}.png`;
+    await page.screenshot({path: `${dir}/${file}`});
+    entries.push({name, file});
+  };
+  // Every case at every width, then one case walked through every control.
+  for (const usage of USAGE_CASES) {
+    const own = await page.context().newPage();
+    await open(own, usage, WIDTHS[0]);
+    for (const width of WIDTHS) {
+      await own.setViewportSize({width, height: 900});
+      await settled(own);
+      const file = `case-${usage.name}-${width}.png`;
+      await own.screenshot({path: `${dir}/${file}`});
+      entries.push({name: `${usage.name} at ${width}`, file});
+    }
+    await own.close();
+  }
+  await open(page, caseNamed('outside-runs'), 1440);
+  await shoot('seven days, cost');
+  const periods = [
+    'Past 24 hours',
+    'Past 7 days',
+    'Past 30 days',
+    'Past 90 days',
+    'Past 30 days',
+    'Past 7 days',
+    'Past 24 hours',
+  ];
+  for (const [at, label] of periods.entries()) {
+    await page.getByLabel('Period').selectOption({label});
+    await expect(page.getByText('Connecting', {exact: true})).toHaveCount(0);
+    await shoot(`period ${at + 1}, ${label}`);
+  }
+  await page.getByLabel('Period').selectOption({label: 'Past 7 days'});
+  await expect(page.getByText('Connecting', {exact: true})).toHaveCount(0);
+  for (const tab of ['Tokens', 'Cost', 'Tokens', 'Cost']) {
+    await page.getByRole('radio', {name: tab}).check({force: true});
+    await shoot(`tab ${tab}`);
+  }
+  for (const source of ['VibeSys runs', 'Outside runs', 'All sources']) {
+    await page.getByLabel('Source').selectOption({label: source});
+    await shoot(`source ${source}`);
+  }
+  await page.getByRole('checkbox', {name: 'Codex'}).uncheck();
+  await shoot('Codex off');
+  await page.getByRole('checkbox', {name: 'Codex'}).check();
+  await shoot('Codex on');
+  await page.getByRole('table', {name: 'Models'}).getByRole('row').nth(1).click();
+  await shoot('model detail');
+  await page.getByRole('dialog').getByRole('button', {name: 'Close'}).click();
+  await page
+    .getByRole('table', {name: 'Models'})
+    .getByRole('button', {name: 'Price'})
+    .first()
+    .click();
+  await shoot('price dialog, automatic');
+  await page.getByRole('dialog').getByRole('checkbox', {name: 'Automatic'}).uncheck();
+  await page.getByRole('dialog').getByLabel('Output per M').fill('-1');
+  await shoot('price dialog, invalid output');
+  await page.getByRole('dialog').getByLabel('Output per M').fill('30');
+  await page.getByRole('dialog').getByRole('button', {name: 'Save'}).click();
+  await expect(page.getByRole('dialog').getByText('Saved', {exact: true})).toBeVisible();
+  await shoot('price dialog, saved');
+  await page.getByRole('dialog').getByRole('button', {name: 'Close'}).click();
+  await shoot('price set');
+  writeFileSync(`${dir}/contact-sheet.html`, contactSheetHtml(entries, 3));
+  const sheet = await browser.newPage({viewport: {width: 1800, height: 1000}});
+  await sheet.goto(`file://${dir}/contact-sheet.html`);
+  await sheet.screenshot({path: `${dir}/contact-sheet.png`, fullPage: true});
+  await sheet.close();
 });

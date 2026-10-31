@@ -3,15 +3,35 @@ import {compactTokens} from '@vibesys/run-state/usage';
 
 const MAX_DECIMALS = 8;
 
+const GROUPED = new Map<number, Intl.NumberFormat>();
+
+/** `amount` with `decimals` places and its thousands grouped, the same in every locale. */
+function grouped(amount: number, decimals: number): string {
+  let format = GROUPED.get(decimals);
+  if (format === undefined) {
+    format = new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
+    GROUPED.set(decimals, format);
+  }
+  return format.format(amount);
+}
+
 /**
- * Dollars as the page writes them: cents from a dollar up, and two significant digits below a cent,
- * so a cost of a hundredth of a cent is not written as zero.
+ * Dollars as the page writes them: cents from a dollar up, two significant digits below a cent,
+ * so a cost of a hundredth of a cent is not written as zero, and thousands grouped.
  */
 export function dollars(amount: number): string {
   if (!Number.isFinite(amount) || amount <= 0) return '$0.00';
   const decimals =
     amount >= 0.01 ? 2 : Math.min(MAX_DECIMALS, Math.max(2, 1 - Math.floor(Math.log10(amount))));
-  return `$${amount.toFixed(decimals)}`;
+  return `$${grouped(amount, decimals)}`;
+}
+
+/** A whole number of dollars without its cents, for an axis; anything else as `dollars`. */
+export function axisDollars(amount: number): string {
+  return Number.isInteger(amount) ? `$${grouped(amount, 0)}` : dollars(amount);
 }
 
 /** A share from 0 to 1 as a whole percent; a nonzero share under one percent is `<1%`. */

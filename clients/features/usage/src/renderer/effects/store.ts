@@ -218,14 +218,13 @@ function dialogOf(context: UsageContext, held: Held | null, filters: ViewFilters
   }
   return {
     kind: 'prices',
-    prices: pricesView(
-      dialog.key,
-      dialog.draft,
-      dialog.apply,
-      dialog.results,
+    prices: pricesView(dialog.key, dialog.draft, {
+      apply: dialog.apply,
+      results: dialog.results,
       replies,
-      dialog.problem,
-    ),
+      problem: dialog.problem,
+      names: held?.answer.names ?? [],
+    }),
   };
 }
 

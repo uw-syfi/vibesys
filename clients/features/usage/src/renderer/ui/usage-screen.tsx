@@ -35,6 +35,7 @@ import {
 import type {JSX} from 'react';
 import {
   type AgentRow,
+  axisDollars,
   type DialogState,
   dollars,
   type ModelDetail,
@@ -152,7 +153,13 @@ function Providers(props: {
     {key: 'figure', header: 'Total', mono: true, align: 'end', cell: row => row.figure},
   ];
   return (
-    <Table label="Providers" columns={columns} rows={props.rows} rowKey={row => row.provider} />
+    <Table
+      label="Providers"
+      columns={columns}
+      rows={props.rows}
+      rowKey={row => row.provider}
+      middle
+    />
   );
 }
 
@@ -370,6 +377,7 @@ function Overview(props: {readonly view: UsageView; readonly tab: UsageTab}): JS
           values: layer.values,
         }))}
         format={tab === 'cost' ? dollars : tokens}
+        axis={tab === 'cost' ? axisDollars : tokens}
       />
       <Row gap="space-6" wrap>
         {view.tiles.map(tile => (
@@ -436,9 +444,11 @@ function Figures(props: UsageScreenProps & {readonly view: UsageView}): JSX.Elem
   return (
     <Stack gap="space-5">
       <Hero view={view} />
-      <Section title="Providers">
-        <Providers rows={view.providers} toggle={actions.provider} />
-      </Section>
+      {view.providers.length === 0 ? null : (
+        <Section title="Providers">
+          <Providers rows={view.providers} toggle={actions.provider} />
+        </Section>
+      )}
       {view.empty ? (
         <Notice text="No usage" />
       ) : (
@@ -447,6 +457,7 @@ function Figures(props: UsageScreenProps & {readonly view: UsageView}): JSX.Elem
           <Section title="Models">
             <Table
               label="Models"
+              middle
               columns={modelColumns(state.tab, actions.setPrice)}
               rows={view.models}
               rowKey={row => row.key}
@@ -545,6 +556,7 @@ function ModelDialog(props: {
             labels={detail.trendLabels}
             layers={[{key: detail.key, name: detail.name, series: 0, values: detail.trend}]}
             format={tab === 'cost' ? dollars : tokens}
+            axis={tab === 'cost' ? axisDollars : tokens}
           />
           <ShareBar label="Cost by kind" parts={parts(detail.costParts)} />
           <ShareBar label="Tokens by kind" parts={parts(detail.tokenParts)} />
