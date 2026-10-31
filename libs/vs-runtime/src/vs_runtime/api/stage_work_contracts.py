@@ -31,7 +31,9 @@ class StageWorkPlace(StrEnum):
     DESCENDANT = "descendant"
     """A process the command started, in its group, that the host may not show a mark on."""
     CONTAINER = "container"
-    """A Docker candidate container opened for the step."""
+    """A Docker container opened for the step, or one of the run's containers that holds its processes."""
+    REMOTE_JOB = "remote-job"
+    """A job on a remote cluster that the step's agent asked for and that outlives the host."""
 
 
 @dataclass(frozen=True)

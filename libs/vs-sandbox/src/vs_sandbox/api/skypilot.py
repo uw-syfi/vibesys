@@ -91,7 +91,7 @@ from vs_sandbox.skypilot_states import (
     observe,
     status_text,
 )
-from vs_sandbox.skypilot_step_jobs import cancel_step_jobs
+from vs_sandbox.skypilot_step_jobs import JobsSurvivedCancelError, cancel_step_jobs
 
 __all__ = [
     "INITIAL_JOB_LIFE",
@@ -130,6 +130,7 @@ __all__ = [
     "JobRunning",
     "JobStatus",
     "JobUnknown",
+    "JobsSurvivedCancelError",
     "LogsFailed",
     "LogsVerdict",
     "OutputFrame",

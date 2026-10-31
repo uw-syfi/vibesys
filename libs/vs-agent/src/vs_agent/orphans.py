@@ -43,20 +43,25 @@ from vs_sim.api import DISCARD
 _DOCKER_TIMEOUT_SECONDS = 60.0
 
 # Kills every process in the container whose initial environment holds the line
-# ``$1=$2`` (the marker name and the step's tag). Like agentshim's sweep for its own
-# marker, it never reads its own shell's or its helpers' environment as a match: the tag
-# travels as arguments, not as environment. Nothing matched is success; a container
-# without ``tr`` or ``grep`` cannot sweep and must say so (exit 127), not report clean.
+# ``$1=$2`` (the marker name and the step's tag) and prints how many it signalled. Like
+# agentshim's sweep for its own marker, it never reads its own shell's or its helpers'
+# environment as a match: the tag travels as arguments, not as environment. Nothing matched
+# prints 0; a container without ``tr`` or ``grep`` cannot sweep and must say so (exit 127),
+# not report clean.
 _REAP_TAGGED_SCRIPT = (
     "command -v tr >/dev/null && command -v grep >/dev/null "
     "|| { echo 'reap needs tr and grep in the container' >&2; exit 127; }; "
-    'self=$$; marker="$1=$2"; '
+    'self=$$; marker="$1=$2"; n=0; '
     "for d in /proc/[0-9]*; do "
     'pid=${d#/proc/}; [ "$pid" = "$self" ] && continue; '
     "tr '\\0' '\\n' < \"$d/environ\" 2>/dev/null | grep -qxF -- \"$marker\" "
-    '&& kill -9 "$pid" 2>/dev/null; '
-    "done; true"
+    '&& kill -9 "$pid" 2>/dev/null && n=$((n+1)); '
+    'done; echo "$n"'
 )
+
+_MAX_SWEEPS = 8
+"""Sweeps of one container before giving up: each signals everything it finds, so a sweep that
+still finds processes after a few means they do not die (a stuck kernel) or are started again."""
 
 # What the docker client says when the container is gone or stopped: none of its
 # processes can still be running.
@@ -91,21 +96,25 @@ def reap_step_agents(
     *,
     docker: DockerCli,
     log: Callable[[str], None],
-    reap_tagged: Callable[[str, str], None] | None = None,
+    reap_tagged: Callable[[str, str], int] | None = None,
 ) -> tuple[str, ...]:
     """Kill every agent process carrying *tag* in the containers of *run_id*; return those searched.
 
-    ``reap_tagged(container_id, tag)`` kills the tagged processes of one container and
-    raises :class:`OrphanReapError` when it cannot tell none remain; the default is
-    ``docker exec`` through *docker*. The containers are left running: only the processes
-    of the step go. Idempotent, and a tag no process carries is not an error.
+    *tag* is the mark the step's processes were started with (``AgentTurnRequest.step_tag``).
+
+    ``reap_tagged(container_id, tag)`` signals the tagged processes of one container and
+    returns how many it found, or raises :class:`OrphanReapError` when it cannot search; the
+    default is ``docker exec`` through *docker*. A container is swept again until a sweep finds
+    none, and one that still has processes after a few sweeps raises: the step's work is then
+    not proven gone. The containers are left running: only the processes of the step go.
+    Idempotent, and a tag no process carries is not an error.
     """
     step_tag_env(tag)
     searched = _labelled_containers(docker, run_id)
     reap = reap_tagged or partial(_exec_reap_tagged, docker)
     for container_id in searched:
         log(f"[recover] ending agents of step {tag} in container {container_id[:12]}")
-        reap(container_id, tag)
+        _sweep_until_none(reap, container_id, tag)
     return searched
 
 
@@ -132,7 +141,15 @@ def reap_recorded_agents(
         _remove(docker, container_id)
 
 
-def _exec_reap_tagged(docker: DockerCli, container_id: str, tag: str) -> None:
+def _sweep_until_none(reap: Callable[[str, str], int], container_id: str, tag: str) -> None:
+    for _ in range(_MAX_SWEEPS):
+        if reap(container_id, tag) == 0:
+            return
+    msg = f"agents of step {tag} in container {container_id} are still running after {_MAX_SWEEPS} sweeps"
+    raise OrphanReapError(msg)
+
+
+def _exec_reap_tagged(docker: DockerCli, container_id: str, tag: str) -> int:
     what = f"end the agents of step {tag} in container {container_id}"
     argv = [
         "docker",
@@ -146,8 +163,14 @@ def _exec_reap_tagged(docker: DockerCli, container_id: str, tag: str) -> None:
         tag,
     ]
     result = _run(docker, argv, what, check=False)
-    if result.returncode == 0 or any(text in result.stderr.lower() for text in _NO_CONTAINER):
-        return
+    if result.returncode == 0:
+        try:
+            return int(result.stdout.strip())
+        except ValueError:
+            msg = f"could not {what}: the sweep printed {result.stdout.strip()!r}, not a count"
+            raise OrphanReapError(msg) from None
+    if any(text in result.stderr.lower() for text in _NO_CONTAINER):
+        return 0
     msg = f"could not {what}: docker exited {result.returncode}: {result.stderr.strip()}"
     raise OrphanReapError(msg)
 

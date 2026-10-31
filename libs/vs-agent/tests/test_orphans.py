@@ -290,10 +290,13 @@ def test_a_tag_no_sweep_could_match_is_refused_before_docker_is_asked(tag: str) 
 class _ExecAnswers:
     """A docker client listing one container of the run, whose ``exec`` answers as given."""
 
-    def __init__(self, container_id: str, returncode: int | None, stderr: str) -> None:
+    def __init__(
+        self, container_id: str, returncode: int | None, stderr: str, stdout: str = "0\n"
+    ) -> None:
         self._container_id = container_id
         self._returncode = returncode
         self._stderr = stderr
+        self._stdout = stdout
         self.execs: list[list[str]] = []
 
     def run(
@@ -306,7 +309,7 @@ class _ExecAnswers:
         self.execs.append(list(argv))
         if self._returncode is None:
             raise docker_timed_out(list(argv), timeout_seconds)
-        return docker_result(list(argv), self._returncode, "", self._stderr)
+        return docker_result(list(argv), self._returncode, self._stdout, self._stderr)
 
     def spawn(self, argv: Sequence[str]) -> NoReturn:
         raise AssertionError(argv)
@@ -347,3 +350,27 @@ def test_the_default_sweep_is_clean_only_when_every_tagged_process_is_proven_end
     else:
         with pytest.raises(OrphanReapError, match="step-a"):
             sweep()
+
+
+@pytest.mark.parametrize("stdout", ["1\n", "7\n", "not a count\n", ""])
+def test_a_sweep_that_keeps_finding_processes_or_prints_no_count_is_not_clean(stdout: str) -> None:
+    """Every sweep that signals something is followed by another; the step's work must be gone."""
+    docker = _ExecAnswers("c0ffee", 0, "", stdout)
+
+    with pytest.raises(OrphanReapError, match="step-a"):
+        reap_step_agents("run-a", "step-a", docker=docker, log=lambda _line: None)
+
+
+def test_a_container_is_swept_again_until_a_sweep_finds_nothing() -> None:
+    answers = iter(["3\n", "1\n", "0\n"])
+
+    docker = _ExecAnswers("c0ffee", 0, "")
+    sweeps: list[tuple[str, str]] = []
+
+    def sweep(container_id: str, tag: str) -> int:
+        sweeps.append((container_id, tag))
+        return int(next(answers))
+
+    reap_step_agents("run-a", "step-a", docker=docker, log=lambda _line: None, reap_tagged=sweep)
+
+    assert sweeps == [("c0ffee", "step-a")] * 3

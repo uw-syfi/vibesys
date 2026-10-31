@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vs_runtime._evaluation_jobs import is_handle_of
+from vs_runtime._evaluation_jobs import handle_for, is_handle_of
 
 if TYPE_CHECKING:
     from vs_core.api import RequestId
@@ -17,6 +17,15 @@ if TYPE_CHECKING:
 def stage_mark(run_id: str, handle: str) -> str:
     """The mark of the evaluation *handle* of run *run_id*."""
     return f"{run_id}:{handle}"
+
+
+def agent_mark(run_id: str, request_id: RequestId) -> str:
+    """The mark of an agent turn's processes: the stage mark of the step's own handle.
+
+    An agent and a stage command of one step carry the same kind of mark, so one reaper that
+    finds a step's marked processes finds both (``is_stage_mark_of``).
+    """
+    return stage_mark(run_id, handle_for(request_id))
 
 
 def is_stage_mark_of(run_id: str, request_id: RequestId, mark: str) -> bool:

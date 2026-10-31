@@ -44,6 +44,7 @@ class FakeAgentProcesses:
         self._alive: dict[int, FakeAgentProcess] = {}
         self._next_pid = 1
         self._unreachable: frozenset[str] = frozenset()
+        self._stuck = False
         self.sweeps: list[tuple[str, str]] = []
         """Every ``reap_tagged(container_id, tag)`` call received, in order."""
 
@@ -82,13 +83,28 @@ class FakeAgentProcesses:
         """Whether *process* still runs."""
         return process.pid in self._alive
 
-    def reap_tagged(self, container_id: str, tag: str) -> None:
-        """Kill every process of *container_id* whose environment carries exactly *tag*."""
+    @contextmanager
+    def stuck(self) -> Iterator[None]:
+        """Make processes survive their kill while the context is open, as in a stuck kernel."""
+        self._stuck = True
+        try:
+            yield
+        finally:
+            self._stuck = False
+
+    def reap_tagged(self, container_id: str, tag: str) -> int:
+        """Kill the processes of *container_id* whose environment carries exactly *tag*.
+
+        Returns how many it signalled. While :meth:`stuck` is open they are signalled and live on.
+        """
         self.sweeps.append((container_id, tag))
         if self._unreachable == _EVERY_CONTAINER or container_id in self._unreachable:
             message = (
                 f"could not end the agents of step {tag} in container {container_id}: unreachable"
             )
             raise OrphanReapError(message)
-        for process in self.alive(container_id=container_id, tag=tag):
-            del self._alive[process.pid]
+        found = self.alive(container_id=container_id, tag=tag)
+        if not self._stuck:
+            for process in found:
+                del self._alive[process.pid]
+        return len(found)

@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 _PROTOCOL_VERSION = 2
 # This helper is mounted alone and cannot import ``vs_sandbox.step_marks``, so it restates the
 # step mark's name; ``tests/test_skypilot_evaluator_helper.py`` pins the two together.
-_STEP_TAG_ENV = "VIBESYS_STEP_TAG"
+STEP_TAG_ENV = "VIBESYS_STEP_TAG"
 _MAX_FRAME_BYTES = 1024 * 1024
 _FRAMEWORK_ARGUMENT_COUNT = 2
 # This helper is mounted alone and cannot import the protocol, so it restates the
@@ -393,7 +393,7 @@ def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] = os.envi
             state_dir=Path(state_dir),
             stdout=sys.stdout,
             stderr=sys.stderr,
-            step_tag=environ.get(_STEP_TAG_ENV),
+            step_tag=environ.get(STEP_TAG_ENV),
         )
     )
 
