@@ -222,6 +222,11 @@ class Project:
         return cls.log_directory_for(project_root, run_id) / "run.log"
 
     @classmethod
+    def state_cache_path_for(cls, project_root: Path | str, run_id: str) -> Path:
+        """Return ``state.pb``, the cache of the fold of the run's log, beside the log."""
+        return cls.log_directory_for(project_root, run_id) / "state.pb"
+
+    @classmethod
     def chat_session_directory_for(
         cls, project_root: Path | str, run_id: str, session_id: str
     ) -> Path:

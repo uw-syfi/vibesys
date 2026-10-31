@@ -166,6 +166,7 @@ def _startup_host(
     namespace = project.state.state_store_namespace("startup-ownership")
     services = CoreServices(
         run_id="startup-ownership",
+        project=project,
         search=counter,
         config=CounterConfig(),
         state=_declared_state() if ended is None else ended.state,

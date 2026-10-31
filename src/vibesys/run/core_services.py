@@ -255,6 +255,8 @@ class CoreServices:
     """
 
     run_id: str
+    project: Project
+    """The project the run belongs to, which says where its files are."""
     search: SearchDef[Any]
     config: object
     """The config the search runs on."""
@@ -334,6 +336,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
     )
     return CoreServices(
         run_id=run_id,
+        project=resources.project,
         search=plan.search,
         config=plan.config,
         state=state,

@@ -77,12 +77,13 @@ from vs_sim.api.testing import run_virtual
 from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, FakeConnector, recorded_commands
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Iterator
     from pathlib import Path
     from typing import Any
 
     from pydantic import BaseModel
 
+    import vs_proto.api as p
     from vibesys.api import CoreEvent, RunHandle
     from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionStore, SkillSelection
     from vs_agent.api.testing import FakeInvocation
@@ -760,6 +761,14 @@ def assert_run_live(core: CoreState, end: End = End.TERMINAL) -> None:
     )
 
 
+def _advances(records: list[p.Record]) -> Iterator[p.StrategyAdvanced]:
+    """The search's advance records, in log order."""
+    for record in records:
+        body = record.body
+        if body is not None and body.field == "strategy_advanced":
+            yield body.value
+
+
 @dataclass(frozen=True)
 class LoadedRun:
     """A run's core state folded from its run.log, and the same with the search's, as JSON."""
@@ -780,11 +789,9 @@ def load_run(project: Project, run_id: str, *, plugin_id: str = "dynamic") -> Lo
         return None
     core = fold(records, registry=loop_spec(plugin_id).registry())
     whole = [
-        r.body.value.strategy.value
-        for r in records
-        if r.body is not None
-        and r.body.field == "strategy_advanced"
-        and r.body.value.strategy.field == "checkpoint"
+        advance.strategy.value
+        for advance in _advances(records)
+        if advance.strategy is not None and advance.strategy.field == "checkpoint"
     ]
     envelope: dict[str, Any] = {"core": json.loads(core.model_dump_json())}
     if whole:

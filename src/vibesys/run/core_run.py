@@ -17,8 +17,9 @@ from typing import TYPE_CHECKING
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import CoreEventType, RunEndingData, RunFailure, RunFailureKind
 from vibesys.run.commit_view import ObservedInputs, RecordView
-from vibesys.run.run_clock import last_run_clock
+from vibesys.run.run_clock import start_clock_from
 from vibesys.run.run_controls import OperatorControls, StoredSteerArtifacts
+from vibesys.run.store_migration import migrate_saved_run
 from vs_core.api import (
     AttemptPhase,
     ControlId,
@@ -30,8 +31,9 @@ from vs_core.api import (
     RunResultProposal,
 )
 from vs_core.api import RunStatus as CoreRunStatus
-from vs_core.api.recovery import RunRest, at_rest
+from vs_core.api.recovery import RunRest, at_rest, starts_run
 from vs_project.api import Project
+from vs_runlog.api import FileFoldCache
 from vs_runtime.api import RunStatus
 from vs_runtime.api.core import (
     CoreResumeError,
@@ -126,16 +128,21 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
     if log_file is None:
         raise RunLogUnavailableError(services.run_id)
     epoch = integration.events.epoch
-    records = log_file.records()
-    resumed = any(r.body is not None and r.body.field == "run_started" for r in records)
     clock = services.clock
-    clock.start_at(last_run_clock(records))
-    search = SearchRun.restored(
-        records,
-        services.search.driver(services.config, services.registry),
-        services.config,
-        services.registry,
+    driver = services.search.driver(services.config, services.registry)
+    migrate_saved_run(
+        services.project,
+        services.run_id,
+        log_file,
+        search=driver,
+        registry=services.registry,
+        epoch=epoch,
+        stamp=clock.stamp,
     )
+    records = log_file.records()
+    resumed = any(starts_run(record) for record in records)
+    start_clock_from(clock, records, epoch)
+    search = SearchRun.restored(records, driver, services.config, services.registry)
     log = RunLogStepLog.open(
         log_file,
         epoch=epoch,
@@ -143,6 +150,8 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         registry=services.registry,
         clock=clock,
         search=search,
+        stamp=clock.stamp,
+        cache=FileFoldCache(Project.state_cache_path_for(services.project.root, services.run_id)),
     )
     controls = OperatorControls(
         RunControlBridge(
