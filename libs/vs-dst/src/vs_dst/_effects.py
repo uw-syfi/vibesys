@@ -42,7 +42,10 @@ class Effects:
     sealed: dict[str, ExecutionResult] = field(default_factory=dict)
     """The result each request's effect left behind: what a restarted host inspects."""
     executed: list[str] = field(default_factory=list)
-    """Requests whose effect ran, in order; a request in it twice ran twice."""
+    """Requests whose effect began, in order; a request in it twice ran twice. One with no
+    sealed result was interrupted: its effect began and left nothing a restart can read."""
+    finished: dict[str, int] = field(default_factory=dict)
+    """How many times each request's effect finished and sealed a result."""
     sequences: dict[str, int] = field(default_factory=dict)
     """Observation sequences issued per request, which a restart continues."""
 
@@ -89,9 +92,15 @@ class RecoverableExecutors(ScriptedExecutors):
             raise ContractError(("request_id",), "a dispatched request carries its identity")
         identity = request.request_id.root
         self._effects.executed.append(identity)
+        self._began(len(self._effects.executed) - 1)
         result = await self._enacted(request, await super().execute(request, context))
         self._effects.sealed[identity] = result
+        self._effects.finished[identity] = self._effects.finished.get(identity, 0) + 1
         return result
+
+    def _began(self, index: int) -> None:
+        """The ``index``-th effect of the run has begun, and nothing of it is sealed yet."""
+        del index
 
     async def _enacted(self, request: Request, result: ExecutionResult) -> ExecutionResult:
         """What the shell is told once the effect's side effects on the host have played out."""
@@ -104,14 +113,40 @@ class RecoverableExecutors(ScriptedExecutors):
             _target_fields(observed), context={"operation_registry": self._registry}
         )
 
+    def _begun_unsealed(
+        self, request: InspectRequest, context: ExecutionContext
+    ) -> TargetObservation:
+        """What the executor's receipts show of an effect that began and sealed nothing: unknown."""
+        target = request.target
+        sequence = self._next(target.root)
+        observation = Observation(
+            event_id=EventId(root=f"{target.root}:observation:{sequence}"),
+            request_id=target,
+            scope=request.scope,
+            admission_id=request.admission_id,
+            sequence=sequence,
+            observed_at=context.now_at,
+            status=ObservationStatus.UNKNOWN,
+            accepted=False,
+            terminal=False,
+            diagnostic="the effect began and has no recorded result",
+        )
+        return TargetObservation(observation=observation, reissue=ReissueProof.BEGUN_UNSEALED)
+
     def _inspect(self, request: InspectRequest, context: ExecutionContext) -> ExecutionResult:
-        """What a restarted host learns of a request: its sealed result, or that it never ran."""
+        """What a restarted host learns of a request.
+
+        Its sealed result, that it began and left none (the effect was in flight), or that it
+        never ran.
+        """
         target = request.target
         sealed = self._effects.sealed.get(target.root)
         owner_events: tuple[OwnerEvent, ...] = ()
         if sealed is not None:
             facts = self._target(sealed.observation)
             owner_events = sealed.owner_events
+        elif target.root in self._effects.executed:
+            facts = self._begun_unsealed(request, context)
         else:
             sequence = self._next(target.root)
             # An effect that never started holds nothing: there is nothing left to release.

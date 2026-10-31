@@ -171,7 +171,7 @@ what `clear` does for each.
 | `ObserveOwnedJob`, `CollectEvidence`, `VerifyAdoption`; registered `QUERY` operations (`interpret_evidence`, `verify_revision`, `export_patch`, board reads) | read only | safe | none | none |
 | `EnsureWorkspace`, `RestoreRevision` | create or reset an attempt's workspace to a recorded revision | safe: the end state is fixed by the request | none | tag (workspace is keyed by attempt and generation) |
 | `DiscardWorkspace`, `CloseAttemptScope`, `CloseSession`, `CancelTurn`, `CancelOwnedJob`, `EnsureSession` | release or bind a resource | safe: releasing twice is a no-op in the contract | none | tag |
-| `SnapshotAndRetain`, `SnapshotAndRetainRun`, `RetainRevision` | commit the workspace and write a retention ref | safe after `clear` of the scope's writers, so the snapshot cannot race a running agent; the ref is content-addressed | reap tagged agent processes of the scope | revision id |
+| `SnapshotAndRetain`, `SnapshotAndRetainRun`, `RetainRevision` | commit the workspace and write a retention ref | safe, and `decide` makes it safe: it runs the step only when every writer of its scope has a result, so it never reads a half-written tree ([Scope order](#scope-order)); the ref is content-addressed | none | revision id |
 | `AdoptRevision` | write the winner into the operator's checkout | safe: it sets the target state and verifies it | none | tag |
 | `DispatchTurn`, `ResumeSessionTurn`; registered `SESSION_TURN` operations | one agent turn: a process group, writes to the workspace, tokens, tool calls | safe after `clear` only | kill the processes carrying the tag in the run's containers (`vs_agent.reap_step_agents`; the containers belong to a role or a workspace and outlive the step, so none is removed), then, unless the journal holds an answer for the invocation, return the workspace to the baseline of its access receipt (`AccessSettlement.rewind`) and forget the invocation's unanswered journal record (`AgentSessions.forget_unfinished`), so the retry dispatches it again and resumes the last completed turn | tag |
 | `SubmitMeasurement`; registered `OWNED_JOB` operations | an evaluation job on Slurm, Docker or a local process | Slurm: safe, the ledger finds the job. Docker and local: safe after `clear` | Slurm: adopt (request claimed, queued, running or ended) and never cancel; `run` attaches. Local and Docker: cancel the process's own evaluation, kill the stage process group, remove the labelled container, discard partial stage output | Slurm: the ledger's content key, which `clear` computes from the step. Local: the tag |
@@ -303,7 +303,7 @@ Field by field (`libs/vs-core/src/vs_core/types/kernel.py:CoreState`, `RunEnvelo
 | `records.recovery`, `records.hosts`, `records.children` | envelope | Not needed: the recovery barrier, the host epoch log and child leases are deleted |
 | `strategy` and `event_cursor` | envelope | Derived: strategy state is a fold of the `StrategyEvent`s the fold emits, restored as today by replaying them |
 | `fence` | envelope | Replaced by the run lock |
-| `pending_inputs`, `pending_decisions`, `wakes`, `pending_publications`, `delivery_cursor` | runtime record | Derived: an owner event is a pure translation of its observation (`_request_forward.py`); decisions and wakes are the strategy's output; publications are the fold's output. The delivery cursor is the one fact that is not derived: after a restart every publication since the last recorded acknowledgement is delivered again |
+| `pending_inputs`, `pending_decisions`, `wakes`, `pending_publications`, `delivery_cursor` | runtime record | Derived, except the owner events: the ledger derives the owner event of a report (`_request_forward.py`) but not every fact an executor tells an owner (a turn's reply, a refused mid-turn steer, a job's failure class, an adoption's publication), so those travel in the `StepFinished` record ([Owner events](#owner-events)). Decisions and wakes are the strategy's output; publications are the fold's output. The delivery cursor is the one fact that is not derived: after a restart every publication since the last recorded acknowledgement is delivered again |
 
 Outside both stores, executors keep durable state keyed by tag: the provider session ids
 (`vs_agent/session_store.py`), the Slurm ledger on the cluster, workspace git state, and the receipt-store
@@ -330,7 +330,7 @@ New records (one proto envelope, `vibesys/store/v1/core_input.proto`, validated 
 | `RunStarted` | the inputs `new_core_state` takes | seed of the fold |
 | `CoreInput` | a decision or proposal, an owner event, an operator control, an epoch resume, a clock advance that changed state | the external inputs of `step` |
 | `StepStarted` | tag, attempt, request, deadline | durable intent before any I/O; makes a re-run visible |
-| `StepFinished` | tag, attempt, `Finished`, `Failed` or `Cancelled` with a typed reason | the result; one per step |
+| `StepFinished` | tag, attempt, `Finished` (the report and the owner events), `Failed` or `Cancelled` with a typed reason | the result; one per step, and one atomic record, so a crash loses no owner event |
 | `AttemptInterrupted` | tag, attempt, reason (`PAUSE`, `SHUTDOWN`, `RAISED`) | an attempt that ended without ending the step; a `RAISED` one (the runner raised or gave nothing back) is charged to the retry bound, the other two are not. The loop writes `PAUSE` and `RAISED`; an orderly stop of the process (`SHUTDOWN`) is not built, and a cancelled loop is a crash |
 | `CoreSnapshot` | an old `RunEnvelope` | the seed of a migrated or imported run only; never written for a new run |
 
@@ -417,8 +417,35 @@ def decide(state: CoreState, now: float) -> tuple[Action, ...]: ...
 raises; `RunStarted` is built with the cutover. `CancelReason` is a `StrEnum` in `vs_core`, and the record
 carries the same set as the proto enum `StepCancelReason`, because the store package cannot import the core
 package (a cycle); a test pins that the two name the same members. `Finished` carries the observation and,
-when the executor reported more (a turn's reply, evidence, a revision), the whole `RequestObserved`.
-`FailureReason` gains `ATTEMPTS_EXHAUSTED`.
+when the executor reported more (a turn's reply, evidence, a revision), the whole `RequestObserved`, and
+the owner events the executor returned beside it. `FailureReason` gains `ATTEMPTS_EXHAUSTED`.
+
+#### Owner events
+
+An executor answers a request with a report and, for the requests whose owner needs more than the
+report says, owner events. The live shell applies the report first and then each owner event in order
+(`ExecutionResult` in `vs_runtime/_core_requests.py`). The fold does the same from one record:
+`Finished.observed` is the report, `Finished.owner_events` the events (`vs_core.types.steps.OwnerEvent`:
+the attempts, sessions, evaluation and settlement events), and the fold steps the report and then each
+event. The ledger derives an owner event of its own from a report (`owner_signals`), so most events
+are redundant with the report, but these facts exist only as the executor's event:
+
+- a plain turn's reply (`TurnObserved`; the ledger withholds its own while a reply is owed);
+- a mid-turn steer the provider refused (`InputMidTurnReleased`);
+- the executor's classification of a failed job (`JobObserved.failure`) and its diagnostic;
+- an adoption's publication and checkout (`AdoptionObserved`).
+
+The fold refuses a record whose observation or owner event names another request, scope or admission,
+as the live shell does. A request that core settled itself (`Failed`, `Cancelled`) has no owner event:
+the ledger derives the owner's from the conclusive observation core writes.
+
+One fact is lost by that order. The report's derived `AdoptionObserved` has no publication, so a
+succeeded adoption takes the legacy path (core issues `VerifyAdoption`), and the executor's own event
+for the same observation sequence is then stale and ignored. The live shell has the same order and
+the same loss. What is missing is a place for the publication and checkout on the report:
+`RequestObserved` has none. Adding both there, and passing them through `owner_signals`, makes the
+first `AdoptionObserved` complete and the executor's own event redundant. Until the cutover (PR 6a)
+places them, an adoption runner's publication does not reach core.
 
 `decide(fold(log), now)` is the issue's `decide(log) -> actions`. It is split in two so a cached state can
 stand in for the fold. The action type has no `Blocked` or `Unknown` variant, and no variant names a step
@@ -442,6 +469,8 @@ kind. The rule is:
   and `Cancel(DRAIN_EXPIRED)` from the pause's drain deadline (`RunPark.deadline_at`);
 - a run whose committed finish is a cancel, or that has ended, gets `Cancel(RUN_ENDING)` for each running
   step and `Settle(Cancelled(RUN_ENDING))` for each other open step, and starts none;
+- a step that snapshots its scope's files waits while any step that writes them is open, and a step that
+  writes them waits while a snapshot of its scope runs ([Scope order](#scope-order));
 - a run with a committed finish and no open step is `End`.
 
 A step runs now when its latest attempt has no record ending it. The first record of a later epoch (the
@@ -450,6 +479,31 @@ began before it: the run has one writer, so the earlier process is dead. The fol
 `decide`, so a state cached before the restart and a full fold agree, and `decide` issues `Run` for those
 steps as soon as the header is in the log. The ended attempts are charged, as a raised one is. Cleanup steps that core issues while a cancelling finish is committed are cancelled
 like any other; whether cleanup should instead outlive the finish is left to the cutover.
+
+#### Scope order
+
+A snapshot of a half-written tree is the one effect `clear` cannot undo, and `clear` cannot prevent
+it either: a process carries the tag of its own step, so the snapshot's `clear` has no tag to reap by.
+The rule orders the steps of one scope instead (`vs_core/_scope_order.py`). `request_effect` classifies
+every request kind as `WRITES`, `SNAPSHOTS` or `NEITHER`, beside `request_lifecycle`, so the rule names
+no kind:
+
+- `SNAPSHOTS`: `SnapshotAndRetain`, `SnapshotAndRetainRun`, `RetainRevision`, and a registered
+  operation whose descriptor has a revision authority of snapshot or retain;
+- `WRITES`: a turn whose session is not read-only, `EnsureWorkspace`, `RestoreRevision`, and a
+  registered operation that is not a query, or that has no descriptor, because a descriptor does not
+  yet declare whether it touches the tree;
+- `NEITHER`: every other kind.
+
+A `SNAPSHOTS` step runs only while no `WRITES` step of its scope is open, and a `WRITES` step starts
+only while no `SNAPSHOTS` step of its scope has a running attempt. Open means no result: a writer whose
+attempt a pause interrupted, a runner raised or a crash ended still holds the scope back, because its
+files are half written and its next attempt resets them before it runs. A writer that depends on the
+snapshot, directly or through other steps, cannot end before it and does not hold it back. A snapshot
+blocked this way still ends: every writer has a limit, and the snapshot's own limit settles it. What
+is missing for a precise rule is a declaration on `OperationDescriptor` of whether an operation
+writes the tree; until then every operation that is not a query counts as a writer, which only delays
+a snapshot. `libs/vs-core/tests/test_recovery_scope_order.py` holds the rule over generated states.
 
 `decide` is total: it never raises on a validated log, and a log that fails validation is a read error at
 the boundary (a corrupt record stops the reader, as `vs_runlog` does today), never an action.
@@ -541,14 +595,17 @@ repeat:
 The loop owns timers, tasks, cancellation and recording. `decide` owns every decision, including that a
 deadline passed. No `if isinstance(step, ...)` appears in either.
 
-In code the loop sees the world through two interfaces it owns. `StepLog` is the log as the loop uses it:
-one atomic durable append per method, a `state` that is the fold of everything appended (by the loop or by
-an input from elsewhere), and `open_step(tag)`, the step with no result as the fold has it (its request, its limit and its latest attempt), which is where `clear` gets the step for a tag with no attempt in flight. `RecoveryRule`
-is core's pure surface: `decide`, and `settled`, which says the log already holds the end of the run
-(`ENDED`) or the run is paused (`PARKED`). A restarted loop over a log that holds `Ended` returns at once
-instead of recording it twice. Each running attempt is a flight, one task that owns the attempt from
-`clear` to the record of how it ended, so a `clear` that waits on an unreachable backend never blocks the
-loop or an ending. How an attempt ends depends on why it was cancelled:
+In code the loop decides with core's own functions, `decide` and `at_rest`, and sees the log through one
+interface it owns. `StepLog` is the log as the loop uses it: one atomic durable append per method, a
+`state` that is the fold of everything appended (by the loop or by an input from elsewhere), and
+`open_step(tag)`, the step with no result as the fold has it (its request, its limit and its latest
+attempt), which is where `clear` gets the step for a tag with no attempt in flight. `StepLogContract`
+holds a log to what the loop relies on, and a restarted log over the records of a dead process is how the
+tests kill the host. The loop's clock is the run clock, the one `decide` reads and the records carry.
+`at_rest(state)` says the run ended (the loop returns at once, so a restart never records the end twice)
+or parked (it returns once nothing is in flight). Each running attempt is a flight, one task that owns the
+attempt from `clear` to the record of how it ended, so a `clear` that waits on an unreachable backend never
+blocks the loop or an ending. How an attempt ends depends on why it was cancelled:
 
 | Cancel reason | Recorded | `clear` unreachable |
 |---|---|---|
@@ -556,7 +613,10 @@ loop or an ending. How an attempt ends depends on why it was cancelled:
 | `RUN_ENDING` | `StepFinished(Cancelled)` | give up; the leftovers are a named residual |
 | `DEADLINE`, `WITHDRAWN`, `INTERRUPTED` | `StepFinished(Cancelled)` | keep retrying with backoff |
 
-An attempt that returned a result on its own is recorded as that result even when a cancel was set. An
+An attempt that returned a result on its own is recorded as that result even when a cancel was set, unless
+the run is parked: core drops a result in a parked epoch, so the attempt is recorded as
+`AttemptInterrupted(PAUSE)` and the step runs again after the resume. A parked run also takes no `Settle`: it
+waits for the resume, so a step past its limit is not settled over and over. An
 attempt the loop gave up on (it ignored the signal through the grace period, or raised) is cleared before
 its end is recorded, so a paused or ended run leaves nothing running. A parked run starts nothing, so
 flights still waiting on `clear` stop waiting. `Settle` and a `Cancel` with no flight (the host restarted)
@@ -642,7 +702,7 @@ Each pull request below is dormant until the cutover: test-reachable, not select
 | PR | Write set | Deletes |
 |---|---|---|
 | 4a. Inputs and decide | `proto/vibesys/store/v1/core_input.proto` and its generated code; `libs/vs-runlog/src/vs_runlog/` (input append, read, the log-prefix rule moved from `_replay_store.py`); `libs/vs-core/src/vs_core/api/recovery.py` and `_decide.py` (`fold`, `decide`, `Action`); `libs/vs-core/tests` (properties over generated logs: fold twice equals once, cached start equals full fold, crash at every record prefix yields `Run` for every open step and never a blocked action) | nothing |
-| 4b. Loop and Protocol | `libs/vs-runtime/src/vs_runtime/_step_loop.py`, `_step_runner.py`, `api/step_runner.py`, `api/step_runner_contracts.py`, `api/testing.py` (`FakeStepRunner`, `FakeStepLog`, `StepRunnerContract`); `tach.toml`; `libs/vs-dst` hooks (#3475 item 2 owns the points) | nothing |
+| 4b. Loop and Protocol | `libs/vs-runtime/src/vs_runtime/_step_loop.py`, `_step_runner.py`, `api/step_runner.py`, `api/step_runner_contracts.py`, `api/step_log_contracts.py`, `api/testing.py` (`FakeStepRunner`, `FakeStepLog`, `StepRunnerContract`, `StepLogContract`); `tach.toml`; `libs/vs-dst` hooks (#3475 item 2 owns the points) | nothing |
 | 5a. Agent turn and workspace runners | `libs/vs-runtime/src/vs_runtime/_agent_turn_step_runner.py`, `_workspace_step_runner.py`; `libs/vs-agent/src/vs_agent/orphans.py` gains reap by step tag beside reap by run | nothing |
 | 5b. Evaluation runners | `libs/vs-runtime/src/vs_runtime/_slurm_job_step_runner.py`, `_local_job_step_runner.py`; Slurm tier case | nothing |
 | 5c. Operation, adoption and environment runners | `libs/vs-runtime/src/vs_runtime/_operation_step_runner.py`, `_adoption_step_runner.py`; per-environment `clear` in `_run_environment.py` (Docker, SkyPilot, Modal, Host) | nothing |

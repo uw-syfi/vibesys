@@ -9,9 +9,9 @@ from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_no
 pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
 _CORE = Path(__file__).resolve().parents[2] / "libs/vs-core/src/vs_core"
-_RULE = ("_decide.py", "_actions.py", "_step_attempts.py", "_step_log.py")
-_NOT_STEP_KINDS = frozenset({"Finished", "Failed", "Cancelled", "Oneof"})
-"""What the rule may test an instance of: a step's result, and the record body of a log."""
+_RULE = ("_decide.py", "_actions.py", "_scope_order.py", "_step_attempts.py", "_step_log.py")
+_NOT_STEP_KINDS = frozenset({"Finished", "Failed", "Cancelled", "Oneof", "Observation"})
+"""What the rule may test an instance of: a step's result and its observation, and a log's record body."""
 
 
 def _tested_classes(source: str) -> list[tuple[int, str]]:

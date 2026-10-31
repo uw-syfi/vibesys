@@ -17,104 +17,28 @@ The edits of that example are built and measured natively by ``test_scripted_que
 from __future__ import annotations
 
 import asyncio
-import re
 from typing import TYPE_CHECKING
 
 from tests.e2e.dynamic_loop_harness import _AGENT_CONFIG, LoopInput, resume_request, run_request
+from tests.e2e.scripted_value_run import SEED, NoAgents, scripted_client
 from tests.support.real_git import REAL_GIT
 
 import vs_proto.api as p
-from launch.scripted_agents import ScriptedDynamicAgents
 from vibesys.api import PauseRequest, RunHandle, RunStatus
 from vibesys.events import CoreEventType, WorkstreamFinishedData
 from vibesys.orchestration.dynamic.scripted.api import (
-    CHAT_REPLY,
     IMPLEMENTER_KIND,
     JUDGE_KIND,
     PLANNER_KIND,
-    EditKind,
-    Recipe,
-    Workload,
 )
-from vs_agent.api import ScriptedAgentClient, ScriptedClientSetup
 from vs_project.api import NullGitTrackerEvents, Project, open_git_repository
 from vs_runlog.api import RunLogReader
-from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
-    from vs_agent.api import AgentClientProtocol, AgentEventSink, AgentSpec
 
 ROUNDS = 3
-SEED = 1
-_VALUE = re.compile(r"^VALUE = (-?\d+)$", re.MULTILINE)
-
-
-def _set_value(change: int | None) -> Callable[[str], str | None]:
-    """An edit of ``queue.py``: raise ``VALUE`` by ``change``, or make it negative for ``None``."""
-
-    def edit(source: str) -> str | None:
-        found = _VALUE.search(source)
-        if found is None:
-            return None
-        value = -1 if change is None else int(found.group(1)) + change
-        return _VALUE.sub(f"VALUE = {value}", source) + "# [scripted] edited: see the diff\n"
-
-    return edit
-
-
-def _recipe(slug: str, kind: EditKind, change: int | None, weight: int = 1) -> Recipe:
-    return Recipe(
-        slug=slug,
-        kind=kind,
-        title=f"Try {slug}",
-        claim=f"The {slug} change moves throughput.",
-        task=f"Apply the {slug} change.",
-        evidence_wanted="The check passes and throughput rises.",
-        summary=f"Applied the {slug} change to queue.py.",
-        edit=_set_value(change),
-        weight=weight,
-    )
-
-
-VALUE_WORKLOAD = Workload(
-    name="value",
-    source="queue.py",
-    manifest="queue.py",
-    manifest_text="VALUE",
-    recipes=(
-        _recipe("raise-value", EditKind.IMPROVES, 3, weight=3),
-        _recipe("lower-value", EditKind.REGRESSES, -1),
-        _recipe("negate-value", EditKind.BREAKS_ACCURACY, None),
-    ),
-)
-
-
-def _scripted_client(
-    *, spec: AgentSpec, events: AgentEventSink, log_dir: Path | None = None, **_services: object
-) -> AgentClientProtocol:
-    """The scripted client over this scenario's workload, as the launcher's factory builds it."""
-    setup = ScriptedClientSetup(
-        responders=ScriptedDynamicAgents(
-            seed=spec.scripted_seed, sink=events, workloads=(VALUE_WORKLOAD,)
-        ).responders(),
-        chat=CHAT_REPLY,
-        provider=spec.provider,
-        model=spec.model,
-        event_sink=events,
-        log_dir=log_dir,
-    )
-    return ScriptedAgentClient(setup, threads=OsThreads())
-
-
-class _NoAgents:
-    """Stands where the harness expects its Fake clients: the scripted factory replaces it."""
-
-    def client(self, **_kwargs: object) -> AgentClientProtocol:
-        message = "an agent-less run builds its clients with the scripted factory"
-        raise AssertionError(message)
 
 
 def test_scripted_agents_plan_edit_and_judge_through_the_real_backend(tmp_path: Path) -> None:
@@ -125,8 +49,8 @@ def test_scripted_agents_plan_edit_and_judge_through_the_real_backend(tmp_path: 
 
     run = run_request(
         request,
-        _NoAgents(),
-        client_factory=_scripted_client,
+        NoAgents(),
+        client_factory=scripted_client,
         slurm_processes=loop_input.connector,
         state_stores=loop_input.state_stores,
         verify=False,
@@ -171,8 +95,8 @@ def test_scripted_run_relaunches_once_from_saved_state(tmp_path: Path) -> None:
 
     first = run_request(
         request,
-        _NoAgents(),
-        client_factory=_scripted_client,
+        NoAgents(),
+        client_factory=scripted_client,
         slurm_processes=loop_input.connector,
         verify=False,
         on_handle=lambda handle: stopped.append(asyncio.create_task(stop_after_start(handle))),
@@ -183,8 +107,8 @@ def test_scripted_run_relaunches_once_from_saved_state(tmp_path: Path) -> None:
     stopped[0].result()
     second = run_request(
         resume_request(request, first.run_id),
-        _NoAgents(),
-        client_factory=_scripted_client,
+        NoAgents(),
+        client_factory=scripted_client,
         slurm_processes=loop_input.connector,
         verify=False,
     )
@@ -223,8 +147,8 @@ def test_a_scripted_run_pauses_then_resumes_without_overwriting_the_project(tmp_
 
     parked = run_request(
         request,
-        _NoAgents(),
-        client_factory=_scripted_client,
+        NoAgents(),
+        client_factory=scripted_client,
         slurm_processes=loop_input.connector,
         on_handle=pause_on_start,
         verify=False,
@@ -256,8 +180,8 @@ def test_a_scripted_run_pauses_then_resumes_without_overwriting_the_project(tmp_
     before = repository.uncommitted_paths(["queue.py", "notes.txt"])
     resumed = run_request(
         resume_request(request, parked.run_id),
-        _NoAgents(),
-        client_factory=_scripted_client,
+        NoAgents(),
+        client_factory=scripted_client,
         slurm_processes=loop_input.connector,
         verify=False,
         relaunch_saved=True,

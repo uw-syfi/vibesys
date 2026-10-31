@@ -146,6 +146,10 @@ class RunSummary(Value):
     result: RunResultProposal | None
 
 
+NO_STEPS = StepsState()
+"""The steps of a log with none: ``CoreState`` leaves them out of its JSON, so identities hold."""
+
+
 class CoreState(Value):
     """Core state lifecycle contract."""
 
@@ -158,7 +162,9 @@ class CoreState(Value):
     evaluation: EvaluationState = EvaluationState()
     settlement: SettlementState = SettlementState()
     records: RecordsState = RecordsState(hosts=())
-    steps: StepsState = Field(default=StepsState(), exclude_if=lambda value: value == StepsState())
+    steps: StepsState = Field(
+        default=NO_STEPS, exclude_if=lambda value: value is NO_STEPS or value == NO_STEPS
+    )
     """The attempts the log records, which only the recovery rule's fold writes."""
 
 

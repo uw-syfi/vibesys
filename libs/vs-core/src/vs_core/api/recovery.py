@@ -21,6 +21,7 @@ from vs_core._step_log import (
     interrupted_message,
     started_message,
 )
+from vs_core.types.records import StepEffect, request_effect, request_interrupt_policy
 from vs_core.types.steps import (
     Cancelled,
     CancelReason,
@@ -47,6 +48,7 @@ __all__ = [
     "RunRest",
     "Settle",
     "StepAttempts",
+    "StepEffect",
     "StepResult",
     "StepsState",
     "Wait",
@@ -57,5 +59,7 @@ __all__ = [
     "input_message",
     "interrupted_message",
     "interruption_of",
+    "request_effect",
+    "request_interrupt_policy",
     "started_message",
 ]

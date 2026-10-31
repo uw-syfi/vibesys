@@ -12,6 +12,7 @@ from .types.steps import (
     Failed,
     Finished,
     Interruption,
+    OwnerEvent,
     StepAttempts,
     StepsState,
 )
@@ -93,21 +94,45 @@ def dispatched(state: CoreState, tag: RequestId) -> CoreState:
     return _replaced(state, record.model_copy(update={"phase": RequestPhase.DISPATCHED}))
 
 
-def report_of(state: CoreState, tag: RequestId, result: StepResult) -> RequestObserved:
-    """The report the ledger takes for the result of ``tag``.
+def finish(
+    state: CoreState, tag: RequestId, result: StepResult
+) -> tuple[RequestObserved, tuple[OwnerEvent, ...]]:
+    """The events the ledger and the owners take for the result of ``tag``, in the order to apply.
 
-    A finished step brings the executor's own; for a failure or cancellation core decided, core
-    writes the conclusive observation itself.
+    A finished step brings the executor's report and its owner events; each may speak only for the
+    request it answers, as the live shell checks. For a failure or cancellation core decided, core
+    writes the conclusive observation itself and no owner event follows: the ledger derives the
+    owner's from it.
     """
     record = open_record(state, tag)
     match result:
         case Finished():
-            if result.observation.request_id != tag:
-                message = f"the log finishes step {tag.root} with another step's observation"
-                raise ValueError(message)
-            return result.report
+            for fact in (result.observation, *result.owner_events):
+                _speaks_for(record, fact)
+            return result.report, result.owner_events
         case Failed() | Cancelled():
-            return _concluded(record, result, state.run.now_at)
+            return _concluded(record, result, state.run.now_at), ()
+
+
+def _speaks_for(record: RequestRecord, fact: object) -> None:
+    """Refuse a fact of the log that names another request, scope or admission."""
+    request = record.request
+    observation = fact if isinstance(fact, Observation) else getattr(fact, "observation", None)
+    scope = getattr(fact, "scope", None)
+    if (
+        (scope is not None and scope != request.scope)
+        or getattr(fact, "admission_id", request.admission_id) != request.admission_id
+        or (
+            observation is not None
+            and (
+                observation.scope != request.scope
+                or observation.admission_id != request.admission_id
+                or (isinstance(fact, Observation) and observation.request_id != record.request_id)
+            )
+        )
+    ):
+        message = f"the log finishes step {record.request_id.root} with a fact of another request"
+        raise ValueError(message)
 
 
 def forgotten(state: CoreState, tag: RequestId) -> CoreState:

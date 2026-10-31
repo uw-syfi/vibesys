@@ -10,12 +10,12 @@ from vs_runtime._fake_core_execution import (
 )
 from vs_runtime._fake_stage_work_reaper import FakeStageWorkReaper
 from vs_runtime._fake_step_log import (
+    FakeLogUncertainError,
+    FakeQuery,
+    FakeRunRecords,
+    FakeRunSeed,
     FakeStepLog,
-    LogEntry,
-    LoggedEnded,
-    LoggedFinished,
-    LoggedInterrupted,
-    LoggedStarted,
+    fake_run_seed,
 )
 from vs_runtime._fake_step_runner import (
     AttemptHangs,
@@ -54,6 +54,7 @@ from vs_runtime.api.stage_work_contracts import (
     StageWorkReaperContract,
     StageWorkUnderTest,
 )
+from vs_runtime.api.step_log_contracts import StepLogContract, StepLogUnderTest
 from vs_runtime.api.step_runner_contracts import StepRunnerContract, StepRunnerUnderTest
 from vs_runtime.fake_docker_daemon import DaemonBackend, daemon_docker_config, daemon_engine
 from vs_runtime.fakes import (
@@ -134,13 +135,17 @@ __all__ = [
     "FakeEvidenceLedger",
     "FakeGitRunner",
     "FakeLocalValidationCall",
+    "FakeLogUncertainError",
     "FakeModelVolumeProvisioner",
     "FakeModelVolumeRequest",
     "FakeProjectMaterializationEffects",
     "FakePublicationDelivery",
+    "FakeQuery",
     "FakeRequestExecution",
     "FakeRunControlEventSink",
     "FakeRunHandle",
+    "FakeRunRecords",
+    "FakeRunSeed",
     "FakeRuns",
     "FakeStageWorkReaper",
     "FakeStepLog",
@@ -156,11 +161,6 @@ __all__ = [
     "InvalidReply",
     "Launch",
     "LeftoverWorkError",
-    "LogEntry",
-    "LoggedEnded",
-    "LoggedFinished",
-    "LoggedInterrupted",
-    "LoggedStarted",
     "MemoryValidationPasses",
     "ProbedRunClock",
     "RecordingSearch",
@@ -173,6 +173,8 @@ __all__ = [
     "StageWorkPlace",
     "StageWorkReaperContract",
     "StageWorkUnderTest",
+    "StepLogContract",
+    "StepLogUnderTest",
     "StepRunnerContract",
     "StepRunnerUnderTest",
     "StepTagMismatchError",
@@ -182,6 +184,7 @@ __all__ = [
     "daemon_docker_config",
     "daemon_engine",
     "drive_shell",
+    "fake_run_seed",
     "finished_result",
     "idle_environment_system",
     "request_executors",
