@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from vs_core.api import DecisionId, ObservationStatus, RequestId
+from vs_core.api import DecisionId, ObservationStatus, RequestId, SubmitMeasurement
 from vs_core.api.recovery import Cancelled, CancelReason, Finished
 from vs_evaluation.api import ResourceRequirements
 from vs_runtime.api import AccuracyEvaluation, PollingEvaluationExecutor
@@ -345,6 +345,7 @@ def test_a_finished_step_has_recorded_every_reading_it_reports_in_the_evidence_l
 
     async def main() -> None:
         measured = world.step(source, ends=True)
+        assert isinstance(measured, SubmitMeasurement)
         first = await world.runner.run(measured, source, 1, DEADLINE_AT, CancelSignal())
         step = measured.model_copy(update={"request_id": reusing, "reuses": source})
         again = await world.runner.run(step, reusing, 1, DEADLINE_AT, CancelSignal())

@@ -1070,6 +1070,10 @@ These are facts the implementation must settle, found while checking the design 
   ending asks to terminate the jobs it holds as the report lands, before the job's observation follows the
   report: a job its own report ended is not terminated (`_measurements._born_ended`), because the
   inspection core would open for an unconfirmed job is a step no runner serves.
+  The poll that used to follow a report did more than observe: it recorded the stage readings in the
+  evidence ledger (the only thing `interpret_evidence` reads), told the host each stage started and ended,
+  and named the decision the job answers. The job runner does all three before it reports (`JobBooks`), as
+  the observer of its job, or every run ends `readings-undecodable`.
 - **A job step is held for the queue budget before its limit counts.** A job's limit counts from its start,
   and queue time (the scheduler's, or the root proof a run environment holds Slurm work for) is not the
   work's. Core sees a step's job only at its end, so no fact credits that time as the ledger did
