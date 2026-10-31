@@ -2,6 +2,7 @@
 import type {LoadRefusal, SkeletonLoad, SkeletonLoadFailure} from '@vibesys/run-skeleton';
 import {progressFraction, type Skeleton} from '@vibesys/run-skeleton';
 import type {GatewayRunContext} from './gateway-machine.js';
+import type {RunPageState} from './run-page.js';
 
 export type LoadView =
   | {readonly kind: 'ready'}
@@ -63,4 +64,39 @@ export function loadView(
 /** Any valid epoch prefix can paint the page; totals carry their own catch-up state. */
 export function paintedSkeleton(load: SkeletonLoad | undefined): Skeleton | undefined {
   return load && load.skeleton.epochs.length > 0 ? load.skeleton : undefined;
+}
+
+/** What the loader's batches change in the context (and in `ui`, below); any other change is for the page at once. */
+const BATCH_FIELDS: ReadonlySet<string> = new Set<keyof GatewayRunContext>([
+  'load',
+  'progress',
+  'replies',
+  'ui',
+]);
+/** The record log grows with each batch; the rest of the screen state is the person's. */
+const BATCH_UI_FIELDS: ReadonlySet<string> = new Set<keyof RunPageState>([
+  'recordLog',
+  'recordLogError',
+]);
+
+function sameOutside<T extends object>(batch: ReadonlySet<string>, previous: T, next: T): boolean {
+  return [...new Set([...Object.keys(previous), ...Object.keys(next)])].every(
+    key => batch.has(key) || Object.is(Reflect.get(previous, key), Reflect.get(next, key)),
+  );
+}
+
+/**
+ * The history is still being read and `next` differs from `previous` only by what the batches
+ * bring, so the page may draw a little behind it (`projectionPace`). A liveness hint, a failure,
+ * the person's click or content that arrived come with their own change and are never held.
+ */
+export function isCatchUpBatch(
+  previous: GatewayRunContext | undefined,
+  next: GatewayRunContext,
+): boolean {
+  if (next.progress.phase !== 'history' || next.failure !== undefined) return false;
+  if (previous === undefined) return true;
+  return (
+    sameOutside(BATCH_FIELDS, previous, next) && sameOutside(BATCH_UI_FIELDS, previous.ui, next.ui)
+  );
 }
